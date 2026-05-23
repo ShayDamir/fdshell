@@ -6,3 +6,12 @@ members = [
     "unsafe/sys",
 ]
 
+[workspace.lints.rust]
+dead_code = "allow"
+
+[workspace.lints.clippy]
+todo = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+

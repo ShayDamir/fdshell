@@ -7,3 +7,6 @@ edition = "2021"
 builtins = { path = "../builtins" }
 sys = { path = "../../unsafe/sys" }
 
+[lints]
+workspace = true
+
