@@ -20,17 +20,21 @@
       });
   in {
     packages = eachSystem (system: {
-      default = pkgsFor.${system}.rustPlatform.buildRustPackage {
-        pname = "fdshell";
+      default = pkgsFor.${system}.callPackage ./package.nix {
         inherit version;
         src = lib.cleanSource ./.;
-        cargoLock.lockFile = ./Cargo.lock;
-        meta.mainProgram = "fdshell";
+        cargoLock = ./Cargo.lock;
       };
     });
 
     checks = eachSystem (system: {
-      default = self.packages.${system}.default;
+      default = pkgsFor.${system}.callPackage ./package.nix {
+        inherit version;
+        src = lib.cleanSource ./.;
+        cargoLock = ./Cargo.lock;
+        doClippy = true;
+        doTests = true;
+      };
     });
   };
 }
