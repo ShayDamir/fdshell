@@ -9,7 +9,7 @@ rustPlatform.buildRustPackage {
 
   useNextest = doTests;
   dontCargoCheck = !doTests && !doClippy;
-  cargoTestFlags = lib.optionals doTests [ "--no-tests" "pass" ];
+  cargoTestFlags = lib.optionals doTests [ ];
   nativeBuildInputs = lib.optionals doClippy [ clippy ];
   preCheck = lib.optionalString doClippy ''
     cargo clippy --all-targets -- -D warnings
