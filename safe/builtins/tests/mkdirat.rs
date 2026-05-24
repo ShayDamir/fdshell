@@ -142,9 +142,9 @@ fn test_mkdirat_exec() {
     let cfg = builtins::mkdirat::parse::mkdirat_parse(&args).unwrap();
     builtins::mkdirat::mkdirat_exec(&cfg).unwrap();
 
-    let mut tag = [0u8; 4096];
-    let fd = sys::shellfd::recv_fd(receiver, &mut tag).unwrap();
-    assert_eq!(&tag[..6], b"dirfd\0");
+    let mut buf = [0u8; 4096];
+    let (fd, tag) = sys::shellfd::recv_fd(receiver, &mut buf).unwrap();
+    assert_eq!(tag.to_bytes(), b"dirfd");
 
     let st = sys::stat::fstat(fd).unwrap();
     assert!(st.mode & 0o170000 == 0o40000, "expected directory");

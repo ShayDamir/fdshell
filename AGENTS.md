@@ -66,6 +66,7 @@ nix flake check             # clippy + cargo nextest
 | `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |
 | `renameat.rs` | Rename — `renameat(olddirfd, oldpath, newdirfd, newpath)` |
 | `openat2.rs` | `openat2` syscall, `OpenHow`, `RESOLVE_*` constants |
+| `pipe.rs` | Pipe — `pipe2(flags)` |
 | `shellfd.rs` | SHELLFD protocol — `send_fd`, `recv_fd` |
 | `stat.rs` | `FileStat`, `stat`, `fstat` |
 

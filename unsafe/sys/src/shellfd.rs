@@ -44,7 +44,7 @@ pub fn send_fd(fd: Fd, tag: &CStr) -> Result<(), i32> {
     Ok(())
 }
 
-pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<Fd, i32> {
+pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<(Fd, &CStr), i32> {
     let mut iov = libc::iovec {
         iov_base: tag.as_mut_ptr() as *mut core::ffi::c_void,
         iov_len: tag.len(),
@@ -63,7 +63,7 @@ pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<Fd, i32> {
     };
     // SAFETY: `iov`, `cmsg`, `msg` are valid stack-allocated values; `recvmsg` writes
     // into `tag` and `cmsg` within their allocated sizes. `sock` must be an open socket.
-    crate::cvt(unsafe { libc::recvmsg(sock, &mut msg, libc::MSG_CMSG_CLOEXEC) })?;
+    let n = crate::cvt(unsafe { libc::recvmsg(sock, &mut msg, libc::MSG_CMSG_CLOEXEC) })? as usize;
     // SAFETY: `CMSG_FIRSTHDR` dereferences `msg` which is a valid local; returns null
     // if no control message is present (handled below).
     let cmsg_ptr = unsafe { libc::CMSG_FIRSTHDR(&msg) };
@@ -73,12 +73,15 @@ pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<Fd, i32> {
     // SAFETY: `cmsg_ptr` is non-null, points into our `cmsg` buffer.  `CMSG_DATA` computes
     // the offset past the `cmsghdr` header; on x86_64 this is 16 bytes, which is within
     // the `CmsgBuf` allocation. The cast to `*const i32` has alignment 4 ≤ 8.
-    unsafe {
+    let fd = unsafe {
         if (*cmsg_ptr).cmsg_level != libc::SOL_SOCKET
             || (*cmsg_ptr).cmsg_type != libc::SCM_RIGHTS
         {
             return Err(libc::EINVAL);
         }
-        Ok(*libc::CMSG_DATA(cmsg_ptr).cast::<i32>())
-    }
+        *libc::CMSG_DATA(cmsg_ptr).cast::<i32>()
+    };
+    let tag_slice = tag.get(..n).ok_or(libc::EINVAL)?;
+    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| libc::EINVAL)?;
+    Ok((fd, tag_cstr))
 }

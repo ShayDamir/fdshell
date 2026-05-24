@@ -23,7 +23,7 @@ fn test_send_recv_fd() -> Result<(), i32> {
     let _ = close(test_pair[1]);
 
     let mut tag = [0u8; TAG_MAX];
-    let test_fd = recv_fd(receiver, &mut tag)?;
+    let (test_fd, _tag) = recv_fd(receiver, &mut tag)?;
 
     let mut buf = [0u8; 8];
     assert_eq!(read(test_fd, &mut buf)?, 2);

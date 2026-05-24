@@ -5,3 +5,4 @@
 pub mod argparse;
 pub mod mkdirat;
 pub mod openat2;
+pub mod pipe;

@@ -24,7 +24,7 @@ fn test_openat2_exec() {
     builtins::openat2::openat2_exec(&cfg).unwrap();
 
     let mut tag = [0u8; 4096];
-    let fd = sys::shellfd::recv_fd(receiver, &mut tag).unwrap();
+    let (fd, _tag) = sys::shellfd::recv_fd(receiver, &mut tag).unwrap();
 
     let after = sys::stat::fstat(fd).unwrap();
     assert_eq!(before, after);
