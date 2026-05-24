@@ -1,0 +1,66 @@
+use core::ffi::CStr;
+
+pub struct MkdiratConfig<'a> {
+    pub dirfd: i32,
+    pub path: &'a CStr,
+    pub mode: u32,
+    pub resolve: u64,
+}
+
+/// Parses mkdirat CLI arguments into an [`MkdiratConfig`].
+///
+/// Returns:
+/// - `Err(0)` — `--help` or `-h` was passed
+/// - `Err(22)` — bad flag name, missing value, etc.
+///
+/// # Example
+///
+/// ```rust
+/// use std::ffi::CString;
+///
+/// let a = CString::new("--mode").unwrap();
+/// let b = CString::new("755").unwrap();
+/// let c = CString::new("newdir").unwrap();
+/// let args = [a.as_c_str(), b.as_c_str(), c.as_c_str()];
+/// let cfg = builtins::mkdirat::parse::mkdirat_parse(&args);
+/// match cfg {
+///     Ok(cfg) => {
+///         assert_eq!(cfg.dirfd, -100);
+///         assert_eq!(cfg.mode, 0o755);
+///         assert_eq!(cfg.path.to_bytes(), b"newdir");
+///     }
+///     _ => panic!("expected Ok"),
+/// }
+/// ```
+pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
+    if args.is_empty() || crate::argparse::wants_help(args) {
+        return Err(0);
+    }
+
+    let mut dirfd = -100;
+    let mut mode: u32 = 0;
+    let mut resolve: u64 = 0;
+    let mut path: Option<&'a CStr> = None;
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = args.get(i).ok_or(22)?;
+        i += 1;
+        let (key, val) = crate::argparse::split(arg)?;
+        match key {
+            b"--dirfd" => dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?,
+            b"--mode" => mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)? as u32,
+            b"--resolve" => resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(args, &mut i, val)?)?,
+            a if a.starts_with(b"-") => return Err(22),
+            _ => {
+                if path.is_some() { return Err(22); }
+                path = Some(arg);
+            }
+        }
+    }
+
+    let path = path.ok_or(22)?;
+    if path.to_bytes().is_empty() { return Err(2); }
+
+    Ok(MkdiratConfig { dirfd, path, mode, resolve })
+}

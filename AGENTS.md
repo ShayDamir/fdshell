@@ -46,10 +46,38 @@ nix flake check             # clippy + cargo nextest
 
 ## Testing
 
-- Tests live in `unsafe/sys/tests/` (one integration test: `shellfd.rs`).
+- Tests live in `unsafe/sys/tests/` and `safe/builtins/tests/`.
 - `useNextest = true` in `package.nix` / `flake.nix`.
-- Run tests: `cargo test -p sys`.
+- Run tests: `cargo test -p sys -p builtins`.
 
 ## Platform
 
-- Linux x86_64 only. Static binary target (no libc dependency at runtime).
+- Linux x86_64 only (for now). Static binary target.
+- Flag constants come from `sys::fcntl` (re-exported from `libc`).
+  Never hardcode — values differ between architectures.
+
+## `unsafe/sys/src/` module layout
+
+| Module | Role |
+|---|---|
+| `fd.rs` | Meta-level fd manipulation — `close`, `dup2`, `dup3` |
+| `rw.rs` | fd I/O — `read`, `write` |
+| `fcntl.rs` | Re-exports O\_\* and fcntl constants from `libc` |
+| `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |
+| `renameat.rs` | Rename — `renameat(olddirfd, oldpath, newdirfd, newpath)` |
+| `openat2.rs` | `openat2` syscall, `OpenHow`, `RESOLVE_*` constants |
+| `shellfd.rs` | SHELLFD protocol — `send_fd`, `recv_fd` |
+| `stat.rs` | `FileStat`, `stat`, `fstat` |
+
+## Builtin conventions
+
+- **SHELLFD tags** are per-builtin constants (`c"openat2"`, `c"dirfd"`),
+  one per builtin, never depend on arguments.
+- **Always produce fds with `O_CLOEXEC`** — every exec function ORs
+  `O_CLOEXEC` into the flags. Only strip it via `dup` if the caller
+  explicitly wants a non-CLOEXEC fd.
+- **No hardcoded flag constants** — use `sys::fcntl`. Values differ
+  between architectures.
+- **`mkdirat` race**: the kernel has no atomic create-directory-and-
+  return-fd operation. `mkdirat_exec` does `mkdirat` → `openat2`. The
+  race is accepted for a shell context.

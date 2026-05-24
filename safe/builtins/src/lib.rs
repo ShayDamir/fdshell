@@ -3,4 +3,5 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod argparse;
+pub mod mkdirat;
 pub mod openat2;

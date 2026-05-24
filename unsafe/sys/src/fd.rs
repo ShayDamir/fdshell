@@ -17,29 +17,3 @@ pub fn dup3(old: Fd, new: Fd) -> Result<(), i32> {
     crate::cvt(unsafe { libc::dup3(old, new, libc::O_CLOEXEC) as isize })?;
     Ok(())
 }
-
-pub fn read(fd: Fd, buf: &mut [u8]) -> Result<isize, i32> {
-    // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
-    crate::cvt(unsafe {
-        libc::read(fd, buf.as_mut_ptr() as *mut core::ffi::c_void, buf.len())
-    })
-}
-
-pub fn write(fd: Fd, buf: &[u8]) -> Result<isize, i32> {
-    // SAFETY: `buf` is a valid immutable slice; `write` won't read past `buf.len()`.
-    crate::cvt(unsafe {
-        libc::write(fd, buf.as_ptr() as *const core::ffi::c_void, buf.len())
-    })
-}
-
-pub fn openat() -> i32 {
-    todo!()
-}
-
-pub fn mkdirat() -> i32 {
-    todo!()
-}
-
-pub fn renameat() -> i32 {
-    todo!()
-}

@@ -1,4 +1,5 @@
 use core::ffi::CStr;
+use sys::openat2::{RESOLVE_BENEATH, RESOLVE_CACHED, RESOLVE_IN_ROOT, RESOLVE_NO_MAGICLINKS, RESOLVE_NO_SYMLINKS, RESOLVE_NO_XDEV};
 
 /// Checks if any argument is `--help` or `-h`.
 pub fn wants_help(args: &[&CStr]) -> bool {
@@ -34,5 +35,45 @@ pub fn next_val<'a>(
             *i += 1;
             Ok(v)
         }
+    }
+}
+
+/// Parses a mode string: octal (default), hex (`0x`), or octal with prefix (`0o`).
+pub fn parse_mode(s: &CStr) -> Result<u64, i32> {
+    let b = s.to_bytes();
+    let (d, r) = if let Some(h) = b.strip_prefix(b"0x") { (h, 16) }
+                 else if let Some(o) = b.strip_prefix(b"0o") { (o, 8) }
+                 else { (b, 8) };
+    u64::from_str_radix(core::str::from_utf8(d).map_err(|_| 22)?, r).map_err(|_| 22)
+}
+
+/// Parses a dirfd: `AT_FDCWD` → -100, otherwise a decimal integer.
+pub fn parse_dirfd(s: &CStr) -> Result<i32, i32> {
+    let b = s.to_bytes();
+    if b == b"AT_FDCWD" { Ok(-100) } else {
+        let s = core::str::from_utf8(b).map_err(|_| 22)?;
+        s.parse().map_err(|_| 22)
+    }
+}
+
+/// Parses resolve flags: `RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS` or raw hex.
+pub fn parse_resolve_flags(s: &CStr) -> Result<u64, i32> {
+    let b = s.to_bytes();
+    if b.starts_with(b"0x") {
+        let h = core::str::from_utf8(b.get(2..).ok_or(22)?).map_err(|_| 22)?;
+        u64::from_str_radix(h, 16).map_err(|_| 22)
+    } else {
+        b.split(|&c| c == b'|').try_fold(0, |acc, name| {
+            let v = match name {
+                b"RESOLVE_NO_SYMLINKS" => RESOLVE_NO_SYMLINKS,
+                b"RESOLVE_NO_MAGICLINKS" => RESOLVE_NO_MAGICLINKS,
+                b"RESOLVE_NO_XDEV" => RESOLVE_NO_XDEV,
+                b"RESOLVE_BENEATH" => RESOLVE_BENEATH,
+                b"RESOLVE_IN_ROOT" => RESOLVE_IN_ROOT,
+                b"RESOLVE_CACHED" => RESOLVE_CACHED,
+                _ => return Err(22),
+            };
+            Ok(acc | v)
+        })
     }
 }

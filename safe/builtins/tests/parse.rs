@@ -2,6 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use sys::fcntl::O_CLOEXEC;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -60,14 +61,14 @@ fn dirfd_numeric() {
 #[test]
 fn eq_syntax() {
     assert_ok(&["--flags=O_CLOEXEC", "x"], |cfg| {
-        assert_eq!(cfg.how.flags, 0o20000000);
+        assert_eq!(cfg.how.flags, O_CLOEXEC as u64);
     });
 }
 
 #[test]
 fn pipe_flags() {
     assert_ok(&["--flags", "O_RDONLY|O_CLOEXEC", "x"], |cfg| {
-        assert_eq!(cfg.how.flags, 0o20000000);
+        assert_eq!(cfg.how.flags, O_CLOEXEC as u64);
     });
 }
 

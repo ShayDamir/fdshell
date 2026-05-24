@@ -12,9 +12,13 @@ pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
     }
 }
 
+pub mod fcntl;
 pub mod fd;
+pub mod mkdirat;
 pub mod net;
 pub mod openat2;
 mod process;
+pub mod renameat;
+pub mod rw;
 pub mod shellfd;
 pub mod stat;

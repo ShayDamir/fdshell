@@ -1,4 +1,5 @@
-use sys::fd::{close, dup2, read, write};
+use sys::fd::{close, dup2};
+use sys::rw::{read, write};
 use sys::net::socketpair;
 use sys::shellfd::{recv_fd, send_fd, SHELLFD, TAG_MAX};
 

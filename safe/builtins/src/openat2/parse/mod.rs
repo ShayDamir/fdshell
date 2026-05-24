@@ -5,22 +5,6 @@ use sys::openat2::OpenHow;
 
 pub struct Openat2Config<'a> { pub dirfd: i32, pub path: &'a CStr, pub how: OpenHow }
 
-fn parse_mode(s: &CStr) -> Result<u64, i32> {
-    let b = s.to_bytes();
-    let (d, r) = if let Some(h) = b.strip_prefix(b"0x") { (h, 16) }
-                 else if let Some(o) = b.strip_prefix(b"0o") { (o, 8) }
-                 else { (b, 8) };
-    u64::from_str_radix(core::str::from_utf8(d).map_err(|_| 22)?, r).map_err(|_| 22)
-}
-
-fn parse_dirfd(s: &CStr) -> Result<i32, i32> {
-    let b = s.to_bytes();
-    if b == b"AT_FDCWD" { Ok(-100) } else {
-        let s = core::str::from_utf8(b).map_err(|_| 22)?;
-        s.parse().map_err(|_| 22)
-    }
-}
-
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
 ///
 /// Returns:
@@ -79,10 +63,10 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
-            b"--dirfd" => dirfd = parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?,
+            b"--dirfd" => dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?,
             b"--flags" => open_flags = flags::parse_open_flags(crate::argparse::next_val(args, &mut i, val)?)?,
-            b"--mode" => mode = parse_mode(crate::argparse::next_val(args, &mut i, val)?)?,
-            b"--resolve" => resolve = flags::parse_resolve_flags(crate::argparse::next_val(args, &mut i, val)?)?,
+            b"--mode" => mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?,
+            b"--resolve" => resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(args, &mut i, val)?)?,
             a if a.starts_with(b"-") => return Err(22),
             _ => {
                 if path.is_some() { return Err(22); }
