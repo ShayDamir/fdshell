@@ -1,6 +1,7 @@
 pub use libc::O_APPEND;
 pub use libc::O_CLOEXEC;
 pub use libc::O_CREAT;
+pub use libc::O_DIRECT;
 pub use libc::O_DIRECTORY;
 pub use libc::O_DSYNC;
 pub use libc::O_EXCL;

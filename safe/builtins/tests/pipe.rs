@@ -3,6 +3,7 @@
 use core::ffi::CStr;
 use std::ffi::CString;
 use sys::errno::{EINVAL, HELP};
+use sys::fcntl::{O_DIRECT, O_NONBLOCK};
 use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -15,6 +16,13 @@ fn assert_err(args: &[&str], code: i32) {
     with_args(args, |a| match builtins::pipe::parse::pipe_parse(a) {
         Err(e) => assert_eq!(e, code),
         _ => panic!("expected Err({code})"),
+    });
+}
+
+fn assert_ok<F: Fn(&builtins::pipe::parse::PipeConfig)>(args: &[&str], f: F) {
+    with_args(args, |a| match builtins::pipe::parse::pipe_parse(a) {
+        Ok(cfg) => f(&cfg),
+        _ => panic!("expected Ok"),
     });
 }
 
@@ -39,6 +47,49 @@ fn unexpected_arg() {
 }
 
 #[test]
+fn flags_nonblock() {
+    assert_ok(&["--flags", "O_NONBLOCK"], |cfg| {
+        assert_eq!(cfg.flags, O_NONBLOCK);
+    });
+}
+
+#[test]
+fn flags_direct() {
+    assert_ok(&["--flags", "O_DIRECT"], |cfg| {
+        assert_eq!(cfg.flags, O_DIRECT);
+    });
+}
+
+#[test]
+fn flags_repeated() {
+    assert_ok(&["--flags", "O_NONBLOCK", "--flags", "O_DIRECT"], |cfg| {
+        assert_eq!(cfg.flags, O_NONBLOCK | O_DIRECT);
+    });
+}
+
+#[test]
+fn flags_hex() {
+    assert_ok(&["--flags", "0x4000"], |cfg| {
+        assert_eq!(cfg.flags, O_DIRECT);
+    });
+}
+
+#[test]
+fn flags_empty_value() {
+    assert_err(&["--flags"], EINVAL);
+}
+
+#[test]
+fn flags_bad() {
+    assert_err(&["--flags", "O_CLOEXEC"], EINVAL);
+}
+
+#[test]
+fn flags_bad_name() {
+    assert_err(&["--flags", "nope"], EINVAL);
+}
+
+#[test]
 fn test_pipe_exec() {
     sys::shellfd::reserve_shellfd().unwrap();
     let (a, b) = sys::net::socketpair().unwrap();
@@ -46,7 +97,7 @@ fn test_pipe_exec() {
     a.close().unwrap();
     let receiver = b;
 
-    builtins::pipe::pipe_exec().unwrap();
+    builtins::pipe::pipe_exec(0).unwrap();
 
     let mut buf_a = [0u8; TAG_MAX];
     let mut buf_b = [0u8; TAG_MAX];
