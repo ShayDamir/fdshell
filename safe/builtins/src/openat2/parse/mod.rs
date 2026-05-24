@@ -79,7 +79,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
                 mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?
             }
             b"--resolve" => {
-                resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(
+                resolve = crate::resolve::parse_resolve_flags(crate::argparse::next_val(
                     args, &mut i, val,
                 )?)?
             }

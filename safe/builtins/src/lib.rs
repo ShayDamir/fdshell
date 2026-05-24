@@ -7,3 +7,4 @@ pub mod mkdirat;
 pub mod openat2;
 pub mod pipe;
 pub mod renameat2;
+pub mod resolve;

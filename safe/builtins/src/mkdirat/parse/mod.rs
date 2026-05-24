@@ -58,7 +58,7 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
                     as u32
             }
             b"--resolve" => {
-                resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(
+                resolve = crate::resolve::parse_resolve_flags(crate::argparse::next_val(
                     args, &mut i, val,
                 )?)?
             }
