@@ -1,6 +1,7 @@
 use crate::Fd;
 
-pub fn socketpair(pair: &mut [Fd; 2]) -> Result<(), i32> {
+pub fn socketpair() -> Result<(Fd, Fd), i32> {
+    let mut pair = [0i32; 2];
     // SAFETY: `pair` is a valid mutable reference to 2 `i32`s; `socketpair` writes
     // exactly 2 fds into it. Invalid input is handled by `cvt`.
     crate::cvt(unsafe {
@@ -11,5 +12,9 @@ pub fn socketpair(pair: &mut [Fd; 2]) -> Result<(), i32> {
             pair.as_mut_ptr(),
         ) as isize
     })?;
-    Ok(())
+    let [a, b] = pair;
+    // SAFETY: both fds have CLOEXEC set by `SOCK_CLOEXEC`.
+    let a = unsafe { Fd::from_raw(a) };
+    let b = unsafe { Fd::from_raw(b) };
+    Ok((a, b))
 }

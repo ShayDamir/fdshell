@@ -1,19 +1,95 @@
-use crate::Fd;
+#[repr(transparent)]
+pub struct Fd(i32);
 
-pub fn close(fd: Fd) -> Result<(), i32> {
-    // SAFETY: `close` is safe to call with any `fd`; invalid fds return `EBADF`.
-    crate::cvt(unsafe { libc::close(fd) as isize })?;
-    Ok(())
+impl Fd {
+    /// # Safety
+    /// `raw` must be a valid fd with `O_CLOEXEC` or equivalent.
+    /// The caller guarantees exclusive ownership — no other code will close it.
+    pub const unsafe fn from_raw(raw: i32) -> Self {
+        Self(raw)
+    }
+
+    pub fn as_raw(&self) -> i32 {
+        self.0
+    }
+
+    /// Explicit close with error reporting. Silently closes on Drop otherwise.
+    pub fn close(self) -> Result<(), i32> {
+        let raw = self.0;
+        core::mem::forget(self);
+        // SAFETY: `raw` came from a valid fd (constructor guarantee).
+        crate::cvt(unsafe { libc::close(raw) as isize })?;
+        Ok(())
+    }
+
+    /// Duplicate to the lowest available fd. Result is not CLOEXEC.
+    pub fn dup(&self) -> Result<DupFd, i32> {
+        // SAFETY: `self.0` is a valid fd; dup returns lowest available or -1.
+        let ret = crate::cvt(unsafe { libc::dup(self.0) as isize })?;
+        Ok(DupFd(ret as i32))
+    }
+
+    /// Duplicate to a specific fd number. Result is not CLOEXEC.
+    pub fn dup2(&self, new: DupFd) -> Result<DupFd, i32> {
+        // SAFETY: `self.0` is a valid fd; invalid `new` returns EBADF.
+        let ret = crate::cvt(unsafe { libc::dup2(self.0, new.as_raw()) as isize })?;
+        Ok(DupFd(ret as i32))
+    }
+
+    /// Duplicate to a specific fd number WITH CLOEXEC. Result is owned.
+    pub fn dup3(&self, new: i32) -> Result<Fd, i32> {
+        // SAFETY: `self.0` is a valid fd; O_CLOEXEC sets CLOEXEC on the copy.
+        let ret = crate::cvt(unsafe { libc::dup3(self.0, new, libc::O_CLOEXEC) as isize })?;
+        // SAFETY: `ret` is a valid fd with CLOEXEC set by dup3.
+        Ok(unsafe { Fd::from_raw(ret as i32) })
+    }
 }
 
-pub fn dup2(old: Fd, new: Fd) -> Result<Fd, i32> {
-    // SAFETY: `dup2` is safe to call with any `old`/`new` fds; invalid fds return `EBADF`.
-    crate::cvt(unsafe { libc::dup2(old, new) as isize })?;
-    Ok(new)
+impl Drop for Fd {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is a valid fd; errors silently ignored in Drop.
+        unsafe {
+            libc::close(self.0);
+        }
+    }
 }
 
-pub fn dup3(old: Fd, new: Fd) -> Result<(), i32> {
-    // SAFETY: `dup3` with invalid fds or flags returns `EBADF`/`EINVAL`.
-    crate::cvt(unsafe { libc::dup3(old, new, libc::O_CLOEXEC) as isize })?;
-    Ok(())
+/// Non-owned fd — no CLOEXEC guarantee, no Drop. Created by `dup`/`dup2`
+/// for child-process inheritance. Lifetime managed by the kernel.
+#[repr(transparent)]
+pub struct DupFd(i32);
+
+impl DupFd {
+    /// # Safety
+    /// `raw` must be an open fd number that stays valid for the lifetime of this value.
+    pub const unsafe fn from_raw(raw: i32) -> Self {
+        Self(raw)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, i32> {
+        let s = core::str::from_utf8(bytes).map_err(|_| 22)?;
+        let raw: i32 = s.parse().map_err(|_| 22)?;
+        // SAFETY: fcntl(F_GETFD) returns ≥0 if fd is open, -1 + errno otherwise.
+        let ret = unsafe { libc::fcntl(raw, libc::F_GETFD) };
+        if ret < 0 {
+            // SAFETY: __errno_location is valid after a failed libc call.
+            return Err(unsafe { *libc::__errno_location() });
+        }
+        // SAFETY: fd `raw` is confirmed open by F_GETFD above.
+        Ok(Self(raw))
+    }
+
+    pub fn as_raw(&self) -> i32 {
+        self.0
+    }
+
+    pub fn at(&self) -> crate::AtFd<'_> {
+        crate::AtFd::from(self)
+    }
+}
+
+impl Fd {
+    pub fn at(&self) -> crate::AtFd<'_> {
+        crate::AtFd::from(self)
+    }
 }

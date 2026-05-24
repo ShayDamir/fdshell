@@ -57,11 +57,30 @@ nix flake check             # fmt + clippy + cargo nextest
 - Flag constants come from `sys::fcntl` (re-exported from `libc`).
   Never hardcode — values differ between architectures.
 
+## FD types
+
+Three fd types in `unsafe/sys/src/fd.rs` and `atfd.rs`:
+
+| Type | Owns? | CLOEXEC? | Drop closes? | `const fn from_raw` | `from_bytes` (validated) |
+|---|---|---|---|---|---|
+| `Fd` | yes | yes | yes | `unsafe` | n/a |
+| `DupFd` | no | no | no | `unsafe` | safe (`fcntl(F_GETFD)`) |
+| `AtFd<'a>` | no | irrelevant | no | `unsafe` | n/a (via `From<&Fd>` / `From<&DupFd>`) |
+
+- `Fd::at(&self) -> AtFd<'_>` — infallible (borrow + `Fd` invariant).
+- `DupFd::at(&self) -> AtFd<'_>` — infallible (`from_bytes` validated at the string boundary).
+- `DupFd::from_bytes` validates via `fcntl(F_GETFD)` — the only way safe code can obtain a `DupFd` from external input.
+- `DupFd::from_raw` is `unsafe` — only for trusted constants (`SHELL_DUPFD`) and kernel returns (`dup`/`dup2`).
+- `AT_FDCWD` stays entirely in `atfd.rs` (`AtFd::cwd()`). Never re-exported.
+- `AtFd` is `Copy + Clone` — used multiple times in exec functions.
+- `*at` syscall wrappers take `AtFd<'_>` or `Option<AtFd<'_>>` instead of raw `i32`.
+
 ## `unsafe/sys/src/` module layout
 
 | Module | Role |
 |---|---|
-| `fd.rs` | Meta-level fd manipulation — `close`, `dup2`, `dup3` |
+| `atfd.rs` | `AtFd<'a>` — non-owning borrowed fd for `*at` syscalls |
+| `fd.rs` | `Fd` and `DupFd` types — owned fd with Drop, and non-owned fd |
 | `rw.rs` | fd I/O — `read`, `write` |
 | `fcntl.rs` | Re-exports O\_\* and fcntl constants from `libc` |
 | `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |
@@ -83,3 +102,6 @@ nix flake check             # fmt + clippy + cargo nextest
 - **`mkdirat` race**: the kernel has no atomic create-directory-and-
   return-fd operation. `mkdirat_exec` does `mkdirat` → `openat2`. The
   race is accepted for a shell context.
+- **Dirfd in configs** is `Option<DupFd>` (`None` = CWD). Parsed via
+  `parse_dirfd` → `DupFd::from_bytes` (validates fd is open). Converted
+  to `AtFd` at exec time via `cfg.dirfd.as_ref().map_or(AtFd::cwd(), DupFd::at)`.

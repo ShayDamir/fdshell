@@ -1,8 +1,7 @@
-use sys::fd::{close, dup2};
 use sys::net::socketpair;
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
-use sys::shellfd::{recv_fd, send_fd, SHELLFD, TAG_MAX};
+use sys::shellfd::{recv_fd, reserve_shellfd, send_fd, SHELL_DUPFD, TAG_MAX};
 
 #[repr(C)]
 struct CmsgBuf {
@@ -45,129 +44,119 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
 
 #[test]
 fn test_send_recv_fd() -> Result<(), i32> {
-    let mut pair = [0; 2];
-    socketpair(&mut pair)?;
+    reserve_shellfd()?;
+    let (a, b) = socketpair()?;
+    a.dup2(SHELL_DUPFD)?;
+    a.close()?;
+    let receiver = b;
 
-    if pair[0] != SHELLFD {
-        dup2(pair[0], SHELLFD)?;
-        let _ = close(pair[0]);
-    }
-    let receiver = pair[1];
-
-    let mut test_pair = [0; 2];
-    socketpair(&mut test_pair)?;
-
-    send_fd(test_pair[0], c"test")?;
-    let _ = close(test_pair[0]);
-    write(test_pair[1], b"42")?;
-    let _ = close(test_pair[1]);
+    let (test_a, test_b) = socketpair()?;
+    send_fd(&test_a, c"test")?;
+    test_a.close()?;
+    write(&test_b, b"42")?;
+    test_b.close()?;
 
     let mut tag = [0u8; TAG_MAX];
-    let (test_fd, _tag) = recv_fd(receiver, &mut tag)?;
+    let (test_fd, _tag) = recv_fd(&receiver, &mut tag)?;
 
     let mut buf = [0u8; 8];
-    assert_eq!(read(test_fd, &mut buf)?, 2);
+    assert_eq!(read(&test_fd, &mut buf)?, 2);
     assert_eq!(&buf[..2], b"42");
-    assert_eq!(read(test_fd, &mut buf)?, 0);
+    assert_eq!(read(&test_fd, &mut buf)?, 0);
 
-    let _ = close(test_fd);
-    let _ = close(receiver);
+    test_fd.close()?;
+    receiver.close()?;
     Ok(())
 }
 
 #[test]
 fn test_recv_fd_truncated() -> Result<(), i32> {
     // 8192 bytes fills tag buffer + spills into extra → n > TAG_MAX
-    let mut pair = [0; 2];
-    socketpair(&mut pair)?;
-    let (dummy_rd, dummy_wr) = pipe2(0)?;
+    let (a, b) = socketpair()?;
+    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
 
     let tag = [b'x'; 8192];
-    send_raw_msg(pair[0], &tag, dummy_wr)?;
-    let _ = close(dummy_wr);
+    send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
+    dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert_eq!(recv_fd(pair[1], &mut buf), Err(libc::EINVAL));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
 
-    let _ = close(dummy_rd);
-    let _ = close(pair[0]);
-    let _ = close(pair[1]);
+    dummy_rd.close()?;
+    a.close()?;
+    b.close()?;
     Ok(())
 }
 
 #[test]
 fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
     // Exactly TAG_MAX bytes, no null → CStr::from_bytes_with_nul fails
-    let mut pair = [0; 2];
-    socketpair(&mut pair)?;
-    let (dummy_rd, dummy_wr) = pipe2(0)?;
+    let (a, b) = socketpair()?;
+    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
 
     let tag = [b'x'; TAG_MAX];
-    send_raw_msg(pair[0], &tag, dummy_wr)?;
-    let _ = close(dummy_wr);
+    send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
+    dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert_eq!(recv_fd(pair[1], &mut buf), Err(libc::EINVAL));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
 
-    let _ = close(dummy_rd);
-    let _ = close(pair[0]);
-    let _ = close(pair[1]);
+    dummy_rd.close()?;
+    a.close()?;
+    b.close()?;
     Ok(())
 }
 
 #[test]
 fn test_recv_fd_short_no_null() -> Result<(), i32> {
-    let mut pair = [0; 2];
-    socketpair(&mut pair)?;
-    let (dummy_rd, dummy_wr) = pipe2(0)?;
+    let (a, b) = socketpair()?;
+    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
 
-    send_raw_msg(pair[0], b"abc", dummy_wr)?;
-    let _ = close(dummy_wr);
+    send_raw_msg(a.as_raw(), b"abc", dummy_wr.as_raw())?;
+    dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert_eq!(recv_fd(pair[1], &mut buf), Err(libc::EINVAL));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
 
-    let _ = close(dummy_rd);
-    let _ = close(pair[0]);
-    let _ = close(pair[1]);
+    dummy_rd.close()?;
+    a.close()?;
+    b.close()?;
     Ok(())
 }
 
 #[test]
 fn test_recv_fd_interior_null() -> Result<(), i32> {
-    let mut pair = [0; 2];
-    socketpair(&mut pair)?;
-    let (dummy_rd, dummy_wr) = pipe2(0)?;
+    let (a, b) = socketpair()?;
+    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
 
-    send_raw_msg(pair[0], b"abc\0fde\0", dummy_wr)?;
-    let _ = close(dummy_wr);
+    send_raw_msg(a.as_raw(), b"abc\0fde\0", dummy_wr.as_raw())?;
+    dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert_eq!(recv_fd(pair[1], &mut buf), Err(libc::EINVAL));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
 
-    let _ = close(dummy_rd);
-    let _ = close(pair[0]);
-    let _ = close(pair[1]);
+    dummy_rd.close()?;
+    a.close()?;
+    b.close()?;
     Ok(())
 }
 
 #[test]
 fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
-    let mut pair = [0; 2];
-    socketpair(&mut pair)?;
-    let (dummy_rd, dummy_wr) = pipe2(0)?;
+    let (a, b) = socketpair()?;
+    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
 
     let mut tag = vec![b'x'; TAG_MAX - 1];
     tag.push(0);
     tag.extend_from_slice(b"rd\0");
-    send_raw_msg(pair[0], &tag, dummy_wr)?;
-    let _ = close(dummy_wr);
+    send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
+    dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert_eq!(recv_fd(pair[1], &mut buf), Err(libc::EINVAL));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
 
-    let _ = close(dummy_rd);
-    let _ = close(pair[0]);
-    let _ = close(pair[1]);
+    dummy_rd.close()?;
+    a.close()?;
+    b.close()?;
     Ok(())
 }

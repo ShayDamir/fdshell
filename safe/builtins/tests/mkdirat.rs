@@ -27,7 +27,7 @@ fn assert_ok<F: FnOnce(&builtins::mkdirat::parse::MkdiratConfig)>(args: &[&str],
 #[test]
 fn basic() {
     assert_ok(&["--mode", "755", "newdir"], |cfg| {
-        assert_eq!(cfg.dirfd, -100);
+        assert!(cfg.dirfd.is_none());
         assert_eq!(cfg.mode, 0o755);
         assert_eq!(cfg.path.to_bytes(), b"newdir");
     });
@@ -76,15 +76,18 @@ fn missing_value() {
 #[test]
 fn dirfd_ateq() {
     assert_ok(&["--dirfd=AT_FDCWD", "x"], |cfg| {
-        assert_eq!(cfg.dirfd, -100);
+        assert!(cfg.dirfd.is_none());
     });
 }
 
 #[test]
 fn dirfd_numeric() {
+    let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
+    let _fd5 = rd.dup3(5).unwrap();
     assert_ok(&["--dirfd", "5", "x"], |cfg| {
-        assert_eq!(cfg.dirfd, 5);
+        assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(5));
     });
+    drop(wr);
 }
 
 #[test]
@@ -148,13 +151,11 @@ fn test_mkdirat_exec() {
 
     let cpath = CString::new(subdir_path.to_str().unwrap()).unwrap();
 
-    let mut pair = [0; 2];
-    sys::net::socketpair(&mut pair).unwrap();
-    if pair[0] != 3 {
-        sys::fd::dup2(pair[0], 3).unwrap();
-        let _ = sys::fd::close(pair[0]);
-    }
-    let receiver = pair[1];
+    sys::shellfd::reserve_shellfd().unwrap();
+    let (a, b) = sys::net::socketpair().unwrap();
+    a.dup2(sys::shellfd::SHELL_DUPFD).unwrap();
+    a.close().unwrap();
+    let receiver = b;
 
     let mode_arg = CString::new("--mode").unwrap();
     let mode_val = CString::new("755").unwrap();
@@ -163,10 +164,10 @@ fn test_mkdirat_exec() {
     builtins::mkdirat::mkdirat_exec(&cfg).unwrap();
 
     let mut buf = [0u8; TAG_MAX];
-    let (fd, tag) = sys::shellfd::recv_fd(receiver, &mut buf).unwrap();
+    let (fd, tag) = sys::shellfd::recv_fd(&receiver, &mut buf).unwrap();
     assert_eq!(tag.to_bytes(), b"dirfd");
 
-    let st = sys::stat::fstat(fd).unwrap();
+    let st = sys::stat::fstat(&fd).unwrap();
     assert!(st.mode & 0o170000 == 0o40000, "expected directory");
 
     // Verify the path also exists as a directory
@@ -174,10 +175,7 @@ fn test_mkdirat_exec() {
     assert_eq!(st.ino, st2.ino);
     assert_eq!(st.dev, st2.dev);
 
-    sys::fd::close(fd).unwrap();
-    sys::fd::close(receiver).unwrap();
-    if pair[0] != 3 {
-        sys::fd::close(3).unwrap();
-    }
+    fd.close().unwrap();
+    receiver.close().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -2,9 +2,10 @@ mod flags;
 
 use core::ffi::CStr;
 use sys::openat2::OpenHow;
+use sys::DupFd;
 
 pub struct Openat2Config<'a> {
-    pub dirfd: i32,
+    pub dirfd: Option<DupFd>,
     pub path: &'a CStr,
     pub how: OpenHow,
 }
@@ -29,7 +30,7 @@ pub struct Openat2Config<'a> {
 /// let cfg = builtins::openat2::parse::openat2_parse(&args);
 /// match cfg {
 ///     Ok(cfg) => {
-///         assert_eq!(cfg.dirfd, -100);
+///         assert!(cfg.dirfd.is_none());
 ///         assert_eq!(cfg.path.to_bytes(), b"package.nix");
 ///         assert_eq!(cfg.how.flags, 0);
 ///     }
@@ -55,7 +56,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
         return Err(0);
     }
 
-    let mut dirfd = -100;
+    let mut dirfd = None;
     let mut open_flags = 0;
     let mut mode: u64 = 0;
     let mut resolve: u64 = 0;

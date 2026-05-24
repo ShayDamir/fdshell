@@ -1,7 +1,8 @@
 use core::ffi::CStr;
+use sys::DupFd;
 
 pub struct MkdiratConfig<'a> {
-    pub dirfd: i32,
+    pub dirfd: Option<DupFd>,
     pub path: &'a CStr,
     pub mode: u32,
     pub resolve: u64,
@@ -25,7 +26,7 @@ pub struct MkdiratConfig<'a> {
 /// let cfg = builtins::mkdirat::parse::mkdirat_parse(&args);
 /// match cfg {
 ///     Ok(cfg) => {
-///         assert_eq!(cfg.dirfd, -100);
+///         assert!(cfg.dirfd.is_none());
 ///         assert_eq!(cfg.mode, 0o755);
 ///         assert_eq!(cfg.path.to_bytes(), b"newdir");
 ///     }
@@ -37,7 +38,7 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
         return Err(0);
     }
 
-    let mut dirfd = -100;
+    let mut dirfd = None;
     let mut mode: u32 = 0;
     let mut resolve: u64 = 0;
     let mut path: Option<&'a CStr> = None;

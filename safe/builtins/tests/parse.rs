@@ -27,7 +27,7 @@ fn assert_ok<F: FnOnce(&builtins::openat2::parse::Openat2Config)>(args: &[&str],
 #[test]
 fn basic() {
     assert_ok(&["--flags", "O_RDONLY", "package.nix"], |cfg| {
-        assert_eq!(cfg.dirfd, -100);
+        assert!(cfg.dirfd.is_none());
         assert_eq!(cfg.path.to_bytes(), b"package.nix");
         assert_eq!(cfg.how.flags, 0);
         assert_eq!(cfg.how.mode, 0);
@@ -53,15 +53,18 @@ fn empty_args() {
 #[test]
 fn dirfd_ateq() {
     assert_ok(&["--dirfd=AT_FDCWD", "x"], |cfg| {
-        assert_eq!(cfg.dirfd, -100);
+        assert!(cfg.dirfd.is_none());
     });
 }
 
 #[test]
 fn dirfd_numeric() {
+    let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
+    let _fd5 = rd.dup3(5).unwrap();
     assert_ok(&["--dirfd", "5", "x"], |cfg| {
-        assert_eq!(cfg.dirfd, 5);
+        assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(5));
     });
+    drop(wr);
 }
 
 #[test]

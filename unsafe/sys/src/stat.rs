@@ -27,11 +27,11 @@ impl core::fmt::Debug for FileStat {
     }
 }
 
-pub fn fstat(fd: Fd) -> Result<FileStat, i32> {
-    // SAFETY: `fd` is any integer; `libc::fstat` with an invalid fd returns `EBADF`.
+pub fn fstat(fd: &Fd) -> Result<FileStat, i32> {
+    // SAFETY: `fd.as_raw()` is any integer; `libc::fstat` with an invalid fd returns `EBADF`.
     // `raw` is zero-initialized, valid for a `libc::stat` (all integer fields).
     let mut raw: libc::stat = unsafe { core::mem::zeroed() };
-    crate::cvt(unsafe { libc::fstat(fd, &mut raw) as isize })?;
+    crate::cvt(unsafe { libc::fstat(fd.as_raw(), &mut raw) as isize })?;
     Ok(FileStat {
         ino: raw.st_ino as u64,
         mode: raw.st_mode as u32,

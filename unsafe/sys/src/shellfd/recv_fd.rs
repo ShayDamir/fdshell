@@ -2,7 +2,7 @@ use super::CmsgBuf;
 use crate::Fd;
 use core::ffi::CStr;
 
-pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<(Fd, &CStr), i32> {
+pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8]) -> Result<(Fd, &'a CStr), i32> {
     let mut extra = 0u8;
     let mut iovs = [
         libc::iovec {
@@ -29,33 +29,29 @@ pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<(Fd, &CStr), i32> {
     // SAFETY: `iovs`, `cmsg`, `msg` are valid stack-allocated values; `recvmsg`
     // writes into `tag` and `cmsg` within their allocated sizes. `sock` must be
     // an open socket. `extra` provides a 1-byte overflow detector.
-    let n = crate::cvt(unsafe { libc::recvmsg(sock, &mut msg, libc::MSG_CMSG_CLOEXEC) })? as usize;
+    let n = crate::cvt(unsafe { libc::recvmsg(sock.as_raw(), &mut msg, libc::MSG_CMSG_CLOEXEC) })?
+        as usize;
     // SAFETY: `CMSG_FIRSTHDR` dereferences `msg` which is a valid local; returns
     // null if no control message is present (handled below).
     let cmsg_ptr = unsafe { libc::CMSG_FIRSTHDR(&msg) };
     if cmsg_ptr.is_null() {
         return Err(libc::EINVAL);
     }
-    // SAFETY: `cmsg_ptr` is non-null, points into our `cmsg` buffer.  `CMSG_DATA`
+    // SAFETY: `cmsg_ptr` is non-null, points into our `cmsg` buffer. `CMSG_DATA`
     // computes the offset past the `cmsghdr` header; on x86_64 this is 16 bytes,
     // within the `CmsgBuf` allocation. The cast to `*const i32` has alignment 4 ≤ 8.
-    let fd = unsafe {
+    let raw_fd = unsafe {
         if (*cmsg_ptr).cmsg_level != libc::SOL_SOCKET || (*cmsg_ptr).cmsg_type != libc::SCM_RIGHTS {
             return Err(libc::EINVAL);
         }
         *libc::CMSG_DATA(cmsg_ptr).cast::<i32>()
     };
+    // SAFETY: `raw_fd` has CLOEXEC from `MSG_CMSG_CLOEXEC` flag in `recvmsg`.
+    let fd = unsafe { Fd::from_raw(raw_fd) };
     if n > tag.len() {
-        let _ = crate::fd::close(fd);
         return Err(libc::EINVAL);
     }
-    let tag_slice = tag.get(..n).ok_or_else(|| {
-        let _ = crate::fd::close(fd);
-        libc::EINVAL
-    })?;
-    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| {
-        let _ = crate::fd::close(fd);
-        libc::EINVAL
-    })?;
+    let tag_slice = tag.get(..n).ok_or(libc::EINVAL)?;
+    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| libc::EINVAL)?;
     Ok((fd, tag_cstr))
 }

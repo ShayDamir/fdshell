@@ -2,7 +2,7 @@ use super::CmsgBuf;
 use crate::Fd;
 use core::ffi::CStr;
 
-pub fn send_fd(fd: Fd, tag: &CStr) -> Result<(), i32> {
+pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
     let tag_bytes = tag.to_bytes_with_nul();
     if tag_bytes.len() > super::TAG_MAX {
         return Err(libc::E2BIG);
@@ -19,7 +19,7 @@ pub fn send_fd(fd: Fd, tag: &CStr) -> Result<(), i32> {
             cmsg_level: libc::SOL_SOCKET,
             cmsg_type: libc::SCM_RIGHTS,
         },
-        fd,
+        fd: fd.as_raw(),
     };
     let msg = libc::msghdr {
         msg_name: core::ptr::null_mut(),

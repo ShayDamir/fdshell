@@ -3,6 +3,7 @@ use sys::openat2::{
     RESOLVE_BENEATH, RESOLVE_CACHED, RESOLVE_IN_ROOT, RESOLVE_NO_MAGICLINKS, RESOLVE_NO_SYMLINKS,
     RESOLVE_NO_XDEV,
 };
+use sys::DupFd;
 
 /// Checks if any argument is `--help` or `-h`.
 pub fn wants_help(args: &[&CStr]) -> bool {
@@ -53,14 +54,13 @@ pub fn parse_mode(s: &CStr) -> Result<u64, i32> {
     u64::from_str_radix(core::str::from_utf8(d).map_err(|_| 22)?, r).map_err(|_| 22)
 }
 
-/// Parses a dirfd: `AT_FDCWD` → -100, otherwise a decimal integer.
-pub fn parse_dirfd(s: &CStr) -> Result<i32, i32> {
+/// Parses a dirfd: `AT_FDCWD` → `None`, otherwise a decimal integer.
+pub fn parse_dirfd(s: &CStr) -> Result<Option<DupFd>, i32> {
     let b = s.to_bytes();
     if b == b"AT_FDCWD" {
-        Ok(-100)
+        Ok(None)
     } else {
-        let s = core::str::from_utf8(b).map_err(|_| 22)?;
-        s.parse().map_err(|_| 22)
+        DupFd::from_bytes(b).map(Some)
     }
 }
 

@@ -4,6 +4,6 @@ pub mod parse;
 
 pub fn pipe_exec() -> Result<(), i32> {
     let (rd, wr) = sys::pipe::pipe2(O_CLOEXEC)?;
-    sys::shellfd::send_fd(rd, c"rd")?;
-    sys::shellfd::send_fd(wr, c"wr")
+    sys::shellfd::send_fd(&rd, c"rd")?;
+    sys::shellfd::send_fd(&wr, c"wr")
 }
