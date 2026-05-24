@@ -12,6 +12,10 @@ dependencies = [
 [[package]]
 name = "fdshell"
 version = "0.1.0"
+dependencies = [
+ "builtins",
+ "sys",
+]
 
 [[package]]
 name = "libc"
