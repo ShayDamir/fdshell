@@ -67,8 +67,8 @@ impl DupFd {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, i32> {
-        let s = core::str::from_utf8(bytes).map_err(|_| 22)?;
-        let raw: i32 = s.parse().map_err(|_| 22)?;
+        let s = core::str::from_utf8(bytes).map_err(|_| crate::errno::EINVAL)?;
+        let raw: i32 = s.parse().map_err(|_| crate::errno::EINVAL)?;
         // SAFETY: fcntl(F_GETFD) returns ≥0 if fd is open, -1 + errno otherwise.
         let ret = unsafe { libc::fcntl(raw, libc::F_GETFD) };
         if ret < 0 {

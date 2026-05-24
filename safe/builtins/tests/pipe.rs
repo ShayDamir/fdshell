@@ -2,6 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use sys::errno::EINVAL;
 use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -34,7 +35,7 @@ fn empty_args() {
 
 #[test]
 fn unexpected_arg() {
-    assert_err(&["x"], 22);
+    assert_err(&["x"], EINVAL);
 }
 
 #[test]

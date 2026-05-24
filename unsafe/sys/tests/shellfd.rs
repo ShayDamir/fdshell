@@ -1,3 +1,4 @@
+use sys::errno::EINVAL;
 use sys::net::socketpair;
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
@@ -80,7 +81,7 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -99,7 +100,7 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -116,7 +117,7 @@ fn test_recv_fd_short_no_null() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -133,7 +134,7 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -153,7 +154,7 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(libc::EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;

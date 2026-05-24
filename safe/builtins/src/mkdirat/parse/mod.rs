@@ -1,4 +1,5 @@
 use core::ffi::CStr;
+use sys::errno::{EINVAL, ENOENT};
 use sys::DupFd;
 
 pub struct MkdiratConfig<'a> {
@@ -12,7 +13,7 @@ pub struct MkdiratConfig<'a> {
 ///
 /// Returns:
 /// - `Err(0)` — `--help` or `-h` was passed
-/// - `Err(22)` — bad flag name, missing value, etc.
+/// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
 ///
 /// # Example
 ///
@@ -45,7 +46,7 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(22)?;
+        let arg = args.get(i).ok_or(EINVAL)?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -61,19 +62,19 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
                     args, &mut i, val,
                 )?)?
             }
-            a if a.starts_with(b"-") => return Err(22),
+            a if a.starts_with(b"-") => return Err(EINVAL),
             _ => {
                 if path.is_some() {
-                    return Err(22);
+                    return Err(EINVAL);
                 }
                 path = Some(arg);
             }
         }
     }
 
-    let path = path.ok_or(22)?;
+    let path = path.ok_or(EINVAL)?;
     if path.to_bytes().is_empty() {
-        return Err(2);
+        return Err(ENOENT);
     }
 
     Ok(MkdiratConfig {

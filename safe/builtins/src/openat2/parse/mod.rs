@@ -1,6 +1,7 @@
 mod flags;
 
 use core::ffi::CStr;
+use sys::errno::{EINVAL, ENOENT};
 use sys::openat2::OpenHow;
 use sys::DupFd;
 
@@ -14,8 +15,8 @@ pub struct Openat2Config<'a> {
 ///
 /// Returns:
 /// - `Err(0)` — `--help` or `-h` was passed
-/// - `Err(22)` — bad flag name, missing value, etc.
-/// - `Err(2)` — empty path
+/// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
+/// - `Err(sys::errno::ENOENT)` — empty path
 ///
 /// # Example
 ///
@@ -47,8 +48,8 @@ pub struct Openat2Config<'a> {
 /// let b = CString::new("x").unwrap();
 /// let args = [a.as_c_str(), b.as_c_str()];
 /// match builtins::openat2::parse::openat2_parse(&args) {
-///     Err(22) => {}
-///     _ => panic!("expected Err(22)"),
+///     Err(sys::errno::EINVAL) => {}
+///     _ => panic!("expected Err(sys::errno::EINVAL)"),
 /// }
 /// ```
 pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
@@ -64,7 +65,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(22)?;
+        let arg = args.get(i).ok_or(EINVAL)?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -82,19 +83,19 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
                     args, &mut i, val,
                 )?)?
             }
-            a if a.starts_with(b"-") => return Err(22),
+            a if a.starts_with(b"-") => return Err(EINVAL),
             _ => {
                 if path.is_some() {
-                    return Err(22);
+                    return Err(EINVAL);
                 }
                 path = Some(arg);
             }
         }
     }
 
-    let path = path.ok_or(22)?;
+    let path = path.ok_or(EINVAL)?;
     if path.to_bytes().is_empty() {
-        return Err(2);
+        return Err(ENOENT);
     }
 
     Ok(Openat2Config {

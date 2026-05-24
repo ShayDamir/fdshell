@@ -1,11 +1,12 @@
 use super::CmsgBuf;
+use crate::errno::E2BIG;
 use crate::Fd;
 use core::ffi::CStr;
 
 pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
     let tag_bytes = tag.to_bytes_with_nul();
     if tag_bytes.len() > super::TAG_MAX {
-        return Err(libc::E2BIG);
+        return Err(E2BIG);
     }
     let iov = libc::iovec {
         iov_base: tag_bytes.as_ptr() as *mut core::ffi::c_void,

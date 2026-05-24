@@ -2,6 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use sys::errno::{EINVAL, ENOENT};
 use sys::fcntl::O_CLOEXEC;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -114,32 +115,32 @@ fn mode_hex() {
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "x"], 22);
+    assert_err(&["--bad", "x"], EINVAL);
 }
 
 #[test]
 fn short_flag() {
-    assert_err(&["-f", "O_RDONLY", "x"], 22);
+    assert_err(&["-f", "O_RDONLY", "x"], EINVAL);
 }
 
 #[test]
 fn missing_path() {
-    assert_err(&["--flags", "O_RDONLY"], 22);
+    assert_err(&["--flags", "O_RDONLY"], EINVAL);
 }
 
 #[test]
 fn extra_path() {
-    assert_err(&["a", "b"], 22);
+    assert_err(&["a", "b"], EINVAL);
 }
 
 #[test]
 fn empty_path() {
-    assert_err(&[""], 2);
+    assert_err(&[""], ENOENT);
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--flags"], 22);
+    assert_err(&["--flags"], EINVAL);
 }
 
 #[test]

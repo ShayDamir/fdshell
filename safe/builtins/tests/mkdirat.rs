@@ -2,6 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use sys::errno::{EINVAL, ENOENT};
 use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -50,27 +51,27 @@ fn empty_args() {
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "x"], 22);
+    assert_err(&["--bad", "x"], EINVAL);
 }
 
 #[test]
 fn missing_path() {
-    assert_err(&["--mode", "755"], 22);
+    assert_err(&["--mode", "755"], EINVAL);
 }
 
 #[test]
 fn extra_path() {
-    assert_err(&["a", "b"], 22);
+    assert_err(&["a", "b"], EINVAL);
 }
 
 #[test]
 fn empty_path() {
-    assert_err(&[""], 2);
+    assert_err(&[""], ENOENT);
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--mode"], 22);
+    assert_err(&["--mode"], EINVAL);
 }
 
 #[test]

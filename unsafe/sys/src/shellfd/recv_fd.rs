@@ -1,4 +1,5 @@
 use super::CmsgBuf;
+use crate::errno::EINVAL;
 use crate::Fd;
 use core::ffi::CStr;
 
@@ -35,23 +36,23 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8]) -> Result<(Fd, &'a CStr), i32> 
     // null if no control message is present (handled below).
     let cmsg_ptr = unsafe { libc::CMSG_FIRSTHDR(&msg) };
     if cmsg_ptr.is_null() {
-        return Err(libc::EINVAL);
+        return Err(EINVAL);
     }
     // SAFETY: `cmsg_ptr` is non-null, points into our `cmsg` buffer. `CMSG_DATA`
     // computes the offset past the `cmsghdr` header; on x86_64 this is 16 bytes,
     // within the `CmsgBuf` allocation. The cast to `*const i32` has alignment 4 ≤ 8.
     let raw_fd = unsafe {
         if (*cmsg_ptr).cmsg_level != libc::SOL_SOCKET || (*cmsg_ptr).cmsg_type != libc::SCM_RIGHTS {
-            return Err(libc::EINVAL);
+            return Err(EINVAL);
         }
         *libc::CMSG_DATA(cmsg_ptr).cast::<i32>()
     };
     // SAFETY: `raw_fd` has CLOEXEC from `MSG_CMSG_CLOEXEC` flag in `recvmsg`.
     let fd = unsafe { Fd::from_raw(raw_fd) };
     if n > tag.len() {
-        return Err(libc::EINVAL);
+        return Err(EINVAL);
     }
-    let tag_slice = tag.get(..n).ok_or(libc::EINVAL)?;
-    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| libc::EINVAL)?;
+    let tag_slice = tag.get(..n).ok_or(EINVAL)?;
+    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| EINVAL)?;
     Ok((fd, tag_cstr))
 }
