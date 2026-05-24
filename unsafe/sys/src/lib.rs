@@ -22,7 +22,7 @@ pub mod net;
 pub mod openat2;
 pub mod pipe;
 mod process;
-pub mod renameat;
+pub mod renameat2;
 pub mod rw;
 pub mod shellfd;
 pub mod stat;

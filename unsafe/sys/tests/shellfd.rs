@@ -52,7 +52,7 @@ fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
     if pid == 0 {
         let code = match f() {
             Ok(()) => 0,
-            Err(e) => e as i32,
+            Err(e) => e,
         };
         std::process::exit(code);
     }

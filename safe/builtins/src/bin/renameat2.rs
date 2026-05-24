@@ -6,24 +6,25 @@ fn main() {
         .map(std::ffi::CString::new)
         .collect::<Result<Vec<_>, _>>()
         .unwrap_or_else(|_| {
-            eprintln!("mkdirat: argv contains NUL");
+            eprintln!("renameat2: argv contains NUL");
             std::process::exit(1);
         });
     let args: Vec<&core::ffi::CStr> = argv.iter().map(|cs| cs.as_c_str()).collect();
-
-    let cfg = match builtins::mkdirat::parse::mkdirat_parse(&args) {
+    let cfg = match builtins::renameat2::parse::renameat2_parse(&args) {
         Err(sys::errno::HELP) => {
-            println!("Usage: mkdirat [--dirfd N] [--mode MODE] [--resolve FLAGS] path");
+            println!(
+                "Usage: renameat2 [--olddirfd N] [--newdirfd N] [--flags FLAGS] oldpath newpath"
+            );
             return;
         }
         Err(e) => {
-            eprintln!("mkdirat: parse error {e}");
+            eprintln!("renameat2: parse error {e}");
             std::process::exit(1);
         }
         Ok(c) => c,
     };
-    if let Err(e) = builtins::mkdirat::mkdirat_exec(&cfg) {
-        eprintln!("mkdirat: error {e}");
+    if let Err(e) = builtins::renameat2::renameat2_exec(&cfg) {
+        eprintln!("renameat2: error {e}");
         std::process::exit(1);
     }
 }

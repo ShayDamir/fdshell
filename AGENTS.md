@@ -84,7 +84,7 @@ Three fd types in `unsafe/sys/src/fd.rs` and `atfd.rs`:
 | `rw.rs` | fd I/O — `read`, `write` |
 | `fcntl.rs` | Re-exports O\_\* and fcntl constants from `libc` |
 | `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |
-| `renameat.rs` | Rename — `renameat(olddirfd, oldpath, newdirfd, newpath)` |
+| `renameat2.rs` | Rename — `renameat2(olddirfd, oldpath, newdirfd, newpath, flags)` + `RENAME_*` constants |
 | `openat2.rs` | `openat2` syscall, `OpenHow`, `RESOLVE_*` constants |
 | `pipe.rs` | Pipe — `pipe2(flags)` |
 | `shellfd/` | SHELLFD protocol — `send_fd`, `recv_fd` |

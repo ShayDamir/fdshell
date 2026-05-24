@@ -12,7 +12,10 @@ fn main() {
     let args: Vec<&core::ffi::CStr> = argv.iter().map(|cs| cs.as_c_str()).collect();
 
     match builtins::pipe::parse::pipe_parse(&args) {
-        Err(sys::errno::HELP) => return,
+        Err(sys::errno::HELP) => {
+            println!("Usage: pipe [--flags FLAGS]");
+            return;
+        }
         Err(e) => {
             eprintln!("pipe: parse error {e}");
             std::process::exit(1);

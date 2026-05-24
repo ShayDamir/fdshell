@@ -12,7 +12,12 @@ fn main() {
     let args: Vec<&core::ffi::CStr> = argv.iter().map(|cs| cs.as_c_str()).collect();
 
     let cfg = match builtins::openat2::parse::openat2_parse(&args) {
-        Err(sys::errno::HELP) => return,
+        Err(sys::errno::HELP) => {
+            println!(
+                "Usage: openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] path"
+            );
+            return;
+        }
         Err(e) => {
             eprintln!("openat2: parse error {e}");
             std::process::exit(1);
