@@ -36,13 +36,19 @@ fn basic() {
 }
 
 #[test]
-fn help_long() { assert_err(&["--help"], 0); }
+fn help_long() {
+    assert_err(&["--help"], 0);
+}
 
 #[test]
-fn help_short() { assert_err(&["-h"], 0); }
+fn help_short() {
+    assert_err(&["-h"], 0);
+}
 
 #[test]
-fn empty_args() { assert_err(&[], 0); }
+fn empty_args() {
+    assert_err(&[], 0);
+}
 
 #[test]
 fn dirfd_ateq() {
@@ -74,9 +80,12 @@ fn pipe_flags() {
 
 #[test]
 fn resolve_or() {
-    assert_ok(&["--resolve", "RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS", "x"], |cfg| {
-        assert_eq!(cfg.how.resolve, 9);
-    });
+    assert_ok(
+        &["--resolve", "RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS", "x"],
+        |cfg| {
+            assert_eq!(cfg.how.resolve, 9);
+        },
+    );
 }
 
 #[test]
@@ -101,22 +110,34 @@ fn mode_hex() {
 }
 
 #[test]
-fn bad_flag() { assert_err(&["--bad", "x"], 22); }
+fn bad_flag() {
+    assert_err(&["--bad", "x"], 22);
+}
 
 #[test]
-fn short_flag() { assert_err(&["-f", "O_RDONLY", "x"], 22); }
+fn short_flag() {
+    assert_err(&["-f", "O_RDONLY", "x"], 22);
+}
 
 #[test]
-fn missing_path() { assert_err(&["--flags", "O_RDONLY"], 22); }
+fn missing_path() {
+    assert_err(&["--flags", "O_RDONLY"], 22);
+}
 
 #[test]
-fn extra_path() { assert_err(&["a", "b"], 22); }
+fn extra_path() {
+    assert_err(&["a", "b"], 22);
+}
 
 #[test]
-fn empty_path() { assert_err(&[""], 2); }
+fn empty_path() {
+    assert_err(&[""], 2);
+}
 
 #[test]
-fn missing_value() { assert_err(&["--flags"], 22); }
+fn missing_value() {
+    assert_err(&["--flags"], 22);
+}
 
 #[test]
 fn mode_eq() {

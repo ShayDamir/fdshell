@@ -11,7 +11,7 @@ Three crates in a Cargo workspace (`resolver = "2"`):
 | `unsafe/sys/` | lib | `#![no_std]`, unsafe allowed | Syscall wrappers for safe crates |
 
 - `safe/` crates **cannot** call libc directly (`forbid(unsafe_code)`).
-- `unsafe/` source files must be ≤80 lines each (excluding comments).
+- `safe/` and `unsafe/` source files must be ≤80 lines each (excluding comments). If a file approaches this limit, split or refactor rather than compress formatting. Tests are exempt from the line limit.
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
 - Safe wrappers in `unsafe/sys` return `Result<_, i32>` (positive errno on error). Use `cvt(ret: isize) -> Result<isize, i32>` from `lib.rs` to convert libc return values.
 - Avoid `#[derive]` where possible. Prefer `no_std` when feasible (binary uses `std` because `no_std` + stable needs nightly + `-Z build-std`).
@@ -30,6 +30,7 @@ Three crates in a Cargo workspace (`resolver = "2"`):
 
 ```sh
 cargo build                  # native build
+cargo fmt                    # format all source
 cargo clippy -- -D warnings  # lint (all warnings denied)
 ```
 
@@ -37,12 +38,12 @@ CI runs via Nix flake:
 
 ```sh
 nix build                   # builds release binary → result/bin/fdshell
-nix flake check             # clippy + cargo nextest
+nix flake check             # fmt + clippy + cargo nextest
 ```
 
 - Version is read from `safe/fdshell/Cargo.toml` in `flake.nix`.
 - Nix files must be `git add`-ed before `nix build`/`nix flake check` (Nix reads from the Git index).
-- `package.nix` parameters: `doClippy`, `doTests`. Future: add `doCoverage ? false` the same way.
+- `package.nix` parameters: `doFmt`, `doClippy`, `doTests`. Future: add `doCoverage ? false` the same way.
 
 ## Testing
 
@@ -67,7 +68,7 @@ nix flake check             # clippy + cargo nextest
 | `renameat.rs` | Rename — `renameat(olddirfd, oldpath, newdirfd, newpath)` |
 | `openat2.rs` | `openat2` syscall, `OpenHow`, `RESOLVE_*` constants |
 | `pipe.rs` | Pipe — `pipe2(flags)` |
-| `shellfd.rs` | SHELLFD protocol — `send_fd`, `recv_fd` |
+| `shellfd/` | SHELLFD protocol — `send_fd`, `recv_fd` |
 | `stat.rs` | `FileStat`, `stat`, `fstat` |
 
 ## Builtin conventions

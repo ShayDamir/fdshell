@@ -1,6 +1,6 @@
-use core::ffi::CStr;
-use crate::Fd;
 use super::CmsgBuf;
+use crate::Fd;
+use core::ffi::CStr;
 
 pub fn send_fd(fd: Fd, tag: &CStr) -> Result<(), i32> {
     let tag_bytes = tag.to_bytes_with_nul();

@@ -32,6 +32,7 @@
         inherit version;
         src = lib.cleanSource ./.;
         cargoLock = ./Cargo.lock;
+        doFmt = true;
         doClippy = true;
         doTests = true;
       };

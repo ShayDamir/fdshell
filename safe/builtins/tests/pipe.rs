@@ -18,16 +18,24 @@ fn assert_err(args: &[&str], code: i32) {
 }
 
 #[test]
-fn help_long() { assert_err(&["--help"], 0); }
+fn help_long() {
+    assert_err(&["--help"], 0);
+}
 
 #[test]
-fn help_short() { assert_err(&["-h"], 0); }
+fn help_short() {
+    assert_err(&["-h"], 0);
+}
 
 #[test]
-fn empty_args() { assert_err(&[], 0); }
+fn empty_args() {
+    assert_err(&[], 0);
+}
 
 #[test]
-fn unexpected_arg() { assert_err(&["x"], 22); }
+fn unexpected_arg() {
+    assert_err(&["x"], 22);
+}
 
 #[test]
 fn test_pipe_exec() {

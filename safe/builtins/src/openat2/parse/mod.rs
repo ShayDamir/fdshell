@@ -3,7 +3,11 @@ mod flags;
 use core::ffi::CStr;
 use sys::openat2::OpenHow;
 
-pub struct Openat2Config<'a> { pub dirfd: i32, pub path: &'a CStr, pub how: OpenHow }
+pub struct Openat2Config<'a> {
+    pub dirfd: i32,
+    pub path: &'a CStr,
+    pub how: OpenHow,
+}
 
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
 ///
@@ -63,20 +67,42 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
-            b"--dirfd" => dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?,
-            b"--flags" => open_flags = flags::parse_open_flags(crate::argparse::next_val(args, &mut i, val)?)?,
-            b"--mode" => mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?,
-            b"--resolve" => resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(args, &mut i, val)?)?,
+            b"--dirfd" => {
+                dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?
+            }
+            b"--flags" => {
+                open_flags = flags::parse_open_flags(crate::argparse::next_val(args, &mut i, val)?)?
+            }
+            b"--mode" => {
+                mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?
+            }
+            b"--resolve" => {
+                resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(
+                    args, &mut i, val,
+                )?)?
+            }
             a if a.starts_with(b"-") => return Err(22),
             _ => {
-                if path.is_some() { return Err(22); }
+                if path.is_some() {
+                    return Err(22);
+                }
                 path = Some(arg);
             }
         }
     }
 
     let path = path.ok_or(22)?;
-    if path.to_bytes().is_empty() { return Err(2); }
+    if path.to_bytes().is_empty() {
+        return Err(2);
+    }
 
-    Ok(Openat2Config { dirfd, path, how: OpenHow { flags: open_flags as u64, mode, resolve } })
+    Ok(Openat2Config {
+        dirfd,
+        path,
+        how: OpenHow {
+            flags: open_flags as u64,
+            mode,
+            resolve,
+        },
+    })
 }

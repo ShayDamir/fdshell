@@ -1,5 +1,5 @@
-use core::ffi::CStr;
 use crate::Fd;
+use core::ffi::CStr;
 
 #[repr(C)]
 pub struct OpenHow {

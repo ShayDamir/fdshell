@@ -1,6 +1,6 @@
-use core::ffi::CStr;
-use crate::Fd;
 use super::CmsgBuf;
+use crate::Fd;
+use core::ffi::CStr;
 
 pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<(Fd, &CStr), i32> {
     let mut extra = 0u8;
@@ -40,9 +40,7 @@ pub fn recv_fd(sock: Fd, tag: &mut [u8]) -> Result<(Fd, &CStr), i32> {
     // computes the offset past the `cmsghdr` header; on x86_64 this is 16 bytes,
     // within the `CmsgBuf` allocation. The cast to `*const i32` has alignment 4 ≤ 8.
     let fd = unsafe {
-        if (*cmsg_ptr).cmsg_level != libc::SOL_SOCKET
-            || (*cmsg_ptr).cmsg_type != libc::SCM_RIGHTS
-        {
+        if (*cmsg_ptr).cmsg_level != libc::SOL_SOCKET || (*cmsg_ptr).cmsg_type != libc::SCM_RIGHTS {
             return Err(libc::EINVAL);
         }
         *libc::CMSG_DATA(cmsg_ptr).cast::<i32>()

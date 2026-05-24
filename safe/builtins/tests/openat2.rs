@@ -21,8 +21,7 @@ fn test_openat2_exec() {
     }
     let receiver = pair[1];
 
-    let cfg =
-        builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()]).unwrap();
+    let cfg = builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()]).unwrap();
     builtins::openat2::openat2_exec(&cfg).unwrap();
 
     let mut tag = [0u8; TAG_MAX];

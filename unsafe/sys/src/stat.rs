@@ -9,8 +9,10 @@ pub struct FileStat {
 
 impl PartialEq for FileStat {
     fn eq(&self, other: &Self) -> bool {
-        self.ino == other.ino && self.mode == other.mode
-            && self.dev == other.dev && self.rdev == other.rdev
+        self.ino == other.ino
+            && self.mode == other.mode
+            && self.dev == other.dev
+            && self.rdev == other.rdev
     }
 }
 

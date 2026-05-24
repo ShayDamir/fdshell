@@ -1,5 +1,8 @@
 use core::ffi::CStr;
-use sys::fcntl::{O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_NONBLOCK, O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY};
+use sys::fcntl::{
+    O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_NONBLOCK,
+    O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
+};
 
 pub(crate) fn parse_open_flags(s: &CStr) -> Result<i32, i32> {
     let b = s.to_bytes();

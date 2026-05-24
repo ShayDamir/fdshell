@@ -34,28 +34,44 @@ fn basic() {
 }
 
 #[test]
-fn help_long() { assert_err(&["--help"], 0); }
+fn help_long() {
+    assert_err(&["--help"], 0);
+}
 
 #[test]
-fn help_short() { assert_err(&["-h"], 0); }
+fn help_short() {
+    assert_err(&["-h"], 0);
+}
 
 #[test]
-fn empty_args() { assert_err(&[], 0); }
+fn empty_args() {
+    assert_err(&[], 0);
+}
 
 #[test]
-fn bad_flag() { assert_err(&["--bad", "x"], 22); }
+fn bad_flag() {
+    assert_err(&["--bad", "x"], 22);
+}
 
 #[test]
-fn missing_path() { assert_err(&["--mode", "755"], 22); }
+fn missing_path() {
+    assert_err(&["--mode", "755"], 22);
+}
 
 #[test]
-fn extra_path() { assert_err(&["a", "b"], 22); }
+fn extra_path() {
+    assert_err(&["a", "b"], 22);
+}
 
 #[test]
-fn empty_path() { assert_err(&[""], 2); }
+fn empty_path() {
+    assert_err(&[""], 2);
+}
 
 #[test]
-fn missing_value() { assert_err(&["--mode"], 22); }
+fn missing_value() {
+    assert_err(&["--mode"], 22);
+}
 
 #[test]
 fn dirfd_ateq() {
@@ -101,9 +117,12 @@ fn resolve_single() {
 
 #[test]
 fn resolve_or() {
-    assert_ok(&["--resolve", "RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS", "x"], |cfg| {
-        assert_eq!(cfg.resolve, 9);
-    });
+    assert_ok(
+        &["--resolve", "RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS", "x"],
+        |cfg| {
+            assert_eq!(cfg.resolve, 9);
+        },
+    );
 }
 
 #[test]

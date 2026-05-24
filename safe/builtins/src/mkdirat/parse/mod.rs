@@ -48,19 +48,37 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
-            b"--dirfd" => dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?,
-            b"--mode" => mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)? as u32,
-            b"--resolve" => resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(args, &mut i, val)?)?,
+            b"--dirfd" => {
+                dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?
+            }
+            b"--mode" => {
+                mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?
+                    as u32
+            }
+            b"--resolve" => {
+                resolve = crate::argparse::parse_resolve_flags(crate::argparse::next_val(
+                    args, &mut i, val,
+                )?)?
+            }
             a if a.starts_with(b"-") => return Err(22),
             _ => {
-                if path.is_some() { return Err(22); }
+                if path.is_some() {
+                    return Err(22);
+                }
                 path = Some(arg);
             }
         }
     }
 
     let path = path.ok_or(22)?;
-    if path.to_bytes().is_empty() { return Err(2); }
+    if path.to_bytes().is_empty() {
+        return Err(2);
+    }
 
-    Ok(MkdiratConfig { dirfd, path, mode, resolve })
+    Ok(MkdiratConfig {
+        dirfd,
+        path,
+        mode,
+        resolve,
+    })
 }
