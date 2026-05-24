@@ -12,7 +12,7 @@ pub struct MkdiratConfig<'a> {
 /// Parses mkdirat CLI arguments into an [`MkdiratConfig`].
 ///
 /// Returns:
-/// - `Err(0)` — `--help` or `-h` was passed
+/// - `Err(sys::errno::HELP)` — `--help` or `-h` was passed
 /// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
 ///
 /// # Example
@@ -36,7 +36,7 @@ pub struct MkdiratConfig<'a> {
 /// ```
 pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(0);
+        return Err(sys::errno::HELP);
     }
 
     let mut dirfd = None;

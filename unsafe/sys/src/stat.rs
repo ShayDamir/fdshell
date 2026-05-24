@@ -1,5 +1,8 @@
 use crate::Fd;
 
+pub const S_IFMT: u32 = libc::S_IFMT;
+pub const S_IFDIR: u32 = libc::S_IFDIR;
+
 pub struct FileStat {
     pub ino: u64,
     pub mode: u32,

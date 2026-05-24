@@ -14,7 +14,7 @@ pub struct Openat2Config<'a> {
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
 ///
 /// Returns:
-/// - `Err(0)` — `--help` or `-h` was passed
+/// - `Err(sys::errno::HELP)` — `--help` or `-h` was passed
 /// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
 /// - `Err(sys::errno::ENOENT)` — empty path
 ///
@@ -54,7 +54,7 @@ pub struct Openat2Config<'a> {
 /// ```
 pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(0);
+        return Err(sys::errno::HELP);
     }
 
     let mut dirfd = None;

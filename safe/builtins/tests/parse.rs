@@ -2,7 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EINVAL, ENOENT};
+use sys::errno::{EINVAL, ENOENT, HELP};
 use sys::fcntl::O_CLOEXEC;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -38,17 +38,17 @@ fn basic() {
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], 0);
+    assert_err(&["--help"], HELP);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], 0);
+    assert_err(&["-h"], HELP);
 }
 
 #[test]
 fn empty_args() {
-    assert_err(&[], 0);
+    assert_err(&[], HELP);
 }
 
 #[test]

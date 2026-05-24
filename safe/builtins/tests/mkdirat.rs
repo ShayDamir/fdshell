@@ -2,7 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EINVAL, ENOENT};
+use sys::errno::{EINVAL, ENOENT, HELP};
 use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -36,17 +36,17 @@ fn basic() {
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], 0);
+    assert_err(&["--help"], HELP);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], 0);
+    assert_err(&["-h"], HELP);
 }
 
 #[test]
 fn empty_args() {
-    assert_err(&[], 0);
+    assert_err(&[], HELP);
 }
 
 #[test]
@@ -169,7 +169,10 @@ fn test_mkdirat_exec() {
     assert_eq!(tag.to_bytes(), b"dirfd");
 
     let st = sys::stat::fstat(&fd).unwrap();
-    assert!(st.mode & 0o170000 == 0o40000, "expected directory");
+    assert!(
+        st.mode & sys::stat::S_IFMT == sys::stat::S_IFDIR,
+        "expected directory"
+    );
 
     // Verify the path also exists as a directory
     let st2 = sys::stat::stat(&cpath).unwrap();

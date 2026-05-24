@@ -12,7 +12,7 @@ fn main() {
     let args: Vec<&core::ffi::CStr> = argv.iter().map(|cs| cs.as_c_str()).collect();
 
     let cfg = match builtins::mkdirat::parse::mkdirat_parse(&args) {
-        Err(0) => return,
+        Err(sys::errno::HELP) => return,
         Err(e) => {
             eprintln!("mkdirat: parse error {e}");
             std::process::exit(1);

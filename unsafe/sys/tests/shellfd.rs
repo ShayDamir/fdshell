@@ -19,7 +19,7 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
         hdr: libc::cmsghdr {
             // SAFETY: `CMSG_LEN(4)` returns the size of a cmsghdr + one i32,
             // always valid on x86_64 Linux.
-            cmsg_len: unsafe { libc::CMSG_LEN(4) as usize },
+            cmsg_len: unsafe { libc::CMSG_LEN(core::mem::size_of::<i32>() as u32) as usize },
             cmsg_level: libc::SOL_SOCKET,
             cmsg_type: libc::SCM_RIGHTS,
         },
@@ -43,31 +43,63 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
     Ok(())
 }
 
+fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
+    // SAFETY: child inherits a copy of the fd table; parent waits for it.
+    let pid = unsafe { libc::fork() };
+    if pid == -1 {
+        return Err(unsafe { *libc::__errno_location() });
+    }
+    if pid == 0 {
+        let code = match f() {
+            Ok(()) => 0,
+            Err(e) => e as i32,
+        };
+        std::process::exit(code);
+    }
+    let mut status = 0i32;
+    // SAFETY: waitpid for our direct child blocks until it exits.
+    unsafe { libc::waitpid(pid, &mut status, 0) };
+    if libc::WIFEXITED(status) {
+        let code = libc::WEXITSTATUS(status);
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(code as i32)
+        }
+    } else if libc::WIFSIGNALED(status) {
+        panic!("test child killed by signal {}", libc::WTERMSIG(status));
+    } else {
+        panic!("test child terminated unexpectedly");
+    }
+}
+
 #[test]
 fn test_send_recv_fd() -> Result<(), i32> {
-    reserve_shellfd()?;
-    let (a, b) = socketpair()?;
-    a.dup2(SHELL_DUPFD)?;
-    a.close()?;
-    let receiver = b;
+    fork_test(|| {
+        reserve_shellfd()?;
+        let (a, b) = socketpair()?;
+        a.dup2(SHELL_DUPFD)?;
+        a.close()?;
+        let receiver = b;
 
-    let (test_a, test_b) = socketpair()?;
-    send_fd(&test_a, c"test")?;
-    test_a.close()?;
-    write(&test_b, b"42")?;
-    test_b.close()?;
+        let (test_a, test_b) = socketpair()?;
+        send_fd(&test_a, c"test")?;
+        test_a.close()?;
+        write(&test_b, b"42")?;
+        test_b.close()?;
 
-    let mut tag = [0u8; TAG_MAX];
-    let (test_fd, _tag) = recv_fd(&receiver, &mut tag)?;
+        let mut tag = [0u8; TAG_MAX];
+        let (test_fd, _tag) = recv_fd(&receiver, &mut tag)?;
 
-    let mut buf = [0u8; 8];
-    assert_eq!(read(&test_fd, &mut buf)?, 2);
-    assert_eq!(&buf[..2], b"42");
-    assert_eq!(read(&test_fd, &mut buf)?, 0);
+        let mut buf = [0u8; 8];
+        assert_eq!(read(&test_fd, &mut buf)?, 2);
+        assert_eq!(&buf[..2], b"42");
+        assert_eq!(read(&test_fd, &mut buf)?, 0);
 
-    test_fd.close()?;
-    receiver.close()?;
-    Ok(())
+        test_fd.close()?;
+        receiver.close()?;
+        Ok(())
+    })
 }
 
 #[test]
@@ -76,7 +108,7 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
     let (a, b) = socketpair()?;
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
 
-    let tag = [b'x'; 8192];
+    let tag = [b'x'; 2 * TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
     dummy_wr.close()?;
 

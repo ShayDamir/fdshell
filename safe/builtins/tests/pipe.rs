@@ -2,7 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::EINVAL;
+use sys::errno::{EINVAL, HELP};
 use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -20,17 +20,17 @@ fn assert_err(args: &[&str], code: i32) {
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], 0);
+    assert_err(&["--help"], HELP);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], 0);
+    assert_err(&["-h"], HELP);
 }
 
 #[test]
 fn empty_args() {
-    assert_err(&[], 0);
+    assert_err(&[], HELP);
 }
 
 #[test]
