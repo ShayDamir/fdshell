@@ -12,6 +12,12 @@ pub fn dup2(old: Fd, new: Fd) -> Result<Fd, i32> {
     Ok(new)
 }
 
+pub fn dup3(old: Fd, new: Fd) -> Result<(), i32> {
+    // SAFETY: `dup3` with invalid fds or flags returns `EBADF`/`EINVAL`.
+    crate::cvt(unsafe { libc::dup3(old, new, libc::O_CLOEXEC) as isize })?;
+    Ok(())
+}
+
 pub fn read(fd: Fd, buf: &mut [u8]) -> Result<isize, i32> {
     // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
     crate::cvt(unsafe {

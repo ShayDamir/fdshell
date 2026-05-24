@@ -14,5 +14,7 @@ pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
 
 pub mod fd;
 pub mod net;
+pub mod openat2;
 mod process;
 pub mod shellfd;
+pub mod stat;

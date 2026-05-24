@@ -3,10 +3,6 @@ name = "fdshell"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-builtins = { path = "../builtins" }
-sys = { path = "../../unsafe/sys" }
-
 [lints]
 workspace = true
 
