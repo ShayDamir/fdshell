@@ -1,5 +1,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use sys::shellfd::TAG_MAX;
+
 #[test]
 fn test_openat2_exec() {
     let dir = std::env::temp_dir().join("fdshell-test-openat2-exec");
@@ -23,7 +25,7 @@ fn test_openat2_exec() {
         builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()]).unwrap();
     builtins::openat2::openat2_exec(&cfg).unwrap();
 
-    let mut tag = [0u8; 4096];
+    let mut tag = [0u8; TAG_MAX];
     let (fd, _tag) = sys::shellfd::recv_fd(receiver, &mut tag).unwrap();
 
     let after = sys::stat::fstat(fd).unwrap();

@@ -2,6 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -142,7 +143,7 @@ fn test_mkdirat_exec() {
     let cfg = builtins::mkdirat::parse::mkdirat_parse(&args).unwrap();
     builtins::mkdirat::mkdirat_exec(&cfg).unwrap();
 
-    let mut buf = [0u8; 4096];
+    let mut buf = [0u8; TAG_MAX];
     let (fd, tag) = sys::shellfd::recv_fd(receiver, &mut buf).unwrap();
     assert_eq!(tag.to_bytes(), b"dirfd");
 

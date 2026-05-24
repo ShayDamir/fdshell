@@ -2,6 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -40,8 +41,8 @@ fn test_pipe_exec() {
 
     builtins::pipe::pipe_exec().unwrap();
 
-    let mut buf_a = [0u8; 4096];
-    let mut buf_b = [0u8; 4096];
+    let mut buf_a = [0u8; TAG_MAX];
+    let mut buf_b = [0u8; TAG_MAX];
     let (fd_a, tag_a) = sys::shellfd::recv_fd(receiver, &mut buf_a).unwrap();
     let (fd_b, tag_b) = sys::shellfd::recv_fd(receiver, &mut buf_b).unwrap();
 
