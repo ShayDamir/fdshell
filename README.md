@@ -1,4 +1,4 @@
-# FD Shell - small, security-oriented shell with file descriptor passing.
+# FD Shell — small, security-oriented shell with file descriptor passing.
 
 FD shell aims to reduce number of security vulnerabilities in common shell scripts
 by allowing passing file descriptors between subprocesses in a controlled, safe way.
@@ -9,21 +9,33 @@ implementations of common file descriptor operations.
 Example:
 
 ```shell
-# this creates new directory and saves the file descriptor to the directory in %foo
-builtin mkdirat %CWD foo %>%foo
-# this creates another directory and saves the file descriptor in %bar
-builtin mkdirat %CWD bar %>%bar
-# this creates new file in %foo
-builtin openat %foo baz --creat --excl --mode %>%baz
-# this renames the foo/baz into bar/qux
-builtin renameat %foo baz %bar qux
-# this spawn external command (/bin/echo) that writes to the same file descriptor that was created as foo/baz
+# creates a directory and saves the fd in %foo
+builtin mkdirat --dirfd %CWD foo %>%foo
+# creates another directory and saves the fd in %bar
+builtin mkdirat --dirfd %CWD bar %>%bar
+# creates a new file in %foo
+builtin openat2 --dirfd %foo --flags O_CREAT --flags O_EXCL --mode 0644 baz %>%baz
+# renames foo/baz into bar/qux
+builtin renameat2 --olddirfd %foo --newdirfd %bar baz qux
+# spawns an external command that writes to the same fd as foo/baz
 echo "test" >%baz
 ```
 
 By passing file descriptors directly instead of using paths to resolve them, scripts
 written in fdshell can avoid TOCTOU vulnerabilities when parts of paths are changed
 parallel to script invocation.
+
+## Builtins
+
+| Command | Description |
+|---|---|
+| `openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] path` | Open or create a file via `openat2`. Returns one fd. |
+| `mkdirat [--dirfd N] [--mode MODE] [--resolve FLAGS] path` | Create a directory via `mkdirat` + `openat2`. Returns one fd. |
+| `pipe [--flags FLAGS]` | Create an anonymous pipe via `pipe2`. Returns two fds tagged `rd` and `wr`. |
+| `renameat2 [--olddirfd N] [--newdirfd N] [--flags FLAGS] oldpath newpath` | Rename or exchange files via `renameat2`. Returns no fd. |
+
+Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
+`0x`-prefixed hex values. Repeat `--flags` to combine multiple flags.
 
 ## How it works?
 
@@ -83,8 +95,8 @@ Example:
 run_server params &
 # saves its pidfd into %server_pid
 %server_pid=%!
-# sends signal to the background process
-builtint kill --pidfd=%server_pid
+# sends signal to the background process (not yet implemented)
+builtin kill --pidfd=%server_pid
 # waits until server is finished
 wait %server_pid
 ```
