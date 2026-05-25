@@ -45,6 +45,16 @@ fn child_main(
 
     match cmd {
         Command::Builtin(name) => match name.as_bytes() {
+            b"echo" => {
+                for (i, arg) in refs.iter().enumerate() {
+                    if i > 0 {
+                        print!(" ");
+                    }
+                    print!("{}", arg.to_str().map_err(|_| sys::errno::EINVAL)?);
+                }
+                println!();
+                Ok(())
+            }
             b"pipe" => builtins::pipe::parse::pipe_parse(&refs)
                 .and_then(|cfg| builtins::pipe::pipe_exec(cfg.flags)),
             b"mkdirat" => builtins::mkdirat::parse::mkdirat_parse(&refs)
