@@ -1,0 +1,49 @@
+use alloc::ffi::CString;
+use alloc::rc::Rc;
+use core::ffi::CStr;
+
+use crate::shortcstr::{InlineSize, ShortCStr, INLINE_CAP, INLINE_MAX};
+
+/// # Safety
+/// `bytes.len()` ≤ `INLINE_MAX` and `bytes` has no interior NUL.
+pub(crate) unsafe fn from_inline(bytes: &[u8]) -> ShortCStr {
+    let mut buf = [0u8; INLINE_CAP];
+    buf[..bytes.len()].copy_from_slice(bytes);
+    buf[bytes.len()] = 0;
+    // SAFETY: caller guaranteed bytes.len() ≤ INLINE_MAX.
+    let len = unsafe { InlineSize::from_u8(bytes.len() as u8) };
+    ShortCStr::Inline { len, buf }
+}
+
+/// # Safety
+/// `bytes.len()` > `INLINE_MAX` and `bytes` has no interior NUL.
+pub(crate) unsafe fn from_long(bytes: &[u8]) -> ShortCStr {
+    let v = bytes.to_vec();
+    // SAFETY: caller guarantees no interior NUL.
+    let cs = unsafe { CString::from_vec_unchecked(v) };
+    ShortCStr::Rc {
+        rc: Rc::from(cs.into_boxed_c_str()),
+        offset: 0,
+        length: bytes.len(),
+    }
+}
+
+impl ShortCStr {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, i32> {
+        if bytes.contains(&0) {
+            return Err(crate::errno::EINVAL);
+        }
+        if bytes.len() <= INLINE_MAX as usize {
+            // SAFETY: bytes.len() ≤ INLINE_MAX and no interior NUL, verified above.
+            Ok(unsafe { from_inline(bytes) })
+        } else {
+            // SAFETY: bytes.len() > INLINE_MAX and no interior NUL, verified above.
+            Ok(unsafe { from_long(bytes) })
+        }
+    }
+
+    pub const fn from_static(s: &'static CStr) -> Self {
+        let len = s.count_bytes();
+        ShortCStr::Static(s, 0, len)
+    }
+}

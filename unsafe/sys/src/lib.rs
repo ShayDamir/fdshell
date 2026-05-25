@@ -1,8 +1,11 @@
 #![no_std]
 
+extern crate alloc;
+
 pub use atfd::AtFd;
 pub use dupfd::DupFd;
 pub use fd::Fd;
+pub use shortcstr::ShortCStr;
 
 pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
     if ret == -1 {
@@ -28,6 +31,7 @@ mod process;
 pub mod renameat2;
 pub mod rw;
 pub mod shellfd;
+pub mod shortcstr;
 pub mod siginfo;
 pub mod stat;
 pub mod wait_pidfd;
