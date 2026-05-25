@@ -31,7 +31,7 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
         msg_iov: &iov as *const libc::iovec as *mut libc::iovec,
         msg_iovlen: 1,
         msg_control: &mut cmsg as *mut CmsgBuf as *mut core::ffi::c_void,
-        msg_controllen: core::mem::size_of::<CmsgBuf>(),
+        msg_controllen: core::mem::size_of_val(&cmsg),
         msg_flags: 0,
     };
     // SAFETY: `iov`, `cmsg`, `msg` are valid stack-local values. `fd` is a

@@ -24,7 +24,7 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8]) -> Result<(Fd, &'a CStr), i32> 
         msg_iov: iovs.as_mut_ptr(),
         msg_iovlen: 2,
         msg_control: &mut cmsg as *mut CmsgBuf as *mut core::ffi::c_void,
-        msg_controllen: core::mem::size_of::<CmsgBuf>(),
+        msg_controllen: core::mem::size_of_val(&cmsg),
         msg_flags: 0,
     };
     // SAFETY: `iovs`, `cmsg`, `msg` are valid stack-allocated values; `recvmsg`

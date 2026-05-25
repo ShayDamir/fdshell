@@ -28,7 +28,7 @@ pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
         msg_iov: &iov as *const libc::iovec as *mut libc::iovec,
         msg_iovlen: 1,
         msg_control: &mut cmsg as *mut CmsgBuf as *mut core::ffi::c_void,
-        msg_controllen: core::mem::size_of::<CmsgBuf>(),
+        msg_controllen: core::mem::size_of_val(&cmsg),
         msg_flags: 0,
     };
     // SAFETY: `iov`, `cmsg`, and `msg` are valid stack-allocated values; `sendmsg`

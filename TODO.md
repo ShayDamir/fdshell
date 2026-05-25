@@ -2,9 +2,6 @@
 
 ## Code quality
 
-- [ ] Convert `size_of::<T>()` → `size_of_val(&var)` where a variable already exists
-  (`send_fd.rs:31`, `recv_fd.rs:27`, `openat2.rs:29`, `shellfd.rs:34`)
-
 ## fdshell
 
 - [ ] Build `child.rs` — child process logic: set up SHELLFD (dup2 child_fd to fd 3),

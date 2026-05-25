@@ -26,7 +26,7 @@ pub fn openat2(dirfd: AtFd<'_>, pathname: &CStr, how: &OpenHow) -> Result<Fd, i3
             dirfd as i64,
             pathname.as_ptr(),
             how as *const OpenHow,
-            core::mem::size_of::<OpenHow>(),
+            core::mem::size_of_val(how),
         ) as isize
     })
     .map(|ret| {
