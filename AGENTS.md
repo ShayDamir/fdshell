@@ -132,3 +132,7 @@ Three fd types across `unsafe/sys/src/`:
   Takes a raw fd number, not a `DupFd`. Used for both SHELLFD reservation and redirects.
 - `Fd::try_clone(new: i32)` returns `Fd` — owned CLOEXEC copy at `new` (wraps `dup3`).
   Used for `%var=%var2` syntax to produce a new CLOEXEC fd.
+- `substitute_arg() in `safe/fdshell/src/resolve.rs` resolves `%var` references in argument
+  strings.  Each `%var` calls `fd.dup()` once per distinct variable via a
+  `HashMap<CString, DupFd>` cache — repeated `%foo` in the same command line
+  produces the same fd number, preserving fd equality for subprocesses.

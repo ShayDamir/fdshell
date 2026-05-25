@@ -2,6 +2,7 @@
 use crate::redirect::Redirect;
 use crate::resolve::substitute_arg;
 use crate::vars::FdVars;
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 pub enum Command {
     Builtin(CString),
@@ -36,9 +37,10 @@ fn child_main(
         src.dup_to(r.target_fd)?;
     }
 
+    let mut dup_cache: HashMap<CString, sys::DupFd> = HashMap::new();
     let resolved: Vec<CString> = args
         .iter()
-        .map(|a| substitute_arg(a, vars))
+        .map(|a| substitute_arg(a, &mut dup_cache, vars))
         .collect::<Result<_, _>>()?;
 
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();

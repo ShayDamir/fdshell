@@ -1,9 +1,15 @@
 #![forbid(unsafe_code)]
 
 use crate::vars::FdVars;
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
+use sys::DupFd;
 
-pub(crate) fn substitute_arg(arg: &CStr, vars: &FdVars) -> Result<CString, i32> {
+pub(crate) fn substitute_arg(
+    arg: &CStr,
+    cache: &mut HashMap<CString, DupFd>,
+    vars: &FdVars,
+) -> Result<CString, i32> {
     let mut out = Vec::new();
     let mut peek = arg.to_bytes().iter().copied().peekable();
     while let Some(b) = peek.next() {
@@ -28,13 +34,19 @@ pub(crate) fn substitute_arg(arg: &CStr, vars: &FdVars) -> Result<CString, i32> 
                         break;
                     }
                 }
-                if let Some(fd) = vars.resolve(&CString::new(name).map_err(|_| sys::errno::EINVAL)?)
-                {
-                    let num_str = format!("{}", fd.dup()?.as_raw());
-                    out.extend_from_slice(num_str.as_bytes());
-                } else {
-                    return Err(sys::errno::EINVAL);
-                }
+                let name_cs = CString::new(name).map_err(|_| sys::errno::EINVAL)?;
+                let raw = match cache.get(&name_cs) {
+                    Some(d) => d.as_raw(),
+                    None => {
+                        let src = vars.resolve(&name_cs).ok_or(sys::errno::EINVAL)?;
+                        let d = src.dup()?;
+                        let raw = d.as_raw();
+                        cache.insert(name_cs, d);
+                        raw
+                    }
+                };
+                let num_str = format!("{}", raw);
+                out.extend_from_slice(num_str.as_bytes());
             }
             _ => out.push(b'%'),
         }

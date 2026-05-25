@@ -12,4 +12,5 @@
 - [x] Split `DupFd` into `dupfd.rs`
 - [ ] Add REPL loop reading commands from stdin
 - [ ] External command execution via `execveat`
+- [ ] Add timeout on `recv_fd` in `do_captures` to prevent parent hang if subprocess sends fewer fds than captures
 
