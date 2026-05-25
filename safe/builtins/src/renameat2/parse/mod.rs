@@ -24,10 +24,10 @@ pub struct Renameat2Config<'a> {
 /// ```rust
 /// use std::ffi::CString;
 ///
-/// let a = CString::new("--flags").unwrap();
-/// let b = CString::new("RENAME_NOREPLACE").unwrap();
-/// let c = CString::new("old.txt").unwrap();
-/// let d = CString::new("new.txt").unwrap();
+/// let a = CString::from(c"--flags");
+/// let b = CString::from(c"RENAME_NOREPLACE");
+/// let c = CString::from(c"old.txt");
+/// let d = CString::from(c"new.txt");
 /// let args = [a.as_c_str(), b.as_c_str(), c.as_c_str(), d.as_c_str()];
 /// let cfg = builtins::renameat2::parse::renameat2_parse(&args);
 /// match cfg {

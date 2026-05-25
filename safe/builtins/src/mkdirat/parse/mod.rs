@@ -20,9 +20,9 @@ pub struct MkdiratConfig<'a> {
 /// ```rust
 /// use std::ffi::CString;
 ///
-/// let a = CString::new("--mode").unwrap();
-/// let b = CString::new("755").unwrap();
-/// let c = CString::new("newdir").unwrap();
+/// let a = CString::from(c"--mode");
+/// let b = CString::from(c"755");
+/// let c = CString::from(c"newdir");
 /// let args = [a.as_c_str(), b.as_c_str(), c.as_c_str()];
 /// let cfg = builtins::mkdirat::parse::mkdirat_parse(&args);
 /// match cfg {

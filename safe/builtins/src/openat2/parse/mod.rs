@@ -24,9 +24,9 @@ pub struct Openat2Config<'a> {
 /// use core::ffi::CStr;
 /// use std::ffi::CString;
 ///
-/// let a = CString::new("--flags").unwrap();
-/// let b = CString::new("O_RDONLY").unwrap();
-/// let c = CString::new("package.nix").unwrap();
+/// let a = CString::from(c"--flags");
+/// let b = CString::from(c"O_RDONLY");
+/// let c = CString::from(c"package.nix");
 /// let args = [a.as_c_str(), b.as_c_str(), c.as_c_str()];
 /// let cfg = builtins::openat2::parse::openat2_parse(&args);
 /// match cfg {
@@ -44,8 +44,8 @@ pub struct Openat2Config<'a> {
 /// ```rust
 /// use std::ffi::CString;
 ///
-/// let a = CString::new("--bad").unwrap();
-/// let b = CString::new("x").unwrap();
+/// let a = CString::from(c"--bad");
+/// let b = CString::from(c"x");
 /// let args = [a.as_c_str(), b.as_c_str()];
 /// match builtins::openat2::parse::openat2_parse(&args) {
 ///     Err(sys::errno::EINVAL) => {}

@@ -163,8 +163,8 @@ fn test_mkdirat_exec() {
     a.close().unwrap();
     let receiver = b;
 
-    let mode_arg = CString::new("--mode").unwrap();
-    let mode_val = CString::new("755").unwrap();
+    let mode_arg = CString::from(c"--mode");
+    let mode_val = CString::from(c"755");
     let args = [mode_arg.as_c_str(), mode_val.as_c_str(), cpath.as_c_str()];
     let cfg = builtins::mkdirat::parse::mkdirat_parse(&args).unwrap();
     builtins::mkdirat::mkdirat_exec(&cfg).unwrap();

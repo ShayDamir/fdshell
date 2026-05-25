@@ -23,6 +23,10 @@ impl FdVars {
         self.map.get(name)
     }
 
+    pub fn remove(&mut self, name: &CStr) -> Option<Fd> {
+        self.map.remove(name)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&CStr, i32)> {
         self.map.iter().map(|(k, v)| (k.as_c_str(), v.as_raw()))
     }

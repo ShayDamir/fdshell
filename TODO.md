@@ -10,7 +10,9 @@
   with tagged-matching + positional fallback
 - [x] `Fd::verify()` / `DupFd::verify()` → `Result<(), i32>` using `cvt`
 - [x] Split `DupFd` into `dupfd.rs`
-- [ ] Add REPL loop reading commands from stdin
-- [ ] External command execution via `execveat`
+- [ ] REPL loop: read line from stdin, `parse()`, `launch()`, handle captures/exit
+- [ ] Background processes: `background: true` in `CommandLine` should skip `wait_pidfd` in parent, store pidfd in `%!`
+- [ ] External command execution via `execveat` in child
+- [ ] File-path redirects: extend `parse_redirect` to handle `[N] > path` / `[N] < path`, open file in parent, dup into child
 - [ ] Add timeout on `recv_fd` in `do_captures` to prevent parent hang if subprocess sends fewer fds than captures
 

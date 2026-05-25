@@ -3,11 +3,13 @@
 mod capture;
 mod child;
 mod launch;
+mod parse;
 mod redirect;
 mod resolve;
 mod vars;
 
 use std::ffi::CString;
+use sys::errno::EINVAL;
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
 use sys::openat2::OpenHow;
 use sys::siginfo::WaitStatus;
@@ -26,32 +28,30 @@ fn main() -> Result<(), i32> {
     let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
     fdvars.insert(CString::from(c"CWD"), cwd);
 
-    let cmd = child::Command::Builtin(CString::from(c"mkdirat"));
-    let args = vec![
-        CString::from(c"--mode"),
-        CString::from(c"755"),
-        CString::from(c"--dirfd"),
-        CString::from(c"%CWD"),
-        CString::from(c"foo"),
-    ];
+    let parsed = parse::parse("builtin mkdirat --mode 755 --dirfd %CWD foo %>%foo")?;
 
-    let captures = vec![capture::Capture {
-        var: CString::from(c"foo"),
-        tag: None,
-        force: false,
-    }];
+    match parsed {
+        parse::ParsedLine::Cmd(cmdline) => {
+            let (status, capture_fd) = launch::launch(&fdvars, &cmdline)?;
+            println!("{status:?}");
 
-    let (status, capture_fd) = launch::launch(&fdvars, cmd, &args, &[])?;
-    println!("{status:?}");
-
-    match status {
-        WaitStatus::Exited(0) => {
-            let entries = capture::do_captures(capture_fd, captures, &fdvars)?;
-            for (var, fd) in entries {
-                fdvars.insert(var, fd);
+            match status {
+                WaitStatus::Exited(0) => {
+                    let entries = capture::do_captures(capture_fd, cmdline.captures, &fdvars)?;
+                    for (var, fd) in entries {
+                        fdvars.insert(var, fd);
+                    }
+                }
+                other => std::process::exit(other.exit_code()),
             }
         }
-        other => std::process::exit(other.exit_code()),
+        parse::ParsedLine::Assign { var, value } => {
+            let src = fdvars.resolve(value.as_c_str()).ok_or(EINVAL)?;
+            fdvars.insert(var, src.try_clone_any()?);
+        }
+        parse::ParsedLine::Unset(var) => {
+            fdvars.remove(var.as_c_str());
+        }
     }
 
     for (name, raw) in fdvars.iter() {
