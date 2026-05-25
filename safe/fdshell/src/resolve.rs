@@ -2,16 +2,17 @@
 
 use crate::vars::FdVars;
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use sys::DupFd;
+use sys::ShortCStr;
 
 pub(crate) fn substitute_arg(
-    arg: &CStr,
-    cache: &mut HashMap<CString, DupFd>,
+    arg: &ShortCStr,
+    cache: &mut HashMap<ShortCStr, DupFd>,
     vars: &FdVars,
 ) -> Result<CString, i32> {
     let mut out = Vec::new();
-    let mut peek = arg.to_bytes().iter().copied().peekable();
+    let mut peek = arg.as_bytes().iter().copied().peekable();
     while let Some(b) = peek.next() {
         if b != b'%' {
             out.push(b);
@@ -34,14 +35,16 @@ pub(crate) fn substitute_arg(
                         break;
                     }
                 }
-                let name_cs = CString::new(name).map_err(|_| sys::errno::EINVAL)?;
-                let raw = match cache.get(&name_cs) {
+                let name_scs = ShortCStr::from_bytes(&name)?;
+                let raw = match cache.get(&name_scs) {
                     Some(d) => d.as_raw(),
                     None => {
-                        let src = vars.resolve(&name_cs).ok_or(sys::errno::EINVAL)?;
+                        let src = vars
+                            .resolve(name_scs.as_c_str())
+                            .ok_or(sys::errno::EINVAL)?;
                         let d = src.dup()?;
                         let raw = d.as_raw();
-                        cache.insert(name_cs, d);
+                        cache.insert(name_scs, d);
                         raw
                     }
                 };

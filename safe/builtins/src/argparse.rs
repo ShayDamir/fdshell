@@ -1,6 +1,6 @@
 use core::ffi::CStr;
-use sys::errno::EINVAL;
 use sys::DupFd;
+use sys::errno::EINVAL;
 
 pub fn wants_help(args: &[&CStr]) -> bool {
     args.iter()

@@ -8,12 +8,12 @@ mod redirect;
 mod resolve;
 mod vars;
 
-use std::ffi::CString;
+use sys::AtFd;
+use sys::ShortCStr;
 use sys::errno::EINVAL;
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
 use sys::openat2::OpenHow;
 use sys::siginfo::WaitStatus;
-use sys::AtFd;
 
 fn main() -> Result<(), i32> {
     sys::shellfd::reserve_shellfd()?;
@@ -26,7 +26,7 @@ fn main() -> Result<(), i32> {
         resolve: 0,
     };
     let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
-    fdvars.insert(CString::from(c"CWD"), cwd);
+    fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);
 
     let parsed = parse::parse("builtin mkdirat --mode 755 --dirfd %CWD foo %>%foo")?;
 

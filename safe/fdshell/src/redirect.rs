@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
-use std::ffi::CString;
+use sys::ShortCStr;
 
 pub struct Redirect {
     pub target_fd: i32,
-    pub src_var: CString,
+    pub src_var: ShortCStr,
 }
 
 impl PartialEq for Redirect {

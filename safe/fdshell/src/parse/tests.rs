@@ -3,7 +3,7 @@
 use super::*;
 use crate::capture::Capture;
 use crate::redirect::Redirect;
-use std::ffi::CString;
+use sys::ShortCStr;
 
 #[test]
 fn test_mkdirat_capture() {
@@ -16,16 +16,16 @@ fn test_mkdirat_capture() {
         cmd,
         CommandLine {
             builtin: true,
-            command: CString::from(c"mkdirat"),
+            command: ShortCStr::from_static(c"mkdirat"),
             args: vec![
-                CString::from(c"--mode"),
-                CString::from(c"755"),
-                CString::from(c"--dirfd"),
-                CString::from(c"%CWD"),
-                CString::from(c"foo"),
+                ShortCStr::from_static(c"--mode"),
+                ShortCStr::from_static(c"755"),
+                ShortCStr::from_static(c"--dirfd"),
+                ShortCStr::from_static(c"%CWD"),
+                ShortCStr::from_static(c"foo"),
             ],
             captures: vec![Capture {
-                var: CString::from(c"foo"),
+                var: ShortCStr::from_static(c"foo"),
                 tag: None,
                 force: false,
             }],
@@ -45,25 +45,25 @@ fn test_openat2_capture() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, CString::from(c"openat2"));
+    assert_eq!(cmd.command, ShortCStr::from_static(c"openat2"));
     assert_eq!(
         cmd.args,
         vec![
-            CString::from(c"--dirfd"),
-            CString::from(c"%foo"),
-            CString::from(c"--flags"),
-            CString::from(c"O_CREAT"),
-            CString::from(c"--flags"),
-            CString::from(c"O_EXCL"),
-            CString::from(c"--mode"),
-            CString::from(c"0644"),
-            CString::from(c"baz"),
+            ShortCStr::from_static(c"--dirfd"),
+            ShortCStr::from_static(c"%foo"),
+            ShortCStr::from_static(c"--flags"),
+            ShortCStr::from_static(c"O_CREAT"),
+            ShortCStr::from_static(c"--flags"),
+            ShortCStr::from_static(c"O_EXCL"),
+            ShortCStr::from_static(c"--mode"),
+            ShortCStr::from_static(c"0644"),
+            ShortCStr::from_static(c"baz"),
         ]
     );
     assert_eq!(
         cmd.captures,
         vec![Capture {
-            var: CString::from(c"baz"),
+            var: ShortCStr::from_static(c"baz"),
             tag: None,
             force: false,
         }]
@@ -79,14 +79,14 @@ fn test_echo_redirect() {
     };
 
     assert!(!cmd.builtin);
-    assert_eq!(cmd.command, CString::from(c"echo"));
-    assert_eq!(cmd.args, vec![CString::from(c"test")]);
+    assert_eq!(cmd.command, ShortCStr::from_static(c"echo"));
+    assert_eq!(cmd.args, vec![ShortCStr::from_static(c"test")]);
     assert!(cmd.captures.is_empty());
     assert_eq!(
         cmd.redirects,
         vec![Redirect {
             target_fd: 1,
-            src_var: CString::from(c"baz"),
+            src_var: ShortCStr::from_static(c"baz"),
         }]
     );
     assert!(!cmd.background);
@@ -99,19 +99,19 @@ fn test_pipe_tagged_captures() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, CString::from(c"pipe"));
+    assert_eq!(cmd.command, ShortCStr::from_static(c"pipe"));
     assert!(cmd.args.is_empty());
     assert_eq!(
         cmd.captures,
         vec![
             Capture {
-                var: CString::from(c"server"),
-                tag: Some(CString::from(c"rd")),
+                var: ShortCStr::from_static(c"server"),
+                tag: Some(ShortCStr::from_static(c"rd")),
                 force: false,
             },
             Capture {
-                var: CString::from(c"client"),
-                tag: Some(CString::from(c"wr")),
+                var: ShortCStr::from_static(c"client"),
+                tag: Some(ShortCStr::from_static(c"wr")),
                 force: false,
             },
         ]
@@ -127,8 +127,8 @@ fn test_background() {
     };
 
     assert!(!cmd.builtin);
-    assert_eq!(cmd.command, CString::from(c"run_server"));
-    assert_eq!(cmd.args, vec![CString::from(c"params")]);
+    assert_eq!(cmd.command, ShortCStr::from_static(c"run_server"));
+    assert_eq!(cmd.args, vec![ShortCStr::from_static(c"params")]);
     assert!(cmd.captures.is_empty());
     assert!(cmd.redirects.is_empty());
     assert!(cmd.background);
@@ -143,7 +143,7 @@ fn test_force_capture() {
     assert_eq!(
         cmd.captures,
         vec![Capture {
-            var: CString::from(c"foo"),
+            var: ShortCStr::from_static(c"foo"),
             tag: None,
             force: true,
         }]
@@ -160,7 +160,7 @@ fn test_stderr_redirect() {
         cmd.redirects,
         vec![Redirect {
             target_fd: 2,
-            src_var: CString::from(c"log"),
+            src_var: ShortCStr::from_static(c"log"),
         }]
     );
 }
@@ -175,7 +175,7 @@ fn test_stdin_redirect() {
         cmd.redirects,
         vec![Redirect {
             target_fd: 0,
-            src_var: CString::from(c"input"),
+            src_var: ShortCStr::from_static(c"input"),
         }]
     );
 }
@@ -189,16 +189,16 @@ fn test_renameat2() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, CString::from(c"renameat2"));
+    assert_eq!(cmd.command, ShortCStr::from_static(c"renameat2"));
     assert_eq!(
         cmd.args,
         vec![
-            CString::from(c"--olddirfd"),
-            CString::from(c"%foo"),
-            CString::from(c"--newdirfd"),
-            CString::from(c"%bar"),
-            CString::from(c"baz"),
-            CString::from(c"qux"),
+            ShortCStr::from_static(c"--olddirfd"),
+            ShortCStr::from_static(c"%foo"),
+            ShortCStr::from_static(c"--newdirfd"),
+            ShortCStr::from_static(c"%bar"),
+            ShortCStr::from_static(c"baz"),
+            ShortCStr::from_static(c"qux"),
         ]
     );
     assert!(cmd.captures.is_empty());
@@ -211,8 +211,8 @@ fn test_assign() {
         panic!("expected Assign")
     };
 
-    assert_eq!(var, CString::from(c"server_pid"));
-    assert_eq!(value, CString::from(c"!"));
+    assert_eq!(var, ShortCStr::from_static(c"server_pid"));
+    assert_eq!(value, ShortCStr::from_static(c"!"));
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn test_unset() {
         panic!("expected Unset")
     };
 
-    assert_eq!(var, CString::from(c"client"));
+    assert_eq!(var, ShortCStr::from_static(c"client"));
 }
 
 #[test]
@@ -230,5 +230,5 @@ fn test_unset_missing_is_ok() {
         panic!("expected Unset")
     };
 
-    assert_eq!(var, CString::from(c"nonexistent"));
+    assert_eq!(var, ShortCStr::from_static(c"nonexistent"));
 }

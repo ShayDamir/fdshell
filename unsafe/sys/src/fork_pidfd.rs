@@ -1,4 +1,4 @@
-use crate::{cvt, Fd};
+use crate::{Fd, cvt};
 
 pub fn fork_pidfd() -> Result<(isize, Option<Fd>), i32> {
     let mut pidfd_out: u64 = 0;

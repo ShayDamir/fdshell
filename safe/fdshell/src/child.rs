@@ -4,15 +4,16 @@ use crate::resolve::substitute_arg;
 use crate::vars::FdVars;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
+use sys::ShortCStr;
 pub enum Command {
-    Builtin(CString),
-    External(CString),
+    Builtin(ShortCStr),
+    External(ShortCStr),
 }
 pub fn child_exec(
     child_sock: sys::Fd,
     vars: &FdVars,
     cmd: Command,
-    args: &[CString],
+    args: &[ShortCStr],
     redirects: &[Redirect],
 ) -> ! {
     match child_main(child_sock, vars, cmd, args, redirects) {
@@ -25,7 +26,7 @@ fn child_main(
     child_sock: sys::Fd,
     vars: &FdVars,
     cmd: Command,
-    args: &[CString],
+    args: &[ShortCStr],
     redirects: &[Redirect],
 ) -> Result<(), i32> {
     child_sock.dup_to(sys::shellfd::SHELLFD)?;
@@ -37,7 +38,7 @@ fn child_main(
         src.dup_to(r.target_fd)?;
     }
 
-    let mut dup_cache: HashMap<CString, sys::DupFd> = HashMap::new();
+    let mut dup_cache: HashMap<ShortCStr, sys::DupFd> = HashMap::new();
     let resolved: Vec<CString> = args
         .iter()
         .map(|a| substitute_arg(a, &mut dup_cache, vars))

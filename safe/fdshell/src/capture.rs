@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
 use crate::vars::FdVars;
-use std::ffi::CString;
+use sys::ShortCStr;
 use sys::errno::EEXIST;
 
 pub struct Capture {
-    pub var: CString,
-    pub tag: Option<CString>,
+    pub var: ShortCStr,
+    pub tag: Option<ShortCStr>,
     pub force: bool,
 }
 
@@ -41,8 +41,8 @@ pub fn do_captures(
     capture_fd: sys::Fd,
     captures: Vec<Capture>,
     fdvars: &FdVars,
-) -> Result<Vec<(CString, sys::Fd)>, i32> {
-    let mut captured_fds: Vec<(CString, sys::Fd)> = Vec::with_capacity(captures.len());
+) -> Result<Vec<(ShortCStr, sys::Fd)>, i32> {
+    let mut captured_fds: Vec<(ShortCStr, sys::Fd)> = Vec::with_capacity(captures.len());
     let mut remaining = captures;
 
     while !remaining.is_empty() {

@@ -1,4 +1,4 @@
-use crate::shortcstr::{ShortCStr, INLINE_MAX};
+use crate::shortcstr::{INLINE_MAX, ShortCStr};
 
 impl ShortCStr {
     pub fn verify(&self) -> Result<(), i32> {

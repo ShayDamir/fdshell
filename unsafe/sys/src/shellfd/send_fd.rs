@@ -1,6 +1,6 @@
 use super::CmsgBuf;
-use crate::errno::E2BIG;
 use crate::Fd;
+use crate::errno::E2BIG;
 use core::ffi::CStr;
 
 pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {

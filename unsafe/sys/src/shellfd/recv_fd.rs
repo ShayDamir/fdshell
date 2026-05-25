@@ -1,6 +1,6 @@
 use super::CmsgBuf;
-use crate::errno::EINVAL;
 use crate::Fd;
+use crate::errno::EINVAL;
 use core::ffi::CStr;
 
 pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8]) -> Result<(Fd, &'a CStr), i32> {

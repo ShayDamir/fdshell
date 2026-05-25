@@ -1,9 +1,9 @@
 mod flags;
 
 use core::ffi::CStr;
+use sys::DupFd;
 use sys::errno::{EINVAL, ENOENT};
 use sys::openat2::OpenHow;
-use sys::DupFd;
 
 pub struct Openat2Config<'a> {
     pub dirfd: Option<DupFd>,

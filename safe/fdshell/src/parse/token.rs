@@ -1,6 +1,7 @@
+use sys::ShortCStr;
 use sys::errno::EINVAL;
 
-pub fn tokenize(line: &str) -> Result<Vec<Vec<u8>>, i32> {
+pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32> {
     let mut tokens = Vec::new();
     let mut cur = Vec::new();
     let mut in_quotes = false;
@@ -20,7 +21,7 @@ pub fn tokenize(line: &str) -> Result<Vec<Vec<u8>>, i32> {
             match b {
                 b' ' | b'\t' => {
                     if !cur.is_empty() {
-                        tokens.push(core::mem::take(&mut cur));
+                        tokens.push(ShortCStr::from_bytes(&core::mem::take(&mut cur))?);
                     }
                 }
                 b'"' => in_quotes = true,
@@ -33,7 +34,7 @@ pub fn tokenize(line: &str) -> Result<Vec<Vec<u8>>, i32> {
         return Err(EINVAL);
     }
     if !cur.is_empty() {
-        tokens.push(cur);
+        tokens.push(ShortCStr::from_bytes(&cur)?);
     }
     Ok(tokens)
 }

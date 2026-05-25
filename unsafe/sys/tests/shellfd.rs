@@ -2,7 +2,7 @@ use sys::errno::EINVAL;
 use sys::net::socketpair;
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
-use sys::shellfd::{recv_fd, reserve_shellfd, send_fd, SHELLFD, TAG_MAX};
+use sys::shellfd::{SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd};
 
 #[repr(C)]
 struct CmsgBuf {
@@ -61,11 +61,7 @@ fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
     unsafe { libc::waitpid(pid, &mut status, 0) };
     if libc::WIFEXITED(status) {
         let code = libc::WEXITSTATUS(status);
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(code as i32)
-        }
+        if code == 0 { Ok(()) } else { Err(code as i32) }
     } else if libc::WIFSIGNALED(status) {
         panic!("test child killed by signal {}", libc::WTERMSIG(status));
     } else {

@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use core::slice::SliceIndex;
 
-use crate::shortcstr::{from_inline, from_long, ShortCStr, INLINE_MAX};
+use crate::shortcstr::{INLINE_MAX, ShortCStr, from_inline, from_long};
 
 impl ShortCStr {
     pub fn get<I>(&self, index: I) -> Option<Self>
@@ -34,6 +34,19 @@ impl ShortCStr {
         } else {
             // SAFETY: new_len and no interior NUL guaranteed by origin.
             Some(unsafe { from_long(new) })
+        }
+    }
+
+    pub fn split_once_byte(&self, byte: u8) -> Option<(Self, Self)> {
+        let pos = self.as_bytes().iter().position(|&b| b == byte)?;
+        Some((self.get(..pos)?, self.get(pos + 1..)?))
+    }
+
+    pub fn strip_prefix(&self, prefix: &[u8]) -> Option<Self> {
+        if self.as_bytes().starts_with(prefix) {
+            self.get(prefix.len()..)
+        } else {
+            None
         }
     }
 }

@@ -1,11 +1,12 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use sys::Fd;
+use sys::ShortCStr;
 
 pub struct FdVars {
-    map: HashMap<CString, Fd>,
+    map: HashMap<ShortCStr, Fd>,
 }
 
 impl FdVars {
@@ -15,7 +16,7 @@ impl FdVars {
         }
     }
 
-    pub fn insert(&mut self, name: CString, fd: Fd) -> Option<Fd> {
+    pub fn insert(&mut self, name: ShortCStr, fd: Fd) -> Option<Fd> {
         self.map.insert(name, fd)
     }
 

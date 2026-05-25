@@ -1,8 +1,8 @@
 mod flags;
 
 use core::ffi::CStr;
-use sys::errno::{EINVAL, ENOENT};
 use sys::DupFd;
+use sys::errno::{EINVAL, ENOENT};
 
 pub struct Renameat2Config<'a> {
     pub olddirfd: Option<DupFd>,

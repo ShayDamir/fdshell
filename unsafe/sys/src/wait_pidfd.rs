@@ -1,5 +1,5 @@
 use crate::siginfo::{SigInfo, WaitStatus};
-use crate::{cvt, Fd};
+use crate::{Fd, cvt};
 
 pub fn wait_pidfd(pidfd: &Fd) -> Result<WaitStatus, i32> {
     // SAFETY: SigInfo is integer types; zeroed is valid.

@@ -1,8 +1,16 @@
 use alloc::rc::Rc;
+use core::borrow::Borrow;
+use core::ffi::CStr;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
 use crate::shortcstr::ShortCStr;
+
+impl Borrow<CStr> for ShortCStr {
+    fn borrow(&self) -> &CStr {
+        self.as_c_str()
+    }
+}
 
 impl Clone for ShortCStr {
     fn clone(&self) -> Self {

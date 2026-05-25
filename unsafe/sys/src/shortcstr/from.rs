@@ -2,7 +2,7 @@ use alloc::ffi::CString;
 use alloc::rc::Rc;
 use core::ffi::CStr;
 
-use crate::shortcstr::{InlineSize, ShortCStr, INLINE_CAP, INLINE_MAX};
+use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr};
 
 /// # Safety
 /// `bytes.len()` ≤ `INLINE_MAX` and `bytes` has no interior NUL.

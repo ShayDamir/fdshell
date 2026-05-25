@@ -1,6 +1,6 @@
 use crate::capture::Capture;
 use crate::redirect::Redirect;
-use std::ffi::CString;
+use sys::ShortCStr;
 
 pub(crate) fn parse_capture(bytes: &[u8]) -> Option<Capture> {
     let pos = bytes.iter().position(|&c| c == b'>')?;
@@ -18,12 +18,12 @@ pub(crate) fn parse_capture(bytes: &[u8]) -> Option<Capture> {
         return None;
     }
     Some(Capture {
-        var: CString::new(var_name).ok()?,
+        var: ShortCStr::from_bytes(var_name).ok()?,
         tag: {
             if tag_part.is_empty() {
                 None
             } else {
-                Some(CString::new(tag_part).ok()?)
+                Some(ShortCStr::from_bytes(tag_part).ok()?)
             }
         },
         force,
@@ -56,6 +56,6 @@ pub(crate) fn parse_redirect(bytes: &[u8]) -> Option<Redirect> {
     };
     Some(Redirect {
         target_fd,
-        src_var: CString::new(var_name).ok()?,
+        src_var: ShortCStr::from_bytes(var_name).ok()?,
     })
 }

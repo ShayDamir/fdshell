@@ -367,3 +367,110 @@ fn static_equals_from_bytes() {
     let b = ShortCStr::from_bytes(b"hello").unwrap();
     assert_eq!(s, b);
 }
+
+// --- split_once_byte ---
+
+#[test]
+fn split_once_mid() {
+    let s = ShortCStr::from_static(c"foo=bar");
+    let (l, r) = s.split_once_byte(b'=').unwrap();
+    assert_eq!(l.as_bytes(), b"foo");
+    assert_eq!(r.as_bytes(), b"bar");
+    assert!(l.verify().is_ok());
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn split_once_start() {
+    let s = ShortCStr::from_static(c"=bar");
+    let (l, r) = s.split_once_byte(b'=').unwrap();
+    assert_eq!(l.as_bytes(), b"");
+    assert_eq!(r.as_bytes(), b"bar");
+    assert!(l.verify().is_ok());
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn split_once_end() {
+    let s = ShortCStr::from_static(c"foo=");
+    let (l, r) = s.split_once_byte(b'=').unwrap();
+    assert_eq!(l.as_bytes(), b"foo");
+    assert_eq!(r.as_bytes(), b"");
+    assert!(l.verify().is_ok());
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn split_once_none() {
+    let s = ShortCStr::from_static(c"foobar");
+    assert!(s.split_once_byte(b'=').is_none());
+}
+
+#[test]
+fn split_once_empty() {
+    let s = ShortCStr::from_static(c"");
+    assert!(s.split_once_byte(b'=').is_none());
+}
+
+#[test]
+fn split_once_long() {
+    let s = ShortCStr::from_static(LONG);
+    assert!(s.split_once_byte(b'=').is_none());
+}
+
+// --- strip_prefix ---
+
+#[test]
+fn strip_prefix_match_full() {
+    let s = ShortCStr::from_static(c"hello world");
+    let r = s.strip_prefix(b"hello").unwrap();
+    assert_eq!(r.as_bytes(), b" world");
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn strip_prefix_partial() {
+    let s = ShortCStr::from_static(c"hello");
+    let r = s.strip_prefix(b"he").unwrap();
+    assert_eq!(r.as_bytes(), b"llo");
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn strip_prefix_no_match() {
+    let s = ShortCStr::from_static(c"hello");
+    assert!(s.strip_prefix(b"x").is_none());
+}
+
+#[test]
+fn strip_prefix_empty() {
+    let s = ShortCStr::from_static(c"hello");
+    let r = s.strip_prefix(b"").unwrap();
+    assert_eq!(r.as_bytes(), b"hello");
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn strip_prefix_all() {
+    let s = ShortCStr::from_static(c"hello");
+    let r = s.strip_prefix(b"hello").unwrap();
+    assert_eq!(r.as_bytes(), b"");
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn strip_prefix_percent() {
+    let s = ShortCStr::from_static(c"%foo");
+    let r = s.strip_prefix(b"%").unwrap();
+    assert_eq!(r.as_bytes(), b"foo");
+    assert!(r.verify().is_ok());
+}
+
+#[test]
+fn strip_prefix_long() {
+    let s = ShortCStr::from_static(LONG);
+    let prefix = b"The quick ";
+    let r = s.strip_prefix(prefix).unwrap();
+    assert_eq!(r.as_bytes(), &LONG.to_bytes()[prefix.len()..]);
+    assert!(r.verify().is_ok());
+}
