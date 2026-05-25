@@ -78,11 +78,15 @@ fn test_send_recv_fd() -> Result<(), i32> {
     fork_test(|| {
         reserve_shellfd()?;
         let (a, b) = socketpair()?;
+        assert!(a.verify());
+        assert!(b.verify());
         a.dup2(SHELL_DUPFD)?;
         a.close()?;
         let receiver = b;
 
         let (test_a, test_b) = socketpair()?;
+        assert!(test_a.verify());
+        assert!(test_b.verify());
         send_fd(&test_a, c"test")?;
         test_a.close()?;
         write(&test_b, b"42")?;
@@ -90,6 +94,7 @@ fn test_send_recv_fd() -> Result<(), i32> {
 
         let mut tag = [0u8; TAG_MAX];
         let (test_fd, _tag) = recv_fd(&receiver, &mut tag)?;
+        assert!(test_fd.verify());
 
         let mut buf = [0u8; 8];
         assert_eq!(read(&test_fd, &mut buf)?, 2);
@@ -106,7 +111,11 @@ fn test_send_recv_fd() -> Result<(), i32> {
 fn test_recv_fd_truncated() -> Result<(), i32> {
     // 8192 bytes fills tag buffer + spills into extra → n > TAG_MAX
     let (a, b) = socketpair()?;
+    assert!(a.verify());
+    assert!(b.verify());
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    assert!(dummy_rd.verify());
+    assert!(dummy_wr.verify());
 
     let tag = [b'x'; 2 * TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
@@ -125,7 +134,11 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
 fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
     // Exactly TAG_MAX bytes, no null → CStr::from_bytes_with_nul fails
     let (a, b) = socketpair()?;
+    assert!(a.verify());
+    assert!(b.verify());
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    assert!(dummy_rd.verify());
+    assert!(dummy_wr.verify());
 
     let tag = [b'x'; TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
@@ -143,7 +156,11 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
 #[test]
 fn test_recv_fd_short_no_null() -> Result<(), i32> {
     let (a, b) = socketpair()?;
+    assert!(a.verify());
+    assert!(b.verify());
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    assert!(dummy_rd.verify());
+    assert!(dummy_wr.verify());
 
     send_raw_msg(a.as_raw(), b"abc", dummy_wr.as_raw())?;
     dummy_wr.close()?;
@@ -160,7 +177,11 @@ fn test_recv_fd_short_no_null() -> Result<(), i32> {
 #[test]
 fn test_recv_fd_interior_null() -> Result<(), i32> {
     let (a, b) = socketpair()?;
+    assert!(a.verify());
+    assert!(b.verify());
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    assert!(dummy_rd.verify());
+    assert!(dummy_wr.verify());
 
     send_raw_msg(a.as_raw(), b"abc\0fde\0", dummy_wr.as_raw())?;
     dummy_wr.close()?;
@@ -177,7 +198,11 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
 #[test]
 fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
     let (a, b) = socketpair()?;
+    assert!(a.verify());
+    assert!(b.verify());
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    assert!(dummy_rd.verify());
+    assert!(dummy_wr.verify());
 
     let mut tag = vec![b'x'; TAG_MAX - 1];
     tag.push(0);

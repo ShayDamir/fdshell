@@ -15,6 +15,8 @@ fn test_openat2_exec() {
 
     sys::shellfd::reserve_shellfd().unwrap();
     let (a, b) = sys::net::socketpair().unwrap();
+    assert!(a.verify());
+    assert!(b.verify());
     a.dup2(sys::shellfd::SHELL_DUPFD).unwrap();
     a.close().unwrap();
     let receiver = b;
@@ -24,6 +26,7 @@ fn test_openat2_exec() {
 
     let mut tag = [0u8; TAG_MAX];
     let (fd, _tag) = sys::shellfd::recv_fd(&receiver, &mut tag).unwrap();
+    assert!(fd.verify());
 
     let after = sys::stat::fstat(&fd).unwrap();
     assert_eq!(before, after);

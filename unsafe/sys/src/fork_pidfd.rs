@@ -21,7 +21,14 @@ pub fn fork_pidfd() -> Result<(isize, Option<Fd>), i32> {
     if ret == 0 {
         return Ok((0, None));
     }
-    // SAFETY: kernel wrote a valid pidfd (with O_CLOEXEC) into pidfd_out.
-    let pidfd = unsafe { Fd::from_raw(pidfd_out as i32) };
+    let raw = pidfd_out as i32;
+    // SAFETY: `raw` is a valid fd from clone3; setting CLOEXEC is well-defined.
+    if unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        let err = unsafe { *libc::__errno_location() };
+        unsafe { libc::close(raw) };
+        return Err(err);
+    }
+    // SAFETY: `raw` has CLOEXEC confirmed above.
+    let pidfd = unsafe { Fd::from_raw(raw) };
     Ok((ret, Some(pidfd)))
 }

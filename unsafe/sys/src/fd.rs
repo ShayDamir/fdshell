@@ -13,6 +13,11 @@ impl Fd {
         self.0
     }
 
+    pub fn verify(&self) -> bool {
+        let ret = unsafe { libc::fcntl(self.0, libc::F_GETFD) };
+        ret >= 0 && (ret & libc::FD_CLOEXEC) != 0
+    }
+
     /// Explicit close with error reporting. Silently closes on Drop otherwise.
     pub fn close(self) -> Result<(), i32> {
         let raw = self.0;
