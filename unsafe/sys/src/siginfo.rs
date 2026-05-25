@@ -17,6 +17,15 @@ pub enum WaitStatus {
     Signaled(i32),
 }
 
+impl WaitStatus {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            WaitStatus::Exited(c) => *c,
+            WaitStatus::Signaled(s) => 128 + *s,
+        }
+    }
+}
+
 impl fmt::Debug for WaitStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

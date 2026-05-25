@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
-use crate::vars::Vars;
+use crate::vars::FdVars;
 use std::ffi::{CStr, CString};
 
-pub(crate) fn substitute_arg(arg: &CStr, vars: &Vars) -> Result<CString, i32> {
+pub(crate) fn substitute_arg(arg: &CStr, vars: &FdVars) -> Result<CString, i32> {
     let mut out = Vec::new();
     let mut peek = arg.to_bytes().iter().copied().peekable();
     while let Some(b) = peek.next() {

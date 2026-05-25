@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 use crate::redirect::Redirect;
 use crate::resolve::substitute_arg;
-use crate::vars::Vars;
+use crate::vars::FdVars;
 use std::ffi::{CStr, CString};
 pub enum Command {
     Builtin(CString),
@@ -9,7 +9,7 @@ pub enum Command {
 }
 pub fn child_exec(
     child_sock: sys::Fd,
-    vars: &Vars,
+    vars: &FdVars,
     cmd: Command,
     args: &[CString],
     redirects: &[Redirect],
@@ -22,7 +22,7 @@ pub fn child_exec(
 
 fn child_main(
     child_sock: sys::Fd,
-    vars: &Vars,
+    vars: &FdVars,
     cmd: Command,
     args: &[CString],
     redirects: &[Redirect],

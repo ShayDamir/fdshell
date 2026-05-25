@@ -110,10 +110,12 @@ Three fd types across `unsafe/sys/src/`:
 
 ## Launch / Capture
 
-- `launch()` in `safe/fdshell/src/launch.rs` is stateless — no capture logic, no `&mut Vars`.
+- `launch()` in `safe/fdshell/src/launch.rs` is stateless — no capture logic, no `&mut FdVars`.
   Returns `Result<(WaitStatus, Fd), i32>` — the `Fd` is the parent end of the capture socket.
-- `do_captures()` in `safe/fdshell/src/capture.rs` owns the capture socket (`take Fd` by value, drops
-  it when done). Caller is not responsible for cleanup.
+- `do_captures()` in `safe/fdshell/src/capture.rs` owns both the capture socket and captures vec
+  (takes `captures: Vec<Capture>` by value). Returns `Vec<(CString, Fd)>` on success.
+  The caller commits atomically into `fdvars` after a successful receive-and-stage phase.
+  Captures are received only when `status == Exited(0)` (status gate).
 - `Capture { var: CString, tag: Option<CString>, force: bool }`:
   - `force = false` → `New` (`%>%var`): fail `EEXIST` if var already exists.
   - `force = true` → `Override` (`%>|%var`): existing fd dropped via `HashMap::insert`.
@@ -121,6 +123,8 @@ Three fd types across `unsafe/sys/src/`:
 - Matching is receiver-driven: `do_captures` loops until captures are exhausted. For each received
   `(fd, tag)`, it scans captures: tagged match first, then positional fallback. Unknown fds
   (no matching capture) are silently closed.
+- Parser must guarantee unique target variables in captures — `do_captures` checks against
+  committed `fdvars` state only (no scan of staged `captured_fds` vec).
 - `Redirect { target_fd: i32, src_var: CString }` — `target_fd` is the fd number to `dup_to`
   onto (0 for `<`, 1 for `>`, 2 for `2>`), `src_var` is the `%var` holding the source fd.
   Applied in the child after `SHELLFD` dup_to but before builtin dispatch.

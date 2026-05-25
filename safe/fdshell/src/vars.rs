@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use sys::Fd;
 
-pub struct Vars {
+pub struct FdVars {
     map: HashMap<CString, Fd>,
 }
 
-impl Vars {
+impl FdVars {
     pub fn new() -> Self {
-        Vars {
+        FdVars {
             map: HashMap::new(),
         }
     }

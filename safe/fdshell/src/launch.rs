@@ -2,12 +2,12 @@
 
 use crate::child::{self, Command};
 use crate::redirect::Redirect;
-use crate::vars::Vars;
+use crate::vars::FdVars;
 use std::ffi::CString;
 use sys::siginfo::WaitStatus;
 
 pub fn launch(
-    vars: &Vars,
+    vars: &FdVars,
     cmd: Command,
     args: &[CString],
     redirects: &[Redirect],
