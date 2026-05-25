@@ -59,18 +59,19 @@ nix flake check             # fmt + clippy + cargo nextest
 
 ## FD types
 
-Three fd types in `unsafe/sys/src/fd.rs` and `atfd.rs`:
+Three fd types across `unsafe/sys/src/`:
 
-| Type | Owns? | CLOEXEC? | Drop closes? | `const fn from_raw` | `from_bytes` (validated) |
-|---|---|---|---|---|---|
-| `Fd` | yes | yes | yes | `unsafe` | n/a |
-| `DupFd` | no | no | no | `unsafe` | safe (`fcntl(F_GETFD)`) |
-| `AtFd<'a>` | no | irrelevant | no | `unsafe` | n/a (via `From<&Fd>` / `From<&DupFd>`) |
+| Type | Owns? | CLOEXEC? | Drop closes? | `const fn from_raw` | `from_bytes` (validated) | Module |
+|---|---|---|---|---|---|---|
+| `Fd` | yes | yes | yes | `unsafe` | n/a | `fd.rs` |
+| `DupFd` | no | no | no | `unsafe` | safe (`verify()`) | `dupfd.rs` |
+| `AtFd<'a>` | no | irrelevant | no | `unsafe` | n/a (via `From<&Fd>` / `From<&DupFd>`) | `atfd.rs` |
 
-- `Fd::at(&self) -> AtFd<'_>` — infallible (borrow + `Fd` invariant).
-- `DupFd::at(&self) -> AtFd<'_>` — infallible (`from_bytes` validated at the string boundary).
-- `DupFd::from_bytes` validates via `fcntl(F_GETFD)` — the only way safe code can obtain a `DupFd` from external input.
+- `Fd::verify()` and `DupFd::verify()` return `Result<(), i32>` using `cvt` (never `__errno_location`).
+  `Fd::verify` checks CLOEXEC is SET; `DupFd::verify` checks CLOEXEC is CLEAR.
+- `DupFd::from_bytes` delegates to `verify()` — validates fd is open AND non-CLOEXEC.
 - `DupFd::from_raw` is `unsafe` — only for trusted constants (`SHELL_DUPFD`) and kernel returns (`dup`/`dup2`).
+  Direct construction `DupFd(n)` is **not** allowed — always use `unsafe { DupFd::from_raw(n) }` with `// SAFETY:`.
 - `AT_FDCWD` stays entirely in `atfd.rs` (`AtFd::cwd()`). Never re-exported.
 - `AtFd` is `Copy + Clone` — used multiple times in exec functions.
 - `*at` syscall wrappers take `AtFd<'_>` or `Option<AtFd<'_>>` instead of raw `i32`.
@@ -106,3 +107,17 @@ Three fd types in `unsafe/sys/src/fd.rs` and `atfd.rs`:
 - **Dirfd in configs** is `Option<DupFd>` (`None` = CWD). Parsed via
   `parse_dirfd` → `DupFd::from_bytes` (validates fd is open). Converted
   to `AtFd` at exec time via `cfg.dirfd.as_ref().map_or(AtFd::cwd(), DupFd::at)`.
+
+## Launch / Capture
+
+- `launch()` in `safe/fdshell/src/launch.rs` is stateless — no capture logic, no `&mut Vars`.
+  Returns `Result<(WaitStatus, Fd), i32>` — the `Fd` is the parent end of the capture socket.
+- `do_captures()` in `safe/fdshell/src/capture.rs` owns the capture socket (`take Fd` by value, drops
+  it when done). Caller is not responsible for cleanup.
+- `Capture { var: CString, tag: Option<CString>, force: bool }`:
+  - `force = false` → `New` (`%>%var`): fail `EEXIST` if var already exists.
+  - `force = true` → `Override` (`%>|%var`): existing fd dropped via `HashMap::insert`.
+  - `tag = None` → positional; `tag = Some("rd")` → tagged match (`%rd>%var`).
+- Matching is receiver-driven: `do_captures` loops until captures are exhausted. For each received
+  `(fd, tag)`, it scans captures: tagged match first, then positional fallback. Unknown fds
+  (no matching capture) are silently closed.

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod capture;
 mod child;
 mod launch;
 mod vars;
@@ -30,8 +31,21 @@ fn main() -> Result<(), i32> {
         CString::from(c"%CWD"),
         CString::from(c"foo"),
     ];
-    let status = launch::launch(&vars, cmd, &args)?;
+
+    let mut captures = vec![capture::Capture {
+        var: CString::from(c"foo"),
+        tag: None,
+        force: false,
+    }];
+
+    let (status, capture_fd) = launch::launch(&vars, cmd, &args)?;
     println!("{status:?}");
+
+    capture::do_captures(capture_fd, &mut captures, &mut vars)?;
+
+    for (name, raw) in vars.iter() {
+        println!("  {:?} → fd {}", name, raw);
+    }
 
     std::fs::remove_dir_all("foo").ok();
     Ok(())
