@@ -75,11 +75,7 @@ impl DupFd {
         let s = core::str::from_utf8(bytes).map_err(|_| crate::errno::EINVAL)?;
         let raw: i32 = s.parse().map_err(|_| crate::errno::EINVAL)?;
         // SAFETY: fcntl(F_GETFD) returns ≥0 if fd is open, -1 + errno otherwise.
-        let ret = unsafe { libc::fcntl(raw, libc::F_GETFD) };
-        if ret < 0 {
-            // SAFETY: __errno_location is valid after a failed libc call.
-            return Err(unsafe { *libc::__errno_location() });
-        }
+        crate::cvt(unsafe { libc::fcntl(raw, libc::F_GETFD) as isize })?;
         // SAFETY: fd `raw` is confirmed open by F_GETFD above.
         Ok(Self(raw))
     }

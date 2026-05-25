@@ -23,10 +23,11 @@ pub fn fork_pidfd() -> Result<(isize, Option<Fd>), i32> {
     }
     let raw = pidfd_out as i32;
     // SAFETY: `raw` is a valid fd from clone3; setting CLOEXEC is well-defined.
-    if unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
-        let err = unsafe { *libc::__errno_location() };
+    if let Err(e) =
+        crate::cvt(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) as isize })
+    {
         unsafe { libc::close(raw) };
-        return Err(err);
+        return Err(e);
     }
     // SAFETY: `raw` has CLOEXEC confirmed above.
     let pidfd = unsafe { Fd::from_raw(raw) };
