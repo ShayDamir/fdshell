@@ -1,23 +1,44 @@
 #![forbid(unsafe_code)]
+use crate::redirect::Redirect;
+use crate::resolve::substitute_arg;
 use crate::vars::Vars;
 use std::ffi::{CStr, CString};
 pub enum Command {
     Builtin(CString),
     External(CString),
 }
-pub fn child_exec(child_sock: sys::Fd, vars: &Vars, cmd: Command, args: &[CString]) -> ! {
-    match child_main(child_sock, vars, cmd, args) {
+pub fn child_exec(
+    child_sock: sys::Fd,
+    vars: &Vars,
+    cmd: Command,
+    args: &[CString],
+    redirects: &[Redirect],
+) -> ! {
+    match child_main(child_sock, vars, cmd, args, redirects) {
         Ok(()) => std::process::exit(0),
         Err(e) => std::process::exit(e),
     }
 }
 
-fn child_main(child_sock: sys::Fd, vars: &Vars, cmd: Command, args: &[CString]) -> Result<(), i32> {
-    child_sock.dup2(sys::shellfd::SHELL_DUPFD)?;
+fn child_main(
+    child_sock: sys::Fd,
+    vars: &Vars,
+    cmd: Command,
+    args: &[CString],
+    redirects: &[Redirect],
+) -> Result<(), i32> {
+    child_sock.dup_to(sys::shellfd::SHELLFD)?;
+
+    for r in redirects {
+        let src = vars
+            .resolve(r.src_var.as_c_str())
+            .ok_or(sys::errno::EINVAL)?;
+        src.dup_to(r.target_fd)?;
+    }
 
     let resolved: Vec<CString> = args
         .iter()
-        .map(|a| resolve_one_arg(a, vars))
+        .map(|a| substitute_arg(a, vars))
         .collect::<Result<_, _>>()?;
 
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
@@ -36,43 +57,4 @@ fn child_main(child_sock: sys::Fd, vars: &Vars, cmd: Command, args: &[CString]) 
         },
         Command::External(_) => todo!(),
     }
-}
-
-fn resolve_one_arg(arg: &CStr, vars: &Vars) -> Result<CString, i32> {
-    let mut out = Vec::new();
-    let mut peek = arg.to_bytes().iter().copied().peekable();
-    while let Some(b) = peek.next() {
-        if b != b'%' {
-            out.push(b);
-            continue;
-        }
-        match peek.peek().copied() {
-            Some(b'%') => {
-                out.push(b'%');
-                peek.next();
-            }
-            Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
-                let mut name = Vec::new();
-                name.push(c);
-                peek.next();
-                while let Some(&nc) = peek.peek() {
-                    if nc.is_ascii_alphanumeric() || nc == b'_' {
-                        name.push(nc);
-                        peek.next();
-                    } else {
-                        break;
-                    }
-                }
-                if let Some(fd) = vars.resolve(&CString::new(name).map_err(|_| sys::errno::EINVAL)?)
-                {
-                    let num_str = format!("{}", fd.dup()?.as_raw());
-                    out.extend_from_slice(num_str.as_bytes());
-                } else {
-                    return Err(sys::errno::EINVAL);
-                }
-            }
-            _ => out.push(b'%'),
-        }
-    }
-    CString::new(out).map_err(|_| sys::errno::EINVAL)
 }

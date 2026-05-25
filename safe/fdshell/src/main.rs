@@ -3,6 +3,8 @@
 mod capture;
 mod child;
 mod launch;
+mod redirect;
+mod resolve;
 mod vars;
 
 use std::ffi::CString;
@@ -38,7 +40,7 @@ fn main() -> Result<(), i32> {
         force: false,
     }];
 
-    let (status, capture_fd) = launch::launch(&vars, cmd, &args)?;
+    let (status, capture_fd) = launch::launch(&vars, cmd, &args, &[])?;
     println!("{status:?}");
 
     capture::do_captures(capture_fd, &mut captures, &mut vars)?;

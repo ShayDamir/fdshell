@@ -70,7 +70,7 @@ Three fd types across `unsafe/sys/src/`:
 - `Fd::verify()` and `DupFd::verify()` return `Result<(), i32>` using `cvt` (never `__errno_location`).
   `Fd::verify` checks CLOEXEC is SET; `DupFd::verify` checks CLOEXEC is CLEAR.
 - `DupFd::from_bytes` delegates to `verify()` — validates fd is open AND non-CLOEXEC.
-- `DupFd::from_raw` is `unsafe` — only for trusted constants (`SHELL_DUPFD`) and kernel returns (`dup`/`dup2`).
+- `DupFd::from_raw` is `unsafe` — only for trusted constants (`SHELLFD`) and kernel returns (`dup`/`dup2`).
   Direct construction `DupFd(n)` is **not** allowed — always use `unsafe { DupFd::from_raw(n) }` with `// SAFETY:`.
 - `AT_FDCWD` stays entirely in `atfd.rs` (`AtFd::cwd()`). Never re-exported.
 - `AtFd` is `Copy + Clone` — used multiple times in exec functions.
@@ -121,3 +121,10 @@ Three fd types across `unsafe/sys/src/`:
 - Matching is receiver-driven: `do_captures` loops until captures are exhausted. For each received
   `(fd, tag)`, it scans captures: tagged match first, then positional fallback. Unknown fds
   (no matching capture) are silently closed.
+- `Redirect { target_fd: i32, src_var: CString }` — `target_fd` is the fd number to `dup_to`
+  onto (0 for `<`, 1 for `>`, 2 for `2>`), `src_var` is the `%var` holding the source fd.
+  Applied in the child after `SHELLFD` dup_to but before builtin dispatch.
+- `Fd::dup_to(new: i32)` returns `DupFd` — kernel always returns `new` on success.
+  Takes a raw fd number, not a `DupFd`. Used for both SHELLFD reservation and redirects.
+- `Fd::try_clone(new: i32)` returns `Fd` — owned CLOEXEC copy at `new` (wraps `dup3`).
+  Used for `%var=%var2` syntax to produce a new CLOEXEC fd.

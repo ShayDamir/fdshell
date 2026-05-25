@@ -30,12 +30,12 @@ impl Fd {
         // SAFETY: dup returns a valid fd or -1; cvt checked for errors.
         Ok(unsafe { DupFd::from_raw(ret as i32) })
     }
-    pub fn dup2(&self, new: DupFd) -> Result<DupFd, i32> {
-        let ret = crate::cvt(unsafe { libc::dup2(self.0, new.as_raw()) as isize })?;
-        // SAFETY: dup2 returns a valid fd or -1; cvt checked for errors.
+    pub fn dup_to(&self, new: i32) -> Result<DupFd, i32> {
+        let ret = crate::cvt(unsafe { libc::dup2(self.0, new) as isize })?;
+        // SAFETY: dup_to (dup2) always returns `new` on success (kernel contract).
         Ok(unsafe { DupFd::from_raw(ret as i32) })
     }
-    pub fn dup3(&self, new: i32) -> Result<Fd, i32> {
+    pub fn try_clone(&self, new: i32) -> Result<Fd, i32> {
         let ret = crate::cvt(unsafe { libc::dup3(self.0, new, libc::O_CLOEXEC) as isize })?;
         Ok(unsafe { Fd::from_raw(ret as i32) })
     }

@@ -17,7 +17,7 @@ fn test_openat2_exec() {
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();
-    a.dup2(sys::shellfd::SHELL_DUPFD).unwrap();
+    a.dup_to(sys::shellfd::SHELLFD).unwrap();
     a.close().unwrap();
     let receiver = b;
 
