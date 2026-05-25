@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod child;
+mod launch;
 mod vars;
 
 use std::ffi::CString;
@@ -18,13 +20,19 @@ fn main() -> Result<(), i32> {
         resolve: 0,
     };
     let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
+    vars.insert(CString::from(c"CWD"), cwd);
 
-    let name = CString::from(c"CWD");
-    vars.insert(name, cwd);
+    let cmd = child::Command::Builtin(CString::from(c"mkdirat"));
+    let args = vec![
+        CString::from(c"--mode"),
+        CString::from(c"755"),
+        CString::from(c"--dirfd"),
+        CString::from(c"%CWD"),
+        CString::from(c"foo"),
+    ];
+    let status = launch::launch(&vars, cmd, &args)?;
+    println!("{status:?}");
 
-    for (tag, num) in vars.iter() {
-        let s = tag.to_str().unwrap_or("?");
-        println!("{s} -> {num}");
-    }
+    std::fs::remove_dir_all("foo").ok();
     Ok(())
 }

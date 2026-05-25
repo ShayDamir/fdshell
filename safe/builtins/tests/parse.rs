@@ -61,12 +61,12 @@ fn dirfd_ateq() {
 #[test]
 fn dirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
-    assert!(rd.verify());
-    assert!(wr.verify());
-    let fd5 = rd.dup3(5).unwrap();
-    assert!(fd5.verify());
-    assert_ok(&["--dirfd", "5", "x"], |cfg| {
-        assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(5));
+    rd.verify().unwrap();
+    wr.verify().unwrap();
+    let dupfd = rd.dup().unwrap();
+    let s = format!("{}", dupfd.as_raw());
+    assert_ok(&["--dirfd", &s, "x"], |cfg| {
+        assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(dupfd.as_raw()));
     });
     drop(wr);
 }

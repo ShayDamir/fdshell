@@ -93,8 +93,8 @@ fn flags_bad_name() {
 fn test_pipe_exec() {
     sys::shellfd::reserve_shellfd().unwrap();
     let (a, b) = sys::net::socketpair().unwrap();
-    assert!(a.verify());
-    assert!(b.verify());
+    a.verify().unwrap();
+    b.verify().unwrap();
     a.dup2(sys::shellfd::SHELL_DUPFD).unwrap();
     a.close().unwrap();
     let receiver = b;
@@ -104,9 +104,9 @@ fn test_pipe_exec() {
     let mut buf_a = [0u8; TAG_MAX];
     let mut buf_b = [0u8; TAG_MAX];
     let (fd_a, tag_a) = sys::shellfd::recv_fd(&receiver, &mut buf_a).unwrap();
-    assert!(fd_a.verify());
+    fd_a.verify().unwrap();
     let (fd_b, tag_b) = sys::shellfd::recv_fd(&receiver, &mut buf_b).unwrap();
-    assert!(fd_b.verify());
+    fd_b.verify().unwrap();
 
     let (rd, wr) = match (tag_a.to_bytes(), tag_b.to_bytes()) {
         (b"rd", b"wr") => (fd_a, fd_b),

@@ -102,12 +102,15 @@ fn olddirfd_ateq() {
 #[test]
 fn olddirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
-    assert!(rd.verify());
-    assert!(wr.verify());
-    let fd5 = rd.dup3(5).unwrap();
-    assert!(fd5.verify());
-    assert_ok(&["--olddirfd", "5", "old", "new"], |cfg| {
-        assert_eq!(cfg.olddirfd.as_ref().map(|d| d.as_raw()), Some(5));
+    rd.verify().unwrap();
+    wr.verify().unwrap();
+    let dupfd = rd.dup().unwrap();
+    let s = format!("{}", dupfd.as_raw());
+    assert_ok(&["--olddirfd", &s, "old", "new"], |cfg| {
+        assert_eq!(
+            cfg.olddirfd.as_ref().map(|d| d.as_raw()),
+            Some(dupfd.as_raw())
+        );
     });
     drop(wr);
 }
@@ -122,12 +125,15 @@ fn newdirfd_ateq() {
 #[test]
 fn newdirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
-    assert!(rd.verify());
-    assert!(wr.verify());
-    let fd6 = rd.dup3(6).unwrap();
-    assert!(fd6.verify());
-    assert_ok(&["--newdirfd", "6", "old", "new"], |cfg| {
-        assert_eq!(cfg.newdirfd.as_ref().map(|d| d.as_raw()), Some(6));
+    rd.verify().unwrap();
+    wr.verify().unwrap();
+    let dupfd = rd.dup().unwrap();
+    let s = format!("{}", dupfd.as_raw());
+    assert_ok(&["--newdirfd", &s, "old", "new"], |cfg| {
+        assert_eq!(
+            cfg.newdirfd.as_ref().map(|d| d.as_raw()),
+            Some(dupfd.as_raw())
+        );
     });
     drop(wr);
 }

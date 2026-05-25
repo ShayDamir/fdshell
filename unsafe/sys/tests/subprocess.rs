@@ -7,7 +7,7 @@ fn fork_exit_0() -> Result<(), i32> {
         std::process::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    assert!(pidfd.verify());
+    pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => panic!("{other:?}"),
@@ -21,7 +21,7 @@ fn fork_exit_42() -> Result<(), i32> {
         std::process::exit(42);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    assert!(pidfd.verify());
+    pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(42) => Ok(()),
         other => panic!("{other:?}"),
@@ -37,7 +37,7 @@ fn fork_signaled() -> Result<(), i32> {
         std::process::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    assert!(pidfd.verify());
+    pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Signaled(libc::SIGKILL) => Ok(()),
         other => panic!("{other:?}"),

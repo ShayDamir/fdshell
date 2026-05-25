@@ -80,7 +80,8 @@ Three fd types in `unsafe/sys/src/fd.rs` and `atfd.rs`:
 | Module | Role |
 |---|---|
 | `atfd.rs` | `AtFd<'a>` — non-owning borrowed fd for `*at` syscalls |
-| `fd.rs` | `Fd` and `DupFd` types — owned fd with Drop, and non-owned fd |
+| `dupfd.rs` | `DupFd` — non-owned fd for child-process inheritance |
+| `fd.rs` | `Fd` — owned fd with Drop |
 | `rw.rs` | fd I/O — `read`, `write` |
 | `fcntl.rs` | Re-exports O\_\* and fcntl constants from `libc` |
 | `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |

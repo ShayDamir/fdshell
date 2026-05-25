@@ -1,7 +1,8 @@
 #![no_std]
 
 pub use atfd::AtFd;
-pub use fd::{DupFd, Fd};
+pub use dupfd::DupFd;
+pub use fd::Fd;
 
 pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
     if ret == -1 {
@@ -14,6 +15,7 @@ pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
 }
 
 pub mod atfd;
+pub mod dupfd;
 pub mod errno;
 pub mod fcntl;
 pub mod fd;
