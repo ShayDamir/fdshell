@@ -4,3 +4,4 @@ pub const ENOENT: i32 = libc::ENOENT;
 pub const E2BIG: i32 = libc::E2BIG;
 pub const ENOSYS: i32 = libc::ENOSYS;
 pub const EEXIST: i32 = libc::EEXIST;
+pub const EIO: i32 = libc::EIO;

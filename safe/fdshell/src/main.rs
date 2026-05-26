@@ -8,6 +8,8 @@ mod redirect;
 mod resolve;
 mod vars;
 
+use std::io::Write;
+
 use sys::AtFd;
 use sys::ShortCStr;
 use sys::errno::EINVAL;
@@ -17,9 +19,9 @@ use sys::siginfo::WaitStatus;
 
 fn main() -> Result<(), i32> {
     sys::shellfd::reserve_shellfd()?;
-
     let mut fdvars = vars::FdVars::new();
-
+    let stdin = std::io::stdin();
+    let mut buf = String::new();
     let how = OpenHow {
         flags: O_DIRECTORY as u64 | O_CLOEXEC as u64,
         mode: 0,
@@ -27,37 +29,44 @@ fn main() -> Result<(), i32> {
     };
     let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
     fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);
-
-    let parsed = parse::parse("builtin mkdirat --mode 755 --dirfd %CWD foo %>%foo")?;
-
-    match parsed {
-        parse::ParsedLine::Cmd(cmdline) => {
-            let (status, capture_fd) = launch::launch(&fdvars, &cmdline)?;
-            println!("{status:?}");
-
-            match status {
-                WaitStatus::Exited(0) => {
-                    let entries = capture::do_captures(capture_fd, cmdline.captures, &fdvars)?;
-                    for (var, fd) in entries {
-                        fdvars.insert(var, fd);
+    loop {
+        buf.clear();
+        print!("fdshell> ");
+        std::io::stdout().flush().ok();
+        let n = stdin.read_line(&mut buf).map_err(|_| sys::errno::EIO)?;
+        if n == 0 {
+            println!();
+            break;
+        }
+        let line = buf.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == "exit" || line == "quit" {
+            break;
+        }
+        match parse::parse(line)? {
+            parse::ParsedLine::Cmd(cmdline) => {
+                let (status, capture_fd) = launch::launch(&fdvars, &cmdline)?;
+                match status {
+                    WaitStatus::Exited(0) => {
+                        let entries = capture::do_captures(capture_fd, cmdline.captures, &fdvars)?;
+                        for (var, fd) in entries {
+                            fdvars.insert(var, fd);
+                        }
                     }
+                    WaitStatus::Exited(n) => eprintln!("exit code: {n}"),
+                    _ => eprintln!("{status:?}"),
                 }
-                other => std::process::exit(other.exit_code()),
+            }
+            parse::ParsedLine::Assign { var, value } => {
+                let src = fdvars.resolve(value.as_c_str()).ok_or(EINVAL)?;
+                fdvars.insert(var, src.try_clone_any()?);
+            }
+            parse::ParsedLine::Unset(var) => {
+                fdvars.remove(var.as_c_str());
             }
         }
-        parse::ParsedLine::Assign { var, value } => {
-            let src = fdvars.resolve(value.as_c_str()).ok_or(EINVAL)?;
-            fdvars.insert(var, src.try_clone_any()?);
-        }
-        parse::ParsedLine::Unset(var) => {
-            fdvars.remove(var.as_c_str());
-        }
     }
-
-    for (name, raw) in fdvars.iter() {
-        println!("  {:?} → fd {}", name, raw);
-    }
-
-    std::fs::remove_dir_all("foo").ok();
     Ok(())
 }
