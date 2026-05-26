@@ -61,7 +61,7 @@ pub fn do_captures(
         if let Some(i) = idx {
             debug_assert!(i < remaining.len());
             let c = remaining.remove(i);
-            if !c.force && fdvars.resolve(c.var.as_c_str()).is_some() {
+            if !c.force && fdvars.resolve(c.var.as_bytes()).is_some() {
                 return Err(EEXIST);
             }
             captured_fds.push((c.var, fd));

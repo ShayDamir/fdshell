@@ -60,11 +60,11 @@ fn main() -> Result<(), i32> {
                 }
             }
             parse::ParsedLine::Assign { var, value } => {
-                let src = fdvars.resolve(value.as_c_str()).ok_or(EINVAL)?;
+                let src = fdvars.resolve(value.as_bytes()).ok_or(EINVAL)?;
                 fdvars.insert(var, src.try_clone_any()?);
             }
             parse::ParsedLine::Unset(var) => {
-                fdvars.remove(var.as_c_str());
+                fdvars.remove(var.as_bytes());
             }
         }
     }

@@ -33,7 +33,7 @@ fn child_main(
 
     for r in redirects {
         let src = vars
-            .resolve(r.src_var.as_c_str())
+            .resolve(r.src_var.as_bytes())
             .ok_or(sys::errno::EINVAL)?;
         src.dup_to(r.target_fd)?;
     }

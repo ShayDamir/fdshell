@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use core::slice::SliceIndex;
 
-use crate::shortcstr::{INLINE_MAX, ShortCStr, from_inline, from_long};
+use crate::shortcstr::{INLINE_MAX, ShortCStr, from_inline};
 
 impl ShortCStr {
     pub fn get<I>(&self, index: I) -> Option<Self>
@@ -18,22 +18,14 @@ impl ShortCStr {
         }
 
         let start = new.as_ptr() as usize - orig.as_ptr() as usize;
-        if start + new_len == self.len() {
-            // Tail slice — preserve variant, adjust offset.
-            match self {
-                ShortCStr::Inline { .. } => unreachable!(),
-                ShortCStr::Static(s, offset, _) => {
-                    Some(ShortCStr::Static(s, offset + start, new_len))
-                }
-                ShortCStr::Rc { rc, offset, .. } => Some(ShortCStr::Rc {
-                    rc: Rc::clone(rc),
-                    offset: offset + start,
-                    length: new_len,
-                }),
-            }
-        } else {
-            // SAFETY: new_len and no interior NUL guaranteed by origin.
-            Some(unsafe { from_long(new) })
+        match self {
+            ShortCStr::Inline { .. } => unreachable!(),
+            ShortCStr::Static(s, offset, _) => Some(ShortCStr::Static(s, offset + start, new_len)),
+            ShortCStr::Rc { rc, offset, .. } => Some(ShortCStr::Rc {
+                rc: Rc::clone(rc),
+                offset: offset + start,
+                length: new_len,
+            }),
         }
     }
 

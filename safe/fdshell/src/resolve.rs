@@ -40,7 +40,7 @@ pub(crate) fn substitute_arg(
                     Some(d) => d.as_raw(),
                     None => {
                         let src = vars
-                            .resolve(name_scs.as_c_str())
+                            .resolve(name_scs.as_bytes())
                             .ok_or(sys::errno::EINVAL)?;
                         let d = src.dup()?;
                         let raw = d.as_raw();

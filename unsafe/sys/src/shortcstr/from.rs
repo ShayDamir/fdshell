@@ -16,19 +16,6 @@ pub(crate) unsafe fn from_inline(bytes: &[u8]) -> ShortCStr {
     ShortCStr::Inline { len, buf }
 }
 
-/// # Safety
-/// `bytes.len()` > `INLINE_MAX` and `bytes` has no interior NUL.
-pub(crate) unsafe fn from_long(bytes: &[u8]) -> ShortCStr {
-    let v = bytes.to_vec();
-    // SAFETY: caller guarantees no interior NUL.
-    let cs = unsafe { CString::from_vec_unchecked(v) };
-    ShortCStr::Rc {
-        rc: Rc::from(cs.into_boxed_c_str()),
-        offset: 0,
-        length: bytes.len(),
-    }
-}
-
 impl ShortCStr {
     pub fn from_vec(bytes: Vec<u8>) -> Result<Self, i32> {
         if bytes.contains(&0) {

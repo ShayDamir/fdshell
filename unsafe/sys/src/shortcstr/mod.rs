@@ -8,9 +8,8 @@ mod from;
 mod get;
 mod size;
 mod traits;
-mod verify;
 
-pub(crate) use from::{from_inline, from_long};
+pub(crate) use from::from_inline;
 pub use size::InlineSize;
 
 const INLINE_CAP: usize = 31;

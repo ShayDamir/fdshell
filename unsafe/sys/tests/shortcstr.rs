@@ -9,32 +9,12 @@ const LONG: &CStr = c"The quick brown fox jumps over the lazy dog. \
     Pack my box with five dozen liquor jugs. \
     How vexingly quick daft zebras jump!";
 
-// --- verify ---
-
-#[test]
-fn verify_inline() {
-    assert!(ShortCStr::from_static(c"hello").verify().is_ok());
-}
-
-#[test]
-fn verify_static() {
-    assert!(ShortCStr::from_static(LONG).verify().is_ok());
-}
-
-#[test]
-fn verify_rc() {
-    let s =
-        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
-    assert!(s.verify().is_ok());
-}
-
 // --- from_vec boundaries ---
 
 #[test]
 fn from_vec_empty() {
     let s = ShortCStr::from_vec(b"".to_vec()).unwrap();
     assert!(s.is_empty());
-    assert!(s.verify().is_ok());
 }
 
 #[test]
@@ -43,7 +23,6 @@ fn from_vec_inline_max() {
     assert_eq!(bytes.len(), 30);
     let s = ShortCStr::from_vec(bytes.to_vec()).unwrap();
     assert_eq!(s.as_bytes(), bytes);
-    assert!(s.verify().is_ok());
 }
 
 #[test]
@@ -52,7 +31,6 @@ fn from_vec_first_rc() {
     assert_eq!(bytes.len(), 31);
     let s = ShortCStr::from_vec(bytes.to_vec()).unwrap();
     assert_eq!(s.as_bytes(), bytes);
-    assert!(s.verify().is_ok());
 }
 
 #[test]
@@ -67,21 +45,18 @@ fn from_vec_interior_nul() {
 fn from_static_empty() {
     let s = ShortCStr::from_static(c"");
     assert!(s.is_empty());
-    assert!(s.verify().is_ok());
 }
 
 #[test]
 fn from_static_single() {
     let s = ShortCStr::from_static(c"x");
     assert_eq!(s.as_bytes(), b"x");
-    assert!(s.verify().is_ok());
 }
 
 #[test]
 fn from_static_long() {
     let s = ShortCStr::from_static(LONG);
     assert_eq!(s.as_bytes(), LONG.to_bytes());
-    assert!(s.verify().is_ok());
 }
 
 // --- get OOB ---
@@ -105,7 +80,6 @@ fn get_zero_len_start() {
     let s = ShortCStr::from_static(c"hello");
     let sub = s.get(0..0).unwrap();
     assert!(sub.is_empty());
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -113,7 +87,6 @@ fn get_zero_len_mid() {
     let s = ShortCStr::from_static(c"hello");
     let sub = s.get(3..3).unwrap();
     assert!(sub.is_empty());
-    assert!(sub.verify().is_ok());
 }
 
 // --- get preserves variant on tail ---
@@ -123,7 +96,6 @@ fn get_full_static_preserves_variant() {
     let s = ShortCStr::from_static(LONG);
     let sub = s.get(..).unwrap();
     assert_eq!(sub.as_bytes(), LONG.to_bytes());
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -132,7 +104,6 @@ fn get_full_rc_preserves_variant() {
     let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let sub = s.get(..).unwrap();
     assert_eq!(sub.as_bytes(), raw);
-    assert!(sub.verify().is_ok());
 }
 
 // --- existing subslice tests (ported) ---
@@ -142,7 +113,6 @@ fn inline_subslice_tail() {
     let s = ShortCStr::from_static(c"hello world");
     let sub = s.get(6..11).unwrap();
     assert_eq!(sub.as_bytes(), b"world");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -150,7 +120,6 @@ fn inline_subslice_mid() {
     let s = ShortCStr::from_static(c"hello world");
     let sub = s.get(1..5).unwrap();
     assert_eq!(sub.as_bytes(), b"ello");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -159,7 +128,6 @@ fn static_tail_subslice() {
     let full = s.len();
     let sub = s.get(100..full).unwrap();
     assert_eq!(sub.as_bytes(), &LONG.to_bytes()[100..full]);
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -167,7 +135,6 @@ fn static_short_mid_subslice() {
     let s = ShortCStr::from_static(LONG);
     let sub = s.get(10..30).unwrap();
     assert_eq!(sub.as_bytes(), &LONG.to_bytes()[10..30]);
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -177,7 +144,6 @@ fn rc_tail_subslice() {
     let full = s.len();
     let sub = s.get(10..full).unwrap();
     assert_eq!(sub.as_bytes(), &raw[10..full]);
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -186,7 +152,6 @@ fn rc_short_mid_subslice() {
         ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
     let sub = s.get(6..20).unwrap();
     assert_eq!(sub.as_bytes(), b"world this is ");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -195,7 +160,6 @@ fn static_long_non_tail() {
     let full = LONG.to_bytes();
     let sub = s.get(10..60).unwrap();
     assert_eq!(sub.as_bytes(), &full[10..60]);
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -204,7 +168,6 @@ fn rc_long_non_tail() {
     let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let sub = s.get(10..55).unwrap();
     assert_eq!(sub.as_bytes(), &raw[10..55]);
-    assert!(sub.verify().is_ok());
 }
 
 // --- range type variants ---
@@ -214,7 +177,6 @@ fn get_range_from() {
     let s = ShortCStr::from_static(c"hello world");
     let sub = s.get(6..).unwrap();
     assert_eq!(sub.as_bytes(), b"world");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -222,7 +184,6 @@ fn get_range_to() {
     let s = ShortCStr::from_static(c"hello world");
     let sub = s.get(..5).unwrap();
     assert_eq!(sub.as_bytes(), b"hello");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -230,7 +191,6 @@ fn get_range_full() {
     let s = ShortCStr::from_static(c"hello");
     let sub = s.get(..).unwrap();
     assert_eq!(sub.as_bytes(), b"hello");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -238,7 +198,6 @@ fn get_range_inclusive() {
     let s = ShortCStr::from_static(c"hello world");
     let sub = s.get(0..=4).unwrap();
     assert_eq!(sub.as_bytes(), b"hello");
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -246,7 +205,6 @@ fn get_non_tail_range_from() {
     let s = ShortCStr::from_static(LONG);
     let sub = s.get(10..).unwrap();
     assert_eq!(sub.as_bytes(), &LONG.to_bytes()[10..]);
-    assert!(sub.verify().is_ok());
 }
 
 #[test]
@@ -254,28 +212,6 @@ fn get_non_tail_range_to() {
     let s = ShortCStr::from_static(c"hello world");
     let sub = s.get(..3).unwrap();
     assert_eq!(sub.as_bytes(), b"hel");
-    assert!(sub.verify().is_ok());
-}
-
-// --- as_c_str consistency ---
-
-#[test]
-fn as_c_str_matches_as_bytes_inline() {
-    let s = ShortCStr::from_static(c"hello");
-    assert_eq!(s.as_c_str().to_bytes(), s.as_bytes());
-}
-
-#[test]
-fn as_c_str_matches_as_bytes_static() {
-    let s = ShortCStr::from_static(LONG);
-    assert_eq!(s.as_c_str().to_bytes(), s.as_bytes());
-}
-
-#[test]
-fn as_c_str_matches_as_bytes_rc() {
-    let s =
-        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
-    assert_eq!(s.as_c_str().to_bytes(), s.as_bytes());
 }
 
 // --- to_c_string correctness ---
@@ -380,8 +316,6 @@ fn split_once_mid() {
     let (l, r) = s.split_once_byte(b'=').unwrap();
     assert_eq!(l.as_bytes(), b"foo");
     assert_eq!(r.as_bytes(), b"bar");
-    assert!(l.verify().is_ok());
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -390,8 +324,6 @@ fn split_once_start() {
     let (l, r) = s.split_once_byte(b'=').unwrap();
     assert_eq!(l.as_bytes(), b"");
     assert_eq!(r.as_bytes(), b"bar");
-    assert!(l.verify().is_ok());
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -400,8 +332,6 @@ fn split_once_end() {
     let (l, r) = s.split_once_byte(b'=').unwrap();
     assert_eq!(l.as_bytes(), b"foo");
     assert_eq!(r.as_bytes(), b"");
-    assert!(l.verify().is_ok());
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -429,7 +359,6 @@ fn strip_prefix_match_full() {
     let s = ShortCStr::from_static(c"hello world");
     let r = s.strip_prefix(b"hello").unwrap();
     assert_eq!(r.as_bytes(), b" world");
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -437,7 +366,6 @@ fn strip_prefix_partial() {
     let s = ShortCStr::from_static(c"hello");
     let r = s.strip_prefix(b"he").unwrap();
     assert_eq!(r.as_bytes(), b"llo");
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -451,7 +379,6 @@ fn strip_prefix_empty() {
     let s = ShortCStr::from_static(c"hello");
     let r = s.strip_prefix(b"").unwrap();
     assert_eq!(r.as_bytes(), b"hello");
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -459,7 +386,6 @@ fn strip_prefix_all() {
     let s = ShortCStr::from_static(c"hello");
     let r = s.strip_prefix(b"hello").unwrap();
     assert_eq!(r.as_bytes(), b"");
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -467,7 +393,6 @@ fn strip_prefix_percent() {
     let s = ShortCStr::from_static(c"%foo");
     let r = s.strip_prefix(b"%").unwrap();
     assert_eq!(r.as_bytes(), b"foo");
-    assert!(r.verify().is_ok());
 }
 
 #[test]
@@ -476,5 +401,4 @@ fn strip_prefix_long() {
     let prefix = b"The quick ";
     let r = s.strip_prefix(prefix).unwrap();
     assert_eq!(r.as_bytes(), &LONG.to_bytes()[prefix.len()..]);
-    assert!(r.verify().is_ok());
 }
