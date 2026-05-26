@@ -35,7 +35,7 @@ pub(crate) fn substitute_arg(
                         break;
                     }
                 }
-                let name_scs = ShortCStr::from_bytes(&name)?;
+                let name_scs = ShortCStr::from_vec(name)?;
                 let raw = match cache.get(&name_scs) {
                     Some(d) => d.as_raw(),
                     None => {

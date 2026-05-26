@@ -21,7 +21,7 @@ pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32> {
             match b {
                 b' ' | b'\t' => {
                     if !cur.is_empty() {
-                        tokens.push(ShortCStr::from_bytes(&core::mem::take(&mut cur))?);
+                        tokens.push(ShortCStr::from_vec(core::mem::take(&mut cur))?);
                     }
                 }
                 b'"' => in_quotes = true,
@@ -34,7 +34,7 @@ pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32> {
         return Err(EINVAL);
     }
     if !cur.is_empty() {
-        tokens.push(ShortCStr::from_bytes(&cur)?);
+        tokens.push(ShortCStr::from_vec(cur)?);
     }
     Ok(tokens)
 }

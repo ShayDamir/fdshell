@@ -23,40 +23,41 @@ fn verify_static() {
 
 #[test]
 fn verify_rc() {
-    let s = ShortCStr::from_bytes(b"hello world this is more than thirty bytes total").unwrap();
+    let s =
+        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
     assert!(s.verify().is_ok());
 }
 
-// --- from_bytes boundaries ---
+// --- from_vec boundaries ---
 
 #[test]
-fn from_bytes_empty() {
-    let s = ShortCStr::from_bytes(b"").unwrap();
+fn from_vec_empty() {
+    let s = ShortCStr::from_vec(b"".to_vec()).unwrap();
     assert!(s.is_empty());
     assert!(s.verify().is_ok());
 }
 
 #[test]
-fn from_bytes_inline_max() {
+fn from_vec_inline_max() {
     let bytes = b"123456789012345678901234567890"; // 30 bytes
     assert_eq!(bytes.len(), 30);
-    let s = ShortCStr::from_bytes(bytes).unwrap();
+    let s = ShortCStr::from_vec(bytes.to_vec()).unwrap();
     assert_eq!(s.as_bytes(), bytes);
     assert!(s.verify().is_ok());
 }
 
 #[test]
-fn from_bytes_first_rc() {
+fn from_vec_first_rc() {
     let bytes = b"1234567890123456789012345678901"; // 31 bytes
     assert_eq!(bytes.len(), 31);
-    let s = ShortCStr::from_bytes(bytes).unwrap();
+    let s = ShortCStr::from_vec(bytes.to_vec()).unwrap();
     assert_eq!(s.as_bytes(), bytes);
     assert!(s.verify().is_ok());
 }
 
 #[test]
-fn from_bytes_interior_nul() {
-    let result = ShortCStr::from_bytes(b"ab\0cd");
+fn from_vec_interior_nul() {
+    let result = ShortCStr::from_vec(b"ab\0cd".to_vec());
     assert!(result.is_err());
 }
 
@@ -128,7 +129,7 @@ fn get_full_static_preserves_variant() {
 #[test]
 fn get_full_rc_preserves_variant() {
     let raw = b"hello world this is more than thirty bytes total";
-    let s = ShortCStr::from_bytes(raw).unwrap();
+    let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let sub = s.get(..).unwrap();
     assert_eq!(sub.as_bytes(), raw);
     assert!(sub.verify().is_ok());
@@ -172,7 +173,7 @@ fn static_short_mid_subslice() {
 #[test]
 fn rc_tail_subslice() {
     let raw = b"hello world this is a long string over thirty bytes";
-    let s = ShortCStr::from_bytes(raw).unwrap();
+    let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let full = s.len();
     let sub = s.get(10..full).unwrap();
     assert_eq!(sub.as_bytes(), &raw[10..full]);
@@ -181,7 +182,8 @@ fn rc_tail_subslice() {
 
 #[test]
 fn rc_short_mid_subslice() {
-    let s = ShortCStr::from_bytes(b"hello world this is more than thirty bytes total").unwrap();
+    let s =
+        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
     let sub = s.get(6..20).unwrap();
     assert_eq!(sub.as_bytes(), b"world this is ");
     assert!(sub.verify().is_ok());
@@ -199,7 +201,7 @@ fn static_long_non_tail() {
 #[test]
 fn rc_long_non_tail() {
     let raw = b"hello world this is a long string over thirty bytes for sure";
-    let s = ShortCStr::from_bytes(raw).unwrap();
+    let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let sub = s.get(10..55).unwrap();
     assert_eq!(sub.as_bytes(), &raw[10..55]);
     assert!(sub.verify().is_ok());
@@ -271,7 +273,8 @@ fn as_c_str_matches_as_bytes_static() {
 
 #[test]
 fn as_c_str_matches_as_bytes_rc() {
-    let s = ShortCStr::from_bytes(b"hello world this is more than thirty bytes total").unwrap();
+    let s =
+        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
     assert_eq!(s.as_c_str().to_bytes(), s.as_bytes());
 }
 
@@ -291,7 +294,8 @@ fn to_c_string_matches_static() {
 
 #[test]
 fn to_c_string_matches_rc() {
-    let s = ShortCStr::from_bytes(b"hello world this is more than thirty bytes total").unwrap();
+    let s =
+        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
     assert_eq!(s.to_c_string().to_bytes(), s.as_bytes());
 }
 
@@ -310,7 +314,7 @@ fn len_variants() {
     assert_eq!(ShortCStr::from_static(c"hi").len(), 2);
     assert_eq!(ShortCStr::from_static(c"hello").len(), 5);
     assert_eq!(ShortCStr::from_static(LONG).len(), LONG.to_bytes().len());
-    let rc = ShortCStr::from_bytes(rc_bytes).unwrap();
+    let rc = ShortCStr::from_vec(rc_bytes.to_vec()).unwrap();
     assert_eq!(rc.len(), rc_bytes.len());
 }
 
@@ -322,7 +326,7 @@ fn clone_equals_original() {
         ShortCStr::from_static(c""),
         ShortCStr::from_static(c"hello"),
         ShortCStr::from_static(LONG),
-        ShortCStr::from_bytes(b"hello world this is more than thirty bytes total").unwrap(),
+        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap(),
     ] {
         assert_eq!(src.clone(), *src);
     }
@@ -331,7 +335,7 @@ fn clone_equals_original() {
 #[test]
 fn cross_variant_equal() {
     let a = ShortCStr::from_static(c"hello");
-    let b = ShortCStr::from_bytes(b"hello").unwrap();
+    let b = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
     let c = ShortCStr::from_static(c"hello"); // Static variant
     assert_eq!(a, b);
     assert_eq!(a, c);
@@ -351,7 +355,7 @@ fn different_content_not_equal() {
 fn hash_consistent_across_variants() {
     use core::hash::{Hash, Hasher};
     let a = ShortCStr::from_static(c"hello");
-    let b = ShortCStr::from_bytes(b"hello").unwrap();
+    let b = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
     let mut ha = std::collections::hash_map::DefaultHasher::new();
     let mut hb = std::collections::hash_map::DefaultHasher::new();
     a.hash(&mut ha);
@@ -359,12 +363,12 @@ fn hash_consistent_across_variants() {
     assert_eq!(ha.finish(), hb.finish());
 }
 
-// --- cross-variant equality (from_static vs from_bytes) ---
+// --- cross-variant equality (from_static vs from_vec) ---
 
 #[test]
-fn static_equals_from_bytes() {
+fn static_equals_from_vec() {
     let s = ShortCStr::from_static(c"hello");
-    let b = ShortCStr::from_bytes(b"hello").unwrap();
+    let b = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
     assert_eq!(s, b);
 }
 

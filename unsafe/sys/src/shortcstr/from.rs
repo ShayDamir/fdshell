@@ -1,5 +1,6 @@
 use alloc::ffi::CString;
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 use core::ffi::CStr;
 
 use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr};
@@ -29,16 +30,21 @@ pub(crate) unsafe fn from_long(bytes: &[u8]) -> ShortCStr {
 }
 
 impl ShortCStr {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, i32> {
+    pub fn from_vec(bytes: Vec<u8>) -> Result<Self, i32> {
         if bytes.contains(&0) {
             return Err(crate::errno::EINVAL);
         }
         if bytes.len() <= INLINE_MAX as usize {
             // SAFETY: bytes.len() ≤ INLINE_MAX and no interior NUL, verified above.
-            Ok(unsafe { from_inline(bytes) })
+            Ok(unsafe { from_inline(&bytes) })
         } else {
-            // SAFETY: bytes.len() > INLINE_MAX and no interior NUL, verified above.
-            Ok(unsafe { from_long(bytes) })
+            let cs = unsafe { CString::from_vec_unchecked(bytes) };
+            let len = cs.count_bytes();
+            Ok(ShortCStr::Rc {
+                rc: Rc::from(cs.into_boxed_c_str()),
+                offset: 0,
+                length: len,
+            })
         }
     }
 

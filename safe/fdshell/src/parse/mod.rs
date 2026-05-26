@@ -67,12 +67,12 @@ pub fn parse(line: &str) -> Result<ParsedLine, i32> {
         if b == b"&" {
             background = true;
         } else if b.starts_with(b"%") {
-            if let Some(c) = classify::parse_capture(b) {
+            if let Some(c) = classify::parse_capture(t) {
                 captures.push(c);
             } else {
                 args.push(t.clone());
             }
-        } else if let Some(r) = classify::parse_redirect(b) {
+        } else if let Some(r) = classify::parse_redirect(t) {
             redirects.push(r);
         } else {
             args.push(t.clone());
