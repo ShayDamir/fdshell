@@ -20,6 +20,7 @@ pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
 pub mod atfd;
 pub mod dupfd;
 pub mod errno;
+pub mod execveat;
 pub mod fcntl;
 pub mod fd;
 pub mod fork_pidfd;

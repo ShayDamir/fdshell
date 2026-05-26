@@ -6,6 +6,12 @@ edition = "2024"
 [dependencies]
 libc = { version = "0.2", default-features = false }
 
+[[bin]]
+name = "execveat_ok"
+path = "tests/bins/execveat_ok.rs"
+test = false
+doctest = false
+
 [lints]
 workspace = true
 
