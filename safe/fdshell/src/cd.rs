@@ -52,6 +52,7 @@ fn move_cwd(fdvars: &mut FdVars, new_cwd: Fd) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use sys::siginfo::WaitStatus;
@@ -86,12 +87,22 @@ mod tests {
 
     #[test]
     fn cd_to_home() {
-        child_test(|| {
-            let mut v = FdVars::new();
-            cd(&[], &mut v).unwrap();
-            let cwd = v.resolve(b"CWD").unwrap();
-            cwd.verify().unwrap();
-        });
+        let home_exists =
+            std::env::var_os("HOME").is_some_and(|p| std::path::Path::new(&p).exists());
+        if home_exists {
+            child_test(|| {
+                let mut v = FdVars::new();
+                cd(&[], &mut v).unwrap();
+                let cwd = v.resolve(b"CWD").unwrap();
+                cwd.verify().unwrap();
+            });
+        } else {
+            child_test(|| {
+                let mut v = FdVars::new();
+                let e = cd(&[], &mut v).unwrap_err();
+                assert_eq!(e, sys::errno::ENOENT);
+            });
+        }
     }
 
     #[test]
