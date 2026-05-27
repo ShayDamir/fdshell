@@ -36,11 +36,9 @@ impl Fd {
         Ok(unsafe { DupFd::from_raw(ret as i32) })
     }
     pub fn try_clone_any(&self) -> Result<Fd, i32> {
-        let ret = crate::cvt(unsafe { libc::dup(self.0) as isize })?;
-        let raw = ret as i32;
-        crate::cvt(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
-        // SAFETY: `raw` has CLOEXEC confirmed above.
-        Ok(unsafe { Fd::from_raw(raw) })
+        let ret = crate::cvt(unsafe { libc::fcntl(self.0, libc::F_DUPFD_CLOEXEC, 0) as isize })?;
+        // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd with CLOEXEC atomically set.
+        Ok(unsafe { Fd::from_raw(ret as i32) })
     }
     pub fn try_clone(&self, new: i32) -> Result<Fd, i32> {
         let ret = crate::cvt(unsafe { libc::dup3(self.0, new, libc::O_CLOEXEC) as isize })?;
