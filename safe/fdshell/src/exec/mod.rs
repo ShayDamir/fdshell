@@ -7,7 +7,7 @@ use sys::openat2::OpenHow;
 use sys::{AtFd, Fd};
 
 pub fn exec_fd(fd: &Fd, argv: &[&CStr]) -> Result<(), i32> {
-    let envp = get_environ();
+    let envp = get_environ(b"1");
     // dup to non-CLOEXEC so the kernel can pass /dev/fd/N to a script interpreter
     let script_fd = fd.dup()?;
     sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
@@ -46,15 +46,24 @@ pub fn resolve_path(bin: &CStr) -> Result<Fd, i32> {
     }
 }
 
-fn get_environ() -> Vec<CString> {
-    std::env::vars()
+fn get_environ(cookie: &[u8]) -> Vec<CString> {
+    let mut env: Vec<CString> = std::env::vars()
+        .filter(|(k, _)| k != "FDSHELL_CAPTURE")
         .filter_map(|(k, v)| {
             let mut entry = k;
             entry.push('=');
             entry.push_str(&v);
             CString::new(entry).ok()
         })
-        .collect()
+        .collect();
+    if sys::shellfd::capture_active() {
+        let mut entry = b"FDSHELL_CAPTURE=".to_vec();
+        entry.extend_from_slice(cookie);
+        if let Ok(cs) = CString::new(entry) {
+            env.push(cs);
+        }
+    }
+    env
 }
 
 #[cfg(test)]
