@@ -6,7 +6,11 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn test_dir() -> std::path::PathBuf {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("fdshell-unlinkat-test-{}-{}", std::process::id(), c))
+    std::env::temp_dir().join(format!(
+        "fdshell-unlinkat-test-{}-{}",
+        std::process::id(),
+        c
+    ))
 }
 
 #[test]

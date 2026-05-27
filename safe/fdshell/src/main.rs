@@ -73,7 +73,7 @@ fn main() -> Result<(), i32> {
             }
             parse::ParsedLine::Assign { var, value } => {
                 let src = fdvars.resolve(value.as_bytes()).ok_or(EINVAL)?;
-                fdvars.insert(var, src.try_clone_any()?);
+                fdvars.insert(var, src.try_clone()?);
             }
             parse::ParsedLine::Unset(var) => {
                 fdvars.remove(var.as_bytes());

@@ -20,15 +20,14 @@ pub fn cd(args: &[ShortCStr], fdvars: &mut FdVars) -> Result<(), i32> {
 
 fn cd_home() -> Result<Fd, i32> {
     let home = std::env::var_os("HOME").ok_or(ENOENT)?;
-    let cs =
-        CString::new(home.as_os_str().as_encoded_bytes()).map_err(|_| EINVAL)?;
+    let cs = CString::new(home.as_os_str().as_encoded_bytes()).map_err(|_| EINVAL)?;
     open_cwd_dir(&cs)
 }
 
 fn cd_var(arg: &ShortCStr, fdvars: &FdVars) -> Result<Fd, i32> {
     let name = arg.strip_prefix(b"%").ok_or(EINVAL)?;
     let src = fdvars.resolve(name.as_bytes()).ok_or(ENOENT)?;
-    src.try_clone_any()
+    src.try_clone()
 }
 
 fn cd_path(path: &ShortCStr) -> Result<Fd, i32> {
@@ -101,7 +100,7 @@ mod tests {
             let mut v = FdVars::new();
             let tmp = ShortCStr::from_static(c"/tmp");
             cd(&[tmp], &mut v).unwrap();
-            let cwd_fd = v.resolve(b"CWD").unwrap().try_clone_any().unwrap();
+            let cwd_fd = v.resolve(b"CWD").unwrap().try_clone().unwrap();
             v.insert(ShortCStr::from_static(c"CWD"), cwd_fd);
             cd(&[ShortCStr::from_static(c"%CWD")], &mut v).unwrap();
             let cwd = v.resolve(b"CWD").unwrap();
