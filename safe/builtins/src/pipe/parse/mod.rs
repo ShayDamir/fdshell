@@ -8,13 +8,17 @@ pub struct PipeConfig {
 }
 
 /// Parses pipe CLI arguments into a [`PipeConfig`].
+/// Empty args produce a default config (flags=0 → `O_CLOEXEC`).
 ///
 /// Returns:
 /// - `Err(sys::errno::HELP)` — `--help` or `-h` was passed
 /// - `Err(sys::errno::EINVAL)` — unknown flag, bad hex, etc.
 pub fn pipe_parse(args: &[&CStr]) -> Result<PipeConfig, i32> {
-    if args.is_empty() || crate::argparse::wants_help(args) {
+    if crate::argparse::wants_help(args) {
         return Err(sys::errno::HELP);
+    }
+    if args.is_empty() {
+        return Ok(PipeConfig { flags: 0 });
     }
     let mut result = PipeConfig { flags: 0 };
     let mut i = 0;

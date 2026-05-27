@@ -38,7 +38,7 @@ fn help_short() {
 
 #[test]
 fn empty_args() {
-    assert_err(&[], HELP);
+    assert_ok(&[], |cfg| assert_eq!(cfg.flags, 0));
 }
 
 #[test]
