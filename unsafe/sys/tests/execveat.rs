@@ -4,6 +4,7 @@ use core::ffi::CStr;
 use std::ffi::CString;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::AtomicU64;
 use sys::execveat::AT_EMPTY_PATH;
 
 /// Path to the test helper binary that exits with 42.
@@ -38,11 +39,22 @@ fn execveat_ok_path() {
     }
 }
 
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn test_dir() -> std::path::PathBuf {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "fdshell-execveat-test-{}-{}",
+        std::process::id(),
+        c
+    ))
+}
+
 /// Helper: creates a script with shebang, opens it, forks, runs execveat(fd, "", AT_EMPTY_PATH).
 /// `cloexec` controls whether O_CLOEXEC is set on the fd.
 /// `expect_ok` is whether execveat is expected to succeed (child exits 42) or fail (child exits 1).
 fn execveat_script(script: &[u8], cloexec: bool, expect_ok: bool) {
-    let dir = std::env::temp_dir().join("fdshell-execveat-script-test");
+    let dir = test_dir();
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let script_path = dir.join("script.sh");
