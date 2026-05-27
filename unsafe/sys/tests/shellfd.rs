@@ -90,7 +90,7 @@ fn test_send_recv_fd() -> Result<(), i32> {
         test_b.close()?;
 
         let mut tag = [0u8; TAG_MAX];
-        let (test_fd, _tag) = recv_fd(&receiver, &mut tag)?;
+        let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)?;
         test_fd.verify()?;
 
         let mut buf = [0u8; 8];
@@ -119,7 +119,7 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -142,7 +142,7 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -163,7 +163,7 @@ fn test_recv_fd_short_no_null() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -184,7 +184,7 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;
@@ -208,7 +208,7 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
     dummy_wr.close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf), Err(EINVAL)));
+    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
     dummy_rd.close()?;
     a.close()?;

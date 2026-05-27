@@ -1,9 +1,8 @@
-use super::CmsgBuf;
 use crate::Fd;
-use crate::errno::EINVAL;
+use crate::errno::{EINVAL, EPERM};
 use core::ffi::CStr;
 
-pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8]) -> Result<(Fd, &'a CStr), i32> {
+pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(Fd, &'a CStr), i32> {
     let mut extra = 0u8;
     let mut iovs = [
         libc::iovec {
@@ -15,40 +14,46 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8]) -> Result<(Fd, &'a CStr), i32> 
             iov_len: 1,
         },
     ];
-    // SAFETY: `CmsgBuf` contains only integer types (`usize`, `i32`) for which the
-    // all-zero bit pattern is valid. The struct is `#[repr(C)]`.
-    let mut cmsg: CmsgBuf = unsafe { core::mem::zeroed() };
+    // SCM_RIGHTS (1 fd: 24 B) + SCM_CREDENTIALS (1 ucred: 32 B) = 56 B
+    let mut ctrl_buf = [0u8; 64];
     let mut msg = libc::msghdr {
         msg_name: core::ptr::null_mut(),
         msg_namelen: 0,
         msg_iov: iovs.as_mut_ptr(),
         msg_iovlen: 2,
-        msg_control: &mut cmsg as *mut CmsgBuf as *mut core::ffi::c_void,
-        msg_controllen: core::mem::size_of_val(&cmsg),
+        msg_control: ctrl_buf.as_mut_ptr() as *mut core::ffi::c_void,
+        msg_controllen: ctrl_buf.len(),
         msg_flags: 0,
     };
-    // SAFETY: `iovs`, `cmsg`, `msg` are valid stack-allocated values; `recvmsg`
-    // writes into `tag` and `cmsg` within their allocated sizes. `sock` must be
-    // an open socket. `extra` provides a 1-byte overflow detector.
     let n = crate::cvt(unsafe { libc::recvmsg(sock.as_raw(), &mut msg, libc::MSG_CMSG_CLOEXEC) })?
         as usize;
-    // SAFETY: `CMSG_FIRSTHDR` dereferences `msg` which is a valid local; returns
-    // null if no control message is present (handled below).
+
+    let mut got_fd = None;
+    let mut got_pid = None;
+
+    // SAFETY: iterate over control messages in ctrl_buf.
     let cmsg_ptr = unsafe { libc::CMSG_FIRSTHDR(&msg) };
-    if cmsg_ptr.is_null() {
-        return Err(EINVAL);
-    }
-    // SAFETY: `cmsg_ptr` is non-null, points into our `cmsg` buffer. `CMSG_DATA`
-    // computes the offset past the `cmsghdr` header; on x86_64 this is 16 bytes,
-    // within the `CmsgBuf` allocation. The cast to `*const i32` has alignment 4 ≤ 8.
-    let raw_fd = unsafe {
-        if (*cmsg_ptr).cmsg_level != libc::SOL_SOCKET || (*cmsg_ptr).cmsg_type != libc::SCM_RIGHTS {
-            return Err(EINVAL);
+    let mut cmsg = cmsg_ptr;
+    while !cmsg.is_null() {
+        let level = unsafe { (*cmsg).cmsg_level };
+        let ctype = unsafe { (*cmsg).cmsg_type };
+        if level == libc::SOL_SOCKET && ctype == libc::SCM_RIGHTS {
+            let raw_fd = unsafe { *libc::CMSG_DATA(cmsg).cast::<i32>() };
+            got_fd = Some(unsafe { Fd::from_raw(raw_fd) });
+        } else if level == libc::SOL_SOCKET && ctype == libc::SCM_CREDENTIALS {
+            let cred = unsafe { &*libc::CMSG_DATA(cmsg).cast::<libc::ucred>() };
+            got_pid = Some(cred.pid);
         }
-        *libc::CMSG_DATA(cmsg_ptr).cast::<i32>()
-    };
-    // SAFETY: `raw_fd` has CLOEXEC from `MSG_CMSG_CLOEXEC` flag in `recvmsg`.
-    let fd = unsafe { Fd::from_raw(raw_fd) };
+        cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
+    }
+
+    let fd = got_fd.ok_or(EINVAL)?;
+    if let Some(pid) = got_pid
+        && pid != expected_pid
+    {
+        return Err(EPERM);
+    }
+
     if n > tag.len() {
         return Err(EINVAL);
     }

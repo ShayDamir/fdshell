@@ -62,9 +62,13 @@ fn main() -> Result<(), i32> {
                 let (status, capture_fd_opt) = launch::launch(&fdvars, &cmdline)?;
                 match status {
                     WaitStatus::Exited(0) => {
-                        if let Some(capture_fd) = capture_fd_opt {
-                            let entries =
-                                capture::do_captures(capture_fd, cmdline.captures, &fdvars)?;
+                        if let Some((capture_fd, child_pid)) = capture_fd_opt {
+                            let entries = capture::do_captures(
+                                capture_fd,
+                                child_pid,
+                                cmdline.captures,
+                                &fdvars,
+                            )?;
                             for (var, fd) in entries {
                                 fdvars.insert(var, fd);
                             }

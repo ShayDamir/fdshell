@@ -1,4 +1,22 @@
 use crate::Fd;
+use crate::cvt;
+
+pub fn set_passcred(sock: &Fd) -> Result<(), i32> {
+    let val: libc::c_int = 1;
+    // SAFETY: `sock` is a valid open socket. `SO_PASSCRED` enables
+    // `SCM_CREDENTIALS` delivery, which the kernel always provides
+    // truthfully — the sender cannot spoof credentials.
+    cvt(unsafe {
+        libc::setsockopt(
+            sock.as_raw(),
+            libc::SOL_SOCKET,
+            libc::SO_PASSCRED,
+            &val as *const libc::c_int as *const libc::c_void,
+            core::mem::size_of_val(&val) as libc::socklen_t,
+        ) as isize
+    })?;
+    Ok(())
+}
 
 pub fn socketpair() -> Result<(Fd, Fd), i32> {
     let mut pair = [0i32; 2];

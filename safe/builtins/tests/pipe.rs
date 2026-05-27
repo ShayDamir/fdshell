@@ -104,9 +104,10 @@ fn test_pipe_exec() {
 
     let mut buf_a = [0u8; TAG_MAX];
     let mut buf_b = [0u8; TAG_MAX];
-    let (fd_a, tag_a) = sys::shellfd::recv_fd(&receiver, &mut buf_a).unwrap();
+    let pid = std::process::id() as i32;
+    let (fd_a, tag_a) = sys::shellfd::recv_fd(&receiver, &mut buf_a, pid).unwrap();
     fd_a.verify().unwrap();
-    let (fd_b, tag_b) = sys::shellfd::recv_fd(&receiver, &mut buf_b).unwrap();
+    let (fd_b, tag_b) = sys::shellfd::recv_fd(&receiver, &mut buf_b, pid).unwrap();
     fd_b.verify().unwrap();
 
     let (rd, wr) = match (tag_a.to_bytes(), tag_b.to_bytes()) {

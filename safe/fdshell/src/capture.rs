@@ -39,6 +39,7 @@ impl core::fmt::Debug for Capture {
 ///   Unknown fds (no matching capture) are silently closed.
 pub fn do_captures(
     capture_fd: sys::Fd,
+    expected_pid: i32,
     captures: Vec<Capture>,
     fdvars: &FdVars,
 ) -> Result<Vec<(ShortCStr, sys::Fd)>, i32> {
@@ -47,7 +48,7 @@ pub fn do_captures(
 
     while !remaining.is_empty() {
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
-        let (fd, rtag) = sys::shellfd::recv_fd(&capture_fd, &mut buf)?;
+        let (fd, rtag) = sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid)?;
 
         let idx = remaining
             .iter()

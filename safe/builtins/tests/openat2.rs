@@ -26,7 +26,7 @@ fn test_openat2_exec() {
     builtins::openat2::openat2_exec(&cfg).unwrap();
 
     let mut tag = [0u8; TAG_MAX];
-    let (fd, _tag) = sys::shellfd::recv_fd(&receiver, &mut tag).unwrap();
+    let (fd, _tag) = sys::shellfd::recv_fd(&receiver, &mut tag, std::process::id() as i32).unwrap();
     fd.verify().unwrap();
 
     let after = sys::stat::fstat(&fd).unwrap();
