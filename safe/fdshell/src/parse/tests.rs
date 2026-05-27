@@ -232,3 +232,21 @@ fn test_unset_missing_is_ok() {
 
     assert_eq!(var, ShortCStr::from_static(c"nonexistent"));
 }
+
+#[test]
+fn test_execveat2_builtin() {
+    let ParsedLine::Cmd(cmd) = parse("builtin execveat2 %MYBIN myprog arg1").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert!(cmd.builtin);
+    assert_eq!(cmd.command, ShortCStr::from_static(c"execveat2"));
+    assert_eq!(
+        cmd.args,
+        vec![
+            ShortCStr::from_static(c"%MYBIN"),
+            ShortCStr::from_static(c"myprog"),
+            ShortCStr::from_static(c"arg1"),
+        ]
+    );
+}

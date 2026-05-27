@@ -2,6 +2,7 @@
 
 mod capture;
 mod child;
+mod exec;
 mod launch;
 mod parse;
 mod redirect;

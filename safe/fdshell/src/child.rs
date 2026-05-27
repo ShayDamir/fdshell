@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+use crate::exec;
 use crate::redirect::Redirect;
 use crate::resolve::substitute_arg;
 use crate::vars::FdVars;
@@ -66,8 +67,24 @@ fn child_main(
                 .and_then(|cfg| builtins::openat2::openat2_exec(&cfg)),
             b"renameat2" => builtins::renameat2::parse::renameat2_parse(&refs)
                 .and_then(|cfg| builtins::renameat2::renameat2_exec(&cfg)),
+            b"execveat2" => {
+                let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
+                let varname = raw0
+                    .as_bytes()
+                    .strip_prefix(b"%")
+                    .ok_or(sys::errno::EINVAL)?;
+                let fd = vars.resolve(varname).ok_or(sys::errno::EINVAL)?;
+                exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?)
+            }
             _ => Err(sys::errno::ENOSYS),
         },
-        Command::External(_) => todo!(),
+        Command::External(name) => {
+            let name_cs = name.to_c_string();
+            let fd = exec::resolve_path(&name_cs)?;
+            let mut full_argv = Vec::with_capacity(refs.len() + 1);
+            full_argv.push(name_cs.as_c_str());
+            full_argv.extend(refs.iter().copied());
+            exec::exec_fd(&fd, &full_argv)
+        }
     }
 }

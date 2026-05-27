@@ -8,6 +8,7 @@ pub use libc::O_EXCL;
 pub use libc::O_NOCTTY;
 pub use libc::O_NOFOLLOW;
 pub use libc::O_NONBLOCK;
+pub use libc::O_PATH;
 pub use libc::O_RDONLY;
 pub use libc::O_RDWR;
 pub use libc::O_SYNC;
