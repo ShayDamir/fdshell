@@ -10,6 +10,7 @@ use sys::{AtFd, Fd, ShortCStr};
 pub fn cd(args: &[ShortCStr], fdvars: &mut FdVars) -> Result<(), i32> {
     let new_fd = match args.first() {
         None => cd_home()?,
+        Some(arg) if arg.as_bytes() == b"-" => cd_var(&ShortCStr::from_static(c"%OLDCWD"), fdvars)?,
         Some(arg) if arg.as_bytes().starts_with(b"%") => cd_var(arg, fdvars)?,
         Some(path) => cd_path(path)?,
     };
@@ -136,6 +137,23 @@ mod tests {
             let bad = ShortCStr::from_static(c"%NONEXISTENT");
             let e = cd(&[bad], &mut v).unwrap_err();
             assert_eq!(e, sys::errno::ENOENT);
+        });
+    }
+
+    #[test]
+    fn cd_dash_switches_to_oldpwd() {
+        child_test(|| {
+            let mut v = FdVars::new();
+            let tmp = ShortCStr::from_static(c"/tmp");
+            cd(&[tmp], &mut v).unwrap();
+            let root = ShortCStr::from_static(c"/");
+            cd(&[root], &mut v).unwrap();
+            let dash = ShortCStr::from_static(c"-");
+            cd(&[dash], &mut v).unwrap();
+            let cwd = v.resolve(b"CWD").unwrap();
+            cwd.verify().unwrap();
+            let old = v.resolve(b"OLDCWD").unwrap();
+            old.verify().unwrap();
         });
     }
 
