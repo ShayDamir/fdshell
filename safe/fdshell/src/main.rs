@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod capture;
+mod cd;
 mod child;
 mod exec;
 mod launch;
@@ -48,6 +49,16 @@ fn main() -> Result<(), i32> {
         }
         match parse::parse(line)? {
             parse::ParsedLine::Cmd(cmdline) => {
+                if cmdline.command.as_bytes() == b"cd" {
+                    if cmdline.builtin
+                        || !cmdline.captures.is_empty()
+                        || !cmdline.redirects.is_empty()
+                    {
+                        return Err(EINVAL);
+                    }
+                    cd::cd(&cmdline.args, &mut fdvars)?;
+                    continue;
+                }
                 let (status, capture_fd) = launch::launch(&fdvars, &cmdline)?;
                 match status {
                     WaitStatus::Exited(0) => {
