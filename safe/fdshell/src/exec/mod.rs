@@ -7,7 +7,9 @@ use sys::openat2::OpenHow;
 use sys::{AtFd, Fd};
 
 pub fn exec_fd(fd: &Fd, argv: &[&CStr]) -> Result<(), i32> {
-    let envp = get_environ(b"1");
+    let pid = std::process::id();
+    let cookie = format!("{}", pid);
+    let envp = get_environ(cookie.as_bytes());
     // dup to non-CLOEXEC so the kernel can pass /dev/fd/N to a script interpreter
     let script_fd = fd.dup()?;
     sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
