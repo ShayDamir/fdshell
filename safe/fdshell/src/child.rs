@@ -11,7 +11,7 @@ pub enum Command {
     External(ShortCStr),
 }
 pub fn child_exec(
-    child_sock: sys::Fd,
+    child_sock: Option<sys::Fd>,
     vars: &FdVars,
     cmd: Command,
     args: &[ShortCStr],
@@ -24,13 +24,18 @@ pub fn child_exec(
 }
 
 fn child_main(
-    child_sock: sys::Fd,
+    child_sock: Option<sys::Fd>,
     vars: &FdVars,
     cmd: Command,
     args: &[ShortCStr],
     redirects: &[Redirect],
 ) -> Result<(), i32> {
-    child_sock.dup_to(sys::shellfd::SHELLFD)?;
+    if let Some(sock) = child_sock {
+        sock.dup_to(sys::shellfd::SHELLFD)?;
+        sys::shellfd::set_capture_active(true);
+    } else {
+        sys::shellfd::set_capture_active(false);
+    }
 
     for r in redirects {
         let src = vars

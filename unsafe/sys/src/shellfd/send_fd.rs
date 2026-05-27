@@ -4,6 +4,9 @@ use crate::errno::E2BIG;
 use core::ffi::CStr;
 
 pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
+    if !super::capture_active() {
+        return Err(crate::errno::ENOENT);
+    }
     let tag_bytes = tag.to_bytes_with_nul();
     if tag_bytes.len() > super::TAG_MAX {
         return Err(E2BIG);

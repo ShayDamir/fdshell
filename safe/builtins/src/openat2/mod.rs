@@ -11,5 +11,6 @@ pub fn openat2_exec(cfg: &parse::Openat2Config) -> Result<(), i32> {
         resolve: cfg.how.resolve,
     };
     let fd = sys::openat2::openat2(dirfd, cfg.path, &how)?;
-    sys::shellfd::send_fd(&fd, c"openat2")
+    sys::shellfd::send_fd(&fd, c"openat2").ok();
+    Ok(())
 }

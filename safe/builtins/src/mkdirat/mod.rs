@@ -12,5 +12,6 @@ pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), i32> {
         resolve: cfg.resolve,
     };
     let fd = sys::openat2::openat2(dirfd, cfg.path, &how)?;
-    sys::shellfd::send_fd(&fd, c"dirfd")
+    sys::shellfd::send_fd(&fd, c"dirfd").ok();
+    Ok(())
 }

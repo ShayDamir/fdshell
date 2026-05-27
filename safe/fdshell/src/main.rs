@@ -59,12 +59,15 @@ fn main() -> Result<(), i32> {
                     cd::cd(&cmdline.args, &mut fdvars)?;
                     continue;
                 }
-                let (status, capture_fd) = launch::launch(&fdvars, &cmdline)?;
+                let (status, capture_fd_opt) = launch::launch(&fdvars, &cmdline)?;
                 match status {
                     WaitStatus::Exited(0) => {
-                        let entries = capture::do_captures(capture_fd, cmdline.captures, &fdvars)?;
-                        for (var, fd) in entries {
-                            fdvars.insert(var, fd);
+                        if let Some(capture_fd) = capture_fd_opt {
+                            let entries =
+                                capture::do_captures(capture_fd, cmdline.captures, &fdvars)?;
+                            for (var, fd) in entries {
+                                fdvars.insert(var, fd);
+                            }
                         }
                     }
                     WaitStatus::Exited(n) => eprintln!("exit code: {n}"),

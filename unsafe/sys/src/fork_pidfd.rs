@@ -33,23 +33,21 @@ pub fn fork_pidfd() -> Result<(isize, Option<Fd>), i32> {
     let state = PIDFD_CLOEXEC.load(Ordering::Relaxed);
     if state == UNKNOWN {
         // Probe whether clone3 sets CLOEXEC automatically.
-        let flags =
-            crate::cvt(unsafe { libc::fcntl(raw, libc::F_GETFD) as isize }).unwrap_or(0);
+        let flags = crate::cvt(unsafe { libc::fcntl(raw, libc::F_GETFD) as isize }).unwrap_or(0);
         if flags & libc::FD_CLOEXEC as isize != 0 {
             PIDFD_CLOEXEC.store(AUTO, Ordering::Relaxed);
         } else {
             PIDFD_CLOEXEC.store(MANUAL, Ordering::Relaxed);
-            if let Err(e) = crate::cvt(unsafe {
-                libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) as isize
-            }) {
+            if let Err(e) =
+                crate::cvt(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) as isize })
+            {
                 unsafe { libc::close(raw) };
                 return Err(e);
             }
         }
     } else if state == MANUAL
-        && let Err(e) = crate::cvt(unsafe {
-            libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) as isize
-        })
+        && let Err(e) =
+            crate::cvt(unsafe { libc::fcntl(raw, libc::F_SETFD, libc::FD_CLOEXEC) as isize })
     {
         unsafe { libc::close(raw) };
         return Err(e);

@@ -5,14 +5,19 @@ use crate::parse::CommandLine;
 use crate::vars::FdVars;
 use sys::siginfo::WaitStatus;
 
-pub fn launch(vars: &FdVars, cmdline: &CommandLine) -> Result<(WaitStatus, sys::Fd), i32> {
+pub fn launch(vars: &FdVars, cmdline: &CommandLine) -> Result<(WaitStatus, Option<sys::Fd>), i32> {
     let cmd = if cmdline.builtin {
         Command::Builtin(cmdline.command.clone())
     } else {
         Command::External(cmdline.command.clone())
     };
 
-    let (capture_fd, child_fd) = sys::net::socketpair()?;
+    let (capture_fd, child_fd) = if cmdline.captures.is_empty() {
+        (None, None)
+    } else {
+        let (cap, ch) = sys::net::socketpair()?;
+        (Some(cap), Some(ch))
+    };
     let (_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
 
     match pidfd_opt {

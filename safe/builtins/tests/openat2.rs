@@ -20,6 +20,7 @@ fn test_openat2_exec() {
     a.dup_to(sys::shellfd::SHELLFD).unwrap();
     a.close().unwrap();
     let receiver = b;
+    sys::shellfd::set_capture_active(true);
 
     let cfg = builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()]).unwrap();
     builtins::openat2::openat2_exec(&cfg).unwrap();

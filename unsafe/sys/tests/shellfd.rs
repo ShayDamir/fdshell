@@ -2,7 +2,7 @@ use sys::errno::EINVAL;
 use sys::net::socketpair;
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
-use sys::shellfd::{SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd};
+use sys::shellfd::{SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd, set_capture_active};
 
 #[repr(C)]
 struct CmsgBuf {
@@ -79,6 +79,7 @@ fn test_send_recv_fd() -> Result<(), i32> {
         a.dup_to(SHELLFD)?;
         a.close()?;
         let receiver = b;
+        set_capture_active(true);
 
         let (test_a, test_b) = socketpair()?;
         test_a.verify()?;

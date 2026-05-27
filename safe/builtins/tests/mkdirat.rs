@@ -162,6 +162,7 @@ fn test_mkdirat_exec() {
     a.dup_to(sys::shellfd::SHELLFD).unwrap();
     a.close().unwrap();
     let receiver = b;
+    sys::shellfd::set_capture_active(true);
 
     let mode_arg = CString::from(c"--mode");
     let mode_val = CString::from(c"755");

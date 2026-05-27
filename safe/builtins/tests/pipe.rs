@@ -98,6 +98,7 @@ fn test_pipe_exec() {
     a.dup_to(sys::shellfd::SHELLFD).unwrap();
     a.close().unwrap();
     let receiver = b;
+    sys::shellfd::set_capture_active(true);
 
     builtins::pipe::pipe_exec(0).unwrap();
 

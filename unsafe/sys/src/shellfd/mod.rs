@@ -1,5 +1,17 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 pub const SHELLFD: i32 = 3;
 pub const TAG_MAX: usize = 4096;
+
+static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_capture_active(active: bool) {
+    CAPTURE_ACTIVE.store(active, Ordering::Release);
+}
+
+pub fn capture_active() -> bool {
+    CAPTURE_ACTIVE.load(Ordering::Acquire)
+}
 
 /// Reserve SHELLFD by placing a harmless pipe read-end there,
 /// preventing subsequent `socketpair()` from returning it.
