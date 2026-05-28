@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::Fd;
 
 pub const SHELLFD: i32 = 3;
+pub const SHELLFD_STR: &[u8] = b"3";
 pub const TAG_MAX: usize = 4096;
 
 static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);

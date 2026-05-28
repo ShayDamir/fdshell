@@ -27,4 +27,10 @@ impl DupFd {
     pub fn at(&self) -> crate::AtFd<'_> {
         crate::AtFd::from(self)
     }
+    /// Set CLOEXEC, converting this leaked DupFd into an owned Fd.
+    pub fn into_owned(self) -> Result<crate::Fd, i32> {
+        crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
+        // SAFETY: fcntl atomically set CLOEXEC; caller gets exclusive ownership.
+        Ok(unsafe { crate::Fd::from_raw(self.0) })
+    }
 }

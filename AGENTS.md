@@ -75,6 +75,11 @@ Three fd types across `unsafe/sys/src/`:
 - `AT_FDCWD` stays entirely in `atfd.rs` (`AtFd::cwd()`). Never re-exported.
 - `AtFd` is `Copy + Clone` — used multiple times in exec functions.
 - `*at` syscall wrappers take `AtFd<'_>` or `Option<AtFd<'_>>` instead of raw `i32`.
+- `DupFd::into_owned()` — sets CLOEXEC via `fcntl(F_SETFD, FD_CLOEXEC)`, returns an owned `Fd`.
+  Type-level transition: leaked (non-CLOEXEC) → owned (CLOEXEC). Used to adopt an fd that
+  survived `execveat` (e.g. the parent's capture socket at SHELLFD) so it doesn't leak
+  through a subsequent `exec` (including `exec`-without-fork, where the PID stays the same
+  and `SCM_CREDENTIALS` would wrongly authorize grandparent communication).
 
 ## `unsafe/sys/src/` module layout
 
@@ -107,6 +112,33 @@ Three fd types across `unsafe/sys/src/`:
 - **Dirfd in configs** is `Option<DupFd>` (`None` = CWD). Parsed via
   `parse_dirfd` → `DupFd::from_bytes` (validates fd is open). Converted
   to `AtFd` at exec time via `cfg.dirfd.as_ref().map_or(AtFd::cwd(), DupFd::at)`.
+
+## Nesting
+
+fdshell detects when it runs as a child of another fdshell via `detect_nested()` in
+`safe/fdshell/src/main.rs`: if `FDSHELL_CAPTURE` env var equals `getpid()`, the
+parent fdshell launched us as a capture target. The function additionally validates
+that fd 3 is actually open and non-CLOEXEC via `DupFd::from_bytes(SHELLFD_STR)`,
+returning `Option<DupFd>`.
+
+On startup, `init_shellfd()` chooses one of two modes (`FdShellMode`):
+
+| Mode | fd 3 origin | Purpose |
+|---|---|---|
+| `Standalone(Fd)` | `reserve_shellfd()` (placeholder pipe) | Prevents fd 3 reuse in parent |
+| `Nested(Fd)` | `detect_nested()` → `into_owned()` | Inherited capture socket, now CLOEXEC |
+
+- **Nested**: the fd survived the first `execveat` from parent to us (non-CLOEXEC).
+  `into_owned()` sets CLOEXEC so it doesn't survive a second `exec` — critical for
+  `exec`-without-fork (same PID), where `SCM_CREDENTIALS.pid` would match grandparent
+  expectations. The `Fd` is held by `Nested(Fd)` for the shell's lifetime; `send_fd`
+  writes to it to return fds to the parent fdshell. `capture_active()` is set per-command
+  in `child_main` as usual — the flag is inherited across fork but resets on exec,
+  so the nested fdshell's child processes don't inherit it.
+- **Standalone**: the CLOEXEC placeholder pipe occupies SHELLFD so no other syscall
+  (`socketpair`, `pipe2`, etc.) accidentally allocates fd 3. Because it has CLOEXEC,
+  it is closed at `execveat` boundaries — children only inherit fd 3 when `launch()`'s
+  child explicitly `dup2(child_sock, SHELLFD)` for captures.
 
 ## Launch / Capture
 

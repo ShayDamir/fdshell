@@ -13,13 +13,36 @@ mod vars;
 
 use std::io::Write;
 
-use sys::AtFd;
-use sys::ShortCStr;
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
 use sys::openat2::OpenHow;
+use sys::{AtFd, Fd, ShortCStr};
+
+enum FdShellMode {
+    Nested(Fd),
+    Standalone(Fd),
+}
+
+fn detect_nested() -> Option<sys::DupFd> {
+    let cookie = std::env::var("FDSHELL_CAPTURE").ok();
+    let pid = cookie.and_then(|s| s.parse::<u32>().ok())?;
+    if pid != std::process::id() {
+        return None;
+    }
+    sys::DupFd::from_bytes(sys::shellfd::SHELLFD_STR).ok()
+}
+
+fn init_shellfd() -> Result<FdShellMode, i32> {
+    if let Some(dupfd) = detect_nested() {
+        let fd = dupfd.into_owned()?;
+        Ok(FdShellMode::Nested(fd))
+    } else {
+        let fd = sys::shellfd::reserve_shellfd()?;
+        Ok(FdShellMode::Standalone(fd))
+    }
+}
 
 fn main() -> Result<(), i32> {
-    let _shellfd = sys::shellfd::reserve_shellfd()?;
+    let _mode = init_shellfd()?;
     let mut fdvars = vars::FdVars::new();
     let stdin = std::io::stdin();
     let mut buf = String::new();
