@@ -55,6 +55,12 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(F
                 }
             }
         } else if level == libc::SOL_SOCKET && ctype == libc::SCM_CREDENTIALS {
+            let payload = (unsafe { (*cmsg).cmsg_len } as usize)
+                .saturating_sub(core::mem::size_of::<libc::cmsghdr>());
+            // SCM_CREDENTIALS must carry a full ucred.
+            if payload < core::mem::size_of::<libc::ucred>() {
+                return Err(EINVAL);
+            }
             let cred = unsafe { &*libc::CMSG_DATA(cmsg).cast::<libc::ucred>() };
             got_pid = Some(cred.pid);
         }

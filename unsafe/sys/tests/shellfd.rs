@@ -1,5 +1,5 @@
 use sys::errno::EINVAL;
-use sys::net::socketpair;
+use sys::net::{set_passcred, socketpair};
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
 use sys::shellfd::{SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd, set_capture_active};
@@ -185,6 +185,52 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
 
     let mut buf = [0u8; TAG_MAX];
     assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
+
+    dummy_rd.close()?;
+    a.close()?;
+    b.close()?;
+    Ok(())
+}
+
+#[test]
+fn test_recv_fd_truncated_creds() -> Result<(), i32> {
+    // The kernel rejects truncated SCM_CREDENTIALS at send time (EINVAL).
+    // This test verifies that behavior and documents the missing cmsg_len
+    // check as a defense-in-depth concern in recv_fd.
+    let (a, b) = socketpair()?;
+    a.verify()?;
+    b.verify()?;
+    set_passcred(&b)?;
+    let (dummy_rd, mut dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    dummy_rd.verify()?;
+    dummy_wr.verify()?;
+
+    let truncated = unsafe { libc::CMSG_SPACE(0) as usize };
+    let mut ctrl = vec![0u8; truncated];
+    let cmsg = unsafe { &mut *ctrl.as_mut_ptr().cast::<libc::cmsghdr>() };
+    cmsg.cmsg_len = unsafe { libc::CMSG_LEN(0) as usize };
+    cmsg.cmsg_level = libc::SOL_SOCKET;
+    cmsg.cmsg_type = libc::SCM_CREDENTIALS;
+
+    let mut iov = libc::iovec {
+        iov_base: (&raw mut dummy_wr).cast(),
+        iov_len: 1,
+    };
+    let msg = libc::msghdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: &raw mut iov,
+        msg_iovlen: 1,
+        msg_control: ctrl.as_mut_ptr().cast(),
+        msg_controllen: truncated,
+        msg_flags: 0,
+    };
+    let ret = unsafe { libc::sendmsg(a.as_raw(), &msg, 0) };
+    dummy_wr.close()?;
+
+    // Kernel rejects truncated creds — this is expected.
+    assert_eq!(ret, -1);
+    let _e = unsafe { *libc::__errno_location() };
 
     dummy_rd.close()?;
     a.close()?;
