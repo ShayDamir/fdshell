@@ -7,6 +7,7 @@ mod exec;
 mod launch;
 mod parse;
 mod redirect;
+mod repl;
 mod resolve;
 mod vars;
 
@@ -14,10 +15,8 @@ use std::io::Write;
 
 use sys::AtFd;
 use sys::ShortCStr;
-use sys::errno::EINVAL;
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
 use sys::openat2::OpenHow;
-use sys::siginfo::WaitStatus;
 
 fn main() -> Result<(), i32> {
     sys::shellfd::reserve_shellfd()?;
@@ -47,45 +46,7 @@ fn main() -> Result<(), i32> {
         if line == "exit" || line == "quit" {
             break;
         }
-        match parse::parse(line)? {
-            parse::ParsedLine::Cmd(cmdline) => {
-                if cmdline.command.as_bytes() == b"cd" {
-                    if cmdline.builtin
-                        || !cmdline.captures.is_empty()
-                        || !cmdline.redirects.is_empty()
-                    {
-                        return Err(EINVAL);
-                    }
-                    cd::cd(&cmdline.args, &mut fdvars)?;
-                    continue;
-                }
-                let (status, capture_fd_opt) = launch::launch(&fdvars, &cmdline)?;
-                match status {
-                    WaitStatus::Exited(0) => {
-                        if let Some((capture_fd, child_pid)) = capture_fd_opt {
-                            let entries = capture::do_captures(
-                                capture_fd,
-                                child_pid,
-                                cmdline.captures,
-                                &fdvars,
-                            )?;
-                            for (var, fd) in entries {
-                                fdvars.insert(var, fd);
-                            }
-                        }
-                    }
-                    WaitStatus::Exited(n) => eprintln!("exit code: {n}"),
-                    _ => eprintln!("{status:?}"),
-                }
-            }
-            parse::ParsedLine::Assign { var, value } => {
-                let src = fdvars.resolve(value.as_bytes()).ok_or(EINVAL)?;
-                fdvars.insert(var, src.try_clone()?);
-            }
-            parse::ParsedLine::Unset(var) => {
-                fdvars.remove(var.as_bytes());
-            }
-        }
+        repl::handle(line, &mut fdvars)?;
     }
     Ok(())
 }
