@@ -1,5 +1,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::Fd;
+
 pub const SHELLFD: i32 = 3;
 pub const TAG_MAX: usize = 4096;
 
@@ -15,16 +17,13 @@ pub fn capture_active() -> bool {
 
 /// Reserve SHELLFD by placing a harmless pipe read-end there,
 /// preventing subsequent `socketpair()` from returning it.
-pub fn reserve_shellfd() -> Result<(), i32> {
-    let (rd, wr) = crate::pipe::pipe2(libc::O_CLOEXEC)?;
+pub fn reserve_shellfd() -> Result<Fd, i32> {
+    let (rd, _wr) = crate::pipe::pipe2(libc::O_CLOEXEC)?;
     if rd.as_raw() != SHELLFD {
-        rd.dup_to(SHELLFD)?;
-        rd.close()?;
+        rd.try_clone_to(SHELLFD)
     } else {
-        core::mem::forget(rd);
+        Ok(rd)
     }
-    wr.close()?;
-    Ok(())
 }
 
 #[repr(C)]

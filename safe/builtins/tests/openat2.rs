@@ -13,7 +13,7 @@ fn test_openat2_exec() {
     let cpath = std::ffi::CString::new(file_path.to_str().unwrap()).unwrap();
     let before = sys::stat::stat(&cpath).unwrap();
 
-    sys::shellfd::reserve_shellfd().unwrap();
+    let _shellfd = sys::shellfd::reserve_shellfd().unwrap();
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();

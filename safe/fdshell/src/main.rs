@@ -19,7 +19,7 @@ use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
 use sys::openat2::OpenHow;
 
 fn main() -> Result<(), i32> {
-    sys::shellfd::reserve_shellfd()?;
+    let _shellfd = sys::shellfd::reserve_shellfd()?;
     let mut fdvars = vars::FdVars::new();
     let stdin = std::io::stdin();
     let mut buf = String::new();

@@ -91,7 +91,7 @@ fn flags_bad_name() {
 
 #[test]
 fn test_pipe_exec() {
-    sys::shellfd::reserve_shellfd().unwrap();
+    let _shellfd = sys::shellfd::reserve_shellfd().unwrap();
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();

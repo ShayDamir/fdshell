@@ -155,7 +155,7 @@ fn test_mkdirat_exec() {
 
     let cpath = CString::new(subdir_path.to_str().unwrap()).unwrap();
 
-    sys::shellfd::reserve_shellfd().unwrap();
+    let _shellfd = sys::shellfd::reserve_shellfd().unwrap();
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();

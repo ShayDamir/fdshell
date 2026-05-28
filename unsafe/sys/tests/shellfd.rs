@@ -72,7 +72,7 @@ fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
 #[test]
 fn test_send_recv_fd() -> Result<(), i32> {
     fork_test(|| {
-        reserve_shellfd()?;
+        let _shellfd = reserve_shellfd()?;
         let (a, b) = socketpair()?;
         a.verify()?;
         b.verify()?;

@@ -40,6 +40,11 @@ impl Fd {
         // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd with CLOEXEC atomically set.
         Ok(unsafe { Fd::from_raw(ret as i32) })
     }
+    pub fn try_clone_to(&self, new: i32) -> Result<Fd, i32> {
+        let ret = crate::cvt(unsafe { libc::dup3(self.0, new, libc::O_CLOEXEC) as isize })?;
+        // SAFETY: dup3 returns `new` on success with CLOEXEC atomically set.
+        Ok(unsafe { Fd::from_raw(ret as i32) })
+    }
     pub fn at(&self) -> crate::AtFd<'_> {
         crate::AtFd::from(self)
     }
