@@ -10,7 +10,7 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(F
             iov_len: tag.len(),
         },
         libc::iovec {
-            iov_base: &mut extra as *mut u8 as *mut core::ffi::c_void,
+            iov_base: (&raw mut extra).cast(),
             iov_len: 1,
         },
     ];

@@ -11,7 +11,7 @@ pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
     if tag_bytes.len() > super::TAG_MAX {
         return Err(E2BIG);
     }
-    let iov = libc::iovec {
+    let mut iov = libc::iovec {
         iov_base: tag_bytes.as_ptr() as *mut core::ffi::c_void,
         iov_len: tag_bytes.len(),
     };
@@ -28,9 +28,9 @@ pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
     let msg = libc::msghdr {
         msg_name: core::ptr::null_mut(),
         msg_namelen: 0,
-        msg_iov: &iov as *const libc::iovec as *mut libc::iovec,
+        msg_iov: &raw mut iov,
         msg_iovlen: 1,
-        msg_control: &mut cmsg as *mut CmsgBuf as *mut core::ffi::c_void,
+        msg_control: (&raw mut cmsg).cast(),
         msg_controllen: core::mem::size_of_val(&cmsg),
         msg_flags: 0,
     };

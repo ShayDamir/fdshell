@@ -11,7 +11,7 @@ pub fn set_passcred(sock: &Fd) -> Result<(), i32> {
             sock.as_raw(),
             libc::SOL_SOCKET,
             libc::SO_PASSCRED,
-            &val as *const libc::c_int as *const libc::c_void,
+            (&raw const val).cast(),
             core::mem::size_of_val(&val) as libc::socklen_t,
         ) as isize
     })?;

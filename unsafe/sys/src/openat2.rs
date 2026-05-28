@@ -25,7 +25,7 @@ pub fn openat2(dirfd: AtFd<'_>, pathname: &CStr, how: &OpenHow) -> Result<Fd, i3
             libc::SYS_openat2,
             dirfd as i64,
             pathname.as_ptr(),
-            how as *const OpenHow,
+            &raw const *how,
             core::mem::size_of_val(how),
         ) as isize
     })
