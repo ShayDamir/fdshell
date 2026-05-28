@@ -29,7 +29,6 @@ pub mod mkdirat;
 pub mod net;
 pub mod openat2;
 pub mod pipe;
-mod process;
 pub mod renameat2;
 pub mod rw;
 pub mod shellfd;
