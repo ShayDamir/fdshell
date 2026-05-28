@@ -63,20 +63,22 @@ Three fd types across `unsafe/sys/src/`:
 
 | Type | Owns? | CLOEXEC? | Drop closes? | `const fn from_raw` | `from_bytes` (validated) | Module |
 |---|---|---|---|---|---|---|
-| `Fd` | yes | yes | yes | `unsafe` | n/a | `fd.rs` |
-| `DupFd` | no | no | no | `unsafe` | safe (`verify()`) | `dupfd.rs` |
-| `AtFd<'a>` | no | irrelevant | no | `unsafe` | n/a (via `From<&Fd>` / `From<&DupFd>`) | `atfd.rs` |
+| `LocalFd` | yes | yes | yes | `unsafe` | n/a | `localfd.rs` |
+| `ImportedFd` | no | no | no | `unsafe` | safe (`verify()`) | `importedfd.rs` |
+| `ExportedFd` | no | no | no | `unsafe` | n/a | `exportedfd.rs` |
+| `AtFd<'a>` | no | irrelevant | no | `unsafe` | n/a (via `From<&LocalFd>` / `From<&ImportedFd>` / `From<&ExportedFd>`) | `atfd.rs` |
 
-- `Fd::verify()` and `DupFd::verify()` return `Result<(), i32>` using `cvt` (never `__errno_location`).
-  `Fd::verify` checks CLOEXEC is SET; `DupFd::verify` checks CLOEXEC is CLEAR.
-- `DupFd::from_bytes` delegates to `verify()` — validates fd is open AND non-CLOEXEC.
-- `DupFd::from_raw` is `unsafe` — only for trusted constants (`SHELLFD`) and kernel returns (`dup`/`dup2`).
-  Direct construction `DupFd(n)` is **not** allowed — always use `unsafe { DupFd::from_raw(n) }` with `// SAFETY:`.
+- `LocalFd::verify()` and `ImportedFd::verify()` return `Result<(), i32>` using `cvt` (never `__errno_location`).
+  `LocalFd::verify` checks CLOEXEC is SET; `ImportedFd::verify` checks CLOEXEC is CLEAR.
+- `ImportedFd::from_bytes` delegates to `verify()` — validates fd is open AND non-CLOEXEC.
+- `ImportedFd::from_raw` / `ExportedFd::from_raw` are `unsafe` — only for trusted constants and kernel returns.
+  Direct construction is **not** allowed — always use `unsafe { Foo::from_raw(n) }` with `// SAFETY:`.
+- `ExportedFd` is used for the `export()` / `export_to()` return types (kernel-guaranteed non-CLOEXEC, no ownership).
 - `AT_FDCWD` stays entirely in `atfd.rs` (`AtFd::cwd()`). Never re-exported.
 - `AtFd` is `Copy + Clone` — used multiple times in exec functions.
 - `*at` syscall wrappers take `AtFd<'_>` or `Option<AtFd<'_>>` instead of raw `i32`.
-- `DupFd::into_owned()` — sets CLOEXEC via `fcntl(F_SETFD, FD_CLOEXEC)`, returns an owned `Fd`.
-  Type-level transition: leaked (non-CLOEXEC) → owned (CLOEXEC). Used to adopt an fd that
+- `ImportedFd::try_into_local()` — sets CLOEXEC via `fcntl(F_SETFD, FD_CLOEXEC)`, returns a `LocalFd`.
+  Type-level transition: non-CLOEXEC (leaked) → CLOEXEC (owned). Used to adopt an fd that
   survived `execveat` (e.g. the parent's capture socket at SHELLFD) so it doesn't leak
   through a subsequent `exec` (including `exec`-without-fork, where the PID stays the same
   and `SCM_CREDENTIALS` would wrongly authorize grandparent communication).
@@ -86,8 +88,9 @@ Three fd types across `unsafe/sys/src/`:
 | Module | Role |
 |---|---|
 | `atfd.rs` | `AtFd<'a>` — non-owning borrowed fd for `*at` syscalls |
-| `dupfd.rs` | `DupFd` — non-owned fd for child-process inheritance |
-| `fd.rs` | `Fd` — owned fd with Drop |
+| `localfd.rs` | `LocalFd` — owned fd with Drop |
+| `importedfd.rs` | `ImportedFd` — non-CLOEXEC, inherited via exec |
+| `exportedfd.rs` | `ExportedFd` — non-CLOEXEC, output of `export()`/`export_to()` |
 | `rw.rs` | fd I/O — `read`, `write` |
 | `fcntl.rs` | Re-exports O\_\* and fcntl constants from `libc` |
 | `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |
@@ -118,20 +121,20 @@ Three fd types across `unsafe/sys/src/`:
 fdshell detects when it runs as a child of another fdshell via `detect_nested()` in
 `safe/fdshell/src/main.rs`: if `FDSHELL_CAPTURE` env var equals `getpid()`, the
 parent fdshell launched us as a capture target. The function additionally validates
-that fd 3 is actually open and non-CLOEXEC via `DupFd::from_bytes(SHELLFD_STR)`,
-returning `Option<DupFd>`.
+that fd 3 is actually open and non-CLOEXEC via `ImportedFd::from_bytes(SHELLFD_STR)`,
+returning `Option<ImportedFd>`.
 
 On startup, `init_shellfd()` chooses one of two modes (`FdShellMode`):
 
 | Mode | fd 3 origin | Purpose |
 |---|---|---|
-| `Standalone(Fd)` | `reserve_shellfd()` (placeholder pipe) | Prevents fd 3 reuse in parent |
-| `Nested(Fd)` | `detect_nested()` → `into_owned()` | Inherited capture socket, now CLOEXEC |
+| `Standalone(LocalFd)` | `reserve_shellfd()` (placeholder pipe) | Prevents fd 3 reuse in parent |
+| `Nested(LocalFd)` | `detect_nested()` → `try_into_local()` | Inherited capture socket, now CLOEXEC |
 
 - **Nested**: the fd survived the first `execveat` from parent to us (non-CLOEXEC).
-  `into_owned()` sets CLOEXEC so it doesn't survive a second `exec` — critical for
+  `try_into_local()` sets CLOEXEC so it doesn't survive a second `exec` — critical for
   `exec`-without-fork (same PID), where `SCM_CREDENTIALS.pid` would match grandparent
-  expectations. The `Fd` is held by `Nested(Fd)` for the shell's lifetime; `send_fd`
+  expectations. The `LocalFd` is held by `Nested(LocalFd)` for the shell's lifetime; `send_fd`
   writes to it to return fds to the parent fdshell. `capture_active()` is set per-command
   in `child_main` as usual — the flag is inherited across fork but resets on exec,
   so the nested fdshell's child processes don't inherit it.
@@ -143,9 +146,9 @@ On startup, `init_shellfd()` chooses one of two modes (`FdShellMode`):
 ## Launch / Capture
 
 - `launch()` in `safe/fdshell/src/launch.rs` is stateless — no capture logic, no `&mut FdVars`.
-  Returns `Result<(WaitStatus, Fd), i32>` — the `Fd` is the parent end of the capture socket.
+  Returns `Result<(WaitStatus, LocalFd), i32>` — the `LocalFd` is the parent end of the capture socket.
 - `do_captures()` in `safe/fdshell/src/capture.rs` owns both the capture socket and captures vec
-  (takes `captures: Vec<Capture>` by value). Returns `Vec<(CString, Fd)>` on success.
+  (takes `captures: Vec<Capture>` by value). Returns `Vec<(CString, LocalFd)>` on success.
   The caller commits atomically into `fdvars` after a successful receive-and-stage phase.
   Captures are received only when `status == Exited(0)` (status gate).
 - `Capture { var: CString, tag: Option<CString>, force: bool }`:
@@ -157,14 +160,14 @@ On startup, `init_shellfd()` chooses one of two modes (`FdShellMode`):
   (no matching capture) are silently closed.
 - Parser must guarantee unique target variables in captures — `do_captures` checks against
   committed `fdvars` state only (no scan of staged `captured_fds` vec).
-- `Redirect { target_fd: i32, src_var: CString }` — `target_fd` is the fd number to `dup_to`
+- `Redirect { target_fd: i32, src_var: CString }` — `target_fd` is the fd number to `export_to`
   onto (0 for `<`, 1 for `>`, 2 for `2>`), `src_var` is the `%var` holding the source fd.
-  Applied in the child after `SHELLFD` dup_to but before builtin dispatch.
-- `Fd::dup_to(new: i32)` returns `DupFd` — kernel always returns `new` on success.
-  Takes a raw fd number, not a `DupFd`. Used for both SHELLFD reservation and redirects.
-- `Fd::try_clone(new: i32)` returns `Fd` — owned CLOEXEC copy at `new` (wraps `dup3`).
+  Applied in the child after `SHELLFD` export_to but before builtin dispatch.
+- `LocalFd::export_to(new: i32)` returns `ExportedFd` — kernel always returns `new` on success.
+  Takes a raw fd number, not a `ExportedFd`. Used for both SHELLFD reservation and redirects.
+- `LocalFd::try_clone(new: i32)` returns `LocalFd` — owned CLOEXEC copy at `new` (wraps `dup3`).
   Used for `%var=%var2` syntax to produce a new CLOEXEC fd.
-- `substitute_arg() in `safe/fdshell/src/resolve.rs` resolves `%var` references in argument
-  strings.  Each `%var` calls `fd.dup()` once per distinct variable via a
-  `HashMap<CString, DupFd>` cache — repeated `%foo` in the same command line
+- `substitute_arg()` in `safe/fdshell/src/resolve.rs` resolves `%var` references in argument
+  strings.  Each `%var` calls `fd.export()` once per distinct variable via a
+  `HashMap<CString, ExportedFd>` cache — repeated `%foo` in the same command line
   produces the same fd number, preserving fd equality for subprocesses.

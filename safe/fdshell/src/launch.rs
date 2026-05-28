@@ -8,7 +8,7 @@ use sys::siginfo::WaitStatus;
 pub fn launch(
     vars: &FdVars,
     cmdline: &CommandLine,
-) -> Result<(WaitStatus, Option<(sys::Fd, i32)>), i32> {
+) -> Result<(WaitStatus, Option<(sys::LocalFd, i32)>), i32> {
     let cmd = if cmdline.builtin {
         Command::Builtin(cmdline.command.clone())
     } else {

@@ -1,4 +1,4 @@
-use crate::Fd;
+use crate::LocalFd;
 
 pub const S_IFMT: u32 = libc::S_IFMT;
 pub const S_IFDIR: u32 = libc::S_IFDIR;
@@ -30,7 +30,7 @@ impl core::fmt::Debug for FileStat {
     }
 }
 
-pub fn fstat(fd: &Fd) -> Result<FileStat, i32> {
+pub fn fstat(fd: &LocalFd) -> Result<FileStat, i32> {
     // SAFETY: `fd.as_raw()` is any integer; `libc::fstat` with an invalid fd returns `EBADF`.
     // `raw` is zero-initialized, valid for a `libc::stat` (all integer fields).
     let mut raw: libc::stat = unsafe { core::mem::zeroed() };

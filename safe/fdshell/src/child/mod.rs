@@ -11,7 +11,7 @@ pub enum Command {
 }
 
 pub fn child_exec(
-    child_sock: Option<sys::Fd>,
+    child_sock: Option<sys::LocalFd>,
     vars: &FdVars,
     cmd: Command,
     args: &[ShortCStr],

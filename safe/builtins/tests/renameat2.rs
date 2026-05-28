@@ -104,7 +104,7 @@ fn olddirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
-    let dupfd = rd.dup().unwrap();
+    let dupfd = rd.export().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--olddirfd", &s, "old", "new"], |cfg| {
         assert_eq!(
@@ -127,7 +127,7 @@ fn newdirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
-    let dupfd = rd.dup().unwrap();
+    let dupfd = rd.export().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--newdirfd", &s, "old", "new"], |cfg| {
         assert_eq!(

@@ -1,10 +1,10 @@
 use sys::fcntl::O_CLOEXEC;
-use sys::{AtFd, DupFd};
+use sys::{AtFd, ImportedFd};
 
 pub mod parse;
 
 pub fn openat2_exec(cfg: &parse::Openat2Config) -> Result<(), i32> {
-    let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), DupFd::at);
+    let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
     let how = sys::openat2::OpenHow {
         flags: cfg.how.flags | (O_CLOEXEC as u64),
         mode: cfg.how.mode,

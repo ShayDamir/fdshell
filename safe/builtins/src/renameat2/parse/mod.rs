@@ -1,12 +1,12 @@
 mod flags;
 
 use core::ffi::CStr;
-use sys::DupFd;
+use sys::ImportedFd;
 use sys::errno::{EINVAL, ENOENT};
 
 pub struct Renameat2Config<'a> {
-    pub olddirfd: Option<DupFd>,
-    pub newdirfd: Option<DupFd>,
+    pub olddirfd: Option<ImportedFd>,
+    pub newdirfd: Option<ImportedFd>,
     pub oldpath: &'a CStr,
     pub newpath: &'a CStr,
     pub flags: u32,

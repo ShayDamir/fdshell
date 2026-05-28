@@ -1,12 +1,12 @@
 mod flags;
 
 use core::ffi::CStr;
-use sys::DupFd;
+use sys::ImportedFd;
 use sys::errno::{EINVAL, ENOENT};
 use sys::openat2::OpenHow;
 
 pub struct Openat2Config<'a> {
-    pub dirfd: Option<DupFd>,
+    pub dirfd: Option<ImportedFd>,
     pub path: &'a CStr,
     pub how: OpenHow,
 }

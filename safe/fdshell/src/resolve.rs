@@ -3,12 +3,12 @@
 use crate::vars::FdVars;
 use std::collections::HashMap;
 use std::ffi::CString;
-use sys::DupFd;
+use sys::ExportedFd;
 use sys::ShortCStr;
 
 pub(crate) fn substitute_arg(
     arg: &ShortCStr,
-    cache: &mut HashMap<ShortCStr, DupFd>,
+    cache: &mut HashMap<ShortCStr, ExportedFd>,
     vars: &FdVars,
 ) -> Result<CString, i32> {
     let mut out = Vec::new();
@@ -42,7 +42,7 @@ pub(crate) fn substitute_arg(
                         let src = vars
                             .resolve(name_scs.as_bytes())
                             .ok_or(sys::errno::EINVAL)?;
-                        let d = src.dup()?;
+                        let d = src.export()?;
                         let raw = d.as_raw();
                         cache.insert(name_scs, d);
                         raw

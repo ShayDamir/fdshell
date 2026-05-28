@@ -8,14 +8,14 @@ use std::ffi::{CStr, CString};
 use sys::ShortCStr;
 
 pub fn child_main(
-    child_sock: Option<sys::Fd>,
+    child_sock: Option<sys::LocalFd>,
     vars: &FdVars,
     cmd: Command,
     args: &[ShortCStr],
     redirects: &[Redirect],
 ) -> Result<(), i32> {
     if let Some(sock) = child_sock {
-        sock.dup_to(sys::shellfd::SHELLFD)?;
+        sock.export_to(sys::shellfd::SHELLFD)?;
         sys::shellfd::set_capture_active(true);
     } else {
         sys::shellfd::set_capture_active(false);
@@ -25,10 +25,10 @@ pub fn child_main(
         let src = vars
             .resolve(r.src_var.as_bytes())
             .ok_or(sys::errno::EINVAL)?;
-        src.dup_to(r.target_fd)?;
+        src.export_to(r.target_fd)?;
     }
 
-    let mut dup_cache: HashMap<ShortCStr, sys::DupFd> = HashMap::new();
+    let mut dup_cache: HashMap<ShortCStr, sys::ExportedFd> = HashMap::new();
     let resolved: Vec<CString> = args
         .iter()
         .map(|a| substitute_arg(a, &mut dup_cache, vars))

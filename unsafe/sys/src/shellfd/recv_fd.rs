@@ -1,8 +1,12 @@
-use crate::Fd;
+use crate::LocalFd;
 use crate::errno::{EINVAL, EPERM};
 use core::ffi::CStr;
 
-pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(Fd, &'a CStr), i32> {
+pub fn recv_fd<'a>(
+    sock: &LocalFd,
+    tag: &'a mut [u8],
+    expected_pid: i32,
+) -> Result<(LocalFd, &'a CStr), i32> {
     let mut extra = 0u8;
     let mut iovs = [
         libc::iovec {
@@ -32,7 +36,7 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(F
         return Err(EINVAL);
     }
 
-    let mut got_fd: Option<Fd> = None;
+    let mut got_fd: Option<LocalFd> = None;
     let mut got_pid = None;
 
     // SAFETY: iterate over control messages in ctrl_buf.
@@ -49,7 +53,7 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(F
             for i in 0..nfds {
                 let raw_fd = unsafe { *data.add(i) };
                 if got_fd.is_none() {
-                    got_fd = Some(unsafe { Fd::from_raw(raw_fd) });
+                    got_fd = Some(unsafe { LocalFd::from_raw(raw_fd) });
                 } else {
                     unsafe { libc::close(raw_fd) };
                 }

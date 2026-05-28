@@ -38,12 +38,12 @@ impl core::fmt::Debug for Capture {
 /// - Captures are positional if untagged, matched by tag if tagged.
 ///   Unknown fds (no matching capture) are silently closed.
 pub fn do_captures(
-    capture_fd: sys::Fd,
+    capture_fd: sys::LocalFd,
     expected_pid: i32,
     captures: Vec<Capture>,
     fdvars: &FdVars,
-) -> Result<Vec<(ShortCStr, sys::Fd)>, i32> {
-    let mut captured_fds: Vec<(ShortCStr, sys::Fd)> = Vec::with_capacity(captures.len());
+) -> Result<Vec<(ShortCStr, sys::LocalFd)>, i32> {
+    let mut captured_fds: Vec<(ShortCStr, sys::LocalFd)> = Vec::with_capacity(captures.len());
     let mut remaining = captures;
 
     while !remaining.is_empty() {

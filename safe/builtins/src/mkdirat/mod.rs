@@ -1,10 +1,10 @@
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW};
-use sys::{AtFd, DupFd};
+use sys::{AtFd, ImportedFd};
 
 pub mod parse;
 
 pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), i32> {
-    let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), DupFd::at);
+    let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
     sys::mkdirat::mkdirat(dirfd, cfg.path, cfg.mode & 0o777)?;
     let how = sys::openat2::OpenHow {
         flags: (O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW) as u64,

@@ -1,6 +1,6 @@
-use crate::Fd;
+use crate::LocalFd;
 
-pub fn read(fd: &Fd, buf: &mut [u8]) -> Result<isize, i32> {
+pub fn read(fd: &LocalFd, buf: &mut [u8]) -> Result<isize, i32> {
     // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
     crate::cvt(unsafe {
         libc::read(
@@ -11,7 +11,7 @@ pub fn read(fd: &Fd, buf: &mut [u8]) -> Result<isize, i32> {
     })
 }
 
-pub fn write(fd: &Fd, buf: &[u8]) -> Result<isize, i32> {
+pub fn write(fd: &LocalFd, buf: &[u8]) -> Result<isize, i32> {
     // SAFETY: `buf` is a valid immutable slice; `write` won't read past `buf.len()`.
     crate::cvt(unsafe {
         libc::write(

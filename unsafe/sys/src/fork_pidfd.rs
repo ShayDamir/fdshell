@@ -1,13 +1,13 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::{Fd, cvt};
+use crate::{LocalFd, cvt};
 
 const UNKNOWN: u8 = 0;
 const AUTO: u8 = 1;
 const MANUAL: u8 = 2;
 static PIDFD_CLOEXEC: AtomicU8 = AtomicU8::new(UNKNOWN);
 
-pub fn fork_pidfd() -> Result<(isize, Option<Fd>), i32> {
+pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), i32> {
     let mut raw_pidfd: i32 = -1;
     // SAFETY: clone_args is integer types; zeroed is valid.
     let mut args: libc::clone_args = unsafe { core::mem::zeroed() };
@@ -55,6 +55,6 @@ pub fn fork_pidfd() -> Result<(isize, Option<Fd>), i32> {
     // state == AUTO: kernel already set CLOEXEC, nothing to do.
 
     // SAFETY: `raw_pidfd` has CLOEXEC (set by kernel or fcntl above).
-    let pidfd = unsafe { Fd::from_raw(raw_pidfd) };
+    let pidfd = unsafe { LocalFd::from_raw(raw_pidfd) };
     Ok((ret, Some(pidfd)))
 }

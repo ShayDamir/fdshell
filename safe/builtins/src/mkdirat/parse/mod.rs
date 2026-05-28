@@ -1,9 +1,9 @@
 use core::ffi::CStr;
-use sys::DupFd;
+use sys::ImportedFd;
 use sys::errno::{EINVAL, ENOENT};
 
 pub struct MkdiratConfig<'a> {
-    pub dirfd: Option<DupFd>,
+    pub dirfd: Option<ImportedFd>,
     pub path: &'a CStr,
     pub mode: u32,
     pub resolve: u64,

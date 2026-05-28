@@ -17,8 +17,8 @@ fn test_openat2_exec() {
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();
-    a.dup_to(sys::shellfd::SHELLFD).unwrap();
-    a.close().unwrap();
+    a.export_to(sys::shellfd::SHELLFD).unwrap();
+    a.try_close().unwrap();
     let receiver = b;
     sys::shellfd::set_capture_active(true);
 
@@ -32,7 +32,7 @@ fn test_openat2_exec() {
     let after = sys::stat::fstat(&fd).unwrap();
     assert_eq!(before, after);
 
-    fd.close().unwrap();
-    receiver.close().unwrap();
+    fd.try_close().unwrap();
+    receiver.try_close().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
 }

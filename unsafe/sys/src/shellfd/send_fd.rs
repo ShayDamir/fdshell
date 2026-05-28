@@ -1,9 +1,9 @@
 use super::CmsgBuf;
-use crate::Fd;
+use crate::LocalFd;
 use crate::errno::E2BIG;
 use core::ffi::CStr;
 
-pub fn send_fd(fd: &Fd, tag: &CStr) -> Result<(), i32> {
+pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), i32> {
     if !super::capture_active() {
         return Err(crate::errno::ENOENT);
     }

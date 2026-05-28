@@ -1,4 +1,4 @@
-use crate::{DupFd, Fd};
+use crate::{ExportedFd, ImportedFd, LocalFd};
 use core::marker::PhantomData;
 
 #[repr(transparent)]
@@ -21,14 +21,20 @@ impl<'a> AtFd<'a> {
     }
 }
 
-impl<'a> From<&'a Fd> for AtFd<'a> {
-    fn from(fd: &'a Fd) -> Self {
+impl<'a> From<&'a LocalFd> for AtFd<'a> {
+    fn from(fd: &'a LocalFd) -> Self {
         Self(fd.as_raw(), PhantomData)
     }
 }
 
-impl<'a> From<&'a DupFd> for AtFd<'a> {
-    fn from(dup: &'a DupFd) -> Self {
+impl<'a> From<&'a ImportedFd> for AtFd<'a> {
+    fn from(dup: &'a ImportedFd) -> Self {
+        Self(dup.as_raw(), PhantomData)
+    }
+}
+
+impl<'a> From<&'a ExportedFd> for AtFd<'a> {
+    fn from(dup: &'a ExportedFd) -> Self {
         Self(dup.as_raw(), PhantomData)
     }
 }

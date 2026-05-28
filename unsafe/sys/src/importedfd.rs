@@ -1,7 +1,7 @@
 #[repr(transparent)]
-pub struct DupFd(i32);
+pub struct ImportedFd(i32);
 
-impl DupFd {
+impl ImportedFd {
     /// # Safety
     /// `raw` must be an open fd. Caller guarantees it stays valid for the value's lifetime.
     pub const unsafe fn from_raw(raw: i32) -> Self {
@@ -27,10 +27,10 @@ impl DupFd {
     pub fn at(&self) -> crate::AtFd<'_> {
         crate::AtFd::from(self)
     }
-    /// Set CLOEXEC, converting this leaked DupFd into an owned Fd.
-    pub fn into_owned(self) -> Result<crate::Fd, i32> {
+    /// Set CLOEXEC, converting this imported fd into a local owned fd.
+    pub fn try_into_local(self) -> Result<crate::LocalFd, i32> {
         crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
         // SAFETY: fcntl atomically set CLOEXEC; caller gets exclusive ownership.
-        Ok(unsafe { crate::Fd::from_raw(self.0) })
+        Ok(unsafe { crate::LocalFd::from_raw(self.0) })
     }
 }

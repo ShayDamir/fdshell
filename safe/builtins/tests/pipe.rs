@@ -95,8 +95,8 @@ fn test_pipe_exec() {
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();
-    a.dup_to(sys::shellfd::SHELLFD).unwrap();
-    a.close().unwrap();
+    a.export_to(sys::shellfd::SHELLFD).unwrap();
+    a.try_close().unwrap();
     let receiver = b;
     sys::shellfd::set_capture_active(true);
 
@@ -122,7 +122,7 @@ fn test_pipe_exec() {
     assert_eq!(n, 5);
     assert_eq!(buf, *b"hello");
 
-    rd.close().unwrap();
-    wr.close().unwrap();
-    receiver.close().unwrap();
+    rd.try_close().unwrap();
+    wr.try_close().unwrap();
+    receiver.try_close().unwrap();
 }

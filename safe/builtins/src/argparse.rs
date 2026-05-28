@@ -1,5 +1,5 @@
 use core::ffi::CStr;
-use sys::DupFd;
+use sys::ImportedFd;
 use sys::errno::EINVAL;
 
 pub fn wants_help(args: &[&CStr]) -> bool {
@@ -47,11 +47,11 @@ pub fn parse_mode(s: &CStr) -> Result<u64, i32> {
     u64::from_str_radix(core::str::from_utf8(d).map_err(|_| EINVAL)?, r).map_err(|_| EINVAL)
 }
 
-pub fn parse_dirfd(s: &CStr) -> Result<Option<DupFd>, i32> {
+pub fn parse_dirfd(s: &CStr) -> Result<Option<ImportedFd>, i32> {
     let b = s.to_bytes();
     if b == b"AT_FDCWD" {
         Ok(None)
     } else {
-        DupFd::from_bytes(b).map(Some)
+        ImportedFd::from_bytes(b).map(Some)
     }
 }

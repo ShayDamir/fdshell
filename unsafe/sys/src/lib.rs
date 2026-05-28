@@ -3,8 +3,9 @@
 extern crate alloc;
 
 pub use atfd::AtFd;
-pub use dupfd::DupFd;
-pub use fd::Fd;
+pub use exportedfd::ExportedFd;
+pub use importedfd::ImportedFd;
+pub use localfd::LocalFd;
 pub use shortcstr::ShortCStr;
 
 pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
@@ -18,13 +19,14 @@ pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
 }
 
 pub mod atfd;
-pub mod dupfd;
 pub mod errno;
 pub mod execveat;
+pub mod exportedfd;
 pub mod fchdir;
 pub mod fcntl;
-pub mod fd;
 pub mod fork_pidfd;
+pub mod importedfd;
+pub mod localfd;
 pub mod mkdirat;
 pub mod net;
 pub mod openat2;

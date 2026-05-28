@@ -4,18 +4,18 @@ use std::ffi::{CStr, CString};
 use sys::execveat::AT_EMPTY_PATH;
 use sys::fcntl::{O_CLOEXEC, O_PATH};
 use sys::openat2::OpenHow;
-use sys::{AtFd, Fd};
+use sys::{AtFd, LocalFd};
 
-pub fn exec_fd(fd: &Fd, argv: &[&CStr]) -> Result<(), i32> {
+pub fn exec_fd(fd: &LocalFd, argv: &[&CStr]) -> Result<(), i32> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
     let envp = get_environ(cookie.as_bytes());
     // dup to non-CLOEXEC so the kernel can pass /dev/fd/N to a script interpreter
-    let script_fd = fd.dup()?;
+    let script_fd = fd.export()?;
     sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
 }
 
-pub fn search_path(bin: &CStr) -> Result<Fd, i32> {
+pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
     let path = match std::env::var("PATH") {
         Ok(p) if !p.is_empty() => p,
         _ => "/usr/local/bin:/usr/bin:/bin".to_string(),
@@ -35,7 +35,7 @@ pub fn search_path(bin: &CStr) -> Result<Fd, i32> {
     Err(sys::errno::ENOENT)
 }
 
-pub fn resolve_path(bin: &CStr) -> Result<Fd, i32> {
+pub fn resolve_path(bin: &CStr) -> Result<LocalFd, i32> {
     if bin.to_bytes().contains(&b'/') {
         let how = OpenHow {
             flags: O_PATH as u64 | O_CLOEXEC as u64,

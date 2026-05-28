@@ -76,8 +76,8 @@ fn test_send_recv_fd() -> Result<(), i32> {
         let (a, b) = socketpair()?;
         a.verify()?;
         b.verify()?;
-        a.dup_to(SHELLFD)?;
-        a.close()?;
+        a.export_to(SHELLFD)?;
+        a.try_close()?;
         let receiver = b;
         set_capture_active(true);
 
@@ -85,9 +85,9 @@ fn test_send_recv_fd() -> Result<(), i32> {
         test_a.verify()?;
         test_b.verify()?;
         send_fd(&test_a, c"test")?;
-        test_a.close()?;
+        test_a.try_close()?;
         write(&test_b, b"42")?;
-        test_b.close()?;
+        test_b.try_close()?;
 
         let mut tag = [0u8; TAG_MAX];
         let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)?;
@@ -98,8 +98,8 @@ fn test_send_recv_fd() -> Result<(), i32> {
         assert_eq!(&buf[..2], b"42");
         assert_eq!(read(&test_fd, &mut buf)?, 0);
 
-        test_fd.close()?;
-        receiver.close()?;
+        test_fd.try_close()?;
+        receiver.try_close()?;
         Ok(())
     })
 }
@@ -116,14 +116,14 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
 
     let tag = [b'x'; 2 * TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
-    dummy_wr.close()?;
+    dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
     assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
-    dummy_rd.close()?;
-    a.close()?;
-    b.close()?;
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
     Ok(())
 }
 
@@ -139,14 +139,14 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
 
     let tag = [b'x'; TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
-    dummy_wr.close()?;
+    dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
     assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
-    dummy_rd.close()?;
-    a.close()?;
-    b.close()?;
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
     Ok(())
 }
 
@@ -160,14 +160,14 @@ fn test_recv_fd_short_no_null() -> Result<(), i32> {
     dummy_wr.verify()?;
 
     send_raw_msg(a.as_raw(), b"abc", dummy_wr.as_raw())?;
-    dummy_wr.close()?;
+    dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
     assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
-    dummy_rd.close()?;
-    a.close()?;
-    b.close()?;
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
     Ok(())
 }
 
@@ -181,14 +181,14 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
     dummy_wr.verify()?;
 
     send_raw_msg(a.as_raw(), b"abc\0fde\0", dummy_wr.as_raw())?;
-    dummy_wr.close()?;
+    dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
     assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
-    dummy_rd.close()?;
-    a.close()?;
-    b.close()?;
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
     Ok(())
 }
 
@@ -226,15 +226,15 @@ fn test_recv_fd_truncated_creds() -> Result<(), i32> {
         msg_flags: 0,
     };
     let ret = unsafe { libc::sendmsg(a.as_raw(), &msg, 0) };
-    dummy_wr.close()?;
+    dummy_wr.try_close()?;
 
     // Kernel rejects truncated creds — this is expected.
     assert_eq!(ret, -1);
     let _e = unsafe { *libc::__errno_location() };
 
-    dummy_rd.close()?;
-    a.close()?;
-    b.close()?;
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
     Ok(())
 }
 
@@ -251,13 +251,13 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
     tag.push(0);
     tag.extend_from_slice(b"rd\0");
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
-    dummy_wr.close()?;
+    dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
     assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
 
-    dummy_rd.close()?;
-    a.close()?;
-    b.close()?;
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
     Ok(())
 }

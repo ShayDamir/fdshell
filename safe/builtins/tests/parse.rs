@@ -63,7 +63,7 @@ fn dirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
-    let dupfd = rd.dup().unwrap();
+    let dupfd = rd.export().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--dirfd", &s, "x"], |cfg| {
         assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(dupfd.as_raw()));

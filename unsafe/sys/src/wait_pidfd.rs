@@ -1,7 +1,7 @@
 use crate::siginfo::{SigInfo, WaitStatus};
-use crate::{Fd, cvt};
+use crate::{LocalFd, cvt};
 
-pub fn wait_pidfd(pidfd: &Fd) -> Result<WaitStatus, i32> {
+pub fn wait_pidfd(pidfd: &LocalFd) -> Result<WaitStatus, i32> {
     // SAFETY: SigInfo is integer types; zeroed is valid.
     let mut info: SigInfo = unsafe { core::mem::zeroed() };
 

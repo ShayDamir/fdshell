@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use sys::Fd;
+use sys::LocalFd;
 use sys::ShortCStr;
 
 pub struct FdVars {
-    map: HashMap<ShortCStr, Fd>,
+    map: HashMap<ShortCStr, LocalFd>,
 }
 
 impl FdVars {
@@ -15,15 +15,15 @@ impl FdVars {
         }
     }
 
-    pub fn insert(&mut self, name: ShortCStr, fd: Fd) -> Option<Fd> {
+    pub fn insert(&mut self, name: ShortCStr, fd: LocalFd) -> Option<LocalFd> {
         self.map.insert(name, fd)
     }
 
-    pub fn resolve(&self, name: &[u8]) -> Option<&Fd> {
+    pub fn resolve(&self, name: &[u8]) -> Option<&LocalFd> {
         self.map.get(name)
     }
 
-    pub fn remove(&mut self, name: &[u8]) -> Option<Fd> {
+    pub fn remove(&mut self, name: &[u8]) -> Option<LocalFd> {
         self.map.remove(name)
     }
 

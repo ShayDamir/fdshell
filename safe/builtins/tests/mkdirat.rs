@@ -86,7 +86,7 @@ fn dirfd_numeric() {
     let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
-    let dupfd = rd.dup().unwrap();
+    let dupfd = rd.export().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--dirfd", &s, "x"], |cfg| {
         assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(dupfd.as_raw()));
@@ -159,8 +159,8 @@ fn test_mkdirat_exec() {
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();
-    a.dup_to(sys::shellfd::SHELLFD).unwrap();
-    a.close().unwrap();
+    a.export_to(sys::shellfd::SHELLFD).unwrap();
+    a.try_close().unwrap();
     let receiver = b;
     sys::shellfd::set_capture_active(true);
 
@@ -186,7 +186,7 @@ fn test_mkdirat_exec() {
     assert_eq!(st.ino, st2.ino);
     assert_eq!(st.dev, st2.dev);
 
-    fd.close().unwrap();
-    receiver.close().unwrap();
+    fd.try_close().unwrap();
+    receiver.try_close().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
 }

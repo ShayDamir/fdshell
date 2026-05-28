@@ -1,4 +1,4 @@
-use crate::{AtFd, Fd};
+use crate::{AtFd, LocalFd};
 use core::ffi::CStr;
 
 #[repr(C)]
@@ -15,7 +15,7 @@ pub const RESOLVE_BENEATH: u64 = 8;
 pub const RESOLVE_IN_ROOT: u64 = 16;
 pub const RESOLVE_CACHED: u64 = 32;
 
-pub fn openat2(dirfd: AtFd<'_>, pathname: &CStr, how: &OpenHow) -> Result<Fd, i32> {
+pub fn openat2(dirfd: AtFd<'_>, pathname: &CStr, how: &OpenHow) -> Result<LocalFd, i32> {
     let dirfd = dirfd.as_raw();
     // SAFETY: SYS_openat2 (437) is valid on Linux ≥5.6 x86_64. dirfd may be
     // AT_FDCWD (−100) or an open dirfd. pathname and how point to valid memory
@@ -31,6 +31,6 @@ pub fn openat2(dirfd: AtFd<'_>, pathname: &CStr, how: &OpenHow) -> Result<Fd, i3
     })
     .map(|ret| {
         // SAFETY: `ret` is a valid fd with CLOEXEC (ORed into `how.flags` by the caller).
-        unsafe { Fd::from_raw(ret as i32) }
+        unsafe { LocalFd::from_raw(ret as i32) }
     })
 }
