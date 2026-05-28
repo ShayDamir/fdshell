@@ -17,7 +17,9 @@ impl ShortCStr {
             return Some(unsafe { from_inline(new) });
         }
 
-        let start = new.as_ptr() as usize - orig.as_ptr() as usize;
+        // SAFETY: `new` is a subslice of `orig` — `get()` returned `Some`,
+        // so both point into the same allocation and `new` ≥ `orig`.
+        let start = unsafe { new.as_ptr().offset_from(orig.as_ptr()) as usize };
         match self {
             ShortCStr::Inline { .. } => unreachable!(),
             ShortCStr::Static(s, offset, _) => Some(ShortCStr::Static(s, offset + start, new_len)),
