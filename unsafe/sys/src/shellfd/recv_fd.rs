@@ -28,7 +28,11 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(F
     let n = crate::cvt(unsafe { libc::recvmsg(sock.as_raw(), &mut msg, libc::MSG_CMSG_CLOEXEC) })?
         as usize;
 
-    let mut got_fd = None;
+    if msg.msg_flags & libc::MSG_CTRUNC != 0 {
+        return Err(EINVAL);
+    }
+
+    let mut got_fd: Option<Fd> = None;
     let mut got_pid = None;
 
     // SAFETY: iterate over control messages in ctrl_buf.
@@ -38,8 +42,18 @@ pub fn recv_fd<'a>(sock: &Fd, tag: &'a mut [u8], expected_pid: i32) -> Result<(F
         let level = unsafe { (*cmsg).cmsg_level };
         let ctype = unsafe { (*cmsg).cmsg_type };
         if level == libc::SOL_SOCKET && ctype == libc::SCM_RIGHTS {
-            let raw_fd = unsafe { *libc::CMSG_DATA(cmsg).cast::<i32>() };
-            got_fd = Some(unsafe { Fd::from_raw(raw_fd) });
+            let data = unsafe { libc::CMSG_DATA(cmsg).cast::<i32>() };
+            let nbytes = (unsafe { (*cmsg).cmsg_len } as usize)
+                .saturating_sub(core::mem::size_of::<libc::cmsghdr>());
+            let nfds = nbytes / core::mem::size_of::<i32>();
+            for i in 0..nfds {
+                let raw_fd = unsafe { *data.add(i) };
+                if got_fd.is_none() {
+                    got_fd = Some(unsafe { Fd::from_raw(raw_fd) });
+                } else {
+                    unsafe { libc::close(raw_fd) };
+                }
+            }
         } else if level == libc::SOL_SOCKET && ctype == libc::SCM_CREDENTIALS {
             let cred = unsafe { &*libc::CMSG_DATA(cmsg).cast::<libc::ucred>() };
             got_pid = Some(cred.pid);
