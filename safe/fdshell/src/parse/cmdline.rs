@@ -1,5 +1,5 @@
 use crate::capture::Capture;
-use crate::redirect::Redirect;
+use crate::redirect::RedirectDef;
 use sys::ShortCStr;
 
 pub struct CommandLine {
@@ -7,7 +7,7 @@ pub struct CommandLine {
     pub command: ShortCStr,
     pub args: Vec<ShortCStr>,
     pub captures: Vec<Capture>,
-    pub redirects: Vec<Redirect>,
+    pub redirects: Vec<RedirectDef>,
     pub background: bool,
 }
 

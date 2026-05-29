@@ -1,6 +1,19 @@
 use crate::capture::Capture;
-use crate::redirect::Redirect;
+use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use sys::ShortCStr;
+
+fn parse_fd(prefix: &[u8], dir: u8) -> Option<i32> {
+    if prefix.is_empty() {
+        Some(match dir {
+            b'<' => 0,
+            _ => 1,
+        })
+    } else if prefix.iter().all(|c| c.is_ascii_digit()) {
+        core::str::from_utf8(prefix).ok()?.parse().ok()
+    } else {
+        None
+    }
+}
 
 pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     let s = s.strip_prefix(b"%")?;
@@ -21,30 +34,37 @@ pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     })
 }
 
-pub fn parse_redirect(s: &ShortCStr) -> Option<Redirect> {
+pub fn parse_redirect(s: &ShortCStr) -> Option<RedirectDef> {
     let bytes = s.as_bytes();
-    let (pos, dir) = if let Some(p) = bytes.windows(2).position(|w| w == b">%") {
-        (p, b'>')
-    } else if let Some(p) = bytes.windows(2).position(|w| w == b"<%") {
-        (p, b'<')
-    } else {
+
+    if let Some(pos) = bytes.windows(2).position(|w| w == b">%") {
+        return Some(RedirectDef {
+            export_to: parse_fd(bytes.get(..pos)?, b'>')?,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::Var(s.get(pos + 2..)?),
+        });
+    }
+    if let Some(pos) = bytes.windows(2).position(|w| w == b"<%") {
+        return Some(RedirectDef {
+            export_to: parse_fd(bytes.get(..pos)?, b'<')?,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(s.get(pos + 2..)?),
+        });
+    }
+
+    let op_pos = bytes.iter().position(|&b| b == b'>' || b == b'<')?;
+    let dir = *bytes.get(op_pos)?;
+    let rest = s.get(op_pos + 1..)?;
+    if rest.is_empty() || rest.as_bytes().starts_with(b"&") {
         return None;
-    };
-    let prefix = bytes.get(..pos)?;
-    let var_name = s.get(pos + 2..)?;
-    let target_fd = if prefix.is_empty() {
-        match dir {
-            b'<' => 0,
-            _ => 1,
-        }
-    } else if prefix.iter().all(|c| c.is_ascii_digit()) {
-        let digits = core::str::from_utf8(prefix).ok()?;
-        digits.parse().ok()?
-    } else {
-        return None;
-    };
-    Some(Redirect {
-        target_fd,
-        src_var: var_name,
+    }
+    Some(RedirectDef {
+        export_to: parse_fd(bytes.get(..op_pos)?, dir)?,
+        direction: if dir == b'<' {
+            RedirectDirection::Read
+        } else {
+            RedirectDirection::Write
+        },
+        source: RedirectSource::Path(rest),
     })
 }

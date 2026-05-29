@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::capture::Capture;
-use crate::redirect::Redirect;
+use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use sys::ShortCStr;
 
 #[test]
@@ -85,9 +85,10 @@ fn test_echo_redirect() {
     assert!(cmd.captures.is_empty());
     assert_eq!(
         cmd.redirects,
-        vec![Redirect {
-            target_fd: 1,
-            src_var: ShortCStr::from_static(c"baz"),
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::Var(ShortCStr::from_static(c"baz")),
         }]
     );
     assert!(!cmd.background);
@@ -159,9 +160,10 @@ fn test_stderr_redirect() {
 
     assert_eq!(
         cmd.redirects,
-        vec![Redirect {
-            target_fd: 2,
-            src_var: ShortCStr::from_static(c"log"),
+        vec![RedirectDef {
+            export_to: 2,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::Var(ShortCStr::from_static(c"log")),
         }]
     );
 }
@@ -174,11 +176,51 @@ fn test_stdin_redirect() {
 
     assert_eq!(
         cmd.redirects,
-        vec![Redirect {
-            target_fd: 0,
-            src_var: ShortCStr::from_static(c"input"),
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(ShortCStr::from_static(c"input")),
         }]
     );
+}
+
+#[test]
+fn test_path_redirect() {
+    let ParsedLine::Cmd(cmd) = parse("echo test >out.txt").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(cmd.redirects, vec![RedirectDef {
+        export_to: 1,
+        direction: RedirectDirection::Write,
+        source: RedirectSource::Path(ShortCStr::from_static(c"out.txt")),
+    }]);
+}
+
+#[test]
+fn test_path_redirect_stdin() {
+    let ParsedLine::Cmd(cmd) = parse("cat <input.txt").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(cmd.redirects, vec![RedirectDef {
+        export_to: 0,
+        direction: RedirectDirection::Read,
+        source: RedirectSource::Path(ShortCStr::from_static(c"input.txt")),
+    }]);
+}
+
+#[test]
+fn test_stderr_path_redirect() {
+    let ParsedLine::Cmd(cmd) = parse("cmd 2>err.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(cmd.redirects, vec![RedirectDef {
+        export_to: 2,
+        direction: RedirectDirection::Write,
+        source: RedirectSource::Path(ShortCStr::from_static(c"err.log")),
+    }]);
 }
 
 #[test]

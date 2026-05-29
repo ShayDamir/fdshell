@@ -12,7 +12,7 @@ pub fn child_main(
     vars: &FdVars,
     cmd: Command,
     args: &[ShortCStr],
-    redirects: &[Redirect],
+    redirects: &[Redirect<'_>],
 ) -> Result<(), i32> {
     if let Some(sock) = child_sock {
         sock.export_to(sys::shellfd::SHELLFD)?;
@@ -22,10 +22,7 @@ pub fn child_main(
     }
 
     for r in redirects {
-        let src = vars
-            .resolve(r.src_var.as_bytes())
-            .ok_or(sys::errno::EINVAL)?;
-        src.export_to(r.target_fd)?;
+        r.export()?;
     }
 
     let mut dup_cache: HashMap<ShortCStr, sys::ExportedFd> = HashMap::new();

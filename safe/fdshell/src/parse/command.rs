@@ -1,6 +1,6 @@
 use crate::capture::Capture;
 use crate::parse::{CommandLine, ParsedLine, Pipeline};
-use crate::redirect::Redirect;
+use crate::redirect::RedirectDef;
 use sys::ShortCStr;
 use sys::errno::EINVAL;
 
@@ -16,7 +16,7 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
     let command = iter.next().ok_or(EINVAL)?.clone();
     let mut args: Vec<ShortCStr> = Vec::new();
     let mut captures: Vec<Capture> = Vec::new();
-    let mut redirects: Vec<Redirect> = Vec::new();
+    let mut redirects: Vec<RedirectDef> = Vec::new();
     let mut background = false;
     for t in iter {
         let b = t.as_bytes();
@@ -29,7 +29,11 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
                 args.push(t.clone());
             }
         } else if let Some(r) = crate::parse::classify::parse_redirect(t) {
-            redirects.push(r);
+            let pos = redirects.binary_search_by_key(&r.export_to, |x| x.export_to);
+            match pos {
+                Ok(_) => return Err(sys::errno::EEXIST),
+                Err(i) => redirects.insert(i, r),
+            }
         } else {
             args.push(t.clone());
         }
