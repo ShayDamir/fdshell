@@ -32,6 +32,10 @@ pub fn recv_fd<'a>(
     let n = crate::cvt(unsafe { libc::recvmsg(sock.as_raw(), &mut msg, libc::MSG_CMSG_CLOEXEC) })?
         as usize;
 
+    if n == 0 {
+        return Err(libc::EAGAIN);
+    }
+
     if msg.msg_flags & libc::MSG_CTRUNC != 0 {
         return Err(EINVAL);
     }

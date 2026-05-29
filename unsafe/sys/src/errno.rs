@@ -6,3 +6,4 @@ pub const ENOSYS: i32 = libc::ENOSYS;
 pub const EEXIST: i32 = libc::EEXIST;
 pub const EIO: i32 = libc::EIO;
 pub const EPERM: i32 = libc::EPERM;
+pub const EAGAIN: i32 = libc::EAGAIN;

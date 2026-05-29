@@ -25,7 +25,7 @@ pub fn socketpair() -> Result<(LocalFd, LocalFd), i32> {
     crate::cvt(unsafe {
         libc::socketpair(
             libc::AF_UNIX,
-            libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
+            libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
             0,
             pair.as_mut_ptr(),
         ) as isize
