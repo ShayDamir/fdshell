@@ -34,3 +34,21 @@ impl core::fmt::Debug for CommandLine {
             .finish()
     }
 }
+
+pub struct Pipeline {
+    pub commands: Vec<CommandLine>,
+}
+
+impl PartialEq for Pipeline {
+    fn eq(&self, other: &Self) -> bool {
+        self.commands == other.commands
+    }
+}
+
+impl core::fmt::Debug for Pipeline {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Pipeline")
+            .field("commands", &self.commands)
+            .finish()
+    }
+}

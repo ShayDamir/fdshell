@@ -2,7 +2,7 @@ use crate::capture::Capture;
 use crate::redirect::Redirect;
 use sys::ShortCStr;
 
-pub(crate) fn parse_capture(s: &ShortCStr) -> Option<Capture> {
+pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     let s = s.strip_prefix(b"%")?;
     let (tag_part, mut rest) = s.split_once_byte(b'>')?;
     let force = rest.strip_prefix(b"|").is_some();
@@ -21,7 +21,7 @@ pub(crate) fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     })
 }
 
-pub(crate) fn parse_redirect(s: &ShortCStr) -> Option<Redirect> {
+pub fn parse_redirect(s: &ShortCStr) -> Option<Redirect> {
     let bytes = s.as_bytes();
     let (pos, dir) = if let Some(p) = bytes.windows(2).position(|w| w == b">%") {
         (p, b'>')

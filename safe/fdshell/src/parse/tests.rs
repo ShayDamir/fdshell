@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::indexing_slicing)]
 
 use super::*;
 use crate::capture::Capture;
@@ -249,4 +250,62 @@ fn test_execveat2_builtin() {
             ShortCStr::from_static(c"arg1"),
         ]
     );
+}
+
+#[test]
+fn test_pipeline_two_commands() {
+    let ParsedLine::Pipeline(pipe) = parse("echo hello | wc -l").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pipe.commands.len(), 2);
+    assert_eq!(pipe.commands[0].command, ShortCStr::from_static(c"echo"));
+    assert_eq!(
+        pipe.commands[0].args,
+        vec![ShortCStr::from_static(c"hello")]
+    );
+    assert_eq!(pipe.commands[1].command, ShortCStr::from_static(c"wc"));
+    assert_eq!(pipe.commands[1].args, vec![ShortCStr::from_static(c"-l")]);
+}
+
+#[test]
+fn test_pipeline_three_commands() {
+    let ParsedLine::Pipeline(pipe) = parse("a | b | c").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pipe.commands.len(), 3);
+    assert_eq!(pipe.commands[0].command, ShortCStr::from_static(c"a"));
+    assert_eq!(pipe.commands[1].command, ShortCStr::from_static(c"b"));
+    assert_eq!(pipe.commands[2].command, ShortCStr::from_static(c"c"));
+}
+
+#[test]
+fn test_pipeline_with_captures() {
+    let ParsedLine::Pipeline(pipe) = parse("cmd1 %>%a | cmd2 %>%b").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pipe.commands.len(), 2);
+    assert_eq!(pipe.commands[0].captures.len(), 1);
+    assert_eq!(pipe.commands[1].captures.len(), 1);
+}
+
+#[test]
+fn test_pipeline_with_redirect() {
+    let ParsedLine::Pipeline(pipe) = parse("cmd1 2>%log | cmd2").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pipe.commands[0].redirects.len(), 1);
+}
+
+#[test]
+fn test_pipeline_empty_segment() {
+    assert!(parse("cmd1 |").is_err());
+    assert!(parse("| cmd2").is_err());
+    assert!(parse("cmd1 || cmd2").is_err());
+}
+
+#[test]
+fn test_pipe_builtin_not_pipeline() {
+    let ParsedLine::Cmd(_) = parse("builtin pipe %rd>%a %wr>%b").unwrap() else {
+        panic!("expected Cmd")
+    };
 }

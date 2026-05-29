@@ -15,4 +15,5 @@
 - [x] External command execution via `execveat` in child
 - [ ] File-path redirects: extend `parse_redirect` to handle `[N] > path` / `[N] < path`, open file in parent, dup into child
 - [x] Non-blocking socketpair + drain loop in `do_captures`: replace blocking `recv_fd` with non-blocking drain (EOF + `EAGAIN` → break)
+- [x] Pipeline syntax `\|`: tokenizer recognizes `|` as separator (unless part of force capture `%>|%var`), parser builds `Pipeline { commands }`, `pipeline::launch_pipeline` creates pipes + per-command capture sockets
 

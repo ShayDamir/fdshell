@@ -24,6 +24,16 @@ pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32> {
                         tokens.push(ShortCStr::from_vec(core::mem::take(&mut cur))?);
                     }
                 }
+                b'|' => {
+                    if cur.starts_with(b"%") && cur.ends_with(b">") {
+                        cur.push(b'|');
+                    } else {
+                        if !cur.is_empty() {
+                            tokens.push(ShortCStr::from_vec(core::mem::take(&mut cur))?);
+                        }
+                        tokens.push(ShortCStr::from_static(c"|"));
+                    }
+                }
                 b'"' => in_quotes = true,
                 _ => cur.push(b),
             }

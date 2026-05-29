@@ -1,9 +1,10 @@
-use crate::parse::CommandLine;
+use crate::parse::{CommandLine, Pipeline};
 use sys::ShortCStr;
 use sys::errno::EINVAL;
 
 pub enum ParsedLine {
     Cmd(CommandLine),
+    Pipeline(Pipeline),
     Assign { var: ShortCStr, value: ShortCStr },
     Unset(ShortCStr),
 }

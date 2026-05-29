@@ -31,6 +31,26 @@ pub fn handle(line: &str, fdvars: &mut FdVars) -> Result<(), i32> {
                 _ => eprintln!("{status:?}"),
             }
         }
+        crate::parse::ParsedLine::Pipeline(pipeline) => {
+            let (status, channels) = crate::pipeline::launch_pipeline(fdvars, pipeline)?;
+            match status {
+                WaitStatus::Exited(0) => {
+                    for ch in channels {
+                        let entries = crate::capture::do_captures(
+                            ch.capture_fd,
+                            ch.child_pid,
+                            ch.captures,
+                            fdvars,
+                        )?;
+                        for (var, fd) in entries {
+                            fdvars.insert(var, fd);
+                        }
+                    }
+                }
+                WaitStatus::Exited(n) => eprintln!("exit code: {n}"),
+                _ => eprintln!("{status:?}"),
+            }
+        }
         crate::parse::ParsedLine::Assign { var, value } => {
             let src = fdvars.resolve(value.as_bytes()).ok_or(EINVAL)?;
             fdvars.insert(var, src.try_clone()?);

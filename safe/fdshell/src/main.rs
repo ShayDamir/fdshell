@@ -6,6 +6,7 @@ mod child;
 mod exec;
 mod launch;
 mod parse;
+mod pipeline;
 mod redirect;
 mod repl;
 mod resolve;

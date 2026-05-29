@@ -4,6 +4,7 @@ use crate::vars::FdVars;
 use sys::ShortCStr;
 use sys::errno::EEXIST;
 
+#[derive(Clone)]
 pub struct Capture {
     pub var: ShortCStr,
     pub tag: Option<ShortCStr>,
