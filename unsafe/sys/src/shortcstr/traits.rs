@@ -1,5 +1,6 @@
 use alloc::rc::Rc;
 use core::borrow::Borrow;
+use core::ffi::CStr;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
@@ -63,5 +64,11 @@ impl fmt::Debug for ShortCStr {
                 .field("length", length)
                 .finish(),
         }
+    }
+}
+
+impl From<&'static CStr> for ShortCStr {
+    fn from(s: &'static CStr) -> Self {
+        Self::from_static(s)
     }
 }

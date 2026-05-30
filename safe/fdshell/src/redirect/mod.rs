@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 
 mod def;
+mod direction;
+mod source;
 
 pub use def::*;
+pub use direction::*;
+pub use source::*;
 
 use sys::LocalFd;
 

@@ -28,7 +28,7 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
             } else {
                 args.push(t.clone());
             }
-        } else if let Some(r) = crate::parse::classify::parse_redirect(t) {
+        } else if let Some(r) = crate::parse::classify::parse_redirect(t)? {
             let pos = redirects.binary_search_by_key(&r.export_to, |x| x.export_to);
             match pos {
                 Ok(_) => return Err(sys::errno::EEXIST),

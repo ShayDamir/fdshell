@@ -2,8 +2,9 @@
 
 use crate::child::{self, Command};
 use crate::parse::CommandLine;
-use crate::redirect::{Redirect, RedirectDirection, RedirectSource};
+use crate::redirect::{Redirect, RedirectSource};
 use crate::vars::FdVars;
+use sys::fcntl::O_CLOEXEC;
 use sys::siginfo::WaitStatus;
 
 pub fn launch(
@@ -15,17 +16,12 @@ pub fn launch(
     let mut opened: Vec<sys::LocalFd> = Vec::with_capacity(cmdline.redirects.len());
     for r in &cmdline.redirects {
         if let RedirectSource::Path(path) = &r.source {
-            let flags = match r.direction {
-                RedirectDirection::Read => sys::fcntl::O_RDONLY,
-                RedirectDirection::Write => {
-                    sys::fcntl::O_WRONLY | sys::fcntl::O_CREAT | sys::fcntl::O_TRUNC
-                }
-            };
+            let flags = r.direction.open_flags();
             let name = path.to_c_string();
             let fd = sys::openat2::openat2(
                 sys::atfd::AtFd::cwd(),
                 &name,
-                &sys::openat2::OpenHow::new(flags as u64 | sys::fcntl::O_CLOEXEC as u64, 0o666),
+                &sys::openat2::OpenHow::new((flags | O_CLOEXEC) as u64, 0o666),
             )?;
             opened.push(fd);
         }

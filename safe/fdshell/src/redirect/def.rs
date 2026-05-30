@@ -1,51 +1,7 @@
-#![forbid(unsafe_code)]
-
 use core::fmt;
 use sys::ShortCStr;
 
-pub enum RedirectSource {
-    Var(ShortCStr),
-    Path(ShortCStr),
-}
-
-impl PartialEq for RedirectSource {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Var(a), Self::Var(b)) => a == b,
-            (Self::Path(a), Self::Path(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl fmt::Debug for RedirectSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Var(v) => f.debug_tuple("Var").field(v).finish(),
-            Self::Path(p) => f.debug_tuple("Path").field(p).finish(),
-        }
-    }
-}
-
-pub enum RedirectDirection {
-    Read,
-    Write,
-}
-
-impl PartialEq for RedirectDirection {
-    fn eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
-    }
-}
-
-impl fmt::Debug for RedirectDirection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Read => "Read",
-            Self::Write => "Write",
-        })
-    }
-}
+use super::{RedirectDirection, RedirectSource};
 
 pub struct RedirectDef {
     pub export_to: i32,
@@ -62,6 +18,38 @@ impl PartialEq for RedirectDef {
 }
 
 impl RedirectDef {
+    pub fn var(export_to: i32, name: impl Into<ShortCStr>) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::var(name),
+        }
+    }
+
+    pub fn read_path(export_to: i32, name: impl Into<ShortCStr>) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::path(name),
+        }
+    }
+
+    pub fn write_path(export_to: i32, name: impl Into<ShortCStr>) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::path(name),
+        }
+    }
+
+    pub fn append_path(export_to: i32, name: impl Into<ShortCStr>) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Append,
+            source: RedirectSource::path(name),
+        }
+    }
+
     pub fn resolve<'a>(&self, local: &'a super::LocalFd) -> super::Redirect<'a> {
         super::Redirect {
             export_to: self.export_to,

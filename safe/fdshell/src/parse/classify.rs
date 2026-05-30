@@ -34,37 +34,59 @@ pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     })
 }
 
-pub fn parse_redirect(s: &ShortCStr) -> Option<RedirectDef> {
+pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
     let bytes = s.as_bytes();
 
     if let Some(pos) = bytes.windows(2).position(|w| w == b">%") {
-        return Some(RedirectDef {
-            export_to: parse_fd(bytes.get(..pos)?, b'>')?,
-            direction: RedirectDirection::Write,
-            source: RedirectSource::Var(s.get(pos + 2..)?),
-        });
+        let prefix = bytes.get(..pos).ok_or(sys::errno::EINVAL)?;
+        let export_to = parse_fd(prefix, b'>').ok_or(sys::errno::EINVAL)?;
+        let source = s.get(pos + 2..).ok_or(sys::errno::EINVAL)?;
+        return Ok(Some(RedirectDef::var(export_to, source)));
     }
     if let Some(pos) = bytes.windows(2).position(|w| w == b"<%") {
-        return Some(RedirectDef {
-            export_to: parse_fd(bytes.get(..pos)?, b'<')?,
-            direction: RedirectDirection::Read,
-            source: RedirectSource::Var(s.get(pos + 2..)?),
-        });
+        let prefix = bytes.get(..pos).ok_or(sys::errno::EINVAL)?;
+        let export_to = parse_fd(prefix, b'<').ok_or(sys::errno::EINVAL)?;
+        let source = s.get(pos + 2..).ok_or(sys::errno::EINVAL)?;
+        return Ok(Some(RedirectDef::var(export_to, source)));
     }
 
-    let op_pos = bytes.iter().position(|&b| b == b'>' || b == b'<')?;
-    let dir = *bytes.get(op_pos)?;
-    let rest = s.get(op_pos + 1..)?;
+    let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let dir = match bytes.get(op_pos) {
+        Some(&d) => d,
+        None => return Ok(None),
+    };
+    let mut rest = match s.get(op_pos + 1..) {
+        Some(r) => r,
+        None => return Ok(None),
+    };
     if rest.is_empty() || rest.as_bytes().starts_with(b"&") {
-        return None;
+        return Ok(None);
     }
-    Some(RedirectDef {
-        export_to: parse_fd(bytes.get(..op_pos)?, dir)?,
-        direction: if dir == b'<' {
-            RedirectDirection::Read
-        } else {
-            RedirectDirection::Write
-        },
-        source: RedirectSource::Path(rest),
-    })
+    if rest.as_bytes().starts_with(b"%") {
+        return Err(sys::errno::EINVAL);
+    }
+    let direction = if dir == b'>' && rest.as_bytes().starts_with(b">") {
+        rest = rest.get(1..).ok_or(sys::errno::EINVAL)?;
+        if rest.is_empty() {
+            return Ok(None);
+        }
+        RedirectDirection::Append
+    } else if dir == b'<' {
+        RedirectDirection::Read
+    } else {
+        RedirectDirection::Write
+    };
+    let prefix = bytes.get(..op_pos).ok_or(sys::errno::EINVAL)?;
+    let export_to = match parse_fd(prefix, dir) {
+        Some(fd) => fd,
+        None => return Ok(None),
+    };
+    Ok(Some(RedirectDef {
+        export_to,
+        direction,
+        source: RedirectSource::path(rest),
+    }))
 }

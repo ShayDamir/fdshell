@@ -3,8 +3,9 @@
 
 use super::*;
 use crate::capture::Capture;
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use crate::redirect::RedirectDef;
 use sys::ShortCStr;
+use sys::errno::EINVAL;
 
 #[test]
 fn test_mkdirat_capture() {
@@ -83,14 +84,7 @@ fn test_echo_redirect() {
     assert_eq!(cmd.command, ShortCStr::from_static(c"echo"));
     assert_eq!(cmd.args, vec![ShortCStr::from_static(c"test")]);
     assert!(cmd.captures.is_empty());
-    assert_eq!(
-        cmd.redirects,
-        vec![RedirectDef {
-            export_to: 1,
-            direction: RedirectDirection::Write,
-            source: RedirectSource::Var(ShortCStr::from_static(c"baz")),
-        }]
-    );
+    assert_eq!(cmd.redirects, vec![RedirectDef::var(1, c"baz")]);
     assert!(!cmd.background);
 }
 
@@ -158,14 +152,7 @@ fn test_stderr_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(
-        cmd.redirects,
-        vec![RedirectDef {
-            export_to: 2,
-            direction: RedirectDirection::Write,
-            source: RedirectSource::Var(ShortCStr::from_static(c"log")),
-        }]
-    );
+    assert_eq!(cmd.redirects, vec![RedirectDef::var(2, c"log")]);
 }
 
 #[test]
@@ -174,14 +161,7 @@ fn test_stdin_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(
-        cmd.redirects,
-        vec![RedirectDef {
-            export_to: 0,
-            direction: RedirectDirection::Read,
-            source: RedirectSource::Var(ShortCStr::from_static(c"input")),
-        }]
-    );
+    assert_eq!(cmd.redirects, vec![RedirectDef::var(0, c"input")]);
 }
 
 #[test]
@@ -190,14 +170,7 @@ fn test_path_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(
-        cmd.redirects,
-        vec![RedirectDef {
-            export_to: 1,
-            direction: RedirectDirection::Write,
-            source: RedirectSource::Path(ShortCStr::from_static(c"out.txt")),
-        }]
-    );
+    assert_eq!(cmd.redirects, vec![RedirectDef::write_path(1, c"out.txt")]);
 }
 
 #[test]
@@ -206,14 +179,7 @@ fn test_path_redirect_stdin() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(
-        cmd.redirects,
-        vec![RedirectDef {
-            export_to: 0,
-            direction: RedirectDirection::Read,
-            source: RedirectSource::Path(ShortCStr::from_static(c"input.txt")),
-        }]
-    );
+    assert_eq!(cmd.redirects, vec![RedirectDef::read_path(0, c"input.txt")]);
 }
 
 #[test]
@@ -222,14 +188,31 @@ fn test_stderr_path_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(
-        cmd.redirects,
-        vec![RedirectDef {
-            export_to: 2,
-            direction: RedirectDirection::Write,
-            source: RedirectSource::Path(ShortCStr::from_static(c"err.log")),
-        }]
-    );
+    assert_eq!(cmd.redirects, vec![RedirectDef::write_path(2, c"err.log")]);
+}
+
+#[test]
+fn test_path_redirect_append() {
+    let ParsedLine::Cmd(cmd) = parse("echo test >>out.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(cmd.redirects, vec![RedirectDef::append_path(1, c"out.log")]);
+}
+
+#[test]
+fn test_path_redirect_append_named_fd() {
+    let ParsedLine::Cmd(cmd) = parse("cmd 2>>err.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(cmd.redirects, vec![RedirectDef::append_path(2, c"err.log")]);
+}
+
+#[test]
+fn test_append_followed_by_percent_is_error() {
+    assert!(matches!(parse("echo >>%var"), Err(EINVAL)));
+    assert!(matches!(parse("echo 2>>%var"), Err(EINVAL)));
 }
 
 #[test]
@@ -349,14 +332,15 @@ fn test_pipeline_with_redirect() {
 
 #[test]
 fn test_pipeline_empty_segment() {
-    assert!(parse("cmd1 |").is_err());
-    assert!(parse("| cmd2").is_err());
-    assert!(parse("cmd1 || cmd2").is_err());
+    assert!(matches!(parse("cmd1 |"), Err(EINVAL)));
+    assert!(matches!(parse("| cmd2"), Err(EINVAL)));
+    assert!(matches!(parse("cmd1 || cmd2"), Err(EINVAL)));
 }
 
 #[test]
 fn test_pipe_builtin_not_pipeline() {
-    let ParsedLine::Cmd(_) = parse("builtin pipe %rd>%a %wr>%b").unwrap() else {
-        panic!("expected Cmd")
-    };
+    assert!(matches!(
+        parse("builtin pipe %rd>%a %wr>%b"),
+        Ok(ParsedLine::Cmd(_))
+    ));
 }
