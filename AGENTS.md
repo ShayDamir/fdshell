@@ -14,7 +14,16 @@ Three crates in a Cargo workspace (`resolver = "2"`):
 - `safe/` and `unsafe/` source files must be ≤80 lines each (excluding comments). If a file approaches this limit, split or refactor rather than compress formatting. Tests are exempt from the line limit.
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
 - Safe wrappers in `unsafe/sys` return `Result<_, i32>` (positive errno on error). Use `cvt(ret: isize) -> Result<isize, i32>` from `lib.rs` to convert libc return values.
-- Avoid `#[derive]` where possible. Prefer `no_std` when feasible (binary uses `std` because `no_std` + stable needs nightly + `-Z build-std`).
+- Avoid `#[derive]` in production code. Derives like `Debug`, `PartialEq`, and `Eq` are
+  contagious — adding them to a type forces every field type to also implement them,
+  propagating through the type graph. Since the codebase bans panicky patterns (`unwrap`,
+  `expect`, indexing) in production, no production code ever formats values with `{:?}`
+  or compares with `==`/`!=` (except `ShortCStr::PartialEq`/`Eq` needed by `HashMap`).
+  These traits belong in `#[cfg(test)]` only — use `#[cfg_attr(test, derive(...))]`
+  or `#[cfg(test)] impl ...` to quarantine them. `ShortCStr` is an exception: `Debug`
+  is needed by integration tests (separate compilation units), and `PartialEq`/`Eq`
+  are required by production `HashMap<ShortCStr, _>` usage.
+- Prefer `no_std` when feasible (binary uses `std` because `no_std` + stable needs nightly + `-Z build-std`).
 
 ## Lints (workspace-wide)
 
