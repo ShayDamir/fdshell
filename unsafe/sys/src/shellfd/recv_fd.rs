@@ -1,5 +1,6 @@
 use crate::LocalFd;
 use crate::errno::{EINVAL, EPERM};
+use crate::iovec::IoVecMut;
 use core::ffi::CStr;
 
 pub fn recv_fd<'a>(
@@ -7,23 +8,14 @@ pub fn recv_fd<'a>(
     tag: &'a mut [u8],
     expected_pid: i32,
 ) -> Result<(LocalFd, &'a CStr), i32> {
-    let mut extra = 0u8;
-    let mut iovs = [
-        libc::iovec {
-            iov_base: tag.as_mut_ptr() as *mut core::ffi::c_void,
-            iov_len: tag.len(),
-        },
-        libc::iovec {
-            iov_base: (&raw mut extra).cast(),
-            iov_len: 1,
-        },
-    ];
+    let mut extra = [0u8; 1];
+    let mut iovs = [IoVecMut::new(tag), IoVecMut::new(&mut extra)];
     // SCM_RIGHTS (1 fd: 24 B) + SCM_CREDENTIALS (1 ucred: 32 B) = 56 B
     let mut ctrl_buf = [0u8; 64];
     let mut msg = libc::msghdr {
         msg_name: core::ptr::null_mut(),
         msg_namelen: 0,
-        msg_iov: iovs.as_mut_ptr(),
+        msg_iov: iovs.as_mut_ptr().cast(),
         msg_iovlen: 2,
         msg_control: ctrl_buf.as_mut_ptr() as *mut core::ffi::c_void,
         msg_controllen: ctrl_buf.len(),

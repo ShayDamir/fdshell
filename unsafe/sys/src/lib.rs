@@ -26,6 +26,7 @@ pub mod fchdir;
 pub mod fcntl;
 pub mod fork_pidfd;
 pub mod importedfd;
+pub mod iovec;
 pub mod localfd;
 pub mod mkdirat;
 pub mod net;

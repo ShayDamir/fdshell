@@ -1,6 +1,7 @@
 use super::CmsgBuf;
 use crate::LocalFd;
 use crate::errno::E2BIG;
+use crate::iovec::IoVec;
 use core::ffi::CStr;
 
 pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), i32> {
@@ -11,10 +12,7 @@ pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), i32> {
     if tag_bytes.len() > super::TAG_MAX {
         return Err(E2BIG);
     }
-    let mut iov = libc::iovec {
-        iov_base: tag_bytes.as_ptr() as *mut core::ffi::c_void,
-        iov_len: tag_bytes.len(),
-    };
+    let mut iov = IoVec::new(tag_bytes);
     let mut cmsg = CmsgBuf {
         // SAFETY: `CMSG_LEN` is a const fn in libc; passing `4` (size of one `i32`)
         // is always valid and returns `20` on x86_64.
@@ -28,7 +26,7 @@ pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), i32> {
     let msg = libc::msghdr {
         msg_name: core::ptr::null_mut(),
         msg_namelen: 0,
-        msg_iov: &raw mut iov,
+        msg_iov: iov.as_mut_ptr(),
         msg_iovlen: 1,
         msg_control: (&raw mut cmsg).cast(),
         msg_controllen: core::mem::size_of_val(&cmsg),
