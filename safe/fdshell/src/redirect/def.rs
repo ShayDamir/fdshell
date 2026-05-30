@@ -1,20 +1,12 @@
-use core::fmt;
 use sys::ShortCStr;
 
 use super::{RedirectDirection, RedirectSource};
 
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub struct RedirectDef {
     pub export_to: i32,
     pub direction: RedirectDirection,
     pub source: RedirectSource,
-}
-
-impl PartialEq for RedirectDef {
-    fn eq(&self, other: &Self) -> bool {
-        self.export_to == other.export_to
-            && self.direction == other.direction
-            && self.source == other.source
-    }
 }
 
 impl RedirectDef {
@@ -55,15 +47,5 @@ impl RedirectDef {
             export_to: self.export_to,
             local,
         }
-    }
-}
-
-impl fmt::Debug for RedirectDef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RedirectDef")
-            .field("export_to", &self.export_to)
-            .field("direction", &self.direction)
-            .field("source", &self.source)
-            .finish()
     }
 }

@@ -5,28 +5,14 @@ use sys::ShortCStr;
 use sys::errno::EEXIST;
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub struct Capture {
     pub var: ShortCStr,
     pub tag: Option<ShortCStr>,
     pub force: bool,
 }
 
-impl PartialEq for Capture {
-    fn eq(&self, other: &Self) -> bool {
-        self.var == other.var && self.tag == other.tag && self.force == other.force
-    }
-}
-
-impl core::fmt::Debug for Capture {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Capture")
-            .field("var", &self.var)
-            .field("tag", &self.tag)
-            .field("force", &self.force)
-            .finish()
-    }
-}
-
+/// Receive fds from `capture_fd`, match against captures, stage results.
 /// Receive fds from `capture_fd`, match against captures, stage results.
 ///
 /// Returns a `Vec` of `(var, fd)` pairs on success. The caller commits
