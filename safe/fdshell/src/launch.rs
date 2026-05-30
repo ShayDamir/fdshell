@@ -4,7 +4,7 @@ use crate::child::{self, Command};
 use crate::parse::CommandLine;
 use crate::redirect::{Redirect, RedirectSource};
 use crate::vars::FdVars;
-use sys::fcntl::O_CLOEXEC;
+use sys::fcntl::{O_CLOEXEC, O_CREAT};
 use sys::siginfo::WaitStatus;
 
 pub fn launch(
@@ -21,7 +21,10 @@ pub fn launch(
             let fd = sys::openat2::openat2(
                 sys::atfd::AtFd::cwd(),
                 &name,
-                &sys::openat2::OpenHow::new((flags | O_CLOEXEC) as u64, 0o666),
+                &sys::openat2::OpenHow::new(
+                    (flags | O_CLOEXEC) as u64,
+                    if flags & O_CREAT != 0 { 0o666 } else { 0 },
+                ),
             )?;
             opened.push(fd);
         }

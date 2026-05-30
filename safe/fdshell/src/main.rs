@@ -10,6 +10,7 @@ mod parse;
 mod pipeline;
 mod redirect;
 mod repl;
+mod replacer;
 mod resolve;
 mod run;
 mod vars;

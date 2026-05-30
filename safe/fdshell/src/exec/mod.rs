@@ -15,6 +15,13 @@ pub fn exec_fd(fd: &LocalFd, argv: &[&CStr]) -> Result<(), i32> {
     sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
 }
 
+pub fn exec_at(dirfd: AtFd<'_>, pathname: &CStr, argv: &[&CStr]) -> Result<(), i32> {
+    let pid = std::process::id();
+    let cookie = format!("{}", pid);
+    let envp = get_environ(cookie.as_bytes());
+    sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
+}
+
 pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
     let path = match std::env::var("PATH") {
         Ok(p) if !p.is_empty() => p,

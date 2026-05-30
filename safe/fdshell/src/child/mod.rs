@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-mod builtin;
+pub(crate) mod builtin;
 mod run;
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;

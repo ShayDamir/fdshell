@@ -28,7 +28,7 @@ pub fn dispatch_builtin(
             .and_then(|cfg| builtins::openat2::openat2_exec(&cfg)),
         b"renameat2" => builtins::renameat2::parse::renameat2_parse(refs)
             .and_then(|cfg| builtins::renameat2::renameat2_exec(&cfg)),
-        b"execveat2" => {
+        b"exec_fd" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
             let varname = raw0
                 .as_bytes()
@@ -36,6 +36,21 @@ pub fn dispatch_builtin(
                 .ok_or(sys::errno::EINVAL)?;
             let fd = vars.resolve(varname).ok_or(sys::errno::EINVAL)?;
             exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?)
+        }
+        b"exec_at" => {
+            let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
+            let varname = raw0
+                .as_bytes()
+                .strip_prefix(b"%")
+                .ok_or(sys::errno::EINVAL)?;
+            let dirfd = vars.resolve(varname).ok_or(sys::errno::EINVAL)?;
+            let pathname = args.get(1).ok_or(sys::errno::EINVAL)?;
+            let path_cs = pathname.to_c_string();
+            exec::exec_at(
+                dirfd.at(),
+                &path_cs,
+                refs.get(2..).ok_or(sys::errno::EINVAL)?,
+            )
         }
         _ => Err(sys::errno::ENOSYS),
     }

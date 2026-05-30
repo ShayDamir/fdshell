@@ -3,7 +3,7 @@
 use crate::parse::CommandLine;
 use crate::redirect::RedirectSource::*;
 use sys::LocalFd;
-use sys::fcntl::O_CLOEXEC;
+use sys::fcntl::{O_CLOEXEC, O_CREAT};
 
 pub fn open_redirect_files(cmd_data: &CommandLine) -> Vec<LocalFd> {
     let mut opened: Vec<LocalFd> = Vec::with_capacity(cmd_data.redirects.len());
@@ -14,7 +14,10 @@ pub fn open_redirect_files(cmd_data: &CommandLine) -> Vec<LocalFd> {
             let fd = match sys::openat2::openat2(
                 sys::atfd::AtFd::cwd(),
                 &name,
-                &sys::openat2::OpenHow::new((flags | O_CLOEXEC) as u64, 0o666),
+                &sys::openat2::OpenHow::new(
+                    (flags | O_CLOEXEC) as u64,
+                    if flags & O_CREAT != 0 { 0o666 } else { 0 },
+                ),
             ) {
                 Ok(f) => f,
                 Err(e) => std::process::exit(e),

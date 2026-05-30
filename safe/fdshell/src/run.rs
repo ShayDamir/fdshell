@@ -32,6 +32,13 @@ pub(crate) fn run_one(
                 };
                 std::process::exit(code);
             }
+            if cmdline.command.as_bytes() == b"become" {
+                if !cmdline.captures.is_empty() {
+                    eprintln!("become: captures not supported");
+                    std::process::exit(sys::errno::EINVAL);
+                }
+                crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, fdvars);
+            }
             let (status, capture_fd_opt) = crate::launch::launch(fdvars, &cmdline)?;
             if let WaitStatus::Exited(0) = status
                 && let Some((capture_fd, child_pid)) = capture_fd_opt
