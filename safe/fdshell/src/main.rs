@@ -11,11 +11,13 @@ mod pipeline;
 mod redirect;
 mod repl;
 mod resolve;
+mod run;
 mod vars;
 
 use std::io::Write;
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
 use sys::openat2::OpenHow;
+use sys::siginfo::WaitStatus;
 use sys::{AtFd, ShortCStr};
 
 fn main() -> Result<(), i32> {
@@ -24,11 +26,12 @@ fn main() -> Result<(), i32> {
     let how = OpenHow::new(O_DIRECTORY as u64 | O_CLOEXEC as u64, 0);
     let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
     fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);
+    let mut last_status = WaitStatus::Exited(0);
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
         if arg == "-c" {
             let cmd = args.next().ok_or(sys::errno::EINVAL)?;
-            let code = repl::exec_cmd(&cmd, &mut fdvars)?;
+            let code = repl::exec_cmd(&cmd, &mut fdvars, &mut last_status)?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -51,10 +54,7 @@ fn main() -> Result<(), i32> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if line == "exit" || line == "quit" {
-            break;
-        }
-        repl::handle(line, &mut fdvars)?;
+        repl::handle(line, &mut fdvars, &mut last_status)?;
     }
     Ok(())
 }
