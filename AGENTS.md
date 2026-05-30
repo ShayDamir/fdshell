@@ -12,6 +12,7 @@ Three crates in a Cargo workspace (`resolver = "2"`):
 
 - `safe/` crates **cannot** call libc directly (`forbid(unsafe_code)`).
 - `safe/` and `unsafe/` source files must be ≤80 lines each (excluding comments). If a file approaches this limit, split or refactor rather than compress formatting. Tests are exempt from the line limit.
+  - Measure code lines after `cargo fmt`. Don't manipulate whitespace to squeeze under the limit — if it's a few lines over, leave it and flag for refactoring in TODO.md.
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
 - Safe wrappers in `unsafe/sys` return `Result<_, i32>` (positive errno on error). Use `cvt(ret: isize) -> Result<isize, i32>` from `lib.rs` to convert libc return values.
 - Avoid `#[derive]` in production code. Derives like `Debug`, `PartialEq`, and `Eq` are
@@ -128,7 +129,7 @@ Three fd types across `unsafe/sys/src/`:
 ## Nesting
 
 fdshell detects when it runs as a child of another fdshell via `detect_nested()` in
-`safe/fdshell/src/main.rs`: if `FDSHELL_CAPTURE` env var equals `getpid()`, the
+`safe/fdshell/src/init.rs`: if `FDSHELL_CAPTURE` env var equals `getpid()`, the
 parent fdshell launched us as a capture target. The function additionally validates
 that fd 3 is actually open and non-CLOEXEC via `ImportedFd::from_bytes(SHELLFD_STR)`,
 returning `Option<ImportedFd>`.
