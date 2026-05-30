@@ -20,11 +20,7 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
         Ok(p) if !p.is_empty() => p,
         _ => "/usr/local/bin:/usr/bin:/bin".to_string(),
     };
-    let how = OpenHow {
-        flags: O_PATH as u64 | O_CLOEXEC as u64,
-        mode: 0,
-        resolve: 0,
-    };
+    let how = OpenHow::new(O_PATH as u64 | O_CLOEXEC as u64, 0);
     for dir in path.split(':').filter(|d| !d.is_empty()) {
         let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
         let pathname = CString::new(full).map_err(|_| sys::errno::EINVAL)?;
@@ -37,12 +33,11 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
 
 pub fn resolve_path(bin: &CStr) -> Result<LocalFd, i32> {
     if bin.to_bytes().contains(&b'/') {
-        let how = OpenHow {
-            flags: O_PATH as u64 | O_CLOEXEC as u64,
-            mode: 0,
-            resolve: 0,
-        };
-        sys::openat2::openat2(AtFd::cwd(), bin, &how)
+        sys::openat2::openat2(
+            AtFd::cwd(),
+            bin,
+            &OpenHow::new(O_PATH as u64 | O_CLOEXEC as u64, 0),
+        )
     } else {
         search_path(bin)
     }

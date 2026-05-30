@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use core::fmt;
-use sys::LocalFd;
 use sys::ShortCStr;
 
 pub enum RedirectSource {
@@ -41,10 +40,10 @@ impl PartialEq for RedirectDirection {
 
 impl fmt::Debug for RedirectDirection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read => write!(f, "Read"),
-            Self::Write => write!(f, "Write"),
-        }
+        f.write_str(match self {
+            Self::Read => "Read",
+            Self::Write => "Write",
+        })
     }
 }
 
@@ -62,6 +61,15 @@ impl PartialEq for RedirectDef {
     }
 }
 
+impl RedirectDef {
+    pub fn resolve<'a>(&self, local: &'a super::LocalFd) -> super::Redirect<'a> {
+        super::Redirect {
+            export_to: self.export_to,
+            local,
+        }
+    }
+}
+
 impl fmt::Debug for RedirectDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedirectDef")
@@ -69,17 +77,5 @@ impl fmt::Debug for RedirectDef {
             .field("direction", &self.direction)
             .field("source", &self.source)
             .finish()
-    }
-}
-
-pub struct Redirect<'a> {
-    pub export_to: i32,
-    pub local: &'a LocalFd,
-}
-
-impl Redirect<'_> {
-    pub fn export(&self) -> Result<(), i32> {
-        self.local.export_to(self.export_to)?;
-        Ok(())
     }
 }

@@ -190,11 +190,14 @@ fn test_path_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Path(ShortCStr::from_static(c"out.txt")),
-    }]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::Path(ShortCStr::from_static(c"out.txt")),
+        }]
+    );
 }
 
 #[test]
@@ -203,11 +206,14 @@ fn test_path_redirect_stdin() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef {
-        export_to: 0,
-        direction: RedirectDirection::Read,
-        source: RedirectSource::Path(ShortCStr::from_static(c"input.txt")),
-    }]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Path(ShortCStr::from_static(c"input.txt")),
+        }]
+    );
 }
 
 #[test]
@@ -216,11 +222,14 @@ fn test_stderr_path_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef {
-        export_to: 2,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Path(ShortCStr::from_static(c"err.log")),
-    }]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 2,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::Path(ShortCStr::from_static(c"err.log")),
+        }]
+    );
 }
 
 #[test]

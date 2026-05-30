@@ -47,11 +47,7 @@ fn main() -> Result<(), i32> {
     let mut fdvars = vars::FdVars::new();
     let stdin = std::io::stdin();
     let mut buf = String::new();
-    let how = OpenHow {
-        flags: O_DIRECTORY as u64 | O_CLOEXEC as u64,
-        mode: 0,
-        resolve: 0,
-    };
+    let how = OpenHow::new(O_DIRECTORY as u64 | O_CLOEXEC as u64, 0);
     let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
     fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);
     loop {

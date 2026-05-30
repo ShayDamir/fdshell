@@ -8,6 +8,16 @@ pub struct OpenHow {
     pub resolve: u64,
 }
 
+impl OpenHow {
+    pub fn new(flags: u64, mode: u64) -> Self {
+        OpenHow {
+            flags,
+            mode,
+            resolve: 0,
+        }
+    }
+}
+
 pub const RESOLVE_NO_SYMLINKS: u64 = 1;
 pub const RESOLVE_NO_MAGICLINKS: u64 = 2;
 pub const RESOLVE_NO_XDEV: u64 = 4;

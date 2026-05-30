@@ -35,11 +35,7 @@ fn cd_path(path: &ShortCStr) -> Result<LocalFd, i32> {
 }
 
 fn open_cwd_dir(path: &std::ffi::CStr) -> Result<LocalFd, i32> {
-    let how = OpenHow {
-        flags: O_DIRECTORY as u64 | O_CLOEXEC as u64 | O_NOFOLLOW as u64,
-        mode: 0,
-        resolve: 0,
-    };
+    let how = OpenHow::new(O_DIRECTORY as u64 | O_CLOEXEC as u64 | O_NOFOLLOW as u64, 0);
     sys::openat2::openat2(AtFd::cwd(), path, &how)
 }
 

@@ -10,11 +10,7 @@ pub fn launch(
     vars: &FdVars,
     cmdline: &CommandLine,
 ) -> Result<(WaitStatus, Option<(sys::LocalFd, i32)>), i32> {
-    let cmd = if cmdline.builtin {
-        Command::Builtin(cmdline.command.clone())
-    } else {
-        Command::External(cmdline.command.clone())
-    };
+    let cmd = Command::from(cmdline);
 
     let mut opened: Vec<sys::LocalFd> = Vec::with_capacity(cmdline.redirects.len());
     for r in &cmdline.redirects {
@@ -29,11 +25,7 @@ pub fn launch(
             let fd = sys::openat2::openat2(
                 sys::atfd::AtFd::cwd(),
                 &name,
-                &sys::openat2::OpenHow {
-                    flags: flags as u64 | sys::fcntl::O_CLOEXEC as u64,
-                    mode: 0o666,
-                    resolve: 0,
-                },
+                &sys::openat2::OpenHow::new(flags as u64 | sys::fcntl::O_CLOEXEC as u64, 0o666),
             )?;
             opened.push(fd);
         }
@@ -50,10 +42,7 @@ pub fn launch(
                 fd
             }
         };
-        resolved.push(Redirect {
-            export_to: r.export_to,
-            local,
-        });
+        resolved.push(r.resolve(local));
     }
 
     let (capture_fd, child_fd) = if cmdline.captures.is_empty() {
