@@ -22,6 +22,7 @@ use sys::siginfo::WaitStatus;
 
 fn main() -> Result<(), i32> {
     let _mode = crate::init::init_shellfd()?;
+    sys::umask::init();
     let mut fdvars = vars::FdVars::new();
     let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
     fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);

@@ -7,6 +7,7 @@ pub enum ParsedLine {
     Pipeline(Pipeline),
     Assign { var: ShortCStr, value: ShortCStr },
     Unset(ShortCStr),
+    Umask(Option<u32>),
 }
 
 pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {
@@ -28,6 +29,21 @@ pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {
             return Ok(Some(ParsedLine::Unset(var)));
         }
         return Err(EINVAL);
+    }
+
+    if first.as_bytes() == b"umask" {
+        let mask = match tokens.get(1) {
+            Some(arg) => {
+                let s = core::str::from_utf8(arg.as_bytes()).map_err(|_| EINVAL)?;
+                let s = s.strip_prefix("0o").unwrap_or(s);
+                Some(u32::from_str_radix(s, 8).map_err(|_| EINVAL)?)
+            }
+            None => None,
+        };
+        if tokens.get(2).is_some() {
+            return Err(EINVAL);
+        }
+        return Ok(Some(ParsedLine::Umask(mask)));
     }
 
     Ok(None)

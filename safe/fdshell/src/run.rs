@@ -77,6 +77,15 @@ pub(crate) fn run_one(
             fdvars.remove(var.as_bytes());
             *last_status = WaitStatus::Exited(0);
         }
+        crate::parse::ParsedLine::Umask(mask) => {
+            match mask {
+                Some(m) => {
+                    sys::umask::set(m);
+                }
+                None => println!("{:04o}", sys::umask::get()),
+            }
+            *last_status = WaitStatus::Exited(0);
+        }
     }
     Ok(())
 }

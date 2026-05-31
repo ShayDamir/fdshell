@@ -38,5 +38,6 @@ pub mod shellfd;
 pub mod shortcstr;
 pub mod siginfo;
 pub mod stat;
+pub mod umask;
 pub mod unlinkat;
 pub mod wait_pidfd;
