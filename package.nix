@@ -1,22 +1,18 @@
-{ lib, rustPlatform, pkgs, version, src, cargoLock, clippy, rustfmt
+{ lib, pkgs, version, src, cargoLock, clippy, rustfmt
+, rustToolchainFile
 , cargo-llvm-cov ? null, cargo-nextest ? null
 , doClippy ? false, doTests ? false, doFmt ? false, doCoverage ? false
 }:
 
 let
-  effectivePlatform = if doCoverage then
-    pkgs.makeRustPlatform {
-      rustc = pkgs.rust-bin.stable.latest.default.override {
-        extensions = [ "llvm-tools-preview" ];
-      };
-      cargo = pkgs.rust-bin.stable.latest.default.override {
-        extensions = [ "llvm-tools-preview" ];
-      };
-    }
-  else
-    rustPlatform;
+  toolchain = pkgs.rust-bin.fromRustupToolchainFile rustToolchainFile;
 
-  base = effectivePlatform.buildRustPackage {
+  rustPlatform' = pkgs.makeRustPlatform {
+    rustc = toolchain;
+    cargo = toolchain;
+  };
+
+  base = rustPlatform'.buildRustPackage {
     pname = "fdshell";
     inherit version src;
     cargoLock.lockFile = cargoLock;

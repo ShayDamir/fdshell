@@ -24,11 +24,13 @@
         inherit version;
         src = lib.cleanSource ./.;
         cargoLock = ./Cargo.lock;
+        rustToolchainFile = ./rust-toolchain.toml;
       };
       coverage = pkgsFor.${system}.callPackage ./package.nix {
         inherit version;
         src = lib.cleanSource ./.;
         cargoLock = ./Cargo.lock;
+        rustToolchainFile = ./rust-toolchain.toml;
         doCoverage = true;
       };
     });
@@ -38,6 +40,7 @@
         inherit version;
         src = lib.cleanSource ./.;
         cargoLock = ./Cargo.lock;
+        rustToolchainFile = ./rust-toolchain.toml;
         doFmt = true;
         doClippy = true;
         doTests = true;
