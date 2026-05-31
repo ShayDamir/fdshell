@@ -60,8 +60,6 @@ pub fn launch_pipeline(
             })
         })
         .collect();
-    drop(capture_pairs);
-    drop(commands);
 
     let last = children.last().ok_or(sys::errno::EINVAL)?;
     let last_status = sys::wait_pidfd::wait_pidfd(&last.1)?;

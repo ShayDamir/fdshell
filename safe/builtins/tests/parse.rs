@@ -68,7 +68,6 @@ fn dirfd_numeric() {
     assert_ok(&["--dirfd", &s, "x"], |cfg| {
         assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(dupfd.as_raw()));
     });
-    drop(wr);
 }
 
 #[test]

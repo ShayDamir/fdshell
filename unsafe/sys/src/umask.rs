@@ -31,7 +31,6 @@ fn read_proc_umask() -> Option<u32> {
     let fd = crate::openat2::open(c"/proc/self/status", O_RDONLY).ok()?;
     let mut buf = [0u8; 4096];
     let n = crate::rw::read(&fd, &mut buf).ok()? as usize;
-    drop(fd);
     let data = buf.get(..n)?;
     let start = data.windows(7).position(|w| w == b"Umask:\t")? + 7;
     let tail = data.get(start..)?;

@@ -112,7 +112,6 @@ fn olddirfd_numeric() {
             Some(dupfd.as_raw())
         );
     });
-    drop(wr);
 }
 
 #[test]
@@ -135,7 +134,6 @@ fn newdirfd_numeric() {
             Some(dupfd.as_raw())
         );
     });
-    drop(wr);
 }
 
 #[test]
