@@ -10,11 +10,11 @@ Example:
 
 ```shell
 # creates a directory and saves the fd in %foo
-builtin mkdirat --dirfd %CWD foo %>%foo
+builtin mkdirat --dirfd %CWD --mode 0755 foo %>%foo
 # creates another directory and saves the fd in %bar
-builtin mkdirat --dirfd %CWD bar %>%bar
+builtin mkdirat --dirfd %CWD --mode 0755 bar %>%bar
 # creates a new file in %foo
-builtin openat2 --dirfd %foo --flags O_CREAT --flags O_EXCL --mode 0644 baz %>%baz
+builtin openat2 --dirfd %foo --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 baz %>%baz
 # renames foo/baz into bar/qux
 builtin renameat2 --olddirfd %foo --newdirfd %bar baz qux
 # spawns an external command that writes to the same fd as foo/baz
