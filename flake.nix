@@ -25,6 +25,12 @@
         src = lib.cleanSource ./.;
         cargoLock = ./Cargo.lock;
       };
+      coverage = pkgsFor.${system}.callPackage ./package.nix {
+        inherit version;
+        src = lib.cleanSource ./.;
+        cargoLock = ./Cargo.lock;
+        doCoverage = true;
+      };
     });
 
     checks = eachSystem (system: {
