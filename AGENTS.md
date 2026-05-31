@@ -59,7 +59,12 @@ nix flake check             # fmt + clippy + cargo nextest
 
 - Tests live in `unsafe/sys/tests/` and `safe/builtins/tests/`.
 - `useNextest = true` in `package.nix` / `flake.nix`.
-- Run tests: `cargo test -p sys -p builtins`.
+- Always run tests via nextest in the checks dev shell:
+  ```
+  nix develop .#checks.x86_64-linux.default -c cargo nextest run
+  ```
+  This uses the same Rust toolchain (from `rust-toolchain.toml`) and nextest
+  configuration (from `nextest.toml`) as CI. Do not use raw `cargo test`.
 
 ## Platform
 
