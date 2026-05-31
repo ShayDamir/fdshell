@@ -18,6 +18,12 @@ pub fn set_passcred(sock: &LocalFd) -> Result<(), i32> {
     Ok(())
 }
 
+pub fn socketpair_with_passcred() -> Result<(LocalFd, LocalFd), i32> {
+    let (a, b) = socketpair()?;
+    set_passcred(&a)?;
+    Ok((a, b))
+}
+
 pub fn socketpair() -> Result<(LocalFd, LocalFd), i32> {
     let mut pair = [0i32; 2];
     // SAFETY: `pair` is a valid mutable reference to 2 `i32`s; `socketpair` writes

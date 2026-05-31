@@ -1,6 +1,6 @@
 use crate::child::{self, Command};
 use crate::parse::CommandLine;
-use crate::redirect::{Redirect, RedirectSource::*};
+use crate::redirect::Redirect;
 use crate::vars::FdVars;
 use sys::LocalFd;
 
@@ -27,24 +27,12 @@ pub fn run_child(
 
     let opened = super::open::open_redirect_files(cmd_data);
 
-    let mut path_idx = 0;
-    for r in &cmd_data.redirects {
-        let local = match &r.source {
-            Var(var) => match vars.resolve(var.as_bytes()) {
-                Some(fd) => fd,
-                None => std::process::exit(sys::errno::EINVAL),
-            },
-            Path(_) => {
-                let fd = match opened.get(path_idx) {
-                    Some(f) => f,
-                    None => std::process::exit(sys::errno::EIO),
-                };
-                path_idx += 1;
-                fd
-            }
+    let file_redirects =
+        match crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, vars) {
+            Ok(fds) => fds,
+            Err(e) => std::process::exit(e),
         };
-        redirects.push(r.resolve(local));
-    }
+    redirects.extend(file_redirects);
 
     let child_sock = capture_pairs
         .get_mut(i)

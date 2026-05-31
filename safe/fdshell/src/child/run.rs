@@ -1,10 +1,9 @@
 use crate::child::{self, Command};
 use crate::exec;
 use crate::redirect::Redirect;
-use crate::resolve::substitute_arg;
+use crate::resolve::substitute_args;
 use crate::vars::FdVars;
-use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use sys::ShortCStr;
 
 pub fn child_main(
@@ -25,12 +24,7 @@ pub fn child_main(
         r.export()?;
     }
 
-    let mut dup_cache: HashMap<ShortCStr, sys::ExportedFd> = HashMap::new();
-    let resolved: Vec<CString> = args
-        .iter()
-        .map(|a| substitute_arg(a, &mut dup_cache, vars))
-        .collect::<Result<_, _>>()?;
-
+    let resolved = substitute_args(args, vars)?;
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
     match cmd {
@@ -38,9 +32,9 @@ pub fn child_main(
         Command::External(name) => {
             let name_cs = name.to_c_string();
             let fd = exec::resolve_path(&name_cs)?;
-            let mut full_argv = Vec::with_capacity(refs.len() + 1);
-            full_argv.push(name_cs.as_c_str());
-            full_argv.extend(refs.iter().copied());
+            let full_argv: Vec<&CStr> = std::iter::once(name_cs.as_c_str())
+                .chain(refs.iter().copied())
+                .collect();
             exec::exec_fd(&fd, &full_argv)
         }
     }

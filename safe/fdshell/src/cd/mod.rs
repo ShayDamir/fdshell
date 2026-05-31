@@ -1,9 +1,8 @@
 use crate::vars::FdVars;
 use std::ffi::CString;
 use sys::errno::{EINVAL, ENOENT};
-use sys::fcntl::{O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW};
-use sys::openat2::OpenHow;
-use sys::{AtFd, LocalFd, ShortCStr};
+use sys::fcntl::{O_DIRECTORY, O_NOFOLLOW};
+use sys::{LocalFd, ShortCStr};
 
 pub fn cd(args: &[ShortCStr], fdvars: &mut FdVars) -> Result<(), i32> {
     let new_fd = match args.first() {
@@ -35,8 +34,7 @@ fn cd_path(path: &ShortCStr) -> Result<LocalFd, i32> {
 }
 
 fn open_cwd_dir(path: &std::ffi::CStr) -> Result<LocalFd, i32> {
-    let how = OpenHow::new(O_DIRECTORY as u64 | O_CLOEXEC as u64 | O_NOFOLLOW as u64, 0);
-    sys::openat2::openat2(AtFd::cwd(), path, &how)
+    sys::openat2::open(path, O_DIRECTORY | O_NOFOLLOW)
 }
 
 fn move_cwd(fdvars: &mut FdVars, new_cwd: LocalFd) {

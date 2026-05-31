@@ -2,9 +2,7 @@
 
 use crate::child::{self, Command};
 use crate::parse::CommandLine;
-use crate::redirect::{Redirect, RedirectSource};
 use crate::vars::FdVars;
-use sys::fcntl::{O_CLOEXEC, O_CREAT};
 use sys::siginfo::WaitStatus;
 
 pub fn launch(
@@ -13,42 +11,13 @@ pub fn launch(
 ) -> Result<(WaitStatus, Option<(sys::LocalFd, i32)>), i32> {
     let cmd = Command::from(cmdline);
 
-    let mut opened: Vec<sys::LocalFd> = Vec::with_capacity(cmdline.redirects.len());
-    for r in &cmdline.redirects {
-        if let RedirectSource::Path(path) = &r.source {
-            let flags = r.direction.open_flags();
-            let name = path.to_c_string();
-            let fd = sys::openat2::openat2(
-                sys::atfd::AtFd::cwd(),
-                &name,
-                &sys::openat2::OpenHow::new(
-                    (flags | O_CLOEXEC) as u64,
-                    if flags & O_CREAT != 0 { 0o666 } else { 0 },
-                ),
-            )?;
-            opened.push(fd);
-        }
-    }
-
-    let mut resolved: Vec<Redirect<'_>> = Vec::with_capacity(cmdline.redirects.len());
-    let mut path_idx = 0usize;
-    for r in &cmdline.redirects {
-        let local = match &r.source {
-            RedirectSource::Var(var) => vars.resolve(var.as_bytes()).ok_or(sys::errno::EINVAL)?,
-            RedirectSource::Path(_) => {
-                let fd = opened.get(path_idx).ok_or(sys::errno::EIO)?;
-                path_idx += 1;
-                fd
-            }
-        };
-        resolved.push(r.resolve(local));
-    }
+    let opened = crate::redirect::open_redirect_files(&cmdline.redirects)?;
+    let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, vars)?;
 
     let (capture_fd, child_fd) = if cmdline.captures.is_empty() {
         (None, None)
     } else {
-        let (cap, ch) = sys::net::socketpair()?;
-        sys::net::set_passcred(&cap)?;
+        let (cap, ch) = sys::net::socketpair_with_passcred()?;
         (Some(cap), Some(ch))
     };
     let (child_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;

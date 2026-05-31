@@ -2,8 +2,7 @@
 
 use std::ffi::{CStr, CString};
 use sys::execveat::AT_EMPTY_PATH;
-use sys::fcntl::{O_CLOEXEC, O_PATH};
-use sys::openat2::OpenHow;
+use sys::fcntl::O_PATH;
 use sys::{AtFd, LocalFd};
 
 pub fn exec_fd(fd: &LocalFd, argv: &[&CStr]) -> Result<(), i32> {
@@ -27,11 +26,10 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
         Ok(p) if !p.is_empty() => p,
         _ => "/usr/local/bin:/usr/bin:/bin".to_string(),
     };
-    let how = OpenHow::new(O_PATH as u64 | O_CLOEXEC as u64, 0);
     for dir in path.split(':').filter(|d| !d.is_empty()) {
         let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
         let pathname = CString::new(full).map_err(|_| sys::errno::EINVAL)?;
-        if let Ok(fd) = sys::openat2::openat2(AtFd::cwd(), &pathname, &how) {
+        if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
             return Ok(fd);
         }
     }
@@ -40,34 +38,22 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
 
 pub fn resolve_path(bin: &CStr) -> Result<LocalFd, i32> {
     if bin.to_bytes().contains(&b'/') {
-        sys::openat2::openat2(
-            AtFd::cwd(),
-            bin,
-            &OpenHow::new(O_PATH as u64 | O_CLOEXEC as u64, 0),
-        )
+        sys::openat2::open(bin, O_PATH)
     } else {
         search_path(bin)
     }
 }
 
 fn get_environ(cookie: &[u8]) -> Vec<CString> {
-    let mut env: Vec<CString> = std::env::vars()
+    let env_iter = std::env::vars()
         .filter(|(k, _)| k != "FDSHELL_CAPTURE")
-        .filter_map(|(k, v)| {
-            let mut entry = k;
-            entry.push('=');
-            entry.push_str(&v);
-            CString::new(entry).ok()
-        })
-        .collect();
+        .filter_map(|(k, v)| CString::new(format!("{k}={v}")).ok());
     if sys::shellfd::capture_active() {
-        let mut entry = b"FDSHELL_CAPTURE=".to_vec();
-        entry.extend_from_slice(cookie);
-        if let Ok(cs) = CString::new(entry) {
-            env.push(cs);
-        }
+        let entry = [b"FDSHELL_CAPTURE=", cookie].concat();
+        env_iter.chain(CString::new(entry).ok()).collect()
+    } else {
+        env_iter.collect()
     }
-    env
 }
 
 #[cfg(test)]

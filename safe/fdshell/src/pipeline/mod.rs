@@ -21,22 +21,20 @@ pub fn launch_pipeline(
     let n = pipeline.commands.len();
     let commands = pipeline.commands;
 
-    let mut pipes: Vec<(sys::LocalFd, sys::LocalFd)> = Vec::with_capacity(n.saturating_sub(1));
-    for _ in 0..n.saturating_sub(1) {
-        let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC)?;
-        pipes.push((rd, wr));
-    }
+    let pipes = std::iter::repeat_with(|| sys::pipe::pipe2(sys::fcntl::O_CLOEXEC))
+        .take(n.saturating_sub(1))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let mut capture_pairs: Vec<Option<(sys::LocalFd, sys::LocalFd)>> = Vec::with_capacity(n);
-    for cmd in &commands {
-        if cmd.captures.is_empty() {
-            capture_pairs.push(None);
-        } else {
-            let (parent, child) = sys::net::socketpair()?;
-            sys::net::set_passcred(&parent)?;
-            capture_pairs.push(Some((parent, child)));
-        }
-    }
+    let mut capture_pairs = commands
+        .iter()
+        .map(|cmd| {
+            if cmd.captures.is_empty() {
+                Ok(None)
+            } else {
+                sys::net::socketpair_with_passcred().map(Some)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut children: Vec<(i32, sys::LocalFd)> = Vec::with_capacity(n);
 
@@ -50,21 +48,18 @@ pub fn launch_pipeline(
 
     drop(pipes);
 
-    let mut channels: Vec<CaptureChannel> = Vec::new();
-    for i in 0..n {
-        if let Some(pair) = capture_pairs.get_mut(i)
-            && let Some((parent_end, child_end)) = pair.take()
-        {
-            drop(child_end);
-            if let (Some(ch), Some(cmd)) = (children.get(i), commands.get(i)) {
-                channels.push(CaptureChannel {
-                    capture_fd: parent_end,
-                    child_pid: ch.0,
-                    captures: cmd.captures.clone(),
-                });
-            }
-        }
-    }
+    let channels: Vec<CaptureChannel> = (0..n)
+        .filter_map(|i| {
+            let pair = capture_pairs.get_mut(i)?;
+            let (parent_end, _child_end) = pair.take()?;
+            let (ch, cmd) = (children.get(i)?, commands.get(i)?);
+            Some(CaptureChannel {
+                capture_fd: parent_end,
+                child_pid: ch.0,
+                captures: cmd.captures.clone(),
+            })
+        })
+        .collect();
     drop(capture_pairs);
     drop(commands);
 

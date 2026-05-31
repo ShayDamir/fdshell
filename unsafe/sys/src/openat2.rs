@@ -1,3 +1,4 @@
+use crate::fcntl::{O_CLOEXEC, O_CREAT};
 use crate::{AtFd, LocalFd};
 use core::ffi::CStr;
 
@@ -24,6 +25,15 @@ pub const RESOLVE_NO_XDEV: u64 = 4;
 pub const RESOLVE_BENEATH: u64 = 8;
 pub const RESOLVE_IN_ROOT: u64 = 16;
 pub const RESOLVE_CACHED: u64 = 32;
+
+pub fn open(pathname: &CStr, flags: i32) -> Result<LocalFd, i32> {
+    let mode = if flags & O_CREAT != 0 { 0o666 } else { 0 };
+    openat2(
+        AtFd::cwd(),
+        pathname,
+        &OpenHow::new((flags | O_CLOEXEC) as u64, mode),
+    )
+}
 
 pub fn openat2(dirfd: AtFd<'_>, pathname: &CStr, how: &OpenHow) -> Result<LocalFd, i32> {
     let dirfd = dirfd.as_raw();

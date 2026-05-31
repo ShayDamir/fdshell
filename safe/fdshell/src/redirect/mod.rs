@@ -2,10 +2,14 @@
 
 mod def;
 mod direction;
+mod open;
+mod resolve;
 mod source;
 
 pub use def::*;
 pub use direction::*;
+pub use open::*;
+pub use resolve::*;
 pub use source::*;
 
 use sys::LocalFd;

@@ -56,3 +56,10 @@ pub(crate) fn substitute_arg(
     }
     CString::new(out).map_err(|_| sys::errno::EINVAL)
 }
+
+pub fn substitute_args(args: &[ShortCStr], vars: &FdVars) -> Result<Vec<CString>, i32> {
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    args.iter()
+        .map(|a| substitute_arg(a, &mut cache, vars))
+        .collect()
+}

@@ -16,16 +16,14 @@ mod run;
 mod vars;
 
 use std::io::Write;
-use sys::fcntl::{O_CLOEXEC, O_DIRECTORY};
-use sys::openat2::OpenHow;
+use sys::ShortCStr;
+use sys::fcntl::O_DIRECTORY;
 use sys::siginfo::WaitStatus;
-use sys::{AtFd, ShortCStr};
 
 fn main() -> Result<(), i32> {
     let _mode = crate::init::init_shellfd()?;
     let mut fdvars = vars::FdVars::new();
-    let how = OpenHow::new(O_DIRECTORY as u64 | O_CLOEXEC as u64, 0);
-    let cwd = sys::openat2::openat2(AtFd::cwd(), c".", &how)?;
+    let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
     fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);
     let mut last_status = WaitStatus::Exited(0);
     let mut args = std::env::args().skip(1);
