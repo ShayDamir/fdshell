@@ -53,7 +53,7 @@ nix flake check             # fmt + clippy + cargo nextest
 
 - Version is read from `safe/fdshell/Cargo.toml` in `flake.nix`.
 - Nix files must be `git add`-ed before `nix build`/`nix flake check` (Nix reads from the Git index).
-- `package.nix` parameters: `doFmt`, `doClippy`, `doTests`. Future: add `doCoverage ? false` the same way.
+- `package.nix` parameters: `doFmt`, `doClippy`, `doTests`, `doCoverage`.
 
 ## Testing
 
@@ -65,6 +65,23 @@ nix flake check             # fmt + clippy + cargo nextest
   ```
   This uses the same Rust toolchain (from `rust-toolchain.toml`) and nextest
   configuration (from `nextest.toml`) as CI. Do not use raw `cargo test`.
+
+## Coverage
+
+- Requires `git add` of all modified files first (Nix reads from git index).
+  ```sh
+  nix build .#coverage
+  ```
+  Produces `result/index.html` (full HTML report) and `result/coverage-summary.json`
+  (per-file JSON summary with region/line/function/branch percentages).
+
+  To list the 10 source files with lowest region coverage:
+  ```sh
+  jq -r '[.data[0].files[] | select(.filename | test("\\.rs$")) |
+    {file: .filename, pct: .summary.regions.percent}] |
+    sort_by(.pct) | .[:10][] | "\(.pct | floor | tostring | " " * (3 - (tostring | length)) + .)%  \(.file)"' \
+    result/coverage-summary.json
+  ```
 
 ## Platform
 
