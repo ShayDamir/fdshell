@@ -16,7 +16,7 @@ fn import_fd(args: &[ShortCStr]) -> Result<(), i32> {
     sys::shellfd::send_fd(&fd.try_into_local()?, c"import_fd")
 }
 
-fn export_fd(args: &[ShortCStr], vars: &FdVars) -> Result<(), i32> {
+pub(crate) fn export_fd(args: &[ShortCStr], vars: &FdVars) -> Result<(), i32> {
     let (vname, tag) = match args {
         [a] => {
             let v = a.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;

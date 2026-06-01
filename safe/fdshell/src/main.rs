@@ -5,6 +5,7 @@ mod cd;
 mod child;
 mod exec;
 mod init;
+mod intercept;
 mod launch;
 mod parse;
 mod pipeline;

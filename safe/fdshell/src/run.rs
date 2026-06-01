@@ -9,35 +9,8 @@ pub(crate) fn run_one(
 ) -> Result<(), i32> {
     match crate::parse::parse(line)? {
         crate::parse::ParsedLine::Cmd(cmdline) => {
-            if cmdline.command.as_bytes() == b"cd" {
-                if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty()
-                {
-                    return Err(EINVAL);
-                }
-                crate::cd::cd(&cmdline.args, fdvars)?;
-                *last_status = WaitStatus::Exited(0);
+            if crate::intercept::try_intercept(&cmdline, fdvars, last_status)? {
                 return Ok(());
-            }
-            if cmdline.command.as_bytes() == b"exit" || cmdline.command.as_bytes() == b"quit" {
-                if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty()
-                {
-                    return Err(EINVAL);
-                }
-                let code = match cmdline.args.first() {
-                    Some(arg) => {
-                        let s = core::str::from_utf8(arg.as_bytes()).map_err(|_| EINVAL)?;
-                        s.parse::<i32>().map_err(|_| EINVAL)?
-                    }
-                    None => last_status.exit_code(),
-                };
-                std::process::exit(code);
-            }
-            if cmdline.command.as_bytes() == b"become" {
-                if !cmdline.captures.is_empty() {
-                    eprintln!("become: captures not supported");
-                    std::process::exit(sys::errno::EINVAL);
-                }
-                crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, fdvars);
             }
             let (status, capture_fd_opt) = crate::launch::launch(fdvars, &cmdline)?;
             if let WaitStatus::Exited(0) = status
