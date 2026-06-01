@@ -199,6 +199,25 @@ fn builtin_pipe_nonblock() {
 }
 
 #[test]
+fn builtin_resolve_success() {
+    let dir = tmpdir();
+    let output = run_c("builtin resolve echo %>%fd", &dir);
+    assert_ok(&output, "builtin_resolve_success");
+}
+
+#[test]
+fn builtin_resolve_and_exec() {
+    let dir = tmpdir();
+    let cmd = concat!(
+        "builtin resolve echo %>%fd; ",
+        "builtin exec_fd %fd echo hello",
+    );
+    let output = run_c(cmd, &dir);
+    assert_ok(&output, "builtin_resolve_and_exec");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "hello");
+}
+
+#[test]
 fn readme_first_example() {
     let dir = tmpdir();
 

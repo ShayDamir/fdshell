@@ -52,6 +52,12 @@ pub fn dispatch_builtin(
                 refs.get(2..).ok_or(sys::errno::EINVAL)?,
             )
         }
+        b"resolve" => {
+            let name = refs.first().ok_or(sys::errno::EINVAL)?;
+            let fd = exec::resolve_path(name)?;
+            sys::shellfd::send_fd(&fd, c"resolve").ok();
+            Ok(())
+        }
         _ => Err(sys::errno::ENOSYS),
     }
 }
