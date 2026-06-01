@@ -5,6 +5,11 @@ use core::ptr;
 
 use crate::AtFd;
 
+#[cfg(coverage)]
+unsafe extern "C" {
+    fn __llvm_profile_write_file() -> i32;
+}
+
 pub use libc::AT_EMPTY_PATH;
 pub use libc::AT_SYMLINK_NOFOLLOW;
 
@@ -29,6 +34,12 @@ pub fn execveat(
     // SAFETY: SYS_execveat (322) is valid on Linux ≥3.19 x86_64.
     // pathname, argv_ptrs, envp_ptrs point to valid memory. argv/envp
     // are NULL-terminated. dirfd is a valid fd or AT_FDCWD.
+    #[cfg(coverage)]
+    // SAFETY: single-threaded child after fork; LLVM's compiler-rt
+    // provides __llvm_profile_write_file when -C instrument-coverage is used.
+    unsafe {
+        __llvm_profile_write_file();
+    };
     crate::cvt(unsafe {
         libc::syscall(
             libc::SYS_execveat,

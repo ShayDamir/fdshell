@@ -3,7 +3,7 @@
 use core::ffi::CStr;
 use std::ffi::CString;
 use sys::errno::{EINVAL, ENOENT, HELP};
-use sys::fcntl::O_CLOEXEC;
+use sys::fcntl::{O_APPEND, O_CLOEXEC, O_CREAT, O_EXCL, O_RDWR, O_TRUNC, O_WRONLY};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -157,4 +157,60 @@ fn resolve_eq() {
     assert_ok(&["--resolve=RESOLVE_IN_ROOT", "x"], |cfg| {
         assert_eq!(cfg.how.resolve, 16);
     });
+}
+
+#[test]
+fn pipe_flags_three() {
+    assert_ok(&["--flags", "O_CREAT|O_EXCL|O_RDWR", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_CREAT | O_EXCL | O_RDWR) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_write_create_append() {
+    assert_ok(&["--flags", "O_WRONLY|O_CREAT|O_APPEND", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_WRONLY | O_CREAT | O_APPEND) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_hex() {
+    assert_ok(&["--flags", "0x42", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, 0x42u64);
+    });
+}
+
+#[test]
+fn repeated_flags_mixed() {
+    assert_ok(
+        &["--flags", "O_RDWR|O_CREAT", "--flags", "O_EXCL", "x"],
+        |cfg| {
+            assert_eq!(cfg.how.flags, (O_RDWR | O_CREAT | O_EXCL) as u64);
+        },
+    );
+}
+
+#[test]
+fn pipe_flags_all_names() {
+    assert_ok(
+        &["--flags", "O_RDWR|O_CREAT|O_EXCL|O_TRUNC|O_APPEND", "x"],
+        |cfg| {
+            assert_eq!(
+                cfg.how.flags,
+                (O_RDWR | O_CREAT | O_EXCL | O_TRUNC | O_APPEND) as u64
+            );
+        },
+    );
+}
+
+#[test]
+fn repeated_flags_individual() {
+    assert_ok(
+        &[
+            "--flags", "O_RDWR", "--flags", "O_CREAT", "--flags", "O_EXCL", "x",
+        ],
+        |cfg| {
+            assert_eq!(cfg.how.flags, (O_RDWR | O_CREAT | O_EXCL) as u64);
+        },
+    );
 }
