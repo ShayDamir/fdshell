@@ -46,8 +46,11 @@ pub fn dispatch_builtin(
             let dirfd = vars.resolve(varname).ok_or(sys::errno::EINVAL)?;
             let pathname = args.get(1).ok_or(sys::errno::EINVAL)?;
             let path_cs = pathname.to_c_string();
+            // execveat with a relative pathname rejects dirfds that have FD_CLOEXEC set.
+            // Create a non-CLOEXEC copy via export().
+            let non_cloexec = dirfd.export()?;
             exec::exec_at(
-                dirfd.at(),
+                non_cloexec.at(),
                 &path_cs,
                 refs.get(2..).ok_or(sys::errno::EINVAL)?,
             )

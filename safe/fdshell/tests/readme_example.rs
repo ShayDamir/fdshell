@@ -2,6 +2,7 @@
 
 use std::process::Command;
 use std::str;
+use sys::errno::ENOSYS;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
@@ -215,6 +216,81 @@ fn builtin_resolve_and_exec() {
     let output = run_c(cmd, &dir);
     assert_ok(&output, "builtin_resolve_and_exec");
     assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "hello");
+}
+
+#[test]
+fn builtin_echo_simple() {
+    let dir = tmpdir();
+    let output = run_c("builtin echo hello", &dir);
+    assert_ok(&output, "builtin_echo_simple");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "hello");
+}
+
+#[test]
+fn builtin_echo_empty() {
+    let dir = tmpdir();
+    let output = run_c("builtin echo", &dir);
+    assert_ok(&output, "builtin_echo_empty");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap(), "\n");
+}
+
+#[test]
+fn builtin_echo_multiple() {
+    let dir = tmpdir();
+    let output = run_c("builtin echo hello world", &dir);
+    assert_ok(&output, "builtin_echo_multiple");
+    assert_eq!(
+        str::from_utf8(&output.stdout).unwrap().trim(),
+        "hello world"
+    );
+}
+
+#[test]
+fn builtin_echo_redirect_file() {
+    let dir = tmpdir();
+    let output = run_c("builtin echo data >out.txt", &dir);
+    assert_ok(&output, "builtin_echo_redirect_file");
+    let content = std::fs::read_to_string(dir.join("out.txt")).unwrap();
+    assert_eq!(content.trim(), "data");
+}
+
+#[test]
+fn builtin_echo_semicolon() {
+    let dir = tmpdir();
+    let output = run_c("builtin echo a; builtin echo b", &dir);
+    assert_ok(&output, "builtin_echo_semicolon");
+    let lines: Vec<&str> = str::from_utf8(&output.stdout).unwrap().lines().collect();
+    assert_eq!(lines, ["a", "b"]);
+}
+
+#[test]
+fn builtin_nonexistent() {
+    let dir = tmpdir();
+    let output = run_c("builtin nonexistent", &dir);
+    assert_eq!(
+        output.status.code(),
+        Some(ENOSYS),
+        "nonexistent builtin should exit with ENOSYS"
+    );
+}
+
+#[test]
+fn builtin_exec_at_script() {
+    let dir = tmpdir();
+    let cmd = concat!(
+        "builtin mkdirat --mode 0755 foo %>%foo; ",
+        "builtin openat2 --dirfd %foo --flags O_CREAT --flags O_RDWR --mode 0755 bar %>%bar; ",
+        "builtin echo \"#!/bin/sh\" >%bar; ",
+        "echo \"echo hello-world\" >%bar; ",
+        "unset %bar; ",
+        "builtin exec_at %foo bar",
+    );
+    let output = run_c(cmd, &dir);
+    assert_ok(&output, "builtin_exec_at_script");
+    assert_eq!(
+        str::from_utf8(&output.stdout).unwrap().trim(),
+        "hello-world"
+    );
 }
 
 #[test]
