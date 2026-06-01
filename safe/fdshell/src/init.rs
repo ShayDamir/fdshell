@@ -17,6 +17,7 @@ fn detect_nested() -> Option<sys::ImportedFd> {
 pub fn init_shellfd() -> Result<FdShellMode, i32> {
     if let Some(dupfd) = detect_nested() {
         let fd = dupfd.try_into_local()?;
+        sys::shellfd::set_capture_active(true);
         Ok(FdShellMode::Nested(fd))
     } else {
         let fd = sys::shellfd::reserve_shellfd()?;

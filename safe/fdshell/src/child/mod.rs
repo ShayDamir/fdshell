@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 pub(crate) mod builtin;
+mod fdpass;
 mod run;
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;

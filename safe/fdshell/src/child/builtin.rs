@@ -61,6 +61,7 @@ pub fn dispatch_builtin(
             sys::shellfd::send_fd(&fd, c"resolve").ok();
             Ok(())
         }
-        _ => Err(sys::errno::ENOSYS),
+        _ => crate::child::fdpass::dispatch(name.as_bytes(), args, vars)
+            .unwrap_or(Err(sys::errno::ENOSYS)),
     }
 }
