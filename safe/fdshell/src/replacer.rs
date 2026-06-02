@@ -33,7 +33,7 @@ fn execute(
 
     sys::shellfd::set_capture_active(false);
 
-    if args.first().map(|a| a.as_bytes()) == Some(b"builtin") {
+    if args.first().is_some_and(|a| a.eq_bytes(b"builtin")) {
         let builtin_name = args.get(1).ok_or(sys::errno::EINVAL)?;
         let builtin_args = args.get(2..).unwrap_or(&[]);
         let substituted = substitute_args(builtin_args, fdvars)?;
@@ -41,7 +41,7 @@ fn execute(
         child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, fdvars)
     } else {
         let binary = args.first().ok_or(sys::errno::EINVAL)?;
-        let binary_cs = binary.to_c_string();
+        let binary_cs = binary.to_c_string()?;
         let fd = exec::resolve_path(&binary_cs)?;
         let substituted = substitute_args(args.get(1..).unwrap_or(&[]), fdvars)?;
         let argv: Vec<&CStr> = std::iter::once(binary_cs.as_c_str())

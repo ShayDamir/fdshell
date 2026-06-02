@@ -48,10 +48,9 @@ pub fn parse_mode(s: &CStr) -> Result<u64, i32> {
 }
 
 pub fn parse_dirfd(s: &CStr) -> Result<Option<ImportedFd>, i32> {
-    let b = s.to_bytes();
-    if b == b"AT_FDCWD" {
+    if s == c"AT_FDCWD" {
         Ok(None)
     } else {
-        ImportedFd::from_bytes(b).map(Some)
+        ImportedFd::try_from(s).map(Some)
     }
 }

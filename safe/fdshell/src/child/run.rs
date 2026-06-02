@@ -30,7 +30,7 @@ pub fn child_main(
     match cmd {
         Command::Builtin(name) => child::builtin::dispatch_builtin(name, &refs, args, vars),
         Command::External(name) => {
-            let name_cs = name.to_c_string();
+            let name_cs = name.to_c_string()?;
             let fd = exec::resolve_path(&name_cs)?;
             let full_argv: Vec<&CStr> = std::iter::once(name_cs.as_c_str())
                 .chain(refs.iter().copied())

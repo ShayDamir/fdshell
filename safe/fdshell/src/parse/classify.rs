@@ -35,7 +35,7 @@ pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
 }
 
 pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
-    let bytes = s.as_bytes();
+    let bytes = s.as_bytes()?;
 
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,
@@ -50,13 +50,13 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
         None => return Ok(None),
     };
 
-    if after_op.is_empty() || after_op.as_bytes().starts_with(b"&") {
+    if after_op.is_empty() || after_op.starts_with(b"&") {
         return Ok(None);
     }
 
     let prefix = bytes.get(..op_pos).ok_or(sys::errno::EINVAL)?;
 
-    if after_op.as_bytes().starts_with(b"%") {
+    if after_op.starts_with(b"%") {
         let source = after_op.get(1..).ok_or(sys::errno::EINVAL)?;
         let export_to = match parse_fd(prefix, dir) {
             Some(fd) => fd,
@@ -65,9 +65,9 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
         return Ok(Some(RedirectDef::var(export_to, source)));
     }
 
-    let (rest, direction) = if dir == b'>' && after_op.as_bytes().starts_with(b">") {
+    let (rest, direction) = if dir == b'>' && after_op.starts_with(b">") {
         let r = after_op.get(1..).ok_or(sys::errno::EINVAL)?;
-        if r.is_empty() || r.as_bytes().starts_with(b"%") {
+        if r.is_empty() || r.starts_with(b"%") {
             return Err(sys::errno::EINVAL);
         }
         (r, RedirectDirection::Append)

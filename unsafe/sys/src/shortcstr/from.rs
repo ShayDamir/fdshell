@@ -5,17 +5,18 @@ use core::ffi::CStr;
 
 use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr};
 
-/// # Safety
-/// `bytes.len()` ≤ `INLINE_MAX` and `bytes` has no interior NUL.
-pub(crate) unsafe fn from_inline(bytes: &[u8]) -> ShortCStr {
+pub(crate) fn from_inline(bytes: &[u8]) -> Result<ShortCStr, i32> {
+    if bytes.len() > INLINE_MAX as usize {
+        return Err(crate::errno::EINVAL);
+    }
     let mut buf = [0u8; INLINE_CAP];
-    // SAFETY: bytes.len() ≤ INLINE_MAX < INLINE_CAP, caller guarantee.
-    unsafe { buf.get_unchecked_mut(..bytes.len()) }.copy_from_slice(bytes);
-    // SAFETY: bytes.len() ≤ INLINE_MAX < INLINE_CAP.
-    unsafe { *buf.get_unchecked_mut(bytes.len()) = 0 };
-    // SAFETY: caller guaranteed bytes.len() ≤ INLINE_MAX.
+    for (dest, &src) in buf.iter_mut().zip(bytes.iter()) {
+        *dest = src;
+    }
+    *buf.get_mut(bytes.len()).ok_or(crate::errno::EINVAL)? = 0;
+    // SAFETY: bytes.len() ≤ INLINE_MAX, checked above.
     let len = unsafe { InlineSize::from_u8(bytes.len() as u8) };
-    ShortCStr::Inline { len, buf }
+    Ok(ShortCStr::Inline { len, buf })
 }
 
 impl ShortCStr {
@@ -23,18 +24,16 @@ impl ShortCStr {
         if bytes.contains(&0) {
             return Err(crate::errno::EINVAL);
         }
-        if bytes.len() <= INLINE_MAX as usize {
-            // SAFETY: bytes.len() ≤ INLINE_MAX and no interior NUL, verified above.
-            Ok(unsafe { from_inline(&bytes) })
-        } else {
+        let result = from_inline(&bytes);
+        Ok(result.unwrap_or_else(|_| {
             let cs = unsafe { CString::from_vec_unchecked(bytes) };
             let len = cs.count_bytes();
-            Ok(ShortCStr::Rc {
+            ShortCStr::Rc {
                 rc: Rc::from(cs.into_boxed_c_str()),
                 offset: 0,
                 length: len,
-            })
-        }
+            }
+        }))
     }
 
     pub const fn from_static(s: &'static CStr) -> Self {

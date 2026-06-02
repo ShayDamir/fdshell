@@ -11,7 +11,7 @@ fn detect_nested() -> Option<sys::ImportedFd> {
     if pid != std::process::id() {
         return None;
     }
-    sys::ImportedFd::from_bytes(sys::shellfd::SHELLFD_STR).ok()
+    sys::ImportedFd::try_from(sys::shellfd::SHELLFD_STR).ok()
 }
 
 pub fn init_shellfd() -> Result<FdShellMode, i32> {

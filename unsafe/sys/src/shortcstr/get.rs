@@ -8,13 +8,12 @@ impl ShortCStr {
     where
         I: SliceIndex<[u8], Output = [u8]>,
     {
-        let orig = self.as_bytes();
+        let orig = self.as_bytes().ok()?;
         let new = orig.get(index)?;
         let new_len = new.len();
 
         if new_len <= INLINE_MAX as usize {
-            // SAFETY: new_len and no interior NUL guaranteed by origin.
-            return Some(unsafe { from_inline(new) });
+            return from_inline(new).ok();
         }
 
         // SAFETY: `new` is a subslice of `orig` — `get()` returned `Some`,
@@ -32,12 +31,12 @@ impl ShortCStr {
     }
 
     pub fn split_once_byte(&self, byte: u8) -> Option<(Self, Self)> {
-        let pos = self.as_bytes().iter().position(|&b| b == byte)?;
+        let pos = self.as_bytes().ok()?.iter().position(|&b| b == byte)?;
         Some((self.get(..pos)?, self.get(pos + 1..)?))
     }
 
     pub fn strip_prefix(&self, prefix: &[u8]) -> Option<Self> {
-        if self.as_bytes().starts_with(prefix) {
+        if self.as_bytes().ok()?.starts_with(prefix) {
             self.get(prefix.len()..)
         } else {
             None

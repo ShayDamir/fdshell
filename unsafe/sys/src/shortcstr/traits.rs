@@ -1,16 +1,9 @@
 use alloc::rc::Rc;
-use core::borrow::Borrow;
 use core::ffi::CStr;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
 use crate::shortcstr::ShortCStr;
-
-impl Borrow<[u8]> for ShortCStr {
-    fn borrow(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
 
 impl Clone for ShortCStr {
     fn clone(&self) -> Self {
@@ -31,7 +24,10 @@ impl Clone for ShortCStr {
 
 impl PartialEq for ShortCStr {
     fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
+        match (self.as_bytes(), other.as_bytes()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
     }
 }
 
@@ -39,17 +35,20 @@ impl Eq for ShortCStr {}
 
 impl Hash for ShortCStr {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_bytes().hash(state);
+        if let Ok(b) = self.as_bytes() {
+            b.hash(state);
+        }
     }
 }
 
 impl fmt::Debug for ShortCStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.as_bytes().unwrap_or(b"<?>");
         match self {
             ShortCStr::Inline { len, .. } => f
                 .debug_struct("Inline")
                 .field("len", &len.as_u8())
-                .field("buf", &self.as_bytes())
+                .field("buf", &bytes)
                 .finish(),
             ShortCStr::Static(s, offset, length) => f
                 .debug_struct("Static")

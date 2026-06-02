@@ -9,7 +9,7 @@ pub fn dispatch_builtin(
     args: &[ShortCStr],
     vars: &FdVars,
 ) -> Result<(), i32> {
-    match name.as_bytes() {
+    match name.as_bytes()? {
         b"echo" => {
             for (i, arg) in refs.iter().enumerate() {
                 if i > 0 {
@@ -30,22 +30,16 @@ pub fn dispatch_builtin(
             .and_then(|cfg| builtins::renameat2::renameat2_exec(&cfg)),
         b"exec_fd" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
-            let varname = raw0
-                .as_bytes()
-                .strip_prefix(b"%")
-                .ok_or(sys::errno::EINVAL)?;
-            let fd = vars.resolve(varname).ok_or(sys::errno::EINVAL)?;
+            let varname = raw0.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
+            let fd = vars.resolve(&varname).ok_or(sys::errno::EINVAL)?;
             exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?)
         }
         b"exec_at" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
-            let varname = raw0
-                .as_bytes()
-                .strip_prefix(b"%")
-                .ok_or(sys::errno::EINVAL)?;
-            let dirfd = vars.resolve(varname).ok_or(sys::errno::EINVAL)?;
+            let varname = raw0.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
+            let dirfd = vars.resolve(&varname).ok_or(sys::errno::EINVAL)?;
             let pathname = args.get(1).ok_or(sys::errno::EINVAL)?;
-            let path_cs = pathname.to_c_string();
+            let path_cs = pathname.to_c_string()?;
             // execveat with a relative pathname rejects dirfds that have FD_CLOEXEC set.
             // Create a non-CLOEXEC copy via export().
             let non_cloexec = dirfd.export()?;
@@ -61,7 +55,7 @@ pub fn dispatch_builtin(
             sys::shellfd::send_fd(&fd, c"resolve").ok();
             Ok(())
         }
-        _ => crate::child::fdpass::dispatch(name.as_bytes(), args, vars)
+        name_bytes => crate::child::fdpass::dispatch(name_bytes, args, vars)
             .unwrap_or(Err(sys::errno::ENOSYS)),
     }
 }

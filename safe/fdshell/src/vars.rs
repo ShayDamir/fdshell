@@ -19,15 +19,11 @@ impl FdVars {
         self.map.insert(name, fd)
     }
 
-    pub fn resolve(&self, name: &[u8]) -> Option<&LocalFd> {
+    pub fn resolve(&self, name: &ShortCStr) -> Option<&LocalFd> {
         self.map.get(name)
     }
 
-    pub fn remove(&mut self, name: &[u8]) -> Option<LocalFd> {
+    pub fn remove(&mut self, name: &ShortCStr) -> Option<LocalFd> {
         self.map.remove(name)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&[u8], i32)> {
-        self.map.iter().map(|(k, v)| (k.as_bytes(), v.as_raw()))
     }
 }

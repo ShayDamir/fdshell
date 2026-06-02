@@ -14,9 +14,7 @@ pub fn resolve_redirects<'a>(
         .iter()
         .map(|r| {
             let local = match &r.source {
-                super::RedirectSource::Var(var) => {
-                    vars.resolve(var.as_bytes()).ok_or(sys::errno::EINVAL)
-                }
+                super::RedirectSource::Var(var) => vars.resolve(var).ok_or(sys::errno::EINVAL),
                 super::RedirectSource::Path(_) => opened_iter.next().ok_or(sys::errno::EIO),
             }?;
             Ok(r.resolve(local))

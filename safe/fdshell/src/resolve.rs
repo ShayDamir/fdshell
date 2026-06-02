@@ -12,7 +12,7 @@ pub(crate) fn substitute_arg(
     vars: &FdVars,
 ) -> Result<CString, i32> {
     let mut out = Vec::new();
-    let mut peek = arg.as_bytes().iter().copied().peekable();
+    let mut peek = arg.as_bytes()?.iter().copied().peekable();
     while let Some(b) = peek.next() {
         if b != b'%' {
             out.push(b);
@@ -38,7 +38,7 @@ pub(crate) fn substitute_arg(
                 let name_scs = ShortCStr::from_vec(name)?;
                 let raw = match cache.get(&name_scs) {
                     Some(d) => d.as_raw(),
-                    None => match vars.resolve(name_scs.as_bytes()) {
+                    None => match vars.resolve(&name_scs) {
                         Some(src) => {
                             let d = src.export()?;
                             let raw = d.as_raw();
@@ -47,7 +47,7 @@ pub(crate) fn substitute_arg(
                         }
                         None => {
                             out.push(b'%');
-                            out.extend_from_slice(name_scs.as_bytes());
+                            out.extend_from_slice(name_scs.as_bytes()?);
                             continue;
                         }
                     },

@@ -1,3 +1,8 @@
+use core::convert::TryFrom;
+use core::ffi::CStr;
+
+use crate::shortcstr::ShortCStr;
+
 #[repr(transparent)]
 pub struct ImportedFd(i32);
 
@@ -32,5 +37,19 @@ impl ImportedFd {
         crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
         // SAFETY: fcntl atomically set CLOEXEC; caller gets exclusive ownership.
         Ok(unsafe { crate::LocalFd::from_raw(self.0) })
+    }
+}
+
+impl TryFrom<&ShortCStr> for ImportedFd {
+    type Error = i32;
+    fn try_from(scs: &ShortCStr) -> Result<Self, i32> {
+        Self::from_bytes(scs.as_bytes()?)
+    }
+}
+
+impl TryFrom<&CStr> for ImportedFd {
+    type Error = i32;
+    fn try_from(s: &CStr) -> Result<Self, i32> {
+        Self::from_bytes(s.to_bytes())
     }
 }

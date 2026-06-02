@@ -14,7 +14,7 @@ pub fn parse(line: &str) -> Result<ParsedLine, i32> {
         return Ok(pl);
     }
 
-    if raw.iter().any(|t| t.as_bytes() == b"|") {
+    if raw.iter().any(|t| t.eq_bytes(b"|")) {
         return command::parse_pipeline(&raw);
     }
 

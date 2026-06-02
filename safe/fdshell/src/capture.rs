@@ -42,16 +42,12 @@ pub fn do_captures(
         };
         let idx = remaining
             .iter()
-            .position(|c| {
-                c.tag
-                    .as_ref()
-                    .is_some_and(|t| t.as_bytes() == rtag.to_bytes())
-            })
+            .position(|c| c.tag.as_ref().is_some_and(|t| t.eq_bytes(rtag.to_bytes())))
             .or_else(|| remaining.iter().position(|c| c.tag.is_none()));
         if let Some(i) = idx {
             debug_assert!(i < remaining.len());
             let c = remaining.remove(i);
-            if !c.force && fdvars.resolve(c.var.as_bytes()).is_some() {
+            if !c.force && fdvars.resolve(&c.var).is_some() {
                 return Err(EEXIST);
             }
             captured_fds.push((c.var, fd));

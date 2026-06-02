@@ -42,12 +42,12 @@ pub(crate) fn run_one(
             *last_status = status;
         }
         crate::parse::ParsedLine::Assign { var, value } => {
-            let src = fdvars.resolve(value.as_bytes()).ok_or(EINVAL)?;
+            let src = fdvars.resolve(&value).ok_or(EINVAL)?;
             fdvars.insert(var, src.try_clone()?);
             *last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
-            fdvars.remove(var.as_bytes());
+            fdvars.remove(&var);
             *last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::Umask(mask) => {

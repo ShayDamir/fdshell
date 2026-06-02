@@ -7,7 +7,7 @@ pub(crate) fn try_intercept(
     fdvars: &mut FdVars,
     last_status: &mut WaitStatus,
 ) -> Result<bool, i32> {
-    match cmdline.command.as_bytes() {
+    match cmdline.command.as_bytes()? {
         b"cd" => {
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
@@ -21,7 +21,7 @@ pub(crate) fn try_intercept(
             }
             let code = match cmdline.args.first() {
                 Some(arg) => {
-                    let s = core::str::from_utf8(arg.as_bytes()).map_err(|_| EINVAL)?;
+                    let s = core::str::from_utf8(arg.as_bytes()?).map_err(|_| EINVAL)?;
                     s.parse::<i32>().map_err(|_| EINVAL)?
                 }
                 None => last_status.exit_code(),

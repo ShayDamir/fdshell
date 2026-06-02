@@ -29,7 +29,7 @@ fn cd_to_tmp() {
         let mut v = FdVars::new();
         let tmp = ShortCStr::from_static(c"/tmp");
         cd(&[tmp], &mut v).unwrap();
-        let cwd = v.resolve(b"CWD").unwrap();
+        let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -41,7 +41,7 @@ fn cd_to_home() {
         child_test(|| {
             let mut v = FdVars::new();
             cd(&[], &mut v).unwrap();
-            let cwd = v.resolve(b"CWD").unwrap();
+            let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
             cwd.verify().unwrap();
         });
     } else {
@@ -59,10 +59,14 @@ fn cd_to_self() {
         let mut v = FdVars::new();
         let tmp = ShortCStr::from_static(c"/tmp");
         cd(&[tmp], &mut v).unwrap();
-        let cwd_fd = v.resolve(b"CWD").unwrap().try_clone().unwrap();
+        let cwd_fd = v
+            .resolve(&ShortCStr::from_static(c"CWD"))
+            .unwrap()
+            .try_clone()
+            .unwrap();
         v.insert(ShortCStr::from_static(c"CWD"), cwd_fd);
         cd(&[ShortCStr::from_static(c"%CWD")], &mut v).unwrap();
-        let cwd = v.resolve(b"CWD").unwrap();
+        let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -97,9 +101,9 @@ fn cd_dash_switches_to_oldpwd() {
         cd(&[root], &mut v).unwrap();
         let dash = ShortCStr::from_static(c"-");
         cd(&[dash], &mut v).unwrap();
-        let cwd = v.resolve(b"CWD").unwrap();
+        let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
         cwd.verify().unwrap();
-        let old = v.resolve(b"OLDCWD").unwrap();
+        let old = v.resolve(&ShortCStr::from_static(c"OLDCWD")).unwrap();
         old.verify().unwrap();
     });
 }
@@ -110,11 +114,11 @@ fn cd_move_cwd_to_oldcwd() {
         let mut v = FdVars::new();
         let tmp = ShortCStr::from_static(c"/tmp");
         cd(&[tmp], &mut v).unwrap();
-        assert!(v.resolve(b"CWD").is_some());
-        assert!(v.resolve(b"OLDCWD").is_none());
+        assert!(v.resolve(&ShortCStr::from_static(c"CWD")).is_some());
+        assert!(v.resolve(&ShortCStr::from_static(c"OLDCWD")).is_none());
         let root = ShortCStr::from_static(c"/");
         cd(&[root], &mut v).unwrap();
-        assert!(v.resolve(b"CWD").is_some());
-        assert!(v.resolve(b"OLDCWD").is_some());
+        assert!(v.resolve(&ShortCStr::from_static(c"CWD")).is_some());
+        assert!(v.resolve(&ShortCStr::from_static(c"OLDCWD")).is_some());
     });
 }

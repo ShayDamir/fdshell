@@ -23,7 +23,7 @@ pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {
         return Ok(Some(ParsedLine::Assign { var, value }));
     }
 
-    if first.as_bytes() == b"unset" {
+    if first.eq_bytes(b"unset") {
         let target = tokens.get(1).ok_or(EINVAL)?;
         if let Some(var) = target.strip_prefix(b"%") {
             return Ok(Some(ParsedLine::Unset(var)));
@@ -31,10 +31,10 @@ pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {
         return Err(EINVAL);
     }
 
-    if first.as_bytes() == b"umask" {
+    if first.eq_bytes(b"umask") {
         let mask = match tokens.get(1) {
             Some(arg) => {
-                let s = core::str::from_utf8(arg.as_bytes()).map_err(|_| EINVAL)?;
+                let s = core::str::from_utf8(arg.as_bytes()?).map_err(|_| EINVAL)?;
                 let s = s.strip_prefix("0o").unwrap_or(s);
                 Some(u32::from_str_radix(s, 8).map_err(|_| EINVAL)?)
             }

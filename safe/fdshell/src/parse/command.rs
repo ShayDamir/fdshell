@@ -7,7 +7,7 @@ use sys::errno::EINVAL;
 pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
     let mut iter = tokens.iter().peekable();
     let builtin = match iter.peek() {
-        Some(t) if t.as_bytes() == b"builtin" => {
+        Some(t) if t.eq_bytes(b"builtin") => {
             iter.next();
             true
         }
@@ -19,7 +19,7 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
     let mut redirects: Vec<RedirectDef> = Vec::new();
     let mut background = false;
     for t in iter {
-        let b = t.as_bytes();
+        let b = t.as_bytes()?;
         if b == b"&" {
             background = true;
         } else if b.starts_with(b"%") {
@@ -52,7 +52,7 @@ pub fn parse_pipeline(raw: &[ShortCStr]) -> Result<ParsedLine, i32> {
     let mut commands = Vec::new();
     let mut start = 0;
     for (i, t) in raw.iter().enumerate() {
-        if t.as_bytes() == b"|" {
+        if t.as_bytes()? == b"|" {
             if i == start {
                 return Err(EINVAL);
             }
