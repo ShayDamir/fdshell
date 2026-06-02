@@ -40,7 +40,6 @@ pub fn do_captures(
             Err(e) => return Err(e),
             Ok(v) => v,
         };
-
         let idx = remaining
             .iter()
             .position(|c| {
@@ -49,7 +48,6 @@ pub fn do_captures(
                     .is_some_and(|t| t.as_bytes() == rtag.to_bytes())
             })
             .or_else(|| remaining.iter().position(|c| c.tag.is_none()));
-
         if let Some(i) = idx {
             debug_assert!(i < remaining.len());
             let c = remaining.remove(i);

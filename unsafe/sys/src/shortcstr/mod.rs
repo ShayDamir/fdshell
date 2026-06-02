@@ -1,5 +1,3 @@
-#![allow(clippy::indexing_slicing)]
-
 use alloc::rc::Rc;
 use core::ffi::CStr;
 

@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![allow(clippy::indexing_slicing)]
+#![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 use super::*;
 use crate::capture::Capture;

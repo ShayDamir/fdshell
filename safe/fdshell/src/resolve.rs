@@ -38,15 +38,19 @@ pub(crate) fn substitute_arg(
                 let name_scs = ShortCStr::from_vec(name)?;
                 let raw = match cache.get(&name_scs) {
                     Some(d) => d.as_raw(),
-                    None => {
-                        let src = vars
-                            .resolve(name_scs.as_bytes())
-                            .ok_or(sys::errno::EINVAL)?;
-                        let d = src.export()?;
-                        let raw = d.as_raw();
-                        cache.insert(name_scs, d);
-                        raw
-                    }
+                    None => match vars.resolve(name_scs.as_bytes()) {
+                        Some(src) => {
+                            let d = src.export()?;
+                            let raw = d.as_raw();
+                            cache.insert(name_scs, d);
+                            raw
+                        }
+                        None => {
+                            out.push(b'%');
+                            out.extend_from_slice(name_scs.as_bytes());
+                            continue;
+                        }
+                    },
                 };
                 let num_str = format!("{}", raw);
                 out.extend_from_slice(num_str.as_bytes());

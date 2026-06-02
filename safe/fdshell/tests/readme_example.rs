@@ -351,3 +351,41 @@ builtin echo "pipedata" | cat >result.txt
         2,
     );
 }
+
+#[test]
+fn nested_simple_echo() {
+    let dir = tmpdir();
+    let fdshell_dir = std::path::Path::new(BIN).parent().unwrap();
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["-c", "fdshell -c \"echo hello\""]);
+    cmd.current_dir(&dir);
+    let path = std::env::var("PATH").unwrap_or_default();
+    cmd.env("PATH", format!("{}:{}", fdshell_dir.display(), path));
+    let output = cmd.output().unwrap();
+    assert_ok(&output, "nested_simple_echo");
+    assert_eq!(std::str::from_utf8(&output.stdout).unwrap().trim(), "hello");
+}
+
+#[test]
+fn nested_import_export_roundtrip() {
+    let dir = tmpdir();
+
+    let script = concat!(
+        "builtin openat2 --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 testfile %>%testfile; ",
+        "fdshell -c \"builtin import_fd 5 %>%imported; builtin export_fd exported %imported\" ",
+        "5>%testfile %>%captured; ",
+        "builtin echo hello >%captured",
+    );
+
+    let fdshell_dir = std::path::Path::new(BIN).parent().unwrap();
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["-c", script]);
+    cmd.current_dir(&dir);
+    let path = std::env::var("PATH").unwrap_or_default();
+    cmd.env("PATH", format!("{}:{}", fdshell_dir.display(), path));
+    let output = cmd.output().unwrap();
+    assert_ok(&output, "nested_import_export_roundtrip");
+
+    let content = std::fs::read_to_string(dir.join("testfile")).unwrap();
+    assert_eq!(content.trim(), "hello");
+}

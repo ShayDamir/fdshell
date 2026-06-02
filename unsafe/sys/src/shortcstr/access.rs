@@ -1,5 +1,3 @@
-#![allow(clippy::indexing_slicing)]
-
 use alloc::ffi::CString;
 
 use crate::shortcstr::ShortCStr;
@@ -22,17 +20,17 @@ impl ShortCStr {
             ShortCStr::Inline { len, buf } => {
                 let n = len.as_u8() as usize;
                 // SAFETY: n ≤ INLINE_MAX < INLINE_CAP, set during construction.
-                &buf[..n]
+                unsafe { buf.get_unchecked(..n) }
             }
             ShortCStr::Static(s, offset, length) => {
                 let full = s.to_bytes();
                 // SAFETY: offset + length ≤ full.len(), set during construction/subslicing.
-                &full[*offset..offset + length]
+                unsafe { full.get_unchecked(*offset..offset + length) }
             }
             ShortCStr::Rc { rc, offset, length } => {
                 let full = rc.to_bytes();
                 // SAFETY: offset + length ≤ full.len(), set during construction/subslicing.
-                &full[*offset..offset + length]
+                unsafe { full.get_unchecked(*offset..offset + length) }
             }
         }
     }
@@ -42,18 +40,26 @@ impl ShortCStr {
             ShortCStr::Inline { len, buf } => {
                 let n = len.as_u8() as usize;
                 // SAFETY: buf[..n] has no interior NUL (validated in from_bytes).
-                unsafe { CString::from_vec_unchecked(buf[..n].to_vec()) }
+                unsafe { CString::from_vec_unchecked(buf.get_unchecked(..n).to_vec()) }
             }
             ShortCStr::Static(s, offset, length) => {
                 // SAFETY: subslice of a CStr, no interior NUL.
                 unsafe {
-                    CString::from_vec_unchecked(s.to_bytes()[*offset..offset + length].to_vec())
+                    CString::from_vec_unchecked(
+                        s.to_bytes()
+                            .get_unchecked(*offset..offset + length)
+                            .to_vec(),
+                    )
                 }
             }
             ShortCStr::Rc { rc, offset, length } => {
                 // SAFETY: subslice of a CStr, no interior NUL.
                 unsafe {
-                    CString::from_vec_unchecked(rc.to_bytes()[*offset..offset + length].to_vec())
+                    CString::from_vec_unchecked(
+                        rc.to_bytes()
+                            .get_unchecked(*offset..offset + length)
+                            .to_vec(),
+                    )
                 }
             }
         }

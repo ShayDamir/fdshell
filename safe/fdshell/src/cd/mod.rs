@@ -45,5 +45,4 @@ fn move_cwd(fdvars: &mut FdVars, new_cwd: LocalFd) {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests;

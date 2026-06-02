@@ -1,5 +1,3 @@
-#![allow(clippy::indexing_slicing)]
-
 #[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum InlineSize {

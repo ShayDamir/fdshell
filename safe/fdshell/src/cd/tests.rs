@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::unwrap_used))]
 use super::*;
 use sys::siginfo::WaitStatus;
 

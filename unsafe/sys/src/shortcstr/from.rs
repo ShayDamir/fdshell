@@ -9,8 +9,10 @@ use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr};
 /// `bytes.len()` ≤ `INLINE_MAX` and `bytes` has no interior NUL.
 pub(crate) unsafe fn from_inline(bytes: &[u8]) -> ShortCStr {
     let mut buf = [0u8; INLINE_CAP];
-    buf[..bytes.len()].copy_from_slice(bytes);
-    buf[bytes.len()] = 0;
+    // SAFETY: bytes.len() ≤ INLINE_MAX < INLINE_CAP, caller guarantee.
+    unsafe { buf.get_unchecked_mut(..bytes.len()) }.copy_from_slice(bytes);
+    // SAFETY: bytes.len() ≤ INLINE_MAX < INLINE_CAP.
+    unsafe { *buf.get_unchecked_mut(bytes.len()) = 0 };
     // SAFETY: caller guaranteed bytes.len() ≤ INLINE_MAX.
     let len = unsafe { InlineSize::from_u8(bytes.len() as u8) };
     ShortCStr::Inline { len, buf }
