@@ -4,7 +4,6 @@
 use super::*;
 use crate::capture::Capture;
 use crate::redirect::RedirectDef;
-use sys::ShortCStr;
 use sys::errno::EINVAL;
 
 #[test]
@@ -18,16 +17,16 @@ fn test_mkdirat_capture() {
         cmd,
         CommandLine {
             builtin: true,
-            command: ShortCStr::from_static(c"mkdirat"),
+            command: c"mkdirat".into(),
             args: vec![
-                ShortCStr::from_static(c"--mode"),
-                ShortCStr::from_static(c"755"),
-                ShortCStr::from_static(c"--dirfd"),
-                ShortCStr::from_static(c"%CWD"),
-                ShortCStr::from_static(c"foo"),
+                c"--mode".into(),
+                c"755".into(),
+                c"--dirfd".into(),
+                c"%CWD".into(),
+                c"foo".into(),
             ],
             captures: vec![Capture {
-                var: ShortCStr::from_static(c"foo"),
+                var: c"foo".into(),
                 tag: None,
                 force: false,
             }],
@@ -47,25 +46,25 @@ fn test_openat2_capture() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, ShortCStr::from_static(c"openat2"));
+    assert_eq!(cmd.command, c"openat2".into());
     assert_eq!(
         cmd.args,
         vec![
-            ShortCStr::from_static(c"--dirfd"),
-            ShortCStr::from_static(c"%foo"),
-            ShortCStr::from_static(c"--flags"),
-            ShortCStr::from_static(c"O_CREAT"),
-            ShortCStr::from_static(c"--flags"),
-            ShortCStr::from_static(c"O_EXCL"),
-            ShortCStr::from_static(c"--mode"),
-            ShortCStr::from_static(c"0644"),
-            ShortCStr::from_static(c"baz"),
+            c"--dirfd".into(),
+            c"%foo".into(),
+            c"--flags".into(),
+            c"O_CREAT".into(),
+            c"--flags".into(),
+            c"O_EXCL".into(),
+            c"--mode".into(),
+            c"0644".into(),
+            c"baz".into(),
         ]
     );
     assert_eq!(
         cmd.captures,
         vec![Capture {
-            var: ShortCStr::from_static(c"baz"),
+            var: c"baz".into(),
             tag: None,
             force: false,
         }]
@@ -81,8 +80,8 @@ fn test_echo_redirect() {
     };
 
     assert!(!cmd.builtin);
-    assert_eq!(cmd.command, ShortCStr::from_static(c"echo"));
-    assert_eq!(cmd.args, vec![ShortCStr::from_static(c"test")]);
+    assert_eq!(cmd.command, c"echo".into());
+    assert_eq!(cmd.args, vec![c"test".into()]);
     assert!(cmd.captures.is_empty());
     assert_eq!(cmd.redirects, vec![RedirectDef::var(1, c"baz")]);
     assert!(!cmd.background);
@@ -95,19 +94,19 @@ fn test_pipe_tagged_captures() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, ShortCStr::from_static(c"pipe"));
+    assert_eq!(cmd.command, c"pipe".into());
     assert!(cmd.args.is_empty());
     assert_eq!(
         cmd.captures,
         vec![
             Capture {
-                var: ShortCStr::from_static(c"server"),
-                tag: Some(ShortCStr::from_static(c"rd")),
+                var: c"server".into(),
+                tag: Some(c"rd".into()),
                 force: false,
             },
             Capture {
-                var: ShortCStr::from_static(c"client"),
-                tag: Some(ShortCStr::from_static(c"wr")),
+                var: c"client".into(),
+                tag: Some(c"wr".into()),
                 force: false,
             },
         ]
@@ -123,8 +122,8 @@ fn test_background() {
     };
 
     assert!(!cmd.builtin);
-    assert_eq!(cmd.command, ShortCStr::from_static(c"run_server"));
-    assert_eq!(cmd.args, vec![ShortCStr::from_static(c"params")]);
+    assert_eq!(cmd.command, c"run_server".into());
+    assert_eq!(cmd.args, vec![c"params".into()]);
     assert!(cmd.captures.is_empty());
     assert!(cmd.redirects.is_empty());
     assert!(cmd.background);
@@ -139,7 +138,7 @@ fn test_force_capture() {
     assert_eq!(
         cmd.captures,
         vec![Capture {
-            var: ShortCStr::from_static(c"foo"),
+            var: c"foo".into(),
             tag: None,
             force: true,
         }]
@@ -224,16 +223,16 @@ fn test_renameat2() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, ShortCStr::from_static(c"renameat2"));
+    assert_eq!(cmd.command, c"renameat2".into());
     assert_eq!(
         cmd.args,
         vec![
-            ShortCStr::from_static(c"--olddirfd"),
-            ShortCStr::from_static(c"%foo"),
-            ShortCStr::from_static(c"--newdirfd"),
-            ShortCStr::from_static(c"%bar"),
-            ShortCStr::from_static(c"baz"),
-            ShortCStr::from_static(c"qux"),
+            c"--olddirfd".into(),
+            c"%foo".into(),
+            c"--newdirfd".into(),
+            c"%bar".into(),
+            c"baz".into(),
+            c"qux".into(),
         ]
     );
     assert!(cmd.captures.is_empty());
@@ -246,8 +245,8 @@ fn test_assign() {
         panic!("expected Assign")
     };
 
-    assert_eq!(var, ShortCStr::from_static(c"server_pid"));
-    assert_eq!(value, ShortCStr::from_static(c"!"));
+    assert_eq!(var, c"server_pid".into());
+    assert_eq!(value, c"!".into());
 }
 
 #[test]
@@ -256,7 +255,7 @@ fn test_unset() {
         panic!("expected Unset")
     };
 
-    assert_eq!(var, ShortCStr::from_static(c"client"));
+    assert_eq!(var, c"client".into());
 }
 
 #[test]
@@ -265,7 +264,7 @@ fn test_unset_missing_is_ok() {
         panic!("expected Unset")
     };
 
-    assert_eq!(var, ShortCStr::from_static(c"nonexistent"));
+    assert_eq!(var, c"nonexistent".into());
 }
 
 #[test]
@@ -275,14 +274,10 @@ fn test_execveat2_builtin() {
     };
 
     assert!(cmd.builtin);
-    assert_eq!(cmd.command, ShortCStr::from_static(c"execveat2"));
+    assert_eq!(cmd.command, c"execveat2".into());
     assert_eq!(
         cmd.args,
-        vec![
-            ShortCStr::from_static(c"%MYBIN"),
-            ShortCStr::from_static(c"myprog"),
-            ShortCStr::from_static(c"arg1"),
-        ]
+        vec![c"%MYBIN".into(), c"myprog".into(), c"arg1".into(),]
     );
 }
 
@@ -292,13 +287,10 @@ fn test_pipeline_two_commands() {
         panic!("expected Pipeline")
     };
     assert_eq!(pipe.commands.len(), 2);
-    assert_eq!(pipe.commands[0].command, ShortCStr::from_static(c"echo"));
-    assert_eq!(
-        pipe.commands[0].args,
-        vec![ShortCStr::from_static(c"hello")]
-    );
-    assert_eq!(pipe.commands[1].command, ShortCStr::from_static(c"wc"));
-    assert_eq!(pipe.commands[1].args, vec![ShortCStr::from_static(c"-l")]);
+    assert_eq!(pipe.commands[0].command, c"echo".into());
+    assert_eq!(pipe.commands[0].args, vec![c"hello".into()]);
+    assert_eq!(pipe.commands[1].command, c"wc".into());
+    assert_eq!(pipe.commands[1].args, vec![c"-l".into()]);
 }
 
 #[test]
@@ -307,9 +299,9 @@ fn test_pipeline_three_commands() {
         panic!("expected Pipeline")
     };
     assert_eq!(pipe.commands.len(), 3);
-    assert_eq!(pipe.commands[0].command, ShortCStr::from_static(c"a"));
-    assert_eq!(pipe.commands[1].command, ShortCStr::from_static(c"b"));
-    assert_eq!(pipe.commands[2].command, ShortCStr::from_static(c"c"));
+    assert_eq!(pipe.commands[0].command, c"a".into());
+    assert_eq!(pipe.commands[1].command, c"b".into());
+    assert_eq!(pipe.commands[2].command, c"c".into());
 }
 
 #[test]

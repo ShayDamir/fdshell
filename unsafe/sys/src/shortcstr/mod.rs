@@ -1,5 +1,4 @@
 use alloc::rc::Rc;
-use core::ffi::CStr;
 
 mod access;
 mod from;
@@ -10,17 +9,17 @@ mod traits;
 pub(crate) use from::from_inline;
 pub use size::InlineSize;
 
-const INLINE_CAP: usize = 31;
 pub(crate) const INLINE_MAX: u8 = 30;
+const INLINE_CAP: usize = INLINE_MAX as usize;
 
 pub enum ShortCStr {
     Inline {
         len: InlineSize,
         buf: [u8; INLINE_CAP],
     },
-    Static(&'static CStr, usize, usize),
+    Static(&'static [u8], usize, usize),
     Rc {
-        rc: Rc<CStr>,
+        rc: Rc<[u8]>,
         offset: usize,
         length: usize,
     },

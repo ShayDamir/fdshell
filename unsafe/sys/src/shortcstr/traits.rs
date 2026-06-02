@@ -50,24 +50,15 @@ impl fmt::Debug for ShortCStr {
                 .field("len", &len.as_u8())
                 .field("buf", &bytes)
                 .finish(),
-            ShortCStr::Static(s, offset, length) => f
-                .debug_struct("Static")
-                .field("s", s)
-                .field("offset", offset)
-                .field("length", length)
-                .finish(),
-            ShortCStr::Rc { rc, offset, length } => f
-                .debug_struct("Rc")
-                .field("rc", rc)
-                .field("offset", offset)
-                .field("length", length)
-                .finish(),
+            ShortCStr::Static(..) => f.debug_tuple("Static").field(&bytes).finish(),
+            ShortCStr::Rc { .. } => f.debug_tuple("Rc").field(&bytes).finish(),
         }
     }
 }
 
 impl From<&'static CStr> for ShortCStr {
     fn from(s: &'static CStr) -> Self {
-        Self::from_static(s)
+        let bytes = s.to_bytes();
+        ShortCStr::Static(bytes, 0, bytes.len())
     }
 }

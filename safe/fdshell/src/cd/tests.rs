@@ -27,9 +27,9 @@ fn child_test(f: impl FnOnce()) {
 fn cd_to_tmp() {
     child_test(|| {
         let mut v = FdVars::new();
-        let tmp = ShortCStr::from_static(c"/tmp");
+        let tmp = c"/tmp".into();
         cd(&[tmp], &mut v).unwrap();
-        let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
+        let cwd = v.resolve(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -41,7 +41,7 @@ fn cd_to_home() {
         child_test(|| {
             let mut v = FdVars::new();
             cd(&[], &mut v).unwrap();
-            let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
+            let cwd = v.resolve(&c"CWD".into()).unwrap();
             cwd.verify().unwrap();
         });
     } else {
@@ -57,16 +57,12 @@ fn cd_to_home() {
 fn cd_to_self() {
     child_test(|| {
         let mut v = FdVars::new();
-        let tmp = ShortCStr::from_static(c"/tmp");
+        let tmp = c"/tmp".into();
         cd(&[tmp], &mut v).unwrap();
-        let cwd_fd = v
-            .resolve(&ShortCStr::from_static(c"CWD"))
-            .unwrap()
-            .try_clone()
-            .unwrap();
-        v.insert(ShortCStr::from_static(c"CWD"), cwd_fd);
-        cd(&[ShortCStr::from_static(c"%CWD")], &mut v).unwrap();
-        let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
+        let cwd_fd = v.resolve(&c"CWD".into()).unwrap().try_clone().unwrap();
+        v.insert(c"CWD".into(), cwd_fd);
+        cd(&[c"%CWD".into()], &mut v).unwrap();
+        let cwd = v.resolve(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -75,7 +71,7 @@ fn cd_to_self() {
 fn cd_missing_path() {
     child_test(|| {
         let mut v = FdVars::new();
-        let bad = ShortCStr::from_static(c"/nonexistent-cd-test-xxxxxxxx");
+        let bad = c"/nonexistent-cd-test-xxxxxxxx".into();
         let e = cd(&[bad], &mut v).unwrap_err();
         assert_eq!(e, sys::errno::ENOENT);
     });
@@ -85,7 +81,7 @@ fn cd_missing_path() {
 fn cd_missing_var() {
     child_test(|| {
         let mut v = FdVars::new();
-        let bad = ShortCStr::from_static(c"%NONEXISTENT");
+        let bad = c"%NONEXISTENT".into();
         let e = cd(&[bad], &mut v).unwrap_err();
         assert_eq!(e, sys::errno::ENOENT);
     });
@@ -95,15 +91,15 @@ fn cd_missing_var() {
 fn cd_dash_switches_to_oldpwd() {
     child_test(|| {
         let mut v = FdVars::new();
-        let tmp = ShortCStr::from_static(c"/tmp");
+        let tmp = c"/tmp".into();
         cd(&[tmp], &mut v).unwrap();
-        let root = ShortCStr::from_static(c"/");
+        let root = c"/".into();
         cd(&[root], &mut v).unwrap();
-        let dash = ShortCStr::from_static(c"-");
+        let dash = c"-".into();
         cd(&[dash], &mut v).unwrap();
-        let cwd = v.resolve(&ShortCStr::from_static(c"CWD")).unwrap();
+        let cwd = v.resolve(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
-        let old = v.resolve(&ShortCStr::from_static(c"OLDCWD")).unwrap();
+        let old = v.resolve(&c"OLDCWD".into()).unwrap();
         old.verify().unwrap();
     });
 }
@@ -112,13 +108,13 @@ fn cd_dash_switches_to_oldpwd() {
 fn cd_move_cwd_to_oldcwd() {
     child_test(|| {
         let mut v = FdVars::new();
-        let tmp = ShortCStr::from_static(c"/tmp");
+        let tmp = c"/tmp".into();
         cd(&[tmp], &mut v).unwrap();
-        assert!(v.resolve(&ShortCStr::from_static(c"CWD")).is_some());
-        assert!(v.resolve(&ShortCStr::from_static(c"OLDCWD")).is_none());
-        let root = ShortCStr::from_static(c"/");
+        assert!(v.resolve(&c"CWD".into()).is_some());
+        assert!(v.resolve(&c"OLDCWD".into()).is_none());
+        let root = c"/".into();
         cd(&[root], &mut v).unwrap();
-        assert!(v.resolve(&ShortCStr::from_static(c"CWD")).is_some());
-        assert!(v.resolve(&ShortCStr::from_static(c"OLDCWD")).is_some());
+        assert!(v.resolve(&c"CWD".into()).is_some());
+        assert!(v.resolve(&c"OLDCWD".into()).is_some());
     });
 }

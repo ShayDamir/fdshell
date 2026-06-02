@@ -17,7 +17,6 @@ mod run;
 mod vars;
 
 use std::io::Write;
-use sys::ShortCStr;
 use sys::fcntl::O_DIRECTORY;
 use sys::siginfo::WaitStatus;
 
@@ -26,7 +25,7 @@ fn main() -> Result<(), i32> {
     sys::umask::init();
     let mut fdvars = vars::FdVars::new();
     let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
-    fdvars.insert(ShortCStr::from_static(c"CWD"), cwd);
+    fdvars.insert(c"CWD".into(), cwd);
     let mut last_status = WaitStatus::Exited(0);
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {

@@ -31,7 +31,7 @@ pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32> {
                         if !cur.is_empty() {
                             tokens.push(ShortCStr::from_vec(core::mem::take(&mut cur))?);
                         }
-                        tokens.push(ShortCStr::from_static(c"|"));
+                        tokens.push(c"|".into());
                     }
                 }
                 b'"' => in_quotes = true,

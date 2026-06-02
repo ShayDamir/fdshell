@@ -22,14 +22,12 @@ impl ShortCStr {
                 buf.get(..n).ok_or(crate::errno::EINVAL)
             }
             ShortCStr::Static(s, offset, length) => {
-                let full = s.to_bytes();
-                full.get(*offset..offset + length)
-                    .ok_or(crate::errno::EINVAL)
+                let end = offset + length;
+                s.get(*offset..end).ok_or(crate::errno::EINVAL)
             }
             ShortCStr::Rc { rc, offset, length } => {
-                let full = rc.to_bytes();
-                full.get(*offset..offset + length)
-                    .ok_or(crate::errno::EINVAL)
+                let end = offset + length;
+                rc.get(*offset..end).ok_or(crate::errno::EINVAL)
             }
         }
     }

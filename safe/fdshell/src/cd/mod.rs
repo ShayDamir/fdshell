@@ -7,7 +7,7 @@ use sys::{LocalFd, ShortCStr};
 pub fn cd(args: &[ShortCStr], fdvars: &mut FdVars) -> Result<(), i32> {
     let new_fd = match args.first() {
         None => cd_home()?,
-        Some(arg) if arg.eq_bytes(b"-") => cd_var(&ShortCStr::from_static(c"%OLDCWD"), fdvars)?,
+        Some(arg) if arg.eq_bytes(b"-") => cd_var(&c"%OLDCWD".into(), fdvars)?,
         Some(arg) if arg.starts_with(b"%") => cd_var(arg, fdvars)?,
         Some(path) => cd_path(path)?,
     };
@@ -38,10 +38,10 @@ fn open_cwd_dir(path: &std::ffi::CStr) -> Result<LocalFd, i32> {
 }
 
 fn move_cwd(fdvars: &mut FdVars, new_cwd: LocalFd) {
-    if let Some(old) = fdvars.remove(&ShortCStr::from_static(c"CWD")) {
-        fdvars.insert(ShortCStr::from_static(c"OLDCWD"), old);
+    if let Some(old) = fdvars.remove(&c"CWD".into()) {
+        fdvars.insert(c"OLDCWD".into(), old);
     }
-    fdvars.insert(ShortCStr::from_static(c"CWD"), new_cwd);
+    fdvars.insert(c"CWD".into(), new_cwd);
 }
 
 #[cfg(test)]
