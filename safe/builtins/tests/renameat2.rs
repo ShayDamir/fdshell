@@ -105,6 +105,7 @@ fn olddirfd_numeric() {
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
+    dupfd.verify().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--olddirfd", &s, "old", "new"], |cfg| {
         assert_eq!(
@@ -127,6 +128,7 @@ fn newdirfd_numeric() {
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
+    dupfd.verify().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--newdirfd", &s, "old", "new"], |cfg| {
         assert_eq!(

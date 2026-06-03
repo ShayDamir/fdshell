@@ -76,7 +76,7 @@ fn test_send_recv_fd() -> Result<(), i32> {
         let (a, b) = socketpair()?;
         a.verify()?;
         b.verify()?;
-        a.export_to(SHELLFD)?;
+        a.export_to(SHELLFD)?.verify()?;
         a.try_close()?;
         let receiver = b;
         set_capture_active(true);

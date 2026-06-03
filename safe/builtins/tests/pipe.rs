@@ -95,7 +95,8 @@ fn test_pipe_exec() {
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();
-    a.export_to(sys::shellfd::SHELLFD).unwrap();
+    let exp = a.export_to(sys::shellfd::SHELLFD).unwrap();
+    exp.verify().unwrap();
     a.try_close().unwrap();
     let receiver = b;
     sys::shellfd::set_capture_active(true);

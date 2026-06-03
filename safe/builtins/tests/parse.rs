@@ -64,6 +64,7 @@ fn dirfd_numeric() {
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
+    dupfd.verify().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--dirfd", &s, "x"], |cfg| {
         assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(dupfd.as_raw()));

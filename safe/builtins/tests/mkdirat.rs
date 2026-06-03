@@ -87,6 +87,7 @@ fn dirfd_numeric() {
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
+    dupfd.verify().unwrap();
     let s = format!("{}", dupfd.as_raw());
     assert_ok(&["--dirfd", &s, "x"], |cfg| {
         assert_eq!(cfg.dirfd.as_ref().map(|d| d.as_raw()), Some(dupfd.as_raw()));
@@ -158,7 +159,8 @@ fn test_mkdirat_exec() {
     let (a, b) = sys::net::socketpair().unwrap();
     a.verify().unwrap();
     b.verify().unwrap();
-    a.export_to(sys::shellfd::SHELLFD).unwrap();
+    let exp = a.export_to(sys::shellfd::SHELLFD).unwrap();
+    exp.verify().unwrap();
     a.try_close().unwrap();
     let receiver = b;
     sys::shellfd::set_capture_active(true);
