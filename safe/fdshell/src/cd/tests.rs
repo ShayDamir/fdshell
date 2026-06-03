@@ -19,11 +19,7 @@ fn child_test(f: impl FnOnce()) {
     }
 }
 
-// TODO: this hangs sometimes (interaction with parallel test runner?).
-// The child forks and immediately tries fchdir(/tmp). Something blocks
-// or waits on an fd that isn't ready. Needs investigation.
 #[test]
-#[ignore]
 fn cd_to_tmp() {
     child_test(|| {
         let mut v = FdVars::new();

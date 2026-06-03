@@ -1,3 +1,4 @@
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
@@ -23,7 +24,7 @@ impl ShortCStr {
         }
         let length = bytes.len();
         Ok(from_inline(&bytes).unwrap_or_else(|_| ShortCStr::Rc {
-            rc: bytes.into(),
+            rc: Rc::new(bytes),
             offset: 0,
             length,
         }))

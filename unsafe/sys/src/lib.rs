@@ -6,7 +6,7 @@ pub use atfd::AtFd;
 pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use localfd::LocalFd;
-pub use shortcstr::ShortCStr;
+pub use shortcstr::{RefCStr, ShortCStr};
 
 pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
     if ret == -1 {

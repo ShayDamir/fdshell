@@ -39,13 +39,13 @@ pub fn dispatch_builtin(
             let varname = raw0.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
             let dirfd = vars.resolve(&varname).ok_or(sys::errno::EINVAL)?;
             let pathname = args.get(1).ok_or(sys::errno::EINVAL)?;
-            let path_cs = pathname.to_c_string()?;
+            let pathname = sys::RefCStr::from(pathname.clone());
             // execveat with a relative pathname rejects dirfds that have FD_CLOEXEC set.
             // Create a non-CLOEXEC copy via export().
             let non_cloexec = dirfd.export()?;
             exec::exec_at(
                 non_cloexec.at(),
-                &path_cs,
+                &pathname,
                 refs.get(2..).ok_or(sys::errno::EINVAL)?,
             )
         }

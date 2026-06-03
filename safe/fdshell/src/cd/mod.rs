@@ -29,8 +29,8 @@ fn cd_var(arg: &ShortCStr, fdvars: &FdVars) -> Result<LocalFd, i32> {
 }
 
 fn cd_path(path: &ShortCStr) -> Result<LocalFd, i32> {
-    let cs = path.to_c_string()?;
-    open_cwd_dir(&cs)
+    let name = sys::RefCStr::from(path.clone());
+    open_cwd_dir(&name)
 }
 
 fn open_cwd_dir(path: &std::ffi::CStr) -> Result<LocalFd, i32> {

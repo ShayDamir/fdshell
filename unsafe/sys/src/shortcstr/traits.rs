@@ -58,7 +58,6 @@ impl fmt::Debug for ShortCStr {
 
 impl From<&'static CStr> for ShortCStr {
     fn from(s: &'static CStr) -> Self {
-        let bytes = s.to_bytes();
-        ShortCStr::Static(bytes, 0, bytes.len())
+        ShortCStr::Static(s, 0, s.count_bytes())
     }
 }

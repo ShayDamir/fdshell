@@ -214,25 +214,37 @@ fn get_non_tail_range_to() {
     assert_eq!(sub.as_bytes().unwrap(), b"hel");
 }
 
-// --- to_c_string correctness ---
+// --- RefCstr ---
 
 #[test]
-fn to_c_string_matches_inline() {
+fn ref_cstr_matches_inline() {
+    use sys::RefCStr;
     let s = ShortCStr::from_static(c"hello");
-    assert_eq!(s.to_c_string().unwrap().to_bytes(), s.as_bytes().unwrap());
+    assert_eq!(
+        RefCStr::from(s.clone()).as_ref().to_bytes(),
+        s.as_bytes().unwrap()
+    );
 }
 
 #[test]
-fn to_c_string_matches_static() {
+fn ref_cstr_matches_static() {
+    use sys::RefCStr;
     let s = ShortCStr::from_static(LONG);
-    assert_eq!(s.to_c_string().unwrap().to_bytes(), s.as_bytes().unwrap());
+    assert_eq!(
+        RefCStr::from(s.clone()).as_ref().to_bytes(),
+        s.as_bytes().unwrap()
+    );
 }
 
 #[test]
-fn to_c_string_matches_rc() {
+fn ref_cstr_matches_rc() {
+    use sys::RefCStr;
     let s =
         ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
-    assert_eq!(s.to_c_string().unwrap().to_bytes(), s.as_bytes().unwrap());
+    assert_eq!(
+        RefCStr::from(s.clone()).as_ref().to_bytes(),
+        s.as_bytes().unwrap()
+    );
 }
 
 // --- len / is_empty ---
@@ -401,4 +413,143 @@ fn strip_prefix_long() {
     let prefix = b"The quick ";
     let r = s.strip_prefix(prefix).unwrap();
     assert_eq!(r.as_bytes().unwrap(), &LONG.to_bytes()[prefix.len()..]);
+}
+
+// --- new() ---
+
+#[test]
+fn new_is_empty() {
+    let s = ShortCStr::new();
+    assert!(s.is_empty());
+    assert_eq!(s.len(), 0);
+}
+
+// --- push / push_unchecked ---
+
+#[test]
+fn push_up_to_inline_cap() {
+    let mut s = ShortCStr::new();
+    for (i, &b) in b"abcdefghijklmnopqrstuvwxyzABCD".iter().enumerate() {
+        s.push(b).unwrap();
+        assert_eq!(s.len(), i + 1);
+    }
+    assert_eq!(s.as_bytes().unwrap(), b"abcdefghijklmnopqrstuvwxyzABCD");
+}
+
+#[test]
+fn push_overflows_to_rc() {
+    let mut s = ShortCStr::new();
+    let payload = b"123456789012345678901234567890!";
+    for &b in payload.iter() {
+        s.push(b).unwrap();
+    }
+    assert_eq!(s.as_bytes().unwrap(), payload);
+    // should be Rc variant now (31 bytes > INLINE_CAP)
+    assert!(s.len() == 31);
+}
+
+#[test]
+fn push_nul_returns_err() {
+    let mut s = ShortCStr::new();
+    s.push(b'a').unwrap();
+    assert!(s.push(b'\0').is_err());
+    // content unchanged
+    assert_eq!(s.as_bytes().unwrap(), b"a");
+}
+
+#[test]
+fn push_unchecked_after_rc_mid_subslice() {
+    let s = ShortCStr::from_vec(b"hello world this is more than thirty bytes".to_vec()).unwrap();
+    let sub = s.get(6..11).unwrap();
+    // sub is an Rc non-tail view → push_unchecked copies
+    let mut sub = sub.clone();
+    unsafe { sub.push_unchecked(b'!') };
+    assert_eq!(sub.as_bytes().unwrap(), b"world!");
+}
+
+#[test]
+fn push_unchecked_rc_tail_growth() {
+    let raw = b"hello world this is more than thirty bytes";
+    let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
+    let tail = s.get(6..).unwrap();
+    assert_eq!(tail.as_bytes().unwrap(), &raw[6..]);
+    let mut tail = tail.clone();
+    unsafe { tail.push_unchecked(b'!') };
+    let mut expected = raw[6..].to_vec();
+    expected.push(b'!');
+    assert_eq!(tail.as_bytes().unwrap(), &expected);
+}
+
+#[test]
+fn push_unchecked_static_non_tail_rc_copy() {
+    // non-tail subslice with n >= INLINE_CAP → case 5 pushes via copy_to_shortcstr
+    let s = ShortCStr::from_static(LONG);
+    let sub = s.get(10..50).unwrap(); // 40 bytes > 30 → stays Static
+    let mut sub = sub.clone();
+    unsafe { sub.push_unchecked(b'!') };
+    let mut expected = LONG.to_bytes()[10..50].to_vec();
+    expected.push(b'!');
+    assert_eq!(sub.as_bytes().unwrap(), &expected);
+}
+
+#[test]
+fn ref_cstr_from_static_non_tail() {
+    let s = ShortCStr::from_static(LONG);
+    let sub = s.get(10..50).unwrap();
+    let r = sys::RefCStr::from(sub);
+    assert_eq!(r.as_ref().to_bytes(), &LONG.to_bytes()[10..50]);
+}
+
+#[test]
+fn ref_cstr_from_static_non_tail_inline() {
+    // short non-tail → push_unchecked(0) copies into Inline (case 3)
+    let s = ShortCStr::from_static(c"hello world");
+    let sub = s.get(6..).unwrap(); // "world" = 5 bytes ≤ INLINE_CAP
+    let r = sys::RefCStr::from(sub);
+    assert_eq!(r.as_ref().to_bytes(), b"world");
+}
+
+#[test]
+fn ref_cstr_from_short_non_tail() {
+    // short non-tail → RefCStr::from appends NUL on Inline (case 1)
+    let s = ShortCStr::from_static(c"hello world");
+    let sub = s.get(6..).unwrap();
+    let r = sys::RefCStr::from(sub);
+    assert_eq!(r.as_ref().to_bytes(), b"world");
+}
+
+#[test]
+fn push_unchecked_static_tail_stays_static() {
+    // tail subslice > INLINE_CAP → case 2: push_unchecked(0) is no-op
+    let s = ShortCStr::from_static(LONG);
+    let tail = s.get(60..).unwrap();
+    let len_before = tail.len();
+    let mut cloned = tail.clone();
+    unsafe { cloned.push_unchecked(0) };
+    assert_eq!(cloned.len(), len_before);
+    assert_eq!(cloned.as_bytes().unwrap(), &LONG.to_bytes()[60..]);
+}
+// --- ends_with ---
+
+#[test]
+fn ends_with_matches() {
+    let s = ShortCStr::from_static(c"hello world");
+    assert!(s.ends_with(b"world"));
+    assert!(s.ends_with(b""));
+    assert!(!s.ends_with(b"hello"));
+}
+
+#[test]
+fn ends_with_rc() {
+    let s = ShortCStr::from_vec(b"hello world this is long".to_vec()).unwrap();
+    assert!(s.ends_with(b"long"));
+    assert!(!s.ends_with(b"short"));
+}
+
+#[test]
+fn contains_found() {
+    let s = ShortCStr::from_static(c"hello world");
+    assert!(s.contains(b'o'));
+    assert!(s.contains(b'h'));
+    assert!(!s.contains(b'z'));
 }

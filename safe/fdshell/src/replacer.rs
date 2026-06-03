@@ -41,10 +41,10 @@ fn execute(
         child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, fdvars)
     } else {
         let binary = args.first().ok_or(sys::errno::EINVAL)?;
-        let binary_cs = binary.to_c_string()?;
-        let fd = exec::resolve_path(&binary_cs)?;
+        let binary = sys::RefCStr::from(binary.clone());
+        let fd = exec::resolve_path(&binary)?;
         let substituted = substitute_args(args.get(1..).unwrap_or(&[]), fdvars)?;
-        let argv: Vec<&CStr> = std::iter::once(binary_cs.as_c_str())
+        let argv: Vec<&CStr> = std::iter::once(binary.as_ref())
             .chain(substituted.iter().map(|s| s.as_c_str()))
             .collect();
         exec::exec_fd(&fd, &argv)
