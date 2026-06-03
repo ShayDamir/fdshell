@@ -1,5 +1,3 @@
-use core::fmt;
-
 #[repr(C)]
 pub struct SigInfo {
     pub si_signo: i32,
@@ -22,15 +20,6 @@ impl WaitStatus {
         match self {
             WaitStatus::Exited(c) => *c,
             WaitStatus::Signaled(s) => 128 + *s,
-        }
-    }
-}
-
-impl fmt::Debug for WaitStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            WaitStatus::Exited(code) => f.debug_tuple("Exited").field(code).finish(),
-            WaitStatus::Signaled(sig) => f.debug_tuple("Signaled").field(sig).finish(),
         }
     }
 }

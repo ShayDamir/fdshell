@@ -10,7 +10,7 @@ fn fork_exit_0() -> Result<(), i32> {
     pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
-        other => panic!("{other:?}"),
+        _ => Err(sys::errno::EINVAL),
     }
 }
 
@@ -24,7 +24,7 @@ fn fork_exit_42() -> Result<(), i32> {
     pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(42) => Ok(()),
-        other => panic!("{other:?}"),
+        _ => Err(sys::errno::EINVAL),
     }
 }
 
@@ -40,6 +40,6 @@ fn fork_signaled() -> Result<(), i32> {
     pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Signaled(libc::SIGKILL) => Ok(()),
-        other => panic!("{other:?}"),
+        _ => Err(sys::errno::EINVAL),
     }
 }

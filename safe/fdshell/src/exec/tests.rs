@@ -37,7 +37,7 @@ fn exec_child(f: impl FnOnce()) {
             let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
             match status {
                 WaitStatus::Exited(42) => {}
-                other => panic!("unexpected {other:?}"),
+                other => panic!("unexpected status {}", other.exit_code()),
             }
         }
     }
