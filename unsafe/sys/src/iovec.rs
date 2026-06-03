@@ -34,8 +34,4 @@ impl<'a> IoVecMut<'a> {
             PhantomData,
         )
     }
-
-    pub fn as_mut_ptr(&mut self) -> *mut libc::iovec {
-        &raw mut self.0
-    }
 }
