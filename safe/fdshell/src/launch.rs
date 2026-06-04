@@ -3,12 +3,14 @@
 use crate::child::{self, Command};
 use crate::parse::CommandLine;
 use crate::vars::FdVars;
-use sys::siginfo::WaitStatus;
 
-pub fn launch(
-    vars: &FdVars,
-    cmdline: &CommandLine,
-) -> Result<(WaitStatus, Option<(sys::LocalFd, i32)>), i32> {
+pub struct LaunchOutcome {
+    pub pidfd: sys::LocalFd,
+    pub capture_fd: Option<sys::LocalFd>,
+    pub child_pid: i32,
+}
+
+pub fn launch(vars: &FdVars, cmdline: &CommandLine) -> Result<LaunchOutcome, i32> {
     let cmd = Command::from(cmdline);
 
     let opened = crate::redirect::open_redirect_files(&cmdline.redirects)?;
@@ -24,9 +26,10 @@ pub fn launch(
 
     match pidfd_opt {
         None => child::child_exec(child_fd, vars, cmd, &cmdline.args, &resolved),
-        Some(pidfd) => {
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd)?;
-            Ok((status, capture_fd.map(|fd| (fd, child_pid as i32))))
-        }
+        Some(pidfd) => Ok(LaunchOutcome {
+            pidfd,
+            capture_fd,
+            child_pid: child_pid as i32,
+        }),
     }
 }

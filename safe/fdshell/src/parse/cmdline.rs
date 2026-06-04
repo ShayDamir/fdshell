@@ -9,7 +9,8 @@ pub struct CommandLine {
     pub args: Vec<ShortCStr>,
     pub captures: Vec<Capture>,
     pub redirects: Vec<RedirectDef>,
-    pub background: bool,
+    pub pidvar: Option<ShortCStr>,
+    pub bg_force: bool,
 }
 
 #[cfg_attr(test, derive(Debug, PartialEq))]

@@ -9,14 +9,18 @@ mod intercept;
 mod launch;
 mod parse;
 mod pipeline;
+mod postlaunch;
 mod redirect;
 mod repl;
 mod replacer;
 mod resolve;
 mod run;
+mod task;
 mod vars;
 
+use std::collections::HashMap;
 use std::io::Write;
+use sys::ShortCStr;
 use sys::fcntl::O_DIRECTORY;
 use sys::siginfo::WaitStatus;
 
@@ -26,12 +30,13 @@ fn main() -> Result<(), i32> {
     let mut fdvars = vars::FdVars::new();
     let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
     fdvars.insert(c"CWD".into(), cwd);
+    let mut tasks: HashMap<ShortCStr, crate::task::Task> = HashMap::new();
     let mut last_status = WaitStatus::Exited(0);
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
         if arg == "-c" {
             let cmd = args.next().ok_or(sys::errno::EINVAL)?;
-            let code = repl::exec_cmd(&cmd, &mut fdvars, &mut last_status)?;
+            let code = repl::exec_cmd(&cmd, &mut fdvars, &mut tasks, &mut last_status)?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -54,7 +59,7 @@ fn main() -> Result<(), i32> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        repl::handle(line, &mut fdvars, &mut last_status)?;
+        repl::handle(line, &mut fdvars, &mut tasks, &mut last_status)?;
     }
     Ok(())
 }

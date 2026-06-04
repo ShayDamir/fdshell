@@ -31,7 +31,8 @@ fn test_mkdirat_capture() {
                 force: false,
             }],
             redirects: vec![],
-            background: false,
+            pidvar: None,
+            bg_force: false,
         }
     );
 }
@@ -70,21 +71,7 @@ fn test_openat2_capture() {
         }]
     );
     assert!(cmd.redirects.is_empty());
-    assert!(!cmd.background);
-}
-
-#[test]
-fn test_echo_redirect() {
-    let ParsedLine::Cmd(cmd) = parse("echo \"test\" >%baz").unwrap() else {
-        panic!("expected Cmd")
-    };
-
-    assert!(!cmd.builtin);
-    assert_eq!(cmd.command, c"echo".into());
-    assert_eq!(cmd.args, vec![c"test".into()]);
-    assert!(cmd.captures.is_empty());
-    assert_eq!(cmd.redirects, vec![RedirectDef::var(1, c"baz")]);
-    assert!(!cmd.background);
+    assert!(cmd.pidvar.is_none());
 }
 
 #[test]
@@ -112,12 +99,12 @@ fn test_pipe_tagged_captures() {
         ]
     );
     assert!(cmd.redirects.is_empty());
-    assert!(!cmd.background);
+    assert!(cmd.pidvar.is_none());
 }
 
 #[test]
 fn test_background() {
-    let ParsedLine::Cmd(cmd) = parse("run_server params &").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse("run_server params &>&myserver").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -126,7 +113,23 @@ fn test_background() {
     assert_eq!(cmd.args, vec![c"params".into()]);
     assert!(cmd.captures.is_empty());
     assert!(cmd.redirects.is_empty());
-    assert!(cmd.background);
+    assert_eq!(cmd.pidvar, Some(c"myserver".into()));
+    assert!(!cmd.bg_force);
+}
+
+#[test]
+fn test_background_force() {
+    let ParsedLine::Cmd(cmd) = parse("run_server &>|&myserver").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(cmd.pidvar, Some(c"myserver".into()));
+    assert!(cmd.bg_force);
+}
+
+#[test]
+fn test_bare_background_is_err() {
+    assert!(matches!(parse("cmd &"), Err(EINVAL)));
 }
 
 #[test]

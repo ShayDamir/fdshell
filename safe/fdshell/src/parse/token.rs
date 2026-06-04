@@ -25,7 +25,9 @@ pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32> {
                     }
                 }
                 b'|' => {
-                    if cur.starts_with(b"%") && cur.ends_with(b">") {
+                    if cur.starts_with(b"%") && cur.ends_with(b">")
+                        || cur.starts_with(b"&") && cur.ends_with(b">")
+                    {
                         cur.push(b'|')?;
                     } else {
                         if !cur.is_empty() {

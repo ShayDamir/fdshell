@@ -85,27 +85,37 @@ as `--fd=63`. The launched subprocess then can use this number as a valid file d
 
 ### Addressing background tasks
 
-When a subprocess is spawned in the background via `&`, fdshell will save the corresponding `pidfd`
-of the subprocess in a special variable `%!`.
-
-Example:
+Subprocesses can be launched in the background using the `&>&name` syntax. The shell stores
+a background task (pidfd + capture context) in a pidvar `name`. The `wait` builtin reaps the
+child and processes any pending captures.
 
 ```shell
-# launches server as background process
-run_server params &
-# saves its pidfd into %server_pid
-%server_pid=%!
-# sends signal to the background process (not yet implemented)
-builtin kill --pidfd=%server_pid
-# waits until server is finished
-wait %server_pid
+# launches server as a named background task
+run_server params &>&server
+# waits until server is finished and receives its captures
+wait &server
 ```
 
-This avoids race conditions that are possible with traditional '$!' variable, which contains PID of the
-latest spawned subprocess. When sending signal to the background process by PID, it is possible that
-the process is already finished and PID was reused, and the signal will go to some unrelated process.
+Multiple background tasks can be created and waited on independently:
 
-With `pidfd`, this type of race conditions can be avoided.
+```shell
+build &>&builder
+test &>&tester
+wait &builder
+wait &tester
+```
+
+The `&>|&name` variant (with `|`) forces an overwrite if a task with that name already exists.
+
+Foreground subprocess with captures is equivalent to background + immediate wait:
+
+```shell
+cmd %>output            # foreground — wait + captures synchronous
+cmd %>output &>&x; wait &x   # same, via explicit background + wait
+```
+
+This avoids race conditions possible with traditional `$!` / PID-based background tracking,
+since pidfds remain valid and unique for the lifetime of the tracked child.
 
 ### Security concerns
 

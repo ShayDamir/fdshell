@@ -1,10 +1,14 @@
+use crate::task::Task;
 use crate::vars::FdVars;
+use std::collections::HashMap;
+use sys::ShortCStr;
 use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
 
 pub(crate) fn try_intercept(
     cmdline: &crate::parse::CommandLine,
     fdvars: &mut FdVars,
+    tasks: &mut HashMap<ShortCStr, Task>,
     last_status: &mut WaitStatus,
 ) -> Result<bool, i32> {
     match cmdline.command.as_bytes()? {
@@ -43,6 +47,12 @@ pub(crate) fn try_intercept(
                 Ok(()) => WaitStatus::Exited(0),
                 Err(e) => WaitStatus::Exited(e),
             };
+        }
+        b"wait" => {
+            if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
+                return Err(EINVAL);
+            }
+            *last_status = crate::task::try_wait(&cmdline.args, fdvars, tasks)?;
         }
         _ => return Ok(false),
     }

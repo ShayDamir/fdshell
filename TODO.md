@@ -10,7 +10,7 @@
   with tagged-matching + positional fallback
 - [x] `LocalFd::verify()`, `ImportedFd::verify()`, `ExportedFd::verify()` → `Result<(), i32>` using `cvt`
 - [x] REPL loop: read line from stdin, `parse()`, `launch()`, handle captures/exit
-- [ ] Background processes: `background: true` in `CommandLine` should skip `wait_pidfd` in parent, store pidfd in `%!`
+- [x] Background processes: `&>&name` stores background task in pidvar `name`, `wait &name` reaps it
 - [x] External command execution via `execveat` in child
 - [x] `become` builtin: process‑replacing exec with redirect support. Impl in `replacer.rs`, dispatch in `run.rs`
 - [x] Split `execveat2` into `exec_fd` (fd + AT_EMPTY_PATH) and `exec_at` (dirfd + pathname)

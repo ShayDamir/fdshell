@@ -17,11 +17,22 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
     let mut args: Vec<ShortCStr> = Vec::new();
     let mut captures: Vec<Capture> = Vec::new();
     let mut redirects: Vec<RedirectDef> = Vec::new();
-    let mut background = false;
+    let mut pidvar: Option<ShortCStr> = None;
+    let mut bg_force = false;
     for t in iter {
         let b = t.as_bytes()?;
         if b == b"&" {
-            background = true;
+            return Err(EINVAL);
+        } else if let Some(rest) = t.strip_prefix(b"&>") {
+            let (force, name) = if let Some(name) = rest.strip_prefix(b"|&") {
+                (true, name)
+            } else if let Some(name) = rest.strip_prefix(b"&") {
+                (false, name)
+            } else {
+                return Err(EINVAL);
+            };
+            pidvar = Some(name);
+            bg_force = force;
         } else if b.starts_with(b"%") {
             if let Some(c) = crate::parse::classify::parse_capture(t) {
                 captures.push(c);
@@ -44,7 +55,8 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
         args,
         captures,
         redirects,
-        background,
+        pidvar,
+        bg_force,
     })
 }
 
