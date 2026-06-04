@@ -3,31 +3,12 @@ use crate::LocalFd;
 pub const S_IFMT: u32 = libc::S_IFMT;
 pub const S_IFDIR: u32 = libc::S_IFDIR;
 
+#[derive(PartialEq, Debug)]
 pub struct FileStat {
     pub ino: u64,
     pub mode: u32,
     pub dev: u64,
     pub rdev: u64,
-}
-
-impl PartialEq for FileStat {
-    fn eq(&self, other: &Self) -> bool {
-        self.ino == other.ino
-            && self.mode == other.mode
-            && self.dev == other.dev
-            && self.rdev == other.rdev
-    }
-}
-
-impl core::fmt::Debug for FileStat {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("FileStat")
-            .field("ino", &self.ino)
-            .field("mode", &self.mode)
-            .field("dev", &self.dev)
-            .field("rdev", &self.rdev)
-            .finish()
-    }
 }
 
 pub fn fstat(fd: &LocalFd) -> Result<FileStat, i32> {
