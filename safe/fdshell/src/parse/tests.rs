@@ -339,3 +339,58 @@ fn test_pipe_builtin_not_pipeline() {
         Ok(ParsedLine::Cmd(_))
     ));
 }
+
+#[test]
+fn test_umask_no_args() {
+    let ParsedLine::Umask(mask) = parse("umask").unwrap() else {
+        panic!("expected Umask")
+    };
+    assert_eq!(mask, None);
+}
+
+#[test]
+fn test_umask_zero_o() {
+    let ParsedLine::Umask(mask) = parse("umask 0o077").unwrap() else {
+        panic!("expected Umask")
+    };
+    assert_eq!(mask, Some(0o077));
+}
+
+#[test]
+fn test_umask_numeric() {
+    let ParsedLine::Umask(mask) = parse("umask 077").unwrap() else {
+        panic!("expected Umask")
+    };
+    assert_eq!(mask, Some(0o077));
+}
+
+#[test]
+fn test_umask_zero() {
+    let ParsedLine::Umask(mask) = parse("umask 0o000").unwrap() else {
+        panic!("expected Umask")
+    };
+    assert_eq!(mask, Some(0o000));
+}
+
+#[test]
+fn test_umask_max() {
+    let ParsedLine::Umask(mask) = parse("umask 0o777").unwrap() else {
+        panic!("expected Umask")
+    };
+    assert_eq!(mask, Some(0o777));
+}
+
+#[test]
+fn test_umask_too_many_args() {
+    assert!(matches!(parse("umask 0o077 extra"), Err(EINVAL)));
+}
+
+#[test]
+fn test_umask_invalid_digit() {
+    assert!(matches!(parse("umask abc"), Err(EINVAL)));
+}
+
+#[test]
+fn test_umask_invalid_non_octal() {
+    assert!(matches!(parse("umask 0o078"), Err(EINVAL)));
+}

@@ -8,7 +8,7 @@ pub use importedfd::ImportedFd;
 pub use localfd::LocalFd;
 pub use shortcstr::{RefCStr, ShortCStr};
 
-pub(crate) fn cvt(ret: isize) -> Result<isize, i32> {
+pub fn cvt(ret: isize) -> Result<isize, i32> {
     if ret == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
         // guaranteed by the C runtime. Only called immediately after a failed libc call.
