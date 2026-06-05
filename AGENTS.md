@@ -91,7 +91,7 @@ nix flake check             # fmt + clippy + cargo nextest
 
 ## FD types
 
-Three fd types across `unsafe/sys/src/`:
+Four fd types across `unsafe/sys/src/`:
 
 | Type | Owns? | CLOEXEC? | Drop closes? | `const fn from_raw` | `from_bytes` (validated) | Module |
 |---|---|---|---|---|---|---|
@@ -119,18 +119,30 @@ Three fd types across `unsafe/sys/src/`:
 
 | Module | Role |
 |---|---|
+| `lib.rs` | `cvt()`, `RefCStr`, re-exports |
 | `atfd.rs` | `AtFd<'a>` — non-owning borrowed fd for `*at` syscalls |
 | `localfd.rs` | `LocalFd` — owned fd with Drop |
 | `importedfd.rs` | `ImportedFd` — non-CLOEXEC, inherited via exec |
 | `exportedfd.rs` | `ExportedFd` — non-CLOEXEC, output of `export()`/`export_to()` |
 | `rw.rs` | fd I/O — `read`, `write` |
 | `fcntl.rs` | Re-exports O\_\* and fcntl constants from `libc` |
+| `errno.rs` | Errno constants (`EINVAL`, `EEXIST`, etc.) |
+| `execveat.rs` | `execveat()` syscall wrapper |
+| `fchdir.rs` | `fchdir()` — change CWD via fd |
+| `fork_pidfd.rs` | `fork_pidfd()` — fork returning a pidfd |
+| `wait_pidfd.rs` | `wait_pidfd()` — wait on a pidfd |
+| `iovec.rs` | `IoVec`, `IoVecMut` — scatter/gather I/O |
 | `mkdirat.rs` | Directory creation — `mkdirat(dirfd, path, mode)` |
 | `renameat2.rs` | Rename — `renameat2(olddirfd, oldpath, newdirfd, newpath, flags)` + `RENAME_*` constants |
 | `openat2.rs` | `openat2` syscall, `OpenHow`, `RESOLVE_*` constants |
 | `pipe.rs` | Pipe — `pipe2(flags)` |
+| `net.rs` | `socketpair()` — used for capture channels |
 | `shellfd/` | SHELLFD protocol — `send_fd`, `recv_fd` |
+| `shortcstr/` | `ShortCStr` — small-string-optimized C string |
+| `siginfo.rs` | `WaitStatus` — child exit status |
 | `stat.rs` | `FileStat`, `stat`, `fstat` |
+| `umask.rs` | `umask` get/set/init |
+| `unlinkat.rs` | `unlinkat()` — delete by dirfd + name |
 
 ## Builtin conventions
 

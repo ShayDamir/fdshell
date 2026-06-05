@@ -109,6 +109,93 @@ fn c_nonzero_exit() {
 }
 
 #[test]
+fn c_and_operator_both_succeed() {
+    let dir = tmpdir();
+    let output = run_c("echo a && echo b", &dir);
+    assert_ok(&output, "c_and_operator_both_succeed");
+    let lines: Vec<&str> = str::from_utf8(&output.stdout).unwrap().lines().collect();
+    assert_eq!(lines, ["a", "b"]);
+}
+
+#[test]
+fn c_and_operator_short_circuit() {
+    let dir = tmpdir();
+    let output = run_c("nonexistent_xyz && echo should_not_run", &dir);
+    assert!(!output.status.success(), "expected non-zero exit");
+    let stdout = str::from_utf8(&output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "", "second command should not run");
+}
+
+#[test]
+fn c_false_and_true() {
+    let dir = tmpdir();
+    let output = run_c("false && true", &dir);
+    assert!(!output.status.success(), "false should exit non-zero");
+    let stdout = str::from_utf8(&output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "", "true should not run after false");
+}
+
+#[test]
+fn c_or_operator_short_circuit() {
+    let dir = tmpdir();
+    let output = run_c("true || echo should_not_run", &dir);
+    assert_ok(&output, "c_or_operator_short_circuit");
+    let stdout = str::from_utf8(&output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "", "second should not run after true");
+}
+
+#[test]
+fn c_or_operator_runs_on_fail() {
+    let dir = tmpdir();
+    let output = run_c("false || echo ran", &dir);
+    assert_ok(&output, "c_or_operator_runs_on_fail");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "ran");
+}
+
+#[test]
+fn c_or_and_chain() {
+    let dir = tmpdir();
+    let output = run_c("false || echo ran && echo also_ran", &dir);
+    assert_ok(&output, "c_or_and_chain");
+    let lines: Vec<&str> = str::from_utf8(&output.stdout).unwrap().lines().collect();
+    assert_eq!(lines, ["ran", "also_ran"]);
+}
+
+#[test]
+fn c_or_quoted() {
+    let dir = tmpdir();
+    let output = run_c("echo \"a || b\"", &dir);
+    assert_ok(&output, "c_or_quoted");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "a || b");
+}
+
+#[test]
+fn c_and_operator_quoted() {
+    let dir = tmpdir();
+    let output = run_c("echo \"a && b\"", &dir);
+    assert_ok(&output, "c_and_operator_quoted");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "a && b");
+}
+
+#[test]
+fn c_and_operator_chained() {
+    let dir = tmpdir();
+    let output = run_c("echo a && echo b && echo c", &dir);
+    assert_ok(&output, "c_and_operator_chained");
+    let lines: Vec<&str> = str::from_utf8(&output.stdout).unwrap().lines().collect();
+    assert_eq!(lines, ["a", "b", "c"]);
+}
+
+#[test]
+fn c_and_operator_chain_short_circuit() {
+    let dir = tmpdir();
+    let output = run_c("echo a && nonexistent_xyz && echo c", &dir);
+    assert!(!output.status.success(), "expected non-zero exit");
+    let stdout = str::from_utf8(&output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "a", "only first command should run");
+}
+
+#[test]
 fn c_empty_string() {
     let dir = tmpdir();
     let output = run_c("", &dir);

@@ -12,22 +12,56 @@ fn run(
 ) -> Result<i32, i32> {
     let mut start = 0;
     let mut in_quote = false;
-    for (i, c) in line.char_indices() {
-        if c == '"' {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i <= bytes.len() {
+        if bytes.get(i) == Some(&b'"') {
             in_quote = !in_quote;
-        } else if c == ';' && !in_quote {
+        } else if i == bytes.len() || (!in_quote && bytes.get(i) == Some(&b';')) {
             let part = line[start..i].trim();
             if !part.is_empty() {
-                crate::run::run_one(part, fdvars, tasks, last_status)?;
+                run_cond_list(part, fdvars, tasks, last_status)?;
             }
             start = i + 1;
         }
-    }
-    let part = line[start..].trim();
-    if !part.is_empty() {
-        crate::run::run_one(part, fdvars, tasks, last_status)?;
+        i += 1;
     }
     Ok(last_status.exit_code())
+}
+
+fn run_cond_list(
+    line: &str,
+    fdvars: &mut FdVars,
+    tasks: &mut HashMap<ShortCStr, Task>,
+    last_status: &mut WaitStatus,
+) -> Result<(), i32> {
+    let mut start = 0;
+    let mut in_quote = false;
+    let mut i = 0;
+    while i <= line.len() {
+        if line.as_bytes().get(i) == Some(&b'"') {
+            in_quote = !in_quote;
+        } else if i == line.len()
+            || (!in_quote && (line[i..].starts_with("&&") || line[i..].starts_with("||")))
+        {
+            let part = line[start..i].trim();
+            if !part.is_empty() {
+                crate::run::run_one(part, fdvars, tasks, last_status)?;
+                if i < line.len() {
+                    let and = line[i..].starts_with("&&");
+                    if (and && last_status.exit_code() != 0)
+                        || (!and && last_status.exit_code() == 0)
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            start = i + 2;
+            i += 1;
+        }
+        i += 1;
+    }
+    Ok(())
 }
 
 pub fn handle(
