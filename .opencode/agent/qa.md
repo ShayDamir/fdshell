@@ -29,6 +29,8 @@ Search for these and flag any occurrence outside `#[cfg(test)]` / `#[cfg(test_mo
 - `.unwrap()` / `.expect("…")` — use `?` or pattern matching
 - Indexing like `foo[i]`, `bar[idx]` — use `.get()` / `.get_mut()`
 - `#[derive(Debug, PartialEq, Eq)]` in production — use `#[cfg_attr(test, derive(...))]` (unless those traits are used in integration tests, which are not using cfg(test))
+- if production code uses derived traits- document that as a comment, but DO NOT derive them manually.
+- manual implementation of traits that could be derived with identical functionality is forbidden. Use derive if needed.
 - `libc::` calls in `safe/` crates — `safe/` has `forbid(unsafe_code)`
 - Hardcoded integer constants — all constants for syscalls should be re-exported from libc in the sys crate
 
@@ -47,6 +49,15 @@ Search for these and flag any occurrence outside `#[cfg(test)]` / `#[cfg(test_mo
 ### 6. Readability
 
 - The code should be easily readable. All non-obvious decisions should be documented in the comments.
+
+### 7. Strings
+
+- Rust &str and String types are disallowed for the following reasons: they enforce utf-8 invariant, which is not guaranteed by OS kernel. Truncating or choking on a perfectly valid string that kernel could accept, but utf-8 cannot is disallowed.
+- Instead of &str and String, use ShortCStr, which are owning, extendable, support zerocopy slicing, stack allocs for short strings
+  and can be converted to CStr via wrapping into RefCStr.
+- The invariant for ShortCStr is that they don't contain NUL bytes.
+- RefCStr contains only terminating NUL byte, but they cannot be modified after.
+- For literals, don't use regular Rust literals. Use b"literal" for comparison as bytes, and  c"literal" for creating literal ShortCStr
 
 ## Automated checks (always run)
 
