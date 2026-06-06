@@ -14,9 +14,9 @@ pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), i32> {
     }
     let mut iov = IoVec::new(tag_bytes);
     let mut cmsg = CmsgBuf {
-        // SAFETY: `CMSG_LEN` is a const fn in libc; passing `4` (size of one `i32`)
-        // is always valid and returns `20` on x86_64.
         hdr: libc::cmsghdr {
+            // SAFETY: `CMSG_LEN(4)` is a const fn returning 20 on x86_64;
+            // the result is stored, not dereferenced.
             cmsg_len: unsafe { libc::CMSG_LEN(core::mem::size_of::<i32>() as u32) as usize },
             cmsg_level: libc::SOL_SOCKET,
             cmsg_type: libc::SCM_RIGHTS,

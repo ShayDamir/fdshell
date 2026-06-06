@@ -22,6 +22,8 @@ fn execveat_ok_path() {
     let exe = CString::new(EXECVEAT_OK).unwrap();
     let argv: &[&CStr] = &[c"execveat_ok"];
     let envp: &[&CStr] = &[];
+    // SAFETY: fork+waitpid are standard POSIX operations; child
+    // calls execveat which either replaces the process or _exit.
     unsafe {
         match libc::fork() {
             0 => {
@@ -113,10 +115,11 @@ fn execveat_ok_fd() {
     let raw = file.as_raw_fd();
     let argv: &[&CStr] = &[c"execveat_ok"];
     let envp: &[&CStr] = &[];
+    // SAFETY: fork+waitpid are standard POSIX operations; raw is
+    // the fd of EXECVEAT_OK, opened before fork.
     unsafe {
         match libc::fork() {
             0 => {
-                // SAFETY: raw is the fd of EXECVEAT_OK, opened before fork.
                 let dirfd = sys::AtFd::from_raw(raw);
                 let _ = sys::execveat::execveat(dirfd, c"", argv, envp, AT_EMPTY_PATH);
                 libc::_exit(1);

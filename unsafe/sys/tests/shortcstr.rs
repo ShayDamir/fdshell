@@ -463,6 +463,7 @@ fn push_unchecked_after_rc_mid_subslice() {
     let sub = s.get(6..11).unwrap();
     // sub is an Rc non-tail view → push_unchecked copies
     let mut sub = sub.clone();
+    // SAFETY: Inline variant has capacity; Rc variant copies via copy_to_shortcstr.
     unsafe { sub.push_unchecked(b'!') };
     assert_eq!(sub.as_bytes().unwrap(), b"world!");
 }
@@ -474,6 +475,7 @@ fn push_unchecked_rc_tail_growth() {
     let tail = s.get(6..).unwrap();
     assert_eq!(tail.as_bytes().unwrap(), &raw[6..]);
     let mut tail = tail.clone();
+    // SAFETY: Rc tail variant has capacity for one more byte.
     unsafe { tail.push_unchecked(b'!') };
     let mut expected = raw[6..].to_vec();
     expected.push(b'!');
@@ -486,6 +488,7 @@ fn push_unchecked_static_non_tail_rc_copy() {
     let s = ShortCStr::from_static(LONG);
     let sub = s.get(10..50).unwrap(); // 40 bytes > 30 → stays Static
     let mut sub = sub.clone();
+    // SAFETY: copies via copy_to_shortcstr into Rc variant.
     unsafe { sub.push_unchecked(b'!') };
     let mut expected = LONG.to_bytes()[10..50].to_vec();
     expected.push(b'!');
@@ -525,6 +528,7 @@ fn push_unchecked_static_tail_stays_static() {
     let tail = s.get(60..).unwrap();
     let len_before = tail.len();
     let mut cloned = tail.clone();
+    // SAFETY: Static tail variant with capacity; push_unchecked(0) is no-op here.
     unsafe { cloned.push_unchecked(0) };
     assert_eq!(cloned.len(), len_before);
     assert_eq!(cloned.as_bytes().unwrap(), &LONG.to_bytes()[60..]);

@@ -4,8 +4,9 @@ use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr};
 impl ShortCStr {
     pub fn new() -> Self {
         // SAFETY: 0 is ≤ INLINE_MAX.
+        let len = unsafe { InlineSize::from_u8(0) };
         ShortCStr::Inline {
-            len: unsafe { InlineSize::from_u8(0) },
+            len,
             buf: [0u8; INLINE_CAP],
         }
     }

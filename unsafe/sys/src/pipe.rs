@@ -7,7 +7,6 @@ pub fn pipe2(flags: i32) -> Result<(LocalFd, LocalFd), i32> {
     crate::cvt(unsafe { libc::pipe2(fds.as_mut_ptr(), flags) as isize })?;
     let [rd, wr] = fds;
     // SAFETY: `pipe2` with `O_CLOEXEC` sets CLOEXEC on both ends.
-    let rd = unsafe { LocalFd::from_raw(rd) };
-    let wr = unsafe { LocalFd::from_raw(wr) };
+    let (rd, wr) = unsafe { (LocalFd::from_raw(rd), LocalFd::from_raw(wr)) };
     Ok((rd, wr))
 }

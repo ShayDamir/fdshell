@@ -39,6 +39,8 @@ impl InlineSize {
     /// `v` must be ≤ `INLINE_MAX`.
     pub(crate) unsafe fn from_u8(v: u8) -> Self {
         debug_assert!(v <= crate::shortcstr::INLINE_MAX);
+        // SAFETY: caller guarantees `v ≤ INLINE_MAX`, which selects
+        // a valid discriminant of the `#[repr(u8)]` enum.
         unsafe { core::mem::transmute(v) }
     }
 

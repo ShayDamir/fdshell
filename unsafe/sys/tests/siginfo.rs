@@ -5,8 +5,14 @@ use sys::siginfo::SigInfo;
 
 #[test]
 fn siginfo_layout_matches_libc() {
-    let ours = unsafe { core::mem::zeroed::<SigInfo>() };
-    let theirs = unsafe { core::mem::zeroed::<libc::siginfo_t>() };
+    // SAFETY: zero-initialized SigInfo and siginfo_t are valid for
+    // layout comparison (all fields are integers).
+    let (ours, theirs) = unsafe {
+        (
+            core::mem::zeroed::<SigInfo>(),
+            core::mem::zeroed::<libc::siginfo_t>(),
+        )
+    };
     let ob = &raw const ours as usize;
     let tb = &raw const theirs as usize;
 

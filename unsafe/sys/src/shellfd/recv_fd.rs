@@ -21,6 +21,9 @@ pub fn recv_fd<'a>(
         msg_controllen: ctrl_buf.len(),
         msg_flags: 0,
     };
+    // SAFETY: `sock` is a valid open socket; `msg` and `ctrl_buf`
+    // are valid stack allocations; `recvmsg` with invalid pointers
+    // returns -1/EFAULT, caught by `cvt`.
     let n = crate::cvt(unsafe { libc::recvmsg(sock.as_raw(), &mut msg, libc::MSG_CMSG_CLOEXEC) })?
         as usize;
 
@@ -35,35 +38,53 @@ pub fn recv_fd<'a>(
     let mut got_fd: Option<LocalFd> = None;
     let mut got_pid = None;
 
-    // SAFETY: iterate over control messages in ctrl_buf.
+    // SAFETY: `CMSG_FIRSTHDR` returns a pointer into `ctrl_buf`
+    // (valid allocation), or null if no messages.
     let cmsg_ptr = unsafe { libc::CMSG_FIRSTHDR(&msg) };
     let mut cmsg = cmsg_ptr;
     while !cmsg.is_null() {
+        // SAFETY: `cmsg` is non-null, returned by `CMSG_FIRSTHDR`/
+        // `CMSG_NXTHDR`; the pointer is valid for a `cmsghdr`.
         let level = unsafe { (*cmsg).cmsg_level };
+        // SAFETY: same pointer validity as above.
         let ctype = unsafe { (*cmsg).cmsg_type };
         if level == libc::SOL_SOCKET && ctype == libc::SCM_RIGHTS {
+            // SAFETY: `cmsg` is a valid `cmsghdr` pointer; `CMSG_DATA`
+            // is valid for `cmsg_len` bytes.
             let data = unsafe { libc::CMSG_DATA(cmsg).cast::<i32>() };
+            // SAFETY: `cmsg` is valid (same as above).
             let nbytes = (unsafe { (*cmsg).cmsg_len } as usize)
                 .saturating_sub(core::mem::size_of::<libc::cmsghdr>());
             let nfds = nbytes / core::mem::size_of::<i32>();
             for i in 0..nfds {
+                // SAFETY: `data` is a valid pointer from `CMSG_DATA`;
+                // `i` is bounded by `nfds` derived from `cmsg_len`.
                 let raw_fd = unsafe { *data.add(i) };
                 if got_fd.is_none() {
+                    // SAFETY: `raw_fd` comes from kernel `SCM_RIGHTS`;
+                    // `MSG_CMSG_CLOEXEC` was set on `recvmsg`.
                     got_fd = Some(unsafe { LocalFd::from_raw(raw_fd) });
                 } else {
+                    // SAFETY: `raw_fd` is a valid fd from the kernel;
+                    // close of a valid fd is safe.
                     unsafe { libc::close(raw_fd) };
                 }
             }
         } else if level == libc::SOL_SOCKET && ctype == libc::SCM_CREDENTIALS {
+            // SAFETY: `cmsg` is a valid `cmsghdr` pointer.
             let payload = (unsafe { (*cmsg).cmsg_len } as usize)
                 .saturating_sub(core::mem::size_of::<libc::cmsghdr>());
             // SCM_CREDENTIALS must carry a full ucred.
             if payload < core::mem::size_of::<libc::ucred>() {
                 return Err(EINVAL);
             }
+            // SAFETY: `cmsg` is a valid `cmsghdr` with `SCM_CREDENTIALS`;
+            // the kernel always provides a full `ucred`.
             let cred = unsafe { &*libc::CMSG_DATA(cmsg).cast::<libc::ucred>() };
             got_pid = Some(cred.pid);
         }
+        // SAFETY: `msg` and `cmsg` are valid pointers; `CMSG_NXTHDR`
+        // returns null at end or on malformed data (safe).
         cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
     }
 

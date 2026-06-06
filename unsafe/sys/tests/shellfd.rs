@@ -34,8 +34,8 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
         msg_controllen: core::mem::size_of_val(&cmsg),
         msg_flags: 0,
     };
-    // SAFETY: `iov`, `cmsg`, `msg` are valid stack-local values. `fd` is a
-    // connected Unix socket. `send_fd` is a valid open fd.
+    // SAFETY: `iov`, `cmsg`, `msg` are valid stack-local values; `fd` is a
+    // connected Unix socket; `send_fd` is a valid open fd.
     if unsafe { libc::sendmsg(fd, &msg, 0) } == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
         return Err(unsafe { *libc::__errno_location() });
@@ -47,6 +47,7 @@ fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
     // SAFETY: child inherits a copy of the fd table; parent waits for it.
     let pid = unsafe { libc::fork() };
     if pid == -1 {
+        // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
         return Err(unsafe { *libc::__errno_location() });
     }
     if pid == 0 {
@@ -205,9 +206,13 @@ fn test_recv_fd_truncated_creds() -> Result<(), i32> {
     dummy_rd.verify()?;
     dummy_wr.verify()?;
 
+    // SAFETY: `CMSG_SPACE(0)` returns the minimum space for a control
+    // message header, a valid constant on x86_64 Linux.
     let truncated = unsafe { libc::CMSG_SPACE(0) as usize };
     let mut ctrl = vec![0u8; truncated];
+    // SAFETY: `ctrl` has `truncated` bytes, enough for `cmsghdr`.
     let cmsg = unsafe { &mut *ctrl.as_mut_ptr().cast::<libc::cmsghdr>() };
+    // SAFETY: `CMSG_LEN(0)` is valid on x86_64 Linux; stored, not dereferenced.
     cmsg.cmsg_len = unsafe { libc::CMSG_LEN(0) as usize };
     cmsg.cmsg_level = libc::SOL_SOCKET;
     cmsg.cmsg_type = libc::SCM_CREDENTIALS;
@@ -225,11 +230,14 @@ fn test_recv_fd_truncated_creds() -> Result<(), i32> {
         msg_controllen: truncated,
         msg_flags: 0,
     };
+    // SAFETY: `msg` and `ctrl` are valid stack allocations; `a` is a
+    // connected Unix socket. Kernel rejects truncated creds — this
+    // is expected.
     let ret = unsafe { libc::sendmsg(a.as_raw(), &msg, 0) };
     dummy_wr.try_close()?;
 
-    // Kernel rejects truncated creds — this is expected.
     assert_eq!(ret, -1);
+    // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
     let _e = unsafe { *libc::__errno_location() };
 
     dummy_rd.try_close()?;

@@ -14,7 +14,10 @@ pub struct FileStat {
 pub fn fstat(fd: &LocalFd) -> Result<FileStat, i32> {
     // SAFETY: `fd.as_raw()` is any integer; `libc::fstat` with an invalid fd returns `EBADF`.
     // `raw` is zero-initialized, valid for a `libc::stat` (all integer fields).
+    // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
     let mut raw: libc::stat = unsafe { core::mem::zeroed() };
+    // SAFETY: `fd.as_raw()` is a valid fd by `LocalFd` invariant;
+    // `fstat` with invalid fd returns `EBADF`, caught by `cvt`.
     crate::cvt(unsafe { libc::fstat(fd.as_raw(), &mut raw) as isize })?;
     Ok(FileStat {
         ino: raw.st_ino as u64,
@@ -27,7 +30,10 @@ pub fn fstat(fd: &LocalFd) -> Result<FileStat, i32> {
 pub fn stat(path: &core::ffi::CStr) -> Result<FileStat, i32> {
     // SAFETY: `path` must be a valid null-terminated C string; an invalid path
     // returns `ENOENT`/`ENOTDIR`. `raw` is zero-initialized, valid for `libc::stat`.
+    // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
     let mut raw: libc::stat = unsafe { core::mem::zeroed() };
+    // SAFETY: `path` is a valid null-terminated C string by `CStr`
+    // invariant; `stat` with an invalid path returns `ENOENT`.
     crate::cvt(unsafe { libc::stat(path.as_ptr(), &mut raw) as isize })?;
     Ok(FileStat {
         ino: raw.st_ino as u64,

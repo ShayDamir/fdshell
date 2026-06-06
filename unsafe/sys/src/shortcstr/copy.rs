@@ -18,10 +18,8 @@ pub(crate) fn copy_to_shortcstr(src: &[u8], offset: usize, length: usize, byte: 
             *d = b;
         }
         // SAFETY: length < INLINE_CAP ≤ INLINE_MAX, so length + 1 ≤ INLINE_MAX
-        ShortCStr::Inline {
-            len: unsafe { InlineSize::from_u8((length + 1) as u8) },
-            buf,
-        }
+        let len = unsafe { InlineSize::from_u8((length + 1) as u8) };
+        ShortCStr::Inline { len, buf }
     } else {
         let mut v = Vec::with_capacity(length + 1);
         for &b in src.iter().skip(offset).take(length) {

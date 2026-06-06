@@ -38,7 +38,6 @@ pub fn socketpair() -> Result<(LocalFd, LocalFd), i32> {
     })?;
     let [a, b] = pair;
     // SAFETY: both fds have CLOEXEC set by `SOCK_CLOEXEC`.
-    let a = unsafe { LocalFd::from_raw(a) };
-    let b = unsafe { LocalFd::from_raw(b) };
+    let (a, b) = unsafe { (LocalFd::from_raw(a), LocalFd::from_raw(b)) };
     Ok((a, b))
 }

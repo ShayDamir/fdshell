@@ -32,23 +32,34 @@ pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), i32> {
     let state = PIDFD_CLOEXEC.load(Ordering::Relaxed);
     if state == UNKNOWN {
         // Probe whether clone3 sets CLOEXEC automatically.
+        // SAFETY: `raw_pidfd` came from clone3 (valid fd or -1);
+        // fcntl on an invalid fd safely returns -1/EBADF.
         let flags =
             crate::cvt(unsafe { libc::fcntl(raw_pidfd, libc::F_GETFD) as isize }).unwrap_or(0);
         if flags & libc::FD_CLOEXEC as isize != 0 {
             PIDFD_CLOEXEC.store(AUTO, Ordering::Relaxed);
         } else {
             PIDFD_CLOEXEC.store(MANUAL, Ordering::Relaxed);
+            // SAFETY: `raw_pidfd` is a valid fd from clone3; fcntl
+            // on invalid fd returns -1, caught by `cvt`.
             if let Err(e) = crate::cvt(unsafe {
                 libc::fcntl(raw_pidfd, libc::F_SETFD, libc::FD_CLOEXEC) as isize
             }) {
+                // SAFETY: `raw_pidfd` is a valid fd (clone3 succeeded);
+                // close of a valid fd is safe.
                 unsafe { libc::close(raw_pidfd) };
                 return Err(e);
             }
         }
     } else if state == MANUAL
-        && let Err(e) =
-            crate::cvt(unsafe { libc::fcntl(raw_pidfd, libc::F_SETFD, libc::FD_CLOEXEC) as isize })
+        && let Err(e) = crate::cvt(
+            // SAFETY: `raw_pidfd` is a valid fd from clone3; fcntl
+            // F_SETFD on invalid fd returns -1, caught by `cvt`.
+            unsafe { libc::fcntl(raw_pidfd, libc::F_SETFD, libc::FD_CLOEXEC) as isize },
+        )
     {
+        // SAFETY: `raw_pidfd` is a valid fd (clone3 succeeded);
+        // close of a valid fd is safe.
         unsafe { libc::close(raw_pidfd) };
         return Err(e);
     }

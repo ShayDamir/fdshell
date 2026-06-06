@@ -8,6 +8,8 @@ impl ExportedFd {
         Self(raw)
     }
     pub fn verify(&self) -> Result<(), i32> {
+        // SAFETY: `self.0` is an open fd by caller guarantee; fcntl
+        // with an invalid fd returns -1/EBADF, handled by `cvt`.
         let flags = crate::cvt(unsafe { libc::fcntl(self.0, libc::F_GETFD) as isize })?;
         if flags & libc::FD_CLOEXEC as isize != 0 {
             return Err(crate::errno::EINVAL);

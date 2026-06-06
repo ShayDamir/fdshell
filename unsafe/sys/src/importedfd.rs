@@ -20,6 +20,8 @@ impl ImportedFd {
         Ok(d)
     }
     pub fn verify(&self) -> Result<(), i32> {
+        // SAFETY: `self.0` is a valid fd by `ImportedFd` invariant;
+        // fcntl on invalid fd returns -1/EBADF safely.
         let flags = crate::cvt(unsafe { libc::fcntl(self.0, libc::F_GETFD) as isize })?;
         if flags & libc::FD_CLOEXEC as isize != 0 {
             return Err(crate::errno::EINVAL);
@@ -34,6 +36,8 @@ impl ImportedFd {
     }
     /// Set CLOEXEC, converting this imported fd into a local owned fd.
     pub fn try_into_local(self) -> Result<crate::LocalFd, i32> {
+        // SAFETY: `self.0` is a valid open fd; fcntl F_SETFD on
+        // an invalid fd returns -1, handled by `cvt`.
         crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
         // SAFETY: fcntl atomically set CLOEXEC; caller gets exclusive ownership.
         Ok(unsafe { crate::LocalFd::from_raw(self.0) })
