@@ -18,6 +18,9 @@ mod run;
 mod task;
 mod vars;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::io::Write;
 use sys::ShortCStr;
