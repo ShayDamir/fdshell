@@ -4,6 +4,7 @@ mod command;
 mod for_block;
 mod if_block;
 mod line;
+mod semi;
 mod token;
 
 pub use cmdline::{CommandLine, Pipeline};

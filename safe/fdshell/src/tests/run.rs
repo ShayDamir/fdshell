@@ -97,7 +97,7 @@ fn wait_one_task() {
         Some(pidfd) => {
             let mut state = ShellState::new();
             state.tasks.insert(
-                ShortCStr::from_static(c"mytask"),
+                ShortCStr::from(c"mytask"),
                 Task {
                     pidfd,
                     capture_fd: None,
@@ -126,7 +126,7 @@ fn wait_all_tasks() {
     };
     let mut state = ShellState::new();
     state.tasks.insert(
-        ShortCStr::from_static(c"task1"),
+        ShortCStr::from(c"task1"),
         Task {
             pidfd: pidfd1,
             capture_fd: None,
@@ -135,7 +135,7 @@ fn wait_all_tasks() {
         },
     );
     state.tasks.insert(
-        ShortCStr::from_static(c"task2"),
+        ShortCStr::from(c"task2"),
         Task {
             pidfd: pidfd2,
             capture_fd: None,
@@ -331,4 +331,40 @@ fn string_assign_empty_value() {
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     let val = state.strings.get(&c"var".into());
     assert_eq!(val, Some(&c"".into()));
+}
+
+#[test]
+fn for_single_word_executes_body() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"for x in hello; do var=set; done", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
+    assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+}
+
+#[test]
+fn for_multiple_words_sets_var_to_last() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"for x in a b c; do var=set; done", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert_eq!(state.strings.get(&c"x".into()), Some(&c"c".into()));
+    assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+}
+
+#[test]
+fn for_empty_words_skips_body() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"for x in; do var=set; done", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert_eq!(state.strings.get(&c"x".into()), None);
+    assert_eq!(state.strings.get(&c"var".into()), None);
+}
+
+#[test]
+fn for_newline_body() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"for x in hello\ndo\nvar=set\ndone", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
+    assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
 }

@@ -1,6 +1,5 @@
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::ffi::CStr;
 
 use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr};
 
@@ -28,9 +27,5 @@ impl ShortCStr {
             offset: 0,
             length,
         }))
-    }
-
-    pub fn from_static(s: &'static CStr) -> Self {
-        s.into()
     }
 }

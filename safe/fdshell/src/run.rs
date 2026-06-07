@@ -36,7 +36,13 @@ pub(crate) fn run_one(line: &[u8], state: &mut ShellState) -> Result<(), i32> {
             }
             state.last_status = WaitStatus::Exited(0);
         }
-        crate::parse::ParsedLine::For(_) => todo!(),
+        crate::parse::ParsedLine::For(forblock) => {
+            state.last_status = WaitStatus::Exited(0);
+            for word in &forblock.words {
+                state.strings.insert(forblock.var.clone(), word.clone());
+                crate::repl::run_script(forblock.body.as_bytes()?, state)?;
+            }
+        }
         crate::parse::ParsedLine::If(ifblock) => {
             let cond = ifblock.condition.as_bytes()?;
             crate::repl::run_cond_list(cond, state)?;

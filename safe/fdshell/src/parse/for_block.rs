@@ -1,4 +1,4 @@
-use crate::parse::if_block::{find_preceded_by_semi, trim_semi, try_join};
+use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
 use sys::ShortCStr;
 use sys::errno::EINVAL;
 

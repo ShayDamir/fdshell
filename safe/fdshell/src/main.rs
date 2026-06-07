@@ -18,6 +18,7 @@ mod resolve;
 mod run;
 mod script;
 mod state;
+mod substitute;
 mod task;
 
 #[cfg(test)]
