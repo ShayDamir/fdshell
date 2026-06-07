@@ -64,7 +64,11 @@ pub(crate) fn tokens_to_if(tokens: &[ShortCStr]) -> Result<IfBlock, i32> {
     })
 }
 
-fn find_preceded_by_semi(tokens: &[ShortCStr], start: usize, needle: &[u8]) -> Option<usize> {
+pub(crate) fn find_preceded_by_semi(
+    tokens: &[ShortCStr],
+    start: usize,
+    needle: &[u8],
+) -> Option<usize> {
     let mut i = start;
     while i < tokens.len() {
         if tokens.get(i).is_some_and(|t| t.eq_bytes(needle))
@@ -77,7 +81,7 @@ fn find_preceded_by_semi(tokens: &[ShortCStr], start: usize, needle: &[u8]) -> O
     None
 }
 
-fn trim_semi(tokens: &[ShortCStr]) -> &[ShortCStr] {
+pub(crate) fn trim_semi(tokens: &[ShortCStr]) -> &[ShortCStr] {
     let start = tokens
         .iter()
         .position(|t| !t.eq_bytes(b";"))
@@ -90,7 +94,7 @@ fn trim_semi(tokens: &[ShortCStr]) -> &[ShortCStr] {
     tokens.get(start..end).unwrap_or(&[])
 }
 
-fn try_join(tokens: &[ShortCStr]) -> Result<ShortCStr, i32> {
+pub(crate) fn try_join(tokens: &[ShortCStr]) -> Result<ShortCStr, i32> {
     let mut s = ShortCStr::new();
     for t in tokens {
         if !s.is_empty() {

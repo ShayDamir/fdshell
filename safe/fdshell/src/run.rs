@@ -40,6 +40,7 @@ pub(crate) fn run_one(
             }
             *last_status = WaitStatus::Exited(0);
         }
+        crate::parse::ParsedLine::For(_) => todo!(),
         crate::parse::ParsedLine::If(ifblock) => {
             let mut cond_status = WaitStatus::Exited(0);
             let cond = ifblock.condition.as_bytes()?;

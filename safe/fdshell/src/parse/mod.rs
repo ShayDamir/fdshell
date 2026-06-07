@@ -1,6 +1,7 @@
 mod classify;
 mod cmdline;
 mod command;
+mod for_block;
 mod if_block;
 mod line;
 mod token;
@@ -17,6 +18,10 @@ pub fn parse(line: &[u8]) -> Result<ParsedLine, i32> {
 
     if raw.first().is_some_and(|t| t.eq_bytes(b"if")) {
         return Ok(ParsedLine::If(if_block::tokens_to_if(&raw)?));
+    }
+
+    if raw.first().is_some_and(|t| t.eq_bytes(b"for")) {
+        return Ok(ParsedLine::For(for_block::tokens_to_for(&raw)?));
     }
 
     if raw.iter().any(|t| t.eq_bytes(b"|")) {

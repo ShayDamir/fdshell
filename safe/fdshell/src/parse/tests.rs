@@ -425,3 +425,73 @@ fn parse_if_newline_separators() {
     assert!(ib.elifs.is_empty());
     assert!(ib.else_body.is_none());
 }
+
+#[test]
+fn for_simple() {
+    let tokens = token::tokenize(b"for var in a b c; do echo $var; done").unwrap();
+    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    assert_eq!(fb.var, c"var".into());
+    assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
+    assert_eq!(fb.body, c"echo $var".into());
+}
+
+#[test]
+fn for_single_word() {
+    let tokens = token::tokenize(b"for x in foo; do cmd; done").unwrap();
+    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    assert_eq!(fb.var, c"x".into());
+    assert_eq!(fb.words, vec![c"foo".into()]);
+    assert_eq!(fb.body, c"cmd".into());
+}
+
+#[test]
+fn for_newline_separators() {
+    let tokens = token::tokenize(b"for x in a b c\ndo\ncmd1; cmd2\ndone").unwrap();
+    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    assert_eq!(fb.var, c"x".into());
+    assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
+    assert_eq!(fb.body, c"cmd1 ; cmd2".into());
+}
+
+#[test]
+fn for_empty_words() {
+    let tokens = token::tokenize(b"for x in ; do cmd; done").unwrap();
+    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    assert_eq!(fb.var, c"x".into());
+    assert!(fb.words.is_empty());
+    assert_eq!(fb.body, c"cmd".into());
+}
+
+#[test]
+fn for_missing_do_returns_err() {
+    let tokens = token::tokenize(b"for x in a; done").unwrap();
+    assert_eq!(for_block::tokens_to_for(&tokens).unwrap_err(), EINVAL);
+}
+
+#[test]
+fn for_missing_done_returns_err() {
+    let tokens = token::tokenize(b"for x in a; do cmd").unwrap();
+    assert_eq!(for_block::tokens_to_for(&tokens).unwrap_err(), EINVAL);
+}
+
+#[test]
+fn for_no_in_returns_err() {
+    let tokens = token::tokenize(b"for x a; do cmd; done").unwrap();
+    assert_eq!(for_block::tokens_to_for(&tokens).unwrap_err(), EINVAL);
+}
+
+#[test]
+fn for_not_starting_with_for_is_not_a_for() {
+    let tokens = token::tokenize(b"while x; do cmd; done").unwrap();
+    assert!(for_block::tokens_to_for(&tokens).is_err());
+}
+
+#[test]
+fn for_parse_dispatch() {
+    let ParsedLine::For(fb) = parse(b"for var in a b c; do echo $var; done").unwrap() else {
+        panic!("expected For")
+    };
+    assert_eq!(fb.var, c"var".into());
+    assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
+    assert_eq!(fb.body, c"echo $var".into());
+}
