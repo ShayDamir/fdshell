@@ -2,13 +2,13 @@ use crate::child::{self, Command};
 use crate::exec;
 use crate::redirect::Redirect;
 use crate::resolve::substitute_args;
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use std::ffi::CStr;
 use sys::ShortCStr;
 
 pub fn child_main(
     child_sock: Option<sys::LocalFd>,
-    vars: &FdVars,
+    state: &ShellState,
     cmd: Command,
     args: &[ShortCStr],
     redirects: &[Redirect<'_>],
@@ -24,11 +24,11 @@ pub fn child_main(
         r.export()?;
     }
 
-    let resolved = substitute_args(args, vars)?;
+    let resolved = substitute_args(args, state)?;
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
     match cmd {
-        Command::Builtin(name) => child::builtin::dispatch_builtin(name, &refs, args, vars),
+        Command::Builtin(name) => child::builtin::dispatch_builtin(name, &refs, args, state),
         Command::External(name) => {
             let name = sys::RefCStr::from(name.clone());
             let fd = exec::resolve_path(&name)?;

@@ -1,9 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::run::run_one;
+use crate::state::ShellState;
 use crate::task::Task;
-use crate::vars::FdVars;
-use std::collections::HashMap;
 use sys::ShortCStr;
 use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
@@ -31,11 +30,9 @@ fn child_test(f: impl FnOnce()) {
 #[test]
 fn umask_set_via_run_one() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        run_one(b"umask 0o077", &mut fdvars, &mut tasks, &mut last_status).unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        let mut state = ShellState::new();
+        run_one(b"umask 0o077", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -43,11 +40,9 @@ fn umask_set_via_run_one() {
 #[test]
 fn umask_set_zero_via_run_one() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        run_one(b"umask 0o000", &mut fdvars, &mut tasks, &mut last_status).unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        let mut state = ShellState::new();
+        run_one(b"umask 0o000", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -55,11 +50,9 @@ fn umask_set_zero_via_run_one() {
 #[test]
 fn umask_set_without_o_prefix() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        run_one(b"umask 077", &mut fdvars, &mut tasks, &mut last_status).unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        let mut state = ShellState::new();
+        run_one(b"umask 077", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -67,10 +60,8 @@ fn umask_set_without_o_prefix() {
 #[test]
 fn umask_invalid_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        let e = run_one(b"umask abc", &mut fdvars, &mut tasks, &mut last_status).unwrap_err();
+        let mut state = ShellState::new();
+        let e = run_one(b"umask abc", &mut state).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -78,41 +69,23 @@ fn umask_invalid_returns_err() {
 #[test]
 fn umask_too_many_args_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        let e = run_one(
-            b"umask 0o077 extra",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
-        )
-        .unwrap_err();
+        let mut state = ShellState::new();
+        let e = run_one(b"umask 0o077 extra", &mut state).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
 
 #[test]
 fn wait_no_tasks() {
-    let mut fdvars = FdVars::new();
-    let mut tasks = HashMap::new();
-    let mut last_status = WaitStatus::Exited(0);
-    run_one(b"wait", &mut fdvars, &mut tasks, &mut last_status).unwrap();
-    assert!(matches!(last_status, WaitStatus::Exited(0)));
+    let mut state = ShellState::new();
+    run_one(b"wait", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }
 
 #[test]
 fn wait_nonexistent_name() {
-    let mut fdvars = FdVars::new();
-    let mut tasks = HashMap::new();
-    let mut last_status = WaitStatus::Exited(0);
-    let e = run_one(
-        b"wait &nonexistent",
-        &mut fdvars,
-        &mut tasks,
-        &mut last_status,
-    )
-    .unwrap_err();
+    let mut state = ShellState::new();
+    let e = run_one(b"wait &nonexistent", &mut state).unwrap_err();
     assert_eq!(e, EINVAL);
 }
 
@@ -122,9 +95,8 @@ fn wait_one_task() {
     match pidfd_opt {
         None => std::process::exit(42),
         Some(pidfd) => {
-            let mut fdvars = FdVars::new();
-            let mut tasks = HashMap::new();
-            tasks.insert(
+            let mut state = ShellState::new();
+            state.tasks.insert(
                 ShortCStr::from_static(c"mytask"),
                 Task {
                     pidfd,
@@ -133,10 +105,9 @@ fn wait_one_task() {
                     captures: Vec::new(),
                 },
             );
-            let mut last_status = WaitStatus::Exited(0);
-            run_one(b"wait &mytask", &mut fdvars, &mut tasks, &mut last_status).unwrap();
-            assert!(matches!(last_status, WaitStatus::Exited(42)));
-            assert!(tasks.is_empty());
+            run_one(b"wait &mytask", &mut state).unwrap();
+            assert!(matches!(state.last_status, WaitStatus::Exited(42)));
+            assert!(state.tasks.is_empty());
         }
     }
 }
@@ -153,9 +124,8 @@ fn wait_all_tasks() {
         None => std::process::exit(7),
         Some(pidfd) => pidfd,
     };
-    let mut fdvars = FdVars::new();
-    let mut tasks = HashMap::new();
-    tasks.insert(
+    let mut state = ShellState::new();
+    state.tasks.insert(
         ShortCStr::from_static(c"task1"),
         Task {
             pidfd: pidfd1,
@@ -164,7 +134,7 @@ fn wait_all_tasks() {
             captures: Vec::new(),
         },
     );
-    tasks.insert(
+    state.tasks.insert(
         ShortCStr::from_static(c"task2"),
         Task {
             pidfd: pidfd2,
@@ -173,39 +143,28 @@ fn wait_all_tasks() {
             captures: Vec::new(),
         },
     );
-    let mut last_status = WaitStatus::Exited(0);
-    run_one(b"wait", &mut fdvars, &mut tasks, &mut last_status).unwrap();
-    let ok = match last_status {
+    run_one(b"wait", &mut state).unwrap();
+    let ok = match state.last_status {
         WaitStatus::Exited(c) => c == 42 || c == 7,
         _ => false,
     };
     assert!(ok);
-    assert!(tasks.is_empty());
+    assert!(state.tasks.is_empty());
 }
 
 #[test]
 fn wait_rejects_capture() {
-    let mut fdvars = FdVars::new();
-    let mut tasks = HashMap::new();
-    let mut last_status = WaitStatus::Exited(0);
-    let e = run_one(b"wait %>%var", &mut fdvars, &mut tasks, &mut last_status).unwrap_err();
+    let mut state = ShellState::new();
+    let e = run_one(b"wait %>%var", &mut state).unwrap_err();
     assert_eq!(e, EINVAL);
 }
 
 #[test]
 fn if_then_runs_body() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        crate::repl::run_script(
-            b"if umask 0o077; then umask 0o000; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
-        )
-        .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"if umask 0o077; then umask 0o000; fi", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -213,17 +172,13 @@ fn if_then_runs_body() {
 #[test]
 fn if_with_else_runs_then() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         crate::repl::run_script(
             b"if umask 0o077; then umask 0o000; else umask 0o007; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -231,16 +186,8 @@ fn if_with_else_runs_then() {
 #[test]
 fn if_missing_then_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        let e = run_one(
-            b"if umask 0o077; umask 0o000; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
-        )
-        .unwrap_err();
+        let mut state = ShellState::new();
+        let e = run_one(b"if umask 0o077; umask 0o000; fi", &mut state).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -248,16 +195,8 @@ fn if_missing_then_returns_err() {
 #[test]
 fn if_missing_fi_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        let e = run_one(
-            b"if umask 0o077; then umask 0o000",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
-        )
-        .unwrap_err();
+        let mut state = ShellState::new();
+        let e = run_one(b"if umask 0o077; then umask 0o000", &mut state).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -265,14 +204,10 @@ fn if_missing_fi_returns_err() {
 #[test]
 fn if_else_before_semicolon_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         let e = run_one(
             b"if umask 0o077; then umask 0o000 else umask 0o007; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap_err();
         assert_eq!(e, EINVAL);
@@ -282,16 +217,8 @@ fn if_else_before_semicolon_returns_err() {
 #[test]
 fn if_then_before_semicolon_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        let e = run_one(
-            b"if umask 0o077 then umask 0o000; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
-        )
-        .unwrap_err();
+        let mut state = ShellState::new();
+        let e = run_one(b"if umask 0o077 then umask 0o000; fi", &mut state).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -299,17 +226,13 @@ fn if_then_before_semicolon_returns_err() {
 #[test]
 fn if_elif_then_runs_then() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         crate::repl::run_script(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; else umask 0o700; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -317,17 +240,13 @@ fn if_elif_then_runs_then() {
 #[test]
 fn if_elif_no_else_runs_then() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         crate::repl::run_script(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -335,14 +254,10 @@ fn if_elif_no_else_runs_then() {
 #[test]
 fn if_elif_before_semicolon_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         let e = run_one(
             b"if umask 0o077; then umask 0o000; elif umask 0o007 then umask 0o070; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap_err();
         assert_eq!(e, EINVAL);
@@ -352,14 +267,10 @@ fn if_elif_before_semicolon_returns_err() {
 #[test]
 fn if_elif_without_then_returns_err() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         let e = run_one(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; else umask 0o070; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap_err();
         assert_eq!(e, EINVAL);
@@ -369,17 +280,9 @@ fn if_elif_without_then_returns_err() {
 #[test]
 fn if_then_newline_separator() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
-        crate::repl::run_script(
-            b"if true\nthen\numask 0o000\nfi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
-        )
-        .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"if true\nthen\numask 0o000\nfi", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -387,17 +290,13 @@ fn if_then_newline_separator() {
 #[test]
 fn nested_if_fails() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         crate::repl::run_script(
             b"if true; then if false; then umask 0o000; fi; fi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -405,17 +304,13 @@ fn nested_if_fails() {
 #[test]
 fn nested_if_newline_fails() {
     child_test(|| {
-        let mut fdvars = FdVars::new();
-        let mut tasks = HashMap::new();
-        let mut last_status = WaitStatus::Exited(0);
+        let mut state = ShellState::new();
         crate::repl::run_script(
             b"if true\nthen\nif false\nthen\numask 0o000\nfi\nfi",
-            &mut fdvars,
-            &mut tasks,
-            &mut last_status,
+            &mut state,
         )
         .unwrap();
-        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_ne!(sys::umask::get(), 0o000);
     });
 }

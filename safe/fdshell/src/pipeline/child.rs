@@ -1,7 +1,7 @@
 use crate::child::{self, Command};
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use sys::LocalFd;
 
 pub fn run_child(
@@ -9,7 +9,7 @@ pub fn run_child(
     pipes: &[(LocalFd, LocalFd)],
     capture_pairs: &mut [Option<(LocalFd, LocalFd)>],
     commands: &[CommandLine],
-    vars: &FdVars,
+    state: &ShellState,
 ) -> ! {
     let cmd_data = match commands.get(i) {
         Some(c) => c,
@@ -28,7 +28,7 @@ pub fn run_child(
     let opened = super::open::open_redirect_files(cmd_data);
 
     let file_redirects =
-        match crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, vars) {
+        match crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, state) {
             Ok(fds) => fds,
             Err(e) => std::process::exit(e),
         };
@@ -40,5 +40,5 @@ pub fn run_child(
 
     let cmd = Command::from(cmd_data);
 
-    child::child_exec(child_sock, vars, cmd, &cmd_data.args, &redirects)
+    child::child_exec(child_sock, state, cmd, &cmd_data.args, &redirects)
 }

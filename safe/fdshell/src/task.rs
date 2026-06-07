@@ -1,8 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::capture::Capture;
-use crate::vars::FdVars;
-use std::collections::HashMap;
+use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
@@ -14,15 +13,11 @@ pub struct Task {
     pub captures: Vec<Capture>,
 }
 
-pub fn try_wait(
-    args: &[ShortCStr],
-    fdvars: &mut FdVars,
-    tasks: &mut HashMap<ShortCStr, Task>,
-) -> Result<WaitStatus, i32> {
+pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus, i32> {
     match args.first() {
         Some(arg) => {
             let key = arg.strip_prefix(b"&").ok_or(EINVAL)?;
-            let Some(task) = tasks.remove(&key) else {
+            let Some(task) = state.tasks.remove(&key) else {
                 return Err(EINVAL);
             };
             let status = sys::wait_pidfd::wait_pidfd(&task.pidfd)?;
@@ -30,18 +25,18 @@ pub fn try_wait(
                 && let Some(capture_fd) = task.capture_fd
             {
                 let entries =
-                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, fdvars)?;
+                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)?;
                 for (var, fd) in entries {
-                    fdvars.insert(var, fd);
+                    state.fds.insert(var, fd);
                 }
             }
             Ok(status)
         }
         None => {
             let mut last = WaitStatus::Exited(0);
-            let keys: Vec<ShortCStr> = tasks.keys().cloned().collect();
+            let keys: Vec<ShortCStr> = state.tasks.keys().cloned().collect();
             for key in keys {
-                let Some(task) = tasks.remove(&key) else {
+                let Some(task) = state.tasks.remove(&key) else {
                     continue;
                 };
                 let status = sys::wait_pidfd::wait_pidfd(&task.pidfd)?;
@@ -51,11 +46,11 @@ pub fn try_wait(
                         capture_fd,
                         task.child_pid,
                         task.captures,
-                        fdvars,
+                        state,
                     )
                 {
                     for (var, fd) in entries {
-                        fdvars.insert(var, fd);
+                        state.fds.insert(var, fd);
                     }
                 }
                 last = status;

@@ -1,18 +1,18 @@
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use std::ffi::CString;
 use sys::errno::{EINVAL, ENOENT};
 use sys::fcntl::{O_DIRECTORY, O_NOFOLLOW};
 use sys::{LocalFd, ShortCStr};
 
-pub fn cd(args: &[ShortCStr], fdvars: &mut FdVars) -> Result<(), i32> {
+pub fn cd(args: &[ShortCStr], state: &mut ShellState) -> Result<(), i32> {
     let new_fd = match args.first() {
         None => cd_home()?,
-        Some(arg) if arg.eq_bytes(b"-") => cd_var(&c"%OLDCWD".into(), fdvars)?,
-        Some(arg) if arg.starts_with(b"%") => cd_var(arg, fdvars)?,
+        Some(arg) if arg.eq_bytes(b"-") => cd_var(&c"%OLDCWD".into(), state)?,
+        Some(arg) if arg.starts_with(b"%") => cd_var(arg, state)?,
         Some(path) => cd_path(path)?,
     };
     sys::fchdir::fchdir(&new_fd)?;
-    move_cwd(fdvars, new_fd);
+    move_cwd(state, new_fd);
     Ok(())
 }
 
@@ -22,9 +22,9 @@ fn cd_home() -> Result<LocalFd, i32> {
     open_cwd_dir(&cs)
 }
 
-fn cd_var(arg: &ShortCStr, fdvars: &FdVars) -> Result<LocalFd, i32> {
+fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<LocalFd, i32> {
     let name = arg.strip_prefix(b"%").ok_or(EINVAL)?;
-    let src = fdvars.resolve(&name).ok_or(ENOENT)?;
+    let src = state.fds.get(&name).ok_or(ENOENT)?;
     src.try_clone()
 }
 
@@ -37,11 +37,11 @@ fn open_cwd_dir(path: &std::ffi::CStr) -> Result<LocalFd, i32> {
     sys::openat2::open(path, O_DIRECTORY | O_NOFOLLOW)
 }
 
-fn move_cwd(fdvars: &mut FdVars, new_cwd: LocalFd) {
-    if let Some(old) = fdvars.remove(&c"CWD".into()) {
-        fdvars.insert(c"OLDCWD".into(), old);
+fn move_cwd(state: &mut ShellState, new_cwd: LocalFd) {
+    if let Some(old) = state.fds.remove(&c"CWD".into()) {
+        state.fds.insert(c"OLDCWD".into(), old);
     }
-    fdvars.insert(c"CWD".into(), new_cwd);
+    state.fds.insert(c"CWD".into(), new_cwd);
 }
 
 #[cfg(test)]

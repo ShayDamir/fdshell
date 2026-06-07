@@ -1,10 +1,10 @@
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use sys::ShortCStr;
 
-pub fn dispatch(name: &[u8], args: &[ShortCStr], vars: &FdVars) -> Option<Result<(), i32>> {
+pub fn dispatch(name: &[u8], args: &[ShortCStr], state: &ShellState) -> Option<Result<(), i32>> {
     match name {
         b"import_fd" => Some(import_fd(args)),
-        b"export_fd" => Some(export_fd(args, vars)),
+        b"export_fd" => Some(export_fd(args, state)),
         _ => None,
     }
 }
@@ -15,7 +15,7 @@ fn import_fd(args: &[ShortCStr]) -> Result<(), i32> {
     sys::shellfd::send_fd(&fd.try_into_local()?, c"import_fd")
 }
 
-pub(crate) fn export_fd(args: &[ShortCStr], vars: &FdVars) -> Result<(), i32> {
+pub(crate) fn export_fd(args: &[ShortCStr], state: &ShellState) -> Result<(), i32> {
     let (vname, tag) = match args {
         [a] => {
             let v = a.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
@@ -32,6 +32,6 @@ pub(crate) fn export_fd(args: &[ShortCStr], vars: &FdVars) -> Result<(), i32> {
         }
         _ => return Err(sys::errno::EINVAL),
     };
-    let fd = vars.resolve(&vname).ok_or(sys::errno::EINVAL)?;
+    let fd = state.fds.get(&vname).ok_or(sys::errno::EINVAL)?;
     sys::shellfd::send_fd(fd, &tag)
 }

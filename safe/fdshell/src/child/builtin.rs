@@ -1,5 +1,5 @@
 use crate::exec;
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use std::ffi::CStr;
 use sys::ShortCStr;
 
@@ -7,7 +7,7 @@ pub fn dispatch_builtin(
     name: ShortCStr,
     refs: &[&CStr],
     args: &[ShortCStr],
-    vars: &FdVars,
+    state: &ShellState,
 ) -> Result<(), i32> {
     match name.as_bytes()? {
         b"echo" => {
@@ -31,13 +31,13 @@ pub fn dispatch_builtin(
         b"exec_fd" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
             let varname = raw0.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
-            let fd = vars.resolve(&varname).ok_or(sys::errno::EINVAL)?;
+            let fd = state.fds.get(&varname).ok_or(sys::errno::EINVAL)?;
             exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?)
         }
         b"exec_at" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
             let varname = raw0.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
-            let dirfd = vars.resolve(&varname).ok_or(sys::errno::EINVAL)?;
+            let dirfd = state.fds.get(&varname).ok_or(sys::errno::EINVAL)?;
             let pathname = args.get(1).ok_or(sys::errno::EINVAL)?;
             let pathname = sys::RefCStr::from(pathname.clone());
             // execveat with a relative pathname rejects dirfds that have FD_CLOEXEC set.
@@ -55,7 +55,7 @@ pub fn dispatch_builtin(
             sys::shellfd::send_fd(&fd, c"resolve").ok();
             Ok(())
         }
-        name_bytes => crate::child::fdpass::dispatch(name_bytes, args, vars)
+        name_bytes => crate::child::fdpass::dispatch(name_bytes, args, state)
             .unwrap_or(Err(sys::errno::ENOSYS)),
     }
 }

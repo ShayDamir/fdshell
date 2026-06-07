@@ -1,5 +1,6 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 use super::*;
+use crate::state::ShellState;
 use sys::siginfo::WaitStatus;
 
 fn child_test(f: impl FnOnce()) {
@@ -22,10 +23,10 @@ fn child_test(f: impl FnOnce()) {
 #[test]
 fn cd_to_tmp() {
     child_test(|| {
-        let mut v = FdVars::new();
+        let mut state = ShellState::new();
         let tmp = c"/tmp".into();
-        cd(&[tmp], &mut v).unwrap();
-        let cwd = v.resolve(&c"CWD".into()).unwrap();
+        cd(&[tmp], &mut state).unwrap();
+        let cwd = state.fds.get(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -35,15 +36,15 @@ fn cd_to_home() {
     let home_exists = std::env::var_os("HOME").is_some_and(|p| std::path::Path::new(&p).exists());
     if home_exists {
         child_test(|| {
-            let mut v = FdVars::new();
-            cd(&[], &mut v).unwrap();
-            let cwd = v.resolve(&c"CWD".into()).unwrap();
+            let mut state = ShellState::new();
+            cd(&[], &mut state).unwrap();
+            let cwd = state.fds.get(&c"CWD".into()).unwrap();
             cwd.verify().unwrap();
         });
     } else {
         child_test(|| {
-            let mut v = FdVars::new();
-            let e = cd(&[], &mut v).unwrap_err();
+            let mut state = ShellState::new();
+            let e = cd(&[], &mut state).unwrap_err();
             assert_eq!(e, sys::errno::ENOENT);
         });
     }
@@ -52,13 +53,13 @@ fn cd_to_home() {
 #[test]
 fn cd_to_self() {
     child_test(|| {
-        let mut v = FdVars::new();
+        let mut state = ShellState::new();
         let tmp = c"/tmp".into();
-        cd(&[tmp], &mut v).unwrap();
-        let cwd_fd = v.resolve(&c"CWD".into()).unwrap().try_clone().unwrap();
-        v.insert(c"CWD".into(), cwd_fd);
-        cd(&[c"%CWD".into()], &mut v).unwrap();
-        let cwd = v.resolve(&c"CWD".into()).unwrap();
+        cd(&[tmp], &mut state).unwrap();
+        let cwd_fd = state.fds.get(&c"CWD".into()).unwrap().try_clone().unwrap();
+        state.fds.insert(c"CWD".into(), cwd_fd);
+        cd(&[c"%CWD".into()], &mut state).unwrap();
+        let cwd = state.fds.get(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -66,9 +67,9 @@ fn cd_to_self() {
 #[test]
 fn cd_missing_path() {
     child_test(|| {
-        let mut v = FdVars::new();
+        let mut state = ShellState::new();
         let bad = c"/nonexistent-cd-test-xxxxxxxx".into();
-        let e = cd(&[bad], &mut v).unwrap_err();
+        let e = cd(&[bad], &mut state).unwrap_err();
         assert_eq!(e, sys::errno::ENOENT);
     });
 }
@@ -76,9 +77,9 @@ fn cd_missing_path() {
 #[test]
 fn cd_missing_var() {
     child_test(|| {
-        let mut v = FdVars::new();
+        let mut state = ShellState::new();
         let bad = c"%NONEXISTENT".into();
-        let e = cd(&[bad], &mut v).unwrap_err();
+        let e = cd(&[bad], &mut state).unwrap_err();
         assert_eq!(e, sys::errno::ENOENT);
     });
 }
@@ -86,16 +87,16 @@ fn cd_missing_var() {
 #[test]
 fn cd_dash_switches_to_oldpwd() {
     child_test(|| {
-        let mut v = FdVars::new();
+        let mut state = ShellState::new();
         let tmp = c"/tmp".into();
-        cd(&[tmp], &mut v).unwrap();
+        cd(&[tmp], &mut state).unwrap();
         let root = c"/".into();
-        cd(&[root], &mut v).unwrap();
+        cd(&[root], &mut state).unwrap();
         let dash = c"-".into();
-        cd(&[dash], &mut v).unwrap();
-        let cwd = v.resolve(&c"CWD".into()).unwrap();
+        cd(&[dash], &mut state).unwrap();
+        let cwd = state.fds.get(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
-        let old = v.resolve(&c"OLDCWD".into()).unwrap();
+        let old = state.fds.get(&c"OLDCWD".into()).unwrap();
         old.verify().unwrap();
     });
 }
@@ -103,14 +104,14 @@ fn cd_dash_switches_to_oldpwd() {
 #[test]
 fn cd_move_cwd_to_oldcwd() {
     child_test(|| {
-        let mut v = FdVars::new();
+        let mut state = ShellState::new();
         let tmp = c"/tmp".into();
-        cd(&[tmp], &mut v).unwrap();
-        assert!(v.resolve(&c"CWD".into()).is_some());
-        assert!(v.resolve(&c"OLDCWD".into()).is_none());
+        cd(&[tmp], &mut state).unwrap();
+        assert!(state.fds.contains_key(&c"CWD".into()));
+        assert!(!state.fds.contains_key(&c"OLDCWD".into()));
         let root = c"/".into();
-        cd(&[root], &mut v).unwrap();
-        assert!(v.resolve(&c"CWD".into()).is_some());
-        assert!(v.resolve(&c"OLDCWD".into()).is_some());
+        cd(&[root], &mut state).unwrap();
+        assert!(state.fds.contains_key(&c"CWD".into()));
+        assert!(state.fds.contains_key(&c"OLDCWD".into()));
     });
 }

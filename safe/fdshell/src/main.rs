@@ -17,31 +17,26 @@ mod replacer;
 mod resolve;
 mod run;
 mod script;
+mod state;
 mod task;
-mod vars;
 
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use sys::ShortCStr;
 use sys::fcntl::O_DIRECTORY;
-use sys::siginfo::WaitStatus;
 
 fn main() -> Result<(), i32> {
     let _mode = crate::init::init_shellfd()?;
     sys::umask::init();
-    let mut fdvars = vars::FdVars::new();
+    let mut state = state::ShellState::new();
     let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
-    fdvars.insert(c"CWD".into(), cwd);
-    let mut tasks: HashMap<ShortCStr, crate::task::Task> = HashMap::new();
-    let mut last_status = WaitStatus::Exited(0);
+    state.fds.insert(c"CWD".into(), cwd);
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
         if arg == "-c" {
             let cmd = args.next().ok_or(sys::errno::EINVAL)?;
-            let code = repl::exec_cmd(cmd.as_bytes(), &mut fdvars, &mut tasks, &mut last_status)?;
+            let code = repl::exec_cmd(cmd.as_bytes(), &mut state)?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -66,7 +61,7 @@ fn main() -> Result<(), i32> {
         if line.is_empty() || line.starts_with(b"#") {
             continue;
         }
-        repl::handle(line, &mut fdvars, &mut tasks, &mut last_status)?;
+        repl::handle(line, &mut state)?;
     }
     Ok(())
 }

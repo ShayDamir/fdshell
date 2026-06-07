@@ -1,23 +1,18 @@
-use crate::task::Task;
-use crate::vars::FdVars;
-use std::collections::HashMap;
-use sys::ShortCStr;
+use crate::state::ShellState;
 use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
 
 pub(crate) fn try_intercept(
     cmdline: &crate::parse::CommandLine,
-    fdvars: &mut FdVars,
-    tasks: &mut HashMap<ShortCStr, Task>,
-    last_status: &mut WaitStatus,
+    state: &mut ShellState,
 ) -> Result<bool, i32> {
     match cmdline.command.as_bytes()? {
         b"cd" => {
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            crate::cd::cd(&cmdline.args, fdvars)?;
-            *last_status = WaitStatus::Exited(0);
+            crate::cd::cd(&cmdline.args, state)?;
+            state.last_status = WaitStatus::Exited(0);
         }
         b"exit" | b"quit" => {
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
@@ -28,7 +23,7 @@ pub(crate) fn try_intercept(
                     let s = core::str::from_utf8(arg.as_bytes()?).map_err(|_| EINVAL)?;
                     s.parse::<i32>().map_err(|_| EINVAL)?
                 }
-                None => last_status.exit_code(),
+                None => state.last_status.exit_code(),
             };
             std::process::exit(code);
         }
@@ -37,13 +32,13 @@ pub(crate) fn try_intercept(
                 eprintln!("become: captures not supported");
                 std::process::exit(sys::errno::EINVAL);
             }
-            crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, fdvars);
+            crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, state);
         }
         b"export_fd" if cmdline.builtin => {
             if !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            *last_status = match crate::child::fdpass::export_fd(&cmdline.args, fdvars) {
+            state.last_status = match crate::child::fdpass::export_fd(&cmdline.args, state) {
                 Ok(()) => WaitStatus::Exited(0),
                 Err(e) => WaitStatus::Exited(e),
             };
@@ -52,7 +47,7 @@ pub(crate) fn try_intercept(
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            *last_status = crate::task::try_wait(&cmdline.args, fdvars, tasks)?;
+            state.last_status = crate::task::try_wait(&cmdline.args, state)?;
         }
         _ => return Ok(false),
     }

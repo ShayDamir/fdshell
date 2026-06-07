@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::errno::EEXIST;
 
@@ -15,22 +15,14 @@ pub struct Capture {
 }
 
 /// Receive fds from `capture_fd`, match against captures, stage results.
-/// Receive fds from `capture_fd`, match against captures, stage results.
 ///
 /// Returns a `Vec` of `(var, fd)` pairs on success. The caller commits
-/// them atomically into `fdvars`.
-///
-/// # Assumptions
-///
-/// - `captures` has unique target variables (parser guarantees this).
-///   Duplicate targets would break the `EEXIST` check against committed state.
-/// - Captures are positional if untagged, matched by tag if tagged.
-///   Unknown fds (no matching capture) are silently closed.
+/// them atomically into the state's fds.
 pub fn do_captures(
     capture_fd: sys::LocalFd,
     expected_pid: i32,
     captures: Vec<Capture>,
-    fdvars: &FdVars,
+    state: &ShellState,
 ) -> Result<Vec<(ShortCStr, sys::LocalFd)>, i32> {
     let mut captured_fds: Vec<(ShortCStr, sys::LocalFd)> = Vec::with_capacity(captures.len());
     let mut remaining = captures;
@@ -49,7 +41,7 @@ pub fn do_captures(
         if let Some(i) = idx {
             debug_assert!(i < remaining.len());
             let c = remaining.remove(i);
-            if !c.force && fdvars.resolve(&c.var).is_some() {
+            if !c.force && state.fds.contains_key(&c.var) {
                 return Err(EEXIST);
             }
             captured_fds.push((c.var, fd));

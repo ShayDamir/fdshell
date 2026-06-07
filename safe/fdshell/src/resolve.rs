@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use std::collections::HashMap;
 use std::ffi::CString;
 use sys::ExportedFd;
@@ -9,7 +9,7 @@ use sys::ShortCStr;
 pub(crate) fn substitute_arg(
     arg: &ShortCStr,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
-    vars: &FdVars,
+    state: &ShellState,
 ) -> Result<CString, i32> {
     let mut out = Vec::new();
     let mut peek = arg.as_bytes()?.iter().copied().peekable();
@@ -38,7 +38,7 @@ pub(crate) fn substitute_arg(
                 let name_scs = ShortCStr::from_vec(name)?;
                 let raw = match cache.get(&name_scs) {
                     Some(d) => d.as_raw(),
-                    None => match vars.resolve(&name_scs) {
+                    None => match state.fds.get(&name_scs) {
                         Some(src) => {
                             let d = src.export()?;
                             let raw = d.as_raw();
@@ -61,9 +61,9 @@ pub(crate) fn substitute_arg(
     CString::new(out).map_err(|_| sys::errno::EINVAL)
 }
 
-pub fn substitute_args(args: &[ShortCStr], vars: &FdVars) -> Result<Vec<CString>, i32> {
+pub fn substitute_args(args: &[ShortCStr], state: &ShellState) -> Result<Vec<CString>, i32> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     args.iter()
-        .map(|a| substitute_arg(a, &mut cache, vars))
+        .map(|a| substitute_arg(a, &mut cache, state))
         .collect()
 }

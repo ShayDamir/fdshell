@@ -5,7 +5,7 @@ mod open;
 
 use crate::capture::Capture;
 use crate::parse::Pipeline;
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use sys::siginfo::WaitStatus;
 
 pub struct CaptureChannel {
@@ -15,7 +15,7 @@ pub struct CaptureChannel {
 }
 
 pub fn launch_pipeline(
-    vars: &FdVars,
+    state: &ShellState,
     pipeline: Pipeline,
 ) -> Result<(WaitStatus, Vec<CaptureChannel>), i32> {
     let n = pipeline.commands.len();
@@ -41,7 +41,7 @@ pub fn launch_pipeline(
     for i in 0..n {
         let (child_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
         match pidfd_opt {
-            None => child::run_child(i, &pipes, &mut capture_pairs, &commands, vars),
+            None => child::run_child(i, &pipes, &mut capture_pairs, &commands, state),
             Some(pidfd) => children.push((child_pid as i32, pidfd)),
         }
     }

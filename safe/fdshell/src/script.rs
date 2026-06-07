@@ -1,9 +1,5 @@
-use crate::task::Task;
-use crate::vars::FdVars;
-use std::collections::HashMap;
-use sys::ShortCStr;
+use crate::state::ShellState;
 use sys::errno::EINVAL;
-use sys::siginfo::WaitStatus;
 
 fn is_if_or_fi(word: &[u8]) -> Option<bool> {
     if word.starts_with(b"if")
@@ -23,12 +19,7 @@ fn is_if_or_fi(word: &[u8]) -> Option<bool> {
     None
 }
 
-pub(crate) fn run_script(
-    line: &[u8],
-    fdvars: &mut FdVars,
-    tasks: &mut HashMap<ShortCStr, Task>,
-    last_status: &mut WaitStatus,
-) -> Result<i32, i32> {
+pub(crate) fn run_script(line: &[u8], state: &mut ShellState) -> Result<i32, i32> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -70,14 +61,14 @@ pub(crate) fn run_script(
                     }
                     let end = line.len().min(start);
                     let full = line.get(if_start..end).unwrap_or(b"").trim_ascii();
-                    crate::cond::run_cond_list(full, fdvars, tasks, last_status)?;
+                    crate::cond::run_cond_list(full, state)?;
                     continue;
                 }
-                crate::cond::run_cond_list(part, fdvars, tasks, last_status)?;
+                crate::cond::run_cond_list(part, state)?;
             }
             start = i + 1;
         }
         i += 1;
     }
-    Ok(last_status.exit_code())
+    Ok(state.last_status.exit_code())
 }

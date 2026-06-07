@@ -4,7 +4,7 @@ pub(crate) mod fdpass;
 mod run;
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;
-use crate::vars::FdVars;
+use crate::state::ShellState;
 use sys::ShortCStr;
 
 pub enum Command {
@@ -24,12 +24,12 @@ impl From<&CommandLine> for Command {
 
 pub fn child_exec(
     child_sock: Option<sys::LocalFd>,
-    vars: &FdVars,
+    state: &ShellState,
     cmd: Command,
     args: &[ShortCStr],
     redirects: &[Redirect<'_>],
 ) -> ! {
-    match run::child_main(child_sock, vars, cmd, args, redirects) {
+    match run::child_main(child_sock, state, cmd, args, redirects) {
         Ok(()) => std::process::exit(0),
         Err(e) => std::process::exit(e),
     }
