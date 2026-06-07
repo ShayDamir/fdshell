@@ -4,6 +4,8 @@ use crate::vars::FdVars;
 use sys::ShortCStr;
 use sys::errno::EEXIST;
 
+// Clone required by pipeline/mod.rs (cmd.captures.clone()).
+// Debug + PartialEq are test-only — quarantined behind cfg_attr.
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub struct Capture {

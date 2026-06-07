@@ -3,6 +3,7 @@
 mod capture;
 mod cd;
 mod child;
+mod cond;
 mod exec;
 mod init;
 mod intercept;
@@ -15,6 +16,7 @@ mod repl;
 mod replacer;
 mod resolve;
 mod run;
+mod script;
 mod task;
 mod vars;
 
@@ -22,7 +24,7 @@ mod vars;
 mod tests;
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use sys::ShortCStr;
 use sys::fcntl::O_DIRECTORY;
 use sys::siginfo::WaitStatus;
@@ -39,7 +41,7 @@ fn main() -> Result<(), i32> {
     if let Some(arg) = args.next() {
         if arg == "-c" {
             let cmd = args.next().ok_or(sys::errno::EINVAL)?;
-            let code = repl::exec_cmd(&cmd, &mut fdvars, &mut tasks, &mut last_status)?;
+            let code = repl::exec_cmd(cmd.as_bytes(), &mut fdvars, &mut tasks, &mut last_status)?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -47,19 +49,21 @@ fn main() -> Result<(), i32> {
         }
         return Err(sys::errno::EINVAL);
     }
-    let stdin = std::io::stdin();
-    let mut buf = String::new();
+    let mut buf = Vec::<u8>::new();
     loop {
         buf.clear();
         print!("fdshell> ");
         std::io::stdout().flush().ok();
-        let n = stdin.read_line(&mut buf).map_err(|_| sys::errno::EIO)?;
+        let n = std::io::stdin()
+            .lock()
+            .read_until(b'\n', &mut buf)
+            .map_err(|_| sys::errno::EIO)?;
         if n == 0 {
             println!();
             break;
         }
-        let line = buf.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let line = buf.trim_ascii();
+        if line.is_empty() || line.starts_with(b"#") {
             continue;
         }
         repl::handle(line, &mut fdvars, &mut tasks, &mut last_status)?;

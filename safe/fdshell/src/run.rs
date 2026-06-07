@@ -6,7 +6,7 @@ use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
 
 pub(crate) fn run_one(
-    line: &str,
+    line: &[u8],
     fdvars: &mut FdVars,
     tasks: &mut HashMap<ShortCStr, Task>,
     last_status: &mut WaitStatus,
@@ -39,6 +39,35 @@ pub(crate) fn run_one(
                 println!("{:04o}", sys::umask::get());
             }
             *last_status = WaitStatus::Exited(0);
+        }
+        crate::parse::ParsedLine::If(ifblock) => {
+            let mut cond_status = WaitStatus::Exited(0);
+            let cond = ifblock.condition.as_bytes()?;
+            crate::repl::run_cond_list(cond, fdvars, tasks, &mut cond_status)?;
+            if cond_status.exit_code() == 0 {
+                let then = ifblock.then_body.as_bytes()?;
+                crate::repl::run_script(then, fdvars, tasks, last_status)?;
+            } else {
+                let mut done = false;
+                for (elif_cond, elif_body) in &ifblock.elifs {
+                    let ec = elif_cond.as_bytes()?;
+                    crate::repl::run_cond_list(ec, fdvars, tasks, &mut cond_status)?;
+                    if cond_status.exit_code() == 0 {
+                        let eb = elif_body.as_bytes()?;
+                        crate::repl::run_script(eb, fdvars, tasks, last_status)?;
+                        done = true;
+                        break;
+                    }
+                }
+                if !done {
+                    if let Some(ref else_body) = ifblock.else_body {
+                        let eb = else_body.as_bytes()?;
+                        crate::repl::run_script(eb, fdvars, tasks, last_status)?;
+                    } else {
+                        *last_status = WaitStatus::Exited(0);
+                    }
+                }
+            }
         }
     }
     Ok(())

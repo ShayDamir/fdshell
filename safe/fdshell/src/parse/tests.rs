@@ -8,7 +8,8 @@ use sys::errno::EINVAL;
 
 #[test]
 fn test_mkdirat_capture() {
-    let ParsedLine::Cmd(cmd) = parse("builtin mkdirat --mode 755 --dirfd %CWD foo %>%foo").unwrap()
+    let ParsedLine::Cmd(cmd) =
+        parse(b"builtin mkdirat --mode 755 --dirfd %CWD foo %>%foo").unwrap()
     else {
         panic!("expected Cmd")
     };
@@ -39,10 +40,10 @@ fn test_mkdirat_capture() {
 
 #[test]
 fn test_openat2_capture() {
-    let ParsedLine::Cmd(cmd) =
-        parse("builtin openat2 --dirfd %foo --flags O_CREAT --flags O_EXCL --mode 0644 baz %>%baz")
-            .unwrap()
-    else {
+    let ParsedLine::Cmd(cmd) = parse(
+        b"builtin openat2 --dirfd %foo --flags O_CREAT --flags O_EXCL --mode 0644 baz %>%baz",
+    )
+    .unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -76,7 +77,7 @@ fn test_openat2_capture() {
 
 #[test]
 fn test_pipe_tagged_captures() {
-    let ParsedLine::Cmd(cmd) = parse("builtin pipe %rd>%server %wr>%client").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"builtin pipe %rd>%server %wr>%client").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -104,7 +105,7 @@ fn test_pipe_tagged_captures() {
 
 #[test]
 fn test_background() {
-    let ParsedLine::Cmd(cmd) = parse("run_server params &>&myserver").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"run_server params &>&myserver").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -119,7 +120,7 @@ fn test_background() {
 
 #[test]
 fn test_background_force() {
-    let ParsedLine::Cmd(cmd) = parse("run_server &>|&myserver").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"run_server &>|&myserver").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -129,12 +130,12 @@ fn test_background_force() {
 
 #[test]
 fn test_bare_background_is_err() {
-    assert!(matches!(parse("cmd &"), Err(EINVAL)));
+    assert!(matches!(parse(b"cmd &"), Err(EINVAL)));
 }
 
 #[test]
 fn test_force_capture() {
-    let ParsedLine::Cmd(cmd) = parse("builtin mkdirat foo %>|%foo").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"builtin mkdirat foo %>|%foo").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -150,7 +151,7 @@ fn test_force_capture() {
 
 #[test]
 fn test_stderr_redirect() {
-    let ParsedLine::Cmd(cmd) = parse("echo err 2>%log").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"echo err 2>%log").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -159,7 +160,7 @@ fn test_stderr_redirect() {
 
 #[test]
 fn test_stdin_redirect() {
-    let ParsedLine::Cmd(cmd) = parse("cat <%input").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <%input").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -168,7 +169,7 @@ fn test_stdin_redirect() {
 
 #[test]
 fn test_path_redirect() {
-    let ParsedLine::Cmd(cmd) = parse("echo test >out.txt").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"echo test >out.txt").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -177,7 +178,7 @@ fn test_path_redirect() {
 
 #[test]
 fn test_path_redirect_stdin() {
-    let ParsedLine::Cmd(cmd) = parse("cat <input.txt").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <input.txt").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -186,7 +187,7 @@ fn test_path_redirect_stdin() {
 
 #[test]
 fn test_stderr_path_redirect() {
-    let ParsedLine::Cmd(cmd) = parse("cmd 2>err.log").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>err.log").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -195,7 +196,7 @@ fn test_stderr_path_redirect() {
 
 #[test]
 fn test_path_redirect_append() {
-    let ParsedLine::Cmd(cmd) = parse("echo test >>out.log").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"echo test >>out.log").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -204,7 +205,7 @@ fn test_path_redirect_append() {
 
 #[test]
 fn test_path_redirect_append_named_fd() {
-    let ParsedLine::Cmd(cmd) = parse("cmd 2>>err.log").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>>err.log").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -213,14 +214,14 @@ fn test_path_redirect_append_named_fd() {
 
 #[test]
 fn test_append_followed_by_percent_is_error() {
-    assert!(matches!(parse("echo >>%var"), Err(EINVAL)));
-    assert!(matches!(parse("echo 2>>%var"), Err(EINVAL)));
+    assert!(matches!(parse(b"echo >>%var"), Err(EINVAL)));
+    assert!(matches!(parse(b"echo 2>>%var"), Err(EINVAL)));
 }
 
 #[test]
 fn test_renameat2() {
     let ParsedLine::Cmd(cmd) =
-        parse("builtin renameat2 --olddirfd %foo --newdirfd %bar baz qux").unwrap()
+        parse(b"builtin renameat2 --olddirfd %foo --newdirfd %bar baz qux").unwrap()
     else {
         panic!("expected Cmd")
     };
@@ -244,7 +245,7 @@ fn test_renameat2() {
 
 #[test]
 fn test_assign() {
-    let ParsedLine::Assign { var, value } = parse("%server_pid=%!").unwrap() else {
+    let ParsedLine::Assign { var, value } = parse(b"%server_pid=%!").unwrap() else {
         panic!("expected Assign")
     };
 
@@ -254,7 +255,7 @@ fn test_assign() {
 
 #[test]
 fn test_unset() {
-    let ParsedLine::Unset(var) = parse("unset %client").unwrap() else {
+    let ParsedLine::Unset(var) = parse(b"unset %client").unwrap() else {
         panic!("expected Unset")
     };
 
@@ -263,7 +264,7 @@ fn test_unset() {
 
 #[test]
 fn test_unset_missing_is_ok() {
-    let ParsedLine::Unset(var) = parse("unset %nonexistent").unwrap() else {
+    let ParsedLine::Unset(var) = parse(b"unset %nonexistent").unwrap() else {
         panic!("expected Unset")
     };
 
@@ -272,7 +273,7 @@ fn test_unset_missing_is_ok() {
 
 #[test]
 fn test_execveat2_builtin() {
-    let ParsedLine::Cmd(cmd) = parse("builtin execveat2 %MYBIN myprog arg1").unwrap() else {
+    let ParsedLine::Cmd(cmd) = parse(b"builtin execveat2 %MYBIN myprog arg1").unwrap() else {
         panic!("expected Cmd")
     };
 
@@ -286,7 +287,7 @@ fn test_execveat2_builtin() {
 
 #[test]
 fn test_pipeline_two_commands() {
-    let ParsedLine::Pipeline(pipe) = parse("echo hello | wc -l").unwrap() else {
+    let ParsedLine::Pipeline(pipe) = parse(b"echo hello | wc -l").unwrap() else {
         panic!("expected Pipeline")
     };
     assert_eq!(pipe.commands.len(), 2);
@@ -298,7 +299,7 @@ fn test_pipeline_two_commands() {
 
 #[test]
 fn test_pipeline_three_commands() {
-    let ParsedLine::Pipeline(pipe) = parse("a | b | c").unwrap() else {
+    let ParsedLine::Pipeline(pipe) = parse(b"a | b | c").unwrap() else {
         panic!("expected Pipeline")
     };
     assert_eq!(pipe.commands.len(), 3);
@@ -309,7 +310,7 @@ fn test_pipeline_three_commands() {
 
 #[test]
 fn test_pipeline_with_captures() {
-    let ParsedLine::Pipeline(pipe) = parse("cmd1 %>%a | cmd2 %>%b").unwrap() else {
+    let ParsedLine::Pipeline(pipe) = parse(b"cmd1 %>%a | cmd2 %>%b").unwrap() else {
         panic!("expected Pipeline")
     };
     assert_eq!(pipe.commands.len(), 2);
@@ -319,7 +320,7 @@ fn test_pipeline_with_captures() {
 
 #[test]
 fn test_pipeline_with_redirect() {
-    let ParsedLine::Pipeline(pipe) = parse("cmd1 2>%log | cmd2").unwrap() else {
+    let ParsedLine::Pipeline(pipe) = parse(b"cmd1 2>%log | cmd2").unwrap() else {
         panic!("expected Pipeline")
     };
     assert_eq!(pipe.commands[0].redirects.len(), 1);
@@ -327,22 +328,22 @@ fn test_pipeline_with_redirect() {
 
 #[test]
 fn test_pipeline_empty_segment() {
-    assert!(matches!(parse("cmd1 |"), Err(EINVAL)));
-    assert!(matches!(parse("| cmd2"), Err(EINVAL)));
-    assert!(matches!(parse("cmd1 || cmd2"), Err(EINVAL)));
+    assert!(matches!(parse(b"cmd1 |"), Err(EINVAL)));
+    assert!(matches!(parse(b"| cmd2"), Err(EINVAL)));
+    assert!(matches!(parse(b"cmd1 || cmd2"), Err(EINVAL)));
 }
 
 #[test]
 fn test_pipe_builtin_not_pipeline() {
     assert!(matches!(
-        parse("builtin pipe %rd>%a %wr>%b"),
+        parse(b"builtin pipe %rd>%a %wr>%b"),
         Ok(ParsedLine::Cmd(_))
     ));
 }
 
 #[test]
 fn test_umask_no_args() {
-    let ParsedLine::Umask(mask) = parse("umask").unwrap() else {
+    let ParsedLine::Umask(mask) = parse(b"umask").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, None);
@@ -350,7 +351,7 @@ fn test_umask_no_args() {
 
 #[test]
 fn test_umask_zero_o() {
-    let ParsedLine::Umask(mask) = parse("umask 0o077").unwrap() else {
+    let ParsedLine::Umask(mask) = parse(b"umask 0o077").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o077));
@@ -358,7 +359,7 @@ fn test_umask_zero_o() {
 
 #[test]
 fn test_umask_numeric() {
-    let ParsedLine::Umask(mask) = parse("umask 077").unwrap() else {
+    let ParsedLine::Umask(mask) = parse(b"umask 077").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o077));
@@ -366,7 +367,7 @@ fn test_umask_numeric() {
 
 #[test]
 fn test_umask_zero() {
-    let ParsedLine::Umask(mask) = parse("umask 0o000").unwrap() else {
+    let ParsedLine::Umask(mask) = parse(b"umask 0o000").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o000));
@@ -374,7 +375,7 @@ fn test_umask_zero() {
 
 #[test]
 fn test_umask_max() {
-    let ParsedLine::Umask(mask) = parse("umask 0o777").unwrap() else {
+    let ParsedLine::Umask(mask) = parse(b"umask 0o777").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o777));
@@ -382,15 +383,45 @@ fn test_umask_max() {
 
 #[test]
 fn test_umask_too_many_args() {
-    assert!(matches!(parse("umask 0o077 extra"), Err(EINVAL)));
+    assert!(matches!(parse(b"umask 0o077 extra"), Err(EINVAL)));
 }
 
 #[test]
 fn test_umask_invalid_digit() {
-    assert!(matches!(parse("umask abc"), Err(EINVAL)));
+    assert!(matches!(parse(b"umask abc"), Err(EINVAL)));
 }
 
 #[test]
 fn test_umask_invalid_non_octal() {
-    assert!(matches!(parse("umask 0o078"), Err(EINVAL)));
+    assert!(matches!(parse(b"umask 0o078"), Err(EINVAL)));
+}
+
+#[test]
+fn tokenize_if_newline_separators() {
+    let tokens = token::tokenize(b"if true\nthen\numask 0o000\nfi").unwrap();
+    assert_eq!(
+        tokens,
+        vec![
+            c"if".into(),
+            c"true".into(),
+            c";".into(),
+            c"then".into(),
+            c";".into(),
+            c"umask".into(),
+            c"0o000".into(),
+            c";".into(),
+            c"fi".into(),
+        ],
+    );
+}
+
+#[test]
+fn parse_if_newline_separators() {
+    let ParsedLine::If(ib) = parse(b"if true\nthen\numask 0o000\nfi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"true".into());
+    assert_eq!(ib.then_body, c"umask 0o000".into());
+    assert!(ib.elifs.is_empty());
+    assert!(ib.else_body.is_none());
 }

@@ -23,5 +23,9 @@
 - [x] Pipeline syntax `\|`: tokenizer recognizes `|` as separator (unless part of force capture `%>|%var`), parser builds `Pipeline { commands }`, `pipeline::launch_pipeline` creates pipes + per-command capture sockets
 - [x] Builtin `umask` — executes at fdshell level like `unset`, affects all subsequent children
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
-- [ ] Refactor `repl.rs` (87 lines, 7 over limit) — extract `&&`/`||` splitting into helper or split `;`/conditional logic
+- [x] Refactor `repl.rs` (87 lines → 25 lines after extraction) — moved `run_script`/`run_cond_list`/`find_fi_end` to `script.rs`/`cond.rs`
+- [ ] Refactor `if_block.rs` (95 code lines, 15 over) — small helper extraction or inline simplification
+- [ ] Refactor `script.rs` (81 code lines, 1 over) — extract `is_if_or_fi` into helper module
+- [x] Nested if support (depth-tracking in `run_script`, whitespace sub-word split for `if`/`fi` detection)
+- [ ] Add tests for `run.rs` else/elif execution paths (currently untested: `if false; then ...; else ...; fi` chains)
 

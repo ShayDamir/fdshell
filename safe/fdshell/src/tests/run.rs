@@ -34,7 +34,7 @@ fn umask_set_via_run_one() {
         let mut fdvars = FdVars::new();
         let mut tasks = HashMap::new();
         let mut last_status = WaitStatus::Exited(0);
-        run_one("umask 0o077", &mut fdvars, &mut tasks, &mut last_status).unwrap();
+        run_one(b"umask 0o077", &mut fdvars, &mut tasks, &mut last_status).unwrap();
         assert!(matches!(last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
@@ -46,7 +46,7 @@ fn umask_set_zero_via_run_one() {
         let mut fdvars = FdVars::new();
         let mut tasks = HashMap::new();
         let mut last_status = WaitStatus::Exited(0);
-        run_one("umask 0o000", &mut fdvars, &mut tasks, &mut last_status).unwrap();
+        run_one(b"umask 0o000", &mut fdvars, &mut tasks, &mut last_status).unwrap();
         assert!(matches!(last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
@@ -58,7 +58,7 @@ fn umask_set_without_o_prefix() {
         let mut fdvars = FdVars::new();
         let mut tasks = HashMap::new();
         let mut last_status = WaitStatus::Exited(0);
-        run_one("umask 077", &mut fdvars, &mut tasks, &mut last_status).unwrap();
+        run_one(b"umask 077", &mut fdvars, &mut tasks, &mut last_status).unwrap();
         assert!(matches!(last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
@@ -70,7 +70,7 @@ fn umask_invalid_returns_err() {
         let mut fdvars = FdVars::new();
         let mut tasks = HashMap::new();
         let mut last_status = WaitStatus::Exited(0);
-        let e = run_one("umask abc", &mut fdvars, &mut tasks, &mut last_status).unwrap_err();
+        let e = run_one(b"umask abc", &mut fdvars, &mut tasks, &mut last_status).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -82,7 +82,7 @@ fn umask_too_many_args_returns_err() {
         let mut tasks = HashMap::new();
         let mut last_status = WaitStatus::Exited(0);
         let e = run_one(
-            "umask 0o077 extra",
+            b"umask 0o077 extra",
             &mut fdvars,
             &mut tasks,
             &mut last_status,
@@ -97,7 +97,7 @@ fn wait_no_tasks() {
     let mut fdvars = FdVars::new();
     let mut tasks = HashMap::new();
     let mut last_status = WaitStatus::Exited(0);
-    run_one("wait", &mut fdvars, &mut tasks, &mut last_status).unwrap();
+    run_one(b"wait", &mut fdvars, &mut tasks, &mut last_status).unwrap();
     assert!(matches!(last_status, WaitStatus::Exited(0)));
 }
 
@@ -107,7 +107,7 @@ fn wait_nonexistent_name() {
     let mut tasks = HashMap::new();
     let mut last_status = WaitStatus::Exited(0);
     let e = run_one(
-        "wait &nonexistent",
+        b"wait &nonexistent",
         &mut fdvars,
         &mut tasks,
         &mut last_status,
@@ -134,7 +134,7 @@ fn wait_one_task() {
                 },
             );
             let mut last_status = WaitStatus::Exited(0);
-            run_one("wait &mytask", &mut fdvars, &mut tasks, &mut last_status).unwrap();
+            run_one(b"wait &mytask", &mut fdvars, &mut tasks, &mut last_status).unwrap();
             assert!(matches!(last_status, WaitStatus::Exited(42)));
             assert!(tasks.is_empty());
         }
@@ -174,7 +174,7 @@ fn wait_all_tasks() {
         },
     );
     let mut last_status = WaitStatus::Exited(0);
-    run_one("wait", &mut fdvars, &mut tasks, &mut last_status).unwrap();
+    run_one(b"wait", &mut fdvars, &mut tasks, &mut last_status).unwrap();
     let ok = match last_status {
         WaitStatus::Exited(c) => c == 42 || c == 7,
         _ => false,
@@ -188,6 +188,234 @@ fn wait_rejects_capture() {
     let mut fdvars = FdVars::new();
     let mut tasks = HashMap::new();
     let mut last_status = WaitStatus::Exited(0);
-    let e = run_one("wait %>%var", &mut fdvars, &mut tasks, &mut last_status).unwrap_err();
+    let e = run_one(b"wait %>%var", &mut fdvars, &mut tasks, &mut last_status).unwrap_err();
     assert_eq!(e, EINVAL);
+}
+
+#[test]
+fn if_then_runs_body() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if umask 0o077; then umask 0o000; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn if_with_else_runs_then() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if umask 0o077; then umask 0o000; else umask 0o007; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn if_missing_then_returns_err() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        let e = run_one(
+            b"if umask 0o077; umask 0o000; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap_err();
+        assert_eq!(e, EINVAL);
+    });
+}
+
+#[test]
+fn if_missing_fi_returns_err() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        let e = run_one(
+            b"if umask 0o077; then umask 0o000",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap_err();
+        assert_eq!(e, EINVAL);
+    });
+}
+
+#[test]
+fn if_else_before_semicolon_returns_err() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        let e = run_one(
+            b"if umask 0o077; then umask 0o000 else umask 0o007; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap_err();
+        assert_eq!(e, EINVAL);
+    });
+}
+
+#[test]
+fn if_then_before_semicolon_returns_err() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        let e = run_one(
+            b"if umask 0o077 then umask 0o000; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap_err();
+        assert_eq!(e, EINVAL);
+    });
+}
+
+#[test]
+fn if_elif_then_runs_then() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; else umask 0o700; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn if_elif_no_else_runs_then() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn if_elif_before_semicolon_returns_err() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        let e = run_one(
+            b"if umask 0o077; then umask 0o000; elif umask 0o007 then umask 0o070; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap_err();
+        assert_eq!(e, EINVAL);
+    });
+}
+
+#[test]
+fn if_elif_without_then_returns_err() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        let e = run_one(
+            b"if umask 0o077; then umask 0o000; elif umask 0o007; else umask 0o070; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap_err();
+        assert_eq!(e, EINVAL);
+    });
+}
+
+#[test]
+fn if_then_newline_separator() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if true\nthen\numask 0o000\nfi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn nested_if_fails() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if true; then if false; then umask 0o000; fi; fi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_ne!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn nested_if_newline_fails() {
+    child_test(|| {
+        let mut fdvars = FdVars::new();
+        let mut tasks = HashMap::new();
+        let mut last_status = WaitStatus::Exited(0);
+        crate::repl::run_script(
+            b"if true\nthen\nif false\nthen\numask 0o000\nfi\nfi",
+            &mut fdvars,
+            &mut tasks,
+            &mut last_status,
+        )
+        .unwrap();
+        assert!(matches!(last_status, WaitStatus::Exited(0)));
+        assert_ne!(sys::umask::get(), 0o000);
+    });
 }

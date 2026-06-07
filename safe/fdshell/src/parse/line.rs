@@ -1,3 +1,4 @@
+use crate::parse::if_block::IfBlock;
 use crate::parse::{CommandLine, Pipeline};
 use sys::ShortCStr;
 use sys::errno::EINVAL;
@@ -8,6 +9,7 @@ pub enum ParsedLine {
     Assign { var: ShortCStr, value: ShortCStr },
     Unset(ShortCStr),
     Umask(Option<u32>),
+    If(IfBlock),
 }
 
 pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {

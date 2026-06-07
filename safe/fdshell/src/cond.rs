@@ -1,0 +1,44 @@
+use crate::task::Task;
+use crate::vars::FdVars;
+use std::collections::HashMap;
+use sys::ShortCStr;
+use sys::siginfo::WaitStatus;
+
+pub(crate) fn run_cond_list(
+    line: &[u8],
+    fdvars: &mut FdVars,
+    tasks: &mut HashMap<ShortCStr, Task>,
+    last_status: &mut WaitStatus,
+) -> Result<(), i32> {
+    let mut start = 0;
+    let mut in_quote = false;
+    let mut i = 0;
+    while i <= line.len() {
+        if line.get(i) == Some(&b'"') {
+            in_quote = !in_quote;
+        } else if i == line.len() {
+            let part = line.get(start..i).unwrap_or(b"").trim_ascii();
+            if !part.is_empty() {
+                crate::run::run_one(part, fdvars, tasks, last_status)?;
+            }
+            break;
+        } else if !in_quote {
+            let tail = line.get(i..).unwrap_or(b"");
+            if tail.starts_with(b"&&") || tail.starts_with(b"||") {
+                let part = line.get(start..i).unwrap_or(b"").trim_ascii();
+                if !part.is_empty() {
+                    crate::run::run_one(part, fdvars, tasks, last_status)?;
+                    if (tail.starts_with(b"&&") && last_status.exit_code() != 0)
+                        || (tail.starts_with(b"||") && last_status.exit_code() == 0)
+                    {
+                        return Ok(());
+                    }
+                }
+                start = i + 2;
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    Ok(())
+}

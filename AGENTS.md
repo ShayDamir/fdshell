@@ -55,6 +55,33 @@ nix flake check             # fmt + clippy + cargo nextest
 - Nix files must be `git add`-ed before `nix build`/`nix flake check` (Nix reads from the Git index).
 - `package.nix` parameters: `doFmt`, `doClippy`, `doTests`, `doCoverage`.
 
+## Execution pipeline (`safe/fdshell/src/`)
+
+Three‑layer dispatch for script execution, mirroring the REPL's structure:
+
+| Layer | File | Role |
+|---|---|---|
+| `run_script` | `script.rs` | Splits input on `;` / `\n` (statement separators), depth‑tracks `if`/`fi` for nesting, hands segments to `run_cond_list` |
+| `run_cond_list` | `cond.rs` | Splits on `&&` / `||` for short‑circuit chaining, hands commands to `run_one` |
+| `run_one` | `run.rs` | Parses a single statement and dispatches by type (`Cmd`, `Pipeline`, `If`, `Assign`, `Unset`, `Umask`) |
+
+### `if`/`fi` nesting in `run_script`
+
+- When a `;`/`\n`‑delimited segment starts with word `if` (checked by `is_if_or_fi`), the outer loop enters a depth‑tracking inner loop.
+- The inner loop splits on `;`/`\n` delimiters, then further splits each segment on **space** before checking `is_if_or_fi`. This catches `if`/`fi` keywords that appear mid‑segment (e.g. `"then if false"` → sub‑words `["then", "if", "false"]`).
+- `is_if_or_fi` returns `Some(true)` for `if` keywords, `Some(false)` for `fi` keywords, `None` for everything else. It validates the keyword is a whole word (not a prefix of `ifconfig` or `endif`).
+- When depth reaches 0, the full span (`if`…`fi`) is handed to `run_cond_list`.
+- Unmatched `if` (depth > 0 at input end) returns `EINVAL`.
+
+### Parsing `if`/`fi` blocks
+
+`tokens_to_if` in `if_block.rs` uses `find_preceded_by_semi` to locate `then`/`elif`/`else`/`fi` tokens (must be preceded by a `;` token). Body/condition slices are cleaned via `trim_semi` (removes leading/trailing `;` tokens) before `try_join` reassembles them with single spaces.
+
+### Statement separators
+
+- `b';'` and `b'\n'` outside quotes are both treated as statement separators (in the tokenizer and in `run_script`'s scan loops).
+- Quotes (`b'"'`) toggle `in_quote` to suppress delimiter recognition inside strings.
+
 ## Testing
 
 - Tests live in `unsafe/sys/tests/` and `safe/builtins/tests/`.
