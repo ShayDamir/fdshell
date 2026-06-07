@@ -314,3 +314,21 @@ fn nested_if_newline_fails() {
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
+
+#[test]
+fn string_assign_stores_in_state() {
+    let mut state = ShellState::new();
+    run_one(b"var=\"hello world\"", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    let val = state.strings.get(&c"var".into());
+    assert_eq!(val, Some(&c"hello world".into()));
+}
+
+#[test]
+fn string_assign_empty_value() {
+    let mut state = ShellState::new();
+    run_one(b"var=", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    let val = state.strings.get(&c"var".into());
+    assert_eq!(val, Some(&c"".into()));
+}

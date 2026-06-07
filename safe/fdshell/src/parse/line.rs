@@ -7,7 +7,8 @@ use sys::errno::EINVAL;
 pub enum ParsedLine {
     Cmd(CommandLine),
     Pipeline(Pipeline),
-    Assign { var: ShortCStr, value: ShortCStr },
+    AssignFd { var: ShortCStr, value: ShortCStr },
+    AssignStr { var: ShortCStr, value: ShortCStr },
     Unset(ShortCStr),
     Umask(Option<u32>),
     If(IfBlock),
@@ -24,7 +25,17 @@ pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {
         && let Some(var) = lhs.strip_prefix(b"%")
         && let Some(value) = rhs.strip_prefix(b"%")
     {
-        return Ok(Some(ParsedLine::Assign { var, value }));
+        return Ok(Some(ParsedLine::AssignFd { var, value }));
+    }
+
+    if let Some((lhs, rhs)) = first.split_once_byte(b'=')
+        && !lhs.is_empty()
+        && !lhs.starts_with(b"%")
+    {
+        return Ok(Some(ParsedLine::AssignStr {
+            var: lhs,
+            value: rhs,
+        }));
     }
 
     if first.eq_bytes(b"unset") {

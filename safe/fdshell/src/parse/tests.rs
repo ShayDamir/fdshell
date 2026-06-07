@@ -244,13 +244,61 @@ fn test_renameat2() {
 }
 
 #[test]
-fn test_assign() {
-    let ParsedLine::Assign { var, value } = parse(b"%server_pid=%!").unwrap() else {
-        panic!("expected Assign")
+fn test_assign_fd() {
+    let ParsedLine::AssignFd { var, value } = parse(b"%server_pid=%!").unwrap() else {
+        panic!("expected AssignFd")
     };
 
     assert_eq!(var, c"server_pid".into());
     assert_eq!(value, c"!".into());
+}
+
+#[test]
+fn test_assign_str_simple() {
+    let ParsedLine::AssignStr { var, value } = parse(b"var=hello").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(var, c"var".into());
+    assert_eq!(value, c"hello".into());
+}
+
+#[test]
+fn test_assign_str_empty_value() {
+    let ParsedLine::AssignStr { var, value } = parse(b"var=").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(var, c"var".into());
+    assert_eq!(value, c"".into());
+}
+
+#[test]
+fn test_assign_str_quoted_spaces() {
+    let ParsedLine::AssignStr { var, value } = parse(b"var=\"foo bar\"").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(var, c"var".into());
+    assert_eq!(value, c"foo bar".into());
+}
+
+#[test]
+fn test_assign_str_no_lhs_is_not_assign() {
+    let result = parse(b"=value").unwrap();
+    assert!(!matches!(result, ParsedLine::AssignStr { .. }));
+}
+
+#[test]
+fn test_assign_str_fd_assign_takes_priority() {
+    let result = parse(b"%x=%y").unwrap();
+    assert!(matches!(result, ParsedLine::AssignFd { .. }));
+}
+
+#[test]
+fn test_assign_str_percent_value_is_literal() {
+    let ParsedLine::AssignStr { var, value } = parse(b"var=%othervar").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(var, c"var".into());
+    assert_eq!(value, c"%othervar".into());
 }
 
 #[test]

@@ -14,9 +14,13 @@ pub(crate) fn run_one(line: &[u8], state: &mut ShellState) -> Result<(), i32> {
         crate::parse::ParsedLine::Pipeline(pipeline) => {
             state.last_status = crate::postlaunch::run_pipeline(pipeline, state)?;
         }
-        crate::parse::ParsedLine::Assign { var, value } => {
+        crate::parse::ParsedLine::AssignFd { var, value } => {
             let src = state.fds.get(&value).ok_or(EINVAL)?;
             state.fds.insert(var, src.try_clone()?);
+            state.last_status = WaitStatus::Exited(0);
+        }
+        crate::parse::ParsedLine::AssignStr { var, value } => {
+            state.strings.insert(var, value);
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
