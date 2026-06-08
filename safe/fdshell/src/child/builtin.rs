@@ -10,6 +10,8 @@ pub fn dispatch_builtin(
     state: &ShellState,
 ) -> Result<(), i32> {
     match name.as_bytes()? {
+        b"fchmod" => builtins::fchmod::parse::fchmod_parse(refs)
+            .and_then(|cfg| builtins::fchmod::fchmod_exec(&cfg)),
         b"echo" => {
             for (i, arg) in refs.iter().enumerate() {
                 if i > 0 {

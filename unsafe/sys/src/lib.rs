@@ -23,6 +23,7 @@ pub mod errno;
 pub mod execveat;
 pub mod exportedfd;
 pub mod fchdir;
+pub mod fchmod;
 pub mod fcntl;
 pub mod fork_pidfd;
 pub mod importedfd;
