@@ -368,3 +368,115 @@ fn for_newline_body() {
     assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
     assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
 }
+
+#[test]
+fn for_backtick_expands_to_words() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"for x in `echo 42 7`; do var=set; done", &mut state).unwrap();
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"7".into()));
+        assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+    });
+}
+
+#[test]
+fn for_backtick_empty_output_skips_body() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"for x in `echo`; do var=set; done", &mut state).unwrap();
+        assert_eq!(state.strings.get(&c"x".into()), None);
+        assert_eq!(state.strings.get(&c"var".into()), None);
+    });
+}
+
+#[test]
+fn for_dollar_paren_expands_to_words() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"for x in $(echo hello world); do var=set; done",
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"world".into()));
+        assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+    });
+}
+
+#[test]
+fn for_backtick_single_number() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"for x in `echo 99`; do var=set; done", &mut state).unwrap();
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"99".into()));
+        assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+    });
+}
+
+#[test]
+fn cmd_subst_in_assign() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"x=$(builtin echo hello)", &mut state).unwrap();
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
+    });
+}
+
+#[test]
+fn cmd_subst_in_assign_and_use() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"x=$(builtin echo world); builtin echo $x", &mut state).unwrap();
+    });
+}
+
+#[test]
+fn string_assign_dollar_var() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"a=hello; b=$a", &mut state).unwrap();
+    assert_eq!(state.strings.get(&c"b".into()), Some(&c"hello".into()));
+}
+
+#[test]
+fn string_assign_multiple_vars() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"a=foo; b=bar; c=$a$b", &mut state).unwrap();
+    assert_eq!(state.strings.get(&c"c".into()), Some(&c"foobar".into()));
+}
+
+#[test]
+fn string_assign_dollar_brace() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"a=hello; b=${a}", &mut state).unwrap();
+    assert_eq!(state.strings.get(&c"b".into()), Some(&c"hello".into()));
+}
+
+#[test]
+fn string_assign_unknown_var_preserves_literal() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"x=$nonexistent", &mut state).unwrap();
+    assert_eq!(
+        state.strings.get(&c"x".into()),
+        Some(&c"$nonexistent".into())
+    );
+}
+
+#[test]
+fn cmd_subst_in_regular_args() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"builtin echo $(builtin echo hello)", &mut state).unwrap();
+    });
+}
+
+#[test]
+fn cmd_subst_mixed_with_text() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"x=prefix$(builtin echo middle)suffix", &mut state).unwrap();
+        assert_eq!(
+            state.strings.get(&c"x".into()),
+            Some(&c"prefixmiddlesuffix".into())
+        );
+    });
+}

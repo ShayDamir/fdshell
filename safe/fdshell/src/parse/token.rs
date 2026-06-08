@@ -43,6 +43,12 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, i32> {
                     tokens.push(c";".into());
                 }
                 b'"' => in_quotes = true,
+                b'$' if bytes.peek() == Some(&b'(') => {
+                    super::token_subst::read_dollar_paren(&mut bytes, &mut cur)?;
+                }
+                b'`' => {
+                    super::token_subst::read_backtick(&mut bytes, &mut cur)?;
+                }
                 _ => cur.push(b)?,
             }
         }

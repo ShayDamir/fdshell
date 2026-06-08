@@ -6,6 +6,7 @@ mod if_block;
 mod line;
 mod semi;
 mod token;
+mod token_subst;
 
 pub use cmdline::{CommandLine, Pipeline};
 pub use line::ParsedLine;

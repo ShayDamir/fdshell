@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use sys::ShortCStr;
+
 use crate::state::ShellState;
 use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
@@ -20,7 +23,10 @@ pub(crate) fn run_one(line: &[u8], state: &mut ShellState) -> Result<(), i32> {
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
-            state.strings.insert(var, value);
+            let expanded = crate::substitute::substitute_arg(&value, &mut HashMap::new(), state)?;
+            state
+                .strings
+                .insert(var, ShortCStr::from_vec(expanded.into_bytes())?);
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
@@ -38,7 +44,8 @@ pub(crate) fn run_one(line: &[u8], state: &mut ShellState) -> Result<(), i32> {
         }
         crate::parse::ParsedLine::For(forblock) => {
             state.last_status = WaitStatus::Exited(0);
-            for word in &forblock.words {
+            let words = crate::expand::expand_for_words(&forblock.words, state)?;
+            for word in &words {
                 state.strings.insert(forblock.var.clone(), word.clone());
                 crate::repl::run_script(forblock.body.as_bytes()?, state)?;
             }

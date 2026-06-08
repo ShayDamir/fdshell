@@ -3,8 +3,10 @@
 mod capture;
 mod cd;
 mod child;
+mod cmd_subst;
 mod cond;
 mod exec;
+mod expand;
 mod init;
 mod intercept;
 mod launch;

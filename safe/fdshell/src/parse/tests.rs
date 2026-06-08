@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg_attr(test, allow(clippy::indexing_slicing))]
+#![allow(clippy::indexing_slicing)]
 
 use super::*;
 use crate::capture::Capture;
@@ -542,4 +542,51 @@ fn for_parse_dispatch() {
     assert_eq!(fb.var, c"var".into());
     assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
     assert_eq!(fb.body, c"echo $var".into());
+}
+
+#[test]
+fn tokenize_backtick_command() {
+    let result = token::tokenize(b"echo `seq 1 10`").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], c"echo".into());
+    assert_eq!(result[1], c"`seq 1 10`".into());
+}
+
+#[test]
+fn tokenize_dollar_paren_command() {
+    let result = token::tokenize(b"echo $(seq 1 10)").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], c"echo".into());
+    assert_eq!(result[1], c"$(seq 1 10)".into());
+}
+
+#[test]
+fn tokenize_backtick_empty() {
+    let result = token::tokenize(b"for x in ``; do body; done").unwrap();
+    assert_eq!(result[3], c"``".into());
+}
+
+#[test]
+fn tokenize_dollar_paren_nested() {
+    let result = token::tokenize(b"$(echo $(seq 3))").unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], c"$(echo $(seq 3))".into());
+}
+
+#[test]
+fn for_backtick_word_is_single_token() {
+    let ParsedLine::For(fb) = parse(b"for x in `echo 1 2 3`; do body; done").unwrap() else {
+        panic!("expected For")
+    };
+    assert_eq!(fb.words.len(), 1);
+    assert_eq!(fb.words[0], c"`echo 1 2 3`".into());
+}
+
+#[test]
+fn for_dollar_paren_word_is_single_token() {
+    let ParsedLine::For(fb) = parse(b"for x in $(echo hello); do body; done").unwrap() else {
+        panic!("expected For")
+    };
+    assert_eq!(fb.words.len(), 1);
+    assert_eq!(fb.words[0], c"$(echo hello)".into());
 }

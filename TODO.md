@@ -17,7 +17,8 @@
 - [x] `become` now dispatches same as child: `builtin` prefix → `dispatch_builtin()`, else PATH‑resolve → `exec_fd()`. Always calls `exit()`.
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [x] Refactor `replacer.rs` — now 52 lines (under 80 limit)
-- [ ] Refactor `run.rs` (236 lines, 156 over limit) — extract builtin dispatchers (`cd`, `exit`/`quit`, `become`) into inline helpers or separate file
+- [x] Refactor `run.rs` — major prior refactoring done; now 81 code lines, 1 over limit
+- [ ] File length: `run.rs` (81 code lines, 1 over), `script.rs` (81 code lines, 1 over) — minor extractions to get under 80
 - [x] File-path redirects: extend `parse_redirect` to handle `[N] > path` / `[N] < path`, open file in parent, dup into child
 - [x] Non-blocking socketpair + drain loop in `do_captures`: replace blocking `recv_fd` with non-blocking drain (EOF + `EAGAIN` → break)
 - [x] Pipeline syntax `\|`: tokenizer recognizes `|` as separator (unless part of force capture `%>|%var`), parser builds `Pipeline { commands }`, `pipeline::launch_pipeline` creates pipes + per-command capture sockets
