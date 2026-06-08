@@ -58,6 +58,12 @@ pub(crate) fn dollar_subst(
                 }
             }
         }
+        Some(b'?') => {
+            peek.next();
+            let code = state.last_status.exit_code();
+            let s = format!("{}", code);
+            out.extend_from_slice(s.as_bytes());
+        }
         _ => out.push(b'$'),
     }
     Ok(())

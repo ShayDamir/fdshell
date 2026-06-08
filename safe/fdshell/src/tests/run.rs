@@ -470,6 +470,27 @@ fn cmd_subst_in_regular_args() {
 }
 
 #[test]
+fn dollar_question_exit_status() {
+    let mut state = ShellState::new();
+    // After a successful command, $? should be 0
+    crate::repl::run_script(b"builtin echo ok; x=$?", &mut state).unwrap();
+    assert_eq!(state.strings.get(&c"x".into()), Some(&c"0".into()));
+}
+
+#[test]
+fn dollar_question_after_failure() {
+    let mut state = ShellState::new();
+    // An unknown command sets non-zero exit; $? captures it
+    crate::repl::run_script(b"nonexistent_cmd_xyzzy; x=$?", &mut state).unwrap();
+    let val = state.strings.get(&c"x".into()).unwrap();
+    let code: i32 = core::str::from_utf8(val.as_bytes().unwrap())
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_ne!(code, 0);
+}
+
+#[test]
 fn cmd_subst_mixed_with_text() {
     child_test(|| {
         let mut state = ShellState::new();
