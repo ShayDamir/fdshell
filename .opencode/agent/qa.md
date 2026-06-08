@@ -59,6 +59,14 @@ Search for these and flag any occurrence outside `#[cfg(test)]` / `#[cfg(test_mo
 - RefCStr contains only terminating NUL byte, but they cannot be modified after.
 - For literals, don't use regular Rust literals. Use b"literal" for comparison as bytes, and  c"literal" for creating literal ShortCStr
 
+### 8. Common idiomatic patterns
+
+- `let mut var = Vec::with_capacity(...)` (or `Vec::new()`) + loop with `push()` should be collect. If loop body is fallible, use `collect:<<Result<Vec<_>,_>>>`
+- map_or(false, ...) should be Option::is_some_and(..) or Result::is_ok_and(...)
+- map_or_else(else_closure, map_closure) should be map(map_closure).unwrap_or_else(else_closure) for better readability
+- if resulting type can be inferred by compiler, prefer `value.into()` to `Type::from(value)`
+- prefer checked operations (checked_mul, checked_add) to regular ones
+
 ## Automated checks (always run)
 
 1. `cargo fmt` — check if files are formatted; if not, report which files changed
