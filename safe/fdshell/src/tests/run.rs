@@ -501,3 +501,87 @@ fn cmd_subst_mixed_with_text() {
         );
     });
 }
+
+#[test]
+fn export_fd_no_args() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin export_fd", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_no_percent_prefix() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin export_fd foo", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_tag_contains_percent() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin export_fd %tag %var", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_second_arg_no_percent() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin export_fd tag var", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_too_many_args() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin export_fd %a %b %c", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_var_not_in_state() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin export_fd tag %nonexistent", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_dispatch_single_arg_no_var() {
+    child_test(|| {
+        let state = ShellState::new();
+        let arg = ShortCStr::from_vec(b"%missing".to_vec()).unwrap();
+        let result = crate::child::fdpass::dispatch(b"export_fd", &[arg], &state);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().unwrap_err(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_dispatch_calls_export_fd() {
+    child_test(|| {
+        let state = ShellState::new();
+        let result = crate::child::fdpass::dispatch(b"export_fd", &[], &state);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().unwrap_err(), sys::errno::EINVAL);
+    });
+}
+
+#[test]
+fn export_fd_dispatch_unknown_name_returns_none() {
+    child_test(|| {
+        let state = ShellState::new();
+        let result = crate::child::fdpass::dispatch(b"nonexistent_builtin", &[], &state);
+        assert!(result.is_none());
+    });
+}
