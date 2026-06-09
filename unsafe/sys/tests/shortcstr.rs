@@ -2,6 +2,7 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 use core::ffi::CStr;
+use std::rc::Rc;
 use sys::ShortCStr;
 
 /// A long (≥100 byte) static CStr for subslicing tests.
@@ -556,4 +557,67 @@ fn contains_found() {
     assert!(s.contains(b'o'));
     assert!(s.contains(b'h'));
     assert!(!s.contains(b'z'));
+}
+
+#[test]
+fn push_copy_to_inline_via_constructed_rc() {
+    // Rc non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
+    let v = Rc::new(b"hello world, this is more than thirty bytes long".to_vec());
+    let s = ShortCStr::Rc {
+        rc: v,
+        offset: 0,
+        length: 5,
+    };
+    let mut s = s;
+    // SAFETY: byte is not NUL
+    unsafe { s.push_unchecked(b'!') };
+    assert_eq!(s.as_bytes().unwrap(), b"hello!");
+}
+
+#[test]
+fn push_copy_to_inline_via_constructed_static() {
+    // Static non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
+    let s = ShortCStr::Static(c"hello world, this is more than thirty bytes long", 0, 5);
+    let mut s = s;
+    // SAFETY: byte is not NUL
+    unsafe { s.push_unchecked(b'!') };
+    assert_eq!(s.as_bytes().unwrap(), b"hello!");
+}
+
+#[test]
+fn debug_fmt_inline() {
+    let s = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
+    let out = format!("{:?}", s);
+    assert!(out.contains("Inline"));
+    assert!(out.contains("len: 5"));
+}
+
+#[test]
+fn debug_fmt_static() {
+    let s = ShortCStr::from(c"hello");
+    let out = format!("{:?}", s);
+    assert!(out.contains("Static"));
+}
+
+#[test]
+fn debug_fmt_rc() {
+    let v = Rc::new(b"hello world, this is more than thirty bytes long".to_vec());
+    let s = ShortCStr::Rc { rc: v, offset: 0, length: 5 };
+    let out = format!("{:?}", s);
+    assert!(out.contains("Rc"));
+}
+
+#[test]
+fn debug_fmt_invalid() {
+    let s = ShortCStr::Rc { rc: Rc::new(b"hi".to_vec()), offset: 0, length: 100 };
+    let out = format!("{:?}", s);
+    // as_bytes fails → unwrap_or(b"<?>") → Debug shows [60, 63, 62]
+    assert!(out.contains("60"));
+}
+
+#[test]
+fn partial_eq_as_bytes_err() {
+    let valid = ShortCStr::from(c"hello");
+    let invalid = ShortCStr::Rc { rc: Rc::new(b"hi".to_vec()), offset: 0, length: 100 };
+    assert_ne!(valid, invalid);
 }
