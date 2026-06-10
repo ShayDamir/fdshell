@@ -42,18 +42,20 @@ pub(crate) fn tokens_to_if(tokens: &[ShortCStr]) -> Result<IfBlock, i32> {
         tokens.get(first_then + 1..first_end - 1).ok_or(EINVAL)?,
     ))?;
 
-    let mut elifs = Vec::with_capacity(elif_pairs.len());
-    for i in 0..elif_pairs.len() {
-        let &(ei, ti) = elif_pairs.get(i).ok_or(EINVAL)?;
-        let ec = try_join(trim_semi(tokens.get(ei + 1..ti - 1).ok_or(EINVAL)?))?;
-        let next = elif_pairs
-            .get(i + 1)
-            .map(|&(ne, _)| ne)
-            .or(else_idx)
-            .unwrap_or(fi_idx);
-        let eb = try_join(trim_semi(tokens.get(ti + 1..next - 1).ok_or(EINVAL)?))?;
-        elifs.push((ec, eb));
-    }
+    let elifs = elif_pairs
+        .iter()
+        .enumerate()
+        .map(|(i, &(ei, ti))| {
+            let ec = try_join(trim_semi(tokens.get(ei + 1..ti - 1).ok_or(EINVAL)?))?;
+            let next = elif_pairs
+                .get(i + 1)
+                .map(|&(ne, _)| ne)
+                .or(else_idx)
+                .unwrap_or(fi_idx);
+            let eb = try_join(trim_semi(tokens.get(ti + 1..next - 1).ok_or(EINVAL)?))?;
+            Ok((ec, eb))
+        })
+        .collect::<Result<Vec<_>, i32>>()?;
 
     let else_str = else_idx
         .map(|ei| try_join(trim_semi(tokens.get(ei + 1..fi_idx - 1).ok_or(EINVAL)?)))
