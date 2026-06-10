@@ -15,8 +15,20 @@ pub(crate) fn substitute_arg(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
 ) -> Result<CString, i32> {
+    let bytes = arg.as_bytes()?;
     let mut out = Vec::new();
-    let mut peek = arg.as_bytes()?.iter().copied().peekable();
+    let mut peek = bytes.iter().copied().peekable();
+    if bytes.first() == Some(&b'~') {
+        peek.next();
+        match peek.peek() {
+            None | Some(&b'/') => {
+                if let Ok(home) = std::env::var("HOME") {
+                    out.extend_from_slice(home.as_bytes());
+                }
+            }
+            _ => out.push(b'~'),
+        }
+    }
     while let Some(b) = peek.next() {
         match b {
             b'%' => percent::percent_subst(&mut peek, cache, state, &mut out)?,

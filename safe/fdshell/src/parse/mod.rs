@@ -4,6 +4,7 @@ mod command;
 mod for_block;
 mod if_block;
 mod line;
+mod pipeline;
 mod semi;
 mod token;
 mod token_subst;
@@ -27,7 +28,7 @@ pub fn parse(line: &[u8]) -> Result<ParsedLine, i32> {
     }
 
     if raw.iter().any(|t| t.eq_bytes(b"|")) {
-        return command::parse_pipeline(&raw);
+        return pipeline::parse_pipeline(&raw);
     }
 
     Ok(ParsedLine::Cmd(command::parse_command(&raw)?))

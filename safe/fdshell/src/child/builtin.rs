@@ -10,6 +10,13 @@ pub fn dispatch_builtin(
     state: &ShellState,
 ) -> Result<(), i32> {
     match name.as_bytes()? {
+        b"true" => Ok(()),
+        b"false" => Err(1),
+        b"pwd" => {
+            let p = std::env::current_dir().map_err(|_| sys::errno::EINVAL)?;
+            println!("{}", p.display());
+            Ok(())
+        }
         b"fchmod" => builtins::fchmod::parse::fchmod_parse(refs)
             .and_then(|cfg| builtins::fchmod::fchmod_exec(&cfg)),
         b"echo" => {

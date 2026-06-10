@@ -585,3 +585,57 @@ fn export_fd_dispatch_unknown_name_returns_none() {
         assert!(result.is_none());
     });
 }
+
+#[test]
+fn true_builtin_exits_zero() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"true", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn false_builtin_exits_one() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"false", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), 1);
+    });
+}
+
+#[test]
+fn true_via_builtin_keyword() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin true", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn false_used_in_cond_list() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_cond_list(b"false && builtin echo ok", &mut state).unwrap();
+        assert_ne!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn pwd_builtin_succeeds() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"pwd", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn pwd_via_builtin_keyword() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        run_one(b"builtin pwd", &mut state).unwrap();
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}

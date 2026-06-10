@@ -12,10 +12,10 @@
 ### P0 — Easy wins
 
 - [ ] `$?` (DONE)
-- [ ] `true` / `false` builtins — exit 0 / exit 1 without PATH lookup
-- [ ] `pwd` — print CWD path via `readlink /proc/self/fd/N` on CWD fd
-- [ ] Tilde expansion (`~`, `~user`) → `$HOME`
-- [ ] `$$` — shell PID in dollar_subst (currently literal `$`)
+- [x] `true` / `false` builtins — exit 0 / exit 1 without PATH lookup
+- [x] `pwd` — print CWD path via `std::env::current_dir()`
+- [x] Tilde expansion (`~`, `~user` literal) → `$HOME`
+- [x] `$$` — shell PID in dollar_subst
 - [ ] `${#var}` — string length expansion
 - [ ] `$!` — last background PID
 - [ ] `$_` — last argument of previous command

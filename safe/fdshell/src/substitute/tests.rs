@@ -42,12 +42,13 @@ fn dollar_unknown_var_is_literal() {
 }
 
 #[test]
-fn dollar_double_dollar_is_literal() {
+fn dollar_double_dollar_is_pid() {
     let state = dummy_state();
     let arg = ShortCStr::from(c"$$");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &state).unwrap();
-    assert_eq!(res.as_bytes(), b"$");
+    let pid_str = format!("{}", state.shell_pid);
+    assert_eq!(res.as_bytes(), pid_str.as_bytes());
 }
 
 #[test]
@@ -168,4 +169,42 @@ fn brace_inside_text() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &state).unwrap();
     assert_eq!(res.as_bytes(), b"aworldb");
+}
+
+#[test]
+fn tilde_expands_to_home() {
+    let state = dummy_state();
+    let arg = ShortCStr::from(c"~");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &state).unwrap();
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(res.as_bytes(), home.as_bytes());
+}
+
+#[test]
+fn tilde_slash_expands() {
+    let state = dummy_state();
+    let arg = ShortCStr::from(c"~/foo");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &state).unwrap();
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(res.as_bytes(), format!("{}/foo", home).as_bytes());
+}
+
+#[test]
+fn tilde_user_remains_literal() {
+    let state = dummy_state();
+    let arg = ShortCStr::from(c"~nobody/bar");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &state).unwrap();
+    assert_eq!(res.as_bytes(), b"~nobody/bar");
+}
+
+#[test]
+fn tilde_mid_word_untouched() {
+    let state = dummy_state();
+    let arg = ShortCStr::from(c"a~");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &state).unwrap();
+    assert_eq!(res.as_bytes(), b"a~");
 }

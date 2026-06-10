@@ -602,14 +602,22 @@ fn debug_fmt_static() {
 #[test]
 fn debug_fmt_rc() {
     let v = Rc::new(b"hello world, this is more than thirty bytes long".to_vec());
-    let s = ShortCStr::Rc { rc: v, offset: 0, length: 5 };
+    let s = ShortCStr::Rc {
+        rc: v,
+        offset: 0,
+        length: 5,
+    };
     let out = format!("{:?}", s);
     assert!(out.contains("Rc"));
 }
 
 #[test]
 fn debug_fmt_invalid() {
-    let s = ShortCStr::Rc { rc: Rc::new(b"hi".to_vec()), offset: 0, length: 100 };
+    let s = ShortCStr::Rc {
+        rc: Rc::new(b"hi".to_vec()),
+        offset: 0,
+        length: 100,
+    };
     let out = format!("{:?}", s);
     // as_bytes fails → unwrap_or(b"<?>") → Debug shows [60, 63, 62]
     assert!(out.contains("60"));
@@ -618,6 +626,10 @@ fn debug_fmt_invalid() {
 #[test]
 fn partial_eq_as_bytes_err() {
     let valid = ShortCStr::from(c"hello");
-    let invalid = ShortCStr::Rc { rc: Rc::new(b"hi".to_vec()), offset: 0, length: 100 };
+    let invalid = ShortCStr::Rc {
+        rc: Rc::new(b"hi".to_vec()),
+        offset: 0,
+        length: 100,
+    };
     assert_ne!(valid, invalid);
 }

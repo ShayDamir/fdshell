@@ -11,8 +11,9 @@ pub(crate) fn dollar_subst(
 ) -> Result<(), i32> {
     match peek.peek().copied() {
         Some(b'$') => {
-            out.push(b'$');
             peek.next();
+            let s = format!("{}", state.shell_pid);
+            out.extend_from_slice(s.as_bytes());
         }
         Some(b'{') => {
             peek.next();

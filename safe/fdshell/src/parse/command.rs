@@ -1,5 +1,5 @@
 use crate::capture::Capture;
-use crate::parse::{CommandLine, ParsedLine, Pipeline};
+use crate::parse::CommandLine;
 use crate::redirect::RedirectDef;
 use sys::ShortCStr;
 use sys::errno::EINVAL;
@@ -11,7 +11,10 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
             iter.next();
             true
         }
-        _ => false,
+        Some(t) => t
+            .as_bytes()
+            .is_ok_and(|b| matches!(b, b"true" | b"false" | b"pwd")),
+        None => false,
     };
     let command = iter.next().ok_or(EINVAL)?.clone();
     let mut args: Vec<ShortCStr> = Vec::new();
@@ -58,23 +61,4 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, i32> {
         pidvar,
         bg_force,
     })
-}
-
-pub fn parse_pipeline(raw: &[ShortCStr]) -> Result<ParsedLine, i32> {
-    let mut commands = Vec::new();
-    let mut start = 0;
-    for (i, t) in raw.iter().enumerate() {
-        if t.as_bytes()? == b"|" {
-            if i == start {
-                return Err(EINVAL);
-            }
-            commands.push(parse_command(raw.get(start..i).ok_or(EINVAL)?)?);
-            start = i + 1;
-        }
-    }
-    if start >= raw.len() {
-        return Err(EINVAL);
-    }
-    commands.push(parse_command(raw.get(start..).ok_or(EINVAL)?)?);
-    Ok(ParsedLine::Pipeline(Pipeline { commands }))
 }
