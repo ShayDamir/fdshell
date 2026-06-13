@@ -12,6 +12,7 @@ pub struct ShellState {
     pub strings: HashMap<ShortCStr, ShortCStr>,
     pub last_status: WaitStatus,
     pub shell_pid: i32,
+    pub last_bg_pid: Option<i32>,
 }
 
 impl ShellState {
@@ -22,6 +23,7 @@ impl ShellState {
             strings: HashMap::new(),
             last_status: WaitStatus::Exited(0),
             shell_pid: std::process::id() as i32,
+            last_bg_pid: None,
         }
     }
 }

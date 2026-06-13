@@ -639,3 +639,29 @@ fn pwd_via_builtin_keyword() {
         assert_eq!(state.last_status.exit_code(), 0);
     });
 }
+
+#[test]
+fn last_bg_pid_set_on_background_task() {
+    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
+    match pidfd_opt {
+        None => std::process::exit(42),
+        Some(pidfd) => {
+            use crate::launch::LaunchOutcome;
+            use crate::parse::ParsedLine;
+            let mut cmdline = match crate::parse::parse(b"echo").unwrap() {
+                ParsedLine::Cmd(cmd) => cmd,
+                _ => panic!("expected Cmd for echo"),
+            };
+            cmdline.pidvar = Some(ShortCStr::from(c"bg"));
+            let mut state = ShellState::new();
+            let outcome = LaunchOutcome {
+                pidfd,
+                capture_fd: None,
+                child_pid: ret as i32,
+            };
+            let status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state).unwrap();
+            assert!(matches!(status, WaitStatus::Exited(0)));
+            assert_eq!(state.last_bg_pid, Some(ret as i32));
+        }
+    }
+}

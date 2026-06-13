@@ -11,13 +11,13 @@
 
 ### P0 — Easy wins
 
-- [ ] `$?` (DONE)
+- [x] `$?`
 - [x] `true` / `false` builtins — exit 0 / exit 1 without PATH lookup
 - [x] `pwd` — print CWD path via `std::env::current_dir()`
 - [x] Tilde expansion (`~`, `~user` literal) → `$HOME`
 - [x] `$$` — shell PID in dollar_subst
 - [ ] `${#var}` — string length expansion
-- [ ] `$!` — last background PID
+- [x] `$!` — last background PID
 - [ ] `$_` — last argument of previous command
 - [ ] `$-` — shell option flags
 - [ ] `help` builtin — list available builtins

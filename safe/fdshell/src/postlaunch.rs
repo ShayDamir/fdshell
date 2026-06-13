@@ -25,6 +25,7 @@ pub fn finish_cmd(
 ) -> Result<WaitStatus, i32> {
     match cmdline.pidvar {
         Some(name) => {
+            state.last_bg_pid = Some(outcome.child_pid);
             state.tasks.insert(
                 name,
                 crate::task::Task {

@@ -20,6 +20,7 @@ fn dummy_state() -> ShellState {
     );
     s.strings
         .insert(ShortCStr::from(c"var"), ShortCStr::from(c"value"));
+    s.last_bg_pid = Some(12345);
     s
 }
 
@@ -207,4 +208,34 @@ fn tilde_mid_word_untouched() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &state).unwrap();
     assert_eq!(res.as_bytes(), b"a~");
+}
+
+#[test]
+fn dollar_bang_returns_last_bg_pid() {
+    let state = dummy_state();
+    let arg = ShortCStr::from(c"$!");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &state).unwrap();
+    assert_eq!(res.as_bytes(), b"12345");
+}
+
+#[test]
+fn dollar_bang_no_bg_returns_empty() {
+    let mut s = ShellState::new();
+    s.strings
+        .insert(ShortCStr::from(c"hello"), ShortCStr::from(c"world"));
+    s.last_bg_pid = None;
+    let arg = ShortCStr::from(c"$!");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &s).unwrap();
+    assert_eq!(res.as_bytes(), b"");
+}
+
+#[test]
+fn dollar_bang_in_text() {
+    let state = dummy_state();
+    let arg = ShortCStr::from(c"job=$! done");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &state).unwrap();
+    assert_eq!(res.as_bytes(), b"job=12345 done");
 }
