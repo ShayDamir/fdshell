@@ -28,7 +28,7 @@
 
 - [ ] `test` / `[` builtin — file tests (`-f`, `-d`, `-e`), string tests (`=`, `!=`, `-z`, `-n`), numeric tests (`-eq`, `-lt`, `-gt`)
 - [x] `while` / `until` loops — shared LoopBlock struct + parser in while_block.rs, separate runner arms with invert flag
-- [ ] `export` — add `exports: HashMap` to ShellState, merge into child envp
+- [x] `export` — shell state exports map, env vars passed to children via exec_fd/exec_at; builtin supports `export VAR=val`, `export VAR`, and `export` (list)
 - [ ] `read` builtin — read line from stdin, split into variables
 - [ ] `printf` builtin — format string output
 - [ ] `set --` + positional params — `$1`..`$9`, `$#`, `$@`, `$*`, `$0`

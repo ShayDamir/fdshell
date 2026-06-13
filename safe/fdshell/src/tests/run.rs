@@ -794,3 +794,37 @@ fn until_true_body_never_runs() {
         assert_ne!(sys::umask::get(), 0o077);
     });
 }
+
+#[test]
+fn export_set_env_var() {
+    let mut state = ShellState::new();
+    run_one(b"export FOO=bar", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert_eq!(state.strings.get(&c"FOO".into()), Some(&c"bar".into()));
+    assert_eq!(
+        state.exports.get(&c"FOO".into()).map(|v| v.as_slice()),
+        Some(&b"bar"[..])
+    );
+}
+
+#[test]
+fn export_multiple_vars() {
+    let mut state = ShellState::new();
+    crate::repl::run_script(b"export FOO=bar; export BAZ=qux", &mut state).unwrap();
+    assert_eq!(state.exports.len(), 2);
+    assert_eq!(
+        state.exports.get(&c"FOO".into()).map(|v| v.as_slice()),
+        Some(&b"bar"[..])
+    );
+    assert_eq!(
+        state.exports.get(&c"BAZ".into()).map(|v| v.as_slice()),
+        Some(&b"qux"[..])
+    );
+}
+
+#[test]
+fn export_list_empty() {
+    let mut state = ShellState::new();
+    run_one(b"export", &mut state).unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}

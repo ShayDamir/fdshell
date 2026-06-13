@@ -47,6 +47,11 @@ fn execute(
         let argv: Vec<&CStr> = std::iter::once(binary.as_ref())
             .chain(substituted.iter().map(|s| s.as_c_str()))
             .collect();
-        exec::exec_fd(&fd, &argv)
+        let exports: Vec<(ShortCStr, Vec<u8>)> = state
+            .exports
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        exec::exec_fd(&fd, &argv, &exports)
     }
 }

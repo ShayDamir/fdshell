@@ -49,6 +49,13 @@ pub(crate) fn try_intercept(
             }
             state.last_status = crate::task::try_wait(&cmdline.args, state)?;
         }
+        b"export" => {
+            if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
+                return Err(EINVAL);
+            }
+            crate::exports::handle_export(&cmdline.args, state)?;
+            state.last_status = WaitStatus::Exited(0);
+        }
         _ => return Ok(false),
     }
     Ok(true)

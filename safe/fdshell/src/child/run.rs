@@ -35,7 +35,12 @@ pub fn child_main(
             let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
                 .chain(refs.iter().copied())
                 .collect();
-            exec::exec_fd(&fd, &full_argv)
+            let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
+                .exports
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            exec::exec_fd(&fd, &full_argv, &exports)
         }
     }
 }

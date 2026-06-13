@@ -7,6 +7,7 @@ mod cmd_subst;
 mod cond;
 mod exec;
 mod expand;
+mod exports;
 mod if_exec;
 mod init;
 mod intercept;

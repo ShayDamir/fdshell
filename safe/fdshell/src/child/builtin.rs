@@ -41,7 +41,12 @@ pub fn dispatch_builtin(
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
             let varname = raw0.strip_prefix(b"%").ok_or(sys::errno::EINVAL)?;
             let fd = state.fds.get(&varname).ok_or(sys::errno::EINVAL)?;
-            exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?)
+            let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
+                .exports
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?, &exports)
         }
         b"exec_at" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
@@ -52,10 +57,16 @@ pub fn dispatch_builtin(
             // execveat with a relative pathname rejects dirfds that have FD_CLOEXEC set.
             // Create a non-CLOEXEC copy via export().
             let non_cloexec = dirfd.export()?;
+            let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
+                .exports
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             exec::exec_at(
                 non_cloexec.at(),
                 &pathname,
                 refs.get(2..).ok_or(sys::errno::EINVAL)?,
+                &exports,
             )
         }
         b"resolve" => {
