@@ -590,3 +590,126 @@ fn for_dollar_paren_word_is_single_token() {
     assert_eq!(fb.words.len(), 1);
     assert_eq!(fb.words[0], c"$(echo hello)".into());
 }
+
+#[test]
+fn while_parse_dispatch() {
+    let ParsedLine::While(wb) = parse(b"while true; do echo x; done").unwrap() else {
+        panic!("expected While")
+    };
+    assert_eq!(wb.condition, c"true".into());
+    assert_eq!(wb.body, c"echo x".into());
+}
+
+#[test]
+fn while_parse_with_semicolon_body() {
+    let ParsedLine::While(wb) = parse(b"while false; do echo a; echo b; done").unwrap() else {
+        panic!("expected While")
+    };
+    assert_eq!(wb.condition, c"false".into());
+    let body_bytes = wb.body.as_bytes().unwrap();
+    // Body is all tokens between "do" and "done", joined with spaces
+    assert!(body_bytes.starts_with(b"echo"));
+}
+
+#[test]
+fn while_parse_pipe_in_body() {
+    let ParsedLine::While(wb) = parse(b"while true; do echo hello | cat; done").unwrap() else {
+        panic!("expected While")
+    };
+    assert_eq!(wb.condition, c"true".into());
+    assert_eq!(wb.body, c"echo hello | cat".into());
+}
+
+#[test]
+fn while_parse_newline_separator() {
+    let ParsedLine::While(wb) = parse(b"while umask 0o077\ndo\numask 0o000\ndone").unwrap() else {
+        panic!("expected While")
+    };
+    assert_eq!(wb.condition, c"umask 0o077".into());
+    assert_eq!(wb.body, c"umask 0o000".into());
+}
+
+#[test]
+fn while_not_starting_with_while_is_a_cmd() {
+    let tokens = token::tokenize(b"while_true; do body; done").unwrap();
+    assert!(!tokens.first().is_some_and(|t| t.eq_bytes(b"while")));
+}
+
+#[test]
+fn while_without_do_returns_err() {
+    let tokens = token::tokenize(b"while true; echo x; done").unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"while").is_err());
+}
+
+#[test]
+fn while_missing_done_at_end_returns_err() {
+    let result = parse(b"while true; do echo x");
+    assert!(result.is_err());
+}
+
+#[test]
+fn while_do_not_preceded_by_semi_returns_err() {
+    let tokens = token::tokenize(b"while true do echo x; done").unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"while").is_err());
+}
+
+#[test]
+fn until_parse_dispatch() {
+    let ParsedLine::Until(wb) = parse(b"until false; do echo x; done").unwrap() else {
+        panic!("expected Until")
+    };
+    assert_eq!(wb.condition, c"false".into());
+    assert_eq!(wb.body, c"echo x".into());
+}
+
+#[test]
+fn until_parse_with_semicolon_body() {
+    let ParsedLine::Until(wb) = parse(b"until false; do echo a; echo b; done").unwrap() else {
+        panic!("expected Until")
+    };
+    assert_eq!(wb.condition, c"false".into());
+    let body_bytes = wb.body.as_bytes().unwrap();
+    assert!(body_bytes.starts_with(b"echo"));
+}
+
+#[test]
+fn until_parse_newline_separator() {
+    let ParsedLine::Until(wb) = parse(b"until false\ndo\numask 0o000\ndone").unwrap() else {
+        panic!("expected Until")
+    };
+    assert_eq!(wb.condition, c"false".into());
+    assert_eq!(wb.body, c"umask 0o000".into());
+}
+
+#[test]
+fn until_not_starting_with_until_is_a_cmd() {
+    let tokens = token::tokenize(b"until_true; do body; done").unwrap();
+    assert!(!tokens.first().is_some_and(|t| t.eq_bytes(b"until")));
+}
+
+#[test]
+fn until_without_do_returns_err() {
+    let tokens = token::tokenize(b"until true; echo x; done").unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"until").is_err());
+}
+
+#[test]
+fn until_missing_done_at_end_returns_err() {
+    let result = parse(b"until true; do echo x");
+    assert!(result.is_err());
+}
+
+#[test]
+fn until_do_not_preceded_by_semi_returns_err() {
+    let tokens = token::tokenize(b"until true do echo x; done").unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"until").is_err());
+}
+
+#[test]
+fn until_parse_pipe_in_body() {
+    let ParsedLine::Until(wb) = parse(b"until true; do echo hello | cat; done").unwrap() else {
+        panic!("expected Until")
+    };
+    assert_eq!(wb.condition, c"true".into());
+    assert_eq!(wb.body, c"echo hello | cat".into());
+}

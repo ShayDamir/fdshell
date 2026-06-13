@@ -774,3 +774,23 @@ fn if_false_else_nested_if_runs_else() {
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
+
+#[test]
+fn while_false_never_runs_body() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"while false; do umask 0o000; done", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(1)));
+        assert_ne!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn until_true_body_never_runs() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"until true; do umask 0o077; done", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_ne!(sys::umask::get(), 0o077);
+    });
+}

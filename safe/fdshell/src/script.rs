@@ -16,6 +16,9 @@ fn keyword_delta(word: &[u8]) -> Option<i32> {
     if word.starts_with(b"for") && boundary(word, 3, b"") {
         return Some(1);
     }
+    if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
+        return Some(1);
+    }
     if word.starts_with(b"done") && boundary(word, 4, b"&|") {
         return Some(-1);
     }

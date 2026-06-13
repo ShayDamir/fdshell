@@ -1,5 +1,6 @@
 use crate::parse::for_block::ForBlock;
 use crate::parse::if_block::IfBlock;
+use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
 use sys::ShortCStr;
 use sys::errno::EINVAL;
@@ -13,6 +14,8 @@ pub enum ParsedLine {
     Umask(Option<u32>),
     If(IfBlock),
     For(ForBlock),
+    While(WhileBlock),
+    Until(UntilBlock),
 }
 
 pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {

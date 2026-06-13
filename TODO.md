@@ -27,7 +27,7 @@
 ### P1 — Major functionality gaps (moderate effort)
 
 - [ ] `test` / `[` builtin — file tests (`-f`, `-d`, `-e`), string tests (`=`, `!=`, `-z`, `-n`), numeric tests (`-eq`, `-lt`, `-gt`)
-- [ ] `while` / `until` loops — similar structure to `for` in parser + runner
+- [x] `while` / `until` loops — shared LoopBlock struct + parser in while_block.rs, separate runner arms with invert flag
 - [ ] `export` — add `exports: HashMap` to ShellState, merge into child envp
 - [ ] `read` builtin — read line from stdin, split into variables
 - [ ] `printf` builtin — format string output
