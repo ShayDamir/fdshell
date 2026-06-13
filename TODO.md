@@ -3,7 +3,7 @@
 ## Refactoring / cleanup
 
 - [ ] File length: `run.rs` (81 code lines, 1 over), `if_block.rs` (95 code lines, 15 over), `script.rs` (81 code lines, 1 over) — minor extractions to get under 80
-- [ ] Add tests for `run.rs` else/elif execution paths (currently untested: `if false; then ...; else ...; fi` chains)
+- [x] Add tests for `run.rs` else/elif execution paths (`if false; then ...; else ...; fi`, elif-first-fails, all-elifs-fail-no-else)
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 

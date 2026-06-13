@@ -665,3 +665,112 @@ fn last_bg_pid_set_on_background_task() {
         }
     }
 }
+
+#[test]
+fn if_false_else_runs_else_body() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false; then umask 0o000; else umask 0o077; fi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o077);
+    });
+}
+
+#[test]
+fn if_false_no_else_sets_zero() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(b"if false; then umask 0o000; fi", &mut state).unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_ne!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn if_first_elif_fails_runs_elif_body() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false; then umask 0o000; elif true; then umask 0o070; else umask 0o700; fi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o070);
+    });
+}
+
+#[test]
+fn if_all_elifs_fail_runs_else() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false; then umask 0o000; elif false; then umask 0o070; else umask 0o007; fi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o007);
+    });
+}
+
+#[test]
+fn if_false_elif_fails_no_else_sets_zero() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false; then umask 0o000; elif false; then umask 0o070; fi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_ne!(sys::umask::get(), 0o000);
+        assert_ne!(sys::umask::get(), 0o070);
+    });
+}
+
+#[test]
+fn if_else_newline_separator() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false\nthen\numask 0o000\nelse\numask 0o077\nfi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o077);
+    });
+}
+
+#[test]
+fn if_elif_else_newline_separator() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false\nthen\numask 0o000\nelif false\nthen\numask 0o070\nelse\numask 0o007\nfi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o007);
+    });
+}
+
+#[test]
+fn if_false_else_nested_if_runs_else() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        crate::repl::run_script(
+            b"if false; then if true; then umask 0o000; fi; else umask 0o077; fi",
+            &mut state,
+        )
+        .unwrap();
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        assert_eq!(sys::umask::get(), 0o077);
+    });
+}
