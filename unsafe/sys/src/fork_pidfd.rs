@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::{LocalFd, cvt};
+use crate::{LocalFd, cvt, fork_cell::ForkCell};
 
 const UNKNOWN: u8 = 0;
 const AUTO: u8 = 1;
@@ -68,4 +68,17 @@ pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), i32> {
     // SAFETY: `raw_pidfd` has CLOEXEC (set by kernel or fcntl above).
     let pidfd = unsafe { LocalFd::from_raw(raw_pidfd) };
     Ok((ret, Some(pidfd)))
+}
+
+/// Fork a subprocess and return a pidfd in the parent. Same return type as
+/// [`fork_pidfd`], but calls `cell.reset_after_fork()` in the child process so
+/// that `borrow_mut()` succeeds there.
+pub fn fork_pidfd_cell<T>(cell: &ForkCell<T>) -> Result<(isize, Option<LocalFd>), i32> {
+    let (ret, pidfd_opt) = fork_pidfd()?;
+    // Only the child (pid == 0, no pidfd) needs to reset its borrow counter.
+    if ret == 0 {
+        // SAFETY: we are in the forked child — exclusive ownership of memory.
+        unsafe { cell.reset_after_fork() };
+    }
+    Ok((ret, pidfd_opt))
 }
