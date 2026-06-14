@@ -42,7 +42,7 @@ impl RedirectDef {
         }
     }
 
-    pub fn resolve<'a>(&self, local: &'a super::LocalFd) -> super::Redirect<'a> {
+    pub fn resolve(&self, local: super::LocalFd) -> super::Redirect {
         super::Redirect {
             export_to: self.export_to,
             local,

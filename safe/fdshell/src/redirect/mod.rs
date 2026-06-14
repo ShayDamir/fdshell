@@ -14,13 +14,13 @@ pub use source::*;
 
 use sys::LocalFd;
 
-pub struct Redirect<'a> {
+pub struct Redirect {
     pub export_to: i32,
-    pub local: &'a LocalFd,
+    pub local: LocalFd,
 }
 
-impl<'a> Redirect<'a> {
-    pub fn new(export_to: i32, local: &'a LocalFd) -> Self {
+impl Redirect {
+    pub fn new(export_to: i32, local: LocalFd) -> Self {
         Redirect { export_to, local }
     }
 

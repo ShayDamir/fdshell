@@ -50,6 +50,14 @@ impl LocalFd {
         // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd with CLOEXEC atomically set.
         Ok(unsafe { LocalFd::from_raw(ret as i32) })
     }
+    pub fn try_clone_above(&self, min_fd: i32) -> Result<LocalFd, i32> {
+        // SAFETY: `self.0` is a valid open fd; `F_DUPFD_CLOEXEC` with
+        // `min_fd` ensures the new fd is >= min_fd, avoiding collisions.
+        let ret =
+            crate::cvt(unsafe { libc::fcntl(self.0, libc::F_DUPFD_CLOEXEC, min_fd) as isize })?;
+        // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd >= min_fd with CLOEXEC set.
+        Ok(unsafe { LocalFd::from_raw(ret as i32) })
+    }
     pub fn try_clone_to(&self, new: i32) -> Result<LocalFd, i32> {
         // SAFETY: `self.0` is a valid open fd; `dup3` with invalid
         // args safely returns -1, handled by `cvt`.

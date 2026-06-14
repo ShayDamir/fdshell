@@ -1,17 +1,19 @@
 use crate::state::ShellState;
 use sys::errno::EINVAL;
+use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
 pub(crate) fn try_intercept(
     cmdline: &crate::parse::CommandLine,
-    state: &mut ShellState,
+    cell: &ForkCell<ShellState>,
 ) -> Result<bool, i32> {
+    let mut state = cell.borrow_mut()?;
     match cmdline.command.as_bytes()? {
         b"cd" => {
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            crate::cd::cd(&cmdline.args, state)?;
+            crate::cd::cd(&cmdline.args, &mut state)?;
             state.last_status = WaitStatus::Exited(0);
         }
         b"exit" | b"quit" => {
@@ -32,13 +34,14 @@ pub(crate) fn try_intercept(
                 eprintln!("become: captures not supported");
                 std::process::exit(sys::errno::EINVAL);
             }
-            crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, state);
+            drop(state);
+            crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, cell);
         }
         b"export_fd" if cmdline.builtin => {
             if !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            state.last_status = match crate::child::fdpass::export_fd(&cmdline.args, state) {
+            state.last_status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {
                 Ok(()) => WaitStatus::Exited(0),
                 Err(e) => WaitStatus::Exited(e),
             };
@@ -47,13 +50,13 @@ pub(crate) fn try_intercept(
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            state.last_status = crate::task::try_wait(&cmdline.args, state)?;
+            state.last_status = crate::task::try_wait(&cmdline.args, &mut state)?;
         }
         b"export" => {
             if cmdline.builtin || !cmdline.captures.is_empty() || !cmdline.redirects.is_empty() {
                 return Err(EINVAL);
             }
-            crate::exports::handle_export(&cmdline.args, state)?;
+            crate::exports::handle_export(&cmdline.args, &mut state)?;
             state.last_status = WaitStatus::Exited(0);
         }
         _ => return Ok(false),

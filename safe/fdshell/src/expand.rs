@@ -1,18 +1,19 @@
 #![forbid(unsafe_code)]
 
 use sys::ShortCStr;
+use sys::fork_cell::ForkCell;
 
 use crate::state::ShellState;
 
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
-    state: &mut ShellState,
+    cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, i32> {
     let mut out = Vec::new();
     for word in words {
         let bs = word.as_bytes()?;
         let split = if is_cmd_subst(bs) {
-            let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), state)?;
+            let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)?;
             split_whitespace(&expanded)?
         } else {
             vec![word.clone()]

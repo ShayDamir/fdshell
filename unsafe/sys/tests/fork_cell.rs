@@ -43,9 +43,10 @@ fn fork_pidfd_cell_child_mut_borrow() -> Result<(), i32> {
         std::process::exit(0);
     }
 
+    // Parent's copy is unchanged by child mutation (fork gives separate address spaces)
+    assert_eq!(*cell.borrow().unwrap(), 100);
+
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    // Parent: child modified the value through its own copy, so we can't
-    // verify the value. But we check exit status.
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(sys::errno::EINVAL),
@@ -72,6 +73,9 @@ fn fork_pidfd_cell_with_active_borrows() -> Result<(), i32> {
         *cell.borrow_mut().unwrap() = 999;
         std::process::exit(0);
     }
+
+    // Parent's value unchanged — child mutated its own copy
+    assert_eq!(*cell.borrow().unwrap(), 42);
 
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {

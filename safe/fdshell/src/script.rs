@@ -1,5 +1,6 @@
 use crate::state::ShellState;
 use sys::errno::EINVAL;
+use sys::fork_cell::ForkCell;
 
 fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
     word.get(len)
@@ -25,7 +26,7 @@ fn keyword_delta(word: &[u8]) -> Option<i32> {
     None
 }
 
-pub(crate) fn run_script(line: &[u8], state: &mut ShellState) -> Result<i32, i32> {
+pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, i32> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -66,15 +67,16 @@ pub(crate) fn run_script(line: &[u8], state: &mut ShellState) -> Result<i32, i32
                 }
                 let end = line.len().min(start);
                 let full = line.get(block_start..end).unwrap_or(b"").trim_ascii();
-                crate::cond::run_cond_list(full, state)?;
+                crate::cond::run_cond_list(full, cell)?;
                 continue;
             }
             if !part.is_empty() {
-                crate::cond::run_cond_list(part, state)?;
+                crate::cond::run_cond_list(part, cell)?;
             }
             start = i + 1;
         }
         i += 1;
     }
+    let state = cell.borrow()?;
     Ok(state.last_status.exit_code())
 }

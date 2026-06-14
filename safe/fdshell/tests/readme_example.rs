@@ -280,7 +280,6 @@ fn builtin_pipe_write_read() {
 }
 
 #[test]
-#[ignore]
 fn builtin_pipe_write_read_cmd_subst() {
     let dir = tmpdir();
     let cmd = concat!(

@@ -35,14 +35,17 @@ use sys::fcntl::O_DIRECTORY;
 fn main() -> Result<(), i32> {
     let _mode = crate::init::init_shellfd()?;
     sys::umask::init();
-    let mut state = state::ShellState::new();
-    let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
-    state.fds.insert(c"CWD".into(), cwd);
+    let state = sys::fork_cell::ForkCell::new(state::ShellState::new());
+    {
+        let mut state = state.borrow_mut()?;
+        let cwd = sys::openat2::open(c".", O_DIRECTORY)?;
+        state.fds.insert(c"CWD".into(), cwd);
+    }
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
         if arg == "-c" {
             let cmd = args.next().ok_or(sys::errno::EINVAL)?;
-            let code = repl::exec_cmd(cmd.as_bytes(), &mut state)?;
+            let code = repl::exec_cmd(cmd.as_bytes(), &state)?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -67,7 +70,7 @@ fn main() -> Result<(), i32> {
         if line.is_empty() || line.starts_with(b"#") {
             continue;
         }
-        repl::handle(line, &mut state)?;
+        repl::handle(line, &state)?;
     }
     Ok(())
 }

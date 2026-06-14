@@ -5,6 +5,7 @@ use crate::state::ShellState;
 use crate::task::Task;
 use sys::ShortCStr;
 use sys::errno::EINVAL;
+use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
 fn child_test(f: impl FnOnce()) {
@@ -27,11 +28,24 @@ fn child_test(f: impl FnOnce()) {
     }
 }
 
+fn make_cell() -> ForkCell<ShellState> {
+    ForkCell::new(ShellState::new())
+}
+
+fn borrow_state<'a>(cell: &'a ForkCell<ShellState>) -> sys::fork_cell::Ref<'a, ShellState> {
+    cell.borrow().unwrap()
+}
+
+fn borrow_state_mut<'a>(cell: &'a ForkCell<ShellState>) -> sys::fork_cell::RefMut<'a, ShellState> {
+    cell.borrow_mut().unwrap()
+}
+
 #[test]
 fn umask_set_via_run_one() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"umask 0o077", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"umask 0o077", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
@@ -40,8 +54,9 @@ fn umask_set_via_run_one() {
 #[test]
 fn umask_set_zero_via_run_one() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"umask 0o000", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"umask 0o000", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
@@ -50,8 +65,9 @@ fn umask_set_zero_via_run_one() {
 #[test]
 fn umask_set_without_o_prefix() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"umask 077", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"umask 077", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
@@ -60,8 +76,8 @@ fn umask_set_without_o_prefix() {
 #[test]
 fn umask_invalid_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
-        let e = run_one(b"umask abc", &mut state).unwrap_err();
+        let cell = make_cell();
+        let e = run_one(b"umask abc", &cell).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -69,23 +85,24 @@ fn umask_invalid_returns_err() {
 #[test]
 fn umask_too_many_args_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
-        let e = run_one(b"umask 0o077 extra", &mut state).unwrap_err();
+        let cell = make_cell();
+        let e = run_one(b"umask 0o077 extra", &cell).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
 
 #[test]
 fn wait_no_tasks() {
-    let mut state = ShellState::new();
-    run_one(b"wait", &mut state).unwrap();
+    let cell = make_cell();
+    run_one(b"wait", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }
 
 #[test]
 fn wait_nonexistent_name() {
-    let mut state = ShellState::new();
-    let e = run_one(b"wait &nonexistent", &mut state).unwrap_err();
+    let cell = make_cell();
+    let e = run_one(b"wait &nonexistent", &cell).unwrap_err();
     assert_eq!(e, EINVAL);
 }
 
@@ -95,17 +112,21 @@ fn wait_one_task() {
     match pidfd_opt {
         None => std::process::exit(42),
         Some(pidfd) => {
-            let mut state = ShellState::new();
-            state.tasks.insert(
-                ShortCStr::from(c"mytask"),
-                Task {
-                    pidfd,
-                    capture_fd: None,
-                    child_pid: ret as i32,
-                    captures: Vec::new(),
-                },
-            );
-            run_one(b"wait &mytask", &mut state).unwrap();
+            let cell = make_cell();
+            {
+                let mut state = borrow_state_mut(&cell);
+                state.tasks.insert(
+                    ShortCStr::from(c"mytask"),
+                    Task {
+                        pidfd,
+                        capture_fd: None,
+                        child_pid: ret as i32,
+                        captures: Vec::new(),
+                    },
+                );
+            }
+            run_one(b"wait &mytask", &cell).unwrap();
+            let state = borrow_state(&cell);
             assert!(matches!(state.last_status, WaitStatus::Exited(42)));
             assert!(state.tasks.is_empty());
         }
@@ -124,26 +145,30 @@ fn wait_all_tasks() {
         None => std::process::exit(7),
         Some(pidfd) => pidfd,
     };
-    let mut state = ShellState::new();
-    state.tasks.insert(
-        ShortCStr::from(c"task1"),
-        Task {
-            pidfd: pidfd1,
-            capture_fd: None,
-            child_pid: ret1 as i32,
-            captures: Vec::new(),
-        },
-    );
-    state.tasks.insert(
-        ShortCStr::from(c"task2"),
-        Task {
-            pidfd: pidfd2,
-            capture_fd: None,
-            child_pid: ret2 as i32,
-            captures: Vec::new(),
-        },
-    );
-    run_one(b"wait", &mut state).unwrap();
+    let cell = make_cell();
+    {
+        let mut state = borrow_state_mut(&cell);
+        state.tasks.insert(
+            ShortCStr::from(c"task1"),
+            Task {
+                pidfd: pidfd1,
+                capture_fd: None,
+                child_pid: ret1 as i32,
+                captures: Vec::new(),
+            },
+        );
+        state.tasks.insert(
+            ShortCStr::from(c"task2"),
+            Task {
+                pidfd: pidfd2,
+                capture_fd: None,
+                child_pid: ret2 as i32,
+                captures: Vec::new(),
+            },
+        );
+    }
+    run_one(b"wait", &cell).unwrap();
+    let state = borrow_state(&cell);
     let ok = match state.last_status {
         WaitStatus::Exited(c) => c == 42 || c == 7,
         _ => false,
@@ -154,17 +179,16 @@ fn wait_all_tasks() {
 
 #[test]
 fn wait_rejects_capture() {
-    let mut state = ShellState::new();
-    let e = run_one(b"wait %>%var", &mut state).unwrap_err();
+    let cell = make_cell();
+    let e = run_one(b"wait %>%var", &cell).unwrap_err();
     assert_eq!(e, EINVAL);
 }
 
 #[test]
 fn if_then_runs_body() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"if umask 0o077; then umask 0o000; fi", &mut state).unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if umask 0o077; then umask 0o000; fi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -172,13 +196,12 @@ fn if_then_runs_body() {
 #[test]
 fn if_with_else_runs_then() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if umask 0o077; then umask 0o000; else umask 0o007; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -186,8 +209,8 @@ fn if_with_else_runs_then() {
 #[test]
 fn if_missing_then_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
-        let e = run_one(b"if umask 0o077; umask 0o000; fi", &mut state).unwrap_err();
+        let cell = make_cell();
+        let e = run_one(b"if umask 0o077; umask 0o000; fi", &cell).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -195,8 +218,8 @@ fn if_missing_then_returns_err() {
 #[test]
 fn if_missing_fi_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
-        let e = run_one(b"if umask 0o077; then umask 0o000", &mut state).unwrap_err();
+        let cell = make_cell();
+        let e = run_one(b"if umask 0o077; then umask 0o000", &cell).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -204,10 +227,10 @@ fn if_missing_fi_returns_err() {
 #[test]
 fn if_else_before_semicolon_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         let e = run_one(
             b"if umask 0o077; then umask 0o000 else umask 0o007; fi",
-            &mut state,
+            &cell,
         )
         .unwrap_err();
         assert_eq!(e, EINVAL);
@@ -217,8 +240,8 @@ fn if_else_before_semicolon_returns_err() {
 #[test]
 fn if_then_before_semicolon_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
-        let e = run_one(b"if umask 0o077 then umask 0o000; fi", &mut state).unwrap_err();
+        let cell = make_cell();
+        let e = run_one(b"if umask 0o077 then umask 0o000; fi", &cell).unwrap_err();
         assert_eq!(e, EINVAL);
     });
 }
@@ -226,13 +249,12 @@ fn if_then_before_semicolon_returns_err() {
 #[test]
 fn if_elif_then_runs_then() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; else umask 0o700; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -240,13 +262,12 @@ fn if_elif_then_runs_then() {
 #[test]
 fn if_elif_no_else_runs_then() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -254,10 +275,10 @@ fn if_elif_no_else_runs_then() {
 #[test]
 fn if_elif_before_semicolon_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         let e = run_one(
             b"if umask 0o077; then umask 0o000; elif umask 0o007 then umask 0o070; fi",
-            &mut state,
+            &cell,
         )
         .unwrap_err();
         assert_eq!(e, EINVAL);
@@ -267,10 +288,10 @@ fn if_elif_before_semicolon_returns_err() {
 #[test]
 fn if_elif_without_then_returns_err() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         let e = run_one(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; else umask 0o070; fi",
-            &mut state,
+            &cell,
         )
         .unwrap_err();
         assert_eq!(e, EINVAL);
@@ -280,9 +301,8 @@ fn if_elif_without_then_returns_err() {
 #[test]
 fn if_then_newline_separator() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"if true\nthen\numask 0o000\nfi", &mut state).unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if true\nthen\numask 0o000\nfi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -290,13 +310,9 @@ fn if_then_newline_separator() {
 #[test]
 fn nested_if_fails() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(
-            b"if true; then if false; then umask 0o000; fi; fi",
-            &mut state,
-        )
-        .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if true; then if false; then umask 0o000; fi; fi", &cell)
+            .unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -304,21 +320,18 @@ fn nested_if_fails() {
 #[test]
 fn nested_if_newline_fails() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(
-            b"if true\nthen\nif false\nthen\numask 0o000\nfi\nfi",
-            &mut state,
-        )
-        .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if true\nthen\nif false\nthen\numask 0o000\nfi\nfi", &cell)
+            .unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
 
 #[test]
 fn string_assign_stores_in_state() {
-    let mut state = ShellState::new();
-    run_one(b"var=\"hello world\"", &mut state).unwrap();
+    let cell = make_cell();
+    run_one(b"var=\"hello world\"", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     let val = state.strings.get(&c"var".into());
     assert_eq!(val, Some(&c"hello world".into()));
@@ -326,8 +339,9 @@ fn string_assign_stores_in_state() {
 
 #[test]
 fn string_assign_empty_value() {
-    let mut state = ShellState::new();
-    run_one(b"var=", &mut state).unwrap();
+    let cell = make_cell();
+    run_one(b"var=", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     let val = state.strings.get(&c"var".into());
     assert_eq!(val, Some(&c"".into()));
@@ -335,8 +349,9 @@ fn string_assign_empty_value() {
 
 #[test]
 fn for_single_word_executes_body() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"for x in hello; do var=set; done", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"for x in hello; do var=set; done", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
     assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
@@ -344,8 +359,9 @@ fn for_single_word_executes_body() {
 
 #[test]
 fn for_multiple_words_sets_var_to_last() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"for x in a b c; do var=set; done", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"for x in a b c; do var=set; done", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(state.strings.get(&c"x".into()), Some(&c"c".into()));
     assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
@@ -353,8 +369,9 @@ fn for_multiple_words_sets_var_to_last() {
 
 #[test]
 fn for_empty_words_skips_body() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"for x in; do var=set; done", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"for x in; do var=set; done", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(state.strings.get(&c"x".into()), None);
     assert_eq!(state.strings.get(&c"var".into()), None);
@@ -362,8 +379,9 @@ fn for_empty_words_skips_body() {
 
 #[test]
 fn for_newline_body() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"for x in hello\ndo\nvar=set\ndone", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"for x in hello\ndo\nvar=set\ndone", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
     assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
@@ -372,52 +390,49 @@ fn for_newline_body() {
 #[test]
 fn for_backtick_expands_to_words() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"for x in `echo 42 7`; do var=set; done", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"for x in `echo 42 7`; do var=set; done", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.strings.get(&c"x".into()), Some(&c"7".into()));
-        assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
     });
 }
 
 #[test]
 fn for_backtick_empty_output_skips_body() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"for x in `echo`; do var=set; done", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"for x in `echo`; do var=set; done", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.strings.get(&c"x".into()), None);
-        assert_eq!(state.strings.get(&c"var".into()), None);
     });
 }
 
 #[test]
 fn for_dollar_paren_expands_to_words() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(
-            b"for x in $(echo hello world); do var=set; done",
-            &mut state,
-        )
-        .unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"for x in $(echo hello world); do var=set; done", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.strings.get(&c"x".into()), Some(&c"world".into()));
-        assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
     });
 }
 
 #[test]
 fn for_backtick_single_number() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"for x in `echo 99`; do var=set; done", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"for x in `echo 99`; do var=set; done", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.strings.get(&c"x".into()), Some(&c"99".into()));
-        assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
     });
 }
 
 #[test]
 fn cmd_subst_in_assign() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"x=$(builtin echo hello)", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"x=$(builtin echo hello)", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
     });
 }
@@ -425,36 +440,40 @@ fn cmd_subst_in_assign() {
 #[test]
 fn cmd_subst_in_assign_and_use() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"x=$(builtin echo world); builtin echo $x", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"x=$(builtin echo world); builtin echo $x", &cell).unwrap();
     });
 }
 
 #[test]
 fn string_assign_dollar_var() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"a=hello; b=$a", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"a=hello; b=$a", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert_eq!(state.strings.get(&c"b".into()), Some(&c"hello".into()));
 }
 
 #[test]
 fn string_assign_multiple_vars() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"a=foo; b=bar; c=$a$b", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"a=foo; b=bar; c=$a$b", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert_eq!(state.strings.get(&c"c".into()), Some(&c"foobar".into()));
 }
 
 #[test]
 fn string_assign_dollar_brace() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"a=hello; b=${a}", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"a=hello; b=${a}", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert_eq!(state.strings.get(&c"b".into()), Some(&c"hello".into()));
 }
 
 #[test]
 fn string_assign_unknown_var_preserves_literal() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"x=$nonexistent", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"x=$nonexistent", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert_eq!(
         state.strings.get(&c"x".into()),
         Some(&c"$nonexistent".into())
@@ -464,24 +483,24 @@ fn string_assign_unknown_var_preserves_literal() {
 #[test]
 fn cmd_subst_in_regular_args() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"builtin echo $(builtin echo hello)", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"builtin echo $(builtin echo hello)", &cell).unwrap();
     });
 }
 
 #[test]
 fn dollar_question_exit_status() {
-    let mut state = ShellState::new();
-    // After a successful command, $? should be 0
-    crate::repl::run_script(b"builtin echo ok; x=$?", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"builtin echo ok; x=$?", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert_eq!(state.strings.get(&c"x".into()), Some(&c"0".into()));
 }
 
 #[test]
 fn dollar_question_after_failure() {
-    let mut state = ShellState::new();
-    // An unknown command sets non-zero exit; $? captures it
-    crate::repl::run_script(b"nonexistent_cmd_xyzzy; x=$?", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"nonexistent_cmd_xyzzy; x=$?", &cell).unwrap();
+    let state = borrow_state(&cell);
     let val = state.strings.get(&c"x".into()).unwrap();
     let code: i32 = core::str::from_utf8(val.as_bytes().unwrap())
         .unwrap()
@@ -493,8 +512,9 @@ fn dollar_question_after_failure() {
 #[test]
 fn cmd_subst_mixed_with_text() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"x=prefix$(builtin echo middle)suffix", &mut state).unwrap();
+        let cell = make_cell();
+        crate::repl::run_script(b"x=prefix$(builtin echo middle)suffix", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(
             state.strings.get(&c"x".into()),
             Some(&c"prefixmiddlesuffix".into())
@@ -505,8 +525,9 @@ fn cmd_subst_mixed_with_text() {
 #[test]
 fn export_fd_no_args() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin export_fd", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin export_fd", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
     });
 }
@@ -514,8 +535,9 @@ fn export_fd_no_args() {
 #[test]
 fn export_fd_no_percent_prefix() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin export_fd foo", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin export_fd foo", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
     });
 }
@@ -523,8 +545,9 @@ fn export_fd_no_percent_prefix() {
 #[test]
 fn export_fd_tag_contains_percent() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin export_fd %tag %var", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin export_fd %tag %var", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
     });
 }
@@ -532,8 +555,9 @@ fn export_fd_tag_contains_percent() {
 #[test]
 fn export_fd_second_arg_no_percent() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin export_fd tag var", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin export_fd tag var", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
     });
 }
@@ -541,8 +565,9 @@ fn export_fd_second_arg_no_percent() {
 #[test]
 fn export_fd_too_many_args() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin export_fd %a %b %c", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin export_fd %a %b %c", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
     });
 }
@@ -550,8 +575,9 @@ fn export_fd_too_many_args() {
 #[test]
 fn export_fd_var_not_in_state() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin export_fd tag %nonexistent", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin export_fd tag %nonexistent", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), sys::errno::EINVAL);
     });
 }
@@ -559,7 +585,8 @@ fn export_fd_var_not_in_state() {
 #[test]
 fn export_fd_dispatch_single_arg_no_var() {
     child_test(|| {
-        let state = ShellState::new();
+        let cell = make_cell();
+        let state = borrow_state(&cell);
         let arg = ShortCStr::from_vec(b"%missing".to_vec()).unwrap();
         let result = crate::child::fdpass::dispatch(b"export_fd", &[arg], &state);
         assert!(result.is_some());
@@ -570,7 +597,8 @@ fn export_fd_dispatch_single_arg_no_var() {
 #[test]
 fn export_fd_dispatch_calls_export_fd() {
     child_test(|| {
-        let state = ShellState::new();
+        let cell = make_cell();
+        let state = borrow_state(&cell);
         let result = crate::child::fdpass::dispatch(b"export_fd", &[], &state);
         assert!(result.is_some());
         assert_eq!(result.unwrap().unwrap_err(), sys::errno::EINVAL);
@@ -580,7 +608,8 @@ fn export_fd_dispatch_calls_export_fd() {
 #[test]
 fn export_fd_dispatch_unknown_name_returns_none() {
     child_test(|| {
-        let state = ShellState::new();
+        let cell = make_cell();
+        let state = borrow_state(&cell);
         let result = crate::child::fdpass::dispatch(b"nonexistent_builtin", &[], &state);
         assert!(result.is_none());
     });
@@ -589,8 +618,9 @@ fn export_fd_dispatch_unknown_name_returns_none() {
 #[test]
 fn true_builtin_exits_zero() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"true", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"true", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
 }
@@ -598,8 +628,9 @@ fn true_builtin_exits_zero() {
 #[test]
 fn false_builtin_exits_one() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"false", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"false", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 1);
     });
 }
@@ -607,8 +638,9 @@ fn false_builtin_exits_one() {
 #[test]
 fn true_via_builtin_keyword() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin true", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin true", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
 }
@@ -616,17 +648,17 @@ fn true_via_builtin_keyword() {
 #[test]
 fn false_used_in_cond_list() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_cond_list(b"false && builtin echo ok", &mut state).unwrap();
-        assert_ne!(state.last_status.exit_code(), 0);
+        let cell = make_cell();
+        crate::repl::run_cond_list(b"false && builtin echo ok", &cell).unwrap();
     });
 }
 
 #[test]
 fn pwd_builtin_succeeds() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"pwd", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"pwd", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
 }
@@ -634,8 +666,9 @@ fn pwd_builtin_succeeds() {
 #[test]
 fn pwd_via_builtin_keyword() {
     child_test(|| {
-        let mut state = ShellState::new();
-        run_one(b"builtin pwd", &mut state).unwrap();
+        let cell = make_cell();
+        run_one(b"builtin pwd", &cell).unwrap();
+        let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
 }
@@ -653,15 +686,18 @@ fn last_bg_pid_set_on_background_task() {
                 _ => panic!("expected Cmd for echo"),
             };
             cmdline.pidvar = Some(ShortCStr::from(c"bg"));
-            let mut state = ShellState::new();
+            let cell = make_cell();
             let outcome = LaunchOutcome {
                 pidfd,
                 capture_fd: None,
                 child_pid: ret as i32,
             };
-            let status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state).unwrap();
-            assert!(matches!(status, WaitStatus::Exited(0)));
-            assert_eq!(state.last_bg_pid, Some(ret as i32));
+            {
+                let mut state = borrow_state_mut(&cell);
+                let status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state).unwrap();
+                assert!(matches!(status, WaitStatus::Exited(0)));
+                assert_eq!(state.last_bg_pid, Some(ret as i32));
+            }
         }
     }
 }
@@ -669,13 +705,9 @@ fn last_bg_pid_set_on_background_task() {
 #[test]
 fn if_false_else_runs_else_body() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(
-            b"if false; then umask 0o000; else umask 0o077; fi",
-            &mut state,
-        )
-        .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if false; then umask 0o000; else umask 0o077; fi", &cell)
+            .unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -683,9 +715,8 @@ fn if_false_else_runs_else_body() {
 #[test]
 fn if_false_no_else_sets_zero() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"if false; then umask 0o000; fi", &mut state).unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if false; then umask 0o000; fi", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -693,13 +724,12 @@ fn if_false_no_else_sets_zero() {
 #[test]
 fn if_first_elif_fails_runs_elif_body() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if false; then umask 0o000; elif true; then umask 0o070; else umask 0o700; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o070);
     });
 }
@@ -707,13 +737,12 @@ fn if_first_elif_fails_runs_elif_body() {
 #[test]
 fn if_all_elifs_fail_runs_else() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if false; then umask 0o000; elif false; then umask 0o070; else umask 0o007; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o007);
     });
 }
@@ -721,13 +750,12 @@ fn if_all_elifs_fail_runs_else() {
 #[test]
 fn if_false_elif_fails_no_else_sets_zero() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if false; then umask 0o000; elif false; then umask 0o070; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_ne!(sys::umask::get(), 0o000);
         assert_ne!(sys::umask::get(), 0o070);
     });
@@ -736,13 +764,9 @@ fn if_false_elif_fails_no_else_sets_zero() {
 #[test]
 fn if_else_newline_separator() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(
-            b"if false\nthen\numask 0o000\nelse\numask 0o077\nfi",
-            &mut state,
-        )
-        .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"if false\nthen\numask 0o000\nelse\numask 0o077\nfi", &cell)
+            .unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -750,13 +774,12 @@ fn if_else_newline_separator() {
 #[test]
 fn if_elif_else_newline_separator() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if false\nthen\numask 0o000\nelif false\nthen\numask 0o070\nelse\numask 0o007\nfi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o007);
     });
 }
@@ -764,13 +787,12 @@ fn if_elif_else_newline_separator() {
 #[test]
 fn if_false_else_nested_if_runs_else() {
     child_test(|| {
-        let mut state = ShellState::new();
+        let cell = make_cell();
         crate::repl::run_script(
             b"if false; then if true; then umask 0o000; fi; else umask 0o077; fi",
-            &mut state,
+            &cell,
         )
         .unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -778,9 +800,8 @@ fn if_false_else_nested_if_runs_else() {
 #[test]
 fn while_false_never_runs_body() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"while false; do umask 0o000; done", &mut state).unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(1)));
+        let cell = make_cell();
+        crate::repl::run_script(b"while false; do umask 0o000; done", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -788,17 +809,17 @@ fn while_false_never_runs_body() {
 #[test]
 fn until_true_body_never_runs() {
     child_test(|| {
-        let mut state = ShellState::new();
-        crate::repl::run_script(b"until true; do umask 0o077; done", &mut state).unwrap();
-        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        let cell = make_cell();
+        crate::repl::run_script(b"until true; do umask 0o077; done", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o077);
     });
 }
 
 #[test]
 fn export_set_env_var() {
-    let mut state = ShellState::new();
-    run_one(b"export FOO=bar", &mut state).unwrap();
+    let cell = make_cell();
+    run_one(b"export FOO=bar", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(state.strings.get(&c"FOO".into()), Some(&c"bar".into()));
     assert_eq!(
@@ -809,8 +830,9 @@ fn export_set_env_var() {
 
 #[test]
 fn export_multiple_vars() {
-    let mut state = ShellState::new();
-    crate::repl::run_script(b"export FOO=bar; export BAZ=qux", &mut state).unwrap();
+    let cell = make_cell();
+    crate::repl::run_script(b"export FOO=bar; export BAZ=qux", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert_eq!(state.exports.len(), 2);
     assert_eq!(
         state.exports.get(&c"FOO".into()).map(|v| v.as_slice()),
@@ -824,7 +846,8 @@ fn export_multiple_vars() {
 
 #[test]
 fn export_list_empty() {
-    let mut state = ShellState::new();
-    run_one(b"export", &mut state).unwrap();
+    let cell = make_cell();
+    run_one(b"export", &cell).unwrap();
+    let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }

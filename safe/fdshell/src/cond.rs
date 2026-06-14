@@ -1,6 +1,7 @@
 use crate::state::ShellState;
+use sys::fork_cell::ForkCell;
 
-pub(crate) fn run_cond_list(line: &[u8], state: &mut ShellState) -> Result<(), i32> {
+pub(crate) fn run_cond_list(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), i32> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -10,7 +11,7 @@ pub(crate) fn run_cond_list(line: &[u8], state: &mut ShellState) -> Result<(), i
         } else if i == line.len() {
             let part = line.get(start..i).unwrap_or(b"").trim_ascii();
             if !part.is_empty() {
-                crate::run::run_one(part, state)?;
+                crate::run::run_one(part, cell)?;
             }
             break;
         } else if !in_quote {
@@ -18,7 +19,8 @@ pub(crate) fn run_cond_list(line: &[u8], state: &mut ShellState) -> Result<(), i
             if tail.starts_with(b"&&") || tail.starts_with(b"||") {
                 let part = line.get(start..i).unwrap_or(b"").trim_ascii();
                 if !part.is_empty() {
-                    crate::run::run_one(part, state)?;
+                    crate::run::run_one(part, cell)?;
+                    let state = cell.borrow()?;
                     if (tail.starts_with(b"&&") && state.last_status.exit_code() != 0)
                         || (tail.starts_with(b"||") && state.last_status.exit_code() == 0)
                     {

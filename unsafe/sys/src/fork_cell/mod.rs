@@ -1,4 +1,5 @@
 use core::cell::{Cell, UnsafeCell};
+use core::marker::PhantomData;
 
 mod ref_mut;
 #[cfg(test)]
@@ -13,19 +14,20 @@ use crate::errno::EINVAL;
 /// Like `RefCell`, but all borrows are **fallible** (`Result`) rather than
 /// panicking — callers can detect and handle borrowing clashes gracefully.
 ///
-/// After a `fork(2)`, the child inherits a stale borrow count from the parent,
-/// which no longer reflects any active borrows in the new process. Calling
-/// `reset_after_fork` safely zeroes this counter so that `borrow_mut()`
-/// succeeds in the new process.
+/// # Fork isolation
+///
+/// After `fork(2)`, the child has its own independent copy of the address
+/// space. Borrows held in the parent are meaningless in the child — the
+/// inherited borrow count is stale and must be reset via
+/// [`reset_after_fork`](Self::reset_after_fork) before the child can borrow.
+/// Mutations in the child never propagate to the parent.
 pub struct ForkCell<T> {
     /// Borrow tracking: 0 = free, >0 = shared borrows, <0 = exclusive mutable borrow.
     count: Cell<isize>,
     value: UnsafeCell<T>,
+    /// Suppresses auto-derived `Send` — single-threaded interior mutability (like `RefCell`).
+    _nosend: PhantomData<*const ()>,
 }
-
-// SAFETY: within a single thread the counter is safe to access; cross-fork the
-// child has its own independent copy of memory.
-unsafe impl<T: Send> Send for ForkCell<T> {}
 
 impl<T> ForkCell<T> {
     /// Create a new `ForkCell` wrapping `val`.
@@ -33,6 +35,7 @@ impl<T> ForkCell<T> {
         ForkCell {
             count: Cell::new(0),
             value: UnsafeCell::new(val),
+            _nosend: PhantomData,
         }
     }
 

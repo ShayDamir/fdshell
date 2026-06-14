@@ -1,21 +1,16 @@
 #![forbid(unsafe_code)]
 
 use crate::state::ShellState;
+use sys::fork_cell::ForkCell;
 
-pub(crate) fn run_and_capture(cmd: &[u8], state: &ShellState) -> Result<Vec<u8>, i32> {
+pub(crate) fn run_and_capture(cmd: &[u8], cell: &ForkCell<ShellState>) -> Result<Vec<u8>, i32> {
     let (r, w) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC)?;
-    match sys::fork_pidfd::fork_pidfd()? {
+    match sys::fork_pidfd::fork_pidfd_cell(cell)? {
         (_, None) => {
-            // SAFETY: child stdout → pipe; failure means empty output
+            // child stdout → pipe; failure means empty output
             let _ = w.export_to(1);
-            let mut child_state = ShellState::new();
-            if let Some(cwd) = state.fds.get(&c"CWD".into())
-                && let Ok(c) = cwd.try_clone()
-            {
-                child_state.fds.insert(c"CWD".into(), c);
-            }
             // Command substitution output already read; exit code irrelevant
-            let _ = crate::repl::run_script(cmd, &mut child_state);
+            let _ = crate::repl::run_script(cmd, cell);
             std::process::exit(0);
         }
         (_, Some(pidfd)) => {
