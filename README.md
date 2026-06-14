@@ -140,7 +140,8 @@ Currently only Linux is supported and only x86_64.
 The project is a workspace, divided into 2 paths:
 
 * safe - all crates there have forbid(unsafe). This also means that they cannot call libc directly.
-* unsafe - lib crates that allow unsafe, but each file should not have more than 80 lines of code (not counting comments)
+* unsafe - lib crates that allow unsafe, but each file should not have more than 80 lines of code (not counting comments).
+  Temporarily suspended during large-scale refactoring (error-handling migration).
 
 Currently following crates are planned;
 

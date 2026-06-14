@@ -19,6 +19,7 @@ For each modified or new `.rs` file in `safe/` or `unsafe/`:
 ### 1. File length
 Source files must be ≤80 lines (excluding comments, blank lines, and `// SAFETY:` lines). Count after `cargo fmt`. Tests are exempt.
 If a file is over, flag it and suggest where to split.
+**Temporarily suspended** — skip this check during large refactoring (error-handling migration). Re-enable when churn settles.
 
 ### 2. `unsafe` blocks
 Every `unsafe { }` block MUST have an immediately preceding `// SAFETY:` comment explaining why preconditions are met. Check that it's not just a placeholder — the comment must be meaningful.

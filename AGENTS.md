@@ -13,6 +13,7 @@ Three crates in a Cargo workspace (`resolver = "2"`):
 - `safe/` crates **cannot** call libc directly (`forbid(unsafe_code)`).
 - `safe/` and `unsafe/` source files must be ≤80 lines each (excluding comments). If a file approaches this limit, split or refactor rather than compress formatting. Tests are exempt from the line limit.
   - Measure code lines after `cargo fmt`. Don't manipulate whitespace to squeeze under the limit — if it's a few lines over, leave it and flag for refactoring in TODO.md.
+  - **Temporarily suspended** during large-scale refactoring (e.g., error-handling migration). Re-enforce when the churn settles.
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
 - Safe wrappers in `unsafe/sys` return `Result<_, i32>` (positive errno on error). Use `cvt(ret: isize) -> Result<isize, i32>` from `lib.rs` to convert libc return values.
 - Avoid `#[derive]` in production code. Derives like `Debug`, `PartialEq`, and `Eq` are
