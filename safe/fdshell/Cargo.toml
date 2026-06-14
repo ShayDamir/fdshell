@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 sys = { path = "../../unsafe/sys" }
 builtins = { path = "../builtins" }
+error-stack = "0.7"
+displaydoc = "0.2"
 
 [[bin]]
 name = "exec_ok"

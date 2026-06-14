@@ -101,7 +101,7 @@ This replaces the current unhelpful `"exit code: {errno_number}"` display in `re
 
 ## Migration order (when ready)
 
-1. Add `error-stack = "2"` + `displaydoc = "0.2"` to `safe/fdshell/Cargo.toml`
+1. Add `error-stack = "0.7"` + `displaydoc = "0.2"` to `safe/fdshell/Cargo.toml` (already done)
 2. Define `ParseError` enum → wire through `parse.rs`, `cond.rs`, `script.rs`
 3. Define `LaunchError` (wrapping sys errors) → wire through `launch.rs`, `postlaunch.rs`
 4. Define domain errors (`CaptureError`, `CdError`, `ResolveError`, etc.)
