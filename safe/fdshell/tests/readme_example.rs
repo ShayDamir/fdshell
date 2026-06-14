@@ -2,13 +2,18 @@
 
 use std::process::Command;
 use std::str;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::errno::ENOSYS;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
 fn tmpdir() -> std::path::PathBuf {
+    let pid = std::process::id();
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let mut p = std::env::temp_dir();
-    p.push(format!("fdshell_test_{}", std::process::id()));
+    p.push(format!("fdshell_test_{}_{}", pid, id));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).unwrap();
     p
