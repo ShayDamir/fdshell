@@ -187,6 +187,16 @@ Four fd types across `unsafe/sys/src/`:
   `parse_dirfd` → `DupFd::from_bytes` (validates fd is open). Converted
   to `AtFd` at exec time via `cfg.dirfd.as_ref().map_or(AtFd::cwd(), DupFd::at)`.
 
+## Error Handling
+
+See [error-handling.md](../error-handling.md) for the full strategy.
+
+- `sys` and `builtins` crates keep returning `Result<_, i32>` — they are leaf layers with zero internal error composition.
+- Typed errors with `error-stack::Report` live **only** in `fdshell/`. Each sub-domain gets its own small enum (variant names only).
+- Enum variants carry no meaningful data — attach context via `Report::attach()` at each level.
+- When converting cross-crate boundaries (`i32` errno → typed error), use `.map_err()` to map errno codes, then `.change_context()` if the fdshell layer adds meaning.
+- Never print raw errno numbers to users — format through the error chain.
+
 ## Nesting
 
 fdshell detects when it runs as a child of another fdshell via `detect_nested()` in

@@ -46,6 +46,16 @@ Search for these and flag any occurrence outside `#[cfg(test)]` / `#[cfg(test_mo
 - `from_raw` is always `unsafe` with `// SAFETY:`
 - `AT_FDCWD` stays in `atfd.rs` only, never re-exported
 
+### 5a. Error handling (safe/fdshell/ only)
+
+See [error-handling.md](../../error-handling.md) for the full strategy.
+
+- **sys and builtins stay as raw `i32`**: Never wrap sys/builtins `Result<_, i32>` in typed errors. These are leaf layers with zero internal propagation.
+- **Typed errors only in fdshell**: Each sub-domain gets its own small enum (e.g., `ParseError`, `CaptureError`). Variants are simple nouns — no payload data carrying meaningful values.
+- **No raw errno printing**: Search `safe/fdshell/src/` for patterns like `"exit code: {code}"`, `format!("{}", e)`, or any place an `i32` error code is interpolated into a user-facing string. Flag and suggest using Report formatting instead.
+- **Report composition**: Functions that chain errors should use `.map_err()` at crate boundaries to convert `i32` to local enum, then `.change_context()` if the layer adds semantic meaning. Attach extra context via `.attach()` (the old `.attach()` is now `.attach_opaque()`).
+- **Error enum docs = Display output**: When defining a new error enum with `displaydoc`, the doc strings on variants ARE the user-facing error messages. Verify they read naturally and don't contain debug-only details.
+
 ### 6. Readability
 
 - The code should be easily readable. All non-obvious decisions should be documented in the comments.
