@@ -280,6 +280,24 @@ fn builtin_pipe_write_read() {
 }
 
 #[test]
+fn builtin_pipe_write_read_cmd_subst() {
+    let dir = tmpdir();
+    let cmd = concat!(
+        "builtin pipe %rd>%r %wr>%w; ",
+        "builtin echo hello >%w; ",
+        "builtin echo world >%w; ",
+        "unset %w; ",
+        "MESSAGE=$(cat <%r); ",
+        "builtin echo $MESSAGE",
+    );
+    let output = run_c(cmd, &dir);
+    assert_ok(&output, "builtin_pipe_write_read_cmd_subst");
+    let stdout = str::from_utf8(&output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines, ["hello", "world"]);
+}
+
+#[test]
 fn builtin_pipe_nonblock() {
     let dir = tmpdir();
     let output = run_c("builtin pipe --flags O_NONBLOCK %rd>%r %wr>%w", &dir);
