@@ -1,4 +1,4 @@
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::slice::SliceIndex;
 
 use crate::shortcstr::{INLINE_MAX, ShortCStr, from_inline};
@@ -22,8 +22,8 @@ impl ShortCStr {
         match self {
             ShortCStr::Inline { .. } => unreachable!(),
             ShortCStr::Static(s, offset, _) => Some(ShortCStr::Static(s, offset + start, new_len)),
-            ShortCStr::Rc { rc, offset, .. } => Some(ShortCStr::Rc {
-                rc: Rc::clone(rc),
+            ShortCStr::Arc { arc, offset, .. } => Some(ShortCStr::Arc {
+                arc: Arc::clone(arc),
                 offset: offset + start,
                 length: new_len,
             }),

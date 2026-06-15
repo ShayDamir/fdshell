@@ -15,7 +15,7 @@ impl ShortCStr {
         match self {
             ShortCStr::Inline { len, .. } => len.as_u8() as usize,
             ShortCStr::Static(_, _, length) => *length,
-            ShortCStr::Rc { length, .. } => *length,
+            ShortCStr::Arc { length, .. } => *length,
         }
     }
 
@@ -33,9 +33,13 @@ impl ShortCStr {
                 let end = offset + length;
                 s.to_bytes().get(*offset..end).ok_or(EINVAL)
             }
-            ShortCStr::Rc { rc, offset, length } => {
+            ShortCStr::Arc {
+                arc,
+                offset,
+                length,
+            } => {
                 let end = offset + length;
-                rc.get(*offset..end).ok_or(EINVAL)
+                arc.get(*offset..end).ok_or(EINVAL)
             }
         }
     }
@@ -46,7 +50,11 @@ impl ShortCStr {
                 let n = len.as_u8() as usize;
                 buf.get(..n).ok_or(EINVAL)
             }
-            ShortCStr::Rc { rc, offset, length } => rc.get(*offset..offset + length).ok_or(EINVAL),
+            ShortCStr::Arc {
+                arc,
+                offset,
+                length,
+            } => arc.get(*offset..offset + length).ok_or(EINVAL),
             ShortCStr::Static(s, offset, ..) => s.to_bytes_with_nul().get(*offset..).ok_or(EINVAL),
         }
     }

@@ -1,4 +1,4 @@
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::shortcstr::copy::copy_to_shortcstr;
@@ -45,8 +45,12 @@ impl ShortCStr {
         // 3. Short data — copy into Inline
         if n < INLINE_CAP {
             let (src, offset, length) = match self {
-                ShortCStr::Rc { rc, offset, length } => {
-                    let s: &[u8] = rc;
+                ShortCStr::Arc {
+                    arc,
+                    offset,
+                    length,
+                } => {
+                    let s: &[u8] = arc;
                     (s, *offset, *length)
                 }
                 ShortCStr::Static(s, offset, length) => (s.to_bytes(), *offset, *length),
@@ -56,16 +60,20 @@ impl ShortCStr {
             return;
         }
 
-        // 4. Rc tail view — in-place growth
-        if let ShortCStr::Rc { rc, offset, length } = self
-            && *offset + *length == rc.len()
+        // 4. Arc tail view — in-place growth
+        if let ShortCStr::Arc {
+            arc,
+            offset,
+            length,
+        } = self
+            && *offset + *length == arc.len()
         {
-            Rc::make_mut(rc).push(byte);
+            Arc::make_mut(arc).push(byte);
             *length += 1;
             return;
         }
 
-        // 5. Everything else — allocate Rc
+        // 5. Everything else — allocate Arc
         match self {
             ShortCStr::Inline { buf, .. } => {
                 let mut v = Vec::with_capacity(INLINE_CAP * 2);
@@ -73,14 +81,18 @@ impl ShortCStr {
                     v.push(b);
                 }
                 v.push(byte);
-                *self = ShortCStr::Rc {
-                    rc: Rc::new(v),
+                *self = ShortCStr::Arc {
+                    arc: Arc::new(v),
                     offset: 0,
                     length: INLINE_CAP + 1,
                 };
             }
-            ShortCStr::Rc { rc, offset, length } => {
-                let src: &[u8] = rc;
+            ShortCStr::Arc {
+                arc,
+                offset,
+                length,
+            } => {
+                let src: &[u8] = arc;
                 let o = *offset;
                 let l = *length;
                 *self = copy_to_shortcstr(src, o, l, byte);

@@ -1,10 +1,10 @@
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr};
 
 /// Copy `src[offset..offset+length]` + `byte` into a new ShortCStr,
-/// choosing Inline or Rc based on length.
+/// choosing Inline or Arc based on length.
 pub(crate) fn copy_to_shortcstr(src: &[u8], offset: usize, length: usize, byte: u8) -> ShortCStr {
     if length < INLINE_CAP {
         let mut buf = [0u8; INLINE_CAP];
@@ -26,8 +26,8 @@ pub(crate) fn copy_to_shortcstr(src: &[u8], offset: usize, length: usize, byte: 
             v.push(b);
         }
         v.push(byte);
-        ShortCStr::Rc {
-            rc: Rc::new(v),
+        ShortCStr::Arc {
+            arc: Arc::new(v),
             offset: 0,
             length: length + 1,
         }

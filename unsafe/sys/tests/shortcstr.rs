@@ -2,7 +2,7 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 use core::ffi::CStr;
-use std::rc::Rc;
+use std::sync::Arc;
 use sys::ShortCStr;
 
 /// A long (≥100 byte) static CStr for subslicing tests.
@@ -445,7 +445,7 @@ fn push_overflows_to_rc() {
         s.push(b).unwrap();
     }
     assert_eq!(s.as_bytes().unwrap(), payload);
-    // should be Rc variant now (31 bytes > INLINE_CAP)
+    // should be Arc variant now (31 bytes > INLINE_CAP)
     assert!(s.len() == 31);
 }
 
@@ -462,9 +462,9 @@ fn push_nul_returns_err() {
 fn push_unchecked_after_rc_mid_subslice() {
     let s = ShortCStr::from_vec(b"hello world this is more than thirty bytes".to_vec()).unwrap();
     let sub = s.get(6..11).unwrap();
-    // sub is an Rc non-tail view → push_unchecked copies
+    // sub is an Arc non-tail view → push_unchecked copies
     let mut sub = sub.clone();
-    // SAFETY: Inline variant has capacity; Rc variant copies via copy_to_shortcstr.
+    // SAFETY: Inline variant has capacity; Arc variant copies via copy_to_shortcstr.
     unsafe { sub.push_unchecked(b'!') };
     assert_eq!(sub.as_bytes().unwrap(), b"world!");
 }
@@ -476,7 +476,7 @@ fn push_unchecked_rc_tail_growth() {
     let tail = s.get(6..).unwrap();
     assert_eq!(tail.as_bytes().unwrap(), &raw[6..]);
     let mut tail = tail.clone();
-    // SAFETY: Rc tail variant has capacity for one more byte.
+    // SAFETY: Arc tail variant has capacity for one more byte.
     unsafe { tail.push_unchecked(b'!') };
     let mut expected = raw[6..].to_vec();
     expected.push(b'!');
@@ -489,7 +489,7 @@ fn push_unchecked_static_non_tail_rc_copy() {
     let s = ShortCStr::from(LONG);
     let sub = s.get(10..50).unwrap(); // 40 bytes > 30 → stays Static
     let mut sub = sub.clone();
-    // SAFETY: copies via copy_to_shortcstr into Rc variant.
+    // SAFETY: copies via copy_to_shortcstr into Arc variant.
     unsafe { sub.push_unchecked(b'!') };
     let mut expected = LONG.to_bytes()[10..50].to_vec();
     expected.push(b'!');
@@ -560,11 +560,11 @@ fn contains_found() {
 }
 
 #[test]
-fn push_copy_to_inline_via_constructed_rc() {
-    // Rc non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
-    let v = Rc::new(b"hello world, this is more than thirty bytes long".to_vec());
-    let s = ShortCStr::Rc {
-        rc: v,
+fn push_copy_to_inline_via_constructed_arc() {
+    // Arc non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
+    let v = Arc::new(b"hello world, this is more than thirty bytes long".to_vec());
+    let s = ShortCStr::Arc {
+        arc: v,
         offset: 0,
         length: 5,
     };
@@ -600,21 +600,21 @@ fn debug_fmt_static() {
 }
 
 #[test]
-fn debug_fmt_rc() {
-    let v = Rc::new(b"hello world, this is more than thirty bytes long".to_vec());
-    let s = ShortCStr::Rc {
-        rc: v,
+fn debug_fmt_arc() {
+    let v = Arc::new(b"hello world, this is more than thirty bytes long".to_vec());
+    let s = ShortCStr::Arc {
+        arc: v,
         offset: 0,
         length: 5,
     };
     let out = format!("{:?}", s);
-    assert!(out.contains("Rc"));
+    assert!(out.contains("Arc"));
 }
 
 #[test]
 fn debug_fmt_invalid() {
-    let s = ShortCStr::Rc {
-        rc: Rc::new(b"hi".to_vec()),
+    let s = ShortCStr::Arc {
+        arc: Arc::new(b"hi".to_vec()),
         offset: 0,
         length: 100,
     };
@@ -626,8 +626,8 @@ fn debug_fmt_invalid() {
 #[test]
 fn partial_eq_as_bytes_err() {
     let valid = ShortCStr::from(c"hello");
-    let invalid = ShortCStr::Rc {
-        rc: Rc::new(b"hi".to_vec()),
+    let invalid = ShortCStr::Arc {
+        arc: Arc::new(b"hi".to_vec()),
         offset: 0,
         length: 100,
     };

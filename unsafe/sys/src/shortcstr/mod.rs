@@ -1,4 +1,4 @@
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
@@ -22,8 +22,8 @@ pub enum ShortCStr {
         buf: [u8; INLINE_CAP],
     },
     Static(&'static CStr, usize, usize),
-    Rc {
-        rc: Rc<Vec<u8>>,
+    Arc {
+        arc: Arc<Vec<u8>>,
         offset: usize,
         length: usize,
     },

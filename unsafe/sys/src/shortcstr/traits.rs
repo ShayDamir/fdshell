@@ -1,4 +1,4 @@
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::ffi::CStr;
 use core::fmt;
 use core::hash::{Hash, Hasher};
@@ -13,8 +13,12 @@ impl Clone for ShortCStr {
                 buf: *buf,
             },
             ShortCStr::Static(s, offset, length) => ShortCStr::Static(s, *offset, *length),
-            ShortCStr::Rc { rc, offset, length } => ShortCStr::Rc {
-                rc: Rc::clone(rc),
+            ShortCStr::Arc {
+                arc,
+                offset,
+                length,
+            } => ShortCStr::Arc {
+                arc: Arc::clone(arc),
                 offset: *offset,
                 length: *length,
             },
@@ -51,7 +55,7 @@ impl fmt::Debug for ShortCStr {
                 .field("buf", &bytes)
                 .finish(),
             ShortCStr::Static(..) => f.debug_tuple("Static").field(&bytes).finish(),
-            ShortCStr::Rc { .. } => f.debug_tuple("Rc").field(&bytes).finish(),
+            ShortCStr::Arc { .. } => f.debug_tuple("Arc").field(&bytes).finish(),
         }
     }
 }

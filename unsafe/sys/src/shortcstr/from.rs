@@ -1,4 +1,4 @@
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr};
@@ -22,8 +22,8 @@ impl ShortCStr {
             return Err(crate::errno::EINVAL);
         }
         let length = bytes.len();
-        Ok(from_inline(&bytes).unwrap_or_else(|_| ShortCStr::Rc {
-            rc: Rc::new(bytes),
+        Ok(from_inline(&bytes).unwrap_or_else(|_| ShortCStr::Arc {
+            arc: Arc::new(bytes),
             offset: 0,
             length,
         }))

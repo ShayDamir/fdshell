@@ -112,8 +112,8 @@ impl ShortCStr {
                 // SAFETY: offset+length ≤ full_len-1, NUL at full[offset+length]
                 unsafe { CStr::from_bytes_with_nul_unchecked(&full[*offset..offset + length + 1]) }
             }
-            ShortCStr::Rc { rc, offset, length } => {
-                let full = rc.to_bytes_with_nul();
+            ShortCStr::Arc { arc, offset, length } => {
+                let full = arc.to_bytes_with_nul();
                 // SAFETY: same as Static
                 unsafe { CStr::from_bytes_with_nul_unchecked(&full[*offset..offset + length + 1]) }
             }
