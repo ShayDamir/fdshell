@@ -1,13 +1,13 @@
+use crate::error::parse::ParseErrorInfo;
 use sys::ShortCStr;
-use sys::errno::EINVAL;
 
 pub(crate) fn read_dollar_paren(
-    bytes: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
     cur: &mut ShortCStr,
-) -> Result<(), i32> {
+    bytes: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+) -> Result<(), ParseErrorInfo> {
     cur.push(b'$')?;
     cur.push(b'(')?;
-    bytes.next();
+    bytes.next(); // consume '('
     let mut depth = 1u32;
     while depth > 0 {
         match bytes.next() {
@@ -24,16 +24,16 @@ pub(crate) fn read_dollar_paren(
                 cur.push(b')')?;
             }
             Some(c) => cur.push(c)?,
-            None => return Err(EINVAL),
+            None => return Err(ParseErrorInfo { source_start: 0 }),
         }
     }
     Ok(())
 }
 
 pub(crate) fn read_backtick(
-    bytes: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
     cur: &mut ShortCStr,
-) -> Result<(), i32> {
+    bytes: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+) -> Result<(), ParseErrorInfo> {
     cur.push(b'`')?;
     loop {
         match bytes.next() {
@@ -43,15 +43,18 @@ pub(crate) fn read_backtick(
             }
             Some(b'\\') => match bytes.next() {
                 Some(b'`') => cur.push(b'`')?,
-                Some(b'\\') => cur.push(b'\\')?,
+                Some(b'\\') => {
+                    cur.push(b'\\')?;
+                    cur.push(b'\\')?;
+                }
                 Some(c) => {
                     cur.push(b'\\')?;
                     cur.push(c)?;
                 }
-                None => return Err(EINVAL),
+                None => return Err(ParseErrorInfo { source_start: 0 }),
             },
             Some(c) => cur.push(c)?,
-            None => return Err(EINVAL),
+            None => return Err(ParseErrorInfo { source_start: 0 }),
         }
     }
 }

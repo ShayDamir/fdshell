@@ -2,8 +2,11 @@
 
 ## Refactoring / cleanup
 
-- [ ] File length: `run.rs` (81 code lines, 1 over), `if_block.rs` (95 code lines, 15 over), `script.rs` (81 code lines, 1 over) — minor extractions to get under 80
+- [ ] File length: `run.rs` (81 code lines, 1 over), `if_block.rs` (95 code lines, 15 over), `script.rs` (81 code lines, 1 over), `token.rs` (92 code lines, 12 over), `format.rs` (110 code lines, 30 over) — minor extractions to get under 80
 - [x] Add tests for `run.rs` else/elif execution paths (`if false; then ...; else ...; fi`, elif-first-fails, all-elifs-fail-no-else)
+- [x] Remove dead `ParseError` enum from `error/parse.rs` (QA finding)
+- [x] Add unit tests for `format_parse_error()` (QA finding)
+- [x] Extract `to_parse_err` to shared `error::parse` module (QA finding — eliminated duplication in run.rs, if_exec.rs, loop_.rs)
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 

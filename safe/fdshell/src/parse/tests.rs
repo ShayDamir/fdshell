@@ -130,7 +130,7 @@ fn test_background_force() {
 
 #[test]
 fn test_bare_background_is_err() {
-    assert!(matches!(parse(b"cmd &"), Err(EINVAL)));
+    assert!(parse(b"cmd &").is_err());
 }
 
 #[test]
@@ -214,8 +214,8 @@ fn test_path_redirect_append_named_fd() {
 
 #[test]
 fn test_append_followed_by_percent_is_error() {
-    assert!(matches!(parse(b"echo >>%var"), Err(EINVAL)));
-    assert!(matches!(parse(b"echo 2>>%var"), Err(EINVAL)));
+    assert!(parse(b"echo >>%var").is_err());
+    assert!(parse(b"echo 2>>%var").is_err());
 }
 
 #[test]
@@ -376,9 +376,9 @@ fn test_pipeline_with_redirect() {
 
 #[test]
 fn test_pipeline_empty_segment() {
-    assert!(matches!(parse(b"cmd1 |"), Err(EINVAL)));
-    assert!(matches!(parse(b"| cmd2"), Err(EINVAL)));
-    assert!(matches!(parse(b"cmd1 || cmd2"), Err(EINVAL)));
+    assert!(parse(b"cmd1 |").is_err());
+    assert!(parse(b"| cmd2").is_err());
+    assert!(parse(b"cmd1 || cmd2").is_err());
 }
 
 #[test]
@@ -431,17 +431,17 @@ fn test_umask_max() {
 
 #[test]
 fn test_umask_too_many_args() {
-    assert!(matches!(parse(b"umask 0o077 extra"), Err(EINVAL)));
+    assert!(parse(b"umask 0o077 extra").is_err());
 }
 
 #[test]
 fn test_umask_invalid_digit() {
-    assert!(matches!(parse(b"umask abc"), Err(EINVAL)));
+    assert!(parse(b"umask abc").is_err());
 }
 
 #[test]
 fn test_umask_invalid_non_octal() {
-    assert!(matches!(parse(b"umask 0o078"), Err(EINVAL)));
+    assert!(parse(b"umask 0o078").is_err());
 }
 
 #[test]

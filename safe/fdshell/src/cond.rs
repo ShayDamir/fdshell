@@ -1,7 +1,11 @@
+use crate::error::parse::ParseErrorInfo;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
-pub(crate) fn run_cond_list(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), i32> {
+pub(crate) fn run_cond_list(
+    line: &[u8],
+    cell: &ForkCell<ShellState>,
+) -> Result<(), ParseErrorInfo> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;

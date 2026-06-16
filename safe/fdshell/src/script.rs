@@ -1,5 +1,5 @@
+use crate::error::parse::ParseErrorInfo;
 use crate::state::ShellState;
-use sys::errno::EINVAL;
 use sys::fork_cell::ForkCell;
 
 fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
@@ -26,7 +26,7 @@ fn keyword_delta(word: &[u8]) -> Option<i32> {
     None
 }
 
-pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, i32> {
+pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, ParseErrorInfo> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -63,7 +63,9 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
                     i += 1;
                 }
                 if depth > 0 {
-                    return Err(EINVAL);
+                    return Err(ParseErrorInfo {
+                        source_start: block_start,
+                    });
                 }
                 let end = line.len().min(start);
                 let full = line.get(block_start..end).unwrap_or(b"").trim_ascii();

@@ -4,7 +4,6 @@ use crate::run::run_one;
 use crate::state::ShellState;
 use crate::task::Task;
 use sys::ShortCStr;
-use sys::errno::EINVAL;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
@@ -78,7 +77,7 @@ fn umask_invalid_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"umask abc", &cell).unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -87,7 +86,7 @@ fn umask_too_many_args_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"umask 0o077 extra", &cell).unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -103,7 +102,7 @@ fn wait_no_tasks() {
 fn wait_nonexistent_name() {
     let cell = make_cell();
     let e = run_one(b"wait &nonexistent", &cell).unwrap_err();
-    assert_eq!(e, EINVAL);
+    assert!(e.source_start == 0);
 }
 
 #[test]
@@ -181,7 +180,7 @@ fn wait_all_tasks() {
 fn wait_rejects_capture() {
     let cell = make_cell();
     let e = run_one(b"wait %>%var", &cell).unwrap_err();
-    assert_eq!(e, EINVAL);
+    assert!(e.source_start == 0);
 }
 
 #[test]
@@ -211,7 +210,7 @@ fn if_missing_then_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"if umask 0o077; umask 0o000; fi", &cell).unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -220,7 +219,7 @@ fn if_missing_fi_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"if umask 0o077; then umask 0o000", &cell).unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -233,7 +232,7 @@ fn if_else_before_semicolon_returns_err() {
             &cell,
         )
         .unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -242,7 +241,7 @@ fn if_then_before_semicolon_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"if umask 0o077 then umask 0o000; fi", &cell).unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -281,7 +280,7 @@ fn if_elif_before_semicolon_returns_err() {
             &cell,
         )
         .unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 
@@ -294,7 +293,7 @@ fn if_elif_without_then_returns_err() {
             &cell,
         )
         .unwrap_err();
-        assert_eq!(e, EINVAL);
+        assert!(e.source_start == 0);
     });
 }
 

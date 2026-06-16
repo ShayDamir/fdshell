@@ -16,6 +16,7 @@ mod intercept;
 mod launch;
 mod loop_;
 mod parse;
+
 mod pipeline;
 mod postlaunch;
 mod redirect;
@@ -57,13 +58,21 @@ fn main() -> Result<(), Report<AppError>> {
     if let Some(arg) = args.next() {
         if arg == "-c" {
             let cmd = args.next().ok_or(AppError::Usage)?;
-            let code = repl::exec_cmd(cmd.as_bytes(), &state)
-                .map_err(LegacyError)
-                .change_context(AppError::Exec)?;
-            if code != 0 {
-                std::process::exit(code);
+            match repl::exec_cmd(cmd.as_bytes(), &state) {
+                Ok(code) => {
+                    if code != 0 {
+                        std::process::exit(code);
+                    }
+                    return Ok(());
+                }
+                Err(info) => {
+                    eprintln!(
+                        "{}",
+                        parse::format_parse_error(cmd.as_bytes(), &info, "Unmatched quote")
+                    );
+                    std::process::exit(1);
+                }
             }
-            return Ok(());
         }
         bail!(AppError::Usage);
     }
@@ -84,8 +93,11 @@ fn main() -> Result<(), Report<AppError>> {
         if line.is_empty() || line.starts_with(b"#") {
             continue;
         }
-        if let Err(e) = repl::handle(line, &state) {
-            eprintln!("fdshell: command execution failed (syscall error: {e})");
+        if let Err(info) = repl::handle(line, &state) {
+            eprintln!(
+                "{}",
+                parse::format_parse_error(line, &info, "Unmatched quote")
+            );
         }
     }
     Ok(())

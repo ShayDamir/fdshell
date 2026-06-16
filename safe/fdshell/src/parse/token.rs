@@ -1,20 +1,29 @@
+use crate::error::parse::ParseErrorInfo;
 use sys::ShortCStr;
-use sys::errno::EINVAL;
 
-pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, i32> {
+pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, ParseErrorInfo> {
     let mut tokens = Vec::new();
     let mut cur = ShortCStr::new();
     let mut in_quotes = false;
+    let mut quote_start: Option<usize> = None;
     let mut bytes = line.iter().copied().peekable();
+    let mut pos = 0usize;
 
     while let Some(b) = bytes.next() {
+        pos += 1;
+
         if in_quotes {
             match b {
                 b'"' => in_quotes = false,
-                b'\\' => match bytes.next() {
-                    Some(c) => cur.push(c)?,
-                    None => return Err(EINVAL),
-                },
+                b'\\' => {
+                    if let Some(c) = bytes.next() {
+                        cur.push(c)?;
+                    } else {
+                        return Err(ParseErrorInfo {
+                            source_start: quote_start.unwrap_or(0),
+                        });
+                    }
+                }
                 _ => cur.push(b)?,
             }
         } else {
@@ -42,12 +51,29 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, i32> {
                     }
                     tokens.push(c";".into());
                 }
-                b'"' => in_quotes = true,
-                b'$' if bytes.peek() == Some(&b'(') => {
-                    super::token_subst::read_dollar_paren(&mut bytes, &mut cur)?;
+                b'"' => {
+                    in_quotes = true;
+                    quote_start = Some(pos - 1);
+                }
+                b'$' => {
+                    if bytes.peek() == Some(&b'(') {
+                        let start = pos - 1; // position of '$'
+                        super::token_subst::read_dollar_paren(&mut cur, &mut bytes).map_err(
+                            |mut e| {
+                                e.source_start = start;
+                                e
+                            },
+                        )?;
+                    } else {
+                        cur.push(b)?;
+                    }
                 }
                 b'`' => {
-                    super::token_subst::read_backtick(&mut bytes, &mut cur)?;
+                    let start = pos - 1; // position of '`'
+                    super::token_subst::read_backtick(&mut cur, &mut bytes).map_err(|mut e| {
+                        e.source_start = start;
+                        e
+                    })?;
                 }
                 _ => cur.push(b)?,
             }
@@ -55,7 +81,9 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, i32> {
     }
 
     if in_quotes {
-        return Err(EINVAL);
+        return Err(ParseErrorInfo {
+            source_start: quote_start.unwrap_or(0),
+        });
     }
     if !cur.is_empty() {
         tokens.push(cur);

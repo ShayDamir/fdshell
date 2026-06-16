@@ -10,6 +10,7 @@ pub(crate) mod cd;
 pub(crate) mod cmd;
 pub(crate) mod exports;
 pub(crate) mod launch;
+pub(crate) mod parse;
 pub(crate) mod pipeline;
 pub(crate) mod redirect;
 pub(crate) mod resolve;
