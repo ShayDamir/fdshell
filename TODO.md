@@ -7,6 +7,7 @@
 - [x] Remove dead `ParseError` enum from `error/parse.rs` (QA finding)
 - [x] Add unit tests for `format_parse_error()` (QA finding)
 - [x] Extract `to_parse_err` to shared `error::parse` module (QA finding — eliminated duplication in run.rs, if_exec.rs, loop_.rs)
+- [x] Add `if` block error messages with position context (missing 'then', missing condition, missing 'fi', missing 'then' after 'elif')
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 

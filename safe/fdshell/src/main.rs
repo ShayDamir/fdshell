@@ -66,10 +66,7 @@ fn main() -> Result<(), Report<AppError>> {
                     return Ok(());
                 }
                 Err(info) => {
-                    eprintln!(
-                        "{}",
-                        parse::format_parse_error(cmd.as_bytes(), &info, "Unmatched quote")
-                    );
+                    eprintln!("{}", parse::format_parse_error(cmd.as_bytes(), &info));
                     std::process::exit(1);
                 }
             }
@@ -94,10 +91,7 @@ fn main() -> Result<(), Report<AppError>> {
             continue;
         }
         if let Err(info) = repl::handle(line, &state) {
-            eprintln!(
-                "{}",
-                parse::format_parse_error(line, &info, "Unmatched quote")
-            );
+            eprintln!("{}", parse::format_parse_error(line, &info));
         }
     }
     Ok(())

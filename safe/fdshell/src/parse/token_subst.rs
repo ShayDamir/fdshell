@@ -24,7 +24,12 @@ pub(crate) fn read_dollar_paren(
                 cur.push(b')')?;
             }
             Some(c) => cur.push(c)?,
-            None => return Err(ParseErrorInfo { source_start: 0 }),
+            None => {
+                return Err(ParseErrorInfo {
+                    source_start: 0,
+                    message: None,
+                });
+            }
         }
     }
     Ok(())
@@ -51,10 +56,20 @@ pub(crate) fn read_backtick(
                     cur.push(b'\\')?;
                     cur.push(c)?;
                 }
-                None => return Err(ParseErrorInfo { source_start: 0 }),
+                None => {
+                    return Err(ParseErrorInfo {
+                        source_start: 0,
+                        message: None,
+                    });
+                }
             },
             Some(c) => cur.push(c)?,
-            None => return Err(ParseErrorInfo { source_start: 0 }),
+            None => {
+                return Err(ParseErrorInfo {
+                    source_start: 0,
+                    message: None,
+                });
+            }
         }
     }
 }

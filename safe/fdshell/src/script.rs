@@ -40,8 +40,21 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
             if !part.is_empty() && keyword_delta(part) == Some(1) {
                 let block_start = start;
                 let mut depth = 1u32;
-                start = i + 1;
-                i += 1;
+                // Find keyword position in original line to skip it when scanning
+                let original = line.get(block_start..i).unwrap_or(b"");
+                let leading_ws = original
+                    .iter()
+                    .take_while(|&&b| b.is_ascii_whitespace())
+                    .count();
+                let kw = if part.starts_with(b"if") {
+                    2
+                } else if part.starts_with(b"for") {
+                    3
+                } else {
+                    5 // while or until
+                };
+                i = block_start + leading_ws + kw;
+                start = i;
                 while i <= line.len() && depth > 0 {
                     if line.get(i) == Some(&b'"') {
                         in_quote = !in_quote;
@@ -63,9 +76,7 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
                     i += 1;
                 }
                 if depth > 0 {
-                    return Err(ParseErrorInfo {
-                        source_start: block_start,
-                    });
+                    return Err(ParseErrorInfo::new(block_start, "missing 'fi'"));
                 }
                 let end = line.len().min(start);
                 let full = line.get(block_start..end).unwrap_or(b"").trim_ascii();

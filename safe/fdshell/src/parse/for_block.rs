@@ -9,27 +9,28 @@ pub struct ForBlock {
     pub body: ShortCStr,
 }
 
-pub(crate) fn tokens_to_for(tokens: &[ShortCStr]) -> Result<ForBlock, i32> {
-    if !tokens.first().is_some_and(|t| t.eq_bytes(b"for")) {
+pub(crate) fn tokens_to_for(tokens: &[(ShortCStr, usize)]) -> Result<ForBlock, i32> {
+    if !tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"for")) {
         return Err(EINVAL);
     }
-    let var = tokens.get(1).ok_or(EINVAL)?.clone();
-
+    let var = tokens.get(1).ok_or(EINVAL)?.0.clone();
     let in_pos = tokens
         .iter()
-        .enumerate()
         .skip(2)
-        .find(|(_, t)| t.eq_bytes(b"in"))
+        .position(|(t, _)| t.eq_bytes(b"in"))
         .ok_or(EINVAL)?
-        .0;
+        + 2;
 
     let do_idx = find_preceded_by_semi(tokens, in_pos + 1, b"do").ok_or(EINVAL)?;
 
     let done_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|t| t.eq_bytes(b"done")) {
+    if !tokens.last().is_some_and(|(t, _)| t.eq_bytes(b"done")) {
         return Err(EINVAL);
     }
-    if !tokens.get(done_idx - 1).is_some_and(|t| t.eq_bytes(b";")) {
+    if !tokens
+        .get(done_idx - 1)
+        .is_some_and(|(t, _)| t.eq_bytes(b";"))
+    {
         return Err(EINVAL);
     }
 
@@ -38,7 +39,7 @@ pub(crate) fn tokens_to_for(tokens: &[ShortCStr]) -> Result<ForBlock, i32> {
     ))?;
 
     let word_tokens = trim_semi(tokens.get(in_pos + 1..do_idx - 1).ok_or(EINVAL)?);
-    let words: Vec<ShortCStr> = word_tokens.to_vec();
+    let words: Vec<ShortCStr> = word_tokens.iter().map(|(t, _)| t.clone()).collect();
 
     Ok(ForBlock { var, words, body })
 }

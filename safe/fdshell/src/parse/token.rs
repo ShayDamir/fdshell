@@ -1,13 +1,14 @@
 use crate::error::parse::ParseErrorInfo;
 use sys::ShortCStr;
 
-pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, ParseErrorInfo> {
+pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseErrorInfo> {
     let mut tokens = Vec::new();
     let mut cur = ShortCStr::new();
     let mut in_quotes = false;
     let mut quote_start: Option<usize> = None;
     let mut bytes = line.iter().copied().peekable();
     let mut pos = 0usize;
+    let mut token_start = 0usize;
 
     while let Some(b) = bytes.next() {
         pos += 1;
@@ -21,6 +22,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, ParseErrorInfo> {
                     } else {
                         return Err(ParseErrorInfo {
                             source_start: quote_start.unwrap_or(0),
+                            message: None,
                         });
                     }
                 }
@@ -30,8 +32,9 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, ParseErrorInfo> {
             match b {
                 b' ' | b'\t' => {
                     if !cur.is_empty() {
-                        tokens.push(core::mem::take(&mut cur));
+                        tokens.push((core::mem::take(&mut cur), token_start));
                     }
+                    token_start = pos;
                 }
                 b'|' => {
                     if cur.starts_with(b"%") && cur.ends_with(b">")
@@ -40,16 +43,17 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, ParseErrorInfo> {
                         cur.push(b'|')?;
                     } else {
                         if !cur.is_empty() {
-                            tokens.push(core::mem::take(&mut cur));
+                            tokens.push((core::mem::take(&mut cur), token_start));
                         }
-                        tokens.push(c"|".into());
+                        tokens.push((c"|".into(), pos - 1));
                     }
                 }
                 b';' | b'\n' => {
                     if !cur.is_empty() {
-                        tokens.push(core::mem::take(&mut cur));
+                        tokens.push((core::mem::take(&mut cur), token_start));
                     }
-                    tokens.push(c";".into());
+                    tokens.push((c";".into(), pos - 1));
+                    token_start = pos;
                 }
                 b'"' => {
                     in_quotes = true;
@@ -83,10 +87,11 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<ShortCStr>, ParseErrorInfo> {
     if in_quotes {
         return Err(ParseErrorInfo {
             source_start: quote_start.unwrap_or(0),
+            message: None,
         });
     }
     if !cur.is_empty() {
-        tokens.push(cur);
+        tokens.push((cur, token_start));
     }
     Ok(tokens)
 }

@@ -11,8 +11,11 @@ pub struct LoopBlock {
 pub type WhileBlock = LoopBlock;
 pub type UntilBlock = LoopBlock;
 
-pub(crate) fn tokens_to_loop(tokens: &[ShortCStr], keyword: &[u8]) -> Result<LoopBlock, i32> {
-    if !tokens.first().is_some_and(|t| t.eq_bytes(keyword)) {
+pub(crate) fn tokens_to_loop(
+    tokens: &[(ShortCStr, usize)],
+    keyword: &[u8],
+) -> Result<LoopBlock, i32> {
+    if !tokens.first().is_some_and(|(t, _)| t.eq_bytes(keyword)) {
         return Err(EINVAL);
     }
 
@@ -22,7 +25,7 @@ pub(crate) fn tokens_to_loop(tokens: &[ShortCStr], keyword: &[u8]) -> Result<Loo
     }
 
     let done_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|t| t.eq_bytes(b"done")) {
+    if !tokens.last().is_some_and(|(t, _)| t.eq_bytes(b"done")) {
         return Err(EINVAL);
     }
 

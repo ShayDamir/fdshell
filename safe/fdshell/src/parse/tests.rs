@@ -447,20 +447,15 @@ fn test_umask_invalid_non_octal() {
 #[test]
 fn tokenize_if_newline_separators() {
     let tokens = token::tokenize(b"if true\nthen\numask 0o000\nfi").unwrap();
-    assert_eq!(
-        tokens,
-        vec![
-            c"if".into(),
-            c"true".into(),
-            c";".into(),
-            c"then".into(),
-            c";".into(),
-            c"umask".into(),
-            c"0o000".into(),
-            c";".into(),
-            c"fi".into(),
-        ],
-    );
+    let expected: &[&[u8]] = &[
+        b"if", b"true", b";", b"then", b";", b"umask", b"0o000", b";", b"fi",
+    ];
+    let expected_pos: &[usize] = &[0, 3, 7, 8, 12, 13, 19, 24, 25];
+    assert_eq!(tokens.len(), expected.len());
+    for (i, (token, pos)) in tokens.iter().enumerate() {
+        assert_eq!(token.as_bytes().unwrap(), expected[i]);
+        assert_eq!(*pos, expected_pos[i]);
+    }
 }
 
 #[test]
@@ -472,6 +467,36 @@ fn parse_if_newline_separators() {
     assert_eq!(ib.then_body, c"umask 0o000".into());
     assert!(ib.elifs.is_empty());
     assert!(ib.else_body.is_none());
+}
+
+#[test]
+fn if_without_then_returns_err() {
+    let result = parse(b"if test fi");
+    assert!(result.is_err());
+    let e = match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e,
+    };
+    assert_eq!(e.message, Some("missing 'then'"));
+    assert_eq!(e.source_start, 0);
+}
+
+#[test]
+fn if_without_then_through_run_script_returns_err() {
+    // This verifies the full path: run_script → run_cond_list → run_one → parse → tokens_to_if
+    // Both paths should return the same error message.
+    let cell = crate::state::ShellState::new();
+    let cell = sys::fork_cell::ForkCell::new(cell);
+    let result = crate::repl::run_script(b"if test fi", &cell);
+    assert!(result.is_err());
+    let e = match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e,
+    };
+    // The error message should be "missing 'then'" since there's no 'then' keyword.
+    // "missing 'fi'" would be wrong because 'fi' IS present.
+    assert_eq!(e.message, Some("missing 'then'"));
+    assert_eq!(e.source_start, 0);
 }
 
 #[test]
@@ -548,29 +573,29 @@ fn for_parse_dispatch() {
 fn tokenize_backtick_command() {
     let result = token::tokenize(b"echo `seq 1 10`").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0], c"echo".into());
-    assert_eq!(result[1], c"`seq 1 10`".into());
+    assert_eq!(result[0].0, c"echo".into());
+    assert_eq!(result[1].0, c"`seq 1 10`".into());
 }
 
 #[test]
 fn tokenize_dollar_paren_command() {
     let result = token::tokenize(b"echo $(seq 1 10)").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0], c"echo".into());
-    assert_eq!(result[1], c"$(seq 1 10)".into());
+    assert_eq!(result[0].0, c"echo".into());
+    assert_eq!(result[1].0, c"$(seq 1 10)".into());
 }
 
 #[test]
 fn tokenize_backtick_empty() {
     let result = token::tokenize(b"for x in ``; do body; done").unwrap();
-    assert_eq!(result[3], c"``".into());
+    assert_eq!(result[3].0, c"``".into());
 }
 
 #[test]
 fn tokenize_dollar_paren_nested() {
     let result = token::tokenize(b"$(echo $(seq 3))").unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0], c"$(echo $(seq 3))".into());
+    assert_eq!(result[0].0, c"$(echo $(seq 3))".into());
 }
 
 #[test]
@@ -632,7 +657,7 @@ fn while_parse_newline_separator() {
 #[test]
 fn while_not_starting_with_while_is_a_cmd() {
     let tokens = token::tokenize(b"while_true; do body; done").unwrap();
-    assert!(!tokens.first().is_some_and(|t| t.eq_bytes(b"while")));
+    assert!(!tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"while")));
 }
 
 #[test]
@@ -684,7 +709,7 @@ fn until_parse_newline_separator() {
 #[test]
 fn until_not_starting_with_until_is_a_cmd() {
     let tokens = token::tokenize(b"until_true; do body; done").unwrap();
-    assert!(!tokens.first().is_some_and(|t| t.eq_bytes(b"until")));
+    assert!(!tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"until")));
 }
 
 #[test]
