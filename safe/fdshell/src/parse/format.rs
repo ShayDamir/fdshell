@@ -1,32 +1,63 @@
-use crate::error::parse::ParseErrorInfo;
+use crate::error::parse::{ParseError, ParseErrorInfo};
+
+/// Trait for extracting position and message from parse errors.
+///
+/// Implemented by both `ParseError` and `ParseErrorInfo` so
+/// `format_parse_error` can accept either type generically.
+pub(crate) trait ErrorPosition {
+    fn source_start(&self) -> usize;
+    fn message(&self) -> Option<&'static str>;
+}
+
+impl ErrorPosition for ParseError {
+    fn source_start(&self) -> usize {
+        match self {
+            ParseError::UnbalancedQuote { pos } => *pos,
+            ParseError::UnexpectedEof { pos } => *pos,
+            ParseError::InvalidChar { pos, .. } => *pos,
+            ParseError::Reason { pos, .. } => *pos,
+        }
+    }
+
+    fn message(&self) -> Option<&'static str> {
+        // ParseError uses Display for its message; no static message.
+        None
+    }
+}
+
+impl ErrorPosition for ParseErrorInfo {
+    fn source_start(&self) -> usize {
+        self.source_start
+    }
+
+    fn message(&self) -> Option<&'static str> {
+        self.message
+    }
+}
 
 /// Format a parser error with fish-like output.
 ///
 /// Shows the offending line and a caret pointing to the error position.
 /// If a shell keyword starts at the error position, the caret covers the full keyword.
 /// Uses `info.message` if present, otherwise falls back to a generic message.
-pub(crate) fn format_parse_error(input: &[u8], info: &ParseErrorInfo) -> String {
-    let message = info.message.unwrap_or("parse error");
+pub(crate) fn format_parse_error(input: &[u8], info: &dyn ErrorPosition) -> String {
+    let pos = info.source_start();
+    let message = info.message().unwrap_or("parse error").to_string();
     let mut output = format!("fdshell: {message}\n");
 
     // Find line boundaries
     let line_start = input
-        .get(..info.source_start)
+        .get(..pos)
         .and_then(|prefix| prefix.iter().rposition(|&b| b == b'\n').map(|p| p + 1))
         .unwrap_or(0);
     let line_end = input
-        .get(info.source_start..)
-        .and_then(|suffix| {
-            suffix
-                .iter()
-                .position(|&b| b == b'\n')
-                .map(|p| info.source_start + p)
-        })
+        .get(pos..)
+        .and_then(|suffix| suffix.iter().position(|&b| b == b'\n').map(|p| pos + p))
         .unwrap_or(input.len());
 
     let line = input.get(line_start..line_end).unwrap_or(&[]);
-    let caret_col = info.source_start - line_start;
-    let caret_len = keyword_caret_len(input, info.source_start);
+    let caret_col = pos - line_start;
+    let caret_len = keyword_caret_len(input, pos);
 
     output.push_str(std::str::from_utf8(line).unwrap_or("?"));
     output.push('\n');
@@ -176,5 +207,24 @@ mod tests {
         let info = ParseErrorInfo::new(0, "missing 'fi'");
         let output = format_parse_error(input, &info);
         assert_eq!(output, "fdshell: missing 'fi'\nif true; then echo hi\n^^\n");
+    }
+
+    #[test]
+    fn parse_error_unbalanced_quote_formats() {
+        let input = b"echo \"hello";
+        let info = ParseError::UnbalancedQuote { pos: 5 };
+        let output = format_parse_error(input, &info);
+        assert!(output.contains("parse error"));
+        assert!(output.contains("echo \"hello"));
+        assert!(output.contains('^'));
+    }
+
+    #[test]
+    fn parse_error_unexpected_eof_formats() {
+        let input = b"if true; then echo hi";
+        let info = ParseError::UnexpectedEof { pos: 0 };
+        let output = format_parse_error(input, &info);
+        assert!(output.contains("parse error"));
+        assert!(output.contains("if true; then echo hi"));
     }
 }

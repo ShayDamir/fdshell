@@ -4,8 +4,6 @@
 use super::*;
 use crate::capture::Capture;
 use crate::redirect::RedirectDef;
-use sys::errno::EINVAL;
-
 #[test]
 fn test_mkdirat_capture() {
     let ParsedLine::Cmd(cmd) =
@@ -538,19 +536,19 @@ fn for_empty_words() {
 #[test]
 fn for_missing_do_returns_err() {
     let tokens = token::tokenize(b"for x in a; done").unwrap();
-    assert_eq!(for_block::tokens_to_for(&tokens).unwrap_err(), EINVAL);
+    assert!(for_block::tokens_to_for(&tokens).is_err());
 }
 
 #[test]
 fn for_missing_done_returns_err() {
     let tokens = token::tokenize(b"for x in a; do cmd").unwrap();
-    assert_eq!(for_block::tokens_to_for(&tokens).unwrap_err(), EINVAL);
+    assert!(for_block::tokens_to_for(&tokens).is_err());
 }
 
 #[test]
 fn for_no_in_returns_err() {
     let tokens = token::tokenize(b"for x a; do cmd; done").unwrap();
-    assert_eq!(for_block::tokens_to_for(&tokens).unwrap_err(), EINVAL);
+    assert!(for_block::tokens_to_for(&tokens).is_err());
 }
 
 #[test]

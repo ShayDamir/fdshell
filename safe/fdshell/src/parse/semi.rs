@@ -1,3 +1,4 @@
+use crate::error::parse::ParseError;
 use sys::ShortCStr;
 
 pub(crate) fn find_preceded_by_semi(
@@ -7,9 +8,8 @@ pub(crate) fn find_preceded_by_semi(
 ) -> Option<usize> {
     let mut i = start;
     while i < tokens.len() {
-        if tokens.get(i).is_some_and(|(t, _)| t.eq_bytes(needle))
-            && tokens.get(i - 1).is_some_and(|(p, _)| p.eq_bytes(b";"))
-        {
+        let preceded = i > 0 && tokens.get(i - 1).is_some_and(|(p, _)| p.eq_bytes(b";"));
+        if tokens.get(i).is_some_and(|(t, _)| t.eq_bytes(needle)) && preceded {
             return Some(i);
         }
         i += 1;
@@ -30,7 +30,7 @@ pub(crate) fn trim_semi(tokens: &[(ShortCStr, usize)]) -> &[(ShortCStr, usize)] 
     tokens.get(start..end).unwrap_or(&[])
 }
 
-pub(crate) fn try_join(tokens: &[(ShortCStr, usize)]) -> Result<ShortCStr, i32> {
+pub(crate) fn try_join(tokens: &[(ShortCStr, usize)]) -> Result<ShortCStr, ParseError> {
     let mut s = ShortCStr::new();
     for (t, _) in tokens {
         if !s.is_empty() {

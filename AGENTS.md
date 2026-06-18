@@ -16,7 +16,7 @@ Three crates in a Cargo workspace (`resolver = "2"`):
   - **Temporarily suspended** during large-scale refactoring (e.g., error-handling migration). Re-enforce when the churn settles.
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
 - Safe wrappers in `unsafe/sys` return `Result<_, i32>` (positive errno on error). Use `cvt(ret: isize) -> Result<isize, i32>` from `lib.rs` to convert libc return values.
-- Avoid `#[derive]` in production code. Derives like `Debug`, `PartialEq`, and `Eq` are
+- Avoid `#[derive]` in production code. Derives like `PartialEq`, `Eq`, and `Hash` are
   contagious — adding them to a type forces every field type to also implement them,
   propagating through the type graph. Since the codebase bans panicky patterns (`unwrap`,
   `expect`, indexing) in production, no production code ever formats values with `{:?}`
@@ -25,6 +25,12 @@ Three crates in a Cargo workspace (`resolver = "2"`):
   or `#[cfg(test)] impl ...` to quarantine them. `ShortCStr` is an exception: `Debug`
   is needed by integration tests (separate compilation units), and `PartialEq`/`Eq`
   are required by production `HashMap<ShortCStr, _>` usage.
+- **Exception: `Display` and `Debug` on error enums.** Error types that implement
+  `core::error::Error` are allowed to derive both `Display` and `Debug`. `Display`
+  is used by `displaydoc` to format error messages for users; `Debug` is needed
+  because `core::error::Error` requires `Debug` as a supertrait. Use
+  `#[derive(Display, Debug)]` with `displaydoc` doc-string derives on error enums.
+  No other production code should derive `Debug`.
 - Prefer `no_std` when feasible (binary uses `std` because `no_std` + stable needs nightly + `-Z build-std`).
 
 ## Lints (workspace-wide)

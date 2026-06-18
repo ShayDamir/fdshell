@@ -16,14 +16,12 @@ pub use line::ParsedLine;
 
 pub(crate) use format::format_parse_error;
 
-use crate::error::parse::ParseErrorInfo;
-
 /// Extract just the `ShortCStr` values from position-tagged tokens.
 fn tokens_only(tokens: &[(sys::ShortCStr, usize)]) -> Vec<sys::ShortCStr> {
     tokens.iter().map(|(t, _)| t.clone()).collect()
 }
 
-pub fn parse(line: &[u8]) -> Result<ParsedLine, ParseErrorInfo> {
+pub fn parse(line: &[u8]) -> Result<ParsedLine, crate::error::parse::ParseErrorInfo> {
     let raw = token::tokenize(line)?;
     let tokens = tokens_only(&raw);
 

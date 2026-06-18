@@ -1,7 +1,7 @@
-use crate::error::parse::ParseErrorInfo;
+use crate::error::parse::ParseError;
 use sys::ShortCStr;
 
-pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseErrorInfo> {
+pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseError> {
     let mut tokens = Vec::new();
     let mut cur = ShortCStr::new();
     let mut in_quotes = false;
@@ -20,10 +20,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseErrorInfo> 
                     if let Some(c) = bytes.next() {
                         cur.push(c)?;
                     } else {
-                        return Err(ParseErrorInfo {
-                            source_start: quote_start.unwrap_or(0),
-                            message: None,
-                        });
+                        return Err(ParseError::UnexpectedEof { pos });
                     }
                 }
                 _ => cur.push(b)?,
@@ -62,22 +59,14 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseErrorInfo> 
                 b'$' => {
                     if bytes.peek() == Some(&b'(') {
                         let start = pos - 1; // position of '$'
-                        super::token_subst::read_dollar_paren(&mut cur, &mut bytes).map_err(
-                            |mut e| {
-                                e.source_start = start;
-                                e
-                            },
-                        )?;
+                        super::token_subst::read_dollar_paren(&mut cur, &mut bytes, start)?;
                     } else {
                         cur.push(b)?;
                     }
                 }
                 b'`' => {
                     let start = pos - 1; // position of '`'
-                    super::token_subst::read_backtick(&mut cur, &mut bytes).map_err(|mut e| {
-                        e.source_start = start;
-                        e
-                    })?;
+                    super::token_subst::read_backtick(&mut cur, &mut bytes, start)?;
                 }
                 _ => cur.push(b)?,
             }
@@ -85,9 +74,8 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseErrorInfo> 
     }
 
     if in_quotes {
-        return Err(ParseErrorInfo {
-            source_start: quote_start.unwrap_or(0),
-            message: None,
+        return Err(ParseError::UnbalancedQuote {
+            pos: quote_start.unwrap_or(0),
         });
     }
     if !cur.is_empty() {
