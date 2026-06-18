@@ -1,4 +1,5 @@
 use crate::capture::Capture;
+use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use sys::ShortCStr;
 
@@ -34,8 +35,10 @@ pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     })
 }
 
-pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
-    let bytes = s.as_bytes()?;
+pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, ParseError> {
+    let bytes = s
+        .as_bytes()
+        .map_err(|_| ParseError::InvalidChar { ch: 0, pos: 0 })?;
 
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,
@@ -54,10 +57,16 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
         return Ok(None);
     }
 
-    let prefix = bytes.get(..op_pos).ok_or(sys::errno::EINVAL)?;
+    let prefix = bytes.get(..op_pos).ok_or(ParseError::Reason {
+        pos: 0,
+        reason: "invalid redirect syntax",
+    })?;
 
     if after_op.starts_with(b"%") {
-        let source = after_op.get(1..).ok_or(sys::errno::EINVAL)?;
+        let source = after_op.get(1..).ok_or(ParseError::Reason {
+            pos: 0,
+            reason: "invalid redirect syntax",
+        })?;
         let export_to = match parse_fd(prefix, dir) {
             Some(fd) => fd,
             None => return Ok(None),
@@ -66,9 +75,15 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, i32> {
     }
 
     let (rest, direction) = if dir == b'>' && after_op.starts_with(b">") {
-        let r = after_op.get(1..).ok_or(sys::errno::EINVAL)?;
+        let r = after_op.get(1..).ok_or(ParseError::Reason {
+            pos: 0,
+            reason: "invalid redirect syntax",
+        })?;
         if r.is_empty() || r.starts_with(b"%") {
-            return Err(sys::errno::EINVAL);
+            return Err(ParseError::Reason {
+                pos: 0,
+                reason: "invalid redirect syntax",
+            });
         }
         (r, RedirectDirection::Append)
     } else if dir == b'<' {

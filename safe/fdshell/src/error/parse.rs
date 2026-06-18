@@ -88,9 +88,9 @@ impl From<ParseError> for ParseErrorInfo {
                 source_start: pos,
                 message: Some("invalid character"),
             },
-            ParseError::Reason { pos, .. } => ParseErrorInfo {
+            ParseError::Reason { pos, reason } => ParseErrorInfo {
                 source_start: pos,
-                message: None,
+                message: Some(reason),
             },
         }
     }
@@ -143,6 +143,6 @@ mod tests {
         };
         let info: ParseErrorInfo = err.into();
         assert_eq!(info.source_start, 10);
-        assert_eq!(info.message, None);
+        assert_eq!(info.message, Some("syscall error"));
     }
 }
