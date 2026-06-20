@@ -6,7 +6,7 @@ fn with_exhausted_fds<T>(f: impl FnOnce() -> T) -> T {
         // SAFETY: dup(0) is safe with stdin; fails with EMFILE when table is full.
         let ret = unsafe { libc::dup(0) } as isize;
         match sys::cvt(ret) {
-            Err(sys::errno::EMFILE) => break,
+            Err(sys::SyscallError::EMFILE) => break,
             Err(e) => panic!("unexpected errno from dup: {e}"),
             Ok(fd) => held.push(fd as i32),
         }

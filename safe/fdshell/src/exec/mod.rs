@@ -11,7 +11,8 @@ pub fn exec_fd(fd: &LocalFd, argv: &[&CStr], exports: &[(ShortCStr, Vec<u8>)]) -
     let cookie = format!("{}", pid);
     let envp = get_environ(cookie.as_bytes(), exports);
     let script_fd = fd.export()?;
-    sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
+    sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)?;
+    Ok(())
 }
 
 pub fn exec_at(
@@ -23,7 +24,8 @@ pub fn exec_at(
     let pid = std::process::id();
     let cookie = format!("{}", pid);
     let envp = get_environ(cookie.as_bytes(), exports);
-    sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
+    sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)?;
+    Ok(())
 }
 
 pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
@@ -43,7 +45,7 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
 
 pub fn resolve_path(bin: &CStr) -> Result<LocalFd, i32> {
     if bin.to_bytes().contains(&b'/') {
-        sys::openat2::open(bin, O_PATH)
+        Ok(sys::openat2::open(bin, O_PATH)?)
     } else {
         search_path(bin)
     }

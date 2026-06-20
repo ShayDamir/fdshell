@@ -20,7 +20,7 @@ pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus
             let Some(task) = state.tasks.remove(&key) else {
                 return Err(TaskError::NotFound);
             };
-            let status = sys::wait_pidfd::wait_pidfd(&task.pidfd)?;
+            let status = sys::wait_pidfd::wait_pidfd(&task.pidfd).map_err(|_| TaskError::Wait)?;
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = task.capture_fd
             {
@@ -40,7 +40,8 @@ pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus
                 let Some(task) = state.tasks.remove(&key) else {
                     continue;
                 };
-                let status = sys::wait_pidfd::wait_pidfd(&task.pidfd)?;
+                let status =
+                    sys::wait_pidfd::wait_pidfd(&task.pidfd).map_err(|_| TaskError::Wait)?;
                 if let WaitStatus::Exited(0) = status
                     && let Some(capture_fd) = task.capture_fd
                     && let Ok(entries) = crate::capture::do_captures(

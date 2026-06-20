@@ -10,7 +10,7 @@ pub fn renameat2(
     newdirfd: AtFd<'_>,
     newpath: &core::ffi::CStr,
     flags: u32,
-) -> Result<(), i32> {
+) -> Result<(), crate::SyscallError> {
     let olddirfd = olddirfd.as_raw();
     let newdirfd = newdirfd.as_raw();
     // SAFETY: renameat2 with invalid fds/paths returns the appropriate errno.

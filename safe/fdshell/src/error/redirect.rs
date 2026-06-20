@@ -9,9 +9,3 @@ use displaydoc::Display;
 pub(crate) struct OpenRedirectError;
 
 impl core::error::Error for OpenRedirectError {}
-
-impl From<i32> for OpenRedirectError {
-    fn from(_: i32) -> Self {
-        OpenRedirectError
-    }
-}

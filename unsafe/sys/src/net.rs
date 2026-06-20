@@ -1,7 +1,7 @@
 use crate::LocalFd;
 use crate::cvt;
 
-pub fn set_passcred(sock: &LocalFd) -> Result<(), i32> {
+pub fn set_passcred(sock: &LocalFd) -> Result<(), crate::SyscallError> {
     let val: libc::c_int = 1;
     // SAFETY: `sock` is a valid open socket. `SO_PASSCRED` enables
     // `SCM_CREDENTIALS` delivery, which the kernel always provides
@@ -18,13 +18,13 @@ pub fn set_passcred(sock: &LocalFd) -> Result<(), i32> {
     Ok(())
 }
 
-pub fn socketpair_with_passcred() -> Result<(LocalFd, LocalFd), i32> {
+pub fn socketpair_with_passcred() -> Result<(LocalFd, LocalFd), crate::SyscallError> {
     let (a, b) = socketpair()?;
     set_passcred(&a)?;
     Ok((a, b))
 }
 
-pub fn socketpair() -> Result<(LocalFd, LocalFd), i32> {
+pub fn socketpair() -> Result<(LocalFd, LocalFd), crate::SyscallError> {
     let mut pair = [0i32; 2];
     // SAFETY: `pair` is a valid mutable reference to 2 `i32`s; `socketpair` writes
     // exactly 2 fds into it. Invalid input is handled by `cvt`.

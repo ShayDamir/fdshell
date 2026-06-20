@@ -51,6 +51,6 @@ pub fn parse_dirfd(s: &CStr) -> Result<Option<ImportedFd>, i32> {
     if s == c"AT_FDCWD" {
         Ok(None)
     } else {
-        ImportedFd::try_from(s).map(Some)
+        Ok(ImportedFd::try_from(s).map(Some)?)
     }
 }

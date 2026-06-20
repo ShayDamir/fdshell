@@ -9,7 +9,10 @@ pub fn open_redirect_files(redirects: &[RedirectDef]) -> Result<Vec<LocalFd>, Op
     for r in redirects {
         if let super::RedirectSource::Path(path) = &r.source {
             let name = sys::RefCStr::from(path.clone());
-            fds.push(sys::openat2::open(&name, r.direction.open_flags())?);
+            fds.push(
+                sys::openat2::open(&name, r.direction.open_flags())
+                    .map_err(|_| OpenRedirectError)?,
+            );
         }
     }
     Ok(fds)

@@ -1,16 +1,15 @@
 use super::CmsgBuf;
 use crate::LocalFd;
-use crate::errno::E2BIG;
 use crate::iovec::IoVec;
 use core::ffi::CStr;
 
-pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), i32> {
+pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), crate::SyscallError> {
     if !super::capture_active() {
-        return Err(crate::errno::ENOENT);
+        return Err(crate::SyscallError::ENOENT);
     }
     let tag_bytes = tag.to_bytes_with_nul();
     if tag_bytes.len() > super::TAG_MAX {
-        return Err(E2BIG);
+        return Err(crate::SyscallError::E2BIG);
     }
     let mut iov = IoVec::new(tag_bytes);
     let mut cmsg = CmsgBuf {

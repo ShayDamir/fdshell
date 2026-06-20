@@ -1,5 +1,4 @@
 use crate::LocalFd;
-use crate::errno::{EINVAL, EPERM};
 use crate::iovec::IoVecMut;
 use core::ffi::CStr;
 
@@ -7,7 +6,7 @@ pub fn recv_fd<'a>(
     sock: &LocalFd,
     tag: &'a mut [u8],
     expected_pid: i32,
-) -> Result<(LocalFd, &'a CStr), i32> {
+) -> Result<(LocalFd, &'a CStr), crate::SyscallError> {
     let mut extra = [0u8; 1];
     let mut iovs = [IoVecMut::new(tag), IoVecMut::new(&mut extra)];
     // SCM_RIGHTS (1 fd: 24 B) + SCM_CREDENTIALS (1 ucred: 32 B) = 56 B
@@ -28,11 +27,11 @@ pub fn recv_fd<'a>(
         as usize;
 
     if n == 0 {
-        return Err(libc::EAGAIN);
+        return Err(crate::SyscallError::EAGAIN);
     }
 
     if msg.msg_flags & libc::MSG_CTRUNC != 0 {
-        return Err(EINVAL);
+        return Err(crate::SyscallError::EINVAL);
     }
 
     let mut got_fd: Option<LocalFd> = None;
@@ -76,7 +75,7 @@ pub fn recv_fd<'a>(
                 .saturating_sub(core::mem::size_of::<libc::cmsghdr>());
             // SCM_CREDENTIALS must carry a full ucred.
             if payload < core::mem::size_of::<libc::ucred>() {
-                return Err(EINVAL);
+                return Err(crate::SyscallError::EINVAL);
             }
             // SAFETY: `cmsg` is a valid `cmsghdr` with `SCM_CREDENTIALS`;
             // the kernel always provides a full `ucred`.
@@ -88,17 +87,17 @@ pub fn recv_fd<'a>(
         cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
     }
 
-    let fd = got_fd.ok_or(EINVAL)?;
+    let fd = got_fd.ok_or(crate::SyscallError::EINVAL)?;
     if let Some(pid) = got_pid
         && pid != expected_pid
     {
-        return Err(EPERM);
+        return Err(crate::SyscallError::EPERM);
     }
 
     if n > tag.len() {
-        return Err(EINVAL);
+        return Err(crate::SyscallError::EINVAL);
     }
-    let tag_slice = tag.get(..n).ok_or(EINVAL)?;
-    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| EINVAL)?;
+    let tag_slice = tag.get(..n).ok_or(crate::SyscallError::EINVAL)?;
+    let tag_cstr = CStr::from_bytes_with_nul(tag_slice).map_err(|_| crate::SyscallError::EINVAL)?;
     Ok((fd, tag_cstr))
 }

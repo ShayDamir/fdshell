@@ -1,6 +1,6 @@
 use crate::LocalFd;
 
-pub fn pipe2(flags: i32) -> Result<(LocalFd, LocalFd), i32> {
+pub fn pipe2(flags: i32) -> Result<(LocalFd, LocalFd), crate::SyscallError> {
     let mut fds = [0i32; 2];
     // SAFETY: `fds` is a valid mutable reference to 2 `i32`s; `pipe2` writes
     // exactly 2 file descriptors into it. Invalid flags return `EINVAL`.

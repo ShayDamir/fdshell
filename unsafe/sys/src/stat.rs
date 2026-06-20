@@ -3,6 +3,9 @@ use crate::LocalFd;
 pub const S_IFMT: u32 = libc::S_IFMT;
 pub const S_IFDIR: u32 = libc::S_IFDIR;
 
+// PartialEq + Debug needed by integration test `assert_eq!(before, after)` in
+// `safe/builtins/tests/openat2.rs` (separate compilation unit — cfg_attr won't help).
+// All fields are primitives, so no trait-propagation concern.
 #[derive(PartialEq, Debug)]
 pub struct FileStat {
     pub ino: u64,
@@ -11,7 +14,7 @@ pub struct FileStat {
     pub rdev: u64,
 }
 
-pub fn fstat(fd: &LocalFd) -> Result<FileStat, i32> {
+pub fn fstat(fd: &LocalFd) -> Result<FileStat, crate::SyscallError> {
     // SAFETY: `fd.as_raw()` is any integer; `libc::fstat` with an invalid fd returns `EBADF`.
     // `raw` is zero-initialized, valid for a `libc::stat` (all integer fields).
     // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
@@ -27,7 +30,7 @@ pub fn fstat(fd: &LocalFd) -> Result<FileStat, i32> {
     })
 }
 
-pub fn stat(path: &core::ffi::CStr) -> Result<FileStat, i32> {
+pub fn stat(path: &core::ffi::CStr) -> Result<FileStat, crate::SyscallError> {
     // SAFETY: `path` must be a valid null-terminated C string; an invalid path
     // returns `ENOENT`/`ENOTDIR`. `raw` is zero-initialized, valid for `libc::stat`.
     // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).

@@ -1,4 +1,4 @@
-use sys::errno::EINVAL;
+use sys::SyscallError;
 use sys::net::{set_passcred, socketpair};
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
@@ -120,7 +120,10 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
+    assert!(matches!(
+        recv_fd(&b, &mut buf, 0),
+        Err(SyscallError::EINVAL)
+    ));
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -143,7 +146,10 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
+    assert!(matches!(
+        recv_fd(&b, &mut buf, 0),
+        Err(SyscallError::EINVAL)
+    ));
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -164,7 +170,10 @@ fn test_recv_fd_short_no_null() -> Result<(), i32> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
+    assert!(matches!(
+        recv_fd(&b, &mut buf, 0),
+        Err(SyscallError::EINVAL)
+    ));
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -185,7 +194,10 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
+    assert!(matches!(
+        recv_fd(&b, &mut buf, 0),
+        Err(SyscallError::EINVAL)
+    ));
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -262,7 +274,10 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(recv_fd(&b, &mut buf, 0), Err(EINVAL)));
+    assert!(matches!(
+        recv_fd(&b, &mut buf, 0),
+        Err(SyscallError::EINVAL)
+    ));
 
     dummy_rd.try_close()?;
     a.try_close()?;

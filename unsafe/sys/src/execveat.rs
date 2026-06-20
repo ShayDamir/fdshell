@@ -19,7 +19,7 @@ pub fn execveat(
     argv: &[impl AsRef<CStr>],
     envp: &[impl AsRef<CStr>],
     flags: i32,
-) -> Result<(), i32> {
+) -> Result<(), crate::SyscallError> {
     let raw = dirfd.as_raw();
     let argv_ptrs: Vec<*const libc::c_char> = argv
         .iter()

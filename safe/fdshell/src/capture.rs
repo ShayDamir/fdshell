@@ -30,7 +30,7 @@ pub fn do_captures(
     while !remaining.is_empty() {
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
         let (fd, rtag) = match sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid) {
-            Err(e) if e == sys::errno::EAGAIN => break,
+            Err(sys::SyscallError::EAGAIN) => break,
             Err(_) => return Err(CaptureError::ReceiveFailed),
             Ok(v) => v,
         };

@@ -1,7 +1,7 @@
 use crate::siginfo::{SigInfo, WaitStatus};
 use crate::{LocalFd, cvt};
 
-pub fn wait_pidfd(pidfd: &LocalFd) -> Result<WaitStatus, i32> {
+pub fn wait_pidfd(pidfd: &LocalFd) -> Result<WaitStatus, crate::SyscallError> {
     // SAFETY: SigInfo is integer types; zeroed is valid.
     let mut info: SigInfo = unsafe { core::mem::zeroed() };
 
@@ -21,6 +21,6 @@ pub fn wait_pidfd(pidfd: &LocalFd) -> Result<WaitStatus, i32> {
     Ok(match info.si_code {
         libc::CLD_EXITED => WaitStatus::Exited(info.si_status),
         libc::CLD_KILLED | libc::CLD_DUMPED => WaitStatus::Signaled(info.si_status),
-        _ => return Err(crate::errno::EINVAL),
+        _ => return Err(crate::SyscallError::EINVAL),
     })
 }

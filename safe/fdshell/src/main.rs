@@ -113,7 +113,7 @@ fn main() -> Result<(), Report<AppError>> {
             .map_err(LegacyError)
             .change_context(AppError::Borrow)?;
         let cwd = sys::openat2::open(c".", O_DIRECTORY)
-            .map_err(LegacyError)
+            .map_err(|e| LegacyError(e.into()))
             .change_context(AppError::Cwd)?;
         state.fds.insert(c"CWD".into(), cwd);
     }

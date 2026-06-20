@@ -18,7 +18,7 @@ pub fn capture_active() -> bool {
 
 /// Reserve SHELLFD by placing a harmless pipe read-end there,
 /// preventing subsequent `socketpair()` from returning it.
-pub fn reserve_shellfd() -> Result<LocalFd, i32> {
+pub fn reserve_shellfd() -> Result<LocalFd, crate::SyscallError> {
     let (rd, _wr) = crate::pipe::pipe2(libc::O_CLOEXEC)?;
     if rd.as_raw() != SHELLFD {
         rd.try_clone_to(SHELLFD)

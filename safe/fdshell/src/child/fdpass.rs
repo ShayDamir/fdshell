@@ -17,7 +17,8 @@ pub fn dispatch(
 fn import_fd(args: &[ShortCStr]) -> Result<(), FdPassError> {
     let raw = args.first().ok_or(FdPassError::MissingArg)?;
     let fd = sys::ImportedFd::try_from(raw).map_err(|_| FdPassError::InvalidName)?;
-    sys::shellfd::send_fd(&fd.try_into_local()?, c"import_fd").map_err(|_| FdPassError::SendFailed)
+    let local = fd.try_into_local().map_err(|_| FdPassError::SendFailed)?;
+    sys::shellfd::send_fd(&local, c"import_fd").map_err(|_| FdPassError::SendFailed)
 }
 
 pub(crate) fn export_fd(args: &[ShortCStr], state: &ShellState) -> Result<(), FdPassError> {

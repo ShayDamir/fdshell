@@ -23,13 +23,13 @@ pub fn run_child(
     if let Some(prev) = i.checked_sub(1).and_then(|p| pipes.get(p)) {
         match prev.0.try_clone() {
             Ok(fd) => redirects.push(Redirect::new(0, fd)),
-            Err(e) => std::process::exit(e),
+            Err(e) => std::process::exit(e.into()),
         }
     }
     if let Some(wr) = pipes.get(i) {
         match wr.1.try_clone() {
             Ok(fd) => redirects.push(Redirect::new(1, fd)),
-            Err(e) => std::process::exit(e),
+            Err(e) => std::process::exit(e.into()),
         }
     }
 

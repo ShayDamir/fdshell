@@ -14,9 +14,3 @@ pub(crate) enum CmdSubstError {
 }
 
 impl core::error::Error for CmdSubstError {}
-
-impl From<i32> for CmdSubstError {
-    fn from(_: i32) -> Self {
-        CmdSubstError::Pipe
-    }
-}

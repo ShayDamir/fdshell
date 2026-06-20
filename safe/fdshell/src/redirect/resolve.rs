@@ -19,10 +19,13 @@ pub fn resolve_redirects(
                     .fds
                     .get(var)
                     .ok_or(OpenRedirectError)?
-                    .try_clone_above(r.export_to + 1)?,
-                super::RedirectSource::Path(_) => {
-                    opened_iter.next().ok_or(OpenRedirectError)?.try_clone()?
-                }
+                    .try_clone_above(r.export_to + 1)
+                    .map_err(|_| OpenRedirectError)?,
+                super::RedirectSource::Path(_) => opened_iter
+                    .next()
+                    .ok_or(OpenRedirectError)?
+                    .try_clone()
+                    .map_err(|_| OpenRedirectError)?,
             };
             Ok(r.resolve(local))
         })

@@ -16,9 +16,3 @@ pub(crate) enum TaskError {
 }
 
 impl core::error::Error for TaskError {}
-
-impl From<i32> for TaskError {
-    fn from(_: i32) -> Self {
-        TaskError::Wait
-    }
-}

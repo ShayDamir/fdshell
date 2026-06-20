@@ -18,9 +18,3 @@ pub(crate) enum FdPassError {
 }
 
 impl core::error::Error for FdPassError {}
-
-impl From<i32> for FdPassError {
-    fn from(_: i32) -> Self {
-        FdPassError::SendFailed
-    }
-}

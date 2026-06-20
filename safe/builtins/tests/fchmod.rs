@@ -2,7 +2,7 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EBADF, EINVAL, HELP};
+use sys::errno::{EINVAL, HELP};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -283,6 +283,9 @@ fn test_fchmod_exec_flags() {
 fn test_fchmod_ebadf() {
     // SAFETY: -1 is never a valid fd; `fchmod` returns `EBADF`.
     let fd = unsafe { sys::LocalFd::from_raw(-1) };
-    assert_eq!(sys::fchmod::fchmod(fd.as_raw(), 0o644), Err(EBADF));
+    assert_eq!(
+        sys::fchmod::fchmod(fd.as_raw(), 0o644),
+        Err(sys::SyscallError::EBADF)
+    );
     // fd intentionally not closed (it was never valid).
 }

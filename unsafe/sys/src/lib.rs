@@ -7,12 +7,13 @@ pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use localfd::LocalFd;
 pub use shortcstr::{RefCStr, ShortCStr};
+pub use syscall_error::SyscallError;
 
-pub fn cvt(ret: isize) -> Result<isize, i32> {
+pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
     if ret == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
         // guaranteed by the C runtime. Only called immediately after a failed libc call.
-        unsafe { Err(*libc::__errno_location()) }
+        unsafe { Err((*libc::__errno_location()).into()) }
     } else {
         Ok(ret)
     }
@@ -40,6 +41,7 @@ pub mod shellfd;
 pub mod shortcstr;
 pub mod siginfo;
 pub mod stat;
+pub mod syscall_error;
 pub mod umask;
 pub mod unlinkat;
 pub mod wait_pidfd;
