@@ -181,7 +181,10 @@ fn wait_all_tasks() {
 fn wait_rejects_capture() {
     let cell = make_cell();
     let e = run_one(b"wait %>%var", &cell).unwrap_err();
-    assert!(matches!(e.current_context(), CmdError::Exec));
+    assert!(matches!(
+        e.current_context(),
+        CmdError::CapturesNotSupported { command: "wait" }
+    ));
 }
 
 #[test]

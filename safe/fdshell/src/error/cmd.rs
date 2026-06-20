@@ -12,6 +12,12 @@ pub(crate) enum CmdError {
     Invalid,
     /// builtin failure
     Builtin,
+    /// {command}: captures are not supported
+    CapturesNotSupported { command: &'static str },
+    /// {command}: redirects are not supported
+    RedirectNotSupported { command: &'static str },
+    /// {command}: `builtin` prefix is not supported
+    BuiltinKeywordNotSupported { command: &'static str },
     /// parse error
     Parse,
     /// launch failed
