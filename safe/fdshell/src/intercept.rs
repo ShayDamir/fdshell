@@ -1,11 +1,20 @@
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
+use crate::error::parse::ParsePosition;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
+fn err_at(line: &[u8], pos: usize, err: CmdError) -> Report<CmdError> {
+    Report::new(err).attach_opaque(ParsePosition {
+        pos,
+        input: Some(line.to_vec()),
+    })
+}
+
 pub(crate) fn try_intercept(
+    line: &[u8],
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
@@ -13,26 +22,62 @@ pub(crate) fn try_intercept(
     match cmdline.command.as_bytes().map_err(|_| CmdError::Exec)? {
         b"cd" => {
             if cmdline.builtin {
-                bail!(CmdError::BuiltinKeywordNotSupported { command: "cd" });
+                let pos = line.windows(7).position(|w| w == b"builtin").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::BuiltinKeywordNotSupported { command: "cd" },
+                ));
             }
             if !cmdline.captures.is_empty() {
-                bail!(CmdError::CapturesNotSupported { command: "cd" });
+                let pos = line.windows(2).position(|w| w == b"%>").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::CapturesNotSupported { command: "cd" },
+                ));
             }
             if !cmdline.redirects.is_empty() {
-                bail!(CmdError::RedirectNotSupported { command: "cd" });
+                let pos = line
+                    .iter()
+                    .position(|&b| b == b'<' || b == b'>')
+                    .unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::RedirectNotSupported { command: "cd" },
+                ));
             }
             crate::cd::cd(&cmdline.args, &mut state)?;
             state.last_status = WaitStatus::Exited(0);
         }
         b"exit" | b"quit" => {
             if cmdline.builtin {
-                bail!(CmdError::BuiltinKeywordNotSupported { command: "exit" });
+                let pos = line.windows(7).position(|w| w == b"builtin").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::BuiltinKeywordNotSupported { command: "exit" },
+                ));
             }
             if !cmdline.captures.is_empty() {
-                bail!(CmdError::CapturesNotSupported { command: "exit" });
+                let pos = line.windows(2).position(|w| w == b"%>").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::CapturesNotSupported { command: "exit" },
+                ));
             }
             if !cmdline.redirects.is_empty() {
-                bail!(CmdError::RedirectNotSupported { command: "exit" });
+                let pos = line
+                    .iter()
+                    .position(|&b| b == b'<' || b == b'>')
+                    .unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::RedirectNotSupported { command: "exit" },
+                ));
             }
             let code = match cmdline.args.first() {
                 Some(arg) => {
@@ -54,14 +99,27 @@ pub(crate) fn try_intercept(
         }
         b"export_fd" if cmdline.builtin => {
             if !cmdline.captures.is_empty() {
-                bail!(CmdError::CapturesNotSupported {
-                    command: "export_fd"
-                });
+                let pos = line.windows(2).position(|w| w == b"%>").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::CapturesNotSupported {
+                        command: "export_fd",
+                    },
+                ));
             }
             if !cmdline.redirects.is_empty() {
-                bail!(CmdError::RedirectNotSupported {
-                    command: "export_fd"
-                });
+                let pos = line
+                    .iter()
+                    .position(|&b| b == b'<' || b == b'>')
+                    .unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::RedirectNotSupported {
+                        command: "export_fd",
+                    },
+                ));
             }
             state.last_status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {
                 Ok(()) => WaitStatus::Exited(0),
@@ -75,25 +133,61 @@ pub(crate) fn try_intercept(
         }
         b"wait" => {
             if cmdline.builtin {
-                bail!(CmdError::BuiltinKeywordNotSupported { command: "wait" });
+                let pos = line.windows(7).position(|w| w == b"builtin").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::BuiltinKeywordNotSupported { command: "wait" },
+                ));
             }
             if !cmdline.captures.is_empty() {
-                bail!(CmdError::CapturesNotSupported { command: "wait" });
+                let pos = line.windows(2).position(|w| w == b"%>").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::CapturesNotSupported { command: "wait" },
+                ));
             }
             if !cmdline.redirects.is_empty() {
-                bail!(CmdError::RedirectNotSupported { command: "wait" });
+                let pos = line
+                    .iter()
+                    .position(|&b| b == b'<' || b == b'>')
+                    .unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::RedirectNotSupported { command: "wait" },
+                ));
             }
             state.last_status = crate::task::try_wait(&cmdline.args, &mut state)?;
         }
         b"export" => {
             if cmdline.builtin {
-                bail!(CmdError::BuiltinKeywordNotSupported { command: "export" });
+                let pos = line.windows(7).position(|w| w == b"builtin").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::BuiltinKeywordNotSupported { command: "export" },
+                ));
             }
             if !cmdline.captures.is_empty() {
-                bail!(CmdError::CapturesNotSupported { command: "export" });
+                let pos = line.windows(2).position(|w| w == b"%>").unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::CapturesNotSupported { command: "export" },
+                ));
             }
             if !cmdline.redirects.is_empty() {
-                bail!(CmdError::RedirectNotSupported { command: "export" });
+                let pos = line
+                    .iter()
+                    .position(|&b| b == b'<' || b == b'>')
+                    .unwrap_or(0);
+                return Err(err_at(
+                    line,
+                    pos,
+                    CmdError::RedirectNotSupported { command: "export" },
+                ));
             }
             crate::exports::handle_export(&cmdline.args, &mut state)?;
             state.last_status = WaitStatus::Exited(0);
