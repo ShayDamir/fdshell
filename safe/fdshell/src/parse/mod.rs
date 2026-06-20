@@ -2,7 +2,6 @@ mod classify;
 mod cmdline;
 mod command;
 mod for_block;
-mod format;
 pub(crate) mod if_block;
 mod line;
 mod pipeline;

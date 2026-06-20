@@ -8,13 +8,10 @@ use displaydoc::Display;
 #[derive(Display, Debug)]
 pub(crate) enum LaunchError {
     /// fork syscall failed
-    #[displaydoc("fork failed")]
     Fork,
     /// child exec syscall failed
-    #[displaydoc("exec failed")]
     Exec,
     /// builtin dispatch in child failed
-    #[displaydoc("builtin dispatch failed")]
     BuiltinDispatch,
 }
 

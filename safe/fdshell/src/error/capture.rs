@@ -8,10 +8,8 @@ use displaydoc::Display;
 #[derive(Display, Debug)]
 pub(crate) enum CaptureError {
     /// capture target already exists
-    #[displaydoc("capture target already exists")]
     Exists,
     /// fd receive failed
-    #[displaydoc("fd receive failed")]
     ReceiveFailed,
 }
 

@@ -8,13 +8,10 @@ use displaydoc::Display;
 #[derive(Display, Debug)]
 pub(crate) enum CdError {
     /// $HOME not set
-    #[displaydoc("$HOME not set")]
     HomeNotSet,
     /// cd path open failed
-    #[displaydoc("cd path open failed")]
     CdPathOpen,
     /// $OLDCWD not set
-    #[displaydoc("$OLDCWD not set")]
     OldcwdNotSet,
 }
 

@@ -4,9 +4,8 @@
 
 use displaydoc::Display;
 
-/// [OpenPath] Failed to open redirection path
+/// [OpenRedirectError] Failed to open redirection path
 #[derive(Display, Debug)]
-#[displaydoc("path open failed")]
 pub(crate) struct OpenRedirectError;
 
 impl core::error::Error for OpenRedirectError {}

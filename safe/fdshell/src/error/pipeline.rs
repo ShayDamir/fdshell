@@ -8,13 +8,10 @@ use displaydoc::Display;
 #[derive(Display, Debug)]
 pub(crate) enum PipelineError {
     /// pipe creation failed
-    #[displaydoc("pipe creation failed")]
     Pipe,
     /// socketpair creation for capture failed
-    #[displaydoc("capture socketpair creation failed")]
     CaptureSocket,
     /// pipeline execution failed
-    #[displaydoc("pipeline failed")]
     Pipeline,
 }
 
