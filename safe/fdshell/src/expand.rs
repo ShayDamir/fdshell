@@ -3,15 +3,16 @@
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
     cell: &ForkCell<ShellState>,
-) -> Result<Vec<ShortCStr>, i32> {
+) -> Result<Vec<ShortCStr>, ResolveError> {
     let mut out = Vec::new();
     for word in words {
-        let bs = word.as_bytes()?;
+        let bs = word.as_bytes().map_err(|_| ResolveError::RefNotFound)?;
         let split = if is_cmd_subst(bs) {
             let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)?;
             split_whitespace(&expanded)?
@@ -36,7 +37,7 @@ fn strip_delims(bs: &[u8]) -> &[u8] {
     }
 }
 
-fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, i32> {
+fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, ResolveError> {
     let mut words = Vec::new();
     let mut cur = ShortCStr::new();
     for &b in data {
@@ -45,7 +46,7 @@ fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, i32> {
                 words.push(core::mem::take(&mut cur));
             }
         } else {
-            cur.push(b)?;
+            cur.push(b).map_err(|_| ResolveError::NulByte)?;
         }
     }
     if !cur.is_empty() {

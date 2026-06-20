@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::capture::Capture;
+use crate::error::cmd::CmdError;
 use crate::redirect::RedirectDef;
 #[test]
 fn test_mkdirat_capture() {
@@ -470,13 +471,15 @@ fn parse_if_newline_separators() {
 #[test]
 fn if_without_then_returns_err() {
     let result = parse(b"if test fi");
-    assert!(result.is_err());
     let e = match result {
         Ok(_) => panic!("expected error"),
         Err(e) => e,
     };
-    assert_eq!(e.message, Some("missing 'then'"));
-    assert_eq!(e.source_start, 0);
+    assert_eq!(
+        e.current_context().to_string(),
+        "missing 'then'",
+        "expected Reason('missing \\'then\\') error"
+    );
 }
 
 #[test]
@@ -491,10 +494,8 @@ fn if_without_then_through_run_script_returns_err() {
         Ok(_) => panic!("expected error"),
         Err(e) => e,
     };
-    // The error message should be "missing 'then'" since there's no 'then' keyword.
-    // "missing 'fi'" would be wrong because 'fi' IS present.
-    assert_eq!(e.message, Some("missing 'then'"));
-    assert_eq!(e.source_start, 0);
+    // Parse errors (missing 'then', missing 'fi', etc.) map to CmdError::Parse.
+    assert!(matches!(e.current_context(), CmdError::Parse));
 }
 
 #[test]

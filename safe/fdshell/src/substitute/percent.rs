@@ -4,13 +4,14 @@ use std::collections::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
 
+use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 pub(crate) fn collect_name(
     peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
-) -> Result<ShortCStr, i32> {
+) -> Result<ShortCStr, ResolveError> {
     let mut name = Vec::new();
-    name.push(peek.next().ok_or(sys::errno::EINVAL)?);
+    name.push(peek.next().ok_or(ResolveError::RefNotFound)?);
     while let Some(&nc) = peek.peek() {
         if nc.is_ascii_alphanumeric() || nc == b'_' {
             name.push(nc);
@@ -19,7 +20,7 @@ pub(crate) fn collect_name(
             break;
         }
     }
-    ShortCStr::from_vec(name)
+    ShortCStr::from_vec(name).map_err(|_| ResolveError::TokenTooLong)
 }
 
 pub(crate) fn percent_subst(
@@ -27,7 +28,7 @@ pub(crate) fn percent_subst(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
     out: &mut Vec<u8>,
-) -> Result<(), i32> {
+) -> Result<(), ResolveError> {
     match peek.peek().copied() {
         Some(b'%') => {
             out.push(b'%');
@@ -39,14 +40,16 @@ pub(crate) fn percent_subst(
                 Some(d) => d.as_raw(),
                 None => match state.fds.get(&name_scs) {
                     Some(src) => {
-                        let d = src.export()?;
+                        let d = src.export().map_err(|_| ResolveError::RefNotFound)?;
                         let raw = d.as_raw();
                         cache.insert(name_scs, d);
                         raw
                     }
                     None => {
                         out.push(b'%');
-                        out.extend_from_slice(name_scs.as_bytes()?);
+                        out.extend_from_slice(
+                            name_scs.as_bytes().map_err(|_| ResolveError::RefNotFound)?,
+                        );
                         return Ok(());
                     }
                 },

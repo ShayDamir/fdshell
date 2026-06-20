@@ -30,7 +30,12 @@ Three crates in a Cargo workspace (`resolver = "2"`):
   is used by `displaydoc` to format error messages for users; `Debug` is needed
   because `core::error::Error` requires `Debug` as a supertrait. Use
   `#[derive(Display, Debug)]` with `displaydoc` doc-string derives on error enums.
-  No other production code should derive `Debug`.
+- **Exception: `Debug` on error-stack attachment types.** Types attached to
+  `Report` via `attach_opaque()` or `attach()` (e.g. `ParsePosition`) must
+  implement `Debug` because `error_stack` requires it on opaque context types.
+  It is safe to `#[derive(Debug)]` on these types — they are never formatted
+  with `{:?}` in application code, only by the error-stack infrastructure.
+- No other production code should derive `Debug`.
 - Prefer `no_std` when feasible (binary uses `std` because `no_std` + stable needs nightly + `-Z build-std`).
 
 ## Lints (workspace-wide)

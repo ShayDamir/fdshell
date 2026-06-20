@@ -1,11 +1,13 @@
-use crate::error::parse::ParseErrorInfo;
+use error_stack::Report;
+
+use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
 pub(crate) fn run_cond_list(
     line: &[u8],
     cell: &ForkCell<ShellState>,
-) -> Result<(), ParseErrorInfo> {
+) -> Result<(), Report<CmdError>> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -24,7 +26,7 @@ pub(crate) fn run_cond_list(
                 let part = line.get(start..i).unwrap_or(b"").trim_ascii();
                 if !part.is_empty() {
                     crate::run::run_one(part, cell)?;
-                    let state = cell.borrow()?;
+                    let state = cell.borrow().map_err(|_| CmdError::Exec)?;
                     if (tail.starts_with(b"&&") && state.last_status.exit_code() != 0)
                         || (tail.starts_with(b"||") && state.last_status.exit_code() == 0)
                     {

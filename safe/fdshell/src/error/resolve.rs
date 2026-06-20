@@ -8,14 +8,22 @@ use displaydoc::Display;
 #[derive(Display, Debug)]
 pub(crate) enum ResolveError {
     /// variable or file reference not found
-    #[displaydoc("reference not found")]
     RefNotFound,
-    /// duplicate redirect target in a single command
-    #[displaydoc("duplicate redirect target")]
-    RedirectDuplicate,
-    /// file descriptor resolution failed
-    #[displaydoc("resolution failed")]
+    /// token too long for variable storage
+    TokenTooLong,
+    /// NUL byte in variable name
+    NulByte,
+    /// unclosed subexpression parenthesis
+    UnclosedParen,
+    /// resolution failed
     Resolve,
 }
 
 impl core::error::Error for ResolveError {}
+
+/// Convert `i32` (errno) to `ResolveError::Resolve`.
+impl From<i32> for ResolveError {
+    fn from(_: i32) -> Self {
+        ResolveError::Resolve
+    }
+}

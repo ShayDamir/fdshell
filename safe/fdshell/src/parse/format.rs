@@ -1,28 +1,13 @@
-use crate::error::parse::{ParseError, ParseErrorInfo};
+use crate::error::parse::ParseErrorInfo;
 
 /// Trait for extracting position and message from parse errors.
 ///
-/// Implemented by both `ParseError` and `ParseErrorInfo` so
-/// `format_parse_error` can accept either type generically.
+/// Implemented by `ParseErrorInfo` (legacy) for use in
+/// `format_parse_error`. `ParseError` no longer carries position —
+/// use `ParsePosition` attached to the `Report` instead.
 pub(crate) trait ErrorPosition {
     fn source_start(&self) -> usize;
     fn message(&self) -> Option<&'static str>;
-}
-
-impl ErrorPosition for ParseError {
-    fn source_start(&self) -> usize {
-        match self {
-            ParseError::UnbalancedQuote { pos } => *pos,
-            ParseError::UnexpectedEof { pos } => *pos,
-            ParseError::InvalidChar { pos, .. } => *pos,
-            ParseError::Reason { pos, .. } => *pos,
-        }
-    }
-
-    fn message(&self) -> Option<&'static str> {
-        // ParseError uses Display for its message; no static message.
-        None
-    }
 }
 
 impl ErrorPosition for ParseErrorInfo {
@@ -212,9 +197,12 @@ mod tests {
     #[test]
     fn parse_error_unbalanced_quote_formats() {
         let input = b"echo \"hello";
-        let info = ParseError::UnbalancedQuote { pos: 5 };
+        let info = ParseErrorInfo {
+            source_start: 5,
+            message: Some("unbalanced quote"),
+        };
         let output = format_parse_error(input, &info);
-        assert!(output.contains("parse error"));
+        assert!(output.contains("unbalanced quote"));
         assert!(output.contains("echo \"hello"));
         assert!(output.contains('^'));
     }
@@ -222,9 +210,12 @@ mod tests {
     #[test]
     fn parse_error_unexpected_eof_formats() {
         let input = b"if true; then echo hi";
-        let info = ParseError::UnexpectedEof { pos: 0 };
+        let info = ParseErrorInfo {
+            source_start: 0,
+            message: Some("unexpected end of input"),
+        };
         let output = format_parse_error(input, &info);
-        assert!(output.contains("parse error"));
+        assert!(output.contains("unexpected end of input"));
         assert!(output.contains("if true; then echo hi"));
     }
 }

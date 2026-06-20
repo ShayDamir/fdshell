@@ -8,11 +8,15 @@ use displaydoc::Display;
 #[derive(Display, Debug)]
 pub(crate) enum CmdError {
     /// invalid command
-    #[displaydoc("invalid command")]
     Invalid,
     /// builtin failure
-    #[displaydoc("builtin failure")]
     Builtin,
+    /// parse error
+    Parse,
+    /// execution error
+    Exec,
+    /// resolution error
+    Resolve,
 }
 
 impl core::error::Error for CmdError {}

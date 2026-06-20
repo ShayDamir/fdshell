@@ -1,6 +1,8 @@
 use crate::capture::Capture;
 use crate::error::parse::ParseError;
+use crate::error::parse::{report_error, report_invalid_char};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use error_stack::Report;
 use sys::ShortCStr;
 
 fn parse_fd(prefix: &[u8], dir: u8) -> Option<i32> {
@@ -35,10 +37,8 @@ pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
     })
 }
 
-pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, ParseError> {
-    let bytes = s
-        .as_bytes()
-        .map_err(|_| ParseError::InvalidChar { ch: 0, pos: 0 })?;
+pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    let bytes = s.as_bytes().map_err(|_| report_invalid_char(0, 0))?;
 
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,
@@ -57,16 +57,14 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, ParseError> 
         return Ok(None);
     }
 
-    let prefix = bytes.get(..op_pos).ok_or(ParseError::Reason {
-        pos: 0,
-        reason: "invalid redirect syntax",
-    })?;
+    let prefix = bytes
+        .get(..op_pos)
+        .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
 
     if after_op.starts_with(b"%") {
-        let source = after_op.get(1..).ok_or(ParseError::Reason {
-            pos: 0,
-            reason: "invalid redirect syntax",
-        })?;
+        let source = after_op
+            .get(1..)
+            .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
         let export_to = match parse_fd(prefix, dir) {
             Some(fd) => fd,
             None => return Ok(None),
@@ -75,15 +73,11 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, ParseError> 
     }
 
     let (rest, direction) = if dir == b'>' && after_op.starts_with(b">") {
-        let r = after_op.get(1..).ok_or(ParseError::Reason {
-            pos: 0,
-            reason: "invalid redirect syntax",
-        })?;
+        let r = after_op
+            .get(1..)
+            .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
         if r.is_empty() || r.starts_with(b"%") {
-            return Err(ParseError::Reason {
-                pos: 0,
-                reason: "invalid redirect syntax",
-            });
+            return Err(report_error("invalid redirect syntax", 0));
         }
         (r, RedirectDirection::Append)
     } else if dir == b'<' {

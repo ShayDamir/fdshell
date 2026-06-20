@@ -14,18 +14,27 @@ mod while_block;
 pub use cmdline::{CommandLine, Pipeline};
 pub use line::ParsedLine;
 
-pub(crate) use format::format_parse_error;
+use crate::error::parse::ParseError;
+use error_stack::Report;
 
 /// Extract just the `ShortCStr` values from position-tagged tokens.
 fn tokens_only(tokens: &[(sys::ShortCStr, usize)]) -> Vec<sys::ShortCStr> {
     tokens.iter().map(|(t, _)| t.clone()).collect()
 }
 
-pub fn parse(line: &[u8]) -> Result<ParsedLine, crate::error::parse::ParseErrorInfo> {
+/// Parse an input line into a `ParsedLine`.
+///
+/// On error, attaches a `ParsePosition` with the input line for
+/// formatted error output via `install_debug_hook`.
+pub(crate) fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
+    inner_parse(line)
+}
+
+fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
     let raw = token::tokenize(line)?;
     let tokens = tokens_only(&raw);
 
-    if let Some(pl) = line::detect(&tokens)? {
+    if let Some(pl) = line::detect(&raw)? {
         return Ok(pl);
     }
 
@@ -50,7 +59,7 @@ pub fn parse(line: &[u8]) -> Result<ParsedLine, crate::error::parse::ParseErrorI
     }
 
     if raw.iter().any(|(t, _)| t.eq_bytes(b"|")) {
-        return Ok(pipeline::parse_pipeline(&tokens)?);
+        return pipeline::parse_pipeline(&tokens);
     }
 
     Ok(ParsedLine::Cmd(command::parse_command(&tokens)?))

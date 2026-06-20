@@ -1,4 +1,6 @@
-use crate::error::parse::ParseErrorInfo;
+use error_stack::Report;
+
+use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
@@ -26,7 +28,10 @@ fn keyword_delta(word: &[u8]) -> Option<i32> {
     None
 }
 
-pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, ParseErrorInfo> {
+pub(crate) fn run_script(
+    line: &[u8],
+    cell: &ForkCell<ShellState>,
+) -> Result<i32, Report<CmdError>> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -40,7 +45,6 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
             if !part.is_empty() && keyword_delta(part) == Some(1) {
                 let block_start = start;
                 let mut depth = 1u32;
-                // Find keyword position in original line to skip it when scanning
                 let original = line.get(block_start..i).unwrap_or(b"");
                 let leading_ws = original
                     .iter()
@@ -51,7 +55,7 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
                 } else if part.starts_with(b"for") {
                     3
                 } else {
-                    5 // while or until
+                    5
                 };
                 i = block_start + leading_ws + kw;
                 start = i;
@@ -76,7 +80,7 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
                     i += 1;
                 }
                 if depth > 0 {
-                    return Err(ParseErrorInfo::new(block_start, "missing 'fi'"));
+                    return Err(CmdError::Parse.into());
                 }
                 let end = line.len().min(start);
                 let full = line.get(block_start..end).unwrap_or(b"").trim_ascii();
@@ -90,6 +94,6 @@ pub(crate) fn run_script(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32
         }
         i += 1;
     }
-    let state = cell.borrow()?;
+    let state = cell.borrow().map_err(|_| CmdError::Exec)?;
     Ok(state.last_status.exit_code())
 }

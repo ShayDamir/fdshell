@@ -5,6 +5,7 @@ use crate::resolve::substitute_args;
 use crate::state::ShellState;
 use std::ffi::CStr;
 use sys::ShortCStr;
+use sys::errno::EINVAL;
 use sys::fork_cell::ForkCell;
 
 pub fn child_main(
@@ -25,7 +26,7 @@ pub fn child_main(
         r.export()?;
     }
 
-    let resolved = substitute_args(args, cell)?;
+    let resolved = substitute_args(args, cell).map_err(|_| EINVAL)?;
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
     let state = cell.borrow_mut()?;

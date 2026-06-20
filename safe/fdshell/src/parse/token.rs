@@ -1,7 +1,8 @@
-use crate::error::parse::ParseError;
+use crate::error::parse::{ParseError, report_unbalanced_quote, report_unexpected_eof};
+use error_stack::Report;
 use sys::ShortCStr;
 
-pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseError> {
+pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseError>> {
     let mut tokens = Vec::new();
     let mut cur = ShortCStr::new();
     let mut in_quotes = false;
@@ -18,12 +19,12 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseError> {
                 b'"' => in_quotes = false,
                 b'\\' => {
                     if let Some(c) = bytes.next() {
-                        cur.push(c)?;
+                        cur.push(c).map_err(ParseError::from)?;
                     } else {
-                        return Err(ParseError::UnexpectedEof { pos });
+                        return Err(report_unexpected_eof(line, pos));
                     }
                 }
-                _ => cur.push(b)?,
+                _ => cur.push(b).map_err(ParseError::from)?,
             }
         } else {
             match b {
@@ -37,7 +38,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseError> {
                     if cur.starts_with(b"%") && cur.ends_with(b">")
                         || cur.starts_with(b"&") && cur.ends_with(b">")
                     {
-                        cur.push(b'|')?;
+                        cur.push(b'|').map_err(ParseError::from)?;
                     } else {
                         if !cur.is_empty() {
                             tokens.push((core::mem::take(&mut cur), token_start));
@@ -59,24 +60,22 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, ParseError> {
                 b'$' => {
                     if bytes.peek() == Some(&b'(') {
                         let start = pos - 1; // position of '$'
-                        super::token_subst::read_dollar_paren(&mut cur, &mut bytes, start)?;
+                        super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, start)?;
                     } else {
-                        cur.push(b)?;
+                        cur.push(b).map_err(ParseError::from)?;
                     }
                 }
                 b'`' => {
                     let start = pos - 1; // position of '`'
-                    super::token_subst::read_backtick(&mut cur, &mut bytes, start)?;
+                    super::token_subst::read_backtick(line, &mut cur, &mut bytes, start)?;
                 }
-                _ => cur.push(b)?,
+                _ => cur.push(b).map_err(ParseError::from)?,
             }
         }
     }
 
     if in_quotes {
-        return Err(ParseError::UnbalancedQuote {
-            pos: quote_start.unwrap_or(0),
-        });
+        return Err(report_unbalanced_quote(line, quote_start.unwrap_or(0)));
     }
     if !cur.is_empty() {
         tokens.push((cur, token_start));

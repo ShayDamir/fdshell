@@ -1,8 +1,10 @@
 use crate::error::parse::ParseError;
+use crate::error::parse::{report_error, report_invalid_char};
 use crate::parse::for_block::ForBlock;
 use crate::parse::if_block::IfBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
+use error_stack::Report;
 use sys::ShortCStr;
 
 pub enum ParsedLine {
@@ -18,9 +20,11 @@ pub enum ParsedLine {
     Until(UntilBlock),
 }
 
-pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, ParseError> {
+pub(crate) fn detect(
+    tokens: &[(ShortCStr, usize)],
+) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
-        Some(t) => t,
+        Some((t, _)) => t,
         None => return Ok(None),
     };
 
@@ -42,40 +46,30 @@ pub(crate) fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, ParseEr
     }
 
     if first.eq_bytes(b"unset") {
-        let target = tokens.get(1).ok_or(ParseError::Reason {
-            pos: 0,
-            reason: "expected variable name after 'unset'",
-        })?;
-        if let Some(var) = target.strip_prefix(b"%") {
+        let target = tokens
+            .get(1)
+            .ok_or_else(|| report_error("expected variable name after 'unset'", 0))?;
+        if let Some(var) = target.0.strip_prefix(b"%") {
             return Ok(Some(ParsedLine::Unset(var)));
         }
-        return Err(ParseError::Reason {
-            pos: 0,
-            reason: "variable must start with '%'",
-        });
+        return Err(report_error("variable must start with '%'", 0));
     }
 
     if first.eq_bytes(b"umask") {
         let mask = match tokens.get(1) {
-            Some(arg) => {
-                let s = arg
-                    .as_bytes()
-                    .map_err(|_| ParseError::InvalidChar { ch: 0, pos: 0 })?;
-                let s = core::str::from_utf8(s)
-                    .map_err(|_| ParseError::InvalidChar { ch: 0, pos: 0 })?;
+            Some((arg, _)) => {
+                let s = arg.as_bytes().map_err(|_| report_invalid_char(0, 0))?;
+                let s = core::str::from_utf8(s).map_err(|_| report_invalid_char(0, 0))?;
                 let s = s.strip_prefix("0o").unwrap_or(s);
-                Some(u32::from_str_radix(s, 8).map_err(|_| ParseError::Reason {
-                    pos: 0,
-                    reason: "invalid octal number",
-                })?)
+                Some(
+                    u32::from_str_radix(s, 8)
+                        .map_err(|_| report_error("invalid octal number", 0))?,
+                )
             }
             None => None,
         };
         if tokens.get(2).is_some() {
-            return Err(ParseError::Reason {
-                pos: 0,
-                reason: "umask takes at most one argument",
-            });
+            return Err(report_error("umask takes at most one argument", 0));
         }
         return Ok(Some(ParsedLine::Umask(mask)));
     }

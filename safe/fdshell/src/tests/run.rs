@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use crate::error::cmd::CmdError;
 use crate::run::run_one;
 use crate::state::ShellState;
 use crate::task::Task;
@@ -77,7 +78,7 @@ fn umask_invalid_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"umask abc", &cell).unwrap_err();
-        assert!(e.source_start == 0);
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 
@@ -86,7 +87,7 @@ fn umask_too_many_args_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"umask 0o077 extra", &cell).unwrap_err();
-        assert!(e.source_start == 0);
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 
@@ -102,7 +103,7 @@ fn wait_no_tasks() {
 fn wait_nonexistent_name() {
     let cell = make_cell();
     let e = run_one(b"wait &nonexistent", &cell).unwrap_err();
-    assert!(e.source_start == 0);
+    assert!(matches!(e.current_context(), CmdError::Exec));
 }
 
 #[test]
@@ -180,7 +181,7 @@ fn wait_all_tasks() {
 fn wait_rejects_capture() {
     let cell = make_cell();
     let e = run_one(b"wait %>%var", &cell).unwrap_err();
-    assert!(e.source_start == 0);
+    assert!(matches!(e.current_context(), CmdError::Exec));
 }
 
 #[test]
@@ -210,7 +211,7 @@ fn if_missing_then_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"if umask 0o077; umask 0o000; fi", &cell).unwrap_err();
-        assert!(e.message.is_some());
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 
@@ -219,7 +220,7 @@ fn if_missing_fi_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"if umask 0o077; then umask 0o000", &cell).unwrap_err();
-        assert!(e.message.is_some());
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 
@@ -233,7 +234,7 @@ fn if_then_before_semicolon_returns_err() {
     child_test(|| {
         let cell = make_cell();
         let e = run_one(b"if umask 0o077 then umask 0o000; fi", &cell).unwrap_err();
-        assert!(e.message.is_some());
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 
@@ -272,7 +273,7 @@ fn if_elif_before_semicolon_returns_err() {
             &cell,
         )
         .unwrap_err();
-        assert!(e.message.is_some());
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 
@@ -285,7 +286,7 @@ fn if_elif_without_then_returns_err() {
             &cell,
         )
         .unwrap_err();
-        assert!(e.message.is_some());
+        assert!(matches!(e.current_context(), CmdError::Parse));
     });
 }
 

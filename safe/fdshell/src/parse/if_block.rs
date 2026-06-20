@@ -1,5 +1,6 @@
 use super::semi::{find_preceded_by_semi, trim_semi, try_join};
-use crate::error::parse::ParseErrorInfo;
+use crate::error::parse::{ParseError, report_error};
+use error_stack::Report;
 use sys::ShortCStr;
 
 pub struct IfBlock {
@@ -9,12 +10,9 @@ pub struct IfBlock {
     pub else_body: Option<ShortCStr>,
 }
 
-pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, ParseErrorInfo> {
+pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Report<ParseError>> {
     if !tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"if")) {
-        return Err(ParseErrorInfo {
-            source_start: 0,
-            message: None,
-        });
+        return Err(report_error("malformed if block", 0));
     }
 
     let if_pos = tokens.first().map(|(_, p)| *p).unwrap_or(0);
@@ -22,32 +20,26 @@ pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Par
     let first_then = find_preceded_by_semi(tokens, 1, b"then");
     let first_then = match first_then {
         Some(idx) => idx,
-        None => {
-            return Err(ParseErrorInfo::new(if_pos, "missing 'then'"));
-        }
+        None => return Err(report_error("missing 'then'", if_pos)),
     };
-
-    // first_then >= 2 is guaranteed by find_preceded_by_semi starting at index 1
-    // and requiring a preceding ';' (which can't be at index 0 since that's 'if').
-    // The condition is empty only if first_then == 2 (tokens: [if, ;, then, ...]).
 
     let fi_idx = tokens.len() - 1;
     if !tokens.last().is_some_and(|(t, _)| t.eq_bytes(b"fi")) {
-        return Err(ParseErrorInfo::new(if_pos, "missing 'fi'"));
+        return Err(report_error("missing 'fi'", if_pos));
     }
 
-    let cond_str =
-        try_join(trim_semi(tokens.get(1..first_then - 1).ok_or_else(
-            || ParseErrorInfo::new(if_pos, "missing condition"),
-        )?))
-        .map_err(ParseErrorInfo::from)?;
+    let cond_str = try_join(trim_semi(
+        tokens
+            .get(1..first_then - 1)
+            .ok_or_else(|| report_error("missing condition", if_pos))?,
+    ))?;
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then + 1;
     while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif") {
         let then_idx = find_preceded_by_semi(tokens, elif_idx + 1, b"then").ok_or_else(|| {
             let elif_pos = tokens.get(elif_idx).map(|(_, p)| *p).unwrap_or(0);
-            ParseErrorInfo::new(elif_pos, "missing 'then' after 'elif'")
+            report_error("missing 'then' after 'elif'", elif_pos)
         })?;
         elif_pairs.push((elif_idx, then_idx));
         pos = then_idx + 1;
@@ -62,22 +54,17 @@ pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Par
     let then_str = try_join(trim_semi(
         tokens
             .get(first_then + 1..first_end - 1)
-            .ok_or_else(|| ParseErrorInfo::new(if_pos, "missing 'then'"))?,
-    ))
-    .map_err(ParseErrorInfo::from)?;
-    // Empty then body is accepted (valid: `if true; then; fi`)
+            .ok_or_else(|| report_error("missing 'then'", if_pos))?,
+    ))?;
 
     let elifs = elif_pairs
         .iter()
         .enumerate()
         .map(|(i, &(ei, ti))| {
             let ec = try_join(trim_semi(tokens.get(ei + 1..ti - 1).ok_or_else(|| {
-                ParseErrorInfo::new(
-                    tokens.get(ei).map(|(_, p)| *p).unwrap_or(0),
-                    "missing condition",
-                )
-            })?))
-            .map_err(ParseErrorInfo::from)?;
+                let p = tokens.get(ei).map(|(_, p)| *p).unwrap_or(0);
+                report_error("missing condition", p)
+            })?))?;
             let next = elif_pairs
                 .get(i + 1)
                 .map(|&(ne, _)| ne)
@@ -85,28 +72,22 @@ pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Par
                 .unwrap_or(fi_idx);
             let eb = try_join(trim_semi(tokens.get(ti + 1..next - 1).ok_or_else(
                 || {
-                    ParseErrorInfo::new(
-                        tokens.get(ti).map(|(_, p)| *p).unwrap_or(0),
-                        "missing 'then'",
-                    )
+                    let p = tokens.get(ti).map(|(_, p)| *p).unwrap_or(0);
+                    report_error("missing 'then'", p)
                 },
-            )?))
-            .map_err(ParseErrorInfo::from)?;
+            )?))?;
             Ok((ec, eb))
         })
-        .collect::<Result<Vec<_>, ParseErrorInfo>>()?;
+        .collect::<Result<Vec<_>, Report<ParseError>>>()?;
 
     let else_str = else_idx
         .map(|ei| {
             try_join(trim_semi(tokens.get(ei + 1..fi_idx - 1).ok_or_else(
                 || {
-                    ParseErrorInfo::new(
-                        tokens.get(ei).map(|(_, p)| *p).unwrap_or(0),
-                        "missing 'else' body",
-                    )
+                    let p = tokens.get(ei).map(|(_, p)| *p).unwrap_or(0);
+                    report_error("missing 'else' body", p)
                 },
             )?))
-            .map_err(ParseErrorInfo::from)
         })
         .transpose()?;
     Ok(IfBlock {
