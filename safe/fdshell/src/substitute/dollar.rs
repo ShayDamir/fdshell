@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use error_stack::Report;
 use sys::ShortCStr;
 
 use crate::error::resolve::ResolveError;
@@ -9,7 +10,7 @@ pub(crate) fn dollar_subst(
     peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
     state: &ShellState,
     out: &mut Vec<u8>,
-) -> Result<(), ResolveError> {
+) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'$') => {
             peek.next();
@@ -28,12 +29,17 @@ pub(crate) fn dollar_subst(
             let name_scs = super::percent::collect_name(peek)?;
             match state.strings.get(&name_scs) {
                 Some(val) => {
-                    out.extend_from_slice(val.as_bytes().map_err(|_| ResolveError::RefNotFound)?);
+                    out.extend_from_slice(
+                        val.as_bytes()
+                            .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+                    );
                 }
                 None => {
                     out.push(b'$');
                     out.extend_from_slice(
-                        name_scs.as_bytes().map_err(|_| ResolveError::RefNotFound)?,
+                        name_scs
+                            .as_bytes()
+                            .map_err(|_| Report::new(ResolveError::RefNotFound))?,
                     );
                 }
             }
@@ -53,7 +59,7 @@ fn handle_brace(
     peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
     state: &ShellState,
     out: &mut Vec<u8>,
-) -> Result<(), ResolveError> {
+) -> Result<(), Report<ResolveError>> {
     peek.next();
     let mut name = Vec::new();
     let mut closed = false;
@@ -67,15 +73,21 @@ fn handle_brace(
         peek.next();
     }
     if closed {
-        let name_scs = ShortCStr::from_vec(name).map_err(|_| ResolveError::TokenTooLong)?;
+        let name_scs =
+            ShortCStr::from_vec(name).map_err(|_| Report::new(ResolveError::TokenTooLong))?;
         match state.strings.get(&name_scs) {
-            Some(val) => {
-                out.extend_from_slice(val.as_bytes().map_err(|_| ResolveError::RefNotFound)?)
-            }
+            Some(val) => out.extend_from_slice(
+                val.as_bytes()
+                    .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+            ),
             None => {
                 out.push(b'$');
                 out.push(b'{');
-                out.extend_from_slice(name_scs.as_bytes().map_err(|_| ResolveError::RefNotFound)?);
+                out.extend_from_slice(
+                    name_scs
+                        .as_bytes()
+                        .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+                );
                 out.push(b'}');
             }
         }

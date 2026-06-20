@@ -48,7 +48,7 @@ pub(crate) fn try_intercept(
                     CmdError::RedirectNotSupported { command: "cd" },
                 ));
             }
-            crate::cd::cd(&cmdline.args, &mut state)?;
+            crate::cd::cd(&cmdline.args, &mut state).change_context(CmdError::Cd)?;
             state.last_status = WaitStatus::Exited(0);
         }
         b"exit" | b"quit" => {
@@ -82,8 +82,8 @@ pub(crate) fn try_intercept(
             let code = match cmdline.args.first() {
                 Some(arg) => {
                     let s = core::str::from_utf8(arg.as_bytes().map_err(|_| CmdError::Exec)?)
-                        .change_context(CmdError::Builtin)?;
-                    s.parse::<i32>().change_context(CmdError::Builtin)?
+                        .change_context(CmdError::ExitArgInvalid)?;
+                    s.parse::<i32>().change_context(CmdError::ExitArgInvalid)?
                 }
                 None => state.last_status.exit_code(),
             };
@@ -159,7 +159,8 @@ pub(crate) fn try_intercept(
                     CmdError::RedirectNotSupported { command: "wait" },
                 ));
             }
-            state.last_status = crate::task::try_wait(&cmdline.args, &mut state)?;
+            state.last_status =
+                crate::task::try_wait(&cmdline.args, &mut state).change_context(CmdError::Task)?;
         }
         b"export" => {
             if cmdline.builtin {
@@ -189,7 +190,8 @@ pub(crate) fn try_intercept(
                     CmdError::RedirectNotSupported { command: "export" },
                 ));
             }
-            crate::exports::handle_export(&cmdline.args, &mut state)?;
+            crate::exports::handle_export(&cmdline.args, &mut state)
+                .change_context(CmdError::ExportName)?;
             state.last_status = WaitStatus::Exited(0);
         }
         _ => return Ok(false),

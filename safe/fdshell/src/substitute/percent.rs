@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use error_stack::Report;
 use std::collections::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
@@ -9,7 +10,7 @@ use crate::state::ShellState;
 
 pub(crate) fn collect_name(
     peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
-) -> Result<ShortCStr, ResolveError> {
+) -> Result<ShortCStr, Report<ResolveError>> {
     let mut name = Vec::new();
     name.push(peek.next().ok_or(ResolveError::RefNotFound)?);
     while let Some(&nc) = peek.peek() {
@@ -20,7 +21,7 @@ pub(crate) fn collect_name(
             break;
         }
     }
-    ShortCStr::from_vec(name).map_err(|_| ResolveError::TokenTooLong)
+    ShortCStr::from_vec(name).map_err(|_| Report::new(ResolveError::TokenTooLong))
 }
 
 pub(crate) fn percent_subst(
@@ -28,7 +29,7 @@ pub(crate) fn percent_subst(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
     out: &mut Vec<u8>,
-) -> Result<(), ResolveError> {
+) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'%') => {
             out.push(b'%');
@@ -40,7 +41,9 @@ pub(crate) fn percent_subst(
                 Some(d) => d.as_raw(),
                 None => match state.fds.get(&name_scs) {
                     Some(src) => {
-                        let d = src.export().map_err(|_| ResolveError::RefNotFound)?;
+                        let d = src
+                            .export()
+                            .map_err(|_| Report::new(ResolveError::RefNotFound))?;
                         let raw = d.as_raw();
                         cache.insert(name_scs, d);
                         raw
@@ -48,7 +51,9 @@ pub(crate) fn percent_subst(
                     None => {
                         out.push(b'%');
                         out.extend_from_slice(
-                            name_scs.as_bytes().map_err(|_| ResolveError::RefNotFound)?,
+                            name_scs
+                                .as_bytes()
+                                .map_err(|_| Report::new(ResolveError::RefNotFound))?,
                         );
                         return Ok(());
                     }

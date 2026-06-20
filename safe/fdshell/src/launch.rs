@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use error_stack::{Report, ResultExt};
+
 use crate::child::{self, Command};
 use crate::parse::CommandLine;
 use crate::state::ShellState;
@@ -14,17 +16,17 @@ pub struct LaunchOutcome {
 pub fn launch(
     cell: &ForkCell<ShellState>,
     cmdline: &CommandLine,
-) -> Result<LaunchOutcome, crate::error::launch::LaunchError> {
+) -> Result<LaunchOutcome, Report<crate::error::launch::LaunchError>> {
     let cmd = Command::from(cmdline);
 
     let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
-        .map_err(|_| crate::error::launch::LaunchError::Redirect)?;
+        .change_context(crate::error::launch::LaunchError::Redirect)?;
     let resolved = {
         let state = cell
             .borrow_mut()
             .map_err(|_| crate::error::launch::LaunchError::Borrow)?;
         crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)
-            .map_err(|_| crate::error::launch::LaunchError::Redirect)?
+            .change_context(crate::error::launch::LaunchError::Redirect)?
     };
 
     let (capture_fd, child_fd) = if cmdline.captures.is_empty() {

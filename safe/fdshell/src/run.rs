@@ -14,14 +14,16 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
             if crate::intercept::try_intercept(line, &cmdline, cell)? {
                 return Ok(());
             }
-            let outcome = crate::launch::launch(cell, &cmdline)?;
+            let outcome = crate::launch::launch(cell, &cmdline).change_context(CmdError::Launch)?;
             {
                 let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
-                state.last_status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state)?;
+                state.last_status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state)
+                    .change_context(CmdError::Launch)?;
             }
         }
         crate::parse::ParsedLine::Pipeline(pipeline) => {
-            let status = crate::postlaunch::run_pipeline(pipeline, cell)?;
+            let status = crate::postlaunch::run_pipeline(pipeline, cell)
+                .change_context(CmdError::Pipeline)?;
             let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
             state.last_status = status;
         }

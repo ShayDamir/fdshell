@@ -22,15 +22,3 @@ pub(crate) enum LaunchError {
 }
 
 impl core::error::Error for LaunchError {}
-
-impl From<crate::error::redirect::OpenRedirectError> for LaunchError {
-    fn from(_: crate::error::redirect::OpenRedirectError) -> Self {
-        LaunchError::Redirect
-    }
-}
-
-impl From<crate::error::capture::CaptureError> for LaunchError {
-    fn from(_: crate::error::capture::CaptureError) -> Self {
-        LaunchError::CaptureSocket
-    }
-}

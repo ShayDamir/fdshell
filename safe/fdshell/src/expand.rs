@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -9,12 +10,15 @@ use crate::state::ShellState;
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
     cell: &ForkCell<ShellState>,
-) -> Result<Vec<ShortCStr>, ResolveError> {
+) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let mut out = Vec::new();
     for word in words {
-        let bs = word.as_bytes().map_err(|_| ResolveError::RefNotFound)?;
+        let bs = word
+            .as_bytes()
+            .map_err(|_| Report::new(ResolveError::RefNotFound))?;
         let split = if is_cmd_subst(bs) {
-            let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)?;
+            let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)
+                .change_context(ResolveError::Resolve)?;
             split_whitespace(&expanded)?
         } else {
             vec![word.clone()]
@@ -37,7 +41,7 @@ fn strip_delims(bs: &[u8]) -> &[u8] {
     }
 }
 
-fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, ResolveError> {
+fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let mut words = Vec::new();
     let mut cur = ShortCStr::new();
     for &b in data {
@@ -46,7 +50,8 @@ fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, ResolveError> {
                 words.push(core::mem::take(&mut cur));
             }
         } else {
-            cur.push(b).map_err(|_| ResolveError::NulByte)?;
+            cur.push(b)
+                .map_err(|_| Report::new(ResolveError::NulByte))?;
         }
     }
     if !cur.is_empty() {

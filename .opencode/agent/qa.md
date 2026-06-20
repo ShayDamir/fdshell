@@ -55,6 +55,7 @@ See [error-handling.md](../../error-handling.md) for the full strategy.
 - **Typed errors only in fdshell**: Each sub-domain gets its own small enum (e.g., `ParseError`, `CaptureError`). Variants are simple nouns — no payload data carrying meaningful values.
 - **No raw errno printing**: Search `safe/fdshell/src/` for patterns like `"exit code: {code}"`, `format!("{}", e)`, or any place an `i32` error code is interpolated into a user-facing string. Flag and suggest using Report formatting instead.
 - **Report composition**: Functions that chain errors should use `.map_err()` at crate boundaries to convert `i32` to local enum, then `.change_context()` if the layer adds semantic meaning. Attach extra context via `.attach()` (the old `.attach()` is now `.attach_opaque()`).
+- **No `From` impls for error types**: Search `safe/fdshell/src/` for `impl From<.*Error> for` and flag any occurrence. Cross-domain `From` impls between typed error enums are banned — use `.change_context()` instead. The only exception is `From<i32>` (accepted temporary, since `i32` can't participate in `error_stack`'s `.change_context()`). This check covers both `From<E> for OtherError` and `From<E> for Report<OtherError>`.
 - **Error enum docs = Display output**: When defining a new error enum with `displaydoc`, the doc strings on variants ARE the user-facing error messages. Verify they read naturally and don't contain debug-only details.
 
 ### 6. Readability

@@ -27,9 +27,3 @@ impl From<i32> for ResolveError {
         ResolveError::Resolve
     }
 }
-
-impl From<crate::error::cmd_subst::CmdSubstError> for ResolveError {
-    fn from(_: crate::error::cmd_subst::CmdSubstError) -> Self {
-        ResolveError::Resolve
-    }
-}
