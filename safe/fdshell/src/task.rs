@@ -25,7 +25,8 @@ pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus
                 && let Some(capture_fd) = task.capture_fd
             {
                 let entries =
-                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)?;
+                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)
+                        .map_err(|_| EINVAL)?;
                 for (var, fd) in entries {
                     state.fds.insert(var, fd);
                 }

@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
+use crate::error::capture::CaptureError;
 use crate::state::ShellState;
 use sys::ShortCStr;
-use sys::errno::EEXIST;
 
 // Clone required by pipeline/mod.rs (cmd.captures.clone()).
 // Debug + PartialEq are test-only — quarantined behind cfg_attr.
@@ -23,7 +23,7 @@ pub fn do_captures(
     expected_pid: i32,
     captures: Vec<Capture>,
     state: &ShellState,
-) -> Result<Vec<(ShortCStr, sys::LocalFd)>, i32> {
+) -> Result<Vec<(ShortCStr, sys::LocalFd)>, CaptureError> {
     let mut captured_fds: Vec<(ShortCStr, sys::LocalFd)> = Vec::with_capacity(captures.len());
     let mut remaining = captures;
 
@@ -31,7 +31,7 @@ pub fn do_captures(
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
         let (fd, rtag) = match sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid) {
             Err(e) if e == sys::errno::EAGAIN => break,
-            Err(e) => return Err(e),
+            Err(_) => return Err(CaptureError::ReceiveFailed),
             Ok(v) => v,
         };
         let idx = remaining
@@ -42,7 +42,7 @@ pub fn do_captures(
             debug_assert!(i < remaining.len());
             let c = remaining.remove(i);
             if !c.force && state.fds.contains_key(&c.var) {
-                return Err(EEXIST);
+                return Err(CaptureError::Exists);
             }
             captured_fds.push((c.var, fd));
         }

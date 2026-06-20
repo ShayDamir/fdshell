@@ -26,10 +26,10 @@ fn execute(
     redirects: &[crate::redirect::RedirectDef],
     cell: &ForkCell<ShellState>,
 ) -> Result<(), i32> {
-    let opened = crate::redirect::open_redirect_files(redirects)?;
+    let opened = crate::redirect::open_redirect_files(redirects).map_err(|_| EINVAL)?;
     let resolved = {
         let state = cell.borrow()?;
-        crate::redirect::resolve_redirects(redirects, &opened, &state)?
+        crate::redirect::resolve_redirects(redirects, &opened, &state).map_err(|_| EINVAL)?
     };
 
     for r in &resolved {

@@ -11,25 +11,38 @@ pub struct LaunchOutcome {
     pub child_pid: i32,
 }
 
-pub fn launch(cell: &ForkCell<ShellState>, cmdline: &CommandLine) -> Result<LaunchOutcome, i32> {
+pub fn launch(
+    cell: &ForkCell<ShellState>,
+    cmdline: &CommandLine,
+) -> Result<LaunchOutcome, crate::error::launch::LaunchError> {
     let cmd = Command::from(cmdline);
 
-    let opened = crate::redirect::open_redirect_files(&cmdline.redirects)?;
+    let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
+        .map_err(|_| crate::error::launch::LaunchError::Redirect)?;
     let resolved = {
-        let state = cell.borrow_mut()?;
-        crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)?
+        let state = cell
+            .borrow_mut()
+            .map_err(|_| crate::error::launch::LaunchError::Borrow)?;
+        crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)
+            .map_err(|_| crate::error::launch::LaunchError::Redirect)?
     };
 
     let (capture_fd, child_fd) = if cmdline.captures.is_empty() {
         (None, None)
     } else {
-        let (cap, ch) = sys::net::socketpair_with_passcred()?;
+        let (cap, ch) = sys::net::socketpair_with_passcred()
+            .map_err(|_| crate::error::launch::LaunchError::CaptureSocket)?;
         (Some(cap), Some(ch))
     };
-    let (child_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(cell)?;
+    let (child_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(cell)
+        .map_err(|_| crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {
-        None => child::child_exec(child_fd, cell, cmd, &cmdline.args, &resolved),
+        None => {
+            // Unreachable in parent — child fork branch calls std::process::exit()
+            // but we need to satisfy the type checker.
+            child::child_exec(child_fd, cell, cmd, &cmdline.args, &resolved);
+        }
         Some(pidfd) => Ok(LaunchOutcome {
             pidfd,
             capture_fd,

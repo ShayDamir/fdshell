@@ -39,10 +39,10 @@ pub fn run_child(
         Ok(state) => {
             match crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, &state) {
                 Ok(fds) => fds,
-                Err(e) => std::process::exit(e),
+                Err(_) => std::process::exit(1),
             }
         }
-        Err(e) => std::process::exit(e),
+        Err(_) => std::process::exit(1),
     };
     redirects.extend(file_redirects);
 
