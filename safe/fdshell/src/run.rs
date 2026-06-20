@@ -11,7 +11,7 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
     let parsed = crate::parse::parse(line).change_context(CmdError::Parse)?;
     match parsed {
         crate::parse::ParsedLine::Cmd(cmdline) => {
-            if crate::intercept::try_intercept(&cmdline, cell).map_err(|_| CmdError::Exec)? {
+            if crate::intercept::try_intercept(&cmdline, cell)? {
                 return Ok(());
             }
             let outcome = crate::launch::launch(cell, &cmdline)?;

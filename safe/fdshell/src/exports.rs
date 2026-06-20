@@ -1,7 +1,8 @@
+use crate::error::exports::InvalidExportName;
 use crate::state::ShellState;
 use sys::ShortCStr;
 
-pub fn handle_export(args: &[ShortCStr], state: &mut ShellState) -> Result<(), i32> {
+pub fn handle_export(args: &[ShortCStr], state: &mut ShellState) -> Result<(), InvalidExportName> {
     match args.first() {
         None => list_exports(state),
         Some(arg) => {
@@ -15,7 +16,7 @@ pub fn handle_export(args: &[ShortCStr], state: &mut ShellState) -> Result<(), i
     }
 }
 
-fn list_exports(state: &ShellState) -> Result<(), i32> {
+fn list_exports(state: &ShellState) -> Result<(), crate::error::exports::InvalidExportName> {
     for (k, v) in &state.exports {
         let key_str = core::str::from_utf8(k.as_bytes().unwrap_or(&[])).unwrap_or("?");
         let val_str = core::str::from_utf8(v.as_slice()).unwrap_or("?");

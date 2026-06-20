@@ -75,7 +75,14 @@ pub fn dispatch_builtin(
             sys::shellfd::send_fd(&fd, c"resolve").ok();
             Ok(())
         }
-        name_bytes => crate::child::fdpass::dispatch(name_bytes, args, state)
-            .unwrap_or(Err(sys::errno::ENOSYS)),
+        name_bytes => match crate::child::fdpass::dispatch(name_bytes, args, state) {
+            Some(result) => result.map_err(|e| match e {
+                crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
+                crate::error::fdpass::FdPassError::NotFound
+                | crate::error::fdpass::FdPassError::InvalidName
+                | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,
+            }),
+            None => Err(sys::errno::ENOSYS),
+        },
     }
 }

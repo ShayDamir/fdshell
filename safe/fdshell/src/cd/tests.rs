@@ -33,8 +33,16 @@ fn cd_to_tmp() {
 
 #[test]
 fn cd_to_home() {
-    let home_exists = std::env::var_os("HOME").is_some_and(|p| std::path::Path::new(&p).exists());
-    if home_exists {
+    let home = std::env::var_os("HOME");
+    let Some(home_path) = home else {
+        child_test(|| {
+            let mut state = ShellState::new();
+            let e = cd(&[], &mut state).unwrap_err();
+            assert!(matches!(e, CdError::HomeNotSet));
+        });
+        return;
+    };
+    if std::path::Path::new(&home_path).exists() {
         child_test(|| {
             let mut state = ShellState::new();
             cd(&[], &mut state).unwrap();
@@ -45,7 +53,7 @@ fn cd_to_home() {
         child_test(|| {
             let mut state = ShellState::new();
             let e = cd(&[], &mut state).unwrap_err();
-            assert_eq!(e, sys::errno::ENOENT);
+            assert!(matches!(e, CdError::CdPathOpen));
         });
     }
 }
@@ -70,7 +78,7 @@ fn cd_missing_path() {
         let mut state = ShellState::new();
         let bad = c"/nonexistent-cd-test-xxxxxxxx".into();
         let e = cd(&[bad], &mut state).unwrap_err();
-        assert_eq!(e, sys::errno::ENOENT);
+        assert!(matches!(e, CdError::CdPathOpen));
     });
 }
 
@@ -80,7 +88,7 @@ fn cd_missing_var() {
         let mut state = ShellState::new();
         let bad = c"%NONEXISTENT".into();
         let e = cd(&[bad], &mut state).unwrap_err();
-        assert_eq!(e, sys::errno::ENOENT);
+        assert!(matches!(e, CdError::CdPathOpen));
     });
 }
 

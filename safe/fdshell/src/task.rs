@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use crate::capture::Capture;
+use crate::error::task::TaskError;
 use crate::state::ShellState;
 use sys::ShortCStr;
-use sys::errno::EINVAL;
 use sys::siginfo::WaitStatus;
 
 pub struct Task {
@@ -13,12 +13,12 @@ pub struct Task {
     pub captures: Vec<Capture>,
 }
 
-pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus, i32> {
+pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus, TaskError> {
     match args.first() {
         Some(arg) => {
-            let key = arg.strip_prefix(b"&").ok_or(EINVAL)?;
+            let key = arg.strip_prefix(b"&").ok_or(TaskError::BadArg)?;
             let Some(task) = state.tasks.remove(&key) else {
-                return Err(EINVAL);
+                return Err(TaskError::NotFound);
             };
             let status = sys::wait_pidfd::wait_pidfd(&task.pidfd)?;
             if let WaitStatus::Exited(0) = status
@@ -26,7 +26,7 @@ pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus
             {
                 let entries =
                     crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)
-                        .map_err(|_| EINVAL)?;
+                        .map_err(|_| TaskError::Wait)?;
                 for (var, fd) in entries {
                     state.fds.insert(var, fd);
                 }

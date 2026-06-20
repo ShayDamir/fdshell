@@ -103,7 +103,7 @@ fn wait_no_tasks() {
 fn wait_nonexistent_name() {
     let cell = make_cell();
     let e = run_one(b"wait &nonexistent", &cell).unwrap_err();
-    assert!(matches!(e.current_context(), CmdError::Exec));
+    assert!(matches!(e.current_context(), CmdError::Task));
 }
 
 #[test]
@@ -582,7 +582,10 @@ fn export_fd_dispatch_single_arg_no_var() {
         let arg = ShortCStr::from_vec(b"%missing".to_vec()).unwrap();
         let result = crate::child::fdpass::dispatch(b"export_fd", &[arg], &state);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().unwrap_err(), sys::errno::EINVAL);
+        assert!(matches!(
+            result.unwrap().unwrap_err(),
+            crate::error::fdpass::FdPassError::NotFound
+        ));
     });
 }
 
@@ -593,7 +596,10 @@ fn export_fd_dispatch_calls_export_fd() {
         let state = borrow_state(&cell);
         let result = crate::child::fdpass::dispatch(b"export_fd", &[], &state);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().unwrap_err(), sys::errno::EINVAL);
+        assert!(matches!(
+            result.unwrap().unwrap_err(),
+            crate::error::fdpass::FdPassError::MissingArg
+        ));
     });
 }
 

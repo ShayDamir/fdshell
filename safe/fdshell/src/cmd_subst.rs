@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
+use crate::error::cmd_subst::CmdSubstError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
-pub(crate) fn run_and_capture(cmd: &[u8], cell: &ForkCell<ShellState>) -> Result<Vec<u8>, i32> {
-    let (r, w) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC)?;
-    match sys::fork_pidfd::fork_pidfd_cell(cell)? {
+pub(crate) fn run_and_capture(
+    cmd: &[u8],
+    cell: &ForkCell<ShellState>,
+) -> Result<Vec<u8>, CmdSubstError> {
+    let (r, w) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).map_err(|_| CmdSubstError::Pipe)?;
+    match sys::fork_pidfd::fork_pidfd_cell(cell).map_err(|_| CmdSubstError::Fork)? {
         (_, None) => {
             // child stdout → pipe; failure means empty output
             let _ = w.export_to(1);

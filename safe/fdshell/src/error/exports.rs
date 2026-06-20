@@ -9,3 +9,9 @@ use displaydoc::Display;
 pub(crate) struct InvalidExportName;
 
 impl core::error::Error for InvalidExportName {}
+
+impl From<i32> for InvalidExportName {
+    fn from(_: i32) -> Self {
+        InvalidExportName
+    }
+}
