@@ -1,13 +1,13 @@
 use core::cell::{Cell, UnsafeCell};
 use core::marker::PhantomData;
 
+mod error;
 mod ref_mut;
 #[cfg(test)]
 mod tests;
 
+pub use self::error::ForkCellError;
 pub use self::ref_mut::{Ref, RefMut};
-
-use crate::errno::EINVAL;
 
 /// Interior mutability with fork-aware borrow tracking.
 ///
@@ -39,21 +39,25 @@ impl<T> ForkCell<T> {
         }
     }
 
-    /// Shared borrow. Returns `Err(EINVAL)` if already mutably borrowed.
-    pub fn borrow(&self) -> Result<Ref<'_, T>, i32> {
+    /// Shared borrow. Returns `Err(ExclusiveBorrowActive)` if already mutably borrowed.
+    pub fn borrow(&self) -> Result<Ref<'_, T>, ForkCellError> {
         let cur = self.count.get();
         if cur < 0 {
-            return Err(EINVAL);
+            return Err(ForkCellError::ExclusiveBorrowActive);
         }
         self.count.set(cur + 1);
         Ok(Ref { cell: self })
     }
 
-    /// Exclusive borrow. Returns `Err(EINVAL)` if already borrowed (shared or exclusive).
-    pub fn borrow_mut(&self) -> Result<RefMut<'_, T>, i32> {
+    /// Exclusive borrow. Returns `Err(SharedBorrowActive)` if shared borrows are
+    /// active, or `Err(ExclusiveBorrowActive)` if another exclusive borrow is active.
+    pub fn borrow_mut(&self) -> Result<RefMut<'_, T>, ForkCellError> {
         let cur = self.count.get();
         if cur != 0 {
-            return Err(EINVAL);
+            if cur > 0 {
+                return Err(ForkCellError::SharedBorrowActive);
+            }
+            return Err(ForkCellError::ExclusiveBorrowActive);
         }
         self.count.set(-1);
         Ok(RefMut { cell: self })

@@ -108,10 +108,7 @@ fn main() -> Result<(), Report<AppError>> {
     sys::umask::init();
     let state = sys::fork_cell::ForkCell::new(state::ShellState::new());
     {
-        let mut state = state
-            .borrow_mut()
-            .map_err(LegacyError)
-            .change_context(AppError::Borrow)?;
+        let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
         let cwd = sys::openat2::open(c".", O_DIRECTORY)
             .map_err(|e| LegacyError(e.into()))
             .change_context(AppError::Cwd)?;
