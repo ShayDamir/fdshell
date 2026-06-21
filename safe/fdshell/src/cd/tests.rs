@@ -38,7 +38,7 @@ fn cd_to_home() {
         child_test(|| {
             let mut state = ShellState::new();
             let e = cd(&[], &mut state).unwrap_err();
-            assert!(matches!(e, CdError::HomeNotSet));
+            assert!(matches!(e.current_context(), CdError::HomeNotSet));
         });
         return;
     };
@@ -53,7 +53,7 @@ fn cd_to_home() {
         child_test(|| {
             let mut state = ShellState::new();
             let e = cd(&[], &mut state).unwrap_err();
-            assert!(matches!(e, CdError::CdPathOpen));
+            assert!(matches!(e.current_context(), CdError::CdPathOpen));
         });
     }
 }
@@ -78,7 +78,7 @@ fn cd_missing_path() {
         let mut state = ShellState::new();
         let bad = c"/nonexistent-cd-test-xxxxxxxx".into();
         let e = cd(&[bad], &mut state).unwrap_err();
-        assert!(matches!(e, CdError::CdPathOpen));
+        assert!(matches!(e.current_context(), CdError::CdPathOpen));
     });
 }
 
@@ -88,7 +88,7 @@ fn cd_missing_var() {
         let mut state = ShellState::new();
         let bad = c"%NONEXISTENT".into();
         let e = cd(&[bad], &mut state).unwrap_err();
-        assert!(matches!(e, CdError::CdPathOpen));
+        assert!(matches!(e.current_context(), CdError::CdPathOpen));
     });
 }
 

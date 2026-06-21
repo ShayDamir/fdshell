@@ -3,6 +3,7 @@
 use crate::capture::Capture;
 use crate::error::task::TaskError;
 use crate::state::ShellState;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
@@ -13,20 +14,30 @@ pub struct Task {
     pub captures: Vec<Capture>,
 }
 
-pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus, TaskError> {
+pub fn try_wait(
+    args: &[ShortCStr],
+    state: &mut ShellState,
+) -> Result<WaitStatus, Report<TaskError>> {
     match args.first() {
         Some(arg) => {
             let key = arg.strip_prefix(b"&").ok_or(TaskError::BadArg)?;
             let Some(task) = state.tasks.remove(&key) else {
-                return Err(TaskError::NotFound);
+                return Err(Report::new(TaskError::NotFound));
             };
-            let status = sys::wait_pidfd::wait_pidfd(&task.pidfd).map_err(|_| TaskError::Wait)?;
+            let status =
+                sys::wait_pidfd::wait_pidfd(&task.pidfd).change_context(TaskError::Wait)?;
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = task.capture_fd
             {
-                let entries =
-                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)
-                        .map_err(|_| TaskError::Wait)?;
+                let entries = match crate::capture::do_captures(
+                    capture_fd,
+                    task.child_pid,
+                    task.captures,
+                    state,
+                ) {
+                    Ok(v) => v,
+                    Err(_) => return Err(Report::new(TaskError::Wait)),
+                };
                 for (var, fd) in entries {
                     state.fds.insert(var, fd);
                 }
@@ -41,7 +52,7 @@ pub fn try_wait(args: &[ShortCStr], state: &mut ShellState) -> Result<WaitStatus
                     continue;
                 };
                 let status =
-                    sys::wait_pidfd::wait_pidfd(&task.pidfd).map_err(|_| TaskError::Wait)?;
+                    sys::wait_pidfd::wait_pidfd(&task.pidfd).change_context(TaskError::Wait)?;
                 if let WaitStatus::Exited(0) = status
                     && let Some(capture_fd) = task.capture_fd
                     && let Ok(entries) = crate::capture::do_captures(

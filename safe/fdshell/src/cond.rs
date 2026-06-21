@@ -1,4 +1,4 @@
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
@@ -26,7 +26,7 @@ pub(crate) fn run_cond_list(
                 let part = line.get(start..i).unwrap_or(b"").trim_ascii();
                 if !part.is_empty() {
                     crate::run::run_one(part, cell)?;
-                    let state = cell.borrow().map_err(|_| CmdError::Exec)?;
+                    let state = cell.borrow().change_context(CmdError::Exec)?;
                     if (tail.starts_with(b"&&") && state.last_status.exit_code() != 0)
                         || (tail.starts_with(b"||") && state.last_status.exit_code() == 0)
                     {

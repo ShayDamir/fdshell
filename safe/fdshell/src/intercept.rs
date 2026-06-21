@@ -18,8 +18,8 @@ pub(crate) fn try_intercept(
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
-    match cmdline.command.as_bytes().map_err(|_| CmdError::Exec)? {
+    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    match cmdline.command.as_bytes().change_context(CmdError::Exec)? {
         b"cd" => {
             if cmdline.builtin {
                 let pos = line.windows(7).position(|w| w == b"builtin").unwrap_or(0);
@@ -81,7 +81,7 @@ pub(crate) fn try_intercept(
             }
             let code = match cmdline.args.first() {
                 Some(arg) => {
-                    let s = core::str::from_utf8(arg.as_bytes().map_err(|_| CmdError::Exec)?)
+                    let s = core::str::from_utf8(arg.as_bytes().change_context(CmdError::Exec)?)
                         .change_context(CmdError::ExitArgInvalid)?;
                     s.parse::<i32>().change_context(CmdError::ExitArgInvalid)?
                 }
@@ -123,7 +123,7 @@ pub(crate) fn try_intercept(
             }
             state.last_status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {
                 Ok(()) => WaitStatus::Exited(0),
-                Err(e) => WaitStatus::Exited(match e {
+                Err(report) => WaitStatus::Exited(match report.current_context() {
                     crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
                     crate::error::fdpass::FdPassError::NotFound
                     | crate::error::fdpass::FdPassError::InvalidName

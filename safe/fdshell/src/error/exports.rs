@@ -4,14 +4,8 @@
 
 use displaydoc::Display;
 
-/// [InvalidExportName] Export string contains invalid characters or NUL bytes
+/// [InvalidExportName] Export string contains NUL bytes or internal inconsistency
 #[derive(Display, Debug)]
 pub(crate) struct InvalidExportName;
 
 impl core::error::Error for InvalidExportName {}
-
-impl From<i32> for InvalidExportName {
-    fn from(_: i32) -> Self {
-        InvalidExportName
-    }
-}

@@ -7,6 +7,7 @@ use crate::capture::Capture;
 use crate::error::pipeline::PipelineError;
 use crate::parse::Pipeline;
 use crate::state::ShellState;
+use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
@@ -19,14 +20,14 @@ pub struct CaptureChannel {
 pub fn launch_pipeline(
     cell: &ForkCell<ShellState>,
     pipeline: Pipeline,
-) -> Result<(WaitStatus, Vec<CaptureChannel>), PipelineError> {
+) -> Result<(WaitStatus, Vec<CaptureChannel>), Report<PipelineError>> {
     let n = pipeline.commands.len();
     let commands = pipeline.commands;
 
     let pipes = std::iter::repeat_with(|| sys::pipe::pipe2(sys::fcntl::O_CLOEXEC))
         .take(n.saturating_sub(1))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| PipelineError::Pipe)?;
+        .change_context(PipelineError::Pipe)?;
 
     let mut capture_pairs = commands
         .iter()
@@ -38,13 +39,13 @@ pub fn launch_pipeline(
             }
         })
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| PipelineError::CaptureSocket)?;
+        .change_context(PipelineError::CaptureSocket)?;
 
     let mut children: Vec<(i32, sys::LocalFd)> = Vec::with_capacity(n);
 
     for i in 0..n {
         let (child_pid, pidfd_opt) =
-            sys::fork_pidfd::fork_pidfd_cell(cell).map_err(|_| PipelineError::Pipeline)?;
+            sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
             None => child::run_child(i, &pipes, &mut capture_pairs, &commands, cell),
             Some(pidfd) => children.push((child_pid as i32, pidfd)),
@@ -67,7 +68,8 @@ pub fn launch_pipeline(
         .collect();
 
     let last = children.last().ok_or(PipelineError::Pipeline)?;
-    let last_status = sys::wait_pidfd::wait_pidfd(&last.1).map_err(|_| PipelineError::Pipeline)?;
+    let last_status =
+        sys::wait_pidfd::wait_pidfd(&last.1).change_context(PipelineError::Pipeline)?;
 
     for i in 0..n.saturating_sub(1) {
         if let Some(ch) = children.get(i) {

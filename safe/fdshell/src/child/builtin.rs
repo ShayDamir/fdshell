@@ -13,7 +13,10 @@ pub fn dispatch_builtin(
         b"true" => Ok(()),
         b"false" => Err(1),
         b"pwd" => {
-            let p = std::env::current_dir().map_err(|_| sys::errno::EINVAL)?;
+            let p = match std::env::current_dir() {
+                Ok(p) => p,
+                Err(_) => return Err(sys::errno::EINVAL),
+            };
             println!("{}", p.display());
             Ok(())
         }
@@ -24,7 +27,13 @@ pub fn dispatch_builtin(
                 if i > 0 {
                     print!(" ");
                 }
-                print!("{}", arg.to_str().map_err(|_| sys::errno::EINVAL)?);
+                print!(
+                    "{}",
+                    match arg.to_str() {
+                        Ok(s) => s,
+                        Err(_) => return Err(sys::errno::EINVAL),
+                    }
+                );
             }
             println!();
             Ok(())
@@ -76,12 +85,15 @@ pub fn dispatch_builtin(
             Ok(())
         }
         name_bytes => match crate::child::fdpass::dispatch(name_bytes, args, state) {
-            Some(result) => result.map_err(|e| match e {
-                crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
-                crate::error::fdpass::FdPassError::NotFound
-                | crate::error::fdpass::FdPassError::InvalidName
-                | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,
-            }),
+            Some(result) => match result {
+                Ok(v) => Ok(v),
+                Err(report) => Err(match report.current_context() {
+                    crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
+                    crate::error::fdpass::FdPassError::NotFound
+                    | crate::error::fdpass::FdPassError::InvalidName
+                    | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,
+                }),
+            },
             None => Err(sys::errno::ENOSYS),
         },
     }

@@ -67,8 +67,14 @@ fn positional_mode(args: &[&CStr]) -> Result<FchmodConfig, i32> {
 
 fn parse_fd(s: &CStr) -> Result<i32, i32> {
     let b = s.to_bytes();
-    let s = core::str::from_utf8(b).map_err(|_| EINVAL)?;
-    let n: i32 = s.parse().map_err(|_| EINVAL)?;
+    let s = match core::str::from_utf8(b) {
+        Ok(s) => s,
+        Err(_) => return Err(sys::errno::EINVAL),
+    };
+    let n: i32 = match s.parse() {
+        Ok(n) => n,
+        Err(_) => return Err(sys::errno::EINVAL),
+    };
     if n < 0 {
         return Err(EINVAL);
     }

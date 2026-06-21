@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 libc = { version = "0.2", default-features = false }
+error-stack = { version = "0.7", default-features = false }
 
 [[bin]]
 name = "execveat_ok"

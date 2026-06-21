@@ -44,7 +44,7 @@ pub fn finish_cmd(
         }
         None => {
             let status =
-                sys::wait_pidfd::wait_pidfd(&outcome.pidfd).map_err(|_| LaunchError::Fork)?;
+                sys::wait_pidfd::wait_pidfd(&outcome.pidfd).change_context(LaunchError::Fork)?;
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = outcome.capture_fd
             {
@@ -62,7 +62,7 @@ pub fn run_pipeline(
 ) -> Result<WaitStatus, Report<PipelineError>> {
     let (status, channels) = crate::pipeline::launch_pipeline(cell, pipeline)?;
     if let WaitStatus::Exited(0) = status {
-        let mut state = cell.borrow_mut().map_err(|_| PipelineError::Pipeline)?;
+        let mut state = cell.borrow_mut().change_context(PipelineError::Pipeline)?;
         for ch in channels {
             apply_captures(ch.capture_fd, ch.child_pid, ch.captures, &mut state)
                 .change_context(PipelineError::Pipeline)?;

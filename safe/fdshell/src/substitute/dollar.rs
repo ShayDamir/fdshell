@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 use crate::error::resolve::ResolveError;
@@ -30,8 +30,7 @@ pub(crate) fn dollar_subst(
             match state.strings.get(&name_scs) {
                 Some(val) => {
                     out.extend_from_slice(
-                        val.as_bytes()
-                            .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+                        val.as_bytes().change_context(ResolveError::RefNotFound)?,
                     );
                 }
                 None => {
@@ -39,7 +38,7 @@ pub(crate) fn dollar_subst(
                     out.extend_from_slice(
                         name_scs
                             .as_bytes()
-                            .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+                            .change_context(ResolveError::RefNotFound)?,
                     );
                 }
             }
@@ -73,20 +72,18 @@ fn handle_brace(
         peek.next();
     }
     if closed {
-        let name_scs =
-            ShortCStr::from_vec(name).map_err(|_| Report::new(ResolveError::TokenTooLong))?;
+        let name_scs = ShortCStr::from_vec(name).change_context(ResolveError::TokenTooLong)?;
         match state.strings.get(&name_scs) {
-            Some(val) => out.extend_from_slice(
-                val.as_bytes()
-                    .map_err(|_| Report::new(ResolveError::RefNotFound))?,
-            ),
+            Some(val) => {
+                out.extend_from_slice(val.as_bytes().change_context(ResolveError::RefNotFound)?)
+            }
             None => {
                 out.push(b'$');
                 out.push(b'{');
                 out.extend_from_slice(
                     name_scs
                         .as_bytes()
-                        .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+                        .change_context(ResolveError::RefNotFound)?,
                 );
                 out.push(b'}');
             }

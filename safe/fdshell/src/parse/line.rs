@@ -1,10 +1,10 @@
 use crate::error::parse::ParseError;
-use crate::error::parse::{report_error, report_invalid_char};
+use crate::error::parse::report_error;
 use crate::parse::for_block::ForBlock;
 use crate::parse::if_block::IfBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub enum ParsedLine {
@@ -58,12 +58,17 @@ pub(crate) fn detect(
     if first.eq_bytes(b"umask") {
         let mask = match tokens.get(1) {
             Some((arg, _)) => {
-                let s = arg.as_bytes().map_err(|_| report_invalid_char(0, 0))?;
-                let s = core::str::from_utf8(s).map_err(|_| report_invalid_char(0, 0))?;
+                let s = arg.as_bytes().change_context(ParseError::Reason {
+                    reason: "internal string state",
+                })?;
+                let s = core::str::from_utf8(s).change_context(ParseError::Reason {
+                    reason: "invalid UTF-8 bytes",
+                })?;
                 let s = s.strip_prefix("0o").unwrap_or(s);
                 Some(
-                    u32::from_str_radix(s, 8)
-                        .map_err(|_| report_error("invalid octal number", 0))?,
+                    u32::from_str_radix(s, 8).change_context(ParseError::Reason {
+                        reason: "invalid octal number",
+                    })?,
                 )
             }
             None => None,

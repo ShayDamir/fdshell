@@ -35,7 +35,10 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, i32> {
     };
     for dir in path.split(':').filter(|d| !d.is_empty()) {
         let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
-        let pathname = CString::new(full).map_err(|_| sys::errno::EINVAL)?;
+        let pathname = match CString::new(full) {
+            Ok(p) => p,
+            Err(_) => return Err(sys::errno::EINVAL),
+        };
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
             return Ok(fd);
         }

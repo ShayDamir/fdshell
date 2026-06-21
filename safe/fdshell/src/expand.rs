@@ -13,9 +13,7 @@ pub(crate) fn expand_for_words(
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let mut out = Vec::new();
     for word in words {
-        let bs = word
-            .as_bytes()
-            .map_err(|_| Report::new(ResolveError::RefNotFound))?;
+        let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
         let split = if is_cmd_subst(bs) {
             let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)
                 .change_context(ResolveError::Resolve)?;
@@ -50,8 +48,7 @@ fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, Report<ResolveError>>
                 words.push(core::mem::take(&mut cur));
             }
         } else {
-            cur.push(b)
-                .map_err(|_| Report::new(ResolveError::NulByte))?;
+            cur.push(b).change_context(ResolveError::NulByte)?;
         }
     }
     if !cur.is_empty() {

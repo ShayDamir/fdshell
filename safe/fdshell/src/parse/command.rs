@@ -1,9 +1,9 @@
 use crate::capture::Capture;
 use crate::error::parse::ParseError;
-use crate::error::parse::{report_error, report_invalid_char};
+use crate::error::parse::report_error;
 use crate::parse::CommandLine;
 use crate::redirect::RedirectDef;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, Report<ParseError>> {
@@ -28,7 +28,9 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, Report<ParseEr
     let mut pidvar: Option<ShortCStr> = None;
     let mut bg_force = false;
     for t in iter {
-        let b = t.as_bytes().map_err(|_| report_invalid_char(0, 0))?;
+        let b = t.as_bytes().change_context(ParseError::Reason {
+            reason: "internal string state",
+        })?;
         if b == b"&" {
             return Err(report_error("unexpected '&'", 0));
         } else if let Some(rest) = t.strip_prefix(b"&>") {

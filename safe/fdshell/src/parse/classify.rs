@@ -1,8 +1,8 @@
 use crate::capture::Capture;
 use crate::error::parse::ParseError;
-use crate::error::parse::{report_error, report_invalid_char};
+use crate::error::parse::report_error;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 fn parse_fd(prefix: &[u8], dir: u8) -> Option<i32> {
@@ -38,7 +38,9 @@ pub fn parse_capture(s: &ShortCStr) -> Option<Capture> {
 }
 
 pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let bytes = s.as_bytes().map_err(|_| report_invalid_char(0, 0))?;
+    let bytes = s.as_bytes().change_context(ParseError::Reason {
+        reason: "internal string state",
+    })?;
 
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,

@@ -102,16 +102,18 @@ fn main() -> Result<(), Report<AppError>> {
         },
     );
 
-    let _mode = crate::init::init_shellfd()
-        .map_err(LegacyError)
-        .change_context(AppError::Init)?;
+    let _mode = match crate::init::init_shellfd() {
+        Ok(m) => m,
+        Err(e) => return Err(Report::new(AppError::Init).attach(LegacyError(e))),
+    };
     sys::umask::init();
     let state = sys::fork_cell::ForkCell::new(state::ShellState::new());
     {
         let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
-        let cwd = sys::openat2::open(c".", O_DIRECTORY)
-            .map_err(|e| LegacyError(e.into()))
-            .change_context(AppError::Cwd)?;
+        let cwd = match sys::openat2::open(c".", O_DIRECTORY) {
+            Ok(fd) => fd,
+            Err(_) => return Err(Report::new(AppError::Cwd)),
+        };
         state.fds.insert(c"CWD".into(), cwd);
     }
     let mut args = std::env::args().skip(1);

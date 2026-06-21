@@ -24,15 +24,6 @@ pub(crate) enum ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Convert `i32` (errno) to `ParseError`.
-///
-/// `ShortCStr::push` returns `EINVAL` for NUL bytes.
-impl From<i32> for ParseError {
-    fn from(_: i32) -> Self {
-        ParseError::InvalidChar { ch: 0 }
-    }
-}
-
 /// Create a `Report<ParseError>` with `ParsePosition` attached.
 pub(crate) fn report_error(reason: &'static str, pos: usize) -> Report<ParseError> {
     Report::new(ParseError::Reason { reason }).attach_opaque(ParsePosition { pos, input: None })

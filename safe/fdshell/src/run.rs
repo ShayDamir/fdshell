@@ -16,7 +16,7 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
             }
             let outcome = crate::launch::launch(cell, &cmdline).change_context(CmdError::Launch)?;
             {
-                let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+                let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
                 state.last_status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state)
                     .change_context(CmdError::Launch)?;
             }
@@ -24,32 +24,32 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
         crate::parse::ParsedLine::Pipeline(pipeline) => {
             let status = crate::postlaunch::run_pipeline(pipeline, cell)
                 .change_context(CmdError::Pipeline)?;
-            let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.last_status = status;
         }
         crate::parse::ParsedLine::AssignFd { var, value } => {
-            let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             let src = state
                 .fds
                 .get(&value)
                 .ok_or(CmdError::Exec)?
                 .try_clone()
-                .map_err(|_| CmdError::Exec)?;
+                .change_context(CmdError::Exec)?;
             state.fds.insert(var, src);
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
             let expanded = crate::substitute::substitute_arg(&value, &mut HashMap::new(), cell)
                 .change_context(CmdError::Resolve)?;
-            let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.strings.insert(
                 var,
-                ShortCStr::from_vec(expanded.into_bytes()).map_err(|_| CmdError::Resolve)?,
+                ShortCStr::from_vec(expanded.into_bytes()).change_context(CmdError::Resolve)?,
             );
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
-            let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.fds.remove(&var);
             state.tasks.remove(&var);
             state.last_status = WaitStatus::Exited(0);
@@ -60,23 +60,23 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
             } else {
                 println!("{:04o}", sys::umask::get());
             }
-            let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::For(forblock) => {
             {
-                let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+                let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
                 state.last_status = WaitStatus::Exited(0);
             }
             let words = crate::expand::expand_for_words(&forblock.words, cell)
                 .change_context(CmdError::Resolve)?;
             for word in &words {
                 {
-                    let mut state = cell.borrow_mut().map_err(|_| CmdError::Exec)?;
+                    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
                     state.strings.insert(forblock.var.clone(), word.clone());
                 }
                 crate::repl::run_script(
-                    forblock.body.as_bytes().map_err(|_| CmdError::Exec)?,
+                    forblock.body.as_bytes().change_context(CmdError::Exec)?,
                     cell,
                 )?;
             }

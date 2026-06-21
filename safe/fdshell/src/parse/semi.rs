@@ -1,5 +1,6 @@
 use crate::error::parse::ParseError;
 use error_stack::Report;
+use error_stack::ResultExt;
 use sys::ShortCStr;
 
 pub(crate) fn find_preceded_by_semi(
@@ -35,10 +36,14 @@ pub(crate) fn try_join(tokens: &[(ShortCStr, usize)]) -> Result<ShortCStr, Repor
     let mut s = ShortCStr::new();
     for (t, _) in tokens {
         if !s.is_empty() {
-            s.push(b' ').map_err(ParseError::from)?;
+            s.push(b' ')
+                .change_context(ParseError::InvalidChar { ch: 0 })?;
         }
-        for &b in t.as_bytes().map_err(ParseError::from)? {
-            s.push(b).map_err(ParseError::from)?;
+        for &b in t.as_bytes().change_context(ParseError::Reason {
+            reason: "internal string inconsistency",
+        })? {
+            s.push(b)
+                .change_context(ParseError::InvalidChar { ch: 0 })?;
         }
     }
     Ok(s)

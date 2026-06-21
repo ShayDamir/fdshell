@@ -19,9 +19,7 @@ pub(crate) fn substitute_arg(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<CString, Report<ResolveError>> {
-    let bytes = arg
-        .as_bytes()
-        .map_err(|_| Report::new(ResolveError::RefNotFound))?;
+    let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
     let mut out = Vec::new();
     let mut peek = bytes.iter().copied().peekable();
     if bytes.first() == Some(&b'~') {
@@ -35,9 +33,7 @@ pub(crate) fn substitute_arg(
             _ => out.push(b'~'),
         }
     }
-    let mut state = cell
-        .borrow()
-        .map_err(|_| Report::new(ResolveError::RefNotFound))?;
+    let mut state = cell.borrow().change_context(ResolveError::RefNotFound)?;
     while let Some(b) = peek.next() {
         match b {
             b'%' => percent::percent_subst(&mut peek, cache, &state, &mut out)?,
@@ -48,9 +44,7 @@ pub(crate) fn substitute_arg(
                 let expanded = crate::cmd_subst::run_and_capture(&inner, cell)
                     .change_context(ResolveError::Resolve)?;
                 out.extend_from_slice(&expanded);
-                state = cell
-                    .borrow()
-                    .map_err(|_| Report::new(ResolveError::RefNotFound))?;
+                state = cell.borrow().change_context(ResolveError::RefNotFound)?;
             }
             b'$' => dollar::dollar_subst(&mut peek, &state, &mut out)?,
             _ => out.push(b),

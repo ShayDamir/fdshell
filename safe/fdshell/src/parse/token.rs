@@ -1,5 +1,6 @@
 use crate::error::parse::{ParseError, report_unbalanced_quote, report_unexpected_eof};
 use error_stack::Report;
+use error_stack::ResultExt;
 use sys::ShortCStr;
 
 pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseError>> {
@@ -19,12 +20,15 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
                 b'"' => in_quotes = false,
                 b'\\' => {
                     if let Some(c) = bytes.next() {
-                        cur.push(c).map_err(ParseError::from)?;
+                        cur.push(c)
+                            .change_context(ParseError::InvalidChar { ch: 0 })?;
                     } else {
                         return Err(report_unexpected_eof(line, pos));
                     }
                 }
-                _ => cur.push(b).map_err(ParseError::from)?,
+                _ => cur
+                    .push(b)
+                    .change_context(ParseError::InvalidChar { ch: 0 })?,
             }
         } else {
             match b {
@@ -38,7 +42,8 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
                     if cur.starts_with(b"%") && cur.ends_with(b">")
                         || cur.starts_with(b"&") && cur.ends_with(b">")
                     {
-                        cur.push(b'|').map_err(ParseError::from)?;
+                        cur.push(b'|')
+                            .change_context(ParseError::InvalidChar { ch: 0 })?;
                     } else {
                         if !cur.is_empty() {
                             tokens.push((core::mem::take(&mut cur), token_start));
@@ -62,14 +67,17 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
                         let start = pos - 1; // position of '$'
                         super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, start)?;
                     } else {
-                        cur.push(b).map_err(ParseError::from)?;
+                        cur.push(b)
+                            .change_context(ParseError::InvalidChar { ch: 0 })?;
                     }
                 }
                 b'`' => {
                     let start = pos - 1; // position of '`'
                     super::token_subst::read_backtick(line, &mut cur, &mut bytes, start)?;
                 }
-                _ => cur.push(b).map_err(ParseError::from)?,
+                _ => cur
+                    .push(b)
+                    .change_context(ParseError::InvalidChar { ch: 0 })?,
             }
         }
     }

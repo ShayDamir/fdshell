@@ -44,16 +44,21 @@ impl ImportedFd {
     }
 }
 
-impl TryFrom<&ShortCStr> for ImportedFd {
-    type Error = crate::SyscallError;
-    fn try_from(scs: &ShortCStr) -> Result<Self, crate::SyscallError> {
-        Self::from_bytes(scs.as_bytes()?)
-    }
-}
-
+// Single-source conversion: no Report needed, used by `builtins` (no_std, i32 errors).
 impl TryFrom<&CStr> for ImportedFd {
     type Error = crate::SyscallError;
     fn try_from(s: &CStr) -> Result<Self, crate::SyscallError> {
         Self::from_bytes(s.to_bytes())
+    }
+}
+
+// Two error sources (as_bytes + from_bytes): Report chains both for fdshell callers.
+impl TryFrom<&ShortCStr> for ImportedFd {
+    type Error = error_stack::Report<crate::SyscallError>;
+    fn try_from(scs: &ShortCStr) -> Result<Self, error_stack::Report<crate::SyscallError>> {
+        use error_stack::ResultExt;
+
+        let bytes = scs.as_bytes().change_context(crate::SyscallError::EINVAL)?;
+        Self::from_bytes(bytes).change_context(crate::SyscallError::EINVAL)
     }
 }

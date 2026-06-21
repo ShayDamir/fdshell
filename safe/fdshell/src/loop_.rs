@@ -1,4 +1,4 @@
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use sys::ShortCStr;
@@ -13,15 +13,15 @@ pub(crate) fn run_loop(
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
     loop {
-        crate::repl::run_cond_list(cond.as_bytes().map_err(|_| CmdError::Exec)?, cell)?;
+        crate::repl::run_cond_list(cond.as_bytes().change_context(CmdError::Exec)?, cell)?;
         let exit_code = {
-            let state = cell.borrow().map_err(|_| CmdError::Exec)?;
+            let state = cell.borrow().change_context(CmdError::Exec)?;
             state.last_status.exit_code()
         };
         if (exit_code == 0) != invert {
             break;
         }
-        crate::repl::run_script(body.as_bytes().map_err(|_| CmdError::Exec)?, cell)?;
+        crate::repl::run_script(body.as_bytes().change_context(CmdError::Exec)?, cell)?;
     }
     Ok(())
 }

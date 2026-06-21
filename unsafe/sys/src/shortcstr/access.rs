@@ -1,5 +1,4 @@
-use crate::errno::EINVAL;
-use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr};
+use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr, ShortCStrError};
 
 impl ShortCStr {
     pub fn new() -> Self {
@@ -23,15 +22,17 @@ impl ShortCStr {
         self.len() == 0
     }
 
-    pub fn as_bytes(&self) -> Result<&[u8], i32> {
+    pub fn as_bytes(&self) -> Result<&[u8], ShortCStrError> {
         match self {
             ShortCStr::Inline { len, buf } => {
                 let n = len.as_u8() as usize;
-                buf.get(..n).ok_or(EINVAL)
+                buf.get(..n).ok_or(ShortCStrError::BadState)
             }
             ShortCStr::Static(s, offset, length) => {
                 let end = offset + length;
-                s.to_bytes().get(*offset..end).ok_or(EINVAL)
+                s.to_bytes()
+                    .get(*offset..end)
+                    .ok_or(ShortCStrError::BadState)
             }
             ShortCStr::Arc {
                 arc,
@@ -39,23 +40,28 @@ impl ShortCStr {
                 length,
             } => {
                 let end = offset + length;
-                arc.get(*offset..end).ok_or(EINVAL)
+                arc.get(*offset..end).ok_or(ShortCStrError::BadState)
             }
         }
     }
 
-    pub(crate) fn as_cstr_bytes(&self) -> Result<&[u8], i32> {
+    pub(crate) fn as_cstr_bytes(&self) -> Result<&[u8], ShortCStrError> {
         match self {
             ShortCStr::Inline { len, buf } => {
                 let n = len.as_u8() as usize;
-                buf.get(..n).ok_or(EINVAL)
+                buf.get(..n).ok_or(ShortCStrError::BadState)
             }
             ShortCStr::Arc {
                 arc,
                 offset,
                 length,
-            } => arc.get(*offset..offset + length).ok_or(EINVAL),
-            ShortCStr::Static(s, offset, ..) => s.to_bytes_with_nul().get(*offset..).ok_or(EINVAL),
+            } => arc
+                .get(*offset..offset + length)
+                .ok_or(ShortCStrError::BadState),
+            ShortCStr::Static(s, offset, ..) => s
+                .to_bytes_with_nul()
+                .get(*offset..)
+                .ok_or(ShortCStrError::BadState),
         }
     }
 

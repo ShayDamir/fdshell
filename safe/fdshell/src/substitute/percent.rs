@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use std::collections::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
@@ -21,7 +21,7 @@ pub(crate) fn collect_name(
             break;
         }
     }
-    ShortCStr::from_vec(name).map_err(|_| Report::new(ResolveError::TokenTooLong))
+    ShortCStr::from_vec(name).change_context(ResolveError::TokenTooLong)
 }
 
 pub(crate) fn percent_subst(
@@ -41,9 +41,7 @@ pub(crate) fn percent_subst(
                 Some(d) => d.as_raw(),
                 None => match state.fds.get(&name_scs) {
                     Some(src) => {
-                        let d = src
-                            .export()
-                            .map_err(|_| Report::new(ResolveError::RefNotFound))?;
+                        let d = src.export().change_context(ResolveError::RefNotFound)?;
                         let raw = d.as_raw();
                         cache.insert(name_scs, d);
                         raw
@@ -53,7 +51,7 @@ pub(crate) fn percent_subst(
                         out.extend_from_slice(
                             name_scs
                                 .as_bytes()
-                                .map_err(|_| Report::new(ResolveError::RefNotFound))?,
+                                .change_context(ResolveError::RefNotFound)?,
                         );
                         return Ok(());
                     }

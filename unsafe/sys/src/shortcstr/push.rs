@@ -2,12 +2,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::shortcstr::copy::copy_to_shortcstr;
-use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr};
+use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr, ShortCStrError};
 
 impl ShortCStr {
-    pub fn push(&mut self, byte: u8) -> Result<(), i32> {
+    pub fn push(&mut self, byte: u8) -> Result<(), ShortCStrError> {
         if byte == 0 {
-            return Err(crate::errno::EINVAL);
+            return Err(ShortCStrError::NulByte);
         }
         // SAFETY: non-NUL checked above.
         unsafe { self.push_unchecked(byte) };

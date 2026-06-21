@@ -1,4 +1,4 @@
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
@@ -94,6 +94,6 @@ pub(crate) fn run_script(
         }
         i += 1;
     }
-    let state = cell.borrow().map_err(|_| CmdError::Exec)?;
+    let state = cell.borrow().change_context(CmdError::Exec)?;
     Ok(state.last_status.exit_code())
 }

@@ -24,7 +24,7 @@ pub fn launch(
     let resolved = {
         let state = cell
             .borrow_mut()
-            .map_err(|_| crate::error::launch::LaunchError::Borrow)?;
+            .change_context(crate::error::launch::LaunchError::Borrow)?;
         crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)
             .change_context(crate::error::launch::LaunchError::Redirect)?
     };
@@ -33,11 +33,11 @@ pub fn launch(
         (None, None)
     } else {
         let (cap, ch) = sys::net::socketpair_with_passcred()
-            .map_err(|_| crate::error::launch::LaunchError::CaptureSocket)?;
+            .change_context(crate::error::launch::LaunchError::CaptureSocket)?;
         (Some(cap), Some(ch))
     };
     let (child_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(cell)
-        .map_err(|_| crate::error::launch::LaunchError::Fork)?;
+        .change_context(crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {
         None => {

@@ -4,12 +4,14 @@ use core::ffi::CStr;
 
 mod access;
 mod copy;
+mod error;
 mod from;
 mod get;
 mod push;
 mod size;
 mod traits;
 
+pub use error::ShortCStrError;
 pub(crate) use from::from_inline;
 pub use size::InlineSize;
 

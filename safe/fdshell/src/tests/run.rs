@@ -586,7 +586,7 @@ fn export_fd_dispatch_single_arg_no_var() {
         let result = crate::child::fdpass::dispatch(b"export_fd", &[arg], &state);
         assert!(result.is_some());
         assert!(matches!(
-            result.unwrap().unwrap_err(),
+            result.unwrap().unwrap_err().current_context(),
             crate::error::fdpass::FdPassError::NotFound
         ));
     });
@@ -600,7 +600,7 @@ fn export_fd_dispatch_calls_export_fd() {
         let result = crate::child::fdpass::dispatch(b"export_fd", &[], &state);
         assert!(result.is_some());
         assert!(matches!(
-            result.unwrap().unwrap_err(),
+            result.unwrap().unwrap_err().current_context(),
             crate::error::fdpass::FdPassError::MissingArg
         ));
     });

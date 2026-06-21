@@ -3,13 +3,14 @@
 use super::{Redirect, RedirectDef};
 use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
+use error_stack::{Report, ResultExt};
 use sys::LocalFd;
 
 pub fn resolve_redirects(
     redirects: &[RedirectDef],
     opened: &[LocalFd],
     state: &ShellState,
-) -> Result<Vec<Redirect>, OpenRedirectError> {
+) -> Result<Vec<Redirect>, Report<OpenRedirectError>> {
     let mut opened_iter = opened.iter();
     redirects
         .iter()
@@ -20,12 +21,12 @@ pub fn resolve_redirects(
                     .get(var)
                     .ok_or(OpenRedirectError)?
                     .try_clone_above(r.export_to + 1)
-                    .map_err(|_| OpenRedirectError)?,
+                    .change_context(OpenRedirectError)?,
                 super::RedirectSource::Path(_) => opened_iter
                     .next()
                     .ok_or(OpenRedirectError)?
                     .try_clone()
-                    .map_err(|_| OpenRedirectError)?,
+                    .change_context(OpenRedirectError)?,
             };
             Ok(r.resolve(local))
         })

@@ -26,7 +26,10 @@ pub fn child_main(
         r.export()?;
     }
 
-    let resolved = substitute_args(args, cell).map_err(|_| EINVAL)?;
+    let resolved = match substitute_args(args, cell) {
+        Ok(r) => r,
+        Err(_) => return Err(EINVAL),
+    };
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
     let state = cell.borrow_mut()?;

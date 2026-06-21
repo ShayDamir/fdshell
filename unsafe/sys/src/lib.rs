@@ -6,7 +6,7 @@ pub use atfd::AtFd;
 pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use localfd::LocalFd;
-pub use shortcstr::{RefCStr, ShortCStr};
+pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
 
 pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
