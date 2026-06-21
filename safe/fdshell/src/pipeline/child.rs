@@ -1,6 +1,8 @@
 use crate::child::{self, Command};
+use crate::error::child::ChildError;
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;
+use error_stack::{Report, ResultExt};
 use sys::LocalFd;
 use sys::fork_cell::ForkCell;
 
@@ -12,37 +14,34 @@ pub fn run_child(
     capture_pairs: &mut [Option<(LocalFd, LocalFd)>],
     commands: &[CommandLine],
     cell: &ForkCell<ShellState>,
-) -> ! {
-    let cmd_data = match commands.get(i) {
-        Some(c) => c,
-        None => std::process::exit(sys::errno::EINVAL),
-    };
+) -> Result<i32, Report<ChildError>> {
+    let cmd_data = commands
+        .get(i)
+        .ok_or_else(|| Report::new(ChildError::ExecFailed))?;
 
     let mut redirects: Vec<Redirect> = Vec::new();
 
     if let Some(prev) = i.checked_sub(1).and_then(|p| pipes.get(p)) {
-        match prev.0.try_clone() {
-            Ok(fd) => redirects.push(Redirect::new(0, fd)),
-            Err(e) => std::process::exit(e.into()),
-        }
+        let fd = prev
+            .0
+            .try_clone()
+            .change_context(ChildError::RedirectFailed)?;
+        redirects.push(Redirect::new(0, fd));
     }
     if let Some(wr) = pipes.get(i) {
-        match wr.1.try_clone() {
-            Ok(fd) => redirects.push(Redirect::new(1, fd)),
-            Err(e) => std::process::exit(e.into()),
-        }
+        let fd =
+            wr.1.try_clone()
+                .change_context(ChildError::RedirectFailed)?;
+        redirects.push(Redirect::new(1, fd));
     }
 
-    let opened = super::open::open_redirect_files(cmd_data);
+    let opened =
+        super::open::open_redirect_files(cmd_data).change_context(ChildError::RedirectFailed)?;
 
-    let file_redirects = match cell.borrow() {
-        Ok(state) => {
-            match crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, &state) {
-                Ok(fds) => fds,
-                Err(_) => std::process::exit(1),
-            }
-        }
-        Err(_) => std::process::exit(1),
+    let file_redirects = {
+        let state = cell.borrow().change_context(ChildError::BorrowFailed)?;
+        crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, &state)
+            .change_context(ChildError::RedirectFailed)?
     };
     redirects.extend(file_redirects);
 
@@ -52,5 +51,5 @@ pub fn run_child(
 
     let cmd = Command::from(cmd_data);
 
-    child::child_exec(child_sock, cell, cmd, &cmd_data.args, &redirects)
+    child::child_main(child_sock, cell, cmd, &cmd_data.args, &redirects)
 }

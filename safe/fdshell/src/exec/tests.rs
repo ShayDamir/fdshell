@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::{exec_fd, resolve_path};
+use crate::error::exec::ExecError;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::unix::fs::PermissionsExt;
@@ -79,7 +80,7 @@ fn exec_fd_with_exports() {
     let exports: Vec<(sys::ShortCStr, Vec<u8>)> = exports_map.into_iter().collect();
     exec_child(|| match exec_fd(&fd, &[&abs], &exports) {
         Ok(()) => {}
-        Err(e) => std::process::exit(e),
+        Err(report) => std::process::exit(report.current_context().exit_code()),
     });
 
     teardown(&dir);
@@ -89,11 +90,11 @@ fn exec_fd_with_exports() {
 fn resolve_path_missing_absolute() {
     let dir = test_dir();
     setup(&dir);
-    let e = match resolve_path(c"/nonexistent-xxxxxxxx/binary") {
-        Err(e) => e,
+    let report = match resolve_path(c"/nonexistent-xxxxxxxx/binary") {
+        Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
-    assert_eq!(e, sys::errno::ENOENT);
+    assert!(matches!(report.current_context(), ExecError::NotFound));
     teardown(&dir);
 }
 
@@ -103,11 +104,11 @@ fn resolve_path_missing_dot_slash() {
     std::fs::create_dir_all(&dir).unwrap();
     let old = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
-    let e = match resolve_path(c"./nope-xxxxxxxx") {
-        Err(e) => e,
+    let report = match resolve_path(c"./nope-xxxxxxxx") {
+        Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
-    assert_eq!(e, sys::errno::ENOENT);
+    assert!(matches!(report.current_context(), ExecError::NotFound));
     std::env::set_current_dir(&old).unwrap();
     teardown(&dir);
 }
@@ -123,7 +124,7 @@ fn exec_with_paths() {
         let fd = resolve_path(&abs).unwrap();
         match exec_fd(&fd, &[&abs], &[]) {
             Ok(()) => {}
-            Err(e) => std::process::exit(e),
+            Err(report) => std::process::exit(report.current_context().exit_code()),
         }
     });
 
@@ -133,7 +134,7 @@ fn exec_with_paths() {
         let fd = resolve_path(c"./mybin").unwrap();
         match exec_fd(&fd, &[c"mybin"], &[]) {
             Ok(()) => {}
-            Err(e) => std::process::exit(e),
+            Err(report) => std::process::exit(report.current_context().exit_code()),
         }
     });
     std::env::set_current_dir(&cd).unwrap();
@@ -158,7 +159,7 @@ fn exec_script_via_resolve_fd() {
         let fd = resolve_path(&script_cs).unwrap();
         match exec_fd(&fd, &[&script_cs], &[]) {
             Ok(()) => {}
-            Err(e) => std::process::exit(e),
+            Err(report) => std::process::exit(report.current_context().exit_code()),
         }
     });
 

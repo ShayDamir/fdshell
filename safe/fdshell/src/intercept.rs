@@ -95,7 +95,13 @@ pub(crate) fn try_intercept(
                 std::process::exit(sys::errno::EINVAL);
             }
             drop(state);
-            crate::replacer::replace_shell(&cmdline.args, &cmdline.redirects, cell);
+            match crate::replacer::execute(&cmdline.args, &cmdline.redirects, cell) {
+                Ok(code) => std::process::exit(code),
+                Err(report) => {
+                    eprintln!("{:?}", report);
+                    std::process::exit(report.current_context().exit_code());
+                }
+            }
         }
         b"export_fd" if cmdline.builtin => {
             if !cmdline.captures.is_empty() {

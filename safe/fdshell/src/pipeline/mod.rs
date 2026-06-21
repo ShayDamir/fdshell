@@ -47,7 +47,13 @@ pub fn launch_pipeline(
         let (child_pid, pidfd_opt) =
             sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
-            None => child::run_child(i, &pipes, &mut capture_pairs, &commands, cell),
+            None => match child::run_child(i, &pipes, &mut capture_pairs, &commands, cell) {
+                Ok(code) => std::process::exit(code),
+                Err(report) => {
+                    eprintln!("{:?}", report);
+                    std::process::exit(report.current_context().exit_code());
+                }
+            },
             Some(pidfd) => children.push((child_pid as i32, pidfd)),
         }
     }

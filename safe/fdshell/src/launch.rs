@@ -40,11 +40,13 @@ pub fn launch(
         .change_context(crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {
-        None => {
-            // Unreachable in parent — child fork branch calls std::process::exit()
-            // but we need to satisfy the type checker.
-            child::child_exec(child_fd, cell, cmd, &cmdline.args, &resolved);
-        }
+        None => match child::child_main(child_fd, cell, cmd, &cmdline.args, &resolved) {
+            Ok(code) => std::process::exit(code),
+            Err(report) => {
+                eprintln!("{:?}", report);
+                std::process::exit(report.current_context().exit_code());
+            }
+        },
         Some(pidfd) => Ok(LaunchOutcome {
             pidfd,
             capture_fd,

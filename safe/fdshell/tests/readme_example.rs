@@ -3,7 +3,6 @@
 use std::process::Command;
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
-use sys::errno::ENOSYS;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
@@ -379,8 +378,8 @@ fn builtin_nonexistent() {
     let output = run_c("builtin nonexistent", &dir);
     assert_eq!(
         output.status.code(),
-        Some(ENOSYS),
-        "nonexistent builtin should exit with ENOSYS"
+        Some(1),
+        "nonexistent builtin should exit with error code 1"
     );
 }
 

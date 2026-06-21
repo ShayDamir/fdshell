@@ -32,7 +32,6 @@ mod task;
 #[cfg(test)]
 mod tests;
 
-use crate::error::LegacyError;
 use app::AppError;
 use error_stack::{Report, ResultExt, bail};
 use std::io::{BufRead, Write};
@@ -102,10 +101,7 @@ fn main() -> Result<(), Report<AppError>> {
         },
     );
 
-    let _mode = match crate::init::init_shellfd() {
-        Ok(m) => m,
-        Err(e) => return Err(Report::new(AppError::Init).attach(LegacyError(e))),
-    };
+    let _mode = crate::init::init_shellfd().change_context(AppError::Init)?;
     sys::umask::init();
     let state = sys::fork_cell::ForkCell::new(state::ShellState::new());
     {

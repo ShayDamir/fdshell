@@ -8,7 +8,7 @@ use core::fmt;
 /// Operation on a [`ShortCStr`](super::ShortCStr) failed.
 ///
 /// Each variant describes a single, distinct cause.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum ShortCStrError {
     /// A NUL byte was provided where data bytes are expected
     /// (via `push()` or `from_vec()`).

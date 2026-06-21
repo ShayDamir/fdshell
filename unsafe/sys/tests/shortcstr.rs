@@ -587,16 +587,13 @@ fn push_copy_to_inline_via_constructed_static() {
 #[test]
 fn debug_fmt_inline() {
     let s = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
-    let out = format!("{:?}", s);
-    assert!(out.contains("Inline"));
-    assert!(out.contains("len: 5"));
+    assert_eq!(format!("{:?}", s), "\"hello\"");
 }
 
 #[test]
 fn debug_fmt_static() {
     let s = ShortCStr::from(c"hello");
-    let out = format!("{:?}", s);
-    assert!(out.contains("Static"));
+    assert_eq!(format!("{:?}", s), "\"hello\"");
 }
 
 #[test]
@@ -607,8 +604,7 @@ fn debug_fmt_arc() {
         offset: 0,
         length: 5,
     };
-    let out = format!("{:?}", s);
-    assert!(out.contains("Arc"));
+    assert_eq!(format!("{:?}", s), "\"hello\"");
 }
 
 #[test]
@@ -618,9 +614,7 @@ fn debug_fmt_invalid() {
         offset: 0,
         length: 100,
     };
-    let out = format!("{:?}", s);
-    // as_bytes fails → unwrap_or(b"<?>") → Debug shows [60, 63, 62]
-    assert!(out.contains("60"));
+    assert_eq!(format!("{:?}", s), "\"<BadState>\"");
 }
 
 #[test]

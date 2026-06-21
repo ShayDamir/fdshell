@@ -23,19 +23,15 @@ pub fn dispatch_builtin(
         b"fchmod" => builtins::fchmod::parse::fchmod_parse(refs)
             .and_then(|cfg| builtins::fchmod::fchmod_exec(&cfg)),
         b"echo" => {
+            use std::io::Write;
+            let mut lock = std::io::stdout().lock();
             for (i, arg) in refs.iter().enumerate() {
                 if i > 0 {
-                    print!(" ");
+                    let _ = lock.write_all(b" ");
                 }
-                print!(
-                    "{}",
-                    match arg.to_str() {
-                        Ok(s) => s,
-                        Err(_) => return Err(sys::errno::EINVAL),
-                    }
-                );
+                let _ = lock.write_all(arg.to_bytes());
             }
-            println!();
+            let _ = lock.write_all(b"\n");
             Ok(())
         }
         b"pipe" => builtins::pipe::parse::pipe_parse(refs)
@@ -55,7 +51,10 @@ pub fn dispatch_builtin(
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
-            exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?, &exports)
+            match exec::exec_fd(fd, refs.get(1..).ok_or(sys::errno::EINVAL)?, &exports) {
+                Ok(()) => Ok(()),
+                Err(report) => Err(report.current_context().exit_code()),
+            }
         }
         b"exec_at" => {
             let raw0 = args.first().ok_or(sys::errno::EINVAL)?;
@@ -71,16 +70,22 @@ pub fn dispatch_builtin(
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
-            exec::exec_at(
+            match exec::exec_at(
                 non_cloexec.at(),
                 &pathname,
                 refs.get(2..).ok_or(sys::errno::EINVAL)?,
                 &exports,
-            )
+            ) {
+                Ok(()) => Ok(()),
+                Err(report) => Err(report.current_context().exit_code()),
+            }
         }
         b"resolve" => {
             let name = refs.first().ok_or(sys::errno::EINVAL)?;
-            let fd = exec::resolve_path(name)?;
+            let fd = match exec::resolve_path(name) {
+                Ok(fd) => fd,
+                Err(report) => return Err(report.current_context().exit_code()),
+            };
             sys::shellfd::send_fd(&fd, c"resolve").ok();
             Ok(())
         }

@@ -9,7 +9,7 @@ use core::fmt;
 /// Borrow operation on a [`ForkCell`](super::ForkCell) failed.
 ///
 /// Variants identify the *conflicting* borrow that is already active.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum ForkCellError {
     /// Tried to obtain a shared (`borrow()`) or exclusive (`borrow_mut()`)
     /// reference, but an exclusive (mutable) borrow is already active.
