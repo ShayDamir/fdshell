@@ -11,7 +11,7 @@ fn main() {
         });
     let args: Vec<&core::ffi::CStr> = argv.iter().map(|cs| cs.as_c_str()).collect();
     let cfg = match builtins::renameat2::parse::renameat2_parse(&args) {
-        Err(sys::errno::HELP) => {
+        Err(builtins::error::BuiltinError::Help) => {
             println!(
                 "Usage: renameat2 [--olddirfd N] [--newdirfd N] [--flags FLAGS] oldpath newpath"
             );

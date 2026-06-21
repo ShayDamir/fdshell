@@ -4,6 +4,7 @@ use crate::exec;
 use crate::redirect::Redirect;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
+use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
@@ -36,11 +37,14 @@ pub fn child_main(
         Command::Builtin(name) => {
             let cmd_name = name.clone();
             match child::builtin::dispatch_builtin(name, &refs, args, &state) {
-                Ok(()) => Ok(0),
-                Err(code) if code == sys::errno::ENOSYS => {
+                Ok(code) => Ok(code),
+                Err(BuiltinError::Unknown) => {
                     Err(Report::new(ChildError::NotABuiltin).attach(cmd_name))
                 }
-                Err(code) => Ok(code),
+                Err(BuiltinError::Help) | Err(BuiltinError::InvalidArgument) => {
+                    Err(Report::new(ChildError::ExecFailed))
+                }
+                Err(BuiltinError::Syscall(e)) => Ok(e.errno()),
             }
         }
         Command::External(name) => {

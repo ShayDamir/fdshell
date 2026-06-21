@@ -33,11 +33,3 @@ impl fmt::Display for ForkCellError {
 }
 
 impl core::error::Error for ForkCellError {}
-
-/// Primitive bridge: either variant maps to `EINVAL` for backward compat
-/// with `Result<_, i32>` functions via `?`.
-impl From<ForkCellError> for i32 {
-    fn from(_: ForkCellError) -> Self {
-        libc::EINVAL
-    }
-}

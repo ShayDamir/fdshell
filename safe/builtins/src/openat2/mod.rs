@@ -1,9 +1,11 @@
 use sys::fcntl::O_CLOEXEC;
 use sys::{AtFd, ImportedFd};
 
+use crate::error::BuiltinError;
+
 pub mod parse;
 
-pub fn openat2_exec(cfg: &parse::Openat2Config) -> Result<(), i32> {
+pub fn openat2_exec(cfg: &parse::Openat2Config) -> Result<(), BuiltinError> {
     let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
     let how = sys::openat2::OpenHow {
         flags: cfg.how.flags | (O_CLOEXEC as u64),

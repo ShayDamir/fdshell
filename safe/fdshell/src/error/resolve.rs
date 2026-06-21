@@ -20,10 +20,3 @@ pub(crate) enum ResolveError {
 }
 
 impl core::error::Error for ResolveError {}
-
-/// Convert `i32` (errno) to `ResolveError::Resolve`.
-impl From<i32> for ResolveError {
-    fn from(_: i32) -> Self {
-        ResolveError::Resolve
-    }
-}

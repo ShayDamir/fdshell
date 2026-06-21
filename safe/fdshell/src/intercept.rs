@@ -128,7 +128,7 @@ pub(crate) fn try_intercept(
                 ));
             }
             state.last_status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {
-                Ok(()) => WaitStatus::Exited(0),
+                Ok(_) => WaitStatus::Exited(0),
                 Err(report) => WaitStatus::Exited(match report.current_context() {
                     crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
                     crate::error::fdpass::FdPassError::NotFound

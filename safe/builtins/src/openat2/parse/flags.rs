@@ -4,17 +4,19 @@ use sys::fcntl::{
     O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
 };
 
-pub(crate) fn parse_open_flags(s: &CStr) -> Result<i32, i32> {
+use crate::error::BuiltinError;
+
+pub(crate) fn parse_open_flags(s: &CStr) -> Result<i32, BuiltinError> {
     let b = s.to_bytes();
     if b.starts_with(b"0x") {
-        let bytes = b.get(2..).ok_or(sys::errno::EINVAL)?;
+        let bytes = b.get(2..).ok_or(BuiltinError::InvalidArgument)?;
         let h = match core::str::from_utf8(bytes) {
             Ok(s) => s,
-            Err(_) => return Err(sys::errno::EINVAL),
+            Err(_) => return Err(BuiltinError::InvalidArgument),
         };
         match i32::from_str_radix(h, 16) {
             Ok(v) => Ok(v),
-            Err(_) => Err(sys::errno::EINVAL),
+            Err(_) => Err(BuiltinError::InvalidArgument),
         }
     } else {
         b.split(|&c| c == b'|').try_fold(0, |acc, name| {
@@ -33,7 +35,7 @@ pub(crate) fn parse_open_flags(s: &CStr) -> Result<i32, i32> {
                 b"O_NOFOLLOW" => O_NOFOLLOW,
                 b"O_CLOEXEC" => O_CLOEXEC,
                 b"O_SYNC" => O_SYNC,
-                _ => return Err(sys::errno::EINVAL),
+                _ => return Err(BuiltinError::InvalidArgument),
             };
             Ok(acc | v)
         })

@@ -32,10 +32,3 @@ impl fmt::Display for ShortCStrError {
 }
 
 impl core::error::Error for ShortCStrError {}
-
-/// Bridge for `?` in `Result<_, i32>` functions.
-impl From<ShortCStrError> for i32 {
-    fn from(_: ShortCStrError) -> Self {
-        libc::EINVAL
-    }
-}

@@ -7,7 +7,7 @@ pub fn dispatch(
     name: &[u8],
     args: &[ShortCStr],
     state: &ShellState,
-) -> Option<Result<(), Report<FdPassError>>> {
+) -> Option<Result<i32, Report<FdPassError>>> {
     match name {
         b"import_fd" => Some(import_fd(args)),
         b"export_fd" => Some(export_fd(args, state)),
@@ -15,16 +15,20 @@ pub fn dispatch(
     }
 }
 
-fn import_fd(args: &[ShortCStr]) -> Result<(), Report<FdPassError>> {
+fn import_fd(args: &[ShortCStr]) -> Result<i32, Report<FdPassError>> {
     let raw = args.first().ok_or(FdPassError::MissingArg)?;
     let fd = sys::ImportedFd::try_from(raw).change_context(FdPassError::InvalidName)?;
     let local = fd
         .try_into_local()
         .change_context(FdPassError::SendFailed)?;
-    sys::shellfd::send_fd(&local, c"import_fd").change_context(FdPassError::SendFailed)
+    sys::shellfd::send_fd(&local, c"import_fd").change_context(FdPassError::SendFailed)?;
+    Ok(0)
 }
 
-pub(crate) fn export_fd(args: &[ShortCStr], state: &ShellState) -> Result<(), Report<FdPassError>> {
+pub(crate) fn export_fd(
+    args: &[ShortCStr],
+    state: &ShellState,
+) -> Result<i32, Report<FdPassError>> {
     let (vname, tag) = match args {
         [a] => {
             let v = a.strip_prefix(b"%").ok_or(FdPassError::InvalidName)?;
@@ -42,5 +46,6 @@ pub(crate) fn export_fd(args: &[ShortCStr], state: &ShellState) -> Result<(), Re
         _ => return Err(Report::new(FdPassError::MissingArg)),
     };
     let fd = state.fds.get(&vname).ok_or(FdPassError::NotFound)?;
-    sys::shellfd::send_fd(fd, &tag).change_context(FdPassError::SendFailed)
+    sys::shellfd::send_fd(fd, &tag).change_context(FdPassError::SendFailed)?;
+    Ok(0)
 }

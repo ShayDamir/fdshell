@@ -1,8 +1,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EINVAL, ENOENT, HELP};
 use sys::renameat2::{RENAME_EXCHANGE, RENAME_NOREPLACE};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -11,12 +11,12 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     f(&refs);
 }
 
-fn assert_err(args: &[&str], code: i32) {
+fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(
         args,
         |a| match builtins::renameat2::parse::renameat2_parse(a) {
-            Err(e) => assert_eq!(e, code),
-            _ => panic!("expected Err({code})"),
+            Err(e) => assert_eq!(e, expected),
+            _ => panic!("expected Err"),
         },
     );
 }
@@ -44,52 +44,58 @@ fn basic() {
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], HELP);
+    assert_err(&["--help"], BuiltinError::Help);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], HELP);
+    assert_err(&["-h"], BuiltinError::Help);
 }
 
 #[test]
 fn empty_args() {
-    assert_err(&[], HELP);
+    assert_err(&[], BuiltinError::Help);
 }
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "x", "y"], EINVAL);
+    assert_err(&["--bad", "x", "y"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_oldpath() {
-    assert_err(&["--flags", "RENAME_NOREPLACE"], EINVAL);
+    assert_err(
+        &["--flags", "RENAME_NOREPLACE"],
+        BuiltinError::InvalidArgument,
+    );
 }
 
 #[test]
 fn missing_newpath() {
-    assert_err(&["old"], EINVAL);
+    assert_err(&["old"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn extra_path() {
-    assert_err(&["a", "b", "c"], EINVAL);
+    assert_err(&["a", "b", "c"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn empty_oldpath() {
-    assert_err(&["", "new"], ENOENT);
+    assert_err(&["", "new"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn empty_newpath() {
-    assert_err(&["old", ""], ENOENT);
+    assert_err(&["old", ""], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--flags", "--olddirfd", "5", "a", "b"], EINVAL);
+    assert_err(
+        &["--flags", "--olddirfd", "5", "a", "b"],
+        BuiltinError::InvalidArgument,
+    );
 }
 
 #[test]

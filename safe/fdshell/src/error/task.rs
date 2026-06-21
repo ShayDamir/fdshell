@@ -7,7 +7,7 @@ use displaydoc::Display;
 /// [TaskError] Task management errors
 #[derive(Display, Debug)]
 pub(crate) enum TaskError {
-    /// missing or invalid task key argument
+    /// task key argument must start with '&'
     BadArg,
     /// task not found
     NotFound,

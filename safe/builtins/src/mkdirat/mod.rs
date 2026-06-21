@@ -1,9 +1,11 @@
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW};
 use sys::{AtFd, ImportedFd};
 
+use crate::error::BuiltinError;
+
 pub mod parse;
 
-pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), i32> {
+pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), BuiltinError> {
     let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
     sys::mkdirat::mkdirat(dirfd, cfg.path, cfg.mode & 0o777)?;
     let how = sys::openat2::OpenHow {

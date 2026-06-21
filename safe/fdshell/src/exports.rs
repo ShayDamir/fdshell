@@ -1,4 +1,4 @@
-use crate::error::exports::InvalidExportName;
+use crate::error::exports::ExportError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::{ShortCStr, ShortCStrError};
@@ -6,7 +6,7 @@ use sys::{ShortCStr, ShortCStrError};
 pub fn handle_export(
     args: &[ShortCStr],
     state: &mut ShellState,
-) -> Result<(), Report<InvalidExportName>> {
+) -> Result<(), Report<ExportError>> {
     match args.first() {
         None => {
             list_exports(state);
@@ -15,13 +15,13 @@ pub fn handle_export(
         Some(arg) => {
             if let Some(eq_pos) = arg
                 .as_bytes()
-                .change_context(InvalidExportName)?
+                .change_context(ExportError::NulByte)?
                 .iter()
                 .position(|&b| b == b'=')
             {
-                set_export(arg, eq_pos, state).change_context(InvalidExportName)?;
+                set_export(arg, eq_pos, state).change_context(ExportError::NulByte)?;
             } else {
-                mark_exported(arg, state).change_context(InvalidExportName)?;
+                mark_exported(arg, state).change_context(ExportError::NulByte)?;
             }
             Ok(())
         }

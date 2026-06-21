@@ -4,8 +4,13 @@
 
 use displaydoc::Display;
 
-/// [InvalidExportName] Export string contains NUL bytes or internal inconsistency
+/// [ExportError] Export errors
 #[derive(Display, Debug)]
-pub(crate) struct InvalidExportName;
+pub(crate) enum ExportError {
+    /// NUL byte in export string
+    NulByte,
+    /// internal inconsistency in export data
+    InternalInconsistency,
+}
 
-impl core::error::Error for InvalidExportName {}
+impl core::error::Error for ExportError {}

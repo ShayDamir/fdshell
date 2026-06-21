@@ -1,8 +1,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EINVAL, HELP};
 use sys::fcntl::{O_DIRECT, O_NONBLOCK};
 use sys::shellfd::TAG_MAX;
 
@@ -12,10 +12,10 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     f(&refs);
 }
 
-fn assert_err(args: &[&str], code: i32) {
+fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| match builtins::pipe::parse::pipe_parse(a) {
-        Err(e) => assert_eq!(e, code),
-        _ => panic!("expected Err({code})"),
+        Err(e) => assert_eq!(e, expected),
+        _ => panic!("expected Err"),
     });
 }
 
@@ -28,12 +28,12 @@ fn assert_ok<F: Fn(&builtins::pipe::parse::PipeConfig)>(args: &[&str], f: F) {
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], HELP);
+    assert_err(&["--help"], BuiltinError::Help);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], HELP);
+    assert_err(&["-h"], BuiltinError::Help);
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn empty_args() {
 
 #[test]
 fn unexpected_arg() {
-    assert_err(&["x"], EINVAL);
+    assert_err(&["x"], BuiltinError::InvalidArgument);
 }
 
 #[test]
@@ -76,17 +76,17 @@ fn flags_hex() {
 
 #[test]
 fn flags_empty_value() {
-    assert_err(&["--flags"], EINVAL);
+    assert_err(&["--flags"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn flags_bad() {
-    assert_err(&["--flags", "O_CLOEXEC"], EINVAL);
+    assert_err(&["--flags", "O_CLOEXEC"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn flags_bad_name() {
-    assert_err(&["--flags", "nope"], EINVAL);
+    assert_err(&["--flags", "nope"], BuiltinError::InvalidArgument);
 }
 
 #[test]

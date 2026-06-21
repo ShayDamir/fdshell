@@ -1,6 +1,7 @@
 use core::ffi::CStr;
 use sys::ImportedFd;
-use sys::errno::{EINVAL, ENOENT};
+
+use crate::error::BuiltinError;
 
 pub struct MkdiratConfig<'a> {
     pub dirfd: Option<ImportedFd>,
@@ -12,8 +13,8 @@ pub struct MkdiratConfig<'a> {
 /// Parses mkdirat CLI arguments into an [`MkdiratConfig`].
 ///
 /// Returns:
-/// - `Err(sys::errno::HELP)` — `--help` or `-h` was passed
-/// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
+/// - `Err(BuiltinError::Help)` — `--help` or `-h` was passed
+/// - `Err(BuiltinError::InvalidArgument)` — bad flag name, missing value, etc.
 ///
 /// # Example
 ///
@@ -34,9 +35,9 @@ pub struct MkdiratConfig<'a> {
 ///     _ => panic!("expected Ok"),
 /// }
 /// ```
-pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
+pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, BuiltinError> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(sys::errno::HELP);
+        return Err(BuiltinError::Help);
     }
 
     let mut dirfd = None;
@@ -46,7 +47,7 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(EINVAL)?;
+        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument)?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -62,19 +63,19 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, i32> {
                     args, &mut i, val,
                 )?)?
             }
-            a if a.starts_with(b"-") => return Err(EINVAL),
+            a if a.starts_with(b"-") => return Err(BuiltinError::InvalidArgument),
             _ => {
                 if path.is_some() {
-                    return Err(EINVAL);
+                    return Err(BuiltinError::InvalidArgument);
                 }
                 path = Some(arg);
             }
         }
     }
 
-    let path = path.ok_or(EINVAL)?;
+    let path = path.ok_or(BuiltinError::InvalidArgument)?;
     if path.to_bytes().is_empty() {
-        return Err(ENOENT);
+        return Err(BuiltinError::InvalidArgument);
     }
 
     Ok(MkdiratConfig {

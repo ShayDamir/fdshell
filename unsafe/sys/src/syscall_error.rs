@@ -80,15 +80,3 @@ impl From<i32> for SyscallError {
         }
     }
 }
-
-/// Bridge from `SyscallError` back to raw `i32` errno.
-///
-/// Required by `safe/builtins/` which returns `Result<_, i32>` and relies
-/// on `?` to propagate syscall errors. This is a conversion to a primitive,
-/// not a cross-domain error-to-error conversion — the exceptional allowance
-/// is intentional.
-impl From<SyscallError> for i32 {
-    fn from(e: SyscallError) -> Self {
-        e.errno()
-    }
-}

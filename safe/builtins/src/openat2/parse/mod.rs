@@ -2,8 +2,9 @@ mod flags;
 
 use core::ffi::CStr;
 use sys::ImportedFd;
-use sys::errno::{EINVAL, ENOENT};
 use sys::openat2::OpenHow;
+
+use crate::error::BuiltinError;
 
 pub struct Openat2Config<'a> {
     pub dirfd: Option<ImportedFd>,
@@ -14,9 +15,8 @@ pub struct Openat2Config<'a> {
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
 ///
 /// Returns:
-/// - `Err(sys::errno::HELP)` — `--help` or `-h` was passed
-/// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
-/// - `Err(sys::errno::ENOENT)` — empty path
+/// - `Err(BuiltinError::Help)` — `--help` or `-h` was passed
+/// - `Err(BuiltinError::InvalidArgument)` — bad flag name, missing value, etc.
 ///
 /// # Example
 ///
@@ -48,13 +48,13 @@ pub struct Openat2Config<'a> {
 /// let b = CString::from(c"x");
 /// let args = [a.as_c_str(), b.as_c_str()];
 /// match builtins::openat2::parse::openat2_parse(&args) {
-///     Err(sys::errno::EINVAL) => {}
-///     _ => panic!("expected Err(sys::errno::EINVAL)"),
+///     Err(BuiltinError::InvalidArgument) => {}
+///     _ => panic!("expected Err(BuiltinError::InvalidArgument)"),
 /// }
 /// ```
-pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
+pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, BuiltinError> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(sys::errno::HELP);
+        return Err(BuiltinError::Help);
     }
 
     let mut dirfd = None;
@@ -65,7 +65,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(EINVAL)?;
+        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument)?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -84,19 +84,19 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, i32> {
                     args, &mut i, val,
                 )?)?
             }
-            a if a.starts_with(b"-") => return Err(EINVAL),
+            a if a.starts_with(b"-") => return Err(BuiltinError::InvalidArgument),
             _ => {
                 if path.is_some() {
-                    return Err(EINVAL);
+                    return Err(BuiltinError::InvalidArgument);
                 }
                 path = Some(arg);
             }
         }
     }
 
-    let path = path.ok_or(EINVAL)?;
+    let path = path.ok_or(BuiltinError::InvalidArgument)?;
     if path.to_bytes().is_empty() {
-        return Err(ENOENT);
+        return Err(BuiltinError::InvalidArgument);
     }
 
     Ok(Openat2Config {

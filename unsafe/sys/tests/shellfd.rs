@@ -10,7 +10,7 @@ struct CmsgBuf {
     fd: libc::c_int,
 }
 
-fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
+fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), SyscallError> {
     let mut iov = libc::iovec {
         iov_base: tag_bytes.as_ptr() as *mut core::ffi::c_void,
         iov_len: tag_bytes.len(),
@@ -38,22 +38,25 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), i32> {
     // connected Unix socket; `send_fd` is a valid open fd.
     if unsafe { libc::sendmsg(fd, &msg, 0) } == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
-        return Err(unsafe { *libc::__errno_location() });
+        return Err(unsafe { SyscallError::Other(*libc::__errno_location()) });
     }
     Ok(())
 }
 
-fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
+fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
     // SAFETY: child inherits a copy of the fd table; parent waits for it.
     let pid = unsafe { libc::fork() };
     if pid == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
-        return Err(unsafe { *libc::__errno_location() });
+        return Err(unsafe { SyscallError::Other(*libc::__errno_location()) });
     }
     if pid == 0 {
         let code = match f() {
             Ok(()) => 0,
-            Err(e) => e,
+            Err(e) => match e {
+                SyscallError::Other(n) => n,
+                other => other.errno(),
+            },
         };
         std::process::exit(code);
     }
@@ -62,7 +65,11 @@ fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
     unsafe { libc::waitpid(pid, &mut status, 0) };
     if libc::WIFEXITED(status) {
         let code = libc::WEXITSTATUS(status);
-        if code == 0 { Ok(()) } else { Err(code as i32) }
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(SyscallError::Other(code as i32))
+        }
     } else if libc::WIFSIGNALED(status) {
         panic!("test child killed by signal {}", libc::WTERMSIG(status));
     } else {
@@ -71,7 +78,7 @@ fn fork_test(f: fn() -> Result<(), i32>) -> Result<(), i32> {
 }
 
 #[test]
-fn test_send_recv_fd() -> Result<(), i32> {
+fn test_send_recv_fd() -> Result<(), SyscallError> {
     fork_test(|| {
         let _shellfd = reserve_shellfd()?;
         let (a, b) = socketpair()?;
@@ -106,7 +113,7 @@ fn test_send_recv_fd() -> Result<(), i32> {
 }
 
 #[test]
-fn test_recv_fd_truncated() -> Result<(), i32> {
+fn test_recv_fd_truncated() -> Result<(), SyscallError> {
     // 8192 bytes fills tag buffer + spills into extra → n > TAG_MAX
     let (a, b) = socketpair()?;
     a.verify()?;
@@ -132,7 +139,7 @@ fn test_recv_fd_truncated() -> Result<(), i32> {
 }
 
 #[test]
-fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
+fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
     // Exactly TAG_MAX bytes, no null → CStr::from_bytes_with_nul fails
     let (a, b) = socketpair()?;
     a.verify()?;
@@ -158,7 +165,7 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), i32> {
 }
 
 #[test]
-fn test_recv_fd_short_no_null() -> Result<(), i32> {
+fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify()?;
     b.verify()?;
@@ -182,7 +189,7 @@ fn test_recv_fd_short_no_null() -> Result<(), i32> {
 }
 
 #[test]
-fn test_recv_fd_interior_null() -> Result<(), i32> {
+fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify()?;
     b.verify()?;
@@ -206,7 +213,7 @@ fn test_recv_fd_interior_null() -> Result<(), i32> {
 }
 
 #[test]
-fn test_recv_fd_truncated_creds() -> Result<(), i32> {
+fn test_recv_fd_truncated_creds() -> Result<(), SyscallError> {
     // The kernel rejects truncated SCM_CREDENTIALS at send time (EINVAL).
     // This test verifies that behavior and documents the missing cmsg_len
     // check as a defense-in-depth concern in recv_fd.
@@ -259,7 +266,7 @@ fn test_recv_fd_truncated_creds() -> Result<(), i32> {
 }
 
 #[test]
-fn test_recv_fd_null_at_end_of_buffer() -> Result<(), i32> {
+fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify()?;
     b.verify()?;

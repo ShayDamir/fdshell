@@ -5,6 +5,7 @@ use crate::error::exec::ExecError;
 use crate::exec;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
+use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
@@ -37,9 +38,12 @@ pub fn execute(
         let refs: Vec<&CStr> = substituted.iter().map(|cs| cs.as_c_str()).collect();
         let state = cell.borrow().change_context(ExecError::ExecFailed)?;
         match child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
-            Ok(()) => Ok(0),
-            Err(code) if code == sys::errno::ENOSYS => Err(Report::new(ExecError::NotABuiltin)),
-            Err(code) => Ok(code),
+            Ok(code) => Ok(code),
+            Err(BuiltinError::Unknown) => Err(Report::new(ExecError::NotABuiltin)),
+            Err(BuiltinError::Help) | Err(BuiltinError::InvalidArgument) => {
+                Err(Report::new(ExecError::ExecFailed))
+            }
+            Err(BuiltinError::Syscall(e)) => Ok(e.errno()),
         }
     } else {
         let binary = args.first().ok_or(ExecError::MissingArg)?;

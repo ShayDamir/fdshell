@@ -46,13 +46,20 @@ impl From<ShortCStr> for RefCStr {
     }
 }
 
-#[allow(clippy::expect_used)]
 impl AsRef<CStr> for RefCStr {
     fn as_ref(&self) -> &CStr {
-        let bytes = self
-            .0
-            .as_cstr_bytes()
-            .expect("RefCStr: NUL guaranteed by construction");
+        // as_cstr_bytes() always returns Ok for a RefCStr because
+        // RefCStr::from guarantees push_unchecked(0) was called (or the
+        // Static variant already has a NUL terminator), and all
+        // offsets/lengths are validated at construction.
+        let bytes = match self.0.as_cstr_bytes() {
+            Ok(b) => b,
+            Err(_) => {
+                // SAFETY: The Err branch is unreachable — the invariants
+                // described above guarantee as_cstr_bytes() returns Ok.
+                unsafe { core::hint::unreachable_unchecked() }
+            }
+        };
         // SAFETY: RefCStr::from guarantees NUL at end of the slice.
         unsafe { CStr::from_bytes_with_nul_unchecked(bytes) }
     }

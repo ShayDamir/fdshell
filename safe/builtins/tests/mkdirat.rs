@@ -1,8 +1,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EINVAL, ENOENT, HELP};
 use sys::shellfd::TAG_MAX;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -11,10 +11,10 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     f(&refs);
 }
 
-fn assert_err(args: &[&str], code: i32) {
+fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| match builtins::mkdirat::parse::mkdirat_parse(a) {
-        Err(e) => assert_eq!(e, code),
-        _ => panic!("expected Err({code})"),
+        Err(e) => assert_eq!(e, expected),
+        _ => panic!("expected Err"),
     });
 }
 
@@ -36,42 +36,42 @@ fn basic() {
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], HELP);
+    assert_err(&["--help"], BuiltinError::Help);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], HELP);
+    assert_err(&["-h"], BuiltinError::Help);
 }
 
 #[test]
 fn empty_args() {
-    assert_err(&[], HELP);
+    assert_err(&[], BuiltinError::Help);
 }
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "x"], EINVAL);
+    assert_err(&["--bad", "x"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_path() {
-    assert_err(&["--mode", "755"], EINVAL);
+    assert_err(&["--mode", "755"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn extra_path() {
-    assert_err(&["a", "b"], EINVAL);
+    assert_err(&["a", "b"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn empty_path() {
-    assert_err(&[""], ENOENT);
+    assert_err(&[""], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--mode"], EINVAL);
+    assert_err(&["--mode"], BuiltinError::InvalidArgument);
 }
 
 #[test]

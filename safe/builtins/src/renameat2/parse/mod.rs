@@ -2,7 +2,8 @@ mod flags;
 
 use core::ffi::CStr;
 use sys::ImportedFd;
-use sys::errno::{EINVAL, ENOENT};
+
+use crate::error::BuiltinError;
 
 pub struct Renameat2Config<'a> {
     pub olddirfd: Option<ImportedFd>,
@@ -15,9 +16,8 @@ pub struct Renameat2Config<'a> {
 /// Parses renameat2 CLI arguments into an [`Renameat2Config`].
 ///
 /// Returns:
-/// - `Err(sys::errno::HELP)` — `--help` or `-h` was passed
-/// - `Err(sys::errno::EINVAL)` — bad flag name, missing value, etc.
-/// - `Err(sys::errno::ENOENT)` — empty path
+/// - `Err(BuiltinError::Help)` — `--help` or `-h` was passed
+/// - `Err(BuiltinError::InvalidArgument)` — bad flag name, missing value, etc.
 ///
 /// # Example
 ///
@@ -41,9 +41,9 @@ pub struct Renameat2Config<'a> {
 ///     _ => panic!("expected Ok"),
 /// }
 /// ```
-pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, i32> {
+pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, BuiltinError> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(sys::errno::HELP);
+        return Err(BuiltinError::Help);
     }
 
     let mut olddirfd = None;
@@ -54,7 +54,7 @@ pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, i32
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(EINVAL)?;
+        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument)?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -69,26 +69,26 @@ pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, i32
             b"--flags" => {
                 flags = flags::parse_rename_flags(crate::argparse::next_val(args, &mut i, val)?)?
             }
-            a if a.starts_with(b"-") => return Err(EINVAL),
+            a if a.starts_with(b"-") => return Err(BuiltinError::InvalidArgument),
             _ => {
                 if oldpath.is_none() {
                     oldpath = Some(arg);
                 } else if newpath.is_none() {
                     newpath = Some(arg);
                 } else {
-                    return Err(EINVAL);
+                    return Err(BuiltinError::InvalidArgument);
                 }
             }
         }
     }
 
-    let oldpath = oldpath.ok_or(EINVAL)?;
-    let newpath = newpath.ok_or(EINVAL)?;
+    let oldpath = oldpath.ok_or(BuiltinError::InvalidArgument)?;
+    let newpath = newpath.ok_or(BuiltinError::InvalidArgument)?;
     if oldpath.to_bytes().is_empty() {
-        return Err(ENOENT);
+        return Err(BuiltinError::InvalidArgument);
     }
     if newpath.to_bytes().is_empty() {
-        return Err(ENOENT);
+        return Err(BuiltinError::InvalidArgument);
     }
 
     Ok(Renameat2Config {

@@ -1,3 +1,4 @@
+use sys::SyscallError;
 use sys::siginfo::WaitStatus;
 
 fn with_exhausted_fds<T>(f: impl FnOnce() -> T) -> T {
@@ -20,7 +21,7 @@ fn with_exhausted_fds<T>(f: impl FnOnce() -> T) -> T {
 }
 
 #[test]
-fn umask_save_restore() -> Result<(), i32> {
+fn umask_save_restore() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
     if ret == 0 {
         sys::umask::init();
@@ -36,14 +37,14 @@ fn umask_save_restore() -> Result<(), i32> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => n,
-            _ => sys::errno::EINVAL,
+            WaitStatus::Exited(n) => SyscallError::Other(n),
+            _ => SyscallError::Other(sys::errno::EINVAL),
         }),
     }
 }
 
 #[test]
-fn umask_set_get() -> Result<(), i32> {
+fn umask_set_get() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
     if ret == 0 {
         sys::umask::init();
@@ -64,14 +65,14 @@ fn umask_set_get() -> Result<(), i32> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => n,
-            _ => sys::errno::EINVAL,
+            WaitStatus::Exited(n) => SyscallError::Other(n),
+            _ => SyscallError::Other(sys::errno::EINVAL),
         }),
     }
 }
 
 #[test]
-fn umask_set_get_zero() -> Result<(), i32> {
+fn umask_set_get_zero() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
     if ret == 0 {
         sys::umask::init();
@@ -87,14 +88,14 @@ fn umask_set_get_zero() -> Result<(), i32> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => n,
-            _ => sys::errno::EINVAL,
+            WaitStatus::Exited(n) => SyscallError::Other(n),
+            _ => SyscallError::Other(sys::errno::EINVAL),
         }),
     }
 }
 
 #[test]
-fn umask_init_fallback_no_proc() -> Result<(), i32> {
+fn umask_init_fallback_no_proc() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
     if ret == 0 {
         let ok = with_exhausted_fds(|| {
@@ -108,8 +109,8 @@ fn umask_init_fallback_no_proc() -> Result<(), i32> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => n,
-            _ => sys::errno::EINVAL,
+            WaitStatus::Exited(n) => SyscallError::Other(n),
+            _ => SyscallError::Other(sys::errno::EINVAL),
         }),
     }
 }

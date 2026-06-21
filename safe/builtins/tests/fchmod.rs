@@ -1,8 +1,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::errno::{EINVAL, HELP};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -10,11 +10,11 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     f(&refs);
 }
 
-fn assert_err(args: &[&str], code: i32) {
+fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| match builtins::fchmod::parse::fchmod_parse(a) {
-        Err(e) => assert_eq!(e, code),
+        Err(e) => assert_eq!(e, expected),
         Ok(cfg) => panic!(
-            "expected Err({code}), got Ok with fds={:?} mode={:o}",
+            "expected Err, got Ok with fds={:?} mode={:o}",
             cfg.fds, cfg.mode
         ),
     });
@@ -29,47 +29,47 @@ fn assert_ok<F: FnOnce(&builtins::fchmod::parse::FchmodConfig)>(args: &[&str], f
 
 #[test]
 fn help_long() {
-    assert_err(&["--help"], HELP);
+    assert_err(&["--help"], BuiltinError::Help);
 }
 
 #[test]
 fn help_short() {
-    assert_err(&["-h"], HELP);
+    assert_err(&["-h"], BuiltinError::Help);
 }
 
 #[test]
 fn empty_args() {
-    assert_err(&[], HELP);
+    assert_err(&[], BuiltinError::Help);
 }
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "3"], EINVAL);
+    assert_err(&["--bad", "3"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_fd_flag() {
-    assert_err(&["--mode", "755"], EINVAL);
+    assert_err(&["--mode", "755"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_mode_flag() {
-    assert_err(&["--fd", "3"], EINVAL);
+    assert_err(&["--fd", "3"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--fd"], EINVAL);
+    assert_err(&["--fd"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn invalid_flag_value() {
-    assert_err(&["--mode"], EINVAL);
+    assert_err(&["--mode"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn unknown_flag() {
-    assert_err(&["--fd", "3", "--xyz"], EINVAL);
+    assert_err(&["--fd", "3", "--xyz"], BuiltinError::InvalidArgument);
 }
 
 #[test]
@@ -112,12 +112,12 @@ fn positional_mode_octal_prefix() {
 
 #[test]
 fn positional_too_few() {
-    assert_err(&["644"], EINVAL);
+    assert_err(&["644"], BuiltinError::InvalidArgument);
 }
 
 #[test]
 fn positional_negative_fd() {
-    assert_err(&["644", "-1"], EINVAL);
+    assert_err(&["644", "-1"], BuiltinError::InvalidArgument);
 }
 
 #[test]
@@ -163,12 +163,18 @@ fn flag_mode_octal_prefix() {
 
 #[test]
 fn flag_invalid_fd() {
-    assert_err(&["--fd", "-1", "--mode", "755"], EINVAL);
+    assert_err(
+        &["--fd", "-1", "--mode", "755"],
+        BuiltinError::InvalidArgument,
+    );
 }
 
 #[test]
 fn flag_non_numeric_fd() {
-    assert_err(&["--fd", "abc", "--mode", "755"], EINVAL);
+    assert_err(
+        &["--fd", "abc", "--mode", "755"],
+        BuiltinError::InvalidArgument,
+    );
 }
 
 #[test]
