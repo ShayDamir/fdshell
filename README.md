@@ -127,8 +127,7 @@ When file descriptors are passed to subprocesses as a fd redirection or as comma
 `dup` or `dup2` syscalls are called after `fork`, but before `exec`. This strips the `CLOEXEC` flag
 and allows the subprocess to access the passed file descriptors.
 
-TODO: how to protect against leaking of fd 3 to the children of the subprocess? The subprocess should
-immediately set CLOEXEC on fd 3?
+The shellfd (fd 3) is reserved with CLOEXEC on startup, so it is automatically closed at exec boundaries. In nested shells, `try_into_local()` sets CLOEXEC on the inherited capture socket to prevent it from leaking through subsequent execs.
 
 
 ### Implementation philosophy
@@ -137,17 +136,12 @@ The fdshell binary is a static binary that has only one dependency: OS kernel.
 
 Currently only Linux is supported and only x86_64.
 
-The project is a workspace, divided into 2 paths:
+The project is a workspace with three crates:
 
-* safe - all crates there have forbid(unsafe). This also means that they cannot call libc directly.
-* unsafe - lib crates that allow unsafe, but each file should not have more than 80 lines of code (not counting comments).
-  Temporarily suspended during large-scale refactoring (error-handling migration).
+* `safe/fdshell` - main shell logic, spawning and receiving file descriptors
+* `safe/builtins` - builtin commands (no_std, forbid(unsafe))
+* `unsafe/sys` - syscall wrappers (no_std, unsafe allowed)
 
-Currently following crates are planned;
+All `safe/` crates have `forbid(unsafe_code)` and cannot call libc directly. All source files must be ≤80 lines (excluding comments, tests exempt).
 
-safe/fdshell - implementation of main shell logic, including spawning and receiving file descriptors
-safe/builtins - implementation of various builtin commands
-unsafe/sys - syscalls and other wrappers needed to implement crates in safe
-
-The ecosystem should avoid derive directives as much as possible to keep the code at minimum.
-If possible, everything should be no_std
+The codebase avoids `#[derive]` directives in production code (except `Display`/`Debug` on error types and `Debug`/`PartialEq`/`Eq` on `ShortCStr`). Prefer `no_std` where feasible — the fdshell binary uses `std` for stability.

@@ -1,5 +1,9 @@
 # FD Shell — agent guidance
 
+## Lessons database
+
+All new plans and implementations must be aligned to [`LESSONS.md`](../LESSONS.md) — the project's self-improvement database. It captures bugs found, edge cases discovered, API gotchas, and refactoring decisions. Before implementing anything, check if a relevant lesson already exists. When you encounter a new issue, add it as a lesson so the next iteration avoids the same pitfall.
+
 ## Workspace layout
 
 Three crates in a Cargo workspace (`resolver = "2"`):
@@ -13,9 +17,8 @@ Three crates in a Cargo workspace (`resolver = "2"`):
 - `safe/` crates **cannot** call libc directly (`forbid(unsafe_code)`).
 - `safe/` and `unsafe/` source files must be ≤80 lines each (excluding comments). If a file approaches this limit, split or refactor rather than compress formatting. Tests are exempt from the line limit.
   - Measure code lines after `cargo fmt`. Don't manipulate whitespace to squeeze under the limit — if it's a few lines over, leave it and flag for refactoring in TODO.md.
-  - **Temporarily suspended** during large-scale refactoring (e.g., error-handling migration). Re-enforce when the churn settles.
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
-- Safe wrappers in `unsafe/sys` return `Result<_, i32>` (positive errno on error). Use `cvt(ret: isize) -> Result<isize, i32>` from `lib.rs` to convert libc return values.
+- Safe wrappers in `unsafe/sys` return `Result<_, SyscallError>`. Use `cvt(ret: isize) -> Result<isize, SyscallError>` from `lib.rs` to convert libc return values.
 - Avoid `#[derive]` in production code. Derives like `PartialEq`, `Eq`, and `Hash` are
   contagious — adding them to a type forces every field type to also implement them,
   propagating through the type graph. Since the codebase bans panicky patterns (`unwrap`,
@@ -139,7 +142,7 @@ Four fd types across `unsafe/sys/src/`:
 | `ExportedFd` | no | no | no | `unsafe` | n/a | `exportedfd.rs` |
 | `AtFd<'a>` | no | irrelevant | no | `unsafe` | n/a (via `From<&LocalFd>` / `From<&ImportedFd>` / `From<&ExportedFd>`) | `atfd.rs` |
 
-- `LocalFd::verify()` and `ImportedFd::verify()` return `Result<(), i32>` using `cvt` (never `__errno_location`).
+- `LocalFd::verify()` and `ImportedFd::verify()` return `Result<(), SyscallError>` using `cvt` (never `__errno_location`).
   `LocalFd::verify` checks CLOEXEC is SET; `ImportedFd::verify` checks CLOEXEC is CLEAR.
 - `ImportedFd::from_bytes` delegates to `verify()` — validates fd is open AND non-CLOEXEC.
 - `ImportedFd::from_raw` / `ExportedFd::from_raw` are `unsafe` — only for trusted constants and kernel returns.
@@ -203,10 +206,10 @@ Four fd types across `unsafe/sys/src/`:
 
 See [error-handling.md](../error-handling.md) for the full strategy.
 
-- `sys` and `builtins` crates keep returning `Result<_, i32>` — they are leaf layers with zero internal error composition.
+- `sys` crate returns `Result<_, SyscallError>`, `builtins` crate returns `Result<_, BuiltinError>` — both are leaf layers with zero internal error composition.
 - Typed errors with `error-stack::Report` live **only** in `fdshell/`. Each sub-domain gets its own small enum (variant names only).
 - Enum variants carry no meaningful data — attach context via `Report::attach()` at each level.
-- When converting cross-crate boundaries (`i32` errno → typed error), use `.map_err()` to map errno codes, then `.change_context()` if the fdshell layer adds meaning.
+- When converting cross-crate boundaries (`SyscallError → BuiltinError → Report`), use `From` or `.map_err()` at the boundary, then `.change_context()` if the fdshell layer adds meaning.
 - Never print raw errno numbers to users — format through the error chain.
 
 ## Nesting
@@ -239,7 +242,7 @@ On startup, `init_shellfd()` chooses one of two modes (`FdShellMode`):
 ## Launch / Capture
 
 - `launch()` in `safe/fdshell/src/launch.rs` is stateless — no capture logic, no `&mut FdVars`.
-  Returns `Result<(WaitStatus, LocalFd), i32>` — the `LocalFd` is the parent end of the capture socket.
+  Returns `Result<LaunchOutcome, Report<LaunchError>>` — `LaunchOutcome` contains `pidfd: LocalFd`, `capture_fd: Option<LocalFd>`, `child_pid: i32`.
 - `do_captures()` in `safe/fdshell/src/capture.rs` owns both the capture socket and captures vec
   (takes `captures: Vec<Capture>` by value). Returns `Vec<(CString, LocalFd)>` on success.
   The caller commits atomically into `fdvars` after a successful receive-and-stage phase.

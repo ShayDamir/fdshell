@@ -48,7 +48,7 @@ Static, Rc, and None. The compiler handles dispatch.
 ```rust
 impl ShortCStr {
     /// Inline if ≤30 bytes, else Rc. Validates no interior NUL.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, i32>;
+    pub fn from_vec(bytes: Vec<u8>) -> Result<Self, ShortCStrError>;
 
     /// Zero-cost. offset=0, length = s.len().
     pub const fn from_static(s: &'static CStr) -> Self;
@@ -129,9 +129,9 @@ impl ShortCStr {
 Tokens are `ShortCStr` from the start:
 
 ```rust
-// tokenize returns Vec<ShortCStr>
-// each token built via ShortCStr::from_bytes(token_bytes)
-pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32>;
+// tokenize returns Vec<(ShortCStr, usize)> (token + span end)
+// each token built via ShortCStr::from_vec(token_bytes.to_vec())
+pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseError>>;
 ```
 
 ### Classification / detection
@@ -139,7 +139,7 @@ pub fn tokenize(line: &str) -> Result<Vec<ShortCStr>, i32>;
 Work with `&[u8]` via `.as_bytes()`:
 
 ```rust
-fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, i32> {
+fn detect(tokens: &[ShortCStr]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
         Some(t) => t.as_bytes(),
         None => return Ok(None),
