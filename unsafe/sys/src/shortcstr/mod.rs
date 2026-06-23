@@ -4,10 +4,13 @@ use core::ffi::CStr;
 
 mod access;
 mod copy;
+mod eq;
 mod error;
 mod from;
 mod get;
+mod len;
 mod push;
+mod push_fallback;
 mod size;
 mod traits;
 

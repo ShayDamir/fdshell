@@ -1,4 +1,5 @@
-use super::semi::{find_preceded_by_semi, trim_semi, try_join};
+use super::semi::find_preceded_by_semi;
+use super::semi::{trim_semi, try_join};
 use crate::error::parse::{ParseError, report_error};
 use error_stack::Report;
 use sys::ShortCStr;
@@ -57,38 +58,9 @@ pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Rep
             .ok_or_else(|| report_error("missing 'then'", if_pos))?,
     ))?;
 
-    let elifs = elif_pairs
-        .iter()
-        .enumerate()
-        .map(|(i, &(ei, ti))| {
-            let ec = try_join(trim_semi(tokens.get(ei + 1..ti - 1).ok_or_else(|| {
-                let p = tokens.get(ei).map(|(_, p)| *p).unwrap_or(0);
-                report_error("missing condition", p)
-            })?))?;
-            let next = elif_pairs
-                .get(i + 1)
-                .map(|&(ne, _)| ne)
-                .or(else_idx)
-                .unwrap_or(fi_idx);
-            let eb = try_join(trim_semi(tokens.get(ti + 1..next - 1).ok_or_else(
-                || {
-                    let p = tokens.get(ti).map(|(_, p)| *p).unwrap_or(0);
-                    report_error("missing 'then'", p)
-                },
-            )?))?;
-            Ok((ec, eb))
-        })
-        .collect::<Result<Vec<_>, Report<ParseError>>>()?;
-
+    let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx)?;
     let else_str = else_idx
-        .map(|ei| {
-            try_join(trim_semi(tokens.get(ei + 1..fi_idx - 1).ok_or_else(
-                || {
-                    let p = tokens.get(ei).map(|(_, p)| *p).unwrap_or(0);
-                    report_error("missing 'else' body", p)
-                },
-            )?))
-        })
+        .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx))
         .transpose()?;
     Ok(IfBlock {
         condition: cond_str,

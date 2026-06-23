@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod brace;
 mod dollar;
 mod paren;
 mod percent;

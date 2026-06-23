@@ -62,3 +62,6 @@ When converting `dispatch_builtin` from `Result<_, i32>` to `Result<i32, Builtin
 
 ## `become` is a reserved keyword in Rust — rename modules
 `become` is an experimental reserved keyword (issue #112788). `mod become;` fails to compile. When a builtin command name conflicts with a Rust reserved keyword, rename the module file and module declaration (e.g., `become_cmd.rs` with `mod become_cmd;`). The file name can be anything — only the module identifier matters.
+
+## Prefer `Result::is_ok_and()` over `map().unwrap_or(false)`
+When checking a predicate on `Result<T, E>` with a fallback of `false`, use `result.is_ok_and(|v| pred(v))` instead of `result.map(|v| pred(v)).unwrap_or(false)`. `is_ok_and` makes the intent explicit, avoids the intermediate `Option<bool>`, and is one allocation-free method call instead of two. This pattern appears naturally on `ShortCStr::as_bytes()` which returns `Result<&[u8], ShortCStrError>` — methods like `eq_bytes`, `starts_with`, `ends_with`, and `contains` all benefit from this simplification.

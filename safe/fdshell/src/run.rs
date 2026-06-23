@@ -64,22 +64,7 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::For(forblock) => {
-            {
-                let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
-                state.last_status = WaitStatus::Exited(0);
-            }
-            let words = crate::expand::expand_for_words(&forblock.words, cell)
-                .change_context(CmdError::Resolve)?;
-            for word in &words {
-                {
-                    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
-                    state.strings.insert(forblock.var.clone(), word.clone());
-                }
-                crate::repl::run_script(
-                    forblock.body.as_bytes().change_context(CmdError::Exec)?,
-                    cell,
-                )?;
-            }
+            crate::for_run::run_for(&forblock, cell)?;
         }
         crate::parse::ParsedLine::While(whileblock) => {
             crate::loop_::run_loop(&whileblock.condition, &whileblock.body, true, cell)?;

@@ -1,10 +1,15 @@
+mod backtick;
+mod capture;
 mod classify;
 mod cmdline;
 mod command;
-mod for_block;
+mod elif;
+pub(crate) mod for_block;
 pub(crate) mod if_block;
 mod line;
 mod pipeline;
+mod quotes;
+mod redirect;
 mod semi;
 mod token;
 mod token_subst;

@@ -1,32 +1,9 @@
+use crate::keywords::keyword_delta;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
-
-fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
-    word.get(len)
-        .is_none_or(|&b| b.is_ascii_whitespace() || b == b';' || extra.contains(&b))
-}
-
-fn keyword_delta(word: &[u8]) -> Option<i32> {
-    if word.starts_with(b"if") && boundary(word, 2, b"") {
-        return Some(1);
-    }
-    if word.starts_with(b"fi") && boundary(word, 2, b"&|") {
-        return Some(-1);
-    }
-    if word.starts_with(b"for") && boundary(word, 3, b"") {
-        return Some(1);
-    }
-    if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
-        return Some(1);
-    }
-    if word.starts_with(b"done") && boundary(word, 4, b"&|") {
-        return Some(-1);
-    }
-    None
-}
 
 pub(crate) fn run_script(
     line: &[u8],

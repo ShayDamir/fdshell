@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod environ;
+
 use std::ffi::{CStr, CString};
 
 use error_stack::{Report, ResultExt};
@@ -8,6 +10,7 @@ use sys::fcntl::O_PATH;
 use sys::{AtFd, LocalFd, ShortCStr};
 
 use crate::error::exec::ExecError;
+use environ::get_environ;
 
 pub fn exec_fd(
     fd: &LocalFd,
@@ -68,28 +71,6 @@ pub fn resolve_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
             .attach(bin_name)
     } else {
         search_path(bin)
-    }
-}
-
-fn get_environ(cookie: &[u8], exports: &[(ShortCStr, Vec<u8>)]) -> Vec<CString> {
-    let env_iter = std::env::vars()
-        .filter(|(k, _)| k != "FDSHELL_CAPTURE")
-        .filter_map(|(k, v)| CString::new(format!("{k}={v}")).ok());
-    let exports_iter = exports.iter().filter_map(|(k, v)| {
-        if let Ok(key) = k.as_bytes() {
-            CString::new([key, b"=", v.as_slice()].concat()).ok()
-        } else {
-            None
-        }
-    });
-    if sys::shellfd::capture_active() {
-        let entry = [b"FDSHELL_CAPTURE=", cookie].concat();
-        env_iter
-            .chain(exports_iter)
-            .chain(CString::new(entry).ok())
-            .collect()
-    } else {
-        env_iter.chain(exports_iter).collect()
     }
 }
 

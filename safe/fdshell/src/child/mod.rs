@@ -1,7 +1,11 @@
 #![forbid(unsafe_code)]
 pub(crate) mod builtin;
+mod delegated;
+mod dispatch;
+mod exec;
 pub(crate) mod fdpass;
 mod run;
+mod simple;
 use crate::parse::CommandLine;
 use sys::ShortCStr;
 

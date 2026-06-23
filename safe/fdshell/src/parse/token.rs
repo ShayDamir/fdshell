@@ -1,4 +1,4 @@
-use crate::error::parse::{ParseError, report_unbalanced_quote, report_unexpected_eof};
+use crate::error::parse::{ParseError, report_unbalanced_quote};
 use error_stack::Report;
 use error_stack::ResultExt;
 use sys::ShortCStr;
@@ -16,19 +16,8 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
         pos += 1;
 
         if in_quotes {
-            match b {
-                b'"' => in_quotes = false,
-                b'\\' => {
-                    if let Some(c) = bytes.next() {
-                        cur.push(c)
-                            .change_context(ParseError::InvalidChar { ch: 0 })?;
-                    } else {
-                        return Err(report_unexpected_eof(line, pos));
-                    }
-                }
-                _ => cur
-                    .push(b)
-                    .change_context(ParseError::InvalidChar { ch: 0 })?,
+            if !super::quotes::handle_quoted_char(b, &mut cur, &mut bytes, line, pos)? {
+                in_quotes = false;
             }
         } else {
             match b {
@@ -73,7 +62,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
                 }
                 b'`' => {
                     let start = pos - 1; // position of '`'
-                    super::token_subst::read_backtick(line, &mut cur, &mut bytes, start)?;
+                    super::backtick::read_backtick(line, &mut cur, &mut bytes, start)?;
                 }
                 _ => cur
                     .push(b)

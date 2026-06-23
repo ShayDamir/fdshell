@@ -2,7 +2,6 @@
 
 ## Refactoring / cleanup
 
-- [ ] File length: `run.rs` (81 code lines, 1 over), `if_block.rs` (95 code lines, 15 over), `script.rs` (81 code lines, 1 over), `token.rs` (92 code lines, 12 over), `format.rs` (110 code lines, 30 over) — minor extractions to get under 80
 - [x] Add tests for `run.rs` else/elif execution paths (`if false; then ...; else ...; fi`, elif-first-fails, all-elifs-fail-no-else)
 - [x] Remove dead `ParseError` enum from `error/parse.rs` (QA finding)
 - [x] Add unit tests for `format_parse_error()` (QA finding)
