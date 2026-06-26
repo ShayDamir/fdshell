@@ -40,7 +40,14 @@ pub fn launch(
         .change_context(crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {
-        None => match child::child_main(child_fd, cell, cmd, &cmdline.args, &resolved) {
+        None => match child::child_main(
+            child_fd,
+            cell,
+            cmd,
+            &cmdline.args,
+            &cmdline.args_fq,
+            &resolved,
+        ) {
             Ok(code) => std::process::exit(code),
             Err(report) => {
                 eprintln!("{:?}", report);

@@ -51,5 +51,12 @@ pub fn run_child(
 
     let cmd = Command::from(cmd_data);
 
-    child::child_main(child_sock, cell, cmd, &cmd_data.args, &redirects)
+    child::child_main(
+        child_sock,
+        cell,
+        cmd,
+        &cmd_data.args,
+        &cmd_data.args_fq,
+        &redirects,
+    )
 }

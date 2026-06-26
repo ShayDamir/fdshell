@@ -22,8 +22,13 @@ use crate::error::parse::ParseError;
 use error_stack::Report;
 
 /// Extract just the `ShortCStr` values from position-tagged tokens.
-fn tokens_only(tokens: &[(sys::ShortCStr, usize)]) -> Vec<sys::ShortCStr> {
-    tokens.iter().map(|(t, _)| t.clone()).collect()
+fn tokens_only(tokens: &[(sys::ShortCStr, usize, bool)]) -> Vec<sys::ShortCStr> {
+    tokens.iter().map(|(t, _, _)| t.clone()).collect()
+}
+
+/// Extract the fully_quoted flags from position-tagged tokens.
+fn fully_quoted_only(tokens: &[(sys::ShortCStr, usize, bool)]) -> Vec<bool> {
+    tokens.iter().map(|(_, _, fq)| *fq).collect()
 }
 
 /// Parse an input line into a `ParsedLine`.
@@ -42,31 +47,35 @@ fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
         return Ok(pl);
     }
 
-    if raw.first().is_some_and(|(t, _)| t.eq_bytes(b"if")) {
+    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")) {
         return Ok(ParsedLine::If(if_block::tokens_to_if(&raw)?));
     }
 
-    if raw.first().is_some_and(|(t, _)| t.eq_bytes(b"for")) {
+    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")) {
         return Ok(ParsedLine::For(for_block::tokens_to_for(&raw)?));
     }
 
-    if raw.first().is_some_and(|(t, _)| t.eq_bytes(b"while")) {
+    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"while")) {
         return Ok(ParsedLine::While(while_block::tokens_to_loop(
             &raw, b"while",
         )?));
     }
 
-    if raw.first().is_some_and(|(t, _)| t.eq_bytes(b"until")) {
+    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"until")) {
         return Ok(ParsedLine::Until(while_block::tokens_to_loop(
             &raw, b"until",
         )?));
     }
 
-    if raw.iter().any(|(t, _)| t.eq_bytes(b"|")) {
-        return pipeline::parse_pipeline(&tokens);
+    if raw.iter().any(|(t, _, _)| t.eq_bytes(b"|")) {
+        return pipeline::parse_pipeline(&raw);
     }
 
-    Ok(ParsedLine::Cmd(command::parse_command(&tokens)?))
+    let fully_quoted = fully_quoted_only(&raw);
+    Ok(ParsedLine::Cmd(command::parse_command(
+        &tokens,
+        fully_quoted,
+    )?))
 }
 
 #[cfg(test)]

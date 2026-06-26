@@ -13,10 +13,10 @@ pub type WhileBlock = LoopBlock;
 pub type UntilBlock = LoopBlock;
 
 pub(crate) fn tokens_to_loop(
-    tokens: &[(ShortCStr, usize)],
+    tokens: &[(ShortCStr, usize, bool)],
     keyword: &[u8],
 ) -> Result<LoopBlock, Report<ParseError>> {
-    if !tokens.first().is_some_and(|(t, _)| t.eq_bytes(keyword)) {
+    if !tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(keyword)) {
         let reason = match keyword {
             b"while" => "expected 'while'",
             b"until" => "expected 'until'",
@@ -32,7 +32,7 @@ pub(crate) fn tokens_to_loop(
     }
 
     let done_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|(t, _)| t.eq_bytes(b"done")) {
+    if !tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")) {
         return Err(report_error("expected 'done'", 0));
     }
 

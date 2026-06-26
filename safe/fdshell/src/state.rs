@@ -1,16 +1,20 @@
 #![forbid(unsafe_code)]
 
-use crate::task::Task;
 use std::collections::HashMap;
+use std::collections::VecDeque;
+
 use sys::LocalFd;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
+
+use crate::task::Task;
 
 pub struct ShellState {
     pub fds: HashMap<ShortCStr, LocalFd>,
     pub tasks: HashMap<ShortCStr, Task>,
     pub strings: HashMap<ShortCStr, ShortCStr>,
     pub exports: HashMap<ShortCStr, Vec<u8>>,
+    pub positional: VecDeque<ShortCStr>,
     pub last_status: WaitStatus,
     pub shell_pid: i32,
     pub last_bg_pid: Option<i32>,
@@ -23,9 +27,16 @@ impl ShellState {
             tasks: HashMap::new(),
             strings: HashMap::new(),
             exports: HashMap::new(),
+            positional: VecDeque::new(),
             last_status: WaitStatus::Exited(0),
             shell_pid: std::process::id() as i32,
             last_bg_pid: None,
+        }
+    }
+
+    pub fn shift(&mut self, n: usize) {
+        for _ in 0..n.min(self.positional.len()) {
+            self.positional.pop_front();
         }
     }
 }

@@ -4,6 +4,7 @@ use std::io::{BufRead, Write};
 use crate::app::AppError;
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
+use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 pub(crate) use crate::cond::run_cond_list;
@@ -19,6 +20,13 @@ pub fn exec_cmd(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, Report<
 }
 
 pub(crate) fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
+    // Set $0 to "fdshell" for interactive mode
+    // Safe to call here because main.rs returns/exits before reaching this path
+    // when in -c or script file mode (positional args already set)
+    {
+        let mut state = cell.borrow_mut().change_context(AppError::Borrow)?;
+        state.positional.push_back(ShortCStr::from(c"fdshell"));
+    }
     let mut buf = Vec::new();
     loop {
         buf.clear();

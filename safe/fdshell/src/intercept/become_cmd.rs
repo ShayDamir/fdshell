@@ -12,9 +12,10 @@ pub(crate) fn run_become(
     }
 
     let args = cmdline.args.clone();
+    let args_fq = cmdline.args_fq.clone();
     let redirects = &cmdline.redirects;
 
-    match crate::replacer::execute(&args, redirects, _cell) {
+    match crate::replacer::execute(&args, &args_fq, redirects, _cell) {
         Ok(code) => std::process::exit(code),
         Err(report) => {
             eprintln!("{:?}", report);

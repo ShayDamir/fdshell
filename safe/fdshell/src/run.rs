@@ -39,8 +39,10 @@ pub(crate) fn run_one(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Re
             state.last_status = WaitStatus::Exited(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
-            let expanded = crate::substitute::substitute_arg(&value, &mut HashMap::new(), cell)
-                .change_context(CmdError::Resolve)?;
+            let expanded = {
+                crate::substitute::substitute_arg(&value, &mut HashMap::new(), cell)
+                    .change_context(CmdError::Resolve)?
+            };
             let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.strings.insert(
                 var,

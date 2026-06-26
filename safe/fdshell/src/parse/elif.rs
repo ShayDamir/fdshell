@@ -4,7 +4,7 @@ use error_stack::Report;
 use sys::ShortCStr;
 
 pub fn parse_elifs(
-    tokens: &[(ShortCStr, usize)],
+    tokens: &[(ShortCStr, usize, bool)],
     elif_pairs: &[(usize, usize)],
     else_idx: Option<usize>,
     fi_idx: usize,
@@ -14,7 +14,7 @@ pub fn parse_elifs(
         .enumerate()
         .map(|(i, &(ei, ti))| {
             let ec = try_join(trim_semi(tokens.get(ei + 1..ti - 1).ok_or_else(|| {
-                let p = tokens.get(ei).map(|(_, p)| *p).unwrap_or(0);
+                let p = tokens.get(ei).map(|(_, p, _)| *p).unwrap_or(0);
                 report_error("missing condition", p)
             })?))?;
             let next = elif_pairs
@@ -24,7 +24,7 @@ pub fn parse_elifs(
                 .unwrap_or(fi_idx);
             let eb = try_join(trim_semi(tokens.get(ti + 1..next - 1).ok_or_else(
                 || {
-                    let p = tokens.get(ti).map(|(_, p)| *p).unwrap_or(0);
+                    let p = tokens.get(ti).map(|(_, p, _)| *p).unwrap_or(0);
                     report_error("missing 'then'", p)
                 },
             )?))?;
@@ -34,13 +34,13 @@ pub fn parse_elifs(
 }
 
 pub fn parse_else_body(
-    tokens: &[(ShortCStr, usize)],
+    tokens: &[(ShortCStr, usize, bool)],
     else_idx: usize,
     fi_idx: usize,
 ) -> Result<ShortCStr, Report<ParseError>> {
     try_join(trim_semi(tokens.get(else_idx + 1..fi_idx - 1).ok_or_else(
         || {
-            let p = tokens.get(else_idx).map(|(_, p)| *p).unwrap_or(0);
+            let p = tokens.get(else_idx).map(|(_, p, _)| *p).unwrap_or(0);
             report_error("missing 'else' body", p)
         },
     )?))

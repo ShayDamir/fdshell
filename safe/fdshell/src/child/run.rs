@@ -15,6 +15,7 @@ pub fn child_main(
     cell: &ForkCell<ShellState>,
     cmd: Command,
     args: &[ShortCStr],
+    args_fq: &[bool],
     redirects: &[Redirect],
 ) -> Result<i32, Report<ChildError>> {
     if let Some(sock) = child_sock {
@@ -29,39 +30,42 @@ pub fn child_main(
         r.export().change_context(ChildError::RedirectFailed)?;
     }
 
-    let resolved = substitute_args(args, cell).change_context(ChildError::SubstituteFailed)?;
+    let resolved =
+        substitute_args(args, args_fq, cell).change_context(ChildError::SubstituteFailed)?;
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
+    // Clone exports before borrowing mutably
+    let exports: Vec<(sys::ShortCStr, Vec<u8>)> = {
+        let state = cell.borrow().change_context(ChildError::BorrowFailed)?;
+        state
+            .exports
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    };
+
     let state = cell.borrow_mut().change_context(ChildError::BorrowFailed)?;
-    match cmd {
-        Command::Builtin(name) => {
-            let cmd_name = name.clone();
-            match child::builtin::dispatch_builtin(name, &refs, args, &state) {
-                Ok(code) => Ok(code),
-                Err(BuiltinError::Unknown) => {
-                    Err(Report::new(ChildError::NotABuiltin).attach(cmd_name))
-                }
-                Err(BuiltinError::Help) | Err(BuiltinError::InvalidArgument) => {
-                    Err(Report::new(ChildError::ExecFailed))
-                }
-                Err(BuiltinError::Syscall(e)) => Ok(e.errno()),
+    if cmd.builtin {
+        let cmd_name = cmd.name.clone();
+        match child::builtin::dispatch_builtin(cmd.name, &refs, args, &state) {
+            Ok(code) => Ok(code),
+            Err(BuiltinError::Unknown) => {
+                Err(Report::new(ChildError::NotABuiltin).attach(cmd_name))
             }
+            Err(BuiltinError::Help) | Err(BuiltinError::InvalidArgument) => {
+                Err(Report::new(ChildError::ExecFailed))
+            }
+            Err(BuiltinError::Syscall(e)) => Ok(e.errno()),
         }
-        Command::External(name) => {
-            let name = sys::RefCStr::from(name.clone());
-            let fd = exec::resolve_path(&name).change_context(ChildError::NotFound)?;
-            let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
-                .chain(refs.iter().copied())
-                .collect();
-            let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
-                .exports
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            match exec::exec_fd(&fd, &full_argv, &exports) {
-                Ok(()) => Ok(0),
-                Err(report) => Err(report.change_context(ChildError::ExecFailed)),
-            }
+    } else {
+        let name = sys::RefCStr::from(cmd.name.clone());
+        let fd = exec::resolve_path(&name).change_context(ChildError::NotFound)?;
+        let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
+            .chain(refs.iter().copied())
+            .collect();
+        match exec::exec_fd(&fd, &full_argv, &exports) {
+            Ok(()) => Ok(0),
+            Err(report) => Err(report.change_context(ChildError::ExecFailed)),
         }
     }
 }

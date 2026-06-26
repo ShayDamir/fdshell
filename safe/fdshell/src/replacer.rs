@@ -13,6 +13,7 @@ use sys::fork_cell::ForkCell;
 
 pub fn execute(
     args: &[ShortCStr],
+    args_fq: &[bool],
     redirects: &[crate::redirect::RedirectDef],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ExecError>> {
@@ -34,7 +35,7 @@ pub fn execute(
         let builtin_name = args.get(1).ok_or(ExecError::MissingArg)?;
         let builtin_args = args.get(2..).unwrap_or(&[]);
         let substituted =
-            substitute_args(builtin_args, cell).change_context(ExecError::ExecFailed)?;
+            substitute_args(builtin_args, &[], cell).change_context(ExecError::ExecFailed)?;
         let refs: Vec<&CStr> = substituted.iter().map(|cs| cs.as_c_str()).collect();
         let state = cell.borrow().change_context(ExecError::ExecFailed)?;
         match child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
@@ -49,7 +50,7 @@ pub fn execute(
         let binary = args.first().ok_or(ExecError::MissingArg)?;
         let binary = sys::RefCStr::from(binary.clone());
         let fd = exec::resolve_path(&binary)?;
-        let substituted = substitute_args(args.get(1..).unwrap_or(&[]), cell)
+        let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_fq, cell)
             .change_context(ExecError::ExecFailed)?;
         let argv: Vec<&CStr> = std::iter::once(binary.as_ref())
             .chain(substituted.iter().map(|s| s.as_c_str()))

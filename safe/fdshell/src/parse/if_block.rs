@@ -11,12 +11,14 @@ pub struct IfBlock {
     pub else_body: Option<ShortCStr>,
 }
 
-pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Report<ParseError>> {
-    if !tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"if")) {
+pub(crate) fn tokens_to_if(
+    tokens: &[(ShortCStr, usize, bool)],
+) -> Result<IfBlock, Report<ParseError>> {
+    if !tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")) {
         return Err(report_error("malformed if block", 0));
     }
 
-    let if_pos = tokens.first().map(|(_, p)| *p).unwrap_or(0);
+    let if_pos = tokens.first().map(|(_, p, _)| *p).unwrap_or(0);
 
     let first_then = find_preceded_by_semi(tokens, 1, b"then");
     let first_then = match first_then {
@@ -25,7 +27,7 @@ pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Rep
     };
 
     let fi_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|(t, _)| t.eq_bytes(b"fi")) {
+    if !tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"fi")) {
         return Err(report_error("missing 'fi'", if_pos));
     }
 
@@ -39,7 +41,7 @@ pub(crate) fn tokens_to_if(tokens: &[(ShortCStr, usize)]) -> Result<IfBlock, Rep
     let mut pos = first_then + 1;
     while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif") {
         let then_idx = find_preceded_by_semi(tokens, elif_idx + 1, b"then").ok_or_else(|| {
-            let elif_pos = tokens.get(elif_idx).map(|(_, p)| *p).unwrap_or(0);
+            let elif_pos = tokens.get(elif_idx).map(|(_, p, _)| *p).unwrap_or(0);
             report_error("missing 'then' after 'elif'", elif_pos)
         })?;
         elif_pairs.push((elif_idx, then_idx));

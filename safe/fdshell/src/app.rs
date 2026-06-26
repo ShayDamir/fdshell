@@ -15,8 +15,12 @@ pub(crate) enum AppError {
     Read,
     /// state borrow failed
     Borrow,
-    /// usage: fdshell [-c command]
+    /// usage: fdshell [-c command] [name args...] or fdshell script.sh [args...]
     Usage,
+    /// failed to read script file
+    ScriptRead,
+    /// invalid UTF-8 in {field}
+    InvalidUtf8 { field: &'static str },
 }
 
 impl core::error::Error for AppError {}

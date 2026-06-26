@@ -3,7 +3,7 @@ use error_stack::Report;
 use error_stack::ResultExt;
 use sys::ShortCStr;
 
-pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseError>> {
+pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<ParseError>> {
     let mut tokens = Vec::new();
     let mut cur = ShortCStr::new();
     let mut in_quotes = false;
@@ -18,12 +18,13 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
         if in_quotes {
             if !super::quotes::handle_quoted_char(b, &mut cur, &mut bytes, line, pos)? {
                 in_quotes = false;
+                quote_start = None;
             }
         } else {
             match b {
                 b' ' | b'\t' => {
                     if !cur.is_empty() {
-                        tokens.push((core::mem::take(&mut cur), token_start));
+                        tokens.push((core::mem::take(&mut cur), token_start, false));
                     }
                     token_start = pos;
                 }
@@ -35,16 +36,16 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
                             .change_context(ParseError::InvalidChar { ch: 0 })?;
                     } else {
                         if !cur.is_empty() {
-                            tokens.push((core::mem::take(&mut cur), token_start));
+                            tokens.push((core::mem::take(&mut cur), token_start, false));
                         }
-                        tokens.push((c"|".into(), pos - 1));
+                        tokens.push((c"|".into(), pos - 1, false));
                     }
                 }
                 b';' | b'\n' => {
                     if !cur.is_empty() {
-                        tokens.push((core::mem::take(&mut cur), token_start));
+                        tokens.push((core::mem::take(&mut cur), token_start, false));
                     }
-                    tokens.push((c";".into(), pos - 1));
+                    tokens.push((c";".into(), pos - 1, false));
                     token_start = pos;
                 }
                 b'"' => {
@@ -75,7 +76,8 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize)>, Report<ParseErro
         return Err(report_unbalanced_quote(line, quote_start.unwrap_or(0)));
     }
     if !cur.is_empty() {
-        tokens.push((cur, token_start));
+        let fully_quoted = quote_start.is_some();
+        tokens.push((cur, token_start, fully_quoted));
     }
     Ok(tokens)
 }

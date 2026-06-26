@@ -6,7 +6,10 @@ use crate::redirect::RedirectDef;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
-pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, Report<ParseError>> {
+pub fn parse_command(
+    tokens: &[ShortCStr],
+    fully_quoted: Vec<bool>,
+) -> Result<CommandLine, Report<ParseError>> {
     let mut iter = tokens.iter().peekable();
     let builtin = match iter.peek() {
         Some(t) if t.eq_bytes(b"builtin") => {
@@ -27,7 +30,16 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, Report<ParseEr
     let mut redirects: Vec<RedirectDef> = Vec::new();
     let mut pidvar: Option<ShortCStr> = None;
     let mut bg_force = false;
+    let mut args_fq = Vec::new();
+    let mut fq_iter = fully_quoted.into_iter();
+    // Skip the first token (command name) in fully_quoted
+    fq_iter.next();
+    // If builtin keyword was consumed, skip its fully_quoted entry too
+    if builtin {
+        fq_iter.next();
+    }
     for t in iter {
+        let fq = fq_iter.next().unwrap_or(false);
         let b = t.as_bytes().change_context(ParseError::Reason {
             reason: "internal string state",
         })?;
@@ -48,6 +60,7 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, Report<ParseEr
                 captures.push(c);
             } else {
                 args.push(t.clone());
+                args_fq.push(fq);
             }
         } else if let Some(r) = crate::parse::classify::parse_redirect(t)? {
             let pos = redirects.binary_search_by_key(&r.export_to, |x| x.export_to);
@@ -57,12 +70,14 @@ pub fn parse_command(tokens: &[ShortCStr]) -> Result<CommandLine, Report<ParseEr
             }
         } else {
             args.push(t.clone());
+            args_fq.push(fq);
         }
     }
     Ok(CommandLine {
         builtin,
         command,
         args,
+        args_fq,
         captures,
         redirects,
         pidvar,

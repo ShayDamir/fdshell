@@ -25,6 +25,7 @@ fn test_mkdirat_capture() {
                 c"%CWD".into(),
                 c"foo".into(),
             ],
+            args_fq: vec![false, false, false, false, false],
             captures: vec![Capture {
                 var: c"foo".into(),
                 tag: None,
@@ -451,7 +452,7 @@ fn tokenize_if_newline_separators() {
     ];
     let expected_pos: &[usize] = &[0, 3, 7, 8, 12, 13, 19, 24, 25];
     assert_eq!(tokens.len(), expected.len());
-    for (i, (token, pos)) in tokens.iter().enumerate() {
+    for (i, (token, pos, _)) in tokens.iter().enumerate() {
         assert_eq!(token.as_bytes().unwrap(), expected[i]);
         assert_eq!(*pos, expected_pos[i]);
     }
@@ -656,7 +657,7 @@ fn while_parse_newline_separator() {
 #[test]
 fn while_not_starting_with_while_is_a_cmd() {
     let tokens = token::tokenize(b"while_true; do body; done").unwrap();
-    assert!(!tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"while")));
+    assert!(!tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"while")));
 }
 
 #[test]
@@ -708,7 +709,7 @@ fn until_parse_newline_separator() {
 #[test]
 fn until_not_starting_with_until_is_a_cmd() {
     let tokens = token::tokenize(b"until_true; do body; done").unwrap();
-    assert!(!tokens.first().is_some_and(|(t, _)| t.eq_bytes(b"until")));
+    assert!(!tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"until")));
 }
 
 #[test]

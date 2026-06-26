@@ -18,6 +18,7 @@ pub(crate) fn try_intercept(
         b"export_fd" => export_fd::run_export_fd(line, cmdline, cell),
         b"wait" => wait::run_wait(line, cmdline, cell),
         b"export" => exports::run_export(line, cmdline, cell),
+        b"shift" => shift::run_shift(line, cmdline, cell),
         _ => Ok(false),
     }
 }
@@ -27,5 +28,6 @@ mod cd;
 mod exit;
 mod export_fd;
 mod exports;
+mod shift;
 mod validation;
 mod wait;

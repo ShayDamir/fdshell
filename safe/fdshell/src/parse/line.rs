@@ -21,10 +21,10 @@ pub enum ParsedLine {
 }
 
 pub(crate) fn detect(
-    tokens: &[(ShortCStr, usize)],
+    tokens: &[(ShortCStr, usize, bool)],
 ) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
-        Some((t, _)) => t,
+        Some((t, _, _)) => t,
         None => return Ok(None),
     };
 
@@ -57,7 +57,7 @@ pub(crate) fn detect(
 
     if first.eq_bytes(b"umask") {
         let mask = match tokens.get(1) {
-            Some((arg, _)) => {
+            Some((arg, _, _)) => {
                 let s = arg.as_bytes().change_context(ParseError::Reason {
                     reason: "internal string state",
                 })?;

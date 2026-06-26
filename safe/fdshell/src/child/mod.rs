@@ -11,17 +11,16 @@ use sys::ShortCStr;
 
 pub use run::child_main;
 
-pub enum Command {
-    Builtin(ShortCStr),
-    External(ShortCStr),
+pub struct Command {
+    pub builtin: bool,
+    pub name: ShortCStr,
 }
 
 impl From<&CommandLine> for Command {
     fn from(cmdline: &CommandLine) -> Self {
-        if cmdline.builtin {
-            Command::Builtin(cmdline.command.clone())
-        } else {
-            Command::External(cmdline.command.clone())
+        Command {
+            builtin: cmdline.builtin,
+            name: cmdline.command.clone(),
         }
     }
 }

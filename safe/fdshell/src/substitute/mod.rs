@@ -34,20 +34,23 @@ pub(crate) fn substitute_arg(
             _ => out.push(b'~'),
         }
     }
-    let mut state = cell.borrow().change_context(ResolveError::RefNotFound)?;
     while let Some(b) = peek.next() {
         match b {
-            b'%' => percent::percent_subst(&mut peek, cache, &state, &mut out)?,
+            b'%' => {
+                let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
+                percent::percent_subst(&mut peek, cache, &state, &mut out)?;
+            }
             b'$' if peek.peek() == Some(&b'(') => {
                 peek.next();
-                drop(state);
                 let inner = paren::read_paren_expr(&mut peek)?;
                 let expanded = crate::cmd_subst::run_and_capture(&inner, cell)
                     .change_context(ResolveError::Resolve)?;
                 out.extend_from_slice(&expanded);
-                state = cell.borrow().change_context(ResolveError::RefNotFound)?;
             }
-            b'$' => dollar::dollar_subst(&mut peek, &state, &mut out)?,
+            b'$' => {
+                let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
+                dollar::dollar_subst(&mut peek, &state, &mut out)?;
+            }
             _ => out.push(b),
         }
     }
@@ -56,12 +59,37 @@ pub(crate) fn substitute_arg(
 
 pub fn substitute_args(
     args: &[ShortCStr],
+    args_fq: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<CString>, Report<ResolveError>> {
+    let mut result = Vec::new();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    args.iter()
-        .map(|a| substitute_arg(a, &mut cache, cell))
-        .collect()
+    let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
+    for (i, arg) in args.iter().enumerate() {
+        let fq = args_fq.get(i).copied().unwrap_or(false);
+        let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
+        if fq && bytes == b"$@" {
+            // Quoted "$@": each positional arg becomes a separate token (no further expansion)
+            for p in &state.positional {
+                let bytes = p.as_bytes().change_context(ResolveError::RefNotFound)?;
+                result.push(CString::new(bytes.to_vec()).change_context(ResolveError::NulByte)?);
+            }
+        } else if fq && bytes == b"$*" {
+            // Quoted "$*": join positional args with spaces (no further expansion)
+            let mut out = Vec::new();
+            for (j, p) in state.positional.iter().enumerate() {
+                if j > 0 {
+                    out.push(b' ');
+                }
+                out.extend_from_slice(p.as_bytes().change_context(ResolveError::RefNotFound)?);
+            }
+            result.push(CString::new(out).change_context(ResolveError::NulByte)?);
+        } else {
+            let expanded = substitute_arg(arg, &mut cache, cell)?;
+            result.push(expanded);
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
