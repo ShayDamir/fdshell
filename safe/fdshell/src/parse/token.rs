@@ -1,3 +1,5 @@
+use super::comment::skip_comment;
+use super::emit::emit_token;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
 use error_stack::Report;
 use error_stack::ResultExt;
@@ -23,9 +25,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
         } else {
             match b {
                 b' ' | b'\t' => {
-                    if !cur.is_empty() {
-                        tokens.push((core::mem::take(&mut cur), token_start, false));
-                    }
+                    emit_token(&mut tokens, &mut cur, token_start);
                     token_start = pos;
                 }
                 b'|' => {
@@ -35,16 +35,12 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                         cur.push(b'|')
                             .change_context(ParseError::InvalidChar { ch: 0 })?;
                     } else {
-                        if !cur.is_empty() {
-                            tokens.push((core::mem::take(&mut cur), token_start, false));
-                        }
+                        emit_token(&mut tokens, &mut cur, token_start);
                         tokens.push((c"|".into(), pos - 1, false));
                     }
                 }
                 b';' | b'\n' => {
-                    if !cur.is_empty() {
-                        tokens.push((core::mem::take(&mut cur), token_start, false));
-                    }
+                    emit_token(&mut tokens, &mut cur, token_start);
                     tokens.push((c";".into(), pos - 1, false));
                     token_start = pos;
                 }
@@ -64,6 +60,12 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                 b'`' => {
                     let start = pos - 1; // position of '`'
                     super::backtick::read_backtick(line, &mut cur, &mut bytes, start)?;
+                }
+                b'#' => {
+                    let consumed = skip_comment(&mut bytes);
+                    pos += consumed - 1; // -1 because outer loop increments pos once
+                    emit_token(&mut tokens, &mut cur, token_start);
+                    token_start = pos;
                 }
                 _ => cur
                     .push(b)

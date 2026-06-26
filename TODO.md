@@ -2,6 +2,8 @@
 
 ## Refactoring / cleanup
 
+- [x] `script.rs` exceeds 80-line limit (101 code lines) — extract `scan_block`/`skip_comment` helpers already done, but file still too long; consider splitting into `script.rs` + `script/block.rs`
+- [ ] `token.rs` at 82 lines (2 over 80-line limit) — consider extracting `tokenize` match arms into separate helpers
 - [x] Add tests for `run.rs` else/elif execution paths (`if false; then ...; else ...; fi`, elif-first-fails, all-elifs-fail-no-else)
 - [x] Remove dead `ParseError` enum from `error/parse.rs` (QA finding)
 - [x] Add unit tests for `format_parse_error()` (QA finding)

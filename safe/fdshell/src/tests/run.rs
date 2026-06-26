@@ -852,3 +852,43 @@ fn export_list_empty() {
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }
+
+#[test]
+fn shebang_is_skipped() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"#!/usr/bin/env fdshell\nbuiltin echo ok", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    });
+}
+
+#[test]
+fn inline_comment_is_skipped() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"builtin echo ok # this is a comment", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    });
+}
+
+#[test]
+fn comment_after_statement_is_skipped() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"builtin echo first # comment\nbuiltin echo second", &cell)
+            .unwrap();
+        let state = borrow_state(&cell);
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    });
+}
+
+#[test]
+fn comment_inside_if_block_is_skipped() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"if true; then # comment\numask 0o077\nfi", &cell).unwrap();
+        assert_eq!(sys::umask::get(), 0o077);
+    });
+}

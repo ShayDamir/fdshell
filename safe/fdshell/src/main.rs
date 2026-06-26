@@ -6,6 +6,7 @@ mod caret;
 mod cd;
 mod child;
 mod cmd_subst;
+mod comment;
 mod cond;
 mod debug;
 mod error;
