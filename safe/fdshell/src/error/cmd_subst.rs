@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! Command substitution errors (cmd_subst.rs).
 
-use displaydoc::Display;
-
 /// [CmdSubstError] Command substitution errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum CmdSubstError {
     /// pipe creation failed
     Pipe,

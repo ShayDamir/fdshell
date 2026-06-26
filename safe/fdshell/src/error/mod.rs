@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Typed errors for the fdshell crate.
 //!
 //! sys and builtins crates stay as raw `i32` (leaf layers with zero composition).

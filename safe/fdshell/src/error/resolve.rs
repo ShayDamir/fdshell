@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! File descriptor resolution errors (redirect/resolve.rs, substitute/).
 
-use displaydoc::Display;
-
 /// [ResolveError] FD resolution errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum ResolveError {
     /// variable or file reference not found
     RefNotFound,

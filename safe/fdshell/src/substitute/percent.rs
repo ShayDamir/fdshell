@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use error_stack::{Report, ResultExt};
 use std::collections::HashMap;
 use sys::ExportedFd;

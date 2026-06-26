@@ -1,6 +1,5 @@
 use crate::error::parse::ParseError;
-use error_stack::Report;
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub(crate) fn find_preceded_by_semi(

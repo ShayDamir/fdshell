@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! Command dispatch errors (run.rs, cond.rs).
 
-use displaydoc::Display;
-
 /// [CmdError] Command dispatch errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum CmdError {
     /// invalid command
     Invalid,

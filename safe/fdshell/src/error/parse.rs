@@ -1,16 +1,13 @@
-#![forbid(unsafe_code)]
-
 //! Parser errors (parse/*.rs).
 //!
 //! `ParseError` covers parse-time errors without position info.
 //! Position is attached separately via `ParsePosition` on the `Report`.
 
-use displaydoc::Display;
 use error_stack::Report;
 
 /// [ParseError] Parser errors
 // Debug needed for impl Error (trait bound), not for display.
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum ParseError {
     /// unmatched quote
     UnbalancedQuote,

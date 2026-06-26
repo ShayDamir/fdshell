@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! Pipeline execution errors (pipeline/mod.rs).
 
-use displaydoc::Display;
-
 /// [PipelineError] Pipeline execution errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum PipelineError {
     /// pipe creation failed
     Pipe,

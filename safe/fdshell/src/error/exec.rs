@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! Exec (execveat, resolve_path) errors.
 
-use displaydoc::Display;
-
 /// [ExecError] Exec / path resolution errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum ExecError {
     /// command not found
     NotFound,

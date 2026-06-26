@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use crate::error::cmd_subst::CmdSubstError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};

@@ -1,5 +1,4 @@
-use crate::error::parse::ParseError;
-use crate::error::parse::report_error;
+use crate::error::parse::{ParseError, report_error};
 use crate::parse::for_block::ForBlock;
 use crate::parse::if_block::IfBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};

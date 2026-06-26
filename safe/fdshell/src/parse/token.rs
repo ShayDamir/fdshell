@@ -1,8 +1,7 @@
 use super::comment::skip_comment;
 use super::emit::emit_token;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
-use error_stack::Report;
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<ParseError>> {

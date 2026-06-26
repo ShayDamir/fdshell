@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use super::{Redirect, RedirectDef};
 use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;

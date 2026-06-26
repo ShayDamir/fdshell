@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! export/unset errors (exports.rs).
 
-use displaydoc::Display;
-
 /// [ExportError] Export errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum ExportError {
     /// NUL byte in export string
     NulByte,

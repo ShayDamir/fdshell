@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Caret line rendering for parse error display.
 //!
 //! Produces a string of `^` and `~` characters aligned to the error

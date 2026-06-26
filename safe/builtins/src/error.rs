@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Typed errors for builtin commands.
 //!
 //! Replaces raw `i32` errno returns so callers can match on the specific

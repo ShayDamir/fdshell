@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! File descriptor pass-through errors (child/fdpass.rs).
 
-use displaydoc::Display;
-
 /// [FdPassError] FD pass-through errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum FdPassError {
     /// missing argument
     MissingArg,

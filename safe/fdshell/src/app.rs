@@ -1,9 +1,5 @@
-#![forbid(unsafe_code)]
-
-use displaydoc::Display;
-
 /// Top-level error for fdshell
-#[derive(Debug, Display)]
+#[derive(Debug, displaydoc::Display)]
 pub(crate) enum AppError {
     /// initialization failed
     Init,

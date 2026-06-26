@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;

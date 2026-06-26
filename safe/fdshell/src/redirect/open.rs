@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use super::RedirectDef;
 use crate::error::redirect::OpenRedirectError;
 use error_stack::{Report, ResultExt};

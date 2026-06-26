@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! Child process execution errors (child/run.rs, pipeline/child.rs).
 
-use displaydoc::Display;
-
 /// [ChildError] Child process execution errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum ChildError {
     /// redirect in child failed
     RedirectFailed,

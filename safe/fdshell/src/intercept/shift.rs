@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;

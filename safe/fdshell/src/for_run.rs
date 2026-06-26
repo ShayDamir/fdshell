@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;

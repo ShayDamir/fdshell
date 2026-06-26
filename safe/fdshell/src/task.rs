@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use crate::capture::Capture;
 use crate::error::task::TaskError;
 use crate::state::ShellState;

@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use error_stack::{Report, ResultExt};
 
 use crate::capture::Capture;

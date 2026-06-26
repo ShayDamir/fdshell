@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::ffi::CString;
 
 use sys::ShortCStr;

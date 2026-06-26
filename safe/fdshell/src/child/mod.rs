@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 pub(crate) mod builtin;
 mod delegated;
 mod dispatch;

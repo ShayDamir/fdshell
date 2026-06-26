@@ -1,11 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! File descriptor capture errors (capture.rs).
 
-use displaydoc::Display;
-
 /// [CaptureError] FD capture errors
-#[derive(Display, Debug)]
+#[derive(displaydoc::Display, Debug)]
 pub(crate) enum CaptureError {
     /// capture target already exists
     Exists,

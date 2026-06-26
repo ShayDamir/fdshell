@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use sys::fcntl::{O_APPEND, O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY};
 
 #[cfg_attr(test, derive(Debug, PartialEq))]

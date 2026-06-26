@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use crate::error::capture::CaptureError;
 use crate::state::ShellState;
 use sys::ShortCStr;

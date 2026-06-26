@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Debug hook installation for `error_stack`.
 //!
 //! Registers hooks for `ParseError` and `ParsePosition` so that

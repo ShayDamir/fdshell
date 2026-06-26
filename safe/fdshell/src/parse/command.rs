@@ -1,6 +1,5 @@
 use crate::capture::Capture;
-use crate::error::parse::ParseError;
-use crate::error::parse::report_error;
+use crate::error::parse::{ParseError, report_error};
 use crate::parse::CommandLine;
 use crate::redirect::RedirectDef;
 use error_stack::{Report, ResultExt};

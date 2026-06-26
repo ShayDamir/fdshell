@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use crate::child;
 use crate::error::exec::ExecError;
 use crate::exec;

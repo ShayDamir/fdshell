@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]

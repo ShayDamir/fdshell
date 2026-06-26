@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 mod environ;
 
 use std::ffi::{CStr, CString};

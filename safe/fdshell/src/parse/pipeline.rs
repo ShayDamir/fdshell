@@ -1,5 +1,4 @@
-use crate::error::parse::ParseError;
-use crate::error::parse::report_error;
+use crate::error::parse::{ParseError, report_error};
 use crate::parse::command::parse_command;
 use crate::parse::{ParsedLine, Pipeline};
 use error_stack::{Report, ResultExt};

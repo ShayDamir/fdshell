@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use crate::error::redirect::OpenRedirectError;
 use crate::parse::CommandLine;
 use error_stack::Report;
