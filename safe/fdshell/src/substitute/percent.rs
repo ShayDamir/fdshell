@@ -21,7 +21,7 @@ pub(crate) fn collect_name(
             break;
         }
     }
-    ShortCStr::from_vec(name).change_context(ResolveError::TokenTooLong)
+    ShortCStr::from_vec(name).change_context(ResolveError::NulByte)
 }
 
 pub(crate) fn percent_subst(

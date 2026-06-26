@@ -9,8 +9,6 @@ use displaydoc::Display;
 pub(crate) enum ResolveError {
     /// variable or file reference not found
     RefNotFound,
-    /// token too long for variable storage
-    TokenTooLong,
     /// NUL byte in variable name
     NulByte,
     /// unclosed subexpression parenthesis

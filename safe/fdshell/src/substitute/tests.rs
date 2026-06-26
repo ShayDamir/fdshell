@@ -172,6 +172,15 @@ fn brace_no_closing_is_literal() {
 }
 
 #[test]
+fn brace_hash_no_closing_is_literal() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${#hello");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes(), b"${#hello");
+}
+
+#[test]
 fn brace_inside_text() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"a${hello}b");
@@ -249,4 +258,40 @@ fn dollar_bang_in_text() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes(), b"job=12345 done");
+}
+
+#[test]
+fn brace_hash_known_var_returns_length() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${#hello}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes(), b"5");
+}
+
+#[test]
+fn brace_hash_empty_var_returns_zero() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${#empty}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes(), b"0");
+}
+
+#[test]
+fn brace_hash_unknown_var_is_literal() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${#nope}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes(), b"${#nope}");
+}
+
+#[test]
+fn brace_hash_in_text() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"len=${#hello} end");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes(), b"len=5 end");
 }
