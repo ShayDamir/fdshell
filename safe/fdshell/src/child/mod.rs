@@ -3,6 +3,7 @@ mod delegated;
 mod dispatch;
 mod exec;
 pub(crate) mod fdpass;
+mod help;
 mod run;
 mod simple;
 use crate::parse::CommandLine;

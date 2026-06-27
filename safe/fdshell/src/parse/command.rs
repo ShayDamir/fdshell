@@ -17,7 +17,7 @@ pub fn parse_command(
         }
         Some(t) => t
             .as_bytes()
-            .is_ok_and(|b| matches!(b, b"true" | b"false" | b"pwd")),
+            .is_ok_and(|b| matches!(b, b"true" | b"false" | b"pwd" | b"help")),
         None => false,
     };
     let command = iter

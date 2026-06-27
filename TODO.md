@@ -4,6 +4,7 @@
 
 - [x] `script.rs` exceeds 80-line limit (101 code lines) — extract `scan_block`/`skip_comment` helpers already done, but file still too long; consider splitting into `script.rs` + `script/block.rs`
 - [ ] `token.rs` at 82 lines (2 over 80-line limit) — consider extracting `tokenize` match arms into separate helpers
+- [ ] `command.rs` at 82 code lines (2 over 80-line limit) — extract builtin-detection helper
 - [x] Add tests for `run.rs` else/elif execution paths (`if false; then ...; else ...; fi`, elif-first-fails, all-elifs-fail-no-else)
 - [x] Remove dead `ParseError` enum from `error/parse.rs` (QA finding)
 - [x] Add unit tests for `format_parse_error()` (QA finding)
@@ -21,11 +22,11 @@
 - [x] `pwd` — print CWD path via `std::env::current_dir()`
 - [x] Tilde expansion (`~`, `~user` literal) → `$HOME`
 - [x] `$$` — shell PID in dollar_subst
-- [ ] `${#var}` — string length expansion
+- [x] `${#var}` — string length expansion
 - [x] `$!` — last background PID
 - [ ] `$_` — last argument of previous command
 - [ ] `$-` — shell option flags
-- [ ] `help` builtin — list available builtins
+- [x] `help` builtin — list available builtins
 - [ ] `type` builtin — show command type (builtin, external, fd var, etc.)
 - [ ] `command` builtin — bypass function lookup (alias for `builtin` prefix)
 

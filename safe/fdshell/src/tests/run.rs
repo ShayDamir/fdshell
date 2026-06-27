@@ -627,6 +627,16 @@ fn true_builtin_exits_zero() {
 }
 
 #[test]
+fn help_builtin_exits_zero() {
+    child_test(|| {
+        let cell = make_cell();
+        run_one(b"help", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
 fn false_builtin_exits_one() {
     child_test(|| {
         let cell = make_cell();

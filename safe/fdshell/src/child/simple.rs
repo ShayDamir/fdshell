@@ -32,6 +32,15 @@ pub(super) fn handle_pwd(
     Ok(0)
 }
 
+pub(super) fn handle_help(
+    _: ShortCStr,
+    _: &[&CStr],
+    _: &[ShortCStr],
+    _: &ShellState,
+) -> Result<i32, BuiltinError> {
+    crate::child::help::print_help()
+}
+
 pub(super) fn handle_echo(
     _: ShortCStr,
     refs: &[&CStr],

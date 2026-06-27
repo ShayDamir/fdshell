@@ -12,6 +12,7 @@ type Handler = fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32,
 const DISPATCH: &[(&[u8], Handler)] = &[
     (b"true", simple::handle_true),
     (b"false", simple::handle_false),
+    (b"help", simple::handle_help),
     (b"pwd", simple::handle_pwd),
     (b"fchmod", delegated::handle_fchmod),
     (b"echo", simple::handle_echo),
