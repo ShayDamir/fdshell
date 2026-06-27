@@ -5,7 +5,7 @@ use fdshell::{AppError, ShellState, exec_cmd, init_shellfd, install_debug_hooks,
 use std::collections::VecDeque;
 use std::ffi::CString;
 use sys::ShortCStr;
-use sys::fcntl::O_DIRECTORY;
+use sys::fcntl::{O_DIRECTORY, O_RDONLY};
 use sys::fork_cell::ForkCell;
 
 fn main() -> Result<(), Report<AppError>> {
@@ -77,16 +77,21 @@ fn main() -> Result<(), Report<AppError>> {
                 new_pos.extend(positional);
                 state.positional = new_pos;
             }
-            let script_path_str = script_path
-                .to_str()
-                .map_err(|_| {
-                    Report::new(AppError::InvalidUtf8 {
-                        field: "script path",
-                    })
-                })
+            let script_fd = sys::openat2::open(script_path.as_c_str(), O_RDONLY)
                 .change_context(AppError::ScriptRead)?;
-            let script_content =
-                std::fs::read(script_path_str).change_context(AppError::ScriptRead)?;
+            let mut script_content = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = script_fd
+                    .read(&mut buf)
+                    .change_context(AppError::ScriptRead)?;
+                if n == 0 {
+                    break;
+                }
+                let n = n as usize;
+                let slice = buf.get(..n).ok_or(AppError::ScriptRead)?;
+                script_content.extend_from_slice(slice);
+            }
             match exec_cmd(&script_content, &state) {
                 Ok(code) => {
                     if code != 0 {

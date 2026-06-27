@@ -15,8 +15,6 @@ pub enum AppError {
     Usage,
     /// failed to read script file
     ScriptRead,
-    /// invalid UTF-8 in {field}
-    InvalidUtf8 { field: &'static str },
 }
 
 impl core::error::Error for AppError {}

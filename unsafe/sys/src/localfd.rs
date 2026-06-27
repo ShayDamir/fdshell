@@ -68,6 +68,16 @@ impl LocalFd {
     pub fn at(&self) -> crate::AtFd<'_> {
         crate::AtFd::from(self)
     }
+    pub fn read(&self, buf: &mut [u8]) -> Result<isize, crate::SyscallError> {
+        // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
+        crate::cvt(unsafe {
+            libc::read(
+                self.as_raw(),
+                buf.as_mut_ptr() as *mut core::ffi::c_void,
+                buf.len(),
+            )
+        })
+    }
 }
 
 impl Drop for LocalFd {
