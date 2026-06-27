@@ -19,7 +19,7 @@ pub fn exec_cmd(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, Report<
     run_script(line, cell)
 }
 
-pub(crate) fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
+pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     // Set $0 to "fdshell" for interactive mode
     // Safe to call here because main.rs returns/exits before reaching this path
     // when in -c or script file mode (positional args already set)

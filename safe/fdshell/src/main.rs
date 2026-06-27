@@ -1,54 +1,19 @@
 #![forbid(unsafe_code)]
 
-mod app;
-mod capture;
-mod caret;
-mod cd;
-mod child;
-mod cmd_subst;
-mod comment;
-mod cond;
-mod debug;
-mod error;
-mod exec;
-mod expand;
-mod exports;
-mod for_run;
-mod if_exec;
-mod init;
-mod intercept;
-mod keywords;
-mod launch;
-mod loop_;
-mod parse;
-mod pipeline;
-mod postlaunch;
-mod redirect;
-mod repl;
-mod replacer;
-mod resolve;
-mod run;
-mod script;
-mod state;
-mod substitute;
-mod task;
-
-#[cfg(test)]
-mod tests;
-
-use app::AppError;
 use error_stack::{Report, ResultExt};
+use fdshell::{AppError, ShellState, exec_cmd, init_shellfd, install_debug_hooks, run};
 use std::collections::VecDeque;
 use std::ffi::CString;
 use sys::ShortCStr;
 use sys::fcntl::O_DIRECTORY;
+use sys::fork_cell::ForkCell;
 
 fn main() -> Result<(), Report<AppError>> {
-    debug::install_debug_hooks();
+    install_debug_hooks();
 
-    let _mode = crate::init::init_shellfd().change_context(AppError::Init)?;
+    let _mode = init_shellfd().change_context(AppError::Init)?;
     sys::umask::init();
-    let state = sys::fork_cell::ForkCell::new(state::ShellState::new());
+    let state = ForkCell::new(ShellState::new());
     {
         let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
         let cwd = match sys::openat2::open(c".", O_DIRECTORY) {
@@ -82,7 +47,7 @@ fn main() -> Result<(), Report<AppError>> {
                     state.positional = positional;
                 }
             }
-            match repl::exec_cmd(cmd.to_bytes(), &state) {
+            match exec_cmd(cmd.to_bytes(), &state) {
                 Ok(code) => {
                     if code != 0 {
                         std::process::exit(code);
@@ -122,7 +87,7 @@ fn main() -> Result<(), Report<AppError>> {
                 .change_context(AppError::ScriptRead)?;
             let script_content =
                 std::fs::read(script_path_str).change_context(AppError::ScriptRead)?;
-            match repl::exec_cmd(&script_content, &state) {
+            match exec_cmd(&script_content, &state) {
                 Ok(code) => {
                     if code != 0 {
                         std::process::exit(code);
@@ -138,5 +103,5 @@ fn main() -> Result<(), Report<AppError>> {
     }
 
     // Interactive mode
-    repl::run(&state)
+    run(&state)
 }

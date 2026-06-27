@@ -2,7 +2,7 @@
 
 /// [CmdError] Command dispatch errors
 #[derive(displaydoc::Display, Debug)]
-pub(crate) enum CmdError {
+pub enum CmdError {
     /// invalid command
     Invalid,
     /// exit: invalid argument

@@ -31,7 +31,15 @@ impl ShellState {
             last_bg_pid: None,
         }
     }
+}
 
+impl Default for ShellState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ShellState {
     pub fn shift(&mut self, n: usize) {
         for _ in 0..n.min(self.positional.len()) {
             self.positional.pop_front();

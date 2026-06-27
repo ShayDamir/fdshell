@@ -7,7 +7,7 @@ use error_stack::{Report, fmt::HookContext};
 
 use crate::error::parse::ParsePosition;
 
-pub(crate) fn install_debug_hooks() {
+pub fn install_debug_hooks() {
     // Suppress default panic location hook body
     Report::install_debug_hook::<std::panic::Location>(
         |_location: &std::panic::Location, _ctx: &mut HookContext<std::panic::Location>| {

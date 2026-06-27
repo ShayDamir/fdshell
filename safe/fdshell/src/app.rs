@@ -1,6 +1,6 @@
 /// Top-level error for fdshell
 #[derive(Debug, displaydoc::Display)]
-pub(crate) enum AppError {
+pub enum AppError {
     /// initialization failed
     Init,
     /// command execution failed
