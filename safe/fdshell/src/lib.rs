@@ -5,6 +5,7 @@ mod capture;
 mod caret;
 mod cd;
 mod child;
+mod cli;
 mod cmd_subst;
 mod comment;
 mod cond;
@@ -37,6 +38,7 @@ mod task;
 mod tests;
 
 pub use app::AppError;
+pub use cli::{CliArgs, load_script, parse_cli_args};
 pub use debug::install_debug_hooks;
 pub use init::{FdShellMode, init_shellfd};
 pub use repl::{exec_cmd, run};

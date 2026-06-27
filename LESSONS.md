@@ -65,3 +65,9 @@ When converting `dispatch_builtin` from `Result<_, i32>` to `Result<i32, Builtin
 
 ## Prefer `Result::is_ok_and()` over `map().unwrap_or(false)`
 When checking a predicate on `Result<T, E>` with a fallback of `false`, use `result.is_ok_and(|v| pred(v))` instead of `result.map(|v| pred(v)).unwrap_or(false)`. `is_ok_and` makes the intent explicit, avoids the intermediate `Option<bool>`, and is one allocation-free method call instead of two. This pattern appears naturally on `ShortCStr::as_bytes()` which returns `Result<&[u8], ShortCStrError>` — methods like `eq_bytes`, `starts_with`, `ends_with`, and `contains` all benefit from this simplification.
+
+## Attachments are for context, not for encoding the error variant
+The `error_stack` attachment system (`.attach()`) is for contextual metadata — file paths, line numbers, operation names, positions. It is NOT for encoding the specific error variant. When different error conditions produce different messages or need to be distinguished by matching, they must be separate enum variants. "Missing value for --dirfd" IS the error, not context around it — it should be a distinct variant like `MissingValue("dirfd")`, not `Report::new(AppError::Usage).attach("missing value for --dirfd")`. Attachments supplement the error variant with extra information; they do not replace the variant as the primary error discriminator.
+
+## Variants that differ only by flag name should use a parameter, not separate variants
+`MissingDirfdValue` and `MissingFdValue` are the same error — a flag is missing its value. The difference is the flag name, which is data, not a variant distinction. Use a single variant with a parameter: `MissingValue(&'static str)` with `MissingValue("dirfd")` and `MissingValue("fd")`. Same for `InvalidDirfd` and `InvalidFd` → `InvalidFdNumber(&'static str)`. If two variants have identical Display semantics and differ only in a string literal, they should be one variant with a parameter.
