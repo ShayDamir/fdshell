@@ -19,7 +19,7 @@ Three crates in a Cargo workspace (`resolver = "2"`):
   - Measure code lines after `cargo fmt`. Don't manipulate whitespace to squeeze under the limit — if it's a few lines over, leave it and flag for refactoring in TODO.md.
   - To find files exceeding the limit: `tokei --types Rust --exclude '*tests*' --output json | jq '.Rust.reports[] | select(.stats.code > 80) | {file: .name, loc: .stats.code}'`
 - Every `unsafe` block **must** have a preceding `// SAFETY:` comment explaining why preconditions are met.
-- Safe wrappers in `unsafe/sys` return `Result<_, SyscallError>`. Use `cvt(ret: isize) -> Result<isize, SyscallError>` from `lib.rs` to convert libc return values.
+- Safe syscall wrappers in `unsafe/sys` return `Result<_, SyscallError>`. Use `cvt(ret: isize) -> Result<isize, SyscallError>` from `lib.rs` to convert libc return values.
 - Avoid `#[derive]` in production code. Derives like `PartialEq`, `Eq`, and `Hash` are
   contagious — adding them to a type forces every field type to also implement them,
   propagating through the type graph. Since the codebase bans panicky patterns (`unwrap`,
@@ -205,13 +205,11 @@ Four fd types across `unsafe/sys/src/`:
 
 ## Error Handling
 
-See [error-handling.md](../error-handling.md) for the full strategy.
-
-- `sys` crate returns `Result<_, SyscallError>`, `builtins` crate returns `Result<_, BuiltinError>` — both are leaf layers with zero internal error composition.
-- Typed errors with `error-stack::Report` live **only** in `fdshell/`. Each sub-domain gets its own small enum (variant names only).
-- Enum variants carry no meaningful data — attach context via `Report::attach()` at each level.
-- When converting cross-crate boundaries (`SyscallError → BuiltinError → Report`), use `From` or `.map_err()` at the boundary, then `.change_context()` if the fdshell layer adds meaning.
-- Never print raw errno numbers to users — format through the error chain.
+- EXTREMELY IMPORTANT, NEVER FORGET: all error messaged MUST be clean, concise and actionable by user.
+- By looking at the message, user must immediately know how to fix the script or the environment.
+- When converting cross-crate boundaries (`SyscallError → BuiltinError → Report`), use `.change_context()`.
+- If during `.change_context()` the error doesn't fit any existing variants - make a new variant.
+- error chain must be preserved
 
 ## Nesting
 
