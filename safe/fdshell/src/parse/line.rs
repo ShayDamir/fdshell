@@ -3,7 +3,7 @@ use crate::parse::for_block::ForBlock;
 use crate::parse::if_block::IfBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ShortCStr;
 
 pub enum ParsedLine {
@@ -72,9 +72,10 @@ pub(crate) fn detect(
             }
             None => None,
         };
-        if tokens.get(2).is_some() {
-            return Err(report_error("umask takes at most one argument", 0));
-        }
+        ensure!(
+            tokens.get(2).is_none(),
+            report_error("umask takes at most one argument", 0)
+        );
         return Ok(Some(ParsedLine::Umask(mask)));
     }
 

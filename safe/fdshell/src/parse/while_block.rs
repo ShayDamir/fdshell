@@ -1,6 +1,6 @@
 use crate::error::parse::{ParseError, report_error};
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
-use error_stack::Report;
+use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug))]
@@ -27,14 +27,13 @@ pub(crate) fn tokens_to_loop(
 
     let do_idx =
         find_preceded_by_semi(tokens, 1, b"do").ok_or_else(|| report_error("expected 'do'", 0))?;
-    if do_idx < 2 {
-        return Err(report_error("expected condition", 0));
-    }
+    ensure!(do_idx >= 2, report_error("expected condition", 0));
 
     let done_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")) {
-        return Err(report_error("expected 'done'", 0));
-    }
+    ensure!(
+        tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")),
+        report_error("expected 'done'", 0)
+    );
 
     let cond_str = try_join(trim_semi(
         tokens

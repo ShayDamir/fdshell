@@ -1,6 +1,6 @@
 use crate::comment::{scan_block, skip_comment};
 use crate::keywords::keyword_delta;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
@@ -40,9 +40,7 @@ pub(crate) fn run_script(
                 i = block_start + leading_ws + kw_len;
                 start = i;
                 let (end_pos, closed) = scan_block(line, i, &mut in_quote, &mut start, 1);
-                if !closed {
-                    return Err(CmdError::Parse.into());
-                }
+                ensure!(closed, CmdError::Parse);
                 i = end_pos;
                 let end = line.len().min(start);
                 let full = line.get(block_start..end).unwrap_or(b"").trim_ascii();

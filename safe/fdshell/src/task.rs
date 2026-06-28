@@ -19,23 +19,15 @@ pub fn try_wait(
     match args.first() {
         Some(arg) => {
             let key = arg.strip_prefix(b"&").ok_or(TaskError::BadArg)?;
-            let Some(task) = state.tasks.remove(&key) else {
-                return Err(Report::new(TaskError::NotFound));
-            };
+            let task = state.tasks.remove(&key).ok_or(TaskError::NotFound)?;
             let status =
                 sys::wait_pidfd::wait_pidfd(&task.pidfd).change_context(TaskError::Wait)?;
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = task.capture_fd
             {
-                let entries = match crate::capture::do_captures(
-                    capture_fd,
-                    task.child_pid,
-                    task.captures,
-                    state,
-                ) {
-                    Ok(v) => v,
-                    Err(_) => return Err(Report::new(TaskError::Wait)),
-                };
+                let entries =
+                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)
+                        .change_context(TaskError::Wait)?;
                 for (var, fd) in entries {
                     state.fds.insert(var, fd);
                 }

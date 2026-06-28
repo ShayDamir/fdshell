@@ -5,7 +5,7 @@ use crate::redirect::Redirect;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -49,13 +49,13 @@ pub fn child_main(
         let cmd_name = cmd.name.clone();
         match child::builtin::dispatch_builtin(cmd.name, &refs, args, &state) {
             Ok(code) => Ok(code),
-            Err(BuiltinError::Unknown) => {
-                Err(Report::new(ChildError::NotABuiltin).attach(cmd_name))
-            }
-            Err(BuiltinError::Help) | Err(BuiltinError::InvalidArgument) => {
-                Err(Report::new(ChildError::ExecFailed))
-            }
-            Err(BuiltinError::Syscall(e)) => Ok(e.errno()),
+            Err(report) => match *report.current_context() {
+                BuiltinError::Unknown => Err(Report::new(ChildError::NotABuiltin).attach(cmd_name)),
+                BuiltinError::Help | BuiltinError::InvalidArgument | BuiltinError::Io => {
+                    bail!(ChildError::ExecFailed)
+                }
+                BuiltinError::Syscall(e) => Ok(e.errno()),
+            },
         }
     } else {
         let name = sys::RefCStr::from(cmd.name.clone());

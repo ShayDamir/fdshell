@@ -44,9 +44,8 @@ pub(crate) fn try_join(
             reason: "internal string inconsistency",
         })?);
     }
-    ShortCStr::from_vec(out).map_err(|_| {
-        Report::new(ParseError::Reason {
-            reason: "token too long",
-        })
-    })
+    let result = ShortCStr::from_vec(out).change_context(ParseError::Reason {
+        reason: "token too long",
+    })?;
+    Ok(result)
 }

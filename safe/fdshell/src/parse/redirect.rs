@@ -1,6 +1,6 @@
 use crate::error::parse::{ParseError, report_error};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ShortCStr;
 
 fn parse_fd(prefix: &[u8], dir: u8) -> Option<i32> {
@@ -57,9 +57,12 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<Parse
         let r = after_op
             .get(1..)
             .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
-        if r.is_empty() || r.starts_with(b"%") {
-            return Err(report_error("invalid redirect syntax", 0));
-        }
+        ensure!(
+            !(r.is_empty() || r.starts_with(b"%")),
+            ParseError::Reason {
+                reason: "invalid redirect syntax",
+            }
+        );
         (r, RedirectDirection::Append)
     } else if dir == b'<' {
         (after_op, RedirectDirection::Read)

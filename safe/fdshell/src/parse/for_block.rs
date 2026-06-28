@@ -1,6 +1,6 @@
 use crate::error::parse::{ParseError, report_error};
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
-use error_stack::Report;
+use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug))]
@@ -13,9 +13,10 @@ pub struct ForBlock {
 pub(crate) fn tokens_to_for(
     tokens: &[(ShortCStr, usize, bool)],
 ) -> Result<ForBlock, Report<ParseError>> {
-    if !tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")) {
-        return Err(report_error("expected 'for'", 0));
-    }
+    ensure!(
+        tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")),
+        report_error("expected 'for'", 0)
+    );
     let var = tokens
         .get(1)
         .ok_or_else(|| report_error("expected variable name", 0))?
@@ -32,15 +33,16 @@ pub(crate) fn tokens_to_for(
         .ok_or_else(|| report_error("expected 'do'", 0))?;
 
     let done_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")) {
-        return Err(report_error("expected 'done'", 0));
-    }
-    if !tokens
-        .get(done_idx - 1)
-        .is_some_and(|(t, _, _)| t.eq_bytes(b";"))
-    {
-        return Err(report_error("expected ';' before 'done'", 0));
-    }
+    ensure!(
+        tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")),
+        report_error("expected 'done'", 0)
+    );
+    ensure!(
+        tokens
+            .get(done_idx - 1)
+            .is_some_and(|(t, _, _)| t.eq_bytes(b";")),
+        report_error("expected ';' before 'done'", 0)
+    );
 
     let body = try_join(trim_semi(
         tokens

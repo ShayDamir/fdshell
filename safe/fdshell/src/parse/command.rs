@@ -2,7 +2,7 @@ use crate::capture::Capture;
 use crate::error::parse::{ParseError, report_error};
 use crate::parse::CommandLine;
 use crate::redirect::RedirectDef;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
 pub fn parse_command(
@@ -43,7 +43,9 @@ pub fn parse_command(
             reason: "internal string state",
         })?;
         if b == b"&" {
-            return Err(report_error("unexpected '&'", 0));
+            bail!(ParseError::Reason {
+                reason: "unexpected '&'"
+            });
         } else if let Some(rest) = t.strip_prefix(b"&>") {
             let (force, name) = if let Some(name) = rest.strip_prefix(b"|&") {
                 (true, name)

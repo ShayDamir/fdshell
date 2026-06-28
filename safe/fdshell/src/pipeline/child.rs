@@ -15,9 +15,7 @@ pub fn run_child(
     commands: &[CommandLine],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildError>> {
-    let cmd_data = commands
-        .get(i)
-        .ok_or_else(|| Report::new(ChildError::ExecFailed))?;
+    let cmd_data = commands.get(i).ok_or(ChildError::ExecFailed)?;
 
     let mut redirects: Vec<Redirect> = Vec::new();
 

@@ -1,5 +1,6 @@
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
+use error_stack::{Report, ResultExt, bail};
 use std::ffi::CStr;
 use sys::ShortCStr;
 
@@ -7,7 +8,8 @@ use super::delegated;
 use super::exec;
 use super::simple;
 
-type Handler = fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32, BuiltinError>;
+type Handler =
+    fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32, Report<BuiltinError>>;
 
 const DISPATCH: &[(&[u8], Handler)] = &[
     (b"true", simple::handle_true),
@@ -30,8 +32,9 @@ pub fn dispatch_builtin(
     refs: &[&CStr],
     args: &[ShortCStr],
     state: &ShellState,
-) -> Result<i32, BuiltinError> {
-    let _ = name.as_bytes().map_err(|_| BuiltinError::InvalidArgument)?;
+) -> Result<i32, Report<BuiltinError>> {
+    name.as_bytes()
+        .change_context(BuiltinError::InvalidArgument)?;
 
     for (known, handler) in DISPATCH {
         if name.eq_bytes(known) {
@@ -47,6 +50,6 @@ pub fn dispatch_builtin(
             | crate::error::fdpass::FdPassError::InvalidName
             | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,
         }),
-        None => Err(BuiltinError::Unknown),
+        None => bail!(BuiltinError::Unknown),
     }
 }

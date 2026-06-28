@@ -6,7 +6,7 @@
 
 use core::fmt;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum SyscallError {
     E2BIG,
     EAGAIN,

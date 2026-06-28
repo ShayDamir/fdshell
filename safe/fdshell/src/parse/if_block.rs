@@ -1,7 +1,7 @@
 use super::semi::find_preceded_by_semi;
 use super::semi::{trim_semi, try_join};
 use crate::error::parse::{ParseError, report_error};
-use error_stack::Report;
+use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
 pub struct IfBlock {
@@ -14,9 +14,10 @@ pub struct IfBlock {
 pub(crate) fn tokens_to_if(
     tokens: &[(ShortCStr, usize, bool)],
 ) -> Result<IfBlock, Report<ParseError>> {
-    if !tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")) {
-        return Err(report_error("malformed if block", 0));
-    }
+    ensure!(
+        tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")),
+        report_error("malformed if block", 0)
+    );
 
     let if_pos = tokens.first().map(|(_, p, _)| *p).unwrap_or(0);
 
@@ -27,9 +28,10 @@ pub(crate) fn tokens_to_if(
     };
 
     let fi_idx = tokens.len() - 1;
-    if !tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"fi")) {
-        return Err(report_error("missing 'fi'", if_pos));
-    }
+    ensure!(
+        tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"fi")),
+        report_error("missing 'fi'", if_pos)
+    );
 
     let cond_str = try_join(trim_semi(
         tokens

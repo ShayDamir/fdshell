@@ -1,6 +1,8 @@
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
+use error_stack::Report;
 use std::ffi::CStr;
+use std::io::Write;
 use sys::ShortCStr;
 
 pub(super) fn handle_true(
@@ -8,7 +10,7 @@ pub(super) fn handle_true(
     _: &[&CStr],
     _: &[ShortCStr],
     _: &ShellState,
-) -> Result<i32, BuiltinError> {
+) -> Result<i32, Report<BuiltinError>> {
     Ok(0)
 }
 
@@ -17,7 +19,7 @@ pub(super) fn handle_false(
     _: &[&CStr],
     _: &[ShortCStr],
     _: &ShellState,
-) -> Result<i32, BuiltinError> {
+) -> Result<i32, Report<BuiltinError>> {
     Ok(1)
 }
 
@@ -26,9 +28,12 @@ pub(super) fn handle_pwd(
     _: &[&CStr],
     _: &[ShortCStr],
     _: &ShellState,
-) -> Result<i32, BuiltinError> {
-    let p = std::env::current_dir().map_err(|_| BuiltinError::InvalidArgument)?;
-    println!("{}", p.display());
+) -> Result<i32, Report<BuiltinError>> {
+    use error_stack::ResultExt;
+    let p = std::env::current_dir().change_context(BuiltinError::Io)?;
+    let mut lock = std::io::stdout().lock();
+    lock.write_all(format!("{}\n", p.display()).as_bytes())
+        .change_context(BuiltinError::Io)?;
     Ok(0)
 }
 
@@ -37,7 +42,7 @@ pub(super) fn handle_help(
     _: &[&CStr],
     _: &[ShortCStr],
     _: &ShellState,
-) -> Result<i32, BuiltinError> {
+) -> Result<i32, Report<BuiltinError>> {
     crate::child::help::print_help()
 }
 
@@ -46,15 +51,16 @@ pub(super) fn handle_echo(
     refs: &[&CStr],
     _: &[ShortCStr],
     _: &ShellState,
-) -> Result<i32, BuiltinError> {
-    use std::io::Write;
+) -> Result<i32, Report<BuiltinError>> {
+    use error_stack::ResultExt;
     let mut lock = std::io::stdout().lock();
     for (i, arg) in refs.iter().enumerate() {
         if i > 0 {
-            let _ = lock.write_all(b" ");
+            lock.write_all(b" ").change_context(BuiltinError::Io)?;
         }
-        let _ = lock.write_all(arg.to_bytes());
+        lock.write_all(arg.to_bytes())
+            .change_context(BuiltinError::Io)?;
     }
-    let _ = lock.write_all(b"\n");
+    lock.write_all(b"\n").change_context(BuiltinError::Io)?;
     Ok(0)
 }

@@ -1,6 +1,6 @@
 use crate::error::fdpass::FdPassError;
 use crate::state::ShellState;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
 
 pub fn dispatch(
@@ -36,14 +36,12 @@ pub(crate) fn export_fd(
             (v, tag)
         }
         [t, v] => {
-            if t.contains(b'%') {
-                return Err(Report::new(FdPassError::InvalidName));
-            }
+            ensure!(!t.contains(b'%'), FdPassError::InvalidName);
             let tag = sys::RefCStr::from(t.clone());
             let v = v.strip_prefix(b"%").ok_or(FdPassError::InvalidName)?;
             (v, tag)
         }
-        _ => return Err(Report::new(FdPassError::MissingArg)),
+        _ => bail!(FdPassError::MissingArg),
     };
     let fd = state.fds.get(&vname).ok_or(FdPassError::NotFound)?;
     sys::shellfd::send_fd(fd, &tag).change_context(FdPassError::SendFailed)?;

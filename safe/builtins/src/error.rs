@@ -18,6 +18,8 @@ pub enum BuiltinError {
     Syscall(sys::SyscallError),
     /// No builtin matches the given command name.
     Unknown,
+    /// I/O operation failed.
+    Io,
 }
 
 impl fmt::Display for BuiltinError {
@@ -27,6 +29,7 @@ impl fmt::Display for BuiltinError {
             Self::InvalidArgument => write!(f, "invalid argument"),
             Self::Syscall(e) => write!(f, "syscall failed: {}", e),
             Self::Unknown => write!(f, "unknown builtin"),
+            Self::Io => write!(f, "I/O error"),
         }
     }
 }

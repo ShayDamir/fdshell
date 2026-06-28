@@ -1,5 +1,5 @@
 use crate::state::ShellState;
-use builtins::error::BuiltinError;
+use error_stack::Report;
 use std::ffi::CStr;
 use sys::ShortCStr;
 
@@ -8,21 +8,25 @@ pub(super) fn handle_exec_fd(
     refs: &[&CStr],
     args: &[ShortCStr],
     state: &ShellState,
-) -> Result<i32, BuiltinError> {
-    let raw0 = args.first().ok_or(BuiltinError::InvalidArgument)?;
+) -> Result<i32, Report<builtins::error::BuiltinError>> {
+    let raw0 = args
+        .first()
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     let varname = raw0
         .strip_prefix(b"%")
-        .ok_or(BuiltinError::InvalidArgument)?;
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     let fd = state
         .fds
         .get(&varname)
-        .ok_or(BuiltinError::InvalidArgument)?;
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
         .exports
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let args_slice = refs.get(1..).ok_or(BuiltinError::InvalidArgument)?;
+    let args_slice = refs
+        .get(1..)
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     // exec-without-fork: PID stays the same, so return child exit code
     // regardless of outcome. Err arm only catches parse/syscall errors.
     match crate::exec::exec_fd(fd, args_slice, &exports) {
@@ -36,25 +40,33 @@ pub(super) fn handle_exec_at(
     refs: &[&CStr],
     args: &[ShortCStr],
     state: &ShellState,
-) -> Result<i32, BuiltinError> {
-    let raw0 = args.first().ok_or(BuiltinError::InvalidArgument)?;
+) -> Result<i32, Report<builtins::error::BuiltinError>> {
+    let raw0 = args
+        .first()
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     let varname = raw0
         .strip_prefix(b"%")
-        .ok_or(BuiltinError::InvalidArgument)?;
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     let dirfd = state
         .fds
         .get(&varname)
-        .ok_or(BuiltinError::InvalidArgument)?;
-    let pathname = args.get(1).ok_or(BuiltinError::InvalidArgument)?;
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
+    let pathname = args
+        .get(1)
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     let pathname = sys::RefCStr::from(pathname.clone());
     // execveat rejects CLOEXEC dirfds for relative paths; use export().
-    let non_cloexec = dirfd.export().map_err(BuiltinError::from)?;
+    let non_cloexec = dirfd
+        .export()
+        .map_err(builtins::error::BuiltinError::from)?;
     let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
         .exports
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let args_slice = refs.get(2..).ok_or(BuiltinError::InvalidArgument)?;
+    let args_slice = refs
+        .get(2..)
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
     // Same exec-without-fork semantics as exec_fd — always Ok(code).
     match crate::exec::exec_at(non_cloexec.at(), &pathname, args_slice, &exports) {
         Ok(()) => Ok(0),
@@ -67,9 +79,13 @@ pub(super) fn handle_resolve(
     refs: &[&CStr],
     _: &[ShortCStr],
     _: &ShellState,
-) -> Result<i32, BuiltinError> {
-    let name = refs.first().ok_or(BuiltinError::InvalidArgument)?;
-    let fd = crate::exec::resolve_path(name).map_err(|_| BuiltinError::InvalidArgument)?;
+) -> Result<i32, Report<builtins::error::BuiltinError>> {
+    use error_stack::ResultExt;
+    let name = refs
+        .first()
+        .ok_or(builtins::error::BuiltinError::InvalidArgument)?;
+    let fd = crate::exec::resolve_path(name)
+        .change_context(builtins::error::BuiltinError::InvalidArgument)?;
     sys::shellfd::send_fd(&fd, c"resolve").ok();
     Ok(0)
 }

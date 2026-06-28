@@ -1,7 +1,7 @@
 use crate::error::parse::{ParseError, report_error};
 use crate::parse::command::parse_command;
 use crate::parse::{ParsedLine, Pipeline};
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ShortCStr;
 
 pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Report<ParseError>> {
@@ -12,9 +12,7 @@ pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Re
             reason: "internal string state",
         })?;
         if bytes == b"|" {
-            if i == start {
-                return Err(report_error("unexpected pipe", 0));
-            }
+            ensure!(i != start, report_error("unexpected pipe", 0));
             let cmd_tokens = raw
                 .get(start..i)
                 .ok_or_else(|| report_error("expected command after pipe", 0))?;
@@ -24,9 +22,10 @@ pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Re
             start = i + 1;
         }
     }
-    if start >= raw.len() {
-        return Err(report_error("expected command after pipe", 0));
-    }
+    ensure!(
+        start < raw.len(),
+        report_error("expected command after pipe", 0)
+    );
     let cmd_tokens = raw
         .get(start..)
         .ok_or_else(|| report_error("expected command after pipe", 0))?;

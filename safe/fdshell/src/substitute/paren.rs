@@ -1,4 +1,4 @@
-use error_stack::Report;
+use error_stack::{Report, bail};
 
 use crate::error::resolve::ResolveError;
 
@@ -27,7 +27,7 @@ pub fn read_paren_expr(
                 inner.push(c);
                 peek.next();
             }
-            None => return Err(Report::new(ResolveError::UnclosedParen)),
+            None => bail!(ResolveError::UnclosedParen),
         }
     }
     Ok(inner)
