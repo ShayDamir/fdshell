@@ -5,7 +5,7 @@ use crate::redirect::Redirect;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -51,9 +51,9 @@ pub fn child_main(
             Ok(code) => Ok(code),
             Err(report) => match *report.current_context() {
                 BuiltinError::Unknown => Err(Report::new(ChildError::NotABuiltin).attach(cmd_name)),
-                BuiltinError::Help | BuiltinError::InvalidArgument | BuiltinError::Io => {
-                    bail!(ChildError::ExecFailed)
-                }
+                BuiltinError::Help => Ok(0),
+               BuiltinError::InvalidArgument => Ok(1),
+                BuiltinError::Io => Err(report.change_context(ChildError::Io)),
                 BuiltinError::Syscall(e) => Ok(e.errno()),
             },
         }
