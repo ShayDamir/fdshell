@@ -60,9 +60,8 @@ pub(crate) fn dollar_subst(
                     break;
                 }
             }
-            let num_str =
-                core::str::from_utf8(&num_bytes).map_err(|_| ResolveError::RefNotFound)?;
-            let idx: usize = num_str.parse().map_err(|_| ResolveError::RefNotFound)?;
+            let num_str = core::str::from_utf8(&num_bytes).change_context(ResolveError::Never)?;
+            let idx: usize = num_str.parse().change_context(ResolveError::MalformedRef)?;
             if let Some(pos) = state.positional.get(idx) {
                 out.extend_from_slice(pos.as_bytes().change_context(ResolveError::RefNotFound)?);
             } else {

@@ -9,8 +9,12 @@ pub(crate) enum ResolveError {
     NulByte,
     /// unclosed subexpression parenthesis
     UnclosedParen,
+    /// malformed variable/reference syntax
+    MalformedRef,
     /// resolution failed
     Resolve,
+    /// impossible error state (should never occur)
+    Never,
 }
 
 impl core::error::Error for ResolveError {}
