@@ -1,12 +1,14 @@
 //! Exec (execveat, resolve_path) errors.
 
+use sys::ShortCStr;
+
 /// [ExecError] Exec / path resolution errors
 #[derive(displaydoc::Display, Debug)]
 pub(crate) enum ExecError {
-    /// command not found
-    NotFound,
-    /// not a shell builtin
-    NotABuiltin,
+    /// "{0}" not found
+    NotFound(ShortCStr),
+    /// "{0}" is not a shell builtin
+    NotABuiltin(ShortCStr),
     /// missing argument
     MissingArg,
     /// fd export for execveat failed
@@ -20,11 +22,11 @@ pub(crate) enum ExecError {
 impl ExecError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::NotFound => 127,
+            Self::NotFound(_) => 127,
             Self::MissingArg
             | Self::ExportFailed
             | Self::ExecFailed
-            | Self::NotABuiltin
+            | Self::NotABuiltin(_)
             | Self::Io => 1,
         }
     }

@@ -94,7 +94,7 @@ fn resolve_path_missing_absolute() {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
-    assert!(matches!(report.current_context(), ExecError::NotFound));
+    assert!(matches!(report.current_context(), ExecError::NotFound(_)));
     teardown(&dir);
 }
 
@@ -108,7 +108,7 @@ fn resolve_path_missing_dot_slash() {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
-    assert!(matches!(report.current_context(), ExecError::NotFound));
+    assert!(matches!(report.current_context(), ExecError::NotFound(_)));
     std::env::set_current_dir(&old).unwrap();
     teardown(&dir);
 }

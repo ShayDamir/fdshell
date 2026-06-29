@@ -1,5 +1,7 @@
 //! Child process execution errors (child/run.rs, pipeline/child.rs).
 
+use sys::ShortCStr;
+
 /// [ChildError] Child process execution errors
 #[derive(displaydoc::Display, Debug)]
 pub(crate) enum ChildError {
@@ -9,10 +11,10 @@ pub(crate) enum ChildError {
     SubstituteFailed,
     /// state borrow in child failed
     BorrowFailed,
-    /// not a shell builtin
-    NotABuiltin,
-    /// failed to resolve command path
-    NotFound,
+    /// "{0}" is not a shell builtin
+    NotABuiltin(ShortCStr),
+    /// failed to resolve command path: "{0}"
+    NotFound(ShortCStr),
     /// execveat in child failed
     ExecFailed,
     /// I/O error in builtin
@@ -22,8 +24,8 @@ pub(crate) enum ChildError {
 impl ChildError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::NotFound => 127,
-            Self::NotABuiltin
+            Self::NotFound(_) => 127,
+            Self::NotABuiltin(_)
             | Self::RedirectFailed
             | Self::SubstituteFailed
             | Self::BorrowFailed

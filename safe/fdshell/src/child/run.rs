@@ -5,7 +5,7 @@ use crate::redirect::Redirect;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -50,7 +50,7 @@ pub fn child_main(
         match child::builtin::dispatch_builtin(cmd.name, &refs, args, &state) {
             Ok(code) => Ok(code),
             Err(report) => match *report.current_context() {
-                BuiltinError::Unknown => Err(Report::new(ChildError::NotABuiltin).attach(cmd_name)),
+                BuiltinError::Unknown => bail!(ChildError::NotABuiltin(cmd_name)),
                 BuiltinError::Help => Ok(0),
                 BuiltinError::InvalidArgument => Ok(1),
                 BuiltinError::Io => Err(report.change_context(ChildError::Io)),
@@ -59,7 +59,8 @@ pub fn child_main(
         }
     } else {
         let name = sys::RefCStr::from(cmd.name.clone());
-        let fd = exec::resolve_path(&name).change_context(ChildError::NotFound)?;
+        let fd =
+            exec::resolve_path(&name).change_context(ChildError::NotFound(cmd.name.clone()))?;
         let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
             .chain(refs.iter().copied())
             .collect();

@@ -2,7 +2,7 @@ mod environ;
 
 use std::ffi::{CStr, CString};
 
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::execveat::AT_EMPTY_PATH;
 use sys::fcntl::O_PATH;
 use sys::{AtFd, LocalFd, ShortCStr};
@@ -52,21 +52,19 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
         let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
         let pathname = match CString::new(full) {
             Ok(p) => p,
-            Err(_) => return Err(Report::new(ExecError::NotFound).attach(bin_name)),
+            Err(_) => bail!(ExecError::NotFound(bin_name)),
         };
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
             return Ok(fd);
         }
     }
-    Err(Report::new(ExecError::NotFound).attach(bin_name))
+    bail!(ExecError::NotFound(bin_name))
 }
 
 pub fn resolve_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
     if bin.to_bytes().contains(&b'/') {
         let bin_name = name_from_cstr(bin);
-        sys::openat2::open(bin, O_PATH)
-            .change_context(ExecError::NotFound)
-            .attach(bin_name)
+        sys::openat2::open(bin, O_PATH).change_context(ExecError::NotFound(bin_name))
     } else {
         search_path(bin)
     }
