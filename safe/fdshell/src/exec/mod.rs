@@ -50,10 +50,7 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
     let bin_name = name_from_cstr(bin);
     for dir in path.split(':').filter(|d| !d.is_empty()) {
         let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
-        let pathname = match CString::new(full) {
-            Ok(p) => p,
-            Err(_) => bail!(ExecError::NotFound(bin_name)),
-        };
+        let pathname = CString::new(full).change_context(ExecError::Never)?;
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
             return Ok(fd);
         }

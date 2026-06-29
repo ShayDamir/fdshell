@@ -17,6 +17,8 @@ pub(crate) enum ExecError {
     ExecFailed,
     /// I/O error in builtin
     Io,
+    /// impossible error state (should never occur)
+    Never,
 }
 
 impl ExecError {
@@ -27,7 +29,8 @@ impl ExecError {
             | Self::ExportFailed
             | Self::ExecFailed
             | Self::NotABuiltin(_)
-            | Self::Io => 1,
+            | Self::Io
+            | Self::Never => 1,
         }
     }
 }
