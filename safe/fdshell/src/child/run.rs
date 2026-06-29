@@ -52,7 +52,7 @@ pub fn child_main(
             Err(report) => match *report.current_context() {
                 BuiltinError::Unknown => Err(Report::new(ChildError::NotABuiltin).attach(cmd_name)),
                 BuiltinError::Help => Ok(0),
-               BuiltinError::InvalidArgument => Ok(1),
+                BuiltinError::InvalidArgument => Ok(1),
                 BuiltinError::Io => Err(report.change_context(ChildError::Io)),
                 BuiltinError::Syscall(e) => Ok(e.errno()),
             },

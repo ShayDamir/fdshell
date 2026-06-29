@@ -4,7 +4,7 @@ use crate::exec;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -39,10 +39,10 @@ pub fn execute(
         match child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
             Ok(code) => Ok(code),
             Err(report) => match *report.current_context() {
-                BuiltinError::Unknown => bail!(ExecError::NotABuiltin),
-                BuiltinError::Help | BuiltinError::InvalidArgument | BuiltinError::Io => {
-                    bail!(ExecError::ExecFailed)
-                }
+                BuiltinError::Unknown => Err(Report::new(ExecError::NotABuiltin).attach(builtin_name.clone())),
+                BuiltinError::Help => Ok(0),
+                BuiltinError::InvalidArgument => Ok(1),
+                BuiltinError::Io => Err(report.change_context(ExecError::Io)),
                 BuiltinError::Syscall(e) => Ok(e.errno()),
             },
         }

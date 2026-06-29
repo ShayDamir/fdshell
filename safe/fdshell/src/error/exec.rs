@@ -13,13 +13,19 @@ pub(crate) enum ExecError {
     ExportFailed,
     /// execveat failed
     ExecFailed,
+    /// I/O error in builtin
+    Io,
 }
 
 impl ExecError {
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::NotFound => 127,
-            Self::MissingArg | Self::ExportFailed | Self::ExecFailed | Self::NotABuiltin => 1,
+            Self::MissingArg
+            | Self::ExportFailed
+            | Self::ExecFailed
+            | Self::NotABuiltin
+            | Self::Io => 1,
         }
     }
 }
