@@ -34,7 +34,7 @@ pub fn dispatch_builtin(
     state: &ShellState,
 ) -> Result<i32, Report<BuiltinError>> {
     name.as_bytes()
-        .change_context(BuiltinError::InvalidArgument)?;
+        .change_context(BuiltinError::InvalidArgument("name"))?;
 
     for (known, handler) in DISPATCH {
         if name.eq_bytes(known) {

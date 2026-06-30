@@ -15,10 +15,21 @@ fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(
         args,
         |a| match builtins::renameat2::parse::renameat2_parse(a) {
-            Err(e) => assert_eq!(e, expected),
+            Err(e) => {
+                let ctx = e.current_context();
+                match (ctx, expected) {
+                    (BuiltinError::Help, BuiltinError::Help) => {}
+                    (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                    _ => panic!("unexpected error: {ctx}"),
+                }
+            }
             _ => panic!("expected Err"),
         },
     );
+}
+
+fn assert_invalid_arg(args: &[&str]) {
+    assert_err(args, BuiltinError::InvalidArgument("x"));
 }
 
 fn assert_ok<F: FnOnce(&builtins::renameat2::parse::Renameat2Config)>(args: &[&str], f: F) {
@@ -59,43 +70,37 @@ fn empty_args() {
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "x", "y"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--bad", "x", "y"])
 }
 
 #[test]
 fn missing_oldpath() {
-    assert_err(
-        &["--flags", "RENAME_NOREPLACE"],
-        BuiltinError::InvalidArgument,
-    );
+    assert_invalid_arg(&["--flags", "RENAME_NOREPLACE"]);
 }
 
 #[test]
 fn missing_newpath() {
-    assert_err(&["old"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["old"])
 }
 
 #[test]
 fn extra_path() {
-    assert_err(&["a", "b", "c"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["a", "b", "c"]);
 }
 
 #[test]
 fn empty_oldpath() {
-    assert_err(&["", "new"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["", "new"]);
 }
 
 #[test]
 fn empty_newpath() {
-    assert_err(&["old", ""], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["old", ""]);
 }
 
 #[test]
 fn missing_value() {
-    assert_err(
-        &["--flags", "--olddirfd", "5", "a", "b"],
-        BuiltinError::InvalidArgument,
-    );
+    assert_invalid_arg(&["--flags", "--olddirfd", "5", "a", "b"]);
 }
 
 #[test]

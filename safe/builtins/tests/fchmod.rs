@@ -12,12 +12,23 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| match builtins::fchmod::parse::fchmod_parse(a) {
-        Err(e) => assert_eq!(e, expected),
+        Err(e) => {
+            let ctx = e.current_context();
+            match (ctx, expected) {
+                (BuiltinError::Help, BuiltinError::Help) => {}
+                (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                _ => panic!("unexpected error: {ctx}"),
+            }
+        }
         Ok(cfg) => panic!(
             "expected Err, got Ok with fds={:?} mode={:o}",
             cfg.fds, cfg.mode
         ),
     });
+}
+
+fn assert_invalid_arg(args: &[&str]) {
+    assert_err(args, BuiltinError::InvalidArgument("x"));
 }
 
 fn assert_ok<F: FnOnce(&builtins::fchmod::parse::FchmodConfig)>(args: &[&str], f: F) {
@@ -44,32 +55,32 @@ fn empty_args() {
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "3"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--bad", "3"])
 }
 
 #[test]
 fn missing_fd_flag() {
-    assert_err(&["--mode", "755"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--mode", "755"])
 }
 
 #[test]
 fn missing_mode_flag() {
-    assert_err(&["--fd", "3"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--fd", "3"])
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--fd"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--fd"])
 }
 
 #[test]
 fn invalid_flag_value() {
-    assert_err(&["--mode"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--mode"])
 }
 
 #[test]
 fn unknown_flag() {
-    assert_err(&["--fd", "3", "--xyz"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--fd", "3", "--xyz"])
 }
 
 #[test]
@@ -112,12 +123,12 @@ fn positional_mode_octal_prefix() {
 
 #[test]
 fn positional_too_few() {
-    assert_err(&["644"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["644"])
 }
 
 #[test]
 fn positional_negative_fd() {
-    assert_err(&["644", "-1"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["644", "-1"])
 }
 
 #[test]
@@ -163,18 +174,12 @@ fn flag_mode_octal_prefix() {
 
 #[test]
 fn flag_invalid_fd() {
-    assert_err(
-        &["--fd", "-1", "--mode", "755"],
-        BuiltinError::InvalidArgument,
-    );
+    assert_invalid_arg(&["--fd", "-1", "--mode", "755"]);
 }
 
 #[test]
 fn flag_non_numeric_fd() {
-    assert_err(
-        &["--fd", "abc", "--mode", "755"],
-        BuiltinError::InvalidArgument,
-    );
+    assert_invalid_arg(&["--fd", "abc", "--mode", "755"]);
 }
 
 #[test]

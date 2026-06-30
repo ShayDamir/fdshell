@@ -13,9 +13,20 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| match builtins::openat2::parse::openat2_parse(a) {
-        Err(e) => assert_eq!(e, expected),
+        Err(e) => {
+            let ctx = e.current_context();
+            match (ctx, expected) {
+                (BuiltinError::Help, BuiltinError::Help) => {}
+                (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                _ => panic!("unexpected error: {ctx}"),
+            }
+        }
         _ => panic!("expected Err"),
     });
+}
+
+fn assert_invalid_arg(args: &[&str]) {
+    assert_err(args, BuiltinError::InvalidArgument("x"));
 }
 
 fn assert_ok<F: FnOnce(&builtins::openat2::parse::Openat2Config)>(args: &[&str], f: F) {
@@ -118,32 +129,32 @@ fn mode_hex() {
 
 #[test]
 fn bad_flag() {
-    assert_err(&["--bad", "x"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--bad", "x"])
 }
 
 #[test]
 fn short_flag() {
-    assert_err(&["-f", "O_RDONLY", "x"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["-f", "O_RDONLY", "x"])
 }
 
 #[test]
 fn missing_path() {
-    assert_err(&["--flags", "O_RDONLY"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--flags", "O_RDONLY"])
 }
 
 #[test]
 fn extra_path() {
-    assert_err(&["a", "b"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["a", "b"])
 }
 
 #[test]
 fn empty_path() {
-    assert_err(&[""], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&[""])
 }
 
 #[test]
 fn missing_value() {
-    assert_err(&["--flags"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--flags"])
 }
 
 #[test]

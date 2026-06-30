@@ -10,7 +10,7 @@ fn main() {
     let args: Vec<&core::ffi::CStr> = argv.iter().map(|cs| cs.as_c_str()).collect();
 
     let cfg = match builtins::openat2::parse::openat2_parse(&args) {
-        Err(builtins::error::BuiltinError::Help) => {
+        Err(ref e) if matches!(e.current_context(), builtins::error::BuiltinError::Help) => {
             println!(
                 "Usage: openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] path"
             );

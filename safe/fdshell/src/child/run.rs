@@ -52,9 +52,18 @@ pub fn child_main(
             Err(report) => match *report.current_context() {
                 BuiltinError::Unknown => bail!(ChildError::NotABuiltin(cmd_name)),
                 BuiltinError::Help => Ok(0),
-                BuiltinError::InvalidArgument => Ok(1),
+                BuiltinError::InvalidArgument(_) => {
+                    eprintln!("{:?}", report);
+                    Ok(1)
+                }
                 BuiltinError::Io => Err(report.change_context(ChildError::Io)),
-                BuiltinError::Syscall(e) => Ok(e.errno()),
+                BuiltinError::Syscall => {
+                    if let Some(e) = report.downcast_ref::<sys::SyscallError>() {
+                        Ok(e.errno())
+                    } else {
+                        Ok(1)
+                    }
+                }
             },
         }
     } else {

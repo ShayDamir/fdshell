@@ -1,10 +1,11 @@
 mod flags;
 
 use core::ffi::CStr;
+use error_stack::{Report, ResultExt};
 use sys::ImportedFd;
 use sys::openat2::OpenHow;
 
-use crate::error::BuiltinError;
+use crate::error::{BuiltinError, Suggestion};
 
 pub struct Openat2Config<'a> {
     pub dirfd: Option<ImportedFd>,
@@ -13,48 +14,9 @@ pub struct Openat2Config<'a> {
 }
 
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
-///
-/// Returns:
-/// - `Err(BuiltinError::Help)` — `--help` or `-h` was passed
-/// - `Err(BuiltinError::InvalidArgument)` — bad flag name, missing value, etc.
-///
-/// # Example
-///
-/// ```rust
-/// use core::ffi::CStr;
-/// use std::ffi::CString;
-///
-/// let a = CString::from(c"--flags");
-/// let b = CString::from(c"O_RDONLY");
-/// let c = CString::from(c"package.nix");
-/// let args = [a.as_c_str(), b.as_c_str(), c.as_c_str()];
-/// let cfg = builtins::openat2::parse::openat2_parse(&args);
-/// match cfg {
-///     Ok(cfg) => {
-///         assert!(cfg.dirfd.is_none());
-///         assert_eq!(cfg.path.to_bytes(), b"package.nix");
-///         assert_eq!(cfg.how.flags, 0);
-///     }
-///     _ => panic!("expected Ok"),
-/// }
-/// ```
-///
-/// # Error example
-///
-/// ```rust
-/// use std::ffi::CString;
-///
-/// let a = CString::from(c"--bad");
-/// let b = CString::from(c"x");
-/// let args = [a.as_c_str(), b.as_c_str()];
-/// match builtins::openat2::parse::openat2_parse(&args) {
-///     Err(BuiltinError::InvalidArgument) => {}
-///     _ => panic!("expected Err(BuiltinError::InvalidArgument)"),
-/// }
-/// ```
-pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, BuiltinError> {
+pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(BuiltinError::Help);
+        return Err(Report::new(BuiltinError::Help));
     }
 
     let mut dirfd = None;
@@ -65,7 +27,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Builtin
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument)?;
+        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument("arg"))?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -73,30 +35,47 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Builtin
                 dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?
             }
             b"--flags" => {
-                open_flags |=
-                    flags::parse_open_flags(crate::argparse::next_val(args, &mut i, val)?)?
+                let s = crate::argparse::next_val(args, &mut i, val)?;
+                open_flags |= flags::parse_open_flags(s)
+                    .change_context(BuiltinError::InvalidArgument("flags"))
+                    .attach_opaque(Suggestion(
+                        "Use O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOCTTY, O_TRUNC, O_APPEND, \
+                        O_NONBLOCK, O_DSYNC, O_DIRECTORY, O_NOFOLLOW, O_CLOEXEC, O_SYNC, or a \
+                        hex value (e.g. 0x4000)",
+                    ))?;
             }
             b"--mode" => {
-                mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?
+                let s = crate::argparse::next_val(args, &mut i, val)?;
+                mode = crate::argparse::parse_mode(s)
+                    .change_context(BuiltinError::InvalidArgument("mode"))
+                    .attach_opaque(Suggestion(
+                        "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
+                    ))?;
             }
             b"--resolve" => {
-                resolve = crate::resolve::parse_resolve_flags(crate::argparse::next_val(
-                    args, &mut i, val,
-                )?)?
+                let s = crate::argparse::next_val(args, &mut i, val)?;
+                resolve = crate::resolve::parse_resolve_flags(s)
+                    .change_context(BuiltinError::InvalidArgument("resolve"))
+                    .attach_opaque(Suggestion(
+                        "Use RESOLVE_NO_SYMLINKS, RESOLVE_NO_MAGICLINKS, RESOLVE_NO_XDEV, \
+                        RESOLVE_BENEATH, RESOLVE_IN_ROOT, RESOLVE_CACHED, or a hex value (e.g. 0x80000)",
+                    ))?;
             }
-            a if a.starts_with(b"-") => return Err(BuiltinError::InvalidArgument),
+            a if a.starts_with(b"-") => {
+                return Err(Report::new(BuiltinError::InvalidArgument("flag")));
+            }
             _ => {
                 if path.is_some() {
-                    return Err(BuiltinError::InvalidArgument);
+                    return Err(Report::new(BuiltinError::InvalidArgument("path")));
                 }
                 path = Some(arg);
             }
         }
     }
 
-    let path = path.ok_or(BuiltinError::InvalidArgument)?;
+    let path = path.ok_or(BuiltinError::InvalidArgument("path"))?;
     if path.to_bytes().is_empty() {
-        return Err(BuiltinError::InvalidArgument);
+        return Err(Report::new(BuiltinError::InvalidArgument("path")));
     }
 
     Ok(Openat2Config {

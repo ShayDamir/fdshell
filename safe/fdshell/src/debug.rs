@@ -1,11 +1,12 @@
 //! Debug hook installation for `error_stack`.
 //!
-//! Registers hooks for `ParseError` and `ParsePosition` so that
-//! parse errors display the offending line with a caret.
+//! Registers hooks for `ParseError`, `ParsePosition`, and `Suggestion` so that
+//! errors display helpful context.
 
 use error_stack::{Report, fmt::HookContext};
 
 use crate::error::parse::ParsePosition;
+use builtins::error::Suggestion;
 
 pub fn install_debug_hooks() {
     // Suppress default panic location hook body
@@ -31,6 +32,13 @@ pub fn install_debug_hooks() {
                 ctx.push_body(line);
                 ctx.push_body(crate::caret::caret_line(caret_col, caret_len));
             }
+        },
+    );
+
+    // Show suggestion for InvalidArgument errors
+    Report::install_debug_hook::<Suggestion>(
+        |Suggestion(msg), ctx: &mut HookContext<Suggestion>| {
+            ctx.push_body(format!("Suggestion: {msg}"));
         },
     );
 }

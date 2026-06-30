@@ -14,9 +14,20 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| match builtins::pipe::parse::pipe_parse(a) {
-        Err(e) => assert_eq!(e, expected),
+        Err(e) => {
+            let ctx = e.current_context();
+            match (ctx, expected) {
+                (BuiltinError::Help, BuiltinError::Help) => {}
+                (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                _ => panic!("unexpected error: {ctx}"),
+            }
+        }
         _ => panic!("expected Err"),
     });
+}
+
+fn assert_invalid_arg(args: &[&str]) {
+    assert_err(args, BuiltinError::InvalidArgument("x"));
 }
 
 fn assert_ok<F: Fn(&builtins::pipe::parse::PipeConfig)>(args: &[&str], f: F) {
@@ -43,7 +54,7 @@ fn empty_args() {
 
 #[test]
 fn unexpected_arg() {
-    assert_err(&["x"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["x"])
 }
 
 #[test]
@@ -76,17 +87,17 @@ fn flags_hex() {
 
 #[test]
 fn flags_empty_value() {
-    assert_err(&["--flags"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--flags"])
 }
 
 #[test]
 fn flags_bad() {
-    assert_err(&["--flags", "O_CLOEXEC"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--flags", "O_CLOEXEC"])
 }
 
 #[test]
 fn flags_bad_name() {
-    assert_err(&["--flags", "nope"], BuiltinError::InvalidArgument);
+    assert_invalid_arg(&["--flags", "nope"])
 }
 
 #[test]

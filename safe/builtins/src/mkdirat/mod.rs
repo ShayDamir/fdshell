@@ -1,3 +1,4 @@
+use error_stack::{Report, ResultExt};
 use sys::fcntl::{O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW};
 use sys::{AtFd, ImportedFd};
 
@@ -5,15 +6,16 @@ use crate::error::BuiltinError;
 
 pub mod parse;
 
-pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), BuiltinError> {
+pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), Report<BuiltinError>> {
     let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
-    sys::mkdirat::mkdirat(dirfd, cfg.path, cfg.mode & 0o777)?;
+    sys::mkdirat::mkdirat(dirfd, cfg.path, cfg.mode & 0o777)
+        .change_context(BuiltinError::Syscall)?;
     let how = sys::openat2::OpenHow {
         flags: (O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW) as u64,
         mode: 0,
         resolve: cfg.resolve,
     };
-    let fd = sys::openat2::openat2(dirfd, cfg.path, &how)?;
+    let fd = sys::openat2::openat2(dirfd, cfg.path, &how).change_context(BuiltinError::Syscall)?;
     sys::shellfd::send_fd(&fd, c"dirfd").ok();
     Ok(())
 }

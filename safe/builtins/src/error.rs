@@ -3,48 +3,62 @@
 //! Replaces raw `i32` errno returns so callers can match on the specific
 //! problem instead of decoding integer constants.
 
-use core::fmt;
-
 /// Errors that can occur in builtin command dispatch and execution.
 ///
 /// Each variant describes a single, distinct cause.
-#[derive(Debug, PartialEq)]
+#[derive(displaydoc::Display, Debug)]
 pub enum BuiltinError {
-    /// User requested help text with `--help` / `-h`.
+    /// user requested help text with `--help` / `-h`
     Help,
-    /// Invalid argument, flag, or value.
-    InvalidArgument,
-    /// Underlying syscall failed.
-    Syscall(sys::SyscallError),
-    /// No builtin matches the given command name.
+    /// invalid argument {0}
+    InvalidArgument(&'static str),
+    /// syscall failed
+    Syscall,
+    /// unknown builtin
     Unknown,
-    /// I/O operation failed.
+    /// I/O error
     Io,
 }
 
-impl fmt::Display for BuiltinError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Help => write!(f, "help requested"),
-            Self::InvalidArgument => write!(f, "invalid argument"),
-            Self::Syscall(e) => write!(f, "syscall failed: {}", e),
-            Self::Unknown => write!(f, "unknown builtin"),
-            Self::Io => write!(f, "I/O error"),
-        }
-    }
+impl core::error::Error for BuiltinError {}
+
+/// Contextual suggestion attached to `InvalidArgument` errors.
+///
+/// Attached via `.attach_opaque()` so it appears in the error chain.
+#[derive(Debug)]
+pub struct Suggestion(pub &'static str);
+
+/// Errors from parsing flag values (hex or named).
+#[derive(displaydoc::Display, Debug)]
+pub enum FlagParseError {
+    /// invalid hexadecimal flag value
+    HexParse,
+    /// invalid UTF-8 in flag value
+    Utf8,
+    /// unknown flag name
+    Unknown,
 }
 
-impl core::error::Error for BuiltinError {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        match self {
-            Self::Syscall(e) => Some(e),
-            _ => None,
-        }
-    }
+impl core::error::Error for FlagParseError {}
+
+/// Errors from parsing file descriptor values.
+#[derive(displaydoc::Display, Debug)]
+pub enum FdParseError {
+    /// invalid file descriptor
+    Invalid,
+    /// negative file descriptor
+    Negative,
 }
 
-impl From<sys::SyscallError> for BuiltinError {
-    fn from(e: sys::SyscallError) -> Self {
-        BuiltinError::Syscall(e)
-    }
+impl core::error::Error for FdParseError {}
+
+/// Errors from parsing mode values (octal/hex).
+#[derive(displaydoc::Display, Debug)]
+pub enum ModeParseError {
+    /// failed to parse mode value
+    ParseFailed,
+    /// invalid UTF-8 in mode value
+    Utf8,
 }
+
+impl core::error::Error for ModeParseError {}

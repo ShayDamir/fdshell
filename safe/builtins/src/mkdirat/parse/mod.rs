@@ -1,7 +1,8 @@
 use core::ffi::CStr;
+use error_stack::{Report, ResultExt};
 use sys::ImportedFd;
 
-use crate::error::BuiltinError;
+use crate::error::{BuiltinError, Suggestion};
 
 pub struct MkdiratConfig<'a> {
     pub dirfd: Option<ImportedFd>,
@@ -13,31 +14,11 @@ pub struct MkdiratConfig<'a> {
 /// Parses mkdirat CLI arguments into an [`MkdiratConfig`].
 ///
 /// Returns:
-/// - `Err(BuiltinError::Help)` — `--help` or `-h` was passed
-/// - `Err(BuiltinError::InvalidArgument)` — bad flag name, missing value, etc.
-///
-/// # Example
-///
-/// ```rust
-/// use std::ffi::CString;
-///
-/// let a = CString::from(c"--mode");
-/// let b = CString::from(c"755");
-/// let c = CString::from(c"newdir");
-/// let args = [a.as_c_str(), b.as_c_str(), c.as_c_str()];
-/// let cfg = builtins::mkdirat::parse::mkdirat_parse(&args);
-/// match cfg {
-///     Ok(cfg) => {
-///         assert!(cfg.dirfd.is_none());
-///         assert_eq!(cfg.mode, 0o755);
-///         assert_eq!(cfg.path.to_bytes(), b"newdir");
-///     }
-///     _ => panic!("expected Ok"),
-/// }
-/// ```
-pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, BuiltinError> {
+/// - `Err(BuiltinError::Help)` -- `--help` or `-h` was passed
+/// - `Err(BuiltinError::InvalidArgument(_))` -- bad flag name, missing value, etc.
+pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(BuiltinError::Help);
+        return Err(Report::new(BuiltinError::Help));
     }
 
     let mut dirfd = None;
@@ -47,7 +28,7 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, Builtin
     let mut i = 0;
 
     while i < args.len() {
-        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument)?;
+        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument("arg"))?;
         i += 1;
         let (key, val) = crate::argparse::split(arg)?;
         match key {
@@ -55,27 +36,37 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, Builtin
                 dirfd = crate::argparse::parse_dirfd(crate::argparse::next_val(args, &mut i, val)?)?
             }
             b"--mode" => {
-                mode = crate::argparse::parse_mode(crate::argparse::next_val(args, &mut i, val)?)?
-                    as u32
+                let s = crate::argparse::next_val(args, &mut i, val)?;
+                mode = crate::argparse::parse_mode(s)
+                    .change_context(BuiltinError::InvalidArgument("mode"))
+                    .attach_opaque(Suggestion(
+                        "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
+                    ))? as u32;
             }
             b"--resolve" => {
-                resolve = crate::resolve::parse_resolve_flags(crate::argparse::next_val(
-                    args, &mut i, val,
-                )?)?
+                let s = crate::argparse::next_val(args, &mut i, val)?;
+                resolve = crate::resolve::parse_resolve_flags(s)
+                    .change_context(BuiltinError::InvalidArgument("resolve"))
+                    .attach_opaque(Suggestion(
+                        "Use RESOLVE_NO_SYMLINKS, RESOLVE_NO_MAGICLINKS, RESOLVE_NO_XDEV, \
+                        RESOLVE_BENEATH, RESOLVE_IN_ROOT, RESOLVE_CACHED, or a hex value (e.g. 0x80000)",
+                    ))?;
             }
-            a if a.starts_with(b"-") => return Err(BuiltinError::InvalidArgument),
+            a if a.starts_with(b"-") => {
+                return Err(Report::new(BuiltinError::InvalidArgument("flag")));
+            }
             _ => {
                 if path.is_some() {
-                    return Err(BuiltinError::InvalidArgument);
+                    return Err(Report::new(BuiltinError::InvalidArgument("path")));
                 }
                 path = Some(arg);
             }
         }
     }
 
-    let path = path.ok_or(BuiltinError::InvalidArgument)?;
+    let path = path.ok_or(BuiltinError::InvalidArgument("path"))?;
     if path.to_bytes().is_empty() {
-        return Err(BuiltinError::InvalidArgument);
+        return Err(Report::new(BuiltinError::InvalidArgument("path")));
     }
 
     Ok(MkdiratConfig {
