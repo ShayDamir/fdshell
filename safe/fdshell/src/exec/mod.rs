@@ -7,20 +7,22 @@ use sys::execveat::AT_EMPTY_PATH;
 use sys::fcntl::O_PATH;
 use sys::{AtFd, LocalFd, ShortCStr};
 
-use crate::error::exec::ExecError;
+use crate::error::child_process::ChildProcessError;
 use environ::get_environ;
 
 pub fn exec_fd(
     fd: &LocalFd,
     argv: &[&CStr],
     exports: &[(ShortCStr, Vec<u8>)],
-) -> Result<(), Report<ExecError>> {
+) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
     let envp = get_environ(cookie.as_bytes(), exports);
-    let script_fd = fd.export().change_context(ExecError::ExportFailed)?;
+    let script_fd = fd
+        .export()
+        .change_context(ChildProcessError::ExportFailed)?;
     sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
-        .change_context(ExecError::ExecFailed)?;
+        .change_context(ChildProcessError::ExecFailed)?;
     Ok(())
 }
 
@@ -29,12 +31,12 @@ pub fn exec_at(
     pathname: &CStr,
     argv: &[&CStr],
     exports: &[(ShortCStr, Vec<u8>)],
-) -> Result<(), Report<ExecError>> {
+) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
     let envp = get_environ(cookie.as_bytes(), exports);
     sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
-        .change_context(ExecError::ExecFailed)?;
+        .change_context(ChildProcessError::ExecFailed)?;
     Ok(())
 }
 
@@ -42,7 +44,7 @@ fn name_from_cstr(bin: &CStr) -> ShortCStr {
     ShortCStr::from_vec(bin.to_bytes().to_vec()).unwrap_or_else(|_| ShortCStr::new())
 }
 
-pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
+pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ChildProcessError>> {
     let path = match std::env::var("PATH") {
         Ok(p) if !p.is_empty() => p,
         _ => "/usr/local/bin:/usr/bin:/bin".to_string(),
@@ -50,18 +52,18 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
     let bin_name = name_from_cstr(bin);
     for dir in path.split(':').filter(|d| !d.is_empty()) {
         let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
-        let pathname = CString::new(full).change_context(ExecError::Never)?;
+        let pathname = CString::new(full).change_context(ChildProcessError::Never)?;
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
             return Ok(fd);
         }
     }
-    bail!(ExecError::NotFound(bin_name))
+    bail!(ChildProcessError::NotFound(bin_name))
 }
 
-pub fn resolve_path(bin: &CStr) -> Result<LocalFd, Report<ExecError>> {
+pub fn resolve_path(bin: &CStr) -> Result<LocalFd, Report<ChildProcessError>> {
     if bin.to_bytes().contains(&b'/') {
         let bin_name = name_from_cstr(bin);
-        sys::openat2::open(bin, O_PATH).change_context(ExecError::NotFound(bin_name))
+        sys::openat2::open(bin, O_PATH).change_context(ChildProcessError::NotFound(bin_name))
     } else {
         search_path(bin)
     }

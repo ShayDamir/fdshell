@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::{exec_fd, resolve_path};
-use crate::error::exec::ExecError;
+use crate::error::child_process::ChildProcessError;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::unix::fs::PermissionsExt;
@@ -94,7 +94,10 @@ fn resolve_path_missing_absolute() {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
-    assert!(matches!(report.current_context(), ExecError::NotFound(_)));
+    assert!(matches!(
+        report.current_context(),
+        ChildProcessError::NotFound(_)
+    ));
     teardown(&dir);
 }
 
@@ -108,7 +111,10 @@ fn resolve_path_missing_dot_slash() {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
-    assert!(matches!(report.current_context(), ExecError::NotFound(_)));
+    assert!(matches!(
+        report.current_context(),
+        ChildProcessError::NotFound(_)
+    ));
     std::env::set_current_dir(&old).unwrap();
     teardown(&dir);
 }

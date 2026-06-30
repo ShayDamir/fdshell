@@ -5,10 +5,9 @@
 
 pub(crate) mod capture;
 pub(crate) mod cd;
-pub(crate) mod child;
+pub(crate) mod child_process;
 pub(crate) mod cmd;
 pub(crate) mod cmd_subst;
-pub(crate) mod exec;
 pub(crate) mod exports;
 pub(crate) mod fdpass;
 pub(crate) mod launch;
