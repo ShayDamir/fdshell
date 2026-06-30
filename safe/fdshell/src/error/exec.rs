@@ -15,8 +15,8 @@ pub(crate) enum ExecError {
     ExportFailed,
     /// execveat failed
     ExecFailed,
-    /// I/O error in builtin
-    Io,
+    /// builtin execution failed
+    BuiltinExecutionFailed,
     /// impossible error state (should never occur)
     Never,
 }
@@ -29,7 +29,7 @@ impl ExecError {
             | Self::ExportFailed
             | Self::ExecFailed
             | Self::NotABuiltin(_)
-            | Self::Io
+            | Self::BuiltinExecutionFailed
             | Self::Never => 1,
         }
     }

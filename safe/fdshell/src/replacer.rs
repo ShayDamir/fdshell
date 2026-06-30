@@ -45,7 +45,7 @@ pub fn execute(
                     eprintln!("{:?}", report);
                     Ok(1)
                 }
-                BuiltinError::Io => Err(report.change_context(ExecError::Io)),
+                BuiltinError::Io => Err(report.change_context(ExecError::BuiltinExecutionFailed)),
                 BuiltinError::Syscall => {
                     if let Some(e) = report.downcast_ref::<sys::SyscallError>() {
                         Ok(e.errno())

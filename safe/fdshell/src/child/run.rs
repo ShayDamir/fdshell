@@ -56,7 +56,7 @@ pub fn child_main(
                     eprintln!("{:?}", report);
                     Ok(1)
                 }
-                BuiltinError::Io => Err(report.change_context(ChildError::Io)),
+                BuiltinError::Io => Err(report.change_context(ChildError::BuiltinExecutionFailed)),
                 BuiltinError::Syscall => {
                     if let Some(e) = report.downcast_ref::<sys::SyscallError>() {
                         Ok(e.errno())

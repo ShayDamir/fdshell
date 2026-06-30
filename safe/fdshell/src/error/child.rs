@@ -17,8 +17,8 @@ pub(crate) enum ChildError {
     NotFound(ShortCStr),
     /// execveat in child failed
     ExecFailed,
-    /// I/O error in builtin
-    Io,
+    /// builtin execution failed
+    BuiltinExecutionFailed,
 }
 
 impl ChildError {
@@ -30,7 +30,7 @@ impl ChildError {
             | Self::SubstituteFailed
             | Self::BorrowFailed
             | Self::ExecFailed
-            | Self::Io => 1,
+            | Self::BuiltinExecutionFailed => 1,
         }
     }
 }
