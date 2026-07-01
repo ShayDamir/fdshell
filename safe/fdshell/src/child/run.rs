@@ -71,6 +71,10 @@ pub fn child_main(
                         Ok(1)
                     }
                 }
+                BuiltinError::SendFdFailed => {
+                    eprintln!("{:?}", report);
+                    Ok(1)
+                }
             },
         }
     } else {

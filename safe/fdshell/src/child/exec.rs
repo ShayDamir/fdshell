@@ -86,6 +86,7 @@ pub(super) fn handle_resolve(
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
     let fd = crate::exec::resolve_path(name)
         .change_context(builtins::error::BuiltinError::InvalidArgument("path"))?;
-    sys::shellfd::send_fd(&fd, c"resolve").ok();
+    sys::shellfd::send_fd(&fd, c"resolve")
+        .change_context(builtins::error::BuiltinError::SendFdFailed)?;
     Ok(0)
 }

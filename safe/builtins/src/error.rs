@@ -18,6 +18,8 @@ pub enum BuiltinError {
     Unknown,
     /// I/O error
     Io,
+    /// failed to send fd to parent shell
+    SendFdFailed,
 }
 
 impl core::error::Error for BuiltinError {}
