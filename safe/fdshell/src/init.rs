@@ -9,8 +9,17 @@ pub enum FdShellMode {
 }
 
 fn detect_nested() -> Option<sys::ImportedFd> {
-    let cookie = std::env::var("FDSHELL_CAPTURE").ok();
-    let pid = cookie.and_then(|s| s.parse::<u32>().ok())?;
+    let cookie = std::env::var("FDSHELL_CAPTURE").ok()?;
+    let pid = match cookie.parse::<u32>() {
+        Ok(pid) => pid,
+        Err(e) => {
+            eprintln!(
+                "fdshell: FDSHELL_CAPTURE has invalid value: {} ({})",
+                cookie, e
+            );
+            return None;
+        }
+    };
     if pid != std::process::id() {
         return None;
     }
