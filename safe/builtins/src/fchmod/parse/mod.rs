@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail, ensure};
 
 use crate::error::{BuiltinError, FdParseError, Suggestion};
 
@@ -11,7 +11,7 @@ pub struct FchmodConfig {
 
 pub fn fchmod_parse(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(Report::new(BuiltinError::Help));
+        bail!(BuiltinError::Help);
     }
 
     let has_flags = args.iter().any(|a| a.to_bytes().starts_with(b"-"));
@@ -35,9 +35,7 @@ fn flag_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
         match key {
             b"--fd" => {
                 let s = crate::argparse::next_val(args, &mut i, val)?;
-                let fd = parse_fd(s)
-                    .change_context(BuiltinError::InvalidArgument("fd"))
-                    .attach_opaque(Suggestion("Use a valid open file descriptor number"))?;
+                let fd = parse_fd(s).change_context(BuiltinError::InvalidArgument("fd"))?;
                 fds.push(fd);
             }
             b"--mode" => {
@@ -49,20 +47,23 @@ fn flag_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
                     ))? as u32;
                 mode = Some(m);
             }
-            _ => return Err(Report::new(BuiltinError::InvalidArgument("flag"))),
+            _ => bail!(BuiltinError::InvalidArgument("flag")),
         }
     }
 
     let mode = mode.ok_or(BuiltinError::InvalidArgument("mode"))?;
     if fds.is_empty() {
-        return Err(Report::new(BuiltinError::InvalidArgument("mode")));
+        bail!(BuiltinError::InvalidArgument("fd"));
     }
     Ok(FchmodConfig { fds, mode })
 }
 
 fn positional_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
-    if args.len() < 2 {
-        return Err(Report::new(BuiltinError::InvalidArgument("mode")));
+    if args.is_empty() {
+        bail!(BuiltinError::MissingArgument("mode"));
+    }
+    if args.len() == 1 {
+        bail!(BuiltinError::MissingArgument("fd"));
     }
 
     let mode =
@@ -74,27 +75,17 @@ fn positional_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>>
 
     let mut fds = Vec::new();
     for a in args.iter().skip(1) {
-        let fd = parse_fd(a)
-            .change_context(BuiltinError::InvalidArgument("fd"))
-            .attach_opaque(Suggestion("Use a valid open file descriptor number"))?;
+        let fd = parse_fd(a).change_context(BuiltinError::InvalidArgument("fd"))?;
         fds.push(fd);
     }
 
     Ok(FchmodConfig { fds, mode })
 }
 
-fn parse_fd(s: &CStr) -> Result<i32, FdParseError> {
+fn parse_fd(s: &CStr) -> Result<i32, Report<FdParseError>> {
     let b = s.to_bytes();
-    let s = match core::str::from_utf8(b) {
-        Ok(s) => s,
-        Err(_) => return Err(FdParseError::Invalid),
-    };
-    let n: i32 = match s.parse() {
-        Ok(n) => n,
-        Err(_) => return Err(FdParseError::Invalid),
-    };
-    if n < 0 {
-        return Err(FdParseError::Negative);
-    }
+    let s = core::str::from_utf8(b).change_context(FdParseError::Invalid)?;
+    let n: i32 = s.parse().change_context(FdParseError::Invalid)?;
+    ensure!(n >= 0, FdParseError::Negative);
     Ok(n)
 }

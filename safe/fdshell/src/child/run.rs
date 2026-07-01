@@ -57,7 +57,7 @@ pub fn child_main(
             Err(report) => match *report.current_context() {
                 BuiltinError::Unknown => bail!(ChildProcessError::NotABuiltin(cmd_name)),
                 BuiltinError::Help => Ok(0),
-                BuiltinError::InvalidArgument(_) => {
+                BuiltinError::InvalidArgument(_) | BuiltinError::MissingArgument(_) => {
                     eprintln!("{:?}", report);
                     Ok(1)
                 }

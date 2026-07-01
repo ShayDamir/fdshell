@@ -17,6 +17,9 @@ fn assert_err(args: &[&str], expected: BuiltinError) {
             match (ctx, expected) {
                 (BuiltinError::Help, BuiltinError::Help) => {}
                 (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                (BuiltinError::MissingArgument(_), BuiltinError::MissingArgument(_)) => {}
+                (BuiltinError::InvalidArgument(_), BuiltinError::MissingArgument(_)) => {}
+                (BuiltinError::MissingArgument(_), BuiltinError::InvalidArgument(_)) => {}
                 _ => panic!("unexpected error: {ctx}"),
             }
         }
@@ -123,7 +126,7 @@ fn positional_mode_octal_prefix() {
 
 #[test]
 fn positional_too_few() {
-    assert_invalid_arg(&["644"])
+    assert_err(&["644"], BuiltinError::MissingArgument("fd"));
 }
 
 #[test]

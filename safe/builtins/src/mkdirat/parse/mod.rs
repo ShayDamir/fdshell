@@ -1,5 +1,5 @@
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ImportedFd;
 
 use crate::error::{BuiltinError, Suggestion};
@@ -18,7 +18,7 @@ pub struct MkdiratConfig<'a> {
 /// - `Err(BuiltinError::InvalidArgument(_))` -- bad flag name, missing value, etc.
 pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(Report::new(BuiltinError::Help));
+        bail!(BuiltinError::Help);
     }
 
     let mut dirfd = None;
@@ -53,11 +53,11 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, Report<
                     ))?;
             }
             a if a.starts_with(b"-") => {
-                return Err(Report::new(BuiltinError::InvalidArgument("flag")));
+                bail!(BuiltinError::InvalidArgument("flag"));
             }
             _ => {
                 if path.is_some() {
-                    return Err(Report::new(BuiltinError::InvalidArgument("path")));
+                    bail!(BuiltinError::InvalidArgument("path"));
                 }
                 path = Some(arg);
             }
@@ -66,7 +66,7 @@ pub fn mkdirat_parse<'a>(args: &[&'a CStr]) -> Result<MkdiratConfig<'a>, Report<
 
     let path = path.ok_or(BuiltinError::InvalidArgument("path"))?;
     if path.to_bytes().is_empty() {
-        return Err(Report::new(BuiltinError::InvalidArgument("path")));
+        bail!(BuiltinError::InvalidArgument("path"));
     }
 
     Ok(MkdiratConfig {

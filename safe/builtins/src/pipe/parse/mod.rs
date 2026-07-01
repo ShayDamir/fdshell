@@ -1,7 +1,7 @@
 mod flags;
 
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 
 use crate::error::{BuiltinError, Suggestion};
 
@@ -12,7 +12,7 @@ pub struct PipeConfig {
 /// Parses pipe CLI arguments into a [`PipeConfig`].
 pub fn pipe_parse(args: &[&CStr]) -> Result<PipeConfig, Report<BuiltinError>> {
     if crate::argparse::wants_help(args) {
-        return Err(Report::new(BuiltinError::Help));
+        bail!(BuiltinError::Help);
     }
     if args.is_empty() {
         return Ok(PipeConfig { flags: 0 });
@@ -33,9 +33,9 @@ pub fn pipe_parse(args: &[&CStr]) -> Result<PipeConfig, Report<BuiltinError>> {
                     ))?;
             }
             a if a.starts_with(b"-") => {
-                return Err(Report::new(BuiltinError::InvalidArgument("flag")));
+                bail!(BuiltinError::InvalidArgument("flag"));
             }
-            _ => return Err(Report::new(BuiltinError::InvalidArgument("arg"))),
+            _ => bail!(BuiltinError::InvalidArgument("arg")),
         }
     }
     Ok(result)

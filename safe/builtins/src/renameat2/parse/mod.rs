@@ -1,7 +1,7 @@
 mod flags;
 
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ImportedFd;
 
 use crate::error::{BuiltinError, Suggestion};
@@ -17,7 +17,7 @@ pub struct Renameat2Config<'a> {
 /// Parses renameat2 CLI arguments into an [`Renameat2Config`].
 pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(Report::new(BuiltinError::Help));
+        bail!(BuiltinError::Help);
     }
 
     let mut olddirfd = None;
@@ -49,7 +49,7 @@ pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, Rep
                     ))?;
             }
             a if a.starts_with(b"-") => {
-                return Err(Report::new(BuiltinError::InvalidArgument("flag")));
+                bail!(BuiltinError::InvalidArgument("flag"));
             }
             _ => {
                 if oldpath.is_none() {
@@ -57,7 +57,7 @@ pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, Rep
                 } else if newpath.is_none() {
                     newpath = Some(arg);
                 } else {
-                    return Err(Report::new(BuiltinError::InvalidArgument("arg")));
+                    bail!(BuiltinError::InvalidArgument("arg"));
                 }
             }
         }
@@ -66,10 +66,10 @@ pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, Rep
     let oldpath = oldpath.ok_or(BuiltinError::InvalidArgument("oldpath"))?;
     let newpath = newpath.ok_or(BuiltinError::InvalidArgument("newpath"))?;
     if oldpath.to_bytes().is_empty() {
-        return Err(Report::new(BuiltinError::InvalidArgument("oldpath")));
+        bail!(BuiltinError::InvalidArgument("oldpath"));
     }
     if newpath.to_bytes().is_empty() {
-        return Err(Report::new(BuiltinError::InvalidArgument("newpath")));
+        bail!(BuiltinError::InvalidArgument("newpath"));
     }
 
     Ok(Renameat2Config {

@@ -47,7 +47,7 @@ pub fn execute(
                     bail!(ChildProcessError::NotABuiltin(builtin_name.clone()))
                 }
                 BuiltinError::Help => Ok(0),
-                BuiltinError::InvalidArgument(_) => {
+                BuiltinError::InvalidArgument(_) | BuiltinError::MissingArgument(_) => {
                     eprintln!("{:?}", report);
                     Ok(1)
                 }

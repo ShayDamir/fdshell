@@ -10,6 +10,8 @@
 pub enum BuiltinError {
     /// user requested help text with `--help` / `-h`
     Help,
+    /// missing argument {0}
+    MissingArgument(&'static str),
     /// invalid argument {0}
     InvalidArgument(&'static str),
     /// syscall failed

@@ -1,7 +1,7 @@
 mod flags;
 
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ImportedFd;
 use sys::openat2::OpenHow;
 
@@ -16,7 +16,7 @@ pub struct Openat2Config<'a> {
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
 pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
-        return Err(Report::new(BuiltinError::Help));
+        bail!(BuiltinError::Help);
     }
 
     let mut dirfd = None;
@@ -62,11 +62,11 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<
                     ))?;
             }
             a if a.starts_with(b"-") => {
-                return Err(Report::new(BuiltinError::InvalidArgument("flag")));
+                bail!(BuiltinError::InvalidArgument("flag"));
             }
             _ => {
                 if path.is_some() {
-                    return Err(Report::new(BuiltinError::InvalidArgument("path")));
+                    bail!(BuiltinError::InvalidArgument("path"));
                 }
                 path = Some(arg);
             }
@@ -75,7 +75,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<
 
     let path = path.ok_or(BuiltinError::InvalidArgument("path"))?;
     if path.to_bytes().is_empty() {
-        return Err(Report::new(BuiltinError::InvalidArgument("path")));
+        bail!(BuiltinError::InvalidArgument("path"));
     }
 
     Ok(Openat2Config {
