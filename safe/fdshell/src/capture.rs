@@ -1,3 +1,5 @@
+use error_stack::{Report, ResultExt, bail};
+
 use crate::error::capture::CaptureError;
 use crate::state::ShellState;
 use sys::ShortCStr;
@@ -21,16 +23,16 @@ pub fn do_captures(
     expected_pid: i32,
     captures: Vec<Capture>,
     state: &ShellState,
-) -> Result<Vec<(ShortCStr, sys::LocalFd)>, CaptureError> {
+) -> Result<Vec<(ShortCStr, sys::LocalFd)>, Report<CaptureError>> {
     let mut captured_fds: Vec<(ShortCStr, sys::LocalFd)> = Vec::with_capacity(captures.len());
     let mut remaining = captures;
 
     while !remaining.is_empty() {
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
         let (fd, rtag) = match sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid) {
-            Err(sys::SyscallError::EAGAIN) => break,
-            Err(_) => return Err(CaptureError::ReceiveFailed),
             Ok(v) => v,
+            Err(sys::SyscallError::EAGAIN) => break,
+            Err(e) => return Err(e).change_context(CaptureError::ReceiveFailed),
         };
         let idx = remaining
             .iter()
@@ -40,7 +42,7 @@ pub fn do_captures(
             debug_assert!(i < remaining.len());
             let c = remaining.remove(i);
             if !c.force && state.fds.contains_key(&c.var) {
-                return Err(CaptureError::Exists);
+                bail!(CaptureError::Exists);
             }
             captured_fds.push((c.var, fd));
         }

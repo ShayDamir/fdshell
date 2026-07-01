@@ -13,7 +13,7 @@ fn apply_captures(
     child_pid: i32,
     captures: Vec<Capture>,
     state: &mut ShellState,
-) -> Result<(), crate::error::capture::CaptureError> {
+) -> Result<(), error_stack::Report<crate::error::capture::CaptureError>> {
     let entries = crate::capture::do_captures(capture_fd, child_pid, captures, state)?;
     for (var, fd) in entries {
         state.fds.insert(var, fd);
