@@ -1,4 +1,4 @@
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
@@ -26,5 +26,6 @@ pub(crate) fn run_exit(
             state.last_status.exit_code()
         }
     };
+    ensure!((0..=255).contains(&code), CmdError::ExitArgInvalid);
     std::process::exit(code);
 }

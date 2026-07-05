@@ -498,3 +498,16 @@ fn nested_import_export_roundtrip() {
     let content = std::fs::read_to_string(dir.join("testfile")).unwrap();
     assert_eq!(content.trim(), "hello");
 }
+#[test]
+fn exit_valid_code() {
+    let dir = tmpdir();
+    let output = run_c("exit 0", &dir);
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn exit_max_valid_code() {
+    let dir = tmpdir();
+    let output = run_c("exit 255", &dir);
+    assert_eq!(output.status.code(), Some(255));
+}

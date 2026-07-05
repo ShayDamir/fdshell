@@ -902,3 +902,18 @@ fn comment_inside_if_block_is_skipped() {
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
+#[test]
+fn exit_rejects_negative_code() {
+    child_test(|| {
+        let cell = make_cell();
+        assert!(run_one(b"exit -1", &cell).is_err());
+    });
+}
+
+#[test]
+fn exit_rejects_overflow_code() {
+    child_test(|| {
+        let cell = make_cell();
+        assert!(run_one(b"exit 256", &cell).is_err());
+    });
+}
