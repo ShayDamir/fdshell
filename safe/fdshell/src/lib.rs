@@ -10,6 +10,7 @@ mod cmd_subst;
 mod comment;
 mod cond;
 mod debug;
+mod envfilter;
 mod error;
 mod exec;
 mod expand;

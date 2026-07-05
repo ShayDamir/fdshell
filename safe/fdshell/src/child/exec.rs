@@ -29,7 +29,8 @@ pub(super) fn handle_exec_fd(
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
     // exec-without-fork: PID stays the same, so return child exit code
     // regardless of outcome. Err arm only catches parse/syscall errors.
-    match crate::exec::exec_fd(fd, args_slice, &exports) {
+    let env_filter = &state.env_filter;
+    match crate::exec::exec_fd(fd, args_slice, &exports, env_filter) {
         Ok(()) => Ok(0),
         Err(report) => Ok(report.current_context().exit_code()),
     }
@@ -68,7 +69,14 @@ pub(super) fn handle_exec_at(
         .get(2..)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
     // Same exec-without-fork semantics as exec_fd — always Ok(code).
-    match crate::exec::exec_at(non_cloexec.at(), &pathname, args_slice, &exports) {
+    let env_filter = &state.env_filter;
+    match crate::exec::exec_at(
+        non_cloexec.at(),
+        &pathname,
+        args_slice,
+        &exports,
+        env_filter,
+    ) {
         Ok(()) => Ok(0),
         Err(report) => Ok(report.current_context().exit_code()),
     }

@@ -35,16 +35,18 @@ pub fn child_main(
         substitute_args(args, args_fq, cell).change_context(ChildProcessError::SubstituteFailed)?;
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
-    // Clone exports before borrowing mutably
-    let exports: Vec<(sys::ShortCStr, Vec<u8>)> = {
+    // Clone exports and env_filter before borrowing mutably
+    let (exports, env_filter) = {
         let state = cell
             .borrow()
             .change_context(ChildProcessError::BorrowFailed)?;
-        state
+        let exports: Vec<_> = state
             .exports
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+            .collect();
+        let env_filter = state.env_filter.clone();
+        (exports, env_filter)
     };
 
     let state = cell
@@ -84,7 +86,7 @@ pub fn child_main(
         let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
             .chain(refs.iter().copied())
             .collect();
-        match exec::exec_fd(&fd, &full_argv, &exports) {
+        match exec::exec_fd(&fd, &full_argv, &exports, &env_filter) {
             Ok(()) => Ok(0),
             Err(report) => Err(report.change_context(ChildProcessError::ExecFailed)),
         }

@@ -7,17 +7,20 @@ use sys::execveat::AT_EMPTY_PATH;
 use sys::fcntl::O_PATH;
 use sys::{AtFd, LocalFd, ShortCStr};
 
+use crate::envfilter::EnvFilter;
 use crate::error::child_process::ChildProcessError;
+
 use environ::get_environ;
 
 pub fn exec_fd(
     fd: &LocalFd,
     argv: &[&CStr],
     exports: &[(ShortCStr, Vec<u8>)],
+    env_filter: &EnvFilter,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
-    let envp = get_environ(cookie.as_bytes(), exports);
+    let envp = get_environ(cookie.as_bytes(), exports, env_filter);
     let script_fd = fd
         .export()
         .change_context(ChildProcessError::ExportFailed)?;
@@ -31,10 +34,11 @@ pub fn exec_at(
     pathname: &CStr,
     argv: &[&CStr],
     exports: &[(ShortCStr, Vec<u8>)],
+    env_filter: &EnvFilter,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
-    let envp = get_environ(cookie.as_bytes(), exports);
+    let envp = get_environ(cookie.as_bytes(), exports, env_filter);
     sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
         .change_context(ChildProcessError::ExecFailed)?;
     Ok(())

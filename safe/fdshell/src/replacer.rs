@@ -84,7 +84,8 @@ pub fn execute(
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        match exec::exec_fd(&fd, &argv, &exports) {
+        let env_filter = state.env_filter.clone();
+        match exec::exec_fd(&fd, &argv, &exports, &env_filter) {
             Ok(()) => Ok(0),
             Err(report) => Err(report),
         }

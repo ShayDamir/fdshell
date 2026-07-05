@@ -18,6 +18,7 @@ pub(crate) fn try_intercept(
         b"export_fd" => export_fd::run_export_fd(line, cmdline, cell),
         b"wait" => wait::run_wait(line, cmdline, cell),
         b"export" => exports::run_export(line, cmdline, cell),
+        b"envfilter" => envfilter::run_envfilter(line, cmdline, cell),
         b"shift" => shift::run_shift(line, cmdline, cell),
         _ => Ok(false),
     }
@@ -25,6 +26,7 @@ pub(crate) fn try_intercept(
 
 mod become_cmd;
 mod cd;
+mod envfilter;
 mod exit;
 mod export_fd;
 mod exports;

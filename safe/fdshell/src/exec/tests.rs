@@ -78,10 +78,12 @@ fn exec_fd_with_exports() {
     let mut exports_map = HashMap::new();
     exports_map.insert(ShortCStr::from(c"EXPORTED_VAR"), b"hello_world".to_vec());
     let exports: Vec<(sys::ShortCStr, Vec<u8>)> = exports_map.into_iter().collect();
-    exec_child(|| match exec_fd(&fd, &[&abs], &exports) {
-        Ok(()) => {}
-        Err(report) => std::process::exit(report.current_context().exit_code()),
-    });
+    exec_child(
+        || match exec_fd(&fd, &[&abs], &exports, &Default::default()) {
+            Ok(()) => {}
+            Err(report) => std::process::exit(report.current_context().exit_code()),
+        },
+    );
 
     teardown(&dir);
 }
@@ -128,7 +130,7 @@ fn exec_with_paths() {
 
     exec_child(|| {
         let fd = resolve_path(&abs).unwrap();
-        match exec_fd(&fd, &[&abs], &[]) {
+        match exec_fd(&fd, &[&abs], &[], &Default::default()) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }
@@ -138,7 +140,7 @@ fn exec_with_paths() {
     std::env::set_current_dir(&dir).unwrap();
     exec_child(|| {
         let fd = resolve_path(c"./mybin").unwrap();
-        match exec_fd(&fd, &[c"mybin"], &[]) {
+        match exec_fd(&fd, &[c"mybin"], &[], &Default::default()) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }
@@ -163,7 +165,7 @@ fn exec_script_via_resolve_fd() {
 
     exec_child(|| {
         let fd = resolve_path(&script_cs).unwrap();
-        match exec_fd(&fd, &[&script_cs], &[]) {
+        match exec_fd(&fd, &[&script_cs], &[], &Default::default()) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }

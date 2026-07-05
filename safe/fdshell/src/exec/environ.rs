@@ -2,12 +2,22 @@ use std::ffi::CString;
 
 use sys::ShortCStr;
 
-pub(crate) fn get_environ(cookie: &[u8], exports: &[(ShortCStr, Vec<u8>)]) -> Vec<CString> {
+use crate::envfilter::EnvFilter;
+
+pub(crate) fn get_environ(
+    cookie: &[u8],
+    exports: &[(ShortCStr, Vec<u8>)],
+    env_filter: &EnvFilter,
+) -> Vec<CString> {
     let env_iter = std::env::vars()
         .filter(|(k, _)| k != "FDSHELL_CAPTURE")
+        .filter(|(k, _)| env_filter.is_allowed(k.as_bytes()))
         .filter_map(|(k, v)| CString::new(format!("{k}={v}")).ok());
     let exports_iter = exports.iter().filter_map(|(k, v)| {
         if let Ok(key) = k.as_bytes() {
+            if !env_filter.is_allowed(key) {
+                return None;
+            }
             CString::new([key, b"=", v.as_slice()].concat()).ok()
         } else {
             None

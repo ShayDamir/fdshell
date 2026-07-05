@@ -37,6 +37,12 @@ pub enum CmdError {
     CmdSubst,
     /// task management failed
     Task,
+    /// envfilter: missing arguments (try --help)
+    EnvfilterNoArgs,
+    /// envfilter: unknown flag
+    EnvfilterUnknownFlag,
+    /// {0} requires a pattern
+    PatternRequired(&'static str),
 }
 
 impl core::error::Error for CmdError {}

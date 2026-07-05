@@ -5,6 +5,7 @@ use sys::LocalFd;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
+use crate::envfilter::EnvFilter;
 use crate::task::Task;
 
 pub struct ShellState {
@@ -16,6 +17,7 @@ pub struct ShellState {
     pub last_status: WaitStatus,
     pub shell_pid: i32,
     pub last_bg_pid: Option<i32>,
+    pub(crate) env_filter: EnvFilter,
 }
 
 impl ShellState {
@@ -29,6 +31,7 @@ impl ShellState {
             last_status: WaitStatus::Exited(0),
             shell_pid: std::process::id() as i32,
             last_bg_pid: None,
+            env_filter: EnvFilter::new(),
         }
     }
 }
