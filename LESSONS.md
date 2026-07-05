@@ -1,5 +1,8 @@
 # Lessons Learned
 
+## Recursive glob_match caused stack overflow on long inputs
+The `match_glob` function in `safe/fdshell/src/envfilter.rs` used two recursive calls — one in the star backtracking loop and one in the literal-character match path. For a 10,000-character literal match this produced 10,000 stack frames. Converted to an iterative version using the classic star-backtracking algorithm (DFA-style with `star_pi`/`star_si` backtrack pointers), eliminating stack overflow risk with identical O(n*m) worst-case behavior. All slice access uses `.get()` per the `indexing_slicing` lint. When encountering a function that recurses linearly on input length, prefer an iterative loop with explicit backtrack state over recursion — the call stack is unbounded by default and can overflow on adversarial input.
+
 ## `input.get(pos)` is ambiguous when `pos` comes from a trait object
 When `pos` is returned from a trait method (e.g., `dyn ErrorPosition::source_start()` returning `usize`), `input.get(pos)` is ambiguous — the compiler can't tell if you mean indexing (`&[u8]` → `&u8`) or slicing (`&[u8]` → `Option<&[u8]>`). Fix: extract `pos` into a local `usize` variable first, then use explicit slice syntax like `input.get(pos..)` or `input.get(..pos)`.
 

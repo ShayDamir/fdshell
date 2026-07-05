@@ -58,5 +58,5 @@
 
 ## Security / hardening
 
-- [ ] `envfilter` builtin — filter sensitive environment variables before child exec (e.g., denylist for `*_KEY`, `*_TOKEN`, `*_SECRET`, `PASS*`)
+- [x] `envfilter` builtin — filter sensitive environment variables before child exec (e.g., denylist for `*_KEY`, `*_TOKEN`, `*_SECRET`, `PASS*`) — glob matching converted from recursive to iterative to prevent stack overflow
 - [ ] Validate exit code range `0..=255` in `exit` builtin, reject negative values with `ExitArgInvalid`

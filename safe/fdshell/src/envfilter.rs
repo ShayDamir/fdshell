@@ -56,46 +56,42 @@ impl Default for EnvFilter {
 /// Simple `*` wildcard glob match.
 ///
 /// Supports only `*` (match any sequence). No `?`, `[...]`, or escapes.
+/// Iterative with backtracking — no stack overflow risk.
 pub(crate) fn glob_match(pattern: &[u8], name: &[u8]) -> bool {
-    match_glob(pattern, 0, name, 0)
-}
+    let (mut pi, mut si) = (0, 0);
+    let (mut star_pi, mut star_si) = (None, 0);
 
-fn match_glob(pat: &[u8], pi: usize, str: &[u8], si: usize) -> bool {
-    let plen = pat.len();
-    let slen = str.len();
-
-    // Both consumed → match
-    if pi == plen && si == slen {
-        return true;
-    }
-
-    // Pattern has `*` ahead
-    if pat.get(pi) == Some(&b'*') {
-        // Skip consecutive stars
-        let mut npi = pi + 1;
-        while pat.get(npi) == Some(&b'*') {
-            npi += 1;
-        }
-        // If star is last in pattern, it matches everything remaining
-        if npi == plen {
-            return true;
-        }
-        // Try matching the rest of the pattern at each position
-        for i in si..=slen {
-            if match_glob(pat, npi, str, i) {
+    while si < name.len() {
+        if pattern.get(pi) == Some(&b'*') {
+            // Record backtrack position, skip consecutive stars
+            star_pi = Some(pi + 1);
+            star_si = si;
+            pi += 1;
+            while pattern.get(pi) == Some(&b'*') {
+                pi += 1;
+            }
+            if pi == pattern.len() {
                 return true;
             }
+        } else if pattern.get(pi) == name.get(si) {
+            // Literal match → advance both
+            pi += 1;
+            si += 1;
+        } else if let Some(sp) = star_pi {
+            // Backtrack: advance the star's match by one char
+            si = star_si + 1;
+            star_si = si;
+            pi = sp;
+        } else {
+            return false;
         }
-        return false;
     }
 
-    // Literal character match (None == None unreachable — caught by early return above)
-    if pat.get(pi) == str.get(si) {
-        return match_glob(pat, pi + 1, str, si + 1);
+    // Consume trailing stars
+    while pattern.get(pi) == Some(&b'*') {
+        pi += 1;
     }
-
-    // Mismatch or one side exhausted
-    false
+    pi == pattern.len()
 }
 
 #[cfg(test)]
