@@ -55,3 +55,8 @@
 - [ ] Process substitution (`<(cmd)`, `>(cmd)`) — fifo/pipe with /dev/fd path
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
 - [ ] History expansion (`!!`, `!echo`) — readline-style history
+
+## Security / hardening
+
+- [ ] `envfilter` builtin — filter sensitive environment variables before child exec (e.g., denylist for `*_KEY`, `*_TOKEN`, `*_SECRET`, `PASS*`)
+- [ ] Validate exit code range `0..=255` in `exit` builtin, reject negative values with `ExitArgInvalid`
