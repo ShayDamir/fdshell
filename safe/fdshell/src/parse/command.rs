@@ -1,7 +1,7 @@
 use crate::capture::Capture;
 use crate::error::parse::{ParseError, report_error};
 use crate::parse::CommandLine;
-use crate::redirect::RedirectDef;
+use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
@@ -47,15 +47,69 @@ pub fn parse_command(
                 reason: "unexpected '&'"
             });
         } else if let Some(rest) = t.strip_prefix(b"&>") {
-            let (force, name) = if let Some(name) = rest.strip_prefix(b"|&") {
-                (true, name)
+            if let Some(name) = rest.strip_prefix(b"|&") {
+                // &>|&name — forced background + pidvar
+                pidvar = Some(name);
+                bg_force = true;
             } else if let Some(name) = rest.strip_prefix(b"&") {
-                (false, name)
+                // &>&name — background + pidvar
+                pidvar = Some(name);
+                bg_force = false;
             } else {
-                return Err(report_error("invalid '&>' syntax", 0));
-            };
-            pidvar = Some(name);
-            bg_force = force;
+                // &>file or &>>file — combined redirect
+                let (path, direction) = if let Some(p) = rest.strip_prefix(b">") {
+                    (p, RedirectDirection::Append)
+                } else {
+                    (rest, RedirectDirection::Write)
+                };
+                if let Some(var) = path.strip_prefix(b"%") {
+                    match redirects.binary_search_by_key(&1, |x| x.export_to) {
+                        Err(i) => redirects.insert(
+                            i,
+                            RedirectDef {
+                                export_to: 1,
+                                direction,
+                                source: RedirectSource::Var(var.clone()),
+                            },
+                        ),
+                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
+                    }
+                    match redirects.binary_search_by_key(&2, |x| x.export_to) {
+                        Err(i) => redirects.insert(
+                            i,
+                            RedirectDef {
+                                export_to: 2,
+                                direction,
+                                source: RedirectSource::Var(var),
+                            },
+                        ),
+                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
+                    }
+                } else {
+                    match redirects.binary_search_by_key(&1, |x| x.export_to) {
+                        Err(i) => redirects.insert(
+                            i,
+                            RedirectDef {
+                                export_to: 1,
+                                direction,
+                                source: RedirectSource::path(path.clone()),
+                            },
+                        ),
+                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
+                    }
+                    match redirects.binary_search_by_key(&2, |x| x.export_to) {
+                        Err(i) => redirects.insert(
+                            i,
+                            RedirectDef {
+                                export_to: 2,
+                                direction,
+                                source: RedirectSource::path(path),
+                            },
+                        ),
+                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
+                    }
+                }
+            }
         } else if b.starts_with(b"%") {
             if let Some(c) = crate::parse::classify::parse_capture(t) {
                 captures.push(c);

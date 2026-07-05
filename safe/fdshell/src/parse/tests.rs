@@ -4,7 +4,7 @@
 use super::*;
 use crate::capture::Capture;
 use crate::error::cmd::CmdError;
-use crate::redirect::RedirectDef;
+use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 #[test]
 fn test_mkdirat_capture() {
     let ParsedLine::Cmd(cmd) =
@@ -216,6 +216,81 @@ fn test_path_redirect_append_named_fd() {
 fn test_append_followed_by_percent_is_error() {
     assert!(parse(b"echo >>%var").is_err());
     assert!(parse(b"echo 2>>%var").is_err());
+}
+
+#[test]
+fn test_combined_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &>out.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::write_path(1, c"out.log"),
+            RedirectDef::write_path(2, c"out.log"),
+        ]
+    );
+}
+
+#[test]
+fn test_combined_redirect_append() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &>>out.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::append_path(1, c"out.log"),
+            RedirectDef::append_path(2, c"out.log"),
+        ]
+    );
+}
+
+#[test]
+fn test_combined_redirect_var() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &>%log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::var(1, c"log"), RedirectDef::var(2, c"log"),]
+    );
+}
+
+#[test]
+fn test_combined_redirect_duplicate_stderr() {
+    assert!(parse(b"cmd &>file 2>other").is_err());
+}
+
+#[test]
+fn test_combined_redirect_duplicate_stdout() {
+    assert!(parse(b"cmd 1>other &>file").is_err());
+}
+
+#[test]
+fn test_combined_redirect_append_var() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &>>%log").unwrap() else {
+        panic!("expected Cmd")
+    };
+
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef {
+                export_to: 1,
+                direction: RedirectDirection::Append,
+                source: RedirectSource::Var(c"log".into()),
+            },
+            RedirectDef {
+                export_to: 2,
+                direction: RedirectDirection::Append,
+                source: RedirectSource::Var(c"log".into()),
+            },
+        ]
+    );
 }
 
 #[test]

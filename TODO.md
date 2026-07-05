@@ -3,7 +3,7 @@
 ## Refactoring / cleanup
 
 - [ ] `token.rs` at 82 lines (2 over 80-line limit) — consider extracting `tokenize` match arms into separate helpers
-- [ ] `command.rs` at 82 code lines (2 over 80-line limit) — extract builtin-detection helper
+- [ ] `command.rs` at ~146 lines (66 over) — combined redirect added; extract combined-redirect parsing into helper
 - [ ] `replacer.rs` at 84 code lines (4 over) — extract builtin-dispatch match into helper; `ChildProcessError` (18 chars) pushed fmt line splits
 - [ ] `child/run.rs` at 82 code lines (2 over) — same cause as replacer.rs
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
@@ -33,7 +33,7 @@
 - [ ] `break` / `continue` — loop control
 - [ ] Here-strings (`<<<"string"`) — pipe string into command's stdin
 - [ ] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
-- [ ] `&>file` — combined stdout+stderr redirect
+- [x] `&>file` — combined stdout+stderr redirect (parse implemented, tests pass)
 - [ ] `<>` — open file for read/write
 - [ ] `/dev/fd/N` — automatic fd path translation
 - [ ] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
