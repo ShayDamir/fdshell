@@ -813,3 +813,165 @@ fn until_parse_pipe_in_body() {
     assert_eq!(wb.condition, c"true".into());
     assert_eq!(wb.body, c"echo hello | cat".into());
 }
+
+#[test]
+fn if_single_elif() {
+    let ParsedLine::If(ib) = parse(b"if false; then a; elif true; then b; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"false".into());
+    assert_eq!(ib.then_body, c"a".into());
+    assert_eq!(ib.elifs.len(), 1);
+    assert_eq!(ib.elifs[0].0, c"true".into());
+    assert_eq!(ib.elifs[0].1, c"b".into());
+    assert!(ib.else_body.is_none());
+}
+
+#[test]
+fn if_multiple_elifs() {
+    let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; elif e; then f; fi").unwrap()
+    else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 2);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.elifs[1].0, c"e".into());
+    assert_eq!(ib.elifs[1].1, c"f".into());
+}
+
+#[test]
+fn if_elif_with_else() {
+    let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; else e; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 1);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.else_body, Some(c"e".into()));
+}
+
+#[test]
+fn if_elif_else_complex() {
+    let ParsedLine::If(ib) =
+        parse(b"if x; then y; elif z; then w; elif m; then n; else o; fi").unwrap()
+    else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"x".into());
+    assert_eq!(ib.then_body, c"y".into());
+    assert_eq!(ib.elifs.len(), 2);
+    assert_eq!(ib.elifs[0].0, c"z".into());
+    assert_eq!(ib.elifs[0].1, c"w".into());
+    assert_eq!(ib.elifs[1].0, c"m".into());
+    assert_eq!(ib.elifs[1].1, c"n".into());
+    assert_eq!(ib.else_body, Some(c"o".into()));
+}
+
+#[test]
+fn if_elif_semi_before_then() {
+    let ParsedLine::If(ib) = parse(b"if a;then b;elif c;then d;fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 1);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+}
+
+#[test]
+fn if_elif_semi_after_then() {
+    let ParsedLine::If(ib) = parse(b"if a; then; b; elif c; then; d; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 1);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+}
+
+#[test]
+fn if_elif_missing_then_returns_err() {
+    let result = parse(b"if a; then b; elif c; fi");
+    match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => {
+            assert_eq!(
+                e.current_context().to_string(),
+                "missing 'then' after 'elif'",
+                "expected Reason('missing \\'then\\' after \\'elif\\') error"
+            );
+        }
+    }
+}
+
+#[test]
+fn if_else_only() {
+    let ParsedLine::If(ib) = parse(b"if false; then true; else fallback; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"false".into());
+    assert_eq!(ib.then_body, c"true".into());
+    assert!(ib.elifs.is_empty());
+    assert_eq!(ib.else_body, Some(c"fallback".into()));
+}
+
+#[test]
+fn if_multiple_elifs_with_else() {
+    let ParsedLine::If(ib) =
+        parse(b"if a; then b; elif c; then d; elif e; then f; else g; fi").unwrap()
+    else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 2);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.elifs[1].0, c"e".into());
+    assert_eq!(ib.elifs[1].1, c"f".into());
+    assert_eq!(ib.else_body, Some(c"g".into()));
+}
+
+#[test]
+fn if_elif_multiline() {
+    let ParsedLine::If(ib) = parse(
+        b"if a
+then
+b
+elif c
+then
+d
+else
+e
+fi",
+    )
+    .unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 1);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.else_body, Some(c"e".into()));
+}
+
+#[test]
+fn if_elif_empty_else_body() {
+    let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; else; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.elifs.len(), 1);
+    assert_eq!(ib.elifs[0].0, c"c".into());
+    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert!(ib.else_body.is_none(), "empty else body should be None");
+}
