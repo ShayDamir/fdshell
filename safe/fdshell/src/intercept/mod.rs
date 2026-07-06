@@ -27,6 +27,7 @@ pub(crate) fn try_intercept(
 mod become_cmd;
 mod cd;
 mod envfilter;
+mod envfilter_display;
 mod exit;
 mod export_fd;
 mod exports;
