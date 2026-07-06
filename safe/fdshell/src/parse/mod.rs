@@ -1,4 +1,6 @@
 mod backtick;
+mod bg_redirect;
+mod builtin;
 mod capture;
 mod classify;
 mod cmdline;
@@ -23,20 +25,14 @@ pub use line::ParsedLine;
 use crate::error::parse::ParseError;
 use error_stack::Report;
 
-/// Extract just the `ShortCStr` values from position-tagged tokens.
 fn tokens_only(tokens: &[(sys::ShortCStr, usize, bool)]) -> Vec<sys::ShortCStr> {
     tokens.iter().map(|(t, _, _)| t.clone()).collect()
 }
 
-/// Extract the fully_quoted flags from position-tagged tokens.
 fn fully_quoted_only(tokens: &[(sys::ShortCStr, usize, bool)]) -> Vec<bool> {
     tokens.iter().map(|(_, _, fq)| *fq).collect()
 }
 
-/// Parse an input line into a `ParsedLine`.
-///
-/// On error, attaches a `ParsePosition` with the input line for
-/// formatted error output via `install_debug_hook`.
 pub(crate) fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
     inner_parse(line)
 }
@@ -62,7 +58,6 @@ fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
             &raw, b"while",
         )?));
     }
-
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"until")) {
         return Ok(ParsedLine::Until(while_block::tokens_to_loop(
             &raw, b"until",

@@ -16,43 +16,11 @@ fn parse_fd(prefix: &[u8], dir: u8) -> Option<i32> {
     }
 }
 
-pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let bytes = s.as_bytes().change_context(ParseError::Reason {
-        reason: "internal string state",
-    })?;
-
-    let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-    let dir = match bytes.get(op_pos) {
-        Some(&d) => d,
-        None => return Ok(None),
-    };
-    let after_op = match s.get(op_pos + 1..) {
-        Some(r) => r,
-        None => return Ok(None),
-    };
-
-    if after_op.is_empty() || after_op.starts_with(b"&") {
-        return Ok(None);
-    }
-
-    let prefix = bytes
-        .get(..op_pos)
-        .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
-
-    if after_op.starts_with(b"%") {
-        let source = after_op
-            .get(1..)
-            .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
-        let export_to = match parse_fd(prefix, dir) {
-            Some(fd) => fd,
-            None => return Ok(None),
-        };
-        return Ok(Some(RedirectDef::var(export_to, source)));
-    }
-
+fn parse_path_redirect(
+    after_op: ShortCStr,
+    prefix: &[u8],
+    dir: u8,
+) -> Result<Option<RedirectDef>, Report<ParseError>> {
     let (rest, direction) = if dir == b'>' && after_op.starts_with(b">") {
         let r = after_op
             .get(1..)
@@ -69,14 +37,50 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<Parse
     } else {
         (after_op, RedirectDirection::Write)
     };
+    if let Some(export_to) = parse_fd(prefix, dir) {
+        Ok(Some(RedirectDef {
+            export_to,
+            direction,
+            source: RedirectSource::path(rest),
+        }))
+    } else {
+        Ok(None)
+    }
+}
 
-    let export_to = match parse_fd(prefix, dir) {
-        Some(fd) => fd,
+pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    let bytes = s.as_bytes().change_context(ParseError::Reason {
+        reason: "internal string state",
+    })?;
+    let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
+        Some(p) => p,
         None => return Ok(None),
     };
-    Ok(Some(RedirectDef {
-        export_to,
-        direction,
-        source: RedirectSource::path(rest),
-    }))
+    let dir = match bytes.get(op_pos) {
+        Some(&d) => d,
+        None => return Ok(None),
+    };
+    let after_op = match s.get(op_pos + 1..) {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+    if after_op.is_empty() || after_op.starts_with(b"&") {
+        return Ok(None);
+    }
+    let prefix = match bytes.get(..op_pos) {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    if after_op.starts_with(b"%") {
+        let source = after_op
+            .get(1..)
+            .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
+        if let Some(export_to) = parse_fd(prefix, dir) {
+            Ok(Some(RedirectDef::var(export_to, source)))
+        } else {
+            Ok(None)
+        }
+    } else {
+        parse_path_redirect(after_op, prefix, dir)
+    }
 }

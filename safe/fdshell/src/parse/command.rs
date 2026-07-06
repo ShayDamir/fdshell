@@ -1,8 +1,11 @@
 use crate::capture::Capture;
 use crate::error::parse::{ParseError, report_error};
 use crate::parse::CommandLine;
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
-use error_stack::{Report, ResultExt, bail};
+use crate::parse::bg_redirect;
+use crate::parse::bg_redirect::parse_bg_redirect;
+use crate::parse::builtin::is_builtin;
+use crate::redirect::RedirectDef;
+use error_stack::{Report, bail};
 use sys::ShortCStr;
 
 pub fn parse_command(
@@ -15,9 +18,7 @@ pub fn parse_command(
             iter.next();
             true
         }
-        Some(t) => t
-            .as_bytes()
-            .is_ok_and(|b| matches!(b, b"true" | b"false" | b"pwd" | b"help")),
+        Some(t) => is_builtin(t),
         None => false,
     };
     let command = iter
@@ -31,86 +32,29 @@ pub fn parse_command(
     let mut bg_force = false;
     let mut args_fq = Vec::new();
     let mut fq_iter = fully_quoted.into_iter();
-    // Skip the first token (command name) in fully_quoted
     fq_iter.next();
-    // If builtin keyword was consumed, skip its fully_quoted entry too
     if builtin {
         fq_iter.next();
     }
     for t in iter {
         let fq = fq_iter.next().unwrap_or(false);
-        let b = t.as_bytes().change_context(ParseError::Reason {
-            reason: "internal string state",
-        })?;
-        if b == b"&" {
+        if t.as_bytes().is_ok_and(|b| b == b"&") {
             bail!(ParseError::Reason {
-                reason: "unexpected '&'"
+                reason: "unexpected '&'",
             });
-        } else if let Some(rest) = t.strip_prefix(b"&>") {
-            if let Some(name) = rest.strip_prefix(b"|&") {
-                // &>|&name — forced background + pidvar
-                pidvar = Some(name);
-                bg_force = true;
-            } else if let Some(name) = rest.strip_prefix(b"&") {
-                // &>&name — background + pidvar
-                pidvar = Some(name);
-                bg_force = false;
+        }
+        if let Some(bg) = parse_bg_redirect(t)? {
+            if let Some(p) = bg.pidvar {
+                pidvar = Some(p);
+                bg_force = bg.bg_force;
             } else {
-                // &>file or &>>file — combined redirect
-                let (path, direction) = if let Some(p) = rest.strip_prefix(b">") {
-                    (p, RedirectDirection::Append)
-                } else {
-                    (rest, RedirectDirection::Write)
-                };
-                if let Some(var) = path.strip_prefix(b"%") {
-                    match redirects.binary_search_by_key(&1, |x| x.export_to) {
-                        Err(i) => redirects.insert(
-                            i,
-                            RedirectDef {
-                                export_to: 1,
-                                direction,
-                                source: RedirectSource::Var(var.clone()),
-                            },
-                        ),
-                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
-                    }
-                    match redirects.binary_search_by_key(&2, |x| x.export_to) {
-                        Err(i) => redirects.insert(
-                            i,
-                            RedirectDef {
-                                export_to: 2,
-                                direction,
-                                source: RedirectSource::Var(var),
-                            },
-                        ),
-                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
-                    }
-                } else {
-                    match redirects.binary_search_by_key(&1, |x| x.export_to) {
-                        Err(i) => redirects.insert(
-                            i,
-                            RedirectDef {
-                                export_to: 1,
-                                direction,
-                                source: RedirectSource::path(path.clone()),
-                            },
-                        ),
-                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
-                    }
-                    match redirects.binary_search_by_key(&2, |x| x.export_to) {
-                        Err(i) => redirects.insert(
-                            i,
-                            RedirectDef {
-                                export_to: 2,
-                                direction,
-                                source: RedirectSource::path(path),
-                            },
-                        ),
-                        Ok(_) => return Err(report_error("duplicate redirect", 0)),
-                    }
+                for r in bg.redirects {
+                    bg_redirect::insert_redirect(&mut redirects, r)?;
                 }
             }
-        } else if b.starts_with(b"%") {
+        } else if t.as_bytes().is_ok_and(|b| b.starts_with(b"%"))
+            && crate::parse::classify::parse_capture(t).is_some()
+        {
             if let Some(c) = crate::parse::classify::parse_capture(t) {
                 captures.push(c);
             } else {
@@ -118,11 +62,7 @@ pub fn parse_command(
                 args_fq.push(fq);
             }
         } else if let Some(r) = crate::parse::classify::parse_redirect(t)? {
-            let pos = redirects.binary_search_by_key(&r.export_to, |x| x.export_to);
-            match pos {
-                Ok(_) => return Err(report_error("duplicate redirect", 0)),
-                Err(i) => redirects.insert(i, r),
-            }
+            bg_redirect::insert_redirect(&mut redirects, r)?;
         } else {
             args.push(t.clone());
             args_fq.push(fq);

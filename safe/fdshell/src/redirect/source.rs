@@ -1,5 +1,6 @@
 use sys::ShortCStr;
 
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum RedirectSource {
     Var(ShortCStr),

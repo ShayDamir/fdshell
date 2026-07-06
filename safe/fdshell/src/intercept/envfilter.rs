@@ -52,4 +52,5 @@ pub(crate) fn run_envfilter(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests;
