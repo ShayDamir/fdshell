@@ -975,3 +975,274 @@ fn if_elif_empty_else_body() {
     assert_eq!(ib.elifs[0].1, c"d".into());
     assert!(ib.else_body.is_none(), "empty else body should be None");
 }
+
+#[test]
+fn parse_elifs_empty_pairs() {
+    use super::elif::parse_elifs;
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![];
+    let pairs: Vec<(usize, usize)> = vec![];
+    let result = parse_elifs(&tokens, &pairs, None, 0);
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+}
+
+#[test]
+fn parse_elifs_single() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, cond, ;, then, ;, body, ;, fi
+    // Indices: 0,     1,    2, 3,     4, 5,    6, 7
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"elif".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (
+            sys::ShortCStr::from_vec(b"cond".to_vec()).unwrap(),
+            1,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+        (
+            sys::ShortCStr::from_vec(b"then".to_vec()).unwrap(),
+            3,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 4, false),
+        (
+            sys::ShortCStr::from_vec(b"body".to_vec()).unwrap(),
+            5,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 6, false),
+        (sys::ShortCStr::from_vec(b"fi".to_vec()).unwrap(), 7, false),
+    ];
+    let pairs = vec![(0, 3)];
+    let result = parse_elifs(&tokens, &pairs, None, 7);
+    assert!(result.is_ok());
+    let elifs = result.unwrap();
+    assert_eq!(elifs.len(), 1);
+    assert_eq!(elifs[0].0, c"cond".into());
+    assert_eq!(elifs[0].1, c"body".into());
+}
+
+#[test]
+fn parse_elifs_multiple() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, c1, ;, then, ;, b1, ;, elif, c2, ;, then, ;, b2, ;, fi
+    // Indices: 0,     1,  2, 3,     4, 5,    6, 7,    8,    9, 10,     11, 12, 13, 14
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"elif".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b"c1".to_vec()).unwrap(), 1, false),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+        (
+            sys::ShortCStr::from_vec(b"then".to_vec()).unwrap(),
+            3,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 4, false),
+        (sys::ShortCStr::from_vec(b"b1".to_vec()).unwrap(), 5, false),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 6, false),
+        (
+            sys::ShortCStr::from_vec(b"elif".to_vec()).unwrap(),
+            7,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b"c2".to_vec()).unwrap(), 8, false),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 9, false),
+        (
+            sys::ShortCStr::from_vec(b"then".to_vec()).unwrap(),
+            10,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 11, false),
+        (sys::ShortCStr::from_vec(b"b2".to_vec()).unwrap(), 12, false),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 13, false),
+        (sys::ShortCStr::from_vec(b"fi".to_vec()).unwrap(), 14, false),
+    ];
+    let pairs = vec![(0, 3), (7, 10)];
+    let result = parse_elifs(&tokens, &pairs, None, 14);
+    assert!(result.is_ok());
+    let elifs = result.unwrap();
+    assert_eq!(elifs.len(), 2);
+    assert_eq!(elifs[0].0, c"c1".into());
+    assert_eq!(elifs[0].1, c"b1".into());
+    assert_eq!(elifs[1].0, c"c2".into());
+    assert_eq!(elifs[1].1, c"b2".into());
+}
+
+#[test]
+fn parse_elifs_with_else() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, cond, ;, then, ;, body, ;, else, ;, else_body, ;, fi
+    // Indices: 0,     1,    2, 3,     4, 5,    6, 7,    8, 9,         10, 11
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"elif".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (
+            sys::ShortCStr::from_vec(b"cond".to_vec()).unwrap(),
+            1,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+        (
+            sys::ShortCStr::from_vec(b"then".to_vec()).unwrap(),
+            3,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 4, false),
+        (
+            sys::ShortCStr::from_vec(b"body".to_vec()).unwrap(),
+            5,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 6, false),
+        (
+            sys::ShortCStr::from_vec(b"else".to_vec()).unwrap(),
+            7,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 8, false),
+        (
+            sys::ShortCStr::from_vec(b"else_body".to_vec()).unwrap(),
+            9,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 10, false),
+        (sys::ShortCStr::from_vec(b"fi".to_vec()).unwrap(), 11, false),
+    ];
+    let pairs = vec![(0, 3)];
+    let result = parse_elifs(&tokens, &pairs, Some(7), 11);
+    assert!(result.is_ok());
+    let elifs = result.unwrap();
+    assert_eq!(elifs.len(), 1);
+    assert_eq!(elifs[0].0, c"cond".into());
+    assert_eq!(elifs[0].1, c"body".into());
+}
+
+#[test]
+fn parse_else_body_simple() {
+    use super::elif::parse_else_body;
+    // Tokens: else, fallback, ;
+    // Indices: 0,      1,        2
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"else".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (
+            sys::ShortCStr::from_vec(b"fallback".to_vec()).unwrap(),
+            1,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+    ];
+    let result = parse_else_body(&tokens, 0, 3);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), c"fallback".into());
+}
+
+#[test]
+fn parse_else_body_multiple_tokens() {
+    use super::elif::parse_else_body;
+    // Tokens: else, cmd1, ;, cmd2, ;
+    // Indices: 0,      1,    2, 3,    4
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"else".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (
+            sys::ShortCStr::from_vec(b"cmd1".to_vec()).unwrap(),
+            1,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+        (
+            sys::ShortCStr::from_vec(b"cmd2".to_vec()).unwrap(),
+            3,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 4, false),
+    ];
+    let result = parse_else_body(&tokens, 0, 5);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), c"cmd1 ; cmd2".into());
+}
+
+#[test]
+fn parse_elifs_missing_condition_err() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, then — no condition between elif and then
+    // Indices: 0,     1,     2
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"elif".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (
+            sys::ShortCStr::from_vec(b"then".to_vec()).unwrap(),
+            1,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+    ];
+    let pairs = vec![(0, 1)];
+    let result = parse_elifs(&tokens, &pairs, None, 2);
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_elifs_missing_body_err() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, cond, ;, then — no body after then
+    // Indices: 0,     1,     2, 3
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"elif".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (
+            sys::ShortCStr::from_vec(b"cond".to_vec()).unwrap(),
+            1,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b";".to_vec()).unwrap(), 2, false),
+        (
+            sys::ShortCStr::from_vec(b"then".to_vec()).unwrap(),
+            3,
+            false,
+        ),
+    ];
+    let pairs = vec![(0, 3)];
+    let result = parse_elifs(&tokens, &pairs, None, 3);
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_else_body_missing_err() {
+    use super::elif::parse_else_body;
+    // Tokens: else, fi — no body between else and fi
+    // Indices: 0,      1, 2
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (
+            sys::ShortCStr::from_vec(b"else".to_vec()).unwrap(),
+            0,
+            false,
+        ),
+        (sys::ShortCStr::from_vec(b"fi".to_vec()).unwrap(), 1, false),
+    ];
+    let result = parse_else_body(&tokens, 0, 1);
+    assert!(result.is_err());
+}
