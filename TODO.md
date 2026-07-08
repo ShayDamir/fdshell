@@ -25,7 +25,7 @@
 - [ ] `set --` — replace positional parameters
 - [ ] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
 - [ ] `${!indirect}` — indirect variable expansion
-- [ ] `exec` builtin — rename/adapt `become`; also support redirect-only mode `exec N>&file`
+- [ ] `exec` builtin — redirect-only mode (`exec N>&file`)
 - [ ] `eval` — parse and execute constructed string
 - [ ] `source` / `.` — execute script file in current shell
 - [ ] `break` / `continue` — loop control

@@ -5,6 +5,7 @@ use std::io::Write;
 const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"become", b"Replace shell with command"),
     (b"cd", b"Change directory"),
+    (b"exec", b"Replace shell with command (alias for become)"),
     (b"envfilter", b"Filter env vars for child processes"),
     (b"exit", b"Exit shell"),
     (b"export", b"Set or list exports"),

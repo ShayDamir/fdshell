@@ -15,6 +15,7 @@ pub(crate) fn try_intercept(
         b"cd" => cd::run_cd(line, cmdline, cell),
         b"exit" | b"quit" => exit::run_exit(line, cmdline, cell),
         b"become" => become_cmd::run_become(line, cmdline, cell),
+        b"exec" => become_cmd::run_exec(line, cmdline, cell),
         b"export_fd" => export_fd::run_export_fd(line, cmdline, cell),
         b"wait" => wait::run_wait(line, cmdline, cell),
         b"export" => exports::run_export(line, cmdline, cell),
