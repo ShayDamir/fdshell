@@ -29,6 +29,7 @@ pub mod fcntl;
 pub mod fork_cell;
 pub mod fork_pidfd;
 pub mod importedfd;
+pub mod importedfd_try;
 pub mod iovec;
 pub mod localfd;
 pub mod mkdirat;

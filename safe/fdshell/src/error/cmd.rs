@@ -43,6 +43,8 @@ pub enum CmdError {
     EnvfilterUnknownFlag,
     /// {0} requires a pattern
     PatternRequired(&'static str),
+    /// read failed
+    Read,
 }
 
 impl core::error::Error for CmdError {}

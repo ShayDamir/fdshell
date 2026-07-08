@@ -13,6 +13,7 @@ pub(crate) mod fdpass;
 pub(crate) mod launch;
 pub(crate) mod parse;
 pub(crate) mod pipeline;
+pub(crate) mod read;
 pub(crate) mod redirect;
 pub(crate) mod resolve;
 pub(crate) mod shell;

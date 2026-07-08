@@ -1,8 +1,3 @@
-use core::convert::TryFrom;
-use core::ffi::CStr;
-
-use crate::shortcstr::ShortCStr;
-
 #[repr(transparent)]
 pub struct ImportedFd(i32);
 
@@ -31,6 +26,29 @@ impl ImportedFd {
     pub fn as_raw(&self) -> i32 {
         self.0
     }
+    pub fn read(&self, buf: &mut [u8]) -> Result<isize, crate::SyscallError> {
+        // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
+        crate::cvt(unsafe {
+            libc::read(
+                self.0,
+                buf.as_mut_ptr() as *mut core::ffi::c_void,
+                buf.len(),
+            )
+        })
+    }
+
+    /// Read from a raw fd number without verifying ownership or CLOEXEC.
+    ///
+    /// # Safety
+    /// `raw` must be a valid open fd.
+    pub fn read_from_raw(raw: i32, buf: &mut [u8]) -> Result<isize, crate::SyscallError> {
+        // SAFETY: Caller guarantees `raw` is a valid open fd.
+        // `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
+        crate::cvt(unsafe {
+            libc::read(raw, buf.as_mut_ptr() as *mut core::ffi::c_void, buf.len())
+        })
+    }
+
     pub fn at(&self) -> crate::AtFd<'_> {
         crate::AtFd::from(self)
     }
@@ -41,24 +59,5 @@ impl ImportedFd {
         crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
         // SAFETY: fcntl atomically set CLOEXEC; caller gets exclusive ownership.
         Ok(unsafe { crate::LocalFd::from_raw(self.0) })
-    }
-}
-
-// Single-source conversion: no Report needed, used by `builtins` (no_std, i32 errors).
-impl TryFrom<&CStr> for ImportedFd {
-    type Error = crate::SyscallError;
-    fn try_from(s: &CStr) -> Result<Self, crate::SyscallError> {
-        Self::from_bytes(s.to_bytes())
-    }
-}
-
-// Two error sources (as_bytes + from_bytes): Report chains both for fdshell callers.
-impl TryFrom<&ShortCStr> for ImportedFd {
-    type Error = error_stack::Report<crate::SyscallError>;
-    fn try_from(scs: &ShortCStr) -> Result<Self, error_stack::Report<crate::SyscallError>> {
-        use error_stack::ResultExt;
-
-        let bytes = scs.as_bytes().change_context(crate::SyscallError::EINVAL)?;
-        Self::from_bytes(bytes).change_context(crate::SyscallError::EINVAL)
     }
 }

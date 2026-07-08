@@ -21,19 +21,16 @@
 ### P1 — Major functionality gaps (moderate effort)
 
 - [ ] `test` / `[` builtin — file tests (`-f`, `-d`, `-e`), string tests (`=`, `!=`, `-z`, `-n`), numeric tests (`-eq`, `-lt`, `-gt`)
-- [ ] `read` builtin — read line from stdin, split into variables
 - [ ] `printf` builtin — format string output
-- [ ] `set --` + positional params — `$1`..`$9`, `$#`, `$@`, `$*`, `$0`
+- [ ] `set --` — replace positional parameters
 - [ ] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
 - [ ] `${!indirect}` — indirect variable expansion
 - [ ] `exec` builtin — rename/adapt `become`; also support redirect-only mode `exec N>&file`
 - [ ] `eval` — parse and execute constructed string
 - [ ] `source` / `.` — execute script file in current shell
-- [ ] `shift` — shift positional parameters
 - [ ] `break` / `continue` — loop control
 - [ ] Here-strings (`<<<"string"`) — pipe string into command's stdin
 - [ ] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
-- [x] `&>file` — combined stdout+stderr redirect (parse implemented, tests pass)
 - [ ] `<>` — open file for read/write
 - [ ] `/dev/fd/N` — automatic fd path translation
 - [ ] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
@@ -58,5 +55,4 @@
 
 ## Security / hardening
 
-- [x] `envfilter` builtin — filter sensitive environment variables before child exec (e.g., denylist for `*_KEY`, `*_TOKEN`, `*_SECRET`, `PASS*`) — glob matching converted from recursive to iterative to prevent stack overflow
-- [x] Validate exit code range `0..=255` in `exit` builtin, reject out-of-range values with `ExitArgInvalid`
+(All items complete)
