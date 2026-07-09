@@ -21,3 +21,7 @@ pub(crate) fn run_cd(
     state.last_status = WaitStatus::Exited(0);
     Ok(true)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
