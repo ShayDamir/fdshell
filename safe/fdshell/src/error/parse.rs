@@ -15,6 +15,10 @@ pub(crate) enum ParseError {
     UnexpectedEof,
     /// NUL byte
     InvalidChar { ch: u8 },
+    /// case: missing 'in'
+    CaseMissingIn,
+    /// case: empty pattern
+    CaseEmptyPattern,
     /// {reason}
     Reason { reason: &'static str },
 }

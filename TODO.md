@@ -47,7 +47,7 @@
 - [ ] Arithmetic expansion `$((expr))` — integer expression evaluation
 - [ ] Brace expansion (`{a,b,c}`, `{1..5}`) — pre-tokenization string generation
 - [ ] Functions — `name() { body; }` with scoped locals, call stack, `return`
-- [ ] `case` / `esac` — pattern matching with `;;` separators
+- [x] `case` / `esac` — pattern matching with `;;` separators
 - [ ] Job control — `bg`, `fg`, `jobs`, SIGTSTP handling, TTY pgrp management
 - [ ] Process substitution (`<(cmd)`, `>(cmd)`) — fifo/pipe with /dev/fd path
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args

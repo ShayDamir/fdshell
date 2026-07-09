@@ -2,6 +2,8 @@ mod backtick;
 mod bg_redirect;
 mod builtin;
 mod capture;
+pub(crate) mod case_block;
+mod case_clause;
 mod classify;
 mod cmdline;
 mod command;
@@ -45,6 +47,10 @@ fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
 
     if let Some(pl) = detect::detect(&raw)? {
         return Ok(pl);
+    }
+
+    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"case")) {
+        return Ok(ParsedLine::Case(case_block::tokens_to_case(&raw)?));
     }
 
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")) {

@@ -34,6 +34,7 @@ pub(crate) fn run_script(
                     .take_while(|&&b| b.is_ascii_whitespace())
                     .count();
                 let kw_len = match part {
+                    p if p.starts_with(b"case") => 4,
                     p if p.starts_with(b"if") => 2,
                     p if p.starts_with(b"for") => 3,
                     _ => 5,

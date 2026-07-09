@@ -43,6 +43,11 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                     tokens.push((c";".into(), pos - 1, false));
                     token_start = pos;
                 }
+                b')' => {
+                    emit_token(&mut tokens, &mut cur, token_start);
+                    tokens.push((c")".into(), pos - 1, false));
+                    token_start = pos;
+                }
                 b'"' => {
                     in_quotes = true;
                     quote_start = Some(pos - 1);

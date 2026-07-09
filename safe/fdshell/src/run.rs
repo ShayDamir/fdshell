@@ -43,6 +43,7 @@ pub(crate) fn run_one(
             crate::loop_::run_loop(&untilblock.condition, &untilblock.body, false, cell)?;
             Ok(None)
         }
+        crate::parse::ParsedLine::Case(caseblock) => crate::case_exec::run_case(caseblock, cell),
         crate::parse::ParsedLine::If(ifblock) => crate::if_exec::run_if(ifblock, cell),
         _ => crate::run_dispatch::run_simple(&parsed, cell),
     }

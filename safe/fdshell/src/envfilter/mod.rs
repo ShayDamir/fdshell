@@ -5,7 +5,7 @@
 
 mod glob;
 
-use glob::glob_match;
+pub(crate) use glob::glob_match;
 use sys::ShortCStr;
 
 /// Filter state: allowlist patterns, denylist patterns.

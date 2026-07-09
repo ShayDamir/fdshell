@@ -3,6 +3,7 @@
 mod app;
 mod capture;
 mod caret;
+mod case_exec;
 mod cd;
 mod child;
 mod cli;

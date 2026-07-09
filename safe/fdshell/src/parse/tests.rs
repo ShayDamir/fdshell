@@ -1246,3 +1246,120 @@ fn parse_else_body_missing_err() {
     let result = parse_else_body(&tokens, 0, 1);
     assert!(result.is_err());
 }
+
+#[test]
+fn case_simple() {
+    let ParsedLine::Case(cb) = parse(b"case \"foo\" in foo) echo one;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.word, c"foo".into());
+    assert_eq!(cb.clauses.len(), 1);
+    assert_eq!(cb.clauses[0].patterns.len(), 1);
+    assert_eq!(cb.clauses[0].patterns[0], c"foo".into());
+    assert_eq!(cb.clauses[0].body, c"echo one".into());
+}
+
+#[test]
+fn case_multiple_clauses() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in a) echo one;; b) echo two;; esac").unwrap()
+    else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.word, c"x".into());
+    assert_eq!(cb.clauses.len(), 2);
+    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].body, c"echo one".into());
+    assert_eq!(cb.clauses[1].patterns[0], c"b".into());
+    assert_eq!(cb.clauses[1].body, c"echo two".into());
+}
+
+#[test]
+fn case_alternative_patterns() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in a|x) echo yes;; *) echo no;; esac").unwrap()
+    else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.word, c"x".into());
+    assert_eq!(cb.clauses.len(), 2);
+    assert_eq!(cb.clauses[0].patterns.len(), 2);
+    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].patterns[1], c"x".into());
+    assert_eq!(cb.clauses[1].patterns[0], c"*".into());
+}
+
+#[test]
+fn case_multiline() {
+    let ParsedLine::Case(cb) = parse(
+        b"case \"foo\"
+in
+foo)
+echo one
+;;
+*)
+echo other
+;;
+esac",
+    )
+    .unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.word, c"foo".into());
+    assert_eq!(cb.clauses.len(), 2);
+    assert_eq!(cb.clauses[0].body, c"echo one".into());
+    assert_eq!(cb.clauses[1].body, c"echo other".into());
+}
+
+#[test]
+fn case_missing_in_returns_err() {
+    let result = parse(b"case \"foo\" foo) echo one;; esac");
+    match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => {
+            assert_eq!(e.current_context().to_string(), "case: missing 'in'");
+        }
+    }
+}
+
+#[test]
+fn case_missing_esac_returns_err() {
+    let result = parse(b"case \"foo\" in foo) echo one;;");
+    match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => {
+            assert_eq!(e.current_context().to_string(), "case: missing 'esac'");
+        }
+    }
+}
+
+#[test]
+fn case_empty_pattern_returns_err() {
+    let result = parse(b"case \"x\" in |) echo yes;; esac");
+    match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => {
+            assert_eq!(e.current_context().to_string(), "case: empty pattern");
+        }
+    }
+}
+
+#[test]
+fn case_missing_close_paren_returns_err() {
+    let result = parse(b"case \"x\" in echo yes;; esac");
+    match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => {
+            assert_eq!(e.current_context().to_string(), "case: missing ')'");
+        }
+    }
+}
+
+#[test]
+fn case_last_clause_no_semi_semi() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in a) echo one;; *) echo two esac").unwrap()
+    else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 2);
+    assert_eq!(cb.clauses[0].body, c"echo one".into());
+    assert_eq!(cb.clauses[1].body, c"echo two".into());
+}

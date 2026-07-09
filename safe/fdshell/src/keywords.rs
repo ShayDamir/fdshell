@@ -6,10 +6,16 @@ fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
 
 /// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers.
 ///
-/// Recognized: `if`, `fi`, `for`, `while`, `until`, `done`.
+/// Recognized: `case`, `esac`, `if`, `fi`, `for`, `while`, `until`, `done`.
 /// Each check requires a word boundary after the keyword to avoid
 /// matching prefixes like `ifconfig` or `donec`.
 pub(super) fn keyword_delta(word: &[u8]) -> Option<i32> {
+    if word.starts_with(b"case") && boundary(word, 4, b"") {
+        return Some(1);
+    }
+    if word.starts_with(b"esac") && boundary(word, 4, b"&|") {
+        return Some(-1);
+    }
     if word.starts_with(b"if") && boundary(word, 2, b"") {
         return Some(1);
     }

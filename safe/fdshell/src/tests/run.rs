@@ -1019,3 +1019,86 @@ fn break_in_if_inside_for() {
         assert_eq!(state.strings.get(&c"x".into()), Some(&c"after".into()));
     });
 }
+
+#[test]
+fn case_match_first_clause() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"case \"foo\" in foo) umask 0o000;; *) umask 0o077;; esac",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn case_match_second_clause() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"case \"bar\" in foo) umask 0o000;; bar) umask 0o070;; *) umask 0o700;; esac",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(sys::umask::get(), 0o070);
+    });
+}
+
+#[test]
+fn case_no_match_sets_zero() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"case \"baz\" in foo) umask 0o000;; bar) umask 0o070;; esac",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(sys::umask::get(), 0o022);
+    });
+}
+
+#[test]
+fn case_star_catchall() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"case \"anything\" in foo) umask 0o000;; *) umask 0o007;; esac",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(sys::umask::get(), 0o007);
+    });
+}
+
+#[test]
+fn case_alternative_patterns() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"case \"x\" in a|x) umask 0o000;; *) umask 0o077;; esac",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(sys::umask::get(), 0o000);
+    });
+}
+
+#[test]
+fn case_no_match_no_else_sets_zero() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"case \"x\" in a) echo yes;; esac", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn case_last_clause_no_double_semi() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"case \"x\" in a) echo yes;; *) echo no esac", &cell).unwrap();
+    });
+}
