@@ -6,6 +6,8 @@ mod classify;
 mod cmdline;
 mod command;
 mod comment;
+mod detect;
+mod detect_keyword;
 mod elif;
 mod emit;
 pub(crate) mod for_block;
@@ -41,7 +43,7 @@ fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
     let raw = token::tokenize(line)?;
     let tokens = tokens_only(&raw);
 
-    if let Some(pl) = line::detect(&raw)? {
+    if let Some(pl) = detect::detect(&raw)? {
         return Ok(pl);
     }
 

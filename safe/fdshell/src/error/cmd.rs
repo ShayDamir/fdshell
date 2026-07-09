@@ -45,6 +45,10 @@ pub enum CmdError {
     PatternRequired(&'static str),
     /// read failed
     Read,
+    /// 'break' is not inside a loop
+    BreakOutsideLoop,
+    /// 'continue' is not inside a loop
+    ContinueOutsideLoop,
 }
 
 impl core::error::Error for CmdError {}

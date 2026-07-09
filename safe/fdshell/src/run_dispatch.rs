@@ -1,0 +1,59 @@
+use crate::error::cmd::CmdError;
+use crate::loop_control::LoopControl;
+use crate::state::ShellState;
+use error_stack::{Report, ResultExt};
+use std::collections::HashMap;
+use sys::ShortCStr;
+use sys::fork_cell::ForkCell;
+use sys::siginfo::WaitStatus;
+
+/// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
+pub(crate) fn run_simple(
+    parsed: &crate::parse::ParsedLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    match parsed {
+        crate::parse::ParsedLine::AssignFd { var, value } => {
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let src = state
+                .fds
+                .get(value)
+                .ok_or(CmdError::Exec)?
+                .try_clone()
+                .change_context(CmdError::Exec)?;
+            state.fds.insert(var.clone(), src);
+            state.last_status = WaitStatus::Exited(0);
+        }
+        crate::parse::ParsedLine::AssignStr { var, value } => {
+            let expanded = {
+                crate::substitute::substitute_arg(value, &mut HashMap::new(), cell)
+                    .change_context(CmdError::Resolve)?
+            };
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            state.strings.insert(
+                var.clone(),
+                ShortCStr::from_vec(expanded.into_bytes()).change_context(CmdError::Resolve)?,
+            );
+            state.last_status = WaitStatus::Exited(0);
+        }
+        crate::parse::ParsedLine::Unset(var) => {
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            state.fds.remove(var);
+            state.tasks.remove(var);
+            state.last_status = WaitStatus::Exited(0);
+        }
+        crate::parse::ParsedLine::Umask(mask) => {
+            if let Some(m) = mask {
+                sys::umask::set(*m);
+            } else {
+                println!("{:04o}", sys::umask::get());
+            }
+            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            state.last_status = WaitStatus::Exited(0);
+        }
+        crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),
+        crate::parse::ParsedLine::Continue => return Ok(Some(LoopControl::Continue)),
+        _ => {}
+    }
+    Ok(None)
+}

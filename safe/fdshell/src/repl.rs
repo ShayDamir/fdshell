@@ -1,8 +1,9 @@
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use std::io::{BufRead, Write};
 
 use crate::app::AppError;
 use crate::error::cmd::CmdError;
+use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -11,12 +12,24 @@ pub(crate) use crate::cond::run_cond_list;
 pub(crate) use crate::script::run_script;
 
 pub fn handle(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
-    run_script(line, cell)?;
+    if let Some(control) = run_script(line, cell)? {
+        match control {
+            LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
+            LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
+        }
+    }
     Ok(())
 }
 
 pub fn exec_cmd(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, Report<CmdError>> {
-    run_script(line, cell)
+    if let Some(control) = run_script(line, cell)? {
+        match control {
+            LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
+            LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
+        }
+    }
+    let state = cell.borrow().change_context(CmdError::Exec)?;
+    Ok(state.last_status.exit_code())
 }
 
 pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {

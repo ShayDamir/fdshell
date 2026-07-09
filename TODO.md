@@ -28,7 +28,7 @@
 - [ ] `exec` builtin — redirect-only mode (`exec N>&file`)
 - [ ] `eval` — parse and execute constructed string
 - [ ] `source` / `.` — execute script file in current shell
-- [ ] `break` / `continue` — loop control
+- [x] `break` / `continue` — loop control (for/while/until)
 - [ ] Here-strings (`<<<"string"`) — pipe string into command's stdin
 - [ ] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
 - [ ] `<>` — open file for read/write

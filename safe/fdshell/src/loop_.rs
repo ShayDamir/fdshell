@@ -1,3 +1,4 @@
+use crate::loop_control::LoopControl;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
@@ -21,7 +22,14 @@ pub(crate) fn run_loop(
         if (exit_code == 0) != invert {
             break;
         }
-        crate::repl::run_script(body.as_bytes().change_context(CmdError::Exec)?, cell)?;
+        if let Some(control) =
+            crate::repl::run_script(body.as_bytes().change_context(CmdError::Exec)?, cell)?
+        {
+            match control {
+                LoopControl::Break => break,
+                LoopControl::Continue => continue,
+            }
+        }
     }
     Ok(())
 }

@@ -3,6 +3,7 @@ use crate::redirect::RedirectDef;
 use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
 pub struct CommandLine {
     pub builtin: bool,
     pub command: ShortCStr,
@@ -17,6 +18,7 @@ pub struct CommandLine {
 }
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
 pub struct Pipeline {
     pub commands: Vec<CommandLine>,
 }

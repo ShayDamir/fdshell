@@ -1,6 +1,7 @@
 use crate::comment::{scan_block, skip_comment};
 use crate::keywords::keyword_delta;
-use error_stack::{Report, ResultExt, ensure};
+use crate::loop_control::LoopControl;
+use error_stack::{Report, ensure};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
@@ -9,7 +10,7 @@ use sys::fork_cell::ForkCell;
 pub(crate) fn run_script(
     line: &[u8],
     cell: &ForkCell<ShellState>,
-) -> Result<i32, Report<CmdError>> {
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -42,18 +43,21 @@ pub(crate) fn run_script(
                 let (end_pos, closed) = scan_block(line, i, &mut in_quote, &mut start, 1);
                 ensure!(closed, CmdError::Parse);
                 i = end_pos;
-                let end = line.len().min(start);
+                let end = line.len().min(start.saturating_sub(1));
                 let full = line.get(block_start..end).unwrap_or(b"").trim_ascii();
-                crate::cond::run_cond_list(full, cell)?;
+                if let Some(control) = crate::cond::run_cond_list(full, cell)? {
+                    return Ok(Some(control));
+                }
                 continue;
             }
-            if !part.is_empty() {
-                crate::cond::run_cond_list(part, cell)?;
+            if !part.is_empty()
+                && let Some(control) = crate::cond::run_cond_list(part, cell)?
+            {
+                return Ok(Some(control));
             }
             start = i + 1;
         }
         i += 1;
     }
-    let state = cell.borrow().change_context(CmdError::Exec)?;
-    Ok(state.last_status.exit_code())
+    Ok(None)
 }

@@ -1,3 +1,4 @@
+use crate::loop_control::LoopControl;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
@@ -21,10 +22,15 @@ pub(crate) fn run_for(
             let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.strings.insert(forblock.var.clone(), word.clone());
         }
-        crate::repl::run_script(
+        if let Some(control) = crate::repl::run_script(
             forblock.body.as_bytes().change_context(CmdError::Exec)?,
             cell,
-        )?;
+        )? {
+            match control {
+                LoopControl::Break => break,
+                LoopControl::Continue => continue,
+            }
+        }
     }
     Ok(())
 }

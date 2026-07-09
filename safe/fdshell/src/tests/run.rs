@@ -917,3 +917,105 @@ fn exit_rejects_overflow_code() {
         assert!(run_one(b"exit 256", &cell).is_err());
     });
 }
+
+#[test]
+fn for_break_exits_loop() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"for x in a b c; do if true; then break; fi; done", &cell)
+            .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"a".into()));
+    });
+}
+
+#[test]
+fn break_in_nested_for() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"for x in a b; do for y in 1 2; do break; done; done",
+            &cell,
+        )
+        .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"b".into()));
+        assert_eq!(state.strings.get(&c"y".into()), Some(&c"1".into()));
+    });
+}
+
+#[test]
+fn while_break_exits_loop() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"while true; do umask 0o077; break; done", &cell).unwrap();
+        assert_eq!(sys::umask::get(), 0o077);
+    });
+}
+
+#[test]
+fn break_outside_loop_returns_error() {
+    child_test(|| {
+        let cell = make_cell();
+        let e = crate::repl::handle(b"break", &cell).unwrap_err();
+        assert!(matches!(e.current_context(), CmdError::BreakOutsideLoop));
+    });
+}
+
+#[test]
+fn continue_outside_loop_returns_error() {
+    child_test(|| {
+        let cell = make_cell();
+        let e = crate::repl::handle(b"continue", &cell).unwrap_err();
+        assert!(matches!(e.current_context(), CmdError::ContinueOutsideLoop));
+    });
+}
+
+#[test]
+fn for_continue_skips_iteration() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"for x in a b c; do if false; then continue; fi; result=$x; done",
+            &cell,
+        )
+        .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.strings.get(&c"result".into()), Some(&c"c".into()));
+    });
+}
+
+#[test]
+fn while_continue_skips_iteration() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(
+            b"while true; do if false; then continue; fi; result=1; break; done",
+            &cell,
+        )
+        .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.strings.get(&c"result".into()), Some(&c"1".into()));
+    });
+}
+
+#[test]
+fn until_break_exits_loop() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"until false; do umask 0o077; break; done", &cell).unwrap();
+        assert_eq!(sys::umask::get(), 0o077);
+    });
+}
+
+#[test]
+fn break_in_if_inside_for() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_script(b"for x in a b c; do if true; then break; fi; done", &cell)
+            .unwrap();
+        crate::repl::run_script(b"x=after", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.strings.get(&c"x".into()), Some(&c"after".into()));
+    });
+}

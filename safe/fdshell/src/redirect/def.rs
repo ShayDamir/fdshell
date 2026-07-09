@@ -3,6 +3,7 @@ use sys::ShortCStr;
 use super::{RedirectDirection, RedirectSource};
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
 pub struct RedirectDef {
     pub export_to: i32,
     pub direction: RedirectDirection,
