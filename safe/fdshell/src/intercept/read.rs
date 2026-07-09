@@ -80,71 +80,8 @@ pub(crate) fn run_read(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_split_fields_single() {
-        let fields = split_fields(b"hello world", 1);
-        assert_eq!(fields, vec![b"hello world".to_vec()]);
-    }
-
-    #[test]
-    fn test_split_fields_two_exact() {
-        let fields = split_fields(b"hello world", 2);
-        assert_eq!(fields, vec![b"hello".to_vec(), b"world".to_vec()]);
-    }
-
-    #[test]
-    fn test_split_fields_two_extra() {
-        let fields = split_fields(b"a b c d", 2);
-        assert_eq!(fields, vec![b"a".to_vec(), b"b c d".to_vec()]);
-    }
-
-    #[test]
-    fn test_split_fields_two_few() {
-        let fields = split_fields(b"hello", 3);
-        assert_eq!(fields, vec![b"hello".to_vec(), Vec::new(), Vec::new()]);
-    }
-
-    #[test]
-    fn test_split_fields_tabs() {
-        let fields = split_fields(b"a\tb\tc", 3);
-        assert_eq!(fields, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
-    }
-
-    #[test]
-    fn test_split_fields_leading_spaces() {
-        let fields = split_fields(b"  a  b  ", 3);
-        assert_eq!(fields, vec![b"a".to_vec(), b"b".to_vec(), Vec::new()]);
-    }
-
-    #[test]
-    fn test_strip_prefix_dollar() {
-        let name = c"$FOO".into();
-        assert_eq!(strip_prefix(&name), c"FOO".into());
-    }
-
-    #[test]
-    fn test_strip_prefix_bare() {
-        let name = c"FOO".into();
-        assert_eq!(strip_prefix(&name), c"FOO".into());
-    }
-
-    #[test]
-    fn test_no_targets_error() {
-        let args: Vec<ShortCStr> = vec![];
-        let result = collect_targets(&args);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_fdvar_target_rejected() {
-        let args = vec![c"%myvar".into()];
-        let result = collect_targets(&args);
-        assert!(result.is_err());
-    }
-}
+#[allow(clippy::unwrap_used)]
+mod tests;
 
 mod collect;
 mod flags;

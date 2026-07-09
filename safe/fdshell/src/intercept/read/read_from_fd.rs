@@ -10,6 +10,7 @@ pub(crate) fn read_from_local_fd(
 ) -> Result<(), Report<CmdError>> {
     let mut temp = [0u8; 4096];
     loop {
+        let mut done = false;
         match fd.read(&mut temp) {
             Ok(n) => match n {
                 1.. => {
@@ -19,12 +20,14 @@ pub(crate) fn read_from_local_fd(
                         .change_context(CmdError::Read)?
                     {
                         if b == b'\n' {
+                            done = true;
                             break;
                         }
                         buf.push(b);
                         if let Some(max) = max_bytes
                             && buf.len() >= max
                         {
+                            done = true;
                             break;
                         }
                     }
@@ -45,7 +48,7 @@ pub(crate) fn read_from_local_fd(
                     .change_context(CmdError::Read));
             }
         }
-        if *eof {
+        if *eof || done {
             break;
         }
     }

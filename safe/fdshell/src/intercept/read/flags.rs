@@ -73,6 +73,7 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>
     Ok((source, max_bytes, prompt))
 }
 
+#[derive(Debug)]
 pub(crate) enum SourceFd {
     Stdin,
     RawFd(i32),

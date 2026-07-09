@@ -33,6 +33,7 @@ pub(crate) fn read_line(
         SourceFd::RawFd(fd) => {
             let mut temp = [0u8; 4096];
             loop {
+                let mut done = false;
                 match sys::ImportedFd::read_from_raw(*fd, &mut temp) {
                     Ok(n) => match n {
                         1.. => {
@@ -42,12 +43,14 @@ pub(crate) fn read_line(
                                 .change_context(CmdError::Read)?
                             {
                                 if b == b'\n' {
+                                    done = true;
                                     break;
                                 }
                                 buf.push(b);
                                 if let Some(max) = max_bytes
                                     && buf.len() >= max
                                 {
+                                    done = true;
                                     break;
                                 }
                             }
@@ -68,7 +71,7 @@ pub(crate) fn read_line(
                             .change_context(CmdError::Read));
                     }
                 }
-                if eof {
+                if eof || done {
                     break;
                 }
             }
