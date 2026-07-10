@@ -1,5 +1,5 @@
 use super::semi::{trim_semi, try_join};
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use error_stack::Report;
 use sys::ShortCStr;
 
@@ -13,21 +13,21 @@ pub fn parse_elifs(
         .iter()
         .enumerate()
         .map(|(i, &(ei, ti))| {
-            let ec = try_join(trim_semi(tokens.get(ei + 1..ti - 1).ok_or_else(|| {
-                let p = tokens.get(ei).map(|(_, p, _)| *p).unwrap_or(0);
-                report_error("missing condition", p)
-            })?))?;
+            let ec = try_join(trim_semi(
+                tokens
+                    .get(ei + 1..ti - 1)
+                    .ok_or(ParseError::MissingCondition)?,
+            ))?;
             let next = elif_pairs
                 .get(i + 1)
                 .map(|&(ne, _)| ne)
                 .or(else_idx)
                 .unwrap_or(fi_idx);
-            let eb = try_join(trim_semi(tokens.get(ti + 1..next - 1).ok_or_else(
-                || {
-                    let p = tokens.get(ti).map(|(_, p, _)| *p).unwrap_or(0);
-                    report_error("missing 'then'", p)
-                },
-            )?))?;
+            let eb = try_join(trim_semi(
+                tokens
+                    .get(ti + 1..next - 1)
+                    .ok_or(ParseError::MissingThen)?,
+            ))?;
             Ok((ec, eb))
         })
         .collect::<Result<Vec<_>, Report<ParseError>>>()
@@ -38,10 +38,9 @@ pub fn parse_else_body(
     else_idx: usize,
     fi_idx: usize,
 ) -> Result<ShortCStr, Report<ParseError>> {
-    try_join(trim_semi(tokens.get(else_idx + 1..fi_idx - 1).ok_or_else(
-        || {
-            let p = tokens.get(else_idx).map(|(_, p, _)| *p).unwrap_or(0);
-            report_error("missing 'else' body", p)
-        },
-    )?))
+    try_join(trim_semi(
+        tokens
+            .get(else_idx + 1..fi_idx - 1)
+            .ok_or(ParseError::MissingElseBody)?,
+    ))
 }

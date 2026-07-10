@@ -1,5 +1,5 @@
 use crate::capture::Capture;
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use crate::parse::CommandLine;
 use crate::parse::bg_redirect;
 use crate::parse::bg_redirect::parse_bg_redirect;
@@ -21,10 +21,7 @@ pub fn parse_command(
         Some(t) => is_builtin(t),
         None => false,
     };
-    let command = iter
-        .next()
-        .ok_or_else(|| report_error("expected command", 0))?
-        .clone();
+    let command = iter.next().ok_or(ParseError::ExpectedCommand)?.clone();
     let mut args: Vec<ShortCStr> = Vec::new();
     let mut captures: Vec<Capture> = Vec::new();
     let mut redirects: Vec<RedirectDef> = Vec::new();
@@ -39,9 +36,7 @@ pub fn parse_command(
     for t in iter {
         let fq = fq_iter.next().unwrap_or(false);
         if t.as_bytes().is_ok_and(|b| b == b"&") {
-            bail!(ParseError::Reason {
-                reason: "unexpected '&'",
-            });
+            bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
         if let Some(bg) = parse_bg_redirect(t)? {
             if let Some(p) = bg.pidvar {

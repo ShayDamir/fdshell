@@ -1,4 +1,4 @@
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use error_stack::{Report, ResultExt, ensure};
 use sys::ShortCStr;
@@ -22,14 +22,10 @@ fn parse_path_redirect(
     dir: u8,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
     let (rest, direction) = if dir == b'>' && after_op.starts_with(b">") {
-        let r = after_op
-            .get(1..)
-            .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
+        let r = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
         ensure!(
             !(r.is_empty() || r.starts_with(b"%")),
-            ParseError::Reason {
-                reason: "invalid redirect syntax",
-            }
+            ParseError::InvalidRedirect
         );
         (r, RedirectDirection::Append)
     } else if dir == b'<' {
@@ -49,9 +45,7 @@ fn parse_path_redirect(
 }
 
 pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let bytes = s.as_bytes().change_context(ParseError::Reason {
-        reason: "internal string state",
-    })?;
+    let bytes = s.as_bytes().change_context(ParseError::Never)?;
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,
         None => return Ok(None),
@@ -72,9 +66,7 @@ pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<Parse
         None => return Ok(None),
     };
     if after_op.starts_with(b"%") {
-        let source = after_op
-            .get(1..)
-            .ok_or_else(|| report_error("invalid redirect syntax", 0))?;
+        let source = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
         if let Some(export_to) = parse_fd(prefix, dir) {
             Ok(Some(RedirectDef::var(export_to, source)))
         } else {

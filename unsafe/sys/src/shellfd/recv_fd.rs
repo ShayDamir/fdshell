@@ -16,7 +16,7 @@ pub fn recv_fd<'a>(
         msg_namelen: 0,
         msg_iov: iovs.as_mut_ptr().cast(),
         msg_iovlen: 2,
-        msg_control: ctrl_buf.as_mut_ptr() as *mut core::ffi::c_void,
+        msg_control: ctrl_buf.as_mut_ptr().cast(),
         msg_controllen: ctrl_buf.len(),
         msg_flags: 0,
     };

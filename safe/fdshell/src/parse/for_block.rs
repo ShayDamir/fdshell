@@ -1,4 +1,4 @@
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
 use error_stack::{Report, ensure};
 use sys::ShortCStr;
@@ -15,45 +15,44 @@ pub(crate) fn tokens_to_for(
 ) -> Result<ForBlock, Report<ParseError>> {
     ensure!(
         tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")),
-        report_error("expected 'for'", 0)
+        ParseError::ExpectedFor
     );
     let var = tokens
         .get(1)
-        .ok_or_else(|| report_error("expected variable name", 0))?
+        .ok_or(ParseError::ExpectedVariableName)?
         .0
         .clone();
     let in_pos = tokens
         .iter()
         .skip(2)
         .position(|(t, _, _)| t.eq_bytes(b"in"))
-        .ok_or_else(|| report_error("expected 'in'", 0))?
+        .ok_or(ParseError::ExpectedIn)?
         + 2;
 
-    let do_idx = find_preceded_by_semi(tokens, in_pos + 1, b"do")
-        .ok_or_else(|| report_error("expected 'do'", 0))?;
+    let do_idx = find_preceded_by_semi(tokens, in_pos + 1, b"do").ok_or(ParseError::ExpectedDo)?;
 
     let done_idx = tokens.len() - 1;
     ensure!(
         tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")),
-        report_error("expected 'done'", 0)
+        ParseError::ExpectedDone
     );
     ensure!(
         tokens
             .get(done_idx - 1)
             .is_some_and(|(t, _, _)| t.eq_bytes(b";")),
-        report_error("expected ';' before 'done'", 0)
+        ParseError::ExpectedSemicolonBeforeDone
     );
 
     let body = try_join(trim_semi(
         tokens
             .get(do_idx + 1..done_idx - 1)
-            .ok_or_else(|| report_error("expected 'done'", 0))?,
+            .ok_or(ParseError::ExpectedDone)?,
     ))?;
 
     let word_tokens = trim_semi(
         tokens
             .get(in_pos + 1..do_idx - 1)
-            .ok_or_else(|| report_error("expected word list", 0))?,
+            .ok_or(ParseError::ExpectedWordList)?,
     );
     let words: Vec<ShortCStr> = word_tokens.iter().map(|(t, _, _)| t.clone()).collect();
 

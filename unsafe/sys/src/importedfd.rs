@@ -33,13 +33,7 @@ impl ImportedFd {
     }
     pub fn read(&self, buf: &mut [u8]) -> Result<isize, crate::SyscallError> {
         // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
-        crate::cvt(unsafe {
-            libc::read(
-                self.0,
-                buf.as_mut_ptr() as *mut core::ffi::c_void,
-                buf.len(),
-            )
-        })
+        crate::cvt(unsafe { libc::read(self.0, buf.as_mut_ptr().cast(), buf.len()) })
     }
 
     pub fn at(&self) -> crate::AtFd<'_> {
@@ -62,12 +56,8 @@ mod tests {
     #[test]
     fn verify_internal_fd_rejected() {
         // Open /dev/null with O_CLOEXEC — CLOEXEC is set, so verify() must reject it.
-        let fd = unsafe {
-            libc::open(
-                b"/dev/null\0".as_ptr() as *const core::ffi::c_char,
-                libc::O_RDONLY | libc::O_CLOEXEC,
-            )
-        };
+        // SAFETY: `/dev/null` is a valid path; O_RDONLY|O_CLOEXEC are valid flags.
+        let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
         assert!(fd >= 0);
         let d = ImportedFd(fd);
         let result = d.verify();
@@ -75,6 +65,7 @@ mod tests {
             result,
             Err(ref e) if matches!(e.current_context(), crate::ImportedFdError::InternalFd)
         ));
+        // SAFETY: `fd` is a valid open fd from the test above.
         unsafe { libc::close(fd) };
     }
 }

@@ -40,12 +40,8 @@ pub(crate) fn try_join(
         if !out.is_empty() {
             out.push(b' ');
         }
-        out.extend_from_slice(t.as_bytes().change_context(ParseError::Reason {
-            reason: "internal string inconsistency",
-        })?);
+        out.extend_from_slice(t.as_bytes().change_context(ParseError::Never)?);
     }
-    let result = ShortCStr::from_vec(out).change_context(ParseError::Reason {
-        reason: "token too long",
-    })?;
+    let result = ShortCStr::from_vec(out).change_context(ParseError::Never)?;
     Ok(result)
 }

@@ -13,22 +13,75 @@ pub(crate) enum ParseError {
     UnbalancedQuote,
     /// unexpected end of input
     UnexpectedEof,
-    /// NUL byte
+    /// invalid character
     InvalidChar { ch: u8 },
     /// case: missing 'in'
     CaseMissingIn,
     /// case: empty pattern
     CaseEmptyPattern,
-    /// {reason}
-    Reason { reason: &'static str },
+    /// case: missing 'esac'
+    CaseMissingEsac,
+    /// case: missing ')'
+    CaseMissingCloseParen,
+    /// internal invariant violated
+    Never,
+    /// duplicate redirect target
+    DuplicateRedirect,
+    /// not a valid octal number
+    InvalidOctal,
+    /// unexpected character in this context
+    UnexpectedChar { ch: u8 },
+    /// invalid redirect syntax
+    InvalidRedirect,
+    /// break takes no arguments
+    BreakTakesNoArguments,
+    /// continue takes no arguments
+    ContinueTakesNoArguments,
+    /// expected ';' before 'done'
+    ExpectedSemicolonBeforeDone,
+    /// expected command
+    ExpectedCommand,
+    /// expected command after pipe
+    ExpectedCommandAfterPipe,
+    /// expected condition
+    ExpectedCondition,
+    /// expected 'do'
+    ExpectedDo,
+    /// expected 'done'
+    ExpectedDone,
+    /// expected 'for'
+    ExpectedFor,
+    /// expected 'in'
+    ExpectedIn,
+    /// expected variable name
+    ExpectedVariableName,
+    /// expected variable name after 'unset'
+    ExpectedVariableNameAfterUnset,
+    /// expected word list
+    ExpectedWordList,
+    /// malformed case block
+    MalformedCaseBlock,
+    /// malformed if block
+    MalformedIfBlock,
+    /// missing condition
+    MissingCondition,
+    /// missing 'else' body
+    MissingElseBody,
+    /// missing 'fi'
+    MissingFi,
+    /// missing 'then'
+    MissingThen,
+    /// missing 'then' after 'elif'
+    MissingThenAfterElif,
+    /// umask takes at most one argument
+    UmaskTakesAtMostOneArgument,
+    /// unexpected pipe
+    UnexpectedPipe,
+    /// variable must start with '%'
+    VariableMustStartWithPercent,
 }
 
 impl std::error::Error for ParseError {}
-
-/// Create a `Report<ParseError>` with `ParsePosition` attached.
-pub(crate) fn report_error(reason: &'static str, pos: usize) -> Report<ParseError> {
-    Report::new(ParseError::Reason { reason }).attach_opaque(ParsePosition { pos, input: None })
-}
 
 /// Create a `Report<ParseError>` for an unbalanced quote at `pos`.
 pub(crate) fn report_unbalanced_quote(line: &[u8], pos: usize) -> Report<ParseError> {

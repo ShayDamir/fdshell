@@ -1,6 +1,6 @@
 use super::semi::find_preceded_by_semi;
 use super::semi::{trim_semi, try_join};
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
@@ -16,36 +16,32 @@ pub(crate) fn tokens_to_if(
 ) -> Result<IfBlock, Report<ParseError>> {
     ensure!(
         tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")),
-        report_error("malformed if block", 0)
+        ParseError::MalformedIfBlock
     );
-
-    let if_pos = tokens.first().map(|(_, p, _)| *p).unwrap_or(0);
 
     let first_then = find_preceded_by_semi(tokens, 1, b"then");
     let first_then = match first_then {
         Some(idx) => idx,
-        None => return Err(report_error("missing 'then'", if_pos)),
+        None => return Err(ParseError::MissingThen.into()),
     };
 
     let fi_idx = tokens.len() - 1;
     ensure!(
         tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"fi")),
-        report_error("missing 'fi'", if_pos)
+        ParseError::MissingFi
     );
 
     let cond_str = try_join(trim_semi(
         tokens
             .get(1..first_then - 1)
-            .ok_or_else(|| report_error("missing condition", if_pos))?,
+            .ok_or(ParseError::MissingCondition)?,
     ))?;
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then + 1;
     while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif") {
-        let then_idx = find_preceded_by_semi(tokens, elif_idx + 1, b"then").ok_or_else(|| {
-            let elif_pos = tokens.get(elif_idx).map(|(_, p, _)| *p).unwrap_or(0);
-            report_error("missing 'then' after 'elif'", elif_pos)
-        })?;
+        let then_idx = find_preceded_by_semi(tokens, elif_idx + 1, b"then")
+            .ok_or(ParseError::MissingThenAfterElif)?;
         elif_pairs.push((elif_idx, then_idx));
         pos = then_idx + 1;
     }
@@ -59,7 +55,7 @@ pub(crate) fn tokens_to_if(
     let then_str = try_join(trim_semi(
         tokens
             .get(first_then + 1..first_end - 1)
-            .ok_or_else(|| report_error("missing 'then'", if_pos))?,
+            .ok_or(ParseError::MissingThen)?,
     ))?;
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx)?;

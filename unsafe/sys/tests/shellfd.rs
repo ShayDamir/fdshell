@@ -12,7 +12,7 @@ struct CmsgBuf {
 
 fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), SyscallError> {
     let mut iov = libc::iovec {
-        iov_base: tag_bytes.as_ptr() as *mut core::ffi::c_void,
+        iov_base: tag_bytes.as_ptr().cast_mut().cast(),
         iov_len: tag_bytes.len(),
     };
     let mut cmsg = CmsgBuf {

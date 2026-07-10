@@ -1,4 +1,4 @@
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
@@ -10,15 +10,11 @@ pub struct BgRedirectResult {
 }
 
 pub fn parse_bg_redirect(t: &ShortCStr) -> Result<Option<BgRedirectResult>, Report<ParseError>> {
-    let b = t.as_bytes().change_context(ParseError::Reason {
-        reason: "internal string state",
-    })?;
+    let b = t.as_bytes().change_context(ParseError::Never)?;
     if !b.starts_with(b"&>") {
         return Ok(None);
     }
-    let rest = t
-        .strip_prefix(b"&>")
-        .ok_or_else(|| report_error("internal string state", 0))?;
+    let rest = t.strip_prefix(b"&>").ok_or(ParseError::Never)?;
     if let Some(name) = rest.strip_prefix(b"|&") {
         return Ok(Some(BgRedirectResult {
             redirects: Vec::new(),
@@ -39,10 +35,7 @@ pub fn parse_bg_redirect(t: &ShortCStr) -> Result<Option<BgRedirectResult>, Repo
         (rest, RedirectDirection::Write)
     };
     let source = if path.starts_with(b"%") {
-        RedirectSource::Var(
-            path.get(1..)
-                .ok_or_else(|| report_error("internal string state", 0))?,
-        )
+        RedirectSource::Var(path.get(1..).ok_or(ParseError::Never)?)
     } else {
         RedirectSource::path(path)
     };
@@ -68,9 +61,7 @@ pub fn insert_redirect(
     r: RedirectDef,
 ) -> Result<(), Report<ParseError>> {
     match redirects.binary_search_by_key(&r.export_to, |x| x.export_to) {
-        Ok(_) => bail!(ParseError::Reason {
-            reason: "duplicate redirect",
-        }),
+        Ok(_) => bail!(ParseError::DuplicateRedirect),
         Err(i) => {
             redirects.insert(i, r);
             Ok(())

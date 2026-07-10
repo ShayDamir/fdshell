@@ -1,4 +1,4 @@
-use crate::error::parse::{ParseError, report_error};
+use crate::error::parse::ParseError;
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
 use error_stack::{Report, ensure};
 use sys::ShortCStr;
@@ -17,34 +17,26 @@ pub(crate) fn tokens_to_loop(
     keyword: &[u8],
 ) -> Result<LoopBlock, Report<ParseError>> {
     if !tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(keyword)) {
-        let reason = match keyword {
-            b"while" => "expected 'while'",
-            b"until" => "expected 'until'",
-            _ => "expected loop keyword",
-        };
-        return Err(report_error(reason, 0));
+        return Err(ParseError::Never.into());
     }
 
-    let do_idx =
-        find_preceded_by_semi(tokens, 1, b"do").ok_or_else(|| report_error("expected 'do'", 0))?;
-    ensure!(do_idx >= 2, report_error("expected condition", 0));
+    let do_idx = find_preceded_by_semi(tokens, 1, b"do").ok_or(ParseError::ExpectedDo)?;
+    ensure!(do_idx >= 2, ParseError::ExpectedCondition);
 
     let done_idx = tokens.len() - 1;
     ensure!(
         tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")),
-        report_error("expected 'done'", 0)
+        ParseError::ExpectedDone
     );
 
     let cond_str = try_join(trim_semi(
-        tokens
-            .get(1..do_idx - 1)
-            .ok_or_else(|| report_error("expected 'do'", 0))?,
+        tokens.get(1..do_idx - 1).ok_or(ParseError::ExpectedDo)?,
     ))?;
 
     let body = try_join(trim_semi(
         tokens
             .get(do_idx + 1..done_idx - 1)
-            .ok_or_else(|| report_error("expected 'done'", 0))?,
+            .ok_or(ParseError::ExpectedDone)?,
     ))?;
 
     Ok(LoopBlock {

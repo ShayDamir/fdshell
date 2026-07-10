@@ -1,6 +1,6 @@
 use super::semi::{trim_semi, try_join};
-use crate::error::parse::{ParseError, report_error};
-use error_stack::Report;
+use crate::error::parse::ParseError;
+use error_stack::{Report, bail};
 use sys::ShortCStr;
 
 pub struct CaseClause {
@@ -33,8 +33,7 @@ pub fn parse_clauses(
             }
             if token.eq_bytes(b"|") {
                 if current_pattern.is_empty() {
-                    let p = tokens.get(pos).map(|(_, p, _)| *p).unwrap_or(0);
-                    return Err(report_error("case: empty pattern", p));
+                    bail!(ParseError::CaseEmptyPattern);
                 }
                 patterns.push(try_join(trim_semi(&current_pattern))?);
                 current_pattern.clear();
@@ -45,12 +44,10 @@ pub fn parse_clauses(
             }
         }
         if pos == esac_idx {
-            let p = tokens.get(esac_idx).map(|(_, p, _)| *p).unwrap_or(0);
-            return Err(report_error("case: missing ')'", p));
+            bail!(ParseError::CaseMissingCloseParen);
         }
         if current_pattern.is_empty() && patterns.is_empty() {
-            let p = tokens.get(pos).map(|(_, p, _)| *p).unwrap_or(0);
-            return Err(report_error("case: empty pattern", p));
+            bail!(ParseError::CaseEmptyPattern);
         }
         if !current_pattern.is_empty() {
             patterns.push(try_join(trim_semi(&current_pattern))?);
