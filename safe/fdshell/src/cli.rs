@@ -42,14 +42,14 @@ pub fn parse_cli_args(all_args: &[CString]) -> Result<CliArgs, Report<AppError>>
                 i += 1;
                 let num_str = all_args.get(i).ok_or(AppError::MissingValue("dirfd"))?;
                 dirfd = Some(
-                    sys::ImportedFd::from_bytes(num_str.to_bytes())
+                    sys::ImportedFd::try_from(num_str.as_ref())
                         .change_context(AppError::InvalidFdNumber("dirfd"))?,
                 );
             }
             b"--fd" => {
                 i += 1;
                 let num_str = all_args.get(i).ok_or(AppError::MissingValue("fd"))?;
-                let imported = sys::ImportedFd::from_bytes(num_str.to_bytes())
+                let imported = sys::ImportedFd::try_from(num_str.as_ref())
                     .change_context(AppError::InvalidFdNumber("fd"))?;
                 script_fd = Some(
                     imported

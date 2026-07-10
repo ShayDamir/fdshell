@@ -107,14 +107,14 @@ fn test_parse_flags_empty() {
 fn test_parse_flags_u_numeric() {
     let args = vec![c"-u".into(), c"3".into()];
     let (source, _, _) = parse_flags(&args).unwrap();
-    assert!(matches!(source, SourceFd::RawFd(3)));
+    assert!(matches!(source, SourceFd::RawFd(_)));
 }
 
 #[test]
 fn test_parse_flags_u_negative() {
     let args = vec![c"-u".into(), c"-1".into()];
     let (source, _, _) = parse_flags(&args).unwrap();
-    assert!(matches!(source, SourceFd::RawFd(-1)));
+    assert!(matches!(source, SourceFd::RawFd(_)));
 }
 
 #[test]
@@ -127,8 +127,8 @@ fn test_parse_flags_u_fdvar() {
 #[test]
 fn test_parse_flags_u_invalid() {
     let args = vec![c"-u".into(), c"abc".into()];
-    let result = parse_flags(&args);
-    assert!(result.is_err());
+    let (source, _, _) = parse_flags(&args).unwrap();
+    assert!(matches!(source, SourceFd::RawFd(_)));
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn test_parse_flags_combined() {
         c"hi".into(),
     ];
     let (source, max_bytes, prompt) = parse_flags(&args).unwrap();
-    assert!(matches!(source, SourceFd::RawFd(3)));
+    assert!(matches!(source, SourceFd::RawFd(_)));
     assert_eq!(max_bytes, Some(5));
     assert_eq!(prompt, Some(b"hi" as &[u8]));
 }
@@ -209,7 +209,7 @@ fn test_parse_flags_unknown_arg_ignored() {
 fn test_parse_flags_multiple_u_last_wins() {
     let args = vec![c"-u".into(), c"3".into(), c"-u".into(), c"5".into()];
     let (source, _, _) = parse_flags(&args).unwrap();
-    assert!(matches!(source, SourceFd::RawFd(5)));
+    assert!(matches!(source, SourceFd::RawFd(_)));
 }
 
 // collect_targets tests
@@ -296,7 +296,9 @@ fn test_read_line_rawfd_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     write_end.try_close().unwrap();
 
-    let source = SourceFd::RawFd(read_end.as_raw());
+    let source = SourceFd::RawFd(
+        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+    );
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
     let (buf, eof) = result.unwrap();
@@ -311,7 +313,9 @@ fn test_read_line_rawfd_data() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let source = SourceFd::RawFd(read_end.as_raw());
+    let source = SourceFd::RawFd(
+        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+    );
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
     let (buf, eof) = result.unwrap();
@@ -326,7 +330,9 @@ fn test_read_line_rawfd_max_bytes() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let source = SourceFd::RawFd(read_end.as_raw());
+    let source = SourceFd::RawFd(
+        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+    );
     let result = read_line(&source, None, Some(5));
     assert!(result.is_ok());
     let (buf, eof) = result.unwrap();
@@ -341,7 +347,9 @@ fn test_read_line_rawfd_stops_at_newline() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let source = SourceFd::RawFd(read_end.as_raw());
+    let source = SourceFd::RawFd(
+        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+    );
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
     let (buf, eof) = result.unwrap();

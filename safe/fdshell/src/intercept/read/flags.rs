@@ -22,21 +22,14 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>
                     .next()
                     .ok_or(ReadError::MissingArgument('u'))
                     .change_context(CmdError::Read)?;
-                let fd_bytes = fd_arg.as_bytes().change_context(CmdError::Read)?;
-                if let Some(name) = fd_bytes.strip_prefix(b"%") {
-                    source = SourceFd::FdVar(name.to_vec());
-                } else if let Ok(n) = core::str::from_utf8(fd_bytes)
-                    .change_context(ReadError::InvalidArgument('u'))
+                if let Some(name) = fd_arg
+                    .as_bytes()
                     .change_context(CmdError::Read)?
-                    .parse::<i32>()
+                    .strip_prefix(b"%")
                 {
-                    source = SourceFd::RawFd(n);
+                    source = SourceFd::FdVar(name.to_vec());
                 } else {
-                    return Err(Report::new(ReadError::InvalidArgument('u'))
-                        .attach_opaque(Suggestion(
-                            "-u value must be a number (e.g. 3) or a %variable",
-                        ))
-                        .change_context(CmdError::Read));
+                    source = SourceFd::RawFd(fd_arg.clone());
                 }
             }
             b"-n" => {
@@ -76,6 +69,6 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>
 #[derive(Debug)]
 pub(crate) enum SourceFd {
     Stdin,
-    RawFd(i32),
+    RawFd(ShortCStr),
     FdVar(Vec<u8>),
 }

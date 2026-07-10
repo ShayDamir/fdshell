@@ -30,11 +30,12 @@ pub(crate) fn read_line(
                 }
             }
         }
-        SourceFd::RawFd(fd) => {
+        SourceFd::RawFd(fd_arg) => {
+            let fd = sys::ImportedFd::try_from(fd_arg).change_context(CmdError::Read)?;
             let mut temp = [0u8; 4096];
             loop {
                 let mut done = false;
-                match sys::ImportedFd::read_from_raw(*fd, &mut temp) {
+                match fd.read(&mut temp) {
                     Ok(n) => match n {
                         1.. => {
                             for &b in temp
