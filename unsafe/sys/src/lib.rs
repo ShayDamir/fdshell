@@ -10,6 +10,7 @@ pub use localfd::LocalFd;
 pub use recv_fd_error::RecvFdError;
 pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
+pub use umask::UmaskError;
 
 pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
     if ret == -1 {
@@ -45,6 +46,7 @@ pub mod rw;
 pub mod shellfd;
 pub mod shortcstr;
 pub mod siginfo;
+pub mod split;
 pub mod stat;
 pub mod syscall_error;
 pub mod umask;

@@ -25,7 +25,7 @@ Each item should be wrapped in `Report<...>` so the error chain is preserved.
 
 ## unsafe/sys/ — `Option` that silently drops syscall errors
 
-- [ ] `read_proc_umask` (`umask.rs:29`) — returns `Option<u32>`, discards open/read/parse errors via `.ok()()` chain
+- [x] `read_proc_umask` (`umask.rs:29`) — changed to `Result<u32, UmaskError>` with variants: `ProcOpen`, `ProcRead`, `UmaskNotFound`, `InvalidUmask`
 - [ ] `ShortCStr::get` (`shortcstr/get.rs:7`) — returns `Option<Self>`, discards bounds / NUL byte
 - [ ] `ShortCStr::split_once_byte` (`shortcstr/get.rs:33`) — returns `Option<(Self, Self)>`, discards not found
 - [ ] `ShortCStr::strip_prefix` (`shortcstr/get.rs:38`) — returns `Option<Self>`, discards mismatch
