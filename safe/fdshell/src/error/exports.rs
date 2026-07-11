@@ -7,6 +7,10 @@ pub(crate) enum ExportError {
     NulByte,
     /// internal inconsistency in export data
     InternalInconsistency,
+    /// impossible — internal state is valid
+    Never,
+    /// I/O error
+    Io,
 }
 
 impl core::error::Error for ExportError {}

@@ -1,6 +1,8 @@
 use crate::error::exports::ExportError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
+use std::io::Write;
+
 use sys::{ShortCStr, ShortCStrError};
 
 pub fn handle_export(
@@ -9,7 +11,7 @@ pub fn handle_export(
 ) -> Result<(), Report<ExportError>> {
     match args.first() {
         None => {
-            list_exports(state);
+            list_exports(state)?;
             Ok(())
         }
         Some(arg) => {
@@ -23,12 +25,21 @@ pub fn handle_export(
     }
 }
 
-fn list_exports(state: &ShellState) {
+fn list_exports(state: &ShellState) -> Result<(), Report<ExportError>> {
+    let mut stdout = std::io::stdout().lock();
     for (k, v) in &state.exports {
-        let key_str = core::str::from_utf8(k.as_bytes().unwrap_or(&[])).unwrap_or("?");
-        let val_str = core::str::from_utf8(v.as_slice()).unwrap_or("?");
-        println!("export {}={}", key_str, val_str);
+        let key_bytes = k.as_bytes().change_context(ExportError::Never)?;
+        write!(stdout, "export ").change_context(ExportError::Io)?;
+        stdout
+            .write_all(key_bytes)
+            .change_context(ExportError::Io)?;
+        write!(stdout, "=").change_context(ExportError::Io)?;
+        stdout
+            .write_all(v.as_slice())
+            .change_context(ExportError::Io)?;
+        writeln!(stdout).change_context(ExportError::Io)?;
     }
+    Ok(())
 }
 
 fn set_export(

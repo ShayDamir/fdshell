@@ -14,7 +14,7 @@ Each item should be wrapped in `Report<...>` so the error chain is preserved.
 
 ## safe/fdshell/ — `unwrap_or` silencing errors
 
-- [ ] `list_exports` (`exports.rs:31`) — uses `.unwrap_or()` to silence NUL byte / UTF-8 errors
+- [x] `list_exports` (`exports.rs:31`) — changed to `Result<(), Report<ExportError>>`; writes raw bytes to stdout instead of `from_utf8`; `as_bytes()` failure uses `.change_context(ExportError::Never)`
 - [ ] `format_line_and_caret` (`debug.rs:46`) — uses `.unwrap_or()` to silence slice / UTF-8 errors
 
 ## safe/fdshell/ — `process::exit()` discards error chain
