@@ -93,9 +93,7 @@ pub fn recv_fd<'a>(
         bail!(crate::RecvFdError::PidMismatch(pid, expected_pid));
     }
 
-    ensure!(n <= tag.len(), crate::RecvFdError::TagTooLong);
-    // SAFETY: `n <= tag.len()` is guaranteed by the ensure! above.
-    let tag_slice = unsafe { tag.get_unchecked(..n) };
+    let tag_slice = tag.get(..n).ok_or(crate::RecvFdError::TagTooLong)?;
     let tag_cstr =
         CStr::from_bytes_with_nul(tag_slice).change_context(crate::RecvFdError::TagNotNul)?;
     Ok((fd, tag_cstr))
