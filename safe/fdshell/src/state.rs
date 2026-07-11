@@ -9,14 +9,14 @@ use crate::envfilter::EnvFilter;
 use crate::task::Task;
 
 pub struct ShellState {
-    pub fds: HashMap<ShortCStr, LocalFd>,
-    pub tasks: HashMap<ShortCStr, Task>,
-    pub strings: HashMap<ShortCStr, ShortCStr>,
-    pub exports: HashMap<ShortCStr, Vec<u8>>,
-    pub positional: VecDeque<ShortCStr>,
-    pub last_status: WaitStatus,
-    pub shell_pid: i32,
-    pub last_bg_pid: Option<i32>,
+    pub(crate) fds: HashMap<ShortCStr, LocalFd>,
+    pub(crate) tasks: HashMap<ShortCStr, Task>,
+    pub(crate) strings: HashMap<ShortCStr, ShortCStr>,
+    pub(crate) exports: HashMap<ShortCStr, Vec<u8>>,
+    pub(crate) positional: VecDeque<ShortCStr>,
+    pub(crate) last_status: WaitStatus,
+    pub(crate) shell_pid: i32,
+    pub(crate) last_bg_pid: Option<i32>,
     pub(crate) env_filter: EnvFilter,
 }
 
@@ -47,5 +47,13 @@ impl ShellState {
         for _ in 0..n.min(self.positional.len()) {
             self.positional.pop_front();
         }
+    }
+
+    pub fn insert_cwd(&mut self, cwd: LocalFd) {
+        self.fds.insert(c"CWD".into(), cwd);
+    }
+
+    pub fn set_positional(&mut self, positional: VecDeque<ShortCStr>) {
+        self.positional = positional;
     }
 }

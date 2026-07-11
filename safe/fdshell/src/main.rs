@@ -20,7 +20,7 @@ fn main() -> Result<(), Report<AppError>> {
     {
         let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
         let cwd = sys::openat2::open(c".", O_DIRECTORY).change_context(AppError::Cwd)?;
-        state.fds.insert(c"CWD".into(), cwd);
+        state.insert_cwd(cwd);
     }
 
     let all_args: Vec<CString> = std::env::args()
@@ -41,9 +41,9 @@ fn main() -> Result<(), Report<AppError>> {
         {
             let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
             if positional.is_empty() {
-                state.positional.push_back(ShortCStr::from(c"sh"));
+                state.set_positional(VecDeque::from([ShortCStr::from(c"sh")]));
             } else {
-                state.positional = positional;
+                state.set_positional(positional);
             }
         }
         match exec_cmd(cmd.to_bytes(), &state) {
@@ -106,7 +106,7 @@ fn main() -> Result<(), Report<AppError>> {
     // Execute
     {
         let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
-        state.positional = positional;
+        state.set_positional(positional);
     }
     match exec_cmd(&script_content, &state) {
         Ok(code) => {
