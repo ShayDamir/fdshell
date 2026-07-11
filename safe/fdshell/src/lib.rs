@@ -30,7 +30,6 @@ mod postlaunch;
 mod redirect;
 mod repl;
 mod replacer;
-mod resolve;
 mod run;
 mod run_dispatch;
 mod script;

@@ -1,8 +1,8 @@
 use crate::child;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
-use crate::resolve::substitute_args;
 use crate::state::ShellState;
+use crate::substitute::substitute_args;
 use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
@@ -39,7 +39,7 @@ pub fn execute(
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        match child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
+        match child::dispatch::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
             Ok(code) => Ok(code),
             Err(report) => crate::child::handle_builtin_error(builtin_name.clone(), report),
         }

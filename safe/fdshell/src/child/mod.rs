@@ -1,6 +1,5 @@
-pub(crate) mod builtin;
 mod delegated;
-mod dispatch;
+pub(crate) mod dispatch;
 mod error;
 mod exec;
 pub(crate) mod fdpass;

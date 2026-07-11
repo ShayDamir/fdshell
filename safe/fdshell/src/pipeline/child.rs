@@ -33,7 +33,7 @@ pub fn run_child(
         redirects.push(Redirect::new(1, fd));
     }
 
-    let opened = super::open::open_redirect_files(cmd_data)
+    let opened = crate::redirect::open_redirect_files(&cmd_data.redirects)
         .change_context(ChildProcessError::RedirectFailed)?;
 
     let file_redirects = {

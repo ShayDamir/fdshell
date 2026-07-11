@@ -1,5 +1,4 @@
 mod child;
-mod open;
 
 use crate::capture::Capture;
 use crate::error::pipeline::PipelineError;

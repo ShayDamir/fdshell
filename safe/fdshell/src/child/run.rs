@@ -2,8 +2,8 @@ use crate::child::{self, Command, handle_builtin_error};
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
 use crate::redirect::Redirect;
-use crate::resolve::substitute_args;
 use crate::state::ShellState;
+use crate::substitute::substitute_args;
 use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
@@ -53,7 +53,7 @@ pub fn child_main(
         .change_context(ChildProcessError::BorrowFailed)?;
     if cmd.builtin {
         let cmd_name = cmd.name.clone();
-        match child::builtin::dispatch_builtin(cmd.name, &refs, args, &state) {
+        match child::dispatch::dispatch_builtin(cmd.name, &refs, args, &state) {
             Ok(code) => Ok(code),
             Err(report) => handle_builtin_error(cmd_name, report),
         }
