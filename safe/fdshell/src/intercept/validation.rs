@@ -62,3 +62,24 @@ pub(crate) fn check_redirects_not_supported(
     }
     Ok(())
 }
+
+pub(crate) fn validate_intercept(
+    line: &[u8],
+    command: &'static str,
+    cmdline: &crate::parse::CommandLine,
+) -> Result<(), Report<CmdError>> {
+    check_builtin_not_supported(line, command, cmdline.builtin)?;
+    check_captures_not_supported(line, command, &cmdline.captures)?;
+    check_redirects_not_supported(line, command, &cmdline.redirects)?;
+    Ok(())
+}
+
+pub(crate) fn validate_intercept_no_builtin(
+    line: &[u8],
+    command: &'static str,
+    cmdline: &crate::parse::CommandLine,
+) -> Result<(), Report<CmdError>> {
+    check_captures_not_supported(line, command, &cmdline.captures)?;
+    check_redirects_not_supported(line, command, &cmdline.redirects)?;
+    Ok(())
+}

@@ -9,8 +9,6 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
-use super::validation::*;
-
 use collect::collect_targets;
 use flags::SourceFd;
 use flags::parse_flags;
@@ -23,9 +21,7 @@ pub(crate) fn run_read(
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    check_builtin_not_supported(line, "read", cmdline.builtin)?;
-    check_captures_not_supported(line, "read", &cmdline.captures)?;
-    check_redirects_not_supported(line, "read", &cmdline.redirects)?;
+    super::validation::validate_intercept(line, "read", cmdline)?;
 
     let (fd_source, max_bytes, prompt) = parse_flags(&cmdline.args)?;
     let targets = collect_targets(&cmdline.args)?;

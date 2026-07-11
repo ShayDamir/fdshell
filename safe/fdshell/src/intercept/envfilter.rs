@@ -2,7 +2,7 @@ use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
-use crate::intercept::validation::*;
+use crate::intercept::validation::err_at;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
@@ -17,9 +17,7 @@ pub(crate) fn run_envfilter(
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    check_builtin_not_supported(line, "envfilter", cmdline.builtin)?;
-    check_captures_not_supported(line, "envfilter", &cmdline.captures)?;
-    check_redirects_not_supported(line, "envfilter", &cmdline.redirects)?;
+    super::validation::validate_intercept(line, "envfilter", cmdline)?;
 
     if cmdline.args.is_empty() {
         return Err(

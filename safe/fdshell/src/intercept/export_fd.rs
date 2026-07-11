@@ -5,15 +5,12 @@ use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 
-use super::validation::*;
-
 pub(crate) fn run_export_fd(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    check_captures_not_supported(line, "export_fd", &cmdline.captures)?;
-    check_redirects_not_supported(line, "export_fd", &cmdline.redirects)?;
+    super::validation::validate_intercept_no_builtin(line, "export_fd", cmdline)?;
 
     let state = cell.borrow().change_context(CmdError::Exec)?;
     let status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {

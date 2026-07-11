@@ -1,32 +1,32 @@
+use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
+use error_stack::Report;
 use sys::fork_cell::ForkCell;
 
 pub(crate) fn run_become(
-    _line: &[u8],
+    line: &[u8],
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, error_stack::Report<crate::error::cmd::CmdError>> {
-    run_replace(cmdline, "become", cell)
+) -> Result<bool, Report<CmdError>> {
+    run_replace(line, cmdline, "become", cell)
 }
 
 pub(crate) fn run_exec(
-    _line: &[u8],
+    line: &[u8],
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, error_stack::Report<crate::error::cmd::CmdError>> {
-    run_replace(cmdline, "exec", cell)
+) -> Result<bool, Report<CmdError>> {
+    run_replace(line, cmdline, "exec", cell)
 }
 
 fn run_replace(
+    line: &[u8],
     cmdline: &CommandLine,
-    name: &str,
+    name: &'static str,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, error_stack::Report<crate::error::cmd::CmdError>> {
-    if !cmdline.captures.is_empty() {
-        eprintln!("{name}: captures not supported");
-        std::process::exit(sys::errno::EINVAL);
-    }
+) -> Result<bool, Report<CmdError>> {
+    super::validation::check_captures_not_supported(line, name, &cmdline.captures)?;
 
     let args = cmdline.args.clone();
     let args_fq = cmdline.args_fq.clone();

@@ -4,16 +4,12 @@ use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
-use super::validation::*;
-
 pub(crate) fn run_exit(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    check_builtin_not_supported(line, "exit", cmdline.builtin)?;
-    check_captures_not_supported(line, "exit", &cmdline.captures)?;
-    check_redirects_not_supported(line, "exit", &cmdline.redirects)?;
+    super::validation::validate_intercept(line, "exit", cmdline)?;
 
     let code = match cmdline.args.first() {
         Some(arg) => {
