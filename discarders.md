@@ -5,7 +5,7 @@ Each item should be wrapped in `Report<...>` so the error chain is preserved.
 ## safe/fdshell/ — `Option` that silently drops parse/runtime errors
 
 - [x] `parse_capture` (`parse/capture.rs:4`) — changed to `Result<Option<Capture>, Report<ParseError>>`; split into `CaptureMissingPercent` (e.g. `%>var` — missing `%` before var name) and `CaptureEmptyVar` (e.g. `%>%` — no var name after `%`)
-- [ ] `detect_nested` (`init.rs:11`) — returns `Option<ImportedFd>`, discards `FDSHELL_CAPTURE` env var parse errors via `.ok()()`
+- [x] `detect_nested` (`init.rs:11`) — changed to log `InvalidUtf8` via `.inspect_err()`, `NotPresent` stays silent
 
 ## safe/fdshell/ — returns raw `ShortCStrError` instead of `Report<ExportError>`
 
