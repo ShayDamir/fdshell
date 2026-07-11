@@ -49,31 +49,24 @@ fn set_export(
 ) -> Result<(), ShortCStrError> {
     let name_bytes = name.as_bytes()?.to_vec();
     let val_bytes = value.as_bytes()?.to_vec();
-    state.strings.insert(
-        ShortCStr::from_vec(name_bytes.clone())?,
-        ShortCStr::from_vec(val_bytes.clone())?,
-    );
-    state
-        .exports
-        .insert(ShortCStr::from_vec(name_bytes)?, val_bytes);
+    let name_str = ShortCStr::from_vec(name_bytes)?;
+    let val_str = ShortCStr::from_vec(val_bytes.clone())?;
+    state.strings.insert(name_str.clone(), val_str);
+    state.exports.insert(name_str, val_bytes);
     Ok(())
 }
 
 fn mark_exported(arg: &ShortCStr, state: &mut ShellState) -> Result<(), ShortCStrError> {
     let target = arg.as_bytes()?;
     if let Some(val) = state.strings.get(arg) {
-        state.exports.insert(
-            ShortCStr::from_vec(target.to_vec())?,
-            val.as_bytes()?.to_vec(),
-        );
-    } else {
-        // No existing string var — store as both with empty value
-        state
-            .strings
-            .insert(ShortCStr::from_vec(target.to_vec())?, ShortCStr::new());
+        let val_bytes = val.as_bytes()?.to_vec();
         state
             .exports
-            .insert(ShortCStr::from_vec(target.to_vec())?, Vec::new());
+            .insert(ShortCStr::from_vec(target.to_vec())?, val_bytes);
+    } else {
+        let name_str = ShortCStr::from_vec(target.to_vec())?;
+        state.strings.insert(name_str.clone(), ShortCStr::new());
+        state.exports.insert(name_str, Vec::new());
     }
     Ok(())
 }
