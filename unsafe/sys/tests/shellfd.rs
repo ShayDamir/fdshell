@@ -1,8 +1,12 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use sys::SyscallError;
 use sys::net::{set_passcred, socketpair};
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
-use sys::shellfd::{SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd, set_capture_active};
+use sys::shellfd::{
+    RecvFdError, SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd, set_capture_active,
+};
 
 #[repr(C)]
 struct CmsgBuf {
@@ -53,9 +57,18 @@ fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
     if pid == 0 {
         let code = match f() {
             Ok(()) => 0,
-            Err(e) => match e {
-                SyscallError::Other(n) => n,
-                other => other.errno(),
+            Err(e) => match &e {
+                SyscallError::Other(n) => *n,
+                SyscallError::EAGAIN => libc::EAGAIN,
+                SyscallError::EBADF => libc::EBADF,
+                SyscallError::EINVAL => libc::EINVAL,
+                SyscallError::EPERM => libc::EPERM,
+                SyscallError::ENOENT => libc::ENOENT,
+                SyscallError::EIO => libc::EIO,
+                SyscallError::EMFILE => libc::EMFILE,
+                SyscallError::E2BIG => libc::E2BIG,
+                SyscallError::EEXIST => libc::EEXIST,
+                SyscallError::ENOSYS => libc::ENOSYS,
             },
         };
         std::process::exit(code);
@@ -98,7 +111,8 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         test_b.try_close()?;
 
         let mut tag = [0u8; TAG_MAX];
-        let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)?;
+        let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)
+            .expect("recv_fd should succeed");
         test_fd.verify()?;
 
         let mut buf = [0u8; 8];
@@ -114,7 +128,6 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
 
 #[test]
 fn test_recv_fd_truncated() -> Result<(), SyscallError> {
-    // 8192 bytes fills tag buffer + spills into extra → n > TAG_MAX
     let (a, b) = socketpair()?;
     a.verify()?;
     b.verify()?;
@@ -127,10 +140,10 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(
-        recv_fd(&b, &mut buf, 0),
-        Err(SyscallError::EINVAL)
-    ));
+    match recv_fd(&b, &mut buf, 0) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::TagTooLong) => {}
+        _other => panic!("expected TagTooLong"),
+    }
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -140,7 +153,6 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
 
 #[test]
 fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
-    // Exactly TAG_MAX bytes, no null → CStr::from_bytes_with_nul fails
     let (a, b) = socketpair()?;
     a.verify()?;
     b.verify()?;
@@ -153,10 +165,10 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(
-        recv_fd(&b, &mut buf, 0),
-        Err(SyscallError::EINVAL)
-    ));
+    match recv_fd(&b, &mut buf, 0) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
+        _other => panic!("expected TagNotNul"),
+    }
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -177,10 +189,10 @@ fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(
-        recv_fd(&b, &mut buf, 0),
-        Err(SyscallError::EINVAL)
-    ));
+    match recv_fd(&b, &mut buf, 0) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
+        _other => panic!("expected TagNotNul"),
+    }
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -201,10 +213,10 @@ fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(
-        recv_fd(&b, &mut buf, 0),
-        Err(SyscallError::EINVAL)
-    ));
+    match recv_fd(&b, &mut buf, 0) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
+        _other => panic!("expected TagNotNul"),
+    }
 
     dummy_rd.try_close()?;
     a.try_close()?;
@@ -281,12 +293,77 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     dummy_wr.try_close()?;
 
     let mut buf = [0u8; TAG_MAX];
-    assert!(matches!(
-        recv_fd(&b, &mut buf, 0),
-        Err(SyscallError::EINVAL)
-    ));
+    match recv_fd(&b, &mut buf, 0) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::TagTooLong) => {}
+        _other => panic!("expected TagTooLong"),
+    }
 
     dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
+    Ok(())
+}
+
+#[test]
+fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
+    let (a, b) = socketpair()?;
+    a.verify()?;
+    b.verify()?;
+    set_passcred(&b)?;
+    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    dummy_rd.verify()?;
+    dummy_wr.verify()?;
+
+    let (fd_a, fd_b) = socketpair()?;
+    fd_a.verify()?;
+    fd_b.verify()?;
+    send_raw_msg(a.as_raw(), b"test", fd_a.as_raw())?;
+    fd_a.try_close()?;
+    fd_b.try_close()?;
+
+    let mut buf = [0u8; TAG_MAX];
+    match recv_fd(&b, &mut buf, 0) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::PidMismatch(_, _)) => {}
+        _other => panic!("expected PidMismatch"),
+    }
+
+    dummy_rd.try_close()?;
+    a.try_close()?;
+    b.try_close()?;
+    Ok(())
+}
+
+#[test]
+fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
+    let (a, b) = socketpair()?;
+    a.verify()?;
+    b.verify()?;
+    set_passcred(&b)?;
+
+    // Send a message without SCM_RIGHTS (msg_controllen == 0) to trigger NoFd.
+    let mut iov = libc::iovec {
+        iov_base: b"test".as_ptr().cast_mut().cast(),
+        iov_len: 4,
+    };
+    let msg = libc::msghdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: &raw mut iov,
+        msg_iovlen: 1,
+        msg_control: core::ptr::null_mut(),
+        msg_controllen: 0,
+        msg_flags: 0,
+    };
+    // SAFETY: `msg` is a valid stack-allocated msghdr with valid iovec; `sendmsg`
+    // only reads from it. `a` is a valid open socket from socketpair().
+    sys::cvt(unsafe { libc::sendmsg(a.as_raw(), &msg, 0) })?;
+
+    let mut buf = [0u8; TAG_MAX];
+    match recv_fd(&b, &mut buf, std::process::id() as i32) {
+        Err(e) if matches!(*e.current_context(), RecvFdError::NoFd) => {}
+        _other => panic!("expected NoFd"),
+    }
+
     a.try_close()?;
     b.try_close()?;
     Ok(())

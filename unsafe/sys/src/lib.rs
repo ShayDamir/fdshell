@@ -7,6 +7,7 @@ pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use importedfd_error::ImportedFdError;
 pub use localfd::LocalFd;
+pub use recv_fd_error::RecvFdError;
 pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
 
@@ -38,6 +39,7 @@ pub mod mkdirat;
 pub mod net;
 pub mod openat2;
 pub mod pipe;
+pub mod recv_fd_error;
 pub mod renameat2;
 pub mod rw;
 pub mod shellfd;

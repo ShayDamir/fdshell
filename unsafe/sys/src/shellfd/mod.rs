@@ -37,4 +37,5 @@ mod send_fd;
 pub use send_fd::send_fd;
 
 mod recv_fd;
+pub use crate::RecvFdError;
 pub use recv_fd::recv_fd;

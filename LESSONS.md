@@ -12,9 +12,6 @@
 ## `cargo fmt` reformatting can change test formatting
 Run `cargo fmt` before `nix flake check`.
 
-## Error position 0 is valid for errors at the start of input
-Don't assert `source_start != 0` for all errors — only mid-input errors have non-zero positions.
-
 ## Always show the caret, even at position 0
 Remove the `!(is_first_line && caret_col == 0)` guard. Fish shows `^^` at position 0; users benefit from the marker.
 
@@ -29,9 +26,6 @@ Use `match result { Ok(_) => panic!(), Err(e) => e }` when the Ok type lacks `De
 
 ## Never add `#[allow(clippy::...)]` in production code
 Use `.get()` + `.ok_or()`, `?`, or propagate errors. Allow attributes are only for test files.
-
-## `Report<T>` does not implement `From<i32>` — `i32` is not an `Error` type
-Use `.map_err(|_| C)` or `.ok_or(C)` when converting `Result<_, i32>` into `Result<_, Report<C>>`.
 
 ## `error-stack` 0.7 uses `current_context()`, not `as_context()`
 Use `.current_context()` to extract the context from `Report<T>`.
@@ -69,3 +63,19 @@ Rename `mod become` to `mod become_cmd` (file: `become_cmd.rs`). Only the module
 
 ## Variants that differ only by flag name should use a parameter, not separate variants
 `MissingValue(&'static str)` instead of `MissingDirfdValue` + `MissingFdValue`.
+
+## Do not use `.map_err(|_| ... )`
+This discards the underlying error. Use `.change_context()` instead. This requires changing error type to `Report<Error>`
+if it was not done before.
+
+## Do not use `unreachable!()`
+If something should never happen, use `Never` variant of Error (like `bail!(Error::Never)` or `ensure!(condition, Error::Never)`).
+If there is no such variant - add one, with "impossible" as rustdoc.
+
+## Use `ensure!()` to conditionally return error without attachments where feasible
+`if condition { return Err(Report::new(Error::Variant));}` -> `ensure!(!condition, Error::Variant)`. This doesn't work on let chains though.
+If condition is complex and negating it would be unreadable, use `if + bail!`.`
+
+## Use `bail!()` to return unconditional errors without attachments
+`return Err(Error::Variant)` -> `bail!(Error::Variant)`
+`return Err(Report::new(Error::Variant))` -> `bail!(Error::Variant)`

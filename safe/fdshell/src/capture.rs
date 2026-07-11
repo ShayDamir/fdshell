@@ -4,6 +4,9 @@ use crate::error::capture::CaptureError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 
+#[cfg(test)]
+mod tests;
+
 // Clone required by pipeline/mod.rs (cmd.captures.clone()).
 // Debug + PartialEq are test-only — quarantined behind cfg_attr.
 #[derive(Clone)]
@@ -31,8 +34,13 @@ pub fn do_captures(
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
         let (fd, rtag) = match sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid) {
             Ok(v) => v,
-            Err(sys::SyscallError::EAGAIN) => break,
-            Err(e) => return Err(e).change_context(CaptureError::ReceiveFailed),
+            Err(e) => {
+                let ctx = e.current_context();
+                if matches!(*ctx, sys::RecvFdError::Closed) {
+                    break;
+                }
+                return Err(e).change_context(CaptureError::ReceiveFailed);
+            }
         };
         let idx = remaining
             .iter()
