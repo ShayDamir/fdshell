@@ -26,8 +26,8 @@ fn cd_home() -> Result<LocalFd, Report<CdError>> {
 }
 
 fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<LocalFd, Report<CdError>> {
-    let name = arg.strip_prefix(b"%").ok_or(CdError::CdPathOpen)?;
-    let src = state.fds.get(&name).ok_or(CdError::CdPathOpen)?;
+    let name = arg.strip_prefix(b"%").ok_or(CdError::Never)?;
+    let src = state.fds.get(&name).ok_or(CdError::FdNotSet)?;
     src.try_clone().change_context(CdError::CdPathOpen)
 }
 

@@ -9,6 +9,10 @@ pub(crate) enum CdError {
     CdPathOpen,
     /// $OLDCWD not set
     OldcwdNotSet,
+    /// fd variable not set
+    FdNotSet,
+    /// impossible
+    Never,
 }
 
 impl core::error::Error for CdError {}

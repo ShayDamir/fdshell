@@ -88,7 +88,7 @@ fn cd_missing_var() {
         let mut state = ShellState::new();
         let bad = c"%NONEXISTENT".into();
         let e = cd(&[bad], &mut state).unwrap_err();
-        assert!(matches!(e.current_context(), CdError::CdPathOpen));
+        assert!(matches!(e.current_context(), CdError::FdNotSet));
     });
 }
 
