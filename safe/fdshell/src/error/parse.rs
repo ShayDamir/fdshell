@@ -79,6 +79,10 @@ pub(crate) enum ParseError {
     UnexpectedPipe,
     /// variable must start with '%'
     VariableMustStartWithPercent,
+    /// capture syntax missing '%' before variable name
+    CaptureMissingPercent,
+    /// capture syntax has no variable name after '%'
+    CaptureEmptyVar,
 }
 
 impl std::error::Error for ParseError {}

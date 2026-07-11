@@ -47,14 +47,14 @@ pub fn parse_command(
                     bg_redirect::insert_redirect(&mut redirects, r)?;
                 }
             }
-        } else if t.as_bytes().is_ok_and(|b| b.starts_with(b"%"))
-            && crate::parse::classify::parse_capture(t).is_some()
-        {
-            if let Some(c) = crate::parse::classify::parse_capture(t) {
-                captures.push(c);
-            } else {
-                args.push(t.clone());
-                args_fq.push(fq);
+        } else if t.as_bytes().is_ok_and(|b| b.starts_with(b"%")) {
+            match crate::parse::classify::parse_capture(t) {
+                Ok(Some(c)) => captures.push(c),
+                Ok(None) => {
+                    args.push(t.clone());
+                    args_fq.push(fq);
+                }
+                Err(e) => return Err(e),
             }
         } else if let Some(r) = crate::parse::classify::parse_redirect(t)? {
             bg_redirect::insert_redirect(&mut redirects, r)?;
