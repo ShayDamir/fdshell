@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::CString;
 
 use sys::ShortCStr;
@@ -6,7 +7,7 @@ use crate::envfilter::EnvFilter;
 
 pub(crate) fn get_environ(
     cookie: &[u8],
-    exports: &[(ShortCStr, Vec<u8>)],
+    exports: &HashMap<ShortCStr, Vec<u8>>,
     env_filter: &EnvFilter,
 ) -> Vec<CString> {
     let env_iter = std::env::vars()

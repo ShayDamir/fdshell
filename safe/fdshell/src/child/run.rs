@@ -34,37 +34,26 @@ pub fn child_main(
         substitute_args(args, args_fq, cell).change_context(ChildProcessError::SubstituteFailed)?;
     let refs: Vec<&CStr> = resolved.iter().map(|cs| cs.as_c_str()).collect();
 
-    // Clone exports and env_filter before borrowing mutably
-    let (exports, env_filter) = {
+    if cmd.builtin {
         let state = cell
             .borrow()
             .change_context(ChildProcessError::BorrowFailed)?;
-        let exports: Vec<_> = state
-            .exports
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let env_filter = state.env_filter.clone();
-        (exports, env_filter)
-    };
-
-    let state = cell
-        .borrow_mut()
-        .change_context(ChildProcessError::BorrowFailed)?;
-    if cmd.builtin {
         let cmd_name = cmd.name.clone();
         match child::dispatch::dispatch_builtin(cmd.name, &refs, args, &state) {
             Ok(code) => Ok(code),
             Err(report) => handle_builtin_error(cmd_name, report),
         }
     } else {
+        let state = cell
+            .borrow()
+            .change_context(ChildProcessError::BorrowFailed)?;
         let name = sys::RefCStr::from(cmd.name.clone());
         let fd = exec::resolve_path(&name)
             .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
         let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
             .chain(refs.iter().copied())
             .collect();
-        match exec::exec_fd(&fd, &full_argv, &exports, &env_filter) {
+        match exec::exec_fd(&fd, &full_argv, &state.exports, &state.env_filter) {
             Ok(()) => Ok(0),
             Err(report) => Err(report.change_context(ChildProcessError::ExecFailed)),
         }

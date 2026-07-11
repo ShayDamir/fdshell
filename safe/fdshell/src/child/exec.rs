@@ -19,18 +19,10 @@ pub(super) fn handle_exec_fd(
         .fds
         .get(&varname)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("var"))?;
-    let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
-        .exports
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
     let args_slice = refs
         .get(1..)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    // exec-without-fork: PID stays the same, so return child exit code
-    // regardless of outcome. Err arm only catches parse/syscall errors.
-    let env_filter = &state.env_filter;
-    match crate::exec::exec_fd(fd, args_slice, &exports, env_filter) {
+    match crate::exec::exec_fd(fd, args_slice, &state.exports, &state.env_filter) {
         Ok(()) => Ok(0),
         Err(report) => Ok(report.current_context().exit_code()),
     }
@@ -60,22 +52,16 @@ pub(super) fn handle_exec_at(
     let non_cloexec = dirfd
         .export()
         .change_context(builtins::error::BuiltinError::Syscall)?;
-    let exports: Vec<(sys::ShortCStr, Vec<u8>)> = state
-        .exports
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
     let args_slice = refs
         .get(2..)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
     // Same exec-without-fork semantics as exec_fd — always Ok(code).
-    let env_filter = &state.env_filter;
     match crate::exec::exec_at(
         non_cloexec.at(),
         &pathname,
         args_slice,
-        &exports,
-        env_filter,
+        &state.exports,
+        &state.env_filter,
     ) {
         Ok(()) => Ok(0),
         Err(report) => Ok(report.current_context().exit_code()),

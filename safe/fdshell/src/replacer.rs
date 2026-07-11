@@ -55,13 +55,7 @@ pub fn execute(
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        let exports: Vec<(ShortCStr, Vec<u8>)> = state
-            .exports
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let env_filter = state.env_filter.clone();
-        match exec::exec_fd(&fd, &argv, &exports, &env_filter) {
+        match exec::exec_fd(&fd, &argv, &state.exports, &state.env_filter) {
             Ok(()) => Ok(0),
             Err(report) => Err(report),
         }

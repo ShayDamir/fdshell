@@ -1,5 +1,6 @@
 mod environ;
 
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 
 use error_stack::{Report, ResultExt, bail};
@@ -15,7 +16,7 @@ use environ::get_environ;
 pub fn exec_fd(
     fd: &LocalFd,
     argv: &[&CStr],
-    exports: &[(ShortCStr, Vec<u8>)],
+    exports: &HashMap<ShortCStr, Vec<u8>>,
     env_filter: &EnvFilter,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
@@ -33,7 +34,7 @@ pub fn exec_at(
     dirfd: AtFd<'_>,
     pathname: &CStr,
     argv: &[&CStr],
-    exports: &[(ShortCStr, Vec<u8>)],
+    exports: &HashMap<ShortCStr, Vec<u8>>,
     env_filter: &EnvFilter,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
