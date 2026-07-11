@@ -1,6 +1,7 @@
 pub(crate) mod builtin;
 mod delegated;
 mod dispatch;
+mod error;
 mod exec;
 pub(crate) mod fdpass;
 mod help;
@@ -9,6 +10,7 @@ mod simple;
 use crate::parse::CommandLine;
 use sys::ShortCStr;
 
+pub(crate) use error::handle_builtin_error;
 pub use run::child_main;
 
 pub struct Command {

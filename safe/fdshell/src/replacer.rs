@@ -3,8 +3,7 @@ use crate::error::child_process::ChildProcessError;
 use crate::exec;
 use crate::resolve::substitute_args;
 use crate::state::ShellState;
-use builtins::error::BuiltinError;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -42,30 +41,7 @@ pub fn execute(
             .change_context(ChildProcessError::ExecFailed)?;
         match child::builtin::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
             Ok(code) => Ok(code),
-            Err(report) => match *report.current_context() {
-                BuiltinError::Unknown => {
-                    bail!(ChildProcessError::NotABuiltin(builtin_name.clone()))
-                }
-                BuiltinError::Help => Ok(0),
-                BuiltinError::InvalidArgument(_) | BuiltinError::MissingArgument(_) => {
-                    eprintln!("{:?}", report);
-                    Ok(1)
-                }
-                BuiltinError::Io => {
-                    Err(report.change_context(ChildProcessError::BuiltinExecutionFailed))
-                }
-                BuiltinError::Syscall => {
-                    if let Some(e) = report.downcast_ref::<sys::SyscallError>() {
-                        Ok(e.errno())
-                    } else {
-                        Ok(1)
-                    }
-                }
-                BuiltinError::SendFdFailed => {
-                    eprintln!("{:?}", report);
-                    Ok(1)
-                }
-            },
+            Err(report) => crate::child::handle_builtin_error(builtin_name.clone(), report),
         }
     } else {
         let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
