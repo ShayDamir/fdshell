@@ -8,6 +8,7 @@
 - [ ] `child/run.rs` at 82 code lines (2 over) — same cause as replacer.rs
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
+- [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
 
 ## Bash compatibility gaps
 
@@ -52,6 +53,10 @@
 - [ ] Process substitution (`<(cmd)`, `>(cmd)`) — fifo/pipe with /dev/fd path
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
 - [ ] History expansion (`!!`, `!echo`) — readline-style history
+
+## Tests
+
+- [ ] Fix parallel test interference — `test_captures_success` and `resolve_path_finds_dot_slash` fail when run with other tests in parallel but pass individually; run with `--test-threads=1` or identify shared state / file system collisions
 
 ## Security / hardening
 

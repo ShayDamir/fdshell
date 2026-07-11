@@ -7,6 +7,8 @@ pub enum ImportedFdError {
     Negative,
     /// fcntl(F_GETFD) failed
     GetFlags,
+    /// fcntl(F_SETFD) failed
+    SetFlags,
     /// file descriptor is internal (not passed from caller)
     InternalFd,
 }

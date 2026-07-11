@@ -40,10 +40,11 @@ impl ImportedFd {
         crate::AtFd::from(self)
     }
     /// Set CLOEXEC, converting this imported fd into a local owned fd.
-    pub fn try_into_local(self) -> Result<crate::LocalFd, crate::SyscallError> {
+    pub fn try_into_local(self) -> Result<crate::LocalFd, Report<crate::ImportedFdError>> {
         // SAFETY: `self.0` is a valid open fd; fcntl F_SETFD on
         // an invalid fd returns -1, handled by `cvt`.
-        crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
+        crate::cvt(unsafe { libc::fcntl(self.0, libc::F_SETFD, libc::FD_CLOEXEC) as isize })
+            .change_context(crate::ImportedFdError::SetFlags)?;
         // SAFETY: fcntl atomically set CLOEXEC; caller gets exclusive ownership.
         Ok(unsafe { crate::LocalFd::from_raw(self.0) })
     }
