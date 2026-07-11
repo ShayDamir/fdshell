@@ -20,7 +20,7 @@ impl ShortCStr {
         // so both point into the same allocation and `new` ≥ `orig`.
         let start = unsafe { new.as_ptr().offset_from(orig.as_ptr()) as usize };
         match self {
-            ShortCStr::Inline { .. } => unreachable!(),
+            ShortCStr::Inline { .. } => None,
             ShortCStr::Static(s, offset, _) => Some(ShortCStr::Static(s, offset + start, new_len)),
             ShortCStr::Arc { arc, offset, .. } => Some(ShortCStr::Arc {
                 arc: Arc::clone(arc),
@@ -30,9 +30,19 @@ impl ShortCStr {
         }
     }
 
+    pub fn split_once(&self, sep: &[u8]) -> Option<(Self, Self)> {
+        let bytes = self.as_bytes().ok()?;
+        if sep.is_empty() || sep.len() > bytes.len() {
+            return None;
+        }
+        let pos = bytes.windows(sep.len()).position(|w| w == sep)?;
+        let left = self.get(..pos)?;
+        let right = self.get(pos + sep.len()..)?;
+        Some((left, right))
+    }
+
     pub fn split_once_byte(&self, byte: u8) -> Option<(Self, Self)> {
-        let pos = self.as_bytes().ok()?.iter().position(|&b| b == byte)?;
-        Some((self.get(..pos)?, self.get(pos + 1..)?))
+        self.split_once(&[byte])
     }
 
     pub fn strip_prefix(&self, prefix: &[u8]) -> Option<Self> {

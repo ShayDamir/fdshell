@@ -26,9 +26,9 @@ Each item should be wrapped in `Report<...>` so the error chain is preserved.
 ## unsafe/sys/ — `Option` that silently drops syscall errors
 
 - [x] `read_proc_umask` (`umask.rs:29`) — changed to `Result<u32, UmaskError>` with variants: `ProcOpen`, `ProcRead`, `UmaskNotFound`, `InvalidUmask`
-- [ ] `ShortCStr::get` (`shortcstr/get.rs:7`) — returns `Option<Self>`, discards bounds / NUL byte
-- [ ] `ShortCStr::split_once_byte` (`shortcstr/get.rs:33`) — returns `Option<(Self, Self)>`, discards not found
-- [ ] `ShortCStr::strip_prefix` (`shortcstr/get.rs:38`) — returns `Option<Self>`, discards mismatch
+- [x] `ShortCStr::get` (`shortcstr/get.rs:7`) — `Option` is correct; callers treat `None` as "not found", not an error. Added `split_once(&[u8])` using `windows()`.
+- [x] `ShortCStr::split_once_byte` (`shortcstr/get.rs:33`) — delegates to `split_once`; same reasoning.
+- [x] `ShortCStr::strip_prefix` (`shortcstr/get.rs:38`) — same reasoning.
 
 ## unsafe/sys/ — `try_into_local` returned `Result<_, SyscallError>` instead of `Report<ImportedFdError>`
 

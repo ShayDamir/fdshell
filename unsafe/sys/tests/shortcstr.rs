@@ -324,7 +324,7 @@ fn static_equals_from_vec() {
 // --- split_once_byte ---
 
 #[test]
-fn split_once_mid() {
+fn split_once_byte_mid() {
     let s = ShortCStr::from(c"foo=bar");
     let (l, r) = s.split_once_byte(b'=').unwrap();
     assert_eq!(l.as_bytes().unwrap(), b"foo");
@@ -332,7 +332,7 @@ fn split_once_mid() {
 }
 
 #[test]
-fn split_once_start() {
+fn split_once_byte_start() {
     let s = ShortCStr::from(c"=bar");
     let (l, r) = s.split_once_byte(b'=').unwrap();
     assert_eq!(l.as_bytes().unwrap(), b"");
@@ -340,7 +340,7 @@ fn split_once_start() {
 }
 
 #[test]
-fn split_once_end() {
+fn split_once_byte_end() {
     let s = ShortCStr::from(c"foo=");
     let (l, r) = s.split_once_byte(b'=').unwrap();
     assert_eq!(l.as_bytes().unwrap(), b"foo");
@@ -348,21 +348,136 @@ fn split_once_end() {
 }
 
 #[test]
-fn split_once_none() {
+fn split_once_byte_none() {
     let s = ShortCStr::from(c"foobar");
     assert!(s.split_once_byte(b'=').is_none());
 }
 
 #[test]
-fn split_once_empty() {
+fn split_once_byte_empty() {
     let s = ShortCStr::from(c"");
     assert!(s.split_once_byte(b'=').is_none());
 }
 
 #[test]
-fn split_once_long() {
+fn split_once_byte_long() {
     let s = ShortCStr::from(LONG);
     assert!(s.split_once_byte(b'=').is_none());
+}
+
+// --- split_once ---
+
+#[test]
+fn split_once_mid() {
+    let s = ShortCStr::from(c"foo=bar");
+    let (l, r) = s.split_once(b"=").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"foo");
+    assert_eq!(r.as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn split_once_start() {
+    let s = ShortCStr::from(c"=bar");
+    let (l, r) = s.split_once(b"=").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"");
+    assert_eq!(r.as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn split_once_end() {
+    let s = ShortCStr::from(c"foo=");
+    let (l, r) = s.split_once(b"=").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"foo");
+    assert_eq!(r.as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn split_once_none() {
+    let s = ShortCStr::from(c"foobar");
+    assert!(s.split_once(b"=").is_none());
+}
+
+#[test]
+fn split_once_empty_sep() {
+    let s = ShortCStr::from(c"foo=bar");
+    assert!(s.split_once(b"").is_none());
+}
+
+#[test]
+fn split_once_empty_data() {
+    let s = ShortCStr::from(c"");
+    assert!(s.split_once(b"=").is_none());
+}
+
+#[test]
+fn split_once_longer_than_data() {
+    let s = ShortCStr::from(c"ab");
+    assert!(s.split_once(b"abc").is_none());
+}
+
+#[test]
+fn split_once_repeated() {
+    let s = ShortCStr::from(c"a=b=c");
+    let (l, r) = s.split_once(b"=").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"a");
+    assert_eq!(r.as_bytes().unwrap(), b"b=c");
+}
+
+#[test]
+fn split_once_multibyte_sep() {
+    let s = ShortCStr::from(c"Umask:\t0022");
+    let (l, r) = s.split_once(b"Umask:\t").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"");
+    assert_eq!(r.as_bytes().unwrap(), b"0022");
+}
+
+#[test]
+fn split_once_static() {
+    let s = ShortCStr::from(LONG);
+    let (l, r) = s.split_once(b"lazy dog.").unwrap();
+    assert_eq!(
+        l.as_bytes().unwrap(),
+        b"The quick brown fox jumps over the "
+    );
+    assert_eq!(
+        r.as_bytes().unwrap(),
+        b" Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump!"
+    );
+}
+
+#[test]
+fn split_once_arc() {
+    let bytes = b"hello=world this is a longer string that goes to arc";
+    let s = ShortCStr::from_vec(bytes.to_vec()).unwrap();
+    let (l, r) = s.split_once(b"=").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"hello");
+    assert_eq!(
+        r.as_bytes().unwrap(),
+        b"world this is a longer string that goes to arc"
+    );
+}
+
+#[test]
+fn split_once_inline() {
+    let bytes = b"foo=bar";
+    let s = ShortCStr::from_vec(bytes.to_vec()).unwrap();
+    let (l, r) = s.split_once(b"=").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"foo");
+    assert_eq!(r.as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn split_once_preserves_static_variant() {
+    let s = ShortCStr::from(LONG);
+    let (l, r) = s.split_once(b"lazy").unwrap();
+    assert_eq!(
+        l.as_bytes().unwrap(),
+        b"The quick brown fox jumps over the "
+    );
+    assert_eq!(
+        r.as_bytes().unwrap(),
+        b" dog. Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump!"
+    );
 }
 
 // --- strip_prefix ---

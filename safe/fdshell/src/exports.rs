@@ -13,13 +13,8 @@ pub fn handle_export(
             Ok(())
         }
         Some(arg) => {
-            if let Some(eq_pos) = arg
-                .as_bytes()
-                .change_context(ExportError::NulByte)?
-                .iter()
-                .position(|&b| b == b'=')
-            {
-                set_export(arg, eq_pos, state).change_context(ExportError::NulByte)?;
+            if let Some((name, value)) = arg.split_once_byte(b'=') {
+                set_export(name, value, state).change_context(ExportError::NulByte)?;
             } else {
                 mark_exported(arg, state).change_context(ExportError::NulByte)?;
             }
@@ -37,24 +32,19 @@ fn list_exports(state: &ShellState) {
 }
 
 fn set_export(
-    arg: &ShortCStr,
-    eq_pos: usize,
+    name: ShortCStr,
+    value: ShortCStr,
     state: &mut ShellState,
 ) -> Result<(), ShortCStrError> {
-    let bytes = arg.as_bytes()?;
-    let name_bytes = bytes
-        .get(..eq_pos)
-        .ok_or(ShortCStrError::BadState)?
-        .to_vec();
-    let val_bytes = bytes
-        .get(eq_pos + 1..)
-        .ok_or(ShortCStrError::BadState)?
-        .to_vec();
-    let name_cstr = ShortCStr::from_vec(name_bytes)?;
+    let name_bytes = name.as_bytes()?.to_vec();
+    let val_bytes = value.as_bytes()?.to_vec();
+    state.strings.insert(
+        ShortCStr::from_vec(name_bytes.clone())?,
+        ShortCStr::from_vec(val_bytes.clone())?,
+    );
     state
-        .strings
-        .insert(name_cstr.clone(), ShortCStr::from_vec(val_bytes.clone())?);
-    state.exports.insert(name_cstr, val_bytes);
+        .exports
+        .insert(ShortCStr::from_vec(name_bytes)?, val_bytes);
     Ok(())
 }
 
