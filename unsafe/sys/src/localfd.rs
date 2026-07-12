@@ -17,7 +17,7 @@ impl LocalFd {
         // with invalid fd returns -1/EBADF, caught by `cvt`.
         let flags = crate::cvt(unsafe { libc::fcntl(self.0, libc::F_GETFD) as isize })?;
         if flags & libc::FD_CLOEXEC as isize == 0 {
-            return Err(crate::SyscallError::EINVAL);
+            return Err(crate::SyscallError::EINVAL("fcntl(F_GETFD)"));
         }
         Ok(())
     }

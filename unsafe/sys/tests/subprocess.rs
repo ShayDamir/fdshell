@@ -7,11 +7,17 @@ fn fork_exit_0() -> Result<(), SyscallError> {
     if ret == 0 {
         std::process::exit(0);
     }
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd",
+    })?;
     pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }
 
@@ -21,11 +27,17 @@ fn fork_exit_42() -> Result<(), SyscallError> {
     if ret == 0 {
         std::process::exit(42);
     }
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd",
+    })?;
     pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(42) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }
 
@@ -37,10 +49,16 @@ fn fork_signaled() -> Result<(), SyscallError> {
         unsafe { libc::raise(libc::SIGKILL) };
         std::process::exit(0);
     }
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd",
+    })?;
     pidfd.verify()?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Signaled(libc::SIGKILL) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }

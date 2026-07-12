@@ -49,6 +49,7 @@ pub mod siginfo;
 pub mod split;
 pub mod stat;
 pub mod syscall_error;
+pub mod syscall_error_from;
 pub mod umask;
 pub mod unlinkat;
 pub mod wait_pidfd;

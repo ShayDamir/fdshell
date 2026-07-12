@@ -14,7 +14,7 @@ const EXECVEAT_OK: &str = env!("CARGO_BIN_EXE_execveat_ok");
 fn execveat_noent() {
     let empty: &[&CStr] = &[];
     let result = sys::execveat::execveat(sys::AtFd::cwd(), c"/does/not/exist", empty, empty, 0);
-    assert_eq!(result, Err(sys::SyscallError::ENOENT));
+    assert_eq!(result, Err(sys::SyscallError::ENOENT("unknown")));
 }
 
 #[test]

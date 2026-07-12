@@ -8,34 +8,43 @@ use core::fmt;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum SyscallError {
-    E2BIG,
-    EAGAIN,
-    EBADF,
-    EEXIST,
-    EINVAL,
-    EIO,
-    EMFILE,
-    ENOENT,
-    ENOSYS,
-    EPERM,
-    Other(i32),
+    E2BIG(&'static str),
+    EAGAIN(&'static str),
+    EBADF(&'static str),
+    EEXIST(&'static str),
+    EINVAL(&'static str),
+    EIO(&'static str),
+    EMFILE(&'static str),
+    ENOENT(&'static str),
+    ENOSYS(&'static str),
+    EPERM(&'static str),
+    Other { errno: i32, syscall: &'static str },
 }
 
 impl SyscallError {
     pub fn errno(self) -> i32 {
         use SyscallError::*;
         match self {
-            E2BIG => libc::E2BIG,
-            EAGAIN => libc::EAGAIN,
-            EBADF => libc::EBADF,
-            EEXIST => libc::EEXIST,
-            EINVAL => libc::EINVAL,
-            EIO => libc::EIO,
-            EMFILE => libc::EMFILE,
-            ENOENT => libc::ENOENT,
-            ENOSYS => libc::ENOSYS,
-            EPERM => libc::EPERM,
-            Other(n) => n,
+            E2BIG(_) => libc::E2BIG,
+            EAGAIN(_) => libc::EAGAIN,
+            EBADF(_) => libc::EBADF,
+            EEXIST(_) => libc::EEXIST,
+            EINVAL(_) => libc::EINVAL,
+            EIO(_) => libc::EIO,
+            EMFILE(_) => libc::EMFILE,
+            ENOENT(_) => libc::ENOENT,
+            ENOSYS(_) => libc::ENOSYS,
+            EPERM(_) => libc::EPERM,
+            Other { errno, .. } => errno,
+        }
+    }
+
+    pub fn syscall(self) -> &'static str {
+        use SyscallError::*;
+        match self {
+            E2BIG(s) | EAGAIN(s) | EBADF(s) | EEXIST(s) | EINVAL(s) | EIO(s) | EMFILE(s)
+            | ENOENT(s) | ENOSYS(s) | EPERM(s) => s,
+            Other { syscall, .. } => syscall,
         }
     }
 }
@@ -43,40 +52,23 @@ impl SyscallError {
 impl fmt::Display for SyscallError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SyscallError::*;
-        let name = match self {
-            E2BIG => "E2BIG",
-            EAGAIN => "EAGAIN",
-            EBADF => "EBADF",
-            EEXIST => "EEXIST",
-            EINVAL => "EINVAL",
-            EIO => "EIO",
-            EMFILE => "EMFILE",
-            ENOENT => "ENOENT",
-            ENOSYS => "ENOSYS",
-            EPERM => "EPERM",
-            Other(n) => return write!(f, "errno {}", n),
+        let (name, syscall) = match self {
+            E2BIG(s) => ("E2BIG", s),
+            EAGAIN(s) => ("EAGAIN", s),
+            EBADF(s) => ("EBADF", s),
+            EEXIST(s) => ("EEXIST", s),
+            EINVAL(s) => ("EINVAL", s),
+            EIO(s) => ("EIO", s),
+            EMFILE(s) => ("EMFILE", s),
+            ENOENT(s) => ("ENOENT", s),
+            ENOSYS(s) => ("ENOSYS", s),
+            EPERM(s) => ("EPERM", s),
+            Other { errno, syscall } => {
+                return write!(f, "{} (errno {})", syscall, errno);
+            }
         };
-        write!(f, "{}", name)
+        write!(f, "{} ({})", name, syscall)
     }
 }
 
 impl core::error::Error for SyscallError {}
-
-impl From<i32> for SyscallError {
-    fn from(raw: i32) -> Self {
-        use SyscallError::*;
-        match raw {
-            libc::E2BIG => E2BIG,
-            libc::EAGAIN => EAGAIN,
-            libc::EBADF => EBADF,
-            libc::EEXIST => EEXIST,
-            libc::EINVAL => EINVAL,
-            libc::EIO => EIO,
-            libc::EMFILE => EMFILE,
-            libc::ENOENT => ENOENT,
-            libc::ENOSYS => ENOSYS,
-            libc::EPERM => EPERM,
-            n => Other(n),
-        }
-    }
-}

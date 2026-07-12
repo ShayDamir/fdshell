@@ -42,7 +42,12 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), SyscallEr
     // connected Unix socket; `send_fd` is a valid open fd.
     if unsafe { libc::sendmsg(fd, &msg, 0) } == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
-        return Err(unsafe { SyscallError::Other(*libc::__errno_location()) });
+        return Err(unsafe {
+            SyscallError::Other {
+                errno: *libc::__errno_location(),
+                syscall: "sendmsg",
+            }
+        });
     }
     Ok(())
 }
@@ -52,24 +57,17 @@ fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
     let pid = unsafe { libc::fork() };
     if pid == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
-        return Err(unsafe { SyscallError::Other(*libc::__errno_location()) });
+        return Err(unsafe {
+            SyscallError::Other {
+                errno: *libc::__errno_location(),
+                syscall: "fork",
+            }
+        });
     }
     if pid == 0 {
-        let code = match f() {
+        let code = match &f() {
             Ok(()) => 0,
-            Err(e) => match &e {
-                SyscallError::Other(n) => *n,
-                SyscallError::EAGAIN => libc::EAGAIN,
-                SyscallError::EBADF => libc::EBADF,
-                SyscallError::EINVAL => libc::EINVAL,
-                SyscallError::EPERM => libc::EPERM,
-                SyscallError::ENOENT => libc::ENOENT,
-                SyscallError::EIO => libc::EIO,
-                SyscallError::EMFILE => libc::EMFILE,
-                SyscallError::E2BIG => libc::E2BIG,
-                SyscallError::EEXIST => libc::EEXIST,
-                SyscallError::ENOSYS => libc::ENOSYS,
-            },
+            Err(e) => e.errno(),
         };
         std::process::exit(code);
     }
@@ -81,7 +79,10 @@ fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
         if code == 0 {
             Ok(())
         } else {
-            Err(SyscallError::Other(code as i32))
+            Err(SyscallError::Other {
+                errno: code as i32,
+                syscall: "fork_test",
+            })
         }
     } else if libc::WIFSIGNALED(status) {
         panic!("test child killed by signal {}", libc::WTERMSIG(status));

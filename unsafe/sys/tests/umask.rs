@@ -7,7 +7,7 @@ fn with_exhausted_fds<T>(f: impl FnOnce() -> T) -> T {
         // SAFETY: dup(0) is safe with stdin; fails with EMFILE when table is full.
         let ret = unsafe { libc::dup(0) } as isize;
         match sys::cvt(ret) {
-            Err(sys::SyscallError::EMFILE) => break,
+            Err(sys::SyscallError::EMFILE(_)) => break,
             Err(e) => panic!("unexpected errno from dup: {e}"),
             Ok(fd) => held.push(fd as i32),
         }
@@ -37,8 +37,14 @@ fn umask_save_restore() -> Result<(), SyscallError> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => SyscallError::Other(n),
-            _ => SyscallError::Other(sys::errno::EINVAL),
+            WaitStatus::Exited(n) => SyscallError::Other {
+                errno: n,
+                syscall: "wait_pidfd",
+            },
+            _ => SyscallError::Other {
+                errno: sys::errno::EINVAL,
+                syscall: "wait_pidfd",
+            },
         }),
     }
 }
@@ -65,8 +71,14 @@ fn umask_set_get() -> Result<(), SyscallError> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => SyscallError::Other(n),
-            _ => SyscallError::Other(sys::errno::EINVAL),
+            WaitStatus::Exited(n) => SyscallError::Other {
+                errno: n,
+                syscall: "wait_pidfd",
+            },
+            _ => SyscallError::Other {
+                errno: sys::errno::EINVAL,
+                syscall: "wait_pidfd",
+            },
         }),
     }
 }
@@ -88,8 +100,14 @@ fn umask_set_get_zero() -> Result<(), SyscallError> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => SyscallError::Other(n),
-            _ => SyscallError::Other(sys::errno::EINVAL),
+            WaitStatus::Exited(n) => SyscallError::Other {
+                errno: n,
+                syscall: "wait_pidfd",
+            },
+            _ => SyscallError::Other {
+                errno: sys::errno::EINVAL,
+                syscall: "wait_pidfd",
+            },
         }),
     }
 }
@@ -109,8 +127,14 @@ fn umask_init_fallback_no_proc() -> Result<(), SyscallError> {
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
-            WaitStatus::Exited(n) => SyscallError::Other(n),
-            _ => SyscallError::Other(sys::errno::EINVAL),
+            WaitStatus::Exited(n) => SyscallError::Other {
+                errno: n,
+                syscall: "wait_pidfd",
+            },
+            _ => SyscallError::Other {
+                errno: sys::errno::EINVAL,
+                syscall: "wait_pidfd",
+            },
         }),
     }
 }

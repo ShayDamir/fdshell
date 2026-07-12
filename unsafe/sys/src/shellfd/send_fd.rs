@@ -5,11 +5,11 @@ use core::ffi::CStr;
 
 pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), crate::SyscallError> {
     if !super::capture_active() {
-        return Err(crate::SyscallError::ENOENT);
+        return Err(crate::SyscallError::ENOENT("send_fd"));
     }
     let tag_bytes = tag.to_bytes_with_nul();
     if tag_bytes.len() > super::TAG_MAX {
-        return Err(crate::SyscallError::E2BIG);
+        return Err(crate::SyscallError::E2BIG("send_fd"));
     }
     let mut iov = IoVec::new(tag_bytes);
     let mut cmsg = CmsgBuf {

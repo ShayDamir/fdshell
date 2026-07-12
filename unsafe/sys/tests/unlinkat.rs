@@ -48,7 +48,7 @@ fn unlinkat_enoent() {
     let missing = dir.join("does-not-exist");
     let path = std::ffi::CString::new(missing.to_str().unwrap()).unwrap();
     let err = sys::unlinkat::unlinkat(sys::AtFd::cwd(), &path, 0).unwrap_err();
-    assert_eq!(err, sys::SyscallError::ENOENT);
+    assert_eq!(err, sys::SyscallError::ENOENT("unknown"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -62,6 +62,12 @@ fn unlinkat_notdir() {
     let path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
     let err =
         sys::unlinkat::unlinkat(sys::AtFd::cwd(), &path, sys::unlinkat::AT_REMOVEDIR).unwrap_err();
-    assert_eq!(err, sys::SyscallError::Other(libc::ENOTDIR));
+    assert_eq!(
+        err,
+        sys::SyscallError::Other {
+            errno: libc::ENOTDIR,
+            syscall: "unknown"
+        }
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

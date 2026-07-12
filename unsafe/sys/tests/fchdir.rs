@@ -21,5 +21,5 @@ fn fchdir_ebadf() {
     // SAFETY: -1 is never a valid fd; fchdir returns EBADF.
     let fd = unsafe { sys::LocalFd::from_raw(-1) };
     let err = sys::fchdir::fchdir(&fd).unwrap_err();
-    assert_eq!(err, sys::SyscallError::EBADF);
+    assert_eq!(err, sys::SyscallError::EBADF("unknown"));
 }

@@ -21,6 +21,6 @@ pub fn wait_pidfd(pidfd: &LocalFd) -> Result<WaitStatus, crate::SyscallError> {
     Ok(match info.si_code {
         libc::CLD_EXITED => WaitStatus::Exited(info.si_status),
         libc::CLD_KILLED | libc::CLD_DUMPED => WaitStatus::Signaled(info.si_status),
-        _ => return Err(crate::SyscallError::EINVAL),
+        _ => return Err(crate::SyscallError::EINVAL("waitid")),
     })
 }

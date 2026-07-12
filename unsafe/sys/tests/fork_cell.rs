@@ -47,10 +47,16 @@ fn fork_pidfd_cell_child_mut_borrow() -> Result<(), SyscallError> {
     // Parent's copy is unchanged by child mutation (fork gives separate address spaces)
     assert_eq!(*cell.borrow().unwrap(), 100);
 
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd_cell",
+    })?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }
 
@@ -78,10 +84,16 @@ fn fork_pidfd_cell_with_active_borrows() -> Result<(), SyscallError> {
     // Parent's value unchanged — child mutated its own copy
     assert_eq!(*cell.borrow().unwrap(), 42);
 
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd_cell",
+    })?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }
 
@@ -100,12 +112,18 @@ fn fork_pidfd_cell_parent_uses_borrow() -> Result<(), SyscallError> {
         std::process::exit(42);
     }
 
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd_cell",
+    })?;
     // Parent can still borrow normally (the child's copy is separate).
     assert_eq!(*cell.borrow().unwrap(), 7);
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(42) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }
 
@@ -125,10 +143,16 @@ fn fork_pidfd_cell_with_struct() -> Result<(), SyscallError> {
         std::process::exit(0);
     }
 
-    let pidfd = pidfd_opt.ok_or(SyscallError::Other(sys::errno::EINVAL))?;
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd_cell",
+    })?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
-        _ => Err(SyscallError::Other(sys::errno::EINVAL)),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
     }
 }
 
