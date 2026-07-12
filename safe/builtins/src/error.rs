@@ -45,17 +45,6 @@ pub enum FlagParseError {
 
 impl core::error::Error for FlagParseError {}
 
-/// Errors from parsing file descriptor values.
-#[derive(displaydoc::Display, Debug)]
-pub enum FdParseError {
-    /// invalid file descriptor
-    Invalid,
-    /// negative file descriptor
-    Negative,
-}
-
-impl core::error::Error for FdParseError {}
-
 /// Errors from parsing mode values (octal/hex).
 #[derive(displaydoc::Display, Debug)]
 pub enum ModeParseError {

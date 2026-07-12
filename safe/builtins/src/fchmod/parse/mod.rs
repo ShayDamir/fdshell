@@ -1,11 +1,12 @@
 use alloc::vec::Vec;
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt, bail, ensure};
+use error_stack::{Report, ResultExt, bail};
 
-use crate::error::{BuiltinError, FdParseError, Suggestion};
+use crate::error::{BuiltinError, Suggestion};
+use sys::ImportedFd;
 
 pub struct FchmodConfig {
-    pub fds: Vec<i32>,
+    pub fds: Vec<ImportedFd>,
     pub mode: u32,
 }
 
@@ -24,7 +25,7 @@ pub fn fchmod_parse(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>
 }
 
 fn flag_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
-    let mut fds: Vec<i32> = Vec::new();
+    let mut fds: Vec<ImportedFd> = Vec::new();
     let mut mode: Option<u32> = None;
     let mut i = 0;
 
@@ -35,7 +36,8 @@ fn flag_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
         match key {
             b"--fd" => {
                 let s = crate::argparse::next_val(args, &mut i, val)?;
-                let fd = parse_fd(s).change_context(BuiltinError::InvalidArgument("fd"))?;
+                let fd = ImportedFd::from_bytes(s.to_bytes())
+                    .change_context(BuiltinError::InvalidArgument("fd"))?;
                 fds.push(fd);
             }
             b"--mode" => {
@@ -75,17 +77,10 @@ fn positional_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>>
 
     let mut fds = Vec::new();
     for a in args.iter().skip(1) {
-        let fd = parse_fd(a).change_context(BuiltinError::InvalidArgument("fd"))?;
+        let fd = ImportedFd::from_bytes(a.to_bytes())
+            .change_context(BuiltinError::InvalidArgument("fd"))?;
         fds.push(fd);
     }
 
     Ok(FchmodConfig { fds, mode })
-}
-
-fn parse_fd(s: &CStr) -> Result<i32, Report<FdParseError>> {
-    let b = s.to_bytes();
-    let s = core::str::from_utf8(b).change_context(FdParseError::Invalid)?;
-    let n: i32 = s.parse().change_context(FdParseError::Invalid)?;
-    ensure!(n >= 0, FdParseError::Negative);
-    Ok(n)
 }

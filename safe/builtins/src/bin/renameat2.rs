@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 fn main() {
     let argv: Vec<std::ffi::CString> = std::env::args()
         .skip(1)
