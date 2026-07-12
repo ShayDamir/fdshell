@@ -10,7 +10,7 @@ pub(crate) fn try_intercept(
     let cmd = cmdline
         .command
         .as_bytes()
-        .change_context(crate::error::cmd::CmdError::Exec)?;
+        .change_context(crate::error::cmd::CmdError::Never)?;
     match cmd {
         b"cd" => cd::run_cd(line, cmdline, cell),
         b"exit" | b"quit" => exit::run_exit(line, cmdline, cell),

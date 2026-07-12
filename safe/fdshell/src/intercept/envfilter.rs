@@ -30,19 +30,19 @@ pub(crate) fn run_envfilter(
     let parsed = parse::parse_args(&cmdline.args, line)?;
 
     if parsed.do_clear {
-        let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.env_filter.clear();
         return Ok(true);
     }
 
     if !parsed.allow_patterns.is_empty() || !parsed.deny_patterns.is_empty() {
-        let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.env_filter.allow.extend(parsed.allow_patterns);
         state.env_filter.deny.extend(parsed.deny_patterns);
     }
 
     if parsed.do_list {
-        let state = cell.borrow().change_context(CmdError::Exec)?;
+        let state = cell.borrow().change_context(CmdError::Never)?;
         print_rules(&state.env_filter);
     }
 

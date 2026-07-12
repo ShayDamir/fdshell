@@ -13,12 +13,13 @@ pub(crate) fn run_exit(
 
     let code = match cmdline.args.first() {
         Some(arg) => {
-            let s = core::str::from_utf8(arg.as_bytes().change_context(CmdError::Exec)?)
-                .change_context(CmdError::ExitArgInvalid)?;
-            s.parse::<i32>().change_context(CmdError::ExitArgInvalid)?
+            let s = core::str::from_utf8(arg.as_bytes().change_context(CmdError::Never)?)
+                .change_context(CmdError::InvalidArgument { arg: "exit code" })?;
+            s.parse::<i32>()
+                .change_context(CmdError::InvalidArgument { arg: "exit code" })?
         }
         None => {
-            let state = cell.borrow().change_context(CmdError::Exec)?;
+            let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()
         }
     };

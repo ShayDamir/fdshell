@@ -11,18 +11,18 @@ pub(crate) fn run_for(
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
     {
-        let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
     }
     let words =
         crate::expand::expand_for_words(&forblock.words, cell).change_context(CmdError::Resolve)?;
     for word in &words {
         {
-            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.strings.insert(forblock.var.clone(), word.clone());
         }
         if let Some(control) = crate::repl::run_script(
-            forblock.body.as_bytes().change_context(CmdError::Exec)?,
+            forblock.body.as_bytes().change_context(CmdError::Never)?,
             cell,
         )? {
             match control {

@@ -28,7 +28,7 @@ pub(super) fn parse_args(args: &[ShortCStr], line: &[u8]) -> Result<ParsedArgs, 
     let mut deny_patterns = Vec::new();
     let mut i = 0;
     while let Some(arg) = args.get(i) {
-        let arg_bytes = arg.as_bytes().change_context(CmdError::Exec)?;
+        let arg_bytes = arg.as_bytes().change_context(CmdError::Never)?;
         if arg_bytes == b"--help" || arg_bytes == b"-h" {
             print_help();
             return Ok(ParsedArgs::default());

@@ -11,7 +11,7 @@ pub(crate) fn run_cd(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "cd", cmdline)?;
 
-    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     crate::cd::cd(&cmdline.args, &mut state).change_context(CmdError::Cd)?;
     state.set_last_exit(0);
     Ok(true)

@@ -12,7 +12,7 @@ pub(crate) fn run_export_fd(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept_no_builtin(line, "export_fd", cmdline)?;
 
-    let state = cell.borrow().change_context(CmdError::Exec)?;
+    let state = cell.borrow().change_context(CmdError::Never)?;
     let status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {
         Ok(_) => WaitStatus::Exited(0),
         Err(report) => WaitStatus::Exited(match report.current_context() {
@@ -24,7 +24,7 @@ pub(crate) fn run_export_fd(
     };
     drop(state);
 
-    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(status.exit_code());
     Ok(true)
 }

@@ -13,13 +13,13 @@ pub(crate) fn run_simple(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     match parsed {
         crate::parse::ParsedLine::AssignFd { var, value } => {
-            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             let src = state
                 .fds
                 .get(value)
-                .ok_or(CmdError::Exec)?
+                .ok_or(CmdError::FdNotSet)?
                 .try_clone()
-                .change_context(CmdError::Exec)?;
+                .change_context(CmdError::Fd)?;
             state.fds.insert(var.clone(), src);
             state.set_last_exit(0);
         }
@@ -28,7 +28,7 @@ pub(crate) fn run_simple(
                 crate::substitute::substitute_arg(value, &mut HashMap::new(), cell)
                     .change_context(CmdError::Resolve)?
             };
-            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.strings.insert(
                 var.clone(),
                 ShortCStr::from_vec(expanded.into_bytes()).change_context(CmdError::Resolve)?,
@@ -36,7 +36,7 @@ pub(crate) fn run_simple(
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
-            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.fds.remove(var);
             state.tasks.remove(var);
             state.set_last_exit(0);
@@ -47,7 +47,7 @@ pub(crate) fn run_simple(
             } else {
                 println!("{:04o}", sys::umask::get());
             }
-            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),

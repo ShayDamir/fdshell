@@ -13,36 +13,36 @@ pub(crate) fn run_if(
     let cond = ifblock
         .condition
         .as_bytes()
-        .change_context(CmdError::Exec)?;
+        .change_context(CmdError::Never)?;
     crate::repl::run_cond_list(cond, cell)?;
     let exit_code = {
-        let state = cell.borrow().change_context(CmdError::Exec)?;
+        let state = cell.borrow().change_context(CmdError::Never)?;
         state.last_status.exit_code()
     };
     if exit_code == 0 {
         let then = ifblock
             .then_body
             .as_bytes()
-            .change_context(CmdError::Exec)?;
+            .change_context(CmdError::Never)?;
         return crate::repl::run_script(then, cell);
     }
     for (elif_cond, elif_body) in &ifblock.elifs {
-        let ec = elif_cond.as_bytes().change_context(CmdError::Exec)?;
+        let ec = elif_cond.as_bytes().change_context(CmdError::Never)?;
         crate::repl::run_cond_list(ec, cell)?;
         let ec_exit = {
-            let state = cell.borrow().change_context(CmdError::Exec)?;
+            let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()
         };
         if ec_exit == 0 {
-            let eb = elif_body.as_bytes().change_context(CmdError::Exec)?;
+            let eb = elif_body.as_bytes().change_context(CmdError::Never)?;
             return crate::repl::run_script(eb, cell);
         }
     }
     if let Some(ref else_body) = ifblock.else_body {
-        let eb = else_body.as_bytes().change_context(CmdError::Exec)?;
+        let eb = else_body.as_bytes().change_context(CmdError::Never)?;
         return crate::repl::run_script(eb, cell);
     } else {
-        let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
     }
     Ok(None)

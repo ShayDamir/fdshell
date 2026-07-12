@@ -11,7 +11,7 @@ pub(crate) fn run_wait(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "wait", cmdline)?;
 
-    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.last_status =
         crate::task::try_wait(&cmdline.args, &mut state).change_context(CmdError::Task)?;
     Ok(true)

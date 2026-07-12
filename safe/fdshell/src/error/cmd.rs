@@ -25,8 +25,6 @@ pub enum CmdError {
     Redirect,
     /// resolution error
     Resolve,
-    /// execution error
-    Exec,
     /// cd failed
     Cd,
     /// invalid export name
@@ -49,6 +47,14 @@ pub enum CmdError {
     BreakOutsideLoop,
     /// 'continue' is not inside a loop
     ContinueOutsideLoop,
+    /// impossible error state (should never occur)
+    Never,
+    /// invalid {arg}
+    InvalidArgument { arg: &'static str },
+    /// fd variable not set
+    FdNotSet,
+    /// fd operation failed
+    Fd,
 }
 
 impl core::error::Error for CmdError {}

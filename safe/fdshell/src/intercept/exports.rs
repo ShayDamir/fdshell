@@ -11,7 +11,7 @@ pub(crate) fn run_export(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "export", cmdline)?;
 
-    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     crate::exports::handle_export(&cmdline.args, &mut state)
         .change_context(CmdError::ExportName)?;
     state.set_last_exit(0);

@@ -21,15 +21,15 @@ pub(crate) fn run_case(
 
     for clause in &caseblock.clauses {
         for pattern in &clause.patterns {
-            let pattern_bytes = pattern.as_bytes().change_context(CmdError::Exec)?;
+            let pattern_bytes = pattern.as_bytes().change_context(CmdError::Never)?;
             if glob_match(pattern_bytes, word_bytes) {
-                let body = clause.body.as_bytes().change_context(CmdError::Exec)?;
+                let body = clause.body.as_bytes().change_context(CmdError::Never)?;
                 return crate::repl::run_script(body, cell);
             }
         }
     }
 
-    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(0);
     Ok(None)
 }

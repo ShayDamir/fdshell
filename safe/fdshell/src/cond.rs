@@ -31,7 +31,7 @@ pub(crate) fn run_cond_list(
                     if let Some(control) = crate::run::run_one(part, cell)? {
                         return Ok(Some(control));
                     }
-                    let state = cell.borrow().change_context(CmdError::Exec)?;
+                    let state = cell.borrow().change_context(CmdError::Never)?;
                     if (tail.starts_with(b"&&") && state.last_status.exit_code() != 0)
                         || (tail.starts_with(b"||") && state.last_status.exit_code() == 0)
                     {

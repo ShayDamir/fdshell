@@ -9,13 +9,15 @@ pub(crate) fn run_shift(
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     let n = match cmdline.args.first() {
         None => 1,
         Some(arg) => {
-            let bytes = arg.as_bytes().change_context(CmdError::Exec)?;
-            let s = core::str::from_utf8(bytes).change_context(CmdError::Exec)?;
-            s.parse::<usize>().change_context(CmdError::Exec)?
+            let bytes = arg.as_bytes().change_context(CmdError::Never)?;
+            let s = core::str::from_utf8(bytes)
+                .change_context(CmdError::InvalidArgument { arg: "shift count" })?;
+            s.parse::<usize>()
+                .change_context(CmdError::InvalidArgument { arg: "shift count" })?
         }
     };
     state.shift(n);

@@ -17,7 +17,7 @@ pub(crate) fn run_one(
             }
             let outcome = crate::launch::launch(cell, cmdline).change_context(CmdError::Launch)?;
             {
-                let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+                let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
                 state.last_status =
                     crate::postlaunch::finish_cmd(cmdline.clone(), outcome, &mut state)
                         .change_context(CmdError::Launch)?;
@@ -27,7 +27,7 @@ pub(crate) fn run_one(
         crate::parse::ParsedLine::Pipeline(pipeline) => {
             let status = crate::postlaunch::run_pipeline(pipeline.clone(), cell)
                 .change_context(CmdError::Pipeline)?;
-            let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.last_status = status;
             Ok(None)
         }

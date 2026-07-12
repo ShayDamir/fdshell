@@ -28,7 +28,7 @@ pub fn exec_cmd(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, Report<
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
         }
     }
-    let state = cell.borrow().change_context(CmdError::Exec)?;
+    let state = cell.borrow().change_context(CmdError::Never)?;
     Ok(state.last_status.exit_code())
 }
 

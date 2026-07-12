@@ -14,16 +14,16 @@ pub(crate) fn run_loop(
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
     loop {
-        crate::repl::run_cond_list(cond.as_bytes().change_context(CmdError::Exec)?, cell)?;
+        crate::repl::run_cond_list(cond.as_bytes().change_context(CmdError::Never)?, cell)?;
         let exit_code = {
-            let state = cell.borrow().change_context(CmdError::Exec)?;
+            let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()
         };
         if (exit_code == 0) != invert {
             break;
         }
         if let Some(control) =
-            crate::repl::run_script(body.as_bytes().change_context(CmdError::Exec)?, cell)?
+            crate::repl::run_script(body.as_bytes().change_context(CmdError::Never)?, cell)?
         {
             match control {
                 LoopControl::Break => break,
