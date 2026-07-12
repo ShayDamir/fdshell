@@ -5,7 +5,7 @@ use crate::error::capture::CaptureError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::net::socketpair;
-use sys::shellfd::{send_fd, set_capture_active};
+use sys::shellfd::{SHELLFD, send_fd, set_capture_active};
 
 fn short_cstr(s: &'static [u8]) -> ShortCStr {
     ShortCStr::from_vec(s.to_vec()).unwrap()
@@ -16,6 +16,9 @@ fn test_captures_exists() {
     let (a, b) = socketpair().expect("socketpair");
     a.verify().expect("verify a");
     b.verify().expect("verify b");
+
+    // Place `a` at SHELLFD so send_fd can send through it.
+    a.export_to(SHELLFD).expect("export a to SHELLFD");
 
     // Send an fd so recv_fd succeeds and reaches the Exists check.
     let (test_a, test_b) = socketpair().expect("socketpair");
@@ -49,6 +52,9 @@ fn test_captures_success() {
     let (a, b) = socketpair().expect("socketpair");
     a.verify().expect("verify a");
     b.verify().expect("verify b");
+
+    // Place `a` at SHELLFD so send_fd can send through it.
+    a.export_to(SHELLFD).expect("export a to SHELLFD");
 
     let (test_a, test_b) = socketpair().expect("socketpair");
     test_a.verify().expect("verify test_a");
