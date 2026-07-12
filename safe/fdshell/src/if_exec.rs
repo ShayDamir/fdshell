@@ -5,7 +5,6 @@ use crate::error::cmd::CmdError;
 use crate::parse::if_block::IfBlock;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
-use sys::siginfo::WaitStatus;
 
 pub(crate) fn run_if(
     ifblock: &IfBlock,
@@ -44,7 +43,7 @@ pub(crate) fn run_if(
         return crate::repl::run_script(eb, cell);
     } else {
         let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
-        state.last_status = WaitStatus::Exited(0);
+        state.set_last_exit(0);
     }
     Ok(None)
 }

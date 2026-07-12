@@ -25,6 +25,6 @@ pub(crate) fn run_export_fd(
     drop(state);
 
     let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
-    state.last_status = status;
+    state.set_last_exit(status.exit_code());
     Ok(true)
 }

@@ -7,7 +7,6 @@ use crate::parse::CommandLine;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
-use sys::siginfo::WaitStatus;
 
 use collect::collect_targets;
 use flags::SourceFd;
@@ -56,7 +55,7 @@ pub(crate) fn run_read(
     let (data, eof) = read_line(&fd_source, resolved_fd.as_ref(), max_bytes)?;
     if data.is_empty() && eof {
         let mut state = cell.borrow_mut().change_context(CmdError::Read)?;
-        state.last_status = WaitStatus::Exited(1);
+        state.set_last_exit(1);
         return Ok(true);
     }
 
@@ -71,7 +70,7 @@ pub(crate) fn run_read(
             .change_context(CmdError::Read)?;
         state.strings.insert(var_name, s);
     }
-    state.last_status = WaitStatus::Exited(0);
+    state.set_last_exit(0);
     Ok(true)
 }
 

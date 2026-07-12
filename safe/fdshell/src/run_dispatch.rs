@@ -5,7 +5,6 @@ use error_stack::{Report, ResultExt};
 use std::collections::HashMap;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
-use sys::siginfo::WaitStatus;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
 pub(crate) fn run_simple(
@@ -22,7 +21,7 @@ pub(crate) fn run_simple(
                 .try_clone()
                 .change_context(CmdError::Exec)?;
             state.fds.insert(var.clone(), src);
-            state.last_status = WaitStatus::Exited(0);
+            state.set_last_exit(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
             let expanded = {
@@ -34,13 +33,13 @@ pub(crate) fn run_simple(
                 var.clone(),
                 ShortCStr::from_vec(expanded.into_bytes()).change_context(CmdError::Resolve)?,
             );
-            state.last_status = WaitStatus::Exited(0);
+            state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
             let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
             state.fds.remove(var);
             state.tasks.remove(var);
-            state.last_status = WaitStatus::Exited(0);
+            state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Umask(mask) => {
             if let Some(m) = mask {
@@ -49,7 +48,7 @@ pub(crate) fn run_simple(
                 println!("{:04o}", sys::umask::get());
             }
             let mut state = cell.borrow_mut().change_context(CmdError::Exec)?;
-            state.last_status = WaitStatus::Exited(0);
+            state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),
         crate::parse::ParsedLine::Continue => return Ok(Some(LoopControl::Continue)),

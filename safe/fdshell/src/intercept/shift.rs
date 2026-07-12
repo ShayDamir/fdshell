@@ -19,6 +19,6 @@ pub(crate) fn run_shift(
         }
     };
     state.shift(n);
-    state.last_status = sys::siginfo::WaitStatus::Exited(0);
+    state.set_last_exit(0);
     Ok(true)
 }

@@ -4,6 +4,7 @@ use crate::capture::Capture;
 use crate::parse::CommandLine;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use sys::ShortCStr;
+use sys::siginfo::WaitStatus;
 
 fn make_read_cmdline(args: &[&str]) -> CommandLine {
     let args_vec: Vec<ShortCStr> = args

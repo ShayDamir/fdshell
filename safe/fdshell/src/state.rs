@@ -56,4 +56,8 @@ impl ShellState {
     pub fn set_positional(&mut self, positional: VecDeque<ShortCStr>) {
         self.positional = positional;
     }
+
+    pub fn set_last_exit(&mut self, code: i32) {
+        self.last_status = WaitStatus::Exited(code);
+    }
 }
