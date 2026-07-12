@@ -33,6 +33,7 @@ mod replacer;
 mod run;
 mod run_dispatch;
 mod script;
+mod segment;
 mod state;
 mod substitute;
 mod task;
