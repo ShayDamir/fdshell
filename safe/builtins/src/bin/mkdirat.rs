@@ -22,7 +22,25 @@ fn main() {
         }
         Ok(c) => c,
     };
-    if let Err(e) = builtins::mkdirat::mkdirat_exec(&cfg) {
+    let sock_str = std::env::var("FDSHELL_SOCKET").unwrap_or_else(|_| {
+        eprintln!("mkdirat: FDSHELL_SOCKET not set");
+        std::process::exit(1);
+    });
+    let sock = match sys::ImportedFd::from_bytes(sock_str.as_bytes()) {
+        Ok(fd) => fd,
+        Err(e) => {
+            eprintln!("mkdirat: invalid FDSHELL_SOCKET '{sock_str}': {e}");
+            std::process::exit(1);
+        }
+    };
+    let sock = match sock.try_into_local() {
+        Ok(local) => local,
+        Err(e) => {
+            eprintln!("mkdirat: cannot lock shell socket: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = builtins::mkdirat::mkdirat_exec(&cfg, &sock) {
         eprintln!("mkdirat: error {e}");
         std::process::exit(1);
     }

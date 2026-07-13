@@ -22,7 +22,25 @@ fn main() {
         }
         Ok(c) => c,
     };
-    if let Err(e) = builtins::pipe::pipe_exec(cfg.flags) {
+    let sock_str = std::env::var("FDSHELL_SOCKET").unwrap_or_else(|_| {
+        eprintln!("pipe: FDSHELL_SOCKET not set");
+        std::process::exit(1);
+    });
+    let sock = match sys::ImportedFd::from_bytes(sock_str.as_bytes()) {
+        Ok(fd) => fd,
+        Err(e) => {
+            eprintln!("pipe: invalid FDSHELL_SOCKET '{sock_str}': {e}");
+            std::process::exit(1);
+        }
+    };
+    let sock = match sock.try_into_local() {
+        Ok(local) => local,
+        Err(e) => {
+            eprintln!("pipe: cannot lock shell socket: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = builtins::pipe::pipe_exec(cfg.flags, &sock) {
         eprintln!("pipe: error {e}");
         std::process::exit(1);
     }

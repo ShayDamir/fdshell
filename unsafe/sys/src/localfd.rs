@@ -1,7 +1,14 @@
 use crate::exportedfd::ExportedFd;
+use core::fmt;
 
 #[repr(transparent)]
 pub struct LocalFd(i32);
+
+impl fmt::Display for LocalFd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl LocalFd {
     /// # Safety

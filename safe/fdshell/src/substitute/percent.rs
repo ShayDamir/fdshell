@@ -35,14 +35,14 @@ pub(crate) fn percent_subst(
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = collect_name(peek)?;
-            let raw = match cache.get(&name_scs) {
-                Some(d) => d.as_raw(),
+            let num_str = match cache.get(&name_scs) {
+                Some(d) => d.to_string(),
                 None => match state.fds.get(&name_scs) {
                     Some(src) => {
-                        let d = src.export().change_context(ResolveError::RefNotFound)?;
-                        let raw = d.as_raw();
-                        cache.insert(name_scs, d);
-                        raw
+                        let owned = src.export().change_context(ResolveError::RefNotFound)?;
+                        let s = owned.to_string();
+                        cache.insert(name_scs, owned);
+                        s
                     }
                     None => {
                         out.push(b'%');
@@ -55,7 +55,6 @@ pub(crate) fn percent_subst(
                     }
                 },
             };
-            let num_str = format!("{}", raw);
             out.extend_from_slice(num_str.as_bytes());
         }
         _ => out.push(b'%'),

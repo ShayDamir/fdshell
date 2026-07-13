@@ -78,7 +78,7 @@ fn exec_fd_with_exports() {
     let mut exports_map = HashMap::new();
     exports_map.insert(ShortCStr::from(c"EXPORTED_VAR"), b"hello_world".to_vec());
     exec_child(
-        || match exec_fd(&fd, &[&abs], &exports_map, &Default::default()) {
+        || match exec_fd(&fd, &[&abs], &exports_map, &Default::default(), None) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         },
@@ -129,7 +129,7 @@ fn exec_with_paths() {
 
     exec_child(|| {
         let fd = resolve_path(&abs).unwrap();
-        match exec_fd(&fd, &[&abs], &HashMap::new(), &Default::default()) {
+        match exec_fd(&fd, &[&abs], &HashMap::new(), &Default::default(), None) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }
@@ -139,7 +139,7 @@ fn exec_with_paths() {
     std::env::set_current_dir(&dir).unwrap();
     exec_child(|| {
         let fd = resolve_path(c"./mybin").unwrap();
-        match exec_fd(&fd, &[c"mybin"], &HashMap::new(), &Default::default()) {
+        match exec_fd(&fd, &[c"mybin"], &HashMap::new(), &Default::default(), None) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }
@@ -164,7 +164,13 @@ fn exec_script_via_resolve_fd() {
 
     exec_child(|| {
         let fd = resolve_path(&script_cs).unwrap();
-        match exec_fd(&fd, &[&script_cs], &HashMap::new(), &Default::default()) {
+        match exec_fd(
+            &fd,
+            &[&script_cs],
+            &HashMap::new(),
+            &Default::default(),
+            None,
+        ) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }

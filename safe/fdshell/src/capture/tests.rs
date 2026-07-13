@@ -5,7 +5,7 @@ use crate::error::capture::CaptureError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::net::socketpair;
-use sys::shellfd::{SHELLFD, send_fd, set_capture_active};
+use sys::shellfd::send_fd;
 
 fn short_cstr(s: &'static [u8]) -> ShortCStr {
     ShortCStr::from_vec(s.to_vec()).unwrap()
@@ -13,26 +13,29 @@ fn short_cstr(s: &'static [u8]) -> ShortCStr {
 
 #[test]
 fn test_captures_exists() {
-    let (a, b) = socketpair().expect("socketpair");
-    a.verify().expect("verify a");
-    b.verify().expect("verify b");
+    // Create a shell socket to send through and receive from
+    let (shell_a, shell_b) = socketpair().expect("socketpair");
+    shell_a.verify().expect("verify shell_a");
+    shell_b.verify().expect("verify shell_b");
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
 
-    // Place `a` at SHELLFD so send_fd can send through it.
-    a.export_to(SHELLFD).expect("export a to SHELLFD");
+    shell_a.export_to(3).expect("export shell_a to fd 3");
+    let shell_sock = shell_a.try_clone().expect("clone shell");
+    shell_a.try_close().expect("close shell_a");
 
     // Send an fd so recv_fd succeeds and reaches the Exists check.
     let (test_a, test_b) = socketpair().expect("socketpair");
     test_a.verify().expect("verify test_a");
     test_b.verify().expect("verify test_b");
-    set_capture_active(true);
-    send_fd(&test_a, c"openat2").expect("send_fd");
+    send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
     test_a.try_close().expect("close test_a");
     test_b.try_close().expect("close test_b");
 
     let mut state = ShellState::new();
     state
         .fds
-        .insert(short_cstr(b"OUT"), a.try_clone().expect("clone"));
+        .insert(short_cstr(b"OUT"), receiver.try_clone().expect("clone"));
 
     let captures = vec![Capture {
         var: short_cstr(b"OUT"),
@@ -40,7 +43,7 @@ fn test_captures_exists() {
         force: false,
     }];
 
-    let result = do_captures(b, std::process::id() as i32, captures, &state);
+    let result = do_captures(receiver, std::process::id() as i32, captures, &state);
     match result {
         Err(e) if matches!(*e.current_context(), CaptureError::Exists) => {}
         _other => panic!("expected Exists"),
@@ -49,19 +52,22 @@ fn test_captures_exists() {
 
 #[test]
 fn test_captures_success() {
-    let (a, b) = socketpair().expect("socketpair");
-    a.verify().expect("verify a");
-    b.verify().expect("verify b");
+    // Create a shell socket to send through and receive from
+    let (shell_a, shell_b) = socketpair().expect("socketpair");
+    shell_a.verify().expect("verify shell_a");
+    shell_b.verify().expect("verify shell_b");
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
 
-    // Place `a` at SHELLFD so send_fd can send through it.
-    a.export_to(SHELLFD).expect("export a to SHELLFD");
+    shell_a.export_to(3).expect("export shell_a to fd 3");
+    let shell_sock = shell_a.try_clone().expect("clone shell");
+    shell_a.try_close().expect("close shell_a");
 
     let (test_a, test_b) = socketpair().expect("socketpair");
     test_a.verify().expect("verify test_a");
     test_b.verify().expect("verify test_b");
 
-    set_capture_active(true);
-    send_fd(&test_a, c"openat2").expect("send_fd");
+    send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
     test_a.try_close().expect("close test_a");
     test_b.try_close().expect("close test_b");
 
@@ -71,7 +77,12 @@ fn test_captures_success() {
         force: false,
     }];
 
-    let result = do_captures(b, std::process::id() as i32, captures, &ShellState::new());
+    let result = do_captures(
+        receiver,
+        std::process::id() as i32,
+        captures,
+        &ShellState::new(),
+    );
     assert!(result.is_ok());
     let captured = result.unwrap();
     assert_eq!(captured.len(), 1);

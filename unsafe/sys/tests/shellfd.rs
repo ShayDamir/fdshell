@@ -4,9 +4,7 @@ use sys::SyscallError;
 use sys::net::{set_passcred, socketpair};
 use sys::pipe::pipe2;
 use sys::rw::{read, write};
-use sys::shellfd::{
-    RecvFdError, SHELLFD, TAG_MAX, recv_fd, reserve_shellfd, send_fd, set_capture_active,
-};
+use sys::shellfd::{RecvFdError, TAG_MAX, recv_fd, send_fd, set_capture_active};
 
 #[repr(C)]
 struct CmsgBuf {
@@ -94,19 +92,21 @@ fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
 #[test]
 fn test_send_recv_fd() -> Result<(), SyscallError> {
     fork_test(|| {
-        let _shellfd = reserve_shellfd()?;
-        let (a, b) = socketpair()?;
-        a.verify()?;
-        b.verify()?;
-        a.export_to(SHELLFD)?.verify()?;
-        a.try_close()?;
-        let receiver = b;
+        let (shell_a, shell_b) = socketpair()?;
+        shell_a.verify()?;
+        shell_b.verify()?;
+        let receiver = shell_b;
         set_capture_active(true);
+
+        shell_a.export_to(3)?;
+        let shell_sock = shell_a.try_clone()?;
+        shell_a.try_close()?;
+        // shell_b stays open — it's the receive end of shell_sock
 
         let (test_a, test_b) = socketpair()?;
         test_a.verify()?;
         test_b.verify()?;
-        send_fd(&test_a, c"test")?;
+        send_fd(&shell_sock, &test_a, c"test")?;
         test_a.try_close()?;
         write(&test_b, b"42")?;
         test_b.try_close()?;

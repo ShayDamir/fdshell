@@ -6,7 +6,10 @@ use crate::error::BuiltinError;
 
 pub mod parse;
 
-pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), Report<BuiltinError>> {
+pub fn mkdirat_exec(
+    cfg: &parse::MkdiratConfig,
+    sock: &sys::LocalFd,
+) -> Result<(), Report<BuiltinError>> {
     let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
     sys::mkdirat::mkdirat(dirfd, cfg.path, cfg.mode & 0o777)
         .change_context(BuiltinError::Syscall)?;
@@ -16,6 +19,6 @@ pub fn mkdirat_exec(cfg: &parse::MkdiratConfig) -> Result<(), Report<BuiltinErro
         resolve: cfg.resolve,
     };
     let fd = sys::openat2::openat2(dirfd, cfg.path, &how).change_context(BuiltinError::Syscall)?;
-    sys::shellfd::send_fd(&fd, c"dirfd").change_context(BuiltinError::SendFdFailed)?;
+    sys::shellfd::send_fd(sock, &fd, c"dirfd").change_context(BuiltinError::SendFdFailed)?;
     Ok(())
 }

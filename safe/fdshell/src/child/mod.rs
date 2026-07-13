@@ -1,9 +1,11 @@
 mod delegated;
 pub(crate) mod dispatch;
 mod error;
-mod exec;
+pub(crate) mod exec_fd;
+pub(crate) mod external;
 pub(crate) mod fdpass;
 mod help;
+mod resolve;
 mod run;
 mod simple;
 use crate::parse::CommandLine;

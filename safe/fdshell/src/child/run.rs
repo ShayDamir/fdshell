@@ -1,6 +1,5 @@
-use crate::child::{self, Command, handle_builtin_error};
+use crate::child::{self, Command, external, handle_builtin_error};
 use crate::error::child_process::ChildProcessError;
-use crate::exec;
 use crate::redirect::Redirect;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
@@ -17,7 +16,7 @@ pub fn child_main(
     args_fq: &[bool],
     redirects: &[Redirect],
 ) -> Result<i32, Report<ChildProcessError>> {
-    setup_shellfd(child_sock)?;
+    setup_shellfd(child_sock, cell)?;
     apply_redirects(redirects)?;
 
     let resolved =
@@ -31,14 +30,19 @@ pub fn child_main(
     if cmd.builtin {
         run_builtin(&cmd, &refs, args, &state)
     } else {
-        run_external(&cmd, &refs, &state)
+        external::run_external(&cmd, &refs, &state)
     }
 }
 
-fn setup_shellfd(sock: Option<sys::LocalFd>) -> Result<(), Report<ChildProcessError>> {
+fn setup_shellfd(
+    sock: Option<sys::LocalFd>,
+    cell: &ForkCell<ShellState>,
+) -> Result<(), Report<ChildProcessError>> {
     if let Some(s) = sock {
-        s.export_to(sys::shellfd::SHELLFD)
-            .change_context(ChildProcessError::RedirectFailed)?;
+        let mut state = cell
+            .borrow_mut()
+            .change_context(ChildProcessError::BorrowFailed)?;
+        state.shell_sock = Some(s);
         sys::shellfd::set_capture_active(true);
     } else {
         sys::shellfd::set_capture_active(false);
@@ -63,22 +67,5 @@ fn run_builtin(
     match child::dispatch::dispatch_builtin(cmd.name.clone(), refs, args, state) {
         Ok(code) => Ok(code),
         Err(report) => handle_builtin_error(cmd.name.clone(), report),
-    }
-}
-
-fn run_external(
-    cmd: &Command,
-    refs: &[&CStr],
-    state: &ShellState,
-) -> Result<i32, Report<ChildProcessError>> {
-    let name = sys::RefCStr::from(cmd.name.clone());
-    let fd = exec::resolve_path(&name)
-        .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
-    let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
-        .chain(refs.iter().copied())
-        .collect();
-    match exec::exec_fd(&fd, &full_argv, &state.exports, &state.env_filter) {
-        Ok(()) => Ok(0),
-        Err(report) => Err(report.change_context(ChildProcessError::ExecFailed)),
     }
 }

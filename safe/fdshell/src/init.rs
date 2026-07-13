@@ -5,31 +5,35 @@ use crate::error::shell::ShellInitError;
 
 pub enum FdShellMode {
     Nested(LocalFd),
-    Standalone(LocalFd),
+    Standalone,
 }
 
 fn detect_nested() -> Option<sys::ImportedFd> {
-    let cookie = std::env::var("FDSHELL_CAPTURE")
+    let cookie = std::env::var("FDSHELL_PID")
         .inspect_err(|e| {
             if !matches!(e, std::env::VarError::NotPresent) {
-                eprintln!("fdshell: ignoring FDSHELL_CAPTURE: {e}");
+                eprintln!("fdshell: ignoring FDSHELL_PID: {e}");
             }
         })
         .ok()?;
     let pid = match cookie.parse::<u32>() {
         Ok(pid) => pid,
         Err(e) => {
-            eprintln!(
-                "fdshell: FDSHELL_CAPTURE has invalid value: {} ({})",
-                cookie, e
-            );
+            eprintln!("fdshell: FDSHELL_PID has invalid value: {} ({})", cookie, e);
             return None;
         }
     };
     if pid != std::process::id() {
         return None;
     }
-    sys::ImportedFd::try_from(sys::shellfd::SHELLFD_STR).ok()
+    let sock = std::env::var("FDSHELL_SOCKET")
+        .inspect_err(|e| {
+            if !matches!(e, std::env::VarError::NotPresent) {
+                eprintln!("fdshell: ignoring FDSHELL_SOCKET: {e}");
+            }
+        })
+        .ok()?;
+    sys::ImportedFd::from_bytes(sock.as_bytes()).ok()
 }
 
 pub fn init_shellfd() -> Result<FdShellMode, Report<ShellInitError>> {
@@ -40,7 +44,7 @@ pub fn init_shellfd() -> Result<FdShellMode, Report<ShellInitError>> {
         sys::shellfd::set_capture_active(true);
         Ok(FdShellMode::Nested(fd))
     } else {
-        let fd = sys::shellfd::reserve_shellfd().change_context(ShellInitError::ShellSocket)?;
-        Ok(FdShellMode::Standalone(fd))
+        sys::shellfd::set_capture_active(false);
+        Ok(FdShellMode::Standalone)
     }
 }

@@ -22,7 +22,13 @@ pub(super) fn handle_exec_fd(
     let args_slice = refs
         .get(1..)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    match crate::exec::exec_fd(fd, args_slice, &state.exports, &state.env_filter) {
+    match crate::exec::exec_fd(
+        fd,
+        args_slice,
+        &state.exports,
+        &state.env_filter,
+        state.shell_sock.as_ref(),
+    ) {
         Ok(()) => Ok(0),
         Err(report) => Ok(report.current_context().exit_code()),
     }
@@ -62,25 +68,9 @@ pub(super) fn handle_exec_at(
         args_slice,
         &state.exports,
         &state.env_filter,
+        state.shell_sock.as_ref(),
     ) {
         Ok(()) => Ok(0),
         Err(report) => Ok(report.current_context().exit_code()),
     }
-}
-
-pub(super) fn handle_resolve(
-    _: ShortCStr,
-    refs: &[&CStr],
-    _: &[ShortCStr],
-    _: &ShellState,
-) -> Result<i32, Report<builtins::error::BuiltinError>> {
-    use error_stack::ResultExt;
-    let name = refs
-        .first()
-        .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    let fd = crate::exec::resolve_path(name)
-        .change_context(builtins::error::BuiltinError::InvalidArgument("path"))?;
-    sys::shellfd::send_fd(&fd, c"resolve")
-        .change_context(builtins::error::BuiltinError::SendFdFailed)?;
-    Ok(0)
 }

@@ -1,5 +1,13 @@
+use core::fmt;
+
 #[repr(transparent)]
 pub struct ExportedFd(i32);
+
+impl fmt::Display for ExportedFd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl ExportedFd {
     /// # Safety
@@ -21,5 +29,12 @@ impl ExportedFd {
     }
     pub fn at(&self) -> crate::AtFd<'_> {
         crate::AtFd::from(self)
+    }
+    pub fn try_close(self) -> Result<(), crate::SyscallError> {
+        let raw = self.0;
+        // SAFETY: `raw` is an open fd by caller guarantee; close
+        // with an invalid fd returns -1/EBADF, handled by `cvt`.
+        crate::cvt(unsafe { libc::close(raw) as isize })?;
+        Ok(())
     }
 }

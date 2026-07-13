@@ -5,7 +5,8 @@ use std::ffi::CStr;
 use sys::ShortCStr;
 
 use super::delegated;
-use super::exec;
+use super::exec_fd;
+use super::resolve;
 use super::simple;
 
 type Handler =
@@ -22,9 +23,9 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"mkdirat", delegated::handle_mkdirat),
     (b"openat2", delegated::handle_openat2),
     (b"renameat2", delegated::handle_renameat2),
-    (b"exec_fd", exec::handle_exec_fd),
-    (b"exec_at", exec::handle_exec_at),
-    (b"resolve", exec::handle_resolve),
+    (b"exec_fd", exec_fd::handle_exec_fd),
+    (b"exec_at", exec_fd::handle_exec_at),
+    (b"resolve", resolve::handle_resolve),
 ];
 
 pub fn dispatch_builtin(

@@ -18,6 +18,7 @@ pub struct ShellState {
     pub(crate) shell_pid: i32,
     pub(crate) last_bg_pid: Option<i32>,
     pub(crate) env_filter: EnvFilter,
+    pub(crate) shell_sock: Option<LocalFd>,
 }
 
 impl ShellState {
@@ -32,6 +33,7 @@ impl ShellState {
             shell_pid: std::process::id() as i32,
             last_bg_pid: None,
             env_filter: EnvFilter::new(),
+            shell_sock: None,
         }
     }
 }
@@ -59,5 +61,9 @@ impl ShellState {
 
     pub fn set_last_exit(&mut self, code: i32) {
         self.last_status = WaitStatus::Exited(code);
+    }
+
+    pub fn set_shell_sock(&mut self, sock: LocalFd) {
+        self.shell_sock = Some(sock);
     }
 }

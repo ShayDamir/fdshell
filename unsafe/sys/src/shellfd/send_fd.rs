@@ -3,7 +3,7 @@ use crate::LocalFd;
 use crate::iovec::IoVec;
 use core::ffi::CStr;
 
-pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), crate::SyscallError> {
+pub fn send_fd(sock: &LocalFd, fd: &LocalFd, tag: &CStr) -> Result<(), crate::SyscallError> {
     if !super::capture_active() {
         return Err(crate::SyscallError::ENOENT("send_fd"));
     }
@@ -32,7 +32,7 @@ pub fn send_fd(fd: &LocalFd, tag: &CStr) -> Result<(), crate::SyscallError> {
         msg_flags: 0,
     };
     // SAFETY: `iov`, `cmsg`, and `msg` are valid stack-allocated values; `sendmsg`
-    // only reads from them. `SHELLFD` must be an open Unix socket.
-    crate::cvt(unsafe { libc::sendmsg(super::SHELLFD, &msg, 0) })?;
+    // only reads from them. `sock` must be an open Unix socket.
+    crate::cvt(unsafe { libc::sendmsg(sock.as_raw(), &msg, 0) })?;
     Ok(())
 }

@@ -18,10 +18,15 @@ pub fn exec_fd(
     argv: &[&CStr],
     exports: &HashMap<ShortCStr, Vec<u8>>,
     env_filter: &EnvFilter,
+    shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
-    let envp = get_environ(cookie.as_bytes(), exports, env_filter);
+    let exec_sock = shell_sock
+        .map(|s| s.export())
+        .transpose()
+        .change_context(ChildProcessError::ExportFailed)?;
+    let envp = get_environ(cookie.as_bytes(), exports, env_filter, exec_sock.as_ref());
     let script_fd = fd
         .export()
         .change_context(ChildProcessError::ExportFailed)?;
@@ -36,10 +41,15 @@ pub fn exec_at(
     argv: &[&CStr],
     exports: &HashMap<ShortCStr, Vec<u8>>,
     env_filter: &EnvFilter,
+    shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = std::process::id();
     let cookie = format!("{}", pid);
-    let envp = get_environ(cookie.as_bytes(), exports, env_filter);
+    let exec_sock = shell_sock
+        .map(|s| s.export())
+        .transpose()
+        .change_context(ChildProcessError::ExportFailed)?;
+    let envp = get_environ(cookie.as_bytes(), exports, env_filter, exec_sock.as_ref());
     sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
         .change_context(ChildProcessError::ExecFailed)?;
     Ok(())

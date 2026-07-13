@@ -44,11 +44,11 @@ Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
 Traditionally shell is responsible to set up file descriptors 0 (stdin), 1 (stdout)
 and 2 (stderr) for launched subprocesses.
 
-fdshell adds another file descriptor number 3 - shellfd. It is an anonymous UNIX
-socket created using socketpair() syscall. The subprocess can use that file descriptor
-to send its own file descriptors using SCM_RIGHTS mechanism. Along the file descriptor,
-the subprocess also transfers a tag (string), which can be used by the fdshell to distinguish
-the returned file descriptors.
+fdshell adds an anonymous UNIX socket called shellfd, created via `socketpair()`.
+The subprocess number is communicated through the `FDSHELL_SOCKET` environment variable.
+The subprocess can use that file descriptor to send its own file descriptors using
+SCM_RIGHTS mechanism. Along the file descriptor, the subprocess also transfers a tag
+(string), which can be used by the fdshell to distinguish the returned file descriptors.
 
 For example, the `pipe` command creates two file descriptors called `rd`
 (read side of the pipe) and `wr` (write side of the pipe). These could be saved into
@@ -127,7 +127,7 @@ When file descriptors are passed to subprocesses as a fd redirection or as comma
 `dup` or `dup2` syscalls are called after `fork`, but before `exec`. This strips the `CLOEXEC` flag
 and allows the subprocess to access the passed file descriptors.
 
-The shellfd (fd 3) is reserved with CLOEXEC on startup, so it is automatically closed at exec boundaries. In nested shells, `try_into_local()` sets CLOEXEC on the inherited capture socket to prevent it from leaking through subsequent execs.
+The shellfd is reserved with CLOEXEC on startup, so it is automatically closed at exec boundaries. In nested shells, `try_into_local()` sets CLOEXEC on the inherited capture socket to prevent it from leaking through subsequent execs.
 
 
 ### Implementation philosophy

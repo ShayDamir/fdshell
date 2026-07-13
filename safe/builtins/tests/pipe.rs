@@ -102,17 +102,18 @@ fn flags_bad_name() {
 
 #[test]
 fn test_pipe_exec() {
-    let _shellfd = sys::shellfd::reserve_shellfd().unwrap();
-    let (a, b) = sys::net::socketpair().unwrap();
-    a.verify().unwrap();
-    b.verify().unwrap();
-    let exp = a.export_to(sys::shellfd::SHELLFD).unwrap();
-    exp.verify().unwrap();
-    a.try_close().unwrap();
-    let receiver = b;
+    // Create a socket to use as the shell fd (fd 3)
+    let (shell_a, shell_b) = sys::net::socketpair().unwrap();
+    shell_a.verify().unwrap();
+    shell_b.verify().unwrap();
+    let receiver = shell_b;
     sys::shellfd::set_capture_active(true);
 
-    builtins::pipe::pipe_exec(0).unwrap();
+    shell_a.export_to(3).unwrap();
+    let shell_sock = shell_a.try_clone().unwrap();
+    shell_a.try_close().unwrap();
+
+    builtins::pipe::pipe_exec(0, &shell_sock).unwrap();
 
     let mut buf_a = [0u8; TAG_MAX];
     let mut buf_b = [0u8; TAG_MAX];
