@@ -67,7 +67,7 @@ fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
             Ok(()) => 0,
             Err(e) => e.errno(),
         };
-        std::process::exit(code);
+        sys::exit(code);
     }
     let mut status = 0i32;
     // SAFETY: waitpid for our direct child blocks until it exits.

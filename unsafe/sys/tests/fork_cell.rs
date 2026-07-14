@@ -41,7 +41,7 @@ fn fork_pidfd_cell_child_mut_borrow() -> Result<(), SyscallError> {
         // this copy of memory; calling reset_after_fork is safe.
         unsafe { cell.reset_after_fork() };
         *cell.borrow_mut().unwrap() += 1;
-        std::process::exit(0);
+        sys::exit(0);
     }
 
     // Parent's copy is unchanged by child mutation (fork gives separate address spaces)
@@ -78,7 +78,7 @@ fn fork_pidfd_cell_with_active_borrows() -> Result<(), SyscallError> {
         // the inherited count > 0. With reset, it should succeed.
         unsafe { cell.reset_after_fork() };
         *cell.borrow_mut().unwrap() = 999;
-        std::process::exit(0);
+        sys::exit(0);
     }
 
     // Parent's value unchanged — child mutated its own copy
@@ -109,7 +109,7 @@ fn fork_pidfd_cell_parent_uses_borrow() -> Result<(), SyscallError> {
         // Child: reset and mutate.
         unsafe { cell.reset_after_fork() };
         *cell.borrow_mut().unwrap() += 1;
-        std::process::exit(42);
+        sys::exit(42);
     }
 
     let pidfd = pidfd_opt.ok_or(SyscallError::Other {
@@ -140,7 +140,7 @@ fn fork_pidfd_cell_with_struct() -> Result<(), SyscallError> {
         // Mutate through borrow_mut
         let s = cell.borrow_mut().unwrap();
         assert_eq!(s.a, 1);
-        std::process::exit(0);
+        sys::exit(0);
     }
 
     let pidfd = pidfd_opt.ok_or(SyscallError::Other {

@@ -29,9 +29,9 @@ fn umask_save_restore() -> Result<(), SyscallError> {
         sys::umask::set(0o077);
         sys::umask::set(original);
         if sys::umask::get() != original {
-            std::process::exit(1);
+            sys::exit(1);
         }
-        std::process::exit(0);
+        sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
@@ -56,16 +56,16 @@ fn umask_set_get() -> Result<(), SyscallError> {
         sys::umask::init();
         sys::umask::set(0o077);
         if sys::umask::get() != 0o077 {
-            std::process::exit(1);
+            sys::exit(1);
         }
         let prev = sys::umask::set(0o022);
         if prev != 0o077 {
-            std::process::exit(2);
+            sys::exit(2);
         }
         if sys::umask::get() != 0o022 {
-            std::process::exit(3);
+            sys::exit(3);
         }
-        std::process::exit(0);
+        sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
@@ -91,10 +91,10 @@ fn umask_set_get_zero() -> Result<(), SyscallError> {
         let original = sys::umask::get();
         sys::umask::set(0o777);
         if sys::umask::get() != 0o777 {
-            std::process::exit(1);
+            sys::exit(1);
         }
         sys::umask::set(original);
-        std::process::exit(0);
+        sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
@@ -121,7 +121,7 @@ fn umask_init_fallback_no_proc() -> Result<(), SyscallError> {
             let mask = sys::umask::get();
             mask != 0 && mask <= 0o777
         });
-        std::process::exit(if ok { 0 } else { 1 });
+        sys::exit(if ok { 0 } else { 1 });
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {

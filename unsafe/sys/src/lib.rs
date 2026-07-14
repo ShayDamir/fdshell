@@ -12,6 +12,8 @@ pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
 pub use umask::UmaskError;
 
+pub use exit::exit;
+
 pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
     if ret == -1 {
         // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
@@ -25,6 +27,7 @@ pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
 pub mod atfd;
 pub mod errno;
 pub mod execveat;
+mod exit;
 pub mod exportedfd;
 pub mod fchdir;
 pub mod fchmod;

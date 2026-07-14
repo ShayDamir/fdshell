@@ -5,7 +5,7 @@ use sys::siginfo::WaitStatus;
 fn fork_exit_0() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
     if ret == 0 {
-        std::process::exit(0);
+        sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(SyscallError::Other {
         errno: sys::errno::EINVAL,
@@ -25,7 +25,7 @@ fn fork_exit_0() -> Result<(), SyscallError> {
 fn fork_exit_42() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
     if ret == 0 {
-        std::process::exit(42);
+        sys::exit(42);
     }
     let pidfd = pidfd_opt.ok_or(SyscallError::Other {
         errno: sys::errno::EINVAL,
@@ -47,7 +47,7 @@ fn fork_signaled() -> Result<(), SyscallError> {
     if ret == 0 {
         // SAFETY: raise sends SIGKILL to ourselves, which terminates the child.
         unsafe { libc::raise(libc::SIGKILL) };
-        std::process::exit(0);
+        sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(SyscallError::Other {
         errno: sys::errno::EINVAL,
