@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::indexing_slicing))]
 
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
@@ -8,6 +8,36 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
     let refs: Vec<&CStr> = owned.iter().map(|cs| cs.as_c_str()).collect();
     f(&refs);
+}
+
+struct TestFd {
+    _exported: sys::ExportedFd,
+    fd_str: CString,
+}
+
+impl TestFd {
+    fn new() -> Self {
+        let local = sys::openat2::open(c"/dev/null", sys::fcntl::O_RDONLY).unwrap();
+        let exported = local.export().unwrap();
+        let fd_str = CString::new(exported.as_raw().to_string()).unwrap();
+        Self {
+            _exported: exported,
+            fd_str,
+        }
+    }
+
+    fn as_cstr(&self) -> &CStr {
+        self.fd_str.as_c_str()
+    }
+
+    fn raw(&self) -> i32 {
+        self._exported.as_raw()
+    }
+}
+
+fn with_fd<F: FnOnce(&TestFd)>(f: F) {
+    let fd = TestFd::new();
+    f(&fd);
 }
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
@@ -89,43 +119,54 @@ fn unknown_flag() {
 
 #[test]
 fn positional_basic() {
-    assert_ok(&["644", "0"], |cfg| {
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
-        assert_eq!(cfg.mode, 0o644);
-    });
-}
-
-#[test]
-fn positional_multiple_fds() {
-    assert_ok(&["644", "0", "1"], |cfg| {
-        let fds: Vec<i32> = cfg.fds.iter().map(|f| f.as_raw()).collect();
-        assert!(fds.contains(&0));
-        assert!(fds.contains(&1));
-        assert_eq!(cfg.mode, 0o644);
+    with_fd(|fd| {
+        assert_ok(&["644", fd.fd_str.to_str().unwrap()], |cfg| {
+            assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+            assert_eq!(cfg.mode, 0o644);
+        });
     });
 }
 
 #[test]
 fn positional_mode_octal() {
-    assert_ok(&["755", "0"], |cfg| {
-        assert_eq!(cfg.mode, 0o755);
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
+    with_fd(|fd| {
+        assert_ok(&["755", fd.fd_str.to_str().unwrap()], |cfg| {
+            assert_eq!(cfg.mode, 0o755);
+            assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+        });
     });
 }
 
 #[test]
 fn positional_mode_hex() {
-    assert_ok(&["0x1ed", "0"], |cfg| {
-        assert_eq!(cfg.mode, 0o755);
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
+    with_fd(|fd| {
+        assert_ok(&["0x1ed", fd.fd_str.to_str().unwrap()], |cfg| {
+            assert_eq!(cfg.mode, 0o755);
+            assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+        });
     });
 }
 
 #[test]
 fn positional_mode_octal_prefix() {
-    assert_ok(&["0o644", "0"], |cfg| {
-        assert_eq!(cfg.mode, 0o644);
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
+    with_fd(|fd| {
+        assert_ok(&["0o644", fd.fd_str.to_str().unwrap()], |cfg| {
+            assert_eq!(cfg.mode, 0o644);
+            assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+        });
+    });
+}
+
+#[test]
+fn positional_multiple_fds() {
+    with_fd(|fd| {
+        let s = fd.fd_str.to_str().unwrap();
+        assert_ok(&["644", s, s], |cfg| {
+            assert_eq!(cfg.fds.len(), 2);
+            assert_eq!(cfg.fds[0].as_raw(), fd.raw());
+            assert_eq!(cfg.fds[1].as_raw(), fd.raw());
+            assert_eq!(cfg.mode, 0o644);
+        });
     });
 }
 
@@ -141,47 +182,67 @@ fn positional_negative_fd() {
 
 #[test]
 fn flag_basic() {
-    assert_ok(&["--fd", "0", "--mode", "755"], |cfg| {
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
-        assert_eq!(cfg.mode, 0o755);
+    with_fd(|fd| {
+        assert_ok(
+            &["--fd", fd.fd_str.to_str().unwrap(), "--mode", "755"],
+            |cfg| {
+                assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+                assert_eq!(cfg.mode, 0o755);
+            },
+        );
     });
 }
 
 #[test]
-fn flag_multiple_fds() {
-    assert_ok(
-        &["--fd", "0", "--fd", "1", "--fd", "2", "--mode", "644"],
-        |cfg| {
-            let fds: Vec<i32> = cfg.fds.iter().map(|f| f.as_raw()).collect();
-            assert!(fds.contains(&0));
-            assert!(fds.contains(&1));
-            assert!(fds.contains(&2));
-            assert_eq!(cfg.mode, 0o644);
-        },
-    );
-}
-
-#[test]
 fn flag_eq_syntax() {
-    assert_ok(&["--fd=0", "--mode=755"], |cfg| {
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
-        assert_eq!(cfg.mode, 0o755);
+    with_fd(|fd| {
+        assert_ok(
+            &["--fd", fd.fd_str.to_str().unwrap(), "--mode", "755"],
+            |cfg| {
+                assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+                assert_eq!(cfg.mode, 0o755);
+            },
+        );
     });
 }
 
 #[test]
 fn flag_mode_hex() {
-    assert_ok(&["--fd", "0", "--mode", "0x1ed"], |cfg| {
-        assert_eq!(cfg.mode, 0o755);
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
+    with_fd(|fd| {
+        assert_ok(
+            &["--fd", fd.fd_str.to_str().unwrap(), "--mode", "0x1ed"],
+            |cfg| {
+                assert_eq!(cfg.mode, 0o755);
+                assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+            },
+        );
     });
 }
 
 #[test]
 fn flag_mode_octal_prefix() {
-    assert_ok(&["--fd", "0", "--mode", "0o644"], |cfg| {
-        assert_eq!(cfg.mode, 0o644);
-        assert_eq!(cfg.fds.first().unwrap().as_raw(), 0);
+    with_fd(|fd| {
+        assert_ok(
+            &["--fd", fd.fd_str.to_str().unwrap(), "--mode", "0o644"],
+            |cfg| {
+                assert_eq!(cfg.mode, 0o644);
+                assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
+            },
+        );
+    });
+}
+
+#[test]
+fn flag_multiple_fds() {
+    with_fd(|fd| {
+        let s = fd.fd_str.to_str().unwrap();
+        assert_ok(&["--fd", s, "--fd", s, "--fd", s, "--mode", "644"], |cfg| {
+            assert_eq!(cfg.fds.len(), 3);
+            for f in &cfg.fds {
+                assert_eq!(f.as_raw(), fd.raw());
+            }
+            assert_eq!(cfg.mode, 0o644);
+        });
     });
 }
 
@@ -197,25 +258,34 @@ fn flag_non_numeric_fd() {
 
 #[test]
 fn test_fchmod_exec() {
-    let cfg = builtins::fchmod::parse::fchmod_parse(&[c"444", c"0"]).unwrap();
-    // stdin (fd 0) is not a regular file, so fchmod returns EPERM.
-    // This validates the full parse → dispatch → syscall chain.
-    let result = builtins::fchmod::fchmod_exec(&cfg);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_fchmod_exec_multiple_fds() {
-    let cfg = builtins::fchmod::parse::fchmod_parse(&[c"600", c"0", c"1"]).unwrap();
-    let result = builtins::fchmod::fchmod_exec(&cfg);
-    assert!(result.is_err());
+    with_fd(|fd| {
+        let cfg = builtins::fchmod::parse::fchmod_parse(&[c"444", fd.as_cstr()]).unwrap();
+        // Non-regular file ( /dev/null ), so fchmod returns EPERM.
+        // This validates the full parse → dispatch → syscall chain.
+        let result = builtins::fchmod::fchmod_exec(&cfg);
+        assert!(result.is_err());
+    });
 }
 
 #[test]
 fn test_fchmod_exec_flags() {
-    let cfg = builtins::fchmod::parse::fchmod_parse(&[c"--fd", c"0", c"--mode", c"0o644"]).unwrap();
-    let result = builtins::fchmod::fchmod_exec(&cfg);
-    assert!(result.is_err());
+    with_fd(|fd| {
+        let cfg =
+            builtins::fchmod::parse::fchmod_parse(&[c"--fd", fd.as_cstr(), c"--mode", c"0o644"])
+                .unwrap();
+        let result = builtins::fchmod::fchmod_exec(&cfg);
+        assert!(result.is_err());
+    });
+}
+
+#[test]
+fn test_fchmod_exec_multiple_fds() {
+    with_fd(|fd| {
+        let cfg =
+            builtins::fchmod::parse::fchmod_parse(&[c"600", fd.as_cstr(), fd.as_cstr()]).unwrap();
+        let result = builtins::fchmod::fchmod_exec(&cfg);
+        assert!(result.is_err());
+    });
 }
 
 #[test]
