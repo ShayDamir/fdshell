@@ -98,7 +98,7 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         let receiver = shell_b;
         set_capture_active(true);
 
-        shell_a.export_to(3)?;
+        shell_a.export()?;
         let shell_sock = shell_a.try_clone()?;
         shell_a.try_close()?;
         // shell_b stays open — it's the receive end of shell_sock

@@ -102,14 +102,14 @@ fn flags_bad_name() {
 
 #[test]
 fn test_pipe_exec() {
-    // Create a socket to use as the shell fd (fd 3)
+    // Create a socket to use as the shell fd
     let (shell_a, shell_b) = sys::net::socketpair().unwrap();
     shell_a.verify().unwrap();
     shell_b.verify().unwrap();
     let receiver = shell_b;
     sys::shellfd::set_capture_active(true);
 
-    shell_a.export_to(3).unwrap();
+    shell_a.export().unwrap();
     let shell_sock = shell_a.try_clone().unwrap();
     shell_a.try_close().unwrap();
 

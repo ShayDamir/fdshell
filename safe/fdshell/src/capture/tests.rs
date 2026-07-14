@@ -20,7 +20,7 @@ fn test_captures_exists() {
     let receiver = shell_b;
     sys::shellfd::set_capture_active(true);
 
-    shell_a.export_to(3).expect("export shell_a to fd 3");
+    shell_a.export().expect("export shell_a");
     let shell_sock = shell_a.try_clone().expect("clone shell");
     shell_a.try_close().expect("close shell_a");
 
@@ -59,7 +59,7 @@ fn test_captures_success() {
     let receiver = shell_b;
     sys::shellfd::set_capture_active(true);
 
-    shell_a.export_to(3).expect("export shell_a to fd 3");
+    shell_a.export().expect("export shell_a");
     let shell_sock = shell_a.try_clone().expect("clone shell");
     shell_a.try_close().expect("close shell_a");
 
