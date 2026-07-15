@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
+use alloc::format;
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;

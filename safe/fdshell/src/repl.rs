@@ -1,5 +1,6 @@
+use alloc::vec::Vec;
+use core::fmt::Write;
 use error_stack::{Report, ResultExt, bail};
-use std::io::{BufRead, Write};
 
 use crate::app::AppError;
 use crate::error::cmd::CmdError;
@@ -43,23 +44,26 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     let mut buf = Vec::new();
     loop {
         buf.clear();
-        print!("fdshell> ");
-        std::io::stdout().flush().change_context(AppError::Read)?;
-        let n = std::io::stdin()
-            .lock()
-            .read_until(b'\n', &mut buf)
+        sys::OUT
+            .write_all(b"fdshell> ")
             .change_context(AppError::Read)?;
-        if n == 0 {
-            println!();
-            break;
+        let mut byte = [0u8; 1];
+        loop {
+            let n = sys::IN.read(&mut byte).change_context(AppError::Read)?;
+            if n == 0 {
+                return Ok(());
+            }
+            if byte[0] == b'\n' {
+                break;
+            }
+            buf.push(byte[0]);
         }
         let line = buf.trim_ascii();
         if line.is_empty() || line.starts_with(b"#") {
             continue;
         }
         if let Err(err) = handle(line, cell) {
-            eprintln!("{err:?}");
+            let _ = writeln!(crate::io::Stderr, "{err:?}");
         }
     }
-    Ok(())
 }

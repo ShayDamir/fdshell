@@ -1,3 +1,4 @@
+use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 use sys::LocalFd;
 
@@ -9,31 +10,34 @@ pub enum FdShellMode {
 }
 
 fn detect_nested() -> Option<sys::ImportedFd> {
-    let cookie = std::env::var("FDSHELL_PID")
-        .inspect_err(|e| {
-            if !matches!(e, std::env::VarError::NotPresent) {
-                eprintln!("fdshell: ignoring FDSHELL_PID: {e}");
-            }
-        })
-        .ok()?;
-    let pid = match cookie.parse::<u32>() {
-        Ok(pid) => pid,
+    let cookie_val = sys::env::getenv(b"FDSHELL_PID");
+    let cookie_str_bytes = cookie_val?;
+    let cookie_str = match core::str::from_utf8(&cookie_str_bytes) {
+        Ok(s) => s,
         Err(e) => {
-            eprintln!("fdshell: FDSHELL_PID has invalid value: {} ({})", cookie, e);
+            let _ = writeln!(
+                crate::io::Stderr,
+                "fdshell: FDSHELL_PID has invalid UTF-8: {e}"
+            );
             return None;
         }
     };
-    if pid != std::process::id() {
+    let pid = match cookie_str.parse::<u32>() {
+        Ok(pid) => pid,
+        Err(e) => {
+            let _ = writeln!(
+                crate::io::Stderr,
+                "fdshell: FDSHELL_PID has invalid value: {cookie_str} ({e})"
+            );
+            return None;
+        }
+    };
+    if pid as i32 != sys::env::getpid() {
         return None;
     }
-    let sock = std::env::var("FDSHELL_SOCKET")
-        .inspect_err(|e| {
-            if !matches!(e, std::env::VarError::NotPresent) {
-                eprintln!("fdshell: ignoring FDSHELL_SOCKET: {e}");
-            }
-        })
-        .ok()?;
-    sys::ImportedFd::from_bytes(sock.as_bytes()).ok()
+    let sock_val = sys::env::getenv(b"FDSHELL_SOCKET");
+    let sock_bytes = sock_val?;
+    sys::ImportedFd::from_bytes(&sock_bytes).ok()
 }
 
 pub fn init_shellfd() -> Result<FdShellMode, Report<ShellInitError>> {

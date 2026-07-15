@@ -2,6 +2,7 @@ use crate::child::{self, Command};
 use crate::error::child_process::ChildProcessError;
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::LocalFd;
 use sys::fork_cell::ForkCell;
@@ -19,18 +20,28 @@ pub fn run_child(
 
     let mut redirects: Vec<Redirect> = Vec::new();
 
-    if let Some(prev) = i.checked_sub(1).and_then(|p| pipes.get(p)) {
-        let fd = prev
-            .0
-            .try_clone()
-            .change_context(ChildProcessError::RedirectFailed)?;
-        redirects.push(Redirect::new(0, fd));
-    }
-    if let Some(wr) = pipes.get(i) {
-        let fd =
-            wr.1.try_clone()
+    // Clone needed pipe fds for stdin/stdout redirects, then close ALL original
+    // pipe fds. Each child inherits all pipe fds from the parent; we clone only
+    // the ones this command needs and redirect to them. Closing all originals
+    // ensures proper EOF signaling when writers exit.
+    for (j, (read_end, write_end)) in pipes.iter().enumerate() {
+        if j == i.saturating_sub(1) {
+            let fd = read_end
+                .try_clone()
                 .change_context(ChildProcessError::RedirectFailed)?;
-        redirects.push(Redirect::new(1, fd));
+            redirects.push(Redirect::new(0, fd));
+        }
+        if j == i {
+            let fd = write_end
+                .try_clone()
+                .change_context(ChildProcessError::RedirectFailed)?;
+            redirects.push(Redirect::new(1, fd));
+        }
+    }
+    // Close ALL original pipe fds — the clones above are what we use via redirects.
+    for (read_end, write_end) in pipes.iter() {
+        sys::close_raw(read_end.as_raw());
+        sys::close_raw(write_end.as_raw());
     }
 
     let opened = crate::redirect::open_redirect_files(&cmd_data.redirects)

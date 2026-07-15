@@ -1,17 +1,18 @@
 use crate::envfilter::EnvFilter;
+use alloc::vec::Vec;
 
 pub(crate) fn print_help() {
-    println!("Usage: envfilter [OPTIONS]");
-    println!();
-    println!("Options:");
-    println!("  --allow <pattern>...   Add allowlist glob patterns");
-    println!("  --deny <pattern>...    Add denylist glob patterns");
-    println!("  --list                 Show current rules");
-    println!("  --clear                Clear all rules");
-    println!("  --help, -h             Show this help");
-    println!();
-    println!("Patterns support * wildcard only.");
-    println!("Allowlist is applied first, then denylist removes from it.");
+    let _ = sys::OUT.write_all(b"Usage: envfilter [OPTIONS]\n");
+    let _ = sys::OUT.write_all(b"\n");
+    let _ = sys::OUT.write_all(b"Options:\n");
+    let _ = sys::OUT.write_all(b"  --allow <pattern>...   Add allowlist glob patterns\n");
+    let _ = sys::OUT.write_all(b"  --deny <pattern>...    Add denylist glob patterns\n");
+    let _ = sys::OUT.write_all(b"  --list                 Show current rules\n");
+    let _ = sys::OUT.write_all(b"  --clear                Clear all rules\n");
+    let _ = sys::OUT.write_all(b"  --help, -h             Show this help\n");
+    let _ = sys::OUT.write_all(b"\n");
+    let _ = sys::OUT.write_all(b"Patterns support * wildcard only.\n");
+    let _ = sys::OUT.write_all(b"Allowlist is applied first, then denylist removes from it.");
 }
 
 pub(crate) fn print_rules(filter: &EnvFilter) {
@@ -27,9 +28,13 @@ pub(crate) fn print_rules(filter: &EnvFilter) {
         .collect();
 
     if !allow_strs.is_empty() {
-        println!("allow: {}", allow_strs.join(" "));
+        let mut line: alloc::string::String = "allow: ".into();
+        line.push_str(&allow_strs.join(" "));
+        let _ = sys::OUT.write_all(line.as_bytes());
     }
     if !deny_strs.is_empty() {
-        println!("deny: {}", deny_strs.join(" "));
+        let mut line: alloc::string::String = "deny: ".into();
+        line.push_str(&deny_strs.join(" "));
+        let _ = sys::OUT.write_all(line.as_bytes());
     }
 }

@@ -1,5 +1,6 @@
 use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 pub(crate) fn read_from_local_fd(

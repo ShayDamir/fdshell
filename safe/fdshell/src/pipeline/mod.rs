@@ -1,4 +1,7 @@
 mod child;
+use alloc::vec::Vec;
+use core::fmt::Write;
+use core::iter::Iterator;
 
 use crate::capture::Capture;
 use crate::error::pipeline::PipelineError;
@@ -21,11 +24,10 @@ pub fn launch_pipeline(
     let n = pipeline.commands.len();
     let commands = pipeline.commands;
 
-    let pipes = std::iter::repeat_with(|| sys::pipe::pipe2(sys::fcntl::O_CLOEXEC))
+    let pipes = core::iter::repeat_with(|| sys::pipe::pipe2(0))
         .take(n.saturating_sub(1))
         .collect::<Result<Vec<_>, _>>()
         .change_context(PipelineError::Pipe)?;
-
     let mut capture_pairs = commands
         .iter()
         .map(|cmd| {
@@ -37,7 +39,6 @@ pub fn launch_pipeline(
         })
         .collect::<Result<Vec<_>, _>>()
         .change_context(PipelineError::CaptureSocket)?;
-
     let mut children: Vec<(i32, sys::LocalFd)> = Vec::with_capacity(n);
 
     for i in 0..n {
@@ -45,10 +46,10 @@ pub fn launch_pipeline(
             sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
             None => match child::run_child(i, &pipes, &mut capture_pairs, &commands, cell) {
-                Ok(code) => std::process::exit(code),
+                Ok(code) => sys::exit(code),
                 Err(report) => {
-                    eprintln!("{:?}", report);
-                    std::process::exit(report.current_context().exit_code());
+                    let _ = writeln!(crate::io::Stderr, "{report:?}");
+                    sys::exit(report.current_context().exit_code());
                 }
             },
             Some(pidfd) => children.push((child_pid as i32, pidfd)),

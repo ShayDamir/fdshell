@@ -1,5 +1,7 @@
+use alloc::string::ToString;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
 
@@ -7,7 +9,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 pub(crate) fn collect_name(
-    peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
 ) -> Result<ShortCStr, Report<ResolveError>> {
     let mut name = Vec::new();
     name.push(peek.next().ok_or(ResolveError::RefNotFound)?);
@@ -23,7 +25,7 @@ pub(crate) fn collect_name(
 }
 
 pub(crate) fn percent_subst(
-    peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
     out: &mut Vec<u8>,

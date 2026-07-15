@@ -24,5 +24,5 @@ pub(crate) fn run_exit(
         }
     };
     ensure!((0..=255).contains(&code), CmdError::ExitArgInvalid);
-    std::process::exit(code);
+    sys::exit(code);
 }

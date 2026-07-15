@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
 

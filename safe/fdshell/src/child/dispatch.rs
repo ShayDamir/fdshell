@@ -1,7 +1,7 @@
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
+use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
-use std::ffi::CStr;
 use sys::ShortCStr;
 
 use super::delegated;

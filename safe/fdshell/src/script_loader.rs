@@ -1,7 +1,8 @@
 use crate::AppError;
 use crate::cli::CliArgs;
+use alloc::collections::VecDeque;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use std::collections::VecDeque;
 use sys::ShortCStr;
 
 type ScriptResult = Option<(Vec<u8>, VecDeque<ShortCStr>)>;

@@ -1,7 +1,7 @@
 use crate::envfilter::glob_match;
 use crate::loop_control::LoopControl;
 use error_stack::{Report, ResultExt};
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use crate::error::cmd::CmdError;
 use crate::parse::case_block::CaseBlock;

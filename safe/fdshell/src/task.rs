@@ -1,6 +1,7 @@
 use crate::capture::Capture;
 use crate::error::task::TaskError;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;

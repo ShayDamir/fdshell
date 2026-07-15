@@ -5,6 +5,7 @@
 
 mod glob;
 
+use alloc::vec::Vec;
 pub(crate) use glob::glob_match;
 use sys::ShortCStr;
 

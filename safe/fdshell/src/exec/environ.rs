@@ -1,5 +1,7 @@
-use std::collections::HashMap;
-use std::ffi::CString;
+use alloc::ffi::CString;
+use alloc::format;
+use alloc::vec::Vec;
+use hashbrown::HashMap;
 
 use sys::ExportedFd;
 use sys::ShortCStr;
@@ -12,10 +14,11 @@ pub(crate) fn get_environ(
     env_filter: &EnvFilter,
     exec_sock: Option<&ExportedFd>,
 ) -> Vec<CString> {
-    let env_iter = std::env::vars()
-        .filter(|(k, _)| k != "FDSHELL_PID" && k != "FDSHELL_SOCKET")
-        .filter(|(k, _)| env_filter.is_allowed(k.as_bytes()))
-        .filter_map(|(k, v)| CString::new(format!("{k}={v}")).ok());
+    let env_iter = sys::env::environ_snapshot()
+        .into_iter()
+        .filter(|(k, _)| k != b"FDSHELL_PID" && k != b"FDSHELL_SOCKET")
+        .filter(|(k, _)| env_filter.is_allowed(k))
+        .filter_map(|(k, v)| CString::new([k.as_slice(), b"=", v.as_slice()].concat()).ok());
     let exports_iter = exports.iter().filter_map(|(k, v)| {
         if let Ok(key) = k.as_bytes() {
             if !env_filter.is_allowed(key) {

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 sys = { path = "../../unsafe/sys" }
-error-stack = "0.7"
+error-stack = { version = "0.7", default-features = false }
 displaydoc = "0.2"
 
 [lints]

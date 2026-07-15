@@ -2,7 +2,7 @@ use error_stack::{Report, ResultExt};
 
 use crate::error::cd::CdError;
 use crate::state::ShellState;
-use std::ffi::CString;
+use alloc::ffi::CString;
 use sys::fcntl::{O_DIRECTORY, O_NOFOLLOW};
 use sys::{LocalFd, ShortCStr};
 
@@ -19,9 +19,8 @@ pub fn cd(args: &[ShortCStr], state: &mut ShellState) -> Result<(), Report<CdErr
 }
 
 fn cd_home() -> Result<LocalFd, Report<CdError>> {
-    let home = std::env::var_os("HOME").ok_or(CdError::HomeNotSet)?;
-    let cs =
-        CString::new(home.as_os_str().as_encoded_bytes()).change_context(CdError::CdPathOpen)?;
+    let home = sys::env::getenv(b"HOME").ok_or(CdError::HomeNotSet)?;
+    let cs = CString::new(home).change_context(CdError::CdPathOpen)?;
     open_cwd_dir(&cs)
 }
 
@@ -36,15 +35,17 @@ fn cd_path(path: &ShortCStr) -> Result<LocalFd, Report<CdError>> {
     open_cwd_dir(&name)
 }
 
-fn open_cwd_dir(path: &std::ffi::CStr) -> Result<LocalFd, Report<CdError>> {
+fn open_cwd_dir(path: &core::ffi::CStr) -> Result<LocalFd, Report<CdError>> {
     sys::openat2::open(path, O_DIRECTORY | O_NOFOLLOW).change_context(CdError::CdPathOpen)
 }
 
 fn move_cwd(state: &mut ShellState, new_cwd: LocalFd) {
-    if let Some(old) = state.fds.remove(&c"CWD".into()) {
+    let cwd_key: sys::ShortCStr = c"CWD".into();
+    let old_cwd = state.fds.remove(&cwd_key);
+    if let Some(old) = old_cwd {
         state.fds.insert(c"OLDCWD".into(), old);
     }
-    state.fds.insert(c"CWD".into(), new_cwd);
+    state.fds.insert(cwd_key, new_cwd);
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use alloc::vec::Vec;
 
 use crate::error::cmd::CmdError;
 use crate::run::run_one;
@@ -328,7 +329,7 @@ fn string_assign_stores_in_state() {
     run_one(b"var=\"hello world\"", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    let val = state.strings.get(&c"var".into());
+    let val = state.strings.get::<sys::ShortCStr>(&c"var".into());
     assert_eq!(val, Some(&c"hello world".into()));
 }
 
@@ -338,7 +339,7 @@ fn string_assign_empty_value() {
     run_one(b"var=", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    let val = state.strings.get(&c"var".into());
+    let val = state.strings.get::<sys::ShortCStr>(&c"var".into());
     assert_eq!(val, Some(&c"".into()));
 }
 
@@ -348,8 +349,14 @@ fn for_single_word_executes_body() {
     crate::repl::run_script(b"for x in hello; do var=set; done", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
-    assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        Some(&c"hello".into())
+    );
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"var".into()),
+        Some(&c"set".into())
+    );
 }
 
 #[test]
@@ -358,8 +365,14 @@ fn for_multiple_words_sets_var_to_last() {
     crate::repl::run_script(b"for x in a b c; do var=set; done", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    assert_eq!(state.strings.get(&c"x".into()), Some(&c"c".into()));
-    assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        Some(&c"c".into())
+    );
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"var".into()),
+        Some(&c"set".into())
+    );
 }
 
 #[test]
@@ -368,8 +381,8 @@ fn for_empty_words_skips_body() {
     crate::repl::run_script(b"for x in; do var=set; done", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    assert_eq!(state.strings.get(&c"x".into()), None);
-    assert_eq!(state.strings.get(&c"var".into()), None);
+    assert_eq!(state.strings.get::<sys::ShortCStr>(&c"x".into()), None);
+    assert_eq!(state.strings.get::<sys::ShortCStr>(&c"var".into()), None);
 }
 
 #[test]
@@ -378,8 +391,14 @@ fn for_newline_body() {
     crate::repl::run_script(b"for x in hello\ndo\nvar=set\ndone", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
-    assert_eq!(state.strings.get(&c"var".into()), Some(&c"set".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        Some(&c"hello".into())
+    );
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"var".into()),
+        Some(&c"set".into())
+    );
 }
 
 #[test]
@@ -388,7 +407,10 @@ fn for_backtick_expands_to_words() {
         let cell = make_cell();
         crate::repl::run_script(b"for x in `echo 42 7`; do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"7".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"7".into())
+        );
     });
 }
 
@@ -398,7 +420,7 @@ fn for_backtick_empty_output_skips_body() {
         let cell = make_cell();
         crate::repl::run_script(b"for x in `echo`; do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), None);
+        assert_eq!(state.strings.get::<sys::ShortCStr>(&c"x".into()), None);
     });
 }
 
@@ -408,7 +430,10 @@ fn for_dollar_paren_expands_to_words() {
         let cell = make_cell();
         crate::repl::run_script(b"for x in $(echo hello world); do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"world".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"world".into())
+        );
     });
 }
 
@@ -418,7 +443,10 @@ fn for_backtick_single_number() {
         let cell = make_cell();
         crate::repl::run_script(b"for x in `echo 99`; do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"99".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"99".into())
+        );
     });
 }
 
@@ -428,7 +456,10 @@ fn cmd_subst_in_assign() {
         let cell = make_cell();
         crate::repl::run_script(b"x=$(builtin echo hello)", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"hello".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"hello".into())
+        );
     });
 }
 
@@ -445,7 +476,10 @@ fn string_assign_dollar_var() {
     let cell = make_cell();
     crate::repl::run_script(b"a=hello; b=$a", &cell).unwrap();
     let state = borrow_state(&cell);
-    assert_eq!(state.strings.get(&c"b".into()), Some(&c"hello".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"b".into()),
+        Some(&c"hello".into())
+    );
 }
 
 #[test]
@@ -453,7 +487,10 @@ fn string_assign_multiple_vars() {
     let cell = make_cell();
     crate::repl::run_script(b"a=foo; b=bar; c=$a$b", &cell).unwrap();
     let state = borrow_state(&cell);
-    assert_eq!(state.strings.get(&c"c".into()), Some(&c"foobar".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"c".into()),
+        Some(&c"foobar".into())
+    );
 }
 
 #[test]
@@ -461,7 +498,10 @@ fn string_assign_dollar_brace() {
     let cell = make_cell();
     crate::repl::run_script(b"a=hello; b=${a}", &cell).unwrap();
     let state = borrow_state(&cell);
-    assert_eq!(state.strings.get(&c"b".into()), Some(&c"hello".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"b".into()),
+        Some(&c"hello".into())
+    );
 }
 
 #[test]
@@ -470,7 +510,7 @@ fn string_assign_unknown_var_preserves_literal() {
     crate::repl::run_script(b"x=$nonexistent", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(
-        state.strings.get(&c"x".into()),
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
         Some(&c"$nonexistent".into())
     );
 }
@@ -488,7 +528,10 @@ fn dollar_question_exit_status() {
     let cell = make_cell();
     crate::repl::run_script(b"builtin echo ok; x=$?", &cell).unwrap();
     let state = borrow_state(&cell);
-    assert_eq!(state.strings.get(&c"x".into()), Some(&c"0".into()));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        Some(&c"0".into())
+    );
 }
 
 #[test]
@@ -496,7 +539,7 @@ fn dollar_question_after_failure() {
     let cell = make_cell();
     crate::repl::run_script(b"nonexistent_cmd_xyzzy; x=$?", &cell).unwrap();
     let state = borrow_state(&cell);
-    let val = state.strings.get(&c"x".into()).unwrap();
+    let val = state.strings.get::<sys::ShortCStr>(&c"x".into()).unwrap();
     let code: i32 = core::str::from_utf8(val.as_bytes().unwrap())
         .unwrap()
         .parse()
@@ -511,7 +554,7 @@ fn cmd_subst_mixed_with_text() {
         crate::repl::run_script(b"x=prefix$(builtin echo middle)suffix", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get(&c"x".into()),
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
             Some(&c"prefixmiddlesuffix".into())
         );
     });
@@ -832,9 +875,15 @@ fn export_set_env_var() {
     run_one(b"export FOO=bar", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    assert_eq!(state.strings.get(&c"FOO".into()), Some(&c"bar".into()));
     assert_eq!(
-        state.exports.get(&c"FOO".into()).map(|v| v.as_slice()),
+        state.strings.get::<sys::ShortCStr>(&c"FOO".into()),
+        Some(&c"bar".into())
+    );
+    assert_eq!(
+        state
+            .exports
+            .get::<sys::ShortCStr>(&c"FOO".into())
+            .map(|v| v.as_slice()),
         Some(&b"bar"[..])
     );
 }
@@ -846,11 +895,17 @@ fn export_multiple_vars() {
     let state = borrow_state(&cell);
     assert_eq!(state.exports.len(), 2);
     assert_eq!(
-        state.exports.get(&c"FOO".into()).map(|v| v.as_slice()),
+        state
+            .exports
+            .get::<sys::ShortCStr>(&c"FOO".into())
+            .map(|v| v.as_slice()),
         Some(&b"bar"[..])
     );
     assert_eq!(
-        state.exports.get(&c"BAZ".into()).map(|v| v.as_slice()),
+        state
+            .exports
+            .get::<sys::ShortCStr>(&c"BAZ".into())
+            .map(|v| v.as_slice()),
         Some(&b"qux"[..])
     );
 }
@@ -925,7 +980,10 @@ fn for_break_exits_loop() {
         crate::repl::run_script(b"for x in a b c; do if true; then break; fi; done", &cell)
             .unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"a".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"a".into())
+        );
     });
 }
 
@@ -939,8 +997,14 @@ fn break_in_nested_for() {
         )
         .unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"b".into()));
-        assert_eq!(state.strings.get(&c"y".into()), Some(&c"1".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"b".into())
+        );
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"y".into()),
+            Some(&c"1".into())
+        );
     });
 }
 
@@ -981,7 +1045,10 @@ fn for_continue_skips_iteration() {
         )
         .unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"result".into()), Some(&c"c".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"result".into()),
+            Some(&c"c".into())
+        );
     });
 }
 
@@ -995,7 +1062,10 @@ fn while_continue_skips_iteration() {
         )
         .unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"result".into()), Some(&c"1".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"result".into()),
+            Some(&c"1".into())
+        );
     });
 }
 
@@ -1016,7 +1086,10 @@ fn break_in_if_inside_for() {
             .unwrap();
         crate::repl::run_script(b"x=after", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get(&c"x".into()), Some(&c"after".into()));
+        assert_eq!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            Some(&c"after".into())
+        );
     });
 }
 

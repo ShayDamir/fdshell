@@ -1,5 +1,6 @@
 use crate::error::parse::ParseError;
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
+use alloc::vec::Vec;
 use error_stack::{Report, ensure};
 use sys::ShortCStr;
 

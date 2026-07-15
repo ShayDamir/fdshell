@@ -1,6 +1,6 @@
 use crate::state::ShellState;
+use core::ffi::CStr;
 use error_stack::Report;
-use std::ffi::CStr;
 use sys::ShortCStr;
 
 pub(super) fn handle_fchmod(

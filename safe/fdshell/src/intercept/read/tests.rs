@@ -3,6 +3,10 @@ use super::*;
 use crate::capture::Capture;
 use crate::parse::CommandLine;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use alloc::format;
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
@@ -483,11 +487,11 @@ fn run_read_simple() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"var1".into()),
+        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
         Some(&ShortCStr::from_vec(b"hello".to_vec()).unwrap())
     );
     assert_eq!(
-        state.strings.get(&c"var2".into()),
+        state.strings.get::<sys::ShortCStr>(&c"var2".into()),
         Some(&ShortCStr::from_vec(b"world".to_vec()).unwrap())
     );
 }
@@ -584,7 +588,7 @@ fn run_read_with_prompt() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"var1".into()),
+        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
         Some(&ShortCStr::from_vec(b"answer".to_vec()).unwrap())
     );
 }
@@ -607,7 +611,7 @@ fn run_read_with_n_max_bytes() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"var1".into()),
+        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
         Some(&ShortCStr::from_vec(b"hel".to_vec()).unwrap())
     );
 }
@@ -633,7 +637,7 @@ fn run_read_with_u_fdvar() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"var1".into()),
+        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
         Some(&ShortCStr::from_vec(b"from var".to_vec()).unwrap())
     );
 }
@@ -667,15 +671,15 @@ fn run_read_multiple_targets() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"x".into()),
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
         Some(&ShortCStr::from_vec(b"a".to_vec()).unwrap())
     );
     assert_eq!(
-        state.strings.get(&c"y".into()),
+        state.strings.get::<sys::ShortCStr>(&c"y".into()),
         Some(&ShortCStr::from_vec(b"b".to_vec()).unwrap())
     );
     assert_eq!(
-        state.strings.get(&c"z".into()),
+        state.strings.get::<sys::ShortCStr>(&c"z".into()),
         Some(&ShortCStr::from_vec(b"c".to_vec()).unwrap())
     );
 }
@@ -698,15 +702,15 @@ fn run_read_fewer_fields_than_targets() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"x".into()),
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
         Some(&ShortCStr::from_vec(b"only_one".to_vec()).unwrap())
     );
     assert_eq!(
-        state.strings.get(&c"y".into()),
+        state.strings.get::<sys::ShortCStr>(&c"y".into()),
         Some(&ShortCStr::from_vec(b"".to_vec()).unwrap())
     );
     assert_eq!(
-        state.strings.get(&c"z".into()),
+        state.strings.get::<sys::ShortCStr>(&c"z".into()),
         Some(&ShortCStr::from_vec(b"".to_vec()).unwrap())
     );
 }
@@ -729,7 +733,7 @@ fn run_read_more_fields_than_targets() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"x".into()),
+        state.strings.get::<sys::ShortCStr>(&c"x".into()),
         Some(&ShortCStr::from_vec(b"a b c d".to_vec()).unwrap())
     );
 }
@@ -772,7 +776,7 @@ fn run_read_strip_prefix_dollar() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"MYVAR".into()),
+        state.strings.get::<sys::ShortCStr>(&c"MYVAR".into()),
         Some(&ShortCStr::from_vec(b"value".to_vec()).unwrap())
     );
 }
@@ -793,7 +797,11 @@ fn run_read_empty_data_eof() {
 
     let state = cell.borrow().unwrap();
     assert!(matches!(state.last_status, WaitStatus::Exited(1)));
-    assert!(!state.strings.contains_key(&c"var1".into()));
+    assert!(
+        !state
+            .strings
+            .contains_key::<sys::ShortCStr>(&c"var1".into())
+    );
 }
 
 #[test]
@@ -814,7 +822,7 @@ fn run_read_newline_stops_reading() {
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get(&c"var1".into()),
+        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
         Some(&ShortCStr::from_vec(b"first".to_vec()).unwrap())
     );
 }

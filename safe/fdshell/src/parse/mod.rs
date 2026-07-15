@@ -1,4 +1,5 @@
 mod backtick;
+use alloc::vec::Vec;
 mod bg_redirect;
 mod builtin;
 mod capture;

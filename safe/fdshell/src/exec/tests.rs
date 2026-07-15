@@ -2,7 +2,8 @@
 
 use super::{exec_fd, resolve_path};
 use crate::error::child_process::ChildProcessError;
-use std::collections::HashMap;
+use alloc::format;
+use hashbrown::HashMap;
 use std::ffi::CString;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::AtomicU64;

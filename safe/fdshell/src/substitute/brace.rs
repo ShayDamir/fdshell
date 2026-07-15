@@ -1,3 +1,5 @@
+use alloc::format;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
@@ -5,7 +7,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 pub(crate) fn handle_brace(
-    peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     state: &ShellState,
     out: &mut Vec<u8>,
 ) -> Result<(), Report<ResolveError>> {
@@ -67,7 +69,7 @@ pub(crate) fn handle_brace(
     Ok(())
 }
 
-fn read_until_close(peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>) -> (Vec<u8>, bool) {
+fn read_until_close(peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>) -> (Vec<u8>, bool) {
     let mut name = Vec::new();
     let mut closed = false;
     while let Some(&nc) = peek.peek() {

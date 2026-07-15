@@ -1,7 +1,10 @@
 mod environ;
 
-use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use alloc::ffi::CString;
+use alloc::format;
+use alloc::vec::Vec;
+use core::ffi::CStr;
+use hashbrown::HashMap;
 
 use error_stack::{Report, ResultExt, bail};
 use sys::execveat::AT_EMPTY_PATH;
@@ -20,7 +23,7 @@ pub fn exec_fd(
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
-    let pid = std::process::id();
+    let pid = sys::env::getpid();
     let cookie = format!("{}", pid);
     let exec_sock = shell_sock
         .map(|s| s.export())
@@ -43,7 +46,7 @@ pub fn exec_at(
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
-    let pid = std::process::id();
+    let pid = sys::env::getpid();
     let cookie = format!("{}", pid);
     let exec_sock = shell_sock
         .map(|s| s.export())
@@ -60,13 +63,10 @@ fn name_from_cstr(bin: &CStr) -> ShortCStr {
 }
 
 pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    let path = match std::env::var("PATH") {
-        Ok(p) if !p.is_empty() => p,
-        _ => "/usr/local/bin:/usr/bin:/bin".to_string(),
-    };
+    let path = sys::env::getenv(b"PATH").unwrap_or(b"/usr/local/bin:/usr/bin:/bin".to_vec());
     let bin_name = name_from_cstr(bin);
-    for dir in path.split(':').filter(|d| !d.is_empty()) {
-        let full = [dir.as_bytes(), b"/", bin.to_bytes()].concat();
+    for dir in path.split(|&b| b == b':').filter(|d| !d.is_empty()) {
+        let full = [dir, b"/", bin.to_bytes()].concat();
         let pathname = CString::new(full).change_context(ChildProcessError::Never)?;
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
             return Ok(fd);

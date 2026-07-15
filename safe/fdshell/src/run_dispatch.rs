@@ -2,7 +2,7 @@ use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -45,7 +45,8 @@ pub(crate) fn run_simple(
             if let Some(m) = mask {
                 sys::umask::set(*m);
             } else {
-                println!("{:04o}", sys::umask::get());
+                let s = alloc::format!("{:04o}", sys::umask::get());
+                sys::OUT.write_all(s.as_bytes()).ok();
             }
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.set_last_exit(0);

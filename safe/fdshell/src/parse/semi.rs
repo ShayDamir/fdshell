@@ -1,4 +1,5 @@
 use crate::error::parse::ParseError;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 

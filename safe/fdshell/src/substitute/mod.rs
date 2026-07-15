@@ -1,11 +1,12 @@
 mod brace;
+use alloc::vec::Vec;
 mod dollar;
 mod paren;
 mod percent;
 
+use alloc::ffi::CString;
 use error_stack::{Report, ResultExt};
-use std::collections::HashMap;
-use std::ffi::CString;
+use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -25,8 +26,8 @@ pub(crate) fn substitute_arg(
         peek.next();
         match peek.peek() {
             None | Some(&b'/') => {
-                if let Ok(home) = std::env::var("HOME") {
-                    out.extend_from_slice(home.as_bytes());
+                if let Some(home) = sys::env::getenv(b"HOME") {
+                    out.extend_from_slice(&home);
                 }
             }
             _ => out.push(b'~'),

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+use alloc::vec;
 
 use super::{Capture, do_captures};
 use crate::error::capture::CaptureError;

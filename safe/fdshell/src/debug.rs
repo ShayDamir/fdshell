@@ -6,12 +6,15 @@
 use error_stack::{Report, fmt::HookContext};
 
 use crate::error::parse::ParsePosition;
+use alloc::format;
+use alloc::string::String;
+use alloc::string::ToString;
 use builtins::error::Suggestion;
 
 pub fn install_debug_hooks() {
     // Suppress default panic location hook body
-    Report::install_debug_hook::<std::panic::Location>(
-        |_location: &std::panic::Location, _ctx: &mut HookContext<std::panic::Location>| {
+    Report::install_debug_hook::<core::panic::Location>(
+        |_location: &core::panic::Location, _ctx: &mut HookContext<core::panic::Location>| {
             #[cfg(debug_assertions)]
             _ctx.push_body(format!("at {}", _location));
         },
@@ -54,7 +57,7 @@ fn format_line_and_caret(input: &[u8], pos: usize) -> (String, usize, usize) {
         .unwrap_or(input.len());
     let line = input
         .get(line_start..line_end)
-        .and_then(|s| std::str::from_utf8(s).ok())
+        .and_then(|s| core::str::from_utf8(s).ok())
         .unwrap_or("?")
         .to_string();
     let caret_col = pos - line_start;

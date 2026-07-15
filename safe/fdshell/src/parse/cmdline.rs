@@ -1,5 +1,6 @@
 use crate::capture::Capture;
 use crate::redirect::RedirectDef;
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]

@@ -1,6 +1,7 @@
 use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
+use core::fmt::Write;
 use error_stack::Report;
 use sys::fork_cell::ForkCell;
 
@@ -33,10 +34,10 @@ fn run_replace(
     let redirects = &cmdline.redirects;
 
     match crate::replacer::execute(&args, &args_fq, redirects, cell) {
-        Ok(code) => std::process::exit(code),
+        Ok(code) => sys::exit(code),
         Err(report) => {
-            eprintln!("{:?}", report);
-            std::process::exit(report.current_context().exit_code());
+            let _ = writeln!(crate::io::Stderr, "{report:?}");
+            sys::exit(report.current_context().exit_code());
         }
     }
 }

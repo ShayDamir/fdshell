@@ -63,7 +63,9 @@ nix flake check        # fmt + clippy + nextest
 nix develop .#checks.x86_64-linux.default -c cargo nextest run
 ```
 
-Tests in `unsafe/sys/tests/` and `safe/builtins/tests/`. Don't use raw `cargo test`.
+Tests in `unsafe/sys/tests/` and `safe/builtins/tests/`.
+
+**Always use `cargo nextest`, never `cargo test`.** Regular `cargo test` runs tests in-process with a shared harness that breaks when tests call `fork()` — child processes inherit the test runner's state, causing hangs, fd corruption, and cross-test interference. `nextest` runs each test in its own isolated process, which is required for correct `fork()` semantics.
 
 ## Coverage
 

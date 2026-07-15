@@ -3,6 +3,7 @@
 //! Provides `parse_args` which parses `--allow`, `--deny`, `--clear`,
 //! `--list`, and `--help` flags from command-line arguments.
 
+use alloc::vec::Vec;
 use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;

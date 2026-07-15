@@ -3,6 +3,8 @@
 //! Produces a string of `^` and `~` characters aligned to the error
 //! position in the offending input line.
 
+use alloc::string::String;
+
 pub(crate) fn caret_line(col: usize, len: usize) -> String {
     let mut s = String::with_capacity(col + len);
     for _ in 0..col {

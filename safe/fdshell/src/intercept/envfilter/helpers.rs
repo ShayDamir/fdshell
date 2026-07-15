@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ShortCStr;
 

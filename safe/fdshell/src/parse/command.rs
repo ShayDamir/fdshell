@@ -5,6 +5,7 @@ use crate::parse::bg_redirect;
 use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::builtin::is_builtin;
 use crate::redirect::RedirectDef;
+use alloc::vec::Vec;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 

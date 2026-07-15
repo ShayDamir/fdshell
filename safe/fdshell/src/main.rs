@@ -1,14 +1,28 @@
+#![no_std]
 #![forbid(unsafe_code)]
 
+extern crate alloc;
+
+use alloc::ffi::CString;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use fdshell::{AppError, ShellState, init_shellfd, install_debug_hooks, parse_cli_args, run};
-use std::ffi::CString;
 use sys::fcntl::O_DIRECTORY;
 use sys::fork_cell::ForkCell;
 
-fn main() -> Result<(), Report<AppError>> {
+fn main() -> ! {
     install_debug_hooks();
+    match run_main() {
+        Ok(()) => sys::exit(0),
+        Err(report) => {
+            let s = alloc::format!("{report:?}\n");
+            let _ = sys::ERR.write_all(s.as_bytes());
+            sys::exit(1);
+        }
+    }
+}
 
+fn run_main() -> Result<(), Report<AppError>> {
     let mode = init_shellfd().change_context(AppError::Init)?;
     sys::umask::init();
     let mut state_inner = ShellState::new();
@@ -25,9 +39,11 @@ fn main() -> Result<(), Report<AppError>> {
         state.insert_cwd(cwd);
     }
 
-    let all_args: Vec<CString> = std::env::args()
+    let all_args: Vec<CString> = sys::env::read_cmdline()
+        .change_context(AppError::Init)?
+        .into_iter()
         .skip(1)
-        .map(|s| CString::new(s).unwrap_or_default())
+        .map(|v| CString::new(v).unwrap_or_default())
         .collect();
 
     if let Some(first) = all_args.first()

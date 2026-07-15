@@ -1,5 +1,6 @@
 use crate::error::cmd_subst::CmdSubstError;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 
@@ -14,7 +15,7 @@ pub(crate) fn run_and_capture(
             let _ = w.export_to(1);
             // Command substitution output already read; exit code irrelevant
             let _ = crate::repl::run_script(cmd, cell);
-            std::process::exit(0);
+            sys::exit(0);
         }
         (_, Some(pidfd)) => {
             drop(w);

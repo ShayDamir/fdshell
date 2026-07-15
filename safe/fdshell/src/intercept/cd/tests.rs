@@ -3,6 +3,8 @@ use crate::capture::Capture;
 use crate::cd::cd;
 use crate::parse::CommandLine;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use alloc::vec;
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 fn make_cmdline(args: &[&str]) -> CommandLine {
@@ -39,7 +41,7 @@ fn cd_to_tmp_success() {
     assert!(result.is_ok());
     assert!(result.unwrap());
     let state = cell.borrow().unwrap();
-    assert!(state.fds.contains_key(&c"CWD".into()));
+    assert!(state.fds.contains_key::<sys::ShortCStr>(&c"CWD".into()));
 }
 
 #[test]
@@ -58,7 +60,7 @@ fn cd_dash_switches_to_oldwd() {
     assert!(result.is_ok());
     assert!(result.unwrap());
     let state = cell.borrow().unwrap();
-    assert!(state.fds.contains_key(&c"OLDCWD".into()));
+    assert!(state.fds.contains_key::<sys::ShortCStr>(&c"OLDCWD".into()));
 }
 
 #[test]
@@ -77,7 +79,7 @@ fn cd_home_success() {
     assert!(result.is_ok());
     assert!(result.unwrap());
     let state = cell.borrow().unwrap();
-    assert!(state.fds.contains_key(&c"CWD".into()));
+    assert!(state.fds.contains_key::<sys::ShortCStr>(&c"CWD".into()));
 }
 
 #[test]

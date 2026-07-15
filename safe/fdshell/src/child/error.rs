@@ -1,5 +1,6 @@
 use crate::error::child_process::ChildProcessError;
 use builtins::error::BuiltinError;
+use core::fmt::Write;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
@@ -11,7 +12,7 @@ pub(crate) fn handle_builtin_error(
         BuiltinError::Unknown => bail!(ChildProcessError::NotABuiltin(name)),
         BuiltinError::Help => Ok(0),
         BuiltinError::InvalidArgument(_) | BuiltinError::MissingArgument(_) => {
-            eprintln!("{:?}", report);
+            let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }
         BuiltinError::Io => Err(report.change_context(ChildProcessError::BuiltinExecutionFailed)),
@@ -23,7 +24,7 @@ pub(crate) fn handle_builtin_error(
             }
         }
         BuiltinError::SendFdFailed => {
-            eprintln!("{:?}", report);
+            let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }
     }

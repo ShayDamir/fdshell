@@ -81,6 +81,15 @@ impl LocalFd {
     }
 }
 
+/// Close a raw file descriptor.
+///
+/// # Safety
+/// `raw` must be a valid open fd. Closing an invalid fd is a no-op.
+pub fn close_raw(raw: i32) {
+    // SAFETY: caller guarantees `raw` is a valid open fd; close of a bad fd is a no-op.
+    unsafe { libc::close(raw) };
+}
+
 impl Drop for LocalFd {
     fn drop(&mut self) {
         // SAFETY: `self.0` is a valid fd by `LocalFd` invariant;

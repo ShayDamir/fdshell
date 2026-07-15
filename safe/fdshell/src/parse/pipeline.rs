@@ -1,6 +1,7 @@
 use crate::error::parse::ParseError;
 use crate::parse::command::parse_command;
 use crate::parse::{ParsedLine, Pipeline};
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ShortCStr;
 

@@ -1,10 +1,12 @@
+#![allow(clippy::indexing_slicing)]
 use crate::child;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
+use alloc::vec::Vec;
+use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -45,13 +47,17 @@ pub fn execute(
         }
     } else {
         let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
-        let binary = sys::RefCStr::from(binary.clone());
-        let fd = exec::resolve_path(&binary)?;
+        let binary_ref = sys::RefCStr::from(binary.clone());
+        let fd = exec::resolve_path(&binary_ref).change_context(ChildProcessError::ExecFailed)?;
+        let binary_cstr =
+            core::ffi::CStr::from_bytes_with_nul(binary_ref.as_ref().to_bytes_with_nul())
+                .change_context(ChildProcessError::Never)?;
         let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_fq, cell)
             .change_context(ChildProcessError::ExecFailed)?;
-        let argv: Vec<&CStr> = std::iter::once(binary.as_ref())
-            .chain(substituted.iter().map(|s| s.as_c_str()))
-            .collect();
+        let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];
+        for s in &substituted {
+            argv.push(s.as_c_str());
+        }
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;

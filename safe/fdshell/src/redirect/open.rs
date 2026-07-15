@@ -1,5 +1,6 @@
 use super::RedirectDef;
 use crate::error::redirect::OpenRedirectError;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::LocalFd;
 

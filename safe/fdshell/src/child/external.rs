@@ -1,9 +1,11 @@
+#![allow(clippy::indexing_slicing)]
 use crate::child::Command;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
 use crate::state::ShellState;
+use alloc::vec::Vec;
+use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use std::ffi::CStr;
 
 pub(super) fn run_external(
     cmd: &Command,
@@ -13,9 +15,12 @@ pub(super) fn run_external(
     let name = sys::RefCStr::from(cmd.name.clone());
     let fd = exec::resolve_path(&name)
         .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
-    let full_argv: Vec<&CStr> = std::iter::once(name.as_ref())
-        .chain(refs.iter().copied())
-        .collect();
+    let name_cstr = core::ffi::CStr::from_bytes_with_nul(name.as_ref().to_bytes_with_nul())
+        .change_context(ChildProcessError::Never)?;
+    let mut full_argv: Vec<&CStr> = alloc::vec![name_cstr];
+    for r in refs {
+        full_argv.push(*r);
+    }
     match exec::exec_fd(
         &fd,
         &full_argv,

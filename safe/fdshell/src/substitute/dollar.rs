@@ -1,10 +1,12 @@
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
+use alloc::format;
 
 pub(crate) fn dollar_subst(
-    peek: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     state: &ShellState,
     out: &mut Vec<u8>,
 ) -> Result<(), Report<ResolveError>> {

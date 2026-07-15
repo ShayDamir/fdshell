@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 /// Emit the current token buffer as a token, then reset it.

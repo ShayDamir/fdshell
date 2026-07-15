@@ -26,7 +26,7 @@ fn cd_to_tmp() {
         let mut state = ShellState::new();
         let tmp = c"/tmp".into();
         cd(&[tmp], &mut state).unwrap();
-        let cwd = state.fds.get(&c"CWD".into()).unwrap();
+        let cwd = state.fds.get::<sys::ShortCStr>(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -46,7 +46,7 @@ fn cd_to_home() {
         child_test(|| {
             let mut state = ShellState::new();
             cd(&[], &mut state).unwrap();
-            let cwd = state.fds.get(&c"CWD".into()).unwrap();
+            let cwd = state.fds.get::<sys::ShortCStr>(&c"CWD".into()).unwrap();
             cwd.verify().unwrap();
         });
     } else {
@@ -64,10 +64,15 @@ fn cd_to_self() {
         let mut state = ShellState::new();
         let tmp = c"/tmp".into();
         cd(&[tmp], &mut state).unwrap();
-        let cwd_fd = state.fds.get(&c"CWD".into()).unwrap().try_clone().unwrap();
+        let cwd_fd = state
+            .fds
+            .get::<sys::ShortCStr>(&c"CWD".into())
+            .unwrap()
+            .try_clone()
+            .unwrap();
         state.fds.insert(c"CWD".into(), cwd_fd);
         cd(&[c"%CWD".into()], &mut state).unwrap();
-        let cwd = state.fds.get(&c"CWD".into()).unwrap();
+        let cwd = state.fds.get::<sys::ShortCStr>(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
     });
 }
@@ -102,9 +107,9 @@ fn cd_dash_switches_to_oldpwd() {
         cd(&[root], &mut state).unwrap();
         let dash = c"-".into();
         cd(&[dash], &mut state).unwrap();
-        let cwd = state.fds.get(&c"CWD".into()).unwrap();
+        let cwd = state.fds.get::<sys::ShortCStr>(&c"CWD".into()).unwrap();
         cwd.verify().unwrap();
-        let old = state.fds.get(&c"OLDCWD".into()).unwrap();
+        let old = state.fds.get::<sys::ShortCStr>(&c"OLDCWD".into()).unwrap();
         old.verify().unwrap();
     });
 }
@@ -115,11 +120,11 @@ fn cd_move_cwd_to_oldcwd() {
         let mut state = ShellState::new();
         let tmp = c"/tmp".into();
         cd(&[tmp], &mut state).unwrap();
-        assert!(state.fds.contains_key(&c"CWD".into()));
-        assert!(!state.fds.contains_key(&c"OLDCWD".into()));
+        assert!(state.fds.contains_key::<sys::ShortCStr>(&c"CWD".into()));
+        assert!(!state.fds.contains_key::<sys::ShortCStr>(&c"OLDCWD".into()));
         let root = c"/".into();
         cd(&[root], &mut state).unwrap();
-        assert!(state.fds.contains_key(&c"CWD".into()));
-        assert!(state.fds.contains_key(&c"OLDCWD".into()));
+        assert!(state.fds.contains_key::<sys::ShortCStr>(&c"CWD".into()));
+        assert!(state.fds.contains_key::<sys::ShortCStr>(&c"OLDCWD".into()));
     });
 }

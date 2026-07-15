@@ -2,6 +2,8 @@ use super::*;
 use crate::capture::Capture;
 use crate::parse::CommandLine;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use alloc::vec;
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 fn make_cmdline(args: &[&str]) -> CommandLine {

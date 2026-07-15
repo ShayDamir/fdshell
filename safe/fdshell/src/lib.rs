@@ -1,4 +1,7 @@
+#![no_std]
 #![forbid(unsafe_code)]
+
+extern crate alloc;
 
 mod app;
 mod capture;
@@ -20,6 +23,7 @@ mod for_run;
 mod if_exec;
 mod init;
 mod intercept;
+mod io;
 mod keywords;
 mod launch;
 mod loop_;
@@ -40,6 +44,8 @@ mod state;
 mod substitute;
 mod task;
 
+#[cfg(test)]
+extern crate std;
 #[cfg(test)]
 mod tests;
 

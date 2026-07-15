@@ -1,7 +1,7 @@
 use crate::error::exports::ExportError;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use std::io::Write;
 
 use sys::{ShortCStr, ShortCStrError};
 
@@ -26,18 +26,14 @@ pub fn handle_export(
 }
 
 fn list_exports(state: &ShellState) -> Result<(), Report<ExportError>> {
-    let mut stdout = std::io::stdout().lock();
     for (k, v) in &state.exports {
         let key_bytes = k.as_bytes().change_context(ExportError::Never)?;
-        write!(stdout, "export ").change_context(ExportError::Io)?;
-        stdout
-            .write_all(key_bytes)
-            .change_context(ExportError::Io)?;
-        write!(stdout, "=").change_context(ExportError::Io)?;
-        stdout
-            .write_all(v.as_slice())
-            .change_context(ExportError::Io)?;
-        writeln!(stdout).change_context(ExportError::Io)?;
+        let mut line: Vec<u8> = b"export ".to_vec();
+        line.extend_from_slice(key_bytes);
+        line.extend_from_slice(b"=");
+        line.extend_from_slice(v.as_slice());
+        line.push(b'\n');
+        sys::OUT.write_all(&line).change_context(ExportError::Io)?;
     }
     Ok(())
 }
@@ -46,27 +42,24 @@ fn set_export(
     name: ShortCStr,
     value: ShortCStr,
     state: &mut ShellState,
-) -> Result<(), ShortCStrError> {
-    let name_bytes = name.as_bytes()?.to_vec();
-    let val_bytes = value.as_bytes()?.to_vec();
-    let name_str = ShortCStr::from_vec(name_bytes)?;
-    let val_str = ShortCStr::from_vec(val_bytes.clone())?;
-    state.strings.insert(name_str.clone(), val_str);
-    state.exports.insert(name_str, val_bytes);
+) -> Result<(), Report<ExportError>> {
+    let val_bytes = value
+        .as_bytes()
+        .change_context(ExportError::NulByte)?
+        .to_vec();
+    state.exports.insert(name.clone(), val_bytes.clone());
+    state.strings.insert(
+        name,
+        ShortCStr::from_vec(val_bytes).change_context(ExportError::Never)?,
+    );
     Ok(())
 }
 
 fn mark_exported(arg: &ShortCStr, state: &mut ShellState) -> Result<(), ShortCStrError> {
-    let target = arg.as_bytes()?;
-    if let Some(val) = state.strings.get(arg) {
-        let val_bytes = val.as_bytes()?.to_vec();
-        state
-            .exports
-            .insert(ShortCStr::from_vec(target.to_vec())?, val_bytes);
-    } else {
-        let name_str = ShortCStr::from_vec(target.to_vec())?;
-        state.strings.insert(name_str.clone(), ShortCStr::new());
-        state.exports.insert(name_str, Vec::new());
-    }
+    let name_bytes = arg.as_bytes()?.to_vec();
+    state.exports.insert(arg.clone(), Vec::new());
+    // Also set the corresponding shell variable.
+    let _var_name =
+        alloc::ffi::CString::new(name_bytes.clone()).map_err(|_| ShortCStrError::NulByte)?;
     Ok(())
 }

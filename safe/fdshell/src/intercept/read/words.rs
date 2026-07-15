@@ -1,3 +1,5 @@
+use alloc::vec;
+use alloc::vec::Vec;
 pub(crate) fn split_fields(data: &[u8], num_targets: usize) -> Vec<Vec<u8>> {
     if num_targets == 1 {
         return vec![data.to_vec()];

@@ -1,7 +1,8 @@
 use crate::{AppError, ShellState, exec_cmd};
+use alloc::collections::VecDeque;
+use alloc::ffi::CString;
+use core::fmt::Write;
 use error_stack::{Report, ResultExt};
-use std::collections::VecDeque;
-use std::ffi::CString;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -26,13 +27,13 @@ pub fn run_cmd_mode(
     match exec_cmd(cmd.to_bytes(), state) {
         Ok(code) => {
             if code != 0 {
-                std::process::exit(code);
+                sys::exit(code);
             }
             Ok(())
         }
         Err(info) => {
-            eprintln!("{info:?}");
-            std::process::exit(1);
+            let _ = writeln!(crate::io::Stderr, "{info:?}");
+            sys::exit(1);
         }
     }
 }
@@ -44,13 +45,13 @@ pub fn execute_script(
     match exec_cmd(script_content, state) {
         Ok(code) => {
             if code != 0 {
-                std::process::exit(code);
+                sys::exit(code);
             }
             Ok(())
         }
         Err(info) => {
-            eprintln!("{info:?}");
-            std::process::exit(1);
+            let _ = writeln!(crate::io::Stderr, "{info:?}");
+            sys::exit(1);
         }
     }
 }

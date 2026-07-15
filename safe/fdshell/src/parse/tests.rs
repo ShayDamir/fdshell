@@ -1,10 +1,11 @@
-#![allow(clippy::unwrap_used)]
-#![allow(clippy::indexing_slicing)]
-
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
 use crate::capture::Capture;
 use crate::error::cmd::CmdError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
 #[test]
 fn test_mkdirat_capture() {
     let ParsedLine::Cmd(cmd) =

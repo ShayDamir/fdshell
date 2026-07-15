@@ -3,6 +3,7 @@
 //! `ParseError` covers parse-time errors without position info.
 //! Position is attached separately via `ParsePosition` on the `Report`.
 
+use alloc::vec::Vec;
 use error_stack::Report;
 
 /// [ParseError] Parser errors
@@ -85,7 +86,7 @@ pub(crate) enum ParseError {
     CaptureEmptyVar,
 }
 
-impl std::error::Error for ParseError {}
+impl core::error::Error for ParseError {}
 
 /// Create a `Report<ParseError>` for an unbalanced quote at `pos`.
 pub(crate) fn report_unbalanced_quote(line: &[u8], pos: usize) -> Report<ParseError> {

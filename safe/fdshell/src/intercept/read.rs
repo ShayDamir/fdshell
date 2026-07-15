@@ -1,5 +1,4 @@
 use error_stack::{Report, ResultExt};
-use std::io::Write as _;
 
 use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
@@ -27,9 +26,8 @@ pub(crate) fn run_read(
 
     let prompt_text = prompt.unwrap_or(b"");
     if !prompt_text.is_empty() {
-        std::io::stderr()
+        sys::ERR
             .write_all(prompt_text)
-            .change_context(ReadError::Io)
             .change_context(CmdError::Read)?;
     }
 

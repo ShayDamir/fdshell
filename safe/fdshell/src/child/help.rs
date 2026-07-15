@@ -1,6 +1,5 @@
 use builtins::error::BuiltinError;
-use error_stack::Report;
-use std::io::Write;
+use error_stack::{Report, ResultExt};
 
 const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"become", b"Replace shell with command"),
@@ -33,35 +32,31 @@ const BUILTINS: &[(&[u8], &[u8])] = &[
 ];
 
 pub(crate) fn print_help() -> Result<i32, Report<BuiltinError>> {
-    use error_stack::ResultExt;
-    let mut lock = std::io::stdout().lock();
-    lock.write_all(b"Shell commands:\n\n")
+    sys::OUT
+        .write_all(b"Shell commands:\n\n")
         .change_context(BuiltinError::Io)?;
-    print_list(&mut lock, SHELL_CMDS)?;
-    lock.write_all(b"\nBuiltins:\n\n")
+    print_list(SHELL_CMDS)?;
+    sys::OUT
+        .write_all(b"\nBuiltins:\n\n")
         .change_context(BuiltinError::Io)?;
-    print_list(&mut lock, BUILTINS)?;
+    print_list(BUILTINS)?;
     Ok(0)
 }
 
-fn print_list(
-    lock: &mut impl Write,
-    entries: &[(&[u8], &[u8])],
-) -> Result<(), Report<BuiltinError>> {
-    use error_stack::ResultExt;
+fn print_list(entries: &[(&[u8], &[u8])]) -> Result<(), Report<BuiltinError>> {
     let max_name = entries
         .iter()
         .map(|(name, _)| name.len())
         .max()
         .unwrap_or(0);
     for (name, desc) in entries {
-        lock.write_all(name).change_context(BuiltinError::Io)?;
+        sys::OUT.write_all(name).change_context(BuiltinError::Io)?;
         for _ in name.len()..max_name {
-            lock.write_all(b" ").change_context(BuiltinError::Io)?;
+            sys::OUT.write_all(b" ").change_context(BuiltinError::Io)?;
         }
-        lock.write_all(b"  ").change_context(BuiltinError::Io)?;
-        lock.write_all(desc).change_context(BuiltinError::Io)?;
-        lock.write_all(b"\n").change_context(BuiltinError::Io)?;
+        sys::OUT.write_all(b"  ").change_context(BuiltinError::Io)?;
+        sys::OUT.write_all(desc).change_context(BuiltinError::Io)?;
+        sys::OUT.write_all(b"\n").change_context(BuiltinError::Io)?;
     }
     Ok(())
 }

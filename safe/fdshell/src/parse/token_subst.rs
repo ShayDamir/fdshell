@@ -5,7 +5,7 @@ use sys::ShortCStr;
 pub(crate) fn read_dollar_paren(
     line: &[u8],
     cur: &mut ShortCStr,
-    bytes: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+    bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     start: usize,
 ) -> Result<(), Report<ParseError>> {
     cur.push(b'$')

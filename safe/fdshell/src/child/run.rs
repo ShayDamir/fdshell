@@ -3,8 +3,9 @@ use crate::error::child_process::ChildProcessError;
 use crate::redirect::Redirect;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
+use alloc::vec::Vec;
+use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use std::ffi::CStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 

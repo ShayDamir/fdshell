@@ -1,6 +1,7 @@
 use super::comment::skip_comment;
 use super::emit::emit_token;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 

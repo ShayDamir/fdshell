@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use core::iter::Peekable;
 
 /// Skip from the current position past a `#` comment to the next `\n` (or end of input).
 /// Returns the number of bytes consumed (including the `#`).

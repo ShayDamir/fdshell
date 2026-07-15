@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 pub(super) fn find_arg_pos(line: &[u8], args: &[ShortCStr], idx: usize) -> usize {

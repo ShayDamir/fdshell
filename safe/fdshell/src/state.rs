@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use alloc::collections::VecDeque;
+use alloc::vec::Vec;
+use hashbrown::HashMap;
 
 use sys::LocalFd;
 use sys::ShortCStr;
@@ -30,7 +31,7 @@ impl ShellState {
             exports: HashMap::new(),
             positional: VecDeque::new(),
             last_status: WaitStatus::Exited(0),
-            shell_pid: std::process::id() as i32,
+            shell_pid: sys::env::getpid(),
             last_bg_pid: None,
             env_filter: EnvFilter::new(),
             shell_sock: None,

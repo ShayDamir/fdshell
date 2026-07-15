@@ -5,7 +5,7 @@ use sys::ShortCStr;
 pub(crate) fn handle_quoted_char(
     b: u8,
     cur: &mut ShortCStr,
-    bytes: &mut std::iter::Peekable<impl Iterator<Item = u8>>,
+    bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     line: &[u8],
     pos: usize,
 ) -> Result<bool, Report<ParseError>> {

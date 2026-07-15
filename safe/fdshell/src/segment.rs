@@ -1,5 +1,6 @@
 use crate::comment::{scan_block, skip_comment};
 use crate::keywords::keyword_delta;
+use alloc::vec::Vec;
 
 /// A segment of a script line extracted by the scanner.
 pub(crate) enum Segment<'a> {

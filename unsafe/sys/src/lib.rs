@@ -7,6 +7,7 @@ pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use importedfd_error::ImportedFdError;
 pub use localfd::LocalFd;
+pub use localfd::close_raw;
 pub use recv_fd_error::RecvFdError;
 pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
@@ -24,7 +25,24 @@ pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
     }
 }
 
+/// Helper to create static ImportedFd instances from raw fds.
+///
+/// # Safety
+/// The fd must be a valid open fd with CLOEXEC clear (fds 0/1/2 always satisfy this).
+const fn std_fd(fd: i32) -> ImportedFd {
+    // SAFETY: fds 0/1/2 are always valid and have CLOEXEC clear in any POSIX process.
+    unsafe { ImportedFd::from_raw(fd) }
+}
+
+/// Standard input (fd 0).
+pub static IN: ImportedFd = std_fd(0);
+/// Standard output (fd 1).
+pub static OUT: ImportedFd = std_fd(1);
+/// Standard error (fd 2).
+pub static ERR: ImportedFd = std_fd(2);
+
 pub mod atfd;
+pub mod env;
 pub mod errno;
 pub mod execveat;
 mod exit;

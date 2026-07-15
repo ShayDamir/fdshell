@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 sys = { path = "../../unsafe/sys" }
 builtins = { path = "../builtins" }
-error-stack = "0.7"
+error-stack = { version = "0.7", default-features = false, features = ["hooks"] }
+hashbrown = "0.15"
 displaydoc = "0.2"
 
 [[bin]]

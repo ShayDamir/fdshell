@@ -1,3 +1,4 @@
+use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 
 use crate::child::{self, Command};
@@ -46,10 +47,10 @@ pub fn launch(
             &cmdline.args_fq,
             &resolved,
         ) {
-            Ok(code) => std::process::exit(code),
+            Ok(code) => sys::exit(code),
             Err(report) => {
-                eprintln!("{:?}", report);
-                std::process::exit(report.current_context().exit_code());
+                let _ = writeln!(crate::io::Stderr, "{report:?}");
+                sys::exit(report.current_context().exit_code());
             }
         },
         Some(pidfd) => Ok(LaunchOutcome {

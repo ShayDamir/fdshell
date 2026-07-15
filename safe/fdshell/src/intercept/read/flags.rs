@@ -1,5 +1,6 @@
 use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
+use alloc::vec::Vec;
 use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;

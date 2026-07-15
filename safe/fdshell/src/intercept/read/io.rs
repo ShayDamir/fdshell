@@ -1,7 +1,7 @@
 use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use std::io::Read as _;
 
 use super::flags::SourceFd;
 
@@ -15,14 +15,16 @@ pub(crate) fn read_line(
 
     match source {
         SourceFd::Stdin => {
-            for byte in std::io::stdin().lock().bytes() {
-                let b = byte
-                    .change_context(ReadError::Io)
-                    .change_context(CmdError::Read)?;
-                if b == b'\n' {
+            let mut byte = [0u8; 1];
+            loop {
+                let n = sys::IN.read(&mut byte).change_context(CmdError::Read)?;
+                if n == 0 {
                     break;
                 }
-                buf.push(b);
+                if byte[0] == b'\n' {
+                    break;
+                }
+                buf.push(byte[0]);
                 if let Some(max) = max_bytes
                     && buf.len() >= max
                 {

@@ -1,3 +1,5 @@
+//! Imported file descriptor — wraps a non-owned fd (e.g. inherited from parent).
+#![allow(clippy::indexing_slicing)]
 use core::fmt;
 
 use error_stack::{Report, ResultExt, ensure};
@@ -42,6 +44,48 @@ impl ImportedFd {
     pub fn read(&self, buf: &mut [u8]) -> Result<isize, crate::SyscallError> {
         // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
         crate::cvt(unsafe { libc::read(self.0, buf.as_mut_ptr().cast(), buf.len()) })
+    }
+
+    /// Write bytes to the fd.
+    pub fn write(&self, buf: &[u8]) -> Result<isize, crate::SyscallError> {
+        // SAFETY: `buf` is a valid slice; `write` won't write past `buf.len()`.
+        crate::cvt(unsafe { libc::write(self.0, buf.as_ptr().cast(), buf.len()) })
+    }
+
+    /// Write all bytes, retrying on short writes.
+    pub fn write_all(&self, buf: &[u8]) -> Result<(), crate::SyscallError> {
+        let mut written = 0;
+        while written < buf.len() {
+            let n = self.write(&buf[written..])?;
+            if n == 0 {
+                break;
+            }
+            written += n as usize;
+        }
+        Ok(())
+    }
+
+    /// Read until EOF or buffer full.
+    pub fn read_all(&self, buf: &mut [u8]) -> Result<usize, crate::SyscallError> {
+        let mut offset = 0;
+        loop {
+            match self.read(&mut buf[offset..])? {
+                0 => break,
+                n => offset += n as usize,
+            }
+            if offset >= buf.len() {
+                break;
+            }
+        }
+        Ok(offset)
+    }
+
+    /// Construct from a raw fd without verification.
+    ///
+    /// # Safety
+    /// `fd` must be a valid open fd with CLOEXEC clear.
+    pub const unsafe fn from_raw(fd: i32) -> Self {
+        Self(fd)
     }
 
     pub fn at(&self) -> crate::AtFd<'_> {

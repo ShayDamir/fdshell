@@ -1,5 +1,6 @@
+use alloc::ffi::CString;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use std::ffi::CString;
 
 use crate::AppError;
 
