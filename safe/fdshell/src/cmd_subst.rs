@@ -8,7 +8,7 @@ pub(crate) fn run_and_capture(
     cmd: &[u8],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<u8>, Report<CmdSubstError>> {
-    let (r, w) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).change_context(CmdSubstError::Pipe)?;
+    let (r, w) = sys::pipe::pipe2(0).change_context(CmdSubstError::Pipe)?;
     match sys::fork_pidfd::fork_pidfd_cell(cell).change_context(CmdSubstError::Fork)? {
         (_, None) => {
             // child stdout → pipe; failure means empty output

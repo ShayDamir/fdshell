@@ -20,10 +20,11 @@ pub fn run_child(
 
     let mut redirects: Vec<Redirect> = Vec::new();
 
-    // Clone needed pipe fds for stdin/stdout redirects, then close ALL original
-    // pipe fds. Each child inherits all pipe fds from the parent; we clone only
-    // the ones this command needs and redirect to them. Closing all originals
-    // ensures proper EOF signaling when writers exit.
+    // Clone needed pipe fds for stdin/stdout redirects. Each child inherits all
+    // pipe fds from the parent; we clone only the ones this command needs and
+    // redirect to them. Pipe fds have CLOEXEC set, so they auto-close on exec.
+    // Closing cloned fds via scope exit ensures proper EOF signaling when writers
+    // exit.
     for (j, (read_end, write_end)) in pipes.iter().enumerate() {
         if j == i.saturating_sub(1) {
             let fd = read_end
@@ -37,11 +38,6 @@ pub fn run_child(
                 .change_context(ChildProcessError::RedirectFailed)?;
             redirects.push(Redirect::new(1, fd));
         }
-    }
-    // Close ALL original pipe fds — the clones above are what we use via redirects.
-    for (read_end, write_end) in pipes.iter() {
-        sys::close_raw(read_end.as_raw());
-        sys::close_raw(write_end.as_raw());
     }
 
     let opened = crate::redirect::open_redirect_files(&cmd_data.redirects)

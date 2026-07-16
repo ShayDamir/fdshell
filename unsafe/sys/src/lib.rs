@@ -7,7 +7,6 @@ pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use importedfd_error::ImportedFdError;
 pub use localfd::LocalFd;
-pub use localfd::close_raw;
 pub use recv_fd_error::RecvFdError;
 pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;

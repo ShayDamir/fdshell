@@ -301,8 +301,9 @@ fn test_read_line_rawfd_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     write_end.try_close().unwrap();
 
+    let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
-        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+        sys::ShortCStr::from_vec(format!("{}", exported.as_raw()).into_bytes()).unwrap(),
     );
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
@@ -318,8 +319,9 @@ fn test_read_line_rawfd_data() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
+    let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
-        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+        sys::ShortCStr::from_vec(format!("{}", exported.as_raw()).into_bytes()).unwrap(),
     );
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
@@ -335,8 +337,9 @@ fn test_read_line_rawfd_max_bytes() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
+    let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
-        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+        sys::ShortCStr::from_vec(format!("{}", exported.as_raw()).into_bytes()).unwrap(),
     );
     let result = read_line(&source, None, Some(5));
     assert!(result.is_ok());
@@ -352,8 +355,9 @@ fn test_read_line_rawfd_stops_at_newline() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
+    let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
-        sys::ShortCStr::from_vec(format!("{}", read_end.as_raw()).into_bytes()).unwrap(),
+        sys::ShortCStr::from_vec(format!("{}", exported.as_raw()).into_bytes()).unwrap(),
     );
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
@@ -476,7 +480,8 @@ fn run_read_simple() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["var1", "var2"], fd);
     let cmdline = make_read_u_cmdline(&["var1", "var2"], fd);
     let cell = make_read_cell();
@@ -501,7 +506,8 @@ fn run_read_eof_returns_status_1() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["var1"], fd);
     let cmdline = make_read_u_cmdline(&["var1"], fd);
     let cell = make_read_cell();
@@ -577,7 +583,8 @@ fn run_read_with_prompt() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["-p", "Enter: ", "var1"], fd);
     let cmdline = make_read_u_cmdline(&["-p", "Enter: ", "var1"], fd);
     let cell = make_read_cell();
@@ -600,7 +607,8 @@ fn run_read_with_n_max_bytes() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["-n", "3", "var1"], fd);
     let cmdline = make_read_u_cmdline(&["-n", "3", "var1"], fd);
     let cell = make_read_cell();
@@ -660,7 +668,8 @@ fn run_read_multiple_targets() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["x", "y", "z"], fd);
     let cmdline = make_read_u_cmdline(&["x", "y", "z"], fd);
     let cell = make_read_cell();
@@ -691,7 +700,8 @@ fn run_read_fewer_fields_than_targets() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["x", "y", "z"], fd);
     let cmdline = make_read_u_cmdline(&["x", "y", "z"], fd);
     let cell = make_read_cell();
@@ -722,7 +732,8 @@ fn run_read_more_fields_than_targets() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["x"], fd);
     let cmdline = make_read_u_cmdline(&["x"], fd);
     let cell = make_read_cell();
@@ -745,7 +756,8 @@ fn run_read_status_0_on_success() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["var1"], fd);
     let cmdline = make_read_u_cmdline(&["var1"], fd);
     let cell = make_read_cell();
@@ -765,7 +777,8 @@ fn run_read_strip_prefix_dollar() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["$MYVAR"], fd);
     let cmdline = make_read_u_cmdline(&["$MYVAR"], fd);
     let cell = make_read_cell();
@@ -786,7 +799,8 @@ fn run_read_empty_data_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["var1"], fd);
     let cmdline = make_read_u_cmdline(&["var1"], fd);
     let cell = make_read_cell();
@@ -811,7 +825,8 @@ fn run_read_newline_stops_reading() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let fd = read_end.as_raw();
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
     let line = make_read_u_line(&["var1"], fd);
     let cmdline = make_read_u_cmdline(&["var1"], fd);
     let cell = make_read_cell();
