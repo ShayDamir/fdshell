@@ -13,7 +13,7 @@ fn make_cmdline(args: &[&str]) -> CommandLine {
         .collect();
     CommandLine {
         builtin: false,
-        command: ShortCStr::from_vec(b"envfilter".to_vec()).unwrap(),
+        command: c"envfilter".into(),
         args: args_vec,
         args_fq: vec![false; args.len()],
         captures: vec![],
@@ -199,7 +199,7 @@ fn captures_not_supported() {
     let line = make_line(&["envfilter", "--allow", "PATH"]);
     let mut cmdline = make_cmdline(&["--allow", "PATH"]);
     cmdline.captures = vec![Capture {
-        var: ShortCStr::from_vec(b"fd".to_vec()).unwrap(),
+        var: c"fd".into(),
         tag: None,
         force: false,
     }];
@@ -220,7 +220,7 @@ fn redirects_not_supported() {
     cmdline.redirects = vec![RedirectDef {
         export_to: 1,
         direction: RedirectDirection::Write,
-        source: RedirectSource::Var(ShortCStr::from_vec(b"test".to_vec()).unwrap()),
+        source: RedirectSource::Var(c"test".into()),
     }];
     let cell = make_cell();
     let result = run_envfilter(&line, &cmdline, &cell);
@@ -287,10 +287,7 @@ fn clear_resets_all_rules() {
     let cell = make_cell();
     {
         let mut state = cell.borrow_mut().unwrap();
-        state
-            .env_filter
-            .allow
-            .push(ShortCStr::from_vec(b"PATH".to_vec()).unwrap());
+        state.env_filter.allow.push(c"PATH".into());
         state
             .env_filter
             .deny

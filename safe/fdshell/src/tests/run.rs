@@ -625,7 +625,7 @@ fn export_fd_dispatch_single_arg_no_var() {
     child_test(|| {
         let cell = make_cell();
         let state = borrow_state(&cell);
-        let arg = ShortCStr::from_vec(b"%missing".to_vec()).unwrap();
+        let arg = c"%missing".into();
         let result = crate::child::fdpass::dispatch(b"export_fd", &[arg], &state);
         assert!(result.is_some());
         assert!(matches!(

@@ -14,7 +14,7 @@ fn make_cmdline(args: &[&str]) -> CommandLine {
         .collect();
     CommandLine {
         builtin: false,
-        command: ShortCStr::from_vec(b"cd".to_vec()).unwrap(),
+        command: c"cd".into(),
         args: args_vec,
         args_fq: vec![false; args.len()],
         captures: vec![],
@@ -115,7 +115,7 @@ fn cd_captures_not_supported() {
     let cmdline = make_cmdline(&["/tmp"]);
     let mut cmdline = cmdline;
     cmdline.captures = vec![Capture {
-        var: ShortCStr::from_vec(b"fd".to_vec()).unwrap(),
+        var: c"fd".into(),
         tag: None,
         force: false,
     }];
@@ -137,7 +137,7 @@ fn cd_redirects_not_supported() {
     cmdline.redirects = vec![RedirectDef {
         export_to: 1,
         direction: RedirectDirection::Write,
-        source: RedirectSource::Var(ShortCStr::from_vec(b"test".to_vec()).unwrap()),
+        source: RedirectSource::Var(c"test".into()),
     }];
     let cell = make_cell();
     let result = run_cd(&line, &cmdline, &cell);

@@ -14,7 +14,7 @@ const LONG: &CStr = c"The quick brown fox jumps over the lazy dog. \
 
 #[test]
 fn from_vec_empty() {
-    let s = ShortCStr::from_vec(b"".to_vec()).unwrap();
+    let s = ShortCStr::new();
     assert!(s.is_empty());
 }
 
@@ -149,8 +149,7 @@ fn rc_tail_subslice() {
 
 #[test]
 fn rc_short_mid_subslice() {
-    let s =
-        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
+    let s: ShortCStr = c"hello world this is more than thirty bytes total".into();
     let sub = s.get(6..20).unwrap();
     assert_eq!(sub.as_bytes().unwrap(), b"world this is ");
 }
@@ -240,8 +239,7 @@ fn ref_cstr_matches_static() {
 #[test]
 fn ref_cstr_matches_rc() {
     use sys::RefCStr;
-    let s =
-        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap();
+    let s: ShortCStr = c"hello world this is more than thirty bytes total".into();
     assert_eq!(
         RefCStr::from(s.clone()).as_ref().to_bytes(),
         s.as_bytes().unwrap()
@@ -275,7 +273,7 @@ fn clone_equals_original() {
         ShortCStr::from(c""),
         ShortCStr::from(c"hello"),
         ShortCStr::from(LONG),
-        ShortCStr::from_vec(b"hello world this is more than thirty bytes total".to_vec()).unwrap(),
+        c"hello world this is more than thirty bytes total".into(),
     ] {
         assert_eq!(src.clone(), *src);
     }
@@ -284,7 +282,7 @@ fn clone_equals_original() {
 #[test]
 fn cross_variant_equal() {
     let a = ShortCStr::from(c"hello");
-    let b = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
+    let b: ShortCStr = c"hello".into();
     let c = ShortCStr::from(c"hello"); // Static variant
     assert_eq!(a, b);
     assert_eq!(a, c);
@@ -304,7 +302,7 @@ fn different_content_not_equal() {
 fn hash_consistent_across_variants() {
     use core::hash::{Hash, Hasher};
     let a = ShortCStr::from(c"hello");
-    let b = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
+    let b: ShortCStr = c"hello".into();
     let mut ha = std::collections::hash_map::DefaultHasher::new();
     let mut hb = std::collections::hash_map::DefaultHasher::new();
     a.hash(&mut ha);
@@ -317,7 +315,7 @@ fn hash_consistent_across_variants() {
 #[test]
 fn static_equals_from_vec() {
     let s = ShortCStr::from(c"hello");
-    let b = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
+    let b: ShortCStr = c"hello".into();
     assert_eq!(s, b);
 }
 
@@ -575,7 +573,7 @@ fn push_nul_returns_err() {
 
 #[test]
 fn push_unchecked_after_rc_mid_subslice() {
-    let s = ShortCStr::from_vec(b"hello world this is more than thirty bytes".to_vec()).unwrap();
+    let s: ShortCStr = c"hello world this is more than thirty bytes".into();
     let sub = s.get(6..11).unwrap();
     // sub is an Arc non-tail view → push_unchecked copies
     let mut sub = sub.clone();
@@ -661,7 +659,7 @@ fn ends_with_matches() {
 
 #[test]
 fn ends_with_rc() {
-    let s = ShortCStr::from_vec(b"hello world this is long".to_vec()).unwrap();
+    let s: ShortCStr = c"hello world this is long".into();
     assert!(s.ends_with(b"long"));
     assert!(!s.ends_with(b"short"));
 }
@@ -701,7 +699,7 @@ fn push_copy_to_inline_via_constructed_static() {
 
 #[test]
 fn debug_fmt_inline() {
-    let s = ShortCStr::from_vec(b"hello".to_vec()).unwrap();
+    let s: ShortCStr = c"hello".into();
     assert_eq!(format!("{:?}", s), "\"hello\"");
 }
 

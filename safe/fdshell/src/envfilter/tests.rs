@@ -57,8 +57,7 @@ fn is_allowed_empty_filter() {
 #[test]
 fn is_allowed_allowlist() {
     let mut f = EnvFilter::new();
-    f.allow
-        .push(sys::ShortCStr::from_vec(b"P*".to_vec()).unwrap());
+    f.allow.push(c"P*".into());
     assert!(f.is_allowed(b"PATH"));
     assert!(f.is_allowed(b"PWD"));
     assert!(!f.is_allowed(b"HOME"));
@@ -67,7 +66,7 @@ fn is_allowed_allowlist() {
 #[test]
 fn is_allowed_denylist() {
     let mut f = EnvFilter::new();
-    let star_key = sys::ShortCStr::from_vec(b"*_KEY".to_vec()).unwrap();
+    let star_key = c"*_KEY".into();
     f.deny.push(star_key);
     assert!(!f.is_allowed(b"SECRET_KEY"));
     assert!(f.is_allowed(b"PATH"));
@@ -76,9 +75,7 @@ fn is_allowed_denylist() {
 #[test]
 fn is_allowed_deny_wins_over_allow() {
     let mut f = EnvFilter::new();
-    f.allow
-        .push(sys::ShortCStr::from_vec(b"PATH".to_vec()).unwrap());
-    f.deny
-        .push(sys::ShortCStr::from_vec(b"PATH".to_vec()).unwrap());
+    f.allow.push(c"PATH".into());
+    f.deny.push(c"PATH".into());
     assert!(!f.is_allowed(b"PATH"));
 }
