@@ -17,7 +17,7 @@ fn make_read_cmdline(args: &[&str]) -> CommandLine {
         .collect();
     CommandLine {
         builtin: false,
-        command: ShortCStr::from_vec(b"read".to_vec()).unwrap(),
+        command: c"read".into(),
         args: args_vec,
         args_fq: vec![false; args.len()],
         captures: vec![],
@@ -126,7 +126,7 @@ fn test_parse_flags_u_negative() {
 fn test_parse_flags_u_fdvar() {
     let args = vec![c"-u".into(), c"%MYVAR".into()];
     let (source, _, _) = parse_flags(&args).unwrap();
-    assert!(matches!(source, SourceFd::FdVar(ref v) if v == b"MYVAR"));
+    assert!(matches!(source, SourceFd::FdVar(v) if v.as_bytes().unwrap() == b"MYVAR"));
 }
 
 #[test]
@@ -368,7 +368,7 @@ fn test_read_line_rawfd_stops_at_newline() {
 
 #[test]
 fn test_read_line_fdvar_no_clone() {
-    let source = SourceFd::FdVar(b"MYVAR".to_vec());
+    let source = SourceFd::FdVar(c"MYVAR".into());
     let result = read_line(&source, None, None);
     assert!(result.is_ok());
     let (buf, eof) = result.unwrap();
@@ -383,7 +383,7 @@ fn test_read_line_fdvar_with_clone() {
     sys::rw::write(&write_end, data).unwrap();
     write_end.try_close().unwrap();
 
-    let source = SourceFd::FdVar(b"MYVAR".to_vec());
+    let source = SourceFd::FdVar(c"MYVAR".into());
     let result = read_line(&source, Some(&read_end), None);
     assert!(result.is_ok());
     let (buf, eof) = result.unwrap();
@@ -493,11 +493,11 @@ fn run_read_simple() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"var1".into()),
-        Some(&ShortCStr::from_vec(b"hello".to_vec()).unwrap())
+        Some(&c"hello".into())
     );
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"var2".into()),
-        Some(&ShortCStr::from_vec(b"world".to_vec()).unwrap())
+        Some(&c"world".into())
     );
 }
 
@@ -542,7 +542,7 @@ fn run_read_captures_not_supported() {
     let cmdline = make_read_cmdline(&["var1"]);
     let mut cmdline = cmdline;
     cmdline.captures = vec![Capture {
-        var: ShortCStr::from_vec(b"fd".to_vec()).unwrap(),
+        var: c"fd".into(),
         tag: None,
         force: false,
     }];
@@ -564,7 +564,7 @@ fn run_read_redirects_not_supported() {
     cmdline.redirects = vec![RedirectDef {
         export_to: 1,
         direction: RedirectDirection::Write,
-        source: RedirectSource::Var(ShortCStr::from_vec(b"test".to_vec()).unwrap()),
+        source: RedirectSource::Var(c"test".into()),
     }];
     let cell = make_read_cell();
     let result = run_read(&line, &cmdline, &cell);
@@ -596,7 +596,7 @@ fn run_read_with_prompt() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"var1".into()),
-        Some(&ShortCStr::from_vec(b"answer".to_vec()).unwrap())
+        Some(&c"answer".into())
     );
 }
 
@@ -620,7 +620,7 @@ fn run_read_with_n_max_bytes() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"var1".into()),
-        Some(&ShortCStr::from_vec(b"hel".to_vec()).unwrap())
+        Some(&c"hel".into())
     );
 }
 
@@ -646,7 +646,7 @@ fn run_read_with_u_fdvar() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"var1".into()),
-        Some(&ShortCStr::from_vec(b"from var".to_vec()).unwrap())
+        Some(&c"from var".into())
     );
 }
 
@@ -681,15 +681,15 @@ fn run_read_multiple_targets() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"x".into()),
-        Some(&ShortCStr::from_vec(b"a".to_vec()).unwrap())
+        Some(&c"a".into())
     );
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"y".into()),
-        Some(&ShortCStr::from_vec(b"b".to_vec()).unwrap())
+        Some(&c"b".into())
     );
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"z".into()),
-        Some(&ShortCStr::from_vec(b"c".to_vec()).unwrap())
+        Some(&c"c".into())
     );
 }
 
@@ -713,15 +713,15 @@ fn run_read_fewer_fields_than_targets() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"x".into()),
-        Some(&ShortCStr::from_vec(b"only_one".to_vec()).unwrap())
+        Some(&c"only_one".into())
     );
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"y".into()),
-        Some(&ShortCStr::from_vec(b"".to_vec()).unwrap())
+        Some(&ShortCStr::new())
     );
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"z".into()),
-        Some(&ShortCStr::from_vec(b"".to_vec()).unwrap())
+        Some(&ShortCStr::new())
     );
 }
 
@@ -745,7 +745,7 @@ fn run_read_more_fields_than_targets() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"x".into()),
-        Some(&ShortCStr::from_vec(b"a b c d".to_vec()).unwrap())
+        Some(&c"a b c d".into())
     );
 }
 
@@ -790,7 +790,7 @@ fn run_read_strip_prefix_dollar() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"MYVAR".into()),
-        Some(&ShortCStr::from_vec(b"value".to_vec()).unwrap())
+        Some(&c"value".into())
     );
 }
 
@@ -838,6 +838,6 @@ fn run_read_newline_stops_reading() {
     let state = cell.borrow().unwrap();
     assert_eq!(
         state.strings.get::<sys::ShortCStr>(&c"var1".into()),
-        Some(&ShortCStr::from_vec(b"first".to_vec()).unwrap())
+        Some(&c"first".into())
     );
 }

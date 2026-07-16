@@ -1,6 +1,5 @@
 use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
-use alloc::vec::Vec;
 use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
@@ -23,12 +22,8 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>
                     .next()
                     .ok_or(ReadError::MissingArgument('u'))
                     .change_context(CmdError::Read)?;
-                if let Some(name) = fd_arg
-                    .as_bytes()
-                    .change_context(CmdError::Read)?
-                    .strip_prefix(b"%")
-                {
-                    source = SourceFd::FdVar(name.to_vec());
+                if let Some(name) = fd_arg.strip_prefix(b"%") {
+                    source = SourceFd::FdVar(name);
                 } else {
                     source = SourceFd::RawFd(fd_arg.clone());
                 }
@@ -71,5 +66,5 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>
 pub(crate) enum SourceFd {
     Stdin,
     RawFd(ShortCStr),
-    FdVar(Vec<u8>),
+    FdVar(ShortCStr),
 }

@@ -32,15 +32,12 @@ pub(crate) fn run_read(
     }
 
     let resolved_fd: Option<sys::LocalFd> = match &fd_source {
-        SourceFd::FdVar(name) => {
+        SourceFd::FdVar(var) => {
             let state = cell.borrow().change_context(CmdError::Read)?;
-            let var = ShortCStr::from_vec(name.clone())
-                .change_context(ReadError::BadTarget)
-                .change_context(CmdError::Read)?;
             Some(
                 state
                     .fds
-                    .get(&var)
+                    .get(var)
                     .ok_or(ReadError::VarNotFound)
                     .change_context(CmdError::Read)?
                     .try_clone()
