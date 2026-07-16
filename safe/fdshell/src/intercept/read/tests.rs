@@ -10,16 +10,12 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
-fn make_read_cmdline(args: &[&str]) -> CommandLine {
-    let args_vec: Vec<ShortCStr> = args
-        .iter()
-        .map(|s| ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap())
-        .collect();
+fn make_read_cmdline(args: &[ShortCStr]) -> CommandLine {
     CommandLine {
         builtin: false,
         command: c"read".into(),
-        args: args_vec,
         args_fq: vec![false; args.len()],
+        args: args.to_vec(),
         captures: vec![],
         redirects: vec![],
         pidvar: None,
@@ -459,18 +455,24 @@ fn test_collect_targets_dollar_var_allowed() {
 
 // run_read integration tests
 
-fn make_read_u_cmdline(args: &[&str], fd: i32) -> CommandLine {
-    let fd_str = fd.to_string();
-    let mut all: Vec<&str> = vec!["-u", &fd_str];
-    all.extend(args);
+fn make_read_u_cmdline(args: &[ShortCStr], fd: i32) -> CommandLine {
+    let fd_str = ShortCStr::from_vec(fd.to_string().into_bytes()).unwrap();
+    let mut all: Vec<ShortCStr> = vec![c"-u".into(), fd_str];
+    all.extend(args.iter().cloned());
     make_read_cmdline(&all)
 }
 
-fn make_read_u_line(args: &[&str], fd: i32) -> Vec<u8> {
+fn make_read_u_line(args: &[ShortCStr], fd: i32) -> Vec<u8> {
     let fd_str = fd.to_string();
-    let mut all: Vec<&str> = vec!["read", "-u", &fd_str];
-    all.extend(args);
-    all.join(" ").into_bytes()
+    let mut result = b"read -u ".to_vec();
+    result.extend(fd_str.into_bytes());
+    for (i, arg) in args.iter().enumerate() {
+        if i > 0 {
+            result.push(b' ');
+        }
+        result.extend(arg.as_bytes().unwrap());
+    }
+    result
 }
 
 #[test]
@@ -482,8 +484,8 @@ fn run_read_simple() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["var1", "var2"], fd);
-    let cmdline = make_read_u_cmdline(&["var1", "var2"], fd);
+    let line = make_read_u_line(&[c"var1".into(), c"var2".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into(), c"var2".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -508,8 +510,8 @@ fn run_read_eof_returns_status_1() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["var1"], fd);
-    let cmdline = make_read_u_cmdline(&["var1"], fd);
+    let line = make_read_u_line(&[c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -523,7 +525,7 @@ fn run_read_eof_returns_status_1() {
 #[test]
 fn run_read_builtin_not_supported() {
     let line = make_read_line(&["builtin", "read", "var1"]);
-    let cmdline = make_read_cmdline(&["var1"]);
+    let cmdline = make_read_cmdline(&[c"var1".into()]);
     let mut cmdline = cmdline;
     cmdline.builtin = true;
     let cell = make_read_cell();
@@ -539,7 +541,7 @@ fn run_read_builtin_not_supported() {
 #[test]
 fn run_read_captures_not_supported() {
     let line = make_read_line(&["read", "var1"]);
-    let cmdline = make_read_cmdline(&["var1"]);
+    let cmdline = make_read_cmdline(&[c"var1".into()]);
     let mut cmdline = cmdline;
     cmdline.captures = vec![Capture {
         var: c"fd".into(),
@@ -559,7 +561,7 @@ fn run_read_captures_not_supported() {
 #[test]
 fn run_read_redirects_not_supported() {
     let line = make_read_line(&["read", "var1"]);
-    let cmdline = make_read_cmdline(&["var1"]);
+    let cmdline = make_read_cmdline(&[c"var1".into()]);
     let mut cmdline = cmdline;
     cmdline.redirects = vec![RedirectDef {
         export_to: 1,
@@ -585,8 +587,8 @@ fn run_read_with_prompt() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["-p", "Enter: ", "var1"], fd);
-    let cmdline = make_read_u_cmdline(&["-p", "Enter: ", "var1"], fd);
+    let line = make_read_u_line(&[c"-p".into(), c"Enter: ".into(), c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"-p".into(), c"Enter: ".into(), c"var1".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -609,8 +611,8 @@ fn run_read_with_n_max_bytes() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["-n", "3", "var1"], fd);
-    let cmdline = make_read_u_cmdline(&["-n", "3", "var1"], fd);
+    let line = make_read_u_line(&[c"-n".into(), c"3".into(), c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"-n".into(), c"3".into(), c"var1".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -638,7 +640,7 @@ fn run_read_with_u_fdvar() {
     }
 
     let line = make_read_line(&["read", "-u", "%MYFD", "var1"]);
-    let cmdline = make_read_cmdline(&["-u", "%MYFD", "var1"]);
+    let cmdline = make_read_cmdline(&[c"-u".into(), c"%MYFD".into(), c"var1".into()]);
     let result = run_read(&line, &cmdline, &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
@@ -653,7 +655,7 @@ fn run_read_with_u_fdvar() {
 #[test]
 fn run_read_with_u_fdvar_not_found() {
     let line = make_read_line(&["read", "-u", "%NONEXISTENT", "var1"]);
-    let cmdline = make_read_cmdline(&["-u", "%NONEXISTENT", "var1"]);
+    let cmdline = make_read_cmdline(&[c"-u".into(), c"%NONEXISTENT".into(), c"var1".into()]);
     let cell = make_read_cell();
     let result = run_read(&line, &cmdline, &cell);
     assert!(result.is_err());
@@ -670,8 +672,8 @@ fn run_read_multiple_targets() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["x", "y", "z"], fd);
-    let cmdline = make_read_u_cmdline(&["x", "y", "z"], fd);
+    let line = make_read_u_line(&[c"x".into(), c"y".into(), c"z".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"x".into(), c"y".into(), c"z".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -702,8 +704,8 @@ fn run_read_fewer_fields_than_targets() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["x", "y", "z"], fd);
-    let cmdline = make_read_u_cmdline(&["x", "y", "z"], fd);
+    let line = make_read_u_line(&[c"x".into(), c"y".into(), c"z".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"x".into(), c"y".into(), c"z".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -734,8 +736,8 @@ fn run_read_more_fields_than_targets() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["x"], fd);
-    let cmdline = make_read_u_cmdline(&["x"], fd);
+    let line = make_read_u_line(&[c"x".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"x".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -758,8 +760,8 @@ fn run_read_status_0_on_success() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["var1"], fd);
-    let cmdline = make_read_u_cmdline(&["var1"], fd);
+    let line = make_read_u_line(&[c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -779,8 +781,8 @@ fn run_read_strip_prefix_dollar() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["$MYVAR"], fd);
-    let cmdline = make_read_u_cmdline(&["$MYVAR"], fd);
+    let line = make_read_u_line(&[c"$MYVAR".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"$MYVAR".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -801,8 +803,8 @@ fn run_read_empty_data_eof() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["var1"], fd);
-    let cmdline = make_read_u_cmdline(&["var1"], fd);
+    let line = make_read_u_line(&[c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
@@ -827,8 +829,8 @@ fn run_read_newline_stops_reading() {
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
-    let line = make_read_u_line(&["var1"], fd);
-    let cmdline = make_read_u_cmdline(&["var1"], fd);
+    let line = make_read_u_line(&[c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
     let result = run_read(&line, &cmdline, &cell);
