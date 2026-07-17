@@ -68,18 +68,6 @@ fn test_split_fields_leading_spaces() {
 }
 
 #[test]
-fn test_strip_prefix_dollar() {
-    let name = c"$FOO".into();
-    assert_eq!(strip_prefix(&name), c"FOO".into());
-}
-
-#[test]
-fn test_strip_prefix_bare() {
-    let name = c"FOO".into();
-    assert_eq!(strip_prefix(&name), c"FOO".into());
-}
-
-#[test]
 fn test_no_targets_error() {
     let args: Vec<ShortCStr> = vec![];
     let result = collect_targets(&args);
@@ -417,15 +405,6 @@ fn test_split_fields_trailing_space() {
 fn test_split_fields_mixed_separators() {
     let fields = split_fields(b"a  b\tc", 3);
     assert_eq!(fields, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
-}
-
-// strip.rs edge cases
-
-#[test]
-fn test_strip_prefix_empty() {
-    let name = ShortCStr::new();
-    let result = strip_prefix(&name);
-    assert_eq!(result.as_bytes().unwrap(), b"");
 }
 
 // collect.rs edge cases

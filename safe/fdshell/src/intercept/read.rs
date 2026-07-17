@@ -11,7 +11,6 @@ use collect::collect_targets;
 use flags::SourceFd;
 use flags::parse_flags;
 use io::read_line;
-use strip::strip_prefix;
 use words::split_fields;
 
 pub(crate) fn run_read(
@@ -59,7 +58,7 @@ pub(crate) fn run_read(
     let mut state = cell.borrow_mut().change_context(CmdError::Read)?;
     for (i, name) in targets.iter().enumerate() {
         let field = fields.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
-        let var_name = strip_prefix(name);
+        let var_name = name.strip_prefix(b"$").unwrap_or_else(|| name.clone());
         let s = ShortCStr::from_vec(field.to_vec())
             .change_context(ReadError::NulByte)
             .change_context(CmdError::Read)?;
@@ -77,5 +76,4 @@ mod collect;
 mod flags;
 mod io;
 mod read_from_fd;
-mod strip;
 mod words;
