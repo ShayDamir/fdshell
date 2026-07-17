@@ -79,6 +79,24 @@ impl LocalFd {
         // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
         crate::cvt(unsafe { libc::read(self.as_raw(), buf.as_mut_ptr().cast(), buf.len()) })
     }
+
+    /// Read until EOF or buffer full.
+    pub fn read_all(&self, buf: &mut [u8]) -> Result<usize, crate::SyscallError> {
+        let mut offset = 0;
+        loop {
+            let slice = buf
+                .get_mut(offset..)
+                .ok_or(crate::SyscallError::EINVAL("buffer full"))?;
+            match self.read(slice)? {
+                0 => break,
+                n => offset += n as usize,
+            }
+            if offset >= buf.len() {
+                break;
+            }
+        }
+        Ok(offset)
+    }
 }
 
 impl Drop for LocalFd {

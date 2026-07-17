@@ -23,6 +23,8 @@ pub enum AppError {
     ScriptRead,
     /// missing script path after --dirfd
     MissingScriptPath,
+    /// impossible
+    Never,
 }
 
 impl core::error::Error for AppError {}

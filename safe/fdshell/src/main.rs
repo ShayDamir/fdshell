@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-use alloc::ffi::CString;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use fdshell::{AppError, ShellState, init_shellfd, install_debug_hooks, parse_cli_args, run};
@@ -39,15 +38,14 @@ fn run_main() -> Result<(), Report<AppError>> {
         state.insert_cwd(cwd);
     }
 
-    let all_args: Vec<CString> = sys::env::read_cmdline()
+    let all_args: Vec<sys::ShortCStr> = sys::env::read_cmdline()
         .change_context(AppError::Init)?
         .into_iter()
         .skip(1)
-        .map(|v| CString::new(v).unwrap_or_default())
         .collect();
 
     if let Some(first) = all_args.first()
-        && first.to_bytes() == b"-c"
+        && first.eq_bytes(b"-c")
     {
         return fdshell::main_cli::run_cmd_mode(&all_args, &state);
     }

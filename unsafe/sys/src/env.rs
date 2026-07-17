@@ -2,12 +2,28 @@
 //!
 //! All functions use `libc` directly; no `std` dependency.
 
-#![allow(clippy::indexing_slicing)]
-
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
+use error_stack::{Report, ResultExt, ensure};
+
 use crate::SyscallError;
+use crate::shortcstr::ShortCStr;
+
+/// Error type for `read_cmdline`.
+#[derive(Debug, displaydoc::Display)]
+pub enum ReadCmdlineError {
+    /// failed to open /proc/self/cmdline
+    OpenFailed,
+    /// argument contains a NUL byte
+    InvalidArg,
+    /// command line is empty (missing argv[0])
+    EmptyCmdline,
+    /// impossible state (indexing invariant violation)
+    Never,
+}
+
+impl core::error::Error for ReadCmdlineError {}
 
 /// Return the current process ID.
 pub fn getpid() -> i32 {
@@ -53,32 +69,36 @@ pub fn getcwd() -> Result<Vec<u8>, SyscallError> {
     }
     // SAFETY: `ret` points into `buf`, which is valid memory.
     let len = unsafe { CStr::from_ptr(ret).to_bytes().len() };
-    Ok(buf[..len].to_vec()) // SAFETY: len is the length of the CStr from buf, so it's always ≤ buf.len().
+    Ok(buf.get(..len).ok_or(SyscallError::Never)?.to_vec())
 }
 
 /// Read `/proc/self/cmdline` and split on NUL bytes.
 ///
-/// Returns each argument as a `Vec<u8>`. Empty input yields an empty `Vec`.
-pub fn read_cmdline() -> Result<Vec<Vec<u8>>, SyscallError> {
+/// Returns each argument as a `ShortCStr`. The command line must contain at least `argv[0]`.
+pub fn read_cmdline() -> Result<Vec<ShortCStr>, Report<ReadCmdlineError>> {
     use crate::fcntl::O_RDONLY;
 
-    let fd = crate::openat2::open(c"/proc/self/cmdline", O_RDONLY)?;
-    let mut buf = [0u8; 4096];
-    let n = crate::rw::read(&fd, &mut buf)? as usize;
-    // SAFETY: fd is about to be closed; read already succeeded.
-    unsafe { libc::close(fd.as_raw()) };
-    if n == 0 {
-        return Ok(Vec::new());
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let fd = crate::openat2::open(c"/proc/self/cmdline", O_RDONLY)
+        .change_context(ReadCmdlineError::OpenFailed)?;
+    loop {
+        let n =
+            crate::rw::read(&fd, &mut chunk).change_context(ReadCmdlineError::OpenFailed)? as usize;
+        if n == 0 {
+            break;
+        }
+        let slice = chunk.get(..n).ok_or(ReadCmdlineError::Never)?;
+        buf.extend_from_slice(slice);
     }
-    // Split on NUL bytes. Only discard a single trailing empty fragment
-    // (the artifact of the final NUL terminator); preserve all other
-    // arguments including empty ones.
-    let mut parts: Vec<Vec<u8>> = buf[..n] // SAFETY: n is the number of bytes read, which is ≤ buf.len().
+    ensure!(!buf.is_empty(), ReadCmdlineError::EmptyCmdline);
+    let mut parts: Vec<ShortCStr> = buf
         .split(|&b| b == b'\0')
-        .map(|s| s.to_vec())
-        .collect();
-    if parts.last().is_some_and(|s| s.is_empty()) {
-        parts.pop();
+        .map(|f| ShortCStr::from_vec(f.to_vec()))
+        .collect::<Result<Vec<_>, _>>()
+        .change_context(ReadCmdlineError::InvalidArg)?;
+    if parts.last().is_some_and(|p| p.is_empty()) {
+        let _ = parts.pop();
     }
     Ok(parts)
 }
@@ -103,8 +123,8 @@ pub fn environ_snapshot() -> Vec<(Vec<u8>, Vec<u8>)> {
         let cstr = unsafe { CStr::from_ptr(entry) };
         let bytes = cstr.to_bytes();
         if let Some(eq_pos) = bytes.iter().position(|&b| b == b'=') {
-            let key = bytes[..eq_pos].to_vec(); // SAFETY: eq_pos < bytes.len() because iter::position found it.
-            let value = bytes[eq_pos + 1..].to_vec(); // SAFETY: eq_pos + 1 ≤ bytes.len() because position found '=' in bytes.
+            let key = bytes.get(..eq_pos).unwrap_or(&[]).to_vec();
+            let value = bytes.get(eq_pos + 1..).unwrap_or(&[]).to_vec();
             result.push((key, value));
         }
         // SAFETY: environ is a NULL-terminated array; we check for NULL above.

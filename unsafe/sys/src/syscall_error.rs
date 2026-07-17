@@ -18,7 +18,38 @@ pub enum SyscallError {
     ENOENT(&'static str),
     ENOSYS(&'static str),
     EPERM(&'static str),
-    Other { errno: i32, syscall: &'static str },
+    /// impossible state (indexing invariant violation)
+    Never,
+    Other {
+        errno: i32,
+        syscall: &'static str,
+    },
+}
+
+impl fmt::Display for SyscallError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use SyscallError::*;
+        let (name, syscall) = match self {
+            E2BIG(s) => ("E2BIG", Some(s)),
+            EAGAIN(s) => ("EAGAIN", Some(s)),
+            EBADF(s) => ("EBADF", Some(s)),
+            EEXIST(s) => ("EEXIST", Some(s)),
+            EINVAL(s) => ("EINVAL", Some(s)),
+            EIO(s) => ("EIO", Some(s)),
+            EMFILE(s) => ("EMFILE", Some(s)),
+            ENOENT(s) => ("ENOENT", Some(s)),
+            ENOSYS(s) => ("ENOSYS", Some(s)),
+            EPERM(s) => ("EPERM", Some(s)),
+            Never => ("Never", None),
+            Other { errno, syscall } => {
+                return write!(f, "{} (errno {})", syscall, errno);
+            }
+        };
+        match syscall {
+            Some(s) => write!(f, "{} ({})", name, s),
+            None => write!(f, "{}", name),
+        }
+    }
 }
 
 impl SyscallError {
@@ -35,6 +66,7 @@ impl SyscallError {
             ENOENT(_) => libc::ENOENT,
             ENOSYS(_) => libc::ENOSYS,
             EPERM(_) => libc::EPERM,
+            Never => 0,
             Other { errno, .. } => errno,
         }
     }
@@ -44,30 +76,9 @@ impl SyscallError {
         match self {
             E2BIG(s) | EAGAIN(s) | EBADF(s) | EEXIST(s) | EINVAL(s) | EIO(s) | EMFILE(s)
             | ENOENT(s) | ENOSYS(s) | EPERM(s) => s,
+            Never => "Never",
             Other { syscall, .. } => syscall,
         }
-    }
-}
-
-impl fmt::Display for SyscallError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use SyscallError::*;
-        let (name, syscall) = match self {
-            E2BIG(s) => ("E2BIG", s),
-            EAGAIN(s) => ("EAGAIN", s),
-            EBADF(s) => ("EBADF", s),
-            EEXIST(s) => ("EEXIST", s),
-            EINVAL(s) => ("EINVAL", s),
-            EIO(s) => ("EIO", s),
-            EMFILE(s) => ("EMFILE", s),
-            ENOENT(s) => ("ENOENT", s),
-            ENOSYS(s) => ("ENOSYS", s),
-            EPERM(s) => ("EPERM", s),
-            Other { errno, syscall } => {
-                return write!(f, "{} (errno {})", syscall, errno);
-            }
-        };
-        write!(f, "{} ({})", name, syscall)
     }
 }
 

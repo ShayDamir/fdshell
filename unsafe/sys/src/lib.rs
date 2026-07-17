@@ -3,6 +3,7 @@
 extern crate alloc;
 
 pub use atfd::AtFd;
+pub use env::ReadCmdlineError;
 pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use importedfd_error::ImportedFdError;

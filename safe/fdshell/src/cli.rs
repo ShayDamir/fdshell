@@ -1,4 +1,3 @@
-use alloc::ffi::CString;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
@@ -24,33 +23,33 @@ pub fn load_script(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<AppError>> {
 pub struct CliArgs {
     pub dirfd: Option<sys::ImportedFd>,
     pub script_fd: Option<sys::LocalFd>,
-    pub positional: Vec<CString>,
+    pub positional: Vec<sys::ShortCStr>,
 }
 
 /// Parse `--dirfd`, `--fd`, and positional arguments.
 ///
 /// `all_args` is already the `skip(1)` slice (i.e. does not include the binary name).
-pub fn parse_cli_args(all_args: &[CString]) -> Result<CliArgs, Report<AppError>> {
+pub fn parse_cli_args(all_args: &[sys::ShortCStr]) -> Result<CliArgs, Report<AppError>> {
     let mut dirfd: Option<sys::ImportedFd> = None;
     let mut script_fd: Option<sys::LocalFd> = None;
-    let mut positional: Vec<CString> = Vec::new();
+    let mut positional: Vec<sys::ShortCStr> = Vec::new();
 
     let mut i = 0;
     while i < all_args.len() {
         let arg = all_args.get(i).ok_or(AppError::Usage)?;
-        match arg.to_bytes() {
+        match arg.as_bytes().change_context(AppError::Never)? {
             b"--dirfd" => {
                 i += 1;
                 let num_str = all_args.get(i).ok_or(AppError::MissingValue("dirfd"))?;
                 dirfd = Some(
-                    sys::ImportedFd::try_from(num_str.as_ref())
+                    sys::ImportedFd::try_from(num_str)
                         .change_context(AppError::InvalidFdNumber("dirfd"))?,
                 );
             }
             b"--fd" => {
                 i += 1;
                 let num_str = all_args.get(i).ok_or(AppError::MissingValue("fd"))?;
-                let imported = sys::ImportedFd::try_from(num_str.as_ref())
+                let imported = sys::ImportedFd::try_from(num_str)
                     .change_context(AppError::InvalidFdNumber("fd"))?;
                 script_fd = Some(
                     imported

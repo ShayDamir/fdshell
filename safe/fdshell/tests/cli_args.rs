@@ -1,12 +1,11 @@
 #![allow(clippy::unwrap_used)]
 
 use fdshell::parse_cli_args;
-use std::ffi::CString;
 
 #[test]
 fn parse_dirfd_without_value_is_usage_error() {
     // --dirfd with no value should return UsageMissingDirfdValue
-    let args: Vec<CString> = vec![CString::new("--dirfd").unwrap()];
+    let args = vec![c"--dirfd".into()];
     let result = parse_cli_args(&args);
     assert!(
         result.is_err(),
@@ -23,7 +22,7 @@ fn parse_dirfd_without_value_is_usage_error() {
 
 #[test]
 fn parse_fd_without_value_is_usage_error() {
-    let args: Vec<CString> = vec![CString::new("--fd").unwrap()];
+    let args = vec![c"--fd".into()];
     let result = parse_cli_args(&args);
     assert!(
         result.is_err(),
@@ -40,10 +39,7 @@ fn parse_fd_without_value_is_usage_error() {
 
 #[test]
 fn parse_dirfd_invalid_fd_number() {
-    let args: Vec<CString> = vec![
-        CString::new("--dirfd").unwrap(),
-        CString::new("badfd").unwrap(),
-    ];
+    let args = vec![c"--dirfd".into(), c"badfd".into()];
     let result = parse_cli_args(&args);
     assert!(
         result.is_err(),
@@ -60,10 +56,7 @@ fn parse_dirfd_invalid_fd_number() {
 
 #[test]
 fn parse_fd_invalid_fd_number() {
-    let args: Vec<CString> = vec![
-        CString::new("--fd").unwrap(),
-        CString::new("badfd").unwrap(),
-    ];
+    let args = vec![c"--fd".into(), c"badfd".into()];
     let result = parse_cli_args(&args);
     assert!(
         result.is_err(),
@@ -85,11 +78,7 @@ fn parse_dirfd_skips_positional_when_index_is_wrong() {
     // This test verifies positional is correctly empty when --dirfd
     // has a value (fd -1 is invalid, so dirfd will be Err, but positional
     // should still be empty if the loop index is correct).
-    let args: Vec<CString> = vec![
-        CString::new("--dirfd").unwrap(),
-        CString::new("badfd").unwrap(),
-        CString::new("script.sh").unwrap(),
-    ];
+    let args = vec![c"--dirfd".into(), c"badfd".into(), c"script.sh".into()];
     let result = parse_cli_args(&args);
     // dirfd parsing fails (badfd is not a valid open fd), but we can
     // check the error is from fd validation, not from missing args.
@@ -119,11 +108,7 @@ fn parse_dirfd_skips_positional_when_index_is_wrong() {
 #[test]
 fn parse_fd_skips_positional_when_index_is_wrong() {
     // Same test for --fd flag
-    let args: Vec<CString> = vec![
-        CString::new("--fd").unwrap(),
-        CString::new("badfd").unwrap(),
-        CString::new("extra").unwrap(),
-    ];
+    let args = vec![c"--fd".into(), c"badfd".into(), c"extra".into()];
     let result = parse_cli_args(&args);
     match result {
         Ok(parsed) => {
