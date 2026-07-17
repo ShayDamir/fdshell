@@ -880,11 +880,8 @@ fn export_set_env_var() {
         Some(&c"bar".into())
     );
     assert_eq!(
-        state
-            .exports
-            .get::<sys::ShortCStr>(&c"FOO".into())
-            .map(|v| v.as_slice()),
-        Some(&b"bar"[..])
+        state.exports.get::<sys::ShortCStr>(&c"FOO".into()),
+        Some(&c"bar".into())
     );
 }
 
@@ -895,18 +892,12 @@ fn export_multiple_vars() {
     let state = borrow_state(&cell);
     assert_eq!(state.exports.len(), 2);
     assert_eq!(
-        state
-            .exports
-            .get::<sys::ShortCStr>(&c"FOO".into())
-            .map(|v| v.as_slice()),
-        Some(&b"bar"[..])
+        state.exports.get::<sys::ShortCStr>(&c"FOO".into()),
+        Some(&c"bar".into())
     );
     assert_eq!(
-        state
-            .exports
-            .get::<sys::ShortCStr>(&c"BAZ".into())
-            .map(|v| v.as_slice()),
-        Some(&b"qux"[..])
+        state.exports.get::<sys::ShortCStr>(&c"BAZ".into()),
+        Some(&c"qux".into())
     );
 }
 

@@ -2,7 +2,6 @@ mod environ;
 
 use alloc::ffi::CString;
 use alloc::format;
-use alloc::vec::Vec;
 use core::ffi::CStr;
 use hashbrown::HashMap;
 
@@ -19,7 +18,7 @@ use environ::get_environ;
 pub fn exec_fd(
     fd: &LocalFd,
     argv: &[&CStr],
-    exports: &HashMap<ShortCStr, Vec<u8>>,
+    exports: &HashMap<ShortCStr, ShortCStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
@@ -42,7 +41,7 @@ pub fn exec_at(
     dirfd: AtFd<'_>,
     pathname: &CStr,
     argv: &[&CStr],
-    exports: &HashMap<ShortCStr, Vec<u8>>,
+    exports: &HashMap<ShortCStr, ShortCStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {

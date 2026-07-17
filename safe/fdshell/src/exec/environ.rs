@@ -4,13 +4,14 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use sys::ExportedFd;
+use sys::RefCStr;
 use sys::ShortCStr;
 
 use crate::envfilter::EnvFilter;
 
 pub(crate) fn get_environ(
     cookie: &[u8],
-    exports: &HashMap<ShortCStr, Vec<u8>>,
+    exports: &HashMap<ShortCStr, ShortCStr>,
     env_filter: &EnvFilter,
     exec_sock: Option<&ExportedFd>,
 ) -> Vec<CString> {
@@ -24,7 +25,8 @@ pub(crate) fn get_environ(
             if !env_filter.is_allowed(key) {
                 return None;
             }
-            CString::new([key, b"=", v.as_slice()].concat()).ok()
+            let ref_cstr: RefCStr = v.clone().into();
+            CString::new([key, b"=", ref_cstr.as_ref().to_bytes_with_nul()].concat()).ok()
         } else {
             None
         }

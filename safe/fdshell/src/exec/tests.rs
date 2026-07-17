@@ -77,7 +77,10 @@ fn exec_fd_with_exports() {
     let fd = resolve_path(&abs).unwrap();
 
     let mut exports_map = HashMap::new();
-    exports_map.insert(ShortCStr::from(c"EXPORTED_VAR"), b"hello_world".to_vec());
+    exports_map.insert(
+        ShortCStr::from(c"EXPORTED_VAR"),
+        ShortCStr::from(c"hello_world"),
+    );
     exec_child(
         || match exec_fd(&fd, &[&abs], &exports_map, &Default::default(), None) {
             Ok(()) => {}

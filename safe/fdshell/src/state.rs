@@ -1,5 +1,4 @@
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use sys::LocalFd;
@@ -13,7 +12,7 @@ pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, LocalFd>,
     pub(crate) tasks: HashMap<ShortCStr, Task>,
     pub(crate) strings: HashMap<ShortCStr, ShortCStr>,
-    pub(crate) exports: HashMap<ShortCStr, Vec<u8>>,
+    pub(crate) exports: HashMap<ShortCStr, ShortCStr>,
     pub(crate) positional: VecDeque<ShortCStr>,
     pub(crate) last_status: WaitStatus,
     pub(crate) shell_pid: i32,
