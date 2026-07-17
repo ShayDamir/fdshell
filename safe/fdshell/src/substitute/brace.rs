@@ -9,7 +9,7 @@ use crate::state::ShellState;
 pub(crate) fn handle_brace(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     state: &ShellState,
-    out: &mut Vec<u8>,
+    out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
     peek.next();
     if peek.peek().copied() == Some(b'#') {
@@ -23,23 +23,25 @@ pub(crate) fn handle_brace(
                     .change_context(ResolveError::RefNotFound)?
                     .len();
                 let s = format!("{}", len);
-                out.extend_from_slice(s.as_bytes());
+                out.extend_from_slice(s.as_bytes())
+                    .change_context(ResolveError::NulByte)?;
             } else {
-                out.push(b'$');
-                out.push(b'{');
-                out.push(b'#');
+                out.extend_from_slice(b"${#")
+                    .change_context(ResolveError::Never)?;
                 out.extend_from_slice(
                     name_scs
                         .as_bytes()
                         .change_context(ResolveError::RefNotFound)?,
-                );
-                out.push(b'}');
+                )
+                .change_context(ResolveError::NulByte)?;
+                out.push(b'}').change_context(ResolveError::Never)?;
             }
         } else {
-            out.push(b'$');
-            out.push(b'{');
-            out.push(b'#');
-            out.extend_from_slice(&name);
+            out.extend_from_slice(b"${#")
+                .change_context(ResolveError::Never)?;
+            for &b in &name {
+                out.push(b).change_context(ResolveError::Never)?;
+            }
         }
         return Ok(());
     }
@@ -47,24 +49,27 @@ pub(crate) fn handle_brace(
     if closed {
         let name_scs = ShortCStr::from_vec(name).change_context(ResolveError::NulByte)?;
         match state.strings.get(&name_scs) {
-            Some(val) => {
-                out.extend_from_slice(val.as_bytes().change_context(ResolveError::RefNotFound)?)
-            }
+            Some(val) => out
+                .extend_from_slice(val.as_bytes().change_context(ResolveError::RefNotFound)?)
+                .change_context(ResolveError::NulByte)?,
             None => {
-                out.push(b'$');
-                out.push(b'{');
+                out.extend_from_slice(b"${")
+                    .change_context(ResolveError::Never)?;
                 out.extend_from_slice(
                     name_scs
                         .as_bytes()
                         .change_context(ResolveError::RefNotFound)?,
-                );
-                out.push(b'}');
+                )
+                .change_context(ResolveError::NulByte)?;
+                out.push(b'}').change_context(ResolveError::Never)?;
             }
         }
     } else {
-        out.push(b'$');
-        out.push(b'{');
-        out.extend_from_slice(&name);
+        out.extend_from_slice(b"${")
+            .change_context(ResolveError::Never)?;
+        for &b in &name {
+            out.push(b).change_context(ResolveError::Never)?;
+        }
     }
     Ok(())
 }

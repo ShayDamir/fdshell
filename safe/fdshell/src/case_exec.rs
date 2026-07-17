@@ -17,7 +17,7 @@ pub(crate) fn run_case(
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let word = crate::substitute::substitute_arg(&caseblock.word, &mut cache, cell)
         .change_context(CmdError::Resolve)?;
-    let word_bytes = word.as_bytes();
+    let word_bytes = word.as_bytes().change_context(CmdError::Never)?;
 
     for clause in &caseblock.clauses {
         for pattern in &clause.patterns {

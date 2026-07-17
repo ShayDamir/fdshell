@@ -3,7 +3,6 @@ use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
@@ -29,10 +28,7 @@ pub(crate) fn run_simple(
                     .change_context(CmdError::Resolve)?
             };
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.strings.insert(
-                var.clone(),
-                ShortCStr::from_vec(expanded.into_bytes()).change_context(CmdError::Resolve)?,
-            );
+            state.strings.insert(var.clone(), expanded);
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Unset(var) => {

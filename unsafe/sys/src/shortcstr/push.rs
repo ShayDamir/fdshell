@@ -14,6 +14,18 @@ impl ShortCStr {
         Ok(())
     }
 
+    pub fn extend_from_slice(&mut self, bytes: &[u8]) -> Result<(), ShortCStrError> {
+        if bytes.contains(&0) {
+            return Err(ShortCStrError::NulByte);
+        }
+        // SAFETY: all bytes validated as non-NUL above.
+        for &byte in bytes {
+            // SAFETY: all bytes validated as non-NUL above.
+            unsafe { self.push_unchecked(byte) };
+        }
+        Ok(())
+    }
+
     /// Push a byte without checking for NUL.
     ///
     /// # Safety

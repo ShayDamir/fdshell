@@ -60,7 +60,7 @@ nix flake check        # fmt + clippy + nextest
 ## Testing
 
 ```sh
-nix develop .#checks.x86_64-linux.default -c cargo nextest run
+cargo nextest run --status-level fail --show-progress none
 ```
 
 Tests in `unsafe/sys/tests/` and `safe/builtins/tests/`.

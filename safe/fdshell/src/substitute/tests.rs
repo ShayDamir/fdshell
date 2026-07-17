@@ -38,7 +38,7 @@ fn dollar_substitutes_matching_var() {
     let arg = ShortCStr::from(c"$hello");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"world");
+    assert_eq!(res.as_bytes().unwrap(), b"world");
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn dollar_unknown_var_is_literal() {
     let arg = ShortCStr::from(c"$nope");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"$nope");
+    assert_eq!(res.as_bytes().unwrap(), b"$nope");
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn dollar_double_dollar_is_pid() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     let pid_str = format!("{}", cell.borrow().unwrap().shell_pid);
-    assert_eq!(res.as_bytes(), pid_str.as_bytes());
+    assert_eq!(res.as_bytes().unwrap(), pid_str.as_bytes());
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn dollar_at_end_is_literal() {
     let arg = ShortCStr::from(c"a$");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"a$");
+    assert_eq!(res.as_bytes().unwrap(), b"a$");
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn dollar_in_middle_of_text() {
     let arg = ShortCStr::from(c"prefix.$hello/suffix");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"prefix.world/suffix");
+    assert_eq!(res.as_bytes().unwrap(), b"prefix.world/suffix");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn dollar_then_percent_handled_separately() {
     let arg = ShortCStr::from(c"$%");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"$%");
+    assert_eq!(res.as_bytes().unwrap(), b"$%");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn dollar_empty_value_produces_nothing() {
     let arg = ShortCStr::from(c"x$empty y");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"x y");
+    assert_eq!(res.as_bytes().unwrap(), b"x y");
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn dollar_multi_word_value() {
     let arg = ShortCStr::from(c"echo $multi_word");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"echo two words");
+    assert_eq!(res.as_bytes().unwrap(), b"echo two words");
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn dollar_followed_by_non_ident_is_literal() {
     let arg = ShortCStr::from(c"$.");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"$.");
+    assert_eq!(res.as_bytes().unwrap(), b"$.");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn combined_percent_and_dollar() {
     let arg = ShortCStr::from(c"$var and %var");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"value and %var");
+    assert_eq!(res.as_bytes().unwrap(), b"value and %var");
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn dollar_underscore_var() {
     let arg = ShortCStr::from(c"$_my_var");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"underscore");
+    assert_eq!(res.as_bytes().unwrap(), b"underscore");
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn brace_substitutes_matching_var() {
     let arg = ShortCStr::from(c"${hello}");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"world");
+    assert_eq!(res.as_bytes().unwrap(), b"world");
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn brace_unknown_var_is_literal() {
     let arg = ShortCStr::from(c"${nope}");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"${nope}");
+    assert_eq!(res.as_bytes().unwrap(), b"${nope}");
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn brace_empty_name_is_literal() {
     let arg = ShortCStr::from(c"${}");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"${}");
+    assert_eq!(res.as_bytes().unwrap(), b"${}");
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn brace_no_closing_is_literal() {
     let arg = ShortCStr::from(c"${hello");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"${hello");
+    assert_eq!(res.as_bytes().unwrap(), b"${hello");
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn brace_hash_no_closing_is_literal() {
     let arg = ShortCStr::from(c"${#hello");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"${#hello");
+    assert_eq!(res.as_bytes().unwrap(), b"${#hello");
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn brace_inside_text() {
     let arg = ShortCStr::from(c"a${hello}b");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"aworldb");
+    assert_eq!(res.as_bytes().unwrap(), b"aworldb");
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn tilde_expands_to_home() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     let home = std::env::var("HOME").unwrap();
-    assert_eq!(res.as_bytes(), home.as_bytes());
+    assert_eq!(res.as_bytes().unwrap(), home.as_bytes());
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn tilde_slash_expands() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     let home = std::env::var("HOME").unwrap();
-    assert_eq!(res.as_bytes(), format!("{}/foo", home).as_bytes());
+    assert_eq!(res.as_bytes().unwrap(), format!("{}/foo", home).as_bytes());
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn tilde_user_remains_literal() {
     let arg = ShortCStr::from(c"~nobody/bar");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"~nobody/bar");
+    assert_eq!(res.as_bytes().unwrap(), b"~nobody/bar");
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn tilde_mid_word_untouched() {
     let arg = ShortCStr::from(c"a~");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"a~");
+    assert_eq!(res.as_bytes().unwrap(), b"a~");
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn dollar_bang_returns_last_bg_pid() {
     let arg = ShortCStr::from(c"$!");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"12345");
+    assert_eq!(res.as_bytes().unwrap(), b"12345");
 }
 
 #[test]
@@ -249,7 +249,7 @@ fn dollar_bang_no_bg_returns_empty() {
     let arg = ShortCStr::from(c"$!");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &s_cell).unwrap();
-    assert_eq!(res.as_bytes(), b"");
+    assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn dollar_bang_in_text() {
     let arg = ShortCStr::from(c"job=$! done");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"job=12345 done");
+    assert_eq!(res.as_bytes().unwrap(), b"job=12345 done");
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn brace_hash_known_var_returns_length() {
     let arg = ShortCStr::from(c"${#hello}");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"5");
+    assert_eq!(res.as_bytes().unwrap(), b"5");
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn brace_hash_empty_var_returns_zero() {
     let arg = ShortCStr::from(c"${#empty}");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"0");
+    assert_eq!(res.as_bytes().unwrap(), b"0");
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn brace_hash_unknown_var_is_literal() {
     let arg = ShortCStr::from(c"${#nope}");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"${#nope}");
+    assert_eq!(res.as_bytes().unwrap(), b"${#nope}");
 }
 
 #[test]
@@ -294,5 +294,5 @@ fn brace_hash_in_text() {
     let arg = ShortCStr::from(c"len=${#hello} end");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes(), b"len=5 end");
+    assert_eq!(res.as_bytes().unwrap(), b"len=5 end");
 }

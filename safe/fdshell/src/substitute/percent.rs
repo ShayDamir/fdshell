@@ -1,5 +1,4 @@
 use alloc::string::ToString;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::ExportedFd;
@@ -11,7 +10,7 @@ use crate::state::ShellState;
 pub(crate) fn collect_name(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
 ) -> Result<ShortCStr, Report<ResolveError>> {
-    let mut name = Vec::new();
+    let mut name = alloc::vec::Vec::new();
     name.push(peek.next().ok_or(ResolveError::RefNotFound)?);
     while let Some(&nc) = peek.peek() {
         if nc.is_ascii_alphanumeric() || nc == b'_' {
@@ -28,11 +27,11 @@ pub(crate) fn percent_subst(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
-    out: &mut Vec<u8>,
+    out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'%') => {
-            out.push(b'%');
+            out.push(b'%').change_context(ResolveError::Never)?;
             peek.next();
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
@@ -47,19 +46,21 @@ pub(crate) fn percent_subst(
                         s
                     }
                     None => {
-                        out.push(b'%');
+                        out.push(b'%').change_context(ResolveError::Never)?;
                         out.extend_from_slice(
                             name_scs
                                 .as_bytes()
                                 .change_context(ResolveError::RefNotFound)?,
-                        );
+                        )
+                        .change_context(ResolveError::NulByte)?;
                         return Ok(());
                     }
                 },
             };
-            out.extend_from_slice(num_str.as_bytes());
+            out.extend_from_slice(num_str.as_bytes())
+                .change_context(ResolveError::NulByte)?;
         }
-        _ => out.push(b'%'),
+        _ => out.push(b'%').change_context(ResolveError::NulByte)?,
     }
     Ok(())
 }

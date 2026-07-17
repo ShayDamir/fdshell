@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing)]
 use crate::child;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
@@ -37,7 +36,8 @@ pub fn execute(
         let builtin_args = args.get(2..).unwrap_or(&[]);
         let substituted = substitute_args(builtin_args, &[], cell)
             .change_context(ChildProcessError::ExecFailed)?;
-        let refs: Vec<&CStr> = substituted.iter().map(|cs| cs.as_c_str()).collect();
+        let sealed: Vec<sys::RefCStr> = substituted.iter().map(|cs| (*cs).clone().into()).collect();
+        let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
@@ -54,9 +54,10 @@ pub fn execute(
                 .change_context(ChildProcessError::Never)?;
         let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_fq, cell)
             .change_context(ChildProcessError::ExecFailed)?;
+        let sealed: Vec<sys::RefCStr> = substituted.iter().map(|s| (*s).clone().into()).collect();
         let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];
-        for s in &substituted {
-            argv.push(s.as_c_str());
+        for s in &sealed {
+            argv.push(s.as_ref());
         }
         let state = cell
             .borrow()
