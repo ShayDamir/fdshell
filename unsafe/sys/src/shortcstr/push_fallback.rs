@@ -4,18 +4,19 @@ use alloc::vec::Vec;
 use crate::shortcstr::copy::copy_to_shortcstr;
 use crate::shortcstr::{INLINE_CAP, ShortCStr};
 
-pub(crate) fn push_fallback(this: &mut ShortCStr, byte: u8) {
+pub(crate) fn extend_from_slice_fallback(this: &mut ShortCStr, bytes: &[u8]) {
     match this {
-        ShortCStr::Inline { buf, .. } => {
+        ShortCStr::Inline { buf, len } => {
             let mut v = Vec::with_capacity(INLINE_CAP * 2);
-            for &b in buf.iter() {
+            let len = len.as_u8() as usize;
+            for &b in buf.iter().take(len) {
                 v.push(b);
             }
-            v.push(byte);
+            v.extend_from_slice(bytes);
             *this = ShortCStr::Arc {
                 arc: Arc::new(v),
                 offset: 0,
-                length: INLINE_CAP + 1,
+                length: len + bytes.len(),
             };
         }
         ShortCStr::Arc {
@@ -26,13 +27,13 @@ pub(crate) fn push_fallback(this: &mut ShortCStr, byte: u8) {
             let src: &[u8] = arc;
             let o = *offset;
             let l = *length;
-            *this = copy_to_shortcstr(src, o, l, byte);
+            *this = copy_to_shortcstr(src, o, l, bytes);
         }
         ShortCStr::Static(s, offset, length) => {
             let src = s.to_bytes();
             let o = *offset;
             let l = *length;
-            *this = copy_to_shortcstr(src, o, l, byte);
+            *this = copy_to_shortcstr(src, o, l, bytes);
         }
     }
 }

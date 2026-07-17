@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use crate::shortcstr::copy::copy_to_shortcstr;
-use crate::shortcstr::push_fallback::push_fallback;
+use crate::shortcstr::push_fallback::extend_from_slice_fallback;
 use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr, ShortCStrError};
 
 impl ShortCStr {
@@ -10,7 +10,7 @@ impl ShortCStr {
             return Err(ShortCStrError::NulByte);
         }
         // SAFETY: non-NUL checked above.
-        unsafe { self.push_unchecked(byte) };
+        unsafe { self.extend_from_slice_unchecked(&[byte]) };
         Ok(())
     }
 
@@ -19,35 +19,42 @@ impl ShortCStr {
             return Err(ShortCStrError::NulByte);
         }
         // SAFETY: all bytes validated as non-NUL above.
-        for &byte in bytes {
-            // SAFETY: all bytes validated as non-NUL above.
-            unsafe { self.push_unchecked(byte) };
-        }
+        unsafe { self.extend_from_slice_unchecked(bytes) };
         Ok(())
     }
 
-    /// Push a byte without checking for NUL.
+    /// Append bytes without checking for NUL.
     ///
     /// # Safety
     ///
-    /// The caller must ensure the byte is not NUL, or intend to
-    /// seal the NUL terminator via [`RefCStr`].
-    pub unsafe fn push_unchecked(&mut self, byte: u8) {
-        let n = self.len();
+    /// The caller must ensure no byte is NUL, or intend to seal
+    /// the NUL terminator via [`RefCStr`].
+    pub unsafe fn extend_from_slice_unchecked(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
 
-        // 1. Inline with room — direct write, no copy
+        let n = self.len();
+        let additional = bytes.len();
+        let new_len = n + additional;
+
+        // 1. Inline with room — direct memcpy, no copy
         if let ShortCStr::Inline { len, buf } = self
-            && n < INLINE_CAP
+            && new_len <= INLINE_CAP
         {
-            // SAFETY: n < INLINE_CAP ≤ buf.len()
-            *unsafe { buf.get_unchecked_mut(n) } = byte;
-            // SAFETY: n + 1 ≤ INLINE_MAX
-            *len = unsafe { InlineSize::from_u8((n + 1) as u8) };
+            // SAFETY: new_len = n + bytes.len() ≤ INLINE_CAP ≤ buf.len()
+            unsafe {
+                buf.get_unchecked_mut(n..new_len).copy_from_slice(bytes);
+            }
+            // SAFETY: new_len ≤ INLINE_CAP ≤ INLINE_MAX
+            *len = unsafe { InlineSize::from_u8(new_len as u8) };
             return;
         }
 
         // 2. Static tail slice pushing NUL — already present
-        if byte == 0
+        if bytes.len() == 1
+            // SAFETY: bytes is non-empty, checked above.
+            && unsafe { *bytes.get_unchecked(0) } == 0
             && let ShortCStr::Static(s, offset, length) = self
             && *offset + *length == s.count_bytes()
         {
@@ -55,7 +62,7 @@ impl ShortCStr {
         }
 
         // 3. Short data — copy into Inline
-        if n < INLINE_CAP {
+        if new_len <= INLINE_CAP {
             let (src, offset, length) = match self {
                 ShortCStr::Arc {
                     arc,
@@ -68,7 +75,7 @@ impl ShortCStr {
                 ShortCStr::Static(s, offset, length) => (s.to_bytes(), *offset, *length),
                 _ => unreachable!(),
             };
-            *self = copy_to_shortcstr(src, offset, length, byte);
+            *self = copy_to_shortcstr(src, offset, length, bytes);
             return;
         }
 
@@ -80,12 +87,12 @@ impl ShortCStr {
         } = self
             && *offset + *length == arc.len()
         {
-            Arc::make_mut(arc).push(byte);
-            *length += 1;
+            Arc::make_mut(arc).extend_from_slice(bytes);
+            *length += additional;
             return;
         }
 
         // 5. Everything else — allocate Arc
-        push_fallback(self, byte);
+        extend_from_slice_fallback(self, bytes);
     }
 }

@@ -538,7 +538,7 @@ fn new_is_empty() {
     assert_eq!(s.len(), 0);
 }
 
-// --- push / push_unchecked ---
+// --- push / extend_from_slice_unchecked ---
 
 #[test]
 fn push_up_to_inline_cap() {
@@ -572,38 +572,38 @@ fn push_nul_returns_err() {
 }
 
 #[test]
-fn push_unchecked_after_rc_mid_subslice() {
+fn extend_after_rc_mid_subslice() {
     let s: ShortCStr = c"hello world this is more than thirty bytes".into();
     let sub = s.get(6..11).unwrap();
-    // sub is an Arc non-tail view → push_unchecked copies
+    // sub is an Arc non-tail view → extend_from_slice_unchecked copies
     let mut sub = sub.clone();
     // SAFETY: Inline variant has capacity; Arc variant copies via copy_to_shortcstr.
-    unsafe { sub.push_unchecked(b'!') };
+    unsafe { sub.extend_from_slice_unchecked(b"!") };
     assert_eq!(sub.as_bytes().unwrap(), b"world!");
 }
 
 #[test]
-fn push_unchecked_rc_tail_growth() {
+fn extend_rc_tail_growth() {
     let raw = b"hello world this is more than thirty bytes";
     let s = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let tail = s.get(6..).unwrap();
     assert_eq!(tail.as_bytes().unwrap(), &raw[6..]);
     let mut tail = tail.clone();
     // SAFETY: Arc tail variant has capacity for one more byte.
-    unsafe { tail.push_unchecked(b'!') };
+    unsafe { tail.extend_from_slice_unchecked(b"!") };
     let mut expected = raw[6..].to_vec();
     expected.push(b'!');
     assert_eq!(tail.as_bytes().unwrap(), &expected);
 }
 
 #[test]
-fn push_unchecked_static_non_tail_rc_copy() {
+fn extend_static_non_tail_rc_copy() {
     // non-tail subslice with n >= INLINE_CAP → case 5 pushes via copy_to_shortcstr
     let s = ShortCStr::from(LONG);
     let sub = s.get(10..50).unwrap(); // 40 bytes > 30 → stays Static
     let mut sub = sub.clone();
     // SAFETY: copies via copy_to_shortcstr into Arc variant.
-    unsafe { sub.push_unchecked(b'!') };
+    unsafe { sub.extend_from_slice_unchecked(b"!") };
     let mut expected = LONG.to_bytes()[10..50].to_vec();
     expected.push(b'!');
     assert_eq!(sub.as_bytes().unwrap(), &expected);
@@ -619,7 +619,7 @@ fn ref_cstr_from_static_non_tail() {
 
 #[test]
 fn ref_cstr_from_static_non_tail_inline() {
-    // short non-tail → push_unchecked(0) copies into Inline (case 3)
+    // short non-tail → extend_from_slice_unchecked(&[0]) copies into Inline (case 3)
     let s = ShortCStr::from(c"hello world");
     let sub = s.get(6..).unwrap(); // "world" = 5 bytes ≤ INLINE_CAP
     let r = sys::RefCStr::from(sub);
@@ -636,14 +636,14 @@ fn ref_cstr_from_short_non_tail() {
 }
 
 #[test]
-fn push_unchecked_static_tail_stays_static() {
-    // tail subslice > INLINE_CAP → case 2: push_unchecked(0) is no-op
+fn extend_static_tail_stays_static() {
+    // tail subslice > INLINE_CAP → case 2: extend_from_slice_unchecked(&[0]) is no-op
     let s = ShortCStr::from(LONG);
     let tail = s.get(60..).unwrap();
     let len_before = tail.len();
     let mut cloned = tail.clone();
-    // SAFETY: Static tail variant with capacity; push_unchecked(0) is no-op here.
-    unsafe { cloned.push_unchecked(0) };
+    // SAFETY: Static tail variant with capacity; extend_from_slice_unchecked(&[0]) is no-op here.
+    unsafe { cloned.extend_from_slice_unchecked(&[0]) };
     assert_eq!(cloned.len(), len_before);
     assert_eq!(cloned.as_bytes().unwrap(), &LONG.to_bytes()[60..]);
 }
@@ -673,7 +673,7 @@ fn contains_found() {
 }
 
 #[test]
-fn push_copy_to_inline_via_constructed_arc() {
+fn extend_copy_to_inline_via_constructed_arc() {
     // Arc non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
     let v = Arc::new(b"hello world, this is more than thirty bytes long".to_vec());
     let s = ShortCStr::Arc {
@@ -683,17 +683,17 @@ fn push_copy_to_inline_via_constructed_arc() {
     };
     let mut s = s;
     // SAFETY: byte is not NUL
-    unsafe { s.push_unchecked(b'!') };
+    unsafe { s.extend_from_slice_unchecked(b"!") };
     assert_eq!(s.as_bytes().unwrap(), b"hello!");
 }
 
 #[test]
-fn push_copy_to_inline_via_constructed_static() {
+fn extend_copy_to_inline_via_constructed_static() {
     // Static non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
     let s = ShortCStr::Static(c"hello world, this is more than thirty bytes long", 0, 5);
     let mut s = s;
     // SAFETY: byte is not NUL
-    unsafe { s.push_unchecked(b'!') };
+    unsafe { s.extend_from_slice_unchecked(b"!") };
     assert_eq!(s.as_bytes().unwrap(), b"hello!");
 }
 

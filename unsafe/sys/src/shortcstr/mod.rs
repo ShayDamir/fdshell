@@ -37,14 +37,14 @@ pub enum ShortCStr {
 /// A sealed C-string view of a [`ShortCStr`].
 ///
 /// Ensures a NUL terminator at the end of the subslice via
-/// [`push_unchecked`], enabling zero-copy [`AsRef<CStr>`].
+/// [`extend_from_slice_unchecked`], enabling zero-copy [`AsRef<CStr>`].
 pub struct RefCStr(ShortCStr);
 
 impl From<ShortCStr> for RefCStr {
     fn from(mut value: ShortCStr) -> Self {
-        // SAFETY: push_unchecked(0) seals the NUL terminator.
+        // SAFETY: extend_from_slice_unchecked(&[0]) seals the NUL terminator.
         // Rule 2 handles tail-slice Static as a no-op.
-        unsafe { value.push_unchecked(0) };
+        unsafe { value.extend_from_slice_unchecked(&[0]) };
         RefCStr(value)
     }
 }
@@ -52,7 +52,7 @@ impl From<ShortCStr> for RefCStr {
 impl AsRef<CStr> for RefCStr {
     fn as_ref(&self) -> &CStr {
         // as_cstr_bytes() always returns Ok for a RefCStr because
-        // RefCStr::from guarantees push_unchecked(0) was called (or the
+        // RefCStr::from guarantees extend_from_slice_unchecked(&[0]) was called (or the
         // Static variant already has a NUL terminator), and all
         // offsets/lengths are validated at construction.
         let bytes = match self.0.as_cstr_bytes() {
