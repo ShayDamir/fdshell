@@ -105,7 +105,7 @@ pub fn read_cmdline() -> Result<Vec<ShortCStr>, Report<ReadCmdlineError>> {
 /// Parse the C `environ` array into a `Vec` of `(key, value)` pairs.
 ///
 /// Skips entries without an `=` sign (same as `std::env::vars()`).
-pub fn environ_snapshot() -> Vec<(Vec<u8>, Vec<u8>)> {
+pub fn environ_snapshot() -> Vec<(ShortCStr, ShortCStr)> {
     // SAFETY: `environ` is a NULL-terminated array of C strings provided by the C runtime.
     let environ_ptr = unsafe { environ };
     let mut result = Vec::new();
@@ -119,12 +119,11 @@ pub fn environ_snapshot() -> Vec<(Vec<u8>, Vec<u8>)> {
         if entry.is_null() {
             break;
         }
-        // SAFETY: `entry` points to a NUL-terminated C string from the environment.
+        // SAFETY: `entry` points to a NUL-terminated C string from the environment;
+        // environ strings live for the duration of the program.
         let cstr = unsafe { CStr::from_ptr(entry) };
-        let bytes = cstr.to_bytes();
-        if let Some(eq_pos) = bytes.iter().position(|&b| b == b'=') {
-            let key = bytes.get(..eq_pos).unwrap_or(&[]).to_vec();
-            let value = bytes.get(eq_pos + 1..).unwrap_or(&[]).to_vec();
+        let short = ShortCStr::from(cstr);
+        if let Some((key, value)) = short.split_once_byte(b'=') {
             result.push((key, value));
         }
         // SAFETY: environ is a NULL-terminated array; we check for NULL above.

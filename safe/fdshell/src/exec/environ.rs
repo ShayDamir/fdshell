@@ -17,9 +17,13 @@ pub(crate) fn get_environ(
 ) -> Vec<CString> {
     let env_iter = sys::env::environ_snapshot()
         .into_iter()
-        .filter(|(k, _)| k != b"FDSHELL_PID" && k != b"FDSHELL_SOCKET")
-        .filter(|(k, _)| env_filter.is_allowed(k))
-        .filter_map(|(k, v)| CString::new([k.as_slice(), b"=", v.as_slice()].concat()).ok());
+        .filter(|(k, _)| !k.eq_bytes(b"FDSHELL_PID") && !k.eq_bytes(b"FDSHELL_SOCKET"))
+        .filter(|(k, _)| env_filter.is_allowed(k.as_bytes().unwrap_or(&[])))
+        .filter_map(|(k, v)| {
+            let key = k.as_bytes().ok()?;
+            let val = v.as_bytes().ok()?;
+            CString::new([key, b"=", val].concat()).ok()
+        });
     let exports_iter = exports.iter().filter_map(|(k, v)| {
         if let Ok(key) = k.as_bytes() {
             if !env_filter.is_allowed(key) {
