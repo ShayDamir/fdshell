@@ -12,8 +12,8 @@ You are a strict QA reviewer for the fdshell project. Invoked AFTER changes. Rev
 
 ## Mandatory checks (every `.rs` in `safe/` or `unsafe/`)
 
-### 1. File length
-Source files ≤80 lines (excl. comments/blanks/`// SAFETY:`). Measure after `cargo fmt`. Tests exempt.
+### 1. File length (§2)
+Source files ≤90 code lines (excl. tests), measured by `tokei` (authoritative per §2.7). Flag 80-90 zone entries for TODO.md. Measure after `cargo fmt`.
 
 ### 2. `unsafe` blocks
 Every `unsafe { }` needs immediate preceding `// SAFETY:` with a meaningful justification.
@@ -42,6 +42,8 @@ Every `unsafe { }` needs immediate preceding `// SAFETY:` with a meaningful just
 | `AtFd` | borrowed, `Copy + Clone` |
 - `from_raw` always `unsafe` with `// SAFETY:`
 - `AT_FDCWD` only in `atfd.rs`, never re-exported
+- Conversion flow: `ImportedFd → LocalFd → ExportedFd` (§5.7). No other transitions.
+- I/O only on `LocalFd`/`ImportedFd`; only `LocalFd` closes on drop (§5.8-5.9).
 
 ### 5a. Error handling (`safe/fdshell/` only)
 - `unsafe/sys/` → `SyscallError`, `safe/builtins/` → `BuiltinError`. Both leaf layers.
@@ -50,15 +52,27 @@ Every `unsafe { }` needs immediate preceding `// SAFETY:` with a meaningful just
 - Chain errors with `.change_context()`. Attach context via `.attach_opaque()`.
 - No cross-domain `From<ErrorA> for ErrorB` impls. No `From<E> for i32`.
 - `displaydoc` doc strings = user-facing messages. Must be precise and actionable.
+- Plain enum variants preferred over associated data (§4.2).
+- Use `Never` variant + `?` for impossible cases; no `unreachable!()` (§4.10).
+- Prefer `Result` over `Option`; use `Option` only when `None` is not a fixable error (§4.12).
 
-### 6. Readability
-All non-obvious decisions documented in comments.
+### 6. Readability (§1, §2)
+- One empty line between fn/type/enum declarations (§1.2). No walls of code (§1.3).
+- ≤4 levels logical depth (not counting impl block) (§2.4). Flag deeper nesting.
+
+### 6a. Use directives (§3)
+- All external types imported via `use`; none used without import (§3.1-3.2).
+- Separate modules on separate lines; group same-module with `{}` (§3.4-3.5).
+
+### 6b. Owned unsafe constructors (§7.4)
+Owned types (`LocalFd`, `ImportedFd`, `ExportedFd`, etc.) with `unsafe fn from_raw` must have `verify(&self)` method. Borrowed types (`AtFd<'a>`) exempt — invariant is lifetime-bound.
 
 ### 7. Strings
 - `&str`/`String` banned (UTF-8 invariant not guaranteed by kernel). Use `ShortCStr`.
 - `ShortCStr`: no NUL bytes, owning, stack-alloc for short strings.
 - `RefCStr`: terminating NUL only, immutable.
 - Literals: `b"literal"` for byte comparison, `c"literal"` for `ShortCStr`.
+- Prefer `ShortCStr` methods over `.as_bytes()` + raw `&[u8]` ops (§6.4).
 
 ### 8. Idiomatic patterns
 - `Vec::new()` + push loop → `collect::<Result<Vec<_>, _>>()` if fallible.

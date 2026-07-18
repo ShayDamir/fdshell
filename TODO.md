@@ -8,11 +8,15 @@
 
 ## Refactoring / cleanup
 
-- [ ] `token.rs` at 82 lines (2 over 80-line limit) — consider extracting `tokenize` match arms into separate helpers
-- [ ] `command.rs` at ~146 lines (66 over) — combined redirect added; extract combined-redirect parsing into helper
-- [ ] `replacer.rs` at 84 code lines (4 over) — extract builtin-dispatch match into helper; `ChildProcessError` (18 chars) pushed fmt line splits
-- [ ] `child/run.rs` at 82 code lines (2 over) — same cause as replacer.rs
-- [ ] `localfd.rs` at 80 code lines (at limit) — extract `read_all` to reduce below 80
+- [ ] `dollar.rs` at 104 code lines (14 over 90-line limit) — extract `$@`, `$*`, `$N` handlers into helpers
+- [ ] `importedfd.rs` (unsafe/sys) at 106 code lines (16 over) — split test module or extract verification logic
+- [ ] `caret.rs` at 88 code lines (in 80-90 flag zone) — tests dominate; extract to `caret/tests.rs`
+- [ ] `substitute/brace.rs` at 87 code lines (in 80-90 flag zone) — extract closed vs unclosed brace handling
+- [ ] `parse/token.rs` at 87 code lines (in 80-90 flag zone) — consider extracting `tokenize` match arms into separate helpers
+- [ ] `intercept/read/io.rs` at 87 code lines (in 80-90 flag zone) — extract `SourceFd::RawFd` read loop
+- [ ] `exec/mod.rs` at 82 code lines (in 80-90 flag zone) — `exec_fd`/`exec_at` share duplicated setup; extract
+- [ ] `openat2/parse/mod.rs` at 81 code lines (in 80-90 flag zone)
+- [ ] `localfd.rs` at 80 code lines (in 80-90 flag zone) — extract `read_all` to reduce below 80
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 - [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md

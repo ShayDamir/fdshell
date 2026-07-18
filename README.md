@@ -142,6 +142,6 @@ The project is a workspace with three crates:
 * `safe/builtins` - builtin commands (no_std, forbid(unsafe))
 * `unsafe/sys` - syscall wrappers (no_std, unsafe allowed)
 
-All `safe/` crates have `forbid(unsafe_code)` and cannot call libc directly. All source files must be ≤80 lines (excluding comments, tests exempt).
+All `safe/` crates have `forbid(unsafe_code)` and cannot call libc directly. All source files must be ≤90 lines (excluding comments, tests exempt).
 
 The codebase avoids `#[derive]` directives in production code (except `Display`/`Debug` on error types and `Debug`/`PartialEq`/`Eq` on `ShortCStr`). Prefer `no_std` where feasible — the fdshell binary uses `std` for stability.
