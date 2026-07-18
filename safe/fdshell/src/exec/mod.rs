@@ -1,6 +1,5 @@
 mod environ;
 
-use alloc::ffi::CString;
 use alloc::format;
 use core::ffi::CStr;
 use hashbrown::HashMap;
@@ -62,17 +61,18 @@ fn name_from_cstr(bin: &CStr) -> ShortCStr {
 }
 
 pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    let default_path = b"/usr/local/bin:/usr/bin:/bin";
-    let path_env = sys::env::getenv(c"PATH");
+    let path_str = sys::env::getenv(c"PATH").unwrap_or(c"/usr/local/bin:/usr/bin:/bin".into());
     let bin_name = name_from_cstr(bin);
-    let mut path_bytes: &[u8] = default_path;
-    if let Some(ref v) = path_env {
-        path_bytes = v.as_bytes().change_context(ChildProcessError::Never)?;
-    }
-    for dir in path_bytes.split(|&b| b == b':').filter(|d| !d.is_empty()) {
-        let full = [dir, b"/", bin.to_bytes()].concat();
-        let pathname = CString::new(full).change_context(ChildProcessError::Never)?;
-        if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {
+    for dir in path_str.split(b':') {
+        if dir.is_empty() {
+            continue;
+        }
+        let mut dir = dir.clone();
+        dir.push(b'/').change_context(ChildProcessError::Never)?;
+        dir.extend_from_slice(bin.to_bytes())
+            .change_context(ChildProcessError::Never)?;
+        let pathname = sys::RefCStr::from(dir);
+        if let Ok(fd) = sys::openat2::open(pathname.as_ref(), O_PATH) {
             return Ok(fd);
         }
     }
