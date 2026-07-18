@@ -740,3 +740,126 @@ fn partial_eq_as_bytes_err() {
     };
     assert_ne!(valid, invalid);
 }
+
+// --- fmt::Write ---
+
+#[test]
+fn fmt_write_simple() {
+    let mut s = ShortCStr::new();
+    core::fmt::write(&mut s, format_args!("{}", 42)).unwrap();
+    assert!(s.eq_bytes(b"42"));
+}
+
+#[test]
+fn fmt_write_composite() {
+    let mut s = ShortCStr::new();
+    core::fmt::write(&mut s, format_args!("{} + {} = {}", 1, 2, 3)).unwrap();
+    assert!(s.eq_bytes(b"1 + 2 = 3"));
+}
+
+#[test]
+fn fmt_write_sequential() {
+    let mut s = ShortCStr::new();
+    use core::fmt::Write;
+    s.write_str("hello").unwrap();
+    s.write_str(" ").unwrap();
+    s.write_str("world").unwrap();
+    assert!(s.eq_bytes(b"hello world"));
+}
+
+#[test]
+fn fmt_write_overflows_inline() {
+    let mut s = ShortCStr::new();
+    core::fmt::write(
+        &mut s,
+        format_args!("{}", "123456789012345678901234567890!"),
+    )
+    .unwrap();
+    assert!(s.eq_bytes(b"123456789012345678901234567890!"));
+}
+
+#[test]
+fn fmt_write_nul_fails() {
+    let mut s = ShortCStr::new();
+    use core::fmt::Write;
+    assert!(s.write_str("a\0b").is_err());
+    assert!(s.eq_bytes(b""));
+}
+
+// --- format!() macro ---
+
+#[test]
+fn format_simple() {
+    let result = sys::format!("hello {}", "world").unwrap();
+    assert!(result.eq_bytes(b"hello world"));
+}
+
+#[test]
+fn format_composite() {
+    let result = sys::format!("{} + {} = {}", 1, 2, 3).unwrap();
+    assert!(result.eq_bytes(b"1 + 2 = 3"));
+}
+
+#[test]
+fn format_inline_max() {
+    let result = sys::format!("{}", "123456789012345678901234567890").unwrap();
+    assert!(result.eq_bytes(b"123456789012345678901234567890"));
+}
+
+#[test]
+fn format_overflows_to_arc() {
+    let result = sys::format!("{}", "123456789012345678901234567890!").unwrap();
+    assert!(result.eq_bytes(b"123456789012345678901234567890!"));
+}
+
+#[test]
+fn format_empty() {
+    let result = sys::format!("").unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn format_nul_err() {
+    let result = sys::format!("{}", "a\0b");
+    assert!(result.is_err());
+}
+
+// --- write!() macro ---
+
+#[test]
+fn write_simple() {
+    let mut buf = ShortCStr::from(c"hello");
+    sys::write!(buf, " {}", "world").unwrap();
+    assert!(buf.eq_bytes(b"hello world"));
+}
+
+#[test]
+fn write_composite() {
+    let mut buf = ShortCStr::new();
+    sys::write!(buf, "{} + {} = {}", 1, 2, 3).unwrap();
+    assert!(buf.eq_bytes(b"1 + 2 = 3"));
+}
+
+#[test]
+fn write_multiple() {
+    let mut buf = ShortCStr::new();
+    sys::write!(buf, "hello").unwrap();
+    sys::write!(buf, " ").unwrap();
+    sys::write!(buf, "world").unwrap();
+    assert!(buf.eq_bytes(b"hello world"));
+}
+
+#[test]
+fn write_overflows_to_arc() {
+    let mut buf = ShortCStr::from(c"start");
+    sys::write!(buf, " {}", "123456789012345678901234567890!").unwrap();
+    assert!(buf.eq_bytes(b"start 123456789012345678901234567890!"));
+}
+
+#[test]
+fn write_nul_err() {
+    let mut buf = ShortCStr::from(c"hello");
+    let result = sys::write!(buf, "\0world");
+    assert!(result.is_err());
+    assert!(buf.eq_bytes(b"hello"));
+}

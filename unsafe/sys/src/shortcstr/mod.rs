@@ -6,6 +6,8 @@ mod access;
 mod copy;
 mod eq;
 mod error;
+mod fmt;
+mod format;
 mod from;
 mod get;
 mod len;
