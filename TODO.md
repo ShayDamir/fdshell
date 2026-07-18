@@ -12,6 +12,7 @@
 - [ ] `command.rs` at ~146 lines (66 over) — combined redirect added; extract combined-redirect parsing into helper
 - [ ] `replacer.rs` at 84 code lines (4 over) — extract builtin-dispatch match into helper; `ChildProcessError` (18 chars) pushed fmt line splits
 - [ ] `child/run.rs` at 82 code lines (2 over) — same cause as replacer.rs
+- [ ] `localfd.rs` at 80 code lines (at limit) — extract `read_all` to reduce below 80
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 - [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md

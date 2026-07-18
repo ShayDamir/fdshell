@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use sys::SyscallError;
 use sys::siginfo::WaitStatus;
 
@@ -11,7 +13,7 @@ fn fork_exit_0() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd",
     })?;
-    pidfd.verify()?;
+    pidfd.verify().expect("pidfd must have CLOEXEC");
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(SyscallError::Other {
@@ -31,7 +33,7 @@ fn fork_exit_42() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd",
     })?;
-    pidfd.verify()?;
+    pidfd.verify().expect("pidfd must have CLOEXEC");
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Exited(42) => Ok(()),
         _ => Err(SyscallError::Other {
@@ -53,7 +55,7 @@ fn fork_signaled() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd",
     })?;
-    pidfd.verify()?;
+    pidfd.verify().expect("pidfd must have CLOEXEC");
     match sys::wait_pidfd::wait_pidfd(&pidfd)? {
         WaitStatus::Signaled(libc::SIGKILL) => Ok(()),
         _ => Err(SyscallError::Other {

@@ -93,8 +93,8 @@ fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
 fn test_send_recv_fd() -> Result<(), SyscallError> {
     fork_test(|| {
         let (shell_a, shell_b) = socketpair()?;
-        shell_a.verify()?;
-        shell_b.verify()?;
+        shell_a.verify().expect("fd must have CLOEXEC");
+        shell_b.verify().expect("fd must have CLOEXEC");
         let receiver = shell_b;
         set_capture_active(true);
 
@@ -104,8 +104,8 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         // shell_b stays open — it's the receive end of shell_sock
 
         let (test_a, test_b) = socketpair()?;
-        test_a.verify()?;
-        test_b.verify()?;
+        test_a.verify().expect("fd must have CLOEXEC");
+        test_b.verify().expect("fd must have CLOEXEC");
         send_fd(&shell_sock, &test_a, c"test")?;
         test_a.try_close()?;
         write(&test_b, b"42")?;
@@ -114,7 +114,7 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         let mut tag = [0u8; TAG_MAX];
         let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)
             .expect("recv_fd should succeed");
-        test_fd.verify()?;
+        test_fd.verify().expect("fd must have CLOEXEC");
 
         let mut buf = [0u8; 8];
         assert_eq!(read(&test_fd, &mut buf)?, 2);
@@ -130,11 +130,11 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_truncated() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     let tag = [b'x'; 2 * TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
@@ -155,11 +155,11 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     let tag = [b'x'; TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
@@ -180,11 +180,11 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     send_raw_msg(a.as_raw(), b"abc", dummy_wr.as_raw())?;
     dummy_wr.try_close()?;
@@ -204,11 +204,11 @@ fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     send_raw_msg(a.as_raw(), b"abc\0fde\0", dummy_wr.as_raw())?;
     dummy_wr.try_close()?;
@@ -231,12 +231,12 @@ fn test_recv_fd_truncated_creds() -> Result<(), SyscallError> {
     // This test verifies that behavior and documents the missing cmsg_len
     // check as a defense-in-depth concern in recv_fd.
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     set_passcred(&b)?;
     let (dummy_rd, mut dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     // SAFETY: `CMSG_SPACE(0)` returns the minimum space for a control
     // message header, a valid constant on x86_64 Linux.
@@ -281,11 +281,11 @@ fn test_recv_fd_truncated_creds() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     let mut tag = vec![b'x'; TAG_MAX - 1];
     tag.push(0);
@@ -308,16 +308,16 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     set_passcred(&b)?;
     let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
-    dummy_rd.verify()?;
-    dummy_wr.verify()?;
+    dummy_rd.verify().expect("fd must have CLOEXEC");
+    dummy_wr.verify().expect("fd must have CLOEXEC");
 
     let (fd_a, fd_b) = socketpair()?;
-    fd_a.verify()?;
-    fd_b.verify()?;
+    fd_a.verify().expect("fd must have CLOEXEC");
+    fd_b.verify().expect("fd must have CLOEXEC");
     send_raw_msg(a.as_raw(), b"test", fd_a.as_raw())?;
     fd_a.try_close()?;
     fd_b.try_close()?;
@@ -337,8 +337,8 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
 #[test]
 fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
-    a.verify()?;
-    b.verify()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
     set_passcred(&b)?;
 
     // Send a message without SCM_RIGHTS (msg_controllen == 0) to trigger NoFd.
