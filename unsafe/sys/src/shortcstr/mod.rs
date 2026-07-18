@@ -12,6 +12,7 @@ mod len;
 mod push;
 mod push_fallback;
 mod size;
+mod split;
 mod traits;
 
 pub use error::ShortCStrError;

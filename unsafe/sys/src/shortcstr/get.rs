@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 use core::slice::SliceIndex;
 
+use crate::shortcstr::split::Split;
 use crate::shortcstr::{INLINE_MAX, ShortCStr, from_inline};
 
 impl ShortCStr {
@@ -51,5 +52,9 @@ impl ShortCStr {
         } else {
             None
         }
+    }
+
+    pub fn split(&self, sep: u8) -> Split {
+        Split::new(self, sep)
     }
 }
