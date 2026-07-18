@@ -62,9 +62,14 @@ fn name_from_cstr(bin: &CStr) -> ShortCStr {
 }
 
 pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    let path = sys::env::getenv(b"PATH").unwrap_or(b"/usr/local/bin:/usr/bin:/bin".to_vec());
+    let default_path = b"/usr/local/bin:/usr/bin:/bin";
+    let path_env = sys::env::getenv(c"PATH");
     let bin_name = name_from_cstr(bin);
-    for dir in path.split(|&b| b == b':').filter(|d| !d.is_empty()) {
+    let mut path_bytes: &[u8] = default_path;
+    if let Some(ref v) = path_env {
+        path_bytes = v.as_bytes().change_context(ChildProcessError::Never)?;
+    }
+    for dir in path_bytes.split(|&b| b == b':').filter(|d| !d.is_empty()) {
         let full = [dir, b"/", bin.to_bytes()].concat();
         let pathname = CString::new(full).change_context(ChildProcessError::Never)?;
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {

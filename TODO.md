@@ -1,5 +1,11 @@
 # TODO
 
+## ShortCStr enhancements
+
+- [ ] Add `ShortCStr::split()` — iterator yielding `ShortCStr` items, splitting on a separator byte/slice
+- [ ] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
+- [ ] Add `TryFrom<T: Display>` for `ShortCStr` — format any Display type into a ShortCStr
+
 ## Refactoring / cleanup
 
 - [ ] `token.rs` at 82 lines (2 over 80-line limit) — consider extracting `tokenize` match arms into separate helpers

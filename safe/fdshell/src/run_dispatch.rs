@@ -4,6 +4,7 @@ use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::fork_cell::ForkCell;
+use sys::importedfd_io::ImportedFdIo;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
 pub(crate) fn run_simple(

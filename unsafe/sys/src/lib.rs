@@ -3,10 +3,11 @@
 extern crate alloc;
 
 pub use atfd::AtFd;
-pub use env::ReadCmdlineError;
+pub use cmdline::ReadCmdlineError;
 pub use exportedfd::ExportedFd;
 pub use importedfd::ImportedFd;
 pub use importedfd_error::ImportedFdError;
+pub use importedfd_io::ImportedFdIo;
 pub use localfd::LocalFd;
 pub use recv_fd_error::RecvFdError;
 pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
@@ -42,6 +43,7 @@ pub static OUT: ImportedFd = std_fd(1);
 pub static ERR: ImportedFd = std_fd(2);
 
 pub mod atfd;
+pub mod cmdline;
 pub mod env;
 pub mod errno;
 pub mod execveat;
@@ -54,6 +56,7 @@ pub mod fork_cell;
 pub mod fork_pidfd;
 pub mod importedfd;
 pub mod importedfd_error;
+pub mod importedfd_io;
 pub mod importedfd_try;
 pub mod iovec;
 pub mod localfd;

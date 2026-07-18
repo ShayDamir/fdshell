@@ -17,10 +17,11 @@ pub(crate) fn get_environ(
 ) -> Vec<CString> {
     let env_iter = sys::env::environ_snapshot()
         .into_iter()
-        .filter(|(k, _)| !k.eq_bytes(b"FDSHELL_PID") && !k.eq_bytes(b"FDSHELL_SOCKET"))
-        .filter(|(k, _)| env_filter.is_allowed(k.as_bytes().unwrap_or(&[])))
         .filter_map(|(k, v)| {
             let key = k.as_bytes().ok()?;
+            key.ne(b"FDSHELL_PID").then_some(())?;
+            key.ne(b"FDSHELL_SOCKET").then_some(())?;
+            env_filter.is_allowed(key).then_some(())?;
             let val = v.as_bytes().ok()?;
             CString::new([key, b"=", val].concat()).ok()
         });

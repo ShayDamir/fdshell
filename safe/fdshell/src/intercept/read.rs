@@ -1,4 +1,5 @@
 use error_stack::{Report, ResultExt};
+use sys::importedfd_io::ImportedFdIo;
 
 use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;

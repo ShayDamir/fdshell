@@ -1,5 +1,6 @@
 use crate::envfilter::EnvFilter;
 use alloc::vec::Vec;
+use sys::importedfd_io::ImportedFdIo;
 
 pub(crate) fn print_help() {
     let _ = sys::OUT.write_all(b"Usage: envfilter [OPTIONS]\n");

@@ -5,25 +5,8 @@
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
-use error_stack::{Report, ResultExt, ensure};
-
 use crate::SyscallError;
 use crate::shortcstr::ShortCStr;
-
-/// Error type for `read_cmdline`.
-#[derive(Debug, displaydoc::Display)]
-pub enum ReadCmdlineError {
-    /// failed to open /proc/self/cmdline
-    OpenFailed,
-    /// argument contains a NUL byte
-    InvalidArg,
-    /// command line is empty (missing argv[0])
-    EmptyCmdline,
-    /// impossible state (indexing invariant violation)
-    Never,
-}
-
-impl core::error::Error for ReadCmdlineError {}
 
 /// Return the current process ID.
 pub fn getpid() -> i32 {
@@ -33,21 +16,17 @@ pub fn getpid() -> i32 {
 
 /// Look up an environment variable by name.
 ///
-/// Returns the value as an owned `Vec<u8>` (without trailing NUL), or `None`
-/// if the variable is not set.
-pub fn getenv(name: &[u8]) -> Option<Vec<u8>> {
-    // SAFETY: `name` is a valid byte slice; we append NUL for the C string.
-    let key = alloc::ffi::CString::new(name).ok()?;
+/// Returns the value as an owned `ShortCStr`, or `None` if the variable is not set.
+pub fn getenv(name: &CStr) -> Option<ShortCStr> {
     // SAFETY: `getenv` returns a pointer to the process environment; the
     // caller copies the value so no lifetime issues arise.
-    let ptr = unsafe { libc::getenv(key.as_ptr()) };
+    let ptr = unsafe { libc::getenv(name.as_ptr()) };
     if ptr.is_null() {
         return None;
     }
     // SAFETY: `ptr` points to a NUL-terminated C string (the environment).
     let cstr = unsafe { CStr::from_ptr(ptr) };
-    let bytes: Vec<u8> = cstr.to_bytes().to_vec();
-    Some(bytes)
+    ShortCStr::from_vec(cstr.to_bytes().to_vec()).ok()
 }
 
 /// Return the current working directory.
@@ -72,36 +51,6 @@ pub fn getcwd() -> Result<Vec<u8>, SyscallError> {
     Ok(buf.get(..len).ok_or(SyscallError::Never)?.to_vec())
 }
 
-/// Read `/proc/self/cmdline` and split on NUL bytes.
-///
-/// Returns each argument as a `ShortCStr`. The command line must contain at least `argv[0]`.
-pub fn read_cmdline() -> Result<Vec<ShortCStr>, Report<ReadCmdlineError>> {
-    use crate::fcntl::O_RDONLY;
-
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let fd = crate::openat2::open(c"/proc/self/cmdline", O_RDONLY)
-        .change_context(ReadCmdlineError::OpenFailed)?;
-    loop {
-        let n =
-            crate::rw::read(&fd, &mut chunk).change_context(ReadCmdlineError::OpenFailed)? as usize;
-        if n == 0 {
-            break;
-        }
-        let slice = chunk.get(..n).ok_or(ReadCmdlineError::Never)?;
-        buf.extend_from_slice(slice);
-    }
-    ensure!(!buf.is_empty(), ReadCmdlineError::EmptyCmdline);
-    let mut parts: Vec<ShortCStr> = buf
-        .split(|&b| b == b'\0')
-        .map(|f| ShortCStr::from_vec(f.to_vec()))
-        .collect::<Result<Vec<_>, _>>()
-        .change_context(ReadCmdlineError::InvalidArg)?;
-    if parts.last().is_some_and(|p| p.is_empty()) {
-        let _ = parts.pop();
-    }
-    Ok(parts)
-}
 /// Parse the C `environ` array into a `Vec` of `(key, value)` pairs.
 ///
 /// Skips entries without an `=` sign (same as `std::env::vars()`).

@@ -2,6 +2,7 @@ use crate::error::exports::ExportError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
+use sys::importedfd_io::ImportedFdIo;
 
 use sys::ShortCStr;
 

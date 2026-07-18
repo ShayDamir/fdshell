@@ -11,6 +11,8 @@ pub enum ImportedFdError {
     SetFlags,
     /// file descriptor is internal (not passed from caller)
     InternalFd,
+    /// impossible error state (should never occur)
+    Never,
 }
 
 impl core::error::Error for ImportedFdError {}

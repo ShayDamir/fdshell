@@ -3,6 +3,8 @@
 //! Wraps `sys::OUT` and `sys::ERR` into types implementing
 //! `core::fmt::Write`, usable with the `write!`/`writeln!` macros.
 
+use sys::importedfd_io::ImportedFdIo;
+
 /// Writer backed by standard output (fd 1).
 pub struct Stdout;
 

@@ -3,6 +3,7 @@ use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
+use sys::importedfd_io::ImportedFdIo;
 
 pub(super) fn handle_true(
     _: ShortCStr,

@@ -10,9 +10,9 @@ pub enum FdShellMode {
 }
 
 fn detect_nested() -> Option<sys::ImportedFd> {
-    let cookie_val = sys::env::getenv(b"FDSHELL_PID");
-    let cookie_str_bytes = cookie_val?;
-    let cookie_str = match core::str::from_utf8(&cookie_str_bytes) {
+    let cookie_val = sys::env::getenv(c"FDSHELL_PID")?;
+    let cookie_str_bytes = cookie_val.as_bytes().ok()?;
+    let cookie_str = match core::str::from_utf8(cookie_str_bytes) {
         Ok(s) => s,
         Err(e) => {
             let _ = writeln!(
@@ -35,9 +35,8 @@ fn detect_nested() -> Option<sys::ImportedFd> {
     if pid as i32 != sys::env::getpid() {
         return None;
     }
-    let sock_val = sys::env::getenv(b"FDSHELL_SOCKET");
-    let sock_bytes = sock_val?;
-    sys::ImportedFd::from_bytes(&sock_bytes).ok()
+    let sock_short = sys::env::getenv(c"FDSHELL_SOCKET")?;
+    sys::ImportedFd::from_shortcstr(&sock_short).ok()
 }
 
 pub fn init_shellfd() -> Result<FdShellMode, Report<ShellInitError>> {
