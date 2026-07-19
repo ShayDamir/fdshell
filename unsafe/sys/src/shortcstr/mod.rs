@@ -12,6 +12,7 @@ mod format;
 mod from;
 mod get;
 mod len;
+mod parse;
 mod push;
 mod push_fallback;
 mod size;

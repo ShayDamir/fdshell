@@ -27,10 +27,12 @@ impl ImportedFd {
     pub fn from_shortcstr(
         short: &crate::ShortCStr,
     ) -> Result<Self, Report<crate::ImportedFdError>> {
-        let bytes = short
-            .as_bytes()
-            .change_context(crate::ImportedFdError::Never)?;
-        Self::from_bytes(bytes)
+        let raw: i32 = short
+            .parse()
+            .change_context(crate::ImportedFdError::NotANumber)?;
+        ensure!(raw >= 0, crate::ImportedFdError::Negative);
+        let d = Self(raw);
+        d.verify().map(|_| d)
     }
 
     pub fn verify(&self) -> Result<(), Report<crate::ImportedFdError>> {

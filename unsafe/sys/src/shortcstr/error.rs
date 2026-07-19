@@ -19,6 +19,11 @@ pub enum ShortCStrError {
     /// Data exceeds the inline capacity (`INLINE_MAX`).
     /// For `from_vec()` this is normal — falls back to heap allocation.
     TooLarge,
+    /// The bytes are not valid UTF-8 and cannot be parsed as a string.
+    InvalidUtf8,
+    /// The bytes are valid UTF-8 but could not be parsed as the
+    /// requested type (e.g. `"abc"` for `i32`).
+    FromStrFailed,
 }
 
 impl fmt::Display for ShortCStrError {
@@ -27,6 +32,8 @@ impl fmt::Display for ShortCStrError {
             Self::NulByte => write!(f, "NUL byte in string data"),
             Self::BadState => write!(f, "internal state is inconsistent"),
             Self::TooLarge => write!(f, "data exceeds inline capacity"),
+            Self::InvalidUtf8 => write!(f, "invalid UTF-8 in string data"),
+            Self::FromStrFailed => write!(f, "string could not be parsed as the requested type"),
         }
     }
 }

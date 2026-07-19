@@ -3,7 +3,7 @@
 
 use core::ffi::CStr;
 use std::sync::Arc;
-use sys::ShortCStr;
+use sys::{ShortCStr, ShortCStrError};
 
 /// A long (≥100 byte) static CStr for subslicing tests.
 const LONG: &CStr = c"The quick brown fox jumps over the lazy dog. \
@@ -958,4 +958,123 @@ fn concat_many_parts_inline() {
     ];
     let result = ShortCStr::concat(&parts.iter().collect::<Vec<_>>()).unwrap();
     assert_eq!(result.as_bytes().unwrap(), b"abcdef");
+}
+
+// --- parse ---
+
+#[test]
+fn parse_i32_inline() {
+    let s: ShortCStr = c"42".into();
+    let n: i32 = s.parse().unwrap();
+    assert_eq!(n, 42);
+}
+
+#[test]
+fn parse_i32_negative() {
+    let s: ShortCStr = c"-17".into();
+    let n: i32 = s.parse().unwrap();
+    assert_eq!(n, -17);
+}
+
+#[test]
+fn parse_i32_zero() {
+    let s: ShortCStr = c"0".into();
+    let n: i32 = s.parse().unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn parse_u32_static() {
+    let s = ShortCStr::from(c"999");
+    let n: u32 = s.parse().unwrap();
+    assert_eq!(n, 999);
+}
+
+#[test]
+fn parse_i32_max() {
+    let s: ShortCStr = c"2147483647".into();
+    let n: i32 = s.parse().unwrap();
+    assert_eq!(n, i32::MAX);
+}
+
+#[test]
+fn parse_i32_min() {
+    let s: ShortCStr = c"-2147483648".into();
+    let n: i32 = s.parse().unwrap();
+    assert_eq!(n, i32::MIN);
+}
+
+#[test]
+fn parse_u32_overflow() {
+    let s: ShortCStr = c"4294967296".into(); // u32::MAX + 1
+    let result: Result<u32, _> = s.parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_invalid_digit() {
+    let s: ShortCStr = c"abc".into();
+    let result: Result<i32, _> = s.parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_empty_string() {
+    let s = ShortCStr::new();
+    let result: Result<i32, _> = s.parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_with_spaces() {
+    let s: ShortCStr = c" 42 ".into();
+    let result: Result<i32, _> = s.parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_bool_true() {
+    let s: ShortCStr = c"true".into();
+    let b: bool = s.parse().unwrap();
+    assert!(b);
+}
+
+#[test]
+fn parse_bool_false() {
+    let s: ShortCStr = c"false".into();
+    let b: bool = s.parse().unwrap();
+    assert!(!b);
+}
+
+#[test]
+fn parse_bool_invalid() {
+    let s: ShortCStr = c"yes".into();
+    let result: Result<bool, _> = s.parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_arc_backed() {
+    // Leading zeros produce >30 bytes to force Arc variant; from_str handles them
+    let s = ShortCStr::from_vec(b"000000000000000000000000000000123".to_vec()).unwrap();
+    let n: i32 = s.parse().unwrap();
+    assert_eq!(n, 123);
+}
+
+#[test]
+fn parse_explicit_type() {
+    let s: ShortCStr = c"123".into();
+    let n = s.parse::<i64>().unwrap();
+    assert_eq!(n, 123_i64);
+}
+
+#[test]
+fn parse_invalid_utf8() {
+    let s = ShortCStr::from_vec(vec![0xFF, 0xFE]).unwrap();
+    let result: Result<i32, _> = s.parse();
+    assert!(result.is_err());
+    assert!(matches!(
+        result.unwrap_err().current_context(),
+        ShortCStrError::InvalidUtf8
+    ));
 }

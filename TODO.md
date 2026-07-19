@@ -3,7 +3,7 @@
 ## ShortCStr enhancements
 
 - [x] Add `ShortCStr::split()` — iterator yielding `ShortCStr` items, splitting on a separator byte
-- [ ] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
+- [x] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
 
 ## Refactoring / cleanup
 
