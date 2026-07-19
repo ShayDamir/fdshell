@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 
@@ -14,92 +13,49 @@ pub(crate) fn dollar_subst(
     match peek.peek().copied() {
         Some(b'$') => {
             peek.next();
-            core::write!(out, "{}", state.shell_pid).change_context(ResolveError::NulByte)?;
+            core::write!(out, "{}", state.shell_pid).change_context(ResolveError::Never)?;
         }
         Some(b'!') => {
             peek.next();
             if let Some(pid) = state.last_bg_pid {
-                core::write!(out, "{pid}").change_context(ResolveError::NulByte)?;
+                core::write!(out, "{pid}").change_context(ResolveError::Never)?;
             }
         }
         Some(b'{') => super::brace::handle_brace(peek, state, out)?,
         Some(b'#') => {
             peek.next();
-            core::write!(out, "{}", state.positional.len())
-                .change_context(ResolveError::NulByte)?;
+            core::write!(out, "{}", state.positional.len()).change_context(ResolveError::Never)?;
         }
-        Some(b'@') => {
+        Some(b'@') | Some(b'*') => {
             peek.next();
-            // $@ always joins positional args with spaces (when not the entire argument)
-            for (i, p) in state.positional.iter().enumerate() {
-                if i > 0 {
-                    out.push(b' ').change_context(ResolveError::Never)?;
-                }
-                out.extend_from_slice(p.as_bytes().change_context(ResolveError::RefNotFound)?)
-                    .change_context(ResolveError::NulByte)?;
-            }
-        }
-        Some(b'*') => {
-            peek.next();
-            // $* always joins with spaces
-            for (i, p) in state.positional.iter().enumerate() {
-                if i > 0 {
-                    out.push(b' ').change_context(ResolveError::Never)?;
-                }
-                out.extend_from_slice(p.as_bytes().change_context(ResolveError::RefNotFound)?)
-                    .change_context(ResolveError::NulByte)?;
-            }
+            join_positional(out, state)?;
         }
         Some(c) if c.is_ascii_digit() => {
-            // $0, $1, $2, ... $N (multi-digit support)
-            let mut num_bytes = Vec::new();
-            num_bytes.push(c);
-            peek.next();
-            while let Some(&nc) = peek.peek() {
-                if nc.is_ascii_digit() {
-                    num_bytes.push(nc);
-                    peek.next();
-                } else {
-                    break;
-                }
-            }
-            let num_short = ShortCStr::from_vec(num_bytes).change_context(ResolveError::Never)?;
-            let idx: usize = num_short
-                .parse()
-                .change_context(ResolveError::MalformedRef)?;
-            if let Some(pos) = state.positional.get(idx) {
-                out.extend_from_slice(pos.as_bytes().change_context(ResolveError::RefNotFound)?)
-                    .change_context(ResolveError::NulByte)?;
-            } else {
-                // Out of range: output empty string (like bash)
-            }
+            // $0, $1, ... $N
+            super::resolve::resolve_positional_index(c, peek, state, out)?;
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = super::percent::collect_name(peek)?;
-            match state.strings.get(&name_scs) {
-                Some(val) => {
-                    out.extend_from_slice(
-                        val.as_bytes().change_context(ResolveError::RefNotFound)?,
-                    )
-                    .change_context(ResolveError::NulByte)?;
-                }
-                None => {
-                    out.push(b'$').change_context(ResolveError::Never)?;
-                    out.extend_from_slice(
-                        name_scs
-                            .as_bytes()
-                            .change_context(ResolveError::RefNotFound)?,
-                    )
-                    .change_context(ResolveError::NulByte)?;
-                }
-            }
+            super::resolve::resolve_var_name(&name_scs, state, out)?;
         }
         Some(b'?') => {
             peek.next();
             let code = state.last_status.exit_code();
-            core::write!(out, "{code}").change_context(ResolveError::NulByte)?;
+            core::write!(out, "{code}").change_context(ResolveError::Never)?;
         }
-        _ => out.push(b'$').change_context(ResolveError::NulByte)?,
+        _ => out.push(b'$').change_context(ResolveError::Never)?,
+    }
+    Ok(())
+}
+
+fn join_positional(out: &mut ShortCStr, state: &ShellState) -> Result<(), Report<ResolveError>> {
+    for (i, p) in state.positional.iter().enumerate() {
+        if i > 0 {
+            out.push(b' ').change_context(ResolveError::Never)?;
+        }
+        p.as_bytes()
+            .and_then(|b| out.extend_from_slice(b))
+            .change_context(ResolveError::Never)?;
     }
     Ok(())
 }

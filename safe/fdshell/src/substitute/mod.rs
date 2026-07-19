@@ -1,9 +1,10 @@
 mod arg;
 mod brace;
-use alloc::vec::Vec;
 mod dollar;
 mod paren;
 mod percent;
+mod resolve;
+use alloc::vec::Vec;
 
 pub(crate) use arg::substitute_arg;
 
