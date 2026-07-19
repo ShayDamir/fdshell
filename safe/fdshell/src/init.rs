@@ -11,27 +11,15 @@ pub enum FdShellMode {
 
 fn detect_nested() -> Option<sys::ImportedFd> {
     let cookie_val = sys::env::getenv(c"FDSHELL_PID")?;
-    let cookie_str_bytes = cookie_val.as_bytes().ok()?;
-    let cookie_str = match core::str::from_utf8(cookie_str_bytes) {
-        Ok(s) => s,
-        Err(e) => {
+    let pid: u32 = cookie_val
+        .parse()
+        .inspect_err(|e| {
             let _ = writeln!(
                 crate::io::Stderr,
-                "fdshell: FDSHELL_PID has invalid UTF-8: {e}"
+                "fdshell: FDSHELL_PID has invalid value: {cookie_val} ({e:?})"
             );
-            return None;
-        }
-    };
-    let pid = match cookie_str.parse::<u32>() {
-        Ok(pid) => pid,
-        Err(e) => {
-            let _ = writeln!(
-                crate::io::Stderr,
-                "fdshell: FDSHELL_PID has invalid value: {cookie_str} ({e})"
-            );
-            return None;
-        }
-    };
+        })
+        .ok()?;
     if pid as i32 != sys::env::getpid() {
         return None;
     }
