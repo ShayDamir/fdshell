@@ -8,15 +8,17 @@ pub(super) fn find_arg_pos(line: &[u8], args: &[ShortCStr], idx: usize) -> usize
         .unwrap_or(0)
 }
 
-pub(super) fn collect_values(args: &[ShortCStr], start: usize) -> (Vec<ShortCStr>, usize) {
-    let mut values = Vec::new();
-    let mut j = start;
-    while let Some(next) = args.get(j) {
-        if next.as_bytes().is_ok_and(|b| b.starts_with(b"--")) {
-            break;
-        }
-        values.push(next.clone());
-        j += 1;
-    }
-    (values, j)
+pub(super) fn collect_values(
+    args: &[ShortCStr],
+    start: usize,
+    patterns: &mut Vec<ShortCStr>,
+) -> usize {
+    let before = patterns.len();
+    patterns.extend(
+        args.iter()
+            .skip(start)
+            .take_while(|v| !v.starts_with(b"--"))
+            .cloned(),
+    );
+    start + patterns.len() - before
 }

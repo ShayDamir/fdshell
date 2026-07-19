@@ -25,7 +25,7 @@ pub(super) fn extend_pattern(
             ));
         }
         Some(next) => {
-            if next.as_bytes().is_ok_and(|b| b.starts_with(b"--")) {
+            if next.starts_with(b"--") {
                 let pos = find_arg_pos(line, args, flag_idx);
                 return Err(validation::err_at(
                     line,
@@ -35,7 +35,6 @@ pub(super) fn extend_pattern(
             }
         }
     }
-    let (values, next_i) = collect_values(args, next_idx);
-    patterns.extend(values);
+    let next_i = collect_values(args, next_idx, patterns);
     Ok(next_i)
 }
