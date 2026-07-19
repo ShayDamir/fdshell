@@ -68,8 +68,10 @@ pub(crate) fn dollar_subst(
                     break;
                 }
             }
-            let num_str = core::str::from_utf8(&num_bytes).change_context(ResolveError::Never)?;
-            let idx: usize = num_str.parse().change_context(ResolveError::MalformedRef)?;
+            let num_short = ShortCStr::from_vec(num_bytes).change_context(ResolveError::Never)?;
+            let idx: usize = num_short
+                .parse()
+                .change_context(ResolveError::MalformedRef)?;
             if let Some(pos) = state.positional.get(idx) {
                 out.extend_from_slice(pos.as_bytes().change_context(ResolveError::RefNotFound)?)
                     .change_context(ResolveError::NulByte)?;

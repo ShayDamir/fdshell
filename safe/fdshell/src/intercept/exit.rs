@@ -12,12 +12,9 @@ pub(crate) fn run_exit(
     super::validation::validate_intercept(line, "exit", cmdline)?;
 
     let code = match cmdline.args.first() {
-        Some(arg) => {
-            let s = core::str::from_utf8(arg.as_bytes().change_context(CmdError::Never)?)
-                .change_context(CmdError::InvalidArgument { arg: "exit code" })?;
-            s.parse::<i32>()
-                .change_context(CmdError::InvalidArgument { arg: "exit code" })?
-        }
+        Some(arg) => arg
+            .parse::<i32>()
+            .change_context(CmdError::InvalidArgument { arg: "exit code" })?,
         None => {
             let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()

@@ -12,13 +12,9 @@ pub(crate) fn run_shift(
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     let n = match cmdline.args.first() {
         None => 1,
-        Some(arg) => {
-            let bytes = arg.as_bytes().change_context(CmdError::Never)?;
-            let s = core::str::from_utf8(bytes)
-                .change_context(CmdError::InvalidArgument { arg: "shift count" })?;
-            s.parse::<usize>()
-                .change_context(CmdError::InvalidArgument { arg: "shift count" })?
-        }
+        Some(arg) => arg
+            .parse::<usize>()
+            .change_context(CmdError::InvalidArgument { arg: "shift count" })?,
     };
     state.shift(n);
     state.set_last_exit(0);

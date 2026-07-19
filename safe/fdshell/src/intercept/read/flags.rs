@@ -33,12 +33,7 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>
                     .next()
                     .ok_or(ReadError::MissingArgument('n'))
                     .change_context(CmdError::Read)?;
-                let n_bytes = n_arg.as_bytes().change_context(CmdError::Read)?;
-                match core::str::from_utf8(n_bytes)
-                    .change_context(ReadError::InvalidArgument('n'))
-                    .change_context(CmdError::Read)?
-                    .parse::<usize>()
-                {
+                match n_arg.parse::<usize>() {
                     Ok(n) => max_bytes = Some(n),
                     Err(_) => {
                         return Err(Report::new(ReadError::InvalidArgument('n'))
