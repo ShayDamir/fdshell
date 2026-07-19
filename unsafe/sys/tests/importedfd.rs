@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use sys::importedfd_io::ImportedFdIo;
 use sys::{ImportedFd, ImportedFdError, ShortCStr};
 
 #[test]
@@ -60,6 +61,40 @@ fn from_shortcstr_internal_fd_rejected() {
         result,
         Err(ref e) if matches!(e.current_context(), ImportedFdError::InternalFd)
     ));
+    // SAFETY: `fd` is a valid open fd from the test above.
+    unsafe { libc::close(fd) };
+}
+
+#[test]
+fn write_str_to_dev_null() {
+    // Open /dev/null without O_CLOEXEC — ImportedFd requires CLOEXEC clear.
+    // SAFETY: `/dev/null` is a valid path; O_WRONLY is a valid flag.
+    let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY) };
+    assert!(fd >= 0);
+    // SAFETY: `fd` is a valid open fd with CLOEXEC clear (O_CLOEXEC not passed).
+    let imported = unsafe { ImportedFd::from_raw(fd) };
+
+    let s = ShortCStr::from_vec(b"hello\n".to_vec()).expect("test");
+    let result = imported.write_str(&s);
+    assert!(result.is_ok());
+
+    // SAFETY: `fd` is a valid open fd from the test above.
+    unsafe { libc::close(fd) };
+}
+
+#[test]
+fn write_str_empty() {
+    // Open /dev/null without O_CLOEXEC — ImportedFd requires CLOEXEC clear.
+    // SAFETY: `/dev/null` is a valid path; O_WRONLY is a valid flag.
+    let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY) };
+    assert!(fd >= 0);
+    // SAFETY: `fd` is a valid open fd with CLOEXEC clear (O_CLOEXEC not passed).
+    let imported = unsafe { ImportedFd::from_raw(fd) };
+
+    let s = ShortCStr::from_vec(vec![]).expect("test");
+    let result = imported.write_str(&s);
+    assert!(result.is_ok());
+
     // SAFETY: `fd` is a valid open fd from the test above.
     unsafe { libc::close(fd) };
 }
