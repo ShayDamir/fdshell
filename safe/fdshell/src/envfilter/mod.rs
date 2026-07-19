@@ -24,12 +24,16 @@ impl EnvFilter {
         }
     }
 
-    pub fn is_allowed(&self, name: &[u8]) -> bool {
+    pub fn is_allowed(&self, name: &ShortCStr) -> bool {
+        let name_bytes = match name.as_bytes() {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
         if !self.allow.is_empty() {
             let allowed = self
                 .allow
                 .iter()
-                .any(|p| p.as_bytes().is_ok_and(|b| glob_match(b, name)));
+                .any(|p| glob_match(p.as_bytes().unwrap_or(&[]), name_bytes));
             if !allowed {
                 return false;
             }
@@ -37,7 +41,7 @@ impl EnvFilter {
         !self
             .deny
             .iter()
-            .any(|p| p.as_bytes().is_ok_and(|b| glob_match(b, name)))
+            .any(|p| glob_match(p.as_bytes().unwrap_or(&[]), name_bytes))
     }
 
     pub fn clear(&mut self) {

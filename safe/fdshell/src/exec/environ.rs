@@ -14,19 +14,16 @@ pub(crate) fn get_environ(
     let env_iter = sys::env::environ_snapshot()
         .into_iter()
         .filter_map(|(k, v)| {
-            let key = k.as_bytes().ok()?;
-            key.ne(b"FDSHELL_PID").then_some(())?;
-            key.ne(b"FDSHELL_SOCKET").then_some(())?;
-            env_filter.is_allowed(key).then_some(())?;
+            (!k.eq_bytes(b"FDSHELL_PID")).then_some(())?;
+            (!k.eq_bytes(b"FDSHELL_SOCKET")).then_some(())?;
+            env_filter.is_allowed(&k).then_some(())?;
             Some(ExportedCStr::from(
                 ShortCStr::concat(&[&k, &c"=".into(), &v]).ok()?,
             ))
         });
     let exports_iter = exports.iter().filter_map(|(k, v)| {
-        if let Ok(key) = k.as_bytes() {
-            if !env_filter.is_allowed(key) {
-                return None;
-            }
+        if !k.eq_bytes(b"FDSHELL_PID") && !k.eq_bytes(b"FDSHELL_SOCKET") && env_filter.is_allowed(k)
+        {
             Some(ExportedCStr::from(
                 ShortCStr::concat(&[k, &c"=".into(), v]).ok()?,
             ))
@@ -35,18 +32,14 @@ pub(crate) fn get_environ(
         }
     });
 
-    let pid_entry = sys::format!("{pid}").ok().and_then(|pid_str| {
-        ShortCStr::concat(&[&c"FDSHELL_PID=".into(), &pid_str])
-            .map(ExportedCStr::from)
-            .ok()
-    });
+    let pid_entry = sys::format!("FDSHELL_PID={pid}")
+        .map(ExportedCStr::from)
+        .ok();
 
     let sock_entry = exec_sock.and_then(|s| {
-        sys::format!("{s}").ok().and_then(|sock_str| {
-            ShortCStr::concat(&[&c"FDSHELL_SOCKET=".into(), &sock_str])
-                .map(ExportedCStr::from)
-                .ok()
-        })
+        sys::format!("FDSHELL_SOCKET={s}")
+            .map(ExportedCStr::from)
+            .ok()
     });
 
     env_iter

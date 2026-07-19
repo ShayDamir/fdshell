@@ -50,17 +50,17 @@ fn glob_empty_pattern() {
 #[test]
 fn is_allowed_empty_filter() {
     let f = EnvFilter::new();
-    assert!(f.is_allowed(b"PATH"));
-    assert!(f.is_allowed(b"SECRET_KEY"));
+    assert!(f.is_allowed(&c"PATH".into()));
+    assert!(f.is_allowed(&c"SECRET_KEY".into()));
 }
 
 #[test]
 fn is_allowed_allowlist() {
     let mut f = EnvFilter::new();
     f.allow.push(c"P*".into());
-    assert!(f.is_allowed(b"PATH"));
-    assert!(f.is_allowed(b"PWD"));
-    assert!(!f.is_allowed(b"HOME"));
+    assert!(f.is_allowed(&c"PATH".into()));
+    assert!(f.is_allowed(&c"PWD".into()));
+    assert!(!f.is_allowed(&c"HOME".into()));
 }
 
 #[test]
@@ -68,8 +68,8 @@ fn is_allowed_denylist() {
     let mut f = EnvFilter::new();
     let star_key = c"*_KEY".into();
     f.deny.push(star_key);
-    assert!(!f.is_allowed(b"SECRET_KEY"));
-    assert!(f.is_allowed(b"PATH"));
+    assert!(!f.is_allowed(&c"SECRET_KEY".into()));
+    assert!(f.is_allowed(&c"PATH".into()));
 }
 
 #[test]
@@ -77,5 +77,5 @@ fn is_allowed_deny_wins_over_allow() {
     let mut f = EnvFilter::new();
     f.allow.push(c"PATH".into());
     f.deny.push(c"PATH".into());
-    assert!(!f.is_allowed(b"PATH"));
+    assert!(!f.is_allowed(&c"PATH".into()));
 }
