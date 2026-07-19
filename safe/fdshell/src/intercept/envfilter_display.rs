@@ -1,41 +1,38 @@
 use crate::envfilter::EnvFilter;
-use alloc::vec::Vec;
 use sys::importedfd_io::ImportedFdIo;
 
 pub(crate) fn print_help() {
-    let _ = sys::OUT.write_all(b"Usage: envfilter [OPTIONS]\n");
-    let _ = sys::OUT.write_all(b"\n");
-    let _ = sys::OUT.write_all(b"Options:\n");
-    let _ = sys::OUT.write_all(b"  --allow <pattern>...   Add allowlist glob patterns\n");
-    let _ = sys::OUT.write_all(b"  --deny <pattern>...    Add denylist glob patterns\n");
-    let _ = sys::OUT.write_all(b"  --list                 Show current rules\n");
-    let _ = sys::OUT.write_all(b"  --clear                Clear all rules\n");
-    let _ = sys::OUT.write_all(b"  --help, -h             Show this help\n");
-    let _ = sys::OUT.write_all(b"\n");
-    let _ = sys::OUT.write_all(b"Patterns support * wildcard only.\n");
-    let _ = sys::OUT.write_all(b"Allowlist is applied first, then denylist removes from it.");
+    let help = b"Usage: envfilter [OPTIONS]\n\
+                 \nOptions:\n  \
+                 --allow <pattern>...   Add allowlist glob patterns\n  \
+                 --deny <pattern>...    Add denylist glob patterns\n  \
+                 --list                 Show current rules\n  \
+                 --clear                Clear all rules\n  \
+                 --help, -h             Show this help\n\
+                 \nPatterns support * wildcard only.\n\
+                 Allowlist is applied first, then denylist removes from it.";
+    let _ = sys::OUT.write_all(help);
 }
 
 pub(crate) fn print_rules(filter: &EnvFilter) {
-    let allow_strs: Vec<&str> = filter
-        .allow
-        .iter()
-        .filter_map(|s| core::str::from_utf8(s.as_bytes().unwrap_or(&[])).ok())
-        .collect();
-    let deny_strs: Vec<&str> = filter
-        .deny
-        .iter()
-        .filter_map(|s| core::str::from_utf8(s.as_bytes().unwrap_or(&[])).ok())
-        .collect();
-
-    if !allow_strs.is_empty() {
-        let mut line: alloc::string::String = "allow: ".into();
-        line.push_str(&allow_strs.join(" "));
-        let _ = sys::OUT.write_all(line.as_bytes());
+    if !filter.allow.is_empty() {
+        let _ = sys::OUT.write_all(b"allow: ");
+        for (i, pattern) in filter.allow.iter().enumerate() {
+            if i > 0 {
+                let _ = sys::OUT.write_all(b" ");
+            }
+            let _ = sys::OUT.write_str(pattern);
+        }
+        let _ = sys::OUT.write_all(b"\n");
     }
-    if !deny_strs.is_empty() {
-        let mut line: alloc::string::String = "deny: ".into();
-        line.push_str(&deny_strs.join(" "));
-        let _ = sys::OUT.write_all(line.as_bytes());
+    if !filter.deny.is_empty() {
+        let _ = sys::OUT.write_all(b"deny: ");
+        for (i, pattern) in filter.deny.iter().enumerate() {
+            if i > 0 {
+                let _ = sys::OUT.write_all(b" ");
+            }
+            let _ = sys::OUT.write_str(pattern);
+        }
+        let _ = sys::OUT.write_all(b"\n");
     }
 }
