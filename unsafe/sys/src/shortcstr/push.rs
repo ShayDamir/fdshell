@@ -14,7 +14,11 @@ impl ShortCStr {
         Ok(())
     }
 
-    pub fn extend_from_slice(&mut self, bytes: &[u8]) -> Result<(), ShortCStrError> {
+    pub fn push_str(&mut self, other: &ShortCStr) -> Result<(), ShortCStrError> {
+        self.push_slice(other.as_bytes()?)
+    }
+
+    pub fn push_slice(&mut self, bytes: &[u8]) -> Result<(), ShortCStrError> {
         if bytes.contains(&0) {
             return Err(ShortCStrError::NulByte);
         }

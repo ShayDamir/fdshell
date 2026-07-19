@@ -59,8 +59,7 @@ fn join_positional_args<'a>(
         if j > 0 {
             out.push(b' ').change_context(ResolveError::Never)?;
         }
-        out.extend_from_slice(p.as_bytes().change_context(ResolveError::RefNotFound)?)
-            .change_context(ResolveError::NulByte)?;
+        out.push_str(p).change_context(ResolveError::Never)?;
     }
     Ok(out)
 }

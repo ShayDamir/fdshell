@@ -47,17 +47,13 @@ pub(crate) fn percent_subst(
                     }
                     None => {
                         out.push(b'%').change_context(ResolveError::Never)?;
-                        out.extend_from_slice(
-                            name_scs
-                                .as_bytes()
-                                .change_context(ResolveError::RefNotFound)?,
-                        )
-                        .change_context(ResolveError::NulByte)?;
+                        out.push_str(&name_scs)
+                            .change_context(ResolveError::Never)?;
                         return Ok(());
                     }
                 },
             };
-            out.extend_from_slice(num_str.as_bytes())
+            out.push_slice(num_str.as_bytes())
                 .change_context(ResolveError::NulByte)?;
         }
         _ => out.push(b'%').change_context(ResolveError::NulByte)?,

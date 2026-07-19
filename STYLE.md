@@ -61,7 +61,7 @@
 6.2 Imported strings are coming from external sources, such as program arguments, environment variables and read from files. They can be `*const c_char` or `&CStr` (from `libc` calls) or `Vec<u8>`. Imported strings should be converted to local ones as soon as feasible, and all parsing should be done on local strings.
 6.3 The type for local strings is `ShortCStr`. It has very cheap `clone()` and subslicing via `get()`, and it does not contain `nul` bytes inside. This is the only type that can be stored in internal structures. To produce literals of such type, use ShortCStr::from(c"literal"), or, if the `ShortCStr` type can be inferred, c"literal".into().
 6.4 `ShortCStr` is the primary type that allows operations similar to `&str`. If some operation is needed, but is missing for `ShortCStr`, it must be added, covered by tests and used instead of calling `ShortCStr::as_bytes()` and operating on `&[u8]`.
-6.5 `ShortCStr` supports mutations like `push(byte)` or `extend_from_slice`. Those check the absence of nul byte and thus can fail.
+6.5 `ShortCStr` supports mutations like `push(byte)`, `push_str(&ShortCStr)` or `push_slice(&[u8])`. Those check the absence of nul byte and thus can fail.
 6.6 `ExportedCStr` is an owned, nul-terminated string, similar to `CString` and can be cheaply constructed from `ShortCStr::export(&self)`, `&ShortCStr`, or via `From<ShortCStr>`. It provides `ExportedCStr::as_ref(&self) -> &CStr`, and is used to pass strings to the kernel.
 6.7 Conversion to utf-8 and back should never be done on imported strings. This conversion is lossy and can lead to denial-of-service or security vulnerabilities due to corrupted data.
 

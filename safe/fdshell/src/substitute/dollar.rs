@@ -53,9 +53,7 @@ fn join_positional(out: &mut ShortCStr, state: &ShellState) -> Result<(), Report
         if i > 0 {
             out.push(b' ').change_context(ResolveError::Never)?;
         }
-        p.as_bytes()
-            .and_then(|b| out.extend_from_slice(b))
-            .change_context(ResolveError::Never)?;
+        out.push_str(p).change_context(ResolveError::Never)?;
     }
     Ok(())
 }

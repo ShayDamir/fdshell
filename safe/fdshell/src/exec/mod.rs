@@ -66,7 +66,7 @@ pub fn search_path(bin: &CStr) -> Result<LocalFd, Report<ChildProcessError>> {
         }
         let mut dir = dir.clone();
         dir.push(b'/').change_context(ChildProcessError::Never)?;
-        dir.extend_from_slice(bin.to_bytes())
+        dir.push_slice(bin.to_bytes())
             .change_context(ChildProcessError::Never)?;
         let pathname = dir.export();
         if let Ok(fd) = sys::openat2::open(&pathname, O_PATH) {

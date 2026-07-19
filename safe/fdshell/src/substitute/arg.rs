@@ -22,8 +22,7 @@ pub(crate) fn substitute_arg(
         match peek.peek() {
             None | Some(&b'/') => {
                 if let Some(home) = sys::env::getenv(c"HOME") {
-                    out.extend_from_slice(home.as_bytes().change_context(ResolveError::Never)?)
-                        .change_context(ResolveError::NulByte)?;
+                    out.push_str(&home).change_context(ResolveError::Never)?;
                 }
             }
             _ => out.push(b'~').change_context(ResolveError::NulByte)?,
@@ -40,7 +39,7 @@ pub(crate) fn substitute_arg(
                 let inner = crate::substitute::paren::read_paren_expr(&mut peek)?;
                 let expanded = crate::cmd_subst::run_and_capture(&inner, cell)
                     .change_context(ResolveError::Resolve)?;
-                out.extend_from_slice(&expanded)
+                out.push_slice(&expanded)
                     .change_context(ResolveError::NulByte)?;
             }
             b'$' => {

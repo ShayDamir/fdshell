@@ -12,13 +12,11 @@ pub(super) fn resolve_var_name(
 ) -> Result<(), Report<ResolveError>> {
     match state.strings.get(name) {
         Some(val) => {
-            out.extend_from_slice(val.as_bytes().change_context(ResolveError::RefNotFound)?)
-                .change_context(ResolveError::NulByte)?;
+            out.push_str(val).change_context(ResolveError::Never)?;
         }
         None => {
             out.push(b'$').change_context(ResolveError::Never)?;
-            out.extend_from_slice(name.as_bytes().change_context(ResolveError::RefNotFound)?)
-                .change_context(ResolveError::NulByte)?;
+            out.push_str(name).change_context(ResolveError::Never)?;
         }
     }
     Ok(())
@@ -44,8 +42,7 @@ pub(super) fn resolve_positional_index(
         .parse()
         .change_context(ResolveError::MalformedRef)?;
     if let Some(pos) = state.positional.get(idx) {
-        out.extend_from_slice(pos.as_bytes().change_context(ResolveError::RefNotFound)?)
-            .change_context(ResolveError::NulByte)?;
+        out.push_str(pos).change_context(ResolveError::Never)?;
     }
     Ok(())
 }

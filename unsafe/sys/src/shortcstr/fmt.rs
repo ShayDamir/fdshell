@@ -41,6 +41,6 @@ impl fmt::Debug for ShortCStr {
 
 impl fmt::Write for ShortCStr {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.extend_from_slice(s.as_bytes()).map_err(|_| fmt::Error)
+        self.push_slice(s.as_bytes()).map_err(|_| fmt::Error)
     }
 }
