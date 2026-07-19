@@ -1,6 +1,5 @@
 use crate::error::exports::ExportError;
 use crate::state::ShellState;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::importedfd_io::ImportedFdIo;
 
@@ -28,13 +27,9 @@ pub fn handle_export(
 
 fn list_exports(state: &ShellState) -> Result<(), Report<ExportError>> {
     for (k, v) in &state.exports {
-        let key_bytes = k.as_bytes().change_context(ExportError::Never)?;
-        let mut line: Vec<u8> = b"export ".to_vec();
-        line.extend_from_slice(key_bytes);
-        line.extend_from_slice(b"=");
-        line.extend_from_slice(v.as_bytes().change_context(ExportError::Never)?);
-        line.push(b'\n');
-        sys::OUT.write_all(&line).change_context(ExportError::Io)?;
+        let line = ShortCStr::concat(&[&c"export ".into(), k, &c"=".into(), v, &c"\n".into()])
+            .change_context(ExportError::NulByte)?;
+        sys::OUT.write_str(&line).change_context(ExportError::Io)?;
     }
     Ok(())
 }

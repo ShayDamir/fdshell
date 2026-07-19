@@ -1,7 +1,7 @@
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, bail};
 use sys::ShortCStr;
 
 use super::delegated;
@@ -34,9 +34,6 @@ pub fn dispatch_builtin(
     args: &[ShortCStr],
     state: &ShellState,
 ) -> Result<i32, Report<BuiltinError>> {
-    name.as_bytes()
-        .change_context(BuiltinError::InvalidArgument("name"))?;
-
     for (known, handler) in DISPATCH {
         if name.eq_bytes(known) {
             return handler(name, refs, args, state);

@@ -36,7 +36,7 @@ pub fn parse_command(
     }
     for t in iter {
         let fq = fq_iter.next().unwrap_or(false);
-        if t.as_bytes().is_ok_and(|b| b == b"&") {
+        if t.eq_bytes(b"&") {
             bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
         if let Some(bg) = parse_bg_redirect(t)? {
@@ -48,7 +48,7 @@ pub fn parse_command(
                     bg_redirect::insert_redirect(&mut redirects, r)?;
                 }
             }
-        } else if t.as_bytes().is_ok_and(|b| b.starts_with(b"%")) {
+        } else if t.starts_with(b"%") {
             match crate::parse::classify::parse_capture(t) {
                 Ok(Some(c)) => captures.push(c),
                 Ok(None) => {

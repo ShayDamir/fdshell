@@ -27,10 +27,9 @@ pub fn substitute_args(
     let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
     for (i, arg) in args.iter().enumerate() {
         let fq = args_fq.get(i).copied().unwrap_or(false);
-        let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
-        if fq && bytes == b"$@" {
+        if fq && arg.eq_bytes(b"$@") {
             expand_positional_args(&state.positional, &mut result)?;
-        } else if fq && bytes == b"$*" {
+        } else if fq && arg.eq_bytes(b"$*") {
             let expanded = join_positional_args(&state.positional)?;
             result.push(expanded);
         } else {

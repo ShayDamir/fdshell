@@ -15,8 +15,8 @@ fn main() -> ! {
     match run_main() {
         Ok(()) => sys::exit(0),
         Err(report) => {
-            let s = alloc::format!("{report:?}\n");
-            let _ = sys::ERR.write_all(s.as_bytes());
+            let s = sys::format!("{report:?}\n").unwrap_or_else(|_| sys::ShortCStr::new());
+            let _ = sys::ERR.write_str(&s);
             sys::exit(1);
         }
     }

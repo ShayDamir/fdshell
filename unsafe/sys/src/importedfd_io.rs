@@ -1,5 +1,9 @@
 //! I/O operations for ImportedFd — read, write, read_all, write_all.
 
+use error_stack::{Report, ResultExt};
+
+use crate::ShortCStr;
+
 /// Extension trait providing I/O operations on ImportedFd.
 pub trait ImportedFdIo {
     /// Read bytes from the fd into buf.
@@ -10,6 +14,9 @@ pub trait ImportedFdIo {
 
     /// Write all bytes, retrying on short writes.
     fn write_all(&self, buf: &[u8]) -> Result<(), crate::SyscallError>;
+
+    /// Write a ShortCStr to the fd.
+    fn write_str(&self, s: &ShortCStr) -> Result<(), Report<crate::SyscallError>>;
 
     /// Read until EOF or buffer full.
     fn read_all(&self, buf: &mut [u8]) -> Result<usize, crate::SyscallError>;
@@ -39,6 +46,11 @@ impl ImportedFdIo for crate::ImportedFd {
             written += n as usize;
         }
         Ok(())
+    }
+
+    /// Write a ShortCStr to the fd.
+    fn write_str(&self, s: &ShortCStr) -> Result<(), Report<crate::SyscallError>> {
+        Ok(self.write_all(s.as_bytes().change_context(crate::SyscallError::Never)?)?)
     }
 
     /// Read until EOF or buffer full.

@@ -2,7 +2,7 @@ use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, bail};
 use sys::ShortCStr;
 
 pub struct BgRedirectResult {
@@ -12,11 +12,9 @@ pub struct BgRedirectResult {
 }
 
 pub fn parse_bg_redirect(t: &ShortCStr) -> Result<Option<BgRedirectResult>, Report<ParseError>> {
-    let b = t.as_bytes().change_context(ParseError::Never)?;
-    if !b.starts_with(b"&>") {
+    let Some(rest) = t.strip_prefix(b"&>") else {
         return Ok(None);
-    }
-    let rest = t.strip_prefix(b"&>").ok_or(ParseError::Never)?;
+    };
     if let Some(name) = rest.strip_prefix(b"|&") {
         return Ok(Some(BgRedirectResult {
             redirects: Vec::new(),

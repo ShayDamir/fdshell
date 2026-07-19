@@ -2,15 +2,14 @@ use crate::error::parse::ParseError;
 use crate::parse::command::parse_command;
 use crate::parse::{ParsedLine, Pipeline};
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, ensure};
+use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
 pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Report<ParseError>> {
     let mut commands = Vec::new();
     let mut start = 0;
     for (i, (t, _, _)) in raw.iter().enumerate() {
-        let bytes = t.as_bytes().change_context(ParseError::Never)?;
-        if bytes == b"|" {
+        if t.eq_bytes(b"|") {
             ensure!(i != start, ParseError::UnexpectedPipe);
             let cmd_tokens = raw
                 .get(start..i)
