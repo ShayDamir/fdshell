@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use core::ffi::CStr;
 
 mod access;
+mod concat;
 mod copy;
 mod eq;
 mod error;

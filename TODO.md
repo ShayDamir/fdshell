@@ -4,8 +4,6 @@
 
 - [x] Add `ShortCStr::split()` — iterator yielding `ShortCStr` items, splitting on a separator byte
 - [ ] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
-- [ ] Add `TryFrom<T: Display>` for `ShortCStr` — format any Display type into a ShortCStr
-- [ ] `sys::format!()` uses `Display` impl which does `from_utf8_lossy` on non-UTF-8 bytes — add a byte-aware format path to bypass the roundtrip to/from `&str` (currently accepted as lossy for environ data)
 
 ## Refactoring / cleanup
 
@@ -21,6 +19,7 @@
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 - [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
+- [ ] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — extract filter + concat logic into a helper function
 
 ## Bash compatibility gaps
 
@@ -69,6 +68,7 @@
 ## Tests
 
 - [ ] Fix parallel test interference — `test_captures_success` and `resolve_path_finds_dot_slash` fail when run with other tests in parallel but pass individually; run with `--test-threads=1` or identify shared state / file system collisions
+- [ ] Add unit test for `get_environ` — currently only covered via fork+exec integration; needs isolated test verifying output vector contents (FDSHELL_PID present, filtered vars excluded, exports merged)
 
 ## Security / hardening
 
