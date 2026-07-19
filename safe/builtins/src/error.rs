@@ -22,6 +22,8 @@ pub enum BuiltinError {
     Io,
     /// failed to send fd to parent shell
     SendFdFailed,
+    /// impossible error state (should never occur)
+    Never,
 }
 
 impl core::error::Error for BuiltinError {}

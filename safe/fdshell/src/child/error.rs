@@ -27,5 +27,6 @@ pub(crate) fn handle_builtin_error(
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }
+        BuiltinError::Never => Err(report.change_context(ChildProcessError::Never)),
     }
 }

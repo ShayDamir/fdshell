@@ -47,11 +47,9 @@ pub fn execute(
         }
     } else {
         let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
-        let binary_ref = binary.export();
-        let fd = exec::resolve_path(&binary_ref).change_context(ChildProcessError::ExecFailed)?;
-        let binary_cstr =
-            core::ffi::CStr::from_bytes_with_nul(binary_ref.as_ref().to_bytes_with_nul())
-                .change_context(ChildProcessError::Never)?;
+        let fd = exec::resolve_path(binary).change_context(ChildProcessError::ExecFailed)?;
+        let binary_exported = binary.export();
+        let binary_cstr = binary_exported.as_ref();
         let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_fq, cell)
             .change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();

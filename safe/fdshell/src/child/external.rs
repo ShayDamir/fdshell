@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing)]
 use crate::child::Command;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
@@ -12,11 +11,10 @@ pub(super) fn run_external(
     refs: &[&CStr],
     state: &ShellState,
 ) -> Result<i32, Report<ChildProcessError>> {
-    let name = cmd.name.export();
-    let fd = exec::resolve_path(&name)
+    let name_exported = cmd.name.export();
+    let fd = exec::resolve_path(&cmd.name)
         .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
-    let name_cstr = core::ffi::CStr::from_bytes_with_nul(name.as_ref().to_bytes_with_nul())
-        .change_context(ChildProcessError::Never)?;
+    let name_cstr = name_exported.as_ref();
     let mut full_argv: Vec<&CStr> = alloc::vec![name_cstr];
     for r in refs {
         full_argv.push(*r);

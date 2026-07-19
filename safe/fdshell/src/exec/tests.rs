@@ -51,7 +51,9 @@ fn exec_child(f: impl FnOnce()) {
 fn resolve_path_finds_absolute() {
     let dir = test_dir();
     let abs = setup(&dir);
-    let fd = resolve_path(&abs).unwrap();
+    let mut bin = ShortCStr::new();
+    bin.push_slice(abs.to_bytes()).unwrap();
+    let fd = resolve_path(&bin).unwrap();
     fd.verify().unwrap();
     teardown(&dir);
 }
@@ -62,7 +64,7 @@ fn resolve_path_finds_dot_slash() {
     setup(&dir);
     let old = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
-    let fd = resolve_path(c"./mybin").unwrap();
+    let fd = resolve_path(&c"./mybin".into()).unwrap();
     fd.verify().unwrap();
     std::env::set_current_dir(&old).unwrap();
     teardown(&dir);
@@ -74,13 +76,12 @@ fn resolve_path_finds_dot_slash() {
 fn exec_fd_with_exports() {
     let dir = test_dir();
     let abs = setup(&dir);
-    let fd = resolve_path(&abs).unwrap();
+    let mut bin = ShortCStr::new();
+    bin.push_slice(abs.to_bytes()).unwrap();
+    let fd = resolve_path(&bin).unwrap();
 
     let mut exports_map = HashMap::new();
-    exports_map.insert(
-        ShortCStr::from(c"EXPORTED_VAR"),
-        ShortCStr::from(c"hello_world"),
-    );
+    exports_map.insert(c"EXPORTED_VAR".into(), c"hello_world".into());
     exec_child(
         || match exec_fd(&fd, &[&abs], &exports_map, &Default::default(), None) {
             Ok(()) => {}
@@ -95,7 +96,7 @@ fn exec_fd_with_exports() {
 fn resolve_path_missing_absolute() {
     let dir = test_dir();
     setup(&dir);
-    let report = match resolve_path(c"/nonexistent-xxxxxxxx/binary") {
+    let report = match resolve_path(&c"/nonexistent-xxxxxxxx/binary".into()) {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
@@ -112,7 +113,7 @@ fn resolve_path_missing_dot_slash() {
     std::fs::create_dir_all(&dir).unwrap();
     let old = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
-    let report = match resolve_path(c"./nope-xxxxxxxx") {
+    let report = match resolve_path(&c"./nope-xxxxxxxx".into()) {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
@@ -132,7 +133,9 @@ fn exec_with_paths() {
     let abs = setup(&dir);
 
     exec_child(|| {
-        let fd = resolve_path(&abs).unwrap();
+        let mut bin = ShortCStr::new();
+        bin.push_slice(abs.to_bytes()).unwrap();
+        let fd = resolve_path(&bin).unwrap();
         match exec_fd(&fd, &[&abs], &HashMap::new(), &Default::default(), None) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
@@ -142,7 +145,7 @@ fn exec_with_paths() {
     let cd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
     exec_child(|| {
-        let fd = resolve_path(c"./mybin").unwrap();
+        let fd = resolve_path(&c"./mybin".into()).unwrap();
         match exec_fd(&fd, &[c"mybin"], &HashMap::new(), &Default::default(), None) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
@@ -167,7 +170,9 @@ fn exec_script_via_resolve_fd() {
     let script_cs = CString::new(script_path.to_str().unwrap()).unwrap();
 
     exec_child(|| {
-        let fd = resolve_path(&script_cs).unwrap();
+        let mut script_bin = ShortCStr::new();
+        script_bin.push_slice(script_cs.to_bytes()).unwrap();
+        let fd = resolve_path(&script_bin).unwrap();
         match exec_fd(
             &fd,
             &[&script_cs],
