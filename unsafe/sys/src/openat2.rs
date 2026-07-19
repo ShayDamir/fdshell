@@ -26,7 +26,8 @@ pub const RESOLVE_BENEATH: u64 = 8;
 pub const RESOLVE_IN_ROOT: u64 = 16;
 pub const RESOLVE_CACHED: u64 = 32;
 
-pub fn open(pathname: &CStr, flags: i32) -> Result<LocalFd, crate::SyscallError> {
+pub fn open<P: AsRef<CStr>>(pathname: P, flags: i32) -> Result<LocalFd, crate::SyscallError> {
+    let pathname = pathname.as_ref();
     let mode = if flags & O_CREAT != 0 { 0o666 } else { 0 };
     openat2(
         AtFd::cwd(),
@@ -35,11 +36,12 @@ pub fn open(pathname: &CStr, flags: i32) -> Result<LocalFd, crate::SyscallError>
     )
 }
 
-pub fn openat2(
+pub fn openat2<P: AsRef<CStr>>(
     dirfd: AtFd<'_>,
-    pathname: &CStr,
+    pathname: P,
     how: &OpenHow,
 ) -> Result<LocalFd, crate::SyscallError> {
+    let pathname = pathname.as_ref();
     let dirfd = dirfd.as_raw();
     // SAFETY: SYS_openat2 (437) is valid on Linux ≥5.6 x86_64. dirfd may be
     // AT_FDCWD (−100) or an open dirfd. pathname and how point to valid memory

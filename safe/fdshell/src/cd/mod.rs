@@ -19,7 +19,7 @@ pub fn cd(args: &[ShortCStr], state: &mut ShellState) -> Result<(), Report<CdErr
 
 fn cd_home() -> Result<LocalFd, Report<CdError>> {
     let home = sys::env::getenv(c"HOME").ok_or(CdError::HomeNotSet)?;
-    open_cwd_dir(home.export().as_ref())
+    cd_path(&home)
 }
 
 fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<LocalFd, Report<CdError>> {
@@ -29,12 +29,7 @@ fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<LocalFd, Report<CdError
 }
 
 fn cd_path(path: &ShortCStr) -> Result<LocalFd, Report<CdError>> {
-    let name = path.export();
-    open_cwd_dir(&name)
-}
-
-fn open_cwd_dir(path: &core::ffi::CStr) -> Result<LocalFd, Report<CdError>> {
-    sys::openat2::open(path, O_DIRECTORY | O_NOFOLLOW).change_context(CdError::CdPathOpen)
+    sys::openat2::open(path.export(), O_DIRECTORY | O_NOFOLLOW).change_context(CdError::CdPathOpen)
 }
 
 fn move_cwd(state: &mut ShellState, new_cwd: LocalFd) {

@@ -3,11 +3,15 @@ use crate::LocalFd;
 use crate::iovec::IoVec;
 use core::ffi::CStr;
 
-pub fn send_fd(sock: &LocalFd, fd: &LocalFd, tag: &CStr) -> Result<(), crate::SyscallError> {
+pub fn send_fd<T: AsRef<CStr>>(
+    sock: &LocalFd,
+    fd: &LocalFd,
+    tag: T,
+) -> Result<(), crate::SyscallError> {
     if !super::capture_active() {
         return Err(crate::SyscallError::ENOENT("send_fd"));
     }
-    let tag_bytes = tag.to_bytes_with_nul();
+    let tag_bytes = tag.as_ref().to_bytes_with_nul();
     if tag_bytes.len() > super::TAG_MAX {
         return Err(crate::SyscallError::E2BIG("send_fd"));
     }
