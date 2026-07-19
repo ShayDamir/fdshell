@@ -1,5 +1,4 @@
 use crate::error::parse::ParseError;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
@@ -36,13 +35,12 @@ pub(crate) fn trim_semi(tokens: &[(ShortCStr, usize, bool)]) -> &[(ShortCStr, us
 pub(crate) fn try_join(
     tokens: &[(ShortCStr, usize, bool)],
 ) -> Result<ShortCStr, Report<ParseError>> {
-    let mut out = Vec::new();
+    let mut out = ShortCStr::new();
     for (t, _, _) in tokens {
         if !out.is_empty() {
-            out.push(b' ');
+            out.push(b' ').change_context(ParseError::Never)?;
         }
-        out.extend_from_slice(t.as_bytes().change_context(ParseError::Never)?);
+        out.push_str(t).change_context(ParseError::Never)?;
     }
-    let result = ShortCStr::from_vec(out).change_context(ParseError::Never)?;
-    Ok(result)
+    Ok(out)
 }
