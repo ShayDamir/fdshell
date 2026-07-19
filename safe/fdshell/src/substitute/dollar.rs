@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
+use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
-use alloc::format;
 use sys::ShortCStr;
 
 pub(crate) fn dollar_subst(
@@ -14,23 +14,18 @@ pub(crate) fn dollar_subst(
     match peek.peek().copied() {
         Some(b'$') => {
             peek.next();
-            let s = format!("{}", state.shell_pid);
-            out.extend_from_slice(s.as_bytes())
-                .change_context(ResolveError::NulByte)?;
+            core::write!(out, "{}", state.shell_pid).change_context(ResolveError::NulByte)?;
         }
         Some(b'!') => {
             peek.next();
             if let Some(pid) = state.last_bg_pid {
-                let s = format!("{}", pid);
-                out.extend_from_slice(s.as_bytes())
-                    .change_context(ResolveError::NulByte)?;
+                core::write!(out, "{pid}").change_context(ResolveError::NulByte)?;
             }
         }
         Some(b'{') => super::brace::handle_brace(peek, state, out)?,
         Some(b'#') => {
             peek.next();
-            let s = format!("{}", state.positional.len());
-            out.extend_from_slice(s.as_bytes())
+            core::write!(out, "{}", state.positional.len())
                 .change_context(ResolveError::NulByte)?;
         }
         Some(b'@') => {
@@ -102,9 +97,7 @@ pub(crate) fn dollar_subst(
         Some(b'?') => {
             peek.next();
             let code = state.last_status.exit_code();
-            let s = format!("{}", code);
-            out.extend_from_slice(s.as_bytes())
-                .change_context(ResolveError::NulByte)?;
+            core::write!(out, "{code}").change_context(ResolveError::NulByte)?;
         }
         _ => out.push(b'$').change_context(ResolveError::NulByte)?,
     }

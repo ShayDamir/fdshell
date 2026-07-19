@@ -1,5 +1,5 @@
-use alloc::format;
 use alloc::vec::Vec;
+use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
@@ -22,9 +22,7 @@ pub(crate) fn handle_brace(
                     .as_bytes()
                     .change_context(ResolveError::RefNotFound)?
                     .len();
-                let s = format!("{}", len);
-                out.extend_from_slice(s.as_bytes())
-                    .change_context(ResolveError::NulByte)?;
+                core::write!(out, "{len}").change_context(ResolveError::NulByte)?;
             } else {
                 out.extend_from_slice(b"${#")
                     .change_context(ResolveError::Never)?;
