@@ -5,6 +5,7 @@
 - [x] Add `ShortCStr::split()` — iterator yielding `ShortCStr` items, splitting on a separator byte
 - [ ] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
 - [ ] Add `TryFrom<T: Display>` for `ShortCStr` — format any Display type into a ShortCStr
+- [ ] `sys::format!()` uses `Display` impl which does `from_utf8_lossy` on non-UTF-8 bytes — add a byte-aware format path to bypass the roundtrip to/from `&str` (currently accepted as lossy for environ data)
 
 ## Refactoring / cleanup
 

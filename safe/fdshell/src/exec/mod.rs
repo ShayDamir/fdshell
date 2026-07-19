@@ -1,6 +1,5 @@
 mod environ;
 
-use alloc::format;
 use core::ffi::CStr;
 use hashbrown::HashMap;
 
@@ -22,12 +21,11 @@ pub fn exec_fd(
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = sys::env::getpid();
-    let cookie = format!("{}", pid);
     let exec_sock = shell_sock
         .map(|s| s.export())
         .transpose()
         .change_context(ChildProcessError::ExportFailed)?;
-    let envp = get_environ(cookie.as_bytes(), exports, env_filter, exec_sock.as_ref());
+    let envp = get_environ(pid, exports, env_filter, exec_sock.as_ref());
     let script_fd = fd
         .export()
         .change_context(ChildProcessError::ExportFailed)?;
@@ -45,12 +43,11 @@ pub fn exec_at(
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
     let pid = sys::env::getpid();
-    let cookie = format!("{}", pid);
     let exec_sock = shell_sock
         .map(|s| s.export())
         .transpose()
         .change_context(ChildProcessError::ExportFailed)?;
-    let envp = get_environ(cookie.as_bytes(), exports, env_filter, exec_sock.as_ref());
+    let envp = get_environ(pid, exports, env_filter, exec_sock.as_ref());
     sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
         .change_context(ChildProcessError::ExecFailed)?;
     Ok(())
