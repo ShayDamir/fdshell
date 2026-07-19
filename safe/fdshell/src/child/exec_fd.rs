@@ -53,7 +53,7 @@ pub(super) fn handle_exec_at(
     let pathname = args
         .get(1)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    let pathname = sys::RefCStr::from(pathname.clone());
+    let pathname = pathname.export();
     // execveat rejects CLOEXEC dirfds for relative paths; use export().
     let non_cloexec = dirfd
         .export()

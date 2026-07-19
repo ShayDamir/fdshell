@@ -214,36 +214,41 @@ fn get_non_tail_range_to() {
     assert_eq!(sub.as_bytes().unwrap(), b"hel");
 }
 
-// --- RefCstr ---
+// --- ExportedCstr ---
 
 #[test]
-fn ref_cstr_matches_inline() {
-    use sys::RefCStr;
+fn exported_cstr_matches_inline() {
+    let s = ShortCStr::from(c"hello");
+    assert_eq!(s.export().as_ref().to_bytes(), s.as_bytes().unwrap());
+}
+
+#[test]
+fn exported_cstr_matches_static() {
+    let s = ShortCStr::from(LONG);
+    assert_eq!(s.export().as_ref().to_bytes(), s.as_bytes().unwrap());
+}
+
+#[test]
+fn exported_cstr_matches_rc() {
+    let s: ShortCStr = c"hello world this is more than thirty bytes total".into();
+    assert_eq!(s.export().as_ref().to_bytes(), s.as_bytes().unwrap());
+}
+
+#[test]
+fn exported_cstr_from_ref() {
+    use sys::ExportedCStr;
     let s = ShortCStr::from(c"hello");
     assert_eq!(
-        RefCStr::from(s.clone()).as_ref().to_bytes(),
+        ExportedCStr::from(&s).as_ref().to_bytes(),
         s.as_bytes().unwrap()
     );
 }
 
 #[test]
-fn ref_cstr_matches_static() {
-    use sys::RefCStr;
-    let s = ShortCStr::from(LONG);
-    assert_eq!(
-        RefCStr::from(s.clone()).as_ref().to_bytes(),
-        s.as_bytes().unwrap()
-    );
-}
-
-#[test]
-fn ref_cstr_matches_rc() {
-    use sys::RefCStr;
-    let s: ShortCStr = c"hello world this is more than thirty bytes total".into();
-    assert_eq!(
-        RefCStr::from(s.clone()).as_ref().to_bytes(),
-        s.as_bytes().unwrap()
-    );
+fn exported_cstr_from_shortcstr() {
+    use sys::ExportedCStr;
+    let s = ShortCStr::from(c"hello");
+    assert_eq!(ExportedCStr::from(s).as_ref().to_bytes(), b"hello");
 }
 
 // --- len / is_empty ---
@@ -610,29 +615,26 @@ fn extend_static_non_tail_rc_copy() {
 }
 
 #[test]
-fn ref_cstr_from_static_non_tail() {
+fn exported_cstr_from_static_non_tail() {
     let s = ShortCStr::from(LONG);
     let sub = s.get(10..50).unwrap();
-    let r = sys::RefCStr::from(sub);
-    assert_eq!(r.as_ref().to_bytes(), &LONG.to_bytes()[10..50]);
+    assert_eq!(sub.export().as_ref().to_bytes(), &LONG.to_bytes()[10..50]);
 }
 
 #[test]
-fn ref_cstr_from_static_non_tail_inline() {
+fn exported_cstr_from_static_non_tail_inline() {
     // short non-tail → extend_from_slice_unchecked(&[0]) copies into Inline (case 3)
     let s = ShortCStr::from(c"hello world");
     let sub = s.get(6..).unwrap(); // "world" = 5 bytes ≤ INLINE_CAP
-    let r = sys::RefCStr::from(sub);
-    assert_eq!(r.as_ref().to_bytes(), b"world");
+    assert_eq!(sub.export().as_ref().to_bytes(), b"world");
 }
 
 #[test]
-fn ref_cstr_from_short_non_tail() {
-    // short non-tail → RefCStr::from appends NUL on Inline (case 1)
+fn exported_cstr_from_short_non_tail() {
+    // short non-tail → ExportedCStr::from appends NUL on Inline (case 1)
     let s = ShortCStr::from(c"hello world");
     let sub = s.get(6..).unwrap();
-    let r = sys::RefCStr::from(sub);
-    assert_eq!(r.as_ref().to_bytes(), b"world");
+    assert_eq!(sub.export().as_ref().to_bytes(), b"world");
 }
 
 #[test]

@@ -37,25 +37,39 @@ pub enum ShortCStr {
     },
 }
 
-/// A sealed C-string view of a [`ShortCStr`].
+/// An owned, NUL-terminated C-string view of a [`ShortCStr`].
 ///
 /// Ensures a NUL terminator at the end of the subslice via
 /// [`extend_from_slice_unchecked`], enabling zero-copy [`AsRef<CStr>`].
-pub struct RefCStr(ShortCStr);
+pub struct ExportedCStr(ShortCStr);
 
-impl From<ShortCStr> for RefCStr {
+impl From<ShortCStr> for ExportedCStr {
     fn from(mut value: ShortCStr) -> Self {
         // SAFETY: extend_from_slice_unchecked(&[0]) seals the NUL terminator.
         // Rule 2 handles tail-slice Static as a no-op.
         unsafe { value.extend_from_slice_unchecked(&[0]) };
-        RefCStr(value)
+        ExportedCStr(value)
     }
 }
 
-impl AsRef<CStr> for RefCStr {
+impl From<&ShortCStr> for ExportedCStr {
+    fn from(value: &ShortCStr) -> Self {
+        value.export()
+    }
+}
+
+impl ShortCStr {
+    /// Seals this `ShortCStr` with a NUL terminator, producing an owned
+    /// C-string suitable for passing to the kernel.
+    pub fn export(&self) -> ExportedCStr {
+        self.clone().into()
+    }
+}
+
+impl AsRef<CStr> for ExportedCStr {
     fn as_ref(&self) -> &CStr {
-        // as_cstr_bytes() always returns Ok for a RefCStr because
-        // RefCStr::from guarantees extend_from_slice_unchecked(&[0]) was called (or the
+        // as_cstr_bytes() always returns Ok for an ExportedCStr because
+        // ExportedCStr::from guarantees extend_from_slice_unchecked(&[0]) was called (or the
         // Static variant already has a NUL terminator), and all
         // offsets/lengths are validated at construction.
         let bytes = match self.0.as_cstr_bytes() {
@@ -66,12 +80,12 @@ impl AsRef<CStr> for RefCStr {
                 unsafe { core::hint::unreachable_unchecked() }
             }
         };
-        // SAFETY: RefCStr::from guarantees NUL at end of the slice.
+        // SAFETY: ExportedCStr::from guarantees NUL at end of the slice.
         unsafe { CStr::from_bytes_with_nul_unchecked(bytes) }
     }
 }
 
-impl core::ops::Deref for RefCStr {
+impl core::ops::Deref for ExportedCStr {
     type Target = CStr;
     fn deref(&self) -> &CStr {
         self.as_ref()

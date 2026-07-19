@@ -3,8 +3,8 @@ use alloc::format;
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
+use sys::ExportedCStr;
 use sys::ExportedFd;
-use sys::RefCStr;
 use sys::ShortCStr;
 
 use crate::envfilter::EnvFilter;
@@ -30,7 +30,7 @@ pub(crate) fn get_environ(
             if !env_filter.is_allowed(key) {
                 return None;
             }
-            let ref_cstr: RefCStr = v.clone().into();
+            let ref_cstr: ExportedCStr = v.export();
             CString::new([key, b"=", ref_cstr.as_ref().to_bytes_with_nul()].concat()).ok()
         } else {
             None

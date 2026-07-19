@@ -2,7 +2,6 @@ use error_stack::{Report, ResultExt};
 
 use crate::error::cd::CdError;
 use crate::state::ShellState;
-use sys::RefCStr;
 use sys::fcntl::{O_DIRECTORY, O_NOFOLLOW};
 use sys::{LocalFd, ShortCStr};
 
@@ -20,7 +19,7 @@ pub fn cd(args: &[ShortCStr], state: &mut ShellState) -> Result<(), Report<CdErr
 
 fn cd_home() -> Result<LocalFd, Report<CdError>> {
     let home = sys::env::getenv(c"HOME").ok_or(CdError::HomeNotSet)?;
-    open_cwd_dir(RefCStr::from(home).as_ref())
+    open_cwd_dir(home.export().as_ref())
 }
 
 fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<LocalFd, Report<CdError>> {
@@ -30,7 +29,7 @@ fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<LocalFd, Report<CdError
 }
 
 fn cd_path(path: &ShortCStr) -> Result<LocalFd, Report<CdError>> {
-    let name = sys::RefCStr::from(path.clone());
+    let name = path.export();
     open_cwd_dir(&name)
 }
 

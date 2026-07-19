@@ -36,7 +36,7 @@ pub fn execute(
         let builtin_args = args.get(2..).unwrap_or(&[]);
         let substituted = substitute_args(builtin_args, &[], cell)
             .change_context(ChildProcessError::ExecFailed)?;
-        let sealed: Vec<sys::RefCStr> = substituted.iter().map(|cs| (*cs).clone().into()).collect();
+        let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
         let state = cell
             .borrow()
@@ -47,14 +47,14 @@ pub fn execute(
         }
     } else {
         let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
-        let binary_ref = sys::RefCStr::from(binary.clone());
+        let binary_ref = binary.export();
         let fd = exec::resolve_path(&binary_ref).change_context(ChildProcessError::ExecFailed)?;
         let binary_cstr =
             core::ffi::CStr::from_bytes_with_nul(binary_ref.as_ref().to_bytes_with_nul())
                 .change_context(ChildProcessError::Never)?;
         let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_fq, cell)
             .change_context(ChildProcessError::ExecFailed)?;
-        let sealed: Vec<sys::RefCStr> = substituted.iter().map(|s| (*s).clone().into()).collect();
+        let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];
         for s in &sealed {
             argv.push(s.as_ref());

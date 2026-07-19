@@ -33,12 +33,12 @@ pub(crate) fn export_fd(
     let (vname, tag) = match args {
         [a] => {
             let v = a.strip_prefix(b"%").ok_or(FdPassError::InvalidName)?;
-            let tag = sys::RefCStr::from(v.clone());
+            let tag = v.export();
             (v, tag)
         }
         [t, v] => {
             ensure!(!t.contains(b'%'), FdPassError::InvalidName);
-            let tag = sys::RefCStr::from(t.clone());
+            let tag = t.export();
             let v = v.strip_prefix(b"%").ok_or(FdPassError::InvalidName)?;
             (v, tag)
         }

@@ -28,7 +28,7 @@ impl ShortCStr {
     /// # Safety
     ///
     /// The caller must ensure no byte is NUL, or intend to seal
-    /// the NUL terminator via [`RefCStr`].
+    /// the NUL terminator via [`ExportedCStr`] or [`ShortCStr::export`].
     pub unsafe fn extend_from_slice_unchecked(&mut self, bytes: &[u8]) {
         if bytes.is_empty() {
             return;

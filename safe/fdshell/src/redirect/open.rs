@@ -10,7 +10,7 @@ pub fn open_redirect_files(
     let mut fds = Vec::new();
     for r in redirects {
         if let super::RedirectSource::Path(path) = &r.source {
-            let name = sys::RefCStr::from(path.clone());
+            let name = path.export();
             fds.push(
                 sys::openat2::open(&name, r.direction.open_flags())
                     .change_context(OpenRedirectError)?,

@@ -12,7 +12,7 @@ pub(super) fn run_external(
     refs: &[&CStr],
     state: &ShellState,
 ) -> Result<i32, Report<ChildProcessError>> {
-    let name = sys::RefCStr::from(cmd.name.clone());
+    let name = cmd.name.export();
     let fd = exec::resolve_path(&name)
         .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
     let name_cstr = core::ffi::CStr::from_bytes_with_nul(name.as_ref().to_bytes_with_nul())

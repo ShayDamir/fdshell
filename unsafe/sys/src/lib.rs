@@ -11,7 +11,7 @@ pub use importedfd_io::ImportedFdIo;
 pub use localfd::LocalFd;
 pub use localfd_error::LocalFdError;
 pub use recv_fd_error::RecvFdError;
-pub use shortcstr::{RefCStr, ShortCStr, ShortCStrError};
+pub use shortcstr::{ExportedCStr, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
 pub use umask::UmaskError;
 

@@ -70,7 +70,7 @@ Owned types (`LocalFd`, `ImportedFd`, `ExportedFd`, etc.) with `unsafe fn from_r
 ### 7. Strings
 - `&str`/`String` banned (UTF-8 invariant not guaranteed by kernel). Use `ShortCStr`.
 - `ShortCStr`: no NUL bytes, owning, stack-alloc for short strings.
-- `RefCStr`: terminating NUL only, immutable.
+- `ExportedCStr`: terminating NUL only, immutable.
 - Literals: `b"literal"` for byte comparison, `c"literal"` for `ShortCStr`.
 - Prefer `ShortCStr` methods over `.as_bytes()` + raw `&[u8]` ops (§6.4).
 

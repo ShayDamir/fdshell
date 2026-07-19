@@ -17,7 +17,7 @@ pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppEr
     }
 
     if let Some(path) = parsed.positional.first() {
-        let cstr = sys::RefCStr::from(path.clone());
+        let cstr = path.export();
         let fd = if let Some(dirfd) = &parsed.dirfd {
             sys::openat2::openat2(
                 dirfd.at(),

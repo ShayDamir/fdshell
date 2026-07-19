@@ -22,7 +22,7 @@ pub fn child_main(
 
     let resolved =
         substitute_args(args, args_fq, cell).change_context(ChildProcessError::SubstituteFailed)?;
-    let sealed: Vec<sys::RefCStr> = resolved.iter().map(|cs| (*cs).clone().into()).collect();
+    let sealed: Vec<sys::ExportedCStr> = resolved.iter().map(|cs| cs.export()).collect();
     let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
 
     let state = cell
