@@ -10,17 +10,18 @@ use crate::state::ShellState;
 pub(crate) fn collect_name(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
 ) -> Result<ShortCStr, Report<ResolveError>> {
-    let mut name = alloc::vec::Vec::new();
-    name.push(peek.next().ok_or(ResolveError::RefNotFound)?);
+    let mut name = ShortCStr::new();
+    name.push(peek.next().ok_or(ResolveError::RefNotFound)?)
+        .change_context(ResolveError::NulByte)?;
     while let Some(&nc) = peek.peek() {
         if nc.is_ascii_alphanumeric() || nc == b'_' {
-            name.push(nc);
+            name.push(nc).change_context(ResolveError::NulByte)?;
             peek.next();
         } else {
             break;
         }
     }
-    ShortCStr::from_vec(name).change_context(ResolveError::NulByte)
+    Ok(name)
 }
 
 pub(crate) fn percent_subst(
