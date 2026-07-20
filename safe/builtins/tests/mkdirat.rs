@@ -159,9 +159,15 @@ fn eq_syntax() {
 
 #[test]
 fn test_mkdirat_exec() {
-    let dir = std::env::temp_dir().join("fdshell-test-mkdirat-exec");
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-test-mkdirat-exec-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
     let subdir_path = dir.join("subdir");
 
     let cpath = CString::new(subdir_path.to_str().unwrap()).unwrap();
