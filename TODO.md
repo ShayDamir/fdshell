@@ -67,8 +67,8 @@
 
 ## Tests
 
-- [ ] Fix parallel test interference — `test_captures_success` and `resolve_path_finds_dot_slash` fail when run with other tests in parallel but pass individually; run with `--test-threads=1` or identify shared state / file system collisions
-- [ ] Add unit test for `get_environ` — currently only covered via fork+exec integration; needs isolated test verifying output vector contents (FDSHELL_PID present, filtered vars excluded, exports merged)
+- [x] Fix parallel test interference — `test_captures_success` and `resolve_path_finds_dot_slash` fail when run with other tests in parallel but pass individually; run with `--test-threads=1` or identify shared state / file system collisions
+- [x] Add unit test for `get_environ` — currently only covered via fork+exec integration; needs isolated test verifying output vector contents (FDSHELL_PID present, filtered vars excluded, exports merged)
 
 ## Security / hardening
 

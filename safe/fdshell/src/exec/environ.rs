@@ -48,3 +48,7 @@ pub(crate) fn get_environ(
         .chain(sock_entry)
         .collect()
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
