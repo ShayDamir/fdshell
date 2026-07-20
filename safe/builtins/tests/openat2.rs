@@ -22,7 +22,7 @@ fn test_openat2_exec() {
 
     shell_a.export().unwrap();
     let shell_sock = shell_a.try_clone().unwrap();
-    shell_a.try_close().unwrap();
+    drop(shell_a);
 
     let cfg = builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()]).unwrap();
     builtins::openat2::openat2_exec(&cfg, &shell_sock).unwrap();
@@ -34,7 +34,7 @@ fn test_openat2_exec() {
     let after = sys::stat::fstat(&fd).unwrap();
     assert_eq!(before, after);
 
-    fd.try_close().unwrap();
-    receiver.try_close().unwrap();
+    drop(fd);
+    drop(receiver);
     std::fs::remove_dir_all(&dir).unwrap();
 }

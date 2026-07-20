@@ -243,7 +243,7 @@ fn test_collect_targets_fdvar_in_targets_rejected() {
 fn test_read_from_local_fd_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     // Close write end immediately → EOF
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let mut buf = Vec::new();
     let mut eof = false;
@@ -257,7 +257,7 @@ fn test_read_from_local_fd_max_bytes() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let mut buf = Vec::new();
     let mut eof = false;
@@ -270,7 +270,7 @@ fn test_read_from_local_fd_stops_at_newline() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"line1\nline2";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let mut buf = Vec::new();
     let mut eof = false;
@@ -283,7 +283,7 @@ fn test_read_from_local_fd_stops_at_newline() {
 #[test]
 fn test_read_line_rawfd_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
@@ -301,7 +301,7 @@ fn test_read_line_rawfd_data() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
@@ -319,7 +319,7 @@ fn test_read_line_rawfd_max_bytes() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
@@ -337,7 +337,7 @@ fn test_read_line_rawfd_stops_at_newline() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"first\nsecond\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let source = SourceFd::RawFd(
@@ -365,7 +365,7 @@ fn test_read_line_fdvar_with_clone() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"from var\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let source = SourceFd::FdVar(c"MYVAR".into());
     let result = read_line(&source, Some(&read_end), None);
@@ -459,7 +459,7 @@ fn run_read_simple() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -485,7 +485,7 @@ fn run_read_simple() {
 #[test]
 fn run_read_eof_returns_status_1() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -562,7 +562,7 @@ fn run_read_with_prompt() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"answer\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -586,7 +586,7 @@ fn run_read_with_n_max_bytes() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -610,7 +610,7 @@ fn run_read_with_u_fdvar() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"from var\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let cell = make_read_cell();
     {
@@ -647,7 +647,7 @@ fn run_read_multiple_targets() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"a b c\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -679,7 +679,7 @@ fn run_read_fewer_fields_than_targets() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"only_one\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -711,7 +711,7 @@ fn run_read_more_fields_than_targets() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"a b c d\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -735,7 +735,7 @@ fn run_read_status_0_on_success() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -756,7 +756,7 @@ fn run_read_strip_prefix_dollar() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"value\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -778,7 +778,7 @@ fn run_read_strip_prefix_dollar() {
 #[test]
 fn run_read_empty_data_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();
@@ -804,7 +804,7 @@ fn run_read_newline_stops_reading() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"first\nsecond\n";
     sys::rw::write(&write_end, data).unwrap();
-    write_end.try_close().unwrap();
+    drop(write_end);
 
     let exported = read_end.export().unwrap();
     let fd = exported.as_raw();

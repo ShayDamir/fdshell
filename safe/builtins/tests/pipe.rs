@@ -111,7 +111,7 @@ fn test_pipe_exec() {
 
     shell_a.export().unwrap();
     let shell_sock = shell_a.try_clone().unwrap();
-    shell_a.try_close().unwrap();
+    drop(shell_a);
 
     builtins::pipe::pipe_exec(0, &shell_sock).unwrap();
 
@@ -135,7 +135,7 @@ fn test_pipe_exec() {
     assert_eq!(n, 5);
     assert_eq!(buf, *b"hello");
 
-    rd.try_close().unwrap();
-    wr.try_close().unwrap();
-    receiver.try_close().unwrap();
+    drop(rd);
+    drop(wr);
+    drop(receiver);
 }

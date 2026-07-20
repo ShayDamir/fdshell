@@ -23,15 +23,15 @@ fn test_captures_exists() {
 
     shell_a.export().expect("export shell_a");
     let shell_sock = shell_a.try_clone().expect("clone shell");
-    shell_a.try_close().expect("close shell_a");
+    drop(shell_a);
 
     // Send an fd so recv_fd succeeds and reaches the Exists check.
     let (test_a, test_b) = socketpair().expect("socketpair");
     test_a.verify().expect("verify test_a");
     test_b.verify().expect("verify test_b");
     send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
-    test_a.try_close().expect("close test_a");
-    test_b.try_close().expect("close test_b");
+    drop(test_a);
+    drop(test_b);
 
     let mut state = ShellState::new();
     state
@@ -62,15 +62,15 @@ fn test_captures_success() {
 
     shell_a.export().expect("export shell_a");
     let shell_sock = shell_a.try_clone().expect("clone shell");
-    shell_a.try_close().expect("close shell_a");
+    drop(shell_a);
 
     let (test_a, test_b) = socketpair().expect("socketpair");
     test_a.verify().expect("verify test_a");
     test_b.verify().expect("verify test_b");
 
     send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
-    test_a.try_close().expect("close test_a");
-    test_b.try_close().expect("close test_b");
+    drop(test_a);
+    drop(test_b);
 
     let captures = vec![Capture {
         var: short_cstr(b"OUT"),

@@ -37,15 +37,6 @@ impl LocalFd {
         Ok(())
     }
 
-    pub fn try_close(self) -> Result<(), SyscallError> {
-        let raw = self.0;
-        core::mem::forget(self);
-        // SAFETY: `raw` is a valid fd (from `self.0`, forgotten to
-        // prevent double-close); close of a bad fd is a no-op.
-        cvt(unsafe { close(raw) as isize })?;
-        Ok(())
-    }
-
     pub fn export(&self) -> Result<ExportedFd, SyscallError> {
         // SAFETY: `self.0` is a valid open fd; `dup` returns a new
         // fd or -1 on error, checked by `cvt`.

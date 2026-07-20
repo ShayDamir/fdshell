@@ -100,16 +100,16 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
 
         shell_a.export()?;
         let shell_sock = shell_a.try_clone()?;
-        shell_a.try_close()?;
+        drop(shell_a);
         // shell_b stays open — it's the receive end of shell_sock
 
         let (test_a, test_b) = socketpair()?;
         test_a.verify().expect("fd must have CLOEXEC");
         test_b.verify().expect("fd must have CLOEXEC");
         send_fd(&shell_sock, &test_a, c"test")?;
-        test_a.try_close()?;
+        drop(test_a);
         write(&test_b, b"42")?;
-        test_b.try_close()?;
+        drop(test_b);
 
         let mut tag = [0u8; TAG_MAX];
         let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)
@@ -121,8 +121,8 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         assert_eq!(&buf[..2], b"42");
         assert_eq!(read(&test_fd, &mut buf)?, 0);
 
-        test_fd.try_close()?;
-        receiver.try_close()?;
+        drop(test_fd);
+        drop(receiver);
         Ok(())
     })
 }
@@ -132,13 +132,13 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
     let tag = [b'x'; 2 * TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
-    dummy_wr.try_close()?;
+    drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
     match recv_fd(&b, &mut buf, 0) {
@@ -146,9 +146,9 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
         _other => panic!("expected TagTooLong"),
     }
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -157,13 +157,13 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
     let tag = [b'x'; TAG_MAX];
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
-    dummy_wr.try_close()?;
+    drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
     match recv_fd(&b, &mut buf, 0) {
@@ -171,9 +171,9 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
         _other => panic!("expected TagNotNul"),
     }
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -182,12 +182,12 @@ fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
     send_raw_msg(a.as_raw(), b"abc", dummy_wr.as_raw())?;
-    dummy_wr.try_close()?;
+    drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
     match recv_fd(&b, &mut buf, 0) {
@@ -195,9 +195,9 @@ fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
         _other => panic!("expected TagNotNul"),
     }
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -206,12 +206,12 @@ fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
     send_raw_msg(a.as_raw(), b"abc\0fde\0", dummy_wr.as_raw())?;
-    dummy_wr.try_close()?;
+    drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
     match recv_fd(&b, &mut buf, 0) {
@@ -219,9 +219,9 @@ fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
         _other => panic!("expected TagNotNul"),
     }
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -234,7 +234,7 @@ fn test_recv_fd_truncated_creds() -> Result<(), SyscallError> {
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
     set_passcred(&b)?;
-    let (dummy_rd, mut dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, mut dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
@@ -266,15 +266,15 @@ fn test_recv_fd_truncated_creds() -> Result<(), SyscallError> {
     // connected Unix socket. Kernel rejects truncated creds — this
     // is expected.
     let ret = unsafe { libc::sendmsg(a.as_raw(), &msg, 0) };
-    dummy_wr.try_close()?;
+    drop(dummy_wr);
 
     assert_eq!(ret, -1);
     // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
     let _e = unsafe { *libc::__errno_location() };
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -283,7 +283,7 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
@@ -291,7 +291,7 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     tag.push(0);
     tag.extend_from_slice(b"rd\0");
     send_raw_msg(a.as_raw(), &tag, dummy_wr.as_raw())?;
-    dummy_wr.try_close()?;
+    drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
     match recv_fd(&b, &mut buf, 0) {
@@ -299,9 +299,9 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
         _other => panic!("expected TagTooLong"),
     }
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -311,7 +311,7 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
     set_passcred(&b)?;
-    let (dummy_rd, dummy_wr) = pipe2(libc::O_CLOEXEC)?;
+    let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
 
@@ -319,8 +319,8 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
     fd_a.verify().expect("fd must have CLOEXEC");
     fd_b.verify().expect("fd must have CLOEXEC");
     send_raw_msg(a.as_raw(), b"test", fd_a.as_raw())?;
-    fd_a.try_close()?;
-    fd_b.try_close()?;
+    drop(fd_a);
+    drop(fd_b);
 
     let mut buf = [0u8; TAG_MAX];
     match recv_fd(&b, &mut buf, 0) {
@@ -328,9 +328,9 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
         _other => panic!("expected PidMismatch"),
     }
 
-    dummy_rd.try_close()?;
-    a.try_close()?;
-    b.try_close()?;
+    drop(dummy_rd);
+    drop(a);
+    drop(b);
     Ok(())
 }
 
@@ -365,7 +365,7 @@ fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
         _other => panic!("expected NoFd"),
     }
 
-    a.try_close()?;
-    b.try_close()?;
+    drop(a);
+    drop(b);
     Ok(())
 }

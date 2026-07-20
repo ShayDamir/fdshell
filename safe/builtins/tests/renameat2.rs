@@ -112,7 +112,7 @@ fn olddirfd_ateq() {
 
 #[test]
 fn olddirfd_numeric() {
-    let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
+    let (rd, wr) = sys::pipe::pipe2(0).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
@@ -135,7 +135,7 @@ fn newdirfd_ateq() {
 
 #[test]
 fn newdirfd_numeric() {
-    let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
+    let (rd, wr) = sys::pipe::pipe2(0).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();

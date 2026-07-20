@@ -94,7 +94,7 @@ fn dirfd_ateq() {
 
 #[test]
 fn dirfd_numeric() {
-    let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
+    let (rd, wr) = sys::pipe::pipe2(0).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
@@ -181,7 +181,7 @@ fn test_mkdirat_exec() {
 
     shell_a.export().unwrap();
     let shell_sock = shell_a.try_clone().unwrap();
-    shell_a.try_close().unwrap();
+    drop(shell_a);
 
     let mode_arg = CString::from(c"--mode");
     let mode_val = CString::from(c"755");
@@ -205,7 +205,7 @@ fn test_mkdirat_exec() {
     assert_eq!(st.ino, st2.ino);
     assert_eq!(st.dev, st2.dev);
 
-    fd.try_close().unwrap();
-    receiver.try_close().unwrap();
+    drop(fd);
+    drop(receiver);
     std::fs::remove_dir_all(&dir).unwrap();
 }

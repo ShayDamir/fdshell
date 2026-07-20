@@ -13,7 +13,7 @@ fn fchdir_ok() {
 
     // fchdir to CWD should leave CWD unchanged.
     assert_eq!(std::env::current_dir().unwrap(), cwd);
-    fd.try_close().unwrap();
+    drop(fd);
 }
 
 #[test]

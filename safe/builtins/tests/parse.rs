@@ -71,7 +71,7 @@ fn dirfd_ateq() {
 
 #[test]
 fn dirfd_numeric() {
-    let (rd, wr) = sys::pipe::pipe2(sys::fcntl::O_CLOEXEC).unwrap();
+    let (rd, wr) = sys::pipe::pipe2(0).unwrap();
     rd.verify().unwrap();
     wr.verify().unwrap();
     let dupfd = rd.export().unwrap();
