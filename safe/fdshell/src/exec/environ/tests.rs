@@ -25,7 +25,7 @@ fn find_entry<'a>(entries: &'a [ExportedCStr], prefix: &[u8]) -> Option<&'a str>
 fn get_environ_includes_pid() {
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(12345, &exports, &filter, None);
+    let result = get_environ(12345, &[], &exports, &filter, None);
 
     assert!(
         entry_has_prefix(&result, b"FDSHELL_PID="),
@@ -39,7 +39,7 @@ fn get_environ_includes_pid() {
 fn get_environ_excludes_socket_when_none() {
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(1, &exports, &filter, None);
+    let result = get_environ(1, &[], &exports, &filter, None);
 
     assert!(
         !entry_has_prefix(&result, b"FDSHELL_SOCKET="),
@@ -53,7 +53,7 @@ fn get_environ_merges_exports() {
     exports.insert(c"MY_VAR".into(), c"my_value".into());
     exports.insert(c"OTHER_VAR".into(), c"other_value".into());
     let filter = EnvFilter::new();
-    let result = get_environ(1, &exports, &filter, None);
+    let result = get_environ(1, &[], &exports, &filter, None);
 
     assert!(entry_has_prefix(&result, b"MY_VAR="));
     assert!(entry_has_prefix(&result, b"OTHER_VAR="));
@@ -73,7 +73,7 @@ fn get_environ_filters_exports_by_deny() {
     let mut filter = EnvFilter::new();
     filter.deny.push(c"DENIED".into());
 
-    let result = get_environ(1, &exports, &filter, None);
+    let result = get_environ(1, &[], &exports, &filter, None);
 
     assert!(entry_has_prefix(&result, b"ALLOWED="));
     assert!(
@@ -91,7 +91,7 @@ fn get_environ_filters_exports_by_allow() {
     let mut filter = EnvFilter::new();
     filter.allow.push(c"ALLOWED".into());
 
-    let result = get_environ(1, &exports, &filter, None);
+    let result = get_environ(1, &[], &exports, &filter, None);
 
     assert!(entry_has_prefix(&result, b"ALLOWED="));
     assert!(
@@ -106,7 +106,7 @@ fn get_environ_excludes_fdshell_vars_from_environ() {
     // (they shouldn't be in test env, but verify the function handles them)
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(999, &exports, &filter, None);
+    let result = get_environ(999, &[], &exports, &filter, None);
 
     // Should have exactly one FDSHELL_PID (added by function)
     assert_eq!(count_prefix(&result, b"FDSHELL_PID="), 1);
@@ -116,7 +116,7 @@ fn get_environ_excludes_fdshell_vars_from_environ() {
 fn get_environ_empty_exports() {
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(42, &exports, &filter, None);
+    let result = get_environ(42, &[], &exports, &filter, None);
 
     assert_eq!(count_prefix(&result, b"FDSHELL_PID="), 1);
     assert!(!entry_has_prefix(&result, b"FDSHELL_SOCKET="));

@@ -60,7 +60,14 @@ pub fn execute(
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        match exec::exec_fd(&fd, &argv, &state.exports, &state.env_filter, None) {
+        match exec::exec_fd(
+            &fd,
+            &argv,
+            &state.environ,
+            &state.exports,
+            &state.env_filter,
+            None,
+        ) {
             Ok(()) => Ok(0),
             Err(report) => Err(report),
         }

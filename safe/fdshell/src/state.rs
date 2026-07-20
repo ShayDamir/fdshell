@@ -1,4 +1,5 @@
 use alloc::collections::VecDeque;
+use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use sys::LocalFd;
@@ -19,6 +20,7 @@ pub struct ShellState {
     pub(crate) last_bg_pid: Option<i32>,
     pub(crate) env_filter: EnvFilter,
     pub(crate) shell_sock: Option<LocalFd>,
+    pub(crate) environ: Vec<(ShortCStr, ShortCStr)>,
 }
 
 impl ShellState {
@@ -34,6 +36,7 @@ impl ShellState {
             last_bg_pid: None,
             env_filter: EnvFilter::new(),
             shell_sock: None,
+            environ: sys::env::environ_snapshot(),
         }
     }
 }

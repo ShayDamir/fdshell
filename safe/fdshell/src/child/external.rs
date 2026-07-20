@@ -22,6 +22,7 @@ pub(super) fn run_external(
     match exec::exec_fd(
         &fd,
         &full_argv,
+        &state.environ,
         &state.exports,
         &state.env_filter,
         state.shell_sock.as_ref(),

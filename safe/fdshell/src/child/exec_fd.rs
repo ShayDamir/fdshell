@@ -25,6 +25,7 @@ pub(super) fn handle_exec_fd(
     match crate::exec::exec_fd(
         fd,
         args_slice,
+        &state.environ,
         &state.exports,
         &state.env_filter,
         state.shell_sock.as_ref(),
@@ -66,6 +67,7 @@ pub(super) fn handle_exec_at(
         non_cloexec.at(),
         &pathname,
         args_slice,
+        &state.environ,
         &state.exports,
         &state.env_filter,
         state.shell_sock.as_ref(),

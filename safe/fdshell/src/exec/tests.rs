@@ -83,7 +83,7 @@ fn exec_fd_with_exports() {
     let mut exports_map = HashMap::new();
     exports_map.insert(c"EXPORTED_VAR".into(), c"hello_world".into());
     exec_child(
-        || match exec_fd(&fd, &[&abs], &exports_map, &Default::default(), None) {
+        || match exec_fd(&fd, &[&abs], &[], &exports_map, &Default::default(), None) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         },
@@ -136,7 +136,14 @@ fn exec_with_paths() {
         let mut bin = ShortCStr::new();
         bin.push_slice(abs.to_bytes()).unwrap();
         let fd = resolve_path(&bin).unwrap();
-        match exec_fd(&fd, &[&abs], &HashMap::new(), &Default::default(), None) {
+        match exec_fd(
+            &fd,
+            &[&abs],
+            &[],
+            &HashMap::new(),
+            &Default::default(),
+            None,
+        ) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }
@@ -146,7 +153,14 @@ fn exec_with_paths() {
     std::env::set_current_dir(&dir).unwrap();
     exec_child(|| {
         let fd = resolve_path(&c"./mybin".into()).unwrap();
-        match exec_fd(&fd, &[c"mybin"], &HashMap::new(), &Default::default(), None) {
+        match exec_fd(
+            &fd,
+            &[c"mybin"],
+            &[],
+            &HashMap::new(),
+            &Default::default(),
+            None,
+        ) {
             Ok(()) => {}
             Err(report) => std::process::exit(report.current_context().exit_code()),
         }
@@ -176,6 +190,7 @@ fn exec_script_via_resolve_fd() {
         match exec_fd(
             &fd,
             &[&script_cs],
+            &[],
             &HashMap::new(),
             &Default::default(),
             None,

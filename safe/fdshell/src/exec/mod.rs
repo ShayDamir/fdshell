@@ -16,6 +16,7 @@ use environ::get_environ;
 pub fn exec_fd(
     fd: &LocalFd,
     argv: &[&CStr],
+    environ: &[(ShortCStr, ShortCStr)],
     exports: &HashMap<ShortCStr, ShortCStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
@@ -25,7 +26,7 @@ pub fn exec_fd(
         .map(|s| s.export())
         .transpose()
         .change_context(ChildProcessError::ExportFailed)?;
-    let envp = get_environ(pid, exports, env_filter, exec_sock.as_ref());
+    let envp = get_environ(pid, environ, exports, env_filter, exec_sock.as_ref());
     let script_fd = fd
         .export()
         .change_context(ChildProcessError::ExportFailed)?;
@@ -38,6 +39,7 @@ pub fn exec_at(
     dirfd: AtFd<'_>,
     pathname: &CStr,
     argv: &[&CStr],
+    environ: &[(ShortCStr, ShortCStr)],
     exports: &HashMap<ShortCStr, ShortCStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
@@ -47,7 +49,7 @@ pub fn exec_at(
         .map(|s| s.export())
         .transpose()
         .change_context(ChildProcessError::ExportFailed)?;
-    let envp = get_environ(pid, exports, env_filter, exec_sock.as_ref());
+    let envp = get_environ(pid, environ, exports, env_filter, exec_sock.as_ref());
     sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
         .change_context(ChildProcessError::ExecFailed)?;
     Ok(())
