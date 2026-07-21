@@ -40,7 +40,7 @@ fn read_returns_bytes() {
     write(&wr, data).unwrap();
     let mut buf = [0u8; 128];
     let n = rd.read(&mut buf).unwrap();
-    assert_eq!(n, data.len() as isize);
+    assert_eq!(n, data.len());
     assert_eq!(&buf[..11], data);
 }
 

@@ -81,9 +81,9 @@ impl LocalFd {
         AtFd::from(self)
     }
 
-    pub fn read(&self, buf: &mut [u8]) -> Result<isize, SyscallError> {
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize, SyscallError> {
         // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
-        cvt(unsafe { read(self.as_raw(), buf.as_mut_ptr().cast(), buf.len()) })
+        cvt(unsafe { read(self.as_raw(), buf.as_mut_ptr().cast(), buf.len()) }).map(|n| n as usize)
     }
 
     /// Read until EOF or buffer full.
@@ -95,7 +95,7 @@ impl LocalFd {
                 .ok_or(SyscallError::EINVAL("buffer full"))?;
             match self.read(slice)? {
                 0 => break,
-                n => offset += n as usize,
+                n => offset += n,
             }
             if offset >= buf.len() {
                 break;

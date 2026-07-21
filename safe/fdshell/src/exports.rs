@@ -1,7 +1,6 @@
 use crate::error::exports::ExportError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
-use sys::importedfd_io::ImportedFdIo;
 
 use sys::ShortCStr;
 

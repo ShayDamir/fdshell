@@ -1,11 +1,13 @@
 use crate::LocalFd;
 
-pub fn read(fd: &LocalFd, buf: &mut [u8]) -> Result<isize, crate::SyscallError> {
+pub fn read(fd: &LocalFd, buf: &mut [u8]) -> Result<usize, crate::SyscallError> {
     // SAFETY: `buf` is a valid mutable slice; `read` won't write past `buf.len()`.
     crate::cvt(unsafe { libc::read(fd.as_raw(), buf.as_mut_ptr().cast(), buf.len()) })
+        .map(|n| n as usize)
 }
 
-pub fn write(fd: &LocalFd, buf: &[u8]) -> Result<isize, crate::SyscallError> {
+pub fn write(fd: &LocalFd, buf: &[u8]) -> Result<usize, crate::SyscallError> {
     // SAFETY: `buf` is a valid immutable slice; `write` won't read past `buf.len()`.
     crate::cvt(unsafe { libc::write(fd.as_raw(), buf.as_ptr().cast(), buf.len()) })
+        .map(|n| n as usize)
 }

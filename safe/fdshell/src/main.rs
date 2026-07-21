@@ -8,7 +8,6 @@ use error_stack::{Report, ResultExt};
 use fdshell::{AppError, ShellState, init_shellfd, install_debug_hooks, parse_cli_args, run};
 use sys::fcntl::O_DIRECTORY;
 use sys::fork_cell::ForkCell;
-use sys::importedfd_io::ImportedFdIo;
 
 fn main() -> ! {
     install_debug_hooks();

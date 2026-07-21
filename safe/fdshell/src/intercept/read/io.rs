@@ -2,7 +2,6 @@ use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::importedfd_io::ImportedFdIo;
 
 use super::flags::SourceFd;
 
@@ -42,7 +41,7 @@ pub(crate) fn read_line(
                     Ok(n) => match n {
                         1.. => {
                             for &b in temp
-                                .get(..n as usize)
+                                .get(..n)
                                 .ok_or(ReadError::Io)
                                 .change_context(CmdError::Read)?
                             {
@@ -62,11 +61,6 @@ pub(crate) fn read_line(
                         0 => {
                             eof = true;
                             break;
-                        }
-                        _ => {
-                            return Err(Report::new(ReadError::Io)
-                                .attach_opaque("read returned negative value")
-                                .change_context(CmdError::Read));
                         }
                     },
                     Err(e) => {

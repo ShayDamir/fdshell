@@ -1,6 +1,5 @@
 use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
-use sys::importedfd_io::ImportedFdIo;
 
 const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"become", b"Replace shell with command"),

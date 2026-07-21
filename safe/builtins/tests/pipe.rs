@@ -131,7 +131,7 @@ fn test_pipe_exec() {
 
     sys::rw::write(&wr, b"hello").unwrap();
     let mut buf = [0u8; 5];
-    let n = sys::rw::read(&rd, &mut buf).unwrap() as usize;
+    let n = sys::rw::read(&rd, &mut buf).unwrap();
     assert_eq!(n, 5);
     assert_eq!(buf, *b"hello");
 

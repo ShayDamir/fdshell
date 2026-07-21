@@ -1,5 +1,4 @@
 use crate::envfilter::EnvFilter;
-use sys::importedfd_io::ImportedFdIo;
 
 pub(crate) fn print_help() {
     let help = b"Usage: envfilter [OPTIONS]\n\

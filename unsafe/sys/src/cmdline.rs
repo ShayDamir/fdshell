@@ -31,8 +31,7 @@ pub fn read_cmdline() -> Result<Vec<ShortCStr>, Report<ReadCmdlineError>> {
     let fd = crate::openat2::open(c"/proc/self/cmdline", O_RDONLY)
         .change_context(ReadCmdlineError::OpenFailed)?;
     loop {
-        let n =
-            crate::rw::read(&fd, &mut chunk).change_context(ReadCmdlineError::OpenFailed)? as usize;
+        let n = crate::rw::read(&fd, &mut chunk).change_context(ReadCmdlineError::OpenFailed)?;
         if n == 0 {
             break;
         }

@@ -50,7 +50,7 @@ fn read_proc_umask() -> Result<u32, Report<UmaskError>> {
     let fd = crate::openat2::open(c"/proc/self/status", O_RDONLY)
         .change_context(UmaskError::ProcOpen)?;
     let mut buf = [0u8; 4096];
-    let n = crate::rw::read(&fd, &mut buf).change_context(UmaskError::ProcRead)? as usize;
+    let n = crate::rw::read(&fd, &mut buf).change_context(UmaskError::ProcRead)?;
     let data = buf.get(..n).ok_or(UmaskError::Never)?;
     let (_, tail) = crate::split::split_once(data, b"Umask:\t").ok_or(UmaskError::UmaskNotFound)?;
     let (s, _) = crate::split::split_once(tail, b"\n").ok_or(UmaskError::InvalidUmask)?;

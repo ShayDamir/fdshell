@@ -16,7 +16,7 @@ pub(crate) fn read_from_local_fd(
             Ok(n) => match n {
                 1.. => {
                     for &b in temp
-                        .get(..n as usize)
+                        .get(..n)
                         .ok_or(ReadError::Io)
                         .change_context(CmdError::Read)?
                     {
@@ -36,11 +36,6 @@ pub(crate) fn read_from_local_fd(
                 0 => {
                     *eof = true;
                     break;
-                }
-                _ => {
-                    return Err(Report::new(ReadError::Io)
-                        .attach_opaque("read returned negative value")
-                        .change_context(CmdError::Read));
                 }
             },
             Err(e) => {

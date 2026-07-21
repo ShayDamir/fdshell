@@ -25,7 +25,7 @@ pub(crate) fn run_and_capture(
                 if n == 0 {
                     break;
                 }
-                if let Some(chunk) = buf.get(..n as usize) {
+                if let Some(chunk) = buf.get(..n) {
                     out.extend_from_slice(chunk);
                 }
             }

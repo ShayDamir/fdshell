@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use sys::importedfd_io::ImportedFdIo;
 use sys::{ExportedFd, ImportedFd};
 
 #[test]

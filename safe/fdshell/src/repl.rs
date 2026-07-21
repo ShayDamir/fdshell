@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 use core::fmt::Write;
 use error_stack::{Report, ResultExt, bail};
-use sys::importedfd_io::ImportedFdIo;
 
 use crate::app::AppError;
 use crate::error::cmd::CmdError;

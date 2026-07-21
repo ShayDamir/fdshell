@@ -12,7 +12,6 @@ pub fn load_script(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<AppError>> {
         if n == 0 {
             break;
         }
-        let n = n as usize;
         let slice = buf.get(..n).ok_or(AppError::ScriptRead)?;
         content.extend_from_slice(slice);
     }
