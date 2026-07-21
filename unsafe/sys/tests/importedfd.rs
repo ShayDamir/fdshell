@@ -98,3 +98,17 @@ fn write_str_empty() {
     // SAFETY: `fd` is a valid open fd from the test above.
     unsafe { libc::close(fd) };
 }
+
+#[test]
+fn display_formats_raw() {
+    // Open /dev/null without O_CLOEXEC — ImportedFd requires CLOEXEC clear.
+    // SAFETY: `/dev/null` is a valid path; O_RDONLY is a valid flag.
+    let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
+    assert!(fd >= 0);
+    // SAFETY: `fd` is a valid open fd with CLOEXEC clear (O_CLOEXEC not passed).
+    let imported = unsafe { ImportedFd::from_raw(fd) };
+    let formatted = format!("{}", imported);
+    assert_eq!(formatted, fd.to_string());
+    // SAFETY: `fd` is a valid open fd from the test above.
+    unsafe { libc::close(fd) };
+}
