@@ -42,6 +42,18 @@ fn glob_multiple_stars() {
 }
 
 #[test]
+fn glob_consecutive_stars() {
+    assert!(glob_match(b"**", b""));
+    assert!(glob_match(b"**", b"a"));
+    assert!(glob_match(b"**", b"ab"));
+    assert!(glob_match(b"***", b"anything"));
+    assert!(glob_match(b"a**b", b"axxb"));
+    assert!(glob_match(b"a**b", b"ab"));
+    assert!(glob_match(b"**suffix", b"prefixsuffix"));
+    assert!(glob_match(b"prefix**", b"prefixsuffix"));
+}
+
+#[test]
 fn glob_empty_pattern() {
     assert!(glob_match(b"", b""));
     assert!(!glob_match(b"", b"x"));

@@ -8,9 +8,8 @@ pub(crate) fn glob_match(pattern: &[u8], name: &[u8]) -> bool {
 
     while si < name.len() {
         if pattern.get(pi) == Some(&b'*') {
-            star_pi = Some(pi + 1);
+            star_pi = Some(pi);
             star_si = si;
-            pi += 1;
             while pattern.get(pi) == Some(&b'*') {
                 pi += 1;
             }
