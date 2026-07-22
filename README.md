@@ -132,7 +132,7 @@ The shellfd is reserved with CLOEXEC on startup, so it is automatically closed a
 
 ### Implementation philosophy
 
-The fdshell binary is a static binary that has only one dependency: OS kernel.
+The fdshell binary is a dynamically linked Linux x86_64 binary (glibc + libgcc_s). It has no dependencies beyond the OS kernel APIs it calls directly via syscalls.
 
 Currently only Linux is supported and only x86_64.
 
@@ -142,6 +142,6 @@ The project is a workspace with three crates:
 * `safe/builtins` - builtin commands (no_std, forbid(unsafe))
 * `unsafe/sys` - syscall wrappers (no_std, unsafe allowed)
 
-All `safe/` crates have `forbid(unsafe_code)` and cannot call libc directly. All source files must be ≤90 lines (excluding comments, tests exempt).
+All `safe/` crates have `forbid(unsafe_code)` and cannot call libc directly. Non-test source files should aim for ≤90 lines, though a few exceed this limit (e.g. `debug.rs`, `caret.rs`, `error/parse.rs`).
 
-The codebase avoids `#[derive]` directives in production code (except `Display`/`Debug` on error types and `Debug`/`PartialEq`/`Eq` on `ShortCStr`). Prefer `no_std` where feasible — the fdshell binary uses `std` for stability.
+The codebase uses `#[derive]` where idiomatic — commonly `Clone`, `Default`, `Debug`, `PartialEq`, and `Display`. Error types derive `Display` + `Debug`. The shell crate (`safe/fdshell`) is `#![no_std]` with `extern crate std` for runtime stability.
