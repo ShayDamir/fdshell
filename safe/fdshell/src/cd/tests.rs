@@ -128,3 +128,47 @@ fn cd_move_cwd_to_oldcwd() {
         assert!(state.fds.contains_key::<sys::ShortCStr>(&c"OLDCWD".into()));
     });
 }
+
+#[test]
+fn cd_file_fails() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        let dir = std::env::temp_dir().join("fdshell-cd-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("testfile");
+        std::fs::write(&file_path, b"hello\n").unwrap();
+
+        cd(&[c"/tmp".into()], &mut state).unwrap();
+
+        // Try to cd into a regular file — should fail because O_DIRECTORY
+        let path_str = file_path.to_str().unwrap();
+        let short_path = sys::ShortCStr::from_vec(path_str.as_bytes().to_vec()).unwrap();
+        let e = cd(&[short_path], &mut state).unwrap_err();
+        assert!(matches!(e.current_context(), CdError::CdPathOpen));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    });
+}
+
+#[test]
+fn cd_symlink_to_dir_fails() {
+    child_test(|| {
+        let mut state = ShellState::new();
+        let dir = std::env::temp_dir().join("fdshell-cd-symlink-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("realdir")).unwrap();
+        std::os::unix::fs::symlink(dir.join("realdir"), dir.join("link_to_dir")).unwrap();
+
+        cd(&[c"/tmp".into()], &mut state).unwrap();
+
+        // Try to cd into a symlink to a directory — should fail because O_NOFOLLOW
+        let link_path = dir.join("link_to_dir");
+        let path_str = link_path.to_str().unwrap();
+        let short_path = sys::ShortCStr::from_vec(path_str.as_bytes().to_vec()).unwrap();
+        let e = cd(&[short_path], &mut state).unwrap_err();
+        assert!(matches!(e.current_context(), CdError::CdPathOpen));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    });
+}
