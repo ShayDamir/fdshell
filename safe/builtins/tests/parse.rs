@@ -3,7 +3,10 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::fcntl::{O_APPEND, O_CLOEXEC, O_CREAT, O_EXCL, O_RDWR, O_TRUNC, O_WRONLY};
+use sys::fcntl::{
+    O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_NONBLOCK,
+    O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
+};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -225,4 +228,115 @@ fn repeated_flags_individual() {
             assert_eq!(cfg.how.flags, (O_RDWR | O_CREAT | O_EXCL) as u64);
         },
     );
+}
+
+#[test]
+fn pipe_flags_noctty() {
+    assert_ok(&["--flags", "O_RDONLY|O_NOCTTY", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_RDONLY | O_NOCTTY) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_nonblock() {
+    assert_ok(&["--flags", "O_RDWR|O_NONBLOCK", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_RDWR | O_NONBLOCK) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_dsync() {
+    assert_ok(&["--flags", "O_WRONLY|O_DSYNC", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_WRONLY | O_DSYNC) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_sync() {
+    assert_ok(&["--flags", "O_WRONLY|O_SYNC", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_WRONLY | O_SYNC) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_directory() {
+    assert_ok(&["--flags", "O_RDONLY|O_DIRECTORY", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_RDONLY | O_DIRECTORY) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_nofollow() {
+    assert_ok(&["--flags", "O_RDONLY|O_NOFOLLOW", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_RDONLY | O_NOFOLLOW) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_all_remaining() {
+    assert_ok(
+        &[
+            "--flags",
+            "O_RDWR|O_CREAT|O_EXCL|O_TRUNC|O_APPEND|O_NONBLOCK|O_DSYNC|O_DIRECTORY|O_NOFOLLOW|O_SYNC|O_NOCTTY",
+            "x",
+        ],
+        |cfg| {
+            assert_eq!(
+                cfg.how.flags,
+                (O_RDWR
+                    | O_CREAT
+                    | O_EXCL
+                    | O_TRUNC
+                    | O_APPEND
+                    | O_NONBLOCK
+                    | O_DSYNC
+                    | O_DIRECTORY
+                    | O_NOFOLLOW
+                    | O_SYNC
+                    | O_NOCTTY) as u64
+            );
+        },
+    );
+}
+
+#[test]
+fn pipe_flags_single_noctty() {
+    assert_ok(&["--flags", "O_NOCTTY", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_NOCTTY as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_single_nonblock() {
+    assert_ok(&["--flags", "O_NONBLOCK", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_NONBLOCK as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_single_dsync() {
+    assert_ok(&["--flags", "O_DSYNC", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_DSYNC as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_single_sync() {
+    assert_ok(&["--flags", "O_SYNC", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_SYNC as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_single_directory() {
+    assert_ok(&["--flags", "O_DIRECTORY", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_DIRECTORY as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_single_nofollow() {
+    assert_ok(&["--flags", "O_NOFOLLOW", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_NOFOLLOW as u64);
+    });
 }
