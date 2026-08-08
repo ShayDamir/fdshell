@@ -978,6 +978,33 @@ fn if_elif_empty_else_body() {
 }
 
 #[test]
+fn if_condition_with_equals() {
+    let ParsedLine::If(ib) = parse(b"if x=y; then z; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"x=y".into());
+    assert_eq!(ib.then_body, c"z".into());
+}
+
+#[test]
+fn if_multi_word_then_body() {
+    let ParsedLine::If(ib) = parse(b"if a; then b c; fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert_eq!(ib.then_body, c"b c".into());
+}
+
+#[test]
+fn if_no_semi_before_fi_body_is_empty() {
+    let ParsedLine::If(ib) = parse(b"if a; then b fi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.condition, c"a".into());
+    assert!(ib.then_body.is_empty());
+}
+
+#[test]
 fn parse_elifs_empty_pairs() {
     use super::elif::parse_elifs;
     let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![];

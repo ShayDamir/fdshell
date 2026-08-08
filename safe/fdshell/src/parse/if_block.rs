@@ -34,17 +34,17 @@ pub(crate) fn tokens_to_if(
 
     let cond_str = try_join(trim_semi(
         tokens
-            .get(1..first_then - 1)
+            .get(1..first_then)
             .ok_or(ParseError::MissingCondition)?,
     ))?;
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
-    let mut pos = first_then + 1;
+    let mut pos = first_then;
     while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif") {
-        let then_idx = find_preceded_by_semi(tokens, elif_idx + 1, b"then")
+        let then_idx = find_preceded_by_semi(tokens, elif_idx, b"then")
             .ok_or(ParseError::MissingThenAfterElif)?;
         elif_pairs.push((elif_idx, then_idx));
-        pos = then_idx + 1;
+        pos = then_idx;
     }
     let else_idx = find_preceded_by_semi(tokens, pos, b"else");
 
