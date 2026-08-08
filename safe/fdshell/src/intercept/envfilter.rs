@@ -6,7 +6,7 @@ use crate::intercept::validation::err_at;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
-use super::envfilter_display::print_rules;
+use super::envfilter_display::rules_text;
 
 mod helpers;
 mod parse;
@@ -43,7 +43,8 @@ pub(crate) fn run_envfilter(
 
     if parsed.do_list {
         let state = cell.borrow().change_context(CmdError::Never)?;
-        print_rules(&state.env_filter);
+        let text = rules_text(&state.env_filter).change_context(CmdError::Never)?;
+        let _ = sys::OUT.write_all(text.as_bytes().change_context(CmdError::Never)?);
     }
 
     Ok(true)

@@ -9,7 +9,7 @@ use error_stack::Report;
 use sys::ShortCStr;
 
 use crate::error::cmd::CmdError;
-use crate::intercept::envfilter_display::print_help;
+use crate::intercept::envfilter_display::help_text;
 use crate::intercept::validation;
 
 use super::{helpers, values};
@@ -30,7 +30,7 @@ pub(super) fn parse_args(args: &[ShortCStr], line: &[u8]) -> Result<ParsedArgs, 
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         if arg.eq_bytes(b"--help") || arg.eq_bytes(b"-h") {
-            print_help();
+            let _ = sys::OUT.write_all(help_text());
             return Ok(ParsedArgs::default());
         } else if arg.eq_bytes(b"--allow") {
             i = helpers::extend_pattern(args, line, i, "--allow", &mut allow_patterns)?;

@@ -4,6 +4,7 @@
 
 - [x] Add `ShortCStr::split()` — iterator yielding `ShortCStr` items, splitting on a separator byte
 - [x] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
+- [ ] Add `push_cstr(&mut self, str: &CStr)` — infallible since `CStr` doesn't contain NUL bytes by definition
 
 ## Refactoring / cleanup
 
