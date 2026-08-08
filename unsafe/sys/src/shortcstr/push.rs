@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use core::ffi::CStr;
 
 use crate::shortcstr::copy::copy_to_shortcstr;
 use crate::shortcstr::push_fallback::extend_from_slice_fallback;
@@ -25,6 +26,11 @@ impl ShortCStr {
         // SAFETY: all bytes validated as non-NUL above.
         unsafe { self.extend_from_slice_unchecked(bytes) };
         Ok(())
+    }
+
+    pub fn push_cstr(&mut self, s: &CStr) {
+        // SAFETY: CStr is guaranteed not to contain NUL bytes in its data.
+        unsafe { self.extend_from_slice_unchecked(s.to_bytes()) };
     }
 
     /// Append bytes without checking for NUL.

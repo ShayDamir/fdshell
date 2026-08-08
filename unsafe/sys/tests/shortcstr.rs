@@ -649,6 +649,97 @@ fn extend_static_tail_stays_static() {
     assert_eq!(cloned.len(), len_before);
     assert_eq!(cloned.as_bytes().unwrap(), &LONG.to_bytes()[60..]);
 }
+
+// --- push_cstr ---
+
+#[test]
+fn push_cstr_inline_empty() {
+    let mut s = ShortCStr::new();
+    s.push_cstr(c"hello");
+    assert_eq!(s.as_bytes().unwrap(), b"hello");
+}
+
+#[test]
+fn push_cstr_inline_existing() {
+    let mut s = ShortCStr::from(c"foo");
+    s.push_cstr(c"bar");
+    assert_eq!(s.as_bytes().unwrap(), b"foobar");
+}
+
+#[test]
+fn push_cstr_empty_cstr() {
+    let mut s = ShortCStr::from(c"hello");
+    s.push_cstr(c"");
+    assert_eq!(s.as_bytes().unwrap(), b"hello");
+}
+
+#[test]
+fn push_cstr_overflows_inline_to_arc() {
+    let mut s = ShortCStr::new();
+    for _ in 0..30 {
+        s.push_cstr(c"x");
+    }
+    assert_eq!(s.len(), 30);
+    s.push_cstr(c"y");
+    assert_eq!(s.len(), 31);
+    let expected = vec![b'x'; 30]
+        .into_iter()
+        .chain(std::iter::once(b'y'))
+        .collect::<Vec<u8>>();
+    assert_eq!(s.as_bytes().unwrap(), &expected);
+}
+
+#[test]
+fn push_cstr_static_variant() {
+    let s = ShortCStr::from(LONG);
+    let tail = s.get(60..).unwrap();
+    let mut tail = tail.clone();
+    tail.push_cstr(c" appended");
+    let expected: Vec<u8> = LONG.to_bytes()[60..]
+        .iter()
+        .copied()
+        .chain(b" appended".iter().copied())
+        .collect();
+    assert_eq!(tail.as_bytes().unwrap(), &expected);
+}
+
+#[test]
+fn push_cstr_arc_variant() {
+    let raw = b"hello world this is more than thirty bytes total";
+    let mut s: ShortCStr = ShortCStr::from_vec(raw.to_vec()).unwrap();
+    s.push_cstr(c" extra");
+    assert_eq!(
+        s.as_bytes().unwrap(),
+        b"hello world this is more than thirty bytes total extra"
+    );
+}
+
+#[test]
+fn push_cstr_arc_non_tail() {
+    let raw = b"hello world this is more than thirty bytes total";
+    let s: ShortCStr = ShortCStr::from_vec(raw.to_vec()).unwrap();
+    let sub = s.get(6..11).unwrap();
+    let mut sub = sub.clone();
+    sub.push_cstr(c" world");
+    assert_eq!(sub.as_bytes().unwrap(), b"world world");
+}
+
+#[test]
+fn push_cstr_special_chars() {
+    let mut s = ShortCStr::new();
+    s.push_cstr(c"tab\there");
+    assert_eq!(s.as_bytes().unwrap(), b"tab\there");
+}
+
+#[test]
+fn push_cstr_multiple() {
+    let mut s = ShortCStr::new();
+    s.push_cstr(c"hello");
+    s.push_cstr(c" ");
+    s.push_cstr(c"world");
+    assert_eq!(s.as_bytes().unwrap(), b"hello world");
+}
+
 // --- ends_with ---
 
 #[test]
