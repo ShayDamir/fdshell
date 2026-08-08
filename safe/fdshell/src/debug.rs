@@ -91,3 +91,6 @@ fn compute_caret_len(input: &[u8], pos: usize, line_start: usize) -> usize {
     }
     caret_len
 }
+
+#[cfg(test)]
+mod tests;

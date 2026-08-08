@@ -20,7 +20,7 @@ mod pipeline;
 mod quotes;
 mod redirect;
 mod semi;
-mod token;
+pub(crate) mod token;
 mod token_subst;
 mod while_block;
 
