@@ -7,15 +7,15 @@
 
 ## Refactoring / cleanup
 
-- [ ] `dollar.rs` at 104 code lines (14 over 90-line limit) — extract `$@`, `$*`, `$N` handlers into helpers
-- [ ] `importedfd.rs` (unsafe/sys) at 106 code lines (16 over) — split test module or extract verification logic
-- [ ] `caret.rs` at 88 code lines (in 80-90 flag zone) — tests dominate; extract to `caret/tests.rs`
-- [ ] `substitute/brace.rs` at 87 code lines (in 80-90 flag zone) — extract closed vs unclosed brace handling
-- [ ] `parse/token.rs` at 87 code lines (in 80-90 flag zone) — consider extracting `tokenize` match arms into separate helpers
-- [ ] `intercept/read/io.rs` at 87 code lines (in 80-90 flag zone) — extract `SourceFd::RawFd` read loop
-- [ ] `exec/mod.rs` at 82 code lines (in 80-90 flag zone) — `exec_fd`/`exec_at` share duplicated setup; extract
-- [ ] `openat2/parse/mod.rs` at 81 code lines (in 80-90 flag zone)
-- [ ] `localfd.rs` at 80 code lines (in 80-90 flag zone) — extract `read_all` to reduce below 80
+- [x] `dollar.rs` — extracted, now 60 lines
+- [x] `importedfd.rs` — split into `importedfd_error.rs` + `importedfd_try.rs`
+- [ ] `caret.rs` at 108 code lines (was 88, grew) — extract tests to `caret/tests.rs`
+- [x] `substitute/brace.rs` — extracted, now 65 lines
+- [ ] `parse/token.rs` at 90 code lines — consider extracting `tokenize` match arms into separate helpers
+- [ ] `intercept/read/io.rs` at 85 code lines — extract `SourceFd::RawFd` read loop
+- [ ] `exec/mod.rs` at 84 code lines — `exec_fd`/`exec_at` share duplicated setup; extract
+- [ ] `openat2/parse/mod.rs` at 90 code lines
+- [ ] `localfd.rs` at 114 code lines (was 80, grew) — extract `read_all` to reduce below 80
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 - [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
@@ -73,3 +73,64 @@
 ## Security / hardening
 
 (All items complete)
+
+## Open Directions
+
+### P0 — Protocol spec + external integration
+
+- [ ] Specify and version the FDSHELL_SOCKET protocol (message format, tags, error reporting, feature negotiation via env var)
+- [ ] Ship `fdsend` helper binary so any program can return fds unmodified
+- [ ] Client libraries for C/Rust/Python/Go (~50 lines each)
+- [ ] Readiness signaling convention (tag-only "ready" message as race-free sd_notify alternative)
+
+### P1 — Core syscall builtins
+
+- [ ] `timerfd` syscall wrapper + builtin; `wait --any` + `--timeout` via timerfd polling
+- [ ] `signalfd` builtin — traps as another fd source
+- [ ] `eventfd` builtin — counters between background tasks
+- [ ] Landlock syscall wrappers + builtin (`landlock --allow-rw %src --restrict`)
+- [ ] `pidfd_send_signal` builtin — kill background jobs by pidfd var
+- [ ] fs-verity ioctls (verify binary before execveat)
+
+### P1 — Language features
+
+- [ ] Lexical scoping / RAII for fd vars: auto-close at block end, linear-use check (use-after-unset + leaks as parse-time errors)
+- [ ] Structured return channel: extend socket protocol to carry payloads (statx results, readlink targets, error strings) alongside fds
+
+### P2 — Syscall coverage
+
+- [ ] `splice`/`copy_file_range`/`sendfile` builtins → zero-copy cat/cp
+- [ ] `memfd_create` builtin — heredocs without temp files, sealed secrets by fd
+- [ ] `O_TMPFILE` + `linkat` atomic file creation pattern
+- [ ] `FICLONE` ioctl for reflinks
+- [ ] More `*at` coverage: `symlinkat`, `linkat`, `statx`, `utimensat` (unlinkat syscall wrapper exists, no builtin)
+- [ ] `flock`, `ftruncate`, `lseek`, `fsync` on existing fd vars
+- [ ] `getdents64` for directory listing
+
+### P2 — Language features
+
+- [ ] Typed fd vars: dir vs file vs pipe-end vs socket vs pidfd, checked against builtin expectations
+- [ ] Coprocesses and process substitution: `coproc name { cmd }` with bidirectional pipe fd vars
+- [ ] Escape hatch expansion: `%var:path` → `/proc/self/fd/63` for programs that only accept paths
+- [ ] `poll`/`epoll` builtin → event-driven scripts (supervisors, watchers)
+
+### P3 — Security directions
+
+- [ ] Strict mode: ban absolute path resolution entirely; every operation relative to an explicit dirfd — capability shell in Capsicum spirit
+- [ ] Broker pattern: make socket bidirectional so sandboxed child can request an open; privileged shell resolves against its dirfds
+- [ ] Provenance/audit: tag every fd with origin; `fdexplain %foo` → "opened by openat2 from %CWD, line 3"
+- [ ] Leak-detector test mode: snapshot `/proc/self/fd` before/after script run, assert no stragglers; verify CLOEXEC invariants
+
+### P3 — Application domains (emerge from above)
+
+- [ ] Init/supervision: pidfds + readiness tags + `wait --any` + restart policies
+- [ ] Mini container runtime: namespaces + new mount API + landlock + seccomp, orchestrated in script
+- [ ] Busybox-style multicall binary: builtins symlinked as cat, mv, ls via getdents64 on dirfd
+
+### P3 — Engineering / ecosystem
+
+- [ ] aarch64/riscv64 ports (sys crate already isolates syscall numbers); static musl builds
+- [ ] Kernel feature detection with documented degradation (openat2 needs 5.6+, pidfds 5.3+)
+- [ ] Parser fuzzing
+- [ ] ShellCheck-style linter (fd leaks, unset-in-branch, missing wait)
+- [ ] "Writing TOCTOU-free scripts" guide
