@@ -15,8 +15,9 @@ impl ShortCStr {
         Ok(())
     }
 
-    pub fn push_str(&mut self, other: &ShortCStr) -> Result<(), ShortCStrError> {
-        self.push_slice(other.as_bytes()?)
+    pub fn push_str(&mut self, other: &ShortCStr) {
+        // SAFETY: other is a valid ShortCStr, guaranteed no NUL bytes by type invariant.
+        unsafe { self.extend_from_slice_unchecked(other.as_bytes().unwrap_or(&[])) };
     }
 
     pub fn push_slice(&mut self, bytes: &[u8]) -> Result<(), ShortCStrError> {

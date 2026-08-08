@@ -962,14 +962,14 @@ fn write_nul_err() {
 #[test]
 fn concat_empty() {
     let parts: Vec<ShortCStr> = vec![];
-    let result = ShortCStr::concat(&parts.iter().collect::<Vec<_>>()).unwrap();
+    let result = ShortCStr::concat(&parts.iter().collect::<Vec<_>>());
     assert!(result.is_empty());
 }
 
 #[test]
 fn concat_single() {
     let s = ShortCStr::from(c"hello");
-    let result = ShortCStr::concat(&[&s]).unwrap();
+    let result = ShortCStr::concat(&[&s]);
     assert_eq!(result.as_bytes().unwrap(), b"hello");
 }
 
@@ -977,7 +977,7 @@ fn concat_single() {
 fn concat_two_inline() {
     let a = ShortCStr::from(c"hello");
     let b = ShortCStr::from(c" world");
-    let result = ShortCStr::concat(&[&a, &b]).unwrap();
+    let result = ShortCStr::concat(&[&a, &b]);
     assert_eq!(result.as_bytes().unwrap(), b"hello world");
 }
 
@@ -986,7 +986,7 @@ fn concat_three_inline() {
     let a = ShortCStr::from(c"foo");
     let b = ShortCStr::from(c"=");
     let c = ShortCStr::from(c"bar");
-    let result = ShortCStr::concat(&[&a, &b, &c]).unwrap();
+    let result = ShortCStr::concat(&[&a, &b, &c]);
     assert_eq!(result.as_bytes().unwrap(), b"foo=bar");
 }
 
@@ -994,7 +994,7 @@ fn concat_three_inline() {
 fn concat_overflows_to_arc() {
     let a = ShortCStr::from_vec(b"123456789012345678901234567890".to_vec()).unwrap(); // 30 bytes
     let b = ShortCStr::from(c"!");
-    let result = ShortCStr::concat(&[&a, &b]).unwrap();
+    let result = ShortCStr::concat(&[&a, &b]);
     assert_eq!(
         result.as_bytes().unwrap(),
         b"123456789012345678901234567890!"
@@ -1005,7 +1005,7 @@ fn concat_overflows_to_arc() {
 fn concat_static_and_inline() {
     let static_s = ShortCStr::from(c"static");
     let inline_s: ShortCStr = c"hello".into();
-    let result = ShortCStr::concat(&[&static_s, &inline_s]).unwrap();
+    let result = ShortCStr::concat(&[&static_s, &inline_s]);
     assert_eq!(result.as_bytes().unwrap(), b"statichello");
 }
 
@@ -1013,7 +1013,7 @@ fn concat_static_and_inline() {
 fn concat_with_empty() {
     let a = ShortCStr::from(c"hello");
     let empty = ShortCStr::new();
-    let result = ShortCStr::concat(&[&a, &empty]).unwrap();
+    let result = ShortCStr::concat(&[&a, &empty]);
     assert_eq!(result.as_bytes().unwrap(), b"hello");
 }
 
@@ -1021,20 +1021,21 @@ fn concat_with_empty() {
 fn concat_empty_parts() {
     let empty1 = ShortCStr::new();
     let empty2 = ShortCStr::new();
-    let result = ShortCStr::concat(&[&empty1, &empty2]).unwrap();
+    let result = ShortCStr::concat(&[&empty1, &empty2]);
     assert!(result.is_empty());
 }
 
 #[test]
-fn concat_nul_err() {
-    // Construct a ShortCStr with NUL byte in its data range manually
+fn concat_nul_in_arc_view() {
+    // Concat with a ShortCStr that has NUL in its data range — push_str is infallible
+    // because it trusts the ShortCStr invariant; the NUL is already present in the source.
     let nul_s = ShortCStr::Arc {
         arc: Arc::new(b"hi\0there".to_vec()),
         offset: 0,
         length: 3, // includes the NUL at index 2
     };
     let result = ShortCStr::concat(&[&nul_s]);
-    assert!(result.is_err());
+    assert_eq!(result.as_bytes().unwrap(), b"hi\0");
 }
 
 #[test]
@@ -1047,7 +1048,7 @@ fn concat_many_parts_inline() {
         ShortCStr::from(c"e"),
         ShortCStr::from(c"f"),
     ];
-    let result = ShortCStr::concat(&parts.iter().collect::<Vec<_>>()).unwrap();
+    let result = ShortCStr::concat(&parts.iter().collect::<Vec<_>>());
     assert_eq!(result.as_bytes().unwrap(), b"abcdef");
 }
 

@@ -36,7 +36,7 @@ pub fn parse_clauses(
                 if current_pattern.is_empty() {
                     bail!(ParseError::CaseEmptyPattern);
                 }
-                patterns.push(try_join(trim_semi(&current_pattern))?);
+                patterns.push(try_join(trim_semi(&current_pattern)));
                 current_pattern.clear();
                 pos += 1;
             } else if let Some(token) = tokens.get(pos) {
@@ -51,7 +51,7 @@ pub fn parse_clauses(
             bail!(ParseError::CaseEmptyPattern);
         }
         if !current_pattern.is_empty() {
-            patterns.push(try_join(trim_semi(&current_pattern))?);
+            patterns.push(try_join(trim_semi(&current_pattern)));
         }
         let body_start = pos;
         let mut i = pos;
@@ -66,10 +66,10 @@ pub fn parse_clauses(
             i += 1;
         }
         let (body, next_pos) = if found {
-            let b = try_join(trim_semi(tokens.get(body_start..i).unwrap_or(&[])))?;
+            let b = try_join(trim_semi(tokens.get(body_start..i).unwrap_or(&[])));
             (b, i + 2)
         } else {
-            let b = try_join(trim_semi(tokens.get(body_start..esac_idx).unwrap_or(&[])))?;
+            let b = try_join(trim_semi(tokens.get(body_start..esac_idx).unwrap_or(&[])));
             (b, esac_idx)
         };
         clauses.push(CaseClause { patterns, body });

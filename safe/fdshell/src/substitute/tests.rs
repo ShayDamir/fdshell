@@ -4,6 +4,7 @@ use alloc::format;
 
 use hashbrown::HashMap;
 
+use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -455,4 +456,54 @@ fn dollar_multi_digit_index_in_text() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg1-arg10-arg19");
+}
+
+#[test]
+fn percent_double_percent_is_literal() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"a%%b");
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a%b");
+}
+
+#[test]
+fn percent_single_percent_unknown_fd_is_literal() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"%unknown_fd");
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%unknown_fd");
+}
+
+#[test]
+fn percent_fd_cache_hit_returns_same_value() {
+    let cell = ForkCell::new(ShellState::new());
+    // Open /dev/null to get a real FD (should be fd 3 after stdin/stdout/stderr)
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"testfd"), dev_null);
+
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+
+    // First call — should lookup FD and cache it
+    let arg1 = ShortCStr::from(c"%testfd");
+    let res1 = substitute_arg(&arg1, &mut cache, &cell).unwrap();
+
+    // Second call — should hit cache and return same value
+    let arg2 = ShortCStr::from(c"%testfd");
+    let res2 = substitute_arg(&arg2, &mut cache, &cell).unwrap();
+    assert_eq!(res1.as_bytes().unwrap(), res2.as_bytes().unwrap());
+
+    // Third call with surrounding text — still hits cache
+    let arg3 = ShortCStr::from(c"prefix-%testfd-suffix");
+    let res3 = substitute_arg(&arg3, &mut cache, &cell).unwrap();
+    let fd_str = alloc::string::String::from_utf8_lossy(res1.as_bytes().unwrap());
+    let expected = format!("prefix-{fd_str}-suffix");
+    assert_eq!(res3.as_bytes().unwrap(), expected.as_bytes());
+
+    // Verify cache contains the exported FD
+    assert!(cache.contains_key(&ShortCStr::from(c"testfd")));
 }

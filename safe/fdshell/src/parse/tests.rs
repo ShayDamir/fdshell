@@ -1110,8 +1110,7 @@ fn parse_else_body_simple() {
         (c";".into(), 2, false),
     ];
     let result = parse_else_body(&tokens, 0, 3);
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), c"fallback".into());
+    assert_eq!(result, c"fallback".into());
 }
 
 #[test]
@@ -1127,8 +1126,7 @@ fn parse_else_body_multiple_tokens() {
         (c";".into(), 4, false),
     ];
     let result = parse_else_body(&tokens, 0, 5);
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), c"cmd1 ; cmd2".into());
+    assert_eq!(result, c"cmd1 ; cmd2".into());
 }
 
 #[test]
@@ -1163,14 +1161,14 @@ fn parse_elifs_missing_body_err() {
 }
 
 #[test]
-fn parse_else_body_missing_err() {
+fn parse_else_body_empty() {
     use super::elif::parse_else_body;
     // Tokens: else, fi — no body between else and fi
     // Indices: 0,      1, 2
     let tokens: Vec<(sys::ShortCStr, usize, bool)> =
         vec![(c"else".into(), 0, false), (c"fi".into(), 1, false)];
     let result = parse_else_body(&tokens, 0, 1);
-    assert!(result.is_err());
+    assert!(result.is_empty());
 }
 
 #[test]

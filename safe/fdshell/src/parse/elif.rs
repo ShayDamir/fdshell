@@ -18,7 +18,7 @@ pub fn parse_elifs(
                 tokens
                     .get(ei + 1..ti - 1)
                     .ok_or(ParseError::MissingCondition)?,
-            ))?;
+            ));
             let next = elif_pairs
                 .get(i + 1)
                 .map(|&(ne, _)| ne)
@@ -28,7 +28,7 @@ pub fn parse_elifs(
                 tokens
                     .get(ti + 1..next - 1)
                     .ok_or(ParseError::MissingThen)?,
-            ))?;
+            ));
             Ok((ec, eb))
         })
         .collect::<Result<Vec<_>, Report<ParseError>>>()
@@ -38,10 +38,7 @@ pub fn parse_else_body(
     tokens: &[(ShortCStr, usize, bool)],
     else_idx: usize,
     fi_idx: usize,
-) -> Result<ShortCStr, Report<ParseError>> {
-    try_join(trim_semi(
-        tokens
-            .get(else_idx + 1..fi_idx - 1)
-            .ok_or(ParseError::MissingElseBody)?,
-    ))
+) -> ShortCStr {
+    let trimmed = trim_semi(tokens.get(else_idx + 1..fi_idx - 1).unwrap_or(&[]));
+    try_join(trimmed)
 }

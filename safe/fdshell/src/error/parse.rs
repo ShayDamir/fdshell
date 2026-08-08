@@ -66,8 +66,6 @@ pub(crate) enum ParseError {
     MalformedIfBlock,
     /// missing condition
     MissingCondition,
-    /// missing 'else' body
-    MissingElseBody,
     /// missing 'fi'
     MissingFi,
     /// missing 'then'

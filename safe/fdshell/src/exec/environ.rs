@@ -9,9 +9,7 @@ fn export_entry(k: &ShortCStr, v: &ShortCStr, env_filter: &EnvFilter) -> Option<
     (!k.eq_bytes(b"FDSHELL_PID")).then_some(())?;
     (!k.eq_bytes(b"FDSHELL_SOCKET")).then_some(())?;
     env_filter.is_allowed(k).then_some(())?;
-    Some(ExportedCStr::from(
-        ShortCStr::concat(&[k, &c"=".into(), v]).ok()?,
-    ))
+    Some(ExportedCStr::from(ShortCStr::concat(&[k, &c"=".into(), v])))
 }
 
 pub(crate) fn get_environ(

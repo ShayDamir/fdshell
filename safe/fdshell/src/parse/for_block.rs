@@ -48,7 +48,7 @@ pub(crate) fn tokens_to_for(
         tokens
             .get(do_idx + 1..done_idx - 1)
             .ok_or(ParseError::ExpectedDone)?,
-    ))?;
+    ));
 
     let word_tokens = trim_semi(
         tokens

@@ -26,8 +26,7 @@ pub fn handle_export(
 
 fn list_exports(state: &ShellState) -> Result<(), Report<ExportError>> {
     for (k, v) in &state.exports {
-        let line = ShortCStr::concat(&[&c"export ".into(), k, &c"=".into(), v, &c"\n".into()])
-            .change_context(ExportError::NulByte)?;
+        let line = ShortCStr::concat(&[&c"export ".into(), k, &c"=".into(), v, &c"\n".into()]);
         sys::OUT.write_str(&line).change_context(ExportError::Io)?;
     }
     Ok(())

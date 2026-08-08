@@ -62,8 +62,7 @@ pub fn search_path(bin: &ShortCStr) -> Result<LocalFd, Report<ChildProcessError>
         if dir.is_empty() {
             continue;
         }
-        let pathname =
-            ShortCStr::concat(&[&dir, &slash, bin]).change_context(ChildProcessError::Never)?;
+        let pathname = ShortCStr::concat(&[&dir, &slash, bin]);
         if let Ok(fd) = sys::openat2::open(pathname.export(), O_PATH) {
             return Ok(fd);
         }

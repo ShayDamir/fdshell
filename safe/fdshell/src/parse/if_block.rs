@@ -36,7 +36,7 @@ pub(crate) fn tokens_to_if(
         tokens
             .get(1..first_then)
             .ok_or(ParseError::MissingCondition)?,
-    ))?;
+    ));
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
@@ -57,12 +57,10 @@ pub(crate) fn tokens_to_if(
         tokens
             .get(first_then + 1..first_end - 1)
             .ok_or(ParseError::MissingThen)?,
-    ))?;
+    ));
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx)?;
-    let else_str = else_idx
-        .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx))
-        .transpose()?;
+    let else_str = else_idx.map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx));
     Ok(IfBlock {
         condition: cond_str,
         then_body: then_str,

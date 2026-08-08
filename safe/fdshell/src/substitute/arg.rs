@@ -22,10 +22,10 @@ pub(crate) fn substitute_arg(
         match peek.peek() {
             None | Some(&b'/') => {
                 if let Some(home) = sys::env::getenv(c"HOME") {
-                    out.push_str(&home).change_context(ResolveError::Never)?;
+                    out.push_str(&home);
                 }
             }
-            _ => out.push(b'~').change_context(ResolveError::NulByte)?,
+            _ => out.push_cstr(c"~"),
         }
     }
     while let Some(b) = peek.next() {

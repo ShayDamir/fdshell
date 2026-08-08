@@ -1,5 +1,4 @@
 use crate::envfilter::EnvFilter;
-use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub(crate) fn help_text() -> &'static [u8] {
@@ -14,47 +13,29 @@ pub(crate) fn help_text() -> &'static [u8] {
                   Allowlist is applied first, then denylist removes from it."
 }
 
-pub(crate) fn rules_text(
-    filter: &EnvFilter,
-) -> Result<ShortCStr, Report<crate::error::cmd::CmdError>> {
+pub(crate) fn rules_text(filter: &EnvFilter) -> ShortCStr {
     let mut result = ShortCStr::new();
     if !filter.allow.is_empty() {
-        result
-            .push_slice(b"allow: ")
-            .change_context(crate::error::cmd::CmdError::Never)?;
+        result.push_cstr(c"allow: ");
         for (i, pattern) in filter.allow.iter().enumerate() {
             if i > 0 {
-                result
-                    .push(b' ')
-                    .change_context(crate::error::cmd::CmdError::Never)?;
+                result.push_cstr(c" ");
             }
-            result
-                .push_str(pattern)
-                .change_context(crate::error::cmd::CmdError::Never)?;
+            result.push_str(pattern);
         }
-        result
-            .push(b'\n')
-            .change_context(crate::error::cmd::CmdError::Never)?;
+        result.push_cstr(c"\n");
     }
     if !filter.deny.is_empty() {
-        result
-            .push_slice(b"deny: ")
-            .change_context(crate::error::cmd::CmdError::Never)?;
+        result.push_cstr(c"deny: ");
         for (i, pattern) in filter.deny.iter().enumerate() {
             if i > 0 {
-                result
-                    .push(b' ')
-                    .change_context(crate::error::cmd::CmdError::Never)?;
+                result.push_cstr(c" ");
             }
-            result
-                .push_str(pattern)
-                .change_context(crate::error::cmd::CmdError::Never)?;
+            result.push_str(pattern);
         }
-        result
-            .push(b'\n')
-            .change_context(crate::error::cmd::CmdError::Never)?;
+        result.push_cstr(c"\n");
     }
-    Ok(result)
+    result
 }
 
 #[cfg(test)]

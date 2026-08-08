@@ -56,9 +56,9 @@ fn join_positional_args<'a>(
     let mut out = ShortCStr::new();
     for (j, p) in positional.into_iter().enumerate() {
         if j > 0 {
-            out.push(b' ').change_context(ResolveError::Never)?;
+            out.push_cstr(c" ");
         }
-        out.push_str(p).change_context(ResolveError::Never)?;
+        out.push_str(p);
     }
     Ok(out)
 }

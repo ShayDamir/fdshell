@@ -30,7 +30,7 @@ pub(crate) fn tokens_to_case(
 
     let word = try_join(trim_semi(
         tokens.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
-    ))?;
+    ));
 
     let clauses = case_clause::parse_clauses(tokens, in_idx + 1, esac_idx)?;
 

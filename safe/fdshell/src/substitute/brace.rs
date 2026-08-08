@@ -18,33 +18,29 @@ pub(crate) fn handle_brace(
             if let Some(val) = state.strings.get(&name) {
                 core::write!(out, "{}", val.len()).change_context(ResolveError::Never)?;
             } else {
-                out.push_slice(b"${#")
-                    .and_then(|_| out.push_str(&name))
-                    .and_then(|_| out.push(b'}'))
-                    .change_context(ResolveError::Never)?;
+                out.push_cstr(c"${#");
+                out.push_str(&name);
+                out.push_cstr(c"}");
             }
         } else {
-            out.push_slice(b"${#")
-                .and_then(|_| out.push_str(&name))
-                .change_context(ResolveError::Never)?;
+            out.push_cstr(c"${#");
+            out.push_str(&name);
         }
         return Ok(());
     }
     let (name, closed) = read_until_close(peek)?;
     if closed {
         match state.strings.get(&name) {
-            Some(val) => out.push_str(val).change_context(ResolveError::Never)?,
+            Some(val) => out.push_str(val),
             None => {
-                out.push_slice(b"${")
-                    .and_then(|_| out.push_str(&name))
-                    .and_then(|_| out.push(b'}'))
-                    .change_context(ResolveError::Never)?;
+                out.push_cstr(c"${");
+                out.push_str(&name);
+                out.push_cstr(c"}");
             }
         }
     } else {
-        out.push_slice(b"${")
-            .and_then(|_| out.push_str(&name))
-            .change_context(ResolveError::Never)?;
+        out.push_cstr(c"${");
+        out.push_str(&name);
     }
     Ok(())
 }

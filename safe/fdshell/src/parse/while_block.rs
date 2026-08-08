@@ -31,13 +31,13 @@ pub(crate) fn tokens_to_loop(
 
     let cond_str = try_join(trim_semi(
         tokens.get(1..do_idx - 1).ok_or(ParseError::ExpectedDo)?,
-    ))?;
+    ));
 
     let body = try_join(trim_semi(
         tokens
             .get(do_idx + 1..done_idx - 1)
             .ok_or(ParseError::ExpectedDone)?,
-    ))?;
+    ));
 
     Ok(LoopBlock {
         condition: cond_str,

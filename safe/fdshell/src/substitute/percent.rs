@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::ExportedFd;
@@ -32,32 +32,30 @@ pub(crate) fn percent_subst(
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'%') => {
-            out.push(b'%').change_context(ResolveError::Never)?;
+            out.push_cstr(c"%");
             peek.next();
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = collect_name(peek)?;
-            let num_str = match cache.get(&name_scs) {
-                Some(d) => d.to_string(),
+            match cache.get(&name_scs) {
+                Some(d) => {
+                    core::write!(out, "{}", d).change_context(ResolveError::Never)?;
+                }
                 None => match state.fds.get(&name_scs) {
                     Some(src) => {
                         let owned = src.export().change_context(ResolveError::RefNotFound)?;
-                        let s = owned.to_string();
+                        core::write!(out, "{}", owned).change_context(ResolveError::Never)?;
                         cache.insert(name_scs, owned);
-                        s
                     }
                     None => {
-                        out.push(b'%').change_context(ResolveError::Never)?;
-                        out.push_str(&name_scs)
-                            .change_context(ResolveError::Never)?;
+                        out.push_cstr(c"%");
+                        out.push_str(&name_scs);
                         return Ok(());
                     }
                 },
-            };
-            out.push_slice(num_str.as_bytes())
-                .change_context(ResolveError::NulByte)?;
+            }
         }
-        _ => out.push(b'%').change_context(ResolveError::NulByte)?,
+        _ => out.push_cstr(c"%"),
     }
     Ok(())
 }

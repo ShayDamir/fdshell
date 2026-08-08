@@ -11,11 +11,11 @@ pub(super) fn resolve_var_name(
 ) -> Result<(), Report<ResolveError>> {
     match state.strings.get(name) {
         Some(val) => {
-            out.push_str(val).change_context(ResolveError::Never)?;
+            out.push_str(val);
         }
         None => {
-            out.push(b'$').change_context(ResolveError::Never)?;
-            out.push_str(name).change_context(ResolveError::Never)?;
+            out.push_cstr(c"$");
+            out.push_str(name);
         }
     }
     Ok(())
@@ -39,7 +39,7 @@ pub(super) fn resolve_positional_index(
     }
     let idx: usize = num.parse().change_context(ResolveError::TooLarge)?;
     if let Some(pos) = state.positional.get(idx) {
-        out.push_str(pos).change_context(ResolveError::Never)?;
+        out.push_str(pos);
     }
     Ok(())
 }

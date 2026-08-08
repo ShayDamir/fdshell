@@ -28,49 +28,49 @@ fn help_text_is_nonempty() {
 #[test]
 fn rules_text_empty_filter() {
     let filter = make_filter(&[], &[]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(text.as_bytes().unwrap(), b"");
 }
 
 #[test]
 fn rules_text_single_allow() {
     let filter = make_filter(&["PATH"], &[]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(text.as_bytes().unwrap(), b"allow: PATH\n");
 }
 
 #[test]
 fn rules_text_single_deny() {
     let filter = make_filter(&[], &["*_KEY"]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(text.as_bytes().unwrap(), b"deny: *_KEY\n");
 }
 
 #[test]
 fn rules_text_multiple_allow() {
     let filter = make_filter(&["PATH", "HOME"], &[]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(text.as_bytes().unwrap(), b"allow: PATH HOME\n");
 }
 
 #[test]
 fn rules_text_multiple_deny() {
     let filter = make_filter(&[], &["*_KEY", "*_TOKEN"]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(text.as_bytes().unwrap(), b"deny: *_KEY *_TOKEN\n");
 }
 
 #[test]
 fn rules_text_allow_and_deny() {
     let filter = make_filter(&["PATH"], &["*_KEY"]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(text.as_bytes().unwrap(), b"allow: PATH\ndeny: *_KEY\n");
 }
 
 #[test]
 fn rules_text_multiple_mixed() {
     let filter = make_filter(&["PATH", "HOME", "USER"], &["*_KEY", "*_TOKEN"]);
-    let text = rules_text(&filter).unwrap();
+    let text = rules_text(&filter);
     assert_eq!(
         text.as_bytes().unwrap(),
         b"allow: PATH HOME USER\ndeny: *_KEY *_TOKEN\n"

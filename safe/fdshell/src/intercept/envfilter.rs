@@ -43,7 +43,7 @@ pub(crate) fn run_envfilter(
 
     if parsed.do_list {
         let state = cell.borrow().change_context(CmdError::Never)?;
-        let text = rules_text(&state.env_filter).change_context(CmdError::Never)?;
+        let text = rules_text(&state.env_filter);
         let _ = sys::OUT.write_all(text.as_bytes().change_context(CmdError::Never)?);
     }
 

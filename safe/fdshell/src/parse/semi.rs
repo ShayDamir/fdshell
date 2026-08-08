@@ -1,5 +1,3 @@
-use crate::error::parse::ParseError;
-use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub(crate) fn find_preceded_by_semi(
@@ -32,15 +30,13 @@ pub(crate) fn trim_semi(tokens: &[(ShortCStr, usize, bool)]) -> &[(ShortCStr, us
     tokens.get(start..end).unwrap_or(&[])
 }
 
-pub(crate) fn try_join(
-    tokens: &[(ShortCStr, usize, bool)],
-) -> Result<ShortCStr, Report<ParseError>> {
+pub(crate) fn try_join(tokens: &[(ShortCStr, usize, bool)]) -> ShortCStr {
     let mut out = ShortCStr::new();
     for (t, _, _) in tokens {
         if !out.is_empty() {
-            out.push(b' ').change_context(ParseError::Never)?;
+            out.push_cstr(c" ");
         }
-        out.push_str(t).change_context(ParseError::Never)?;
+        out.push_str(t);
     }
-    Ok(out)
+    out
 }
