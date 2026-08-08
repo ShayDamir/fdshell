@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-use fdshell::parse_cli_args;
+use fdshell::{load_script, parse_cli_args};
+use sys::pipe::pipe2;
 
 #[test]
 fn parse_dirfd_without_value_is_usage_error() {
@@ -121,4 +122,42 @@ fn parse_fd_skips_positional_when_index_is_wrong() {
             // fd validation failed - expected
         }
     }
+}
+
+#[test]
+fn parse_positional_only() {
+    let args = vec![c"script.sh".into(), c"--flag".into()];
+    let result = parse_cli_args(&args);
+    assert!(
+        result.is_ok(),
+        "positional-only args should parse successfully"
+    );
+    let parsed = result.unwrap();
+    assert_eq!(parsed.positional.len(), 2, "both args should be positional");
+    assert_eq!(
+        parsed.positional.first().unwrap().as_bytes().unwrap(),
+        b"script.sh"
+    );
+    assert_eq!(
+        parsed.positional.get(1).unwrap().as_bytes().unwrap(),
+        b"--flag"
+    );
+    assert!(parsed.dirfd.is_none());
+    assert!(parsed.script_fd.is_none());
+}
+
+#[test]
+fn load_script_reads_data_until_eof() {
+    let (rd, wr) = pipe2(0).unwrap();
+    // Write > 4096 bytes to force multiple reads; mutant breaks on first read
+    // and returns truncated data, causing this assertion to fail.
+    let expected: Vec<u8> = vec![0xAB; 8192];
+    let data = expected.clone();
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            sys::rw::write(&wr, &data).unwrap();
+        });
+        let content = load_script(&rd).unwrap();
+        assert_eq!(content.as_slice(), &expected[..]);
+    });
 }
