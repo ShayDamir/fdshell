@@ -1262,3 +1262,122 @@ fn case_last_clause_no_semi_semi() {
     assert_eq!(cb.clauses[0].body, c"echo one".into());
     assert_eq!(cb.clauses[1].body, c"echo two".into());
 }
+
+#[test]
+fn tokenize_pipe_after_gt_token() {
+    let tokens = token::tokenize(b"foo>bar | cmd").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].0, c"foo>bar".into());
+    assert_eq!(tokens[1].0, c"|".into());
+    assert_eq!(tokens[2].0, c"cmd".into());
+}
+
+#[test]
+fn tokenize_pipe_position() {
+    let tokens = token::tokenize(b"a|b").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].0, c"a".into());
+    assert_eq!(tokens[0].1, 0);
+    assert_eq!(tokens[1].0, c"|".into());
+    assert_eq!(tokens[1].1, 1);
+    assert_eq!(tokens[2].0, c"b".into());
+    assert_eq!(tokens[2].1, 0);
+}
+
+#[test]
+fn tokenize_caret_pipe_position() {
+    let tokens = token::tokenize(b"%>%fd|cmd").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].0, c"%>%fd".into());
+    assert_eq!(tokens[1].0, c"|".into());
+    assert_eq!(tokens[1].1, 5);
+    assert_eq!(tokens[2].0, c"cmd".into());
+}
+
+#[test]
+fn tokenize_close_paren_position() {
+    let tokens = token::tokenize(b"case x in a) echo one;; esac").unwrap();
+    let paren_token = tokens.iter().find(|(t, _, _)| t.eq_bytes(b")")).unwrap();
+    assert_eq!(paren_token.0, c")".into());
+    assert_eq!(paren_token.1, 11);
+}
+
+#[test]
+fn tokenize_comment_shifts_positions() {
+    let tokens = token::tokenize(b"hello # comment\nworld").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, c"hello".into());
+    assert_eq!(tokens[1].0, c"world".into());
+}
+
+#[test]
+fn tokenize_comment_no_newline_shifts_positions() {
+    let tokens = token::tokenize(b"hello # trailing comment").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"hello".into());
+}
+
+#[test]
+fn tokenize_comment_with_trailing_token_position() {
+    let tokens = token::tokenize(b"a # comment\nb").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, c"a".into());
+    assert_eq!(tokens[0].1, 0);
+    assert_eq!(tokens[1].0, c"b".into());
+    assert_eq!(tokens[1].1, 12);
+}
+
+#[test]
+fn tokenize_unbalanced_quote_error_position() {
+    let result = token::tokenize(b"\"unclosed");
+    assert!(result.is_err());
+    let e = result.unwrap_err();
+    let pos: usize = e
+        .downcast_ref::<crate::error::parse::ParsePosition>()
+        .unwrap()
+        .pos;
+    assert_eq!(
+        pos, 0,
+        "unbalanced quote should be at position 0 (opening quote)"
+    );
+}
+
+#[test]
+fn tokenize_unbalanced_dollar_paren_error_position() {
+    let result = token::tokenize(b"$(unclosed");
+    assert!(result.is_err());
+    let e = result.unwrap_err();
+    let pos: usize = e
+        .downcast_ref::<crate::error::parse::ParsePosition>()
+        .unwrap()
+        .pos;
+    assert_eq!(pos, 0, "unbalanced $() should be at position 0");
+}
+
+#[test]
+fn tokenize_unbalanced_backtick_error_position() {
+    let result = token::tokenize(b"`unclosed");
+    assert!(result.is_err());
+    let e = result.unwrap_err();
+    let pos: usize = e
+        .downcast_ref::<crate::error::parse::ParsePosition>()
+        .unwrap()
+        .pos;
+    assert_eq!(pos, 0, "unbalanced backtick should be at position 0");
+}
+
+#[test]
+fn tokenize_amp_pipe_valid() {
+    let tokens = token::tokenize(b"&|").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, c"&".into());
+    assert_eq!(tokens[1].0, c"|".into());
+}
+
+#[test]
+fn tokenize_percent_pipe_valid() {
+    let tokens = token::tokenize(b"%|").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, c"%".into());
+    assert_eq!(tokens[1].0, c"|".into());
+}
