@@ -26,6 +26,10 @@ pub(crate) fn try_intercept(
     }
 }
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
+
 mod become_cmd;
 mod cd;
 mod envfilter;

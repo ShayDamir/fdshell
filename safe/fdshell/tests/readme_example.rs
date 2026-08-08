@@ -511,3 +511,11 @@ fn exit_max_valid_code() {
     let output = run_c("exit 255", &dir);
     assert_eq!(output.status.code(), Some(255));
 }
+
+#[test]
+fn exec_builtin_replaces_shell() {
+    let dir = tmpdir();
+    let output = run_c("exec builtin echo hello", &dir);
+    assert_ok(&output, "exec_builtin_replaces_shell");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "hello");
+}
