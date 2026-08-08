@@ -30,8 +30,9 @@ pub(crate) fn dollar_subst(
             peek.next();
             join_positional(out, state)?;
         }
-        Some(c) if c.is_ascii_digit() => {
+        Some(c @ b'0'..=b'9') => {
             // $0, $1, ... $N
+            peek.next();
             super::resolve::resolve_positional_index(c, peek, state, out)?;
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {

@@ -9,8 +9,8 @@ pub(crate) enum ResolveError {
     NulByte,
     /// unclosed subexpression parenthesis
     UnclosedParen,
-    /// malformed variable/reference syntax
-    MalformedRef,
+    /// index or value too large for type
+    TooLarge,
     /// resolution failed
     Resolve,
     /// impossible error state (should never occur)

@@ -1,4 +1,3 @@
-use alloc::vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
@@ -28,19 +27,17 @@ pub(super) fn resolve_positional_index(
     state: &ShellState,
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
-    let mut num_bytes = vec![first_digit];
+    let mut num = ShortCStr::new();
+    num.push(first_digit).change_context(ResolveError::Never)?;
     while let Some(&nc) = peek.peek() {
         if nc.is_ascii_digit() {
-            num_bytes.push(nc);
+            num.push(nc).change_context(ResolveError::Never)?;
             peek.next();
         } else {
             break;
         }
     }
-    let num_short = ShortCStr::from_vec(num_bytes).change_context(ResolveError::Never)?;
-    let idx: usize = num_short
-        .parse()
-        .change_context(ResolveError::MalformedRef)?;
+    let idx: usize = num.parse().change_context(ResolveError::TooLarge)?;
     if let Some(pos) = state.positional.get(idx) {
         out.push_str(pos).change_context(ResolveError::Never)?;
     }

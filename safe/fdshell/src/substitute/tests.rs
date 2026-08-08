@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use alloc::collections::VecDeque;
 use alloc::format;
 
 use hashbrown::HashMap;
@@ -295,4 +296,163 @@ fn brace_hash_in_text() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"len=5 end");
+}
+
+fn positional_cell() -> ForkCell<ShellState> {
+    positional_cell_with_n(3)
+}
+
+fn positional_cell_with_n(n: usize) -> ForkCell<ShellState> {
+    let cell = ForkCell::new(ShellState::new());
+    let mut positional: alloc::collections::VecDeque<ShortCStr> =
+        alloc::collections::VecDeque::new();
+    for i in 0..n {
+        positional.push_back(match i {
+            0 => ShortCStr::from(c"arg0"),
+            1 => ShortCStr::from(c"arg1"),
+            2 => ShortCStr::from(c"arg2"),
+            3 => ShortCStr::from(c"arg3"),
+            4 => ShortCStr::from(c"arg4"),
+            5 => ShortCStr::from(c"arg5"),
+            6 => ShortCStr::from(c"arg6"),
+            7 => ShortCStr::from(c"arg7"),
+            8 => ShortCStr::from(c"arg8"),
+            9 => ShortCStr::from(c"arg9"),
+            10 => ShortCStr::from(c"arg10"),
+            11 => ShortCStr::from(c"arg11"),
+            12 => ShortCStr::from(c"arg12"),
+            13 => ShortCStr::from(c"arg13"),
+            14 => ShortCStr::from(c"arg14"),
+            15 => ShortCStr::from(c"arg15"),
+            16 => ShortCStr::from(c"arg16"),
+            17 => ShortCStr::from(c"arg17"),
+            18 => ShortCStr::from(c"arg18"),
+            19 => ShortCStr::from(c"arg19"),
+            _ => ShortCStr::from(c"argx"),
+        });
+    }
+    cell.borrow_mut().unwrap().set_positional(positional);
+    cell
+}
+
+#[test]
+fn dollar_hash_returns_positional_count() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$#");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"3");
+}
+
+#[test]
+fn dollar_hash_empty_positional() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(VecDeque::new());
+    let arg = ShortCStr::from(c"$#");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"0");
+}
+
+#[test]
+fn dollar_at_expands_positional() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$@");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg0 arg1 arg2");
+}
+
+#[test]
+fn dollar_star_expands_positional() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$*");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg0 arg1 arg2");
+}
+
+#[test]
+fn dollar_at_single_positional() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut()
+        .unwrap()
+        .set_positional([c"only"].into_iter().map(ShortCStr::from).collect());
+    let arg = ShortCStr::from(c"$@");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"only");
+}
+
+#[test]
+fn dollar_at_empty_positional() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(VecDeque::new());
+    let arg = ShortCStr::from(c"$@");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn dollar_zero_is_first_positional() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$0");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg0");
+}
+
+#[test]
+fn dollar_one_is_second_positional() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$1");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg1");
+}
+
+#[test]
+fn dollar_n_is_third_positional() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$2");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg2");
+}
+
+#[test]
+fn dollar_n_out_of_range_is_empty() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$9");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn dollar_positional_in_text() {
+    let cell = positional_cell();
+    let arg = ShortCStr::from(c"$0-$1-$2");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg0-arg1-arg2");
+}
+
+#[test]
+fn dollar_multi_digit_index() {
+    let cell = positional_cell_with_n(15);
+    let arg = ShortCStr::from(c"$10");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg10");
+}
+
+#[test]
+fn dollar_multi_digit_index_in_text() {
+    let cell = positional_cell_with_n(20);
+    let arg = ShortCStr::from(c"$1-$10-$19");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg1-arg10-arg19");
 }
