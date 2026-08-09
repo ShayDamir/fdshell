@@ -1243,3 +1243,111 @@ fn starts_with_rc() {
     assert!(s.starts_with(b"hello"));
     assert!(!s.starts_with(b"world"));
 }
+
+// --- split iterator ---
+
+#[test]
+fn split_single_no_sep() {
+    let s = ShortCStr::from(c"hello");
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"hello");
+}
+
+#[test]
+fn split_two_parts() {
+    let s = ShortCStr::from(c"foo,bar");
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"foo");
+    assert_eq!(parts[1].as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn split_three_parts() {
+    let s = ShortCStr::from(c"a,b,c");
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 3);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"a");
+    assert_eq!(parts[1].as_bytes().unwrap(), b"b");
+    assert_eq!(parts[2].as_bytes().unwrap(), b"c");
+}
+
+#[test]
+fn split_empty_prefix() {
+    let s = ShortCStr::from(c",bar");
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"");
+    assert_eq!(parts[1].as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn split_empty_suffix() {
+    let s = ShortCStr::from(c"foo,");
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"foo");
+    assert_eq!(parts[1].as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn split_empty_string() {
+    let s = ShortCStr::new();
+    let parts: Vec<_> = s.split(b',').collect();
+    assert!(parts.is_empty());
+}
+
+#[test]
+fn split_static() {
+    let s = ShortCStr::from(LONG);
+    let parts: Vec<_> = s.split(b' ').collect();
+    assert!(parts.len() > 1);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"The");
+}
+
+#[test]
+fn split_rc() {
+    let raw = b"one,this is more than thirty bytes long in the second part";
+    let s: ShortCStr = ShortCStr::from_vec(raw.to_vec()).unwrap();
+    assert!(s.len() > 30);
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"one");
+    assert_eq!(
+        parts[1].as_bytes().unwrap(),
+        b"this is more than thirty bytes long in the second part"
+    );
+}
+
+#[test]
+fn split_middle_empty() {
+    let s = ShortCStr::from(c"a,,b");
+    let parts: Vec<_> = s.split(b',').collect();
+    assert_eq!(parts.len(), 3);
+    assert_eq!(parts[0].as_bytes().unwrap(), b"a");
+    assert!(parts[1].is_empty());
+    assert_eq!(parts[2].as_bytes().unwrap(), b"b");
+}
+
+#[test]
+fn split_drain_first() {
+    let s = ShortCStr::from(c"foo,bar,baz");
+    let mut iter = s.split(b',');
+    let a = iter.next().unwrap();
+    assert_eq!(a.as_bytes().unwrap(), b"foo");
+    let b = iter.next().unwrap();
+    assert_eq!(b.as_bytes().unwrap(), b"bar");
+    let c = iter.next().unwrap();
+    assert_eq!(c.as_bytes().unwrap(), b"baz");
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn split_drain_all() {
+    let s = ShortCStr::from(c"a,b,c");
+    let mut iter = s.split(b',');
+    let parts: Vec<_> = iter.by_ref().collect();
+    assert_eq!(parts.len(), 3);
+    assert!(iter.next().is_none());
+}
