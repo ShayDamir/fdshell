@@ -156,6 +156,49 @@ fn fork_pidfd_cell_with_struct() -> Result<(), SyscallError> {
     }
 }
 
+/// After fork_pidfd_cell, the parent's ForkCell borrow state must be preserved.
+/// If reset_after_fork is incorrectly called in the parent (mutation ret == 0
+/// → ret != 0), the borrow count would be reset to 0, allowing mutable borrows
+/// that should fail when shared borrows are active.
+#[test]
+fn fork_pidfd_cell_preserves_parent_borrow_state() -> Result<(), SyscallError> {
+    let cell = ForkCell::new(42);
+
+    // Hold an active shared borrow in the parent (count becomes 1).
+    let _parent_borrow = cell.borrow().unwrap();
+
+    // Fork — the parent's borrow count should remain 1.
+    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(&cell)?;
+    if ret == 0 {
+        // Child: reset and exit.
+        // SAFETY: we are in the forked child process -- exclusive ownership of
+        // this copy of memory; calling reset_after_fork is safe.
+        unsafe { cell.reset_after_fork() };
+        sys::exit(0);
+    }
+
+    // Parent: mutable borrow must fail because shared borrow is still active.
+    // With the mutation (ret == 0 → ret != 0), reset_after_fork corrupts the
+    // parent's count to 0, making this succeed when it should fail.
+    assert!(
+        cell.borrow_mut().is_err(),
+        "mutable borrow should fail while shared borrow is active — \
+         fork_pidfd_cell corrupted parent ForkCell state"
+    );
+
+    let pidfd = pidfd_opt.ok_or(SyscallError::Other {
+        errno: sys::errno::EINVAL,
+        syscall: "fork_pidfd_cell",
+    })?;
+    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+        WaitStatus::Exited(0) => Ok(()),
+        _ => Err(SyscallError::Other {
+            errno: sys::errno::EINVAL,
+            syscall: "wait_pidfd",
+        }),
+    }
+}
+
 struct MyStruct {
     a: i32,
     b: &'static str,

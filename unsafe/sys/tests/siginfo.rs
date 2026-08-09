@@ -1,7 +1,7 @@
 #![allow(deprecated)]
 
 use core::mem::size_of_val;
-use sys::siginfo::SigInfo;
+use sys::siginfo::{SigInfo, WaitStatus};
 
 #[test]
 fn siginfo_layout_matches_libc() {
@@ -44,4 +44,16 @@ fn siginfo_layout_matches_libc() {
     check_pad!(si_pid, 1usize);
     check_pad!(si_uid, 2usize);
     check_pad!(si_status, 3usize);
+}
+
+#[test]
+fn wait_status_exit_code_returns_correct_values() {
+    assert_eq!(WaitStatus::Exited(0).exit_code(), 0);
+    assert_eq!(WaitStatus::Exited(42).exit_code(), 42);
+    assert_eq!(WaitStatus::Exited(255).exit_code(), 255);
+
+    // Signal exit codes: 128 + signal_number
+    assert_eq!(WaitStatus::Signaled(9).exit_code(), 137);
+    assert_eq!(WaitStatus::Signaled(11).exit_code(), 139);
+    assert_eq!(WaitStatus::Signaled(15).exit_code(), 143);
 }
