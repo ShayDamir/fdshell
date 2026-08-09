@@ -11,11 +11,11 @@ pub(crate) fn collect_name(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
 ) -> Result<ShortCStr, Report<ResolveError>> {
     let mut name = ShortCStr::new();
-    name.push(peek.next().ok_or(ResolveError::RefNotFound)?)
+    name.push_byte(peek.next().ok_or(ResolveError::RefNotFound)?)
         .change_context(ResolveError::NulByte)?;
     while let Some(&nc) = peek.peek() {
         if nc.is_ascii_alphanumeric() || nc == b'_' {
-            name.push(nc).change_context(ResolveError::NulByte)?;
+            name.push_byte(nc).change_context(ResolveError::NulByte)?;
             peek.next();
         } else {
             break;
@@ -32,7 +32,7 @@ pub(crate) fn percent_subst(
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'%') => {
-            out.push_cstr(c"%");
+            out.push(c"%");
             peek.next();
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
@@ -48,14 +48,14 @@ pub(crate) fn percent_subst(
                         cache.insert(name_scs, owned);
                     }
                     None => {
-                        out.push_cstr(c"%");
-                        out.push_str(&name_scs);
+                        out.push(c"%");
+                        out.push(&name_scs);
                         return Ok(());
                     }
                 },
             }
         }
-        _ => out.push_cstr(c"%"),
+        _ => out.push(c"%"),
     }
     Ok(())
 }

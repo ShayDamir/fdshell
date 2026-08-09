@@ -1,12 +1,11 @@
 use alloc::sync::Arc;
-use core::ffi::CStr;
 
 use crate::shortcstr::copy::copy_to_shortcstr;
 use crate::shortcstr::push_fallback::extend_from_slice_fallback;
-use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr, ShortCStrError};
+use crate::shortcstr::{INLINE_CAP, InlineSize, NoNul, ShortCStr, ShortCStrError};
 
 impl ShortCStr {
-    pub fn push(&mut self, byte: u8) -> Result<(), ShortCStrError> {
+    pub fn push_byte(&mut self, byte: u8) -> Result<(), ShortCStrError> {
         if byte == 0 {
             return Err(ShortCStrError::NulByte);
         }
@@ -15,23 +14,24 @@ impl ShortCStr {
         Ok(())
     }
 
-    pub fn push_str(&mut self, other: &ShortCStr) {
-        // SAFETY: other is a valid ShortCStr, guaranteed no NUL bytes by type invariant.
-        unsafe { self.extend_from_slice_unchecked(other.as_bytes().unwrap_or(&[])) };
+    /// Infallible push of a type guaranteed to contain no NUL bytes.
+    pub fn push<T: NoNul>(&mut self, val: T) {
+        // SAFETY: T::as_non_zero_bytes() returns &[NonZeroU8], which cannot contain zero bytes.
+        unsafe {
+            let nz = val.as_non_zero_bytes();
+            let bytes = core::slice::from_raw_parts(nz.as_ptr() as *const u8, nz.len());
+            self.extend_from_slice_unchecked(bytes);
+        }
     }
 
-    pub fn push_slice(&mut self, bytes: &[u8]) -> Result<(), ShortCStrError> {
+    /// Append bytes after checking for NUL. Used by `fmt::Write`.
+    pub fn push_checked(&mut self, bytes: &[u8]) -> Result<(), ShortCStrError> {
         if bytes.contains(&0) {
             return Err(ShortCStrError::NulByte);
         }
         // SAFETY: all bytes validated as non-NUL above.
         unsafe { self.extend_from_slice_unchecked(bytes) };
         Ok(())
-    }
-
-    pub fn push_cstr(&mut self, s: &CStr) {
-        // SAFETY: CStr is guaranteed not to contain NUL bytes in its data.
-        unsafe { self.extend_from_slice_unchecked(s.to_bytes()) };
     }
 
     /// Append bytes without checking for NUL.

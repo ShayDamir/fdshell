@@ -8,31 +8,31 @@ pub(crate) fn read_dollar_paren(
     bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     start: usize,
 ) -> Result<(), Report<ParseError>> {
-    cur.push(b'$')
+    cur.push_byte(b'$')
         .change_context(ParseError::InvalidChar { ch: 0 })?;
-    cur.push(b'(')
+    cur.push_byte(b'(')
         .change_context(ParseError::InvalidChar { ch: 0 })?;
     bytes.next(); // consume '('
     let mut depth = 1u32;
     while depth > 0 {
         match bytes.next() {
             Some(b'(') => {
-                cur.push(b'(')
+                cur.push_byte(b'(')
                     .change_context(ParseError::InvalidChar { ch: 0 })?;
                 depth += 1;
             }
             Some(b')') => {
                 depth -= 1;
                 if depth == 0 {
-                    cur.push(b')')
+                    cur.push_byte(b')')
                         .change_context(ParseError::InvalidChar { ch: 0 })?;
                     break;
                 }
-                cur.push(b')')
+                cur.push_byte(b')')
                     .change_context(ParseError::InvalidChar { ch: 0 })?;
             }
             Some(c) => cur
-                .push(c)
+                .push_byte(c)
                 .change_context(ParseError::InvalidChar { ch: 0 })?,
             None => return Err(report_unexpected_eof(line, start)),
         }

@@ -10,7 +10,7 @@ pub use importedfd_error::ImportedFdError;
 pub use localfd::LocalFd;
 pub use localfd_error::LocalFdError;
 pub use recv_fd_error::RecvFdError;
-pub use shortcstr::{ExportedCStr, ShortCStr, ShortCStrError};
+pub use shortcstr::{ExportedCStr, NoNul, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
 pub use umask::UmaskError;
 

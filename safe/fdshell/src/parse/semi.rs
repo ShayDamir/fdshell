@@ -34,9 +34,9 @@ pub(crate) fn try_join(tokens: &[(ShortCStr, usize, bool)]) -> ShortCStr {
     let mut out = ShortCStr::new();
     for (t, _, _) in tokens {
         if !out.is_empty() {
-            out.push_cstr(c" ");
+            out.push(c" ");
         }
-        out.push_str(t);
+        out.push(t);
     }
     out
 }

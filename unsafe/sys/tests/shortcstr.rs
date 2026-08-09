@@ -549,7 +549,7 @@ fn new_is_empty() {
 fn push_up_to_inline_cap() {
     let mut s = ShortCStr::new();
     for (i, &b) in b"abcdefghijklmnopqrstuvwxyzABCD".iter().enumerate() {
-        s.push(b).unwrap();
+        s.push_byte(b).unwrap();
         assert_eq!(s.len(), i + 1);
     }
     assert_eq!(s.as_bytes().unwrap(), b"abcdefghijklmnopqrstuvwxyzABCD");
@@ -560,7 +560,7 @@ fn push_overflows_to_rc() {
     let mut s = ShortCStr::new();
     let payload = b"123456789012345678901234567890!";
     for &b in payload.iter() {
-        s.push(b).unwrap();
+        s.push_byte(b).unwrap();
     }
     assert_eq!(s.as_bytes().unwrap(), payload);
     // should be Arc variant now (31 bytes > INLINE_CAP)
@@ -570,8 +570,8 @@ fn push_overflows_to_rc() {
 #[test]
 fn push_nul_returns_err() {
     let mut s = ShortCStr::new();
-    s.push(b'a').unwrap();
-    assert!(s.push(b'\0').is_err());
+    s.push_byte(b'a').unwrap();
+    assert!(s.push_byte(b'\0').is_err());
     // content unchanged
     assert_eq!(s.as_bytes().unwrap(), b"a");
 }
@@ -655,21 +655,21 @@ fn extend_static_tail_stays_static() {
 #[test]
 fn push_cstr_inline_empty() {
     let mut s = ShortCStr::new();
-    s.push_cstr(c"hello");
+    s.push(c"hello");
     assert_eq!(s.as_bytes().unwrap(), b"hello");
 }
 
 #[test]
 fn push_cstr_inline_existing() {
     let mut s = ShortCStr::from(c"foo");
-    s.push_cstr(c"bar");
+    s.push(c"bar");
     assert_eq!(s.as_bytes().unwrap(), b"foobar");
 }
 
 #[test]
 fn push_cstr_empty_cstr() {
     let mut s = ShortCStr::from(c"hello");
-    s.push_cstr(c"");
+    s.push(c"");
     assert_eq!(s.as_bytes().unwrap(), b"hello");
 }
 
@@ -677,10 +677,10 @@ fn push_cstr_empty_cstr() {
 fn push_cstr_overflows_inline_to_arc() {
     let mut s = ShortCStr::new();
     for _ in 0..30 {
-        s.push_cstr(c"x");
+        s.push(c"x");
     }
     assert_eq!(s.len(), 30);
-    s.push_cstr(c"y");
+    s.push(c"y");
     assert_eq!(s.len(), 31);
     let expected = vec![b'x'; 30]
         .into_iter()
@@ -694,7 +694,7 @@ fn push_cstr_static_variant() {
     let s = ShortCStr::from(LONG);
     let tail = s.get(60..).unwrap();
     let mut tail = tail.clone();
-    tail.push_cstr(c" appended");
+    tail.push(c" appended");
     let expected: Vec<u8> = LONG.to_bytes()[60..]
         .iter()
         .copied()
@@ -707,7 +707,7 @@ fn push_cstr_static_variant() {
 fn push_cstr_arc_variant() {
     let raw = b"hello world this is more than thirty bytes total";
     let mut s: ShortCStr = ShortCStr::from_vec(raw.to_vec()).unwrap();
-    s.push_cstr(c" extra");
+    s.push(c" extra");
     assert_eq!(
         s.as_bytes().unwrap(),
         b"hello world this is more than thirty bytes total extra"
@@ -720,23 +720,23 @@ fn push_cstr_arc_non_tail() {
     let s: ShortCStr = ShortCStr::from_vec(raw.to_vec()).unwrap();
     let sub = s.get(6..11).unwrap();
     let mut sub = sub.clone();
-    sub.push_cstr(c" world");
+    sub.push(c" world");
     assert_eq!(sub.as_bytes().unwrap(), b"world world");
 }
 
 #[test]
 fn push_cstr_special_chars() {
     let mut s = ShortCStr::new();
-    s.push_cstr(c"tab\there");
+    s.push(c"tab\there");
     assert_eq!(s.as_bytes().unwrap(), b"tab\there");
 }
 
 #[test]
 fn push_cstr_multiple() {
     let mut s = ShortCStr::new();
-    s.push_cstr(c"hello");
-    s.push_cstr(c" ");
-    s.push_cstr(c"world");
+    s.push(c"hello");
+    s.push(c" ");
+    s.push(c"world");
     assert_eq!(s.as_bytes().unwrap(), b"hello world");
 }
 
@@ -1027,7 +1027,7 @@ fn concat_empty_parts() {
 
 #[test]
 fn concat_nul_in_arc_view() {
-    // Concat with a ShortCStr that has NUL in its data range — push_str is infallible
+    // Concat with a ShortCStr that has NUL in its data range — push is infallible
     // because it trusts the ShortCStr invariant; the NUL is already present in the source.
     let nul_s = ShortCStr::Arc {
         arc: Arc::new(b"hi\0there".to_vec()),

@@ -5,7 +5,7 @@
 - [x] Add `ShortCStr::split()` — iterator yielding `ShortCStr` items, splitting on a separator byte
 - [x] Add `ShortCStr::parse<T: FromStr>()` — convert ShortCStr to typed values (e.g. `i32`, `u32`)
 - [x] Add `push_cstr(&mut self, str: &CStr)` — infallible since `CStr` doesn't contain NUL bytes by definition
-- [ ] Add `AsNonNullBytes` unsafe trait implemented for all types that cannot contain NUL bytes; use it to extend infallible pushes (`push_str_checked`, `concat`) to such types (e.g. `CString`, `String`, `&str`)
+- [x] Add `NoNul` unsafe trait implemented for all types that cannot contain NUL bytes; use it to extend infallible pushes (`push`, `concat`) to such types (e.g. `CStr`, `CString`, `ShortCStr`)
 
 ## Refactoring / cleanup
 

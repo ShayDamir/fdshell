@@ -13,7 +13,7 @@ pub(crate) fn handle_quoted_char(
         b'"' => Ok(false),
         b'\\' => {
             if let Some(c) = bytes.next() {
-                cur.push(c)
+                cur.push_byte(c)
                     .change_context(ParseError::InvalidChar { ch: 0 })?;
             } else {
                 return Err(report_unexpected_eof(line, pos));
@@ -21,7 +21,7 @@ pub(crate) fn handle_quoted_char(
             Ok(true)
         }
         _ => {
-            cur.push(b)
+            cur.push_byte(b)
                 .change_context(ParseError::InvalidChar { ch: 0 })?;
             Ok(true)
         }

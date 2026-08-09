@@ -22,6 +22,7 @@ mod traits;
 pub use error::ShortCStrError;
 pub(crate) use from::from_inline;
 pub use size::InlineSize;
+pub use traits::NoNul;
 
 pub(crate) const INLINE_MAX: u8 = 30;
 const INLINE_CAP: usize = INLINE_MAX as usize;

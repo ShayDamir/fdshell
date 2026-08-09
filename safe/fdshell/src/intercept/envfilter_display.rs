@@ -16,24 +16,24 @@ pub(crate) fn help_text() -> &'static [u8] {
 pub(crate) fn rules_text(filter: &EnvFilter) -> ShortCStr {
     let mut result = ShortCStr::new();
     if !filter.allow.is_empty() {
-        result.push_cstr(c"allow: ");
+        result.push(c"allow: ");
         for (i, pattern) in filter.allow.iter().enumerate() {
             if i > 0 {
-                result.push_cstr(c" ");
+                result.push(c" ");
             }
-            result.push_str(pattern);
+            result.push(pattern);
         }
-        result.push_cstr(c"\n");
+        result.push(c"\n");
     }
     if !filter.deny.is_empty() {
-        result.push_cstr(c"deny: ");
+        result.push(c"deny: ");
         for (i, pattern) in filter.deny.iter().enumerate() {
             if i > 0 {
-                result.push_cstr(c" ");
+                result.push(c" ");
             }
-            result.push_str(pattern);
+            result.push(pattern);
         }
-        result.push_cstr(c"\n");
+        result.push(c"\n");
     }
     result
 }

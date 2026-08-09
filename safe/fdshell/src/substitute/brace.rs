@@ -18,29 +18,29 @@ pub(crate) fn handle_brace(
             if let Some(val) = state.strings.get(&name) {
                 core::write!(out, "{}", val.len()).change_context(ResolveError::Never)?;
             } else {
-                out.push_cstr(c"${#");
-                out.push_str(&name);
-                out.push_cstr(c"}");
+                out.push(c"${#");
+                out.push(&name);
+                out.push(c"}");
             }
         } else {
-            out.push_cstr(c"${#");
-            out.push_str(&name);
+            out.push(c"${#");
+            out.push(&name);
         }
         return Ok(());
     }
     let (name, closed) = read_until_close(peek)?;
     if closed {
         match state.strings.get(&name) {
-            Some(val) => out.push_str(val),
+            Some(val) => out.push(val),
             None => {
-                out.push_cstr(c"${");
-                out.push_str(&name);
-                out.push_cstr(c"}");
+                out.push(c"${");
+                out.push(&name);
+                out.push(c"}");
             }
         }
     } else {
-        out.push_cstr(c"${");
-        out.push_str(&name);
+        out.push(c"${");
+        out.push(&name);
     }
     Ok(())
 }
@@ -55,7 +55,7 @@ fn read_until_close(
             closed = true;
             break;
         }
-        name.push(nc).change_context(ResolveError::NulByte)?;
+        name.push_byte(nc).change_context(ResolveError::NulByte)?;
     }
     Ok((name, closed))
 }

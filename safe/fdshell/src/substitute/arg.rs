@@ -22,10 +22,10 @@ pub(crate) fn substitute_arg(
         match peek.peek() {
             None | Some(&b'/') => {
                 if let Some(home) = sys::env::getenv(c"HOME") {
-                    out.push_str(&home);
+                    out.push(&home);
                 }
             }
-            _ => out.push_cstr(c"~"),
+            _ => out.push(c"~"),
         }
     }
     while let Some(b) = peek.next() {
@@ -39,14 +39,14 @@ pub(crate) fn substitute_arg(
                 let inner = crate::substitute::paren::read_paren_expr(&mut peek)?;
                 let expanded = crate::cmd_subst::run_and_capture(&inner, cell)
                     .change_context(ResolveError::Resolve)?;
-                out.push_slice(&expanded)
+                out.push_checked(&expanded)
                     .change_context(ResolveError::NulByte)?;
             }
             b'$' => {
                 let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
                 crate::substitute::dollar::dollar_subst(&mut peek, &state, &mut out)?;
             }
-            _ => out.push(b).change_context(ResolveError::NulByte)?,
+            _ => out.push_byte(b).change_context(ResolveError::NulByte)?,
         }
     }
     Ok(out)

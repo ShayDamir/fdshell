@@ -11,11 +11,11 @@ pub(super) fn resolve_var_name(
 ) -> Result<(), Report<ResolveError>> {
     match state.strings.get(name) {
         Some(val) => {
-            out.push_str(val);
+            out.push(val);
         }
         None => {
-            out.push_cstr(c"$");
-            out.push_str(name);
+            out.push(c"$");
+            out.push(name);
         }
     }
     Ok(())
@@ -28,10 +28,11 @@ pub(super) fn resolve_positional_index(
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
     let mut num = ShortCStr::new();
-    num.push(first_digit).change_context(ResolveError::Never)?;
+    num.push_byte(first_digit)
+        .change_context(ResolveError::Never)?;
     while let Some(&nc) = peek.peek() {
         if nc.is_ascii_digit() {
-            num.push(nc).change_context(ResolveError::Never)?;
+            num.push_byte(nc).change_context(ResolveError::Never)?;
             peek.next();
         } else {
             break;
@@ -39,7 +40,7 @@ pub(super) fn resolve_positional_index(
     }
     let idx: usize = num.parse().change_context(ResolveError::TooLarge)?;
     if let Some(pos) = state.positional.get(idx) {
-        out.push_str(pos);
+        out.push(pos);
     }
     Ok(())
 }

@@ -44,7 +44,7 @@ pub(crate) fn dollar_subst(
             let code = state.last_status.exit_code();
             core::write!(out, "{code}").change_context(ResolveError::Never)?;
         }
-        _ => out.push_cstr(c"$"),
+        _ => out.push(c"$"),
     }
     Ok(())
 }
@@ -52,9 +52,9 @@ pub(crate) fn dollar_subst(
 fn join_positional(out: &mut ShortCStr, state: &ShellState) -> Result<(), Report<ResolveError>> {
     for (i, p) in state.positional.iter().enumerate() {
         if i > 0 {
-            out.push_cstr(c" ");
+            out.push(c" ");
         }
-        out.push_str(p);
+        out.push(p);
     }
     Ok(())
 }

@@ -52,7 +52,7 @@ fn resolve_path_finds_absolute() {
     let dir = test_dir();
     let abs = setup(&dir);
     let mut bin = ShortCStr::new();
-    bin.push_cstr(abs.as_ref());
+    bin.push(abs.as_ref());
     let fd = resolve_path(&bin).unwrap();
     fd.verify().unwrap();
     teardown(&dir);
@@ -77,7 +77,7 @@ fn exec_fd_with_exports() {
     let dir = test_dir();
     let abs = setup(&dir);
     let mut bin = ShortCStr::new();
-    bin.push_cstr(abs.as_ref());
+    bin.push(abs.as_ref());
     let fd = resolve_path(&bin).unwrap();
 
     let mut exports_map = HashMap::new();
@@ -134,7 +134,7 @@ fn exec_with_paths() {
 
     exec_child(|| {
         let mut bin = ShortCStr::new();
-        bin.push_cstr(abs.as_ref());
+        bin.push(abs.as_ref());
         let fd = resolve_path(&bin).unwrap();
         match exec_fd(
             &fd,
@@ -185,7 +185,7 @@ fn exec_script_via_resolve_fd() {
 
     exec_child(|| {
         let mut script_bin = ShortCStr::new();
-        script_bin.push_cstr(script_cs.as_ref());
+        script_bin.push(script_cs.as_ref());
         let fd = resolve_path(&script_bin).unwrap();
         match exec_fd(
             &fd,

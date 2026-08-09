@@ -32,7 +32,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                     if cur.starts_with(b"%") && cur.ends_with(b">")
                         || cur.starts_with(b"&") && cur.ends_with(b">")
                     {
-                        cur.push(b'|')
+                        cur.push_byte(b'|')
                             .change_context(ParseError::InvalidChar { ch: 0 })?;
                     } else {
                         emit_token(&mut tokens, &mut cur, token_start);
@@ -58,7 +58,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                         let start = pos - 1; // position of '$'
                         super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, start)?;
                     } else {
-                        cur.push(b)
+                        cur.push_byte(b)
                             .change_context(ParseError::InvalidChar { ch: 0 })?;
                     }
                 }
@@ -73,7 +73,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                     token_start = pos;
                 }
                 _ => cur
-                    .push(b)
+                    .push_byte(b)
                     .change_context(ParseError::InvalidChar { ch: 0 })?,
             }
         }

@@ -48,7 +48,7 @@ fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, Report<ResolveError>>
                 words.push(core::mem::take(&mut cur));
             }
         } else {
-            cur.push(b).change_context(ResolveError::NulByte)?;
+            cur.push_byte(b).change_context(ResolveError::NulByte)?;
         }
     }
     if !cur.is_empty() {
