@@ -47,11 +47,14 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                     .iter()
                     .take_while(|&&b| b.is_ascii_whitespace())
                     .count();
-                let kw_len = match part {
-                    p if p.starts_with(b"case") => 4,
-                    p if p.starts_with(b"if") => 2,
-                    p if p.starts_with(b"for") => 3,
-                    _ => 5,
+                let kw_len = if part.starts_with(b"case") {
+                    4
+                } else if part.starts_with(b"if") {
+                    2
+                } else if part.starts_with(b"for") {
+                    3
+                } else {
+                    5
                 };
                 let after_kw = block_start + leading_ws + kw_len;
                 let mut quote_state = in_quote;
@@ -76,3 +79,6 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     }
     segments
 }
+
+#[cfg(test)]
+mod tests;
