@@ -1170,3 +1170,76 @@ fn parse_invalid_utf8() {
         ShortCStrError::InvalidUtf8
     ));
 }
+
+// --- eq_bytes ---
+
+#[test]
+fn eq_bytes_matches() {
+    let s = ShortCStr::from(c"hello");
+    assert!(s.eq_bytes(b"hello"));
+}
+
+#[test]
+fn eq_bytes_no_match() {
+    let s = ShortCStr::from(c"hello");
+    assert!(!s.eq_bytes(b"world"));
+}
+
+#[test]
+fn eq_bytes_empty() {
+    let s = ShortCStr::new();
+    assert!(s.eq_bytes(b""));
+    assert!(!s.eq_bytes(b"a"));
+}
+
+#[test]
+fn eq_bytes_different_length() {
+    let s = ShortCStr::from(c"hi");
+    assert!(!s.eq_bytes(b"hello"));
+}
+
+#[test]
+fn eq_bytes_rc() {
+    let s: ShortCStr = c"hello world this is more than thirty bytes total".into();
+    assert!(s.eq_bytes(b"hello world this is more than thirty bytes total"));
+    assert!(!s.eq_bytes(b"different"));
+}
+
+// --- starts_with ---
+
+#[test]
+fn starts_with_matches() {
+    let s = ShortCStr::from(c"hello world");
+    assert!(s.starts_with(b"hello"));
+}
+
+#[test]
+fn starts_with_full_match() {
+    let s = ShortCStr::from(c"hello");
+    assert!(s.starts_with(b"hello"));
+}
+
+#[test]
+fn starts_with_empty_prefix() {
+    let s = ShortCStr::from(c"hello");
+    assert!(s.starts_with(b""));
+}
+
+#[test]
+fn starts_with_no_match() {
+    let s = ShortCStr::from(c"hello");
+    assert!(!s.starts_with(b"world"));
+}
+
+#[test]
+fn starts_with_longer_prefix() {
+    let s = ShortCStr::from(c"hi");
+    assert!(!s.starts_with(b"hello"));
+}
+
+#[test]
+fn starts_with_rc() {
+    let s: ShortCStr = c"hello world this is more than thirty bytes total".into();
+    assert!(s.starts_with(b"hello"));
+    assert!(!s.starts_with(b"world"));
+}
