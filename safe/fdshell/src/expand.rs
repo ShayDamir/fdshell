@@ -56,3 +56,6 @@ fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, Report<ResolveError>>
     }
     Ok(words)
 }
+
+#[cfg(test)]
+mod tests;

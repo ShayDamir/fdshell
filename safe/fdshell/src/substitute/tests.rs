@@ -1,6 +1,5 @@
-#![allow(clippy::unwrap_used)]
-use alloc::collections::VecDeque;
-use alloc::format;
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use alloc::{collections::VecDeque, format, vec::Vec};
 
 use hashbrown::HashMap;
 
@@ -506,4 +505,112 @@ fn percent_fd_cache_hit_returns_same_value() {
 
     // Verify cache contains the exported FD
     assert!(cache.contains_key(&ShortCStr::from(c"testfd")));
+}
+
+// Mutant-catching tests for substitute/mod.rs (MISSED 25-31)
+#[test]
+fn dollar_at_expanded_via_substitute_arg_joins() {
+    // Mutant MISSED 25: replace && with || in substitute_args line 30
+    // With fq=false: correct → substitute_arg → dollar_subst → join_positional (1 element)
+    // Mutant: expand_positional_args (N elements, one per positional)
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"arg0", c"arg1", c"arg2"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .collect(),
+    );
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_fq = alloc::vec![false];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    // Correct: 1 element (joined by dollar_subst→join_positional)
+    // Mutant: 3 elements (separate via expand_positional_args)
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1 arg2");
+}
+
+#[test]
+fn dollar_star_fq_true_joins_positional() {
+    // Mutant MISSED 26: replace && with || in substitute_args line 32
+    // With fq=true and "$*": correct → join_positional_args (1 joined element)
+    // Mutant: same path, but tests fq=true branch coverage
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"arg0", c"arg1"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .collect(),
+    );
+    let args = alloc::vec![ShortCStr::from(c"$*")];
+    let args_fq = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1");
+}
+
+#[test]
+fn literal_arg_with_fq_true_not_routed_to_positional() {
+    // Mutant MISSED 26: || mutant would route non-$@/$* FQ args into join_positional_args
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"arg0", c"arg1"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .collect(),
+    );
+    let args = alloc::vec![ShortCStr::from(c"hello")];
+    let args_fq = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"hello");
+}
+
+#[test]
+fn join_positional_args_has_spaces_between() {
+    // Mutant MISSED 28,30,31: replace > with ==, <, >= in join_positional_args line 58
+    // j==0: space before first element (wrong)
+    // j<0: no spaces at all (impossible for usize)
+    // j>=0: space before every element including first (wrong)
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"a", c"b", c"c"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .collect(),
+    );
+    let state = cell.borrow().unwrap();
+    let result = super::join_positional_args(&state.positional).unwrap();
+    assert_eq!(result.as_bytes().unwrap(), b"a b c");
+}
+
+#[test]
+fn expand_positional_args_pushes_all_positional() {
+    // Mutant MISSED 27: replace expand_positional_args -> Result<(), ...> with Ok(())
+    // If replaced with Ok(()), no positional args are pushed to result
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"arg0", c"arg1", c"arg2"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .collect(),
+    );
+    let state = cell.borrow().unwrap();
+    let mut result = Vec::new();
+    super::expand_positional_args(&state.positional, &mut result).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].as_bytes().unwrap(), b"arg0");
+    assert_eq!(result[1].as_bytes().unwrap(), b"arg1");
+    assert_eq!(result[2].as_bytes().unwrap(), b"arg2");
+}
+
+#[test]
+fn join_positional_args_single_element_no_space() {
+    // Mutant MISSED 28,30,31: j>=0 would add space before single element
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut()
+        .unwrap()
+        .set_positional([c"only"].into_iter().map(ShortCStr::from).collect());
+    let state = cell.borrow().unwrap();
+    let result = super::join_positional_args(&state.positional).unwrap();
+    assert_eq!(result.as_bytes().unwrap(), b"only");
 }

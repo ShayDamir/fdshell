@@ -274,3 +274,35 @@ fn scan_kw_len_arithmetic_with_whitespace() {
         _ => panic!("expected Block segments"),
     }
 }
+
+// Tests to catch comment.rs mutants (MISSED 1-4)
+#[test]
+fn skip_comment_advances_past_all_chars() {
+    // Mutants: i += 1 → i -= 1 or i *= 1 would return wrong index
+    let result = super::super::comment::skip_comment(b"abc#def\nghi", 3);
+    assert_eq!(result, 8); // # at index 3, \n at index 7, returns 7+1=8
+}
+
+#[test]
+fn skip_comment_handles_no_newline() {
+    // Mutants would fail to advance correctly
+    let result = super::super::comment::skip_comment(b"abc#def", 3);
+    assert_eq!(result, 8); // returns len+1 (past slice end) when no newline found
+}
+
+#[test]
+fn scan_block_detects_fi_after_comment_outside_quotes() {
+    // Mutant MISSED 4: delete ! in scan_block line 31 affects quote toggling
+    let mut in_quote = false;
+    let mut start = 0usize;
+    let depth = 1u32;
+    let (_end, closed) = super::super::comment::scan_block(
+        b"if \"hello\" # comment\nfi",
+        0,
+        &mut in_quote,
+        &mut start,
+        depth,
+    );
+    assert!(closed); // fi IS detected after comment, block should be closed
+    assert!(!in_quote); // should end with quote state = false
+}
