@@ -1289,6 +1289,40 @@ fn case_last_clause_no_semi_semi() {
 }
 
 #[test]
+fn case_empty_body_clause() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in a) ;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 1);
+    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert!(cb.clauses[0].body.is_empty());
+}
+
+#[test]
+fn case_long_body_catches_skip() {
+    let ParsedLine::Case(cb) =
+        parse(b"case \"x\" in a) echo hello world foo bar baz ;; b) echo two;; esac").unwrap()
+    else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 2);
+    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].body, c"echo hello world foo bar baz".into());
+    assert_eq!(cb.clauses[1].patterns[0], c"b".into());
+    assert_eq!(cb.clauses[1].body, c"echo two".into());
+}
+
+#[test]
+fn case_esac_as_pattern_word() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in esac) echo yes;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 1);
+    assert_eq!(cb.clauses[0].patterns[0], c"esac".into());
+    assert_eq!(cb.clauses[0].body, c"echo yes".into());
+}
+
+#[test]
 fn tokenize_pipe_after_gt_token() {
     let tokens = token::tokenize(b"foo>bar | cmd").unwrap();
     assert_eq!(tokens.len(), 3);

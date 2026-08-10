@@ -15,16 +15,19 @@ pub fn parse_clauses(
 ) -> Result<Vec<CaseClause>, Report<ParseError>> {
     let mut clauses = Vec::new();
     let mut pos = start;
-    while pos < esac_idx {
-        while pos < esac_idx && tokens.get(pos).is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
+    while pos <= esac_idx {
+        if pos == esac_idx {
+            break;
+        }
+        while pos <= esac_idx && tokens.get(pos).is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
             pos += 1;
         }
-        if pos >= esac_idx {
+        if pos == esac_idx {
             break;
         }
         let mut patterns = Vec::new();
         let mut current_pattern = Vec::new();
-        while pos < esac_idx {
+        while pos <= esac_idx {
             let Some((token, _, _)) = tokens.get(pos) else {
                 break;
             };
@@ -44,7 +47,7 @@ pub fn parse_clauses(
                 pos += 1;
             }
         }
-        if pos == esac_idx {
+        if pos >= esac_idx {
             bail!(ParseError::CaseMissingCloseParen);
         }
         if current_pattern.is_empty() && patterns.is_empty() {
@@ -54,20 +57,22 @@ pub fn parse_clauses(
             patterns.push(try_join(trim_semi(&current_pattern)));
         }
         let body_start = pos;
-        let mut i = pos;
         let mut found = false;
-        while i + 1 < tokens.len() {
-            if tokens.get(i).is_some_and(|(t, _, _)| t.eq_bytes(b";"))
-                && tokens.get(i + 1).is_some_and(|(t, _, _)| t.eq_bytes(b";"))
-            {
+        let mut body_end = esac_idx;
+        let body_slice = tokens.get(body_start..esac_idx).unwrap_or(&[]);
+        for (i, window) in body_slice.windows(2).enumerate() {
+            let [a, b] = window else {
+                continue;
+            };
+            if a.0.eq_bytes(b";") && b.0.eq_bytes(b";") {
                 found = true;
+                body_end = body_start + i;
                 break;
             }
-            i += 1;
         }
         let (body, next_pos) = if found {
-            let b = try_join(trim_semi(tokens.get(body_start..i).unwrap_or(&[])));
-            (b, i + 2)
+            let b = try_join(trim_semi(tokens.get(body_start..body_end).unwrap_or(&[])));
+            (b, body_end + 2)
         } else {
             let b = try_join(trim_semi(tokens.get(body_start..esac_idx).unwrap_or(&[])));
             (b, esac_idx)
