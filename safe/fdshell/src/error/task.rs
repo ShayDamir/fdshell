@@ -9,6 +9,8 @@ pub(crate) enum TaskError {
     NotFound,
     /// wait syscall failed
     Wait,
+    /// failed to collect captured output
+    Capture,
 }
 
 impl core::error::Error for TaskError {}

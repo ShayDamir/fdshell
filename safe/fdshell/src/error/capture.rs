@@ -7,6 +7,9 @@ pub(crate) enum CaptureError {
     Exists,
     /// fd receive failed
     ReceiveFailed,
+    /// incomplete capture — expected {expected} but received {received}
+    // §4.2 prefers plain variants; counts required for actionable message (§4.7).
+    Incomplete { expected: usize, received: usize },
 }
 
 impl core::error::Error for CaptureError {}

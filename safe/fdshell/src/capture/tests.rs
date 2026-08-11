@@ -89,3 +89,101 @@ fn test_captures_success() {
     assert_eq!(captured.len(), 1);
     assert_eq!(captured[0].0.as_bytes().expect("as_bytes"), b"OUT");
 }
+
+#[test]
+fn test_captures_incomplete_zero() {
+    // Socket closes before any fd is sent — expect Incomplete { expected: 1, received: 0 }
+    let (shell_a, shell_b) = socketpair().expect("socketpair");
+    shell_a.verify().expect("verify shell_a");
+    shell_b.verify().expect("verify shell_b");
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
+
+    shell_a.export().expect("export shell_a");
+    drop(shell_a);
+
+    let captures = vec![Capture {
+        var: short_cstr(b"OUT"),
+        tag: Some(short_cstr(b"openat2")),
+        force: false,
+    }];
+
+    let result = do_captures(
+        receiver,
+        std::process::id() as i32,
+        captures,
+        &ShellState::new(),
+    );
+    match result {
+        Err(e)
+            if matches!(
+                *e.current_context(),
+                CaptureError::Incomplete {
+                    expected: 1,
+                    received: 0
+                }
+            ) => {}
+        _other => panic!("expected Incomplete {{ expected: 1, received: 0 }}"),
+    }
+}
+
+#[test]
+fn test_captures_incomplete_partial() {
+    // 2 captures, only 1 fd sent — expect Incomplete { expected: 2, received: 1 }
+    let (shell_a, shell_b) = socketpair().expect("socketpair");
+    shell_a.verify().expect("verify shell_a");
+    shell_b.verify().expect("verify shell_b");
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
+
+    shell_a.export().expect("export shell_a");
+    let shell_sock = shell_a.try_clone().expect("clone shell");
+    drop(shell_a);
+
+    // Send first fd with matching tag
+    let (test_a, test_b) = socketpair().expect("socketpair");
+    test_a.verify().expect("verify test_a");
+    test_b.verify().expect("verify test_b");
+    send_fd(&shell_sock, &test_a, c"tag1").expect("send_fd");
+    drop(test_a);
+    drop(test_b);
+
+    // Second sender — export then drop to close the socket (no second fd)
+    let (test2_a, test2_b) = socketpair().expect("socketpair");
+    test2_a.verify().expect("verify test2_a");
+    test2_b.verify().expect("verify test2_b");
+    test2_a.export().expect("export test2_a");
+    drop(test2_a);
+    drop(test2_b);
+
+    let captures = vec![
+        Capture {
+            var: short_cstr(b"OUT1"),
+            tag: Some(short_cstr(b"tag1")),
+            force: false,
+        },
+        Capture {
+            var: short_cstr(b"OUT2"),
+            tag: Some(short_cstr(b"tag2")),
+            force: false,
+        },
+    ];
+
+    let result = do_captures(
+        receiver,
+        std::process::id() as i32,
+        captures,
+        &ShellState::new(),
+    );
+    match result {
+        Err(e)
+            if matches!(
+                *e.current_context(),
+                CaptureError::Incomplete {
+                    expected: 2,
+                    received: 1
+                }
+            ) => {}
+        _other => panic!("expected Incomplete {{ expected: 2, received: 1 }}"),
+    }
+}

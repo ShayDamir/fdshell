@@ -57,5 +57,12 @@ pub fn do_captures(
         }
     }
 
+    if !remaining.is_empty() {
+        bail!(CaptureError::Incomplete {
+            expected: remaining.len() + captured_fds.len(),
+            received: captured_fds.len(),
+        });
+    }
+
     Ok(captured_fds)
 }
