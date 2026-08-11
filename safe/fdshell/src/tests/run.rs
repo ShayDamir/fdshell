@@ -472,6 +472,18 @@ fn cmd_subst_in_assign_and_use() {
 }
 
 #[test]
+fn cmd_subst_semicolon_inside() {
+    let cell = make_cell();
+    crate::repl::run_script(b"result=$(builtin echo a; builtin echo b)", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"result".into()),
+        Some(&c"a\nb".into())
+    );
+}
+
+#[test]
 fn string_assign_dollar_var() {
     let cell = make_cell();
     crate::repl::run_script(b"a=hello; b=$a", &cell).unwrap();

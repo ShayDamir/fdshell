@@ -24,12 +24,17 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     let mut segments = Vec::new();
     let mut start = 0;
     let mut in_quote = false;
+    let mut dollar_paren_depth = 0u32;
+    let mut in_backtick = false;
     let mut i = 0;
 
     while i <= line.len() {
-        let is_comment = !in_quote && line.get(i) == Some(&b'#');
-        let is_sep =
-            i == line.len() || (!in_quote && matches!(line.get(i), Some(&b';') | Some(&b'\n')));
+        let is_comment = !in_quote && !in_backtick && line.get(i) == Some(&b'#');
+        let is_sep = i == line.len()
+            || (!in_quote
+                && !in_backtick
+                && dollar_paren_depth == 0
+                && matches!(line.get(i), Some(&b';') | Some(&b'\n')));
 
         if is_comment || is_sep {
             let part = line.get(start..i).unwrap_or(b"").trim_ascii();
@@ -76,6 +81,23 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             }
         } else if line.get(i) == Some(&b'"') {
             in_quote = !in_quote;
+        } else if !in_quote && !in_backtick && line.get(i) == Some(&b'$') {
+            if line.get(i + 1) == Some(&b'(') {
+                dollar_paren_depth = dollar_paren_depth.saturating_add(1);
+                i += 1;
+            }
+        } else if !in_quote && !in_backtick && line.get(i) == Some(&b'(') {
+            if dollar_paren_depth > 0 {
+                dollar_paren_depth = dollar_paren_depth.saturating_add(1);
+            }
+        } else if !in_quote && !in_backtick && line.get(i) == Some(&b')') {
+            if dollar_paren_depth > 0 {
+                dollar_paren_depth = dollar_paren_depth.saturating_sub(1);
+            }
+        } else if !in_quote && !in_backtick && line.get(i) == Some(&b'`') {
+            in_backtick = true;
+        } else if in_backtick && line.get(i) == Some(&b'`') {
+            in_backtick = false;
         }
 
         i += 1;

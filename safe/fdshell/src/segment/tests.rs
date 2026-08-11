@@ -306,3 +306,95 @@ fn scan_block_detects_fi_after_comment_outside_quotes() {
     assert!(closed); // fi IS detected after comment, block should be closed
     assert!(!in_quote); // should end with quote state = false
 }
+
+#[test]
+fn scan_statement_semicolon_inside_dollar_paren() {
+    let segments = scan_segments(b"echo $(a; b)", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(s, b"echo $(a; b)"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+#[test]
+fn scan_statement_semicolon_inside_nested_dollar_paren() {
+    let segments = scan_segments(b"echo $(a $(b; c) d)", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(s, b"echo $(a $(b; c) d)"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+#[test]
+fn scan_statement_semicolon_inside_backtick() {
+    let segments = scan_segments(b"echo `a; b`", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(s, b"echo `a; b`"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+#[test]
+fn scan_statement_semicolon_inside_dollar_paren_with_newline() {
+    let segments = scan_segments(b"echo $(a\nb)", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(s, b"echo $(a\nb)"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+#[test]
+fn scan_block_semicolon_inside_dollar_paren() {
+    let mut in_quote = false;
+    let mut start = 3usize;
+    let depth = 1u32;
+    let (end, closed) = super::super::comment::scan_block(
+        b"if $(a; b); then x; fi",
+        3,
+        &mut in_quote,
+        &mut start,
+        depth,
+    );
+    assert!(closed);
+    assert_eq!(end, 23);
+}
+
+#[test]
+fn scan_statement_plain_paren_inside_dollar_paren() {
+    let segments = scan_segments(b"echo $(a (b; c) d)", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(s, b"echo $(a (b; c) d)"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+#[test]
+fn scan_block_plain_paren_inside_dollar_paren() {
+    let mut in_quote = false;
+    let mut start = 3usize;
+    let depth = 1u32;
+    let (end, closed) = super::super::comment::scan_block(
+        b"if $(a (b; c) d); then x; fi",
+        3,
+        &mut in_quote,
+        &mut start,
+        depth,
+    );
+    assert!(closed);
+    assert_eq!(end, 29);
+}
+
+#[test]
+fn scan_statement_backtick_paren_isolated() {
+    let segments = scan_segments(b"echo $(a `b) ; c` d)", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(s, b"echo $(a `b) ; c` d)"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
