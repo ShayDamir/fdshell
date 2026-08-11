@@ -21,6 +21,7 @@ mod quotes;
 mod redirect;
 mod semi;
 pub(crate) mod token;
+mod token_pipe;
 mod token_subst;
 mod while_block;
 

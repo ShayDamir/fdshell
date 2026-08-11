@@ -509,6 +509,27 @@ fn percent_fd_cache_hit_returns_same_value() {
 
 // Mutant-catching tests for substitute/mod.rs (MISSED 25-31)
 #[test]
+fn dollar_at_fq_true_expands_separate_args() {
+    // Regression: quoted "$@" must expand to separate arguments (not joined)
+    // With fq=true and "$@": correct → expand_positional_args (N elements)
+    // Bug (before fix): fq was always false, so "$@" joined args into 1 element
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"arg0", c"arg1", c"arg2"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .collect(),
+    );
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_fq = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].as_bytes().unwrap(), b"arg0");
+    assert_eq!(result[1].as_bytes().unwrap(), b"arg1");
+    assert_eq!(result[2].as_bytes().unwrap(), b"arg2");
+}
+
+#[test]
 fn dollar_at_expanded_via_substitute_arg_joins() {
     // Mutant MISSED 25: replace && with || in substitute_args line 30
     // With fq=false: correct → substitute_arg → dollar_subst → join_positional (1 element)

@@ -6,8 +6,9 @@ pub fn emit_token(
     tokens: &mut Vec<(ShortCStr, usize, bool)>,
     cur: &mut ShortCStr,
     token_start: usize,
+    fully_quoted: bool,
 ) {
     if !cur.is_empty() {
-        tokens.push((core::mem::take(cur), token_start, false));
+        tokens.push((core::mem::take(cur), token_start, fully_quoted));
     }
 }

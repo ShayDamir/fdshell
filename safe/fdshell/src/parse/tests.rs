@@ -1514,3 +1514,183 @@ fn tokenize_percent_pipe_valid() {
     assert_eq!(tokens[0].0, c"%".into());
     assert_eq!(tokens[1].0, c"|".into());
 }
+
+#[test]
+fn tokenize_fully_quoted_dollar_at_end() {
+    let tokens = token::tokenize(b"printf \"%s\\n\" \"$@\"").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].0, c"printf".into());
+    assert!(!tokens[0].2);
+    assert_eq!(tokens[1].0, c"%sn".into());
+    assert!(tokens[1].2);
+    assert_eq!(tokens[2].0, c"$@".into());
+    assert!(tokens[2].2);
+}
+
+#[test]
+fn tokenize_fully_quoted_dollar_at_middle() {
+    let tokens = token::tokenize(b"printf \"%s\\n\" \"$@\" extra").unwrap();
+    assert_eq!(tokens.len(), 4);
+    assert_eq!(tokens[0].0, c"printf".into());
+    assert!(!tokens[0].2);
+    assert_eq!(tokens[1].0, c"%sn".into());
+    assert!(tokens[1].2);
+    assert_eq!(tokens[2].0, c"$@".into());
+    assert!(tokens[2].2);
+    assert_eq!(tokens[3].0, c"extra".into());
+    assert!(!tokens[3].2);
+}
+
+#[test]
+fn tokenize_fully_quoted_dollar_star() {
+    let tokens = token::tokenize(b"$*").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"$*".into());
+    assert!(!tokens[0].2);
+}
+
+#[test]
+fn tokenize_fully_quoted_literal() {
+    let tokens = token::tokenize(b"\"hello\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"hello".into());
+    assert!(tokens[0].2);
+}
+
+#[test]
+fn tokenize_unquoted_prefix_not_fully_quoted() {
+    let tokens = token::tokenize(b"foo\"bar\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"foobar".into());
+    assert!(!tokens[0].2);
+}
+
+#[test]
+fn tokenize_mixed_quoted_unquoted() {
+    let tokens = token::tokenize(b"\"$@\" \"$*\" literal").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].0, c"$@".into());
+    assert!(tokens[0].2);
+    assert_eq!(tokens[1].0, c"$*".into());
+    assert!(tokens[1].2);
+    assert_eq!(tokens[2].0, c"literal".into());
+    assert!(!tokens[2].2);
+}
+
+#[test]
+fn tokenize_fully_quoted_with_separator() {
+    let tokens = token::tokenize(b"\"$@\";").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, c"$@".into());
+    assert!(tokens[0].2);
+    assert_eq!(tokens[1].0, c";".into());
+    assert!(!tokens[1].2);
+}
+
+#[test]
+fn tokenize_fully_quoted_with_pipe() {
+    let tokens = token::tokenize(b"\"$@\" | cat").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert_eq!(tokens[0].0, c"$@".into());
+    assert!(tokens[0].2);
+    assert_eq!(tokens[1].0, c"|".into());
+    assert!(!tokens[1].2);
+    assert_eq!(tokens[2].0, c"cat".into());
+    assert!(!tokens[2].2);
+}
+
+#[test]
+fn tokenize_adjacent_quotes_still_fully_quoted() {
+    let tokens = token::tokenize(b"\"a\"\"b\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"ab".into());
+    assert!(tokens[0].2);
+}
+
+#[test]
+fn tokenize_dollar_paren_not_fully_quoted() {
+    let tokens = token::tokenize(b"\"x\"$(y)").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert!(!tokens[0].2);
+}
+
+#[test]
+fn tokenize_empty_adjacent_quotes() {
+    let tokens = token::tokenize(b"\"\"\"\"").unwrap();
+    assert_eq!(tokens.len(), 0);
+}
+
+#[test]
+fn parse_fully_quoted_dollar_at_preserves_flag() {
+    // Regression: end-to-end test that "$@" through parse → CommandLine gets fq=true
+    let ParsedLine::Cmd(cmd) = parse(b"printf \"%s\\n\" \"$@\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 2);
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%sn");
+    assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
+    assert_eq!(cmd.args_fq.len(), 2);
+    assert!(cmd.args_fq[0]);
+    assert!(cmd.args_fq[1]);
+}
+
+#[test]
+fn parse_fully_quoted_dollar_at_middle_preserves_flag() {
+    // Regression: "$@" followed by another arg should keep fq=true on "$@"
+    let ParsedLine::Cmd(cmd) = parse(b"printf \"%s\\n\" \"$@\" extra").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 3);
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%sn");
+    assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
+    assert_eq!(cmd.args[2].as_bytes().unwrap(), b"extra");
+    assert_eq!(cmd.args_fq.len(), 3);
+    assert!(cmd.args_fq[0]);
+    assert!(cmd.args_fq[1]);
+    assert!(!cmd.args_fq[2]);
+}
+
+#[test]
+fn parse_fully_quoted_dollar_star_preserves_flag() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo \"$*\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 1);
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$*");
+    assert_eq!(cmd.args_fq.len(), 1);
+    assert!(cmd.args_fq[0]);
+}
+
+#[test]
+fn parse_unquoted_dollar_at_has_false_flag() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo $@").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 1);
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$@");
+    assert_eq!(cmd.args_fq.len(), 1);
+    assert!(!cmd.args_fq[0]);
+}
+
+#[test]
+fn parse_fully_quoted_literal_preserves_flag() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo \"hello world\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 1);
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"hello world");
+    assert_eq!(cmd.args_fq.len(), 1);
+    assert!(cmd.args_fq[0]);
+}
+
+#[test]
+fn parse_mixed_quoted_args_preserves_flags() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd \"$@\" \"$*\" literal").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 3);
+    assert_eq!(cmd.args_fq.len(), 3);
+    assert!(cmd.args_fq[0]);
+    assert!(cmd.args_fq[1]);
+    assert!(!cmd.args_fq[2]);
+}

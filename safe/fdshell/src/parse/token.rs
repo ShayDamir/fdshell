@@ -1,5 +1,6 @@
 use super::comment::skip_comment;
 use super::emit::emit_token;
+use super::token_pipe::handle_pipe;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -10,13 +11,12 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
     let mut cur = ShortCStr::new();
     let mut in_quotes = false;
     let mut quote_start: Option<usize> = None;
+    let mut token_fully_quoted = false;
     let mut bytes = line.iter().copied().peekable();
     let mut pos = 0usize;
     let mut token_start = 0usize;
-
     while let Some(b) = bytes.next() {
         pos += 1;
-
         if in_quotes {
             if !super::quotes::handle_quoted_char(b, &mut cur, &mut bytes, line, pos)? {
                 in_quotes = false;
@@ -24,67 +24,56 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
             }
         } else {
             match b {
-                b' ' | b'\t' => {
-                    emit_token(&mut tokens, &mut cur, token_start);
+                b' ' | b'\t' | b';' | b'\n' | b')' => {
+                    let needs_sep = b == b';' || b == b'\n' || b == b')';
+                    let sep = if b == b')' { c")" } else { c";" };
+                    emit_token(&mut tokens, &mut cur, token_start, token_fully_quoted);
+                    token_fully_quoted = false;
                     token_start = pos;
-                }
-                b'|' => {
-                    if cur.starts_with(b"%") && cur.ends_with(b">")
-                        || cur.starts_with(b"&") && cur.ends_with(b">")
-                    {
-                        cur.push_byte(b'|')
-                            .change_context(ParseError::InvalidChar { ch: 0 })?;
-                    } else {
-                        emit_token(&mut tokens, &mut cur, token_start);
-                        tokens.push((c"|".into(), pos - 1, false));
+                    if needs_sep {
+                        tokens.push((sep.into(), pos - 1, false));
                     }
                 }
-                b';' | b'\n' => {
-                    emit_token(&mut tokens, &mut cur, token_start);
-                    tokens.push((c";".into(), pos - 1, false));
-                    token_start = pos;
-                }
-                b')' => {
-                    emit_token(&mut tokens, &mut cur, token_start);
-                    tokens.push((c")".into(), pos - 1, false));
-                    token_start = pos;
+                b'|' => {
+                    if handle_pipe(&mut tokens, &mut cur, token_start, token_fully_quoted, pos)? {
+                        token_fully_quoted = false;
+                    }
                 }
                 b'"' => {
+                    if cur.is_empty() {
+                        token_fully_quoted = true;
+                    }
                     in_quotes = true;
                     quote_start = Some(pos - 1);
                 }
-                b'$' => {
-                    if bytes.peek() == Some(&b'(') {
-                        let start = pos - 1; // position of '$'
-                        super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, start)?;
-                    } else {
-                        cur.push_byte(b)
-                            .change_context(ParseError::InvalidChar { ch: 0 })?;
-                    }
+                b'$' if bytes.peek() == Some(&b'(') => {
+                    token_fully_quoted = false;
+                    super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, pos - 1)?;
                 }
                 b'`' => {
-                    let start = pos - 1; // position of '`'
-                    super::backtick::read_backtick(line, &mut cur, &mut bytes, start)?;
+                    token_fully_quoted = false;
+                    super::backtick::read_backtick(line, &mut cur, &mut bytes, pos - 1)?;
                 }
                 b'#' => {
                     let consumed = skip_comment(&mut bytes);
-                    pos += consumed - 1; // -1 because outer loop increments pos once
-                    emit_token(&mut tokens, &mut cur, token_start);
+                    pos += consumed - 1;
+                    emit_token(&mut tokens, &mut cur, token_start, token_fully_quoted);
+                    token_fully_quoted = false;
                     token_start = pos;
                 }
-                _ => cur
-                    .push_byte(b)
-                    .change_context(ParseError::InvalidChar { ch: 0 })?,
+                _ => {
+                    token_fully_quoted = false;
+                    cur.push_byte(b)
+                        .change_context(ParseError::InvalidChar { ch: 0 })?;
+                }
             }
         }
     }
-
     if in_quotes {
         return Err(report_unbalanced_quote(line, quote_start.unwrap_or(0)));
     }
     if !cur.is_empty() {
-        let fully_quoted = quote_start.is_some();
-        tokens.push((cur, token_start, fully_quoted));
+        tokens.push((cur, token_start, token_fully_quoted));
     }
     Ok(tokens)
 }

@@ -13,7 +13,7 @@
 - [x] `importedfd.rs` — split into `importedfd_error.rs` + `importedfd_try.rs`
 - [ ] `caret.rs` at 108 code lines (was 88, grew) — extract tests to `caret/tests.rs`
 - [x] `substitute/brace.rs` — extracted, now 65 lines
-- [ ] `parse/token.rs` at 90 code lines — consider extracting `tokenize` match arms into separate helpers
+- [x] `parse/token.rs` — combined whitespace/separators, separated `$`/`` ` `` arms, removed dead token_emit.rs (93 → 78 lines)
 - [ ] `intercept/read/io.rs` at 85 code lines — extract `SourceFd::RawFd` read loop
 - [ ] `exec/mod.rs` at 84 code lines — `exec_fd`/`exec_at` share duplicated setup; extract
 - [ ] `openat2/parse/mod.rs` at 90 code lines
