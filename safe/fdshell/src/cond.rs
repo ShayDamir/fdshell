@@ -32,9 +32,26 @@ pub(crate) fn run_cond_list(
                         return Ok(Some(control));
                     }
                     let state = cell.borrow().change_context(CmdError::Never)?;
-                    if (tail.starts_with(b"&&") && state.last_status.exit_code() != 0)
-                        || (tail.starts_with(b"||") && state.last_status.exit_code() == 0)
-                    {
+                    if tail.starts_with(b"&&") && state.last_status.exit_code() != 0 {
+                        let mut j = i + 2;
+                        let mut q = false;
+                        while j <= line.len() {
+                            if line.get(j) == Some(&b'"') {
+                                q = !q;
+                            } else if (!q
+                                && line.get(j..) != Some(b"")
+                                && line.get(j..).unwrap_or(b"").starts_with(b"||"))
+                                || j == line.len()
+                            {
+                                start = j;
+                                i = j;
+                                break;
+                            }
+                            j += 1;
+                        }
+                        continue;
+                    }
+                    if tail.starts_with(b"||") && state.last_status.exit_code() == 0 {
                         return Ok(None);
                     }
                 }

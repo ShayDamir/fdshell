@@ -708,6 +708,52 @@ fn false_used_in_cond_list() {
 }
 
 #[test]
+fn and_fail_with_or_fallback() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_cond_list(b"false && builtin echo skipped || builtin echo ran", &cell)
+            .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn and_fail_chain_with_or_fallback() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_cond_list(
+            b"false && builtin echo a && builtin echo b || builtin echo c",
+            &cell,
+        )
+        .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn or_success_skips_rest() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_cond_list(b"true || builtin echo skipped", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn and_fail_with_quoted_or_in_skipped_part() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_cond_list(b"false && builtin echo \"a||b\" || builtin echo ran", &cell)
+            .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
 fn pwd_builtin_succeeds() {
     child_test(|| {
         let cell = make_cell();
