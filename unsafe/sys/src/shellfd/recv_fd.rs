@@ -4,6 +4,9 @@ use crate::LocalFd;
 use crate::iovec::IoVecMut;
 use core::ffi::CStr;
 
+#[repr(align(8))]
+struct CtrlBuf([u8; 64]);
+
 pub fn recv_fd<'a>(
     sock: &LocalFd,
     tag: &'a mut [u8],
@@ -11,15 +14,15 @@ pub fn recv_fd<'a>(
 ) -> Result<(LocalFd, &'a CStr), Report<crate::RecvFdError>> {
     let mut extra = [0u8; 1];
     // SCM_RIGHTS (1 fd: 24 B) + SCM_CREDENTIALS (1 ucred: 32 B) = 56 B
-    let mut ctrl_buf = [0u8; 64];
+    let mut ctrl_buf = CtrlBuf([0; 64]);
     let mut iovs = [IoVecMut::new(tag), IoVecMut::new(&mut extra)];
     let mut msg = libc::msghdr {
         msg_name: core::ptr::null_mut(),
         msg_namelen: 0,
         msg_iov: iovs.as_mut_ptr().cast(),
         msg_iovlen: 2,
-        msg_control: ctrl_buf.as_mut_ptr().cast(),
-        msg_controllen: ctrl_buf.len(),
+        msg_control: ctrl_buf.0.as_mut_ptr().cast(),
+        msg_controllen: ctrl_buf.0.len(),
         msg_flags: 0,
     };
     // SAFETY: `sock` is a valid open socket; `msg` and `ctrl_buf`
