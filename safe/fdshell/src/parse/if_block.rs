@@ -60,11 +60,14 @@ pub(crate) fn tokens_to_if(
     ));
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx)?;
-    let else_str = else_idx.map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx));
+    let else_str: Result<Option<ShortCStr>, Report<ParseError>> = else_idx
+        .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx))
+        .transpose();
+    let else_str = else_str?.filter(|s| !s.is_empty());
     Ok(IfBlock {
         condition: cond_str,
         then_body: then_str,
         elifs,
-        else_body: else_str.filter(|s| !s.is_empty()),
+        else_body: else_str,
     })
 }

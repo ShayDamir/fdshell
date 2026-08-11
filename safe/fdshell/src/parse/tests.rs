@@ -1109,7 +1109,7 @@ fn parse_else_body_simple() {
         (c"fallback".into(), 1, false),
         (c";".into(), 2, false),
     ];
-    let result = parse_else_body(&tokens, 0, 3);
+    let result = parse_else_body(&tokens, 0, 3).unwrap();
     assert_eq!(result, c"fallback".into());
 }
 
@@ -1125,7 +1125,7 @@ fn parse_else_body_multiple_tokens() {
         (c"cmd2".into(), 3, false),
         (c";".into(), 4, false),
     ];
-    let result = parse_else_body(&tokens, 0, 5);
+    let result = parse_else_body(&tokens, 0, 5).unwrap();
     assert_eq!(result, c"cmd1 ; cmd2".into());
 }
 
@@ -1167,8 +1167,82 @@ fn parse_else_body_empty() {
     // Indices: 0,      1, 2
     let tokens: Vec<(sys::ShortCStr, usize, bool)> =
         vec![(c"else".into(), 0, false), (c"fi".into(), 1, false)];
-    let result = parse_else_body(&tokens, 0, 1);
+    let result = parse_else_body(&tokens, 0, 1).unwrap();
     assert!(result.is_empty());
+}
+
+#[test]
+fn parse_elifs_condition_trailing_semi_err() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, c, ;, ;, then, b, ;, fi
+    // Indices: 0,     1, 2, 3, 4,     5, 6, 7
+    // ti=4, cond range = 1..3 = [c, ;], last is ';' → MalformedIfBlock
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (c"elif".into(), 0, false),
+        (c"c".into(), 1, false),
+        (c";".into(), 2, false),
+        (c";".into(), 3, false),
+        (c"then".into(), 4, false),
+        (c"b".into(), 5, false),
+        (c";".into(), 6, false),
+        (c"fi".into(), 7, false),
+    ];
+    let pairs = vec![(0, 4)];
+    let result = parse_elifs(&tokens, &pairs, None, 7);
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_elifs_body_trailing_semi_err() {
+    use super::elif::parse_elifs;
+    // Tokens: elif, c, ;, then, b, ;, ;, fi
+    // Indices: 0,     1, 2, 3,     4, 5, 6, 7
+    // next=7, body range = 4..6 = [b, ;], last is ';' → MalformedIfBlock
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (c"elif".into(), 0, false),
+        (c"c".into(), 1, false),
+        (c";".into(), 2, false),
+        (c"then".into(), 3, false),
+        (c"b".into(), 4, false),
+        (c";".into(), 5, false),
+        (c";".into(), 6, false),
+        (c"fi".into(), 7, false),
+    ];
+    let pairs = vec![(0, 3)];
+    let result = parse_elifs(&tokens, &pairs, None, 7);
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_else_body_trailing_semi_err() {
+    use super::elif::parse_else_body;
+    // Tokens: else, b, ;, ;, fi
+    // Indices: 0,     1, 2, 3, 4
+    // fi_idx=4, raw range = 1..3 = [b, ;], last is ';' → MalformedIfBlock
+    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
+        (c"else".into(), 0, false),
+        (c"b".into(), 1, false),
+        (c";".into(), 2, false),
+        (c";".into(), 3, false),
+        (c"fi".into(), 4, false),
+    ];
+    let result = parse_else_body(&tokens, 0, 4);
+    assert!(result.is_err());
+}
+
+#[test]
+fn if_else_trailing_semi_err() {
+    // End-to-end: double ';' before 'fi' routes through tokens_to_if → else_str?
+    let result = parse(b"if a; then b; else c; ; fi");
+    assert!(result.is_err());
+    match result {
+        Err(e) => assert_eq!(
+            e.current_context().to_string(),
+            "malformed if block",
+            "expected MalformedIfBlock error"
+        ),
+        Ok(_) => panic!("expected error"),
+    }
 }
 
 #[test]
