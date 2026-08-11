@@ -175,16 +175,16 @@ fn scan_semicolon_separated_statements() {
 #[test]
 fn scan_comment_skipped() {
     let segments = scan_segments(b"echo hello # comment", false);
-    assert!(
-        segments.is_empty(),
-        "comment should skip all content to end of line"
-    );
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s) => assert_eq!(*s, b"echo hello"),
+        _ => panic!("expected Statement"),
+    }
 }
 
 #[test]
 fn scan_comment_on_block_line() {
-    // Comment after closing keyword prevents scan_block from finding it,
-    // so the block is not considered closed.
+    // Comment after closing keyword should not prevent detection.
     let segments = scan_segments(b"if x; then y; fi # comment", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
@@ -195,7 +195,7 @@ fn scan_comment_on_block_line() {
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 26);
-            assert!(!*closed);
+            assert!(*closed);
         }
         Segment::Statement(_) => panic!("expected Block"),
     }
@@ -294,11 +294,11 @@ fn skip_comment_handles_no_newline() {
 fn scan_block_detects_fi_after_comment_outside_quotes() {
     // Mutant MISSED 4: delete ! in scan_block line 31 affects quote toggling
     let mut in_quote = false;
-    let mut start = 0usize;
+    let mut start = 2usize; // start after "if"
     let depth = 1u32;
     let (_end, closed) = super::super::comment::scan_block(
         b"if \"hello\" # comment\nfi",
-        0,
+        2,
         &mut in_quote,
         &mut start,
         depth,

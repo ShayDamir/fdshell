@@ -22,16 +22,11 @@ pub(crate) fn scan_block(
     mut depth: u32,
 ) -> (usize, bool) {
     while i <= line.len() && depth > 0 {
-        if !*in_quote && line.get(i) == Some(&b'#') {
-            i = skip_comment(line, i);
-            *start = i;
-            continue;
-        }
-        if line.get(i) == Some(&b'"') {
-            *in_quote = !*in_quote;
-        } else if i == line.len()
-            || (!*in_quote && matches!(line.get(i), Some(&b';') | Some(&b'\n')))
-        {
+        let is_comment = !*in_quote && line.get(i) == Some(&b'#');
+        let is_sep =
+            i == line.len() || (!*in_quote && matches!(line.get(i), Some(&b';') | Some(&b'\n')));
+
+        if is_comment || is_sep {
             let raw = line.get(*start..i).unwrap_or(b"").trim_ascii();
             for sub in raw.split(|&b| b == b' ') {
                 if !sub.is_empty() {
@@ -42,7 +37,15 @@ pub(crate) fn scan_block(
                     }
                 }
             }
-            *start = i + 1;
+            if is_comment {
+                i = skip_comment(line, i);
+                *start = i;
+                continue;
+            } else {
+                *start = i + 1;
+            }
+        } else if line.get(i) == Some(&b'"') {
+            *in_quote = !*in_quote;
         }
         i += 1;
     }

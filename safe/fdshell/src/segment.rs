@@ -27,17 +27,11 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     let mut i = 0;
 
     while i <= line.len() {
-        if !in_quote && line.get(i) == Some(&b'#') {
-            i = skip_comment(line, i);
-            start = i;
-            continue;
-        }
+        let is_comment = !in_quote && line.get(i) == Some(&b'#');
+        let is_sep =
+            i == line.len() || (!in_quote && matches!(line.get(i), Some(&b';') | Some(&b'\n')));
 
-        if line.get(i) == Some(&b'"') {
-            in_quote = !in_quote;
-        } else if i == line.len()
-            || (!in_quote && matches!(line.get(i), Some(&b';') | Some(&b'\n')))
-        {
+        if is_comment || is_sep {
             let part = line.get(start..i).unwrap_or(b"").trim_ascii();
 
             if !in_block && !part.is_empty() && keyword_delta(part) == Some(1) {
@@ -73,8 +67,17 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                 segments.push(Segment::Statement(part));
             }
 
-            start = i + 1;
+            if is_comment {
+                i = skip_comment(line, i);
+                start = i;
+                continue;
+            } else {
+                start = i + 1;
+            }
+        } else if line.get(i) == Some(&b'"') {
+            in_quote = !in_quote;
         }
+
         i += 1;
     }
     segments
