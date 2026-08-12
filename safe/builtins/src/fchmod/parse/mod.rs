@@ -46,7 +46,7 @@ fn flag_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>> {
                     .change_context(BuiltinError::InvalidArgument("mode"))
                     .attach_opaque(Suggestion(
                         "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
-                    ))? as u32;
+                    ))?;
                 mode = Some(m);
             }
             _ => bail!(BuiltinError::InvalidArgument("flag")),
@@ -73,7 +73,7 @@ fn positional_mode(args: &[&CStr]) -> Result<FchmodConfig, Report<BuiltinError>>
             .change_context(BuiltinError::InvalidArgument("mode"))
             .attach_opaque(Suggestion(
                 "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
-            ))? as u32;
+            ))?;
 
     let mut fds = Vec::new();
     for a in args.iter().skip(1) {

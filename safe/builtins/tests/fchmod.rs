@@ -152,6 +152,29 @@ fn positional_mode_octal_prefix() {
     with_fd(|fd| {
         assert_ok(&["0o644", fd.fd_str.to_str().unwrap()], |cfg| {
             assert_eq!(cfg.mode, 0o644);
+        });
+    });
+}
+
+#[test]
+fn mode_overflow_flag() {
+    with_fd(|fd| {
+        assert_invalid_arg(&["--fd", fd.fd_str.to_str().unwrap(), "--mode", "0x100000000"]);
+    });
+}
+
+#[test]
+fn mode_overflow_positional() {
+    with_fd(|fd| {
+        assert_invalid_arg(&["0x100000000", fd.fd_str.to_str().unwrap()]);
+    });
+}
+
+#[test]
+fn mode_boundary() {
+    with_fd(|fd| {
+        assert_ok(&["0xffffffff", fd.fd_str.to_str().unwrap()], |cfg| {
+            assert_eq!(cfg.mode, 0xffffffff);
             assert_eq!(cfg.fds.first().unwrap().as_raw(), fd.raw());
         });
     });

@@ -127,6 +127,11 @@ fn mode_octal_prefix() {
 }
 
 #[test]
+fn mode_overflow() {
+    assert_invalid_arg(&["--mode", "0x100000000", "x"])
+}
+
+#[test]
 fn resolve_single() {
     assert_ok(&["--resolve", "RESOLVE_BENEATH", "x"], |cfg| {
         assert_eq!(cfg.resolve, 8);

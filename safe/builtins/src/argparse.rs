@@ -44,7 +44,7 @@ pub fn next_val<'a>(
     }
 }
 
-pub fn parse_mode(s: &CStr) -> Result<u64, Report<ModeParseError>> {
+pub fn parse_mode(s: &CStr) -> Result<u32, Report<ModeParseError>> {
     let b = s.to_bytes();
     let (d, r) = if let Some(h) = b.strip_prefix(b"0x") {
         (h, 16)
@@ -54,7 +54,7 @@ pub fn parse_mode(s: &CStr) -> Result<u64, Report<ModeParseError>> {
         (b, 8)
     };
     let s = core::str::from_utf8(d).change_context(ModeParseError::Utf8)?;
-    u64::from_str_radix(s, r).change_context(ModeParseError::ParseFailed)
+    u32::from_str_radix(s, r).change_context(ModeParseError::ParseFailed)
 }
 
 pub fn parse_dirfd(s: &CStr) -> Result<Option<ImportedFd>, Report<BuiltinError>> {

@@ -131,6 +131,18 @@ fn mode_hex() {
 }
 
 #[test]
+fn mode_overflow() {
+    assert_invalid_arg(&["--mode", "0x100000000", "x"])
+}
+
+#[test]
+fn mode_boundary() {
+    assert_ok(&["--mode", "0xffffffff", "x"], |cfg| {
+        assert_eq!(cfg.how.mode, 0xffffffff);
+    });
+}
+
+#[test]
 fn bad_flag() {
     assert_invalid_arg(&["--bad", "x"])
 }

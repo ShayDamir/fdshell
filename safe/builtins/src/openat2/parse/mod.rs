@@ -50,7 +50,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<
                     .change_context(BuiltinError::InvalidArgument("mode"))
                     .attach_opaque(Suggestion(
                         "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
-                    ))?;
+                    ))? as u64;
             }
             b"--resolve" => {
                 let s = crate::argparse::next_val(args, &mut i, val)?;
