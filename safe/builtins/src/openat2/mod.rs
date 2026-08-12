@@ -1,5 +1,4 @@
 use error_stack::{Report, ResultExt};
-use sys::fcntl::O_CLOEXEC;
 use sys::{AtFd, ImportedFd};
 
 use crate::error::BuiltinError;
@@ -12,7 +11,7 @@ pub fn openat2_exec(
 ) -> Result<(), Report<BuiltinError>> {
     let dirfd = cfg.dirfd.as_ref().map_or(AtFd::cwd(), ImportedFd::at);
     let how = sys::openat2::OpenHow {
-        flags: cfg.how.flags | (O_CLOEXEC as u64),
+        flags: cfg.how.flags,
         mode: cfg.how.mode,
         resolve: cfg.how.resolve,
     };

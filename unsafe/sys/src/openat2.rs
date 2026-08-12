@@ -3,6 +3,7 @@ use crate::{AtFd, LocalFd};
 use core::ffi::CStr;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct OpenHow {
     pub flags: u64,
     pub mode: u64,
@@ -43,6 +44,10 @@ pub fn openat2<P: AsRef<CStr>>(
 ) -> Result<LocalFd, crate::SyscallError> {
     let pathname = pathname.as_ref();
     let dirfd = dirfd.as_raw();
+    // Force O_CLOEXEC to enforce the LocalFd invariant, regardless of what
+    // the caller passed in the OpenHow flags.
+    let mut how = *how;
+    how.flags |= O_CLOEXEC as u64;
     // SAFETY: SYS_openat2 (437) is valid on Linux ≥5.6 x86_64. dirfd may be
     // AT_FDCWD (−100) or an open dirfd. pathname and how point to valid memory
     // and are only read by the kernel.
@@ -51,12 +56,12 @@ pub fn openat2<P: AsRef<CStr>>(
             libc::SYS_openat2,
             dirfd as i64,
             pathname.as_ptr(),
-            &raw const *how,
-            core::mem::size_of_val(how),
+            &raw const how,
+            core::mem::size_of_val(&how),
         ) as isize
     })
     .map(|ret| {
-        // SAFETY: `ret` is a valid fd with CLOEXEC (ORed into `how.flags` by the caller).
+        // SAFETY: O_CLOEXEC is forced above, satisfying the LocalFd invariant.
         unsafe { LocalFd::from_raw(ret as i32) }
     })
 }

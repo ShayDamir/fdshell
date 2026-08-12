@@ -22,10 +22,7 @@ pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppEr
             sys::openat2::openat2(
                 dirfd.at(),
                 &cstr,
-                &sys::openat2::OpenHow::new(
-                    (sys::fcntl::O_RDONLY | sys::fcntl::O_CLOEXEC) as u64,
-                    0,
-                ),
+                &sys::openat2::OpenHow::new(sys::fcntl::O_RDONLY as u64, 0),
             )
             .change_context(AppError::ScriptRead)?
         } else {
