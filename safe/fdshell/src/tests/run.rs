@@ -915,6 +915,8 @@ fn while_false_never_runs_body() {
         let cell = make_cell();
         crate::repl::run_script(b"while false; do umask 0o000; done", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
+        let state = borrow_state(&cell);
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     });
 }
 
@@ -924,6 +926,8 @@ fn until_true_body_never_runs() {
         let cell = make_cell();
         crate::repl::run_script(b"until true; do umask 0o077; done", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o077);
+        let state = borrow_state(&cell);
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     });
 }
 

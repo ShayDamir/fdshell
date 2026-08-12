@@ -13,6 +13,7 @@ pub(crate) fn run_loop(
     invert: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
+    let mut ran_body = false;
     loop {
         crate::repl::run_cond_list(cond.as_bytes().change_context(CmdError::Never)?, cell)?;
         let exit_code = {
@@ -22,6 +23,7 @@ pub(crate) fn run_loop(
         if (exit_code == 0) != invert {
             break;
         }
+        ran_body = true;
         if let Some(control) =
             crate::repl::run_script(body.as_bytes().change_context(CmdError::Never)?, cell)?
         {
@@ -30,6 +32,10 @@ pub(crate) fn run_loop(
                 LoopControl::Continue => continue,
             }
         }
+    }
+    if !ran_body {
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+        state.set_last_exit(0);
     }
     Ok(())
 }
