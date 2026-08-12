@@ -9,7 +9,7 @@ use sys::siginfo::WaitStatus;
 pub struct Task {
     pub pidfd: sys::LocalFd,
     pub capture_fd: Option<sys::LocalFd>,
-    pub child_pid: i32,
+    pub child_pid: sys::Pid,
     pub captures: Vec<Capture>,
 }
 

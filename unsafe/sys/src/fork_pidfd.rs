@@ -1,13 +1,13 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::{LocalFd, cvt, fork_cell::ForkCell};
+use crate::{LocalFd, Pid, cvt, fork_cell::ForkCell};
 
 const UNKNOWN: u8 = 0;
 const AUTO: u8 = 1;
 const MANUAL: u8 = 2;
 static PIDFD_CLOEXEC: AtomicU8 = AtomicU8::new(UNKNOWN);
 
-pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), crate::SyscallError> {
+pub fn fork_pidfd() -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
     let mut raw_pidfd: i32 = -1;
     // SAFETY: clone_args is integer types; zeroed is valid.
     let mut args: libc::clone_args = unsafe { core::mem::zeroed() };
@@ -26,7 +26,7 @@ pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), crate::SyscallError> {
     })?;
 
     if ret == 0 {
-        return Ok((0, None));
+        return Ok((Pid::from_raw(0), None));
     }
 
     let state = PIDFD_CLOEXEC.load(Ordering::Relaxed);
@@ -67,7 +67,7 @@ pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), crate::SyscallError> {
 
     // SAFETY: `raw_pidfd` has CLOEXEC (set by kernel or fcntl above).
     let pidfd = unsafe { LocalFd::from_raw(raw_pidfd) };
-    Ok((ret, Some(pidfd)))
+    Ok((Pid::from_raw(ret as i32), Some(pidfd)))
 }
 
 /// Fork a subprocess and return a pidfd in the parent. Same return type as
@@ -75,10 +75,10 @@ pub fn fork_pidfd() -> Result<(isize, Option<LocalFd>), crate::SyscallError> {
 /// that `borrow_mut()` succeeds there.
 pub fn fork_pidfd_cell<T>(
     cell: &ForkCell<T>,
-) -> Result<(isize, Option<LocalFd>), crate::SyscallError> {
+) -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
     let (ret, pidfd_opt) = fork_pidfd()?;
     // Only the child (pid == 0, no pidfd) needs to reset its borrow counter.
-    if ret == 0 {
+    if ret.as_raw() == 0 {
         // SAFETY: we are in the forked child — exclusive ownership of memory.
         unsafe { cell.reset_after_fork() };
     }

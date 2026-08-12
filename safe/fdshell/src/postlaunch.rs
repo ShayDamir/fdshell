@@ -11,7 +11,7 @@ use sys::siginfo::WaitStatus;
 
 fn apply_captures(
     capture_fd: sys::LocalFd,
-    child_pid: i32,
+    child_pid: sys::Pid,
     captures: Vec<Capture>,
     state: &mut ShellState,
 ) -> Result<(), error_stack::Report<crate::error::capture::CaptureError>> {

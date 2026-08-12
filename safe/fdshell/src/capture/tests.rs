@@ -44,7 +44,12 @@ fn test_captures_exists() {
         force: false,
     }];
 
-    let result = do_captures(receiver, std::process::id() as i32, captures, &state);
+    let result = do_captures(
+        receiver,
+        sys::Pid::from_raw(std::process::id() as i32),
+        captures,
+        &state,
+    );
     match result {
         Err(e) if matches!(*e.current_context(), CaptureError::Exists) => {}
         _other => panic!("expected Exists"),
@@ -80,7 +85,7 @@ fn test_captures_success() {
 
     let result = do_captures(
         receiver,
-        std::process::id() as i32,
+        sys::Pid::from_raw(std::process::id() as i32),
         captures,
         &ShellState::new(),
     );
@@ -110,7 +115,7 @@ fn test_captures_incomplete_zero() {
 
     let result = do_captures(
         receiver,
-        std::process::id() as i32,
+        sys::Pid::from_raw(std::process::id() as i32),
         captures,
         &ShellState::new(),
     );
@@ -171,7 +176,7 @@ fn test_captures_incomplete_partial() {
 
     let result = do_captures(
         receiver,
-        std::process::id() as i32,
+        sys::Pid::from_raw(std::process::id() as i32),
         captures,
         &ShellState::new(),
     );

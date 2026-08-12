@@ -29,7 +29,7 @@ fn dummy_cell() -> ForkCell<ShellState> {
         .unwrap()
         .strings
         .insert(ShortCStr::from(c"var"), ShortCStr::from(c"value"));
-    cell.borrow_mut().unwrap().last_bg_pid = Some(12345);
+    cell.borrow_mut().unwrap().last_bg_pid = Some(sys::Pid::from_raw(12345));
     cell
 }
 

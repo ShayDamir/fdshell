@@ -6,12 +6,13 @@ use alloc::vec::Vec;
 use core::ffi::CStr;
 
 use crate::SyscallError;
+use crate::pid::Pid;
 use crate::shortcstr::ShortCStr;
 
 /// Return the current process ID.
-pub fn getpid() -> i32 {
+pub fn getpid() -> Pid {
     // SAFETY: `getpid()` always succeeds and returns a valid PID.
-    unsafe { libc::getpid() }
+    Pid::from_raw(unsafe { libc::getpid() })
 }
 
 /// Look up an environment variable by name.

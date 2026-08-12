@@ -24,7 +24,7 @@ pub struct Capture {
 /// them atomically into the state's fds.
 pub fn do_captures(
     capture_fd: sys::LocalFd,
-    expected_pid: i32,
+    expected_pid: sys::Pid,
     captures: Vec<Capture>,
     state: &ShellState,
 ) -> Result<Vec<(ShortCStr, sys::LocalFd)>, Report<CaptureError>> {

@@ -121,7 +121,7 @@ fn wait_one_task() {
                     Task {
                         pidfd,
                         capture_fd: None,
-                        child_pid: ret as i32,
+                        child_pid: ret,
                         captures: Vec::new(),
                     },
                 );
@@ -154,7 +154,7 @@ fn wait_all_tasks() {
             Task {
                 pidfd: pidfd1,
                 capture_fd: None,
-                child_pid: ret1 as i32,
+                child_pid: ret1,
                 captures: Vec::new(),
             },
         );
@@ -163,7 +163,7 @@ fn wait_all_tasks() {
             Task {
                 pidfd: pidfd2,
                 capture_fd: None,
-                child_pid: ret2 as i32,
+                child_pid: ret2,
                 captures: Vec::new(),
             },
         );
@@ -802,13 +802,13 @@ fn last_bg_pid_set_on_background_task() {
             let outcome = LaunchOutcome {
                 pidfd,
                 capture_fd: None,
-                child_pid: ret as i32,
+                child_pid: ret,
             };
             {
                 let mut state = borrow_state_mut(&cell);
                 let status = crate::postlaunch::finish_cmd(cmdline, outcome, &mut state).unwrap();
                 assert!(matches!(status, WaitStatus::Exited(0)));
-                assert_eq!(state.last_bg_pid, Some(ret as i32));
+                assert_eq!(state.last_bg_pid, Some(ret));
             }
         }
     }

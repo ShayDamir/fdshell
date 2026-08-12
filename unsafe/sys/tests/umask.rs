@@ -23,7 +23,7 @@ fn with_exhausted_fds<T>(f: impl FnOnce() -> T) -> T {
 #[test]
 fn umask_save_restore() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
-    if ret == 0 {
+    if ret.as_raw() == 0 {
         sys::umask::init();
         let original = sys::umask::get();
         sys::umask::set(0o077);
@@ -52,7 +52,7 @@ fn umask_save_restore() -> Result<(), SyscallError> {
 #[test]
 fn umask_set_get() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
-    if ret == 0 {
+    if ret.as_raw() == 0 {
         sys::umask::init();
         sys::umask::set(0o077);
         if sys::umask::get() != 0o077 {
@@ -86,7 +86,7 @@ fn umask_set_get() -> Result<(), SyscallError> {
 #[test]
 fn umask_set_get_zero() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
-    if ret == 0 {
+    if ret.as_raw() == 0 {
         sys::umask::init();
         let original = sys::umask::get();
         sys::umask::set(0o777);
@@ -115,7 +115,7 @@ fn umask_set_get_zero() -> Result<(), SyscallError> {
 #[test]
 fn umask_init_fallback_no_proc() -> Result<(), SyscallError> {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd()?;
-    if ret == 0 {
+    if ret.as_raw() == 0 {
         let ok = with_exhausted_fds(|| {
             sys::umask::init();
             let mask = sys::umask::get();

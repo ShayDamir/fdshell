@@ -195,7 +195,12 @@ fn test_mkdirat_exec() {
     builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
 
     let mut buf = [0u8; TAG_MAX];
-    let (fd, tag) = sys::shellfd::recv_fd(&receiver, &mut buf, std::process::id() as i32).unwrap();
+    let (fd, tag) = sys::shellfd::recv_fd(
+        &receiver,
+        &mut buf,
+        sys::Pid::from_raw(std::process::id() as i32),
+    )
+    .unwrap();
     fd.verify().unwrap();
     assert_eq!(tag.to_bytes(), b"dirfd");
 

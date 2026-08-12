@@ -13,7 +13,7 @@ use sys::siginfo::WaitStatus;
 
 pub struct CaptureChannel {
     pub capture_fd: sys::LocalFd,
-    pub child_pid: i32,
+    pub child_pid: sys::Pid,
     pub captures: Vec<Capture>,
 }
 
@@ -39,7 +39,7 @@ pub fn launch_pipeline(
         })
         .collect::<Result<Vec<_>, _>>()
         .change_context(PipelineError::CaptureSocket)?;
-    let mut children: Vec<(i32, sys::LocalFd)> = Vec::with_capacity(n);
+    let mut children: Vec<(sys::Pid, sys::LocalFd)> = Vec::with_capacity(n);
 
     for i in 0..n {
         let (child_pid, pidfd_opt) =
@@ -52,7 +52,7 @@ pub fn launch_pipeline(
                     sys::exit(report.current_context().exit_code());
                 }
             },
-            Some(pidfd) => children.push((child_pid as i32, pidfd)),
+            Some(pidfd) => children.push((child_pid, pidfd)),
         }
     }
 

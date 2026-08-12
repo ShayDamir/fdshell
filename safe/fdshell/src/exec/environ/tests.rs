@@ -1,4 +1,5 @@
 use super::*;
+use alloc::vec;
 use hashbrown::HashMap;
 
 fn entry_has_prefix(entries: &[ExportedCStr], prefix: &[u8]) -> bool {
@@ -25,7 +26,7 @@ fn find_entry<'a>(entries: &'a [ExportedCStr], prefix: &[u8]) -> Option<&'a str>
 fn get_environ_includes_pid() {
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(12345, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(12345), &[], &exports, &filter, None);
 
     assert!(
         entry_has_prefix(&result, b"FDSHELL_PID="),
@@ -39,7 +40,7 @@ fn get_environ_includes_pid() {
 fn get_environ_excludes_socket_when_none() {
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(1, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(1), &[], &exports, &filter, None);
 
     assert!(
         !entry_has_prefix(&result, b"FDSHELL_SOCKET="),
@@ -53,7 +54,7 @@ fn get_environ_merges_exports() {
     exports.insert(c"MY_VAR".into(), c"my_value".into());
     exports.insert(c"OTHER_VAR".into(), c"other_value".into());
     let filter = EnvFilter::new();
-    let result = get_environ(1, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(1), &[], &exports, &filter, None);
 
     assert!(entry_has_prefix(&result, b"MY_VAR="));
     assert!(entry_has_prefix(&result, b"OTHER_VAR="));
@@ -73,7 +74,7 @@ fn get_environ_filters_exports_by_deny() {
     let mut filter = EnvFilter::new();
     filter.deny.push(c"DENIED".into());
 
-    let result = get_environ(1, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(1), &[], &exports, &filter, None);
 
     assert!(entry_has_prefix(&result, b"ALLOWED="));
     assert!(
@@ -91,7 +92,7 @@ fn get_environ_filters_exports_by_allow() {
     let mut filter = EnvFilter::new();
     filter.allow.push(c"ALLOWED".into());
 
-    let result = get_environ(1, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(1), &[], &exports, &filter, None);
 
     assert!(entry_has_prefix(&result, b"ALLOWED="));
     assert!(
@@ -106,7 +107,7 @@ fn get_environ_excludes_fdshell_vars_from_environ() {
     // (they shouldn't be in test env, but verify the function handles them)
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(999, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(999), &[], &exports, &filter, None);
 
     // Should have exactly one FDSHELL_PID (added by function)
     assert_eq!(count_prefix(&result, b"FDSHELL_PID="), 1);
@@ -116,8 +117,41 @@ fn get_environ_excludes_fdshell_vars_from_environ() {
 fn get_environ_empty_exports() {
     let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
     let filter = EnvFilter::new();
-    let result = get_environ(42, &[], &exports, &filter, None);
+    let result = get_environ(sys::Pid::from_raw(42), &[], &exports, &filter, None);
 
     assert_eq!(count_prefix(&result, b"FDSHELL_PID="), 1);
     assert!(!entry_has_prefix(&result, b"FDSHELL_SOCKET="));
+}
+
+#[test]
+fn get_environ_exports_override_inherited() {
+    let environ = vec![(c"MY_VAR".into(), c"inherited".into())];
+
+    let mut exports = HashMap::new();
+    exports.insert(c"MY_VAR".into(), c"overridden".into());
+
+    let filter = EnvFilter::new();
+    let result = get_environ(sys::Pid::from_raw(1), &environ, &exports, &filter, None);
+
+    assert_eq!(count_prefix(&result, b"MY_VAR="), 1);
+    assert_eq!(
+        find_entry(&result, b"MY_VAR=").unwrap(),
+        "MY_VAR=overridden"
+    );
+}
+
+#[test]
+fn get_environ_keeps_unique_inherited_when_not_exported() {
+    let environ = vec![(c"INHERITED".into(), c"val".into())];
+
+    let mut exports = HashMap::new();
+    exports.insert(c"EXPORTED".into(), c"val2".into());
+
+    let filter = EnvFilter::new();
+    let result = get_environ(sys::Pid::from_raw(1), &environ, &exports, &filter, None);
+
+    assert!(entry_has_prefix(&result, b"INHERITED="));
+    assert_eq!(find_entry(&result, b"INHERITED=").unwrap(), "INHERITED=val");
+    assert!(entry_has_prefix(&result, b"EXPORTED="));
+    assert_eq!(find_entry(&result, b"EXPORTED=").unwrap(), "EXPORTED=val2");
 }

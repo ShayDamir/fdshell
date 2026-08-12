@@ -9,7 +9,7 @@ use sys::fork_cell::ForkCell;
 pub struct LaunchOutcome {
     pub pidfd: sys::LocalFd,
     pub capture_fd: Option<sys::LocalFd>,
-    pub child_pid: i32,
+    pub child_pid: sys::Pid,
 }
 
 pub fn launch(
@@ -56,7 +56,7 @@ pub fn launch(
         Some(pidfd) => Ok(LaunchOutcome {
             pidfd,
             capture_fd,
-            child_pid: child_pid as i32,
+            child_pid,
         }),
     }
 }

@@ -13,15 +13,18 @@ fn export_entry(k: &ShortCStr, v: &ShortCStr, env_filter: &EnvFilter) -> Option<
 }
 
 pub(crate) fn get_environ(
-    pid: i32,
+    pid: sys::Pid,
     environ: &[(ShortCStr, ShortCStr)],
     exports: &HashMap<ShortCStr, ShortCStr>,
     env_filter: &EnvFilter,
     exec_sock: Option<&ExportedFd>,
 ) -> Vec<ExportedCStr> {
+    let mut seen = exports.keys().cloned().collect::<hashbrown::HashSet<_>>();
+
     let env_iter = environ
         .iter()
-        .filter_map(|(k, v)| export_entry(k, v, env_filter));
+        .filter_map(|(k, v)| export_entry(k, v, env_filter).filter(|_| seen.insert(k.clone())));
+
     let exports_iter = exports
         .iter()
         .filter_map(|(k, v)| export_entry(k, v, env_filter));

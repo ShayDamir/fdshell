@@ -10,7 +10,7 @@ struct CtrlBuf([u8; 64]);
 pub fn recv_fd<'a>(
     sock: &LocalFd,
     tag: &'a mut [u8],
-    expected_pid: i32,
+    expected_pid: crate::Pid,
 ) -> Result<(LocalFd, &'a CStr), Report<crate::RecvFdError>> {
     let mut extra = [0u8; 1];
     // SCM_RIGHTS (1 fd: 24 B) + SCM_CREDENTIALS (1 ucred: 32 B) = 56 B
@@ -91,9 +91,9 @@ pub fn recv_fd<'a>(
 
     let fd = got_fd.ok_or(crate::RecvFdError::NoFd)?;
     if let Some(pid) = got_pid
-        && pid != expected_pid
+        && pid != expected_pid.as_raw()
     {
-        bail!(crate::RecvFdError::PidMismatch(pid, expected_pid));
+        bail!(crate::RecvFdError::PidMismatch(pid, expected_pid.as_raw()));
     }
 
     let tag_slice = tag.get(..n).ok_or(crate::RecvFdError::TagTooLong)?;

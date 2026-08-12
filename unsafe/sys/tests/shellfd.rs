@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use sys::Pid;
 use sys::SyscallError;
 use sys::net::{set_passcred, socketpair};
 use sys::pipe::pipe2;
@@ -112,8 +113,12 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         drop(test_b);
 
         let mut tag = [0u8; TAG_MAX];
-        let (test_fd, _tag) = recv_fd(&receiver, &mut tag, std::process::id() as i32)
-            .expect("recv_fd should succeed");
+        let (test_fd, _tag) = recv_fd(
+            &receiver,
+            &mut tag,
+            Pid::from_raw(std::process::id() as i32),
+        )
+        .expect("recv_fd should succeed");
         test_fd.verify().expect("fd must have CLOEXEC");
 
         let mut buf = [0u8; 8];
@@ -141,7 +146,7 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, 0) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagTooLong) => {}
         _other => panic!("expected TagTooLong"),
     }
@@ -166,7 +171,7 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, 0) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
         _other => panic!("expected TagNotNul"),
     }
@@ -190,7 +195,7 @@ fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, 0) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
         _other => panic!("expected TagNotNul"),
     }
@@ -214,7 +219,7 @@ fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, 0) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
         _other => panic!("expected TagNotNul"),
     }
@@ -294,7 +299,7 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, 0) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagTooLong) => {}
         _other => panic!("expected TagTooLong"),
     }
@@ -323,7 +328,7 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
     drop(fd_b);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, 0) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::PidMismatch(_, _)) => {}
         _other => panic!("expected PidMismatch"),
     }
@@ -360,7 +365,7 @@ fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
     sys::cvt(unsafe { libc::sendmsg(a.as_raw(), &msg, 0) })?;
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, std::process::id() as i32) {
+    match recv_fd(&b, &mut buf, Pid::from_raw(std::process::id() as i32)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::NoFd) => {}
         _other => panic!("expected NoFd"),
     }

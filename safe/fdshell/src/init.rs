@@ -20,7 +20,7 @@ fn detect_nested() -> Option<sys::ImportedFd> {
             );
         })
         .ok()?;
-    if pid as i32 != sys::env::getpid() {
+    if pid as i32 != sys::env::getpid().as_raw() {
         return None;
     }
     let sock_short = sys::env::getenv(c"FDSHELL_SOCKET")?;
