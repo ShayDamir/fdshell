@@ -1,7 +1,6 @@
 ---
 description: Quality assurance review for fdshell Rust code. Run at end of any change session. Checks file length, SAFETY comments, lint rules, derive hygiene, unsafe discipline, and runs cargo fmt + clippy.
 mode: subagent
-model: opencode/big-pickle
 permission:
   edit: deny
   bash: allow

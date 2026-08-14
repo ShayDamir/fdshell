@@ -1,93 +1,30 @@
 # FD Shell — agent guidance
 
-## Lessons
-
-All plans/implementations must align to [`LESSONS.md`] and [`STYLE.md`]. Check before implementing; add new issues as lessons.
+Read [`STYLE.md`] and [`LESSONS.md`] before changing code; add new lessons there.
 
 ## Workspace
-
-Three crates (`resolver = "2"`):
-
-| Path | Type | Key attributes | Role |
-|---|---|---|---|
-| `safe/fdshell/` | bin | `#![no_std]`, `#![forbid(unsafe_code)]` | Shell logic, fd passing |
-| `safe/builtins/` | lib | `#![no_std]`, `#![forbid(unsafe_code)]` | Builtin commands |
-| `unsafe/sys/` | lib | `#![no_std]`, unsafe allowed | Syscall wrappers |
-
-- `safe/` crates cannot call libc directly.
-- File length: see [`STYLE.md`] §2.
-- Unsafe conventions: [`STYLE.md`] §7.
-- Safe syscall wrappers return `Result<_, SyscallError>` via `cvt()`.
-- All crates are `#![no_std]`.
+`resolver = "2"`; three `#![no_std]` crates: `safe/fdshell/` (bin, `forbid(unsafe_code)`, shell logic), `safe/builtins/` (lib, `forbid(unsafe_code)`, builtins), `unsafe/sys/` (lib, unsafe, syscalls — the only crate with raw fds). Safe crates never call libc. Syscall wrappers return `Result<_, SyscallError>` via `cvt()`. Platform: Linux x86_64 only.
 
 ## Lints
-
-| Lint | Severity |
-|---|---|
-| `dead_code` | allow |
-| `clippy::todo` | allow |
-| `clippy::unwrap_used` | deny |
-| `clippy::expect_used` | deny |
-| `clippy::indexing_slicing` | deny |
+Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`. Allow: `dead_code`, `clippy::todo`.
 
 ## Commands
-
-```sh
-cargo build            # native build
-cargo fmt              # format
-cargo clippy -- -D warnings
-nix build              # release → result/bin/fdshell
-nix flake check --build-all # fmt + clippy + nextest
-```
-
-- Version from `safe/fdshell/Cargo.toml`. Nix files must be `git add`-ed first.
-- `package.nix` params: `doFmt`, `doClippy`, `doTests`, `doCoverage`.
+`cargo build`; `cargo fmt`; `cargo clippy -- -D warnings`; `nix build` (→ `result/bin/fdshell`); `nix flake check --build-all` (fmt + clippy + nextest). Version from `safe/fdshell/Cargo.toml`; `git add` nix files first. `package.nix` params: `doFmt`, `doClippy`, `doTests`, `doCoverage`.
 
 ## Execution pipeline (`safe/fdshell/src/`)
-
-| Layer | File | Role |
-|---|---|---|
-| `run_script` | `script.rs` | Split on `;`/`\n`, depth-track `if`/`fi` |
-| `run_cond_list` | `cond.rs` | Split on `&&`/`||` |
-| `run_one` | `run.rs` | Parse single statement, dispatch by type |
-
-- `if`/`fi`: when segment starts with `if`, enter depth-tracking inner loop. Split on space mid-segment to catch keywords. `is_if_or_fi` returns `Some(true/false)` for `if`/`fi`, `None` otherwise. Unmatched `if` → `EINVAL`.
-- `tokens_to_if` uses `find_preceded_by_semi` for `then`/`elif`/`else`/`fi`. `trim_semi` cleans slices, `try_join` reassembles.
-- `b';'` and `b'\n'` outside quotes are statement separators.
+`script.rs` = `run_script` (split on `;`/`\n`), `cond.rs` = `run_cond_list` (split `&&`/`||`), `run.rs` = `run_one` (parse + dispatch). `if`/`fi`: split on space mid-segment to catch keywords; unmatched `if` → `EINVAL`. Separators apply only outside quotes.
 
 ## Testing
-
-```sh
-cargo nextest run --status-level fail --show-progress none
-```
-
-Tests in `unsafe/sys/tests/` and `safe/builtins/tests/`.
-
-**Always use `cargo nextest`, never `cargo test`.** Regular `cargo test` runs tests in-process with a shared harness that breaks when tests call `fork()` — child processes inherit the test runner's state, causing hangs, fd corruption, and cross-test interference. `nextest` runs each test in its own isolated process, which is required for correct `fork()` semantics.
+`cargo nextest run --status-level fail --show-progress none`; tests in `unsafe/sys/tests/` and `safe/builtins/tests/`. **Never `cargo test`** — its shared harness breaks `fork()`-based tests (hangs, fd corruption, interference).
 
 ## Coverage
-
-```sh
-# git add first, then:
-nix build .#coverage   # → result/index.html + result/coverage-summary.json
-```
-
-## Platform
-
-Linux x86_64 only for now.
+`nix build .#coverage` (after `git add`) → `result/index.html` + `result/coverage-summary.json`.
 
 ## FD types
+Spec: [`STYLE.md`] §5. No raw fds outside `unsafe/sys`.
 
-Full spec in [`STYLE.md`] §5. Key rules:
-- Never use raw file descriptors outside of `sys` crate
+## Builtins
+SHELLFD tags are per-builtin constants (`c"openat2"`, `c"dirfd"`). Always `O_CLOEXEC` (strip via `dup` if needed). No hardcoded constants: `libc::` in sys, re-exported in safe crates. `mkdirat` race accepted.
 
-## Builtin conventions
-
-- SHELLFD tags are per-builtin constants (`c"openat2"`, `c"dirfd"`).
-- Always produce fds with `O_CLOEXEC`. Strip via `dup` if needed.
-- No hardcoded constants — use named constants: in sys use `libc::` constants, re-export is needed in safe crates.
-- `mkdirat` race (no atomic mkdir+open): accepted for shell context.
-
-## Error handling
-
-All error messages must be clean, concise, actionable. Cross-crate boundaries: `.change_context()`. Add new variant if none fits. Preserve error chain at all cost. Full spec in [`STYLE.md`] §4
+## Errors
+Spec: [`STYLE.md`] §4. Clean, concise, actionable. Cross-crate: `.change_context()`; add a variant if none fits; preserve the error chain.
