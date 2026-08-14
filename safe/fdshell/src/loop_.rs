@@ -24,9 +24,9 @@ pub(crate) fn run_loop(
             break;
         }
         ran_body = true;
-        if let Some(control) =
-            crate::repl::run_script(body.as_bytes().change_context(CmdError::Never)?, cell)?
-        {
+        if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+            crate::repl::run_script(body.as_bytes().change_context(CmdError::Never)?, cell)
+        })? {
             match control {
                 LoopControl::Break => break,
                 LoopControl::Continue => continue,

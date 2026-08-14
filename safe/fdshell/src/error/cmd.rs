@@ -47,6 +47,8 @@ pub enum CmdError {
     BreakOutsideLoop,
     /// 'continue' is not inside a loop
     ContinueOutsideLoop,
+    /// nesting too deep; reduce the depth of nested blocks or command substitutions
+    NestingTooDeep,
     /// impossible error state (should never occur)
     Never,
     /// invalid {arg}

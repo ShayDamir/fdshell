@@ -24,7 +24,9 @@ pub(crate) fn run_case(
             let pattern_bytes = pattern.as_bytes().change_context(CmdError::Never)?;
             if glob_match(pattern_bytes, word_bytes) {
                 let body = clause.body.as_bytes().change_context(CmdError::Never)?;
-                return crate::repl::run_script(body, cell);
+                return crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+                    crate::repl::run_script(body, cell)
+                });
             }
         }
     }

@@ -21,10 +21,12 @@ pub(crate) fn run_for(
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.strings.insert(forblock.var.clone(), word.clone());
         }
-        if let Some(control) = crate::repl::run_script(
-            forblock.body.as_bytes().change_context(CmdError::Never)?,
-            cell,
-        )? {
+        if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+            crate::repl::run_script(
+                forblock.body.as_bytes().change_context(CmdError::Never)?,
+                cell,
+            )
+        })? {
             match control {
                 LoopControl::Break => break,
                 LoopControl::Continue => continue,

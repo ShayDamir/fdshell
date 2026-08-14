@@ -21,6 +21,7 @@ pub struct ShellState {
     pub(crate) env_filter: EnvFilter,
     pub(crate) shell_sock: Option<LocalFd>,
     pub(crate) environ: Vec<(ShortCStr, ShortCStr)>,
+    pub(crate) nesting: u32,
 }
 
 impl ShellState {
@@ -37,6 +38,7 @@ impl ShellState {
             env_filter: EnvFilter::new(),
             shell_sock: None,
             environ: sys::env::environ_snapshot(),
+            nesting: 0,
         }
     }
 }

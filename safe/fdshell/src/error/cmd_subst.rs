@@ -7,6 +7,8 @@ pub(crate) enum CmdSubstError {
     Pipe,
     /// fork failed
     Fork,
+    /// nesting too deep; reduce the depth of nested blocks or command substitutions
+    NestingTooDeep,
 }
 
 impl core::error::Error for CmdSubstError {}

@@ -24,7 +24,9 @@ pub(crate) fn run_if(
             .then_body
             .as_bytes()
             .change_context(CmdError::Never)?;
-        return crate::repl::run_script(then, cell);
+        return crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+            crate::repl::run_script(then, cell)
+        });
     }
     for (elif_cond, elif_body) in &ifblock.elifs {
         let ec = elif_cond.as_bytes().change_context(CmdError::Never)?;
@@ -35,12 +37,16 @@ pub(crate) fn run_if(
         };
         if ec_exit == 0 {
             let eb = elif_body.as_bytes().change_context(CmdError::Never)?;
-            return crate::repl::run_script(eb, cell);
+            return crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+                crate::repl::run_script(eb, cell)
+            });
         }
     }
     if let Some(ref else_body) = ifblock.else_body {
         let eb = else_body.as_bytes().change_context(CmdError::Never)?;
-        return crate::repl::run_script(eb, cell);
+        return crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+            crate::repl::run_script(eb, cell)
+        });
     } else {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);

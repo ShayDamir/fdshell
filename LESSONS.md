@@ -43,6 +43,12 @@ Rename `mod become` to `mod become_cmd` (file: `become_cmd.rs`). Only the module
 ## Prefer `Result::is_ok_and()` over `map().unwrap_or(false)`
 `result.is_ok_and(|v| pred(v))` vs `result.map(|v| pred(v)).unwrap_or(false)`.
 
+## Keep execution-context counters in ShellState, not threaded parameters
+A limit that must be visible to both the block executors and `$(…)` (the `nesting` depth cap) should live in `ShellState`: a forked `$(…)` child inherits the state copy, so the counter propagates for free. Threading a parameter would have forced it through `substitute_arg` and its many callers.
+
+## Never hold a ForkCell borrow across a recursive call that re-borrows
+`nest::deeper` increments the depth, drops the borrow, runs the body (which borrows the same cell), then re-borrows to decrement. Holding the `RefMut` across the body would clash with the body's own borrows.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)
