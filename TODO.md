@@ -78,19 +78,22 @@
 ### P0 — Script-reachable crash/hang (fix first)
 
 - [x] `export_to + 1` overflow — `2147483647>%var` redirect panics in debug (`attempt to add with overflow`) and wraps to `i32::MIN` → EINVAL in release (`redirect/resolve.rs:22`); fixed with `checked_add` → `OpenRedirectError::FdNumberOutOfRange` (+ regression test)
-- [ ] Deeply nested `if` — O(n²) parse (re-parses remaining body per level, `if_exec.rs:9`) + unbounded in-process recursion → 23s at n=4000 (release), stack-overflow SIGABRT in debug; tokenize once per line, cap nesting depth
+- [ ] Deeply nested `if`/`while`/`until`/`for`/`case` — superlinear O(n²) CPU: each nesting level re-runs `scan_block`'s keyword scan + `try_join` over the remaining body (`segment.rs:62`, `script.rs:17-30` re-tokenizes the body). Verified: single-line `if true; then … ;fi` chain → 100→25ms, 500→160ms, 2000→2.2s, 4000→13s (release); 20000 → >120s (both release and debug, CPU-bound; no stack overflow because nesting is shallow — `parse` stores bodies as strings and `run_if`/`run_loop`/`run_for` recurse only ~n frames at runtime). Fix: linear single-pass parse, or cap nesting depth
 
 ### P1 — DoS / hardening
 
 - [ ] `cmd_subst::run_and_capture` accumulates output with no cap — `echo $(yes)` → unbounded memory (`cmd_subst.rs`); apply size limit
 - [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory (`shellfd/recv_fd.rs`)
 - [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
+- [ ] `~` / `$HOME` escape the capability model — the shell operates on fd-vars (`%CWD`) but `~` expansion (`substitute/arg.rs:24`) and `cd_home` (`cd/mod.rs:20`) open the inherited `$HOME` via *absolute* path with default `openat2` flags (no `RESOLVE_BENEATH`, no `O_NOFOLLOW`); a symlink at `$HOME` (or inside it) silently redirects file ops / `cd` to an attacker-controlled location, and `~` reaches outside any `RESOLVE_BENEATH` sandbox. Resolve `~` against a controlled dirfd, or drop `~` in strict mode
 
 ### P2 — Hardening / informational
 
-- [ ] Numbered path redirects at `i32::MAX` (`2147483647>file`) fail at `dup2` with generic "failed to open redirection path" — apply the same range check as the var branch for a consistent "file descriptor number is out of range" (`redirect/mod.rs:29`)
+- [ ] Numbered path redirects at `i32::MAX` (`true 2147483647>file`) fail at `dup2` with a generic "failed to open redirection path" / `EBADF` (verified: `true 2147483647>%f` gives the clean "file descriptor number is out of range" but the path branch does not) — apply the same range check as the var branch (`redirect/resolve.rs:24-25` is var-only; add it for `RedirectSource::Path` in `resolve_redirects` or range-check `export_to` at parse time in `parse/redirect.rs:34`)
 - [ ] Non-CLOEXEC socket fd leaks into nested-shell grandchildren via `FDSHELL_SOCKET` — ensure CLOEXEC or strip in children
 - [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current invariants but UB-fragile; add safety comment/invariant test (`shortcstr/access.rs`)
+- [ ] Unbounded script size — `cli::load_script` and the `-c`/stdin paths read the entire script into a `Vec<u8>` with no cap (`cli.rs:7`); a multi-GB script / `-c` argument OOMs the shell before parsing (compounds with the nested-`if` O(n²) CPU). Add a max-script-size check
+- [ ] `getcwd` fixed 4096-byte buffer — `env::getcwd` (`env.rs:37`) fails with `ENAMETOOLONG` (surfaced as a generic `BuiltinError::Io`) when the CWD path exceeds 4096 bytes; `pwd` then gives an unactionable error. Read the cwd via `/proc/self/cwd` (readlink) or grow the buffer so `pwd` keeps working for deep directory trees
 
 ## Open Directions
 
