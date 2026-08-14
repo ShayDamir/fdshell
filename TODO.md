@@ -75,7 +75,21 @@
 
 ## Security / hardening
 
-(All items complete)
+### P0 — Script-reachable crash/hang (fix first)
+
+- [ ] `export_to + 1` overflow — `2147483647>%var` redirect panics in debug (`attempt to add with overflow`) and wraps to `i32::MIN` → EINVAL in release (`redirect/resolve.rs:22`); use checked arithmetic / reject `export_to == i32::MAX`
+- [ ] Deeply nested `if` — O(n²) parse (re-parses remaining body per level, `if_exec.rs:9`) + unbounded in-process recursion → 23s at n=4000 (release), stack-overflow SIGABRT in debug; tokenize once per line, cap nesting depth
+
+### P1 — DoS / hardening
+
+- [ ] `cmd_subst::run_and_capture` accumulates output with no cap — `echo $(yes)` → unbounded memory (`cmd_subst.rs`); apply size limit
+- [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory (`shellfd/recv_fd.rs`)
+- [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
+
+### P2 — Hardening / informational
+
+- [ ] Non-CLOEXEC socket fd leaks into nested-shell grandchildren via `FDSHELL_SOCKET` — ensure CLOEXEC or strip in children
+- [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current invariants but UB-fragile; add safety comment/invariant test (`shortcstr/access.rs`)
 
 ## Open Directions
 
