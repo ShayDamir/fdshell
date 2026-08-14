@@ -77,7 +77,7 @@
 
 ### P0 — Script-reachable crash/hang (fix first)
 
-- [ ] `export_to + 1` overflow — `2147483647>%var` redirect panics in debug (`attempt to add with overflow`) and wraps to `i32::MIN` → EINVAL in release (`redirect/resolve.rs:22`); use checked arithmetic / reject `export_to == i32::MAX`
+- [x] `export_to + 1` overflow — `2147483647>%var` redirect panics in debug (`attempt to add with overflow`) and wraps to `i32::MIN` → EINVAL in release (`redirect/resolve.rs:22`); fixed with `checked_add` → `OpenRedirectError::FdNumberOutOfRange` (+ regression test)
 - [ ] Deeply nested `if` — O(n²) parse (re-parses remaining body per level, `if_exec.rs:9`) + unbounded in-process recursion → 23s at n=4000 (release), stack-overflow SIGABRT in debug; tokenize once per line, cap nesting depth
 
 ### P1 — DoS / hardening
@@ -88,6 +88,7 @@
 
 ### P2 — Hardening / informational
 
+- [ ] Numbered path redirects at `i32::MAX` (`2147483647>file`) fail at `dup2` with generic "failed to open redirection path" — apply the same range check as the var branch for a consistent "file descriptor number is out of range" (`redirect/mod.rs:29`)
 - [ ] Non-CLOEXEC socket fd leaks into nested-shell grandchildren via `FDSHELL_SOCKET` — ensure CLOEXEC or strip in children
 - [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current invariants but UB-fragile; add safety comment/invariant test (`shortcstr/access.rs`)
 

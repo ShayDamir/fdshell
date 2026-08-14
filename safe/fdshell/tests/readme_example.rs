@@ -519,3 +519,26 @@ fn exec_builtin_replaces_shell() {
     assert_ok(&output, "exec_builtin_replaces_shell");
     assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "hello");
 }
+
+#[test]
+fn out_of_range_redirect_export_is_graceful_error() {
+    let dir = tmpdir();
+    let script = concat!(
+        "builtin mkdirat --mode 0755 d %>%d; ",
+        "builtin openat2 --dirfd %d --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 f %>%f; ",
+        "true 2147483647>%f",
+    );
+    let output = run_c(script, &dir);
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert!(
+        !stderr.contains("panicked"),
+        "must not panic: exit={:?} stderr={}",
+        output.status.code(),
+        stderr
+    );
+    assert!(
+        stderr.contains("file descriptor number is out of range"),
+        "expected actionable error, got: {}",
+        stderr
+    );
+}

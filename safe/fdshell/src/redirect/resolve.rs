@@ -18,16 +18,41 @@ pub fn resolve_redirects(
                 super::RedirectSource::Var(var) => state
                     .fds
                     .get(var)
-                    .ok_or(OpenRedirectError)?
-                    .try_clone_above(r.export_to + 1)
-                    .change_context(OpenRedirectError)?,
+                    .ok_or(OpenRedirectError::Open)?
+                    .try_clone_above(
+                        r.export_to
+                            .checked_add(1)
+                            .ok_or(OpenRedirectError::FdNumberOutOfRange)?,
+                    )
+                    .change_context(OpenRedirectError::Open)?,
                 super::RedirectSource::Path(_) => opened_iter
                     .next()
-                    .ok_or(OpenRedirectError)?
+                    .ok_or(OpenRedirectError::Open)?
                     .try_clone()
-                    .change_context(OpenRedirectError)?,
+                    .change_context(OpenRedirectError::Open)?,
             };
             Ok(r.resolve(local))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn out_of_range_export_to_is_actionable_error() {
+        let mut state = ShellState::new();
+        let fd = sys::openat2::open(c"/dev/null", sys::fcntl::O_RDONLY).unwrap();
+        state.fds.insert(c"x".into(), fd);
+        let report = resolve_redirects(&[RedirectDef::var(i32::MAX, c"x")], &[], &state)
+            .err()
+            .unwrap();
+        assert!(matches!(
+            report.current_context(),
+            OpenRedirectError::FdNumberOutOfRange
+        ));
+    }
 }

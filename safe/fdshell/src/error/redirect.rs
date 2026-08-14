@@ -1,7 +1,12 @@
-//! Redirection file opening errors (redirect/open.rs, redirect/direction.rs).
+//! Redirection file opening errors (redirect/open.rs, redirect/resolve.rs).
 
-/// [OpenRedirectError] Failed to open redirection path
+/// [OpenRedirectError] Redirection file opening errors
 #[derive(displaydoc::Display, Debug)]
-pub(crate) struct OpenRedirectError;
+pub(crate) enum OpenRedirectError {
+    /// failed to open redirection path
+    Open,
+    /// file descriptor number is out of range
+    FdNumberOutOfRange,
+}
 
 impl core::error::Error for OpenRedirectError {}

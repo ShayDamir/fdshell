@@ -28,7 +28,7 @@ impl Redirect {
     pub fn export(&self) -> Result<(), Report<OpenRedirectError>> {
         self.local
             .export_to(self.export_to)
-            .change_context(OpenRedirectError)?;
+            .change_context(OpenRedirectError::Open)?;
         Ok(())
     }
 }

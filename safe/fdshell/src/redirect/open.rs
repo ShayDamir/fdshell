@@ -13,7 +13,7 @@ pub fn open_redirect_files(
             let name = path.export();
             fds.push(
                 sys::openat2::open(&name, r.direction.open_flags())
-                    .change_context(OpenRedirectError)?,
+                    .change_context(OpenRedirectError::Open)?,
             );
         }
     }
