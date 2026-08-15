@@ -1,6 +1,7 @@
 ---
 description: Quality assurance review for fdshell Rust code. Run at end of any change session. Checks file length, SAFETY comments, lint rules, derive hygiene, unsafe discipline, and runs cargo fmt + clippy.
 mode: subagent
+model: opencode/big-pickle
 permission:
   edit: deny
   bash: allow
@@ -86,7 +87,7 @@ Read [`LESSONS.md`](../../LESSONS.md). Flag deviations from documented lessons a
 ## Automated checks (always run)
 1. `cargo fmt` — report which files changed
 2. `cargo clippy -- -D warnings`
-3. `nix build .#coverage` → `result/coverage-summary.json`
+3. `nix build .#coverage` → `result/coverage-report.txt`
 4. `nix flake check --build-all`
 
 ## Test coverage

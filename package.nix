@@ -7,7 +7,6 @@
   rustfmt,
   cargo-llvm-cov,
   cargo-nextest,
-  jq,
   doClippy ? false,
   doTests ? false,
   doFmt ? false,
@@ -32,7 +31,7 @@
     nativeBuildInputs =
       lib.optionals doClippy [clippy]
       ++ lib.optionals doFmt [rustfmt]
-      ++ lib.optionals doCoverage [cargo-llvm-cov cargo-nextest jq];
+      ++ lib.optionals doCoverage [cargo-llvm-cov cargo-nextest];
     preCheck =
       lib.optionalString doFmt ''
         cargo fmt --check
@@ -48,9 +47,10 @@ in
       dontCargoCheck = true;
       checkPhase = ''
         cargo llvm-cov nextest --html
-        cargo llvm-cov report --json --summary-only --output-path target/llvm-cov/coverage-summary.json
-        cp -r target/llvm-cov/html $out/
-        cp target/llvm-cov/coverage-summary.json $out/
+        cargo llvm-cov report --text --output-path target/llvm-cov/coverage-report.txt
+        mkdir -p "$out"
+        cp -r target/llvm-cov/html/. "$out/"
+        cp target/llvm-cov/coverage-report.txt "$out/"
       '';
     })
   else base

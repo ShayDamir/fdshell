@@ -18,7 +18,7 @@ Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_un
 `cargo nextest run --status-level fail --show-progress none`; tests in `unsafe/sys/tests/` and `safe/builtins/tests/`. **Never `cargo test`** — its shared harness breaks `fork()`-based tests (hangs, fd corruption, interference).
 
 ## Coverage
-`nix build .#coverage` (after `git add`) → `result/index.html` + `result/coverage-summary.json`.
+`nix build .#coverage` (after `git add`) → `result/index.html` + `result/coverage-report.txt`.
 
 ## FD types
 Spec: [`STYLE.md`] §5. No raw fds outside `unsafe/sys`.
