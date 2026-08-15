@@ -82,7 +82,8 @@
 
 ### P1 — DoS / hardening
 
-- [ ] `cmd_subst::run_and_capture` accumulates output with no cap — `echo $(yes)` → unbounded memory (`cmd_subst.rs`); apply size limit
+- [x] `cmd_subst::run_and_capture` accumulates output with no cap — `echo $(yes)` → unbounded memory (`cmd_subst.rs`); apply size limit. Fixed: `drain` is capped at `MAX_CAPTURED` (64 MiB) via a new `CmdSubstError::OutputTooLarge`; on overflow the read end is dropped and the child is killed via a new `pidfd_send_signal` wrapper so an unbounded producer can't linger or hang the shell
+- [ ] `set --stdout-capture-limit <bytes>` — make the `$(…)` stdout capture cap configurable; `MAX_CAPTURED` is hardcoded at 64 MiB (`cmd_subst.rs:13`); bash has no such limit, so this is an fdshell-specific escape hatch for scripts that legitimately capture more than the default
 - [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory (`shellfd/recv_fd.rs`)
 - [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
 - [ ] `~` / `$HOME` escape the capability model — the shell operates on fd-vars (`%CWD`) but `~` expansion (`substitute/arg.rs:24`) and `cd_home` (`cd/mod.rs:20`) open the inherited `$HOME` via *absolute* path with default `openat2` flags (no `RESOLVE_BENEATH`, no `O_NOFOLLOW`); a symlink at `$HOME` (or inside it) silently redirects file ops / `cd` to an attacker-controlled location, and `~` reaches outside any `RESOLVE_BENEATH` sandbox. Resolve `~` against a controlled dirfd, or drop `~` in strict mode

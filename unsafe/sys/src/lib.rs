@@ -65,6 +65,7 @@ pub mod mkdirat;
 pub mod net;
 pub mod openat2;
 pub mod pid;
+pub mod pidfd_send_signal;
 pub mod pipe;
 pub mod recv_fd_error;
 pub mod renameat2;

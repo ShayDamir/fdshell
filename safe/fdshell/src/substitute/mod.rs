@@ -24,12 +24,13 @@ pub fn substitute_args(
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let mut result = Vec::new();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
     for (i, arg) in args.iter().enumerate() {
         let fq = args_fq.get(i).copied().unwrap_or(false);
         if fq && arg.eq_bytes(b"$@") {
+            let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
             expand_positional_args(&state.positional, &mut result)?;
         } else if fq && arg.eq_bytes(b"$*") {
+            let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
             let expanded = join_positional_args(&state.positional)?;
             result.push(expanded);
         } else {

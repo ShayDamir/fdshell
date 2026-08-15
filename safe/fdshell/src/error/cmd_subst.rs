@@ -9,6 +9,8 @@ pub(crate) enum CmdSubstError {
     Fork,
     /// nesting too deep; reduce the depth of nested blocks or command substitutions
     NestingTooDeep,
+    /// command substitution output exceeds the capture limit; produce less output or write to a file
+    OutputTooLarge,
 }
 
 impl core::error::Error for CmdSubstError {}

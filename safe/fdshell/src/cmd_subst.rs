@@ -1,9 +1,16 @@
 use crate::error::cmd_subst::CmdSubstError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::LocalFd;
 use sys::fork_cell::ForkCell;
+
+/// Maximum number of bytes a command substitution may capture.
+///
+/// Without a cap, an unbounded producer such as `$(yes)` grows the buffer
+/// until the process runs out of memory. Exceeding the cap aborts the
+/// substitution and kills the child.
+pub(crate) const MAX_CAPTURED: usize = 64 * 1024 * 1024;
 
 pub(crate) fn run_and_capture(
     cmd: &[u8],
@@ -21,29 +28,51 @@ pub(crate) fn run_and_capture(
             }
             (_, Some(pidfd)) => {
                 drop(w);
-                let out = drain(&r);
-                // Reap child; stdout already consumed above
+                let out = drain(&r, MAX_CAPTURED);
+                if out.is_err() {
+                    // Abandon the pipe so an orphaned producer (e.g. `yes`)
+                    // gets SIGPIPE on its next write, and kill the child so
+                    // it can't keep running while the parent is idle. Both
+                    // are best-effort.
+                    drop(r);
+                    let _ = sys::pidfd_send_signal::send_signal(
+                        &pidfd,
+                        sys::pidfd_send_signal::SIGKILL,
+                    );
+                }
+                // Reap child; stdout already consumed (or abandoned) above.
                 let _ = sys::wait_pidfd::wait_pidfd(&pidfd);
-                Ok(out)
+                out
             }
         }
     })
 }
 
-/// Read the pipe until EOF, stripping trailing newlines (command substitution semantics).
-fn drain(r: &LocalFd) -> Vec<u8> {
+/// Read the pipe until EOF, stripping trailing newlines (command substitution
+/// semantics). Fails with [`CmdSubstError::OutputTooLarge`] once `limit` bytes
+/// would be captured; the caller must kill the child in that case.
+fn drain(r: &LocalFd, limit: usize) -> Result<Vec<u8>, Report<CmdSubstError>> {
     let mut out = Vec::new();
     let mut buf = [0u8; 4096];
-    while let Ok(n) = sys::rw::read(r, &mut buf) {
-        if n == 0 {
-            break;
-        }
+    loop {
+        let n = match sys::rw::read(r, &mut buf) {
+            // Preserve prior behavior: a read error ends the capture.
+            Err(_) => break,
+            Ok(0) => break,
+            Ok(n) => n,
+        };
         if let Some(chunk) = buf.get(..n) {
+            if out.len() + chunk.len() > limit {
+                bail!(CmdSubstError::OutputTooLarge);
+            }
             out.extend_from_slice(chunk);
         }
     }
     while out.last() == Some(&b'\n') {
         out.pop();
     }
-    out
+    Ok(out)
 }
+
+#[cfg(test)]
+mod tests;
