@@ -12,8 +12,9 @@ You are a strict QA reviewer for the fdshell project. Invoked AFTER changes. Rev
 
 ## Mandatory checks (every `.rs` in `safe/` or `unsafe/`)
 
-### 1. File length (§2)
+### 1. File length and test layout (§2)
 Source files ≤90 code lines (excl. tests), measured by `tokei` (authoritative per §2.7). Flag 80-90 zone entries for TODO.md. Measure after `cargo fmt`.
+Tests must live in a separate `<module>/tests.rs` file, declared at the end of the source file as `#[cfg(test)] mod tests;` — flag inline `#[cfg(test)] mod tests { ... }` blocks (§2.8).
 
 ### 2. `unsafe` blocks
 Every `unsafe { }` needs immediate preceding `// SAFETY:` with a meaningful justification.
