@@ -1,4 +1,4 @@
-use super::read_from_fd::read_from_local_fd;
+use super::read_from_fd::read_line_from_fd;
 use super::*;
 use crate::capture::Capture;
 use crate::parse::CommandLine;
@@ -8,6 +8,7 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::ShortCStr;
+use sys::SyscallError;
 use sys::siginfo::WaitStatus;
 
 fn make_read_cmdline(args: &[ShortCStr]) -> CommandLine {
@@ -240,20 +241,20 @@ fn test_collect_targets_fdvar_in_targets_rejected() {
 // read_from_fd tests
 
 #[test]
-fn test_read_from_local_fd_eof() {
+fn test_read_line_from_fd_eof() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     // Close write end immediately → EOF
     drop(write_end);
 
     let mut buf = Vec::new();
     let mut eof = false;
-    read_from_local_fd(&read_end, &mut buf, &mut eof, None).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut buf, &mut eof, None).unwrap();
     assert!(eof);
     assert!(buf.is_empty());
 }
 
 #[test]
-fn test_read_from_local_fd_max_bytes() {
+fn test_read_line_from_fd_max_bytes() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world";
     sys::rw::write(&write_end, data).unwrap();
@@ -261,12 +262,12 @@ fn test_read_from_local_fd_max_bytes() {
 
     let mut buf = Vec::new();
     let mut eof = false;
-    read_from_local_fd(&read_end, &mut buf, &mut eof, Some(5)).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut buf, &mut eof, Some(5)).unwrap();
     assert_eq!(buf, b"hello");
 }
 
 #[test]
-fn test_read_from_local_fd_stops_at_newline() {
+fn test_read_line_from_fd_stops_at_newline() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"line1\nline2";
     sys::rw::write(&write_end, data).unwrap();
@@ -274,8 +275,43 @@ fn test_read_from_local_fd_stops_at_newline() {
 
     let mut buf = Vec::new();
     let mut eof = false;
-    read_from_local_fd(&read_end, &mut buf, &mut eof, None).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut buf, &mut eof, None).unwrap();
     assert_eq!(buf, b"line1");
+}
+
+#[test]
+fn test_read_line_from_fd_error() {
+    let mut buf = Vec::new();
+    let mut eof = false;
+    let result = read_line_from_fd(
+        |_b: &mut [u8]| Err(SyscallError::EBADF("read")),
+        &mut buf,
+        &mut eof,
+        None,
+    );
+    assert!(result.is_err());
+    assert!(matches!(
+        result.unwrap_err().current_context(),
+        CmdError::Read
+    ));
+    assert!(!eof);
+    assert!(buf.is_empty());
+}
+
+#[test]
+fn test_read_line_from_fd_multi_chunk() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    let data = [b'x'; 8192];
+    sys::rw::write(&write_end, &data).unwrap();
+    sys::rw::write(&write_end, b"\n").unwrap();
+    drop(write_end);
+
+    let mut buf = Vec::new();
+    let mut eof = false;
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut buf, &mut eof, None).unwrap();
+    assert!(!eof);
+    assert_eq!(buf.len(), 8192);
+    assert!(buf.into_iter().all(|b| b == b'x'));
 }
 
 // read_line tests via SourceFd::RawFd
@@ -636,6 +672,25 @@ fn run_read_with_u_fdvar_not_found() {
     let line = make_read_line(&["read", "-u", "%NONEXISTENT", "var1"]);
     let cmdline = make_read_cmdline(&[c"-u".into(), c"%NONEXISTENT".into(), c"var1".into()]);
     let cell = make_read_cell();
+    let result = run_read(&line, &cmdline, &cell);
+    assert!(result.is_err());
+    let report = result.unwrap_err();
+    assert!(matches!(report.current_context(), CmdError::Read));
+}
+
+#[test]
+fn run_read_nul_byte_error() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    let data = b"a\0b\n";
+    sys::rw::write(&write_end, data).unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let line = make_read_u_line(&[c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
+    let cell = make_read_cell();
+
     let result = run_read(&line, &cmdline, &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();

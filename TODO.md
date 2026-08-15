@@ -14,7 +14,7 @@
 - [x] `caret.rs` — extracted tests to `caret/tests.rs`, now 21 code lines
 - [x] `substitute/brace.rs` — extracted, now 65 lines
 - [x] `parse/token.rs` — combined whitespace/separators, separated `$`/`` ` `` arms, removed dead token_emit.rs (93 → 78 lines)
-- [ ] `intercept/read/io.rs` at 85 code lines — extract `SourceFd::RawFd` read loop
+- [x] `intercept/read/io.rs` at 85 code lines — extract `SourceFd::RawFd` read loop
 - [ ] `exec/mod.rs` at 84 code lines — `exec_fd`/`exec_at` share duplicated setup; extract
 - [ ] `openat2/parse/mod.rs` at 90 code lines
 - [ ] `localfd.rs` at 114 code lines (was 80, grew) — extract `read_all` to reduce below 80

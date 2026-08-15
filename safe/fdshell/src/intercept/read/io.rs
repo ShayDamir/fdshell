@@ -1,9 +1,9 @@
 use crate::error::cmd::CmdError;
-use crate::error::read::ReadError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use super::flags::SourceFd;
+use super::read_from_fd::read_line_from_fd;
 
 pub(crate) fn read_line(
     source: &SourceFd,
@@ -34,49 +34,11 @@ pub(crate) fn read_line(
         }
         SourceFd::RawFd(fd_arg) => {
             let fd = sys::ImportedFd::try_from(fd_arg).change_context(CmdError::Read)?;
-            let mut temp = [0u8; 4096];
-            loop {
-                let mut done = false;
-                match fd.read(&mut temp) {
-                    Ok(n) => match n {
-                        1.. => {
-                            for &b in temp
-                                .get(..n)
-                                .ok_or(ReadError::Io)
-                                .change_context(CmdError::Read)?
-                            {
-                                if b == b'\n' {
-                                    done = true;
-                                    break;
-                                }
-                                buf.push(b);
-                                if let Some(max) = max_bytes
-                                    && buf.len() >= max
-                                {
-                                    done = true;
-                                    break;
-                                }
-                            }
-                        }
-                        0 => {
-                            eof = true;
-                            break;
-                        }
-                    },
-                    Err(e) => {
-                        return Err(Report::new(e)
-                            .change_context(ReadError::Io)
-                            .change_context(CmdError::Read));
-                    }
-                }
-                if eof || done {
-                    break;
-                }
-            }
+            read_line_from_fd(|b: &mut [u8]| fd.read(b), &mut buf, &mut eof, max_bytes)?;
         }
         SourceFd::FdVar(_) => {
             if let Some(local) = fd_clone {
-                super::read_from_fd::read_from_local_fd(local, &mut buf, &mut eof, max_bytes)?;
+                read_line_from_fd(|b: &mut [u8]| local.read(b), &mut buf, &mut eof, max_bytes)?;
             }
         }
     }

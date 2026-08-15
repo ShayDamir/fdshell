@@ -59,9 +59,7 @@ pub(crate) fn run_read(
     for (i, name) in targets.iter().enumerate() {
         let field = fields.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
         let var_name = name.strip_prefix(b"$").unwrap_or_else(|| name.clone());
-        let s = ShortCStr::from_vec(field.to_vec())
-            .change_context(ReadError::NulByte)
-            .change_context(CmdError::Read)?;
+        let s = ShortCStr::from_vec(field.to_vec()).change_context(CmdError::Read)?;
         state.strings.insert(var_name, s);
     }
     state.set_last_exit(0);

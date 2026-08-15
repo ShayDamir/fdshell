@@ -42,6 +42,8 @@
 4.13 Rustdoc comments for error variants will be rendered as Display implementation, look at existing Error types as examples.
 4.14 `bail!` from `error_stack` should be used to return errors instead of `return Err(Report::new(Error))`, unless you need to chain `.change_context()` or `.attach_opaque()`.
 4.15 `ensure!` from `error_stack` should be used to provide conditional errors if condition is a simple, positive predicate. For complex and negated conditions use `if` + `bail!()`.
+4.16 Never chain multiple `.change_context()` calls in one expression — at most one per expression. The end consumer of every error is the user, who must read the chain of frames to understand (1) when and why the error happened and (2) how it can be fixed — by modifying the script (e.g. a typo) or the environment (e.g. file permissions). A context no longer properly produced by current code is vestigial: it adds nothing to (1) or (2), so delete the variant and flatten the error instead of chaining through a dead frame.
+4.17 A produced `Never` variant may only be `.change_context()`-ed to another `Never` variant — an invariant violation must never be relabeled as a domain error the user can fix. By 4.16, a `Never` produced and re-contexted within one expression adds no information: `get(..).ok_or(Error1::Never).change_context(Error2::Never)` collapses to `get(..).ok_or(Error2::Never)`.
 
 ## 5 File descriptor types
 
