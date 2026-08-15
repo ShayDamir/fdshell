@@ -15,7 +15,7 @@ Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_un
 `script.rs` = `run_script` (split on `;`/`\n`), `cond.rs` = `run_cond_list` (split `&&`/`||`), `run.rs` = `run_one` (parse + dispatch). `if`/`fi`: split on space mid-segment to catch keywords; unmatched `if` → `EINVAL`. Separators apply only outside quotes.
 
 ## Testing
-`cargo nextest run --status-level fail --show-progress none`; tests in `unsafe/sys/tests/` and `safe/builtins/tests/`. **Never `cargo test`** — its shared harness breaks `fork()`-based tests (hangs, fd corruption, interference).
+`cargo nextest run --status-level fail --show-progress none`; integration tests in `unsafe/sys/tests/` and `safe/builtins/tests/`; unit tests in separate `<module>/tests.rs` files (inline `mod tests {}` forbidden — STYLE.md §2.8). **Never `cargo test`** — its shared harness breaks `fork()`-based tests (hangs, fd corruption, interference).
 
 ## Coverage
 `nix build .#coverage` (after `git add`) → `result/index.html` + `result/coverage-report.txt`.

@@ -3,8 +3,6 @@ use core::marker::PhantomData;
 
 mod error;
 mod ref_mut;
-#[cfg(test)]
-mod tests;
 
 pub use self::error::ForkCellError;
 pub use self::ref_mut::{Ref, RefMut};
@@ -88,3 +86,6 @@ impl<T> ForkCell<T> {
         self.count.get()
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -16,6 +16,7 @@
 2.5 Code flagged for refactoring is placed into refactoring section in `TODO.md`.
 2.6 Refactoring includes extracting complex logic into helper functions, extracting types/functions/impl blocks into separate files.
 2.7 `tokei` metric is authoritative, `wc -l` includes comments, empty lines etc etc.
+2.8 Unit tests must live in a separate file in a directory named after the module file (`foo.rs` → `foo/tests.rs`), declared at the end of the source file as `#[cfg(test)] mod tests;`. Inline `#[cfg(test)] mod tests { ... }` blocks are forbidden — they bloat the source file and defeat the §2.2 line limit.
 
 ## 3 Use directives
 
