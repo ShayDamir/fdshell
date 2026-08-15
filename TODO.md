@@ -11,7 +11,7 @@
 
 - [x] `dollar.rs` — extracted, now 60 lines
 - [x] `importedfd.rs` — split into `importedfd_error.rs` + `importedfd_try.rs`
-- [ ] `caret.rs` at 108 code lines (was 88, grew) — extract tests to `caret/tests.rs`
+- [x] `caret.rs` — extracted tests to `caret/tests.rs`, now 21 code lines
 - [x] `substitute/brace.rs` — extracted, now 65 lines
 - [x] `parse/token.rs` — combined whitespace/separators, separated `$`/`` ` `` arms, removed dead token_emit.rs (93 → 78 lines)
 - [ ] `intercept/read/io.rs` at 85 code lines — extract `SourceFd::RawFd` read loop
