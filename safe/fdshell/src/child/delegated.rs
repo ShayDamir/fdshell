@@ -64,3 +64,6 @@ pub(super) fn handle_renameat2(
     let cfg = builtins::renameat2::parse::renameat2_parse(refs)?;
     builtins::renameat2::renameat2_exec(&cfg).map(|()| 0)
 }
+
+#[cfg(test)]
+mod tests;
