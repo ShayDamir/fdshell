@@ -1036,6 +1036,34 @@ fn export_name_only_lists_empty_value() {
     assert_eq!(out, b"export FOO=\n");
 }
 
+fn script_exit_code(script: &[u8]) -> i32 {
+    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
+        None => {
+            let cell = make_cell();
+            match crate::main_cli::execute_script(script, &cell) {
+                Ok(()) => std::process::exit(42),
+                Err(_) => std::process::exit(43),
+            }
+        }
+        Some(pidfd) => sys::wait_pidfd::wait_pidfd(&pidfd).unwrap().exit_code(),
+    }
+}
+
+#[test]
+fn execute_script_exits_with_script_code() {
+    assert_eq!(script_exit_code(b"false"), 1);
+}
+
+#[test]
+fn execute_script_zero_code_returns_ok() {
+    assert_eq!(script_exit_code(b"true"), 42);
+}
+
+#[test]
+fn execute_script_error_exits_one() {
+    assert_eq!(script_exit_code(b"nonexistent_cmd_xyz"), 1);
+}
+
 #[test]
 fn shebang_is_skipped() {
     child_test(|| {
