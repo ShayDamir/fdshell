@@ -8,7 +8,7 @@ pub fn read_paren_expr(
 ) -> Result<Vec<u8>, Report<ResolveError>> {
     let mut inner = Vec::new();
     let mut depth = 1u32;
-    while depth > 0 {
+    loop {
         match peek.peek().copied() {
             Some(b'(') => {
                 inner.push(b'(');

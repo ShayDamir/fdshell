@@ -635,3 +635,39 @@ fn join_positional_args_single_element_no_space() {
     let result = super::join_positional_args(&state.positional).unwrap();
     assert_eq!(result.as_bytes().unwrap(), b"only");
 }
+
+// Mutant-catching tests for substitute/paren.rs
+#[test]
+fn paren_single_level_expr() {
+    let mut peek = b"echo hi)".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek).unwrap();
+    assert_eq!(res, b"echo hi".as_slice());
+}
+
+#[test]
+fn paren_nested_expr_keeps_all_levels() {
+    // depth += 1 mutant (-=, *=) truncates or corrupts nested captures.
+    // Input mirrors what arg.rs passes: outer `$(` already consumed, so the
+    // byte sequence ends with the `)` closing that outer level.
+    let input = b"(a(b(c))d))";
+    let mut peek = input.iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek).unwrap();
+    assert_eq!(res, b"(a(b(c))d)");
+}
+
+#[test]
+fn paren_empty_inner() {
+    let mut peek = b")".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek).unwrap();
+    assert!(res.is_empty());
+}
+
+#[test]
+fn paren_unclosed_is_error() {
+    let mut peek = b"abc".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek);
+    assert!(matches!(
+        res.unwrap_err().current_context(),
+        crate::error::resolve::ResolveError::UnclosedParen
+    ));
+}
