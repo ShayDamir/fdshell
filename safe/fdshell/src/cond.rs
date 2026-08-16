@@ -56,7 +56,8 @@ pub(crate) fn run_cond_list(
                     }
                 }
                 start = i + 2;
-                i += 1;
+                i = start;
+                continue;
             }
         }
         i += 1;

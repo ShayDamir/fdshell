@@ -766,6 +766,26 @@ fn and_fail_with_quoted_or_in_skipped_part() {
 }
 
 #[test]
+fn and_fail_with_trailing_quote_in_failed_part() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_cond_list(b"false \"x\" && echo a || true", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn and_success_runs_second_command() {
+    child_test(|| {
+        let cell = make_cell();
+        crate::repl::run_cond_list(b"true && builtin true", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
 fn pwd_builtin_succeeds() {
     child_test(|| {
         let cell = make_cell();
