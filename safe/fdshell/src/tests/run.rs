@@ -991,6 +991,51 @@ fn export_list_empty() {
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }
 
+fn export_output(setup: &[u8]) -> Vec<u8> {
+    let (out_r, out_w) = sys::pipe::pipe2(0).unwrap();
+    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
+        None => {
+            let cell = make_cell();
+            run_one(setup, &cell).unwrap();
+            out_w.export_to(1).unwrap();
+            drop(out_w);
+            run_one(b"export", &cell).unwrap();
+            std::process::exit(0);
+        }
+        Some(pidfd) => {
+            drop(out_w);
+            let mut out = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = out_r.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                if let Some(part) = chunk.get(..n) {
+                    out.extend_from_slice(part);
+                }
+            }
+            match sys::wait_pidfd::wait_pidfd(&pidfd).unwrap() {
+                WaitStatus::Exited(0) => {}
+                other => panic!("child failed: {}", other.exit_code()),
+            }
+            out
+        }
+    }
+}
+
+#[test]
+fn export_list_writes_entries() {
+    let out = export_output(b"export FOO=bar");
+    assert_eq!(out, b"export FOO=bar\n");
+}
+
+#[test]
+fn export_name_only_lists_empty_value() {
+    let out = export_output(b"export FOO");
+    assert_eq!(out, b"export FOO=\n");
+}
+
 #[test]
 fn shebang_is_skipped() {
     child_test(|| {
