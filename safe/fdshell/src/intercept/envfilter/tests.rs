@@ -282,6 +282,35 @@ fn list_with_no_rules_prints_nothing() {
 }
 
 #[test]
+fn unknown_flag_error_position_points_at_flag() {
+    let line = make_line(&["envfilter", "--bogus"]);
+    let cmdline = make_cmdline(&["--bogus"]);
+    let cell = make_cell();
+    let result = run_envfilter(&line, &cmdline, &cell);
+    let e = result.unwrap_err();
+    let pos: usize = e
+        .downcast_ref::<crate::error::parse::ParsePosition>()
+        .unwrap()
+        .pos;
+    assert_eq!(
+        pos, 10,
+        "unknown flag should be reported at its position in the line"
+    );
+}
+
+#[test]
+fn repeated_flags_collect_all_patterns() {
+    let line = make_line(&["envfilter", "--allow", "A", "--allow", "B", "--deny", "C"]);
+    let cmdline = make_cmdline(&["--allow", "A", "--allow", "B", "--deny", "C"]);
+    let cell = make_cell();
+    let result = run_envfilter(&line, &cmdline, &cell);
+    assert!(result.is_ok());
+    let state = cell.borrow().unwrap();
+    assert_eq!(state.env_filter.allow.len(), 2);
+    assert_eq!(state.env_filter.deny.len(), 1);
+}
+
+#[test]
 fn clear_resets_all_rules() {
     // First add some rules via state manipulation, then clear
     let cell = make_cell();

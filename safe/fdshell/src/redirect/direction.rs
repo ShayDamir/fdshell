@@ -9,11 +9,16 @@ pub enum RedirectDirection {
 }
 
 impl RedirectDirection {
+    // The O_* flags are disjoint single bits, so summing is identical to OR.
+    // `|` here produces equivalent mutants under mutation testing.
     pub fn open_flags(&self) -> i32 {
         match self {
             Self::Read => O_RDONLY,
-            Self::Write => O_WRONLY | O_CREAT | O_TRUNC,
-            Self::Append => O_WRONLY | O_CREAT | O_APPEND,
+            Self::Write => O_WRONLY + O_CREAT + O_TRUNC,
+            Self::Append => O_WRONLY + O_CREAT + O_APPEND,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -30,7 +30,7 @@ pub(crate) fn tokens_to_for(
         .ok_or(ParseError::ExpectedIn)?
         + 2;
 
-    let do_idx = find_preceded_by_semi(tokens, in_pos + 1, b"do").ok_or(ParseError::ExpectedDo)?;
+    let do_idx = find_preceded_by_semi(tokens, in_pos, b"do").ok_or(ParseError::ExpectedDo)?;
 
     let done_idx = tokens.len() - 1;
     ensure!(
@@ -46,13 +46,13 @@ pub(crate) fn tokens_to_for(
 
     let body = try_join(trim_semi(
         tokens
-            .get(do_idx + 1..done_idx - 1)
+            .get(do_idx + 1..done_idx)
             .ok_or(ParseError::ExpectedDone)?,
     ));
 
     let word_tokens = trim_semi(
         tokens
-            .get(in_pos + 1..do_idx - 1)
+            .get(in_pos + 1..do_idx)
             .ok_or(ParseError::ExpectedWordList)?,
     );
     let words: Vec<ShortCStr> = word_tokens.iter().map(|(t, _, _)| t.clone()).collect();
