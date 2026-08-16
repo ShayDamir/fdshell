@@ -1,3 +1,4 @@
 # Exclude XOR mutation on O_DIRECTORY | O_NOFOLLOW — produces identical value to OR
 # since these kernel flags share no bits (0x4000 ^ 0x1000 == 0x4000 | 0x1000)
 exclude_re = ["replace \\| with \\^ in cd_path"]
+test_tool = "nextest"
