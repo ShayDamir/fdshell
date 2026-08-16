@@ -38,6 +38,7 @@ mod repl;
 mod replacer;
 mod run;
 mod run_dispatch;
+mod scan;
 mod script;
 pub mod script_loader;
 mod segment;

@@ -1,3 +1,5 @@
+use crate::scan::{Boundary, ScanState, advance, boundary};
+
 /// Skip from `i` past a `#` comment to the next `\n` (or end of input).
 /// Returns the index to resume scanning from.
 pub(crate) fn skip_comment(line: &[u8], mut i: usize) -> usize {
@@ -21,54 +23,36 @@ pub(crate) fn scan_block(
     start: &mut usize,
     mut depth: u32,
 ) -> (usize, bool) {
-    let mut dollar_paren_depth = 0u32;
-    let mut in_backtick = false;
+    let mut state = ScanState {
+        in_quote: *in_quote,
+        in_backtick: false,
+        dollar_paren_depth: 0,
+    };
     while i <= line.len() && depth > 0 {
-        let is_comment = !*in_quote && !in_backtick && line.get(i) == Some(&b'#');
-        let is_sep = i == line.len()
-            || (!*in_quote
-                && !in_backtick
-                && dollar_paren_depth == 0
-                && matches!(line.get(i), Some(&b';') | Some(&b'\n')));
-
-        if is_comment || is_sep {
-            let raw = line.get(*start..i).unwrap_or(b"").trim_ascii();
-            for sub in raw.split(|&b| b == b' ') {
-                if !sub.is_empty() {
-                    match crate::keywords::keyword_delta(sub) {
-                        Some(1) => depth += 1,
-                        Some(-1) => depth -= 1,
-                        _ => {}
-                    }
+        let kind = boundary(line, i, &state);
+        if kind == Boundary::Char {
+            i = advance(line, i, &mut state);
+            continue;
+        }
+        let raw = line.get(*start..i).unwrap_or(b"").trim_ascii();
+        for sub in raw.split(|&b| b == b' ') {
+            if !sub.is_empty() {
+                match crate::keywords::keyword_delta(sub) {
+                    Some(1) => depth += 1,
+                    Some(-1) => depth -= 1,
+                    _ => {}
                 }
             }
-            if is_comment {
-                i = skip_comment(line, i);
-                *start = i;
-                continue;
-            } else {
-                *start = i + 1;
-            }
-        } else if line.get(i) == Some(&b'"') {
-            *in_quote = !*in_quote;
-        } else if !*in_quote && !in_backtick && line.get(i) == Some(&b'$') {
-            if line.get(i + 1) == Some(&b'(') {
-                dollar_paren_depth = dollar_paren_depth.saturating_add(1);
-                i += 1;
-            }
-        } else if !*in_quote && !in_backtick && line.get(i) == Some(&b'(') {
-            if dollar_paren_depth > 0 {
-                dollar_paren_depth = dollar_paren_depth.saturating_add(1);
-            }
-        } else if !*in_quote && !in_backtick && line.get(i) == Some(&b')') {
-            dollar_paren_depth = dollar_paren_depth.saturating_sub(1);
-        } else if !*in_quote && !in_backtick && line.get(i) == Some(&b'`') {
-            in_backtick = true;
-        } else if in_backtick && line.get(i) == Some(&b'`') {
-            in_backtick = false;
         }
-        i += 1;
+        if kind == Boundary::Comment {
+            i = skip_comment(line, i);
+            *start = i;
+        } else {
+            *start = i + 1;
+            i += 1;
+        }
     }
+    *in_quote = state.in_quote;
     (i, depth == 0)
 }
 
