@@ -61,9 +61,7 @@ pub(crate) fn scan_block(
                 dollar_paren_depth = dollar_paren_depth.saturating_add(1);
             }
         } else if !*in_quote && !in_backtick && line.get(i) == Some(&b')') {
-            if dollar_paren_depth > 0 {
-                dollar_paren_depth = dollar_paren_depth.saturating_sub(1);
-            }
+            dollar_paren_depth = dollar_paren_depth.saturating_sub(1);
         } else if !*in_quote && !in_backtick && line.get(i) == Some(&b'`') {
             in_backtick = true;
         } else if in_backtick && line.get(i) == Some(&b'`') {
@@ -73,3 +71,6 @@ pub(crate) fn scan_block(
     }
     (i, depth == 0)
 }
+
+#[cfg(test)]
+mod tests;

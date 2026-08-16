@@ -398,3 +398,63 @@ fn scan_statement_backtick_paren_isolated() {
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
+
+// A `(` inside double quotes (within `$( )`) does not open a plain-paren
+// scope, so the trailing `;` still splits into a second statement.
+#[test]
+fn scan_statement_paren_inside_quote_within_dollar_paren() {
+    let segments = scan_segments(b"echo $(x \"a(b\"); echo c", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (Segment::Statement(s1), Segment::Statement(s2)) => {
+            assert_eq!(s1, b"echo $(x \"a(b\")");
+            assert_eq!(s2, b"echo c");
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
+
+// A `(` inside backticks (within `$( )`) does not open a plain-paren scope.
+#[test]
+fn scan_statement_paren_inside_backtick_within_dollar_paren() {
+    let segments = scan_segments(b"echo $(x `a(b`); echo c", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (Segment::Statement(s1), Segment::Statement(s2)) => {
+            assert_eq!(s1, b"echo $(x `a(b`)");
+            assert_eq!(s2, b"echo c");
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
+
+// A top-level plain `(` is not a dollar-paren scope, so the `;` inside it is
+// a top-level separator and splits the line.
+#[test]
+fn scan_statement_top_level_paren_splits_on_semicolon() {
+    let segments = scan_segments(b"echo (a; b); echo c", false);
+    assert_eq!(segments.len(), 3);
+    match (&segments[0], &segments[1], &segments[2]) {
+        (Segment::Statement(s1), Segment::Statement(s2), Segment::Statement(s3)) => {
+            assert_eq!(s1, b"echo (a");
+            assert_eq!(s2, b"b)");
+            assert_eq!(s3, b"echo c");
+        }
+        _ => panic!("expected three Statement segments"),
+    }
+}
+
+// A plain `(` inside `$( )` adds a dollar-paren depth level, so the `;` after
+// the inner `)` is not a top-level separator.
+#[test]
+fn scan_statement_nested_paren_inside_dollar_paren_protects_semicolon() {
+    let segments = scan_segments(b"echo $(a (b); c); echo d", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (Segment::Statement(s1), Segment::Statement(s2)) => {
+            assert_eq!(s1, b"echo $(a (b); c)");
+            assert_eq!(s2, b"echo d");
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
