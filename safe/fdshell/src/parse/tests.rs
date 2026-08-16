@@ -702,6 +702,15 @@ fn while_parse_dispatch() {
 }
 
 #[test]
+fn while_parse_body_without_semi_before_done() {
+    let ParsedLine::While(wb) = parse(b"while true; do echo x done").unwrap() else {
+        panic!("expected While")
+    };
+    assert_eq!(wb.condition, c"true".into());
+    assert_eq!(wb.body, c"echo x".into());
+}
+
+#[test]
 fn while_parse_with_semicolon_body() {
     let ParsedLine::While(wb) = parse(b"while false; do echo a; echo b; done").unwrap() else {
         panic!("expected While")
@@ -760,6 +769,15 @@ fn until_parse_dispatch() {
         panic!("expected Until")
     };
     assert_eq!(wb.condition, c"false".into());
+    assert_eq!(wb.body, c"echo x".into());
+}
+
+#[test]
+fn until_parse_body_without_semi_before_done() {
+    let ParsedLine::Until(wb) = parse(b"until true; do echo x done").unwrap() else {
+        panic!("expected Until")
+    };
+    assert_eq!(wb.condition, c"true".into());
     assert_eq!(wb.body, c"echo x".into());
 }
 
