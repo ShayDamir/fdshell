@@ -2,6 +2,11 @@
 
 use super::*;
 
+#[test]
+fn max_captured_is_64_mib() {
+    assert_eq!(MAX_CAPTURED, 67_108_864);
+}
+
 fn drain_bytes(data: &[u8], limit: usize) -> Result<Vec<u8>, Report<CmdSubstError>> {
     let (r, w) = sys::pipe::pipe2(0).unwrap();
     sys::rw::write(&w, data).unwrap();
