@@ -1,17 +1,39 @@
 mod environ;
+mod search;
 
+pub use search::resolve_path;
+
+use alloc::vec::Vec;
 use core::ffi::CStr;
 use hashbrown::HashMap;
 
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::execveat::AT_EMPTY_PATH;
-use sys::fcntl::O_PATH;
-use sys::{AtFd, LocalFd, ShortCStr};
+use sys::{AtFd, ExportedCStr, LocalFd, ShortCStr};
 
 use crate::envfilter::EnvFilter;
 use crate::error::child_process::ChildProcessError;
 
 use environ::get_environ;
+
+fn prepare_envp(
+    environ: &[(ShortCStr, ShortCStr)],
+    exports: &HashMap<ShortCStr, ShortCStr>,
+    env_filter: &EnvFilter,
+    shell_sock: Option<&LocalFd>,
+) -> Result<Vec<ExportedCStr>, Report<ChildProcessError>> {
+    let exec_sock = shell_sock
+        .map(|s| s.export())
+        .transpose()
+        .change_context(ChildProcessError::ExportFailed)?;
+    Ok(get_environ(
+        sys::env::getpid(),
+        environ,
+        exports,
+        env_filter,
+        exec_sock.as_ref(),
+    ))
+}
 
 pub fn exec_fd(
     fd: &LocalFd,
@@ -21,12 +43,7 @@ pub fn exec_fd(
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
-    let pid = sys::env::getpid();
-    let exec_sock = shell_sock
-        .map(|s| s.export())
-        .transpose()
-        .change_context(ChildProcessError::ExportFailed)?;
-    let envp = get_environ(pid, environ, exports, env_filter, exec_sock.as_ref());
+    let envp = prepare_envp(environ, exports, env_filter, shell_sock)?;
     let script_fd = fd
         .export()
         .change_context(ChildProcessError::ExportFailed)?;
@@ -44,39 +61,10 @@ pub fn exec_at(
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
-    let pid = sys::env::getpid();
-    let exec_sock = shell_sock
-        .map(|s| s.export())
-        .transpose()
-        .change_context(ChildProcessError::ExportFailed)?;
-    let envp = get_environ(pid, environ, exports, env_filter, exec_sock.as_ref());
+    let envp = prepare_envp(environ, exports, env_filter, shell_sock)?;
     sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
         .change_context(ChildProcessError::ExecFailed)?;
     Ok(())
-}
-
-pub fn search_path(bin: &ShortCStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    let path_str = sys::env::getenv(c"PATH").unwrap_or(c"/usr/local/bin:/usr/bin:/bin".into());
-    let slash: ShortCStr = c"/".into();
-    for dir in path_str.split(b':') {
-        if dir.is_empty() {
-            continue;
-        }
-        let pathname = ShortCStr::concat(&[&dir, &slash, bin]);
-        if let Ok(fd) = sys::openat2::open(pathname.export(), O_PATH) {
-            return Ok(fd);
-        }
-    }
-    bail!(ChildProcessError::NotFound(bin.clone()))
-}
-
-pub fn resolve_path(bin: &ShortCStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    if bin.contains(b'/') {
-        sys::openat2::open(bin.export(), O_PATH)
-            .change_context_lazy(|| ChildProcessError::NotFound(bin.clone()))
-    } else {
-        search_path(bin)
-    }
 }
 
 #[cfg(test)]
