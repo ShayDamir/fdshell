@@ -411,6 +411,74 @@ fn test_read_line_fdvar_with_clone() {
     assert_eq!(buf, b"from var");
 }
 
+// read_line tests via SourceFd::Stdin (fork + dup2 onto fd 0)
+
+fn stdin_read_line(data: &[u8], max_bytes: Option<usize>) -> (Vec<u8>, bool) {
+    let (res_r, res_w) = sys::pipe::pipe2(0).unwrap();
+    let (data_r, data_w) = sys::pipe::pipe2(0).unwrap();
+    if !data.is_empty() {
+        sys::rw::write(&data_w, data).unwrap();
+    }
+    drop(data_w);
+
+    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
+        None => {
+            data_r.export_to(0).unwrap();
+            drop(data_r);
+            let (buf, eof) = match read_line(&SourceFd::Stdin, None, max_bytes) {
+                Ok(v) => v,
+                Err(_) => std::process::exit(3),
+            };
+            sys::rw::write(&res_w, &buf).unwrap();
+            let flag: [u8; 1] = [if eof { 1 } else { 0 }];
+            sys::rw::write(&res_w, &flag).unwrap();
+            drop(res_w);
+            std::process::exit(0);
+        }
+        Some(pidfd) => {
+            drop(res_w);
+            let mut out = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = res_r.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                if let Some(part) = chunk.get(..n) {
+                    out.extend_from_slice(part);
+                }
+            }
+            match sys::wait_pidfd::wait_pidfd(&pidfd).unwrap() {
+                WaitStatus::Exited(0) => {}
+                other => panic!("child failed: {}", other.exit_code()),
+            }
+            let eof = out.pop().unwrap_or(0) == 1;
+            (out, eof)
+        }
+    }
+}
+
+#[test]
+fn test_read_line_stdin_data() {
+    let (buf, eof) = stdin_read_line(b"abc\n", None);
+    assert!(!eof);
+    assert_eq!(buf, b"abc");
+}
+
+#[test]
+fn test_read_line_stdin_eof() {
+    let (buf, eof) = stdin_read_line(b"", None);
+    assert!(!eof);
+    assert!(buf.is_empty());
+}
+
+#[test]
+fn test_read_line_stdin_max_bytes() {
+    let (buf, eof) = stdin_read_line(b"hello world\n", Some(5));
+    assert!(!eof);
+    assert_eq!(buf, b"hello");
+}
+
 // words.rs edge cases
 
 #[test]
