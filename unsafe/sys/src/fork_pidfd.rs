@@ -1,19 +1,15 @@
-use core::sync::atomic::{AtomicU8, Ordering};
-
-use crate::{LocalFd, Pid, cvt, fork_cell::ForkCell};
-
-const UNKNOWN: u8 = 0;
-const AUTO: u8 = 1;
-const MANUAL: u8 = 2;
-static PIDFD_CLOEXEC: AtomicU8 = AtomicU8::new(UNKNOWN);
+use crate::fork_cell::ForkCell;
+use crate::{LocalFd, Pid, cvt};
 
 pub fn fork_pidfd() -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
-    let mut raw_pidfd: i32 = -1;
+    // SAFETY: `raw_pidfd` is a clone3 out-parameter; the kernel writes a valid
+    // pidfd to it on the parent path before it is read via `assume_init`.
+    let mut raw_pidfd = core::mem::MaybeUninit::<i32>::uninit();
     // SAFETY: clone_args is integer types; zeroed is valid.
     let mut args: libc::clone_args = unsafe { core::mem::zeroed() };
     args.flags = libc::CLONE_PIDFD as u64;
     args.exit_signal = libc::SIGCHLD as u64;
-    args.pidfd = (&raw mut raw_pidfd) as u64;
+    args.pidfd = raw_pidfd.as_mut_ptr() as u64;
 
     // SAFETY: SYS_clone3 (435) is valid on Linux ≥5.3 x86_64.
     // args and raw_pidfd are valid stack allocations.
@@ -29,43 +25,16 @@ pub fn fork_pidfd() -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
         return Ok((Pid::from_raw(0), None));
     }
 
-    let state = PIDFD_CLOEXEC.load(Ordering::Relaxed);
-    if state == UNKNOWN {
-        // Probe whether clone3 sets CLOEXEC automatically.
-        // SAFETY: `raw_pidfd` came from clone3 (valid fd or -1);
-        // fcntl on an invalid fd safely returns -1/EBADF.
-        let flags =
-            crate::cvt(unsafe { libc::fcntl(raw_pidfd, libc::F_GETFD) as isize }).unwrap_or(0);
-        if flags & libc::FD_CLOEXEC as isize != 0 {
-            PIDFD_CLOEXEC.store(AUTO, Ordering::Relaxed);
-        } else {
-            PIDFD_CLOEXEC.store(MANUAL, Ordering::Relaxed);
-            // SAFETY: `raw_pidfd` is a valid fd from clone3; fcntl
-            // on invalid fd returns -1, caught by `cvt`.
-            if let Err(e) = crate::cvt(unsafe {
-                libc::fcntl(raw_pidfd, libc::F_SETFD, libc::FD_CLOEXEC) as isize
-            }) {
-                // SAFETY: `raw_pidfd` is a valid fd (clone3 succeeded);
-                // close of a valid fd is safe.
-                unsafe { libc::close(raw_pidfd) };
-                return Err(e);
-            }
-        }
-    } else if state == MANUAL
-        && let Err(e) = crate::cvt(
-            // SAFETY: `raw_pidfd` is a valid fd from clone3; fcntl
-            // F_SETFD on invalid fd returns -1, caught by `cvt`.
-            unsafe { libc::fcntl(raw_pidfd, libc::F_SETFD, libc::FD_CLOEXEC) as isize },
-        )
-    {
-        // SAFETY: `raw_pidfd` is a valid fd (clone3 succeeded);
-        // close of a valid fd is safe.
-        unsafe { libc::close(raw_pidfd) };
-        return Err(e);
-    }
-    // state == AUTO: kernel already set CLOEXEC, nothing to do.
+    // SAFETY: on the parent path clone3 has written a valid pidfd into
+    // `raw_pidfd` before returning, so the memory is initialized.
+    let raw_pidfd = unsafe { raw_pidfd.assume_init() };
 
-    // SAFETY: `raw_pidfd` has CLOEXEC (set by kernel or fcntl above).
+    // SAFETY: `raw_pidfd` is a valid fd from clone3; fcntl on an invalid
+    // fd returns -1/EBADF, caught by `cvt`.
+    cvt(unsafe { libc::fcntl(raw_pidfd, libc::F_SETFD, libc::FD_CLOEXEC) as isize })?;
+
+    // SAFETY: `raw_pidfd` now has CLOEXEC (set by the kernel and reaffirmed
+    // by fcntl above); the parent has exclusive ownership of the fd.
     let pidfd = unsafe { LocalFd::from_raw(raw_pidfd) };
     Ok((Pid::from_raw(ret as i32), Some(pidfd)))
 }
