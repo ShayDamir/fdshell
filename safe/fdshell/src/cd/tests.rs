@@ -8,7 +8,7 @@ fn child_test(f: impl FnOnce()) {
     match pidfd_opt {
         None => {
             f();
-            std::process::exit(42);
+            sys::exit(42);
         }
         Some(pidfd) => {
             let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();

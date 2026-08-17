@@ -31,6 +31,8 @@
     nativeBuildInputs =
       lib.optionals doClippy [clippy]
       ++ lib.optionals doFmt [rustfmt]
+      # prlimit: nextest wrapper script (.config/nextest.toml) caps test VA
+      ++ lib.optionals (doTests || doCoverage) [pkgs.util-linux]
       ++ lib.optionals doCoverage [cargo-llvm-cov cargo-nextest];
     preCheck =
       lib.optionalString doFmt ''

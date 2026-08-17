@@ -17,7 +17,7 @@ fn child_test(f: impl FnOnce()) {
             let saved = sys::umask::get();
             f();
             sys::umask::set(saved);
-            std::process::exit(42);
+            sys::exit(42);
         }
         Some(pidfd) => {
             let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
@@ -111,7 +111,7 @@ fn wait_nonexistent_name() {
 fn wait_one_task() {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     match pidfd_opt {
-        None => std::process::exit(42),
+        None => sys::exit(42),
         Some(pidfd) => {
             let cell = make_cell();
             {
@@ -138,12 +138,12 @@ fn wait_one_task() {
 fn wait_all_tasks() {
     let (ret1, pidfd1_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     let pidfd1 = match pidfd1_opt {
-        None => std::process::exit(42),
+        None => sys::exit(42),
         Some(pidfd) => pidfd,
     };
     let (ret2, pidfd2_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     let pidfd2 = match pidfd2_opt {
-        None => std::process::exit(7),
+        None => sys::exit(7),
         Some(pidfd) => pidfd,
     };
     let cell = make_cell();
@@ -809,7 +809,7 @@ fn pwd_via_builtin_keyword() {
 fn last_bg_pid_set_on_background_task() {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     match pidfd_opt {
-        None => std::process::exit(42),
+        None => sys::exit(42),
         Some(pidfd) => {
             use crate::launch::LaunchOutcome;
             use crate::parse::ParsedLine;
@@ -998,7 +998,7 @@ fn capture_stdout(f: impl FnOnce()) -> Vec<u8> {
             out_w.export_to(1).unwrap();
             drop(out_w);
             f();
-            std::process::exit(0);
+            sys::exit(0);
         }
         Some(pidfd) => {
             drop(out_w);
@@ -1035,7 +1035,7 @@ fn builtin_output(name: &[u8]) -> Vec<u8> {
         let state = ShellState::new();
         let cmd = sys::ShortCStr::from_vec(name.to_vec()).unwrap();
         let code = crate::child::dispatch::dispatch_builtin(cmd, &[], &[], &state).unwrap();
-        std::process::exit(code);
+        sys::exit(code);
     })
 }
 
@@ -1075,8 +1075,8 @@ fn script_exit_code(script: &[u8]) -> i32 {
         None => {
             let cell = make_cell();
             match crate::main_cli::execute_script(script, &cell) {
-                Ok(()) => std::process::exit(42),
-                Err(_) => std::process::exit(43),
+                Ok(()) => sys::exit(42),
+                Err(_) => sys::exit(43),
             }
         }
         Some(pidfd) => sys::wait_pidfd::wait_pidfd(&pidfd).unwrap().exit_code(),

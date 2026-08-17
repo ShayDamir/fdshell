@@ -427,13 +427,13 @@ fn stdin_read_line(data: &[u8], max_bytes: Option<usize>) -> (Vec<u8>, bool) {
             drop(data_r);
             let (buf, eof) = match read_line(&SourceFd::Stdin, None, max_bytes) {
                 Ok(v) => v,
-                Err(_) => std::process::exit(3),
+                Err(_) => sys::exit(3),
             };
             sys::rw::write(&res_w, &buf).unwrap();
             let flag: [u8; 1] = [if eof { 1 } else { 0 }];
             sys::rw::write(&res_w, &flag).unwrap();
             drop(res_w);
-            std::process::exit(0);
+            sys::exit(0);
         }
         Some(pidfd) => {
             drop(res_w);
@@ -727,7 +727,7 @@ fn run_read_writes_prompt_to_stderr() {
             err_w.export_to(2).unwrap();
             drop(err_w);
             let result = run_read(&line, &cmdline, &cell);
-            std::process::exit(if result.is_ok() { 0 } else { 1 });
+            sys::exit(if result.is_ok() { 0 } else { 1 });
         }
         Some(pidfd) => {
             drop(err_w);

@@ -17,7 +17,7 @@ fn child_test(f: impl FnOnce()) {
             let saved = sys::umask::get();
             f();
             sys::umask::set(saved);
-            std::process::exit(42);
+            sys::exit(42);
         }
         Some(pidfd) => {
             let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();

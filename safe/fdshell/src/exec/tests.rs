@@ -35,7 +35,7 @@ fn exec_child(f: impl FnOnce()) {
     match pidfd_opt {
         None => {
             f();
-            std::process::exit(1);
+            sys::exit(1);
         }
         Some(pidfd) => {
             let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
@@ -85,7 +85,7 @@ fn exec_fd_with_exports() {
     exec_child(
         || match exec_fd(&fd, &[&abs], &[], &exports_map, &Default::default(), None) {
             Ok(()) => {}
-            Err(report) => std::process::exit(report.current_context().exit_code()),
+            Err(report) => sys::exit(report.current_context().exit_code()),
         },
     );
 
@@ -145,7 +145,7 @@ fn exec_with_paths() {
             None,
         ) {
             Ok(()) => {}
-            Err(report) => std::process::exit(report.current_context().exit_code()),
+            Err(report) => sys::exit(report.current_context().exit_code()),
         }
     });
 
@@ -162,7 +162,7 @@ fn exec_with_paths() {
             None,
         ) {
             Ok(()) => {}
-            Err(report) => std::process::exit(report.current_context().exit_code()),
+            Err(report) => sys::exit(report.current_context().exit_code()),
         }
     });
     std::env::set_current_dir(&cd).unwrap();
@@ -196,7 +196,7 @@ fn exec_script_via_resolve_fd() {
             None,
         ) {
             Ok(()) => {}
-            Err(report) => std::process::exit(report.current_context().exit_code()),
+            Err(report) => sys::exit(report.current_context().exit_code()),
         }
     });
 

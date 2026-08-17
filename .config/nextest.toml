@@ -1,2 +1,14 @@
+experimental = ["wrapper-scripts"]
+
 [profile.default]
 slow-timeout = { period = "10s", terminate-after = 1 }
+
+# Cap each test binary at 128MB of virtual address space (RLIMIT_AS).
+# Allocation failures abort the test cleanly instead of tripping the host
+# OOM killer, which filters out infinite-allocation mutants (e.g. in semi.rs).
+[scripts.wrapper.mem-limit]
+command = ['prlimit', '--as=134217728', '--']
+
+[[profile.default.scripts]]
+filter = 'all()'
+run-wrapper = 'mem-limit'
