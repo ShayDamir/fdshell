@@ -30,11 +30,7 @@ pub const RESOLVE_CACHED: u64 = 32;
 pub fn open<P: AsRef<CStr>>(pathname: P, flags: i32) -> Result<LocalFd, crate::SyscallError> {
     let pathname = pathname.as_ref();
     let mode = if flags & O_CREAT != 0 { 0o666 } else { 0 };
-    openat2(
-        AtFd::cwd(),
-        pathname,
-        &OpenHow::new((flags | O_CLOEXEC) as u64, mode),
-    )
+    openat2(AtFd::cwd(), pathname, &OpenHow::new(flags as u64, mode))
 }
 
 pub fn openat2<P: AsRef<CStr>>(

@@ -51,10 +51,10 @@ impl<T> ForkCell<T> {
     /// active, or `Err(ExclusiveBorrowActive)` if another exclusive borrow is active.
     pub fn borrow_mut(&self) -> Result<RefMut<'_, T>, ForkCellError> {
         let cur = self.count.get();
-        if cur != 0 {
-            if cur > 0 {
-                return Err(ForkCellError::SharedBorrowActive);
-            }
+        if cur > 0 {
+            return Err(ForkCellError::SharedBorrowActive);
+        }
+        if cur < 0 {
             return Err(ForkCellError::ExclusiveBorrowActive);
         }
         self.count.set(-1);
