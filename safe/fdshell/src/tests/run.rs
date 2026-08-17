@@ -991,15 +991,13 @@ fn export_list_empty() {
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }
 
-fn export_output(setup: &[u8]) -> Vec<u8> {
+fn capture_stdout(f: impl FnOnce()) -> Vec<u8> {
     let (out_r, out_w) = sys::pipe::pipe2(0).unwrap();
     match sys::fork_pidfd::fork_pidfd().unwrap().1 {
         None => {
-            let cell = make_cell();
-            run_one(setup, &cell).unwrap();
             out_w.export_to(1).unwrap();
             drop(out_w);
-            run_one(b"export", &cell).unwrap();
+            f();
             std::process::exit(0);
         }
         Some(pidfd) => {
@@ -1024,6 +1022,23 @@ fn export_output(setup: &[u8]) -> Vec<u8> {
     }
 }
 
+fn export_output(setup: &[u8]) -> Vec<u8> {
+    capture_stdout(|| {
+        let cell = make_cell();
+        run_one(setup, &cell).unwrap();
+        run_one(b"export", &cell).unwrap();
+    })
+}
+
+fn builtin_output(name: &[u8]) -> Vec<u8> {
+    capture_stdout(|| {
+        let state = ShellState::new();
+        let cmd = sys::ShortCStr::from_vec(name.to_vec()).unwrap();
+        let code = crate::child::dispatch::dispatch_builtin(cmd, &[], &[], &state).unwrap();
+        std::process::exit(code);
+    })
+}
+
 #[test]
 fn export_list_writes_entries() {
     let out = export_output(b"export FOO=bar");
@@ -1034,6 +1049,25 @@ fn export_list_writes_entries() {
 fn export_name_only_lists_empty_value() {
     let out = export_output(b"export FOO");
     assert_eq!(out, b"export FOO=\n");
+}
+
+#[test]
+fn help_lists_shell_commands_and_builtins() {
+    let out = builtin_output(b"help");
+    let text = std::str::from_utf8(&out).unwrap();
+    assert!(text.starts_with("Shell commands:"));
+    assert!(text.contains("Change directory"));
+    assert!(text.contains("Builtins:"));
+    assert!(text.contains("Print arguments"));
+}
+
+#[test]
+fn pwd_prints_current_directory() {
+    let out = builtin_output(b"pwd");
+    let cwd = sys::env::getcwd().unwrap();
+    let mut expected = cwd;
+    expected.push(b'\n');
+    assert_eq!(out, expected);
 }
 
 fn script_exit_code(script: &[u8]) -> i32 {
