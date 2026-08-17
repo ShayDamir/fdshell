@@ -33,3 +33,6 @@ pub(super) fn keyword_delta(word: &[u8]) -> Option<i32> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests;

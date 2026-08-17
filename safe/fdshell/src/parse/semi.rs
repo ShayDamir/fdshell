@@ -5,13 +5,11 @@ pub(crate) fn find_preceded_by_semi(
     start: usize,
     needle: &[u8],
 ) -> Option<usize> {
-    let mut i = start;
-    while i < tokens.len() {
+    for (i, (t, _, _)) in tokens.iter().enumerate().skip(start) {
         let preceded = i > 0 && tokens.get(i - 1).is_some_and(|(p, _, _)| p.eq_bytes(b";"));
-        if tokens.get(i).is_some_and(|(t, _, _)| t.eq_bytes(needle)) && preceded {
+        if t.eq_bytes(needle) && preceded {
             return Some(i);
         }
-        i += 1;
     }
     None
 }

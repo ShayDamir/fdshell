@@ -1712,3 +1712,26 @@ fn parse_mixed_quoted_args_preserves_flags() {
     assert!(cmd.args_fq[1]);
     assert!(!cmd.args_fq[2]);
 }
+
+#[test]
+fn find_preceded_by_semi_start_zero_no_match() {
+    let tokens = [(c"echo".into(), 0, false), (c"hi".into(), 5, false)];
+    assert_eq!(
+        super::semi::find_preceded_by_semi(&tokens, 0, b"echo"),
+        None
+    );
+}
+
+#[test]
+fn find_preceded_by_semi_skips_to_start() {
+    let tokens = [
+        (c";".into(), 0, false),
+        (c"done".into(), 1, false),
+        (c";".into(), 6, false),
+        (c"done".into(), 7, false),
+    ];
+    assert_eq!(
+        super::semi::find_preceded_by_semi(&tokens, 2, b"done"),
+        Some(3)
+    );
+}

@@ -507,6 +507,34 @@ fn percent_fd_cache_hit_returns_same_value() {
     assert!(cache.contains_key(&ShortCStr::from(c"testfd")));
 }
 
+#[test]
+fn percent_leading_underscore_name_resolves() {
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"_fd"), dev_null);
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let arg = ShortCStr::from(c"%_fd");
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert!(res.as_bytes().unwrap().iter().all(|b| b.is_ascii_digit()));
+}
+
+#[test]
+fn percent_hyphen_after_percent_is_literal() {
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"-testfd"), dev_null);
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let arg = ShortCStr::from(c"%-testfd");
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%-testfd");
+}
+
 // Mutant-catching tests for substitute/mod.rs (MISSED 25-31)
 #[test]
 fn dollar_at_fq_true_expands_separate_args() {
