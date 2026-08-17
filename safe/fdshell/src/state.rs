@@ -72,3 +72,6 @@ impl ShellState {
         self.shell_sock = Some(sock);
     }
 }
+
+#[cfg(test)]
+mod tests;

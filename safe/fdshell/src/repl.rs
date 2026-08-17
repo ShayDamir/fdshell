@@ -59,7 +59,7 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
             buf.push(byte[0]);
         }
         let line = buf.trim_ascii();
-        if line.is_empty() || line.starts_with(b"#") {
+        if line.is_empty() {
             continue;
         }
         if let Err(err) = handle(line, cell) {

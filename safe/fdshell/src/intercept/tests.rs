@@ -61,6 +61,24 @@ fn try_intercept_shift_returns_true() {
 }
 
 #[test]
+fn run_shift_removes_positional_args() {
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.positional.push_back(c"zero".into());
+        state.positional.push_back(c"one".into());
+    }
+    let cmdline = make_cmdline(b"shift", &["1"]);
+    assert!(shift::run_shift(b"shift", &cmdline, &cell).unwrap());
+    let state = cell.borrow().unwrap();
+    assert_eq!(state.positional.len(), 1);
+    assert_eq!(
+        state.positional.front().unwrap().as_bytes().unwrap(),
+        b"one"
+    );
+}
+
+#[test]
 fn try_intercept_read_returns_true() {
     let line = make_line("read", &["var1"]);
     let cmdline = make_cmdline(b"read", &["-u", "0", "var1"]);

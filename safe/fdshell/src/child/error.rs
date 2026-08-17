@@ -30,3 +30,6 @@ pub(crate) fn handle_builtin_error(
         BuiltinError::Never => Err(report.change_context(ChildProcessError::Never)),
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -39,3 +39,6 @@ pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppEr
 
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests;

@@ -1355,3 +1355,15 @@ fn case_last_clause_no_double_semi() {
         crate::repl::run_script(b"case \"x\" in a) echo yes;; *) echo no esac", &cell).unwrap();
     });
 }
+
+#[test]
+fn assign_fd_copies_fd_variable() {
+    let cell = make_cell();
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    borrow_state_mut(&cell)
+        .fds
+        .insert(ShortCStr::from(c"src"), dev_null);
+    run_one(b"%copy=%src", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert!(state.fds.contains_key(&ShortCStr::from(c"copy")));
+}

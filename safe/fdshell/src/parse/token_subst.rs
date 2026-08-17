@@ -14,7 +14,7 @@ pub(crate) fn read_dollar_paren(
         .change_context(ParseError::InvalidChar { ch: 0 })?;
     bytes.next(); // consume '('
     let mut depth = 1u32;
-    while depth > 0 {
+    loop {
         match bytes.next() {
             Some(b'(') => {
                 cur.push_byte(b'(')
@@ -23,13 +23,11 @@ pub(crate) fn read_dollar_paren(
             }
             Some(b')') => {
                 depth -= 1;
-                if depth == 0 {
-                    cur.push_byte(b')')
-                        .change_context(ParseError::InvalidChar { ch: 0 })?;
-                    break;
-                }
                 cur.push_byte(b')')
                     .change_context(ParseError::InvalidChar { ch: 0 })?;
+                if depth == 0 {
+                    break;
+                }
             }
             Some(c) => cur
                 .push_byte(c)

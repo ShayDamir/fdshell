@@ -1714,6 +1714,28 @@ fn parse_mixed_quoted_args_preserves_flags() {
 }
 
 #[test]
+fn amp_after_gt_stays_argument() {
+    let ParsedLine::Cmd(cmd) = parse(b"builtin echo 2>&1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args.len(), 1);
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"2>&1");
+}
+
+#[test]
+fn parse_capture_empty_var_is_error() {
+    let s = sys::ShortCStr::from(c"%>%");
+    assert!(super::capture::parse_capture(&s).is_err());
+}
+
+#[test]
+fn parse_capture_tagged_empty_var_is_error() {
+    let s = sys::ShortCStr::from(c"%tag>%");
+    assert!(super::capture::parse_capture(&s).is_err());
+}
+
+#[test]
 fn find_preceded_by_semi_start_zero_no_match() {
     let tokens = [(c"echo".into(), 0, false), (c"hi".into(), 5, false)];
     assert_eq!(

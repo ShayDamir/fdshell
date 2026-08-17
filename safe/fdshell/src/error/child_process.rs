@@ -50,3 +50,6 @@ impl ChildProcessError {
 }
 
 impl core::error::Error for ChildProcessError {}
+
+#[cfg(test)]
+mod tests;
