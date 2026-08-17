@@ -138,3 +138,13 @@ fn umask_init_fallback_no_proc() -> Result<(), SyscallError> {
         }),
     }
 }
+
+#[test]
+fn umask_init_reads_current_mask() {
+    // SAFETY: umask always succeeds; 0o022 is a valid mode_t.
+    let old = unsafe { libc::umask(0o022) };
+    sys::umask::init();
+    assert_eq!(sys::umask::get(), 0o022);
+    // SAFETY: `old` is the previous umask — a valid restore value.
+    unsafe { libc::umask(old) };
+}
