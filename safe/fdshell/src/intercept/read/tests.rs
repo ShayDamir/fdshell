@@ -686,6 +686,72 @@ fn run_read_with_prompt() {
 }
 
 #[test]
+fn run_read_data_without_newline_sets_vars() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    sys::rw::write(&write_end, b"hello").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let line = make_read_u_line(&[c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        Some(&c"hello".into())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_writes_prompt_to_stderr() {
+    let (data_r, data_w) = sys::pipe::pipe2(0).unwrap();
+    sys::rw::write(&data_w, b"answer\n").unwrap();
+    drop(data_w);
+
+    let exported = data_r.export().unwrap();
+    let fd = exported.as_raw();
+    let line = make_read_u_line(&[c"-p".into(), c"Enter: ".into(), c"var1".into()], fd);
+    let cmdline = make_read_u_cmdline(&[c"-p".into(), c"Enter: ".into(), c"var1".into()], fd);
+    let cell = make_read_cell();
+
+    let (err_r, err_w) = sys::pipe::pipe2(0).unwrap();
+    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
+        None => {
+            err_w.export_to(2).unwrap();
+            drop(err_w);
+            let result = run_read(&line, &cmdline, &cell);
+            std::process::exit(if result.is_ok() { 0 } else { 1 });
+        }
+        Some(pidfd) => {
+            drop(err_w);
+            let mut err = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = err_r.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                if let Some(part) = chunk.get(..n) {
+                    err.extend_from_slice(part);
+                }
+            }
+            match sys::wait_pidfd::wait_pidfd(&pidfd).unwrap() {
+                WaitStatus::Exited(0) => {}
+                other => panic!("child failed: {}", other.exit_code()),
+            }
+            assert_eq!(err, b"Enter: ");
+        }
+    }
+}
+
+#[test]
 fn run_read_with_n_max_bytes() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = b"hello world\n";
