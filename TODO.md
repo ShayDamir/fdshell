@@ -24,6 +24,7 @@
 - [ ] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — extract filter + concat logic into a helper function
 - [ ] `comment.rs::scan_block` has 5 levels of logical nesting (while → if is_comment||is_sep → for sub → if !sub.is_empty() → match) exceeding §2.4 limit of 4 — extract keyword delta processing into a helper
 - [ ] `parse/case_clause.rs` at 86 code lines (80-90 zone) — extract the body-slice extraction in `parse_clauses` into a helper
+- [ ] `shellfd/recv_fd.rs` has 5 levels of logical nesting (while → if tuple → if let split_first → for rest) exceeding §2.4 limit of 4 — extract the SCM_RIGHTS handler into a helper
 
 ## Bash compatibility gaps
 

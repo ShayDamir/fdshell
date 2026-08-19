@@ -49,7 +49,7 @@ pub fn recv_fd<'a>(
         let level = unsafe { (*cmsg).cmsg_level };
         // SAFETY: same pointer validity as above.
         let ctype = unsafe { (*cmsg).cmsg_type };
-        if level == libc::SOL_SOCKET && ctype == libc::SCM_RIGHTS {
+        if (level, ctype) == (libc::SOL_SOCKET, libc::SCM_RIGHTS) {
             // SAFETY: `cmsg` is a valid `cmsghdr`; `CMSG_DATA` is valid for
             // `cmsg_len` bytes and 8-byte aligned, satisfying i32's alignment.
             let nfds = ((unsafe { (*cmsg).cmsg_len } as usize)
@@ -69,7 +69,7 @@ pub fn recv_fd<'a>(
                         .change_context(crate::RecvFdError::Never)?;
                 }
             }
-        } else if level == libc::SOL_SOCKET && ctype == libc::SCM_CREDENTIALS {
+        } else if (level, ctype) == (libc::SOL_SOCKET, libc::SCM_CREDENTIALS) {
             // SAFETY: `cmsg` is a valid `cmsghdr` pointer.
             let payload = (unsafe { (*cmsg).cmsg_len } as usize)
                 .saturating_sub(core::mem::size_of::<libc::cmsghdr>());

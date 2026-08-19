@@ -90,12 +90,12 @@ Read [`LESSONS.md`](../../LESSONS.md). Flag deviations from documented lessons a
 2. `cargo clippy -- -D warnings`
 3. `nix build .#coverage` → `result/coverage-report.txt`
 4. `nix flake check --build-all`
-5. Mutation check — for every changed **non-test** `.rs` file under `safe/fdshell/src/`,
-   run `cargo mutants -j4 --test-tool nextest -f <file> --iterate` and confirm the file is
-   absent from `mutants.out/missed.txt`. Any missed mutant is a QA failure: add a test that
-   kills it, or (if it is an equivalent/unkillable mutant) refactor the source to remove the
-   equivalence. Scope is limited to the `safe/fdshell` crate for now;
-   Use the `mutants` skill (`.opencode/skills/mutants/SKILL.md`) for the full workflow.
+5. Mutation check — for every changed **non-test** `.rs` file under `safe/fdshell/src/`
+   or `unsafe/sys/src/`, run `cargo mutants -j4 --test-tool nextest -f <file> --iterate` and
+   confirm the file is absent from `mutants.out/missed.txt`. Any missed mutant is a QA
+   failure: add a test that kills it, or (if it is an equivalent/unkillable mutant) refactor
+   the source to remove the equivalence. Applies to both the `safe/fdshell` and `unsafe/sys`
+   crates. Use the `mutants` skill (`.opencode/skills/mutants/SKILL.md`) for the full workflow.
 
 ## Test coverage
 - New code: 100% line, 90% region coverage. Suggest tests to fill gaps.
