@@ -1,5 +1,4 @@
-use crate::LocalFd;
-use crate::cvt;
+use crate::{LocalFd, cvt};
 
 pub fn set_passcred(sock: &LocalFd) -> Result<(), crate::SyscallError> {
     let val: libc::c_int = 1;
@@ -31,7 +30,7 @@ pub fn socketpair() -> Result<(LocalFd, LocalFd), crate::SyscallError> {
     crate::cvt(unsafe {
         libc::socketpair(
             libc::AF_UNIX,
-            libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            libc::SOCK_STREAM + libc::SOCK_CLOEXEC + libc::SOCK_NONBLOCK,
             0,
             pair.as_mut_ptr(),
         ) as isize

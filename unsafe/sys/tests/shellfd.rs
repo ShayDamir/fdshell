@@ -374,3 +374,41 @@ fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
     drop(b);
     Ok(())
 }
+
+#[test]
+fn test_send_fd_requires_capture_active() -> Result<(), SyscallError> {
+    let (a, _b) = socketpair()?;
+    let (fd_a, _fd_b) = socketpair()?;
+    set_capture_active(false);
+    // Without capture enabled, send_fd must refuse to send.
+    assert!(matches!(
+        send_fd(&a, &fd_a, c"tag"),
+        Err(SyscallError::ENOENT(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_send_fd_tag_at_max_proceeds() -> Result<(), SyscallError> {
+    let (a, _b) = socketpair()?;
+    let (fd_a, _fd_b) = socketpair()?;
+    set_capture_active(true);
+    // TAG_MAX data bytes would overflow; TAG_MAX - 1 data bytes + NUL == TAG_MAX is allowed.
+    let tag = std::ffi::CString::new(vec![b'a'; TAG_MAX - 1]).unwrap();
+    send_fd(&a, &fd_a, &tag)?;
+    set_capture_active(false);
+    Ok(())
+}
+
+#[test]
+fn test_send_fd_tag_over_max_is_e2big() -> Result<(), SyscallError> {
+    let (a, _b) = socketpair()?;
+    let (fd_a, _fd_b) = socketpair()?;
+    set_capture_active(true);
+    // TAG_MAX data bytes + NUL == TAG_MAX + 1 exceeds the limit.
+    let tag = std::ffi::CString::new(vec![b'a'; TAG_MAX]).unwrap();
+    let err = send_fd(&a, &fd_a, &tag).unwrap_err();
+    assert!(matches!(err, SyscallError::E2BIG(_)));
+    set_capture_active(false);
+    Ok(())
+}

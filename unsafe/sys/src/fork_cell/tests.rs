@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 #[allow(unused_imports)]
-use super::ForkCell;
+use super::{ForkCell, ForkCellError};
 
 #[test]
 fn fork_cell_new() {
@@ -84,4 +84,28 @@ fn refmut_count_decrements_on_drop() {
     }
     // After drop, count should be back to 0.
     assert!(cell.borrow_count() == 0);
+}
+
+#[test]
+fn borrow_mut_fails_on_exclusive_borrow() {
+    let cell = ForkCell::new(10);
+    let _m1 = cell.borrow_mut().unwrap();
+    // A second exclusive borrow must be rejected while one is active.
+    assert!(matches!(
+        cell.borrow_mut(),
+        Err(ForkCellError::ExclusiveBorrowActive)
+    ));
+}
+
+#[test]
+fn display_error_variants() {
+    use crate::alloc::string::ToString;
+    assert_eq!(
+        ForkCellError::ExclusiveBorrowActive.to_string(),
+        "cannot borrow – exclusive borrow already active"
+    );
+    assert_eq!(
+        ForkCellError::SharedBorrowActive.to_string(),
+        "cannot borrow mutably – shared borrows are active"
+    );
 }

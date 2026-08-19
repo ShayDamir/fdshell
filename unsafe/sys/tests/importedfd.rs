@@ -306,3 +306,72 @@ fn write_str_to_dev_full_fails() {
     // SAFETY: `fd` is a valid open fd from the test above.
     unsafe { libc::close(fd) };
 }
+
+#[test]
+fn write_all_errors_when_send_buffer_cannot_accept_all() {
+    // A non-blocking socket with a small send buffer makes the first write a
+    // short write and the next one fail with EAGAIN, so write_all must return
+    // an error. A `n == 0`→`n != 0` mutation would break after the first
+    // (partial) write and return Ok, which this catches.
+    let (a, _b) = sys::net::socketpair().unwrap();
+    // dup so the fd has CLOEXEC clear (satisfying the ImportedFd invariant).
+    // SAFETY: `a.as_raw()` is a valid open socket; dup returns a new fd or -1.
+    let raw = unsafe { libc::dup(a.as_raw()) };
+    assert!(raw >= 0);
+    let sndbuf: libc::c_int = 64;
+    // SAFETY: `raw` is a valid socket; SO_SNDBUF is a valid SOL_SOCKET option.
+    unsafe {
+        libc::setsockopt(
+            raw,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            (&raw const sndbuf).cast(),
+            core::mem::size_of_val(&sndbuf) as libc::socklen_t,
+        )
+    };
+    // SAFETY: `raw` is a valid open fd with CLOEXEC clear (dup clears it).
+    let imported = unsafe { ImportedFd::from_raw(raw) };
+    let payload = vec![b'x'; 1024 * 1024];
+    assert!(imported.write_all(&payload).is_err());
+    // SAFETY: `raw` is the valid open fd created via dup above.
+    unsafe { libc::close(raw) };
+}
+
+#[test]
+fn read_all_fills_buffer_across_reads() {
+    // Data arrives in two 256-byte chunks with a delay, so read_all must loop
+    // past a partial fill to reach EOF. A `offset >= len`→`offset < len`
+    // mutation would break after the first chunk and return 256, not 512.
+    let mut fds: [i32; 2] = [0; 2];
+    // SAFETY: pipe() with a valid 2-element array.
+    unsafe { libc::pipe(fds.as_mut_ptr()) };
+    assert!(fds[0] >= 0 && fds[1] >= 0);
+    let wr_fd = fds[1];
+    // SAFETY: `fds[0]` is a valid open fd with CLOEXEC clear (raw pipe default).
+    let imported = unsafe { ImportedFd::from_raw(fds[0]) };
+
+    std::thread::scope(move |t| {
+        t.spawn(move || {
+            let first = [0xABu8; 256];
+            let second = [0xCDu8; 256];
+            // SAFETY: `wr_fd` is a valid fd; the buffers are valid slices.
+            unsafe { libc::write(wr_fd, first.as_ptr().cast(), first.len() as libc::size_t) };
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            // SAFETY: `wr_fd` is a valid fd; the buffer is a valid slice.
+            unsafe { libc::write(wr_fd, second.as_ptr().cast(), second.len() as libc::size_t) };
+        });
+        t.spawn(move || {
+            let mut buf = [0u8; 512];
+            let n = imported.read_all(&mut buf).expect("read_all");
+            assert_eq!(n, 512);
+            assert_eq!(&buf[..256], &[0xABu8; 256]);
+            assert_eq!(&buf[256..], &[0xCDu8; 256]);
+        });
+    });
+
+    // SAFETY: both `wr_fd` and `fds[0]` are valid open fds from the pipe above.
+    unsafe {
+        libc::close(wr_fd);
+        libc::close(fds[0]);
+    }
+}

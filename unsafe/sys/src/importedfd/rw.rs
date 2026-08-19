@@ -19,14 +19,13 @@ impl ImportedFd {
 
     /// Write all bytes, retrying on short writes.
     pub fn write_all(&self, buf: &[u8]) -> Result<(), SyscallError> {
-        let mut written = 0;
-        while written < buf.len() {
-            let slice = buf.get(written..).ok_or(SyscallError::Never)?;
-            let n = self.write(slice)?;
+        let mut remaining = buf;
+        while !remaining.is_empty() {
+            let n = self.write(remaining)?;
             if n == 0 {
                 break;
             }
-            written += n;
+            remaining = remaining.get(n..).ok_or(SyscallError::Never)?;
         }
         Ok(())
     }

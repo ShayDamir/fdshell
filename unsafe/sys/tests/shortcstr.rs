@@ -1351,3 +1351,95 @@ fn split_drain_all() {
     assert_eq!(parts.len(), 3);
     assert!(iter.next().is_none());
 }
+
+// --- Display (impl fmt::Display) ---
+
+#[test]
+fn display_fmt_static() {
+    let s = ShortCStr::from(c"hello");
+    assert_eq!(format!("{}", s), "hello");
+}
+
+#[test]
+fn display_fmt_inline() {
+    let s: ShortCStr = c"world".into();
+    assert_eq!(format!("{}", s), "world");
+}
+
+#[test]
+fn display_fmt_empty() {
+    let s = ShortCStr::new();
+    assert_eq!(format!("{}", s), "");
+}
+
+#[test]
+fn display_fmt_bad_state() {
+    let s = ShortCStr::Arc {
+        arc: Arc::new(b"hi".to_vec()),
+        offset: 0,
+        length: 100,
+    };
+    assert_eq!(format!("{}", s), "<BadState>");
+}
+
+// --- ShortCStrError Display ---
+
+#[test]
+fn display_error_variants() {
+    assert_eq!(
+        ShortCStrError::NulByte.to_string(),
+        "NUL byte in string data"
+    );
+    assert_eq!(
+        ShortCStrError::BadState.to_string(),
+        "internal state is inconsistent"
+    );
+    assert_eq!(
+        ShortCStrError::TooLarge.to_string(),
+        "data exceeds inline capacity"
+    );
+    assert_eq!(
+        ShortCStrError::InvalidUtf8.to_string(),
+        "invalid UTF-8 in string data"
+    );
+    assert_eq!(
+        ShortCStrError::FromStrFailed.to_string(),
+        "string could not be parsed as the requested type"
+    );
+}
+
+// --- Hash discriminates distinct values ---
+
+#[test]
+fn hash_differs_for_different_values() {
+    use core::hash::{Hash, Hasher};
+    fn h(s: &ShortCStr) -> u64 {
+        let mut st = std::collections::hash_map::DefaultHasher::new();
+        s.hash(&mut st);
+        st.finish()
+    }
+    assert_ne!(h(&ShortCStr::from(c"hello")), h(&ShortCStr::from(c"world")));
+    assert_ne!(
+        h(&ShortCStr::from(c"hello")),
+        h(&ShortCStr::from(c"hello!"))
+    );
+}
+
+// --- get at exactly INLINE_MAX bytes stays in-bounds (from_inline boundary) ---
+
+#[test]
+fn get_inline_max_length_is_some() {
+    let s = ShortCStr::from(LONG);
+    let sub = s.get(0..30).unwrap();
+    assert_eq!(sub.as_bytes().unwrap(), &LONG.to_bytes()[0..30]);
+}
+
+// --- split_once where sep spans the whole string ---
+
+#[test]
+fn split_once_sep_equals_data() {
+    let s = ShortCStr::from(c"abc");
+    let (l, r) = s.split_once(b"abc").unwrap();
+    assert_eq!(l.as_bytes().unwrap(), b"");
+    assert_eq!(r.as_bytes().unwrap(), b"");
+}
