@@ -1,18 +1,20 @@
 use crate::error::parse::ParseError;
-use crate::parse::semi::{find_preceded_by_semi, trim_semi, try_join};
+use crate::parse::semi::{find_preceded_by_semi, trim_semi, verbatim};
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
+use sys::ScriptText;
 use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug))]
 pub struct ForBlock {
     pub var: ShortCStr,
     pub words: Vec<ShortCStr>,
-    pub body: ShortCStr,
+    pub body: ScriptText,
 }
 
 pub(crate) fn tokens_to_for(
     tokens: &[(ShortCStr, usize, bool)],
+    text: &ScriptText,
 ) -> Result<ForBlock, Report<ParseError>> {
     ensure!(
         tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")),
@@ -44,11 +46,14 @@ pub(crate) fn tokens_to_for(
         ParseError::ExpectedSemicolonBeforeDone
     );
 
-    let body = try_join(trim_semi(
-        tokens
-            .get(do_idx + 1..done_idx)
-            .ok_or(ParseError::ExpectedDone)?,
-    ));
+    let body = verbatim(
+        text,
+        trim_semi(
+            tokens
+                .get(do_idx + 1..done_idx)
+                .ok_or(ParseError::ExpectedDone)?,
+        ),
+    )?;
 
     let word_tokens = trim_semi(
         tokens

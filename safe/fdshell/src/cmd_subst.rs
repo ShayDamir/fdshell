@@ -22,8 +22,15 @@ pub(crate) fn run_and_capture(
             (_, None) => {
                 // child stdout → pipe; failure means empty output
                 let _ = w.export_to(1);
+                // Inner scripts run standalone: state changes die with the child,
+                // so provenance here is unobservable — position/origin are nominal.
+                let text = sys::ScriptText::new(
+                    sys::ShortCStr::from_vec(cmd.to_vec()).unwrap_or_default(),
+                    sys::Position::new(1, 1),
+                    sys::Origin::Shell,
+                );
                 // Command substitution output already read; exit code irrelevant
-                let _ = crate::repl::run_script(cmd, cell);
+                let _ = crate::repl::run_script(&text, cell);
                 sys::exit(0)
             }
             (_, Some(pidfd)) => {

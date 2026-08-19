@@ -56,12 +56,12 @@ fn run_main() -> Result<(), Report<AppError>> {
     }
 
     match fdshell::script_loader::load_script_source(&parsed) {
-        Ok(Some((script_content, positional))) => {
+        Ok(Some((script_content, positional, origin))) => {
             {
                 let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
                 state.set_positional(positional);
             }
-            fdshell::main_cli::execute_script(&script_content, &state)
+            fdshell::main_cli::execute_script(&script_content, origin, &state)
         }
         Ok(None) => run(&state),
         Err(e) => Err(e),

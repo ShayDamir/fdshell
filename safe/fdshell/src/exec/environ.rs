@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
-use sys::{ExportedCStr, ExportedFd, ShortCStr};
+use sys::{ExportedCStr, ExportedFd, ImportedStr, ShortCStr};
 
 use crate::envfilter::EnvFilter;
 
@@ -15,7 +15,7 @@ fn export_entry(k: &ShortCStr, v: &ShortCStr, env_filter: &EnvFilter) -> Option<
 pub(crate) fn get_environ(
     pid: sys::Pid,
     environ: &[(ShortCStr, ShortCStr)],
-    exports: &HashMap<ShortCStr, ShortCStr>,
+    exports: &HashMap<ShortCStr, ImportedStr>,
     env_filter: &EnvFilter,
     exec_sock: Option<&ExportedFd>,
 ) -> Vec<ExportedCStr> {
@@ -27,7 +27,7 @@ pub(crate) fn get_environ(
 
     let exports_iter = exports
         .iter()
-        .filter_map(|(k, v)| export_entry(k, v, env_filter));
+        .filter_map(|(k, v)| export_entry(k, &v.value, env_filter));
 
     let pid_entry = sys::format!("FDSHELL_PID={pid}")
         .map(ExportedCStr::from)

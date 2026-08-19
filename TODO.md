@@ -32,6 +32,7 @@
 - [ ] `$-` — shell option flags
 - [ ] `type` builtin — show command type (builtin, external, fd var, etc.)
 - [ ] `command` builtin — bypass function lookup (alias for `builtin` prefix)
+- [ ] Allow environment variables to become shell variables — `FOO=bar fdshell -c 'builtin echo $FOO'` should output `bar` (resolve `$FOO` against the inherited environ when not set in `state.strings`)
 
 ### P1 — Major functionality gaps (moderate effort)
 
@@ -140,7 +141,7 @@
 
 - [ ] Strict mode: ban absolute path resolution entirely; every operation relative to an explicit dirfd — capability shell in Capsicum spirit
 - [ ] Broker pattern: make socket bidirectional so sandboxed child can request an open; privileged shell resolves against its dirfds
-- [ ] Provenance/audit: tag every fd with origin; `fdexplain %foo` → "opened by openat2 from %CWD, line 3"
+- [ ] Provenance/audit: tag every fd with origin; `fdexplain %foo` → "opened by openat2 from %CWD, line 3" — design is reusable from string provenance: `Origin`/`Trace`/`ScriptText` in `unsafe/sys/src/importedstr/` already track `(Position, Origin)` for strings and the `explain` builtin renders them; attach a `Trace` to fd vars at acquisition points and add an `fdexplain` builtin
 - [ ] Leak-detector test mode: snapshot `/proc/self/fd` before/after script run, assert no stragglers; verify CLOEXEC invariants
 
 ### P3 — Application domains (emerge from above)

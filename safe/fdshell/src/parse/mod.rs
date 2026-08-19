@@ -23,27 +23,30 @@ mod semi;
 pub(crate) mod token;
 mod token_pipe;
 mod token_subst;
-mod while_block;
+pub(crate) mod while_block;
 
 pub use cmdline::{CommandLine, Pipeline};
 pub use line::ParsedLine;
 
 use crate::error::parse::ParseError;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
+use sys::ScriptText;
+use sys::ShortCStr;
 
-fn tokens_only(tokens: &[(sys::ShortCStr, usize, bool)]) -> Vec<sys::ShortCStr> {
+fn tokens_only(tokens: &[(ShortCStr, usize, bool)]) -> Vec<ShortCStr> {
     tokens.iter().map(|(t, _, _)| t.clone()).collect()
 }
 
-fn fully_quoted_only(tokens: &[(sys::ShortCStr, usize, bool)]) -> Vec<bool> {
+fn fully_quoted_only(tokens: &[(ShortCStr, usize, bool)]) -> Vec<bool> {
     tokens.iter().map(|(_, _, fq)| *fq).collect()
 }
 
-pub(crate) fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
-    inner_parse(line)
+pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
+    inner_parse(text)
 }
 
-fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
+fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
+    let line = text.as_bytes().change_context(ParseError::Never)?;
     let raw = token::tokenize(line)?;
     let tokens = tokens_only(&raw);
 
@@ -52,25 +55,25 @@ fn inner_parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
     }
 
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"case")) {
-        return Ok(ParsedLine::Case(case_block::tokens_to_case(&raw)?));
+        return Ok(ParsedLine::Case(case_block::tokens_to_case(&raw, text)?));
     }
 
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")) {
-        return Ok(ParsedLine::If(if_block::tokens_to_if(&raw)?));
+        return Ok(ParsedLine::If(if_block::tokens_to_if(&raw, text)?));
     }
 
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")) {
-        return Ok(ParsedLine::For(for_block::tokens_to_for(&raw)?));
+        return Ok(ParsedLine::For(for_block::tokens_to_for(&raw, text)?));
     }
 
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"while")) {
         return Ok(ParsedLine::While(while_block::tokens_to_loop(
-            &raw, b"while",
+            &raw, b"while", text,
         )?));
     }
     if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"until")) {
         return Ok(ParsedLine::Until(while_block::tokens_to_loop(
-            &raw, b"until",
+            &raw, b"until", text,
         )?));
     }
 

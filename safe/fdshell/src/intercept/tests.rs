@@ -36,12 +36,20 @@ fn make_line(command: &str, args: &[&str]) -> Vec<u8> {
     }
 }
 
+fn text(bytes: &[u8]) -> sys::ScriptText {
+    sys::ScriptText::new(
+        ShortCStr::from_vec(bytes.to_vec()).unwrap(),
+        sys::Position::new(1, 1),
+        sys::Origin::Shell,
+    )
+}
+
 #[test]
 fn try_intercept_cd_returns_true() {
     let line = make_line("cd", &["/tmp"]);
     let cmdline = make_cmdline(b"cd", &["/tmp"]);
     let cell = make_cell();
-    assert!(try_intercept(&line, &cmdline, &cell).unwrap());
+    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
 }
 
 #[test]
@@ -49,7 +57,7 @@ fn try_intercept_envfilter_returns_true() {
     let line = make_line("envfilter", &["--list"]);
     let cmdline = make_cmdline(b"envfilter", &["--list"]);
     let cell = make_cell();
-    assert!(try_intercept(&line, &cmdline, &cell).unwrap());
+    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
 }
 
 #[test]
@@ -57,7 +65,7 @@ fn try_intercept_shift_returns_true() {
     let line = make_line("shift", &[]);
     let cmdline = make_cmdline(b"shift", &[]);
     let cell = make_cell();
-    assert!(try_intercept(&line, &cmdline, &cell).unwrap());
+    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
 }
 
 #[test]
@@ -65,8 +73,12 @@ fn run_shift_removes_positional_args() {
     let cell = make_cell();
     {
         let mut state = cell.borrow_mut().unwrap();
-        state.positional.push_back(c"zero".into());
-        state.positional.push_back(c"one".into());
+        state
+            .positional
+            .push_back(sys::ImportedStr::shell(c"zero".into()));
+        state
+            .positional
+            .push_back(sys::ImportedStr::shell(c"one".into()));
     }
     let cmdline = make_cmdline(b"shift", &["1"]);
     assert!(shift::run_shift(b"shift", &cmdline, &cell).unwrap());
@@ -83,7 +95,7 @@ fn try_intercept_read_returns_true() {
     let line = make_line("read", &["var1"]);
     let cmdline = make_cmdline(b"read", &["-u", "0", "var1"]);
     let cell = make_cell();
-    assert!(try_intercept(&line, &cmdline, &cell).unwrap());
+    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
 }
 
 #[test]
@@ -91,7 +103,7 @@ fn try_intercept_unknown_returns_false() {
     let line = make_line("unknown_xyzzy", &[]);
     let cmdline = make_cmdline(b"unknown_xyzzy", &[]);
     let cell = make_cell();
-    assert!(!try_intercept(&line, &cmdline, &cell).unwrap());
+    assert!(!try_intercept(&text(&line), &cmdline, &cell).unwrap());
 }
 
 #[test]
@@ -104,7 +116,7 @@ fn try_intercept_export_fd_with_captures_returns_error() {
         force: false,
     }];
     let cell = make_cell();
-    let result = try_intercept(&line, &cmdline, &cell);
+    let result = try_intercept(&text(&line), &cmdline, &cell);
     assert!(
         result.is_err(),
         "export_fd with captures should return an error"
@@ -121,7 +133,7 @@ fn try_intercept_export_fd_with_redirects_returns_error() {
         source: RedirectSource::Var(c"test".into()),
     }];
     let cell = make_cell();
-    let result = try_intercept(&line, &cmdline, &cell);
+    let result = try_intercept(&text(&line), &cmdline, &cell);
     assert!(
         result.is_err(),
         "export_fd with redirects should return an error"
@@ -134,7 +146,7 @@ fn builtin_pos_found_at_correct_position() {
     let mut cmdline = make_cmdline(b"envfilter", &["--allow", "PATH"]);
     cmdline.builtin = true;
     let cell = make_cell();
-    let result = try_intercept(&line, &cmdline, &cell);
+    let result = try_intercept(&text(&line), &cmdline, &cell);
     assert!(result.is_err());
     let e = result.unwrap_err();
     let pos: usize = e
@@ -150,7 +162,7 @@ fn builtin_pos_found_at_correct_position() {
     let line2 = make_line("cmd builtin envfilter", &["--allow", "PATH"]);
     let mut cmdline2 = make_cmdline(b"envfilter", &["--allow", "PATH"]);
     cmdline2.builtin = true;
-    let result2 = try_intercept(&line2, &cmdline2, &cell);
+    let result2 = try_intercept(&text(&line2), &cmdline2, &cell);
     assert!(result2.is_err());
     let e2 = result2.unwrap_err();
     let pos2: usize = e2
@@ -172,7 +184,7 @@ fn capture_pos_found_at_correct_position() {
         force: false,
     }];
     let cell = make_cell();
-    let result = try_intercept(&b"envfilter --allow %>fd PATH"[..], &cmdline, &cell);
+    let result = try_intercept(&text(b"envfilter --allow %>fd PATH"), &cmdline, &cell);
     assert!(result.is_err());
     let e = result.unwrap_err();
     let pos: usize = e
@@ -192,7 +204,7 @@ fn redirect_pos_found_at_correct_position() {
     }];
     let cell = make_cell();
 
-    let result = try_intercept(&b"envfilter --allow PATH < input"[..], &cmdline, &cell);
+    let result = try_intercept(&text(b"envfilter --allow PATH < input"), &cmdline, &cell);
     assert!(result.is_err());
     let e = result.unwrap_err();
     let pos: usize = e
@@ -201,7 +213,7 @@ fn redirect_pos_found_at_correct_position() {
         .pos;
     assert_eq!(pos, 23, "< should be detected at position 23");
 
-    let result2 = try_intercept(&b"cmd > output"[..], &cmdline, &cell);
+    let result2 = try_intercept(&text(b"cmd > output"), &cmdline, &cell);
     assert!(result2.is_err());
     let e2 = result2.unwrap_err();
     let pos2: usize = e2

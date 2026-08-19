@@ -11,6 +11,7 @@ pub(crate) use arg::substitute_arg;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::ExportedFd;
+use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -42,17 +43,17 @@ pub fn substitute_args(
 }
 
 fn expand_positional_args<'a>(
-    positional: impl IntoIterator<Item = &'a ShortCStr>,
+    positional: impl IntoIterator<Item = &'a ImportedStr>,
     result: &mut Vec<ShortCStr>,
 ) -> Result<(), Report<ResolveError>> {
     for p in positional {
-        result.push(p.clone());
+        result.push(p.value.clone());
     }
     Ok(())
 }
 
 fn join_positional_args<'a>(
-    positional: impl IntoIterator<Item = &'a ShortCStr>,
+    positional: impl IntoIterator<Item = &'a ImportedStr>,
 ) -> Result<ShortCStr, Report<ResolveError>> {
     let mut out = ShortCStr::new();
     for (j, p) in positional.into_iter().enumerate() {

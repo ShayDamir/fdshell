@@ -1,27 +1,35 @@
-use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+use sys::{ImportedStr, Origin, ScriptText, Trace};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
+    text: &ScriptText,
     cell: &ForkCell<ShellState>,
-) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
+) -> Result<Vec<ImportedStr>, Report<ResolveError>> {
     let mut out = Vec::new();
     for word in words {
         let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
-        let split = if is_cmd_subst(bs) {
+        if is_cmd_subst(bs) {
             let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)
                 .change_context(ResolveError::Resolve)?;
-            split_whitespace(&expanded)?
+            for w in split_whitespace(&expanded)? {
+                out.push(ImportedStr::new(
+                    w,
+                    Trace::at(text.start, Origin::CommandOutput),
+                ));
+            }
         } else {
-            vec![word.clone()]
-        };
-        out.extend(split);
+            out.push(ImportedStr::new(
+                word.clone(),
+                Trace::at(text.start, text.origin.clone()),
+            ));
+        }
     }
     Ok(out)
 }

@@ -3,21 +3,25 @@ use crate::cli::CliArgs;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
+use sys::ImportedStr;
+use sys::Origin;
 
-type ScriptResult = Option<(Vec<u8>, VecDeque<ShortCStr>)>;
+type ScriptResult = Option<(Vec<u8>, VecDeque<ImportedStr>, Origin)>;
 
 pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppError>> {
+    let positional: VecDeque<ImportedStr> = parsed.positional.iter().cloned().collect();
+
     if let Some(fd) = &parsed.script_fd {
-        let pos: VecDeque<ShortCStr> = parsed.positional.iter().cloned().collect();
+        let origin = parsed.script_origin.clone().unwrap_or(Origin::Stdin);
         return Ok(Some((
             crate::cli::load_script(fd).change_context(AppError::ScriptRead)?,
-            pos,
+            positional,
+            origin,
         )));
     }
 
     if let Some(path) = parsed.positional.first() {
-        let cstr = path.export();
+        let cstr = path.value.export();
         let fd = if let Some(dirfd) = &parsed.dirfd {
             sys::openat2::openat2(
                 dirfd.at(),
@@ -28,12 +32,10 @@ pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppEr
         } else {
             sys::openat2::open(&cstr, sys::fcntl::O_RDONLY).change_context(AppError::ScriptRead)?
         };
-        let mut pos = VecDeque::new();
-        pos.push_back(path.clone());
-        pos.extend(parsed.positional.iter().skip(1).cloned());
         return Ok(Some((
             crate::cli::load_script(&fd).change_context(AppError::ScriptRead)?,
-            pos,
+            positional,
+            Origin::File(path.value.clone()),
         )));
     }
 

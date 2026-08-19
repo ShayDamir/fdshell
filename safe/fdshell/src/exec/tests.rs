@@ -7,6 +7,7 @@ use hashbrown::HashMap;
 use std::ffi::CString;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::AtomicU64;
+use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
@@ -81,7 +82,10 @@ fn exec_fd_with_exports() {
     let fd = resolve_path(&bin).unwrap();
 
     let mut exports_map = HashMap::new();
-    exports_map.insert(c"EXPORTED_VAR".into(), c"hello_world".into());
+    exports_map.insert(
+        c"EXPORTED_VAR".into(),
+        ImportedStr::shell(c"hello_world".into()),
+    );
     exec_child(
         || match exec_fd(&fd, &[&abs], &[], &exports_map, &Default::default(), None) {
             Ok(()) => {}

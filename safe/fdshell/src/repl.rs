@@ -6,14 +6,14 @@ use crate::app::AppError;
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
 
 pub(crate) use crate::cond::run_cond_list;
 pub(crate) use crate::script::run_script;
 
-pub fn handle(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
-    if let Some(control) = run_script(line, cell)? {
+pub fn handle(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
+    if let Some(control) = run_script(text, cell)? {
         match control {
             LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
@@ -22,8 +22,8 @@ pub fn handle(line: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<Cmd
     Ok(())
 }
 
-pub fn exec_cmd(line: &[u8], cell: &ForkCell<ShellState>) -> Result<i32, Report<CmdError>> {
-    if let Some(control) = run_script(line, cell)? {
+pub fn exec_cmd(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<i32, Report<CmdError>> {
+    if let Some(control) = run_script(text, cell)? {
         match control {
             LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
@@ -39,7 +39,9 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     // when in -c or script file mode (positional args already set)
     {
         let mut state = cell.borrow_mut().change_context(AppError::Borrow)?;
-        state.positional.push_back(ShortCStr::from(c"fdshell"));
+        state
+            .positional
+            .push_back(ImportedStr::shell(ShortCStr::from(c"fdshell")));
     }
     let mut buf = Vec::new();
     loop {
@@ -62,7 +64,12 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
         if line.is_empty() {
             continue;
         }
-        if let Err(err) = handle(line, cell) {
+        let text = ScriptText::new(
+            ShortCStr::from_vec(line.to_vec()).change_context(AppError::Read)?,
+            Position::new(1, 1),
+            Origin::Stdin,
+        );
+        if let Err(err) = handle(&text, cell) {
             let _ = writeln!(crate::io::Stderr, "{err:?}");
         }
     }

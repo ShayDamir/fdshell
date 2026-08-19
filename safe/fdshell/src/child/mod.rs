@@ -2,6 +2,7 @@ mod delegated;
 pub(crate) mod dispatch;
 mod error;
 pub(crate) mod exec_fd;
+mod explain;
 pub(crate) mod external;
 pub(crate) mod fdpass;
 mod help;

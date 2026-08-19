@@ -17,6 +17,7 @@ const SHELL_CMDS: &[(&[u8], &[u8])] = &[
 
 const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"echo", b"Print arguments"),
+    (b"explain", b"Show provenance of a variable"),
     (b"exec_at", b"Execute with path lookup"),
     (b"exec_fd", b"Execute with fd lookup"),
     (b"false", b"Exit with failure status"),

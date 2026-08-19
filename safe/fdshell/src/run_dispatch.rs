@@ -4,10 +4,12 @@ use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::fork_cell::ForkCell;
+use sys::{ImportedStr, ScriptText, Trace};
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
 pub(crate) fn run_simple(
     parsed: &crate::parse::ParsedLine,
+    text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     match parsed {
@@ -23,12 +25,14 @@ pub(crate) fn run_simple(
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
-            let expanded = {
-                crate::substitute::substitute_arg(value, &mut HashMap::new(), cell)
-                    .change_context(CmdError::Resolve)?
-            };
+            let expanded = crate::substitute::substitute_arg(value, &mut HashMap::new(), cell)
+                .change_context(CmdError::Resolve)?;
+            let origin = crate::run_origin::assign_origin(value, text.origin.clone(), cell)?;
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.strings.insert(var.clone(), expanded);
+            state.strings.insert(
+                var.clone(),
+                ImportedStr::new(expanded, Trace::at(text.start, origin)),
+            );
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Unset(var) => {

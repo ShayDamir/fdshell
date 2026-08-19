@@ -2,10 +2,26 @@
 use super::*;
 use crate::capture::Capture;
 use crate::error::cmd::CmdError;
+use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
+use error_stack::Report;
+use sys::{Origin, Position, ScriptText};
+
+fn stext(bytes: &[u8]) -> ScriptText {
+    ScriptText::new(
+        sys::ShortCStr::from_vec(bytes.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    )
+}
+
+/// Wraps a raw line in a nominal `ScriptText` so call sites keep passing `&[u8]`.
+fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
+    super::parse(&stext(line))
+}
 #[test]
 fn test_mkdirat_capture() {
     let ParsedLine::Cmd(cmd) =
@@ -539,8 +555,8 @@ fn parse_if_newline_separators() {
     let ParsedLine::If(ib) = parse(b"if true\nthen\numask 0o000\nfi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"true".into());
-    assert_eq!(ib.then_body, c"umask 0o000".into());
+    assert_eq!(ib.condition.data, c"true".into());
+    assert_eq!(ib.then_body.data, c"umask 0o000".into());
     assert!(ib.elifs.is_empty());
     assert!(ib.else_body.is_none());
 }
@@ -565,7 +581,7 @@ fn if_without_then_through_run_script_returns_err() {
     // Both paths should return the same error message.
     let cell = crate::state::ShellState::new();
     let cell = sys::fork_cell::ForkCell::new(cell);
-    let result = crate::repl::run_script(b"if test fi", &cell);
+    let result = crate::repl::run_script(&stext(b"if test fi"), &cell);
     assert!(result.is_err());
     let e = match result {
         Ok(_) => panic!("expected error"),
@@ -577,62 +593,70 @@ fn if_without_then_through_run_script_returns_err() {
 
 #[test]
 fn for_simple() {
-    let tokens = token::tokenize(b"for var in a b c; do echo $var; done").unwrap();
-    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    let line = b"for var in a b c; do echo $var; done";
+    let tokens = token::tokenize(line).unwrap();
+    let fb = for_block::tokens_to_for(&tokens, &stext(line)).unwrap();
     assert_eq!(fb.var, c"var".into());
     assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
-    assert_eq!(fb.body, c"echo $var".into());
+    assert_eq!(fb.body.data, c"echo $var".into());
 }
 
 #[test]
 fn for_single_word() {
-    let tokens = token::tokenize(b"for x in foo; do cmd; done").unwrap();
-    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    let line = b"for x in foo; do cmd; done";
+    let tokens = token::tokenize(line).unwrap();
+    let fb = for_block::tokens_to_for(&tokens, &stext(line)).unwrap();
     assert_eq!(fb.var, c"x".into());
     assert_eq!(fb.words, vec![c"foo".into()]);
-    assert_eq!(fb.body, c"cmd".into());
+    assert_eq!(fb.body.data, c"cmd".into());
 }
 
 #[test]
 fn for_newline_separators() {
-    let tokens = token::tokenize(b"for x in a b c\ndo\ncmd1; cmd2\ndone").unwrap();
-    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    let line = b"for x in a b c\ndo\ncmd1; cmd2\ndone";
+    let tokens = token::tokenize(line).unwrap();
+    let fb = for_block::tokens_to_for(&tokens, &stext(line)).unwrap();
     assert_eq!(fb.var, c"x".into());
     assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
-    assert_eq!(fb.body, c"cmd1 ; cmd2".into());
+    assert_eq!(fb.body.data, c"cmd1; cmd2".into());
 }
 
 #[test]
 fn for_empty_words() {
-    let tokens = token::tokenize(b"for x in ; do cmd; done").unwrap();
-    let fb = for_block::tokens_to_for(&tokens).unwrap();
+    let line = b"for x in ; do cmd; done";
+    let tokens = token::tokenize(line).unwrap();
+    let fb = for_block::tokens_to_for(&tokens, &stext(line)).unwrap();
     assert_eq!(fb.var, c"x".into());
     assert!(fb.words.is_empty());
-    assert_eq!(fb.body, c"cmd".into());
+    assert_eq!(fb.body.data, c"cmd".into());
 }
 
 #[test]
 fn for_missing_do_returns_err() {
-    let tokens = token::tokenize(b"for x in a; done").unwrap();
-    assert!(for_block::tokens_to_for(&tokens).is_err());
+    let line = b"for x in a; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(for_block::tokens_to_for(&tokens, &stext(line)).is_err());
 }
 
 #[test]
 fn for_missing_done_returns_err() {
-    let tokens = token::tokenize(b"for x in a; do cmd").unwrap();
-    assert!(for_block::tokens_to_for(&tokens).is_err());
+    let line = b"for x in a; do cmd";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(for_block::tokens_to_for(&tokens, &stext(line)).is_err());
 }
 
 #[test]
 fn for_no_in_returns_err() {
-    let tokens = token::tokenize(b"for x a; do cmd; done").unwrap();
-    assert!(for_block::tokens_to_for(&tokens).is_err());
+    let line = b"for x a; do cmd; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(for_block::tokens_to_for(&tokens, &stext(line)).is_err());
 }
 
 #[test]
 fn for_not_starting_with_for_is_not_a_for() {
-    let tokens = token::tokenize(b"while x; do cmd; done").unwrap();
-    assert!(for_block::tokens_to_for(&tokens).is_err());
+    let line = b"while x; do cmd; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(for_block::tokens_to_for(&tokens, &stext(line)).is_err());
 }
 
 #[test]
@@ -642,7 +666,7 @@ fn for_parse_dispatch() {
     };
     assert_eq!(fb.var, c"var".into());
     assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
-    assert_eq!(fb.body, c"echo $var".into());
+    assert_eq!(fb.body.data, c"echo $var".into());
 }
 
 #[test]
@@ -697,8 +721,8 @@ fn while_parse_dispatch() {
     let ParsedLine::While(wb) = parse(b"while true; do echo x; done").unwrap() else {
         panic!("expected While")
     };
-    assert_eq!(wb.condition, c"true".into());
-    assert_eq!(wb.body, c"echo x".into());
+    assert_eq!(wb.condition.data, c"true".into());
+    assert_eq!(wb.body.data, c"echo x".into());
 }
 
 #[test]
@@ -706,8 +730,8 @@ fn while_parse_body_without_semi_before_done() {
     let ParsedLine::While(wb) = parse(b"while true; do echo x done").unwrap() else {
         panic!("expected While")
     };
-    assert_eq!(wb.condition, c"true".into());
-    assert_eq!(wb.body, c"echo x".into());
+    assert_eq!(wb.condition.data, c"true".into());
+    assert_eq!(wb.body.data, c"echo x".into());
 }
 
 #[test]
@@ -715,7 +739,7 @@ fn while_parse_with_semicolon_body() {
     let ParsedLine::While(wb) = parse(b"while false; do echo a; echo b; done").unwrap() else {
         panic!("expected While")
     };
-    assert_eq!(wb.condition, c"false".into());
+    assert_eq!(wb.condition.data, c"false".into());
     let body_bytes = wb.body.as_bytes().unwrap();
     // Body is all tokens between "do" and "done", joined with spaces
     assert!(body_bytes.starts_with(b"echo"));
@@ -726,8 +750,8 @@ fn while_parse_pipe_in_body() {
     let ParsedLine::While(wb) = parse(b"while true; do echo hello | cat; done").unwrap() else {
         panic!("expected While")
     };
-    assert_eq!(wb.condition, c"true".into());
-    assert_eq!(wb.body, c"echo hello | cat".into());
+    assert_eq!(wb.condition.data, c"true".into());
+    assert_eq!(wb.body.data, c"echo hello | cat".into());
 }
 
 #[test]
@@ -735,8 +759,8 @@ fn while_parse_newline_separator() {
     let ParsedLine::While(wb) = parse(b"while umask 0o077\ndo\numask 0o000\ndone").unwrap() else {
         panic!("expected While")
     };
-    assert_eq!(wb.condition, c"umask 0o077".into());
-    assert_eq!(wb.body, c"umask 0o000".into());
+    assert_eq!(wb.condition.data, c"umask 0o077".into());
+    assert_eq!(wb.body.data, c"umask 0o000".into());
 }
 
 #[test]
@@ -747,8 +771,9 @@ fn while_not_starting_with_while_is_a_cmd() {
 
 #[test]
 fn while_without_do_returns_err() {
-    let tokens = token::tokenize(b"while true; echo x; done").unwrap();
-    assert!(while_block::tokens_to_loop(&tokens, b"while").is_err());
+    let line = b"while true; echo x; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"while", &stext(line)).is_err());
 }
 
 #[test]
@@ -759,8 +784,9 @@ fn while_missing_done_at_end_returns_err() {
 
 #[test]
 fn while_do_not_preceded_by_semi_returns_err() {
-    let tokens = token::tokenize(b"while true do echo x; done").unwrap();
-    assert!(while_block::tokens_to_loop(&tokens, b"while").is_err());
+    let line = b"while true do echo x; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"while", &stext(line)).is_err());
 }
 
 #[test]
@@ -768,8 +794,8 @@ fn until_parse_dispatch() {
     let ParsedLine::Until(wb) = parse(b"until false; do echo x; done").unwrap() else {
         panic!("expected Until")
     };
-    assert_eq!(wb.condition, c"false".into());
-    assert_eq!(wb.body, c"echo x".into());
+    assert_eq!(wb.condition.data, c"false".into());
+    assert_eq!(wb.body.data, c"echo x".into());
 }
 
 #[test]
@@ -777,8 +803,8 @@ fn until_parse_body_without_semi_before_done() {
     let ParsedLine::Until(wb) = parse(b"until true; do echo x done").unwrap() else {
         panic!("expected Until")
     };
-    assert_eq!(wb.condition, c"true".into());
-    assert_eq!(wb.body, c"echo x".into());
+    assert_eq!(wb.condition.data, c"true".into());
+    assert_eq!(wb.body.data, c"echo x".into());
 }
 
 #[test]
@@ -786,7 +812,7 @@ fn until_parse_with_semicolon_body() {
     let ParsedLine::Until(wb) = parse(b"until false; do echo a; echo b; done").unwrap() else {
         panic!("expected Until")
     };
-    assert_eq!(wb.condition, c"false".into());
+    assert_eq!(wb.condition.data, c"false".into());
     let body_bytes = wb.body.as_bytes().unwrap();
     assert!(body_bytes.starts_with(b"echo"));
 }
@@ -796,8 +822,8 @@ fn until_parse_newline_separator() {
     let ParsedLine::Until(wb) = parse(b"until false\ndo\numask 0o000\ndone").unwrap() else {
         panic!("expected Until")
     };
-    assert_eq!(wb.condition, c"false".into());
-    assert_eq!(wb.body, c"umask 0o000".into());
+    assert_eq!(wb.condition.data, c"false".into());
+    assert_eq!(wb.body.data, c"umask 0o000".into());
 }
 
 #[test]
@@ -808,8 +834,9 @@ fn until_not_starting_with_until_is_a_cmd() {
 
 #[test]
 fn until_without_do_returns_err() {
-    let tokens = token::tokenize(b"until true; echo x; done").unwrap();
-    assert!(while_block::tokens_to_loop(&tokens, b"until").is_err());
+    let line = b"until true; echo x; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"until", &stext(line)).is_err());
 }
 
 #[test]
@@ -820,8 +847,9 @@ fn until_missing_done_at_end_returns_err() {
 
 #[test]
 fn until_do_not_preceded_by_semi_returns_err() {
-    let tokens = token::tokenize(b"until true do echo x; done").unwrap();
-    assert!(while_block::tokens_to_loop(&tokens, b"until").is_err());
+    let line = b"until true do echo x; done";
+    let tokens = token::tokenize(line).unwrap();
+    assert!(while_block::tokens_to_loop(&tokens, b"until", &stext(line)).is_err());
 }
 
 #[test]
@@ -829,8 +857,8 @@ fn until_parse_pipe_in_body() {
     let ParsedLine::Until(wb) = parse(b"until true; do echo hello | cat; done").unwrap() else {
         panic!("expected Until")
     };
-    assert_eq!(wb.condition, c"true".into());
-    assert_eq!(wb.body, c"echo hello | cat".into());
+    assert_eq!(wb.condition.data, c"true".into());
+    assert_eq!(wb.body.data, c"echo hello | cat".into());
 }
 
 #[test]
@@ -838,11 +866,11 @@ fn if_single_elif() {
     let ParsedLine::If(ib) = parse(b"if false; then a; elif true; then b; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"false".into());
-    assert_eq!(ib.then_body, c"a".into());
+    assert_eq!(ib.condition.data, c"false".into());
+    assert_eq!(ib.then_body.data, c"a".into());
     assert_eq!(ib.elifs.len(), 1);
-    assert_eq!(ib.elifs[0].0, c"true".into());
-    assert_eq!(ib.elifs[0].1, c"b".into());
+    assert_eq!(ib.elifs[0].cond.data, c"true".into());
+    assert_eq!(ib.elifs[0].body.data, c"b".into());
     assert!(ib.else_body.is_none());
 }
 
@@ -852,13 +880,13 @@ fn if_multiple_elifs() {
     else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 2);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
-    assert_eq!(ib.elifs[1].0, c"e".into());
-    assert_eq!(ib.elifs[1].1, c"f".into());
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
+    assert_eq!(ib.elifs[1].cond.data, c"e".into());
+    assert_eq!(ib.elifs[1].body.data, c"f".into());
 }
 
 #[test]
@@ -866,12 +894,12 @@ fn if_elif_with_else() {
     let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; else e; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 1);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
-    assert_eq!(ib.else_body, Some(c"e".into()));
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
+    assert_eq!(ib.else_body.unwrap().data, c"e".into());
 }
 
 #[test]
@@ -881,14 +909,14 @@ fn if_elif_else_complex() {
     else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"x".into());
-    assert_eq!(ib.then_body, c"y".into());
+    assert_eq!(ib.condition.data, c"x".into());
+    assert_eq!(ib.then_body.data, c"y".into());
     assert_eq!(ib.elifs.len(), 2);
-    assert_eq!(ib.elifs[0].0, c"z".into());
-    assert_eq!(ib.elifs[0].1, c"w".into());
-    assert_eq!(ib.elifs[1].0, c"m".into());
-    assert_eq!(ib.elifs[1].1, c"n".into());
-    assert_eq!(ib.else_body, Some(c"o".into()));
+    assert_eq!(ib.elifs[0].cond.data, c"z".into());
+    assert_eq!(ib.elifs[0].body.data, c"w".into());
+    assert_eq!(ib.elifs[1].cond.data, c"m".into());
+    assert_eq!(ib.elifs[1].body.data, c"n".into());
+    assert_eq!(ib.else_body.unwrap().data, c"o".into());
 }
 
 #[test]
@@ -896,11 +924,11 @@ fn if_elif_semi_before_then() {
     let ParsedLine::If(ib) = parse(b"if a;then b;elif c;then d;fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 1);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
 }
 
 #[test]
@@ -908,11 +936,11 @@ fn if_elif_semi_after_then() {
     let ParsedLine::If(ib) = parse(b"if a; then; b; elif c; then; d; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 1);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
 }
 
 #[test]
@@ -935,10 +963,10 @@ fn if_else_only() {
     let ParsedLine::If(ib) = parse(b"if false; then true; else fallback; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"false".into());
-    assert_eq!(ib.then_body, c"true".into());
+    assert_eq!(ib.condition.data, c"false".into());
+    assert_eq!(ib.then_body.data, c"true".into());
     assert!(ib.elifs.is_empty());
-    assert_eq!(ib.else_body, Some(c"fallback".into()));
+    assert_eq!(ib.else_body.unwrap().data, c"fallback".into());
 }
 
 #[test]
@@ -948,14 +976,14 @@ fn if_multiple_elifs_with_else() {
     else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 2);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
-    assert_eq!(ib.elifs[1].0, c"e".into());
-    assert_eq!(ib.elifs[1].1, c"f".into());
-    assert_eq!(ib.else_body, Some(c"g".into()));
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
+    assert_eq!(ib.elifs[1].cond.data, c"e".into());
+    assert_eq!(ib.elifs[1].body.data, c"f".into());
+    assert_eq!(ib.else_body.unwrap().data, c"g".into());
 }
 
 #[test]
@@ -974,12 +1002,12 @@ fi",
     .unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 1);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
-    assert_eq!(ib.else_body, Some(c"e".into()));
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
+    assert_eq!(ib.else_body.unwrap().data, c"e".into());
 }
 
 #[test]
@@ -987,11 +1015,11 @@ fn if_elif_empty_else_body() {
     let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; else; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b".into());
     assert_eq!(ib.elifs.len(), 1);
-    assert_eq!(ib.elifs[0].0, c"c".into());
-    assert_eq!(ib.elifs[0].1, c"d".into());
+    assert_eq!(ib.elifs[0].cond.data, c"c".into());
+    assert_eq!(ib.elifs[0].body.data, c"d".into());
     assert!(ib.else_body.is_none(), "empty else body should be None");
 }
 
@@ -1000,8 +1028,8 @@ fn if_condition_with_equals() {
     let ParsedLine::If(ib) = parse(b"if x=y; then z; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"x=y".into());
-    assert_eq!(ib.then_body, c"z".into());
+    assert_eq!(ib.condition.data, c"x=y".into());
+    assert_eq!(ib.then_body.data, c"z".into());
 }
 
 #[test]
@@ -1009,8 +1037,8 @@ fn if_multi_word_then_body() {
     let ParsedLine::If(ib) = parse(b"if a; then b c; fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert_eq!(ib.then_body, c"b c".into());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert_eq!(ib.then_body.data, c"b c".into());
 }
 
 #[test]
@@ -1018,8 +1046,8 @@ fn if_no_semi_before_fi_body_is_empty() {
     let ParsedLine::If(ib) = parse(b"if a; then b fi").unwrap() else {
         panic!("expected If")
     };
-    assert_eq!(ib.condition, c"a".into());
-    assert!(ib.then_body.is_empty());
+    assert_eq!(ib.condition.data, c"a".into());
+    assert!(ib.then_body.data.is_empty());
 }
 
 #[test]
@@ -1027,7 +1055,7 @@ fn parse_elifs_empty_pairs() {
     use super::elif::parse_elifs;
     let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![];
     let pairs: Vec<(usize, usize)> = vec![];
-    let result = parse_elifs(&tokens, &pairs, None, 0);
+    let result = parse_elifs(&tokens, &pairs, None, 0, &stext(b""));
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty());
 }
@@ -1037,23 +1065,15 @@ fn parse_elifs_single() {
     use super::elif::parse_elifs;
     // Tokens: elif, cond, ;, then, ;, body, ;, fi
     // Indices: 0,     1,    2, 3,     4, 5,    6, 7
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"cond".into(), 1, false),
-        (c";".into(), 2, false),
-        (c"then".into(), 3, false),
-        (c";".into(), 4, false),
-        (c"body".into(), 5, false),
-        (c";".into(), 6, false),
-        (c"fi".into(), 7, false),
-    ];
+    let line = b"elif cond; then; body; fi";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 3)];
-    let result = parse_elifs(&tokens, &pairs, None, 7);
+    let result = parse_elifs(&tokens, &pairs, None, 7, &stext(line));
     assert!(result.is_ok());
     let elifs = result.unwrap();
     assert_eq!(elifs.len(), 1);
-    assert_eq!(elifs[0].0, c"cond".into());
-    assert_eq!(elifs[0].1, c"body".into());
+    assert_eq!(elifs[0].cond.data, c"cond".into());
+    assert_eq!(elifs[0].body.data, c"body".into());
 }
 
 #[test]
@@ -1061,104 +1081,66 @@ fn parse_elifs_multiple() {
     use super::elif::parse_elifs;
     // Tokens: elif, c1, ;, then, ;, b1, ;, elif, c2, ;, then, ;, b2, ;, fi
     // Indices: 0,     1,  2, 3,     4, 5,    6, 7,    8,    9, 10,     11, 12, 13, 14
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"c1".into(), 1, false),
-        (c";".into(), 2, false),
-        (c"then".into(), 3, false),
-        (c";".into(), 4, false),
-        (c"b1".into(), 5, false),
-        (c";".into(), 6, false),
-        (c"elif".into(), 7, false),
-        (c"c2".into(), 8, false),
-        (c";".into(), 9, false),
-        (c"then".into(), 10, false),
-        (c";".into(), 11, false),
-        (c"b2".into(), 12, false),
-        (c";".into(), 13, false),
-        (c"fi".into(), 14, false),
-    ];
+    let line = b"elif c1; then; b1; elif c2; then; b2; fi";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 3), (7, 10)];
-    let result = parse_elifs(&tokens, &pairs, None, 14);
+    let result = parse_elifs(&tokens, &pairs, None, 14, &stext(line));
     assert!(result.is_ok());
     let elifs = result.unwrap();
     assert_eq!(elifs.len(), 2);
-    assert_eq!(elifs[0].0, c"c1".into());
-    assert_eq!(elifs[0].1, c"b1".into());
-    assert_eq!(elifs[1].0, c"c2".into());
-    assert_eq!(elifs[1].1, c"b2".into());
+    assert_eq!(elifs[0].cond.data, c"c1".into());
+    assert_eq!(elifs[0].body.data, c"b1".into());
+    assert_eq!(elifs[1].cond.data, c"c2".into());
+    assert_eq!(elifs[1].body.data, c"b2".into());
 }
 
 #[test]
 fn parse_elifs_with_else() {
     use super::elif::parse_elifs;
-    // Tokens: elif, cond, ;, then, ;, body, ;, else, ;, else_body, ;, fi
-    // Indices: 0,     1,    2, 3,     4, 5,    6, 7,    8, 9,         10, 11
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"cond".into(), 1, false),
-        (c";".into(), 2, false),
-        (c"then".into(), 3, false),
-        (c";".into(), 4, false),
-        (c"body".into(), 5, false),
-        (c";".into(), 6, false),
-        (c"else".into(), 7, false),
-        (c";".into(), 8, false),
-        (c"else_body".into(), 9, false),
-        (c";".into(), 10, false),
-        (c"fi".into(), 11, false),
-    ];
+    // Tokens: elif, cond, ;, then, ;, body, ;, else, else_body, ;, fi
+    // Indices: 0,     1,    2, 3,     4, 5,    6, 7,    8,         9, 10
+    let line = b"elif cond; then; body; else; else_body; fi";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 3)];
-    let result = parse_elifs(&tokens, &pairs, Some(7), 11);
+    let result = parse_elifs(&tokens, &pairs, Some(7), 10, &stext(line));
     assert!(result.is_ok());
     let elifs = result.unwrap();
     assert_eq!(elifs.len(), 1);
-    assert_eq!(elifs[0].0, c"cond".into());
-    assert_eq!(elifs[0].1, c"body".into());
+    assert_eq!(elifs[0].cond.data, c"cond".into());
+    assert_eq!(elifs[0].body.data, c"body".into());
 }
 
 #[test]
 fn parse_else_body_simple() {
     use super::elif::parse_else_body;
-    // Tokens: else, fallback, ;
-    // Indices: 0,      1,        2
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"else".into(), 0, false),
-        (c"fallback".into(), 1, false),
-        (c";".into(), 2, false),
-    ];
-    let result = parse_else_body(&tokens, 0, 3).unwrap();
-    assert_eq!(result, c"fallback".into());
+    // Tokens: else, fallback, ;, fi
+    // Indices: 0,      1,        2, 3
+    let line = b"else fallback; fi";
+    let tokens = token::tokenize(line).unwrap();
+    let result = parse_else_body(&tokens, 0, 3, &stext(line)).unwrap();
+    assert_eq!(result.data, c"fallback".into());
 }
 
 #[test]
 fn parse_else_body_multiple_tokens() {
     use super::elif::parse_else_body;
-    // Tokens: else, cmd1, ;, cmd2, ;
-    // Indices: 0,      1,    2, 3,    4
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"else".into(), 0, false),
-        (c"cmd1".into(), 1, false),
-        (c";".into(), 2, false),
-        (c"cmd2".into(), 3, false),
-        (c";".into(), 4, false),
-    ];
-    let result = parse_else_body(&tokens, 0, 5).unwrap();
-    assert_eq!(result, c"cmd1 ; cmd2".into());
+    // Tokens: else, cmd1, ;, cmd2, ;, fi
+    // Indices: 0,      1,    2, 3,    4, 5
+    let line = b"else cmd1; cmd2; fi";
+    let tokens = token::tokenize(line).unwrap();
+    let result = parse_else_body(&tokens, 0, 5, &stext(line)).unwrap();
+    assert_eq!(result.data, c"cmd1; cmd2".into());
 }
 
 #[test]
 fn parse_elifs_missing_condition_err() {
     use super::elif::parse_elifs;
-    // Tokens: elif, then — no condition between elif and then
-    // Indices: 0,     1,     2
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"then".into(), 1, false),
-        (c";".into(), 2, false),
-    ];
+    // Tokens: elif, then, ; — no condition between elif and then
+    // Indices: 0,     1,    2
+    let line = b"elif then;";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 1)];
-    let result = parse_elifs(&tokens, &pairs, None, 2);
+    let result = parse_elifs(&tokens, &pairs, None, 2, &stext(line));
     assert!(result.is_err());
 }
 
@@ -1166,15 +1148,11 @@ fn parse_elifs_missing_condition_err() {
 fn parse_elifs_missing_body_err() {
     use super::elif::parse_elifs;
     // Tokens: elif, cond, ;, then — no body after then
-    // Indices: 0,     1,     2, 3
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"cond".into(), 1, false),
-        (c";".into(), 2, false),
-        (c"then".into(), 3, false),
-    ];
+    // Indices: 0,     1,    2, 3
+    let line = b"elif cond; then";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 3)];
-    let result = parse_elifs(&tokens, &pairs, None, 3);
+    let result = parse_elifs(&tokens, &pairs, None, 3, &stext(line));
     assert!(result.is_err());
 }
 
@@ -1182,31 +1160,23 @@ fn parse_elifs_missing_body_err() {
 fn parse_else_body_empty() {
     use super::elif::parse_else_body;
     // Tokens: else, fi — no body between else and fi
-    // Indices: 0,      1, 2
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> =
-        vec![(c"else".into(), 0, false), (c"fi".into(), 1, false)];
-    let result = parse_else_body(&tokens, 0, 1).unwrap();
-    assert!(result.is_empty());
+    // Indices: 0,      1
+    let line = b"else fi";
+    let tokens = token::tokenize(line).unwrap();
+    let result = parse_else_body(&tokens, 0, 1, &stext(line)).unwrap();
+    assert!(result.data.is_empty());
 }
 
 #[test]
 fn parse_elifs_condition_trailing_semi_err() {
     use super::elif::parse_elifs;
     // Tokens: elif, c, ;, ;, then, b, ;, fi
-    // Indices: 0,     1, 2, 3, 4,     5, 6, 7
+    // Indices: 0,     1, 2, 3, 4,    5, 6, 7
     // ti=4, cond range = 1..3 = [c, ;], last is ';' → MalformedIfBlock
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"c".into(), 1, false),
-        (c";".into(), 2, false),
-        (c";".into(), 3, false),
-        (c"then".into(), 4, false),
-        (c"b".into(), 5, false),
-        (c";".into(), 6, false),
-        (c"fi".into(), 7, false),
-    ];
+    let line = b"elif c; ; then b; fi";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 4)];
-    let result = parse_elifs(&tokens, &pairs, None, 7);
+    let result = parse_elifs(&tokens, &pairs, None, 7, &stext(line));
     assert!(result.is_err());
 }
 
@@ -1214,20 +1184,12 @@ fn parse_elifs_condition_trailing_semi_err() {
 fn parse_elifs_body_trailing_semi_err() {
     use super::elif::parse_elifs;
     // Tokens: elif, c, ;, then, b, ;, ;, fi
-    // Indices: 0,     1, 2, 3,     4, 5, 6, 7
+    // Indices: 0,     1, 2, 3,    4, 5, 6, 7
     // next=7, body range = 4..6 = [b, ;], last is ';' → MalformedIfBlock
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"elif".into(), 0, false),
-        (c"c".into(), 1, false),
-        (c";".into(), 2, false),
-        (c"then".into(), 3, false),
-        (c"b".into(), 4, false),
-        (c";".into(), 5, false),
-        (c";".into(), 6, false),
-        (c"fi".into(), 7, false),
-    ];
+    let line = b"elif c; then b; ; fi";
+    let tokens = token::tokenize(line).unwrap();
     let pairs = vec![(0, 3)];
-    let result = parse_elifs(&tokens, &pairs, None, 7);
+    let result = parse_elifs(&tokens, &pairs, None, 7, &stext(line));
     assert!(result.is_err());
 }
 
@@ -1235,16 +1197,11 @@ fn parse_elifs_body_trailing_semi_err() {
 fn parse_else_body_trailing_semi_err() {
     use super::elif::parse_else_body;
     // Tokens: else, b, ;, ;, fi
-    // Indices: 0,     1, 2, 3, 4
+    // Indices: 0,    1, 2, 3, 4
     // fi_idx=4, raw range = 1..3 = [b, ;], last is ';' → MalformedIfBlock
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![
-        (c"else".into(), 0, false),
-        (c"b".into(), 1, false),
-        (c";".into(), 2, false),
-        (c";".into(), 3, false),
-        (c"fi".into(), 4, false),
-    ];
-    let result = parse_else_body(&tokens, 0, 4);
+    let line = b"else b; ; fi";
+    let tokens = token::tokenize(line).unwrap();
+    let result = parse_else_body(&tokens, 0, 4, &stext(line));
     assert!(result.is_err());
 }
 
@@ -1272,7 +1229,7 @@ fn case_simple() {
     assert_eq!(cb.clauses.len(), 1);
     assert_eq!(cb.clauses[0].patterns.len(), 1);
     assert_eq!(cb.clauses[0].patterns[0], c"foo".into());
-    assert_eq!(cb.clauses[0].body, c"echo one".into());
+    assert_eq!(cb.clauses[0].body.data, c"echo one".into());
 }
 
 #[test]
@@ -1284,9 +1241,9 @@ fn case_multiple_clauses() {
     assert_eq!(cb.word, c"x".into());
     assert_eq!(cb.clauses.len(), 2);
     assert_eq!(cb.clauses[0].patterns[0], c"a".into());
-    assert_eq!(cb.clauses[0].body, c"echo one".into());
+    assert_eq!(cb.clauses[0].body.data, c"echo one".into());
     assert_eq!(cb.clauses[1].patterns[0], c"b".into());
-    assert_eq!(cb.clauses[1].body, c"echo two".into());
+    assert_eq!(cb.clauses[1].body.data, c"echo two".into());
 }
 
 #[test]
@@ -1321,8 +1278,8 @@ esac",
     };
     assert_eq!(cb.word, c"foo".into());
     assert_eq!(cb.clauses.len(), 2);
-    assert_eq!(cb.clauses[0].body, c"echo one".into());
-    assert_eq!(cb.clauses[1].body, c"echo other".into());
+    assert_eq!(cb.clauses[0].body.data, c"echo one".into());
+    assert_eq!(cb.clauses[1].body.data, c"echo other".into());
 }
 
 #[test]
@@ -1376,8 +1333,8 @@ fn case_last_clause_no_semi_semi() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses.len(), 2);
-    assert_eq!(cb.clauses[0].body, c"echo one".into());
-    assert_eq!(cb.clauses[1].body, c"echo two".into());
+    assert_eq!(cb.clauses[0].body.data, c"echo one".into());
+    assert_eq!(cb.clauses[1].body.data, c"echo two".into());
 }
 
 #[test]
@@ -1387,7 +1344,7 @@ fn case_empty_body_clause() {
     };
     assert_eq!(cb.clauses.len(), 1);
     assert_eq!(cb.clauses[0].patterns[0], c"a".into());
-    assert!(cb.clauses[0].body.is_empty());
+    assert!(cb.clauses[0].body.data.is_empty());
 }
 
 #[test]
@@ -1399,9 +1356,12 @@ fn case_long_body_catches_skip() {
     };
     assert_eq!(cb.clauses.len(), 2);
     assert_eq!(cb.clauses[0].patterns[0], c"a".into());
-    assert_eq!(cb.clauses[0].body, c"echo hello world foo bar baz".into());
+    assert_eq!(
+        cb.clauses[0].body.data,
+        c"echo hello world foo bar baz".into()
+    );
     assert_eq!(cb.clauses[1].patterns[0], c"b".into());
-    assert_eq!(cb.clauses[1].body, c"echo two".into());
+    assert_eq!(cb.clauses[1].body.data, c"echo two".into());
 }
 
 #[test]
@@ -1411,7 +1371,7 @@ fn case_esac_as_pattern_word() {
     };
     assert_eq!(cb.clauses.len(), 1);
     assert_eq!(cb.clauses[0].patterns[0], c"esac".into());
-    assert_eq!(cb.clauses[0].body, c"echo yes".into());
+    assert_eq!(cb.clauses[0].body.data, c"echo yes".into());
 }
 
 #[test]

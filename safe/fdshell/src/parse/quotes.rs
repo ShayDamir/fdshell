@@ -7,16 +7,17 @@ pub(crate) fn handle_quoted_char(
     cur: &mut ShortCStr,
     bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     line: &[u8],
-    pos: usize,
+    pos: &mut usize,
 ) -> Result<bool, Report<ParseError>> {
     match b {
         b'"' => Ok(false),
         b'\\' => {
             if let Some(c) = bytes.next() {
+                *pos += 1;
                 cur.push_byte(c)
                     .change_context(ParseError::InvalidChar { ch: 0 })?;
             } else {
-                return Err(report_unexpected_eof(line, pos));
+                return Err(report_unexpected_eof(line, *pos));
             }
             Ok(true)
         }

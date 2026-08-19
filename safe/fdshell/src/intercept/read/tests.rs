@@ -32,6 +32,14 @@ fn make_read_line(args: &[&str]) -> Vec<u8> {
     args.join(" ").into_bytes()
 }
 
+fn text(bytes: &[u8]) -> sys::ScriptText {
+    sys::ScriptText::new(
+        ShortCStr::from_vec(bytes.to_vec()).unwrap(),
+        sys::Position::new(1, 1),
+        sys::Origin::Shell,
+    )
+}
+
 #[test]
 fn test_split_fields_single() {
     let fields = split_fields(b"hello world", 1);
@@ -571,17 +579,23 @@ fn run_read_simple() {
     let cmdline = make_read_u_cmdline(&[c"var1".into(), c"var2".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var1".into())
+            .map(|v| &v.value),
         Some(&c"hello".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var2".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var2".into())
+            .map(|v| &v.value),
         Some(&c"world".into())
     );
 }
@@ -597,7 +611,7 @@ fn run_read_eof_returns_status_1() {
     let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
@@ -612,7 +626,7 @@ fn run_read_builtin_not_supported() {
     let mut cmdline = cmdline;
     cmdline.builtin = true;
     let cell = make_read_cell();
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(
@@ -632,7 +646,7 @@ fn run_read_captures_not_supported() {
         force: false,
     }];
     let cell = make_read_cell();
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(
@@ -652,7 +666,7 @@ fn run_read_redirects_not_supported() {
         source: RedirectSource::Var(c"test".into()),
     }];
     let cell = make_read_cell();
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(
@@ -674,13 +688,16 @@ fn run_read_with_prompt() {
     let cmdline = make_read_u_cmdline(&[c"-p".into(), c"Enter: ".into(), c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var1".into())
+            .map(|v| &v.value),
         Some(&c"answer".into())
     );
 }
@@ -697,13 +714,16 @@ fn run_read_data_without_newline_sets_vars() {
     let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var1".into())
+            .map(|v| &v.value),
         Some(&c"hello".into())
     );
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
@@ -726,7 +746,7 @@ fn run_read_writes_prompt_to_stderr() {
         None => {
             err_w.export_to(2).unwrap();
             drop(err_w);
-            let result = run_read(&line, &cmdline, &cell);
+            let result = run_read(&line, &cmdline, &text(&line), &cell);
             sys::exit(if result.is_ok() { 0 } else { 1 });
         }
         Some(pidfd) => {
@@ -764,13 +784,16 @@ fn run_read_with_n_max_bytes() {
     let cmdline = make_read_u_cmdline(&[c"-n".into(), c"3".into(), c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var1".into())
+            .map(|v| &v.value),
         Some(&c"hel".into())
     );
 }
@@ -790,13 +813,16 @@ fn run_read_with_u_fdvar() {
 
     let line = make_read_line(&["read", "-u", "%MYFD", "var1"]);
     let cmdline = make_read_cmdline(&[c"-u".into(), c"%MYFD".into(), c"var1".into()]);
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var1".into())
+            .map(|v| &v.value),
         Some(&c"from var".into())
     );
 }
@@ -806,7 +832,7 @@ fn run_read_with_u_fdvar_not_found() {
     let line = make_read_line(&["read", "-u", "%NONEXISTENT", "var1"]);
     let cmdline = make_read_cmdline(&[c"-u".into(), c"%NONEXISTENT".into(), c"var1".into()]);
     let cell = make_read_cell();
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(report.current_context(), CmdError::Read));
@@ -825,7 +851,7 @@ fn run_read_nul_byte_error() {
     let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(report.current_context(), CmdError::Read));
@@ -844,21 +870,30 @@ fn run_read_multiple_targets() {
     let cmdline = make_read_u_cmdline(&[c"x".into(), c"y".into(), c"z".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"a".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"y".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"y".into())
+            .map(|v| &v.value),
         Some(&c"b".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"z".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"z".into())
+            .map(|v| &v.value),
         Some(&c"c".into())
     );
 }
@@ -876,21 +911,30 @@ fn run_read_fewer_fields_than_targets() {
     let cmdline = make_read_u_cmdline(&[c"x".into(), c"y".into(), c"z".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"only_one".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"y".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"y".into())
+            .map(|v| &v.value),
         Some(&ShortCStr::new())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"z".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"z".into())
+            .map(|v| &v.value),
         Some(&ShortCStr::new())
     );
 }
@@ -908,13 +952,16 @@ fn run_read_more_fields_than_targets() {
     let cmdline = make_read_u_cmdline(&[c"x".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"a b c d".into())
     );
 }
@@ -932,7 +979,7 @@ fn run_read_status_0_on_success() {
     let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
@@ -953,13 +1000,16 @@ fn run_read_strip_prefix_dollar() {
     let cmdline = make_read_u_cmdline(&[c"$MYVAR".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"MYVAR".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"MYVAR".into())
+            .map(|v| &v.value),
         Some(&c"value".into())
     );
 }
@@ -975,7 +1025,7 @@ fn run_read_empty_data_eof() {
     let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
@@ -1001,13 +1051,16 @@ fn run_read_newline_stops_reading() {
     let cmdline = make_read_u_cmdline(&[c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let result = run_read(&line, &cmdline, &cell);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
 
     let state = cell.borrow().unwrap();
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var1".into()),
+        state
+            .strings
+            .get::<ShortCStr>(&c"var1".into())
+            .map(|v| &v.value),
         Some(&c"first".into())
     );
 }

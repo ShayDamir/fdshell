@@ -1,5 +1,6 @@
 use crate::loop_control::LoopControl;
 use error_stack::{Report, ResultExt};
+use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
 use crate::error::cmd::CmdError;
@@ -8,24 +9,22 @@ use crate::state::ShellState;
 
 pub(crate) fn run_for(
     forblock: &ForBlock,
+    text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
     {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
     }
-    let words =
-        crate::expand::expand_for_words(&forblock.words, cell).change_context(CmdError::Resolve)?;
+    let words = crate::expand::expand_for_words(&forblock.words, text, cell)
+        .change_context(CmdError::Resolve)?;
     for word in &words {
         {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.strings.insert(forblock.var.clone(), word.clone());
         }
         if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
-            crate::repl::run_script(
-                forblock.body.as_bytes().change_context(CmdError::Never)?,
-                cell,
-            )
+            crate::repl::run_script(&forblock.body, cell)
         })? {
             match control {
                 LoopControl::Break => break,

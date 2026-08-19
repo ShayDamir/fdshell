@@ -6,7 +6,8 @@ use alloc::vec::Vec;
 /// A segment of a script line extracted by the scanner.
 pub(crate) enum Segment<'a> {
     /// Simple statement ending at a separator (`;` or `\n`).
-    Statement(&'a [u8]),
+    /// The second element is the offset of the first byte within the line.
+    Statement(&'a [u8], usize),
     /// Block (e.g. `if … fi`) spanning from `block_start` to `end_pos`.
     Block {
         block_start: usize,
@@ -34,15 +35,12 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             continue;
         }
 
-        let part = line.get(start..i).unwrap_or(b"").trim_ascii();
+        let raw = line.get(start..i).unwrap_or(b"");
+        let part = raw.trim_ascii();
 
         if !in_block && !part.is_empty() && keyword_delta(part) == Some(1) {
             let block_start = start;
-            let original = line.get(block_start..i).unwrap_or(b"");
-            let leading_ws = original
-                .iter()
-                .take_while(|&&b| b.is_ascii_whitespace())
-                .count();
+            let leading_ws = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
             let kw_len = if part.starts_with(b"case") {
                 4
             } else if part.starts_with(b"if") {
@@ -66,7 +64,8 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             });
             i = end;
         } else if !part.is_empty() {
-            segments.push(Segment::Statement(part));
+            let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
+            segments.push(Segment::Statement(part, start + lead));
         }
 
         if kind == Boundary::Comment {

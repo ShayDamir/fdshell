@@ -4,6 +4,7 @@ use alloc::{collections::VecDeque, format, vec::Vec};
 use hashbrown::HashMap;
 
 use sys::ExportedFd;
+use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -11,24 +12,28 @@ use crate::state::ShellState;
 
 use super::substitute_arg;
 
+fn is_(value: &'static core::ffi::CStr) -> ImportedStr {
+    ImportedStr::shell(value.into())
+}
+
 fn dummy_cell() -> ForkCell<ShellState> {
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut()
         .unwrap()
         .strings
-        .insert(ShortCStr::from(c"hello"), ShortCStr::from(c"world"));
+        .insert(ShortCStr::from(c"hello"), is_(c"world"));
     cell.borrow_mut()
         .unwrap()
         .strings
-        .insert(ShortCStr::from(c"empty"), ShortCStr::from(c""));
-    cell.borrow_mut().unwrap().strings.insert(
-        ShortCStr::from(c"multi_word"),
-        ShortCStr::from(c"two words"),
-    );
+        .insert(ShortCStr::from(c"empty"), is_(c""));
     cell.borrow_mut()
         .unwrap()
         .strings
-        .insert(ShortCStr::from(c"var"), ShortCStr::from(c"value"));
+        .insert(ShortCStr::from(c"multi_word"), is_(c"two words"));
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"var"), is_(c"value"));
     cell.borrow_mut().unwrap().last_bg_pid = Some(sys::Pid::from_raw(12345));
     cell
 }
@@ -130,7 +135,7 @@ fn dollar_underscore_var() {
     cell.borrow_mut()
         .unwrap()
         .strings
-        .insert(ShortCStr::from(c"_my_var"), ShortCStr::from(c"underscore"));
+        .insert(ShortCStr::from(c"_my_var"), is_(c"underscore"));
     let arg = ShortCStr::from(c"$_my_var");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
@@ -245,7 +250,7 @@ fn dollar_bang_no_bg_returns_empty() {
         .borrow_mut()
         .unwrap()
         .strings
-        .insert(ShortCStr::from(c"hello"), ShortCStr::from(c"world"));
+        .insert(ShortCStr::from(c"hello"), is_(c"world"));
     s_cell.borrow_mut().unwrap().last_bg_pid = None;
     let arg = ShortCStr::from(c"$!");
     let mut cache = HashMap::new();
@@ -304,10 +309,10 @@ fn positional_cell() -> ForkCell<ShellState> {
 
 fn positional_cell_with_n(n: usize) -> ForkCell<ShellState> {
     let cell = ForkCell::new(ShellState::new());
-    let mut positional: alloc::collections::VecDeque<ShortCStr> =
+    let mut positional: alloc::collections::VecDeque<ImportedStr> =
         alloc::collections::VecDeque::new();
     for i in 0..n {
-        positional.push_back(match i {
+        positional.push_back(ImportedStr::shell(match i {
             0 => ShortCStr::from(c"arg0"),
             1 => ShortCStr::from(c"arg1"),
             2 => ShortCStr::from(c"arg2"),
@@ -329,7 +334,7 @@ fn positional_cell_with_n(n: usize) -> ForkCell<ShellState> {
             18 => ShortCStr::from(c"arg18"),
             19 => ShortCStr::from(c"arg19"),
             _ => ShortCStr::from(c"argx"),
-        });
+        }));
     }
     cell.borrow_mut().unwrap().set_positional(positional);
     cell
@@ -375,9 +380,13 @@ fn dollar_star_expands_positional() {
 #[test]
 fn dollar_at_single_positional() {
     let cell = ForkCell::new(ShellState::new());
-    cell.borrow_mut()
-        .unwrap()
-        .set_positional([c"only"].into_iter().map(ShortCStr::from).collect());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"only"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
     let arg = ShortCStr::from(c"$@");
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
@@ -546,6 +555,7 @@ fn dollar_at_fq_true_expands_separate_args() {
         [c"arg0", c"arg1", c"arg2"]
             .into_iter()
             .map(ShortCStr::from)
+            .map(ImportedStr::shell)
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"$@")];
@@ -567,6 +577,7 @@ fn dollar_at_expanded_via_substitute_arg_joins() {
         [c"arg0", c"arg1", c"arg2"]
             .into_iter()
             .map(ShortCStr::from)
+            .map(ImportedStr::shell)
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"$@")];
@@ -588,6 +599,7 @@ fn dollar_star_fq_true_joins_positional() {
         [c"arg0", c"arg1"]
             .into_iter()
             .map(ShortCStr::from)
+            .map(ImportedStr::shell)
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"$*")];
@@ -605,6 +617,7 @@ fn literal_arg_with_fq_true_not_routed_to_positional() {
         [c"arg0", c"arg1"]
             .into_iter()
             .map(ShortCStr::from)
+            .map(ImportedStr::shell)
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"hello")];
@@ -625,6 +638,7 @@ fn join_positional_args_has_spaces_between() {
         [c"a", c"b", c"c"]
             .into_iter()
             .map(ShortCStr::from)
+            .map(ImportedStr::shell)
             .collect(),
     );
     let state = cell.borrow().unwrap();
@@ -641,6 +655,7 @@ fn expand_positional_args_pushes_all_positional() {
         [c"arg0", c"arg1", c"arg2"]
             .into_iter()
             .map(ShortCStr::from)
+            .map(ImportedStr::shell)
             .collect(),
     );
     let state = cell.borrow().unwrap();
@@ -656,9 +671,13 @@ fn expand_positional_args_pushes_all_positional() {
 fn join_positional_args_single_element_no_space() {
     // Mutant MISSED 28,30,31: j>=0 would add space before single element
     let cell = ForkCell::new(ShellState::new());
-    cell.borrow_mut()
-        .unwrap()
-        .set_positional([c"only"].into_iter().map(ShortCStr::from).collect());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"only"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
     let state = cell.borrow().unwrap();
     let result = super::join_positional_args(&state.positional).unwrap();
     assert_eq!(result.as_bytes().unwrap(), b"only");

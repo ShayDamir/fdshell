@@ -9,7 +9,7 @@ use hashbrown::HashMap;
 
 use error_stack::{Report, ResultExt};
 use sys::execveat::AT_EMPTY_PATH;
-use sys::{AtFd, ExportedCStr, LocalFd, ShortCStr};
+use sys::{AtFd, ExportedCStr, ImportedStr, LocalFd, ShortCStr};
 
 use crate::envfilter::EnvFilter;
 use crate::error::child_process::ChildProcessError;
@@ -18,7 +18,7 @@ use environ::get_environ;
 
 fn prepare_envp(
     environ: &[(ShortCStr, ShortCStr)],
-    exports: &HashMap<ShortCStr, ShortCStr>,
+    exports: &HashMap<ShortCStr, ImportedStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<Vec<ExportedCStr>, Report<ChildProcessError>> {
@@ -39,7 +39,7 @@ pub fn exec_fd(
     fd: &LocalFd,
     argv: &[&CStr],
     environ: &[(ShortCStr, ShortCStr)],
-    exports: &HashMap<ShortCStr, ShortCStr>,
+    exports: &HashMap<ShortCStr, ImportedStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
@@ -57,7 +57,7 @@ pub fn exec_at(
     pathname: &CStr,
     argv: &[&CStr],
     environ: &[(ShortCStr, ShortCStr)],
-    exports: &HashMap<ShortCStr, ShortCStr>,
+    exports: &HashMap<ShortCStr, ImportedStr>,
     env_filter: &EnvFilter,
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {

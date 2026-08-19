@@ -3,6 +3,7 @@ use super::semi::{trim_semi, try_join};
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
+use sys::ScriptText;
 use sys::ShortCStr;
 
 pub struct CaseBlock {
@@ -12,6 +13,7 @@ pub struct CaseBlock {
 
 pub(crate) fn tokens_to_case(
     tokens: &[(ShortCStr, usize, bool)],
+    text: &ScriptText,
 ) -> Result<CaseBlock, Report<ParseError>> {
     ensure!(
         tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"case")),
@@ -32,7 +34,7 @@ pub(crate) fn tokens_to_case(
         tokens.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
     ));
 
-    let clauses = case_clause::parse_clauses(tokens, in_idx + 1, esac_idx)?;
+    let clauses = case_clause::parse_clauses(tokens, in_idx + 1, esac_idx, text)?;
 
     Ok(CaseBlock { word, clauses })
 }

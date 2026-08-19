@@ -38,7 +38,15 @@ fn borrow_state<'a>(cell: &'a ForkCell<ShellState>) -> sys::fork_cell::Ref<'a, S
 }
 
 fn var<'a>(state: &'a ShellState, name: &'static CStr) -> Option<&'a ShortCStr> {
-    state.strings.get::<ShortCStr>(&name.into())
+    state.strings.get::<ShortCStr>(&name.into()).map(|v| &**v)
+}
+
+fn stext(bytes: &[u8]) -> sys::ScriptText {
+    sys::ScriptText::new(
+        ShortCStr::from_vec(bytes.to_vec()).unwrap(),
+        sys::Position::new(1, 1),
+        sys::Origin::Shell,
+    )
 }
 
 /// Wrap `inner` in `levels` nested `if true; then … ; fi` blocks.
@@ -59,7 +67,7 @@ fn nested_ifs_at_limit_run() {
     child_test(|| {
         let cell = make_cell();
         let script = nested_ifs(100, b"deep=yes");
-        crate::repl::run_script(&script, &cell).unwrap();
+        crate::repl::run_script(&stext(&script), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"deep"), Some(&c"yes".into()));
     });
 }
@@ -69,7 +77,7 @@ fn nested_ifs_over_limit_fail() {
     child_test(|| {
         let cell = make_cell();
         let script = nested_ifs(101, b"deep=yes");
-        let e = crate::repl::run_script(&script, &cell).unwrap_err();
+        let e = crate::repl::run_script(&stext(&script), &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
     });
 }
@@ -79,10 +87,10 @@ fn nesting_restored_after_failure() {
     child_test(|| {
         let cell = make_cell();
         let script = nested_ifs(101, b"deep=yes");
-        let e = crate::repl::run_script(&script, &cell).unwrap_err();
+        let e = crate::repl::run_script(&stext(&script), &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
         assert_eq!(borrow_state(&cell).nesting, 0);
-        crate::repl::run_script(b"ok=1", &cell).unwrap();
+        crate::repl::run_script(&stext(b"ok=1"), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"ok"), Some(&c"1".into()));
     });
 }
@@ -92,11 +100,11 @@ fn while_body_counts_toward_limit() {
     child_test(|| {
         let cell = make_cell();
         let body = b"while true; do deep=yes; break; done";
-        crate::repl::run_script(&nested_ifs(99, body), &cell).unwrap();
+        crate::repl::run_script(&stext(&nested_ifs(99, body)), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"deep"), Some(&c"yes".into()));
 
         let cell = make_cell();
-        let e = crate::repl::run_script(&nested_ifs(100, body), &cell).unwrap_err();
+        let e = crate::repl::run_script(&stext(&nested_ifs(100, body)), &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
     });
 }
@@ -106,11 +114,11 @@ fn for_body_counts_toward_limit() {
     child_test(|| {
         let cell = make_cell();
         let body = b"for x in a; do deep=yes; done";
-        crate::repl::run_script(&nested_ifs(99, body), &cell).unwrap();
+        crate::repl::run_script(&stext(&nested_ifs(99, body)), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"deep"), Some(&c"yes".into()));
 
         let cell = make_cell();
-        let e = crate::repl::run_script(&nested_ifs(100, body), &cell).unwrap_err();
+        let e = crate::repl::run_script(&stext(&nested_ifs(100, body)), &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
     });
 }
@@ -120,11 +128,11 @@ fn case_body_counts_toward_limit() {
     child_test(|| {
         let cell = make_cell();
         let body = b"case x in x) deep=yes;; esac";
-        crate::repl::run_script(&nested_ifs(99, body), &cell).unwrap();
+        crate::repl::run_script(&stext(&nested_ifs(99, body)), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"deep"), Some(&c"yes".into()));
 
         let cell = make_cell();
-        let e = crate::repl::run_script(&nested_ifs(100, body), &cell).unwrap_err();
+        let e = crate::repl::run_script(&stext(&nested_ifs(100, body)), &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
     });
 }
@@ -138,7 +146,7 @@ fn cmd_subst_inherits_nesting() {
         script.extend_from_slice(b"x=$(");
         script.extend_from_slice(&inner);
         script.extend_from_slice(b")");
-        crate::repl::run_script(&script, &cell).unwrap();
+        crate::repl::run_script(&stext(&script), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"x"), Some(&c"deep".into()));
     });
 }
@@ -152,7 +160,7 @@ fn cmd_subst_over_limit_in_child() {
         script.extend_from_slice(b"x=$(");
         script.extend_from_slice(&inner);
         script.extend_from_slice(b")");
-        crate::repl::run_script(&script, &cell).unwrap();
+        crate::repl::run_script(&stext(&script), &cell).unwrap();
         assert_eq!(var(&borrow_state(&cell), c"x"), Some(&c"".into()));
     });
 }

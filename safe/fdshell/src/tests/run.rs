@@ -2,12 +2,44 @@
 use alloc::vec::Vec;
 
 use crate::error::cmd::CmdError;
-use crate::run::run_one;
+use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use crate::task::Task;
+use error_stack::Report;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
+use sys::{Origin, Position, ScriptText};
+
+fn st(b: &[u8]) -> ScriptText {
+    ScriptText::new(
+        ShortCStr::from_vec(b.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    )
+}
+
+fn run_one(b: &[u8], cell: &ForkCell<ShellState>) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::run::run_one(&st(b), cell)
+}
+
+fn run_script(
+    b: &[u8],
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::script::run_script(&st(b), cell)
+}
+
+fn run_cond_list(
+    b: &[u8],
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::cond::run_cond_list(&st(b), cell)
+}
+
+fn handle(b: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
+    crate::repl::handle(&st(b), cell)
+}
 
 fn child_test(f: impl FnOnce()) {
     let (_, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
@@ -192,7 +224,7 @@ fn wait_rejects_capture() {
 fn if_then_runs_body() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if umask 0o077; then umask 0o000; fi", &cell).unwrap();
+        run_script(b"if umask 0o077; then umask 0o000; fi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -201,7 +233,7 @@ fn if_then_runs_body() {
 fn if_with_else_runs_then() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if umask 0o077; then umask 0o000; else umask 0o007; fi",
             &cell,
         )
@@ -246,7 +278,7 @@ fn if_then_before_semicolon_returns_err() {
 fn if_elif_then_runs_then() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; else umask 0o700; fi",
             &cell,
         )
@@ -259,7 +291,7 @@ fn if_elif_then_runs_then() {
 fn if_elif_no_else_runs_then() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if umask 0o077; then umask 0o000; elif umask 0o007; then umask 0o070; fi",
             &cell,
         )
@@ -298,7 +330,7 @@ fn if_elif_without_then_returns_err() {
 fn if_then_newline_separator() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if true\nthen\numask 0o000\nfi", &cell).unwrap();
+        run_script(b"if true\nthen\numask 0o000\nfi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o000);
     });
 }
@@ -307,8 +339,7 @@ fn if_then_newline_separator() {
 fn nested_if_fails() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if true; then if false; then umask 0o000; fi; fi", &cell)
-            .unwrap();
+        run_script(b"if true; then if false; then umask 0o000; fi; fi", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -317,8 +348,7 @@ fn nested_if_fails() {
 fn nested_if_newline_fails() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if true\nthen\nif false\nthen\numask 0o000\nfi\nfi", &cell)
-            .unwrap();
+        run_script(b"if true\nthen\nif false\nthen\numask 0o000\nfi\nfi", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -329,7 +359,10 @@ fn string_assign_stores_in_state() {
     run_one(b"var=\"hello world\"", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    let val = state.strings.get::<sys::ShortCStr>(&c"var".into());
+    let val = state
+        .strings
+        .get::<sys::ShortCStr>(&c"var".into())
+        .map(|v| &v.value);
     assert_eq!(val, Some(&c"hello world".into()));
 }
 
@@ -339,22 +372,31 @@ fn string_assign_empty_value() {
     run_one(b"var=", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    let val = state.strings.get::<sys::ShortCStr>(&c"var".into());
+    let val = state
+        .strings
+        .get::<sys::ShortCStr>(&c"var".into())
+        .map(|v| &v.value);
     assert_eq!(val, Some(&c"".into()));
 }
 
 #[test]
 fn for_single_word_executes_body() {
     let cell = make_cell();
-    crate::repl::run_script(b"for x in hello; do var=set; done", &cell).unwrap();
+    run_script(b"for x in hello; do var=set; done", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"hello".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"var".into())
+            .map(|v| &v.value),
         Some(&c"set".into())
     );
 }
@@ -362,15 +404,21 @@ fn for_single_word_executes_body() {
 #[test]
 fn for_multiple_words_sets_var_to_last() {
     let cell = make_cell();
-    crate::repl::run_script(b"for x in a b c; do var=set; done", &cell).unwrap();
+    run_script(b"for x in a b c; do var=set; done", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"c".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"var".into())
+            .map(|v| &v.value),
         Some(&c"set".into())
     );
 }
@@ -378,25 +426,43 @@ fn for_multiple_words_sets_var_to_last() {
 #[test]
 fn for_empty_words_skips_body() {
     let cell = make_cell();
-    crate::repl::run_script(b"for x in; do var=set; done", &cell).unwrap();
+    run_script(b"for x in; do var=set; done", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
-    assert_eq!(state.strings.get::<sys::ShortCStr>(&c"x".into()), None);
-    assert_eq!(state.strings.get::<sys::ShortCStr>(&c"var".into()), None);
+    assert_eq!(
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
+        None
+    );
+    assert_eq!(
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"var".into())
+            .map(|v| &v.value),
+        None
+    );
 }
 
 #[test]
 fn for_newline_body() {
     let cell = make_cell();
-    crate::repl::run_script(b"for x in hello\ndo\nvar=set\ndone", &cell).unwrap();
+    run_script(b"for x in hello\ndo\nvar=set\ndone", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"hello".into())
     );
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"var".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"var".into())
+            .map(|v| &v.value),
         Some(&c"set".into())
     );
 }
@@ -405,10 +471,13 @@ fn for_newline_body() {
 fn for_backtick_expands_to_words() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"for x in `echo 42 7`; do var=set; done", &cell).unwrap();
+        run_script(b"for x in `echo 42 7`; do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"7".into())
         );
     });
@@ -418,9 +487,15 @@ fn for_backtick_expands_to_words() {
 fn for_backtick_empty_output_skips_body() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"for x in `echo`; do var=set; done", &cell).unwrap();
+        run_script(b"for x in `echo`; do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
-        assert_eq!(state.strings.get::<sys::ShortCStr>(&c"x".into()), None);
+        assert_eq!(
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
+            None
+        );
     });
 }
 
@@ -428,10 +503,13 @@ fn for_backtick_empty_output_skips_body() {
 fn for_dollar_paren_expands_to_words() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"for x in $(echo hello world); do var=set; done", &cell).unwrap();
+        run_script(b"for x in $(echo hello world); do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"world".into())
         );
     });
@@ -441,10 +519,13 @@ fn for_dollar_paren_expands_to_words() {
 fn for_backtick_single_number() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"for x in `echo 99`; do var=set; done", &cell).unwrap();
+        run_script(b"for x in `echo 99`; do var=set; done", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"99".into())
         );
     });
@@ -454,10 +535,13 @@ fn for_backtick_single_number() {
 fn cmd_subst_in_assign() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"x=$(builtin echo hello)", &cell).unwrap();
+        run_script(b"x=$(builtin echo hello)", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"hello".into())
         );
     });
@@ -467,18 +551,21 @@ fn cmd_subst_in_assign() {
 fn cmd_subst_in_assign_and_use() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"x=$(builtin echo world); builtin echo $x", &cell).unwrap();
+        run_script(b"x=$(builtin echo world); builtin echo $x", &cell).unwrap();
     });
 }
 
 #[test]
 fn cmd_subst_semicolon_inside() {
     let cell = make_cell();
-    crate::repl::run_script(b"result=$(builtin echo a; builtin echo b)", &cell).unwrap();
+    run_script(b"result=$(builtin echo a; builtin echo b)", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"result".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"result".into())
+            .map(|v| &v.value),
         Some(&c"a\nb".into())
     );
 }
@@ -486,10 +573,13 @@ fn cmd_subst_semicolon_inside() {
 #[test]
 fn string_assign_dollar_var() {
     let cell = make_cell();
-    crate::repl::run_script(b"a=hello; b=$a", &cell).unwrap();
+    run_script(b"a=hello; b=$a", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"b".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"b".into())
+            .map(|v| &v.value),
         Some(&c"hello".into())
     );
 }
@@ -497,10 +587,13 @@ fn string_assign_dollar_var() {
 #[test]
 fn string_assign_multiple_vars() {
     let cell = make_cell();
-    crate::repl::run_script(b"a=foo; b=bar; c=$a$b", &cell).unwrap();
+    run_script(b"a=foo; b=bar; c=$a$b", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"c".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"c".into())
+            .map(|v| &v.value),
         Some(&c"foobar".into())
     );
 }
@@ -508,10 +601,13 @@ fn string_assign_multiple_vars() {
 #[test]
 fn string_assign_dollar_brace() {
     let cell = make_cell();
-    crate::repl::run_script(b"a=hello; b=${a}", &cell).unwrap();
+    run_script(b"a=hello; b=${a}", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"b".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"b".into())
+            .map(|v| &v.value),
         Some(&c"hello".into())
     );
 }
@@ -519,10 +615,13 @@ fn string_assign_dollar_brace() {
 #[test]
 fn string_assign_unknown_var_preserves_literal() {
     let cell = make_cell();
-    crate::repl::run_script(b"x=$nonexistent", &cell).unwrap();
+    run_script(b"x=$nonexistent", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"$nonexistent".into())
     );
 }
@@ -531,17 +630,20 @@ fn string_assign_unknown_var_preserves_literal() {
 fn cmd_subst_in_regular_args() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"builtin echo $(builtin echo hello)", &cell).unwrap();
+        run_script(b"builtin echo $(builtin echo hello)", &cell).unwrap();
     });
 }
 
 #[test]
 fn dollar_question_exit_status() {
     let cell = make_cell();
-    crate::repl::run_script(b"builtin echo ok; x=$?", &cell).unwrap();
+    run_script(b"builtin echo ok; x=$?", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"x".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"x".into())
+            .map(|v| &v.value),
         Some(&c"0".into())
     );
 }
@@ -549,9 +651,13 @@ fn dollar_question_exit_status() {
 #[test]
 fn dollar_question_after_failure() {
     let cell = make_cell();
-    crate::repl::run_script(b"nonexistent_cmd_xyzzy; x=$?", &cell).unwrap();
+    run_script(b"nonexistent_cmd_xyzzy; x=$?", &cell).unwrap();
     let state = borrow_state(&cell);
-    let val = state.strings.get::<sys::ShortCStr>(&c"x".into()).unwrap();
+    let val = state
+        .strings
+        .get::<sys::ShortCStr>(&c"x".into())
+        .map(|v| &v.value)
+        .unwrap();
     let code: i32 = core::str::from_utf8(val.as_bytes().unwrap())
         .unwrap()
         .parse()
@@ -563,10 +669,13 @@ fn dollar_question_after_failure() {
 fn cmd_subst_mixed_with_text() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"x=prefix$(builtin echo middle)suffix", &cell).unwrap();
+        run_script(b"x=prefix$(builtin echo middle)suffix", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"prefixmiddlesuffix".into())
         );
     });
@@ -715,7 +824,7 @@ fn true_via_builtin_keyword() {
 fn false_used_in_cond_list() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(b"false && builtin echo ok", &cell).unwrap();
+        run_cond_list(b"false && builtin echo ok", &cell).unwrap();
     });
 }
 
@@ -723,8 +832,7 @@ fn false_used_in_cond_list() {
 fn and_fail_with_or_fallback() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(b"false && builtin echo skipped || builtin echo ran", &cell)
-            .unwrap();
+        run_cond_list(b"false && builtin echo skipped || builtin echo ran", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
@@ -734,7 +842,7 @@ fn and_fail_with_or_fallback() {
 fn and_fail_chain_with_or_fallback() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(
+        run_cond_list(
             b"false && builtin echo a && builtin echo b || builtin echo c",
             &cell,
         )
@@ -748,7 +856,7 @@ fn and_fail_chain_with_or_fallback() {
 fn or_success_skips_rest() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(b"true || builtin echo skipped", &cell).unwrap();
+        run_cond_list(b"true || builtin echo skipped", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
@@ -758,8 +866,7 @@ fn or_success_skips_rest() {
 fn and_fail_with_quoted_or_in_skipped_part() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(b"false && builtin echo \"a||b\" || builtin echo ran", &cell)
-            .unwrap();
+        run_cond_list(b"false && builtin echo \"a||b\" || builtin echo ran", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
@@ -769,7 +876,7 @@ fn and_fail_with_quoted_or_in_skipped_part() {
 fn and_fail_with_trailing_quote_in_failed_part() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(b"false \"x\" && echo a || true", &cell).unwrap();
+        run_cond_list(b"false \"x\" && echo a || true", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
@@ -779,7 +886,7 @@ fn and_fail_with_trailing_quote_in_failed_part() {
 fn and_success_runs_second_command() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_cond_list(b"true && builtin true", &cell).unwrap();
+        run_cond_list(b"true && builtin true", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
@@ -813,7 +920,7 @@ fn last_bg_pid_set_on_background_task() {
         Some(pidfd) => {
             use crate::launch::LaunchOutcome;
             use crate::parse::ParsedLine;
-            let mut cmdline = match crate::parse::parse(b"echo").unwrap() {
+            let mut cmdline = match crate::parse::parse(&st(b"echo")).unwrap() {
                 ParsedLine::Cmd(cmd) => cmd,
                 _ => panic!("expected Cmd for echo"),
             };
@@ -838,8 +945,7 @@ fn last_bg_pid_set_on_background_task() {
 fn if_false_else_runs_else_body() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if false; then umask 0o000; else umask 0o077; fi", &cell)
-            .unwrap();
+        run_script(b"if false; then umask 0o000; else umask 0o077; fi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -848,7 +954,7 @@ fn if_false_else_runs_else_body() {
 fn if_false_no_else_sets_zero() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if false; then umask 0o000; fi", &cell).unwrap();
+        run_script(b"if false; then umask 0o000; fi", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
     });
 }
@@ -857,7 +963,7 @@ fn if_false_no_else_sets_zero() {
 fn if_first_elif_fails_runs_elif_body() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if false; then umask 0o000; elif true; then umask 0o070; else umask 0o700; fi",
             &cell,
         )
@@ -870,7 +976,7 @@ fn if_first_elif_fails_runs_elif_body() {
 fn if_all_elifs_fail_runs_else() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if false; then umask 0o000; elif false; then umask 0o070; else umask 0o007; fi",
             &cell,
         )
@@ -883,7 +989,7 @@ fn if_all_elifs_fail_runs_else() {
 fn if_false_elif_fails_no_else_sets_zero() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if false; then umask 0o000; elif false; then umask 0o070; fi",
             &cell,
         )
@@ -897,8 +1003,7 @@ fn if_false_elif_fails_no_else_sets_zero() {
 fn if_else_newline_separator() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if false\nthen\numask 0o000\nelse\numask 0o077\nfi", &cell)
-            .unwrap();
+        run_script(b"if false\nthen\numask 0o000\nelse\numask 0o077\nfi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -907,7 +1012,7 @@ fn if_else_newline_separator() {
 fn if_elif_else_newline_separator() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if false\nthen\numask 0o000\nelif false\nthen\numask 0o070\nelse\numask 0o007\nfi",
             &cell,
         )
@@ -920,7 +1025,7 @@ fn if_elif_else_newline_separator() {
 fn if_false_else_nested_if_runs_else() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"if false; then if true; then umask 0o000; fi; else umask 0o077; fi",
             &cell,
         )
@@ -933,7 +1038,7 @@ fn if_false_else_nested_if_runs_else() {
 fn while_false_never_runs_body() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"while false; do umask 0o000; done", &cell).unwrap();
+        run_script(b"while false; do umask 0o000; done", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o000);
         let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
@@ -944,7 +1049,7 @@ fn while_false_never_runs_body() {
 fn until_true_body_never_runs() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"until true; do umask 0o077; done", &cell).unwrap();
+        run_script(b"until true; do umask 0o077; done", &cell).unwrap();
         assert_ne!(sys::umask::get(), 0o077);
         let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
@@ -958,11 +1063,17 @@ fn export_set_env_var() {
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     assert_eq!(
-        state.strings.get::<sys::ShortCStr>(&c"FOO".into()),
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"FOO".into())
+            .map(|v| &v.value),
         Some(&c"bar".into())
     );
     assert_eq!(
-        state.exports.get::<sys::ShortCStr>(&c"FOO".into()),
+        state
+            .exports
+            .get::<sys::ShortCStr>(&c"FOO".into())
+            .map(|v| &v.value),
         Some(&c"bar".into())
     );
 }
@@ -970,15 +1081,21 @@ fn export_set_env_var() {
 #[test]
 fn export_multiple_vars() {
     let cell = make_cell();
-    crate::repl::run_script(b"export FOO=bar; export BAZ=qux", &cell).unwrap();
+    run_script(b"export FOO=bar; export BAZ=qux", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(state.exports.len(), 2);
     assert_eq!(
-        state.exports.get::<sys::ShortCStr>(&c"FOO".into()),
+        state
+            .exports
+            .get::<sys::ShortCStr>(&c"FOO".into())
+            .map(|v| &v.value),
         Some(&c"bar".into())
     );
     assert_eq!(
-        state.exports.get::<sys::ShortCStr>(&c"BAZ".into()),
+        state
+            .exports
+            .get::<sys::ShortCStr>(&c"BAZ".into())
+            .map(|v| &v.value),
         Some(&c"qux".into())
     );
 }
@@ -1074,7 +1191,7 @@ fn script_exit_code(script: &[u8]) -> i32 {
     match sys::fork_pidfd::fork_pidfd().unwrap().1 {
         None => {
             let cell = make_cell();
-            match crate::main_cli::execute_script(script, &cell) {
+            match crate::main_cli::execute_script(script, Origin::Shell, &cell) {
                 Ok(()) => sys::exit(42),
                 Err(_) => sys::exit(43),
             }
@@ -1102,7 +1219,7 @@ fn execute_script_error_exits_one() {
 fn shebang_is_skipped() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"#!/usr/bin/env fdshell\nbuiltin echo ok", &cell).unwrap();
+        run_script(b"#!/usr/bin/env fdshell\nbuiltin echo ok", &cell).unwrap();
         let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     });
@@ -1112,7 +1229,7 @@ fn shebang_is_skipped() {
 fn inline_comment_is_skipped() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"builtin echo ok # this is a comment", &cell).unwrap();
+        run_script(b"builtin echo ok # this is a comment", &cell).unwrap();
         let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     });
@@ -1122,8 +1239,7 @@ fn inline_comment_is_skipped() {
 fn comment_after_statement_is_skipped() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"builtin echo first # comment\nbuiltin echo second", &cell)
-            .unwrap();
+        run_script(b"builtin echo first # comment\nbuiltin echo second", &cell).unwrap();
         let state = borrow_state(&cell);
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
     });
@@ -1133,7 +1249,7 @@ fn comment_after_statement_is_skipped() {
 fn comment_inside_if_block_is_skipped() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"if true; then # comment\numask 0o077\nfi", &cell).unwrap();
+        run_script(b"if true; then # comment\numask 0o077\nfi", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -1157,11 +1273,13 @@ fn exit_rejects_overflow_code() {
 fn for_break_exits_loop() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"for x in a b c; do if true; then break; fi; done", &cell)
-            .unwrap();
+        run_script(b"for x in a b c; do if true; then break; fi; done", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"a".into())
         );
     });
@@ -1171,18 +1289,24 @@ fn for_break_exits_loop() {
 fn break_in_nested_for() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"for x in a b; do for y in 1 2; do break; done; done",
             &cell,
         )
         .unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"b".into())
         );
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"y".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"y".into())
+                .map(|v| &v.value),
             Some(&c"1".into())
         );
     });
@@ -1192,7 +1316,7 @@ fn break_in_nested_for() {
 fn while_break_exits_loop() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"while true; do umask 0o077; break; done", &cell).unwrap();
+        run_script(b"while true; do umask 0o077; break; done", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -1201,7 +1325,7 @@ fn while_break_exits_loop() {
 fn break_outside_loop_returns_error() {
     child_test(|| {
         let cell = make_cell();
-        let e = crate::repl::handle(b"break", &cell).unwrap_err();
+        let e = handle(b"break", &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::BreakOutsideLoop));
     });
 }
@@ -1210,7 +1334,7 @@ fn break_outside_loop_returns_error() {
 fn continue_outside_loop_returns_error() {
     child_test(|| {
         let cell = make_cell();
-        let e = crate::repl::handle(b"continue", &cell).unwrap_err();
+        let e = handle(b"continue", &cell).unwrap_err();
         assert!(matches!(e.current_context(), CmdError::ContinueOutsideLoop));
     });
 }
@@ -1219,14 +1343,17 @@ fn continue_outside_loop_returns_error() {
 fn for_continue_skips_iteration() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"for x in a b c; do if false; then continue; fi; result=$x; done",
             &cell,
         )
         .unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"result".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"result".into())
+                .map(|v| &v.value),
             Some(&c"c".into())
         );
     });
@@ -1236,14 +1363,17 @@ fn for_continue_skips_iteration() {
 fn while_continue_skips_iteration() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"while true; do if false; then continue; fi; result=1; break; done",
             &cell,
         )
         .unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"result".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"result".into())
+                .map(|v| &v.value),
             Some(&c"1".into())
         );
     });
@@ -1253,7 +1383,7 @@ fn while_continue_skips_iteration() {
 fn until_break_exits_loop() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"until false; do umask 0o077; break; done", &cell).unwrap();
+        run_script(b"until false; do umask 0o077; break; done", &cell).unwrap();
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
@@ -1262,12 +1392,14 @@ fn until_break_exits_loop() {
 fn break_in_if_inside_for() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"for x in a b c; do if true; then break; fi; done", &cell)
-            .unwrap();
-        crate::repl::run_script(b"x=after", &cell).unwrap();
+        run_script(b"for x in a b c; do if true; then break; fi; done", &cell).unwrap();
+        run_script(b"x=after", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(
-            state.strings.get::<sys::ShortCStr>(&c"x".into()),
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"x".into())
+                .map(|v| &v.value),
             Some(&c"after".into())
         );
     });
@@ -1277,7 +1409,7 @@ fn break_in_if_inside_for() {
 fn case_match_first_clause() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"case \"foo\" in foo) umask 0o000;; *) umask 0o077;; esac",
             &cell,
         )
@@ -1290,7 +1422,7 @@ fn case_match_first_clause() {
 fn case_match_second_clause() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"case \"bar\" in foo) umask 0o000;; bar) umask 0o070;; *) umask 0o700;; esac",
             &cell,
         )
@@ -1303,7 +1435,7 @@ fn case_match_second_clause() {
 fn case_no_match_sets_zero() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"case \"baz\" in foo) umask 0o000;; bar) umask 0o070;; esac",
             &cell,
         )
@@ -1316,7 +1448,7 @@ fn case_no_match_sets_zero() {
 fn case_star_catchall() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"case \"anything\" in foo) umask 0o000;; *) umask 0o007;; esac",
             &cell,
         )
@@ -1329,7 +1461,7 @@ fn case_star_catchall() {
 fn case_alternative_patterns() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(
+        run_script(
             b"case \"x\" in a|x) umask 0o000;; *) umask 0o077;; esac",
             &cell,
         )
@@ -1342,7 +1474,7 @@ fn case_alternative_patterns() {
 fn case_no_match_no_else_sets_zero() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"case \"x\" in a) echo yes;; esac", &cell).unwrap();
+        run_script(b"case \"x\" in a) echo yes;; esac", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
@@ -1352,7 +1484,7 @@ fn case_no_match_no_else_sets_zero() {
 fn case_last_clause_no_double_semi() {
     child_test(|| {
         let cell = make_cell();
-        crate::repl::run_script(b"case \"x\" in a) echo yes;; *) echo no esac", &cell).unwrap();
+        run_script(b"case \"x\" in a) echo yes;; *) echo no esac", &cell).unwrap();
     });
 }
 
@@ -1366,4 +1498,101 @@ fn assign_fd_copies_fd_variable() {
     run_one(b"%copy=%src", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(state.fds.contains_key(&ShortCStr::from(c"copy")));
+}
+
+#[test]
+fn explain_unset_var_reports_unset() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_one(b"explain nope", &cell).unwrap();
+    });
+    assert_eq!(out, b"nope is unset\n");
+}
+
+#[test]
+fn explain_assigned_var_shows_position_and_origin() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_one(b"x=hi", &cell).unwrap();
+        run_one(b"explain x", &cell).unwrap();
+    });
+    assert_eq!(
+        out,
+        b"x=\"hi\" (set on line 1, column 1, from shell default)\n"
+    );
+}
+
+#[test]
+fn explain_positional_shows_argv_origin() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let mut positional = alloc::collections::VecDeque::new();
+            positional.push_back(sys::ImportedStr::shell(ShortCStr::from(c"sh")));
+            positional.push_back(sys::ImportedStr::new(
+                ShortCStr::from(c"first"),
+                sys::Trace::boundary(sys::Origin::CliArgument(2)),
+            ));
+            state.set_positional(positional);
+        }
+        run_one(b"explain 1", &cell).unwrap();
+    });
+    assert_eq!(out, b"$1=\"first\" (from argv[2])\n");
+}
+
+#[test]
+fn explain_assignment_is_transitive() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let mut positional = alloc::collections::VecDeque::new();
+            positional.push_back(sys::ImportedStr::shell(ShortCStr::from(c"sh")));
+            positional.push_back(sys::ImportedStr::new(
+                ShortCStr::from(c"first"),
+                sys::Trace::boundary(sys::Origin::CliArgument(2)),
+            ));
+            state.set_positional(positional);
+        }
+        run_one(b"p=$1", &cell).unwrap();
+        run_one(b"explain p", &cell).unwrap();
+    });
+    assert_eq!(
+        out,
+        b"p=\"first\" (set on line 1, column 1, from argv[2])\n"
+    );
+}
+
+#[test]
+fn explain_command_output_origin() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_one(b"q=$(builtin echo hi)", &cell).unwrap();
+        run_one(b"explain q", &cell).unwrap();
+    });
+    assert_eq!(
+        out,
+        b"q=\"hi\" (set on line 1, column 1, from command output)\n"
+    );
+}
+
+#[test]
+fn explain_no_argument_sets_status_1() {
+    child_test(|| {
+        let cell = make_cell();
+        run_one(b"explain", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 1);
+    });
+}
+
+#[test]
+fn explain_two_arguments_sets_status_1() {
+    child_test(|| {
+        let cell = make_cell();
+        run_one(b"explain a b", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 1);
+    });
 }

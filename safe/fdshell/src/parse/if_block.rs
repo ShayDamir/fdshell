@@ -1,19 +1,27 @@
 use super::semi::find_preceded_by_semi;
-use super::semi::{trim_semi, try_join};
+use super::semi::trim_semi;
+use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
+use sys::ScriptText;
 use sys::ShortCStr;
 
+pub struct ElifArm {
+    pub cond: ScriptText,
+    pub body: ScriptText,
+}
+
 pub struct IfBlock {
-    pub condition: ShortCStr,
-    pub then_body: ShortCStr,
-    pub elifs: Vec<(ShortCStr, ShortCStr)>,
-    pub else_body: Option<ShortCStr>,
+    pub condition: ScriptText,
+    pub then_body: ScriptText,
+    pub elifs: Vec<ElifArm>,
+    pub else_body: Option<ScriptText>,
 }
 
 pub(crate) fn tokens_to_if(
     tokens: &[(ShortCStr, usize, bool)],
+    text: &ScriptText,
 ) -> Result<IfBlock, Report<ParseError>> {
     ensure!(
         tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")),
@@ -32,11 +40,14 @@ pub(crate) fn tokens_to_if(
         ParseError::MissingFi
     );
 
-    let cond_str = try_join(trim_semi(
-        tokens
-            .get(1..first_then)
-            .ok_or(ParseError::MissingCondition)?,
-    ));
+    let condition = verbatim(
+        text,
+        trim_semi(
+            tokens
+                .get(1..first_then)
+                .ok_or(ParseError::MissingCondition)?,
+        ),
+    )?;
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
@@ -53,21 +64,24 @@ pub(crate) fn tokens_to_if(
         .map(|&(ei, _)| ei)
         .or(else_idx)
         .unwrap_or(fi_idx);
-    let then_str = try_join(trim_semi(
-        tokens
-            .get(first_then + 1..first_end - 1)
-            .ok_or(ParseError::MissingThen)?,
-    ));
+    let then_body = verbatim(
+        text,
+        trim_semi(
+            tokens
+                .get(first_then + 1..first_end - 1)
+                .ok_or(ParseError::MissingThen)?,
+        ),
+    )?;
 
-    let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx)?;
-    let else_str: Result<Option<ShortCStr>, Report<ParseError>> = else_idx
-        .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx))
+    let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
+    let else_body: Result<Option<ScriptText>, Report<ParseError>> = else_idx
+        .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx, text))
         .transpose();
-    let else_str = else_str?.filter(|s| !s.is_empty());
+    let else_body = else_body?.filter(|t| !t.data.is_empty());
     Ok(IfBlock {
-        condition: cond_str,
-        then_body: then_str,
+        condition,
+        then_body,
         elifs,
-        else_body: else_str,
+        else_body,
     })
 }

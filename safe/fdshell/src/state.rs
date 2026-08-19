@@ -2,6 +2,7 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
+use sys::ImportedStr;
 use sys::LocalFd;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
@@ -12,9 +13,9 @@ use crate::task::Task;
 pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, LocalFd>,
     pub(crate) tasks: HashMap<ShortCStr, Task>,
-    pub(crate) strings: HashMap<ShortCStr, ShortCStr>,
-    pub(crate) exports: HashMap<ShortCStr, ShortCStr>,
-    pub(crate) positional: VecDeque<ShortCStr>,
+    pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
+    pub(crate) exports: HashMap<ShortCStr, ImportedStr>,
+    pub(crate) positional: VecDeque<ImportedStr>,
     pub(crate) last_status: WaitStatus,
     pub(crate) shell_pid: sys::Pid,
     pub(crate) last_bg_pid: Option<sys::Pid>,
@@ -60,7 +61,7 @@ impl ShellState {
         self.fds.insert(c"CWD".into(), cwd);
     }
 
-    pub fn set_positional(&mut self, positional: VecDeque<ShortCStr>) {
+    pub fn set_positional(&mut self, positional: VecDeque<ImportedStr>) {
         self.positional = positional;
     }
 

@@ -1,7 +1,10 @@
-use super::semi::{trim_semi, try_join};
+use super::if_block::ElifArm;
+use super::semi::trim_semi;
+use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
+use sys::ScriptText;
 use sys::ShortCStr;
 
 pub fn parse_elifs(
@@ -9,7 +12,8 @@ pub fn parse_elifs(
     elif_pairs: &[(usize, usize)],
     else_idx: Option<usize>,
     fi_idx: usize,
-) -> Result<Vec<(ShortCStr, ShortCStr)>, Report<ParseError>> {
+    text: &ScriptText,
+) -> Result<Vec<ElifArm>, Report<ParseError>> {
     elif_pairs
         .iter()
         .enumerate()
@@ -20,7 +24,7 @@ pub fn parse_elifs(
             if cond.last().is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
                 bail!(ParseError::MalformedIfBlock);
             }
-            let ec = try_join(trim_semi(cond));
+            let ec = verbatim(text, trim_semi(cond))?;
             let next = elif_pairs
                 .get(i + 1)
                 .map(|&(ne, _)| ne)
@@ -32,8 +36,8 @@ pub fn parse_elifs(
             if body.last().is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
                 bail!(ParseError::MalformedIfBlock);
             }
-            let eb = try_join(trim_semi(body));
-            Ok((ec, eb))
+            let eb = verbatim(text, trim_semi(body))?;
+            Ok(ElifArm { cond: ec, body: eb })
         })
         .collect::<Result<Vec<_>, Report<ParseError>>>()
 }
@@ -42,11 +46,12 @@ pub fn parse_else_body(
     tokens: &[(ShortCStr, usize, bool)],
     else_idx: usize,
     fi_idx: usize,
-) -> Result<ShortCStr, Report<ParseError>> {
+    text: &ScriptText,
+) -> Result<ScriptText, Report<ParseError>> {
     let raw = tokens.get(else_idx + 1..fi_idx - 1).unwrap_or(&[]);
     if raw.last().is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
         bail!(ParseError::MalformedIfBlock);
     }
     let trimmed = trim_semi(raw);
-    Ok(try_join(trimmed))
+    verbatim(text, trimmed)
 }

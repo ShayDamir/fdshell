@@ -6,6 +6,7 @@ use crate::parse::CommandLine;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+use sys::{ImportedStr, Origin, ScriptText, Trace};
 
 use collect::collect_targets;
 use flags::SourceFd;
@@ -16,6 +17,7 @@ use words::split_fields;
 pub(crate) fn run_read(
     line: &[u8],
     cmdline: &CommandLine,
+    text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "read", cmdline)?;
@@ -54,13 +56,21 @@ pub(crate) fn run_read(
     }
 
     let fields = split_fields(&data, targets.len());
+    let origin = match &fd_source {
+        SourceFd::FdVar(var) => Origin::Read(var.clone()),
+        SourceFd::RawFd(num) => Origin::Read(num.clone()),
+        SourceFd::Stdin => Origin::Stdin,
+    };
 
     let mut state = cell.borrow_mut().change_context(CmdError::Read)?;
     for (i, name) in targets.iter().enumerate() {
         let field = fields.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
         let var_name = name.strip_prefix(b"$").unwrap_or_else(|| name.clone());
         let s = ShortCStr::from_vec(field.to_vec()).change_context(CmdError::Read)?;
-        state.strings.insert(var_name, s);
+        state.strings.insert(
+            var_name,
+            ImportedStr::new(s, Trace::at(text.start, origin.clone())),
+        );
     }
     state.set_last_exit(0);
     Ok(true)

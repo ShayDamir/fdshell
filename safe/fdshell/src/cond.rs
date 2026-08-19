@@ -1,14 +1,16 @@
-use crate::loop_control::LoopControl;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
+use crate::loop_control::LoopControl;
 use crate::state::ShellState;
+use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
 pub(crate) fn run_cond_list(
-    line: &[u8],
+    text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    let line = text.as_bytes().change_context(CmdError::Never)?;
     let mut start = 0;
     let mut in_quote = false;
     let mut i = 0;
@@ -16,19 +18,15 @@ pub(crate) fn run_cond_list(
         if line.get(i) == Some(&b'"') {
             in_quote = !in_quote;
         } else if i == line.len() {
-            let part = line.get(start..i).unwrap_or(b"").trim_ascii();
-            if !part.is_empty()
-                && let Some(control) = crate::run::run_one(part, cell)?
-            {
+            if let Some(control) = run_part(text, line, start, i, cell)? {
                 return Ok(Some(control));
             }
             break;
         } else if !in_quote {
             let tail = line.get(i..).unwrap_or(b"");
             if tail.starts_with(b"&&") || tail.starts_with(b"||") {
-                let part = line.get(start..i).unwrap_or(b"").trim_ascii();
-                if !part.is_empty() {
-                    if let Some(control) = crate::run::run_one(part, cell)? {
+                if !is_empty_part(line, start, i) {
+                    if let Some(control) = run_part(text, line, start, i, cell)? {
                         return Ok(Some(control));
                     }
                     let state = cell.borrow().change_context(CmdError::Never)?;
@@ -63,4 +61,28 @@ pub(crate) fn run_cond_list(
         i += 1;
     }
     Ok(None)
+}
+
+/// Run the conditional part spanning `line[start..i]` as a subsliced statement.
+fn run_part(
+    text: &ScriptText,
+    line: &[u8],
+    start: usize,
+    i: usize,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    let raw = line.get(start..i).unwrap_or(b"");
+    let part = raw.trim_ascii();
+    if part.is_empty() {
+        return Ok(None);
+    }
+    let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
+    let part_text = text
+        .subslice(start + lead, part.len())
+        .ok_or(CmdError::Never)?;
+    crate::run::run_one(&part_text, cell)
+}
+
+fn is_empty_part(line: &[u8], start: usize, i: usize) -> bool {
+    line.get(start..i).unwrap_or(b"").trim_ascii().is_empty()
 }

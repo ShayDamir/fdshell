@@ -2,6 +2,10 @@ use super::*;
 use alloc::vec;
 use hashbrown::HashMap;
 
+fn is_(value: &'static core::ffi::CStr) -> ImportedStr {
+    ImportedStr::shell(value.into())
+}
+
 fn entry_has_prefix(entries: &[ExportedCStr], prefix: &[u8]) -> bool {
     entries
         .iter()
@@ -24,7 +28,7 @@ fn find_entry<'a>(entries: &'a [ExportedCStr], prefix: &[u8]) -> Option<&'a str>
 
 #[test]
 fn get_environ_includes_pid() {
-    let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
+    let exports: HashMap<ShortCStr, ImportedStr> = HashMap::new();
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(12345), &[], &exports, &filter, None);
 
@@ -38,7 +42,7 @@ fn get_environ_includes_pid() {
 
 #[test]
 fn get_environ_excludes_socket_when_none() {
-    let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
+    let exports: HashMap<ShortCStr, ImportedStr> = HashMap::new();
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(1), &[], &exports, &filter, None);
 
@@ -51,8 +55,8 @@ fn get_environ_excludes_socket_when_none() {
 #[test]
 fn get_environ_merges_exports() {
     let mut exports = HashMap::new();
-    exports.insert(c"MY_VAR".into(), c"my_value".into());
-    exports.insert(c"OTHER_VAR".into(), c"other_value".into());
+    exports.insert(c"MY_VAR".into(), is_(c"my_value"));
+    exports.insert(c"OTHER_VAR".into(), is_(c"other_value"));
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(1), &[], &exports, &filter, None);
 
@@ -68,8 +72,8 @@ fn get_environ_merges_exports() {
 #[test]
 fn get_environ_filters_exports_by_deny() {
     let mut exports = HashMap::new();
-    exports.insert(c"ALLOWED".into(), c"yes".into());
-    exports.insert(c"DENIED".into(), c"no".into());
+    exports.insert(c"ALLOWED".into(), is_(c"yes"));
+    exports.insert(c"DENIED".into(), is_(c"no"));
 
     let mut filter = EnvFilter::new();
     filter.deny.push(c"DENIED".into());
@@ -86,8 +90,8 @@ fn get_environ_filters_exports_by_deny() {
 #[test]
 fn get_environ_filters_exports_by_allow() {
     let mut exports = HashMap::new();
-    exports.insert(c"ALLOWED".into(), c"yes".into());
-    exports.insert(c"NOT_ALLOWED".into(), c"no".into());
+    exports.insert(c"ALLOWED".into(), is_(c"yes"));
+    exports.insert(c"NOT_ALLOWED".into(), is_(c"no"));
 
     let mut filter = EnvFilter::new();
     filter.allow.push(c"ALLOWED".into());
@@ -105,7 +109,7 @@ fn get_environ_filters_exports_by_allow() {
 fn get_environ_excludes_fdshell_vars_from_environ() {
     // Ensure FDSHELL_PID and FDSHELL_SOCKET are not in current environ
     // (they shouldn't be in test env, but verify the function handles them)
-    let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
+    let exports: HashMap<ShortCStr, ImportedStr> = HashMap::new();
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(999), &[], &exports, &filter, None);
 
@@ -115,7 +119,7 @@ fn get_environ_excludes_fdshell_vars_from_environ() {
 
 #[test]
 fn get_environ_empty_exports() {
-    let exports: HashMap<ShortCStr, ShortCStr> = HashMap::new();
+    let exports: HashMap<ShortCStr, ImportedStr> = HashMap::new();
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(42), &[], &exports, &filter, None);
 
@@ -128,7 +132,7 @@ fn get_environ_exports_override_inherited() {
     let environ = vec![(c"MY_VAR".into(), c"inherited".into())];
 
     let mut exports = HashMap::new();
-    exports.insert(c"MY_VAR".into(), c"overridden".into());
+    exports.insert(c"MY_VAR".into(), is_(c"overridden"));
 
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(1), &environ, &exports, &filter, None);
@@ -145,7 +149,7 @@ fn get_environ_keeps_unique_inherited_when_not_exported() {
     let environ = vec![(c"INHERITED".into(), c"val".into())];
 
     let mut exports = HashMap::new();
-    exports.insert(c"EXPORTED".into(), c"val2".into());
+    exports.insert(c"EXPORTED".into(), is_(c"val2"));
 
     let filter = EnvFilter::new();
     let result = get_environ(sys::Pid::from_raw(1), &environ, &exports, &filter, None);

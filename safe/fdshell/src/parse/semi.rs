@@ -1,3 +1,6 @@
+use crate::error::parse::ParseError;
+use error_stack::Report;
+use sys::ScriptText;
 use sys::ShortCStr;
 
 pub(crate) fn find_preceded_by_semi(
@@ -37,4 +40,22 @@ pub(crate) fn try_join(tokens: &[(ShortCStr, usize, bool)]) -> ShortCStr {
         out.push(t);
     }
     out
+}
+
+/// A verbatim subslice of `text` covering the given tokens' byte ranges.
+pub(crate) fn verbatim(
+    text: &ScriptText,
+    tokens: &[(ShortCStr, usize, bool)],
+) -> Result<ScriptText, Report<ParseError>> {
+    let (off, end) = token_range(tokens);
+    let t = text.subslice(off, end - off).ok_or(ParseError::Never)?;
+    Ok(t)
+}
+
+/// Byte range `(start, end)` covered by the first and last tokens, or `(0, 0)`.
+pub(crate) fn token_range(tokens: &[(ShortCStr, usize, bool)]) -> (usize, usize) {
+    match (tokens.first(), tokens.last()) {
+        (Some(f), Some(l)) => (f.1, l.1 + l.0.len()),
+        _ => (0, 0),
+    }
 }

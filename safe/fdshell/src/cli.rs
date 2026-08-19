@@ -22,7 +22,9 @@ pub fn load_script(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<AppError>> {
 pub struct CliArgs {
     pub dirfd: Option<sys::ImportedFd>,
     pub script_fd: Option<sys::LocalFd>,
-    pub positional: Vec<sys::ShortCStr>,
+    /// Origin of `--fd` script content (the fd number); `None` without `--fd`.
+    pub script_origin: Option<sys::Origin>,
+    pub positional: Vec<sys::ImportedStr>,
 }
 
 /// Parse `--dirfd`, `--fd`, and positional arguments.
@@ -31,7 +33,8 @@ pub struct CliArgs {
 pub fn parse_cli_args(all_args: &[sys::ShortCStr]) -> Result<CliArgs, Report<AppError>> {
     let mut dirfd: Option<sys::ImportedFd> = None;
     let mut script_fd: Option<sys::LocalFd> = None;
-    let mut positional: Vec<sys::ShortCStr> = Vec::new();
+    let mut script_origin: Option<sys::Origin> = None;
+    let mut positional: Vec<sys::ImportedStr> = Vec::new();
 
     let mut i = 0;
     while i < all_args.len() {
@@ -55,9 +58,13 @@ pub fn parse_cli_args(all_args: &[sys::ShortCStr]) -> Result<CliArgs, Report<App
                         .try_into_local()
                         .change_context(AppError::CloexecFailed)?,
                 );
+                script_origin = Some(sys::Origin::Read(num_str.clone()));
             }
             _ => {
-                positional.push(arg.clone());
+                positional.push(sys::ImportedStr::new(
+                    arg.clone(),
+                    sys::Trace::boundary(sys::Origin::CliArgument(i + 1)),
+                ));
             }
         }
         i += 1;
@@ -66,6 +73,7 @@ pub fn parse_cli_args(all_args: &[sys::ShortCStr]) -> Result<CliArgs, Report<App
     Ok(CliArgs {
         dirfd,
         script_fd,
+        script_origin,
         positional,
     })
 }

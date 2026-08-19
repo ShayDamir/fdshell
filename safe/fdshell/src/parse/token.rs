@@ -18,7 +18,7 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
     while let Some(b) = bytes.next() {
         pos += 1;
         if in_quotes {
-            if !super::quotes::handle_quoted_char(b, &mut cur, &mut bytes, line, pos)? {
+            if !super::quotes::handle_quoted_char(b, &mut cur, &mut bytes, line, &mut pos)? {
                 in_quotes = false;
                 quote_start = None;
             }
@@ -48,11 +48,11 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<(ShortCStr, usize, bool)>, Report<Par
                 }
                 b'$' if bytes.peek() == Some(&b'(') => {
                     token_fully_quoted = false;
-                    super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, pos - 1)?;
+                    super::token_subst::read_dollar_paren(line, &mut cur, &mut bytes, &mut pos)?;
                 }
                 b'`' => {
                     token_fully_quoted = false;
-                    super::backtick::read_backtick(line, &mut cur, &mut bytes, pos - 1)?;
+                    super::backtick::read_backtick(line, &mut cur, &mut bytes, &mut pos)?;
                 }
                 b'#' => {
                     let consumed = skip_comment(&mut bytes);
