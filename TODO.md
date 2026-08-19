@@ -16,7 +16,7 @@
 - [x] `parse/token.rs` — combined whitespace/separators, separated `$`/`` ` `` arms, removed dead token_emit.rs (93 → 78 lines)
 - [x] `intercept/read/io.rs` at 85 code lines — extract `SourceFd::RawFd` read loop
 - [x] `exec/mod.rs` — extracted duplicated `exec_fd`/`exec_at` setup (sock export + `get_environ`) into `prepare_envp`, moved PATH lookup to `search.rs` (74 → 62 code lines)
-- [ ] `openat2/parse/mod.rs` at 90 code lines
+- [x] `openat2/parse/mod.rs` — extracted arg loop to `openat2/parse/args.rs` (90 → 36 code lines)
 - [ ] `localfd.rs` at 114 code lines (was 80, grew) — extract `read_all` to reduce below 80
 - [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
