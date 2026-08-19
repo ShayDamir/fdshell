@@ -88,20 +88,7 @@ impl LocalFd {
 
     /// Read until EOF or buffer full.
     pub fn read_all(&self, buf: &mut [u8]) -> Result<usize, SyscallError> {
-        let mut offset = 0;
-        loop {
-            let slice = buf
-                .get_mut(offset..)
-                .ok_or(SyscallError::EINVAL("buffer full"))?;
-            match self.read(slice)? {
-                0 => break,
-                n => offset += n,
-            }
-            if offset >= buf.len() {
-                break;
-            }
-        }
-        Ok(offset)
+        crate::rw::read_all(self, buf)
     }
 }
 
