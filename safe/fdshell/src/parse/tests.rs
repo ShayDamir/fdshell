@@ -699,6 +699,36 @@ fn tokenize_dollar_paren_nested() {
 }
 
 #[test]
+fn tokenize_backtick_escape_positions() {
+    let result = token::tokenize(b"`a\\`\\\\\\z` b").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, c"`a`\\\\\\z`".into());
+    assert_eq!(result[0].1, 0);
+    assert_eq!(result[1].0, c"b".into());
+    assert_eq!(result[1].1, 10);
+}
+
+#[test]
+fn tokenize_dollar_paren_positions() {
+    let result = token::tokenize(b"$(a(b)c) x").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, c"$(a(b)c)".into());
+    assert_eq!(result[0].1, 0);
+    assert_eq!(result[1].0, c"x".into());
+    assert_eq!(result[1].1, 9);
+}
+
+#[test]
+fn tokenize_quoted_escape_positions() {
+    let result = token::tokenize(b"\"a\\\"b\" c").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, c"a\"b".into());
+    assert_eq!(result[0].1, 0);
+    assert_eq!(result[1].0, c"c".into());
+    assert_eq!(result[1].1, 7);
+}
+
+#[test]
 fn for_backtick_word_is_single_token() {
     let ParsedLine::For(fb) = parse(b"for x in `echo 1 2 3`; do body; done").unwrap() else {
         panic!("expected For")
@@ -1372,6 +1402,16 @@ fn case_esac_as_pattern_word() {
     assert_eq!(cb.clauses.len(), 1);
     assert_eq!(cb.clauses[0].patterns[0], c"esac".into());
     assert_eq!(cb.clauses[0].body.data, c"echo yes".into());
+}
+
+#[test]
+fn case_leading_semi_skipped() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in ; a) echo one;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 1);
+    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].body.data, c"echo one".into());
 }
 
 #[test]

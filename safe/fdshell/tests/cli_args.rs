@@ -147,6 +147,20 @@ fn parse_positional_only() {
 }
 
 #[test]
+fn parse_positional_origins_are_one_based() {
+    let args = vec![c"script.sh".into(), c"--flag".into()];
+    let parsed = parse_cli_args(&args).unwrap();
+    assert_eq!(
+        parsed.positional.first().unwrap().trace.origin,
+        sys::Origin::CliArgument(1)
+    );
+    assert_eq!(
+        parsed.positional.get(1).unwrap().trace.origin,
+        sys::Origin::CliArgument(2)
+    );
+}
+
+#[test]
 fn load_script_reads_data_until_eof() {
     let (rd, wr) = pipe2(0).unwrap();
     // Write > 4096 bytes to force multiple reads; mutant breaks on first read

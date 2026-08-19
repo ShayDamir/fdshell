@@ -18,11 +18,9 @@ pub fn parse_clauses(
     let mut clauses = Vec::new();
     let mut pos = start;
     while pos < esac_idx {
-        while pos <= esac_idx && tokens.get(pos).is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
+        if tokens.get(pos).is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
             pos += 1;
-        }
-        if pos == esac_idx {
-            break;
+            continue;
         }
         let patterns = collect_patterns(tokens, &mut pos, esac_idx)?;
         let body_start = pos;

@@ -230,6 +230,15 @@ fn if_then_runs_body() {
 }
 
 #[test]
+fn indented_block_runs_from_keyword() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_script(b"true;  if true; then builtin echo hi; fi", &cell).unwrap();
+    });
+    assert_eq!(out, b"hi\n");
+}
+
+#[test]
 fn if_with_else_runs_then() {
     child_test(|| {
         let cell = make_cell();
@@ -893,6 +902,16 @@ fn and_success_runs_second_command() {
 }
 
 #[test]
+fn empty_part_between_operators_is_separator() {
+    child_test(|| {
+        let cell = make_cell();
+        run_cond_list(b"false || && builtin true", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
 fn pwd_builtin_succeeds() {
     child_test(|| {
         let cell = make_cell();
@@ -1213,6 +1232,29 @@ fn execute_script_zero_code_returns_ok() {
 #[test]
 fn execute_script_error_exits_one() {
     assert_eq!(script_exit_code(b"nonexistent_cmd_xyz"), 1);
+}
+
+#[test]
+fn cmd_mode_positional_origins_are_argv_indexed() {
+    child_test(|| {
+        let cell = make_cell();
+        let args: [ShortCStr; 4] = [
+            ShortCStr::from(c"fdshell"),
+            ShortCStr::from(c"builtin true"),
+            ShortCStr::from(c"first"),
+            ShortCStr::from(c"second"),
+        ];
+        crate::main_cli::run_cmd_mode(&args, &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(
+            state.positional.front().unwrap().trace.origin,
+            Origin::CliArgument(3)
+        );
+        assert_eq!(
+            state.positional.get(1).unwrap().trace.origin,
+            Origin::CliArgument(4)
+        );
+    });
 }
 
 #[test]
@@ -1575,6 +1617,29 @@ fn explain_command_output_origin() {
         out,
         b"q=\"hi\" (set on line 1, column 1, from command output)\n"
     );
+}
+
+#[test]
+fn explain_second_positional_uses_index() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let mut positional = alloc::collections::VecDeque::new();
+            positional.push_back(sys::ImportedStr::shell(ShortCStr::from(c"sh")));
+            positional.push_back(sys::ImportedStr::new(
+                ShortCStr::from(c"one"),
+                sys::Trace::boundary(sys::Origin::CliArgument(2)),
+            ));
+            positional.push_back(sys::ImportedStr::new(
+                ShortCStr::from(c"two"),
+                sys::Trace::boundary(sys::Origin::CliArgument(3)),
+            ));
+            state.set_positional(positional);
+        }
+        run_one(b"explain 2", &cell).unwrap();
+    });
+    assert_eq!(out, b"$2=\"two\" (from argv[3])\n");
 }
 
 #[test]

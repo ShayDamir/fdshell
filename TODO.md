@@ -23,6 +23,7 @@
 - [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
 - [ ] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — extract filter + concat logic into a helper function
 - [ ] `comment.rs::scan_block` has 5 levels of logical nesting (while → if is_comment||is_sep → for sub → if !sub.is_empty() → match) exceeding §2.4 limit of 4 — extract keyword delta processing into a helper
+- [ ] `parse/case_clause.rs` at 86 code lines (80-90 zone) — extract the body-slice extraction in `parse_clauses` into a helper
 
 ## Bash compatibility gaps
 
