@@ -50,25 +50,23 @@ pub fn recv_fd<'a>(
         // SAFETY: same pointer validity as above.
         let ctype = unsafe { (*cmsg).cmsg_type };
         if level == libc::SOL_SOCKET && ctype == libc::SCM_RIGHTS {
-            // SAFETY: `cmsg` is a valid `cmsghdr` pointer; `CMSG_DATA`
-            // is valid for `cmsg_len` bytes.
-            let data = unsafe { libc::CMSG_DATA(cmsg).cast::<i32>() };
-            // SAFETY: `cmsg` is valid (same as above).
+            // SAFETY: `cmsg` is a valid `cmsghdr`; `CMSG_DATA` is valid for
+            // `cmsg_len` bytes and 8-byte aligned, satisfying i32's alignment.
             let nfds = ((unsafe { (*cmsg).cmsg_len } as usize)
                 .saturating_sub(core::mem::size_of::<libc::cmsghdr>()))
                 / core::mem::size_of::<i32>();
-            for i in 0..nfds {
-                // SAFETY: `data` is a valid pointer from `CMSG_DATA`;
-                // `i` is bounded by `nfds` derived from `cmsg_len`.
-                let raw_fd = unsafe { *data.add(i) };
-                if got_fd.is_none() {
-                    // SAFETY: `raw_fd` comes from kernel `SCM_RIGHTS`;
-                    // `MSG_CMSG_CLOEXEC` was set on `recvmsg`.
-                    got_fd = Some(unsafe { LocalFd::from_raw(raw_fd) });
-                } else {
-                    // SAFETY: `raw_fd` is a valid fd from the kernel;
-                    // close of a valid fd is safe.
-                    unsafe { libc::close(raw_fd) };
+            // SAFETY: pointer is valid for `nfds` i32s within the `CMSG_DATA` region.
+            let fds =
+                unsafe { core::slice::from_raw_parts(libc::CMSG_DATA(cmsg).cast::<i32>(), nfds) };
+            // Take the first fd, close any further fds sent in the same message.
+            if let Some((first, rest)) = fds.split_first() {
+                // SAFETY: `first` comes from kernel `SCM_RIGHTS`;
+                // `MSG_CMSG_CLOEXEC` was set on `recvmsg`.
+                got_fd = Some(unsafe { LocalFd::from_raw(*first) });
+                for &raw_fd in rest {
+                    // SAFETY: `raw_fd` is a valid fd from the kernel; close is safe.
+                    crate::cvt(unsafe { libc::close(raw_fd) as isize })
+                        .change_context(crate::RecvFdError::Never)?;
                 }
             }
         } else if level == libc::SOL_SOCKET && ctype == libc::SCM_CREDENTIALS {

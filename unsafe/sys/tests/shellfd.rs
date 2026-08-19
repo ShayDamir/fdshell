@@ -51,6 +51,50 @@ fn send_raw_msg(fd: i32, tag_bytes: &[u8], send_fd: i32) -> Result<(), SyscallEr
     Ok(())
 }
 
+#[repr(C)]
+struct CmsgBuf2 {
+    hdr: libc::cmsghdr,
+    fds: [libc::c_int; 2],
+}
+
+fn send_raw_two_fds(fd: i32, tag_bytes: &[u8], fd1: i32, fd2: i32) -> Result<(), SyscallError> {
+    let mut iov = libc::iovec {
+        iov_base: tag_bytes.as_ptr().cast_mut().cast(),
+        iov_len: tag_bytes.len(),
+    };
+    let mut cmsg = CmsgBuf2 {
+        hdr: libc::cmsghdr {
+            // SAFETY: `CMSG_LEN(8)` returns the size of a cmsghdr + two i32s,
+            // always valid on x86_64 Linux.
+            cmsg_len: unsafe { libc::CMSG_LEN(2 * core::mem::size_of::<i32>() as u32) as usize },
+            cmsg_level: libc::SOL_SOCKET,
+            cmsg_type: libc::SCM_RIGHTS,
+        },
+        fds: [fd1, fd2],
+    };
+    let msg = libc::msghdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: &raw mut iov,
+        msg_iovlen: 1,
+        msg_control: (&raw mut cmsg).cast(),
+        msg_controllen: core::mem::size_of_val(&cmsg),
+        msg_flags: 0,
+    };
+    // SAFETY: `iov`, `cmsg`, `msg` are valid stack-local values; `fd` is a
+    // connected Unix socket; `fd1` and `fd2` are valid open fds.
+    if unsafe { libc::sendmsg(fd, &msg, 0) } == -1 {
+        // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno.
+        return Err(unsafe {
+            SyscallError::Other {
+                errno: *libc::__errno_location(),
+                syscall: "sendmsg",
+            }
+        });
+    }
+    Ok(())
+}
+
 fn fork_test(f: fn() -> Result<(), SyscallError>) -> Result<(), SyscallError> {
     // SAFETY: child inherits a copy of the fd table; parent waits for it.
     let pid = unsafe { libc::fork() };
@@ -130,6 +174,53 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         drop(receiver);
         Ok(())
     })
+}
+
+#[test]
+fn test_recv_fd_keeps_first_closes_rest() -> Result<(), SyscallError> {
+    let (a, b) = socketpair()?;
+    a.verify().expect("fd must have CLOEXEC");
+    b.verify().expect("fd must have CLOEXEC");
+    let (rd1, wr1) = pipe2(0)?;
+    rd1.verify().expect("fd must have CLOEXEC");
+    wr1.verify().expect("fd must have CLOEXEC");
+    let (rd2, wr2) = pipe2(0)?;
+    rd2.verify().expect("fd must have CLOEXEC");
+    wr2.verify().expect("fd must have CLOEXEC");
+
+    send_raw_two_fds(a.as_raw(), b"multi\0", wr1.as_raw(), wr2.as_raw())?;
+    drop(wr1);
+    drop(wr2);
+
+    let mut buf = [0u8; TAG_MAX];
+    let (kept, _tag) = recv_fd(&b, &mut buf, Pid::from_raw(0)).expect("recv_fd should succeed");
+    kept.verify().expect("fd must have CLOEXEC");
+
+    write(&kept, b"hi")?;
+    let mut out = [0u8; 2];
+    assert_eq!(read(&rd1, &mut out)?, 2);
+    assert_eq!(&out[..2], b"hi");
+    drop(kept);
+    assert_eq!(read(&rd1, &mut out)?, 0);
+
+    let mut pfd = libc::pollfd {
+        fd: rd2.as_raw(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: `pfd` is a valid pollfd with an open fd; the timeout bounds the call.
+    let n = unsafe { libc::poll(&mut pfd, 1, 500) };
+    assert!(
+        n > 0 && (pfd.revents & (libc::POLLIN | libc::POLLHUP)) != 0,
+        "second fd leaked: read end still open"
+    );
+    assert_eq!(read(&rd2, &mut out)?, 0);
+
+    drop(rd1);
+    drop(rd2);
+    drop(a);
+    drop(b);
+    Ok(())
 }
 
 #[test]
