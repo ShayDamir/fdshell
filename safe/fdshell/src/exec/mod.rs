@@ -8,7 +8,6 @@ use core::ffi::CStr;
 use hashbrown::HashMap;
 
 use error_stack::{Report, ResultExt};
-use sys::execveat::AT_EMPTY_PATH;
 use sys::{AtFd, ExportedCStr, ImportedStr, LocalFd, ShortCStr};
 
 use crate::envfilter::EnvFilter;
@@ -44,12 +43,7 @@ pub fn exec_fd(
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
     let envp = prepare_envp(environ, exports, env_filter, shell_sock)?;
-    let script_fd = fd
-        .export()
-        .change_context(ChildProcessError::ExportFailed)?;
-    sys::execveat::execveat(script_fd.at(), c"", argv, &envp, AT_EMPTY_PATH)
-        .change_context(ChildProcessError::ExecFailed)?;
-    Ok(())
+    builtins::execfd::execfd_exec(fd, argv, &envp).change_context(ChildProcessError::ExecFailed)
 }
 
 pub fn exec_at(
@@ -62,9 +56,8 @@ pub fn exec_at(
     shell_sock: Option<&LocalFd>,
 ) -> Result<(), Report<ChildProcessError>> {
     let envp = prepare_envp(environ, exports, env_filter, shell_sock)?;
-    sys::execveat::execveat(dirfd, pathname, argv, &envp, 0)
-        .change_context(ChildProcessError::ExecFailed)?;
-    Ok(())
+    builtins::execat::execat_exec(dirfd, pathname, argv, &envp)
+        .change_context(ChildProcessError::ExecFailed)
 }
 
 #[cfg(test)]

@@ -1,7 +1,15 @@
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
+use sys::{ExportedCStr, ShortCStr};
+
+fn lookup_var(args: &[ShortCStr]) -> Result<ShortCStr, Report<builtins::error::BuiltinError>> {
+    Ok(args
+        .first()
+        .and_then(|a| a.strip_prefix(b"%"))
+        .ok_or(builtins::error::BuiltinError::InvalidArgument("var"))?)
+}
 
 pub(super) fn handle_exec_fd(
     _: ShortCStr,
@@ -9,22 +17,21 @@ pub(super) fn handle_exec_fd(
     args: &[ShortCStr],
     state: &ShellState,
 ) -> Result<i32, Report<builtins::error::BuiltinError>> {
-    let raw0 = args
-        .first()
-        .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    let varname = raw0
-        .strip_prefix(b"%")
-        .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
+    let _sealed: Vec<ExportedCStr> = args.iter().map(|a| a.export()).collect();
+    let words: Vec<&CStr> = _sealed.iter().map(|s| s.as_ref()).collect();
+    builtins::execfd::parse::execfd_parse(&words)?;
+    let varname = lookup_var(args)?;
     let fd = state
         .fds
         .get(&varname)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("var"))?;
-    let args_slice = refs
+    let argv = refs
         .get(1..)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
+    // Same exec-without-fork semantics as external commands — always Ok(code).
     match crate::exec::exec_fd(
         fd,
-        args_slice,
+        argv,
         &state.environ,
         &state.exports,
         &state.env_filter,
@@ -41,32 +48,25 @@ pub(super) fn handle_exec_at(
     args: &[ShortCStr],
     state: &ShellState,
 ) -> Result<i32, Report<builtins::error::BuiltinError>> {
-    let raw0 = args
-        .first()
-        .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    let varname = raw0
-        .strip_prefix(b"%")
-        .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
+    let _sealed: Vec<ExportedCStr> = args.iter().map(|a| a.export()).collect();
+    let words: Vec<&CStr> = _sealed.iter().map(|s| s.as_ref()).collect();
+    let cfg = builtins::execat::parse::execat_parse(&words)?;
+    let varname = lookup_var(args)?;
     let dirfd = state
         .fds
         .get(&varname)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("var"))?;
-    let pathname = args
-        .get(1)
-        .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    let pathname = pathname.export();
     // execveat rejects CLOEXEC dirfds for relative paths; use export().
     let non_cloexec = dirfd
         .export()
         .change_context(builtins::error::BuiltinError::Syscall)?;
-    let args_slice = refs
+    let argv = refs
         .get(2..)
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
-    // Same exec-without-fork semantics as exec_fd — always Ok(code).
     match crate::exec::exec_at(
         non_cloexec.at(),
-        &pathname,
-        args_slice,
+        cfg.pathname,
+        argv,
         &state.environ,
         &state.exports,
         &state.env_filter,

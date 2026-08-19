@@ -8,5 +8,11 @@ sys = { path = "../../unsafe/sys" }
 error-stack = { version = "0.7", default-features = false }
 displaydoc = "0.2"
 
+[[bin]]
+name = "builtin_exec_ok"
+path = "tests/bins/builtin_exec_ok.rs"
+test = false
+doctest = false
+
 [lints]
 workspace = true

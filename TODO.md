@@ -18,7 +18,7 @@
 - [x] `exec/mod.rs` — extracted duplicated `exec_fd`/`exec_at` setup (sock export + `get_environ`) into `prepare_envp`, moved PATH lookup to `search.rs` (74 → 62 code lines)
 - [x] `openat2/parse/mod.rs` — extracted arg loop to `openat2/parse/args.rs` (90 → 36 code lines)
 - [x] `localfd.rs` at 114 code lines (was 80, grew) — extracted `read_all` loop to `rw.rs` free fn, method now delegates (74 → 61 code lines)
-- [ ] Add `exec_fd`/`exec_at` to `safe/builtins/` crate (parse modules + integration tests)
+- [x] Add `exec_fd`/`exec_at` to `safe/builtins/` crate — `execfd`/`execat` modules with parse + exec, `builtin_exec_ok` test helper, integration tests; fdshell `exec`/handlers now delegate to them
 - [ ] Drop `no_std` on `unsafe/sys` — replace `IoVec`/`IoVecMut` with `std::io::IoSlice`/`IoSliceMut`
 - [ ] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
 - [ ] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — extract filter + concat logic into a helper function

@@ -6,6 +6,8 @@ extern crate alloc;
 
 pub mod argparse;
 pub mod error;
+pub mod execat;
+pub mod execfd;
 pub mod fchmod;
 pub mod mkdirat;
 pub mod openat2;
