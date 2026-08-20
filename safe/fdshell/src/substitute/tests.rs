@@ -56,6 +56,85 @@ fn dollar_unknown_var_is_literal() {
     assert_eq!(res.as_bytes().unwrap(), b"$nope");
 }
 
+fn env_cell() -> ForkCell<ShellState> {
+    let cell = dummy_cell();
+    cell.borrow_mut().unwrap().environ = Vec::new();
+    cell
+}
+
+#[test]
+fn dollar_resolves_inherited_env_var() {
+    let cell = env_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
+    let arg = ShortCStr::from(c"$FOO");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn shell_string_shadows_inherited_env_var() {
+    let cell = env_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"FOO"), is_(c"shell"));
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
+    let arg = ShortCStr::from(c"$FOO");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"shell");
+}
+
+#[test]
+fn brace_resolves_inherited_env_var() {
+    let cell = env_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
+    let arg = ShortCStr::from(c"${FOO}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"bar");
+}
+
+#[test]
+fn brace_len_of_inherited_env_var() {
+    let cell = env_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
+    let arg = ShortCStr::from(c"${#FOO}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"3");
+}
+
+#[test]
+fn brace_len_shadows_inherited_env_var() {
+    let cell = env_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"FOO"), is_(c"x"));
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
+    let arg = ShortCStr::from(c"${#FOO}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"1");
+}
+
 #[test]
 fn dollar_double_dollar_is_pid() {
     let cell = dummy_cell();

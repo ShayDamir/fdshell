@@ -13,10 +13,13 @@ pub(super) fn resolve_var_name(
         Some(val) => {
             out.push(val);
         }
-        None => {
-            out.push(c"$");
-            out.push(name);
-        }
+        None => match state.environ.iter().find(|(k, _)| k == name) {
+            Some((_, val)) => out.push(val),
+            None => {
+                out.push(c"$");
+                out.push(name);
+            }
+        },
     }
     Ok(())
 }

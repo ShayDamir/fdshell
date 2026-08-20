@@ -15,12 +15,20 @@ pub(crate) fn handle_brace(
         peek.next();
         let (name, closed) = read_until_close(peek)?;
         if closed {
-            if let Some(val) = state.strings.get(&name) {
-                core::write!(out, "{}", val.len()).change_context(ResolveError::Never)?;
-            } else {
-                out.push(c"${#");
-                out.push(&name);
-                out.push(c"}");
+            let len = state.strings.get(&name).map(|val| val.len()).or_else(|| {
+                state
+                    .environ
+                    .iter()
+                    .find(|(k, _)| k == &name)
+                    .map(|(_, v)| v.len())
+            });
+            match len {
+                Some(len) => core::write!(out, "{}", len).change_context(ResolveError::Never)?,
+                None => {
+                    out.push(c"${#");
+                    out.push(&name);
+                    out.push(c"}");
+                }
             }
         } else {
             out.push(c"${#");
@@ -32,11 +40,14 @@ pub(crate) fn handle_brace(
     if closed {
         match state.strings.get(&name) {
             Some(val) => out.push(val),
-            None => {
-                out.push(c"${");
-                out.push(&name);
-                out.push(c"}");
-            }
+            None => match state.environ.iter().find(|(k, _)| k == &name) {
+                Some((_, val)) => out.push(val),
+                None => {
+                    out.push(c"${");
+                    out.push(&name);
+                    out.push(c"}");
+                }
+            },
         }
     } else {
         out.push(c"${");
