@@ -54,14 +54,14 @@ fn write_trace(display: &ShortCStr, v: &sys::ImportedStr) -> Result<(), Report<B
     Ok(())
 }
 
-fn write_unset(display: &ShortCStr) -> Result<(), Report<BuiltinError>> {
+pub(super) fn write_unset(display: &ShortCStr) -> Result<(), Report<BuiltinError>> {
     let msg = sys::format!("{display} is unset").change_context(BuiltinError::Io)?;
     sys::OUT.write_str(&msg).change_context(BuiltinError::Io)?;
     sys::OUT.write_all(b"\n").change_context(BuiltinError::Io)?;
     Ok(())
 }
 
-fn origin_phrase(origin: &Origin) -> Result<ShortCStr, Report<BuiltinError>> {
+pub(super) fn origin_phrase(origin: &Origin) -> Result<ShortCStr, Report<BuiltinError>> {
     let s = match origin {
         Origin::CliArgument(i) => sys::format!("argv[{i}]"),
         Origin::EnvVar(n) => sys::format!("environment variable {n}"),
@@ -70,6 +70,7 @@ fn origin_phrase(origin: &Origin) -> Result<ShortCStr, Report<BuiltinError>> {
         Origin::CommandOutput => sys::format!("command output"),
         Origin::Read(n) => sys::format!("fd {n}"),
         Origin::Shell => sys::format!("shell default"),
+        Origin::Builtin(n) => sys::format!("{n}"),
     };
     s.change_context(BuiltinError::Io)
 }

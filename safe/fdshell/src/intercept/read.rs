@@ -41,6 +41,7 @@ pub(crate) fn run_read(
                     .get(var)
                     .ok_or(ReadError::VarNotFound)
                     .change_context(CmdError::Read)?
+                    .fd
                     .try_clone()
                     .change_context(CmdError::Read)?,
             )

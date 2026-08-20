@@ -111,7 +111,7 @@
 
 - [ ] Init/supervision: pidfds + readiness tags + `wait --any` + restart policies
 - [ ] Mini container runtime: namespaces + new mount API + landlock + seccomp, orchestrated in script
-- [ ] Busybox-style multicall binary: builtins symlinked as cat, mv, ls via getdents64 on dirfd
+- [x] Busybox-style multicall binary: builtins symlinked as cat, mv, ls via getdents64 on dirfd
 
 ### P3 — Engineering / ecosystem
 

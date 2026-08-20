@@ -8,9 +8,16 @@ use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-use crate::state::ShellState;
+use crate::state::{FdVar, ShellState};
 
 use super::substitute_arg;
+
+fn fdvar(fd: sys::LocalFd) -> FdVar {
+    FdVar {
+        fd,
+        trace: sys::Trace::boundary(sys::Origin::Shell),
+    }
+}
 
 fn is_(value: &'static core::ffi::CStr) -> ImportedStr {
     ImportedStr::shell(value.into())
@@ -571,7 +578,7 @@ fn percent_fd_cache_hit_returns_same_value() {
     cell.borrow_mut()
         .unwrap()
         .fds
-        .insert(ShortCStr::from(c"testfd"), dev_null);
+        .insert(ShortCStr::from(c"testfd"), fdvar(dev_null));
 
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
 
@@ -602,7 +609,7 @@ fn percent_leading_underscore_name_resolves() {
     cell.borrow_mut()
         .unwrap()
         .fds
-        .insert(ShortCStr::from(c"_fd"), dev_null);
+        .insert(ShortCStr::from(c"_fd"), fdvar(dev_null));
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let arg = ShortCStr::from(c"%_fd");
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
@@ -616,7 +623,7 @@ fn percent_hyphen_after_percent_is_literal() {
     cell.borrow_mut()
         .unwrap()
         .fds
-        .insert(ShortCStr::from(c"-testfd"), dev_null);
+        .insert(ShortCStr::from(c"-testfd"), fdvar(dev_null));
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let arg = ShortCStr::from(c"%-testfd");
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();

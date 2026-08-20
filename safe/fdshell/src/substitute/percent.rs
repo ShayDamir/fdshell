@@ -43,7 +43,7 @@ pub(crate) fn percent_subst(
                 }
                 None => match state.fds.get(&name_scs) {
                     Some(src) => {
-                        let owned = src.export().change_context(ResolveError::RefNotFound)?;
+                        let owned = src.fd.export().change_context(ResolveError::RefNotFound)?;
                         core::write!(out, "{}", owned).change_context(ResolveError::Never)?;
                         cache.insert(name_scs, owned);
                     }

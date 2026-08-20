@@ -42,8 +42,8 @@ pub(crate) fn export_fd(
         }
         _ => bail!(FdPassError::MissingArg),
     };
-    let fd = state.fds.get(&vname).ok_or(FdPassError::NotFound)?;
+    let var = state.fds.get(&vname).ok_or(FdPassError::NotFound)?;
     let sock = state.shell_sock.as_ref().ok_or(FdPassError::SendFailed)?;
-    sys::shellfd::send_fd(sock, fd, &tag).change_context(FdPassError::SendFailed)?;
+    sys::shellfd::send_fd(sock, &var.fd, &tag).change_context(FdPassError::SendFailed)?;
     Ok(0)
 }

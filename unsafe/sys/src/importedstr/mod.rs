@@ -37,6 +37,8 @@ pub enum Origin {
     Read(ShortCStr),
     /// Produced by the shell itself (e.g. the default `$0`).
     Shell,
+    /// An fd created by the named builtin (or sent with that SHELLFD tag).
+    Builtin(ShortCStr),
 }
 
 /// Provenance metadata for a traced string value.

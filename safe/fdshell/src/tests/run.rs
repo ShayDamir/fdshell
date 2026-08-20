@@ -3,10 +3,11 @@ use alloc::vec::Vec;
 
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
-use crate::state::ShellState;
+use crate::state::{FdVar, ShellState};
 use crate::task::Task;
 use error_stack::Report;
 use sys::ShortCStr;
+use sys::Trace;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 use sys::{Origin, Position, ScriptText};
@@ -1534,9 +1535,13 @@ fn case_last_clause_no_double_semi() {
 fn assign_fd_copies_fd_variable() {
     let cell = make_cell();
     let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
-    borrow_state_mut(&cell)
-        .fds
-        .insert(ShortCStr::from(c"src"), dev_null);
+    borrow_state_mut(&cell).fds.insert(
+        ShortCStr::from(c"src"),
+        FdVar {
+            fd: dev_null,
+            trace: Trace::boundary(Origin::Builtin(ShortCStr::from(c"openat2"))),
+        },
+    );
     run_one(b"%copy=%src", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(state.fds.contains_key(&ShortCStr::from(c"copy")));
@@ -1657,6 +1662,120 @@ fn explain_two_arguments_sets_status_1() {
     child_test(|| {
         let cell = make_cell();
         run_one(b"explain a b", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 1);
+    });
+}
+
+#[test]
+fn fdexplain_unset_var_reports_unset() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_one(b"fdexplain %nope", &cell).unwrap();
+    });
+    assert_eq!(out, b"%nope is unset\n");
+}
+
+#[test]
+fn fdexplain_cwd_shows_shell_origin() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let cwd = sys::openat2::open(c"/tmp", sys::fcntl::O_DIRECTORY).unwrap();
+            state.insert_cwd(cwd);
+        }
+        run_one(b"fdexplain %CWD", &cell).unwrap();
+    });
+    assert_eq!(out, b"%CWD (from shell default)\n");
+}
+
+#[test]
+fn fdexplain_captured_fd_shows_tag_and_line() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let fd = sys::openat2::open(c"/dev/null", 0).unwrap();
+            state.fds.insert(
+                ShortCStr::from(c"f"),
+                FdVar {
+                    fd,
+                    trace: Trace::at(
+                        Position::new(3, 1),
+                        Origin::Builtin(ShortCStr::from(c"openat2")),
+                    ),
+                },
+            );
+        }
+        run_one(b"fdexplain %f", &cell).unwrap();
+    });
+    assert_eq!(out, b"%f (set on line 3, column 1, from openat2)\n");
+}
+
+#[test]
+fn fdexplain_assigned_fd_is_transitive() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let fd = sys::openat2::open(c"/dev/null", 0).unwrap();
+            state.fds.insert(
+                ShortCStr::from(c"src"),
+                FdVar {
+                    fd,
+                    trace: Trace::boundary(Origin::Builtin(ShortCStr::from(c"openat2"))),
+                },
+            );
+        }
+        run_one(b"%copy=%src", &cell).unwrap();
+        run_one(b"fdexplain %copy", &cell).unwrap();
+    });
+    assert_eq!(out, b"%copy (set on line 1, column 1, from openat2)\n");
+}
+
+#[test]
+fn fdexplain_end_to_end_capture_origin() {
+    let dir = std::env::temp_dir().join("fdshell-fdexplain-e2e");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("target"), b"x").unwrap();
+
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            let path = dir.to_str().unwrap().as_bytes().to_vec();
+            let path = ShortCStr::from_vec(path).unwrap();
+            let cwd = sys::openat2::open(path.export(), sys::fcntl::O_DIRECTORY).unwrap();
+            state.insert_cwd(cwd);
+        }
+        run_one(
+            b"builtin openat2 --dirfd %CWD --flags O_RDONLY target %>%f",
+            &cell,
+        )
+        .unwrap();
+        run_one(b"fdexplain %f", &cell).unwrap();
+    });
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(out, b"%f (set on line 1, column 1, from openat2)\n");
+}
+
+#[test]
+fn fdexplain_no_argument_sets_status_1() {
+    child_test(|| {
+        let cell = make_cell();
+        run_one(b"fdexplain", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 1);
+    });
+}
+
+#[test]
+fn fdexplain_two_arguments_sets_status_1() {
+    child_test(|| {
+        let cell = make_cell();
+        run_one(b"fdexplain %a %b", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 1);
     });

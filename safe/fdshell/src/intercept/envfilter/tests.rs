@@ -202,6 +202,7 @@ fn captures_not_supported() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        set_at: sys::Position::new(1, 1),
     }];
     let cell = make_cell();
     let result = run_envfilter(&line, &cmdline, &cell);

@@ -1,9 +1,13 @@
 use crate::capture::Capture;
 use crate::error::parse::ParseError;
 use error_stack::{Report, bail};
+use sys::Position;
 use sys::ShortCStr;
 
-pub fn parse_capture(s: &ShortCStr) -> Result<Option<Capture>, Report<ParseError>> {
+pub fn parse_capture(
+    s: &ShortCStr,
+    set_at: Position,
+) -> Result<Option<Capture>, Report<ParseError>> {
     let s = match s.strip_prefix(b"%") {
         Some(s) => s,
         None => return Ok(None),
@@ -29,5 +33,6 @@ pub fn parse_capture(s: &ShortCStr) -> Result<Option<Capture>, Report<ParseError
             Some(tag_part)
         },
         force,
+        set_at,
     }))
 }

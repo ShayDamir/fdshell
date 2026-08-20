@@ -22,6 +22,7 @@ const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"exec_fd", b"Execute with fd lookup"),
     (b"false", b"Exit with failure status"),
     (b"fchmod", b"Change file mode"),
+    (b"fdexplain", b"Show provenance of an fd variable"),
     (b"help", b"List available commands"),
     (b"mkdirat", b"Create directory"),
     (b"openat2", b"Open file"),

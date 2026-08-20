@@ -78,13 +78,14 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     }
 
     if raw.iter().any(|(t, _, _)| t.eq_bytes(b"|")) {
-        return pipeline::parse_pipeline(&raw);
+        return pipeline::parse_pipeline(&raw, text.start);
     }
 
     let fully_quoted = fully_quoted_only(&raw);
     Ok(ParsedLine::Cmd(command::parse_command(
         &tokens,
         fully_quoted,
+        text.start,
     )?))
 }
 

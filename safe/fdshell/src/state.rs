@@ -4,14 +4,22 @@ use hashbrown::HashMap;
 
 use sys::ImportedStr;
 use sys::LocalFd;
+use sys::Origin;
 use sys::ShortCStr;
+use sys::Trace;
 use sys::siginfo::WaitStatus;
 
 use crate::envfilter::EnvFilter;
 use crate::task::Task;
 
+/// An fd variable: an owned descriptor together with its provenance trace.
+pub struct FdVar {
+    pub fd: LocalFd,
+    pub trace: Trace,
+}
+
 pub struct ShellState {
-    pub(crate) fds: HashMap<ShortCStr, LocalFd>,
+    pub(crate) fds: HashMap<ShortCStr, FdVar>,
     pub(crate) tasks: HashMap<ShortCStr, Task>,
     pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
     pub(crate) exports: HashMap<ShortCStr, ImportedStr>,
@@ -58,7 +66,13 @@ impl ShellState {
     }
 
     pub fn insert_cwd(&mut self, cwd: LocalFd) {
-        self.fds.insert(c"CWD".into(), cwd);
+        self.fds.insert(
+            c"CWD".into(),
+            FdVar {
+                fd: cwd,
+                trace: Trace::boundary(Origin::Shell),
+            },
+        );
     }
 
     pub fn set_positional(&mut self, positional: VecDeque<ImportedStr>) {

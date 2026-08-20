@@ -7,6 +7,7 @@ use sys::ShortCStr;
 use super::delegated;
 use super::exec_fd;
 use super::explain;
+use super::fdexplain;
 use super::resolve;
 use super::simple;
 
@@ -21,6 +22,7 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"fchmod", delegated::handle_fchmod),
     (b"echo", simple::handle_echo),
     (b"explain", explain::handle_explain),
+    (b"fdexplain", fdexplain::handle_fdexplain),
     (b"pipe", delegated::handle_pipe),
     (b"mkdirat", delegated::handle_mkdirat),
     (b"openat2", delegated::handle_openat2),

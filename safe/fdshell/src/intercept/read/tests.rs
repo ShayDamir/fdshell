@@ -308,18 +308,34 @@ fn test_read_line_from_fd_error() {
 
 #[test]
 fn test_read_line_from_fd_multi_chunk() {
+    // The writer runs in a forked child: pre-writing >4 KiB into a pipe
+    // deadlocks when the kernel has shrunk the pipe (system pipe-page
+    // pressure), because the write blocks before any reader exists.
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let data = [b'x'; 8192];
-    sys::rw::write(&write_end, &data).unwrap();
-    sys::rw::write(&write_end, b"\n").unwrap();
-    drop(write_end);
-
-    let mut buf = Vec::new();
-    let mut eof = false;
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut buf, &mut eof, None).unwrap();
-    assert!(!eof);
-    assert_eq!(buf.len(), 8192);
-    assert!(buf.into_iter().all(|b| b == b'x'));
+    let (_, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
+    match pidfd_opt {
+        None => {
+            // Child: the write may block until the parent drains the pipe.
+            sys::rw::write(&write_end, &data).unwrap();
+            sys::rw::write(&write_end, b"\n").unwrap();
+            drop(write_end);
+            sys::exit(0);
+        }
+        Some(pidfd) => {
+            let mut buf = Vec::new();
+            let mut eof = false;
+            read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut buf, &mut eof, None).unwrap();
+            assert!(!eof);
+            assert_eq!(buf.len(), 8192);
+            assert!(buf.into_iter().all(|b| b == b'x'));
+            drop(read_end);
+            match sys::wait_pidfd::wait_pidfd(&pidfd).unwrap() {
+                WaitStatus::Exited(0) => {}
+                other => panic!("unexpected status {}", other.exit_code()),
+            }
+        }
+    }
 }
 
 // read_line tests via SourceFd::RawFd
@@ -644,6 +660,7 @@ fn run_read_captures_not_supported() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        set_at: sys::Position::new(1, 1),
     }];
     let cell = make_read_cell();
     let result = run_read(&line, &cmdline, &text(&line), &cell);
@@ -808,7 +825,13 @@ fn run_read_with_u_fdvar() {
     let cell = make_read_cell();
     {
         let mut state = cell.borrow_mut().unwrap();
-        state.fds.insert(c"MYFD".into(), read_end);
+        state.fds.insert(
+            c"MYFD".into(),
+            crate::state::FdVar {
+                fd: read_end,
+                trace: sys::Trace::boundary(sys::Origin::Shell),
+            },
+        );
     }
 
     let line = make_read_line(&["read", "-u", "%MYFD", "var1"]);

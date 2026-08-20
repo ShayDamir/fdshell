@@ -18,6 +18,10 @@ fn stext(bytes: &[u8]) -> ScriptText {
     )
 }
 
+fn pos() -> Position {
+    Position::new(1, 1)
+}
+
 /// Wraps a raw line in a nominal `ScriptText` so call sites keep passing `&[u8]`.
 fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
     super::parse(&stext(line))
@@ -47,6 +51,7 @@ fn test_mkdirat_capture() {
                 var: c"foo".into(),
                 tag: None,
                 force: false,
+                set_at: pos(),
             }],
             redirects: vec![],
             pidvar: None,
@@ -86,6 +91,7 @@ fn test_openat2_capture() {
             var: c"baz".into(),
             tag: None,
             force: false,
+            set_at: pos(),
         }]
     );
     assert!(cmd.redirects.is_empty());
@@ -108,11 +114,13 @@ fn test_pipe_tagged_captures() {
                 var: c"server".into(),
                 tag: Some(c"rd".into()),
                 force: false,
+                set_at: pos(),
             },
             Capture {
                 var: c"client".into(),
                 tag: Some(c"wr".into()),
                 force: false,
+                set_at: pos(),
             },
         ]
     );
@@ -162,6 +170,7 @@ fn test_force_capture() {
             var: c"foo".into(),
             tag: None,
             force: true,
+            set_at: pos(),
         }]
     );
 }
@@ -1726,13 +1735,13 @@ fn amp_after_gt_stays_argument() {
 #[test]
 fn parse_capture_empty_var_is_error() {
     let s = sys::ShortCStr::from(c"%>%");
-    assert!(super::capture::parse_capture(&s).is_err());
+    assert!(super::capture::parse_capture(&s, pos()).is_err());
 }
 
 #[test]
 fn parse_capture_tagged_empty_var_is_error() {
     let s = sys::ShortCStr::from(c"%tag>%");
-    assert!(super::capture::parse_capture(&s).is_err());
+    assert!(super::capture::parse_capture(&s, pos()).is_err());
 }
 
 #[test]

@@ -19,6 +19,7 @@ pub fn resolve_redirects(
                     .fds
                     .get(var)
                     .ok_or(OpenRedirectError::Open)?
+                    .fd
                     .try_clone_above(
                         r.export_to
                             .checked_add(1)

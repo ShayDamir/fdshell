@@ -1,6 +1,6 @@
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
-use crate::state::ShellState;
+use crate::state::{FdVar, ShellState};
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::fork_cell::ForkCell;
@@ -15,13 +15,10 @@ pub(crate) fn run_simple(
     match parsed {
         crate::parse::ParsedLine::AssignFd { var, value } => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            let src = state
-                .fds
-                .get(value)
-                .ok_or(CmdError::FdNotSet)?
-                .try_clone()
-                .change_context(CmdError::Fd)?;
-            state.fds.insert(var.clone(), src);
+            let src = state.fds.get(value).ok_or(CmdError::FdNotSet)?;
+            let fd = src.fd.try_clone().change_context(CmdError::Fd)?;
+            let trace = Trace::at(text.start, src.trace.origin.clone());
+            state.fds.insert(var.clone(), FdVar { fd, trace });
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {

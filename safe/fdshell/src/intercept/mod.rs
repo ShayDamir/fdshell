@@ -12,7 +12,7 @@ pub(crate) fn try_intercept(
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let cmd = cmdline.command.as_bytes().change_context(CmdError::Never)?;
     match cmd {
-        b"cd" => cd::run_cd(line, cmdline, cell),
+        b"cd" => cd::run_cd(line, cmdline, text, cell),
         b"exit" | b"quit" => exit::run_exit(line, cmdline, cell),
         b"become" => become_cmd::run_become(line, cmdline, cell),
         b"exec" => become_cmd::run_exec(line, cmdline, cell),

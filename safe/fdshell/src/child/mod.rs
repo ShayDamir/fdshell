@@ -4,6 +4,7 @@ mod error;
 pub(crate) mod exec_fd;
 mod explain;
 pub(crate) mod external;
+mod fdexplain;
 pub(crate) mod fdpass;
 mod help;
 mod resolve;

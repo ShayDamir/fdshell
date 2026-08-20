@@ -5,7 +5,22 @@ use crate::parse::CommandLine;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
+use sys::Origin;
+use sys::Position;
+use sys::ScriptText;
 use sys::ShortCStr;
+
+fn text(bytes: &[u8]) -> ScriptText {
+    ScriptText::new(
+        ShortCStr::from_vec(bytes.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    )
+}
+
+fn pos() -> Position {
+    Position::new(1, 1)
+}
 
 fn make_cmdline(args: &[&str]) -> CommandLine {
     let args_vec: Vec<ShortCStr> = args
@@ -37,7 +52,7 @@ fn cd_to_tmp_success() {
     let line = make_line(&["cd", "/tmp"]);
     let cmdline = make_cmdline(&["/tmp"]);
     let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
     let state = cell.borrow().unwrap();
@@ -50,13 +65,13 @@ fn cd_dash_switches_to_oldwd() {
     {
         let mut state = cell.borrow_mut().unwrap();
         let tmp = c"/tmp".into();
-        cd(&[tmp], &mut state).unwrap();
+        cd(&[tmp], &mut state, pos()).unwrap();
         let root = c"/".into();
-        cd(&[root], &mut state).unwrap();
+        cd(&[root], &mut state, pos()).unwrap();
     }
     let line = make_line(&["cd", "-"]);
     let cmdline = make_cmdline(&["-"]);
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
     let state = cell.borrow().unwrap();
@@ -75,7 +90,7 @@ fn cd_home_success() {
     let line = make_line(&["cd"]);
     let cmdline = make_cmdline(&[]);
     let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
     assert!(result.unwrap());
     let state = cell.borrow().unwrap();
@@ -87,7 +102,7 @@ fn cd_missing_var_fails() {
     let line = make_line(&["cd", "%NONEXISTENT"]);
     let cmdline = make_cmdline(&["%NONEXISTENT"]);
     let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(report.current_context(), CmdError::Cd));
@@ -100,7 +115,7 @@ fn cd_builtin_not_supported() {
     let mut cmdline = cmdline;
     cmdline.builtin = true;
     let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(
@@ -118,9 +133,10 @@ fn cd_captures_not_supported() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        set_at: pos(),
     }];
     let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(
@@ -140,7 +156,7 @@ fn cd_redirects_not_supported() {
         source: RedirectSource::Var(c"test".into()),
     }];
     let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &cell);
+    let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());
     let report = result.unwrap_err();
     assert!(matches!(

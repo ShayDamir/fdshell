@@ -7,11 +7,13 @@ use crate::parse::builtin::is_builtin;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
+use sys::Position;
 use sys::ShortCStr;
 
 pub fn parse_command(
     tokens: &[ShortCStr],
     fully_quoted: Vec<bool>,
+    set_at: Position,
 ) -> Result<CommandLine, Report<ParseError>> {
     let mut iter = tokens.iter().peekable();
     let builtin = match iter.peek() {
@@ -49,7 +51,7 @@ pub fn parse_command(
                 }
             }
         } else if t.starts_with(b"%") {
-            match crate::parse::classify::parse_capture(t) {
+            match crate::parse::classify::parse_capture(t, set_at) {
                 Ok(Some(c)) => captures.push(c),
                 Ok(None) => {
                     args.push(t.clone());

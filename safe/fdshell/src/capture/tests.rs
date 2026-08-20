@@ -12,6 +12,10 @@ fn short_cstr(s: &'static [u8]) -> ShortCStr {
     ShortCStr::from_vec(s.to_vec()).unwrap()
 }
 
+fn pos() -> sys::Position {
+    sys::Position::new(1, 1)
+}
+
 #[test]
 fn test_captures_exists() {
     // Create a shell socket to send through and receive from
@@ -34,14 +38,19 @@ fn test_captures_exists() {
     drop(test_b);
 
     let mut state = ShellState::new();
-    state
-        .fds
-        .insert(short_cstr(b"OUT"), receiver.try_clone().expect("clone"));
+    state.fds.insert(
+        short_cstr(b"OUT"),
+        crate::state::FdVar {
+            fd: receiver.try_clone().expect("clone"),
+            trace: sys::Trace::boundary(sys::Origin::Shell),
+        },
+    );
 
     let captures = vec![Capture {
         var: short_cstr(b"OUT"),
         tag: Some(short_cstr(b"openat2")),
         force: false,
+        set_at: pos(),
     }];
 
     let result = do_captures(
@@ -81,6 +90,7 @@ fn test_captures_success() {
         var: short_cstr(b"OUT"),
         tag: Some(short_cstr(b"openat2")),
         force: false,
+        set_at: pos(),
     }];
 
     let result = do_captures(
@@ -111,6 +121,7 @@ fn test_captures_incomplete_zero() {
         var: short_cstr(b"OUT"),
         tag: Some(short_cstr(b"openat2")),
         force: false,
+        set_at: pos(),
     }];
 
     let result = do_captures(
@@ -166,11 +177,13 @@ fn test_captures_incomplete_partial() {
             var: short_cstr(b"OUT1"),
             tag: Some(short_cstr(b"tag1")),
             force: false,
+            set_at: pos(),
         },
         Capture {
             var: short_cstr(b"OUT2"),
             tag: Some(short_cstr(b"tag2")),
             force: false,
+            set_at: pos(),
         },
     ];
 

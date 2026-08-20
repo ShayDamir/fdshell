@@ -3,9 +3,13 @@ use crate::parse::command::parse_command;
 use crate::parse::{ParsedLine, Pipeline};
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
+use sys::Position;
 use sys::ShortCStr;
 
-pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Report<ParseError>> {
+pub fn parse_pipeline(
+    raw: &[(ShortCStr, usize, bool)],
+    set_at: Position,
+) -> Result<ParsedLine, Report<ParseError>> {
     let mut commands = Vec::new();
     let mut start = 0;
     for (i, (t, _, _)) in raw.iter().enumerate() {
@@ -16,7 +20,7 @@ pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Re
                 .ok_or(ParseError::ExpectedCommandAfterPipe)?;
             let fq: Vec<bool> = cmd_tokens.iter().map(|(_, _, fq)| *fq).collect();
             let tokens: Vec<ShortCStr> = cmd_tokens.iter().map(|(t, _, _)| t.clone()).collect();
-            commands.push(parse_command(&tokens, fq)?);
+            commands.push(parse_command(&tokens, fq, set_at)?);
             start = i + 1;
         }
     }
@@ -26,6 +30,6 @@ pub fn parse_pipeline(raw: &[(ShortCStr, usize, bool)]) -> Result<ParsedLine, Re
         .ok_or(ParseError::ExpectedCommandAfterPipe)?;
     let fq: Vec<bool> = cmd_tokens.iter().map(|(_, _, fq)| *fq).collect();
     let tokens: Vec<ShortCStr> = cmd_tokens.iter().map(|(t, _, _)| t.clone()).collect();
-    commands.push(parse_command(&tokens, fq)?);
+    commands.push(parse_command(&tokens, fq, set_at)?);
     Ok(ParsedLine::Pipeline(Pipeline { commands }))
 }

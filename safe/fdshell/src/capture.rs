@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
+use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
 
 use crate::error::capture::CaptureError;
-use crate::state::ShellState;
-use sys::ShortCStr;
+use crate::state::{FdVar, ShellState};
+use sys::{Origin, Position, ShortCStr, Trace};
 
 #[cfg(test)]
 mod tests;
@@ -16,19 +17,22 @@ pub struct Capture {
     pub var: ShortCStr,
     pub tag: Option<ShortCStr>,
     pub force: bool,
+    /// Position of the capture token in the source line.
+    pub set_at: Position,
 }
 
 /// Receive fds from `capture_fd`, match against captures, stage results.
 ///
-/// Returns a `Vec` of `(var, fd)` pairs on success. The caller commits
-/// them atomically into the state's fds.
+/// Returns a `Vec` of `(var, FdVar)` pairs on success. Each fd carries a
+/// trace: the capture position plus the sender's SHELLFD tag as origin.
+/// The caller commits them atomically into the state's fds.
 pub fn do_captures(
     capture_fd: sys::LocalFd,
     expected_pid: sys::Pid,
     captures: Vec<Capture>,
     state: &ShellState,
-) -> Result<Vec<(ShortCStr, sys::LocalFd)>, Report<CaptureError>> {
-    let mut captured_fds: Vec<(ShortCStr, sys::LocalFd)> = Vec::with_capacity(captures.len());
+) -> Result<Vec<(ShortCStr, FdVar)>, Report<CaptureError>> {
+    let mut captured_fds: Vec<(ShortCStr, FdVar)> = Vec::with_capacity(captures.len());
     let mut remaining = captures;
 
     while !remaining.is_empty() {
@@ -53,7 +57,13 @@ pub fn do_captures(
             if !c.force && state.fds.contains_key(&c.var) {
                 bail!(CaptureError::Exists);
             }
-            captured_fds.push((c.var, fd));
+            captured_fds.push((
+                c.var,
+                FdVar {
+                    fd,
+                    trace: Trace::at(c.set_at, Origin::Builtin(tag_name(rtag))),
+                },
+            ));
         }
     }
 
@@ -65,4 +75,11 @@ pub fn do_captures(
     }
 
     Ok(captured_fds)
+}
+
+/// A received SHELLFD tag is NUL-free up to its terminator, so `push` is infallible.
+fn tag_name(rtag: &CStr) -> ShortCStr {
+    let mut name = ShortCStr::new();
+    name.push(rtag);
+    name
 }
