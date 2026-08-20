@@ -45,7 +45,8 @@ pub fn dispatch_builtin(
     match crate::child::fdpass::dispatch(name.as_bytes().unwrap_or(&[]), args, state) {
         Some(Ok(v)) => Ok(v),
         Some(Err(report)) => Ok(match report.current_context() {
-            crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
+            crate::error::fdpass::FdPassError::SendFailed
+            | crate::error::fdpass::FdPassError::Cloexec => sys::errno::EIO,
             crate::error::fdpass::FdPassError::NotFound
             | crate::error::fdpass::FdPassError::InvalidName
             | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,

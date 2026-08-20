@@ -11,6 +11,8 @@ pub(crate) enum FdPassError {
     NotFound,
     /// fd send failed
     SendFailed,
+    /// failed to set CLOEXEC on imported fd
+    Cloexec,
 }
 
 impl core::error::Error for FdPassError {}

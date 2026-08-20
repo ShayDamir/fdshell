@@ -16,7 +16,8 @@ pub(crate) fn run_export_fd(
     let status = match crate::child::fdpass::export_fd(&cmdline.args, &state) {
         Ok(_) => WaitStatus::Exited(0),
         Err(report) => WaitStatus::Exited(match report.current_context() {
-            crate::error::fdpass::FdPassError::SendFailed => sys::errno::EIO,
+            crate::error::fdpass::FdPassError::SendFailed
+            | crate::error::fdpass::FdPassError::Cloexec => sys::errno::EIO,
             crate::error::fdpass::FdPassError::NotFound
             | crate::error::fdpass::FdPassError::InvalidName
             | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,

@@ -18,9 +18,7 @@ pub fn dispatch(
 fn import_fd(args: &[ShortCStr], state: &ShellState) -> Result<i32, Report<FdPassError>> {
     let raw = args.first().ok_or(FdPassError::MissingArg)?;
     let fd = sys::ImportedFd::try_from(raw).change_context(FdPassError::InvalidName)?;
-    let local = fd
-        .try_into_local()
-        .change_context(FdPassError::SendFailed)?;
+    let local = fd.try_into_local().change_context(FdPassError::Cloexec)?;
     let sock = state.shell_sock.as_ref().ok_or(FdPassError::SendFailed)?;
     sys::shellfd::send_fd(sock, &local, c"import_fd").change_context(FdPassError::SendFailed)?;
     Ok(0)
