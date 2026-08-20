@@ -55,6 +55,9 @@ A limit that must be visible to both the block executors and `$(…)` (the `nest
 ## `|` on disjoint bit flags produces equivalent mutants
 `O_WRONLY | O_CREAT | O_TRUNC` mutates `|`→`^`, which is unkillable because the O_* flags are disjoint single bits (`|` ≡ `^` ≡ `+` on them). Sum the flags with `+` instead: same value, but `+`→`-`/`*` mutants change the value and are killable by an exact-value test. See `RedirectDirection::open_flags`.
 
+## Open flags on a just-created path: `|`→`&`/`^` is equivalent
+In `mkdirat_exec`, the openat2 call that re-opens the just-created directory uses `(O_DIRECTORY | O_NOFOLLOW)`. The `|`→`^` mutant is equivalent (disjoint bits). The `|`→`&` mutant (flags=0) is also unkillable: the path is guaranteed to be a real directory (mkdirat just created it), so the open succeeds regardless of O_DIRECTORY/O_NOFOLLOW. Unlike flag-accumulation in a `try_fold` (where an exact-value test kills `+`→`-`/`*`), here no test can observe the flag value because the target is a known directory.
+
 ## `while cond` with an invariant condition produces equivalent mutants
 In `read_paren_expr`, `while depth > 0` was always true at the loop top (depth starts at 1 and the only path to 0 breaks immediately), so `>`→`>=` was unkillable. A loop whose exit is fully decided by `break`/`bail!` inside the body should be a bare `loop`; the redundant condition is both dead logic and a mutant source. See `parse/backtick.rs`.
 

@@ -66,6 +66,11 @@ fn bad_flag() {
 }
 
 #[test]
+fn short_flag_no_path() {
+    assert_invalid_arg(&["-x"])
+}
+
+#[test]
 fn missing_path() {
     assert_invalid_arg(&["--mode", "755"])
 }
@@ -149,6 +154,27 @@ fn resolve_or() {
 }
 
 #[test]
+fn resolve_no_magiclinks() {
+    assert_ok(&["--resolve", "RESOLVE_NO_MAGICLINKS", "x"], |cfg| {
+        assert_eq!(cfg.resolve, 2);
+    });
+}
+
+#[test]
+fn resolve_no_xdev() {
+    assert_ok(&["--resolve", "RESOLVE_NO_XDEV", "x"], |cfg| {
+        assert_eq!(cfg.resolve, 4);
+    });
+}
+
+#[test]
+fn resolve_cached() {
+    assert_ok(&["--resolve", "RESOLVE_CACHED", "x"], |cfg| {
+        assert_eq!(cfg.resolve, 32);
+    });
+}
+
+#[test]
 fn resolve_hex() {
     assert_ok(&["--resolve", "0xff", "x"], |cfg| {
         assert_eq!(cfg.resolve, 255);
@@ -214,6 +240,54 @@ fn test_mkdirat_exec() {
     let st2 = sys::stat::stat(&cpath).unwrap();
     assert_eq!(st.ino, st2.ino);
     assert_eq!(st.dev, st2.dev);
+
+    drop(fd);
+    drop(receiver);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn test_mkdirat_exec_masks_special_bits() {
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-test-mkdirat-mask-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    let subdir_path = dir.join("subdir");
+
+    let cpath = CString::new(subdir_path.to_str().unwrap()).unwrap();
+
+    let (shell_a, shell_b) = sys::net::socketpair().unwrap();
+    shell_a.verify().unwrap();
+    shell_b.verify().unwrap();
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
+
+    shell_a.export().unwrap();
+    let shell_sock = shell_a.try_clone().unwrap();
+    drop(shell_a);
+
+    let mode_arg = CString::from(c"--mode");
+    let mode_val = CString::from(c"0o1755");
+    let args = [mode_arg.as_c_str(), mode_val.as_c_str(), cpath.as_c_str()];
+    let cfg = builtins::mkdirat::parse::mkdirat_parse(&args).unwrap();
+    builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
+
+    let mut buf = [0u8; TAG_MAX];
+    let (fd, _tag) = sys::shellfd::recv_fd(
+        &receiver,
+        &mut buf,
+        sys::Pid::from_raw(std::process::id() as i32),
+    )
+    .unwrap();
+    fd.verify().unwrap();
+
+    let st = sys::stat::fstat(&fd).unwrap();
+    assert_eq!(st.mode & 0o7777, 0o755, "special bits must be stripped");
 
     drop(fd);
     drop(receiver);

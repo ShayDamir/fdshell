@@ -18,7 +18,7 @@ pub(crate) fn parse_rename_flags(s: &CStr) -> Result<u32, Report<FlagParseError>
                     b"RENAME_WHITEOUT" => sys::renameat2::RENAME_WHITEOUT,
                     _ => return Err(FlagParseError::Unknown),
                 };
-                Ok(acc | v)
+                Ok(acc + v)
             })
             .change_context(FlagParseError::Unknown)
     }

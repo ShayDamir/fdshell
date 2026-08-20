@@ -58,6 +58,34 @@ fn unexpected_arg() {
 }
 
 #[test]
+fn non_dash_is_arg_error() {
+    with_args(&["x"], |a| match builtins::pipe::parse::pipe_parse(a) {
+        Err(e) => {
+            let ctx = e.current_context();
+            assert!(
+                matches!(ctx, BuiltinError::InvalidArgument(msg) if *msg == "arg"),
+                "expected arg error, got {ctx}"
+            );
+        }
+        _ => panic!("expected Err"),
+    });
+}
+
+#[test]
+fn dash_is_flag_error() {
+    with_args(&["-x"], |a| match builtins::pipe::parse::pipe_parse(a) {
+        Err(e) => {
+            let ctx = e.current_context();
+            assert!(
+                matches!(ctx, BuiltinError::InvalidArgument(msg) if *msg == "flag"),
+                "expected flag error, got {ctx}"
+            );
+        }
+        _ => panic!("expected Err"),
+    });
+}
+
+#[test]
 fn flags_nonblock() {
     assert_ok(&["--flags", "O_NONBLOCK"], |cfg| {
         assert_eq!(cfg.flags, O_NONBLOCK);

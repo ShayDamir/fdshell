@@ -25,7 +25,7 @@ pub fn parse_resolve_flags(s: &CStr) -> Result<u64, Report<FlagParseError>> {
                     b"RESOLVE_CACHED" => RESOLVE_CACHED,
                     _ => return Err(FlagParseError::Unknown),
                 };
-                Ok(acc | v)
+                Ok(acc + v)
             })
             .change_context(FlagParseError::Unknown)
     }

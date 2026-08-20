@@ -46,6 +46,23 @@ fn help_long() {
 }
 
 #[test]
+fn help_with_other_args() {
+    with_args(
+        &["%CWD", "--help"],
+        |a| match builtins::execfd::parse::execfd_parse(a) {
+            Err(e) => {
+                let ctx = e.current_context();
+                assert!(
+                    matches!(ctx, BuiltinError::Help),
+                    "expected Help, got {ctx}"
+                );
+            }
+            _ => panic!("expected Err"),
+        },
+    );
+}
+
+#[test]
 fn help_short() {
     assert_parse_err(&["-h"]);
 }

@@ -153,6 +153,11 @@ fn short_flag() {
 }
 
 #[test]
+fn single_short_flag() {
+    assert_invalid_arg(&["-x"])
+}
+
+#[test]
 fn missing_path() {
     assert_invalid_arg(&["--flags", "O_RDONLY"])
 }

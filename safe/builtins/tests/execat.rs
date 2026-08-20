@@ -47,6 +47,23 @@ fn help_long() {
 }
 
 #[test]
+fn help_with_other_args() {
+    with_args(
+        &["%CWD", "--help"],
+        |a| match builtins::execat::parse::execat_parse(a) {
+            Err(e) => {
+                let ctx = e.current_context();
+                assert!(
+                    matches!(ctx, BuiltinError::Help),
+                    "expected Help, got {ctx}"
+                );
+            }
+            _ => panic!("expected Err"),
+        },
+    );
+}
+
+#[test]
 fn missing_percent() {
     assert_parse_err(&["CWD", "bin"]);
 }

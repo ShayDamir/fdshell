@@ -3,7 +3,7 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::renameat2::{RENAME_EXCHANGE, RENAME_NOREPLACE};
+use sys::renameat2::{RENAME_EXCHANGE, RENAME_NOREPLACE, RENAME_WHITEOUT};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -71,6 +71,11 @@ fn empty_args() {
 #[test]
 fn bad_flag() {
     assert_invalid_arg(&["--bad", "x", "y"])
+}
+
+#[test]
+fn short_flag_as_path() {
+    assert_invalid_arg(&["-x", "y"])
 }
 
 #[test]
@@ -171,6 +176,13 @@ fn flags_noreplace_exchange() {
             assert_eq!(cfg.flags, RENAME_NOREPLACE | RENAME_EXCHANGE);
         },
     );
+}
+
+#[test]
+fn flags_whiteout() {
+    assert_ok(&["--flags", "RENAME_WHITEOUT", "old", "new"], |cfg| {
+        assert_eq!(cfg.flags, RENAME_WHITEOUT);
+    });
 }
 
 #[test]
