@@ -1,9 +1,10 @@
-use super::semi::{trim_semi, try_join, verbatim};
+mod extract;
+
+use super::semi::{trim_semi, try_join};
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
-use sys::ScriptText;
-use sys::ShortCStr;
+use sys::{ScriptText, ShortCStr};
 
 pub struct CaseClause {
     pub patterns: Vec<ShortCStr>,
@@ -23,25 +24,7 @@ pub fn parse_clauses(
             continue;
         }
         let patterns = collect_patterns(tokens, &mut pos, esac_idx)?;
-        let body_start = pos;
-        let body_slice = tokens.get(body_start..esac_idx).unwrap_or(&[]);
-        let end = body_slice
-            .windows(2)
-            .position(|w| matches!(w, [a, b] if a.0.eq_bytes(b";") && b.0.eq_bytes(b";")))
-            .map(|i| body_start + i);
-        let (body, next_pos) = match end {
-            Some(end) => {
-                let b = verbatim(text, trim_semi(tokens.get(body_start..end).unwrap_or(&[])))?;
-                (b, end + 2)
-            }
-            None => {
-                let b = verbatim(
-                    text,
-                    trim_semi(tokens.get(body_start..esac_idx).unwrap_or(&[])),
-                )?;
-                (b, esac_idx)
-            }
-        };
+        let (body, next_pos) = extract::body(tokens, text, pos, esac_idx)?;
         clauses.push(CaseClause { patterns, body });
         pos = next_pos;
     }

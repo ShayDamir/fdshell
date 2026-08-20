@@ -22,7 +22,7 @@
 - [x] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
 - [x] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — already extracted to `export_entry` helper (commit a9a8abf); now 41 code lines, max depth 3
 - [x] `comment.rs::scan_block` has 5 levels of logical nesting (while → if is_comment||is_sep → for sub → if !sub.is_empty() → match) exceeding §2.4 limit of 4 — extracted to `depth_delta` helper; also fixed a script-reachable u32 underflow panic on unbalanced closers (`if true; then fi fi; fi` now fails gracefully instead of panicking)
-- [ ] `parse/case_clause.rs` at 86 code lines (80-90 zone) — extract the body-slice extraction in `parse_clauses` into a helper
+- [x] `parse/case_clause.rs` at 86 code lines (80-90 zone) — extracted clause-body extraction to `parse/case_clause/extract.rs::body` (86 → 69 code lines)
 - [ ] `shellfd/recv_fd.rs` has 5 levels of logical nesting (while → if tuple → if let split_first → for rest) exceeding §2.4 limit of 4 — extract the SCM_RIGHTS handler into a helper
 
 ## Bash compatibility gaps
