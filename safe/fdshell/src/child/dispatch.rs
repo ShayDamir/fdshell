@@ -30,6 +30,10 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"resolve", resolve::handle_resolve),
 ];
 
+pub(crate) fn is_dispatched(name: &ShortCStr) -> bool {
+    DISPATCH.iter().any(|(known, _)| name.eq_bytes(known))
+}
+
 pub fn dispatch_builtin(
     name: ShortCStr,
     refs: &[&CStr],

@@ -73,6 +73,9 @@ In `tokens_to_for`, `get(in_pos + 1..do_idx - 1)` adjusted bounds the surroundin
 ## `recv_fd` cmsg-type guard `&&`→`||` is equivalent — compare tuples instead
 The `else if level == SOL_SOCKET && ctype == SCM_CREDENTIALS` branch is only reached by cmsgs the kernel sends on a Unix socket, and the kernel delivers only `SOL_SOCKET` `SCM_RIGHTS`/`SCM_CREDENTIALS` there: verified empirically that `SO_TIMESTAMP`/`SO_TIMESTAMPNS` append nothing on AF_UNIX streams, sender-side cmsgs of other `SOL_SOCKET` types are rejected with `EINVAL` at `sendmsg`, and cmsgs of other levels are silently dropped, never delivered. The mutant was genuinely unkillable — so, as with disjoint flag `|`→`+`, remove the equivalence source: compare tuples, `(level, ctype) == (SOL_SOCKET, SCM_RIGHTS)`. The `==`→`!=` mutants that replaces it with are killable by the existing `NoFd`/`PidMismatch` tests.
 
+## Test `argv[0]`-keyed behavior (busybox mode) by re-execing `/proc/self/exe`
+To exercise a code path keyed on the invocation name — e.g. busybox-style builtin dispatch — re-exec the running binary under a different name without creating a symlink: `builtin openat2 --flags O_RDONLY /proc/self/exe %>%exe; builtin exec_fd %exe <name> [args]`. `exec_fd` sets `argv[0]` to `<name>`, so the re-exec'd process behaves as that builtin. A plain symlink named `<name>` also works and, because `argv[0]` carries the full path, additionally exercises the last-`/` basename split.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)

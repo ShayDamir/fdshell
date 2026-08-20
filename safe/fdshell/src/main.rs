@@ -24,6 +24,20 @@ fn main() -> ! {
 fn run_main() -> Result<(), Report<AppError>> {
     let mode = init_shellfd().change_context(AppError::Init)?;
     sys::umask::init();
+
+    let cmdline = sys::cmdline::read_cmdline().change_context(AppError::Init)?;
+    let all_args: Vec<sys::ShortCStr> = cmdline.iter().skip(1).cloned().collect();
+
+    if let Some(argv0) = cmdline.first()
+        && let Some(name) = fdshell::busybox::builtin_name(argv0)
+    {
+        let sock = match mode {
+            fdshell::FdShellMode::Nested(fd) => Some(fd),
+            fdshell::FdShellMode::Standalone => None,
+        };
+        sys::exit(fdshell::busybox::run(name, &all_args, sock));
+    }
+
     let mut state_inner = ShellState::new();
     match mode {
         fdshell::FdShellMode::Nested(fd) => {
@@ -37,12 +51,6 @@ fn run_main() -> Result<(), Report<AppError>> {
         let cwd = sys::openat2::open(c".", O_DIRECTORY).change_context(AppError::Cwd)?;
         state.insert_cwd(cwd);
     }
-
-    let all_args: Vec<sys::ShortCStr> = sys::cmdline::read_cmdline()
-        .change_context(AppError::Init)?
-        .into_iter()
-        .skip(1)
-        .collect();
 
     if let Some(first) = all_args.first()
         && first.eq_bytes(b"-c")

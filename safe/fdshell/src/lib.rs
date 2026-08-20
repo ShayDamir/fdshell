@@ -4,6 +4,7 @@
 extern crate alloc;
 
 mod app;
+pub mod busybox;
 mod capture;
 mod caret;
 mod case_exec;
