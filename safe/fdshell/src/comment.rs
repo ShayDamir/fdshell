@@ -13,6 +13,13 @@ pub(crate) fn skip_comment(line: &[u8], mut i: usize) -> usize {
     i
 }
 
+/// Sum the block-depth deltas of the keywords in a space-separated word run.
+fn depth_delta(raw: &[u8]) -> i32 {
+    raw.split(|&b| b == b' ')
+        .filter_map(crate::keywords::keyword_delta)
+        .sum()
+}
+
 /// Scan forward from `i` looking for the matching closing keyword (depth == 0).
 /// Updates `in_quote` and `start` as side effects.
 /// Returns `(end_position, block_was_closed)`.
@@ -35,15 +42,7 @@ pub(crate) fn scan_block(
             continue;
         }
         let raw = line.get(*start..i).unwrap_or(b"").trim_ascii();
-        for sub in raw.split(|&b| b == b' ') {
-            if !sub.is_empty() {
-                match crate::keywords::keyword_delta(sub) {
-                    Some(1) => depth += 1,
-                    Some(-1) => depth -= 1,
-                    _ => {}
-                }
-            }
-        }
+        depth = depth.saturating_add_signed(depth_delta(raw));
         if kind == Boundary::Comment {
             i = skip_comment(line, i);
             *start = i;

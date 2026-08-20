@@ -20,8 +20,8 @@
 - [x] `localfd.rs` at 114 code lines (was 80, grew) — extracted `read_all` loop to `rw.rs` free fn, method now delegates (74 → 61 code lines)
 - [x] Add `exec_fd`/`exec_at` to `safe/builtins/` crate — `execfd`/`execat` modules with parse + exec, `builtin_exec_ok` test helper, integration tests; fdshell `exec`/handlers now delegate to them
 - [x] `FdPassError::SendFailed` in `child/fdpass.rs:23` used for both `try_into_local()` (CLOEXEC) and `send_fd()` (socket send) — split into `FdPassError::Cloexec` so error variants are not too coarse per LESSONS.md
-- [ ] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — extract filter + concat logic into a helper function
-- [ ] `comment.rs::scan_block` has 5 levels of logical nesting (while → if is_comment||is_sep → for sub → if !sub.is_empty() → match) exceeding §2.4 limit of 4 — extract keyword delta processing into a helper
+- [x] `environ.rs` at 51 code lines with 4 levels of nesting in `exports_iter` closure (§2.4 limit) — already extracted to `export_entry` helper (commit a9a8abf); now 41 code lines, max depth 3
+- [x] `comment.rs::scan_block` has 5 levels of logical nesting (while → if is_comment||is_sep → for sub → if !sub.is_empty() → match) exceeding §2.4 limit of 4 — extracted to `depth_delta` helper; also fixed a script-reachable u32 underflow panic on unbalanced closers (`if true; then fi fi; fi` now fails gracefully instead of panicking)
 - [ ] `parse/case_clause.rs` at 86 code lines (80-90 zone) — extract the body-slice extraction in `parse_clauses` into a helper
 - [ ] `shellfd/recv_fd.rs` has 5 levels of logical nesting (while → if tuple → if let split_first → for rest) exceeding §2.4 limit of 4 — extract the SCM_RIGHTS handler into a helper
 

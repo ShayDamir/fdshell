@@ -278,3 +278,11 @@ fn plain_paren_inside_dollar_paren_adds_depth() {
     let r = scan(b"if $(x (a) fi;", 2);
     assert_eq!(r.end, 15, "plain ( ) must raise dollar-paren depth");
 }
+
+// Excess closers in one word run saturate depth at 0 (no u32 underflow).
+#[test]
+fn excess_closers_saturate_depth() {
+    let r = scan(b"if fi fi; then y; fi", 2);
+    assert_eq!(r.end, 9);
+    assert!(r.closed, "excess closers must saturate depth at 0");
+}
