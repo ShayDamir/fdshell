@@ -50,25 +50,7 @@ pub fn recv_fd<'a>(
         // SAFETY: same pointer validity as above.
         let ctype = unsafe { (*cmsg).cmsg_type };
         if (level, ctype) == (libc::SOL_SOCKET, libc::SCM_RIGHTS) {
-            // SAFETY: `cmsg` is a valid `cmsghdr`; `CMSG_DATA` is valid for
-            // `cmsg_len` bytes and 8-byte aligned, satisfying i32's alignment.
-            let nfds = ((unsafe { (*cmsg).cmsg_len } as usize)
-                .saturating_sub(core::mem::size_of::<libc::cmsghdr>()))
-                / core::mem::size_of::<i32>();
-            // SAFETY: pointer is valid for `nfds` i32s within the `CMSG_DATA` region.
-            let fds =
-                unsafe { core::slice::from_raw_parts(libc::CMSG_DATA(cmsg).cast::<i32>(), nfds) };
-            // Take the first fd, close any further fds sent in the same message.
-            if let Some((first, rest)) = fds.split_first() {
-                // SAFETY: `first` comes from kernel `SCM_RIGHTS`;
-                // `MSG_CMSG_CLOEXEC` was set on `recvmsg`.
-                got_fd = Some(unsafe { LocalFd::from_raw(*first) });
-                for &raw_fd in rest {
-                    // SAFETY: `raw_fd` is a valid fd from the kernel; close is safe.
-                    crate::cvt(unsafe { libc::close(raw_fd) as isize })
-                        .change_context(crate::RecvFdError::Never)?;
-                }
-            }
+            got_fd = take_rights(cmsg)?;
         } else if (level, ctype) == (libc::SOL_SOCKET, libc::SCM_CREDENTIALS) {
             // SAFETY: `cmsg` is a valid `cmsghdr` pointer.
             let payload = (unsafe { (*cmsg).cmsg_len } as usize)
@@ -98,4 +80,27 @@ pub fn recv_fd<'a>(
     let tag_cstr =
         CStr::from_bytes_with_nul(tag_slice).change_context(crate::RecvFdError::TagNotNul)?;
     Ok((fd, tag_cstr))
+}
+
+/// Handle an `SCM_RIGHTS` cmsg: adopt the first fd as a `LocalFd` and
+/// close any further fds carried in the same message.
+fn take_rights(cmsg: *const libc::cmsghdr) -> Result<Option<LocalFd>, Report<crate::RecvFdError>> {
+    // SAFETY: `cmsg` is a valid `cmsghdr`; `CMSG_DATA` is valid for
+    // `cmsg_len` bytes and 8-byte aligned, satisfying i32's alignment.
+    let nfds = (unsafe { (*cmsg).cmsg_len }.saturating_sub(core::mem::size_of::<libc::cmsghdr>()))
+        / core::mem::size_of::<i32>();
+    // SAFETY: pointer is valid for `nfds` i32s within the `CMSG_DATA` region.
+    let fds = unsafe { core::slice::from_raw_parts(libc::CMSG_DATA(cmsg).cast::<i32>(), nfds) };
+    let Some((first, rest)) = fds.split_first() else {
+        return Ok(None);
+    };
+    // SAFETY: `first` comes from kernel `SCM_RIGHTS`;
+    // `MSG_CMSG_CLOEXEC` was set on `recvmsg`.
+    let fd = unsafe { LocalFd::from_raw(*first) };
+    for &raw_fd in rest {
+        // SAFETY: `raw_fd` is a valid fd from the kernel; close is safe.
+        crate::cvt(unsafe { libc::close(raw_fd) as isize })
+            .change_context(crate::RecvFdError::Never)?;
+    }
+    Ok(Some(fd))
 }
