@@ -8,6 +8,7 @@ use super::delegated;
 use super::exec_fd;
 use super::explain;
 use super::fdexplain;
+use super::printf;
 use super::resolve;
 use super::simple;
 
@@ -26,6 +27,7 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"pipe", delegated::handle_pipe),
     (b"mkdirat", delegated::handle_mkdirat),
     (b"openat2", delegated::handle_openat2),
+    (b"printf", printf::handle_printf),
     (b"renameat2", delegated::handle_renameat2),
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),

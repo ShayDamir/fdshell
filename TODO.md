@@ -13,7 +13,7 @@
 ### P1 — Major functionality gaps (moderate effort)
 
 - [ ] `test` / `[` builtin — file tests (`-f`, `-d`, `-e`), string tests (`=`, `!=`, `-z`, `-n`), numeric tests (`-eq`, `-lt`, `-gt`)
-- [ ] `printf` builtin — format string output
+- [x] `printf` builtin — format string output
 - [ ] `set --` — replace positional parameters
 - [ ] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
 - [ ] `${!indirect}` — indirect variable expansion
@@ -42,6 +42,10 @@
 - [ ] Process substitution (`<(cmd)`, `>(cmd)`) — fifo/pipe with /dev/fd path
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
 - [ ] History expansion (`!!`, `!echo`) — readline-style history
+
+## Refactoring
+
+- [ ] `parse/command.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
 
 ## Security / hardening
 

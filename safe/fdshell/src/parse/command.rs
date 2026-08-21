@@ -16,9 +16,11 @@ pub fn parse_command(
     set_at: Position,
 ) -> Result<CommandLine, Report<ParseError>> {
     let mut iter = tokens.iter().peekable();
+    let mut builtin_kw = false;
     let builtin = match iter.peek() {
         Some(t) if t.eq_bytes(b"builtin") => {
             iter.next();
+            builtin_kw = true;
             true
         }
         Some(t) => is_builtin(t),
@@ -33,7 +35,7 @@ pub fn parse_command(
     let mut args_fq = Vec::new();
     let mut fq_iter = fully_quoted.into_iter();
     fq_iter.next();
-    if builtin {
+    if builtin_kw {
         fq_iter.next();
     }
     for t in iter {

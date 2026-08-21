@@ -27,6 +27,7 @@ const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"mkdirat", b"Create directory"),
     (b"openat2", b"Open file"),
     (b"pipe", b"Create pipe"),
+    (b"printf", b"Format and print arguments"),
     (b"pwd", b"Print working directory"),
     (b"renameat2", b"Rename/move file"),
     (b"resolve", b"Resolve fd variables"),

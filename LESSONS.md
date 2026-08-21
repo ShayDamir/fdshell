@@ -82,6 +82,9 @@ To exercise a code path keyed on the invocation name — e.g. busybox-style buil
 ## Pre-writing more than 4 KiB into a fresh pipe can deadlock under system pipe-page pressure
 `test_read_line_from_fd_multi_chunk` wrote 8192 B + `\n` before any reader existed. Linux shrinks new pipes when the system exhausts `fs.pipe-user-pages-soft` (observed: other processes holding thousands of pipes shrank new ones to 8192 B), so the second write blocked forever in `anon_pipe_write` — a random-environment hang that looked like a mutant-test failure. Rule: a test that pre-fills a pipe must fit within the minimum guaranteed capacity (4096 B), or the writer must run in a forked child that blocks on `write` while the parent reads. The forked-writer form keeps payloads arbitrarily large.
 
+## Non-raw string literals in escape-handling tests pre-interpret the escapes under test
+Testing `printf` backslash escapes with `"a\nb"` fed the test *real* control bytes — rustc interpreted the escapes — so only the unknown-escape path (literal backslash-d) ever executed and seven `match` arms in `emit_escape` had zero coverage (mutants unkillable). Use raw strings (`r"\n"`) when the input must contain literal backslash sequences.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)
