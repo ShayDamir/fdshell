@@ -70,7 +70,7 @@ pub(super) fn origin_phrase(origin: &Origin) -> Result<ShortCStr, Report<Builtin
         Origin::CommandOutput => sys::format!("command output"),
         Origin::Read(n) => sys::format!("fd {n}"),
         Origin::Shell => sys::format!("shell default"),
-        Origin::Builtin(n) => sys::format!("{n}"),
+        Origin::Captured(n) => sys::format!("tag {n}"),
     };
     s.change_context(BuiltinError::Io)
 }

@@ -61,7 +61,7 @@ pub fn do_captures(
                 c.var,
                 FdVar {
                     fd,
-                    trace: Trace::at(c.set_at, Origin::Builtin(tag_name(rtag))),
+                    trace: Trace::at(c.set_at, Origin::Captured(tag_name(rtag))),
                 },
             ));
         }

@@ -1539,7 +1539,7 @@ fn assign_fd_copies_fd_variable() {
         ShortCStr::from(c"src"),
         FdVar {
             fd: dev_null,
-            trace: Trace::boundary(Origin::Builtin(ShortCStr::from(c"openat2"))),
+            trace: Trace::boundary(Origin::Captured(ShortCStr::from(c"openat2"))),
         },
     );
     run_one(b"%copy=%src", &cell).unwrap();
@@ -1703,14 +1703,14 @@ fn fdexplain_captured_fd_shows_tag_and_line() {
                     fd,
                     trace: Trace::at(
                         Position::new(3, 1),
-                        Origin::Builtin(ShortCStr::from(c"openat2")),
+                        Origin::Captured(ShortCStr::from(c"openat2")),
                     ),
                 },
             );
         }
         run_one(b"fdexplain %f", &cell).unwrap();
     });
-    assert_eq!(out, b"%f (set on line 3, column 1, from openat2)\n");
+    assert_eq!(out, b"%f (set on line 3, column 1, from tag openat2)\n");
 }
 
 #[test]
@@ -1724,14 +1724,14 @@ fn fdexplain_assigned_fd_is_transitive() {
                 ShortCStr::from(c"src"),
                 FdVar {
                     fd,
-                    trace: Trace::boundary(Origin::Builtin(ShortCStr::from(c"openat2"))),
+                    trace: Trace::boundary(Origin::Captured(ShortCStr::from(c"openat2"))),
                 },
             );
         }
         run_one(b"%copy=%src", &cell).unwrap();
         run_one(b"fdexplain %copy", &cell).unwrap();
     });
-    assert_eq!(out, b"%copy (set on line 1, column 1, from openat2)\n");
+    assert_eq!(out, b"%copy (set on line 1, column 1, from tag openat2)\n");
 }
 
 #[test]
@@ -1758,7 +1758,7 @@ fn fdexplain_end_to_end_capture_origin() {
         run_one(b"fdexplain %f", &cell).unwrap();
     });
     std::fs::remove_dir_all(&dir).unwrap();
-    assert_eq!(out, b"%f (set on line 1, column 1, from openat2)\n");
+    assert_eq!(out, b"%f (set on line 1, column 1, from tag openat2)\n");
 }
 
 #[test]
