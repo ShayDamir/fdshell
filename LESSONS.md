@@ -82,6 +82,9 @@ To exercise a code path keyed on the invocation name — e.g. busybox-style buil
 ## Pre-writing more than 4 KiB into a fresh pipe can deadlock under system pipe-page pressure
 `test_read_line_from_fd_multi_chunk` wrote 8192 B + `\n` before any reader existed. Linux shrinks new pipes when the system exhausts `fs.pipe-user-pages-soft` (observed: other processes holding thousands of pipes shrank new ones to 8192 B), so the second write blocked forever in `anon_pipe_write` — a random-environment hang that looked like a mutant-test failure. Rule: a test that pre-fills a pipe must fit within the minimum guaranteed capacity (4096 B), or the writer must run in a forked child that blocks on `write` while the parent reads. The forked-writer form keeps payloads arbitrarily large.
 
+## Positional parameters are 0-indexed; `set --` / `source` replace the whole deque
+`state.positional.get(0)` is `$0` (seeded with "sh"/"fdshell"), so `source f x y` makes `$0=x` in the sourced script — unlike bash, which keeps `$0` and sets `$1..$n`. This follows from the existing convention that `set -- a b` also replaces the deque including index 0; keep the two consistent rather than special-casing one.
+
 ## Non-raw string literals in escape-handling tests pre-interpret the escapes under test
 Testing `printf` backslash escapes with `"a\nb"` fed the test *real* control bytes — rustc interpreted the escapes — so only the unknown-escape path (literal backslash-d) ever executed and seven `match` arms in `emit_escape` had zero coverage (mutants unkillable). Use raw strings (`r"\n"`) when the input must contain literal backslash sequences.
 

@@ -43,6 +43,14 @@ pub enum CmdError {
     PatternRequired(&'static str),
     /// read failed
     Read,
+    /// source: missing file argument (usage: source <file> [args...])
+    SourceNoFile,
+    /// source: failed to open file
+    SourceOpen,
+    /// source: failed to read file
+    SourceRead,
+    /// source: file contains NUL bytes
+    SourceNul,
     /// 'break' is not inside a loop
     BreakOutsideLoop,
     /// 'continue' is not inside a loop

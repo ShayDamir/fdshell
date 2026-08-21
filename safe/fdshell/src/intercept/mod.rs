@@ -22,6 +22,7 @@ pub(crate) fn try_intercept(
         b"wait" => wait::run_wait(line, cmdline, cell).map(handled),
         b"export" => exports::run_export(line, cmdline, text, cell).map(handled),
         b"eval" => eval_cmd::run_eval(line, cmdline, text, cell).map(Some),
+        b"source" | b"." => source::run_source(line, cmdline, text, cell).map(Some),
         b"envfilter" => envfilter::run_envfilter(line, cmdline, cell).map(handled),
         b"shift" => shift::run_shift(line, cmdline, cell).map(handled),
         b"set" => set_cmd::run_set(line, cmdline, text, cell).map(handled),
@@ -49,5 +50,6 @@ mod exports;
 mod read;
 mod set_cmd;
 mod shift;
+mod source;
 mod validation;
 mod wait;
