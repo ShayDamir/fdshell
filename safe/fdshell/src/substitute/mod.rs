@@ -1,6 +1,7 @@
 mod arg;
 mod brace;
 mod dollar;
+mod param_op;
 mod paren;
 mod percent;
 mod resolve;
@@ -13,10 +14,16 @@ use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::ImportedStr;
 use sys::ShortCStr;
-use sys::fork_cell::ForkCell;
+use sys::fork_cell::{ForkCell, Ref};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
+
+pub(crate) fn borrow_state(
+    cell: &ForkCell<ShellState>,
+) -> Result<Ref<'_, ShellState>, Report<ResolveError>> {
+    cell.borrow().change_context(ResolveError::RefNotFound)
+}
 
 pub fn substitute_args(
     args: &[ShortCStr],

@@ -4,22 +4,28 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 
+/// Value of `name` in the shell's strings, then the inherited environment.
+pub(super) fn var_value<'a>(name: &'a ShortCStr, state: &'a ShellState) -> Option<&'a ShortCStr> {
+    state.strings.get(name).map(|v| &v.value).or_else(|| {
+        state
+            .environ
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v)
+    })
+}
+
 pub(super) fn resolve_var_name(
     name: &ShortCStr,
     state: &ShellState,
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
-    match state.strings.get(name) {
-        Some(val) => {
-            out.push(val);
+    match var_value(name, state) {
+        Some(val) => out.push(val),
+        None => {
+            out.push(c"$");
+            out.push(name);
         }
-        None => match state.environ.iter().find(|(k, _)| k == name) {
-            Some((_, val)) => out.push(val),
-            None => {
-                out.push(c"$");
-                out.push(name);
-            }
-        },
     }
     Ok(())
 }

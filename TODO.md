@@ -15,7 +15,7 @@
 - [x] `test` / `[` builtin — file tests (`-f`, `-d`, `-e`), string tests (`=`, `!=`, `-z`, `-n`), numeric tests (`-eq`, `-lt`, `-gt`)
 - [x] `printf` builtin — format string output
 - [x] `set --` — replace positional parameters
-- [ ] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
+- [x] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
 - [ ] `${!indirect}` — indirect variable expansion
 - [x] `exec` builtin — redirect-only mode (`exec N>&file`)
 - [ ] `eval` — parse and execute constructed string

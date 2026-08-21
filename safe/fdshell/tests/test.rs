@@ -88,6 +88,29 @@ fn exec_redirect_only_applies_to_shell() {
 }
 
 #[test]
+fn param_expansion_dash_and_plus_colon() {
+    let (out, _err, code) =
+        run(r#"X=; printf "${X:-d}"; X=hi; printf "${X:-d} ${X:+a}"; printf "${Y:+a}""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "dhi a");
+}
+
+#[test]
+fn param_expansion_assign_colon() {
+    let (out, _err, code) = run(r#"printf "${Z:=v} [$Z]""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "v [v]");
+}
+
+#[test]
+fn param_expansion_question_colon_fails_command() {
+    let (out, err, code) = run(r#"printf "a${NOPE:?boom}b""#);
+    assert_eq!(code, 1);
+    assert!(out.is_empty());
+    assert!(err.contains("NOPE: boom"), "got: {err}");
+}
+
+#[test]
 fn exec_with_command_and_redirect_still_execs() {
     let path =
         std::env::temp_dir().join(format!("fdshell_exec_cmd_redirect_{}", std::process::id()));

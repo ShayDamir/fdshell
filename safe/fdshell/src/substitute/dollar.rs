@@ -4,43 +4,51 @@ use error_stack::{Report, ResultExt};
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::ShortCStr;
+use sys::fork_cell::ForkCell;
 
 pub(crate) fn dollar_subst(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
-    state: &ShellState,
+    cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'$') => {
             peek.next();
+            let state = super::borrow_state(cell)?;
             core::write!(out, "{}", state.shell_pid).change_context(ResolveError::Never)?;
         }
         Some(b'!') => {
             peek.next();
+            let state = super::borrow_state(cell)?;
             if let Some(pid) = state.last_bg_pid {
                 core::write!(out, "{pid}").change_context(ResolveError::Never)?;
             }
         }
-        Some(b'{') => super::brace::handle_brace(peek, state, out)?,
+        Some(b'{') => super::brace::handle_brace(peek, cell, out)?,
         Some(b'#') => {
             peek.next();
+            let state = super::borrow_state(cell)?;
             core::write!(out, "{}", state.positional.len()).change_context(ResolveError::Never)?;
         }
         Some(b'@') | Some(b'*') => {
             peek.next();
-            join_positional(out, state)?;
+            let state = super::borrow_state(cell)?;
+            join_positional(out, &state)?;
         }
         Some(c @ b'0'..=b'9') => {
             // $0, $1, ... $N
             peek.next();
-            super::resolve::resolve_positional_index(c, peek, state, out)?;
+            let state = super::borrow_state(cell)?;
+            super::resolve::resolve_positional_index(c, peek, &state, out)?;
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = super::percent::collect_name(peek)?;
-            super::resolve::resolve_var_name(&name_scs, state, out)?;
+            let state = super::borrow_state(cell)?;
+            super::resolve::resolve_var_name(&name_scs, &state, out)?;
         }
         Some(b'?') => {
             peek.next();
+            let state = super::borrow_state(cell)?;
             let code = state.last_status.exit_code();
             core::write!(out, "{code}").change_context(ResolveError::Never)?;
         }

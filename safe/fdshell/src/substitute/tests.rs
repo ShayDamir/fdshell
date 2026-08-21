@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use alloc::{collections::VecDeque, format, vec::Vec};
+use alloc::{collections::VecDeque, format, vec, vec::Vec};
 
 use hashbrown::HashMap;
 
@@ -271,6 +271,188 @@ fn brace_hash_no_closing_is_literal() {
     let mut cache = HashMap::new();
     let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${#hello");
+}
+
+#[test]
+fn param_dash_colon_unset_gives_word() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${nope:-d}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"d");
+}
+
+#[test]
+fn param_dash_colon_set_gives_value() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${var:-d}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"value");
+}
+
+#[test]
+fn param_dash_colon_empty_gives_word() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${empty:-d}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"d");
+}
+
+#[test]
+fn param_plus_colon_set_gives_word() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${var:+alt}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"alt");
+}
+
+#[test]
+fn param_plus_colon_unset_gives_empty() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${nope:+alt}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn param_plus_colon_empty_gives_empty() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${empty:+alt}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn param_assign_colon_sets_and_reuses() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${Z:=v} [$Z]");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"v [v]");
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get(&ShortCStr::from(c"Z"))
+            .unwrap()
+            .value
+            .as_bytes()
+            .unwrap(),
+        b"v"
+    );
+}
+
+#[test]
+fn param_assign_colon_empty_resets_to_word() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${empty:=w}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"w");
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get(&ShortCStr::from(c"empty"))
+            .unwrap()
+            .value
+            .as_bytes()
+            .unwrap(),
+        b"w"
+    );
+}
+
+#[test]
+fn param_assign_colon_set_keeps_value() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${var:=other}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"value");
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get(&ShortCStr::from(c"var"))
+            .unwrap()
+            .value
+            .as_bytes()
+            .unwrap(),
+        b"value"
+    );
+}
+
+#[test]
+fn param_question_colon_set_gives_value() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${var:?err}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"value");
+}
+
+#[test]
+fn param_question_colon_unset_errors_with_word() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${nope:?boom}");
+    let mut cache = HashMap::new();
+    let err = substitute_arg(&arg, &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        err.current_context(),
+        crate::error::resolve::ResolveError::ParamNullOrNotSet { word, .. }
+            if word.eq_bytes(b"boom")
+    ));
+}
+
+#[test]
+fn param_question_colon_empty_errors() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"${empty:?boom}");
+    let mut cache = HashMap::new();
+    let err = substitute_arg(&arg, &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        err.current_context(),
+        crate::error::resolve::ResolveError::ParamNullOrNotSet { word, .. }
+            if word.eq_bytes(b"boom")
+    ));
+}
+
+#[test]
+fn param_question_colon_unset_uses_default_message() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${nope:?}");
+    let mut cache = HashMap::new();
+    let err = substitute_arg(&arg, &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        err.current_context(),
+        crate::error::resolve::ResolveError::ParamNullOrNotSet { word, .. }
+            if word.eq_bytes(b"parameter null or not set")
+    ));
+}
+
+#[test]
+fn param_operator_on_environ_var_counts_set() {
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().environ =
+        vec![(ShortCStr::from(c"ENVV"), ShortCStr::from(c"envval"))];
+    let arg = ShortCStr::from(c"${ENVV:-d}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"envval");
+}
+
+#[test]
+fn param_operator_scan_skips_non_operator_colon() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${var:x:-w}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"w");
 }
 
 #[test]

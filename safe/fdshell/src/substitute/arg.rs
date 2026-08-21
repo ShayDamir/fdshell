@@ -43,8 +43,7 @@ pub(crate) fn substitute_arg(
                     .change_context(ResolveError::NulByte)?;
             }
             b'$' => {
-                let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-                crate::substitute::dollar::dollar_subst(&mut peek, &state, &mut out)?;
+                crate::substitute::dollar::dollar_subst(&mut peek, cell, &mut out)?;
             }
             _ => out.push_byte(b).change_context(ResolveError::NulByte)?,
         }
