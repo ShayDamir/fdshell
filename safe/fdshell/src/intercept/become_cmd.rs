@@ -2,7 +2,7 @@ use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
 use core::fmt::Write;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 
 pub(crate) fn run_become(
@@ -18,7 +18,34 @@ pub(crate) fn run_exec(
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
+    if cmdline.args.is_empty() && !cmdline.redirects.is_empty() {
+        super::validation::check_captures_not_supported(line, "exec", &cmdline.captures)?;
+        apply_redirects(cmdline, cell)?;
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+        state.set_last_exit(0);
+        return Ok(true);
+    }
     run_replace(line, cmdline, "exec", cell)
+}
+
+/// `exec` with redirections and no command: apply them to the shell's own fds.
+fn apply_redirects(
+    cmdline: &CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<(), Report<CmdError>> {
+    let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
+        .change_context(CmdError::Redirect)?;
+    let resolved = {
+        let state = cell.borrow().change_context(CmdError::Never)?;
+        crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)
+            .change_context(CmdError::Redirect)?
+    };
+    for r in &resolved {
+        r.export().change_context(CmdError::Redirect)?;
+    }
+    // The cloned local fds in `resolved`/`opened` close on drop; the dup2'd
+    // targets stay open in the shell.
+    Ok(())
 }
 
 fn run_replace(
@@ -41,3 +68,6 @@ fn run_replace(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

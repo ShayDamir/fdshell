@@ -17,7 +17,7 @@
 - [x] `set --` — replace positional parameters
 - [ ] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
 - [ ] `${!indirect}` — indirect variable expansion
-- [ ] `exec` builtin — redirect-only mode (`exec N>&file`)
+- [x] `exec` builtin — redirect-only mode (`exec N>&file`)
 - [ ] `eval` — parse and execute constructed string
 - [ ] `source` / `.` — execute script file in current shell
 - [ ] Here-strings (`<<<"string"`) — pipe string into command's stdin

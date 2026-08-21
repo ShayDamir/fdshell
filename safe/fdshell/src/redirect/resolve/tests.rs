@@ -20,3 +20,15 @@ fn out_of_range_export_to_is_actionable_error() {
         OpenRedirectError::FdNumberOutOfRange
     ));
 }
+
+#[test]
+fn unknown_var_source_names_the_missing_variable() {
+    let state = ShellState::new();
+    let report = resolve_redirects(&[RedirectDef::var(99, c"nope")], &[], &state)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::VarNotFound { var } if var.eq_bytes(b"nope")
+    ));
+}

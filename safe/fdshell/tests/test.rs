@@ -78,6 +78,45 @@ fn set_dashdash_clears_positional() {
 }
 
 #[test]
+fn exec_redirect_only_applies_to_shell() {
+    let path = std::env::temp_dir().join(format!("fdshell_exec_redirect_{}", std::process::id()));
+    let script = format!("exec 1>{}; printf hi", path.display());
+    let (out, _err, code) = run(&script);
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "hi");
+}
+
+#[test]
+fn exec_with_command_and_redirect_still_execs() {
+    let path =
+        std::env::temp_dir().join(format!("fdshell_exec_cmd_redirect_{}", std::process::id()));
+    let script = format!("exec printf abc 1>{}", path.display());
+    let (out, _err, code) = run(&script);
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "abc");
+}
+
+#[test]
+fn exec_with_command_no_redirect_becomes() {
+    let (out, _err, code) = run("exec printf became");
+    assert_eq!(code, 0);
+    assert_eq!(out, "became");
+}
+
+#[test]
+fn exec_stdin_redirect_feeds_read() {
+    let in_path =
+        std::env::temp_dir().join(format!("fdshell_exec_stdin_in_{}", std::process::id()));
+    std::fs::write(&in_path, "abc\n").unwrap();
+    let script = format!("exec <{}; read v; printf \"$v\"", in_path.display());
+    let (out, _err, code) = run(&script);
+    assert_eq!(code, 0);
+    assert_eq!(out, "abc");
+}
+
+#[test]
 fn test_integer_comparison() {
     let (out, _err, code) = run("if test 10 -gt 9; then printf y; else printf n; fi");
     assert_eq!(code, 0);

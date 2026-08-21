@@ -18,7 +18,7 @@ pub fn resolve_redirects(
                 super::RedirectSource::Var(var) => state
                     .fds
                     .get(var)
-                    .ok_or(OpenRedirectError::Open)?
+                    .ok_or_else(|| OpenRedirectError::VarNotFound { var: var.clone() })?
                     .fd
                     .try_clone_above(
                         r.export_to
