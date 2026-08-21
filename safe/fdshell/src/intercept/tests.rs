@@ -49,7 +49,11 @@ fn try_intercept_cd_returns_true() {
     let line = make_line("cd", &["/tmp"]);
     let cmdline = make_cmdline(b"cd", &["/tmp"]);
     let cell = make_cell();
-    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -57,7 +61,11 @@ fn try_intercept_envfilter_returns_true() {
     let line = make_line("envfilter", &["--list"]);
     let cmdline = make_cmdline(b"envfilter", &["--list"]);
     let cell = make_cell();
-    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -65,7 +73,11 @@ fn try_intercept_shift_returns_true() {
     let line = make_line("shift", &[]);
     let cmdline = make_cmdline(b"shift", &[]);
     let cell = make_cell();
-    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -143,13 +155,88 @@ fn run_set_substitutes_variable_args() {
 }
 
 #[test]
+fn run_eval_executes_assignment_in_current_state() {
+    let cell = make_cell();
+    let cmdline = make_cmdline(b"eval", &[r"A=1"]);
+    let line = make_line("eval", &[r"A=1"]);
+    assert!(
+        eval_cmd::run_eval(&line, &cmdline, &text(&line), &cell)
+            .unwrap()
+            .is_none()
+    );
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get(&sys::ShortCStr::from(c"A"))
+            .unwrap()
+            .value
+            .as_bytes()
+            .unwrap(),
+        b"1"
+    );
+}
+
+#[test]
+fn run_eval_break_propagates_loop_control() {
+    let cell = make_cell();
+    let cmdline = make_cmdline(b"eval", &[r"break"]);
+    let line = make_line("eval", &[r"break"]);
+    let control = eval_cmd::run_eval(&line, &cmdline, &text(&line), &cell).unwrap();
+    assert!(matches!(
+        control,
+        Some(crate::loop_control::LoopControl::Break)
+    ));
+}
+
+#[test]
+fn run_eval_parse_error_propagates() {
+    let cell = make_cell();
+    let cmdline = make_cmdline(b"eval", &[r"if"]);
+    let line = make_line("eval", &[r"if"]);
+    assert!(eval_cmd::run_eval(&line, &cmdline, &text(&line), &cell).is_err());
+}
+
+#[test]
+fn try_intercept_eval_with_captures_returns_error() {
+    let line = make_line("eval", &["%tag", "%var"]);
+    let mut cmdline = make_cmdline(b"eval", &["%tag", "%var"]);
+    cmdline.captures = vec![Capture {
+        var: c"fd".into(),
+        tag: None,
+        force: false,
+        set_at: sys::Position::new(1, 1),
+    }];
+    let cell = make_cell();
+    assert!(try_intercept(&text(&line), &cmdline, &cell).is_err());
+}
+
+#[test]
+fn run_eval_empty_script_sets_zero_status() {
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.set_last_exit(7);
+    }
+    let cmdline = make_cmdline(b"eval", &[]);
+    assert!(
+        eval_cmd::run_eval(b"eval", &cmdline, &text(b"eval"), &cell)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
+}
+
+#[test]
 fn try_intercept_set_without_dashdash_returns_false() {
     for args in [&[] as &[&str], &["-e"] as &[&str], &["a", "b"] as &[&str]] {
         let cmdline = make_cmdline(b"set", args);
         let line = make_line("set", args);
         let cell = make_cell();
         assert!(
-            !try_intercept(&text(&line), &cmdline, &cell).unwrap(),
+            try_intercept(&text(&line), &cmdline, &cell)
+                .unwrap()
+                .is_none(),
             "set {args:?} should fall through to external lookup"
         );
     }
@@ -160,7 +247,11 @@ fn try_intercept_read_returns_true() {
     let line = make_line("read", &["var1"]);
     let cmdline = make_cmdline(b"read", &["-u", "0", "var1"]);
     let cell = make_cell();
-    assert!(try_intercept(&text(&line), &cmdline, &cell).unwrap());
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -168,7 +259,11 @@ fn try_intercept_unknown_returns_false() {
     let line = make_line("unknown_xyzzy", &[]);
     let cmdline = make_cmdline(b"unknown_xyzzy", &[]);
     let cell = make_cell();
-    assert!(!try_intercept(&text(&line), &cmdline, &cell).unwrap());
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

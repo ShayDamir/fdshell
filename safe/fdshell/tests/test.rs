@@ -88,6 +88,62 @@ fn exec_redirect_only_applies_to_shell() {
 }
 
 #[test]
+fn eval_assignment_persists_in_shell() {
+    let (out, _err, code) = run(r#"eval "X=1"; printf "$X""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "1");
+}
+
+#[test]
+fn eval_joins_args_with_spaces() {
+    let (out, err, code) = run("eval printf a b");
+    assert_eq!(code, 0, "args must be space-joined: {err}");
+    assert_eq!(out, "a");
+}
+
+#[test]
+fn eval_double_expansion() {
+    let (out, _err, code) = run(r#"S="printf hi"; eval "$S""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "hi");
+}
+
+#[test]
+fn eval_runs_conditional_and_keeps_status() {
+    let (out, _err, code) = run(r#"eval "true && printf both"; eval "test 1 -eq 2"; printf "s$?""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "boths1");
+}
+
+#[test]
+fn eval_parse_error_fails_script() {
+    let (_out, err, code) = run(r#"eval "if""#);
+    assert_ne!(code, 0);
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn eval_break_exits_loop() {
+    let (out, _err, code) = run(r#"while true; do eval "break"; done; printf done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "done");
+}
+
+#[test]
+fn eval_continue_skips_iteration() {
+    let (out, _err, code) = run(r#"for x in a b; do eval "continue"; printf X; done; printf done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "done");
+}
+
+#[test]
+fn eval_break_outside_loop_errors() {
+    let (_out, err, code) = run(r#"eval "break""#);
+    assert_ne!(code, 0);
+    assert!(!err.is_empty());
+}
+
+#[test]
 fn param_expansion_indirect() {
     let (out, _err, code) = run(r#"X=hello; n=X; printf "${!n}""#);
     assert_eq!(code, 0);

@@ -13,8 +13,8 @@ pub(crate) fn run_one(
     let parsed = crate::parse::parse(text).change_context(CmdError::Parse)?;
     match &parsed {
         crate::parse::ParsedLine::Cmd(cmdline) => {
-            if crate::intercept::try_intercept(text, cmdline, cell)? {
-                return Ok(None);
+            if let Some(control) = crate::intercept::try_intercept(text, cmdline, cell)? {
+                return Ok(control);
             }
             let outcome = crate::launch::launch(cell, cmdline).change_context(CmdError::Launch)?;
             {
