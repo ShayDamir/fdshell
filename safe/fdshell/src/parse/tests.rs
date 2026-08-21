@@ -239,6 +239,55 @@ fn test_path_redirect_append_named_fd() {
 }
 
 #[test]
+fn test_here_string_prefix_form() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<hello").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"hello")]);
+    assert!(cmd.args.is_empty());
+}
+
+#[test]
+fn test_here_string_keeps_unquoted_spaces() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<\"a b\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"a b")]);
+}
+
+#[test]
+fn test_here_string_bare_takes_next_token() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<< word").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"word")]);
+    assert!(cmd.args.is_empty());
+}
+
+#[test]
+fn test_here_string_bare_at_eof_is_empty_word() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"")]);
+}
+
+#[test]
+fn test_here_string_bare_before_redirect_is_error() {
+    assert!(parse(b"cat <<< >file").is_err());
+    assert!(parse(b"cat <<< %var").is_err());
+}
+
+#[test]
+fn test_here_string_quoted_is_plain_arg() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat \"<<<x\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args, vec![c"<<<x".into()]);
+}
+
+#[test]
 fn test_append_followed_by_percent_is_error() {
     assert!(parse(b"echo >>%var").is_err());
     assert!(parse(b"echo 2>>%var").is_err());

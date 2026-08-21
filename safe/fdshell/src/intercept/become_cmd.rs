@@ -35,11 +35,8 @@ fn apply_redirects(
 ) -> Result<(), Report<CmdError>> {
     let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
         .change_context(CmdError::Redirect)?;
-    let resolved = {
-        let state = cell.borrow().change_context(CmdError::Never)?;
-        crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)
-            .change_context(CmdError::Redirect)?
-    };
+    let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, cell)
+        .change_context(CmdError::Redirect)?;
     for r in &resolved {
         r.export().change_context(CmdError::Redirect)?;
     }

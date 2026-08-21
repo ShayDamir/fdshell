@@ -14,6 +14,7 @@ mod detect_keyword;
 mod elif;
 mod emit;
 pub(crate) mod for_block;
+mod here_string;
 pub(crate) mod if_block;
 mod line;
 mod pipeline;

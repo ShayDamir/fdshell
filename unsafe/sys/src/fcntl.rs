@@ -18,3 +18,4 @@ pub use libc::O_WRONLY;
 pub use libc::F_DUPFD_CLOEXEC;
 pub use libc::F_GETFD;
 pub use libc::FD_CLOEXEC;
+pub use libc::SEEK_SET;

@@ -4,6 +4,7 @@ use crate::parse::CommandLine;
 use crate::parse::bg_redirect;
 use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::builtin::is_builtin;
+use crate::parse::classify::parse_here_string;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
@@ -38,7 +39,7 @@ pub fn parse_command(
     if builtin_kw {
         fq_iter.next();
     }
-    for t in iter {
+    while let Some(t) = iter.next() {
         let fq = fq_iter.next().unwrap_or(false);
         if t.eq_bytes(b"&") {
             bail!(ParseError::UnexpectedChar { ch: b'&' });
@@ -61,7 +62,9 @@ pub fn parse_command(
                 }
                 Err(e) => return Err(e),
             }
-        } else if let Some(r) = crate::parse::classify::parse_redirect(t)? {
+        } else if let Some(r) = parse_here_string(t, fq, &mut iter, &mut fq_iter)? {
+            bg_redirect::insert_redirect(&mut redirects, r)?;
+        } else if let Some(r) = crate::parse::classify::parse_redirect(t, fq)? {
             bg_redirect::insert_redirect(&mut redirects, r)?;
         } else {
             args.push(t.clone());

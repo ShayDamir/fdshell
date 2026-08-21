@@ -43,6 +43,15 @@ impl RedirectDef {
         }
     }
 
+    /// Here-string: the expanded `word` becomes the stdin of the command.
+    pub fn here_string(word: impl Into<ShortCStr>) -> Self {
+        RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::here_string(word),
+        }
+    }
+
     pub fn resolve(&self, local: super::LocalFd) -> super::Redirect {
         super::Redirect {
             export_to: self.export_to,

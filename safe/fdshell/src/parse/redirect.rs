@@ -42,7 +42,10 @@ fn parse_path_redirect(
     }
 }
 
-pub fn parse_redirect(s: &ShortCStr) -> Result<Option<RedirectDef>, Report<ParseError>> {
+pub fn parse_redirect(s: &ShortCStr, fq: bool) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    if fq {
+        return Ok(None);
+    }
     let bytes = s.as_bytes().change_context(ParseError::Never)?;
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,

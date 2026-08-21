@@ -28,6 +28,17 @@ pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
     }
 }
 
+/// Like [`cvt`], but for libc calls that return a 64-bit value (e.g. `off_t`).
+pub fn cvt64(ret: i64) -> Result<i64, SyscallError> {
+    if ret == -1 {
+        // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
+        // guaranteed by the C runtime. Only called immediately after a failed libc call.
+        unsafe { Err((*libc::__errno_location()).into()) }
+    } else {
+        Ok(ret)
+    }
+}
+
 /// Helper to create static ImportedFd instances from raw fds.
 ///
 /// # Safety
@@ -63,6 +74,7 @@ pub mod importedstr;
 pub mod iovec;
 pub mod localfd;
 pub mod localfd_error;
+pub mod memfd;
 pub mod mkdirat;
 pub mod net;
 pub mod openat2;

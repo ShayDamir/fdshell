@@ -17,13 +17,8 @@ pub fn execute(
 ) -> Result<i32, Report<ChildProcessError>> {
     let opened = crate::redirect::open_redirect_files(redirects)
         .change_context(ChildProcessError::ExportFailed)?;
-    let resolved = {
-        let state = cell
-            .borrow()
-            .change_context(ChildProcessError::ExportFailed)?;
-        crate::redirect::resolve_redirects(redirects, &opened, &state)
-            .change_context(ChildProcessError::ExportFailed)?
-    };
+    let resolved = crate::redirect::resolve_redirects(redirects, &opened, cell)
+        .change_context(ChildProcessError::ExportFailed)?;
 
     for r in &resolved {
         r.export().change_context(ChildProcessError::ExportFailed)?;

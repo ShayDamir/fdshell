@@ -9,6 +9,12 @@ pub(crate) enum OpenRedirectError {
     VarNotFound { var: sys::ShortCStr },
     /// file descriptor number is out of range
     FdNumberOutOfRange,
+    /// here-string: failed to expand the word
+    HereStringExpand,
+    /// here-string: failed to create the stdin file
+    HereStringCreate,
+    /// internal invariant violated
+    Never,
 }
 
 impl core::error::Error for OpenRedirectError {}

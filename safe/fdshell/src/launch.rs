@@ -20,13 +20,8 @@ pub fn launch(
 
     let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
         .change_context(crate::error::launch::LaunchError::Redirect)?;
-    let resolved = {
-        let state = cell
-            .borrow_mut()
-            .change_context(crate::error::launch::LaunchError::Borrow)?;
-        crate::redirect::resolve_redirects(&cmdline.redirects, &opened, &state)
-            .change_context(crate::error::launch::LaunchError::Redirect)?
-    };
+    let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, cell)
+        .change_context(crate::error::launch::LaunchError::Redirect)?;
 
     let (capture_fd, child_fd) = if cmdline.captures.is_empty() {
         (None, None)

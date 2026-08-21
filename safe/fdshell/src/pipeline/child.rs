@@ -43,13 +43,8 @@ pub fn run_child(
     let opened = crate::redirect::open_redirect_files(&cmd_data.redirects)
         .change_context(ChildProcessError::RedirectFailed)?;
 
-    let file_redirects = {
-        let state = cell
-            .borrow()
-            .change_context(ChildProcessError::BorrowFailed)?;
-        crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, &state)
-            .change_context(ChildProcessError::RedirectFailed)?
-    };
+    let file_redirects = crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, cell)
+        .change_context(ChildProcessError::RedirectFailed)?;
     redirects.extend(file_redirects);
 
     let child_sock = capture_pairs

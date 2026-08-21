@@ -20,7 +20,7 @@
 - [x] `exec` builtin — redirect-only mode (`exec N>&file`)
 - [x] `eval` — parse and execute constructed string
 - [x] `source` / `.` — execute script file in current shell
-- [ ] Here-strings (`<<<"string"`) — pipe string into command's stdin
+- [x] Here-strings (`<<<"string"`) — pipe string into command's stdin
 - [ ] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
 - [ ] `<>` — open file for read/write
 - [ ] `/dev/fd/N` — automatic fd path translation
@@ -45,7 +45,7 @@
 
 ## Refactoring
 
-- [ ] `parse/command.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
+- [ ] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
 - [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
 - [ ] `parse/token.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
 - [ ] `parse/mod.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
