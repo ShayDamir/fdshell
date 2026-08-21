@@ -15,6 +15,12 @@ pub(crate) fn handle_builtin_error(
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }
+        BuiltinError::TestUsage
+        | BuiltinError::TestNonInteger
+        | BuiltinError::TestMissingCloseBracket => {
+            let _ = writeln!(crate::io::Stderr, "{report:?}");
+            Ok(2)
+        }
         BuiltinError::Io => Err(report.change_context(ChildProcessError::BuiltinExecutionFailed)),
         BuiltinError::Syscall => {
             if let Some(e) = report.downcast_ref::<sys::SyscallError>() {

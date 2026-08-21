@@ -22,6 +22,12 @@ pub enum BuiltinError {
     Io,
     /// failed to send fd to parent shell
     SendFdFailed,
+    /// test: malformed expression (expected a string, `OP ARG`, or `ARG OP ARG`)
+    TestUsage,
+    /// test: operand is not an integer
+    TestNonInteger,
+    /// test: missing closing ']'
+    TestMissingCloseBracket,
     /// impossible error state (should never occur)
     Never,
 }

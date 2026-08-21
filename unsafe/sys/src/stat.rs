@@ -2,6 +2,7 @@ use crate::LocalFd;
 
 pub const S_IFMT: u32 = libc::S_IFMT;
 pub const S_IFDIR: u32 = libc::S_IFDIR;
+pub const S_IFREG: u32 = libc::S_IFREG;
 
 // PartialEq + Debug needed by integration test `assert_eq!(before, after)` in
 // `safe/builtins/tests/openat2.rs` (separate compilation unit — cfg_attr won't help).

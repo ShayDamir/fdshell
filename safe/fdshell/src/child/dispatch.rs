@@ -11,6 +11,7 @@ use super::fdexplain;
 use super::printf;
 use super::resolve;
 use super::simple;
+use super::test;
 
 type Handler =
     fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32, Report<BuiltinError>>;
@@ -32,6 +33,8 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),
     (b"resolve", resolve::handle_resolve),
+    (b"test", test::handle_test),
+    (b"[", test::handle_test),
 ];
 
 pub(crate) fn is_dispatched(name: &ShortCStr) -> bool {

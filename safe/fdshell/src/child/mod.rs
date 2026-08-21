@@ -11,6 +11,7 @@ mod printf;
 mod resolve;
 mod run;
 mod simple;
+mod test;
 use crate::parse::CommandLine;
 use sys::ShortCStr;
 

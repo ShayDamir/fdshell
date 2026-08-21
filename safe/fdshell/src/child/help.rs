@@ -31,6 +31,7 @@ const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"pwd", b"Print working directory"),
     (b"renameat2", b"Rename/move file"),
     (b"resolve", b"Resolve fd variables"),
+    (b"test", b"Test expression (also '[')"),
     (b"true", b"Exit with success status"),
 ];
 
