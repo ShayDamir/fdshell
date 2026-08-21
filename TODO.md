@@ -16,7 +16,7 @@
 - [x] `printf` builtin — format string output
 - [x] `set --` — replace positional parameters
 - [x] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
-- [ ] `${!indirect}` — indirect variable expansion
+- [x] `${!indirect}` — indirect variable expansion
 - [x] `exec` builtin — redirect-only mode (`exec N>&file`)
 - [ ] `eval` — parse and execute constructed string
 - [ ] `source` / `.` — execute script file in current shell

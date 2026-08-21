@@ -88,6 +88,13 @@ fn exec_redirect_only_applies_to_shell() {
 }
 
 #[test]
+fn param_expansion_indirect() {
+    let (out, _err, code) = run(r#"X=hello; n=X; printf "${!n}""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "hello");
+}
+
+#[test]
 fn param_expansion_dash_and_plus_colon() {
     let (out, _err, code) =
         run(r#"X=; printf "${X:-d}"; X=hi; printf "${X:-d} ${X:+a}"; printf "${Y:+a}""#);

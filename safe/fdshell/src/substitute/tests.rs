@@ -238,6 +238,54 @@ fn brace_substitutes_matching_var() {
 }
 
 #[test]
+fn brace_bang_indirect_expands_target() {
+    let cell = dummy_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"p"), is_(c"var"));
+    let arg = ShortCStr::from(c"${!p}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"value");
+}
+
+#[test]
+fn brace_bang_indirect_unset_name_is_literal() {
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${!nope}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"${!nope}");
+}
+
+#[test]
+fn brace_bang_indirect_unset_target_shows_target() {
+    let cell = dummy_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"q"), is_(c"missing"));
+    let arg = ShortCStr::from(c"${!q}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"${missing}");
+}
+
+#[test]
+fn brace_bang_indirect_empty_target_is_empty() {
+    let cell = dummy_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"e"), is_(c"empty"));
+    let arg = ShortCStr::from(c"${!e}");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"");
+}
+
+#[test]
 fn brace_unknown_var_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${nope}");

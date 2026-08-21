@@ -41,19 +41,17 @@ pub(crate) fn handle_brace(
         out.push(&content);
         return Ok(());
     }
-    match super::param_op::split_operator(&content) {
-        Some((name, op, word)) => super::param_op::apply_param_op(&name, op, &word, cell, out)?,
-        None => {
-            let state = super::borrow_state(cell)?;
-            match super::resolve::var_value(&content, &state) {
-                Some(val) => out.push(val),
-                None => {
-                    out.push(c"${");
-                    out.push(&content);
-                    out.push(c"}");
-                }
-            }
-        }
+    if let Some((name, op, word)) = super::param_op::split_operator(&content) {
+        return super::param_op::apply_param_op(&name, op, &word, cell, out);
+    }
+    let state = super::borrow_state(cell)?;
+    if let Some(name) = content.strip_prefix(b"!") {
+        super::resolve::resolve_indirect(&name, &state, out);
+        return Ok(());
+    }
+    match super::resolve::var_value(&content, &state) {
+        Some(val) => out.push(val),
+        None => super::resolve::literal_braced(false, &content, out),
     }
     Ok(())
 }

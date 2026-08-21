@@ -15,6 +15,27 @@ pub(super) fn var_value<'a>(name: &'a ShortCStr, state: &'a ShellState) -> Optio
     })
 }
 
+/// Push an unresolved `${name}` — or `${!name}` — as literal text.
+pub(super) fn literal_braced(bang: bool, name: &ShortCStr, out: &mut ShortCStr) {
+    out.push(c"${");
+    if bang {
+        out.push(c"!");
+    }
+    out.push(name);
+    out.push(c"}");
+}
+
+/// Indirect reference: expand `name`, then expand its value as a variable name.
+pub(super) fn resolve_indirect(name: &ShortCStr, state: &ShellState, out: &mut ShortCStr) {
+    match var_value(name, state) {
+        Some(target) => match var_value(target, state) {
+            Some(val) => out.push(val),
+            None => literal_braced(false, target, out),
+        },
+        None => literal_braced(true, name, out),
+    }
+}
+
 pub(super) fn resolve_var_name(
     name: &ShortCStr,
     state: &ShellState,
