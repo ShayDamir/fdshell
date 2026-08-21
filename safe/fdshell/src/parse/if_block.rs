@@ -1,3 +1,4 @@
+use super::Token;
 use super::semi::find_preceded_by_semi;
 use super::semi::trim_semi;
 use super::semi::verbatim;
@@ -5,7 +6,6 @@ use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
 use sys::ScriptText;
-use sys::ShortCStr;
 
 pub struct ElifArm {
     pub cond: ScriptText,
@@ -20,11 +20,11 @@ pub struct IfBlock {
 }
 
 pub(crate) fn tokens_to_if(
-    tokens: &[(ShortCStr, usize, bool)],
+    tokens: &[Token],
     text: &ScriptText,
 ) -> Result<IfBlock, Report<ParseError>> {
     ensure!(
-        tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")),
+        tokens.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"if")),
         ParseError::MalformedIfBlock
     );
 
@@ -36,7 +36,7 @@ pub(crate) fn tokens_to_if(
 
     let fi_idx = tokens.len() - 1;
     ensure!(
-        tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"fi")),
+        tokens.last().is_some_and(|(t, _, _, _)| t.eq_bytes(b"fi")),
         ParseError::MissingFi
     );
 

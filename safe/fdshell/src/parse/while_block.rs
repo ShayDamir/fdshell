@@ -1,8 +1,8 @@
+use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, verbatim};
 use error_stack::{Report, ensure};
 use sys::ScriptText;
-use sys::ShortCStr;
 
 #[cfg_attr(test, derive(Debug))]
 pub struct LoopBlock {
@@ -14,11 +14,14 @@ pub type WhileBlock = LoopBlock;
 pub type UntilBlock = LoopBlock;
 
 pub(crate) fn tokens_to_loop(
-    tokens: &[(ShortCStr, usize, bool)],
+    tokens: &[Token],
     keyword: &[u8],
     text: &ScriptText,
 ) -> Result<LoopBlock, Report<ParseError>> {
-    if !tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(keyword)) {
+    if !tokens
+        .first()
+        .is_some_and(|(t, _, _, _)| t.eq_bytes(keyword))
+    {
         return Err(ParseError::Never.into());
     }
 
@@ -27,7 +30,9 @@ pub(crate) fn tokens_to_loop(
 
     let done_idx = tokens.len() - 1;
     ensure!(
-        tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"done")),
+        tokens
+            .last()
+            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
     );
 

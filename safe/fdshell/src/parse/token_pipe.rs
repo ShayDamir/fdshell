@@ -1,3 +1,4 @@
+use super::Token;
 use crate::error::parse::ParseError;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
@@ -6,7 +7,7 @@ use super::emit::emit_token;
 
 /// Handle pipe character `|`. Returns whether a pipe token was emitted.
 pub(crate) fn handle_pipe(
-    tokens: &mut alloc::vec::Vec<(ShortCStr, usize, bool)>,
+    tokens: &mut alloc::vec::Vec<Token>,
     cur: &mut ShortCStr,
     token_start: usize,
     token_fully_quoted: bool,
@@ -18,8 +19,8 @@ pub(crate) fn handle_pipe(
             .change_context(ParseError::InvalidChar { ch: 0 })?;
         Ok(false)
     } else {
-        emit_token(tokens, cur, token_start, token_fully_quoted);
-        tokens.push((c"|".into(), pos - 1, false));
+        emit_token(tokens, cur, token_start, pos - 1, token_fully_quoted);
+        tokens.push((c"|".into(), pos - 1, pos, false));
         Ok(true)
     }
 }

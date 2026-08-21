@@ -1,5 +1,6 @@
 mod extract;
 
+use super::Token;
 use super::semi::{trim_semi, try_join};
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
@@ -11,7 +12,7 @@ pub struct CaseClause {
     pub body: ScriptText,
 }
 pub fn parse_clauses(
-    tokens: &[(ShortCStr, usize, bool)],
+    tokens: &[Token],
     start: usize,
     esac_idx: usize,
     text: &ScriptText,
@@ -19,7 +20,7 @@ pub fn parse_clauses(
     let mut clauses = Vec::new();
     let mut pos = start;
     while pos < esac_idx {
-        if tokens.get(pos).is_some_and(|(t, _, _)| t.eq_bytes(b";")) {
+        if tokens.get(pos).is_some_and(|(t, _, _, _)| t.eq_bytes(b";")) {
             pos += 1;
             continue;
         }
@@ -34,7 +35,7 @@ pub fn parse_clauses(
 /// Collect the `|`-separated patterns of one clause, up to and including `)`.
 /// Advances `pos` past the closing paren.
 fn collect_patterns(
-    tokens: &[(ShortCStr, usize, bool)],
+    tokens: &[Token],
     pos: &mut usize,
     esac_idx: usize,
 ) -> Result<Vec<ShortCStr>, Report<ParseError>> {

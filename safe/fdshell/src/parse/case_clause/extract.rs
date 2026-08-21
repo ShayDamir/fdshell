@@ -1,13 +1,14 @@
+use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::semi::{trim_semi, verbatim};
 use error_stack::Report;
-use sys::{ScriptText, ShortCStr};
+use sys::ScriptText;
 
 /// Extract one clause body starting at `body_start`, up to the `;;`
 /// clause separator or `esac_idx`. Returns the body text and the
 /// position to resume clause scanning from.
 pub(crate) fn body(
-    tokens: &[(ShortCStr, usize, bool)],
+    tokens: &[Token],
     text: &ScriptText,
     body_start: usize,
     esac_idx: usize,

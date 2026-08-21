@@ -56,6 +56,14 @@ fn test_string_equality_with_variables() {
 }
 
 #[test]
+fn test_string_empty_with_variables() {
+    let (out, _err, code) =
+        run("X=; if test -z \"$X\"; then printf a; fi; X=hi; if test -n \"$X\"; then printf b; fi");
+    assert_eq!(code, 0);
+    assert_eq!(out, "ab");
+}
+
+#[test]
 fn test_integer_comparison() {
     let (out, _err, code) = run("if test 10 -gt 9; then printf y; else printf n; fi");
     assert_eq!(code, 0);

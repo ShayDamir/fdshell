@@ -1,3 +1,4 @@
+use super::Token;
 use super::case_clause;
 use super::semi::{trim_semi, try_join};
 use crate::error::parse::ParseError;
@@ -12,21 +13,25 @@ pub struct CaseBlock {
 }
 
 pub(crate) fn tokens_to_case(
-    tokens: &[(ShortCStr, usize, bool)],
+    tokens: &[Token],
     text: &ScriptText,
 ) -> Result<CaseBlock, Report<ParseError>> {
     ensure!(
-        tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"case")),
+        tokens
+            .first()
+            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"case")),
         ParseError::MalformedCaseBlock
     );
 
     let in_idx = (1..tokens.len())
-        .find(|&i| tokens.get(i).is_some_and(|(t, _, _)| t.eq_bytes(b"in")))
+        .find(|&i| tokens.get(i).is_some_and(|(t, _, _, _)| t.eq_bytes(b"in")))
         .ok_or(ParseError::CaseMissingIn)?;
 
     let esac_idx = tokens.len() - 1;
     ensure!(
-        tokens.last().is_some_and(|(t, _, _)| t.eq_bytes(b"esac")),
+        tokens
+            .last()
+            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"esac")),
         ParseError::CaseMissingEsac
     );
 

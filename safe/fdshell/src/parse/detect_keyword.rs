@@ -1,11 +1,9 @@
+use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::line::ParsedLine;
 use error_stack::{Report, ResultExt, bail};
-use sys::ShortCStr;
 
-pub(crate) fn detect_unset(
-    tokens: &[(ShortCStr, usize, bool)],
-) -> Result<Option<ParsedLine>, Report<ParseError>> {
+pub(crate) fn detect_unset(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let target = tokens
         .get(1)
         .ok_or(ParseError::ExpectedVariableNameAfterUnset)?;
@@ -15,11 +13,9 @@ pub(crate) fn detect_unset(
     bail!(ParseError::VariableMustStartWithPercent)
 }
 
-pub(crate) fn detect_umask(
-    tokens: &[(ShortCStr, usize, bool)],
-) -> Result<Option<ParsedLine>, Report<ParseError>> {
+pub(crate) fn detect_umask(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let mask = match tokens.get(1) {
-        Some((arg, _, _)) => {
+        Some((arg, _, _, _)) => {
             let s = arg.as_bytes().change_context(ParseError::Never)?;
             let s = core::str::from_utf8(s).change_context(ParseError::InvalidChar { ch: 0 })?;
             let s = s.strip_prefix("0o").unwrap_or(s);
@@ -33,11 +29,9 @@ pub(crate) fn detect_umask(
     Ok(Some(ParsedLine::Umask(mask)))
 }
 
-pub(crate) fn detect_control(
-    tokens: &[(ShortCStr, usize, bool)],
-) -> Result<Option<ParsedLine>, Report<ParseError>> {
+pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
-        Some((t, _, _)) => t,
+        Some((t, _, _, _)) => t,
         None => return Ok(None),
     };
 

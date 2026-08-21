@@ -71,9 +71,20 @@ fn integer_comparisons() {
 }
 
 #[test]
+fn string_empty_tests() {
+    let state = ShellState::new();
+    assert_eq!(run(&["-z", ""], &state).unwrap(), 0);
+    assert_eq!(run(&["-z", "x"], &state).unwrap(), 1);
+    assert_eq!(run(&["-n", ""], &state).unwrap(), 1);
+    assert_eq!(run(&["-n", "x"], &state).unwrap(), 0);
+}
+
+#[test]
 fn file_test_rejects_unknown_unary_op() {
     let state = ShellState::new();
-    let e = super::ops::file_test(b"-z", c"/tmp", None, &state).unwrap_err();
+    let e = super::ops::file_test(b"-r", c"/tmp", None, &state).unwrap_err();
+    assert!(matches!(e.current_context(), BuiltinError::Never));
+    let e = super::ops::string_test(b"-f", c"x").unwrap_err();
     assert!(matches!(e.current_context(), BuiltinError::Never));
 }
 

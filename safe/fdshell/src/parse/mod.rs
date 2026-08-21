@@ -33,12 +33,16 @@ use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::ShortCStr;
 
-fn tokens_only(tokens: &[(ShortCStr, usize, bool)]) -> Vec<ShortCStr> {
-    tokens.iter().map(|(t, _, _)| t.clone()).collect()
+/// A token: its unquoted word, the byte range `(start, end)` of its raw text,
+/// and whether it was fully quoted.
+pub(crate) type Token = (ShortCStr, usize, usize, bool);
+
+fn tokens_only(tokens: &[Token]) -> Vec<ShortCStr> {
+    tokens.iter().map(|(t, _, _, _)| t.clone()).collect()
 }
 
-fn fully_quoted_only(tokens: &[(ShortCStr, usize, bool)]) -> Vec<bool> {
-    tokens.iter().map(|(_, _, fq)| *fq).collect()
+fn fully_quoted_only(tokens: &[Token]) -> Vec<bool> {
+    tokens.iter().map(|(_, _, _, fq)| *fq).collect()
 }
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
@@ -54,30 +58,30 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
         return Ok(pl);
     }
 
-    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"case")) {
+    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"case")) {
         return Ok(ParsedLine::Case(case_block::tokens_to_case(&raw, text)?));
     }
 
-    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"if")) {
+    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"if")) {
         return Ok(ParsedLine::If(if_block::tokens_to_if(&raw, text)?));
     }
 
-    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"for")) {
+    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"for")) {
         return Ok(ParsedLine::For(for_block::tokens_to_for(&raw, text)?));
     }
 
-    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"while")) {
+    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"while")) {
         return Ok(ParsedLine::While(while_block::tokens_to_loop(
             &raw, b"while", text,
         )?));
     }
-    if raw.first().is_some_and(|(t, _, _)| t.eq_bytes(b"until")) {
+    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"until")) {
         return Ok(ParsedLine::Until(while_block::tokens_to_loop(
             &raw, b"until", text,
         )?));
     }
 
-    if raw.iter().any(|(t, _, _)| t.eq_bytes(b"|")) {
+    if raw.iter().any(|(t, _, _, _)| t.eq_bytes(b"|")) {
         return pipeline::parse_pipeline(&raw, text.start);
     }
 

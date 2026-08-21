@@ -46,6 +46,9 @@
 ## Refactoring
 
 - [ ] `parse/command.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
+- [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
+- [ ] `parse/token.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
+- [ ] `parse/mod.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
 
 ## Security / hardening
 

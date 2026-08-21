@@ -1,14 +1,12 @@
+use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::detect_keyword;
 use crate::parse::line::ParsedLine;
 use error_stack::Report;
-use sys::ShortCStr;
 
-pub(crate) fn detect(
-    tokens: &[(ShortCStr, usize, bool)],
-) -> Result<Option<ParsedLine>, Report<ParseError>> {
+pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
-        Some((t, _, _)) => t,
+        Some((t, _, _, _)) => t,
         None => return Ok(None),
     };
 

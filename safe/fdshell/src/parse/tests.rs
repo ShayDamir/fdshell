@@ -553,7 +553,7 @@ fn tokenize_if_newline_separators() {
     ];
     let expected_pos: &[usize] = &[0, 3, 7, 8, 12, 13, 19, 24, 25];
     assert_eq!(tokens.len(), expected.len());
-    for (i, (token, pos, _)) in tokens.iter().enumerate() {
+    for (i, (token, pos, _, _)) in tokens.iter().enumerate() {
         assert_eq!(token.as_bytes().unwrap(), expected[i]);
         assert_eq!(*pos, expected_pos[i]);
     }
@@ -805,7 +805,11 @@ fn while_parse_newline_separator() {
 #[test]
 fn while_not_starting_with_while_is_a_cmd() {
     let tokens = token::tokenize(b"while_true; do body; done").unwrap();
-    assert!(!tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"while")));
+    assert!(
+        !tokens
+            .first()
+            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"while"))
+    );
 }
 
 #[test]
@@ -868,7 +872,11 @@ fn until_parse_newline_separator() {
 #[test]
 fn until_not_starting_with_until_is_a_cmd() {
     let tokens = token::tokenize(b"until_true; do body; done").unwrap();
-    assert!(!tokens.first().is_some_and(|(t, _, _)| t.eq_bytes(b"until")));
+    assert!(
+        !tokens
+            .first()
+            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"until"))
+    );
 }
 
 #[test]
@@ -1092,7 +1100,7 @@ fn if_no_semi_before_fi_body_is_empty() {
 #[test]
 fn parse_elifs_empty_pairs() {
     use super::elif::parse_elifs;
-    let tokens: Vec<(sys::ShortCStr, usize, bool)> = vec![];
+    let tokens: Vec<Token> = vec![];
     let pairs: Vec<(usize, usize)> = vec![];
     let result = parse_elifs(&tokens, &pairs, None, 0, &stext(b""));
     assert!(result.is_ok());
@@ -1442,6 +1450,9 @@ fn tokenize_pipe_position() {
     assert_eq!(tokens[1].1, 1);
     assert_eq!(tokens[2].0, c"b".into());
     assert_eq!(tokens[2].1, 0);
+    assert_eq!(tokens[0].2, 1, "pre-pipe token ends at the '|'");
+    assert_eq!(tokens[1].2, 2, "pipe token end");
+    assert_eq!(tokens[2].2, 3, "final token end");
 }
 
 #[test]
@@ -1457,7 +1468,7 @@ fn tokenize_caret_pipe_position() {
 #[test]
 fn tokenize_close_paren_position() {
     let tokens = token::tokenize(b"case x in a) echo one;; esac").unwrap();
-    let paren_token = tokens.iter().find(|(t, _, _)| t.eq_bytes(b")")).unwrap();
+    let paren_token = tokens.iter().find(|(t, _, _, _)| t.eq_bytes(b")")).unwrap();
     assert_eq!(paren_token.0, c")".into());
     assert_eq!(paren_token.1, 11);
 }
@@ -1485,6 +1496,18 @@ fn tokenize_comment_with_trailing_token_position() {
     assert_eq!(tokens[0].1, 0);
     assert_eq!(tokens[1].0, c"b".into());
     assert_eq!(tokens[1].1, 12);
+}
+
+#[test]
+fn tokenize_token_ending_at_comment_end_position() {
+    let tokens = token::tokenize(b"ab# c").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"ab".into());
+    assert_eq!(tokens[0].1, 0);
+    assert_eq!(
+        tokens[0].2, 2,
+        "end must be at the '#', not after the comment"
+    );
 }
 
 #[test]
@@ -1547,11 +1570,11 @@ fn tokenize_fully_quoted_dollar_at_end() {
     let tokens = token::tokenize(b"printf \"%s\\n\" \"$@\"").unwrap();
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].0, c"printf".into());
-    assert!(!tokens[0].2);
+    assert!(!tokens[0].3);
     assert_eq!(tokens[1].0, c"%sn".into());
-    assert!(tokens[1].2);
+    assert!(tokens[1].3);
     assert_eq!(tokens[2].0, c"$@".into());
-    assert!(tokens[2].2);
+    assert!(tokens[2].3);
 }
 
 #[test]
@@ -1559,13 +1582,13 @@ fn tokenize_fully_quoted_dollar_at_middle() {
     let tokens = token::tokenize(b"printf \"%s\\n\" \"$@\" extra").unwrap();
     assert_eq!(tokens.len(), 4);
     assert_eq!(tokens[0].0, c"printf".into());
-    assert!(!tokens[0].2);
+    assert!(!tokens[0].3);
     assert_eq!(tokens[1].0, c"%sn".into());
-    assert!(tokens[1].2);
+    assert!(tokens[1].3);
     assert_eq!(tokens[2].0, c"$@".into());
-    assert!(tokens[2].2);
+    assert!(tokens[2].3);
     assert_eq!(tokens[3].0, c"extra".into());
-    assert!(!tokens[3].2);
+    assert!(!tokens[3].3);
 }
 
 #[test]
@@ -1573,7 +1596,7 @@ fn tokenize_fully_quoted_dollar_star() {
     let tokens = token::tokenize(b"$*").unwrap();
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0, c"$*".into());
-    assert!(!tokens[0].2);
+    assert!(!tokens[0].3);
 }
 
 #[test]
@@ -1581,7 +1604,7 @@ fn tokenize_fully_quoted_literal() {
     let tokens = token::tokenize(b"\"hello\"").unwrap();
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0, c"hello".into());
-    assert!(tokens[0].2);
+    assert!(tokens[0].3);
 }
 
 #[test]
@@ -1589,7 +1612,7 @@ fn tokenize_unquoted_prefix_not_fully_quoted() {
     let tokens = token::tokenize(b"foo\"bar\"").unwrap();
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0, c"foobar".into());
-    assert!(!tokens[0].2);
+    assert!(!tokens[0].3);
 }
 
 #[test]
@@ -1597,11 +1620,11 @@ fn tokenize_mixed_quoted_unquoted() {
     let tokens = token::tokenize(b"\"$@\" \"$*\" literal").unwrap();
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].0, c"$@".into());
-    assert!(tokens[0].2);
+    assert!(tokens[0].3);
     assert_eq!(tokens[1].0, c"$*".into());
-    assert!(tokens[1].2);
+    assert!(tokens[1].3);
     assert_eq!(tokens[2].0, c"literal".into());
-    assert!(!tokens[2].2);
+    assert!(!tokens[2].3);
 }
 
 #[test]
@@ -1609,9 +1632,9 @@ fn tokenize_fully_quoted_with_separator() {
     let tokens = token::tokenize(b"\"$@\";").unwrap();
     assert_eq!(tokens.len(), 2);
     assert_eq!(tokens[0].0, c"$@".into());
-    assert!(tokens[0].2);
+    assert!(tokens[0].3);
     assert_eq!(tokens[1].0, c";".into());
-    assert!(!tokens[1].2);
+    assert!(!tokens[1].3);
 }
 
 #[test]
@@ -1619,11 +1642,11 @@ fn tokenize_fully_quoted_with_pipe() {
     let tokens = token::tokenize(b"\"$@\" | cat").unwrap();
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].0, c"$@".into());
-    assert!(tokens[0].2);
+    assert!(tokens[0].3);
     assert_eq!(tokens[1].0, c"|".into());
-    assert!(!tokens[1].2);
+    assert!(!tokens[1].3);
     assert_eq!(tokens[2].0, c"cat".into());
-    assert!(!tokens[2].2);
+    assert!(!tokens[2].3);
 }
 
 #[test]
@@ -1631,14 +1654,14 @@ fn tokenize_adjacent_quotes_still_fully_quoted() {
     let tokens = token::tokenize(b"\"a\"\"b\"").unwrap();
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0, c"ab".into());
-    assert!(tokens[0].2);
+    assert!(tokens[0].3);
 }
 
 #[test]
 fn tokenize_dollar_paren_not_fully_quoted() {
     let tokens = token::tokenize(b"\"x\"$(y)").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(!tokens[0].2);
+    assert!(!tokens[0].3);
 }
 
 #[test]
@@ -1746,7 +1769,7 @@ fn parse_capture_tagged_empty_var_is_error() {
 
 #[test]
 fn find_preceded_by_semi_start_zero_no_match() {
-    let tokens = [(c"echo".into(), 0, false), (c"hi".into(), 5, false)];
+    let tokens = [(c"echo".into(), 0, 4, false), (c"hi".into(), 5, 7, false)];
     assert_eq!(
         super::semi::find_preceded_by_semi(&tokens, 0, b"echo"),
         None
@@ -1756,10 +1779,10 @@ fn find_preceded_by_semi_start_zero_no_match() {
 #[test]
 fn find_preceded_by_semi_skips_to_start() {
     let tokens = [
-        (c";".into(), 0, false),
-        (c"done".into(), 1, false),
-        (c";".into(), 6, false),
-        (c"done".into(), 7, false),
+        (c";".into(), 0, 1, false),
+        (c"done".into(), 1, 5, false),
+        (c";".into(), 6, 7, false),
+        (c"done".into(), 7, 11, false),
     ];
     assert_eq!(
         super::semi::find_preceded_by_semi(&tokens, 2, b"done"),

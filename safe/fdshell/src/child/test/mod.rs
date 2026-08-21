@@ -47,12 +47,16 @@ pub(super) fn eval(
         // like a unary operator (bash rule).
         (s, []) => Ok(usize::from(s.to_bytes().is_empty()) as i32),
         (op, [arg]) => {
-            if !is_unary(op.to_bytes()) {
+            let op = op.to_bytes();
+            if !is_unary(op) {
                 bail!(BuiltinError::TestUsage);
+            }
+            if op == b"-z" || op == b"-n" {
+                return ops::string_test(op, arg);
             }
             // `arg` is `expr[1]`; its original token is `orig[1]` (the two
             // slices are parallel). A `%var` original means fd-table lookup.
-            ops::file_test(op.to_bytes(), arg, orig.get(1), state)
+            ops::file_test(op, arg, orig.get(1), state)
         }
         (lhs, [op, rhs]) => ops::string_or_int_test(lhs, op, rhs),
         _ => bail!(BuiltinError::TestUsage),

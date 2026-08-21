@@ -7,7 +7,19 @@ use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
 pub(super) fn is_unary(op: &[u8]) -> bool {
-    matches!(op, b"-e" | b"-f" | b"-d")
+    matches!(op, b"-e" | b"-f" | b"-d" | b"-z" | b"-n")
+}
+
+/// String tests `-z` (empty) and `-n` (non-empty) on the substituted value.
+pub(super) fn string_test(op: &[u8], arg: &CStr) -> Result<i32, Report<BuiltinError>> {
+    let empty = arg.to_bytes().is_empty();
+    let ok = match op {
+        b"-z" => empty,
+        b"-n" => !empty,
+        // `is_unary` restricts `op`; `-z`/`-n` are the only string tests.
+        _ => bail!(BuiltinError::Never),
+    };
+    Ok(usize::from(!ok) as i32)
 }
 
 pub(super) fn file_test(
