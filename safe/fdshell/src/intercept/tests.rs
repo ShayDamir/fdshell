@@ -91,6 +91,71 @@ fn run_shift_removes_positional_args() {
 }
 
 #[test]
+fn run_set_replaces_positional_args() {
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state
+            .positional
+            .push_back(sys::ImportedStr::shell(c"old".into()));
+    }
+    let cmdline = make_cmdline(b"set", &["--", "a", "b"]);
+    let line = make_line("set", &["--", "a", "b"]);
+    assert!(set_cmd::run_set(&line, &cmdline, &text(&line), &cell).unwrap());
+    let state = cell.borrow().unwrap();
+    assert_eq!(state.positional.len(), 2);
+    assert_eq!(state.positional.front().unwrap().as_bytes().unwrap(), b"a");
+    assert_eq!(state.positional.back().unwrap().as_bytes().unwrap(), b"b");
+}
+
+#[test]
+fn run_set_dashdash_only_clears_positional() {
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state
+            .positional
+            .push_back(sys::ImportedStr::shell(c"old".into()));
+    }
+    let cmdline = make_cmdline(b"set", &["--"]);
+    assert!(set_cmd::run_set(b"set --", &cmdline, &text(b"set --"), &cell).unwrap());
+    let state = cell.borrow().unwrap();
+    assert!(state.positional.is_empty());
+}
+
+#[test]
+fn run_set_substitutes_variable_args() {
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state
+            .strings
+            .insert(c"X".into(), sys::ImportedStr::shell(c"val".into()));
+    }
+    let cmdline = make_cmdline(b"set", &["--", "$X"]);
+    assert!(set_cmd::run_set(b"set -- $X", &cmdline, &text(b"set -- $X"), &cell).unwrap());
+    let state = cell.borrow().unwrap();
+    assert_eq!(state.positional.len(), 1);
+    assert_eq!(
+        state.positional.front().unwrap().as_bytes().unwrap(),
+        b"val"
+    );
+}
+
+#[test]
+fn try_intercept_set_without_dashdash_returns_false() {
+    for args in [&[] as &[&str], &["-e"] as &[&str], &["a", "b"] as &[&str]] {
+        let cmdline = make_cmdline(b"set", args);
+        let line = make_line("set", args);
+        let cell = make_cell();
+        assert!(
+            !try_intercept(&text(&line), &cmdline, &cell).unwrap(),
+            "set {args:?} should fall through to external lookup"
+        );
+    }
+}
+
+#[test]
 fn try_intercept_read_returns_true() {
     let line = make_line("read", &["var1"]);
     let cmdline = make_cmdline(b"read", &["-u", "0", "var1"]);

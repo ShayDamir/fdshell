@@ -64,6 +64,20 @@ fn test_string_empty_with_variables() {
 }
 
 #[test]
+fn set_dashdash_replaces_positional() {
+    let (out, _err, code) = run(r#"X=old; set -- $X two; printf "$0 $1""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "old two");
+}
+
+#[test]
+fn set_dashdash_clears_positional() {
+    let (out, _err, code) = run(r#"set -- a b; set --; printf "z$@""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "z");
+}
+
+#[test]
 fn test_integer_comparison() {
     let (out, _err, code) = run("if test 10 -gt 9; then printf y; else printf n; fi");
     assert_eq!(code, 0);

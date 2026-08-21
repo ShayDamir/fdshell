@@ -21,6 +21,7 @@ pub(crate) fn try_intercept(
         b"export" => exports::run_export(line, cmdline, text, cell),
         b"envfilter" => envfilter::run_envfilter(line, cmdline, cell),
         b"shift" => shift::run_shift(line, cmdline, cell),
+        b"set" => set_cmd::run_set(line, cmdline, text, cell),
         b"read" => read::run_read(line, cmdline, text, cell),
         _ => Ok(false),
     }
@@ -38,6 +39,7 @@ mod exit;
 mod export_fd;
 mod exports;
 mod read;
+mod set_cmd;
 mod shift;
 mod validation;
 mod wait;
