@@ -86,7 +86,7 @@
 - [ ] `set --stdout-capture-limit <bytes>` — make the `$(…)` stdout capture cap configurable; `MAX_CAPTURED` is hardcoded at 64 MiB (`cmd_subst.rs:13`); bash has no such limit, so this is an fdshell-specific escape hatch for scripts that legitimately capture more than the default
 - [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory: `ensure!(got_pid.is_some())` so an fd is never accepted without kernel-attested credentials (`shellfd/recv_fd.rs`)
 - [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
-- [ ] `source` recursion bypasses MAX_NESTING → stack overflow + core dump — `run_sourced` (`intercept/source.rs`) recurses through `run_script` without `nest::deeper` (the cap of 100 guards only if/while/until/for/case/`$()`), so self-sourcing overflows the native stack:
+- [x] `source` recursion bypasses MAX_NESTING → stack overflow + core dump — `run_sourced` (`intercept/source.rs`) recurses through `run_script` without `nest::deeper` (the cap of 100 guards only if/while/until/for/case/`$()`), so self-sourcing overflows the native stack:
   ```
   printf 'source /tmp/selfsrc.sh\n' > /tmp/selfsrc.sh
   fdshell -c 'source /tmp/selfsrc.sh'   # → thread 'main' has overflowed its stack (SIGABRT, core dumped)

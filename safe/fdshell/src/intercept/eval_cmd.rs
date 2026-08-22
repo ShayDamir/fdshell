@@ -22,7 +22,11 @@ pub(crate) fn run_eval(
         return Ok(None);
     }
     let script_text = ScriptText::new(script, text.start, text.origin.clone());
-    crate::script::run_script(&script_text, cell)
+    // Count each eval level toward the nesting cap (a self-eval would
+    // otherwise recurse through run_script until the stack overflows).
+    crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+        crate::script::run_script(&script_text, cell)
+    })
 }
 
 fn join_space(args: &[ShortCStr]) -> ShortCStr {

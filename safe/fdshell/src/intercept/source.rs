@@ -66,7 +66,11 @@ fn run_sourced(
     let content = read_to_end(&fd)?;
     let data = ShortCStr::from_vec(content).change_context(CmdError::SourceNul)?;
     let script = ScriptText::new(data, Position::new(1, 1), Origin::File(path.clone()));
-    crate::script::run_script(&script, cell)
+    // Count each source level toward the nesting cap: a self-sourcing file
+    // recurses through run_script and would otherwise overflow the stack.
+    crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+        crate::script::run_script(&script, cell)
+    })
 }
 
 /// Read `fd` to EOF.

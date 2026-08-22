@@ -237,6 +237,16 @@ fn run_source_substitutes_path_argument() {
 }
 
 #[test]
+fn run_source_self_recursion_over_limit_fails() {
+    let (_tmp, path) = TempFile::new("selfsrc", b"");
+    std::fs::write(&path, format!("source {path}\n").as_bytes()).unwrap();
+    let cell = make_cell();
+    let cmdline = make_cmdline(b"source", &[&path]);
+    let e = run_source(b"source f", &cmdline, &text(b"source f"), &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
+}
+
+#[test]
 fn try_intercept_source_returns_some() {
     let (_tmp, path) = TempFile::new("dispatch", b"A=1\n");
     let cell = make_cell();
