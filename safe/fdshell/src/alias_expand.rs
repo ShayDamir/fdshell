@@ -26,7 +26,7 @@ pub(crate) fn expand_alias(
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let tokens = tokenize(line).change_context(CmdError::Parse)?;
     let mut current = ShortCStr::from_vec(line.to_vec()).change_context(CmdError::Never)?;
-    let mut delta = 0usize;
+    let mut delta: isize = 0;
     for (word0, s0, e0, fq) in command_positions(&tokens) {
         let quoted = line.get(*s0..*e0).is_some_and(|r| r.contains(&b'"'));
         if *fq || quoted || RESERVED.iter().any(|r| word0.eq_bytes(r)) {
@@ -55,17 +55,19 @@ fn command_positions(tokens: &[Token]) -> alloc::vec::Vec<(&ShortCStr, &usize, &
 }
 
 /// Replace the word at `s0 + delta..e0 + delta` with its alias value,
-/// chaining while the replacement is itself an alias. `delta` tracks the
-/// length drift against the original token offsets.
+/// chaining while the replacement is itself an alias. `delta` is the signed
+/// length drift against the original token offsets; it goes negative when a
+/// replacement is shorter than the word it replaces.
 fn expand_at(
     current: &mut ShortCStr,
-    delta: &mut usize,
+    delta: &mut isize,
     mut word: ShortCStr,
     s0: usize,
     e0: usize,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
-    let (s, mut e) = (s0 + *delta, e0 + *delta);
+    let s = s0 as isize + *delta;
+    let mut e = e0 as isize + *delta;
     for _ in 0..MAX_ALIAS_DEPTH {
         if RESERVED.iter().any(|r| word.eq_bytes(r)) {
             break;
@@ -76,19 +78,15 @@ fn expand_at(
         let Some(value) = value else {
             break;
         };
-        let pre = current
-            .get(..s)
-            .ok_or(CmdError::Never)
-            .change_context(CmdError::Never)?;
-        let post = current
-            .get(e..)
-            .ok_or(CmdError::Never)
-            .change_context(CmdError::Never)?;
-        let replaced = ShortCStr::concat(&[&pre, &value, &post]);
-        *delta += value.len() - (e - s);
-        *current = replaced;
-        e = s + value.len();
+        let pre = current.get(..(s as usize)).ok_or(CmdError::Never)?;
+        let post = current.get(e as usize..).ok_or(CmdError::Never)?;
+        *delta += value.len() as isize - (e - s);
+        *current = ShortCStr::concat(&[&pre, &value, &post]);
+        e = s + value.len() as isize;
         word = value;
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

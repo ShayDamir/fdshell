@@ -64,7 +64,7 @@
   ```
   Preserve the backslash unless the next char is one of `"` `\` `$` `` ` `` newline
 - [ ] `#` begins a comment mid-word — `parse/token.rs:58-65` does not require `#` to start a token: `builtin echo a#b` prints `a` (bash prints `a#b`); data containing `#` (colors, hostnames, filenames) changes meaning depending on position. Require start-of-token like POSIX shells
-- [ ] Shrinking alias underflows the expansion delta — `alias_expand.rs:88`: `*delta += value.len() - (e - s)` underflows when an alias value is shorter than the word it replaces (e.g. `alias ab="z"`): panics in debug builds; in release the wrapped delta mispositions later expansions; an empty alias aborts the rest of the line with "expected command". Use `checked_`/`saturating_` arithmetic with an explicit error
+- [x] Shrinking alias underflows the expansion delta — `alias_expand.rs:88`: `*delta += value.len() - (e - s)` underflows when an alias value is shorter than the word it replaces (e.g. `alias ab="z"`): panics in debug builds; in release the wrapped delta mispositions later expansions; an empty alias aborts the rest of the line with "expected command". Use `checked_`/`saturating_` arithmetic with an explicit error
 
 ## Refactoring
 
@@ -77,7 +77,7 @@
 - [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
 - [x] `state.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
 - [ ] `intercept/alias_cmd.rs` is 90 code lines (STYLE.md §2.3 flag zone) — extract the definition parsing into a helper
-- [ ] `alias_expand.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
+- [ ] `alias_expand.rs` is 87 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
 
 ## Security / hardening
 

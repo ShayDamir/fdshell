@@ -88,6 +88,9 @@ To exercise a code path keyed on the invocation name — e.g. busybox-style buil
 ## Non-raw string literals in escape-handling tests pre-interpret the escapes under test
 Testing `printf` backslash escapes with `"a\nb"` fed the test *real* control bytes — rustc interpreted the escapes — so only the unknown-escape path (literal backslash-d) ever executed and seven `match` arms in `emit_escape` had zero coverage (mutants unkillable). Use raw strings (`r"\n"`) when the input must contain literal backslash sequences.
 
+## A text-replacement drift counter must be signed when replacements can shrink
+`alias_expand` tracked the byte-offset drift between original token spans and the edited line as `usize`, doing `*delta += value.len() - (e - s)`. A value shorter than the word it replaces (or an empty alias) underflows `usize` — a debug panic (SIGABRT) and, in release, a wrapped offset that mispositions every later replacement. The drift is a *net length change* and is legitimately negative, so it must be an `isize`. For the out-of-range/invariant path, cast the offset with `s as usize` and let the `Option`-returning `get(..)` bounds-check it: a negative `isize` wraps to a huge index that `get()` rejects with `None`, which maps to a `Never` — no `try_from`, no panic.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)
