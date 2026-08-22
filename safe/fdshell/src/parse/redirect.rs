@@ -26,6 +26,10 @@ fn parse_path_redirect(
             ParseError::InvalidRedirect
         );
         (r, RedirectDirection::Append)
+    } else if dir == b'<' && after_op.starts_with(b">") {
+        let r = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
+        ensure!(!r.is_empty(), ParseError::InvalidRedirect);
+        (r, RedirectDirection::Rw)
     } else if dir == b'<' {
         (after_op, RedirectDirection::Read)
     } else {

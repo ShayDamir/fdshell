@@ -358,6 +358,42 @@ fn test_fd_dup_redirect_non_numeric_prefix_is_arg() {
 }
 
 #[test]
+fn test_rw_redirect_defaults_to_fd_zero() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <>file").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Rw,
+            source: RedirectSource::path(c"file"),
+        }]
+    );
+}
+
+#[test]
+fn test_rw_redirect_numbered() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 3<>file").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 3,
+            direction: RedirectDirection::Rw,
+            source: RedirectSource::path(c"file"),
+        }]
+    );
+}
+
+#[test]
+fn test_rw_redirect_without_path_is_error() {
+    assert!(parse(b"cmd <>").is_err());
+    assert!(parse(b"cmd 2<>").is_err());
+}
+
+#[test]
 fn test_fd_dup_redirect_negative_tail_is_arg() {
     let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&-5").unwrap() else {
         panic!("expected Cmd")

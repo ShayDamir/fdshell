@@ -20,3 +20,8 @@ fn append_uses_wronly_creat_append() {
         O_WRONLY + O_CREAT + O_APPEND
     );
 }
+
+#[test]
+fn rw_uses_rdwr_creat_without_trunc() {
+    assert_eq!(RedirectDirection::Rw.open_flags(), O_RDWR + O_CREAT);
+}
