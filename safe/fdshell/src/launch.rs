@@ -18,7 +18,7 @@ pub fn launch(
 ) -> Result<LaunchOutcome, Report<crate::error::launch::LaunchError>> {
     let cmd = Command::from(cmdline);
 
-    let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
+    let opened = crate::redirect::open_redirect_files(&cmdline.redirects, cell)
         .change_context(crate::error::launch::LaunchError::Redirect)?;
     let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, cell)
         .change_context(crate::error::launch::LaunchError::Redirect)?;

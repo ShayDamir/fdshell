@@ -40,7 +40,7 @@ pub fn run_child(
         }
     }
 
-    let opened = crate::redirect::open_redirect_files(&cmd_data.redirects)
+    let opened = crate::redirect::open_redirect_files(&cmd_data.redirects, cell)
         .change_context(ChildProcessError::RedirectFailed)?;
 
     let file_redirects = crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, cell)

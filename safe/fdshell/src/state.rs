@@ -32,6 +32,7 @@ pub struct ShellState {
     pub(crate) environ: Vec<(ShortCStr, ShortCStr)>,
     pub(crate) nesting: u32,
     pub(crate) ifs: ShortCStr,
+    pub(crate) options: u32,
 }
 
 impl ShellState {
@@ -50,6 +51,7 @@ impl ShellState {
             environ: sys::env::environ_snapshot(),
             nesting: 0,
             ifs: c" \t\n".into(),
+            options: crate::options::DEFAULTS,
         }
     }
 }

@@ -15,6 +15,8 @@ pub(crate) enum OpenRedirectError {
     HereStringCreate,
     /// fd {n} is not open; `>&{n}` has nothing to duplicate
     FdNotOpen { n: i32 },
+    /// cannot overwrite existing file '{name}': noclobber is set
+    Noclobber { name: sys::ShortCStr },
     /// failed to duplicate fd {n}; the descriptor table may be full
     DupFdFailed { n: i32 },
     /// failed to close redirection target fd {n}

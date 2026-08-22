@@ -31,6 +31,7 @@ mod loop_;
 mod loop_control;
 pub mod main_cli;
 mod nest;
+mod options;
 mod parse;
 mod pipeline;
 mod postlaunch;

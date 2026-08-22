@@ -61,6 +61,11 @@ pub enum CmdError {
     Never,
     /// invalid {arg}
     InvalidArgument { arg: &'static str },
+    /// {command}: unknown option '{name}'
+    ShellOptionUnknown {
+        command: &'static str,
+        name: sys::ShortCStr,
+    },
     /// fd variable not set
     FdNotSet,
     /// fd operation failed

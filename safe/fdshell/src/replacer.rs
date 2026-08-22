@@ -15,7 +15,7 @@ pub fn execute(
     redirects: &[crate::redirect::RedirectDef],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
-    let opened = crate::redirect::open_redirect_files(redirects)
+    let opened = crate::redirect::open_redirect_files(redirects, cell)
         .change_context(ChildProcessError::ExportFailed)?;
     let resolved = crate::redirect::resolve_redirects(redirects, &opened, cell)
         .change_context(ChildProcessError::ExportFailed)?;

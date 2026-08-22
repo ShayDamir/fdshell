@@ -26,6 +26,7 @@ pub(crate) fn try_intercept(
         b"envfilter" => envfilter::run_envfilter(line, cmdline, cell).map(handled),
         b"shift" => shift::run_shift(line, cmdline, cell).map(handled),
         b"set" => set_cmd::run_set(line, cmdline, text, cell).map(handled),
+        b"shopt" => shopt::run_shopt(line, cmdline, text, cell).map(handled),
         b"read" => read::run_read(line, cmdline, text, cell).map(handled),
         _ => Ok(None),
     }
@@ -50,6 +51,7 @@ mod exports;
 mod read;
 mod set_cmd;
 mod shift;
+mod shopt;
 mod source;
 mod validation;
 mod wait;

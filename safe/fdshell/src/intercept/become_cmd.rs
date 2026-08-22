@@ -33,7 +33,7 @@ fn apply_redirects(
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
-    let opened = crate::redirect::open_redirect_files(&cmdline.redirects)
+    let opened = crate::redirect::open_redirect_files(&cmdline.redirects, cell)
         .change_context(CmdError::Redirect)?;
     let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, cell)
         .change_context(CmdError::Redirect)?;
