@@ -864,7 +864,7 @@ fn percent_hyphen_after_percent_is_literal() {
 #[test]
 fn dollar_at_fq_true_expands_separate_args() {
     // Regression: quoted "$@" must expand to separate arguments (not joined)
-    // With fq=true and "$@": correct → expand_positional_args (N elements)
+    // With fq=true and "$@": correct → one word per positional (N elements)
     // Bug (before fix): fq was always false, so "$@" joined args into 1 element
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
@@ -885,10 +885,8 @@ fn dollar_at_fq_true_expands_separate_args() {
 
 #[test]
 fn dollar_at_unquoted_splits_on_ifs() {
-    // Mutant MISSED 25: replace && with || in substitute_args line 30
-    // With fq=false: correct → substitute_arg → join_positional → IFS split
-    // (3 fields: "a b" joins as "a b c" and splits into three).
-    // Mutant: expand_positional_args pushes unsplit → 2 fields ("a b", "c").
+    // Unquoted $@: each positional is word-split on IFS separately.
+    // "a b" splits into "a" "b", "c" stays → 3 fields.
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
         [c"a b", c"c"]
@@ -908,9 +906,7 @@ fn dollar_at_unquoted_splits_on_ifs() {
 
 #[test]
 fn dollar_star_fq_true_joins_positional() {
-    // Mutant MISSED 26: replace && with || in substitute_args line 32
-    // With fq=true and "$*": correct → join_positional_args (1 joined element)
-    // Mutant: same path, but tests fq=true branch coverage
+    // Quoted "$*": one word joined by the first IFS byte (space by default).
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
         [c"arg0", c"arg1"]
@@ -924,6 +920,119 @@ fn dollar_star_fq_true_joins_positional() {
     let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1");
+}
+
+#[test]
+fn dollar_at_unquoted_custom_ifs_splits_per_positional() {
+    // IFS=":": each positional is split on ":" separately; an injected space
+    // join would leave "a b" intact and fail this test.
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = c":".into();
+        state.set_positional(
+            [c"a:b", c"c d"]
+                .into_iter()
+                .map(ShortCStr::from)
+                .map(ImportedStr::shell)
+                .collect(),
+        );
+    }
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_fq = alloc::vec![false];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].as_bytes().unwrap(), b"b");
+    assert_eq!(result[2].as_bytes().unwrap(), b"c d");
+}
+
+#[test]
+fn dollar_at_unquoted_empty_ifs_keeps_positionals_separate() {
+    // Empty IFS disables splitting; positionals must not be joined into one word.
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = ShortCStr::new();
+        state.set_positional(
+            [c"a b", c"c"]
+                .into_iter()
+                .map(ShortCStr::from)
+                .map(ImportedStr::shell)
+                .collect(),
+        );
+    }
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_fq = alloc::vec![false];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a b");
+    assert_eq!(result[1].as_bytes().unwrap(), b"c");
+}
+
+#[test]
+fn dollar_star_unquoted_custom_ifs_splits_per_positional() {
+    // Unquoted $* behaves like $@: per-positional IFS splitting.
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = c":".into();
+        state.set_positional(
+            [c"a:b"]
+                .into_iter()
+                .map(ShortCStr::from)
+                .map(ImportedStr::shell)
+                .collect(),
+        );
+    }
+    let args = alloc::vec![ShortCStr::from(c"$*")];
+    let args_fq = alloc::vec![false];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].as_bytes().unwrap(), b"b");
+}
+
+#[test]
+fn dollar_star_quoted_custom_ifs_joins_with_first_ifs_byte() {
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = c":".into();
+        state.set_positional(
+            [c"a", c"b"]
+                .into_iter()
+                .map(ShortCStr::from)
+                .map(ImportedStr::shell)
+                .collect(),
+        );
+    }
+    let args = alloc::vec![ShortCStr::from(c"$*")];
+    let args_fq = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a:b");
+}
+
+#[test]
+fn dollar_star_quoted_empty_ifs_joins_with_nothing() {
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = ShortCStr::new();
+        state.set_positional(
+            [c"a", c"b"]
+                .into_iter()
+                .map(ShortCStr::from)
+                .map(ImportedStr::shell)
+                .collect(),
+        );
+    }
+    let args = alloc::vec![ShortCStr::from(c"$*")];
+    let args_fq = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"ab");
 }
 
 #[test]
@@ -949,7 +1058,7 @@ fn quoted_var_with_spaces_does_not_split() {
 
 #[test]
 fn literal_arg_with_fq_true_not_routed_to_positional() {
-    // Mutant MISSED 26: || mutant would route non-$@/$* FQ args into join_positional_args
+    // A || mutant would route non-$@/$* FQ args into expand_positional_word
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
         [c"arg0", c"arg1"]
@@ -966,11 +1075,8 @@ fn literal_arg_with_fq_true_not_routed_to_positional() {
 }
 
 #[test]
-fn join_positional_args_has_spaces_between() {
-    // Mutant MISSED 28,30,31: replace > with ==, <, >= in join_positional_args line 58
-    // j==0: space before first element (wrong)
-    // j<0: no spaces at all (impossible for usize)
-    // j>=0: space before every element including first (wrong)
+fn positional_join_has_spaces_between() {
+    // Default IFS: separator is its first byte, a space.
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
         [c"a", c"b", c"c"]
@@ -980,14 +1086,13 @@ fn join_positional_args_has_spaces_between() {
             .collect(),
     );
     let state = cell.borrow().unwrap();
-    let result = super::join_positional_args(&state.positional).unwrap();
+    let result = super::positional::positional_join(&state.positional, &state.ifs).unwrap();
     assert_eq!(result.as_bytes().unwrap(), b"a b c");
 }
 
 #[test]
-fn expand_positional_args_pushes_all_positional() {
-    // Mutant MISSED 27: replace expand_positional_args -> Result<(), ...> with Ok(())
-    // If replaced with Ok(()), no positional args are pushed to result
+fn expand_positional_word_quoted_at_pushes_all_positional() {
+    // Quoted "$@": one word per positional, unsplit.
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
         [c"arg0", c"arg1", c"arg2"]
@@ -996,9 +1101,8 @@ fn expand_positional_args_pushes_all_positional() {
             .map(ImportedStr::shell)
             .collect(),
     );
-    let state = cell.borrow().unwrap();
     let mut result = Vec::new();
-    super::expand_positional_args(&state.positional, &mut result).unwrap();
+    super::positional::expand_positional_word(false, true, &cell, &mut result).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0");
     assert_eq!(result[1].as_bytes().unwrap(), b"arg1");
@@ -1006,8 +1110,7 @@ fn expand_positional_args_pushes_all_positional() {
 }
 
 #[test]
-fn join_positional_args_single_element_no_space() {
-    // Mutant MISSED 28,30,31: j>=0 would add space before single element
+fn positional_join_single_element_no_space() {
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
         [c"only"]
@@ -1017,7 +1120,7 @@ fn join_positional_args_single_element_no_space() {
             .collect(),
     );
     let state = cell.borrow().unwrap();
-    let result = super::join_positional_args(&state.positional).unwrap();
+    let result = super::positional::positional_join(&state.positional, &state.ifs).unwrap();
     assert_eq!(result.as_bytes().unwrap(), b"only");
 }
 

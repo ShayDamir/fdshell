@@ -33,7 +33,8 @@ pub(crate) fn dollar_subst(
         Some(b'@') | Some(b'*') => {
             peek.next();
             let state = super::borrow_state(cell)?;
-            join_positional(out, &state)?;
+            let joined = super::positional::positional_join(&state.positional, &state.ifs)?;
+            out.push(&joined);
         }
         Some(c @ b'0'..=b'9') => {
             // $0, $1, ... $N
@@ -53,16 +54,6 @@ pub(crate) fn dollar_subst(
             core::write!(out, "{code}").change_context(ResolveError::Never)?;
         }
         _ => out.push(c"$"),
-    }
-    Ok(())
-}
-
-fn join_positional(out: &mut ShortCStr, state: &ShellState) -> Result<(), Report<ResolveError>> {
-    for (i, p) in state.positional.iter().enumerate() {
-        if i > 0 {
-            out.push(c" ");
-        }
-        out.push(p);
     }
     Ok(())
 }

@@ -4,6 +4,7 @@ mod dollar;
 mod param_op;
 mod paren;
 mod percent;
+mod positional;
 mod resolve;
 mod split;
 use alloc::vec::Vec;
@@ -13,7 +14,6 @@ pub(crate) use arg::substitute_arg;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::ExportedFd;
-use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::fork_cell::{ForkCell, Ref};
 
@@ -35,13 +35,8 @@ pub fn substitute_args(
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     for (i, arg) in args.iter().enumerate() {
         let fq = args_fq.get(i).copied().unwrap_or(false);
-        if fq && arg.eq_bytes(b"$@") {
-            let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-            expand_positional_args(&state.positional, &mut result)?;
-        } else if fq && arg.eq_bytes(b"$*") {
-            let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-            let expanded = join_positional_args(&state.positional)?;
-            result.push(expanded);
+        if arg.eq_bytes(b"$@") || arg.eq_bytes(b"$*") {
+            positional::expand_positional_word(arg.eq_bytes(b"$*"), fq, cell, &mut result)?;
         } else {
             let expanded = arg::substitute_arg(arg, &mut cache, cell)?;
             if fq {
@@ -53,29 +48,6 @@ pub fn substitute_args(
         }
     }
     Ok(result)
-}
-
-fn expand_positional_args<'a>(
-    positional: impl IntoIterator<Item = &'a ImportedStr>,
-    result: &mut Vec<ShortCStr>,
-) -> Result<(), Report<ResolveError>> {
-    for p in positional {
-        result.push(p.value.clone());
-    }
-    Ok(())
-}
-
-fn join_positional_args<'a>(
-    positional: impl IntoIterator<Item = &'a ImportedStr>,
-) -> Result<ShortCStr, Report<ResolveError>> {
-    let mut out = ShortCStr::new();
-    for (j, p) in positional.into_iter().enumerate() {
-        if j > 0 {
-            out.push(c" ");
-        }
-        out.push(p);
-    }
-    Ok(out)
 }
 
 #[cfg(test)]

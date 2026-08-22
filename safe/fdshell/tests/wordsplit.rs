@@ -126,3 +126,38 @@ fn for_ifs_updates_word_splitting() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
+
+#[test]
+fn unquoted_dollar_at_custom_ifs_splits_per_positional() {
+    let (out, err, code) = run(r"IFS=:; set -- a:b c; printf %s\n $@");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\nb\nc\n");
+}
+
+#[test]
+fn unquoted_dollar_at_empty_ifs_keeps_positionals() {
+    let (out, err, code) = run(r#"set -- "a b" c; IFS=; printf %s\n $@"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a b\nc\n");
+}
+
+#[test]
+fn quoted_dollar_star_custom_ifs_joins_with_first_ifs_byte() {
+    let (out, err, code) = run(r#"IFS=:; set -- a b; printf %s\n "$*""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a:b\n");
+}
+
+#[test]
+fn quoted_dollar_star_empty_ifs_joins_with_nothing() {
+    let (out, err, code) = run(r#"IFS=; set -- a b; printf %s\n "$*""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "ab\n");
+}
+
+#[test]
+fn embedded_dollar_at_uses_first_ifs_byte_join() {
+    let (out, err, code) = run(r"IFS=:; set -- a b; printf %s\n x$@");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "xa\nb\n");
+}

@@ -26,7 +26,7 @@
 - [x] `/dev/fd/N` — automatic fd path translation
 - [x] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
 - [x] IFS sync only happens on `IFS=…` assignment — `read IFS`, `export IFS=x`, `${IFS=…}`, `for IFS in …` store in `strings` without updating `state.ifs` (centralize on a `set_var` helper or sync at each insert site)
-- [ ] Unquoted `$@`/`$*` join positional args with literal spaces before IFS splitting — wrong with custom IFS lacking space (injected spaces survive) and with empty IFS (collapses to one field); split per-positional instead of join-then-split
+- [x] Unquoted `$@`/`$*` join positional args with literal spaces before IFS splitting — wrong with custom IFS lacking space (injected spaces survive) and with empty IFS (collapses to one field); split per-positional instead of join-then-split
 - [x] `shopt` / `set -o` — shell options bitmask
 - [x] Alias expansion — text-replacement pass on command words
 - [ ] Alias expansion only rewrites the first word of a line — words after `|`, `&&`, `||` (cond.rs/pipeline subcommands) are not alias-expanded
