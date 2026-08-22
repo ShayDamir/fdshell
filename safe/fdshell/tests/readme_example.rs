@@ -298,7 +298,8 @@ fn builtin_pipe_write_read_cmd_subst() {
     assert_ok(&output, "builtin_pipe_write_read_cmd_subst");
     let stdout = str::from_utf8(&output.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines, ["hello", "world"]);
+    // Unquoted $MESSAGE is word-split on IFS, so the two lines become two args.
+    assert_eq!(lines, ["hello world"]);
 }
 
 #[test]

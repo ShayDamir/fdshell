@@ -24,7 +24,9 @@
 - [x] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
 - [x] `<>` — open file for read/write
 - [x] `/dev/fd/N` — automatic fd path translation
-- [ ] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
+- [x] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
+- [ ] IFS sync only happens on `IFS=…` assignment — `read IFS`, `export IFS=x`, `${IFS=…}`, `for IFS in …` store in `strings` without updating `state.ifs` (centralize on a `set_var` helper or sync at each insert site)
+- [ ] Unquoted `$@`/`$*` join positional args with literal spaces before IFS splitting — wrong with custom IFS lacking space (injected spaces survive) and with empty IFS (collapses to one field); split per-positional instead of join-then-split
 - [ ] `shopt` / `set -o` — shell options bitmask
 - [ ] Alias expansion — text-replacement pass on command words
 - [ ] `hash` — PATH lookup cache
@@ -51,6 +53,7 @@
 - [ ] `parse/token.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
 - [ ] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
 - [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
+- [ ] `state.rs` is 84 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
 
 ## Security / hardening
 

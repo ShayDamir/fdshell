@@ -884,13 +884,14 @@ fn dollar_at_fq_true_expands_separate_args() {
 }
 
 #[test]
-fn dollar_at_expanded_via_substitute_arg_joins() {
+fn dollar_at_unquoted_splits_on_ifs() {
     // Mutant MISSED 25: replace && with || in substitute_args line 30
-    // With fq=false: correct → substitute_arg → dollar_subst → join_positional (1 element)
-    // Mutant: expand_positional_args (N elements, one per positional)
+    // With fq=false: correct → substitute_arg → join_positional → IFS split
+    // (3 fields: "a b" joins as "a b c" and splits into three).
+    // Mutant: expand_positional_args pushes unsplit → 2 fields ("a b", "c").
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().set_positional(
-        [c"arg0", c"arg1", c"arg2"]
+        [c"a b", c"c"]
             .into_iter()
             .map(ShortCStr::from)
             .map(ImportedStr::shell)
@@ -899,10 +900,10 @@ fn dollar_at_expanded_via_substitute_arg_joins() {
     let args = alloc::vec![ShortCStr::from(c"$@")];
     let args_fq = alloc::vec![false];
     let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
-    // Correct: 1 element (joined by dollar_subst→join_positional)
-    // Mutant: 3 elements (separate via expand_positional_args)
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1 arg2");
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].as_bytes().unwrap(), b"b");
+    assert_eq!(result[2].as_bytes().unwrap(), b"c");
 }
 
 #[test]
@@ -923,6 +924,27 @@ fn dollar_star_fq_true_joins_positional() {
     let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1");
+}
+
+#[test]
+fn unquoted_var_with_spaces_splits_on_ifs() {
+    let cell = dummy_cell();
+    let args = alloc::vec![ShortCStr::from(c"$multi_word")];
+    let args_fq = alloc::vec![false];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].as_bytes().unwrap(), b"two");
+    assert_eq!(result[1].as_bytes().unwrap(), b"words");
+}
+
+#[test]
+fn quoted_var_with_spaces_does_not_split() {
+    let cell = dummy_cell();
+    let args = alloc::vec![ShortCStr::from(c"$multi_word")];
+    let args_fq = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"two words");
 }
 
 #[test]

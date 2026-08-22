@@ -5,6 +5,7 @@ mod param_op;
 mod paren;
 mod percent;
 mod resolve;
+mod split;
 use alloc::vec::Vec;
 
 pub(crate) use arg::substitute_arg;
@@ -43,7 +44,12 @@ pub fn substitute_args(
             result.push(expanded);
         } else {
             let expanded = arg::substitute_arg(arg, &mut cache, cell)?;
-            result.push(expanded);
+            if fq {
+                result.push(expanded);
+            } else {
+                let state = borrow_state(cell)?;
+                result.extend(split::split_word(&expanded, &state.ifs)?);
+            }
         }
     }
     Ok(result)

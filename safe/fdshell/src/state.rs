@@ -31,6 +31,7 @@ pub struct ShellState {
     pub(crate) shell_sock: Option<LocalFd>,
     pub(crate) environ: Vec<(ShortCStr, ShortCStr)>,
     pub(crate) nesting: u32,
+    pub(crate) ifs: ShortCStr,
 }
 
 impl ShellState {
@@ -48,6 +49,7 @@ impl ShellState {
             shell_sock: None,
             environ: sys::env::environ_snapshot(),
             nesting: 0,
+            ifs: c" \t\n".into(),
         }
     }
 }
@@ -85,6 +87,10 @@ impl ShellState {
 
     pub fn set_shell_sock(&mut self, sock: LocalFd) {
         self.shell_sock = Some(sock);
+    }
+
+    pub fn set_ifs(&mut self, ifs: ShortCStr) {
+        self.ifs = ifs;
     }
 }
 
