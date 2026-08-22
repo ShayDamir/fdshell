@@ -56,6 +56,7 @@ pub static OUT: ImportedFd = std_fd(1);
 pub static ERR: ImportedFd = std_fd(2);
 
 pub mod atfd;
+pub mod close;
 pub mod cmdline;
 pub mod env;
 pub mod errno;

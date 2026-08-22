@@ -21,7 +21,7 @@
 - [x] `eval` — parse and execute constructed string
 - [x] `source` / `.` — execute script file in current shell
 - [x] Here-strings (`<<<"string"`) — pipe string into command's stdin
-- [ ] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
+- [x] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
 - [ ] `<>` — open file for read/write
 - [ ] `/dev/fd/N` — automatic fd path translation
 - [ ] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
@@ -46,6 +46,7 @@
 ## Refactoring
 
 - [ ] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
+- [ ] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
 - [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
 - [ ] `parse/token.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
 - [ ] `parse/mod.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
@@ -61,7 +62,7 @@
 
 ### P2 — Hardening / informational
 
-- [ ] Numbered path redirects at `i32::MAX` (`true 2147483647>file`) fail at `dup2` with a generic "failed to open redirection path" / `EBADF` (verified: `true 2147483647>%f` gives the clean "file descriptor number is out of range" but the path branch does not) — apply the same range check as the var branch (`redirect/resolve.rs:24-25` is var-only; add it for `RedirectSource::Path` in `resolve_redirects` or range-check `export_to` at parse time in `parse/redirect.rs:34`)
+- [x] Numbered path redirects at `i32::MAX` (`true 2147483647>file`) fail at `dup2` with a generic "failed to open redirection path" / `EBADF` (verified: `true 2147483647>%f` gives the clean "file descriptor number is out of range" but the path branch does not) — apply the same range check as the var branch (`redirect/resolve.rs:24-25` is var-only; add it for `RedirectSource::Path` in `resolve_redirects` or range-check `export_to` at parse time in `parse/redirect.rs:34`)
 - [ ] Non-CLOEXEC socket fd leaks into nested-shell grandchildren via `FDSHELL_SOCKET` — ensure CLOEXEC or strip in children
 - [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current invariants but UB-fragile; add safety comment/invariant test (`shortcstr/access.rs`)
 - [ ] Unbounded script size — `cli::load_script` and the `-c`/stdin paths read the entire script into a `Vec<u8>` with no cap (`cli.rs:7`); a multi-GB script / `-c` argument OOMs the shell before parsing (compounds with the nested-`if` O(n²) CPU). Add a max-script-size check

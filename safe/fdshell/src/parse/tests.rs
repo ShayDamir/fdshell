@@ -279,6 +279,94 @@ fn test_here_string_bare_before_redirect_is_error() {
 }
 
 #[test]
+fn test_fd_dup_redirect_stderr_to_stdout() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hello 2>&1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 2,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Dup(1),
+        }]
+    );
+    assert_eq!(cmd.args, vec![c"hello".into()]);
+}
+
+#[test]
+fn test_fd_dup_redirect_stdin_from_stdout() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat 0<&1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Dup(1),
+        }]
+    );
+}
+
+#[test]
+fn test_fd_dup_redirect_bare_prefix() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd >&1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Dup(1),
+        }]
+    );
+}
+
+#[test]
+fn test_fd_close_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 3>&-").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 3,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Close,
+        }]
+    );
+}
+
+#[test]
+fn test_fd_dup_redirect_non_numeric_is_arg() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&abc").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args, vec![c"2>&abc".into()]);
+}
+
+#[test]
+fn test_fd_dup_redirect_non_numeric_prefix_is_arg() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd a>&1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args, vec![c"a>&1".into()]);
+}
+
+#[test]
+fn test_fd_dup_redirect_negative_tail_is_arg() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&-5").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args, vec![c"2>&-5".into()]);
+}
+
+#[test]
 fn test_here_string_quoted_is_plain_arg() {
     let ParsedLine::Cmd(cmd) = parse(b"cat \"<<<x\"").unwrap() else {
         panic!("expected Cmd")
@@ -1795,13 +1883,12 @@ fn parse_mixed_quoted_args_preserves_flags() {
 }
 
 #[test]
-fn amp_after_gt_stays_argument() {
+fn amp_after_gt_is_dup_redirect() {
     let ParsedLine::Cmd(cmd) = parse(b"builtin echo 2>&1").unwrap() else {
         panic!("expected Cmd")
     };
-    assert!(cmd.redirects.is_empty());
-    assert_eq!(cmd.args.len(), 1);
-    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"2>&1");
+    assert_eq!(cmd.redirects, vec![RedirectDef::dup(2, 1)]);
+    assert!(cmd.args.is_empty());
 }
 
 #[test]

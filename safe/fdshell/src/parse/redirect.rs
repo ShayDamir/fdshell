@@ -3,7 +3,7 @@ use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use error_stack::{Report, ResultExt, ensure};
 use sys::ShortCStr;
 
-fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
+pub(super) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
     if prefix.is_empty() {
         Some(match dir {
             b'<' => 0,
@@ -59,13 +59,16 @@ pub fn parse_redirect(s: &ShortCStr, fq: bool) -> Result<Option<RedirectDef>, Re
         Some(r) => r,
         None => return Ok(None),
     };
-    if after_op.is_empty() || after_op.starts_with(b"&") {
+    if after_op.is_empty() {
         return Ok(None);
     }
     let prefix = match s.get(..op_pos) {
         Some(p) => p,
         None => return Ok(None),
     };
+    if after_op.starts_with(b"&") {
+        return super::fd_dup::parse_fd_dup_redirect(&after_op, &prefix, dir);
+    }
     if after_op.starts_with(b"%") {
         let source = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
         if let Some(export_to) = parse_fd(&prefix, dir) {

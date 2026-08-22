@@ -35,6 +35,24 @@ impl ImportedFd {
         d.verify().map(|_| d)
     }
 
+    /// Validate an fd number parsed from a script (e.g. the `1` in `2>&1`).
+    pub fn from_number(raw: i32) -> Result<Self, Report<crate::ImportedFdError>> {
+        ensure!(raw >= 0, crate::ImportedFdError::Negative);
+        let d = Self(raw);
+        d.verify().map(|_| d)
+    }
+
+    /// Duplicate this borrowed fd into a new owned fd with `CLOEXEC` set,
+    /// leaving the original untouched.
+    pub fn try_dup(&self) -> Result<crate::LocalFd, Report<crate::ImportedFdError>> {
+        // SAFETY: `self.0` is a valid open fd; `F_DUPFD_CLOEXEC` on an invalid
+        // fd safely returns -1/EBADF, handled by `cvt`.
+        let ret = crate::cvt(unsafe { libc::fcntl(self.0, libc::F_DUPFD_CLOEXEC, 0) as isize })
+            .change_context(crate::ImportedFdError::SetFlags)?;
+        // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd >= 0 with CLOEXEC atomically set.
+        Ok(unsafe { crate::LocalFd::from_raw(ret as i32) })
+    }
+
     pub fn verify(&self) -> Result<(), Report<crate::ImportedFdError>> {
         // SAFETY: `self.0` is a valid fd by `ImportedFd` invariant;
         // fcntl on invalid fd returns -1/EBADF safely.

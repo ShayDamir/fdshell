@@ -13,6 +13,7 @@ mod detect;
 mod detect_keyword;
 mod elif;
 mod emit;
+mod fd_dup;
 pub(crate) mod for_block;
 mod here_string;
 pub(crate) mod if_block;

@@ -7,7 +7,6 @@ use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::LocalFd;
 use sys::ShortCStr;
-use sys::fcntl::SEEK_SET;
 use sys::fork_cell::ForkCell;
 
 pub fn resolve_redirects(
@@ -19,8 +18,7 @@ pub fn resolve_redirects(
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let mut resolved = Vec::new();
     for r in redirects {
-        let local = resolve_one(r, &mut opened_iter, &mut cache, cell)?;
-        resolved.push(r.resolve(local));
+        resolved.push(resolve_one(r, &mut opened_iter, &mut cache, cell)?);
     }
     Ok(resolved)
 }
@@ -30,46 +28,56 @@ fn resolve_one(
     opened_iter: &mut core::slice::Iter<'_, LocalFd>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
-) -> Result<LocalFd, Report<OpenRedirectError>> {
+) -> Result<Redirect, Report<OpenRedirectError>> {
+    let min_fd = r
+        .export_to
+        .checked_add(1)
+        .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
     match &r.source {
         super::RedirectSource::Var(var) => {
-            let min_fd = r
-                .export_to
-                .checked_add(1)
-                .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
             let state = cell.borrow().change_context(OpenRedirectError::Never)?;
-            state
+            let local = state
                 .fds
                 .get(var)
                 .ok_or_else(|| OpenRedirectError::VarNotFound { var: var.clone() })?
                 .fd
                 .try_clone_above(min_fd)
-                .change_context(OpenRedirectError::Open)
+                .change_context(OpenRedirectError::Open)?;
+            Ok(Redirect::Dup {
+                export_to: r.export_to,
+                local,
+            })
         }
-        super::RedirectSource::Path(_) => opened_iter
-            .next()
-            .ok_or(OpenRedirectError::Open)?
-            .try_clone()
-            .change_context(OpenRedirectError::Open),
-        super::RedirectSource::HereString(word) => here_string(word, cache, cell),
+        super::RedirectSource::Path(_) => {
+            let local = opened_iter
+                .next()
+                .ok_or(OpenRedirectError::Open)?
+                .try_clone()
+                .change_context(OpenRedirectError::Open)?;
+            Ok(Redirect::Dup {
+                export_to: r.export_to,
+                local,
+            })
+        }
+        super::RedirectSource::HereString(word) => Ok(Redirect::Dup {
+            export_to: r.export_to,
+            local: super::herestring::here_string(word, cache, cell)?,
+        }),
+        super::RedirectSource::Dup(from) => {
+            let imported = sys::ImportedFd::from_number(*from)
+                .change_context_lazy(|| OpenRedirectError::FdNotOpen { n: *from })?;
+            let local = imported
+                .try_dup()
+                .change_context_lazy(|| OpenRedirectError::DupFdFailed { n: *from })?;
+            Ok(Redirect::Dup {
+                export_to: r.export_to,
+                local,
+            })
+        }
+        super::RedirectSource::Close => Ok(Redirect::Close {
+            export_to: r.export_to,
+        }),
     }
-}
-
-/// Expand the word and back it with a seeked-to-zero memfd as the new stdin.
-fn here_string(
-    word: &ShortCStr,
-    cache: &mut HashMap<ShortCStr, ExportedFd>,
-    cell: &ForkCell<ShellState>,
-) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let data = crate::substitute::substitute_arg(word, cache, cell)
-        .change_context(OpenRedirectError::HereStringExpand)?;
-    let fd = sys::memfd::memfd_create().change_context(OpenRedirectError::HereStringCreate)?;
-    let mut payload = Vec::with_capacity(data.len() + 1);
-    payload.extend_from_slice(data.as_bytes().change_context(OpenRedirectError::Never)?);
-    payload.push(b'\n');
-    sys::rw::write_all(&fd, &payload).change_context(OpenRedirectError::HereStringCreate)?;
-    sys::rw::lseek(&fd, 0, SEEK_SET).change_context(OpenRedirectError::HereStringCreate)?;
-    Ok(fd)
 }
 
 #[cfg(test)]

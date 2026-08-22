@@ -375,3 +375,12 @@ fn read_all_fills_buffer_across_reads() {
         libc::close(fds[0]);
     }
 }
+
+#[test]
+fn from_number_negative() {
+    let result = ImportedFd::from_number(-1);
+    assert!(matches!(
+        result,
+        Err(ref e) if matches!(e.current_context(), ImportedFdError::Negative)
+    ));
+}

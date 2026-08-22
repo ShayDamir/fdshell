@@ -52,10 +52,21 @@ impl RedirectDef {
         }
     }
 
-    pub fn resolve(&self, local: super::LocalFd) -> super::Redirect {
-        super::Redirect {
-            export_to: self.export_to,
-            local,
+    /// Dup redirect: copy the already-open fd `from` to `export_to` (`2>&1`).
+    pub fn dup(export_to: i32, from: i32) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::dup(from),
+        }
+    }
+
+    /// Close redirect: drop fd `export_to` (`2>&-`).
+    pub fn close(export_to: i32) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::close(),
         }
     }
 }

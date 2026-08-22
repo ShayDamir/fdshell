@@ -13,6 +13,12 @@ pub(crate) enum OpenRedirectError {
     HereStringExpand,
     /// here-string: failed to create the stdin file
     HereStringCreate,
+    /// fd {n} is not open; `>&{n}` has nothing to duplicate
+    FdNotOpen { n: i32 },
+    /// failed to duplicate fd {n}; the descriptor table may be full
+    DupFdFailed { n: i32 },
+    /// failed to close redirection target fd {n}
+    CloseFd { n: i32 },
     /// internal invariant violated
     Never,
 }
