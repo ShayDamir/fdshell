@@ -1159,3 +1159,44 @@ fn paren_unclosed_is_error() {
         crate::error::resolve::ResolveError::UnclosedParen
     ));
 }
+
+#[test]
+fn paren_paren_in_quotes_is_data() {
+    let mut peek = b"echo \"a)b\")".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek).unwrap();
+    assert_eq!(res, b"echo \"a)b\"".as_slice());
+}
+
+#[test]
+fn paren_open_paren_in_quotes_is_data() {
+    let mut peek = b"a\"(b)c\")".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek).unwrap();
+    assert_eq!(res, b"a\"(b)c\"".as_slice());
+}
+
+#[test]
+fn paren_escaped_quote_in_quotes_is_data() {
+    let mut peek = b"echo \"a\\\"b)\")".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek).unwrap();
+    assert_eq!(res, b"echo \"a\\\"b)\"".as_slice());
+}
+
+#[test]
+fn paren_unclosed_quote_is_error() {
+    let mut peek = b"echo \"a".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek);
+    assert!(matches!(
+        res.unwrap_err().current_context(),
+        crate::error::resolve::ResolveError::UnclosedParen
+    ));
+}
+
+#[test]
+fn paren_trailing_escape_in_quotes_is_error() {
+    let mut peek = b"echo \"a\\".iter().copied().peekable();
+    let res = super::paren::read_paren_expr(&mut peek);
+    assert!(matches!(
+        res.unwrap_err().current_context(),
+        crate::error::resolve::ResolveError::UnclosedParen
+    ));
+}

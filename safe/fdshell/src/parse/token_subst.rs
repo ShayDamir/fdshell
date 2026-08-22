@@ -16,29 +16,37 @@ pub(crate) fn read_dollar_paren(
     bytes.next(); // consume '('
     *pos += 1;
     let mut depth = 1u32;
+    let mut in_quotes = false;
     loop {
-        match bytes.next() {
-            Some(b'(') => {
-                *pos += 1;
-                cur.push_byte(b'(')
-                    .change_context(ParseError::InvalidChar { ch: 0 })?;
-                depth += 1;
-            }
-            Some(b')') => {
-                *pos += 1;
+        let Some(c) = bytes.next() else {
+            return Err(report_unexpected_eof(line, start));
+        };
+        *pos += 1;
+        // Inside double quotes a backslash makes the next byte data: it
+        // neither toggles the quote nor counts as a paren.
+        if in_quotes && c == b'\\' {
+            let Some(escaped) = bytes.next() else {
+                return Err(report_unexpected_eof(line, start));
+            };
+            *pos += 1;
+            cur.push_byte(b'\\')
+                .change_context(ParseError::InvalidChar { ch: 0 })?;
+            cur.push_byte(escaped)
+                .change_context(ParseError::InvalidChar { ch: 0 })?;
+            continue;
+        }
+        cur.push_byte(c)
+            .change_context(ParseError::InvalidChar { ch: 0 })?;
+        match c {
+            b'"' => in_quotes = !in_quotes,
+            b'(' if !in_quotes => depth += 1,
+            b')' if !in_quotes => {
                 depth -= 1;
-                cur.push_byte(b')')
-                    .change_context(ParseError::InvalidChar { ch: 0 })?;
                 if depth == 0 {
                     break;
                 }
             }
-            Some(c) => {
-                *pos += 1;
-                cur.push_byte(c)
-                    .change_context(ParseError::InvalidChar { ch: 0 })?;
-            }
-            None => return Err(report_unexpected_eof(line, start)),
+            _ => {}
         }
     }
     Ok(())

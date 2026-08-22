@@ -970,6 +970,62 @@ fn tokenize_dollar_paren_positions() {
 }
 
 #[test]
+fn tokenize_dollar_paren_paren_in_quotes_is_data() {
+    let result = token::tokenize(b"x=$(echo \"a)b\") y").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, c"x=$(echo \"a)b\")".into());
+    assert_eq!(result[0].1, 0);
+    assert_eq!(result[1].0, c"y".into());
+    assert_eq!(result[1].1, 16);
+}
+
+#[test]
+fn tokenize_dollar_paren_open_paren_in_quotes_is_data() {
+    let result = token::tokenize(b"$(a\"(b)c\") d").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, c"$(a\"(b)c\")".into());
+    assert_eq!(result[1].0, c"d".into());
+}
+
+#[test]
+fn tokenize_dollar_paren_escaped_quote_in_quotes_is_data() {
+    let result = token::tokenize(b"x=$(echo \"a\\\"b)\")").unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, c"x=$(echo \"a\\\"b)\")".into());
+}
+
+#[test]
+fn tokenize_dollar_paren_escaped_quote_positions() {
+    let result = token::tokenize(b"x=$(echo \"a\\\"b\") y").unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, c"x=$(echo \"a\\\"b\")".into());
+    assert_eq!(result[0].1, 0);
+    assert_eq!(result[1].0, c"y".into());
+    assert_eq!(
+        result[1].1, 17,
+        "pos must advance past both escape bytes before 'y'"
+    );
+}
+
+#[test]
+fn tokenize_dollar_paren_unclosed_quote_is_eof() {
+    let result = token::tokenize(b"$(echo \"a)");
+    assert!(matches!(
+        result.unwrap_err().current_context(),
+        ParseError::UnexpectedEof
+    ));
+}
+
+#[test]
+fn tokenize_dollar_paren_trailing_escape_in_quotes_is_eof() {
+    let result = token::tokenize(b"$(echo \"a\\");
+    assert!(matches!(
+        result.unwrap_err().current_context(),
+        ParseError::UnexpectedEof
+    ));
+}
+
+#[test]
 fn tokenize_quoted_escape_positions() {
     let result = token::tokenize(b"\"a\\\"b\" c").unwrap();
     assert_eq!(result.len(), 2);

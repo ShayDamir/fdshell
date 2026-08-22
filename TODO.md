@@ -48,7 +48,7 @@
 
 ## Parser & expansion bugs
 
-- [ ] `$(…)` paren matching is quote-blind — `read_dollar_paren` (`parse/token_subst.rs:18-43`) and `read_paren_expr` (`substitute/paren.rs:6-35`) count raw `(`/`)` bytes without tracking double-quote or backslash state, so a `)` that is data inside `"…"` terminates the substitution early and the remainder of the line is re-parsed as shell syntax — text intended as data after the `)` becomes executable (injection class, e.g. `res=$(lookup "key:$user_input")` with a `)` in the input):
+- [x] `$(…)` paren matching is quote-blind — `read_dollar_paren` (`parse/token_subst.rs:18-43`) and `read_paren_expr` (`substitute/paren.rs:6-35`) count raw `(`/`)` bytes without tracking double-quote or backslash state, so a `)` that is data inside `"…"` terminates the substitution early and the remainder of the line is re-parsed as shell syntax — text intended as data after the `)` becomes executable (injection class, e.g. `res=$(lookup "key:$user_input")` with a `)` in the input):
   ```
   fdshell -c 'x=$(echo "a)b"); echo got:$x'   # → parse error "unmatched quote"; bash prints got:a)b
   ```
@@ -68,6 +68,7 @@
 
 ## Refactoring
 
+- [ ] `parse/token_subst.rs` and `substitute/paren.rs` duplicate the quote/backslash `$(…)` scanning automaton — extract a shared helper (a byte-consumption scan returning the substitution body) so the two scanners cannot drift
 - [ ] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
 - [ ] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
 - [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper

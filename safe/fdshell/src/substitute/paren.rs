@@ -8,28 +8,30 @@ pub fn read_paren_expr(
 ) -> Result<Vec<u8>, Report<ResolveError>> {
     let mut inner = Vec::new();
     let mut depth = 1u32;
+    let mut in_quotes = false;
     loop {
-        match peek.peek().copied() {
-            Some(b'(') => {
-                inner.push(b'(');
-                depth += 1;
-                peek.next();
-            }
-            Some(b')') => {
-                depth -= 1;
-                if depth == 0 {
-                    peek.next();
-                    break;
-                }
-                inner.push(b')');
-                peek.next();
-            }
-            Some(c) => {
-                inner.push(c);
-                peek.next();
-            }
-            None => bail!(ResolveError::UnclosedParen),
+        let Some(c) = peek.next() else {
+            bail!(ResolveError::UnclosedParen);
+        };
+        // Same quoting rules as the parse-time scanner: quoted parens are
+        // data, and a backslash inside quotes shields the next byte.
+        if in_quotes && c == b'\\' {
+            let Some(escaped) = peek.next() else {
+                bail!(ResolveError::UnclosedParen);
+            };
+            inner.push(b'\\');
+            inner.push(escaped);
+            continue;
+        }
+        if c == b')' && !in_quotes && depth == 1 {
+            return Ok(inner);
+        }
+        inner.push(c);
+        match c {
+            b'"' => in_quotes = !in_quotes,
+            b'(' if !in_quotes => depth += 1,
+            b')' if !in_quotes => depth -= 1,
+            _ => {}
         }
     }
-    Ok(inner)
 }
