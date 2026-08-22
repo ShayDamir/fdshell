@@ -19,6 +19,30 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+fn run_stdin(script: &str, stdin: &str) -> (String, String, i32) {
+    use std::io::Write;
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.stdin.take().unwrap();
+    let output = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 #[test]
 fn unquoted_expansion_splits_on_default_ifs() {
     let (out, err, code) = run(r#"x="a b"; printf %s\n $x"#);
@@ -73,4 +97,32 @@ fn set_dash_dash_splits_expansion() {
     let (out, err, code) = run(r#"x="a b"; set -- $x; printf "%s|%s" $0 $1"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a|b");
+}
+
+#[test]
+fn read_ifs_updates_word_splitting() {
+    let (out, err, code) = run_stdin(r"read IFS; x=a:b; printf %s\n $x", ":\n");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\nb\n");
+}
+
+#[test]
+fn export_ifs_updates_word_splitting() {
+    let (out, err, code) = run(r"export IFS=:; x=a:b; printf %s\n $x");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\nb\n");
+}
+
+#[test]
+fn param_op_ifs_assign_updates_word_splitting() {
+    let (out, err, code) = run(r"IFS=; y=a,b; x=${IFS:=,}; printf %s\n $y");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\nb\n");
+}
+
+#[test]
+fn for_ifs_updates_word_splitting() {
+    let (out, err, code) = run(r"for IFS in ,; do x=a,b; printf %s\n $x; done");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\nb\n");
 }

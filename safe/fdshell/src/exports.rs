@@ -44,7 +44,7 @@ fn set_export(
     let trace = Trace::at(text.start, text.origin.clone());
     let v = ImportedStr::new(value, trace);
     state.exports.insert(name.clone(), v.clone());
-    state.strings.insert(name, v);
+    state.set_var(name, v);
     Ok(())
 }
 

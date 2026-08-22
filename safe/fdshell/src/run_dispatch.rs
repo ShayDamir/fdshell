@@ -26,10 +26,7 @@ pub(crate) fn run_simple(
                 .change_context(CmdError::Resolve)?;
             let origin = crate::run_origin::assign_origin(value, text.origin.clone(), cell)?;
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            if var.eq_bytes(b"IFS") {
-                state.set_ifs(expanded.clone());
-            }
-            state.strings.insert(
+            state.set_var(
                 var.clone(),
                 ImportedStr::new(expanded, Trace::at(text.start, origin)),
             );

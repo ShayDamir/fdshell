@@ -21,7 +21,7 @@ pub(crate) fn run_for(
     for word in &words {
         {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.strings.insert(forblock.var.clone(), word.clone());
+            state.set_var(forblock.var.clone(), word.clone());
         }
         if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
             crate::repl::run_script(&forblock.body, cell)

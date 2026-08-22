@@ -39,7 +39,7 @@ pub(super) fn apply_param_op(
         match super::resolve::var_value(name, &state) {
             Some(val) if !val.is_empty() => out.push(val),
             _ => {
-                state.strings.insert(
+                state.set_var(
                     name.clone(),
                     sys::ImportedStr::new(word.clone(), sys::Trace::boundary(sys::Origin::Shell)),
                 );

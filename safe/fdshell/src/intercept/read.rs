@@ -68,7 +68,7 @@ pub(crate) fn run_read(
         let field = fields.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
         let var_name = name.strip_prefix(b"$").unwrap_or_else(|| name.clone());
         let s = ShortCStr::from_vec(field.to_vec()).change_context(CmdError::Read)?;
-        state.strings.insert(
+        state.set_var(
             var_name,
             ImportedStr::new(s, Trace::at(text.start, origin.clone())),
         );
