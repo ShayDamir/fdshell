@@ -29,7 +29,7 @@
 - [x] Unquoted `$@`/`$*` join positional args with literal spaces before IFS splitting — wrong with custom IFS lacking space (injected spaces survive) and with empty IFS (collapses to one field); split per-positional instead of join-then-split
 - [x] `shopt` / `set -o` — shell options bitmask
 - [x] Alias expansion — text-replacement pass on command words
-- [ ] Alias expansion only rewrites the first word of a line — words after `|`, `&&`, `||` (cond.rs/pipeline subcommands) are not alias-expanded
+- [x] Alias expansion only rewrites the first word of a line — words after `|`, `&&`, `||` (cond.rs/pipeline subcommands) are not alias-expanded
 - [ ] `hash` — PATH lookup cache
 - [ ] `ulimit` — resource limit get/set
 - [ ] `return` builtin (requires functions)
@@ -56,6 +56,7 @@
 - [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
 - [x] `state.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
 - [ ] `intercept/alias_cmd.rs` is 90 code lines (STYLE.md §2.3 flag zone) — extract the definition parsing into a helper
+- [ ] `alias_expand.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
 
 ## Security / hardening
 

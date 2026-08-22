@@ -100,3 +100,43 @@ fn alias_value_with_quote_round_trips() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "alias q='echo a'\\''b'\n");
 }
+
+#[test]
+fn alias_expands_after_pipe() {
+    let (out, err, code) = run(r#"alias g="echo got"; echo hi | g"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "got\n");
+}
+
+#[test]
+fn alias_expands_in_every_pipeline_segment() {
+    // The first segment's stdout flows into the pipe; an unexpanded `g` there
+    // would surface as "not found" on stderr.
+    let (out, err, code) = run(r#"alias g="echo got"; g x | g y"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(out, "got y\n");
+}
+
+#[test]
+fn alias_expands_after_pipe_and_cond_operators() {
+    let (out, err, code) = run(r#"alias g="echo got"; g x && g y | g z"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(out, "got x\ngot z\n");
+}
+
+#[test]
+fn alias_chains_after_pipe() {
+    let (out, err, code) = run(r#"alias a=b; alias b="echo deep"; a | b"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(out, "deep\n");
+}
+
+#[test]
+fn alias_ignores_pipe_inside_quotes() {
+    let (out, err, code) = run(r#"alias g="echo got"; echo "a|b" | g"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "got\n");
+}
