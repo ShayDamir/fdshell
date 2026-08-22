@@ -46,6 +46,26 @@
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
 - [ ] History expansion (`!!`, `!echo`) — readline-style history
 
+## Parser & expansion bugs
+
+- [ ] `$(…)` paren matching is quote-blind — `read_dollar_paren` (`parse/token_subst.rs:18-43`) and `read_paren_expr` (`substitute/paren.rs:6-35`) count raw `(`/`)` bytes without tracking double-quote or backslash state, so a `)` that is data inside `"…"` terminates the substitution early and the remainder of the line is re-parsed as shell syntax — text intended as data after the `)` becomes executable (injection class, e.g. `res=$(lookup "key:$user_input")` with a `)` in the input):
+  ```
+  fdshell -c 'x=$(echo "a)b"); echo got:$x'   # → parse error "unmatched quote"; bash prints got:a)b
+  ```
+  Track quote/backslash state in both scanners, or tokenize once and drive substitution from tokens instead of re-scanning raw text
+- [ ] Word splitting cuts through quoted sections of mixed tokens — quote boundaries are erased during tokenize and "fully quoted" is one bit per token (`parse/token.rs:43-49`), so `split_word` (`substitute/mod.rs:41-47`) splits on IFS chars *inside* what was quoted; one argv entry silently becomes two (argument smuggling — callees can be made to act on attacker-chosen fragments):
+  ```
+  fdshell -c 'builtin printf "[%s]" x"a b"c'   # → [xa][bc]; bash/POSIX: [xa bc] (one word)
+  ```
+  Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
+- [ ] Backslash swallowed for all characters inside double quotes — `parse/quotes.rs:14-23` pushes only `X` for `\X`, so `"C:\temp"` → `C:temp` and regexes/format strings containing `\<char>` are silently corrupted:
+  ```
+  fdshell -c 'x="a\nb"; builtin printf "%s|\n" "$x"'   # → anb|; bash: a\nb (backslash retained)
+  ```
+  Preserve the backslash unless the next char is one of `"` `\` `$` `` ` `` newline
+- [ ] `#` begins a comment mid-word — `parse/token.rs:58-65` does not require `#` to start a token: `builtin echo a#b` prints `a` (bash prints `a#b`); data containing `#` (colors, hostnames, filenames) changes meaning depending on position. Require start-of-token like POSIX shells
+- [ ] Shrinking alias underflows the expansion delta — `alias_expand.rs:88`: `*delta += value.len() - (e - s)` underflows when an alias value is shorter than the word it replaces (e.g. `alias ab="z"`): panics in debug builds; in release the wrapped delta mispositions later expansions; an empty alias aborts the rest of the line with "expected command". Use `checked_`/`saturating_` arithmetic with an explicit error
+
 ## Refactoring
 
 - [ ] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
@@ -63,16 +83,25 @@
 ### P1 — DoS / hardening
 
 - [ ] `set --stdout-capture-limit <bytes>` — make the `$(…)` stdout capture cap configurable; `MAX_CAPTURED` is hardcoded at 64 MiB (`cmd_subst.rs:13`); bash has no such limit, so this is an fdshell-specific escape hatch for scripts that legitimately capture more than the default
-- [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory (`shellfd/recv_fd.rs`)
+- [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory: `ensure!(got_pid.is_some())` so an fd is never accepted without kernel-attested credentials (`shellfd/recv_fd.rs`)
 - [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
+- [ ] `source` recursion bypasses MAX_NESTING → stack overflow + core dump — `run_sourced` (`intercept/source.rs`) recurses through `run_script` without `nest::deeper` (the cap of 100 guards only if/while/until/for/case/`$()`), so self-sourcing overflows the native stack:
+  ```
+  printf 'source /tmp/selfsrc.sh\n' > /tmp/selfsrc.sh
+  fdshell -c 'source /tmp/selfsrc.sh'   # → thread 'main' has overflowed its stack (SIGABRT, core dumped)
+  ```
+  Wrap `run_sourced`'s `run_script` call in `nest::deeper` (and `eval_cmd::run_eval` for symmetry)
+- [ ] Pipeline builtin children hold every pipe/socketpair/pidfd open — `pipeline/mod.rs:27-57` copies `pipes`/`capture_pairs` into each forked child as borrows that are never dropped; external-command exec hides this via CLOEXEC, but builtins run their whole lifetime with the full inheritance (verified via `/proc/<pid>/fd`: a stage-3 builtin in a 3-stage pipeline holds ~15 fds, incl. sibling pipe ends, capture socketpair, sibling pidfds). Latent risk: any long-running/blocking builtin mid-pipeline keeps upstream write ends alive → upstream readers never see EOF → pipeline deadlock. In the child, before running a builtin, close all pipe ends except the two cloned ones and drop sibling capture pairs/pidfds
 - [ ] `~` / `$HOME` escape the capability model — the shell operates on fd-vars (`%CWD`) but `~` expansion (`substitute/arg.rs:24`) and `cd_home` (`cd/mod.rs:20`) open the inherited `$HOME` via *absolute* path with default `openat2` flags (no `RESOLVE_BENEATH`, no `O_NOFOLLOW`); a symlink at `$HOME` (or inside it) silently redirects file ops / `cd` to an attacker-controlled location, and `~` reaches outside any `RESOLVE_BENEATH` sandbox. Resolve `~` against a controlled dirfd, or drop `~` in strict mode
 
 ### P2 — Hardening / informational
 
 - [x] Numbered path redirects at `i32::MAX` (`true 2147483647>file`) fail at `dup2` with a generic "failed to open redirection path" / `EBADF` (verified: `true 2147483647>%f` gives the clean "file descriptor number is out of range" but the path branch does not) — apply the same range check as the var branch (`redirect/resolve.rs:24-25` is var-only; add it for `RedirectSource::Path` in `resolve_redirects` or range-check `export_to` at parse time in `parse/redirect.rs:34`)
 - [ ] Non-CLOEXEC socket fd leaks into nested-shell grandchildren via `FDSHELL_SOCKET` — ensure CLOEXEC or strip in children
-- [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current invariants but UB-fragile; add safety comment/invariant test (`shortcstr/access.rs`)
-- [ ] Unbounded script size — `cli::load_script` and the `-c`/stdin paths read the entire script into a `Vec<u8>` with no cap (`cli.rs:7`); a multi-GB script / `-c` argument OOMs the shell before parsing (compounds with the nested-`if` O(n²) CPU). Add a max-script-size check
+- [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked` and `CStr::from_bytes_with_nul_unchecked` (`shortcstr/mod.rs:72-89`); `shortcstr/push.rs:43-108` uses `get_unchecked_mut` and a transmute-based `InlineSize` guarded only by `debug_assert!`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current construction invariants but UB-fragile to future edits; replace `unreachable_unchecked` with the existing `ShortCStrError::BadState` mapping and add `verify()` coverage per STYLE.md §7.4
+- [ ] Capture completion depends on socket EOF from *all* socket holders — `do_captures` (`capture.rs:38-68`) loops `recv_fd` until EOF; EOF requires every holder of the child-end to exit, including descendants that inherited the exported socket dup (no CLOEXEC by definition of `ExportedFd`); a descendant outliving its child delays capture past `wait_pidfd`, and for background tasks (`pidvar` path) the same stall hits the `wait` builtin. Add a timeout, or count expected senders explicitly
+- [ ] Unbounded script size — `cli::load_script` and the `-c`/stdin paths read the entire script into a `Vec<u8>` with no cap (`cli.rs:7`); a multi-GB script / `-c` argument OOMs the shell before parsing (compounds with the nested-`if` O(n²) CPU). `source` targets are read the same way (`read_to_end` in `intercept/source.rs`): `source /dev/zero` allocates until OOM as an exit-free memory bomb. Reuse the `MAX_CAPTURED` cap + error for both loaders
+- [ ] Error output leaks absolute internal source paths — error reports embed locations like `at safe/fdshell/src/exec/search.rs:19:5` on stderr; build-path leakage in dev/test builds — strip via release profile or route through the display chain only
 - [ ] `getcwd` fixed 4096-byte buffer — `env::getcwd` (`env.rs:37`) fails with `ENAMETOOLONG` (surfaced as a generic `BuiltinError::Io`) when the CWD path exceeds 4096 bytes; `pwd` then gives an unactionable error. Read the cwd via `/proc/self/cwd` (readlink) or grow the buffer so `pwd` keeps working for deep directory trees
 
 ## Open Directions
