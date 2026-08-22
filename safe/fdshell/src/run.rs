@@ -10,10 +10,11 @@ pub(crate) fn run_one(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    let parsed = crate::parse::parse(text).change_context(CmdError::Parse)?;
+    let text = crate::alias_expand::expand_alias(text, cell)?;
+    let parsed = crate::parse::parse(&text).change_context(CmdError::Parse)?;
     match &parsed {
         crate::parse::ParsedLine::Cmd(cmdline) => {
-            if let Some(control) = crate::intercept::try_intercept(text, cmdline, cell)? {
+            if let Some(control) = crate::intercept::try_intercept(&text, cmdline, cell)? {
                 return Ok(control);
             }
             let outcome = crate::launch::launch(cell, cmdline).change_context(CmdError::Launch)?;
@@ -33,7 +34,7 @@ pub(crate) fn run_one(
             Ok(None)
         }
         crate::parse::ParsedLine::For(forblock) => {
-            crate::for_run::run_for(forblock, text, cell)?;
+            crate::for_run::run_for(forblock, &text, cell)?;
             Ok(None)
         }
         crate::parse::ParsedLine::While(whileblock) => {
@@ -46,6 +47,6 @@ pub(crate) fn run_one(
         }
         crate::parse::ParsedLine::Case(caseblock) => crate::case_exec::run_case(caseblock, cell),
         crate::parse::ParsedLine::If(ifblock) => crate::if_exec::run_if(ifblock, cell),
-        _ => crate::run_dispatch::run_simple(&parsed, text, cell),
+        _ => crate::run_dispatch::run_simple(&parsed, &text, cell),
     }
 }

@@ -66,6 +66,8 @@ pub enum CmdError {
         command: &'static str,
         name: sys::ShortCStr,
     },
+    /// alias: '{name}': not found
+    AliasNotFound { name: sys::ShortCStr },
     /// fd variable not set
     FdNotSet,
     /// fd operation failed

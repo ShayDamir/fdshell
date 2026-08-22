@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+mod alias_expand;
 mod app;
 pub mod busybox;
 mod capture;

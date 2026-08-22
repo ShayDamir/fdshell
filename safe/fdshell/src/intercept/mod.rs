@@ -14,6 +14,8 @@ pub(crate) fn try_intercept(
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let cmd = cmdline.command.as_bytes().change_context(CmdError::Never)?;
     match cmd {
+        b"alias" => alias_cmd::run_alias(line, cmdline, text, cell).map(handled),
+        b"unalias" => alias_cmd::run_unalias(line, cmdline, text, cell).map(handled),
         b"cd" => cd::run_cd(line, cmdline, text, cell).map(handled),
         b"exit" | b"quit" => exit::run_exit(line, cmdline, cell).map(handled),
         b"become" => become_cmd::run_become(line, cmdline, cell).map(handled),
@@ -40,6 +42,7 @@ fn handled(ran: bool) -> Option<Option<LoopControl>> {
 #[allow(clippy::unwrap_used)]
 mod tests;
 
+mod alias_cmd;
 mod become_cmd;
 mod cd;
 mod envfilter;

@@ -33,6 +33,7 @@ pub struct ShellState {
     pub(crate) nesting: u32,
     pub(crate) ifs: ShortCStr,
     pub(crate) options: u32,
+    pub(crate) aliases: HashMap<ShortCStr, ShortCStr>,
 }
 
 impl ShellState {
@@ -52,6 +53,7 @@ impl ShellState {
             nesting: 0,
             ifs: c" \t\n".into(),
             options: crate::options::DEFAULTS,
+            aliases: HashMap::new(),
         }
     }
 }
