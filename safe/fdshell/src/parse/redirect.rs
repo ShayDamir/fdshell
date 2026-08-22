@@ -35,15 +35,17 @@ fn parse_path_redirect(
     } else {
         (after_op, RedirectDirection::Write)
     };
-    if let Some(export_to) = parse_fd(&prefix, dir) {
-        Ok(Some(RedirectDef {
-            export_to,
-            direction,
-            source: RedirectSource::path(rest),
-        }))
-    } else {
-        Ok(None)
+    let Some(export_to) = parse_fd(&prefix, dir) else {
+        return Ok(None);
+    };
+    if let Some(n) = super::fd_path::fd_path_target(&rest) {
+        return Ok(Some(RedirectDef::dup(export_to, n)));
     }
+    Ok(Some(RedirectDef {
+        export_to,
+        direction,
+        source: RedirectSource::path(rest),
+    }))
 }
 
 pub fn parse_redirect(s: &ShortCStr, fq: bool) -> Result<Option<RedirectDef>, Report<ParseError>> {

@@ -23,7 +23,7 @@
 - [x] Here-strings (`<<<"string"`) — pipe string into command's stdin
 - [x] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
 - [x] `<>` — open file for read/write
-- [ ] `/dev/fd/N` — automatic fd path translation
+- [x] `/dev/fd/N` — automatic fd path translation
 - [ ] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
 - [ ] `shopt` / `set -o` — shell options bitmask
 - [ ] Alias expansion — text-replacement pass on command words
@@ -49,8 +49,8 @@
 - [ ] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
 - [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
 - [ ] `parse/token.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
-- [ ] `parse/mod.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
-- [ ] `parse/redirect.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
+- [ ] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
+- [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
 
 ## Security / hardening
 

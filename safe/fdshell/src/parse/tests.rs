@@ -358,6 +358,75 @@ fn test_fd_dup_redirect_non_numeric_prefix_is_arg() {
 }
 
 #[test]
+fn test_fd_path_redirect_dups_fd() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat </dev/fd/3").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Dup(3),
+        }]
+    );
+}
+
+#[test]
+fn test_fd_path_redirect_numbered_write() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 5>/dev/fd/2").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 5,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Dup(2),
+        }]
+    );
+}
+
+#[test]
+fn test_proc_self_fd_redirect_dups_fd() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd </proc/self/fd/7").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::dup(0, 7)]);
+}
+
+#[test]
+fn test_fd_path_redirect_like_is_path() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat </dev/fd/3x").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::read_path(0, c"/dev/fd/3x")]
+    );
+}
+
+#[test]
+fn test_fd_path_negative_falls_through_to_path() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat </dev/fd/-1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::read_path(0, c"/dev/fd/-1")]
+    );
+}
+
+#[test]
+fn test_fd_path_argument_is_not_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat /dev/fd/3").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args, vec![c"/dev/fd/3".into()]);
+}
+
+#[test]
 fn test_rw_redirect_defaults_to_fd_zero() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <>file").unwrap() else {
         panic!("expected Cmd")

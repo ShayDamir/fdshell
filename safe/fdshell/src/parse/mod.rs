@@ -14,6 +14,7 @@ mod detect_keyword;
 mod elif;
 mod emit;
 mod fd_dup;
+mod fd_path;
 pub(crate) mod for_block;
 mod here_string;
 pub(crate) mod if_block;
