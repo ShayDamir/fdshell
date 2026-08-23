@@ -12,14 +12,28 @@ pub(crate) fn handle_quoted_char(
     match b {
         b'"' => Ok(false),
         b'\\' => {
-            if let Some(c) = bytes.next() {
-                *pos += 1;
-                cur.push_byte(c)
-                    .change_context(ParseError::InvalidChar { ch: 0 })?;
-            } else {
+            let Some(c) = bytes.next() else {
                 return Err(report_unexpected_eof(line, *pos));
+            };
+            *pos += 1;
+            // `\<newline>` is line continuation (both bytes removed); `\` before
+            // `"`, `\`, `$` or a backtick escapes that char; any other `\<char>`
+            // keeps the backslash literally.
+            match c {
+                b'\n' => Ok(true),
+                b'"' | b'\\' | b'$' | b'`' => {
+                    cur.push_byte(c)
+                        .change_context(ParseError::InvalidChar { ch: 0 })?;
+                    Ok(true)
+                }
+                _ => {
+                    cur.push_byte(b'\\')
+                        .change_context(ParseError::InvalidChar { ch: 0 })?;
+                    cur.push_byte(c)
+                        .change_context(ParseError::InvalidChar { ch: 0 })?;
+                    Ok(true)
+                }
             }
-            Ok(true)
         }
         _ => {
             cur.push_byte(b)

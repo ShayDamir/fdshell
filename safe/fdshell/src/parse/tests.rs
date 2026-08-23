@@ -1036,6 +1036,49 @@ fn tokenize_quoted_escape_positions() {
 }
 
 #[test]
+fn tokenize_dquote_backslash_non_special_preserved() {
+    // `\n` is data inside double quotes: the backslash is retained.
+    let tokens = token::tokenize(b"\"a\\nb\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"a\\nb".into());
+    assert!(tokens[0].3);
+}
+
+#[test]
+fn tokenize_dquote_backslash_before_special_dropped() {
+    // `\\` → `\`, `\$` → `$`, backtick → backtick: backslash consumed, char kept.
+    let cases = [
+        (b"\"a\\\\b\"", c"a\\b"),
+        (b"\"a\\$b\"", c"a$b"),
+        (b"\"a\\`b\"", c"a`b"),
+    ];
+    for (input, expected) in cases {
+        let tokens = token::tokenize(input).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].0, expected.into());
+        assert!(tokens[0].3);
+    }
+}
+
+#[test]
+fn tokenize_dquote_backslash_newline_is_continuation() {
+    // `\<newline>` inside double quotes is line continuation: both bytes removed.
+    let tokens = token::tokenize(b"\"a\\\nb\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"ab".into());
+    assert!(tokens[0].3);
+}
+
+#[test]
+fn tokenize_dquote_backslash_at_eof_is_error() {
+    let result = token::tokenize(b"\"a\\");
+    assert!(matches!(
+        result.unwrap_err().current_context(),
+        ParseError::UnexpectedEof
+    ));
+}
+
+#[test]
 fn for_backtick_word_is_single_token() {
     let ParsedLine::For(fb) = parse(b"for x in `echo 1 2 3`; do body; done").unwrap() else {
         panic!("expected For")
@@ -1869,7 +1912,7 @@ fn tokenize_fully_quoted_dollar_at_end() {
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].0, c"printf".into());
     assert!(!tokens[0].3);
-    assert_eq!(tokens[1].0, c"%sn".into());
+    assert_eq!(tokens[1].0, c"%s\\n".into());
     assert!(tokens[1].3);
     assert_eq!(tokens[2].0, c"$@".into());
     assert!(tokens[2].3);
@@ -1881,7 +1924,7 @@ fn tokenize_fully_quoted_dollar_at_middle() {
     assert_eq!(tokens.len(), 4);
     assert_eq!(tokens[0].0, c"printf".into());
     assert!(!tokens[0].3);
-    assert_eq!(tokens[1].0, c"%sn".into());
+    assert_eq!(tokens[1].0, c"%s\\n".into());
     assert!(tokens[1].3);
     assert_eq!(tokens[2].0, c"$@".into());
     assert!(tokens[2].3);
@@ -1975,7 +2018,7 @@ fn parse_fully_quoted_dollar_at_preserves_flag() {
         panic!("expected Cmd")
     };
     assert_eq!(cmd.args.len(), 2);
-    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%sn");
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%s\\n");
     assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args_fq.len(), 2);
     assert!(cmd.args_fq[0]);
@@ -1989,7 +2032,7 @@ fn parse_fully_quoted_dollar_at_middle_preserves_flag() {
         panic!("expected Cmd")
     };
     assert_eq!(cmd.args.len(), 3);
-    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%sn");
+    assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%s\\n");
     assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args[2].as_bytes().unwrap(), b"extra");
     assert_eq!(cmd.args_fq.len(), 3);

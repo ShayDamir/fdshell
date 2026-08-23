@@ -58,7 +58,7 @@
   fdshell -c 'builtin printf "[%s]" x"a b"c'   # → [xa][bc]; bash/POSIX: [xa bc] (one word)
   ```
   Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
-- [ ] Backslash swallowed for all characters inside double quotes — `parse/quotes.rs:14-23` pushes only `X` for `\X`, so `"C:\temp"` → `C:temp` and regexes/format strings containing `\<char>` are silently corrupted:
+- [x] Backslash swallowed for all characters inside double quotes — `parse/quotes.rs:14-23` pushes only `X` for `\X`, so `"C:\temp"` → `C:temp` and regexes/format strings containing `\<char>` are silently corrupted:
   ```
   fdshell -c 'x="a\nb"; builtin printf "%s|\n" "$x"'   # → anb|; bash: a\nb (backslash retained)
   ```
