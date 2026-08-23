@@ -27,6 +27,7 @@ mod init;
 mod intercept;
 mod io;
 mod keywords;
+mod last_arg;
 mod launch;
 mod loop_;
 mod loop_control;

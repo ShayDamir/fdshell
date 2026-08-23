@@ -44,6 +44,11 @@ pub fn finish_cmd(
         None => {
             let status =
                 sys::wait_pidfd::wait_pidfd(&outcome.pidfd).change_context(LaunchError::Fork)?;
+            if let Some(capture_fd) = &outcome.capture_fd
+                && let Some(arg) = crate::last_arg::recv(capture_fd, outcome.child_pid)?
+            {
+                state.set_last_arg(arg);
+            }
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = outcome.capture_fd
             {

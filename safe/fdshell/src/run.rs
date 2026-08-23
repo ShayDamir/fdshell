@@ -17,6 +17,9 @@ pub(crate) fn run_one(
             if let Some(control) = crate::intercept::try_intercept(&text, cmdline, cell)? {
                 return Ok(control);
             }
+            // Forked commands must expand their args against the previous `$_`,
+            // so the child (not the parent) reports the new value via the
+            // capture socket, consumed by `finish_cmd`.
             let outcome = crate::launch::launch(cell, cmdline).change_context(CmdError::Launch)?;
             {
                 let mut state = cell.borrow_mut().change_context(CmdError::Never)?;

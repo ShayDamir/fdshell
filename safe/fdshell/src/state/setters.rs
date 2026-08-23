@@ -45,4 +45,32 @@ impl ShellState {
         }
         self.strings.insert(name, value);
     }
+
+    /// Store the last argument of the previous command as the `_` variable
+    /// (bash `$_`), skipping the update while an `eval`/`source` frame runs.
+    pub fn set_last_arg(&mut self, arg: ShortCStr) {
+        if self.eval_depth == 0 {
+            let trace = Trace::boundary(Origin::Shell);
+            self.set_var(c"_".into(), ImportedStr::new(arg, trace));
+        }
+    }
+
+    /// Clear `_` to empty, as bash does after assignments and `for` loops,
+    /// skipping the update while an `eval`/`source` frame runs.
+    pub fn clear_last_arg(&mut self) {
+        if self.eval_depth == 0 {
+            let trace = Trace::boundary(Origin::Shell);
+            self.set_var(c"_".into(), ImportedStr::new(ShortCStr::new(), trace));
+        }
+    }
+
+    /// Enter an `eval`/`source` frame, where inner commands must not update `_`.
+    pub fn begin_eval(&mut self) {
+        self.eval_depth += 1;
+    }
+
+    /// Leave an `eval`/`source` frame.
+    pub fn end_eval(&mut self) {
+        self.eval_depth = self.eval_depth.saturating_sub(1);
+    }
 }

@@ -47,6 +47,9 @@ pub fn do_captures(
                 return Err(e).change_context(CaptureError::ReceiveFailed);
             }
         };
+        if crate::last_arg::is_tag(rtag) {
+            continue;
+        }
         let idx = remaining
             .iter()
             .position(|c| c.tag.as_ref().is_some_and(|t| t.eq_bytes(rtag.to_bytes())))

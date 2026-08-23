@@ -13,7 +13,7 @@ pub(crate) fn try_intercept(
 ) -> Result<Option<Option<LoopControl>>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let cmd = cmdline.command.as_bytes().change_context(CmdError::Never)?;
-    match cmd {
+    let result = match cmd {
         b"alias" => alias_cmd::run_alias(line, cmdline, text, cell).map(handled),
         b"unalias" => alias_cmd::run_unalias(line, cmdline, text, cell).map(handled),
         b"cd" => cd::run_cd(line, cmdline, text, cell).map(handled),
@@ -30,7 +30,13 @@ pub(crate) fn try_intercept(
         b"set" => set_cmd::run_set(line, cmdline, text, cell).map(handled),
         b"shopt" => shopt::run_shopt(line, cmdline, text, cell).map(handled),
         b"read" => read::run_read(line, cmdline, text, cell).map(handled),
-        _ => Ok(None),
+        _ => return Ok(None),
+    };
+    if let Some(control) = result? {
+        last_arg_frame::set_intercepted_last_arg(cmdline, cell)?;
+        Ok(Some(control))
+    } else {
+        Ok(None)
     }
 }
 
@@ -51,6 +57,7 @@ mod eval_cmd;
 mod exit;
 mod export_fd;
 mod exports;
+mod last_arg_frame;
 mod read;
 mod set_cmd;
 mod shift;

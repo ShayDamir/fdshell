@@ -4,11 +4,13 @@
 
 ### P0 — Easy wins
 
-- [ ] `$_` — last argument of previous command
+- [x] `$_` — last argument of previous command
 - [ ] `$-` — shell option flags
 - [ ] `type` builtin — show command type (builtin, external, fd var, etc.)
 - [ ] `command` builtin — bypass function lookup (alias for `builtin` prefix)
 - [x] Allow environment variables to become shell variables — `FOO=bar fdshell -c 'builtin echo $FOO'` should output `bar` (resolve `$FOO` against the inherited environ when not set in `state.strings`)
+
+- [ ] `\$` inside double quotes expands instead of deferring — `builtin echo [\$_]` prints `[\hello]` (backslash retained AND `$_` expanded; bash prints literal `[$_]"). Consequence: nothing can defer a `$` reference into an `eval`/`source` body, so end-to-end tests cannot exercise the `eval_depth` gating (unit tests in `state/tests.rs` cover it directly). Fix escape handling first, then add an end-to-end test with `true hello; eval "true x y; builtin echo [\$_]"`
 
 ### P1 — Major functionality gaps (moderate effort)
 

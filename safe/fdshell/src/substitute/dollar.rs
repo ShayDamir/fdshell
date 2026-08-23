@@ -45,7 +45,15 @@ pub(crate) fn dollar_subst(
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = super::percent::collect_name(peek)?;
             let state = super::borrow_state(cell)?;
-            super::resolve::resolve_var_name(&name_scs, &state, out)?;
+            if name_scs.eq_bytes(b"_") {
+                // `$_`: the `_` variable set by the shell after each command.
+                // Empty when unset, unlike ordinary variables (literal `$name`).
+                if let Some(val) = super::resolve::var_value(&name_scs, &state) {
+                    out.push(val);
+                }
+            } else {
+                super::resolve::resolve_var_name(&name_scs, &state, out)?;
+            }
         }
         Some(b'?') => {
             peek.next();

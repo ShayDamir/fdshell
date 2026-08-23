@@ -23,7 +23,10 @@ pub fn launch(
     let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, cell)
         .change_context(crate::error::launch::LaunchError::Redirect)?;
 
-    let (capture_fd, child_fd) = if cmdline.captures.is_empty() {
+    // Foreground commands always get a capture socket so the child can report
+    // its last expanded word for `$_`; background commands only need one for
+    // captures (bash does not update `$_` for background commands).
+    let (capture_fd, child_fd) = if cmdline.captures.is_empty() && cmdline.pidvar.is_some() {
         (None, None)
     } else {
         let (cap, ch) = sys::net::socketpair_with_passcred()

@@ -40,6 +40,7 @@ fn run_set_positional(
     )
     .change_context(CmdError::Resolve)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+    state.set_last_arg(expanded.last().cloned().unwrap_or_else(|| c"set".into()));
     let positional = expanded
         .iter()
         .map(|s| ImportedStr::new(s.clone(), Trace::at(text.start, text.origin.clone())))

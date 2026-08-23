@@ -1200,3 +1200,28 @@ fn paren_trailing_escape_in_quotes_is_error() {
         crate::error::resolve::ResolveError::UnclosedParen
     ));
 }
+
+#[test]
+fn dollar_underscore_expands_to_last_arg_var() {
+    let cell = dummy_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"_"), is_(c"lastword"));
+    let arg = ShortCStr::from(c"a $_ b");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a lastword b");
+}
+
+#[test]
+fn dollar_underscore_unset_is_empty_not_literal() {
+    // Unset ordinary variables expand to literal text (`$nope`), but an unset
+    // `_` expands to empty — it needs a pristine environ without an inherited
+    // `_`, so reuse env_cell's cleared-environ setup.
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"[$_]");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"[]");
+}

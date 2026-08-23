@@ -25,6 +25,8 @@ pub(crate) enum ChildProcessError {
     BuiltinExecutionFailed,
     /// missing argument
     MissingArg,
+    /// failed to report the last argument to the parent
+    LastArgSend,
     /// fd export for execveat failed
     ExportFailed,
     /// impossible error state (should never occur)
@@ -43,6 +45,7 @@ impl ChildProcessError {
             | Self::ExecFailed
             | Self::BuiltinExecutionFailed
             | Self::MissingArg
+            | Self::LastArgSend
             | Self::ExportFailed
             | Self::Never => 1,
         }

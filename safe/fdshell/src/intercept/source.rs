@@ -28,7 +28,7 @@ pub(crate) fn run_source(
     let path = substituted.first().ok_or(CmdError::SourceNoFile)?;
     let extra = substituted.get(1..).unwrap_or(&[]);
     let saved = swap_positional(cell, extra, text)?;
-    let result = run_sourced(path, cell);
+    let result = super::last_arg_frame::with_eval_frame(cell, || run_sourced(path, cell));
     if let Some(saved) = saved {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_positional(saved);

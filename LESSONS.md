@@ -91,6 +91,12 @@ Testing `printf` backslash escapes with `"a\nb"` fed the test *real* control byt
 ## A text-replacement drift counter must be signed when replacements can shrink
 `alias_expand` tracked the byte-offset drift between original token spans and the edited line as `usize`, doing `*delta += value.len() - (e - s)`. A value shorter than the word it replaces (or an empty alias) underflows `usize` — a debug panic (SIGABRT) and, in release, a wrapped offset that mispositions every later replacement. The drift is a *net length change* and is legitimately negative, so it must be an `isize`. For the out-of-range/invariant path, cast the offset with `s as usize` and let the `Option`-returning `get(..)` bounds-check it: a negative `isize` wraps to a huge index that `get()` rejects with `None`, which maps to a `Never` — no `try_from`, no panic.
 
+## A match guard that re-peeks the scrutinee is always self-referential
+`dollar_subst` matched on `peek.peek()` and guarded the `$_` arm with `!name_continues(peek.peek())` — the guard re-peeks the SAME item (`_` itself), so it always saw a name-continuation and the arm was dead code. Peekable has no two-item lookahead: to branch on "the byte after `_`", consume `_` first (or fold the special case into the shared name path, as done now). Mutation testing found it: guard→false mutants were equivalent because the arm never executed.
+
+## A memfd passed via SCM_RIGHTS shares its file offset with the sender
+The child wrote the `$_` word into a memfd (offset left at EOF) and sent the fd to the parent; the parent's first `read` returned 0 bytes — the offset is shared through the open file description, so the reader starts at EOF. The receiver must `lseek(fd, 0, SEEK_SET)` before reading. Any string-via-memfd channel needs the same seek.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)

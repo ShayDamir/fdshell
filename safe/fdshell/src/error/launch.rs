@@ -15,6 +15,10 @@ pub(crate) enum LaunchError {
     CaptureSocket,
     /// state borrow failed
     Borrow,
+    /// failed to receive the last argument from the child
+    LastArg,
+    /// impossible error state (should never occur)
+    Never,
 }
 
 impl core::error::Error for LaunchError {}

@@ -106,6 +106,46 @@ fn test_captures_success() {
 }
 
 #[test]
+fn test_captures_skips_last_arg_tag() {
+    // A `$_`-tagged message (last-arg report) must be skipped, not captured.
+    let (shell_a, shell_b) = socketpair().expect("socketpair");
+    shell_a.verify().expect("verify shell_a");
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
+
+    shell_a.export().expect("export shell_a");
+    let shell_sock = shell_a.try_clone().expect("clone shell");
+    drop(shell_a);
+
+    let (skip_a, skip_b) = socketpair().expect("socketpair");
+    send_fd(&shell_sock, &skip_a, c"$_").expect("send_fd");
+    drop(skip_a);
+    drop(skip_b);
+
+    let (test_a, test_b) = socketpair().expect("socketpair");
+    send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
+    drop(test_a);
+    drop(test_b);
+
+    let captures = vec![Capture {
+        var: short_cstr(b"OUT"),
+        tag: Some(short_cstr(b"openat2")),
+        force: false,
+        set_at: pos(),
+    }];
+
+    let result = do_captures(
+        receiver,
+        sys::Pid::from_raw(std::process::id() as i32),
+        captures,
+        &ShellState::new(),
+    );
+    let captured = result.expect("captures should succeed past the $_ tag");
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].0.as_bytes().expect("as_bytes"), b"OUT");
+}
+
+#[test]
 fn test_captures_incomplete_zero() {
     // Socket closes before any fd is sent — expect Incomplete { expected: 1, received: 0 }
     let (shell_a, shell_b) = socketpair().expect("socketpair");

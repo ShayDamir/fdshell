@@ -17,11 +17,15 @@ pub fn child_main(
     args_fq: &[bool],
     redirects: &[Redirect],
 ) -> Result<i32, Report<ChildProcessError>> {
-    setup_shellfd(child_sock, cell)?;
+    setup_shellfd(child_sock.as_ref(), cell)?;
     apply_redirects(redirects)?;
 
     let resolved =
         substitute_args(args, args_fq, cell).change_context(ChildProcessError::SubstituteFailed)?;
+    if let Some(sock) = &child_sock {
+        let last = resolved.last().cloned().unwrap_or_else(|| cmd.name.clone());
+        crate::last_arg::send(sock, &last).change_context(ChildProcessError::LastArgSend)?;
+    }
     let sealed: Vec<sys::ExportedCStr> = resolved.iter().map(|cs| cs.export()).collect();
     let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
 
@@ -37,14 +41,17 @@ pub fn child_main(
 }
 
 fn setup_shellfd(
-    sock: Option<sys::LocalFd>,
+    sock: Option<&sys::LocalFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<ChildProcessError>> {
     if let Some(s) = sock {
         let mut state = cell
             .borrow_mut()
             .change_context(ChildProcessError::BorrowFailed)?;
-        state.shell_sock = Some(s);
+        state.shell_sock = Some(
+            s.try_clone()
+                .change_context(ChildProcessError::ExportFailed)?,
+        );
         sys::shellfd::set_capture_active(true);
     } else {
         sys::shellfd::set_capture_active(false);

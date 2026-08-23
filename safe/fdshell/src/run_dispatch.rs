@@ -19,6 +19,7 @@ pub(crate) fn run_simple(
             let fd = src.fd.try_clone().change_context(CmdError::Fd)?;
             let trace = Trace::at(text.start, src.trace.origin.clone());
             state.fds.insert(var.clone(), FdVar { fd, trace });
+            state.clear_last_arg();
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
@@ -30,12 +31,15 @@ pub(crate) fn run_simple(
                 var.clone(),
                 ImportedStr::new(expanded, Trace::at(text.start, origin)),
             );
+            // Bash clears `$_` for plain assignments.
+            state.clear_last_arg();
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Unset(var) => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.fds.remove(var);
             state.tasks.remove(var);
+            state.set_last_arg(var.clone());
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Umask(mask) => {
