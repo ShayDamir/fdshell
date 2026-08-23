@@ -34,6 +34,8 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             i = advance(line, i, &mut state);
             continue;
         }
+        // A separator or comment boundary ends the current word.
+        state.word_active = false;
 
         let raw = line.get(start..i).unwrap_or(b"");
         let part = raw.trim_ascii();

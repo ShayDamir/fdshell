@@ -1840,15 +1840,34 @@ fn tokenize_comment_with_trailing_token_position() {
 }
 
 #[test]
-fn tokenize_token_ending_at_comment_end_position() {
-    let tokens = token::tokenize(b"ab# c").unwrap();
+fn tokenize_token_ending_before_comment() {
+    let tokens = token::tokenize(b"ab # c").unwrap();
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0, c"ab".into());
     assert_eq!(tokens[0].1, 0);
     assert_eq!(
         tokens[0].2, 2,
-        "end must be at the '#', not after the comment"
+        "end must be at the end of the word, before the comment"
     );
+}
+
+#[test]
+fn tokenize_hash_mid_word_is_literal() {
+    // `#` inside a word is data, not a comment.
+    let tokens = token::tokenize(b"ab# c").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, c"ab#".into());
+    assert_eq!(tokens[1].0, c"c".into());
+}
+
+#[test]
+fn tokenize_empty_quote_then_hash_kept() {
+    // A closing quote still counts as word content, so a `#` right after it is
+    // literal even though the accumulated bytes are empty.
+    let tokens = token::tokenize(b"\"\"#x").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"#x".into());
+    assert!(!tokens[0].3, "#x is not fully quoted");
 }
 
 #[test]

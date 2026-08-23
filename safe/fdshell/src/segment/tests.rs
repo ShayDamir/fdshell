@@ -198,6 +198,29 @@ fn scan_comment_skipped() {
 }
 
 #[test]
+fn scan_hash_mid_word_kept() {
+    // `#` inside a word is data, not a comment: the segment keeps it.
+    let segments = scan_segments(b"echo a#b", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s, _) => assert_eq!(*s, b"echo a#b"),
+        _ => panic!("expected Statement"),
+    }
+}
+
+#[test]
+fn scan_hash_after_semicolon_is_comment() {
+    // A `;` ends the word, so the following `#` begins a comment; only the
+    // first statement survives, proving `word_active` is reset at separators.
+    let segments = scan_segments(b"echo a;#x", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement(s, _) => assert_eq!(*s, b"echo a"),
+        _ => panic!("expected Statement"),
+    }
+}
+
+#[test]
 fn scan_comment_on_block_line() {
     // Comment after closing keyword should not prevent detection.
     let segments = scan_segments(b"if x; then y; fi # comment", false);

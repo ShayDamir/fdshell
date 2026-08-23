@@ -1296,6 +1296,38 @@ fn comment_inside_if_block_is_skipped() {
         assert_eq!(sys::umask::get(), 0o077);
     });
 }
+
+#[test]
+fn hash_mid_word_is_not_a_comment() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_one(b"builtin echo a#b", &cell).unwrap();
+    });
+    assert_eq!(out, b"a#b\n");
+}
+
+#[test]
+fn hash_after_semicolon_is_a_comment() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_script(b"builtin echo a;#x", &cell).unwrap();
+    });
+    assert_eq!(out, b"a\n");
+}
+
+#[test]
+fn full_line_comment_after_command_is_skipped() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_script(
+            b"builtin echo a\n# full line comment\nbuiltin echo b",
+            &cell,
+        )
+        .unwrap();
+    });
+    assert_eq!(out, b"a\nb\n");
+}
+
 #[test]
 fn exit_rejects_negative_code() {
     child_test(|| {

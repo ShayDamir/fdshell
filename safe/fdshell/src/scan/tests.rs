@@ -132,3 +132,56 @@ fn boundary_eol_is_separator() {
     let s = ScanState::new();
     assert_eq!(boundary(b"ab", 2, &s), Boundary::Separator);
 }
+
+// A `#` mid-word is data once a word char has been consumed.
+#[test]
+fn boundary_hash_mid_word_is_char() {
+    let line = b"a#";
+    let mut s = ScanState::new();
+    advance(line, 0, &mut s); // 'a' sets word_active
+    assert_eq!(boundary(line, 1, &s), Boundary::Char);
+}
+
+// A whitespace byte ends the current word.
+#[test]
+fn advance_space_resets_word_active() {
+    let line = b"a ";
+    let mut s = ScanState::new();
+    advance(line, 0, &mut s);
+    assert!(s.word_active);
+    advance(line, 1, &mut s);
+    assert!(!s.word_active);
+}
+
+// A `)` closing a `$( )` substitution keeps the word active (so `#` stays data).
+#[test]
+fn advance_substitution_close_keeps_word() {
+    let line = b"$()";
+    let mut s = ScanState::new();
+    advance(line, 0, &mut s); // `$( `
+    advance(line, 2, &mut s); // `)`
+    assert!(s.word_active);
+}
+
+// A top-level (non-substitution) paren ends the current word.
+#[test]
+fn advance_top_level_parens_reset_word() {
+    let mut s = ScanState::new();
+    advance(b")", 0, &mut s);
+    assert!(!s.word_active, "a top-level `)` ends the word");
+    let mut s = ScanState::new();
+    advance(b"(", 0, &mut s);
+    assert!(!s.word_active, "a top-level `(` ends the word");
+}
+
+#[test]
+fn is_word_break_chars() {
+    let breaks = [b' ', b'\t', b'\n', b';', b'|', b'&', b'<', b'>'];
+    for &b in &breaks {
+        assert!(super::is_word_break(b));
+    }
+    let words = [b'a', b'0', b'_', b'-', b'.', b'/', b'{', b'"', b'#'];
+    for &b in &words {
+        assert!(!super::is_word_break(b));
+    }
+}

@@ -34,6 +34,7 @@ pub(crate) fn scan_block(
         in_quote: *in_quote,
         in_backtick: false,
         dollar_paren_depth: 0,
+        word_active: false,
     };
     while i <= line.len() && depth > 0 {
         let kind = boundary(line, i, &state);
@@ -41,6 +42,8 @@ pub(crate) fn scan_block(
             i = advance(line, i, &mut state);
             continue;
         }
+        // A separator or comment boundary ends the current word.
+        state.word_active = false;
         let raw = line.get(*start..i).unwrap_or(b"").trim_ascii();
         depth = depth.saturating_add_signed(depth_delta(raw));
         if kind == Boundary::Comment {

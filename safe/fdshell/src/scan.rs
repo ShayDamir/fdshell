@@ -6,6 +6,8 @@ pub(crate) struct ScanState {
     pub(crate) in_quote: bool,
     pub(crate) in_backtick: bool,
     pub(crate) dollar_paren_depth: u32,
+    /// A word char was just consumed, so a following `#` is data, not a comment.
+    pub(crate) word_active: bool,
 }
 
 impl ScanState {
@@ -15,6 +17,7 @@ impl ScanState {
             in_quote: false,
             in_backtick: false,
             dollar_paren_depth: 0,
+            word_active: false,
         }
     }
 }
@@ -32,10 +35,11 @@ pub(crate) enum Boundary {
 
 /// Classify what sits at position `i`.
 ///
-/// A comment only counts outside quotes and backticks. A separator only counts
-/// when not inside quotes, backticks, or an open `$( )` substitution.
+/// A comment counts only at the start of a word, outside quotes and backticks.
+/// A separator only counts when not inside quotes, backticks, or an open
+/// `$( )` substitution.
 pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
-    if !state.in_quote && !state.in_backtick && line.get(i) == Some(&b'#') {
+    if !state.in_quote && !state.in_backtick && !state.word_active && line.get(i) == Some(&b'#') {
         return Boundary::Comment;
     }
     let is_sep = i == line.len()
@@ -54,33 +58,50 @@ pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
 /// Toggles quotes and backticks and tracks `$( )` depth. A `$(` pair is
 /// consumed together, advancing two positions.
 pub(crate) fn advance(line: &[u8], i: usize, state: &mut ScanState) -> usize {
-    if line.get(i) == Some(&b'"') {
+    let b = line.get(i).copied().unwrap_or(0);
+    let bare = !state.in_quote && !state.in_backtick;
+    if b == b'"' {
         state.in_quote = !state.in_quote;
+        state.word_active = true;
         i + 1
-    } else if !state.in_quote && !state.in_backtick && line.get(i) == Some(&b'$') {
+    } else if bare && b == b'$' {
+        state.word_active = true;
         if line.get(i + 1) == Some(&b'(') {
             state.dollar_paren_depth = state.dollar_paren_depth.saturating_add(1);
             i + 2
         } else {
             i + 1
         }
-    } else if !state.in_quote && !state.in_backtick && line.get(i) == Some(&b'(') {
-        if state.dollar_paren_depth > 0 {
+    } else if bare && b == b'(' {
+        let nested = state.dollar_paren_depth > 0;
+        if nested {
             state.dollar_paren_depth = state.dollar_paren_depth.saturating_add(1);
         }
+        state.word_active = nested;
         i + 1
-    } else if !state.in_quote && !state.in_backtick && line.get(i) == Some(&b')') {
+    } else if bare && b == b')' {
+        let closed_sub = state.dollar_paren_depth > 0;
         state.dollar_paren_depth = state.dollar_paren_depth.saturating_sub(1);
+        state.word_active = closed_sub;
         i + 1
-    } else if !state.in_quote && !state.in_backtick && line.get(i) == Some(&b'`') {
+    } else if bare && b == b'`' {
         state.in_backtick = true;
+        state.word_active = true;
         i + 1
-    } else if state.in_backtick && line.get(i) == Some(&b'`') {
+    } else if state.in_backtick && b == b'`' {
         state.in_backtick = false;
+        state.word_active = true;
         i + 1
     } else {
+        state.word_active = !is_word_break(b);
         i + 1
     }
+}
+
+/// A byte that ends the current word, so the next byte starts a new one
+/// (whitespace or an unquoted shell metacharacter).
+fn is_word_break(b: u8) -> bool {
+    b.is_ascii_whitespace() || matches!(b, b';' | b'|' | b'&' | b'<' | b'>')
 }
 
 #[cfg(test)]

@@ -63,7 +63,7 @@
   fdshell -c 'x="a\nb"; builtin printf "%s|\n" "$x"'   # → anb|; bash: a\nb (backslash retained)
   ```
   Preserve the backslash unless the next char is one of `"` `\` `$` `` ` `` newline
-- [ ] `#` begins a comment mid-word — `parse/token.rs:58-65` does not require `#` to start a token: `builtin echo a#b` prints `a` (bash prints `a#b`); data containing `#` (colors, hostnames, filenames) changes meaning depending on position. Require start-of-token like POSIX shells
+- [x] `#` begins a comment mid-word — `parse/token.rs:58-65` does not require `#` to start a token: `builtin echo a#b` prints `a` (bash prints `a#b`); data containing `#` (colors, hostnames, filenames) changes meaning depending on position. Require start-of-token like POSIX shells
 - [x] Shrinking alias underflows the expansion delta — `alias_expand.rs:88`: `*delta += value.len() - (e - s)` underflows when an alias value is shorter than the word it replaces (e.g. `alias ab="z"`): panics in debug builds; in release the wrapped delta mispositions later expansions; an empty alias aborts the rest of the line with "expected command". Use `checked_`/`saturating_` arithmetic with an explicit error
 
 ## Refactoring
@@ -72,7 +72,8 @@
 - [ ] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
 - [ ] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
 - [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
-- [ ] `parse/token.rs` is 80 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
+- [ ] `parse/token.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
+- [ ] `scan.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract `advance`/`is_word_break` into a `ScanState` impl or helper module
 - [ ] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
 - [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
 - [x] `state.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
