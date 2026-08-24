@@ -2,6 +2,7 @@ use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::line::ParsedLine;
 use error_stack::{Report, ResultExt, bail};
+use sys::ShortCStr;
 
 pub(crate) fn detect_unset(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let target = tokens
@@ -49,5 +50,25 @@ pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Rep
         return Ok(Some(ParsedLine::Continue));
     }
 
+    if first.eq_bytes(b"return") {
+        return detect_return(tokens);
+    }
+
     Ok(None)
+}
+
+/// `return` with an optional integer status.
+pub(crate) fn detect_return(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
+    if tokens.get(2).is_some() {
+        bail!(ParseError::ReturnTakesAtMostOneArgument);
+    }
+    let code = match tokens.get(1) {
+        None => None,
+        Some((t, _, _, _)) => Some(parse_status(t)?),
+    };
+    Ok(Some(ParsedLine::Return(code)))
+}
+
+fn parse_status(t: &ShortCStr) -> Result<i32, Report<ParseError>> {
+    t.parse::<i32>().change_context(ParseError::InvalidInt)
 }

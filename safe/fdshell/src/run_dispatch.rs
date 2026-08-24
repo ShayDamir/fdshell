@@ -52,8 +52,22 @@ pub(crate) fn run_simple(
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.set_last_exit(0);
         }
+        crate::parse::ParsedLine::Function(def) => {
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+            state
+                .functions
+                .insert(def.name.clone(), def.body.data.clone());
+            state.set_last_exit(0);
+        }
         crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),
         crate::parse::ParsedLine::Continue => return Ok(Some(LoopControl::Continue)),
+        crate::parse::ParsedLine::Return(code) => {
+            if let Some(n) = code {
+                let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+                state.set_last_exit(*n);
+            }
+            return Ok(Some(LoopControl::Return));
+        }
         _ => {}
     }
     Ok(None)

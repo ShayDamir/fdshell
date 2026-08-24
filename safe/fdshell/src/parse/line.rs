@@ -1,5 +1,6 @@
 use crate::parse::case_block::CaseBlock;
 use crate::parse::for_block::ForBlock;
+use crate::parse::function_block::FunctionDef;
 use crate::parse::if_block::IfBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
@@ -17,6 +18,8 @@ pub enum ParsedLine {
     For(ForBlock),
     While(WhileBlock),
     Until(UntilBlock),
+    Function(FunctionDef),
     Break,
     Continue,
+    Return(Option<i32>),
 }

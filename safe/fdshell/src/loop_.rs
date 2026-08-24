@@ -10,7 +10,7 @@ pub(crate) fn run_loop(
     block: &LoopBlock,
     invert: bool,
     cell: &ForkCell<ShellState>,
-) -> Result<(), Report<CmdError>> {
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let mut ran_body = false;
     loop {
         crate::repl::run_cond_list(&block.condition, cell)?;
@@ -28,6 +28,7 @@ pub(crate) fn run_loop(
             match control {
                 LoopControl::Break => break,
                 LoopControl::Continue => continue,
+                LoopControl::Return => return Ok(Some(LoopControl::Return)),
             }
         }
     }
@@ -35,5 +36,5 @@ pub(crate) fn run_loop(
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
     }
-    Ok(())
+    Ok(None)
 }

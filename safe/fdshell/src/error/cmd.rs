@@ -55,6 +55,8 @@ pub enum CmdError {
     BreakOutsideLoop,
     /// 'continue' is not inside a loop
     ContinueOutsideLoop,
+    /// 'return' is not inside a function
+    ReturnOutsideFunction,
     /// nesting too deep; reduce the depth of nested blocks or command substitutions
     NestingTooDeep,
     /// impossible error state (should never occur)
@@ -72,6 +74,8 @@ pub enum CmdError {
     FdNotSet,
     /// fd operation failed
     Fd,
+    /// redirections on a function call are not supported
+    FunctionRedirectNotSupported,
 }
 
 impl core::error::Error for CmdError {}

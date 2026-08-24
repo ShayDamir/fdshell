@@ -226,8 +226,8 @@ fn install_debug_hooks_shows_line_and_caret_in_error() {
     assert_eq!(
         msg,
         "\x1b[1munmatched quote\x1b[22m\n\
-         ├╴at safe/fdshell/src/error/parse.rs:91:5\n\
-         ├╴\"unclosed\n\
+          ├╴at safe/fdshell/src/error/parse.rs:99:5\n\
+          ├╴\"unclosed\n\
          ╰╴^"
     );
 }
@@ -244,8 +244,8 @@ fn install_debug_hooks_shows_correct_caret_position() {
     assert_eq!(
         msg,
         "\x1b[1munmatched quote\x1b[22m\n\
-         ├╴at safe/fdshell/src/error/parse.rs:91:5\n\
-         ├╴abc \"def\n\
+          ├╴at safe/fdshell/src/error/parse.rs:99:5\n\
+          ├╴abc \"def\n\
          ╰╴    ^"
     );
 }
@@ -262,8 +262,8 @@ fn install_debug_hooks_multiline_error_context() {
     assert_eq!(
         msg,
         "\x1b[1munmatched quote\x1b[22m\n\
-         ├╴at safe/fdshell/src/error/parse.rs:91:5\n\
-         ├╴\"broken\n\
+          ├╴at safe/fdshell/src/error/parse.rs:99:5\n\
+          ├╴\"broken\n\
          ╰╴^"
     );
 }

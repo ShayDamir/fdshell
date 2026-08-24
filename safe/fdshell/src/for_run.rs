@@ -11,7 +11,7 @@ pub(crate) fn run_for(
     forblock: &ForBlock,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
-) -> Result<(), Report<CmdError>> {
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
@@ -29,8 +29,9 @@ pub(crate) fn run_for(
             match control {
                 LoopControl::Break => break,
                 LoopControl::Continue => continue,
+                LoopControl::Return => return Ok(Some(LoopControl::Return)),
             }
         }
     }
-    Ok(())
+    Ok(None)
 }

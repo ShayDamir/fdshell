@@ -1,3 +1,4 @@
+use crate::brace::scan_function_block;
 use crate::comment::{scan_block, skip_comment};
 use crate::keywords::keyword_delta;
 use crate::scan::{Boundary, ScanState, advance, boundary};
@@ -61,6 +62,15 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             let end = line.len().min(block_start_pos.saturating_sub(1));
             segments.push(Segment::Block {
                 block_start,
+                end_pos: end,
+                closed,
+            });
+            i = end;
+        } else if !in_block
+            && let Some((end, closed)) = scan_function_block(line, part, start, state.in_quote)
+        {
+            segments.push(Segment::Block {
+                block_start: start,
                 end_pos: end,
                 closed,
             });

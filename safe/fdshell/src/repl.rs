@@ -17,6 +17,7 @@ pub fn handle(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<(), Repo
         match control {
             LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
+            LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
         }
     }
     Ok(())
@@ -27,6 +28,7 @@ pub fn exec_cmd(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<i32, R
         match control {
             LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
+            LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
         }
     }
     let state = cell.borrow().change_context(CmdError::Never)?;

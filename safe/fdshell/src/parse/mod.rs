@@ -11,11 +11,13 @@ mod command;
 mod comment;
 mod detect;
 mod detect_keyword;
+mod dispatch;
 mod elif;
 mod emit;
 mod fd_dup;
 mod fd_path;
 pub(crate) mod for_block;
+pub(crate) mod function_block;
 mod here_string;
 pub(crate) mod if_block;
 mod line;
@@ -61,27 +63,8 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
         return Ok(pl);
     }
 
-    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"case")) {
-        return Ok(ParsedLine::Case(case_block::tokens_to_case(&raw, text)?));
-    }
-
-    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"if")) {
-        return Ok(ParsedLine::If(if_block::tokens_to_if(&raw, text)?));
-    }
-
-    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"for")) {
-        return Ok(ParsedLine::For(for_block::tokens_to_for(&raw, text)?));
-    }
-
-    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"while")) {
-        return Ok(ParsedLine::While(while_block::tokens_to_loop(
-            &raw, b"while", text,
-        )?));
-    }
-    if raw.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"until")) {
-        return Ok(ParsedLine::Until(while_block::tokens_to_loop(
-            &raw, b"until", text,
-        )?));
+    if let Some(pl) = dispatch::dispatch_keyword(&raw, text)? {
+        return Ok(pl);
     }
 
     if raw.iter().any(|(t, _, _, _)| t.eq_bytes(b"|")) {

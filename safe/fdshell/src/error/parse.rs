@@ -38,6 +38,14 @@ pub(crate) enum ParseError {
     BreakTakesNoArguments,
     /// continue takes no arguments
     ContinueTakesNoArguments,
+    /// return takes at most one argument
+    ReturnTakesAtMostOneArgument,
+    /// 'return' status must be an integer
+    InvalidInt,
+    /// function definition has an empty name
+    FunctionEmptyName,
+    /// function definition is missing a closing brace
+    FunctionMissingCloseBrace,
     /// expected ';' before 'done'
     ExpectedSemicolonBeforeDone,
     /// expected command

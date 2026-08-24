@@ -14,6 +14,11 @@ pub(crate) fn run_one(
     let parsed = crate::parse::parse(&text).change_context(CmdError::Parse)?;
     match &parsed {
         crate::parse::ParsedLine::Cmd(cmdline) => {
+            // A user function shadows builtins and interceptors (as in bash); a
+            // `builtin` prefix bypasses the lookup inside `try_call`.
+            if let Some(control) = crate::function_call::try_call(&text, cmdline, cell)? {
+                return Ok(control);
+            }
             if let Some(control) = crate::intercept::try_intercept(&text, cmdline, cell)? {
                 return Ok(control);
             }
@@ -37,15 +42,21 @@ pub(crate) fn run_one(
             Ok(None)
         }
         crate::parse::ParsedLine::For(forblock) => {
-            crate::for_run::run_for(forblock, &text, cell)?;
+            if let Some(control) = crate::for_run::run_for(forblock, &text, cell)? {
+                return Ok(Some(control));
+            }
             Ok(None)
         }
         crate::parse::ParsedLine::While(whileblock) => {
-            crate::loop_::run_loop(whileblock, true, cell)?;
+            if let Some(control) = crate::loop_::run_loop(whileblock, true, cell)? {
+                return Ok(Some(control));
+            }
             Ok(None)
         }
         crate::parse::ParsedLine::Until(untilblock) => {
-            crate::loop_::run_loop(untilblock, false, cell)?;
+            if let Some(control) = crate::loop_::run_loop(untilblock, false, cell)? {
+                return Ok(Some(control));
+            }
             Ok(None)
         }
         crate::parse::ParsedLine::Case(caseblock) => crate::case_exec::run_case(caseblock, cell),

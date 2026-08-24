@@ -1812,3 +1812,130 @@ fn fdexplain_two_arguments_sets_status_1() {
         assert_eq!(state.last_status.exit_code(), 1);
     });
 }
+
+fn string_of(state: &ShellState, name: &str) -> Option<ShortCStr> {
+    let key = ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap();
+    state
+        .strings
+        .get::<sys::ShortCStr>(&key)
+        .map(|s| s.value.clone())
+}
+
+#[test]
+fn function_definition_stores_and_call_runs_body() {
+    let cell = make_cell();
+    run_script(b"foo() { a=one; b=two; } foo", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.last_status.exit_code(), 0);
+    assert_eq!(string_of(&state, "a"), Some(c"one".into()));
+    assert_eq!(string_of(&state, "b"), Some(c"two".into()));
+}
+
+#[test]
+fn function_return_sets_status_and_stops_body() {
+    let cell = make_cell();
+    run_script(b"foo() { a=before; return 5; a=after; } foo", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.last_status.exit_code(), 5);
+    assert_eq!(string_of(&state, "a"), Some(c"before".into()));
+}
+
+#[test]
+fn function_return_without_arg_keeps_last_status() {
+    let cell = make_cell();
+    run_script(b"foo() { a=1; return; } foo", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.last_status.exit_code(), 0);
+}
+
+#[test]
+fn function_args_become_positional_params() {
+    let cell = make_cell();
+    run_script(b"foo() { first=$1; second=$2; } foo alpha beta", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(string_of(&state, "first"), Some(c"alpha".into()));
+    assert_eq!(string_of(&state, "second"), Some(c"beta".into()));
+}
+
+#[test]
+fn function_call_restores_caller_positional_params() {
+    let cell = make_cell();
+    run_script(b"set -- sh A B; foo() { inner=$1; } foo X; first=$1", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(string_of(&state, "inner"), Some(c"X".into()));
+    assert_eq!(string_of(&state, "first"), Some(c"A".into()));
+}
+
+#[test]
+fn nested_function_calls() {
+    let cell = make_cell();
+    run_script(
+        b"inner() { msg=from-inner; } outer() { inner; msg2=set; } outer",
+        &cell,
+    )
+    .unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(string_of(&state, "msg"), Some(c"from-inner".into()));
+    assert_eq!(string_of(&state, "msg2"), Some(c"set".into()));
+}
+
+#[test]
+fn function_return_escapes_inner_loop() {
+    let cell = make_cell();
+    run_script(b"foo() { while true; do return 7; done; } foo", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.last_status.exit_code(), 7);
+}
+
+#[test]
+fn function_return_inside_if_skips_rest() {
+    let cell = make_cell();
+    run_script(
+        b"foo() { if true; then return 3; fi; a=not-run; } foo",
+        &cell,
+    )
+    .unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.last_status.exit_code(), 3);
+    assert_eq!(string_of(&state, "a"), None);
+}
+
+#[test]
+fn function_redefinition_overwrites_body() {
+    let cell = make_cell();
+    run_script(b"foo() { a=first; } foo() { a=second; } foo", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(string_of(&state, "a"), Some(c"second".into()));
+}
+
+#[test]
+fn function_shadows_builtin() {
+    let cell = make_cell();
+    run_script(b"echo() { shadowed=yes; } echo", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(string_of(&state, "shadowed"), Some(c"yes".into()));
+}
+
+#[test]
+fn return_outside_function_is_error() {
+    let cell = make_cell();
+    let e = handle(b"return 1", &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        CmdError::ReturnOutsideFunction
+    ));
+}
+
+#[test]
+fn return_with_non_integer_is_parse_error() {
+    let cell = make_cell();
+    let e = run_one(b"return abc", &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::Parse));
+}
+
+#[test]
+fn unclosed_function_brace_is_parse_error() {
+    let cell = make_cell();
+    let e = run_script(b"foo() { a=1", &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::Parse));
+}

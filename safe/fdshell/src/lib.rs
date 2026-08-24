@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod alias_expand;
 mod app;
+mod brace;
 pub mod busybox;
 mod capture;
 mod caret;
@@ -22,6 +23,7 @@ mod exec;
 mod expand;
 mod exports;
 mod for_run;
+mod function_call;
 mod if_exec;
 mod init;
 mod intercept;

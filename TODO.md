@@ -34,7 +34,7 @@
 - [x] Alias expansion only rewrites the first word of a line — words after `|`, `&&`, `||` (cond.rs/pipeline subcommands) are not alias-expanded
 - [ ] `hash` — PATH lookup cache
 - [ ] `ulimit` — resource limit get/set
-- [ ] `return` builtin (requires functions)
+- [x] `return` builtin (requires functions)
 
 ### P2 — Important for bash compatibility (hard)
 
@@ -42,7 +42,7 @@
 - [ ] Glob expansion (`*`, `?`, `[...]`) — expand patterns to matching filenames
 - [ ] Arithmetic expansion `$((expr))` — integer expression evaluation
 - [ ] Brace expansion (`{a,b,c}`, `{1..5}`) — pre-tokenization string generation
-- [ ] Functions — `name() { body; }` with scoped locals, call stack, `return`
+- [x] Functions — `name() { body; }` with call stack, args as positional params (`$0`=name, `$1..`), and `return [n]`
 - [ ] Job control — `bg`, `fg`, `jobs`, SIGTSTP handling, TTY pgrp management
 - [ ] Process substitution (`<(cmd)`, `>(cmd)`) — fifo/pipe with /dev/fd path
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
@@ -76,9 +76,10 @@
 - [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
 - [ ] `parse/token.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
 - [ ] `scan.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract `advance`/`is_word_break` into a `ScanState` impl or helper module
-- [ ] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
+- [x] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
 - [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
 - [x] `state.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
+- [ ] `segment.rs` is 76 code lines (STYLE.md §2.3 flag zone) — extract the keyword/function block-branch construction into a helper
 - [ ] `intercept/alias_cmd.rs` is 90 code lines (STYLE.md §2.3 flag zone) — extract the definition parsing into a helper
 - [ ] `alias_expand.rs` is 87 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
 
