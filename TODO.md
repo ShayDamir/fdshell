@@ -126,6 +126,15 @@
 - [ ] Landlock syscall wrappers + builtin (`landlock --allow-rw %src --restrict`)
 - [ ] `pidfd_send_signal` builtin — kill background jobs by pidfd var
 - [ ] fs-verity ioctls (verify binary before execveat)
+- [ ] `getdents64` syscall wrapper + builtin — list a directory by dirfd; the foundation for TOCTOU-free glob expansion (feeds the P2 glob item)
+- [ ] `memfd` builtin — heredocs without temp files, sealed secrets by fd (wrapper exists in `unsafe/sys/src/memfd.rs`; add `F_SEAL_*` / `memfd_set_seal` support and a name/size argument)
+- [ ] `flock` builtin — advisory locking on existing fd vars (`flock %lock --wait`); coordinate processes by handle, never by path
+- [ ] `ftruncate` / `lseek` / `fsync` builtins on existing fd vars (`lseek` wrapper exists in `rw.rs`; add `ftruncate` / `fsync` wrappers)
+- [ ] `splice` / `copy_file_range` / `sendfile` builtins → zero-copy cat/cp between fd vars, no path re-lookup on the hot path
+- [ ] `O_TMPFILE` + `linkat` atomic file creation — write to an unlinked tempfd, `linkat` into the target dirfd only when complete, so the target path is never observable half-written (needs `linkat` wrapper + builtin)
+- [ ] `statx` builtin — metadata by dirfd + relative path, superseding the `stat` / `fstat` wrappers; `AT_SYMLINK_NOFOLLOW` for TOCTOU-safe symlink checks, re-stat the same open handle after open
+- [ ] `readlinkat` builtin — resolve symlink targets by dirfd without escaping the resolution root (pairs with `statx` for symlink-safe open)
+- [ ] `openat2 --path` (O_PATH) — hold a handle to a file without open permission; combine with `fstat` / `fchdir` / `faccessat2` for inspect-then-act on files the user may not be able to read
 
 ### P1 — Language features
 
@@ -134,13 +143,8 @@
 
 ### P2 — Syscall coverage
 
-- [ ] `splice`/`copy_file_range`/`sendfile` builtins → zero-copy cat/cp
-- [ ] `memfd_create` builtin — heredocs without temp files, sealed secrets by fd
-- [ ] `O_TMPFILE` + `linkat` atomic file creation pattern
 - [ ] `FICLONE` ioctl for reflinks
-- [ ] More `*at` coverage: `symlinkat`, `linkat`, `statx`, `utimensat` (unlinkat syscall wrapper exists, no builtin)
-- [ ] `flock`, `ftruncate`, `lseek`, `fsync` on existing fd vars
-- [ ] `getdents64` for directory listing
+- [ ] More `*at` coverage: `symlinkat`, `utimensat` builtins (unlinkat syscall wrapper exists, no builtin)
 
 ### P2 — Language features
 
