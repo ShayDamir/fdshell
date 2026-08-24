@@ -64,6 +64,7 @@ pub(super) fn eval(
 }
 
 mod ops;
+mod stat;
 
 #[cfg(test)]
 mod tests;

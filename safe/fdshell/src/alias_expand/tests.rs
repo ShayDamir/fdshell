@@ -81,12 +81,18 @@ fn aliased_cell() -> ForkCell<ShellState> {
 fn negative_offset_maps_to_never() {
     let mut cur = from("abc");
     let mut delta: isize = -20;
-    assert!(super::expand_at(&mut cur, &mut delta, from("w"), 5, 7, &aliased_cell()).is_err());
+    assert!(
+        super::expand_at::expand_at(&mut cur, &mut delta, from("w"), 5, 7, &aliased_cell())
+            .is_err()
+    );
 }
 
 #[test]
 fn out_of_range_end_maps_to_never() {
     let mut cur = from("abc");
     let mut delta: isize = 0;
-    assert!(super::expand_at(&mut cur, &mut delta, from("w"), 1, 10, &aliased_cell()).is_err());
+    assert!(
+        super::expand_at::expand_at(&mut cur, &mut delta, from("w"), 1, 10, &aliased_cell())
+            .is_err()
+    );
 }

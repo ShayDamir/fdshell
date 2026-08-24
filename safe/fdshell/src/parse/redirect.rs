@@ -1,6 +1,6 @@
 use crate::error::parse::ParseError;
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
-use error_stack::{Report, ResultExt, ensure};
+use crate::redirect::{RedirectDef, RedirectSource};
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 pub(super) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
@@ -19,22 +19,7 @@ fn parse_path_redirect(
     prefix: ShortCStr,
     dir: u8,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let (rest, direction) = if dir == b'>' && after_op.starts_with(b">") {
-        let r = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
-        ensure!(
-            !(r.is_empty() || r.starts_with(b"%")),
-            ParseError::InvalidRedirect
-        );
-        (r, RedirectDirection::Append)
-    } else if dir == b'<' && after_op.starts_with(b">") {
-        let r = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
-        ensure!(!r.is_empty(), ParseError::InvalidRedirect);
-        (r, RedirectDirection::Rw)
-    } else if dir == b'<' {
-        (after_op, RedirectDirection::Read)
-    } else {
-        (after_op, RedirectDirection::Write)
-    };
+    let (rest, direction) = super::redirect_op::redirect_op(dir, after_op)?;
     let Some(export_to) = parse_fd(&prefix, dir) else {
         return Ok(None);
     };

@@ -53,56 +53,7 @@ pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
     Boundary::Char
 }
 
-/// Fold the character at `i` into `state` and return the next position to scan.
-///
-/// Toggles quotes and backticks and tracks `$( )` depth. A `$(` pair is
-/// consumed together, advancing two positions.
-pub(crate) fn advance(line: &[u8], i: usize, state: &mut ScanState) -> usize {
-    let b = line.get(i).copied().unwrap_or(0);
-    let bare = !state.in_quote && !state.in_backtick;
-    if b == b'"' {
-        state.in_quote = !state.in_quote;
-        state.word_active = true;
-        i + 1
-    } else if bare && b == b'$' {
-        state.word_active = true;
-        if line.get(i + 1) == Some(&b'(') {
-            state.dollar_paren_depth = state.dollar_paren_depth.saturating_add(1);
-            i + 2
-        } else {
-            i + 1
-        }
-    } else if bare && b == b'(' {
-        let nested = state.dollar_paren_depth > 0;
-        if nested {
-            state.dollar_paren_depth = state.dollar_paren_depth.saturating_add(1);
-        }
-        state.word_active = nested;
-        i + 1
-    } else if bare && b == b')' {
-        let closed_sub = state.dollar_paren_depth > 0;
-        state.dollar_paren_depth = state.dollar_paren_depth.saturating_sub(1);
-        state.word_active = closed_sub;
-        i + 1
-    } else if bare && b == b'`' {
-        state.in_backtick = true;
-        state.word_active = true;
-        i + 1
-    } else if state.in_backtick && b == b'`' {
-        state.in_backtick = false;
-        state.word_active = true;
-        i + 1
-    } else {
-        state.word_active = !is_word_break(b);
-        i + 1
-    }
-}
-
-/// A byte that ends the current word, so the next byte starts a new one
-/// (whitespace or an unquoted shell metacharacter).
-fn is_word_break(b: u8) -> bool {
-    b.is_ascii_whitespace() || matches!(b, b';' | b'|' | b'&' | b'<' | b'>')
-}
+mod advance;
 
 #[cfg(test)]
 mod tests;

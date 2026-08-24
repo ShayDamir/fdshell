@@ -1,3 +1,5 @@
+mod args;
+
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
@@ -20,18 +22,7 @@ pub(crate) fn run_alias(
     } else {
         let mut out = Vec::new();
         for arg in cmdline.args.iter() {
-            match arg
-                .as_bytes()
-                .ok()
-                .and_then(|b| b.iter().position(|&c| c == b'='))
-            {
-                Some(i) => {
-                    let name = arg.get(..i).ok_or(CmdError::Never)?;
-                    let value = arg.get(i + 1..).ok_or(CmdError::Never)?;
-                    state.aliases.insert(name.clone(), value.clone());
-                }
-                None => display_alias(&state, arg, &mut out)?,
-            }
+            args::apply_alias_arg(&mut state, arg, &mut out)?;
         }
         sys::OUT.write_all(&out).ok();
     }
@@ -57,19 +48,6 @@ pub(crate) fn run_unalias(
     Ok(true)
 }
 
-fn display_alias(
-    state: &ShellState,
-    name: &ShortCStr,
-    out: &mut Vec<u8>,
-) -> Result<(), Report<CmdError>> {
-    let value = state
-        .aliases
-        .get(name)
-        .ok_or(CmdError::AliasNotFound { name: name.clone() })?;
-    push_definition(name, value, out);
-    Ok(())
-}
-
 fn list_aliases(state: &ShellState) {
     let mut names: Vec<&ShortCStr> = state.aliases.keys().collect();
     names.sort_unstable_by(|a, b| a.as_bytes().unwrap_or(&[]).cmp(b.as_bytes().unwrap_or(&[])));
@@ -82,7 +60,7 @@ fn list_aliases(state: &ShellState) {
     sys::OUT.write_all(&out).ok();
 }
 
-fn push_definition(name: &ShortCStr, value: &ShortCStr, out: &mut Vec<u8>) {
+pub(super) fn push_definition(name: &ShortCStr, value: &ShortCStr, out: &mut Vec<u8>) {
     out.extend_from_slice(b"alias ");
     out.extend_from_slice(name.as_bytes().unwrap_or(&[]));
     out.extend_from_slice(b"='");

@@ -1,7 +1,9 @@
+mod block;
+
 use crate::brace::scan_function_block;
-use crate::comment::{scan_block, skip_comment};
+use crate::comment::skip_comment;
 use crate::keywords::keyword_delta;
-use crate::scan::{Boundary, ScanState, advance, boundary};
+use crate::scan::{Boundary, ScanState, boundary};
 use alloc::vec::Vec;
 
 /// A segment of a script line extracted by the scanner.
@@ -32,7 +34,7 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     while i <= line.len() {
         let kind = boundary(line, i, &state);
         if kind == Boundary::Char {
-            i = advance(line, i, &mut state);
+            i = state.advance(line, i);
             continue;
         }
         // A separator or comment boundary ends the current word.
@@ -42,29 +44,8 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         let part = raw.trim_ascii();
 
         if !in_block && !part.is_empty() && keyword_delta(part) == Some(1) {
-            let block_start = start;
-            let leading_ws = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-            let kw_len = if part.starts_with(b"case") {
-                4
-            } else if part.starts_with(b"if") {
-                2
-            } else if part.starts_with(b"for") {
-                3
-            } else {
-                5
-            };
-            let after_kw = block_start + leading_ws + kw_len;
-            let mut quote_state = state.in_quote;
-            let mut block_start_pos = after_kw;
-            let (_end_pos, closed) =
-                scan_block(line, after_kw, &mut quote_state, &mut block_start_pos, 1);
-
-            let end = line.len().min(block_start_pos.saturating_sub(1));
-            segments.push(Segment::Block {
-                block_start,
-                end_pos: end,
-                closed,
-            });
+            let (segment, end) = block::keyword_block(line, raw, part, start, &state);
+            segments.push(segment);
             i = end;
         } else if !in_block
             && let Some((end, closed)) = scan_function_block(line, part, start, state.in_quote)

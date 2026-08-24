@@ -70,18 +70,18 @@
 
 ## Refactoring
 
-- [ ] `parse/token_subst.rs` and `substitute/paren.rs` duplicate the quote/backslash `$(…)` scanning automaton — extract a shared helper (a byte-consumption scan returning the substitution body) so the two scanners cannot drift
-- [ ] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
-- [ ] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
-- [ ] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
-- [ ] `parse/token.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
-- [ ] `scan.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract `advance`/`is_word_break` into a `ScanState` impl or helper module
+- [x] `parse/token_subst.rs` and `substitute/paren.rs` duplicate the quote/backslash `$(…)` scanning automaton — extract a shared helper (a byte-consumption scan returning the substitution body) so the two scanners cannot drift
+- [x] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
+- [x] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
+- [x] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
+- [x] `parse/token.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
+- [x] `scan.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract `advance`/`is_word_break` into a `ScanState` impl or helper module
 - [x] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
-- [ ] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
+- [x] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
 - [x] `state.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
-- [ ] `segment.rs` is 76 code lines (STYLE.md §2.3 flag zone) — extract the keyword/function block-branch construction into a helper
-- [ ] `intercept/alias_cmd.rs` is 90 code lines (STYLE.md §2.3 flag zone) — extract the definition parsing into a helper
-- [ ] `alias_expand.rs` is 87 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
+- [x] `segment.rs` is 76 code lines (STYLE.md §2.3 flag zone) — extract the keyword/function block-branch construction into a helper
+- [x] `intercept/alias_cmd.rs` is 90 code lines (STYLE.md §2.3 flag zone) — extract the definition parsing into a helper
+- [x] `alias_expand.rs` is 87 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
 
 ## Security / hardening
 

@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn advance_dollar_paren_advances_two() {
     let mut s = ScanState::new();
-    let next = advance(b"$(x", 0, &mut s);
+    let next = s.advance(b"$(x", 0);
     assert_eq!(next, 2, "$ ( must be consumed together");
     assert_eq!(s.dollar_paren_depth, 1);
 }
@@ -14,7 +14,7 @@ fn advance_dollar_paren_advances_two() {
 #[test]
 fn advance_dollar_var_advances_one() {
     let mut s = ScanState::new();
-    let next = advance(b"$x", 0, &mut s);
+    let next = s.advance(b"$x", 0);
     assert_eq!(next, 1);
     assert_eq!(s.dollar_paren_depth, 0);
 }
@@ -24,13 +24,13 @@ fn advance_dollar_var_advances_one() {
 fn advance_quote_open_close() {
     let line = b"a\"b\"c";
     let mut s = ScanState::new();
-    advance(line, 0, &mut s); // 'a'
+    s.advance(line, 0); // 'a'
     assert!(!s.in_quote);
-    advance(line, 1, &mut s); // '"'
+    s.advance(line, 1); // '"'
     assert!(s.in_quote);
-    advance(line, 2, &mut s); // 'b'
+    s.advance(line, 2); // 'b'
     assert!(s.in_quote);
-    advance(line, 3, &mut s); // '"'
+    s.advance(line, 3); // '"'
     assert!(!s.in_quote);
 }
 
@@ -39,10 +39,10 @@ fn advance_quote_open_close() {
 fn advance_quote_inside_backtick_toggles_quote() {
     let line = b"`\"";
     let mut s = ScanState::new();
-    advance(line, 0, &mut s); // '`' opens backtick
+    s.advance(line, 0); // '`' opens backtick
     assert!(s.in_backtick);
     assert!(!s.in_quote);
-    advance(line, 1, &mut s); // '"' inside backtick
+    s.advance(line, 1); // '"' inside backtick
     assert!(
         s.in_quote,
         "a double quote toggles in_quote even inside a backtick span"
@@ -54,11 +54,11 @@ fn advance_quote_inside_backtick_toggles_quote() {
 fn advance_backtick_open_close() {
     let line = b"`a`";
     let mut s = ScanState::new();
-    advance(line, 0, &mut s); // '`'
+    s.advance(line, 0); // '`'
     assert!(s.in_backtick);
-    advance(line, 1, &mut s); // 'a'
+    s.advance(line, 1); // 'a'
     assert!(s.in_backtick);
-    advance(line, 2, &mut s); // '`'
+    s.advance(line, 2); // '`'
     assert!(!s.in_backtick);
 }
 
@@ -138,7 +138,7 @@ fn boundary_eol_is_separator() {
 fn boundary_hash_mid_word_is_char() {
     let line = b"a#";
     let mut s = ScanState::new();
-    advance(line, 0, &mut s); // 'a' sets word_active
+    s.advance(line, 0); // 'a' sets word_active
     assert_eq!(boundary(line, 1, &s), Boundary::Char);
 }
 
@@ -147,9 +147,9 @@ fn boundary_hash_mid_word_is_char() {
 fn advance_space_resets_word_active() {
     let line = b"a ";
     let mut s = ScanState::new();
-    advance(line, 0, &mut s);
+    s.advance(line, 0);
     assert!(s.word_active);
-    advance(line, 1, &mut s);
+    s.advance(line, 1);
     assert!(!s.word_active);
 }
 
@@ -158,8 +158,8 @@ fn advance_space_resets_word_active() {
 fn advance_substitution_close_keeps_word() {
     let line = b"$()";
     let mut s = ScanState::new();
-    advance(line, 0, &mut s); // `$( `
-    advance(line, 2, &mut s); // `)`
+    s.advance(line, 0); // `$( `
+    s.advance(line, 2); // `)`
     assert!(s.word_active);
 }
 
@@ -167,10 +167,10 @@ fn advance_substitution_close_keeps_word() {
 #[test]
 fn advance_top_level_parens_reset_word() {
     let mut s = ScanState::new();
-    advance(b")", 0, &mut s);
+    s.advance(b")", 0);
     assert!(!s.word_active, "a top-level `)` ends the word");
     let mut s = ScanState::new();
-    advance(b"(", 0, &mut s);
+    s.advance(b"(", 0);
     assert!(!s.word_active, "a top-level `(` ends the word");
 }
 
@@ -178,10 +178,10 @@ fn advance_top_level_parens_reset_word() {
 fn is_word_break_chars() {
     let breaks = [b' ', b'\t', b'\n', b';', b'|', b'&', b'<', b'>'];
     for &b in &breaks {
-        assert!(super::is_word_break(b));
+        assert!(super::advance::is_word_break(b));
     }
     let words = [b'a', b'0', b'_', b'-', b'.', b'/', b'{', b'"', b'#'];
     for &b in &words {
-        assert!(!super::is_word_break(b));
+        assert!(!super::advance::is_word_break(b));
     }
 }

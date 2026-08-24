@@ -1,6 +1,6 @@
 use crate::comment::skip_comment;
 use crate::keywords::function_def_name;
-use crate::scan::{Boundary, ScanState, advance, boundary};
+use crate::scan::{Boundary, ScanState, boundary};
 
 /// If `part` opens a `name() { … }` block, return the exclusive end position
 /// and whether the block was closed. `in_quote` is the quote state at `start`.
@@ -50,7 +50,7 @@ fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, b
         }
         let kind = boundary(line, i, &state);
         if kind == Boundary::Char {
-            i = advance(line, i, &mut state);
+            i = state.advance(line, i);
             continue;
         }
         state.word_active = false;

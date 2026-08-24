@@ -1,4 +1,4 @@
-use crate::scan::{Boundary, ScanState, advance, boundary};
+use crate::scan::{Boundary, ScanState, boundary};
 
 /// Skip from `i` past a `#` comment to the next `\n` (or end of input).
 /// Returns the index to resume scanning from.
@@ -39,7 +39,7 @@ pub(crate) fn scan_block(
     while i <= line.len() && depth > 0 {
         let kind = boundary(line, i, &state);
         if kind == Boundary::Char {
-            i = advance(line, i, &mut state);
+            i = state.advance(line, i);
             continue;
         }
         // A separator or comment boundary ends the current word.

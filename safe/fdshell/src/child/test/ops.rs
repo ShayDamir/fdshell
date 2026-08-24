@@ -28,7 +28,7 @@ pub(super) fn file_test(
     orig: Option<&ShortCStr>,
     state: &ShellState,
 ) -> Result<i32, Report<BuiltinError>> {
-    let ok = match stat_operand(arg, orig, state)? {
+    let ok = match super::stat::stat_operand(arg, orig, state)? {
         Some(st) => match op {
             b"-e" => true,
             b"-d" => st.mode & sys::stat::S_IFMT == sys::stat::S_IFDIR,
@@ -39,28 +39,6 @@ pub(super) fn file_test(
         None => false,
     };
     Ok(usize::from(!ok) as i32)
-}
-
-/// Stat the operand: a `%var` original argument is resolved through the fd
-/// table; anything else is a path. `None` means unset or nonexistent.
-pub(super) fn stat_operand(
-    arg: &CStr,
-    orig: Option<&ShortCStr>,
-    state: &ShellState,
-) -> Result<Option<sys::stat::FileStat>, Report<BuiltinError>> {
-    if let Some(var) = orig.and_then(|o| o.strip_prefix(b"%")) {
-        return match state.fds.get(&var) {
-            Some(v) => Ok(Some(
-                sys::stat::fstat(&v.fd).change_context(BuiltinError::Syscall)?,
-            )),
-            None => Ok(None),
-        };
-    }
-    // A stat failure (e.g. ENOENT) is false, matching bash.
-    match sys::stat::stat(arg) {
-        Ok(st) => Ok(Some(st)),
-        Err(_) => Ok(None),
-    }
 }
 
 pub(super) fn string_or_int_test(
