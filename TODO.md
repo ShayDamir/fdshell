@@ -5,8 +5,12 @@
 ### P0 — Easy wins
 
 - [ ] `$-` — shell option flags
+- [ ] `set -o ignoreeof` / `set +o ignoreeof` — prevent shell from exiting on EOF (`Ctrl+D`), P0; add `IGNOREEOF` shell option (`options.rs`); default `off` for scripts, `on` for interactive use; pairs with the `$-` item (shows `i` when on)
 - [ ] `type` builtin — show command type (builtin, external, fd var, etc.)
 - [ ] `command` builtin — bypass function lookup (alias for `builtin` prefix)
+- [ ] `set` listing — bare `set` lists all variables (bash compat; currently falls through to external lookup, `set_cmd.rs:16-26`); add a flag to list fd variables — name TBD, avoid `-f` (bash reserves it for `noglob` when glob expansion lands)
+- [ ] `set -x` / `set +x` (xtrace) — new `XTRACE` bit in `options.rs`; print `+ <name> <expanded args>` to stderr (PS4 prefix, default `+ `) at each dispatch entry — intercept commands, `replacer.rs`, pipeline stages — before the command runs; pairs with the `$-` item (shows `x` when on); security: expanded values can carry secrets into stderr — consider a mode that traces unresolved references (`$VAR` / `%fd`) instead
+- [ ] Builtin-first lookup — `set -o builtin_first` option (`options.rs`): resolve bare command names against the builtin table (`is_dispatched`, `child/dispatch.rs:40`) before PATH lookup (`replacer.rs:44-45`), making the `builtin` keyword optional and retiring the hardcoded auto-builtin list (`parse/builtin.rs:3`); PATH can no longer swap which `test` / `printf` / `openat2` runs; explicit `/path/...` still reaches externals; candidate default under strict mode (P3)
 
 - [ ] `\$` inside double quotes expands instead of deferring — `builtin echo [\$_]` prints `[\hello]` (backslash retained AND `$_` expanded; bash prints literal `[$_]"). Consequence: nothing can defer a `$` reference into an `eval`/`source` body, so end-to-end tests cannot exercise the `eval_depth` gating (unit tests in `state/tests.rs` cover it directly). Fix escape handling first, then add an end-to-end test with `true hello; eval "true x y; builtin echo [\$_]"`
 
@@ -68,25 +72,39 @@
 
 ### P1 — Core syscall builtins
 
-- [ ] `timerfd` syscall wrapper + builtin; `wait --any` + `--timeout` via timerfd polling
+- [ ] `timerfd` syscall wrapper + builtin (the `wait --any` + `--timeout` half is subsumed by the `wait` keyword, [TODO-WAIT.md](TODO-WAIT.md))
 - [ ] `signalfd` builtin — traps as another fd source
 - [ ] `eventfd` builtin — counters between background tasks
+- [ ] `timeout N` builtin — run a command with a wall-clock limit; after N seconds signal the child (SIGTERM, then SIGKILL) and fail the command; pairs with the `timerfd` item above
 - [ ] Landlock syscall wrappers + builtin (`landlock --allow-rw %src --restrict`)
 - [ ] `pidfd_send_signal` builtin — kill background jobs by pidfd var
 - [ ] fs-verity ioctls (verify binary before execveat)
 - [ ] `getdents64` syscall wrapper + builtin — list a directory by dirfd; the foundation for TOCTOU-free glob expansion (feeds the P2 glob item)
 - [ ] `memfd` builtin — heredocs without temp files, sealed secrets by fd (wrapper exists in `unsafe/sys/src/memfd.rs`; add `F_SEAL_*` / `memfd_set_seal` support and a name/size argument)
 - [ ] `flock` builtin — advisory locking on existing fd vars (`flock %lock --wait`); coordinate processes by handle, never by path
+- [ ] `sendmsg` / `recvmsg` builtins — raw AF_UNIX payload + SCM_RIGHTS fd transfer for *custom* protocols (the existing wrappers are FDSHELL-protocol-only, `shellfd/send_fd.rs` / `shellfd/recv_fd.rs`): send a byte payload (arg or file fd) plus any number of fd vars; receive a payload into a var plus N named fd vars (script declares the slots); optional cred surfacing (SO_PASSCRED + pid/uid into a var) so custom protocols can enforce the same pid-verification rule as the `recv_fd` item
+- [ ] Socket lifecycle builtins on fd vars — `bind` (socket + bind), `listen` (socket + bind + listen, backlog arg, `--type stream|dgram`; AF_UNIX with a path or abstract-namespace address (`@…` — no filesystem socket file, no path TOCTOU, fits the capability model; define who unlinks a filesystem socket path), or AF_INET via `--bind ADDR --port N`), `accept` (blocking accept on a listening fd var → new fd var, captured with the existing `%>%var` form); `accept --cap N %arr` — if the array is full, accept and close immediately (reject; RST if unread data is buffered — acceptable for a cap), bounding the concurrent `wait` arm children, the real unbounded resource; the event-loop form of the same cap + parent-side append is the `accept` arm in [TODO-WAIT.md](TODO-WAIT.md); `accept` blocks, so it is a top-level command (mid-pipeline it hits the pipeline fd-leak item above)
+- [ ] `setsockopt` builtin — named options on an existing fd var (`PASSCRED`, `PASSFD`, …), replacing the hardcoded `SO_PASSCRED` helper in `net.rs:5-12`
 - [ ] `ftruncate` / `lseek` / `fsync` builtins on existing fd vars (`lseek` wrapper exists in `rw.rs`; add `ftruncate` / `fsync` wrappers)
 - [ ] `splice` / `copy_file_range` / `sendfile` builtins → zero-copy cat/cp between fd vars, no path re-lookup on the hot path
 - [ ] `O_TMPFILE` + `linkat` atomic file creation — write to an unlinked tempfd, `linkat` into the target dirfd only when complete, so the target path is never observable half-written (needs `linkat` wrapper + builtin)
 - [ ] `statx` builtin — metadata by dirfd + relative path, superseding the `stat` / `fstat` wrappers; `AT_SYMLINK_NOFOLLOW` for TOCTOU-safe symlink checks, re-stat the same open handle after open
 - [ ] `readlinkat` builtin — resolve symlink targets by dirfd without escaping the resolution root (pairs with `statx` for symlink-safe open)
 - [ ] `openat2 --path` (O_PATH) — hold a handle to a file without open permission; combine with `fstat` / `fchdir` / `faccessat2` for inspect-then-act on files the user may not be able to read
+- [ ] `test`: every bash operator that takes a path also takes a `%fd` — fstat the fd var instead of stat'ing a path; the `%var` lookup exists for `-e -f -d` already (`child/test/mod.rs:57-61`), extend to the rest:
+  - kinds: `-f -d -b -c -p -S` (st_mode); `-t` is fd-native in bash (`test -t 1`) — accept a fd var; `-L` only meaningful for O_PATH fds opened on a symlink
+  - permissions: `-r -w -x -g -k` (mode bits vs uid/gid, or faccessat via `/proc/self/fd/N`)
+  - size: `-s` (exists and size > 0)
+  - binary: `%fd1 -nt %fd2` / `-ot` (mtime); `%fd1 -fdeq %fd2` / `-fdne` — same `(st_dev, st_ino)`, the fd version of bash's `-ef` (ino alone is ambiguous across filesystems; both pipe ends share one inode, so this also answers "same pipe?"); use case: TOCTOU guard — reopen a path, verify it still resolves to the same inode as a previously held fd var
+  - fdshell extras beyond bash: `-fdsize +/-N` (size compare); `openat2 --same-as %fd` (verify inode at open time instead of a separate test step)
+- [ ] `fallocate` syscall wrapper + builtin — preallocate space on a file fd var
+- [ ] `mkfifoat` syscall wrapper + builtin — create a fifo inside a dirfd var; underpins coprocess / message-passing scripts without temp files
 
 ### P1 — Language features
 
 - [ ] Lexical scoping / RAII for fd vars: auto-close at block end, linear-use check (use-after-unset + leaks as parse-time errors)
+- [ ] fd-var arrays — `%arr=[]` (empty), `%arr+=%conn` (append; dup semantics, matching `%var1=%var2`), `unset %arr[%conn]` (remove the entry originating from `%conn` — match by provenance, since a dup'd entry has a different fd number; inode match via `-fdeq` is ambiguous when one conn was added twice), `unset %arr` (close every descriptor the array owns); indexed read-out `%x=%arr[N]`; iteration by extending the word list of the existing `for %x in …` (`parse/for_block.rs`) to take an array ref, expanding each entry into `%x` as a dup; pairs with `accept` (hold all connections, fan out) and typed fd vars (one array, one kind)
+- [ ] `wait` keyword — event-case over fd vars; full design in [TODO-WAIT.md](TODO-WAIT.md) (arms incl. `accept %listenfd %array limit N` with built-in cap, one-shot rounds, fork-per-arm, keep/release via arm exit status, one-shot `wait %p1` legacy form); absorbs the legacy `wait` builtin, supersedes the `poll`/`epoll` builtin idea, and subsumes the `wait --any` + `--timeout` half of the `timerfd` item
 - [ ] Structured return channel: extend socket protocol to carry payloads (statx results, readlink targets, error strings) alongside fds
 
 ### P2 — Syscall coverage
@@ -99,7 +117,6 @@
 - [ ] Typed fd vars: dir vs file vs pipe-end vs socket vs pidfd, checked against builtin expectations
 - [ ] Coprocesses and process substitution: `coproc name { cmd }` with bidirectional pipe fd vars
 - [ ] Escape hatch expansion: `%var:path` → `/proc/self/fd/63` for programs that only accept paths
-- [ ] `poll`/`epoll` builtin → event-driven scripts (supervisors, watchers)
 
 ### P3 — Security directions
 
@@ -111,7 +128,7 @@
 
 ### P3 — Application domains (emerge from above)
 
-- [ ] Init/supervision: pidfds + readiness tags + `wait --any` + restart policies
+- [ ] Init/supervision: pidfds + readiness tags + the `wait` keyword ([TODO-WAIT.md](TODO-WAIT.md)) + restart policies
 - [ ] Mini container runtime: namespaces + new mount API + landlock + seccomp, orchestrated in script
 
 ### P3 — Engineering / ecosystem
