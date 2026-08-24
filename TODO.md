@@ -4,37 +4,16 @@
 
 ### P0 — Easy wins
 
-- [x] `$_` — last argument of previous command
 - [ ] `$-` — shell option flags
 - [ ] `type` builtin — show command type (builtin, external, fd var, etc.)
 - [ ] `command` builtin — bypass function lookup (alias for `builtin` prefix)
-- [x] Allow environment variables to become shell variables — `FOO=bar fdshell -c 'builtin echo $FOO'` should output `bar` (resolve `$FOO` against the inherited environ when not set in `state.strings`)
 
 - [ ] `\$` inside double quotes expands instead of deferring — `builtin echo [\$_]` prints `[\hello]` (backslash retained AND `$_` expanded; bash prints literal `[$_]"). Consequence: nothing can defer a `$` reference into an `eval`/`source` body, so end-to-end tests cannot exercise the `eval_depth` gating (unit tests in `state/tests.rs` cover it directly). Fix escape handling first, then add an end-to-end test with `true hello; eval "true x y; builtin echo [\$_]"`
 
 ### P1 — Major functionality gaps (moderate effort)
 
-- [x] `test` / `[` builtin — file tests (`-f`, `-d`, `-e`), string tests (`=`, `!=`, `-z`, `-n`), numeric tests (`-eq`, `-lt`, `-gt`)
-- [x] `printf` builtin — format string output
-- [x] `set --` — replace positional parameters
-- [x] `${var:-default}`, `${var:=default}`, `${var:+alt}`, `${var:?err}` — parameter expansion operators
-- [x] `${!indirect}` — indirect variable expansion
-- [x] `exec` builtin — redirect-only mode (`exec N>&file`)
-- [x] `eval` — parse and execute constructed string
-- [x] `source` / `.` — execute script file in current shell
-- [x] Here-strings (`<<<"string"`) — pipe string into command's stdin
-- [x] `>&` / `<&` fd dup redirects — `echo hello 2>&1`, `exec 5>&1`
-- [x] `<>` — open file for read/write
-- [x] `/dev/fd/N` — automatic fd path translation
-- [x] Word splitting after unquoted `$` expansion — split on IFS when assignment is unquoted
-- [x] IFS sync only happens on `IFS=…` assignment — `read IFS`, `export IFS=x`, `${IFS=…}`, `for IFS in …` store in `strings` without updating `state.ifs` (centralize on a `set_var` helper or sync at each insert site)
-- [x] Unquoted `$@`/`$*` join positional args with literal spaces before IFS splitting — wrong with custom IFS lacking space (injected spaces survive) and with empty IFS (collapses to one field); split per-positional instead of join-then-split
-- [x] `shopt` / `set -o` — shell options bitmask
-- [x] Alias expansion — text-replacement pass on command words
-- [x] Alias expansion only rewrites the first word of a line — words after `|`, `&&`, `||` (cond.rs/pipeline subcommands) are not alias-expanded
 - [ ] `hash` — PATH lookup cache
 - [ ] `ulimit` — resource limit get/set
-- [x] `return` builtin (requires functions)
 
 ### P2 — Important for bash compatibility (hard)
 
@@ -42,7 +21,6 @@
 - [ ] Glob expansion (`*`, `?`, `[...]`) — expand patterns to matching filenames
 - [ ] Arithmetic expansion `$((expr))` — integer expression evaluation
 - [ ] Brace expansion (`{a,b,c}`, `{1..5}`) — pre-tokenization string generation
-- [x] Functions — `name() { body; }` with call stack, args as positional params (`$0`=name, `$1..`), and `return [n]`
 - [ ] Job control — `bg`, `fg`, `jobs`, SIGTSTP handling, TTY pgrp management
 - [ ] Process substitution (`<(cmd)`, `>(cmd)`) — fifo/pipe with /dev/fd path
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
@@ -50,38 +28,15 @@
 
 ## Parser & expansion bugs
 
-- [x] `$(…)` paren matching is quote-blind — `read_dollar_paren` (`parse/token_subst.rs:18-43`) and `read_paren_expr` (`substitute/paren.rs:6-35`) count raw `(`/`)` bytes without tracking double-quote or backslash state, so a `)` that is data inside `"…"` terminates the substitution early and the remainder of the line is re-parsed as shell syntax — text intended as data after the `)` becomes executable (injection class, e.g. `res=$(lookup "key:$user_input")` with a `)` in the input):
-  ```
-  fdshell -c 'x=$(echo "a)b"); echo got:$x'   # → parse error "unmatched quote"; bash prints got:a)b
-  ```
-  Track quote/backslash state in both scanners, or tokenize once and drive substitution from tokens instead of re-scanning raw text
 - [ ] Word splitting cuts through quoted sections of mixed tokens — quote boundaries are erased during tokenize and "fully quoted" is one bit per token (`parse/token.rs:43-49`), so `split_word` (`substitute/mod.rs:41-47`) splits on IFS chars *inside* what was quoted; one argv entry silently becomes two (argument smuggling — callees can be made to act on attacker-chosen fragments):
   ```
   fdshell -c 'builtin printf "[%s]" x"a b"c'   # → [xa][bc]; bash/POSIX: [xa bc] (one word)
   ```
   Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
-- [x] Backslash swallowed for all characters inside double quotes — `parse/quotes.rs:14-23` pushes only `X` for `\X`, so `"C:\temp"` → `C:temp` and regexes/format strings containing `\<char>` are silently corrupted:
-  ```
-  fdshell -c 'x="a\nb"; builtin printf "%s|\n" "$x"'   # → anb|; bash: a\nb (backslash retained)
-  ```
-  Preserve the backslash unless the next char is one of `"` `\` `$` `` ` `` newline
-- [x] `#` begins a comment mid-word — `parse/token.rs:58-65` does not require `#` to start a token: `builtin echo a#b` prints `a` (bash prints `a#b`); data containing `#` (colors, hostnames, filenames) changes meaning depending on position. Require start-of-token like POSIX shells
-- [x] Shrinking alias underflows the expansion delta — `alias_expand.rs:88`: `*delta += value.len() - (e - s)` underflows when an alias value is shorter than the word it replaces (e.g. `alias ab="z"`): panics in debug builds; in release the wrapped delta mispositions later expansions; an empty alias aborts the rest of the line with "expected command". Use `checked_`/`saturating_` arithmetic with an explicit error
 
 ## Refactoring
 
-- [x] `parse/token_subst.rs` and `substitute/paren.rs` duplicate the quote/backslash `$(…)` scanning automaton — extract a shared helper (a byte-consumption scan returning the substitution body) so the two scanners cannot drift
-- [x] `parse/command.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the arg/capture/redirect loop into a helper
-- [x] `redirect/resolve.rs` is 81 code lines (STYLE.md §2.3 flag zone) — extract the per-source arm construction into helpers
-- [x] `child/test/ops.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the file-test path/fd lookup into a helper
-- [x] `parse/token.rs` is 89 code lines (STYLE.md §2.3 flag zone) — extract the per-byte match arm into a helper
-- [x] `scan.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract `advance`/`is_word_break` into a `ScanState` impl or helper module
-- [x] `parse/mod.rs` is 83 code lines (STYLE.md §2.3 flag zone) — extract the keyword dispatch into a helper
-- [x] `parse/redirect.rs` is 85 code lines (STYLE.md §2.3 flag zone) — extract the `>>`/`<>` operator dispatch into a helper
-- [x] `state.rs` is 88 code lines (STYLE.md §2.3 flag zone) — extract the setter cluster into a helper module
-- [x] `segment.rs` is 76 code lines (STYLE.md §2.3 flag zone) — extract the keyword/function block-branch construction into a helper
-- [x] `intercept/alias_cmd.rs` is 90 code lines (STYLE.md §2.3 flag zone) — extract the definition parsing into a helper
-- [x] `alias_expand.rs` is 87 code lines (STYLE.md §2.3 flag zone) — extract the per-position expansion loop into a helper
+- [ ] `ShortCStr` has no byte-search API — several call sites do `as_bytes().ok().and_then(|b| b.iter().position(…))` instead (STYLE.md §6.4): `intercept/alias_cmd/args.rs:14` (`position(|&c| c == b'=')`), `parse/redirect.rs:40` (`position(|&b| b == b'>' || b == b'<')`), `busybox.rs:17` (`rposition(|&c| c == b'/')`). Add `find_byte(byte: u8) -> Option<usize>` next to `contains` in `unsafe/sys/src/shortcstr/eq.rs` (plus `rfind_byte` / a byte-set variant if the other sites need them), cover with tests in `unsafe/sys/tests/`, and switch all call sites off `as_bytes()`
 
 ## Security / hardening
 
@@ -90,18 +45,11 @@
 - [ ] `set --stdout-capture-limit <bytes>` — make the `$(…)` stdout capture cap configurable; `MAX_CAPTURED` is hardcoded at 64 MiB (`cmd_subst.rs:13`); bash has no such limit, so this is an fdshell-specific escape hatch for scripts that legitimately capture more than the default
 - [ ] `recv_fd` pid verification is best-effort — SCM_CREDENTIALS checked only if delivered; make mandatory: `ensure!(got_pid.is_some())` so an fd is never accepted without kernel-attested credentials (`shellfd/recv_fd.rs`)
 - [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
-- [x] `source` recursion bypasses MAX_NESTING → stack overflow + core dump — `run_sourced` (`intercept/source.rs`) recurses through `run_script` without `nest::deeper` (the cap of 100 guards only if/while/until/for/case/`$()`), so self-sourcing overflows the native stack:
-  ```
-  printf 'source /tmp/selfsrc.sh\n' > /tmp/selfsrc.sh
-  fdshell -c 'source /tmp/selfsrc.sh'   # → thread 'main' has overflowed its stack (SIGABRT, core dumped)
-  ```
-  Wrap `run_sourced`'s `run_script` call in `nest::deeper` (and `eval_cmd::run_eval` for symmetry)
 - [ ] Pipeline builtin children hold every pipe/socketpair/pidfd open — `pipeline/mod.rs:27-57` copies `pipes`/`capture_pairs` into each forked child as borrows that are never dropped; external-command exec hides this via CLOEXEC, but builtins run their whole lifetime with the full inheritance (verified via `/proc/<pid>/fd`: a stage-3 builtin in a 3-stage pipeline holds ~15 fds, incl. sibling pipe ends, capture socketpair, sibling pidfds). Latent risk: any long-running/blocking builtin mid-pipeline keeps upstream write ends alive → upstream readers never see EOF → pipeline deadlock. In the child, before running a builtin, close all pipe ends except the two cloned ones and drop sibling capture pairs/pidfds
 - [ ] `~` / `$HOME` escape the capability model — the shell operates on fd-vars (`%CWD`) but `~` expansion (`substitute/arg.rs:24`) and `cd_home` (`cd/mod.rs:20`) open the inherited `$HOME` via *absolute* path with default `openat2` flags (no `RESOLVE_BENEATH`, no `O_NOFOLLOW`); a symlink at `$HOME` (or inside it) silently redirects file ops / `cd` to an attacker-controlled location, and `~` reaches outside any `RESOLVE_BENEATH` sandbox. Resolve `~` against a controlled dirfd, or drop `~` in strict mode
 
 ### P2 — Hardening / informational
 
-- [x] Numbered path redirects at `i32::MAX` (`true 2147483647>file`) fail at `dup2` with a generic "failed to open redirection path" / `EBADF` (verified: `true 2147483647>%f` gives the clean "file descriptor number is out of range" but the path branch does not) — apply the same range check as the var branch (`redirect/resolve.rs:24-25` is var-only; add it for `RedirectSource::Path` in `resolve_redirects` or range-check `export_to` at parse time in `parse/redirect.rs:34`)
 - [ ] Non-CLOEXEC socket fd leaks into nested-shell grandchildren via `FDSHELL_SOCKET` — ensure CLOEXEC or strip in children
 - [ ] `ExportedCStr::as_ref` uses `unreachable_unchecked` and `CStr::from_bytes_with_nul_unchecked` (`shortcstr/mod.rs:72-89`); `shortcstr/push.rs:43-108` uses `get_unchecked_mut` and a transmute-based `InlineSize` guarded only by `debug_assert!`; tail-`Static` `as_cstr_bytes` ignores `length` — sound under current construction invariants but UB-fragile to future edits; replace `unreachable_unchecked` with the existing `ShortCStrError::BadState` mapping and add `verify()` coverage per STYLE.md §7.4
 - [ ] Capture completion depends on socket EOF from *all* socket holders — `do_captures` (`capture.rs:38-68`) loops `recv_fd` until EOF; EOF requires every holder of the child-end to exit, including descendants that inherited the exported socket dup (no CLOEXEC by definition of `ExportedFd`); a descendant outliving its child delays capture past `wait_pidfd`, and for background tasks (`pidvar` path) the same stall hits the `wait` builtin. Add a timeout, or count expected senders explicitly
@@ -165,7 +113,6 @@
 
 - [ ] Init/supervision: pidfds + readiness tags + `wait --any` + restart policies
 - [ ] Mini container runtime: namespaces + new mount API + landlock + seccomp, orchestrated in script
-- [x] Busybox-style multicall binary: builtins symlinked as cat, mv, ls via getdents64 on dirfd
 
 ### P3 — Engineering / ecosystem
 
