@@ -54,6 +54,19 @@ impl ShortCStr {
         }
     }
 
+    pub fn strip_suffix(&self, suffix: &[u8]) -> Option<Self> {
+        let bytes = self.as_bytes().ok()?;
+        let len = bytes.len();
+        if suffix.len() > len {
+            return None;
+        }
+        if bytes.get(len - suffix.len()..) == Some(suffix) {
+            self.get(..len - suffix.len())
+        } else {
+            None
+        }
+    }
+
     pub fn split(&self, sep: u8) -> Split {
         Split::new(self, sep)
     }

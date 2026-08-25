@@ -133,6 +133,7 @@ fn cd_captures_not_supported() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        cap: None,
         set_at: pos(),
     }];
     let cell = make_cell();

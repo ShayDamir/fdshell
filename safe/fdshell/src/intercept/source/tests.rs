@@ -119,6 +119,7 @@ fn run_source_with_captures_fails() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        cap: None,
         set_at: sys::Position::new(1, 1),
     }];
     let cell = make_cell();

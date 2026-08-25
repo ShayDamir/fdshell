@@ -51,6 +51,7 @@ fn test_mkdirat_capture() {
                 var: c"foo".into(),
                 tag: None,
                 force: false,
+                cap: None,
                 set_at: pos(),
             }],
             redirects: vec![],
@@ -91,6 +92,7 @@ fn test_openat2_capture() {
             var: c"baz".into(),
             tag: None,
             force: false,
+            cap: None,
             set_at: pos(),
         }]
     );
@@ -114,12 +116,14 @@ fn test_pipe_tagged_captures() {
                 var: c"server".into(),
                 tag: Some(c"rd".into()),
                 force: false,
+                cap: None,
                 set_at: pos(),
             },
             Capture {
                 var: c"client".into(),
                 tag: Some(c"wr".into()),
                 force: false,
+                cap: None,
                 set_at: pos(),
             },
         ]
@@ -170,6 +174,7 @@ fn test_force_capture() {
             var: c"foo".into(),
             tag: None,
             force: true,
+            cap: None,
             set_at: pos(),
         }]
     );
@@ -594,6 +599,65 @@ fn test_assign_fd() {
 
     assert_eq!(var, c"server_pid".into());
     assert_eq!(value, c"!".into());
+}
+
+#[test]
+fn test_assign_array_empty() {
+    let ParsedLine::AssignArrayEmpty { var } = parse(b"%arr=[]").unwrap() else {
+        panic!("expected AssignArrayEmpty")
+    };
+    assert_eq!(var, c"arr".into());
+}
+
+#[test]
+fn test_append_fd() {
+    let ParsedLine::AppendFd { var, value } = parse(b"%arr+=%conn").unwrap() else {
+        panic!("expected AppendFd")
+    };
+    assert_eq!(var, c"arr".into());
+    assert_eq!(value, c"conn".into());
+}
+
+#[test]
+fn test_assign_fd_index() {
+    let ParsedLine::AssignFdIndex { var, value, index } = parse(b"%x=%arr[2]").unwrap() else {
+        panic!("expected AssignFdIndex")
+    };
+    assert_eq!(var, c"x".into());
+    assert_eq!(value, c"arr".into());
+    assert_eq!(index, 2);
+}
+
+#[test]
+fn test_assign_fd_index_zero() {
+    let result = parse(b"%x=%arr[0]").unwrap();
+    assert!(matches!(result, ParsedLine::AssignFdIndex { index: 0, .. }));
+}
+
+#[test]
+fn test_assign_fd_non_numeric_index_is_plain_name() {
+    let ParsedLine::AssignFd { var, value } = parse(b"%x=%arr[abc]").unwrap() else {
+        panic!("expected AssignFd")
+    };
+    assert_eq!(var, c"x".into());
+    assert_eq!(value, c"arr[abc]".into());
+}
+
+#[test]
+fn test_unset_array_entry() {
+    let ParsedLine::UnsetArrayEntry { var, source } = parse(b"unset %arr[%conn]").unwrap() else {
+        panic!("expected UnsetArrayEntry")
+    };
+    assert_eq!(var, c"arr".into());
+    assert_eq!(source, c"conn".into());
+}
+
+#[test]
+fn test_unset_array_entry_malformed_is_plain_unset() {
+    let ParsedLine::Unset(var) = parse(b"unset %arr[conn]").unwrap() else {
+        panic!("expected Unset")
+    };
+    assert_eq!(var, c"arr[conn]".into());
 }
 
 #[test]
@@ -2124,6 +2188,40 @@ fn parse_capture_empty_var_is_error() {
 fn parse_capture_tagged_empty_var_is_error() {
     let s = sys::ShortCStr::from(c"%tag>%");
     assert!(super::capture::parse_capture(&s, pos()).is_err());
+}
+
+#[test]
+fn parse_capture_unbounded_has_no_cap() {
+    let s = sys::ShortCStr::from(c"%>%arr");
+    let c = super::capture::parse_capture(&s, pos()).unwrap().unwrap();
+    assert_eq!(c.var, c"arr".into());
+    assert_eq!(c.cap, None);
+}
+
+#[test]
+fn parse_capture_bounded() {
+    let s = sys::ShortCStr::from(c"%>%arr[2]");
+    let c = super::capture::parse_capture(&s, pos()).unwrap().unwrap();
+    assert_eq!(c.var, c"arr".into());
+    assert_eq!(c.cap, Some(2));
+    assert_eq!(c.tag, None);
+}
+
+#[test]
+fn parse_capture_tagged_bounded() {
+    let s = sys::ShortCStr::from(c"%tag>%arr[3]");
+    let c = super::capture::parse_capture(&s, pos()).unwrap().unwrap();
+    assert_eq!(c.var, c"arr".into());
+    assert_eq!(c.cap, Some(3));
+    assert_eq!(c.tag, Some(c"tag".into()));
+}
+
+#[test]
+fn parse_capture_malformed_index_is_plain_name() {
+    let s = sys::ShortCStr::from(c"%>%arr[2x]");
+    let c = super::capture::parse_capture(&s, pos()).unwrap().unwrap();
+    assert_eq!(c.var, c"arr[2x]".into());
+    assert_eq!(c.cap, None);
 }
 
 #[test]

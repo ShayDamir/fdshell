@@ -16,4 +16,9 @@ impl ShortCStr {
     pub fn contains(&self, byte: u8) -> bool {
         self.as_bytes().is_ok_and(|b| b.contains(&byte))
     }
+
+    /// Index of the first occurrence of `byte`, or `None` if absent.
+    pub fn find_byte(&self, byte: u8) -> Option<usize> {
+        self.as_bytes().ok()?.iter().position(|&b| b == byte)
+    }
 }

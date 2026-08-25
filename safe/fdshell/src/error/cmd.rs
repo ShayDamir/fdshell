@@ -74,6 +74,10 @@ pub enum CmdError {
     FdNotSet,
     /// fd operation failed
     Fd,
+    /// {name} is not an array
+    NotAnArray { name: sys::ShortCStr },
+    /// {name}[{index}]: index out of range
+    ArrayIndexOutOfRange { name: sys::ShortCStr, index: usize },
     /// redirections on a function call are not supported
     FunctionRedirectNotSupported,
 }

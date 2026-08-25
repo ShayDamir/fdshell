@@ -205,6 +205,7 @@ fn try_intercept_eval_with_captures_returns_error() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        cap: None,
         set_at: sys::Position::new(1, 1),
     }];
     let cell = make_cell();
@@ -274,6 +275,7 @@ fn try_intercept_export_fd_with_captures_returns_error() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        cap: None,
         set_at: sys::Position::new(1, 1),
     }];
     let cell = make_cell();
@@ -343,6 +345,7 @@ fn capture_pos_found_at_correct_position() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        cap: None,
         set_at: sys::Position::new(1, 1),
     }];
     let cell = make_cell();

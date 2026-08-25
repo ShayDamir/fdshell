@@ -15,11 +15,7 @@ fn apply_captures(
     captures: Vec<Capture>,
     state: &mut ShellState,
 ) -> Result<(), error_stack::Report<crate::error::capture::CaptureError>> {
-    let entries = crate::capture::do_captures(capture_fd, child_pid, captures, state)?;
-    for (var, fd) in entries {
-        state.fds.insert(var, fd);
-    }
-    Ok(())
+    crate::capture::capture_and_commit(capture_fd, child_pid, captures, state)
 }
 
 pub fn finish_cmd(

@@ -766,6 +766,50 @@ fn contains_found() {
 }
 
 #[test]
+fn find_byte_first_occurrence() {
+    let s = ShortCStr::from(c"a[b]c[d]");
+    assert_eq!(s.find_byte(b'['), Some(1));
+    assert_eq!(s.find_byte(b']'), Some(3));
+    assert_eq!(s.find_byte(b'd'), Some(6));
+}
+
+#[test]
+fn find_byte_absent() {
+    let s = ShortCStr::from(c"plain");
+    assert_eq!(s.find_byte(b'['), None);
+    assert_eq!(ShortCStr::new().find_byte(b'a'), None);
+}
+
+#[test]
+fn strip_suffix_matching() {
+    let s = ShortCStr::from(c"arr+");
+    assert_eq!(s.strip_suffix(b"+"), Some(ShortCStr::from(c"arr")));
+}
+
+#[test]
+fn strip_suffix_non_matching() {
+    let s = ShortCStr::from(c"plain");
+    assert_eq!(s.strip_suffix(b"+"), None);
+}
+
+#[test]
+fn strip_suffix_longer_than_self() {
+    let s = ShortCStr::from(c"a");
+    assert_eq!(s.strip_suffix(b"ab"), None);
+}
+
+#[test]
+fn strip_suffix_equals_self() {
+    let s = ShortCStr::from(c"xy");
+    assert_eq!(s.strip_suffix(b"xy"), Some(ShortCStr::new()));
+}
+
+#[test]
+fn strip_suffix_empty_self() {
+    assert_eq!(ShortCStr::new().strip_suffix(b"a"), None);
+}
+
+#[test]
 fn extend_copy_to_inline_via_constructed_arc() {
     // Arc non-tail view < INLINE_CAP → case 3 → copy_to_shortcstr inline path
     let v = Arc::new(b"hello world, this is more than thirty bytes long".to_vec());

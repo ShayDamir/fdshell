@@ -25,14 +25,19 @@ pub fn parse_capture(
         Some(v) => v,
         None => bail!(ParseError::CaptureMissingPercent),
     };
+    let (var, cap) = match crate::parse::array_ref::split_index_ref(&var_name) {
+        Some((base, idx)) => (base, Some(idx)),
+        None => (var_name, None),
+    };
     Ok(Some(Capture {
-        var: var_name,
+        var,
         tag: if tag_part.is_empty() {
             None
         } else {
             Some(tag_part)
         },
         force,
+        cap,
         set_at,
     }))
 }

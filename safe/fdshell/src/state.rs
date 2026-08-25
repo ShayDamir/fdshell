@@ -17,8 +17,17 @@ pub struct FdVar {
     pub trace: Trace,
 }
 
+/// An fd array element: an owned descriptor, the name of the variable or
+/// SHELLFD tag it originated from (its provenance), and its trace.
+pub struct FdArrayEntry {
+    pub fd: LocalFd,
+    pub source: ShortCStr,
+    pub trace: Trace,
+}
+
 pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, FdVar>,
+    pub(crate) arrays: HashMap<ShortCStr, Vec<FdArrayEntry>>,
     pub(crate) tasks: HashMap<ShortCStr, Task>,
     pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
     pub(crate) exports: HashMap<ShortCStr, ImportedStr>,
@@ -41,6 +50,7 @@ impl ShellState {
     pub fn new() -> Self {
         ShellState {
             fds: HashMap::new(),
+            arrays: HashMap::new(),
             tasks: HashMap::new(),
             strings: HashMap::new(),
             exports: HashMap::new(),
@@ -67,6 +77,7 @@ impl Default for ShellState {
     }
 }
 
+mod arrays;
 mod setters;
 
 #[cfg(test)]

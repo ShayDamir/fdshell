@@ -6,19 +6,24 @@ use hashbrown::HashMap;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ScriptText, Trace};
 
+mod array_ops;
+
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
 pub(crate) fn run_simple(
     parsed: &crate::parse::ParsedLine,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    if array_ops::run(parsed, text, cell)? {
+        return Ok(None);
+    }
     match parsed {
         crate::parse::ParsedLine::AssignFd { var, value } => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             let src = state.fds.get(value).ok_or(CmdError::FdNotSet)?;
             let fd = src.fd.try_clone().change_context(CmdError::Fd)?;
             let trace = Trace::at(text.start, src.trace.origin.clone());
-            state.fds.insert(var.clone(), FdVar { fd, trace });
+            state.set_fd_var(var.clone(), FdVar { fd, trace });
             state.clear_last_arg();
             state.set_last_exit(0);
         }
@@ -38,6 +43,7 @@ pub(crate) fn run_simple(
         crate::parse::ParsedLine::Unset(var) => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.fds.remove(var);
+            state.arrays.remove(var);
             state.tasks.remove(var);
             state.set_last_arg(var.clone());
             state.set_last_exit(0);

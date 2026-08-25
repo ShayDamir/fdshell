@@ -26,12 +26,13 @@ pub fn try_wait(
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = task.capture_fd
             {
-                let entries =
-                    crate::capture::do_captures(capture_fd, task.child_pid, task.captures, state)
-                        .change_context(TaskError::Capture)?;
-                for (var, fd) in entries {
-                    state.fds.insert(var, fd);
-                }
+                crate::capture::capture_and_commit(
+                    capture_fd,
+                    task.child_pid,
+                    task.captures,
+                    state,
+                )
+                .change_context(TaskError::Capture)?;
             }
             Ok(status)
         }
@@ -47,16 +48,13 @@ pub fn try_wait(
                 if let WaitStatus::Exited(0) = status
                     && let Some(capture_fd) = task.capture_fd
                 {
-                    let entries = crate::capture::do_captures(
+                    crate::capture::capture_and_commit(
                         capture_fd,
                         task.child_pid,
                         task.captures,
                         state,
                     )
                     .change_context(TaskError::Capture)?;
-                    for (var, fd) in entries {
-                        state.fds.insert(var, fd);
-                    }
                 }
                 last = status;
             }

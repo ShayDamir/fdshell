@@ -660,6 +660,7 @@ fn run_read_captures_not_supported() {
         var: c"fd".into(),
         tag: None,
         force: false,
+        cap: None,
         set_at: sys::Position::new(1, 1),
     }];
     let cell = make_read_cell();

@@ -8,10 +8,13 @@ pub(crate) fn detect_unset(tokens: &[Token]) -> Result<Option<ParsedLine>, Repor
     let target = tokens
         .get(1)
         .ok_or(ParseError::ExpectedVariableNameAfterUnset)?;
-    if let Some(var) = target.0.strip_prefix(b"%") {
-        return Ok(Some(ParsedLine::Unset(var)));
+    let Some(var) = target.0.strip_prefix(b"%") else {
+        bail!(ParseError::VariableMustStartWithPercent)
+    };
+    if let Some((arr, source)) = super::array_ref::split_element_ref(&var) {
+        return Ok(Some(ParsedLine::UnsetArrayEntry { var: arr, source }));
     }
-    bail!(ParseError::VariableMustStartWithPercent)
+    Ok(Some(ParsedLine::Unset(var)))
 }
 
 pub(crate) fn detect_umask(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {

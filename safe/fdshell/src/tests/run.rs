@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use alloc::vec::Vec;
 
 use crate::error::cmd::CmdError;
@@ -1577,6 +1577,220 @@ fn assign_fd_copies_fd_variable() {
     run_one(b"%copy=%src", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(state.fds.contains_key(&ShortCStr::from(c"copy")));
+}
+
+fn insert_fd_var(cell: &ForkCell<ShellState>, name: &[u8]) {
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    borrow_state_mut(cell).fds.insert(
+        ShortCStr::from_vec(name.to_vec()).unwrap(),
+        FdVar {
+            fd: dev_null,
+            trace: Trace::boundary(Origin::Shell),
+        },
+    );
+}
+
+#[test]
+fn array_empty_creates_array() {
+    let cell = make_cell();
+    run_one(b"%arr=[]", &cell).unwrap();
+    let state = borrow_state(&cell);
+    let arr = state.arrays.get(&ShortCStr::from(c"arr")).unwrap();
+    assert!(arr.is_empty());
+    assert!(!state.fds.contains_key(&ShortCStr::from(c"arr")));
+}
+
+#[test]
+fn array_empty_replaces_scalar() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"arr");
+    run_one(b"%arr=[]", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert!(state.arrays.contains_key(&ShortCStr::from(c"arr")));
+    assert!(!state.fds.contains_key(&ShortCStr::from(c"arr")));
+}
+
+#[test]
+fn array_append_dups_scalar_with_provenance() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    run_one(b"%arr=[]", &cell).unwrap();
+    run_one(b"%arr+=%src", &cell).unwrap();
+    run_one(b"%arr+=%src", &cell).unwrap();
+    let state = borrow_state(&cell);
+    let arr = state.arrays.get(&ShortCStr::from(c"arr")).unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0].source, ShortCStr::from(c"src"));
+    let src_fd = state.fds.get(&ShortCStr::from(c"src")).unwrap().fd.as_raw();
+    assert_ne!(arr[0].fd.as_raw(), src_fd);
+    assert_ne!(arr[0].fd.as_raw(), arr[1].fd.as_raw());
+}
+
+#[test]
+fn array_append_creates_array() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    run_one(b"%arr+=%src", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.arrays.get(&ShortCStr::from(c"arr")).unwrap().len(), 1);
+}
+
+#[test]
+fn array_append_on_scalar_is_not_an_array() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"arr");
+    let e = run_one(b"%arr+=%arr", &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::NotAnArray { .. }));
+}
+
+#[test]
+fn array_indexed_read_dups_entry() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    run_one(b"%arr=[]", &cell).unwrap();
+    run_one(b"%arr+=%src", &cell).unwrap();
+    run_one(b"%x=%arr[0]", &cell).unwrap();
+    let state = borrow_state(&cell);
+    let x = state.fds.get(&ShortCStr::from(c"x")).unwrap();
+    let entry = state.arrays.get(&ShortCStr::from(c"arr")).unwrap();
+    assert_ne!(x.fd.as_raw(), entry[0].fd.as_raw());
+    assert_eq!(x.trace.origin, entry[0].trace.origin);
+}
+
+#[test]
+fn array_index_out_of_range_is_error() {
+    let cell = make_cell();
+    run_one(b"%arr=[]", &cell).unwrap();
+    let e = run_one(b"%x=%arr[0]", &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        CmdError::ArrayIndexOutOfRange { .. }
+    ));
+}
+
+#[test]
+fn array_index_on_unset_var_is_fd_not_set() {
+    let cell = make_cell();
+    let e = run_one(b"%x=%nope[0]", &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::FdNotSet));
+}
+
+#[test]
+fn array_index_on_scalar_is_not_an_array() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"arr");
+    let e = run_one(b"%x=%arr[0]", &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::NotAnArray { .. }));
+}
+
+#[test]
+fn array_unset_entry_by_provenance() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"a");
+    insert_fd_var(&cell, b"b");
+    run_one(b"%arr=[]", &cell).unwrap();
+    run_one(b"%arr+=%a", &cell).unwrap();
+    run_one(b"%arr+=%b", &cell).unwrap();
+    run_one(b"%arr+=%a", &cell).unwrap();
+    run_one(b"unset %arr[%a]", &cell).unwrap();
+    {
+        let state = borrow_state(&cell);
+        let arr = state.arrays.get(&ShortCStr::from(c"arr")).unwrap();
+        let sources: Vec<&sys::ShortCStr> = arr.iter().map(|e| &e.source).collect();
+        assert_eq!(
+            sources,
+            alloc::vec![&ShortCStr::from(c"b"), &ShortCStr::from(c"a")]
+        );
+    }
+    run_one(b"unset %arr[%a]", &cell).unwrap();
+    run_one(b"unset %arr[%b]", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert!(
+        state
+            .arrays
+            .get(&ShortCStr::from(c"arr"))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn array_unset_entry_missing_is_ok() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"a");
+    run_one(b"%arr=[]", &cell).unwrap();
+    run_one(b"%arr+=%a", &cell).unwrap();
+    run_one(b"unset %arr[%missing]", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.arrays.get(&ShortCStr::from(c"arr")).unwrap().len(), 1);
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn array_unset_closes_all_entries() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    run_one(b"%arr=[]", &cell).unwrap();
+    run_one(b"%arr+=%src", &cell).unwrap();
+    let before = std::fs::read_dir("/proc/self/fd").unwrap().count();
+    run_one(b"unset %arr", &cell).unwrap();
+    let after = std::fs::read_dir("/proc/self/fd").unwrap().count();
+    assert_eq!(after, before - 1);
+    let state = borrow_state(&cell);
+    assert!(!state.arrays.contains_key(&ShortCStr::from(c"arr")));
+    assert!(state.fds.contains_key(&ShortCStr::from(c"src")));
+}
+
+#[test]
+fn for_over_array_runs_body_per_entry() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        insert_fd_var(&cell, b"src");
+        run_script(
+            b"%arr=[]; %arr+=%src; %arr+=%src; for %x in %arr; do builtin echo hi; done",
+            &cell,
+        )
+        .unwrap();
+    });
+    assert_eq!(out, b"hi\nhi\n");
+}
+
+#[test]
+fn for_over_array_binds_fd_var() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    run_script(
+        b"%arr=[]; %arr+=%src; for %x in %arr; do var=set; done",
+        &cell,
+    )
+    .unwrap();
+    let state = borrow_state(&cell);
+    assert!(state.fds.contains_key(&ShortCStr::from(c"x")));
+    assert!(state.strings.contains_key(&ShortCStr::from(c"var")));
+}
+
+#[test]
+fn for_over_empty_array_skips_body() {
+    let cell = make_cell();
+    run_script(b"%arr=[]; for %x in %arr; do var=set; done", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert!(!state.fds.contains_key(&ShortCStr::from(c"x")));
+    assert!(!state.strings.contains_key(&ShortCStr::from(c"var")));
+}
+
+#[test]
+fn for_over_unset_percent_name_is_literal_word() {
+    let cell = make_cell();
+    run_script(b"for %x in %nope; do var=set; done", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert!(!state.fds.contains_key(&ShortCStr::from(c"x")));
+    assert_eq!(
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"var".into())
+            .map(|v| &v.value),
+        Some(&c"set".into())
+    );
 }
 
 #[test]

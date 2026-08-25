@@ -9,9 +9,31 @@ use sys::ShortCStr;
 pub enum ParsedLine {
     Cmd(CommandLine),
     Pipeline(Pipeline),
-    AssignFd { var: ShortCStr, value: ShortCStr },
-    AssignStr { var: ShortCStr, value: ShortCStr },
+    AssignFd {
+        var: ShortCStr,
+        value: ShortCStr,
+    },
+    AssignFdIndex {
+        var: ShortCStr,
+        value: ShortCStr,
+        index: usize,
+    },
+    AssignArrayEmpty {
+        var: ShortCStr,
+    },
+    AppendFd {
+        var: ShortCStr,
+        value: ShortCStr,
+    },
+    AssignStr {
+        var: ShortCStr,
+        value: ShortCStr,
+    },
     Unset(ShortCStr),
+    UnsetArrayEntry {
+        var: ShortCStr,
+        source: ShortCStr,
+    },
     Umask(Option<u32>),
     Case(CaseBlock),
     If(IfBlock),

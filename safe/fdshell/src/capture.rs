@@ -1,10 +1,14 @@
 use alloc::vec::Vec;
-use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
 
 use crate::error::capture::CaptureError;
-use crate::state::{FdVar, ShellState};
-use sys::{Origin, Position, ShortCStr, Trace};
+use crate::state::ShellState;
+use sys::{LocalFd, Position, ShortCStr};
+
+mod commit;
+mod slot;
+
+pub use commit::{CapturedFd, capture_and_commit};
 
 #[cfg(test)]
 mod tests;
@@ -17,25 +21,29 @@ pub struct Capture {
     pub var: ShortCStr,
     pub tag: Option<ShortCStr>,
     pub force: bool,
+    /// Bounded capture: append at most this many entries to the array var.
+    pub cap: Option<usize>,
     /// Position of the capture token in the source line.
     pub set_at: Position,
 }
 
-/// Receive fds from `capture_fd`, match against captures, stage results.
+/// Receive fds from `capture_fd`, match them against captures, stage results.
 ///
-/// Returns a `Vec` of `(var, FdVar)` pairs on success. Each fd carries a
-/// trace: the capture position plus the sender's SHELLFD tag as origin.
-/// The caller commits them atomically into the state's fds.
+/// Unbounded captures take exactly one fd; bounded ones (`cap: Some(n)`)
+/// append to an array var up to `n` entries in total, closing excess fds.
+/// Commit the result with `commit_captured`.
 pub fn do_captures(
-    capture_fd: sys::LocalFd,
+    capture_fd: LocalFd,
     expected_pid: sys::Pid,
     captures: Vec<Capture>,
     state: &ShellState,
-) -> Result<Vec<(ShortCStr, FdVar)>, Report<CaptureError>> {
-    let mut captured_fds: Vec<(ShortCStr, FdVar)> = Vec::with_capacity(captures.len());
-    let mut remaining = captures;
+) -> Result<Vec<CapturedFd>, Report<CaptureError>> {
+    let mut slots = captures
+        .into_iter()
+        .map(|c| slot::Slot::new(c, state))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    while !remaining.is_empty() {
+    while slots.iter().any(slot::Slot::needs_more) {
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
         let (fd, rtag) = match sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid) {
             Ok(v) => v,
@@ -50,39 +58,25 @@ pub fn do_captures(
         if crate::last_arg::is_tag(rtag) {
             continue;
         }
-        let idx = remaining
-            .iter()
-            .position(|c| c.tag.as_ref().is_some_and(|t| t.eq_bytes(rtag.to_bytes())))
-            .or_else(|| remaining.iter().position(|c| c.tag.is_none()));
-        if let Some(i) = idx {
-            debug_assert!(i < remaining.len());
-            let c = remaining.remove(i);
-            if !c.force && state.fds.contains_key(&c.var) {
-                bail!(CaptureError::Exists);
-            }
-            captured_fds.push((
-                c.var,
-                FdVar {
-                    fd,
-                    trace: Trace::at(c.set_at, Origin::Captured(tag_name(rtag))),
-                },
-            ));
+        let idx = slots.iter().position(|s| s.needs_more() && s.matches(rtag));
+        if let Some(i) = idx
+            && let Some(slot) = slots.get_mut(i)
+        {
+            slot.take(fd, rtag);
         }
     }
 
-    if !remaining.is_empty() {
+    let unmet = slots.iter().filter(|s| !s.satisfied()).count();
+    if unmet > 0 {
+        let received = slots.iter().map(|s| s.entries.len()).sum::<usize>();
         bail!(CaptureError::Incomplete {
-            expected: remaining.len() + captured_fds.len(),
-            received: captured_fds.len(),
+            expected: unmet + received,
+            received,
         });
     }
-
-    Ok(captured_fds)
-}
-
-/// A received SHELLFD tag is NUL-free up to its terminator, so `push` is infallible.
-fn tag_name(rtag: &CStr) -> ShortCStr {
-    let mut name = ShortCStr::new();
-    name.push(rtag);
-    name
+    let mut out = Vec::with_capacity(slots.len());
+    for slot in slots {
+        out.push(slot.finish()?);
+    }
+    Ok(out)
 }
