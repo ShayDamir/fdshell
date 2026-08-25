@@ -207,6 +207,47 @@ fn dollar_followed_by_non_ident_is_literal() {
 }
 
 #[test]
+fn dollar_dash_expands_active_option_flags() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    // `expand_aliases` is on by default but has no short flag, so `$-` is empty.
+    let res = substitute_arg(&ShortCStr::from(c"x$-y"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"xy");
+    cell.borrow_mut().unwrap().options |= crate::options::NOCLOBBER;
+    let res = substitute_arg(&ShortCStr::from(c"$-"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"C");
+}
+
+#[test]
+fn backslash_dollar_is_literal_unexpanded() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&ShortCStr::from(c"a\\$_b"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a$_b");
+    let res = substitute_arg(&ShortCStr::from(c"\\$hello"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"$hello");
+}
+
+#[test]
+fn backslash_backslash_folds_to_single() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&ShortCStr::from(c"a\\\\b"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a\\b");
+    // `\\` before a live `$var` keeps the variable expanded (bash).
+    let res = substitute_arg(&ShortCStr::from(c"\\\\$hello"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"\\world");
+}
+
+#[test]
+fn backslash_other_char_kept() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&ShortCStr::from(c"a\\nb"), &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a\\nb");
+}
+
+#[test]
 fn combined_percent_and_dollar() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$var and %var");

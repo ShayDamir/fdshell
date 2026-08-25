@@ -40,7 +40,8 @@ fn cd_path(path: &ShortCStr) -> Result<(LocalFd, Origin), Report<CdError>> {
 }
 
 fn open_dir(path: &ShortCStr) -> Result<LocalFd, Report<CdError>> {
-    sys::openat2::open(path.export(), O_DIRECTORY | O_NOFOLLOW).change_context(CdError::CdPathOpen)
+    // `+` not `|`: disjoint flags, `|` would leave an unkillable `|`-`^` mutant (LESSONS.md)
+    sys::openat2::open(path.export(), O_DIRECTORY + O_NOFOLLOW).change_context(CdError::CdPathOpen)
 }
 
 fn move_cwd(state: &mut ShellState, new_cwd: LocalFd, origin: Origin, set_at: Position) {

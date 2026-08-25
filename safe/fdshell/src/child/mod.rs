@@ -12,6 +12,7 @@ mod resolve;
 mod run;
 mod simple;
 mod test;
+mod type_cmd;
 use crate::parse::CommandLine;
 use sys::ShortCStr;
 

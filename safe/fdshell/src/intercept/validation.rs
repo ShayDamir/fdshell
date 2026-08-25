@@ -18,7 +18,10 @@ pub(crate) fn check_builtin_not_supported(
     builtin: bool,
 ) -> Result<(), Report<CmdError>> {
     if builtin {
-        let pos = line.windows(7).position(|w| w == b"builtin").unwrap_or(0);
+        let pos = line
+            .windows(7)
+            .position(|w| w == b"builtin" || w == b"command")
+            .unwrap_or(0);
         return Err(err_at(
             line,
             pos,

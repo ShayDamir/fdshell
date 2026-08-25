@@ -12,6 +12,7 @@ pub fn is_builtin(t: &ShortCStr) -> bool {
                 | b"fdexplain"
                 | b"printf"
                 | b"test"
+                | b"type"
                 | b"["
         )
     })

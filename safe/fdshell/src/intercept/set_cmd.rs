@@ -5,8 +5,9 @@ use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ShortCStr, Trace};
 
-/// Replace positional parameters with the args after `--`, or set/clear a
-/// shell option with `-o`/`+o`. Other `set` forms fall through to external lookup.
+/// Replace positional parameters with the args after `--`, set/clear a shell
+/// option with `-o`/`+o`, or list variables (bare `set`) / fd variables
+/// (`set -F`). Other `set` forms fall through to external lookup.
 pub(crate) fn run_set(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
@@ -14,14 +15,27 @@ pub(crate) fn run_set(
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
     let Some(first) = cmdline.args.first() else {
-        return Ok(false);
+        super::validation::validate_intercept(line, "set", cmdline)?;
+        crate::xtrace::trace_cmd(b"set", cmdline, cell);
+        return super::set_list::list_vars(cell).map(|_| true);
     };
     if first.eq_bytes(b"--") {
+        crate::xtrace::trace_cmd(b"set", cmdline, cell);
         return run_set_positional(line, cmdline, text, cell);
     }
     if first.eq_bytes(b"-o") || first.eq_bytes(b"+o") {
         super::validation::validate_intercept(line, "set", cmdline)?;
-        return run_set_option(first, cmdline, cell).map(|_| true);
+        crate::xtrace::trace_cmd(b"set", cmdline, cell);
+        return super::set_list::run_set_option(first, cmdline, cell).map(|_| true);
+    }
+    if first.eq_bytes(b"-x") || first.eq_bytes(b"+x") {
+        super::validation::validate_intercept(line, "set", cmdline)?;
+        return run_set_xtrace(first, cmdline, cell).map(|_| true);
+    }
+    if first.eq_bytes(b"-F") {
+        super::validation::validate_intercept(line, "set", cmdline)?;
+        crate::xtrace::trace_cmd(b"set", cmdline, cell);
+        return super::set_list::list_fds(cell).map(|_| true);
     }
     Ok(false)
 }
@@ -50,29 +64,17 @@ fn run_set_positional(
     Ok(true)
 }
 
-/// `set -o name` enables, `set +o name` disables; bare `set -o` lists options.
-fn run_set_option(
+/// `set -x` enables, `set +x` disables xtrace. The command itself is printed
+/// either way, as in bash.
+fn run_set_xtrace(
     flag: &ShortCStr,
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
-    let enable = flag.eq_bytes(b"-o");
+    crate::xtrace::trace_unconditional(b"set", &cmdline.args);
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    match cmdline.args.get(1) {
-        None => {
-            sys::OUT
-                .write_all(&crate::options::list(state.options))
-                .ok();
-            state.set_last_exit(0);
-        }
-        Some(name) => {
-            let bit = crate::options::lookup(name).ok_or(CmdError::ShellOptionUnknown {
-                command: "set",
-                name: name.clone(),
-            })?;
-            state.options = crate::options::set(state.options, bit, enable);
-            state.set_last_exit(0);
-        }
-    }
+    state.options =
+        crate::options::set(state.options, crate::options::XTRACE, flag.eq_bytes(b"-x"));
+    state.set_last_exit(0);
     Ok(())
 }

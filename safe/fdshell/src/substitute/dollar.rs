@@ -61,6 +61,13 @@ pub(crate) fn dollar_subst(
             let code = state.last_status.exit_code();
             core::write!(out, "{code}").change_context(ResolveError::Never)?;
         }
+        Some(b'-') => {
+            // `$-`: the active shell options' short flags (bash compat).
+            peek.next();
+            let state = super::borrow_state(cell)?;
+            out.push_checked(&crate::options::flags(state.options))
+                .change_context(ResolveError::NulByte)?;
+        }
         _ => out.push(c"$"),
     }
     Ok(())

@@ -12,6 +12,7 @@ use super::printf;
 use super::resolve;
 use super::simple;
 use super::test;
+use super::type_cmd;
 
 type Handler =
     fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32, Report<BuiltinError>>;
@@ -35,10 +36,20 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"resolve", resolve::handle_resolve),
     (b"test", test::handle_test),
     (b"[", test::handle_test),
+    (b"type", type_cmd::handle_type),
 ];
 
 pub(crate) fn is_dispatched(name: &ShortCStr) -> bool {
     DISPATCH.iter().any(|(known, _)| name.eq_bytes(known))
+}
+
+/// With `builtin_first` on, a bare name in the builtin table resolves as a
+/// builtin without the `builtin` keyword; names containing `/` always reach
+/// the external.
+pub fn builtin_first(name: &ShortCStr, state: &ShellState) -> bool {
+    state.options & crate::options::BUILTIN_FIRST != 0
+        && !name.contains(b'/')
+        && is_dispatched(name)
 }
 
 pub fn dispatch_builtin(

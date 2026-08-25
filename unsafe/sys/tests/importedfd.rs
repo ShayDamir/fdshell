@@ -384,3 +384,56 @@ fn from_number_negative() {
         Err(ref e) if matches!(e.current_context(), ImportedFdError::Negative)
     ));
 }
+
+#[test]
+fn is_tty_pipe_is_false() {
+    let mut fds = [0i32; 2];
+    // SAFETY: `fds` is a valid two-slot array for `pipe`.
+    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+    // SAFETY: `fds[0]` is a valid open fd with CLOEXEC clear (pipe default).
+    let rd = unsafe { ImportedFd::from_raw(fds[0]) };
+    // SAFETY: `fds[1]` is a valid open fd with CLOEXEC clear (pipe default).
+    let wr = unsafe { ImportedFd::from_raw(fds[1]) };
+    assert!(!rd.is_tty().unwrap());
+    assert!(!wr.is_tty().unwrap());
+    // SAFETY: `fds[0]` and `fds[1]` are valid open fds created above.
+    unsafe { libc::close(fds[0]) };
+    // SAFETY: `fds[1]` is a valid open fd created above.
+    unsafe { libc::close(fds[1]) };
+}
+
+#[test]
+fn is_tty_dev_null_is_false() {
+    // SAFETY: O_RDWR on /dev/null yields a valid open fd with CLOEXEC clear.
+    let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR) };
+    assert!(fd >= 0);
+    // SAFETY: `fd` is a valid open fd with CLOEXEC clear (opened above).
+    let imported = unsafe { ImportedFd::from_raw(fd) };
+    assert!(!imported.is_tty().unwrap());
+    // SAFETY: `fd` is the valid open fd created above.
+    unsafe { libc::close(fd) };
+}
+
+#[test]
+fn is_tty_pty_slave_is_true() {
+    let mut master = 0i32;
+    let mut slave = 0i32;
+    // SAFETY: null name/termios/winsize are the documented defaults for `openpty`.
+    let ret = unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            core::ptr::null_mut(),
+            core::ptr::null(),
+            core::ptr::null(),
+        )
+    };
+    assert_eq!(ret, 0);
+    // SAFETY: `slave` is a valid open fd with CLOEXEC clear (openpty default).
+    let imported = unsafe { ImportedFd::from_raw(slave) };
+    assert!(imported.is_tty().unwrap());
+    // SAFETY: `master` and `slave` are valid open fds created above.
+    unsafe { libc::close(master) };
+    // SAFETY: `slave` is a valid open fd created above.
+    unsafe { libc::close(slave) };
+}

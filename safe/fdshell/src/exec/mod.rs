@@ -1,7 +1,7 @@
 mod environ;
 mod search;
 
-pub use search::resolve_path;
+pub use search::{resolve_path, resolve_path_str};
 
 use alloc::vec::Vec;
 use core::ffi::CStr;

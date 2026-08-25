@@ -133,6 +133,19 @@ fn test_pipe_tagged_captures() {
 }
 
 #[test]
+fn test_command_keyword_is_builtin_prefix() {
+    let ParsedLine::Cmd(cmd) = parse(b"command openat2 --dirfd %foo %>%baz").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.builtin);
+    assert_eq!(cmd.command, c"openat2".into());
+    let ParsedLine::Cmd(plain) = parse(b"openat2 --dirfd %foo %>%baz").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(!plain.builtin);
+}
+
+#[test]
 fn test_background() {
     let ParsedLine::Cmd(cmd) = parse(b"run_server params &>&myserver").unwrap() else {
         panic!("expected Cmd")
@@ -1110,11 +1123,13 @@ fn tokenize_dquote_backslash_non_special_preserved() {
 
 #[test]
 fn tokenize_dquote_backslash_before_special_dropped() {
-    // `\\` → `\`, `\$` → `$`, backtick → backtick: backslash consumed, char kept.
+    // `\"` and `` \` `` drop the backslash; `\\` and `\$` keep both bytes so
+    // substitution resolves them.
     let cases = [
-        (b"\"a\\\\b\"", c"a\\b"),
-        (b"\"a\\$b\"", c"a$b"),
+        (b"\"a\\\"b\"", c"a\"b"),
         (b"\"a\\`b\"", c"a`b"),
+        (b"\"a\\\\b\"", c"a\\\\b"),
+        (b"\"a\\$b\"", c"a\\$b"),
     ];
     for (input, expected) in cases {
         let tokens = token::tokenize(input).unwrap();

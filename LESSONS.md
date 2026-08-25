@@ -97,6 +97,12 @@ Testing `printf` backslash escapes with `"a\nb"` fed the test *real* control byt
 ## A memfd passed via SCM_RIGHTS shares its file offset with the sender
 The child wrote the `$_` word into a memfd (offset left at EOF) and sent the fd to the parent; the parent's first `read` returned 0 bytes — the offset is shared through the open file description, so the reader starts at EOF. The receiver must `lseek(fd, 0, SEEK_SET)` before reading. Any string-via-memfd channel needs the same seek.
 
+## Shadowing a Ref guard does not drop it — scope it in a block
+`let state = cell.borrow(); …use…; let mut state = cell.borrow_mut()…` failed at runtime with "cannot borrow mutably – shared borrows are active": the shadowed `Ref` guard lives until the end of the enclosing scope, not until the shadowing binding. Compile-time borrow checking doesn't catch this (separate `Ref`/`RefMut` types), so it survives review and clippy. Wrap the shared-borrow section in a `{ … }` block before the mutable re-borrow (see `run_set_xtrace`).
+
+## Test tty-gated behavior from safe-crate integration tests via `script`
+`safe/fdshell` has no `libc` dev-dep (safe crates forbid unsafe), so a pty can't be opened in its tests. To exercise code gated on stdin being a terminal, spawn the binary under util-linux `script -qec <bin> /dev/null` with piped stdin — `script` attaches a pty and forwards the pipe into it, making `isatty(0)` true. util-linux is already a test-environment requirement (the nextest wrapper's `prlimit`), so this costs nothing. The REPL's tty-default `ignoreeof` (`|=`→`&=` mutant) was unkillable by any piped-stdin test — only the `script`-wrapped test reaches that branch.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)

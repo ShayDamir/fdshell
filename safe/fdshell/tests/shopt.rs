@@ -131,3 +131,16 @@ fn set_dash_o_lists_options() {
     assert!(out.contains("noclobber on"), "stdout={out:?}");
     assert!(out.contains("expand_aliases on"), "stdout={out:?}");
 }
+
+#[test]
+fn dollar_dash_expands_active_option_flags() {
+    let (out, _err, code) = run("builtin echo [$-]");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n");
+    let (out, _err, code) = run("set -o noclobber; builtin echo [$-]");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[C]\n");
+    let (out, _err, code) = run("set -o noclobber; set +o noclobber; builtin echo [$-]");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n");
+}

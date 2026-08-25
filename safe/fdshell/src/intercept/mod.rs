@@ -13,6 +13,11 @@ pub(crate) fn try_intercept(
 ) -> Result<Option<Option<LoopControl>>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let cmd = cmdline.command.as_bytes().change_context(CmdError::Never)?;
+    // `set` traces itself once it has decided which form ran, so a
+    // fall-through `set` is not traced.
+    if !cmd.eq(b"set") {
+        crate::xtrace::trace_cmd(cmd, cmdline, cell);
+    }
     let result = match cmd {
         b"alias" => alias_cmd::run_alias(line, cmdline, text, cell).map(handled),
         b"unalias" => alias_cmd::run_unalias(line, cmdline, text, cell).map(handled),
@@ -60,6 +65,7 @@ mod exports;
 mod last_arg_frame;
 mod read;
 mod set_cmd;
+mod set_list;
 mod shift;
 mod shopt;
 mod source;

@@ -44,9 +44,15 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
         state
             .positional
             .push_back(ImportedStr::shell(ShortCStr::from(c"fdshell")));
+        // Like bash, `ignoreeof` is on only when stdin is a terminal, so a
+        // stray Ctrl+D does not kill an interactive shell; piped input
+        // still exits on EOF.
+        if sys::IN.is_tty().change_context(AppError::Read)? {
+            state.options |= crate::options::IGNOREEOF;
+        }
     }
     let mut buf = Vec::new();
-    loop {
+    'line: loop {
         buf.clear();
         sys::OUT
             .write_all(b"fdshell> ")
@@ -55,6 +61,9 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
         loop {
             let n = sys::IN.read(&mut byte).change_context(AppError::Read)?;
             if n == 0 {
+                if eof_continues(cell)? {
+                    continue 'line;
+                }
                 return Ok(());
             }
             if byte[0] == b'\n' {
@@ -76,3 +85,19 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
         }
     }
 }
+
+/// End of input: with `ignoreeof` on, hint how to leave and keep the shell
+/// alive (bash compat); otherwise exit.
+fn eof_continues(cell: &ForkCell<ShellState>) -> Result<bool, Report<AppError>> {
+    let state = cell.borrow().change_context(AppError::Borrow)?;
+    if state.options & crate::options::IGNOREEOF == 0 {
+        return Ok(false);
+    }
+    sys::OUT
+        .write_all(b"use `exit' to leave\n")
+        .change_context(AppError::Read)?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests;

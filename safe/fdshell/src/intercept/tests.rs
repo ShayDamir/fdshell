@@ -229,8 +229,8 @@ fn run_eval_empty_script_sets_zero_status() {
 }
 
 #[test]
-fn try_intercept_set_without_dashdash_returns_false() {
-    for args in [&[] as &[&str], &["-e"] as &[&str], &["a", "b"] as &[&str]] {
+fn try_intercept_set_unhandled_forms_return_false() {
+    for args in [&["-e"] as &[&str], &["a", "b"] as &[&str]] {
         let cmdline = make_cmdline(b"set", args);
         let line = make_line("set", args);
         let cell = make_cell();
@@ -241,6 +241,19 @@ fn try_intercept_set_without_dashdash_returns_false() {
             "set {args:?} should fall through to external lookup"
         );
     }
+}
+
+#[test]
+fn try_intercept_bare_set_lists_variables() {
+    let cmdline = make_cmdline(b"set", &[]);
+    let line = make_line("set", &[]);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some(),
+        "bare set should list variables"
+    );
 }
 
 #[test]

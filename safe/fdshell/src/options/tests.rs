@@ -2,7 +2,7 @@
 
 use sys::ShortCStr;
 
-use super::{EXPAND_ALIASES, NOCLOBBER, lookup, name_of, set};
+use super::{EXPAND_ALIASES, NOCLOBBER, flags, lookup, name_of, set};
 
 #[test]
 fn lookup_known_names() {
@@ -25,6 +25,15 @@ fn name_of_round_trips() {
     assert_eq!(name_of(EXPAND_ALIASES), Some(b"expand_aliases".as_slice()));
     assert_eq!(name_of(0), None);
     assert_eq!(name_of(1 << 8), None);
+}
+
+#[test]
+fn flags_lists_active_short_flags_in_table_order() {
+    assert_eq!(flags(0), &b""[..]);
+    assert_eq!(flags(NOCLOBBER), &b"C"[..]);
+    // `expand_aliases` has no short flag, so it never appears in `$-`.
+    assert_eq!(flags(EXPAND_ALIASES), &b""[..]);
+    assert_eq!(flags(NOCLOBBER | EXPAND_ALIASES), &b"C"[..]);
 }
 
 #[test]

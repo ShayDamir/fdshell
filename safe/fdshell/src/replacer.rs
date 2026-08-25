@@ -36,12 +36,28 @@ pub fn execute(
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
+        crate::xtrace::trace(builtin_name.as_bytes().unwrap_or(&[]), &substituted, &state);
         match child::dispatch::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
             Ok(code) => Ok(code),
             Err(report) => crate::child::handle_builtin_error(builtin_name.clone(), report),
         }
     } else {
         let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
+        let state = cell
+            .borrow()
+            .change_context(ChildProcessError::ExecFailed)?;
+        if child::dispatch::builtin_first(binary, &state) {
+            let rest = args.get(1..).unwrap_or(&[]);
+            let substituted = substitute_args(rest, args_fq, cell)
+                .change_context(ChildProcessError::ExecFailed)?;
+            let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
+            let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
+            crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
+            return match child::dispatch::dispatch_builtin(binary.clone(), &refs, rest, &state) {
+                Ok(code) => Ok(code),
+                Err(report) => crate::child::handle_builtin_error(binary.clone(), report),
+            };
+        }
         let fd = exec::resolve_path(binary).change_context(ChildProcessError::ExecFailed)?;
         let binary_exported = binary.export();
         let binary_cstr = binary_exported.as_ref();
@@ -52,9 +68,7 @@ pub fn execute(
         for s in &sealed {
             argv.push(s.as_ref());
         }
-        let state = cell
-            .borrow()
-            .change_context(ChildProcessError::ExecFailed)?;
+        crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
         match exec::exec_fd(
             &fd,
             &argv,

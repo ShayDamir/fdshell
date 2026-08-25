@@ -11,7 +11,7 @@ pub enum CmdError {
     CapturesNotSupported { command: &'static str },
     /// {command}: redirects are not supported
     RedirectNotSupported { command: &'static str },
-    /// {command}: `builtin` prefix is not supported
+    /// {command}: `builtin`/`command` prefix is not supported
     BuiltinKeywordNotSupported { command: &'static str },
     /// parse error
     Parse,

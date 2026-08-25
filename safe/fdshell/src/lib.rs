@@ -53,6 +53,7 @@ mod segment;
 mod state;
 mod substitute;
 mod task;
+mod xtrace;
 
 #[cfg(test)]
 extern crate std;

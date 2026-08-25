@@ -4,15 +4,15 @@
 
 ### P0 — Easy wins
 
-- [ ] `$-` — shell option flags
-- [ ] `set -o ignoreeof` / `set +o ignoreeof` — prevent shell from exiting on EOF (`Ctrl+D`), P0; add `IGNOREEOF` shell option (`options.rs`); default `off` for scripts, `on` for interactive use; pairs with the `$-` item (shows `i` when on)
-- [ ] `type` builtin — show command type (builtin, external, fd var, etc.)
-- [ ] `command` builtin — bypass function lookup (alias for `builtin` prefix)
-- [ ] `set` listing — bare `set` lists all variables (bash compat; currently falls through to external lookup, `set_cmd.rs:16-26`); add a flag to list fd variables — name TBD, avoid `-f` (bash reserves it for `noglob` when glob expansion lands)
-- [ ] `set -x` / `set +x` (xtrace) — new `XTRACE` bit in `options.rs`; print `+ <name> <expanded args>` to stderr (PS4 prefix, default `+ `) at each dispatch entry — intercept commands, `replacer.rs`, pipeline stages — before the command runs; pairs with the `$-` item (shows `x` when on); security: expanded values can carry secrets into stderr — consider a mode that traces unresolved references (`$VAR` / `%fd`) instead
-- [ ] Builtin-first lookup — `set -o builtin_first` option (`options.rs`): resolve bare command names against the builtin table (`is_dispatched`, `child/dispatch.rs:40`) before PATH lookup (`replacer.rs:44-45`), making the `builtin` keyword optional and retiring the hardcoded auto-builtin list (`parse/builtin.rs:3`); PATH can no longer swap which `test` / `printf` / `openat2` runs; explicit `/path/...` still reaches externals; candidate default under strict mode (P3)
+- [x] `$-` — shell option flags (`options.rs` `flags()`, `substitute/dollar.rs`)
+- [x] `set -o ignoreeof` / `set +o ignoreeof` — prevent shell from exiting on EOF (`Ctrl+D`), P0; add `IGNOREEOF` shell option (`options.rs`); default `off` for scripts, `on` for interactive use; pairs with the `$-` item (shows `i` when on)
+- [x] `type` builtin — show command type (builtin, external, fd var, etc.) (`child/type_cmd.rs`)
+- [x] `command` builtin — bypass function lookup (alias for `builtin` prefix, `parse/command.rs:19`)
+- [x] `set` listing — bare `set` lists all variables (bash compat); `set -F` lists fd variables (`intercept/set_list.rs`); `-f` left free for `noglob`
+- [x] `set -x` / `set +x` (xtrace) — `XTRACE` bit in `options.rs`, `xtrace.rs` prints `+ <name> <args>` to stderr at dispatch entry; pairs with the `$-` item (shows `x` when on); open follow-up: a mode that traces unresolved references (`$VAR` / `%fd`) instead of expanded values, which can carry secrets into stderr
+- [x] Builtin-first lookup — `set -o builtin_first` option (`options.rs`): bare command names resolve against the builtin table (`child/dispatch.rs:49`) before PATH lookup; PATH can no longer swap which `test` / `printf` / `openat2` runs; explicit `/path/...` still reaches externals; candidate default under strict mode (P3); note: the hardcoded parse-level list (`parse/builtin.rs:3`) still exists for fq-flag handling
 
-- [ ] `\$` inside double quotes expands instead of deferring — `builtin echo [\$_]` prints `[\hello]` (backslash retained AND `$_` expanded; bash prints literal `[$_]"). Consequence: nothing can defer a `$` reference into an `eval`/`source` body, so end-to-end tests cannot exercise the `eval_depth` gating (unit tests in `state/tests.rs` cover it directly). Fix escape handling first, then add an end-to-end test with `true hello; eval "true x y; builtin echo [\$_]"`
+- [x] `\$` inside double quotes — `\$` is now a literal, unexpanded `$` and `\\` folds to `\` (`substitute/arg.rs:33-45`); end-to-end coverage in `tests/dollar_escape.rs` incl. the `eval_depth` gating case `true hello; eval "true x y; builtin echo [\$_]"`
 
 ### P1 — Major functionality gaps (moderate effort)
 
@@ -40,6 +40,8 @@
 
 ## Refactoring
 
+- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `intercept/set_list.rs` (89), `repl.rs` (88), `intercept/validation.rs` (81), `replacer.rs` (80)
+- [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
 - [ ] `ShortCStr` has no byte-search API — several call sites do `as_bytes().ok().and_then(|b| b.iter().position(…))` instead (STYLE.md §6.4): `intercept/alias_cmd/args.rs:14` (`position(|&c| c == b'=')`), `parse/redirect.rs:40` (`position(|&b| b == b'>' || b == b'<')`), `busybox.rs:17` (`rposition(|&c| c == b'/')`). Add `find_byte(byte: u8) -> Option<usize>` next to `contains` in `unsafe/sys/src/shortcstr/eq.rs` (plus `rfind_byte` / a byte-set variant if the other sites need them), cover with tests in `unsafe/sys/tests/`, and switch all call sites off `as_bytes()`
 
 ## Security / hardening

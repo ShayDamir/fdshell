@@ -33,6 +33,7 @@ const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"resolve", b"Resolve fd variables"),
     (b"test", b"Test expression (also '[')"),
     (b"true", b"Exit with success status"),
+    (b"type", b"Show how a command name resolves"),
 ];
 
 pub(crate) fn print_help() -> Result<i32, Report<BuiltinError>> {

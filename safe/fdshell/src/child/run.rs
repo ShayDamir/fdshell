@@ -33,7 +33,9 @@ pub fn child_main(
         .borrow()
         .change_context(ChildProcessError::BorrowFailed)?;
 
-    if cmd.builtin {
+    crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), &resolved, &state);
+
+    if cmd.builtin || child::dispatch::builtin_first(&cmd.name, &state) {
         run_builtin(&cmd, &refs, args, &state)
     } else {
         external::run_external(&cmd, &refs, &state)

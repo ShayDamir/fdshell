@@ -30,6 +30,19 @@ pub(crate) fn substitute_arg(
     }
     while let Some(b) = peek.next() {
         match b {
+            // `\$` is a literal, unexpanded `$` (bash); `\\` folds to `\`;
+            // any other `\<char>` keeps the backslash.
+            b'\\' => match peek.peek() {
+                Some(&b'$') => {
+                    peek.next();
+                    out.push_byte(b'$').change_context(ResolveError::NulByte)?;
+                }
+                Some(&b'\\') => {
+                    peek.next();
+                    out.push_byte(b'\\').change_context(ResolveError::NulByte)?;
+                }
+                _ => out.push_byte(b'\\').change_context(ResolveError::NulByte)?,
+            },
             b'%' => {
                 let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
                 crate::substitute::percent::percent_subst(&mut peek, cache, &state, &mut out)?;

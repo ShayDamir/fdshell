@@ -73,6 +73,14 @@ impl ImportedFd {
         self.0
     }
 
+    /// Returns `true` if this fd refers to a terminal.
+    pub fn is_tty(&self) -> Result<bool, crate::SyscallError> {
+        // SAFETY: `isatty` only inspects an open fd; the `ImportedFd`
+        // invariant guarantees the fd is open.
+        let ret = crate::cvt(unsafe { libc::isatty(self.0) as isize })?;
+        Ok(ret != 0)
+    }
+
     /// Construct from a raw fd without verification.
     ///
     /// # Safety

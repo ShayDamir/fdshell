@@ -17,11 +17,12 @@ pub(crate) fn handle_quoted_char(
             };
             *pos += 1;
             // `\<newline>` is line continuation (both bytes removed); `\` before
-            // `"`, `\`, `$` or a backtick escapes that char; any other `\<char>`
-            // keeps the backslash literally.
+            // `"` or a backtick escapes that char; `\\` and `\$` keep both bytes
+            // so substitution resolves them (`\\`→`\`, `\$`→a literal,
+            // unexpanded `$`); any other `\<char>` keeps the backslash literally.
             match c {
                 b'\n' => Ok(true),
-                b'"' | b'\\' | b'$' | b'`' => {
+                b'"' | b'`' => {
                     cur.push_byte(c)
                         .change_context(ParseError::InvalidChar { ch: 0 })?;
                     Ok(true)

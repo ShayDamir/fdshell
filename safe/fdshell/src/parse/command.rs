@@ -14,7 +14,9 @@ pub fn parse_command(
     let mut iter = tokens.iter().peekable();
     let mut builtin_kw = false;
     let builtin = match iter.peek() {
-        Some(t) if t.eq_bytes(b"builtin") => {
+        // `command` (bash) is an alias for the `builtin` prefix: it bypasses
+        // user-function lookup.
+        Some(t) if t.eq_bytes(b"builtin") || t.eq_bytes(b"command") => {
             iter.next();
             builtin_kw = true;
             true
