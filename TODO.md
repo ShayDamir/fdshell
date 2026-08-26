@@ -36,7 +36,16 @@
   ```
   fdshell -c 'builtin printf "[%s]" x"a b"c'   # → [xa][bc]; bash/POSIX: [xa bc] (one word)
   ```
-  Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
+   Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
+
+- [ ] A shell keyword appearing as a *quoted* word inside a block body breaks parsing — `scan_block` (`comment.rs:48`) applies `depth_delta` to every word regardless of quote state, so a block-opening keyword (`for` / `while` / `case` / `if` …) inside a quoted string is counted as a nested block opening and the enclosing block is never seen as closed (`run_script` `ensure!(closed)` → parse error). Affects every block, not just `wait`:
+  ```
+  fdshell -c 'while true; do echo "for x"; done'   # parse error
+  fdshell -c 'wait
+      after 1) echo "idle for a second" ;;
+  done'      # parse error
+  ```
+  A block keyword must only count when its word is unquoted — track per-word quote state in `scan_block` and skip `depth_delta` for quoted words
 
 ## Refactoring
 
@@ -74,7 +83,7 @@
 
 ### P1 — Core syscall builtins
 
-- [ ] `timerfd` syscall wrapper + builtin (the `wait --any` + `--timeout` half is subsumed by the `wait` keyword, [TODO-WAIT.md](TODO-WAIT.md))
+- [ ] `timerfd` syscall wrapper + builtin (the `wait --any` + `--timeout` half is subsumed by the `wait` keyword's `after N` arm)
 - [ ] `signalfd` builtin — traps as another fd source
 - [ ] `eventfd` builtin — counters between background tasks
 - [ ] `timeout N` builtin — run a command with a wall-clock limit; after N seconds signal the child (SIGTERM, then SIGKILL) and fail the command; pairs with the `timerfd` item above
@@ -85,7 +94,7 @@
 - [ ] `memfd` builtin — heredocs without temp files, sealed secrets by fd (wrapper exists in `unsafe/sys/src/memfd.rs`; add `F_SEAL_*` / `memfd_set_seal` support and a name/size argument)
 - [ ] `flock` builtin — advisory locking on existing fd vars (`flock %lock --wait`); coordinate processes by handle, never by path
 - [ ] `sendmsg` / `recvmsg` builtins — raw AF_UNIX payload + SCM_RIGHTS fd transfer for *custom* protocols (the existing wrappers are FDSHELL-protocol-only, `shellfd/send_fd.rs` / `shellfd/recv_fd.rs`): send a byte payload (arg or file fd) plus any number of fd vars; receive a payload into a var plus N named fd vars (script declares the slots); optional cred surfacing (SO_PASSCRED + pid/uid into a var) so custom protocols can enforce the same pid-verification rule as the `recv_fd` item
-- [ ] Socket lifecycle builtins on fd vars — `bind` (socket + bind), `listen` (socket + bind + listen, backlog arg, `--type stream|dgram`; AF_UNIX with a path or abstract-namespace address (`@…` — no filesystem socket file, no path TOCTOU, fits the capability model; define who unlinks a filesystem socket path), or AF_INET via `--bind ADDR --port N`), `accept` (blocking accept on a listening fd var → new fd var, captured with the existing `%>%var` form); `accept %fd %>%array[N]` — bounded-capture form: if the array is full, accept and close immediately (reject; RST if unread data is buffered — acceptable for a cap), bounding the concurrent `wait` arm children, the real unbounded resource; the event-loop form of the same cap + parent-side append is bounded capture (`%>%arr[N]` / `%tag>%arr[N]`, `readable %listener` arm) in [TODO-WAIT.md](TODO-WAIT.md); `accept` blocks, so it is a top-level command (mid-pipeline it hits the pipeline fd-leak item above)
+- [ ] Socket lifecycle builtins on fd vars — `bind` (socket + bind), `listen` (socket + bind + listen, backlog arg, `--type stream|dgram`; AF_UNIX with a path or abstract-namespace address (`@…` — no filesystem socket file, no path TOCTOU, fits the capability model; define who unlinks a filesystem socket path), or AF_INET via `--bind ADDR --port N`), `accept` (blocking accept on a listening fd var → new fd var, captured with the existing `%>%var` form); `accept %fd %>%array[N]` — bounded-capture form: if the array is full, accept and close immediately (reject; RST if unread data is buffered — acceptable for a cap), bounding the concurrent `wait` arm children, the real unbounded resource; the event-loop form of the same cap + parent-side append is the implemented bounded capture (`%>%arr[N]` / `%tag>%arr[N]`, `readable %listener` arm); `accept` blocks, so it is a top-level command (mid-pipeline it hits the pipeline fd-leak item above)
 - [ ] `setsockopt` builtin — named options on an existing fd var (`PASSCRED`, `PASSFD`, …), replacing the hardcoded `SO_PASSCRED` helper in `net.rs:5-12`
 - [ ] `ftruncate` / `lseek` / `fsync` builtins on existing fd vars (`lseek` wrapper exists in `rw.rs`; add `ftruncate` / `fsync` wrappers)
 - [ ] `splice` / `copy_file_range` / `sendfile` builtins → zero-copy cat/cp between fd vars, no path re-lookup on the hot path
@@ -106,8 +115,12 @@
 
 - [ ] Lexical scoping / RAII for fd vars: auto-close at block end, linear-use check (use-after-unset + leaks as parse-time errors)
 - [ ] fd-var arrays — `%arr=[]` (empty), `%arr+=%conn` (append; dup semantics, matching `%var1=%var2`), `unset %arr[%conn]` (remove the entry originating from `%conn` — match by provenance, since a dup'd entry has a different fd number; inode match via `-fdeq` is ambiguous when one conn was added twice), `unset %arr` (close every descriptor the array owns); indexed read-out `%x=%arr[N]`; iteration by extending the word list of the existing `for %x in …` (`parse/for_block.rs`) to take an array ref, expanding each entry into `%x` as a dup; pairs with `accept` (hold all connections, fan out) and typed fd vars (one array, one kind)
-- [ ] Bounded array capture `%>%arr[N]` / `%tag>%arr[N]` — general extension of fd capture (`parse/capture.rs`, `capture.rs`): received fds append to an array var up to N elements, beyond the cap closed (accept use: RST if unread data buffered); `%>` untagged (any tag), `%tag` matching tag only, as in the existing single-fd forms; usable by any command — `wait` arms build on it ([TODO-WAIT.md](TODO-WAIT.md)); decomposed via the for-loop-over-arrays item above
-- [ ] `wait` keyword — event-case over fd vars; full design in [TODO-WAIT.md](TODO-WAIT.md) (arms incl. `accept %listenfd %array limit N` with built-in cap, one-shot rounds, fork-per-arm, keep/release via arm exit status, one-shot `wait %p1` legacy form); absorbs the legacy `wait` builtin, supersedes the `poll`/`epoll` builtin idea, and subsumes the `wait --any` + `--timeout` half of the `timerfd` item
+- [ ] Bounded array capture `%>%arr[N]` / `%tag>%arr[N]` — general extension of fd capture (`parse/capture.rs`, `capture.rs`): received fds append to an array var up to N elements, beyond the cap closed (accept use: RST if unread data buffered); `%>` untagged (any tag), `%tag` matching tag only, as in the existing single-fd forms; usable by any command — `wait` arms build on it (implemented); decomposed via the for-loop-over-arrays item above
+- [x] `wait` keyword — event-case over fd vars: one poll round, fork-per-arm, keep/release via the arm's exit status, `readable` / `writable` / `finished` / `after N` arms, `%arr[]` wildcard, bounded capture (`%>%arr[N]`), matched fd bound to `%?`; the legacy one-shot `wait %p1` is now the `waitpid` builtin (`intercept/waitpid.rs`); supersedes the `poll`/`epoll` builtin idea and subsumes the `wait --any` + `--timeout` half of the `timerfd` item. Remaining:
+  - [ ] async reaping + reentrancy guard — v1 reaps each arm child synchronously before the block returns; the target model lets an arm child outlive the poll round (its pidfd joins the next round's set for non-blocking reaping) and keeps an fd with a live arm child out of the poll set meanwhile (kernel buffers the data)
+  - [ ] `break` in an arm body exits the child, not the parent's `while` loop — propagate via the block's `$?` or an explicit sentinel
+  - [ ] the poll wait must loop on `EINTR` once signal handlers can interrupt it (the `signalfd` item); removed for now as dead code (no handlers installed)
+  - [ ] validate the echo-server proof-of-concept end-to-end once `listen` / `accept` land (the socket-lifecycle item above)
 - [ ] Structured return channel: extend socket protocol to carry payloads (statx results, readlink targets, error strings) alongside fds
 
 ### P2 — Syscall coverage
@@ -131,7 +144,7 @@
 
 ### P3 — Application domains (emerge from above)
 
-- [ ] Init/supervision: pidfds + readiness tags + the `wait` keyword ([TODO-WAIT.md](TODO-WAIT.md)) + restart policies
+- [ ] Init/supervision: pidfds + readiness tags + the `wait` keyword + restart policies
 - [ ] Mini container runtime: namespaces + new mount API + landlock + seccomp, orchestrated in script
 
 ### P3 — Engineering / ecosystem

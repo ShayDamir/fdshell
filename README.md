@@ -86,14 +86,14 @@ as `--fd=63`. The launched subprocess then can use this number as a valid file d
 ### Addressing background tasks
 
 Subprocesses can be launched in the background using the `&>&name` syntax. The shell stores
-a background task (pidfd + capture context) in a pidvar `name`. The `wait` builtin reaps the
+a background task (pidfd + capture context) in a pidvar `name`. The `waitpid` builtin reaps the
 child and processes any pending captures.
 
 ```shell
 # launches server as a named background task
 run_server params &>&server
 # waits until server is finished and receives its captures
-wait &server
+waitpid &server
 ```
 
 Multiple background tasks can be created and waited on independently:
@@ -101,8 +101,8 @@ Multiple background tasks can be created and waited on independently:
 ```shell
 build &>&builder
 test &>&tester
-wait &builder
-wait &tester
+waitpid &builder
+waitpid &tester
 ```
 
 The `&>|&name` variant (with `|`) forces an overwrite if a task with that name already exists.
@@ -110,12 +110,40 @@ The `&>|&name` variant (with `|`) forces an overwrite if a task with that name a
 Foreground subprocess with captures is equivalent to background + immediate wait:
 
 ```shell
-cmd %>output            # foreground — wait + captures synchronous
-cmd %>output &>&x; wait &x   # same, via explicit background + wait
+cmd %>output                    # foreground — wait + captures synchronous
+cmd %>output &>&x; waitpid &x   # same, via explicit background + wait
 ```
 
 This avoids race conditions possible with traditional `$!` / PID-based background tracking,
 since pidfds remain valid and unique for the lifetime of the tracked child.
+
+### Event-case `wait`
+
+`wait` runs one poll round over fd variables. For every descriptor that is ready it runs
+the matching arm in a forked child; the arm's exit status decides the descriptor's fate —
+exit `0` keeps it open for the next round, any other status closes it (the `finished` arm
+closes unconditionally). The ready descriptor is bound to `%?`. `after N` arms fire when
+nothing is ready within `N` milliseconds.
+
+```shell
+# wait for data on the pipe's read end, or for a background job to finish
+builtin pipe %>%rd %>%wr
+echo "ping" >%wr
+echo hi &>&job
+wait
+    readable %rd)
+        read -u %? LINE
+        echo "got $LINE" ;;
+    finished %&job)
+        echo "job $?" ;;
+    after 1000)
+        echo "no data" ;;
+done
+echo "wait exited $?"
+```
+
+Wrap it in a loop (`while true; do wait … done`) to re-poll each round. Arms run in
+separate children, so a slow arm (a blocking read) cannot stall the others or the parent.
 
 ### Security concerns
 
