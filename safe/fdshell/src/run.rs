@@ -61,6 +61,7 @@ pub(crate) fn run_one(
         }
         crate::parse::ParsedLine::Case(caseblock) => crate::case_exec::run_case(caseblock, cell),
         crate::parse::ParsedLine::If(ifblock) => crate::if_exec::run_if(ifblock, cell),
+        crate::parse::ParsedLine::Wait(waitblock) => crate::wait::run_wait(waitblock, cell),
         _ => crate::run_dispatch::run_simple(&parsed, &text, cell),
     }
 }

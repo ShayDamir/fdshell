@@ -63,6 +63,32 @@ fn dollar_unknown_var_is_literal() {
     assert_eq!(res.as_bytes().unwrap(), b"$nope");
 }
 
+#[test]
+fn percent_question_substitutes_bound_fd() {
+    let cell = dummy_cell();
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .set_fd_var(ShortCStr::from(c"?"), fdvar(rd));
+    let arg = ShortCStr::from(c"%?");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    // A bound `?` substitutes to its fd number, not the literal `%?` or `?`.
+    let bytes = res.as_bytes().unwrap();
+    assert!(!bytes.is_empty());
+    assert_ne!(bytes, b"?");
+    assert_ne!(bytes, b"%?");
+}
+
+#[test]
+fn percent_question_unbound_is_literal() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"%?");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%?");
+}
+
 fn env_cell() -> ForkCell<ShellState> {
     let cell = dummy_cell();
     cell.borrow_mut().unwrap().environ = Vec::new();

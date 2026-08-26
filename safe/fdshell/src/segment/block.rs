@@ -12,7 +12,7 @@ pub(super) fn keyword_block<'a>(
     state: &ScanState,
 ) -> (Segment<'a>, usize) {
     let leading_ws = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-    let kw_len = if part.starts_with(b"case") {
+    let kw_len = if part.starts_with(b"case") || part.starts_with(b"wait") {
         4
     } else if part.starts_with(b"if") {
         2

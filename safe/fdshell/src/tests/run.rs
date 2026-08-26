@@ -126,22 +126,22 @@ fn umask_too_many_args_returns_err() {
 }
 
 #[test]
-fn wait_no_tasks() {
+fn waitpid_no_tasks() {
     let cell = make_cell();
-    run_one(b"wait", &cell).unwrap();
+    run_one(b"waitpid", &cell).unwrap();
     let state = borrow_state(&cell);
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
 }
 
 #[test]
-fn wait_nonexistent_name() {
+fn waitpid_nonexistent_name() {
     let cell = make_cell();
-    let e = run_one(b"wait &nonexistent", &cell).unwrap_err();
+    let e = run_one(b"waitpid &nonexistent", &cell).unwrap_err();
     assert!(matches!(e.current_context(), CmdError::Task));
 }
 
 #[test]
-fn wait_one_task() {
+fn waitpid_one_task() {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     match pidfd_opt {
         None => sys::exit(42),
@@ -159,7 +159,7 @@ fn wait_one_task() {
                     },
                 );
             }
-            run_one(b"wait &mytask", &cell).unwrap();
+            run_one(b"waitpid &mytask", &cell).unwrap();
             let state = borrow_state(&cell);
             assert!(matches!(state.last_status, WaitStatus::Exited(42)));
             assert!(state.tasks.is_empty());
@@ -168,7 +168,7 @@ fn wait_one_task() {
 }
 
 #[test]
-fn wait_all_tasks() {
+fn waitpid_all_tasks() {
     let (ret1, pidfd1_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     let pidfd1 = match pidfd1_opt {
         None => sys::exit(42),
@@ -201,7 +201,7 @@ fn wait_all_tasks() {
             },
         );
     }
-    run_one(b"wait", &cell).unwrap();
+    run_one(b"waitpid", &cell).unwrap();
     let state = borrow_state(&cell);
     let ok = match state.last_status {
         WaitStatus::Exited(c) => c == 42 || c == 7,
@@ -212,12 +212,12 @@ fn wait_all_tasks() {
 }
 
 #[test]
-fn wait_rejects_capture() {
+fn waitpid_rejects_capture() {
     let cell = make_cell();
-    let e = run_one(b"wait %>%var", &cell).unwrap_err();
+    let e = run_one(b"waitpid %>%var", &cell).unwrap_err();
     assert!(matches!(
         e.current_context(),
-        CmdError::CapturesNotSupported { command: "wait" }
+        CmdError::CapturesNotSupported { command: "waitpid" }
     ));
 }
 

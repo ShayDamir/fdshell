@@ -53,6 +53,7 @@ mod segment;
 mod state;
 mod substitute;
 mod task;
+mod wait;
 mod xtrace;
 
 #[cfg(test)]

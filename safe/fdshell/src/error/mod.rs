@@ -18,3 +18,4 @@ pub(crate) mod redirect;
 pub(crate) mod resolve;
 pub(crate) mod shell;
 pub(crate) mod task;
+pub(crate) mod wait;

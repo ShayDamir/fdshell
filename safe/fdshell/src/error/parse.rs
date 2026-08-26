@@ -90,6 +90,26 @@ pub(crate) enum ParseError {
     CaptureMissingPercent,
     /// capture syntax has no variable name after '%'
     CaptureEmptyVar,
+    /// malformed `wait` block
+    MalformedWaitBlock,
+    /// `wait`: empty block (no arms)
+    WaitEmptyBlock,
+    /// `wait`: empty arm pattern
+    WaitEmptyPattern,
+    /// `wait`: missing ')' after arm pattern
+    WaitMissingCloseParen,
+    /// `wait`: unknown arm pattern keyword
+    WaitUnknownPattern,
+    /// `wait`: `readable`/`writable`/`finished` need an fd reference
+    WaitMissingFd,
+    /// `wait`: fd reference must start with '%'
+    WaitFdRefPercent,
+    /// `wait`: `after` needs a millisecond deadline
+    WaitMissingTimeout,
+    /// `wait`: `after` deadline must be a non-negative integer
+    WaitInvalidTimeout,
+    /// `wait`: unexpected token in arm pattern
+    WaitUnexpectedToken,
 }
 
 impl core::error::Error for ParseError {}

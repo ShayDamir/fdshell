@@ -35,6 +35,8 @@ pub(crate) fn percent_subst(
             out.push(c"%");
             peek.next();
         }
+        // `%?` is the `wait` arm's matched fd; a name in the fd namespace.
+        Some(b'?') => wait_fd_subst(peek, cache, state, out)?,
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = collect_name(peek)?;
             match cache.get(&name_scs) {
@@ -56,6 +58,32 @@ pub(crate) fn percent_subst(
             }
         }
         _ => out.push(c"%"),
+    }
+    Ok(())
+}
+
+/// Substitute the `wait` arm's matched fd bound under the reserved name `?`.
+fn wait_fd_subst(
+    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    cache: &mut HashMap<ShortCStr, ExportedFd>,
+    state: &ShellState,
+    out: &mut ShortCStr,
+) -> Result<(), Report<ResolveError>> {
+    peek.next();
+    let name = ShortCStr::from(c"?");
+    match cache.get(&name) {
+        Some(d) => core::write!(out, "{}", d).change_context(ResolveError::Never)?,
+        None => match state.fds.get(&name) {
+            Some(src) => {
+                let owned = src.fd.export().change_context(ResolveError::RefNotFound)?;
+                core::write!(out, "{}", owned).change_context(ResolveError::Never)?;
+                cache.insert(name, owned);
+            }
+            None => {
+                out.push(c"%");
+                out.push_byte(b'?').change_context(ResolveError::NulByte)?;
+            }
+        },
     }
     Ok(())
 }

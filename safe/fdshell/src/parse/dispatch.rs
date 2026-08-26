@@ -1,4 +1,4 @@
-use super::{Token, case_block, for_block, function_block, if_block, while_block};
+use super::{Token, case_block, for_block, function_block, if_block, wait_block, while_block};
 use crate::error::parse::ParseError;
 use crate::parse::line::ParsedLine;
 use error_stack::Report;
@@ -26,6 +26,11 @@ pub(super) fn dispatch_keyword(
     }
     if is(b"for") {
         return Ok(Some(ParsedLine::For(for_block::tokens_to_for(raw, text)?)));
+    }
+    if is(b"wait") {
+        return Ok(Some(ParsedLine::Wait(wait_block::tokens_to_wait(
+            raw, text,
+        )?)));
     }
     if is(b"while") {
         return Ok(Some(ParsedLine::While(while_block::tokens_to_loop(

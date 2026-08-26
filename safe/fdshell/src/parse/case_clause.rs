@@ -1,4 +1,4 @@
-mod extract;
+pub(crate) mod extract;
 
 use super::Token;
 use super::semi::{trim_semi, try_join};

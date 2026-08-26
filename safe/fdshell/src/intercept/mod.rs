@@ -26,7 +26,7 @@ pub(crate) fn try_intercept(
         b"become" => become_cmd::run_become(line, cmdline, cell).map(handled),
         b"exec" => become_cmd::run_exec(line, cmdline, cell).map(handled),
         b"export_fd" => export_fd::run_export_fd(line, cmdline, cell).map(handled),
-        b"wait" => wait::run_wait(line, cmdline, cell).map(handled),
+        b"waitpid" => waitpid::run_waitpid(line, cmdline, cell).map(handled),
         b"export" => exports::run_export(line, cmdline, text, cell).map(handled),
         b"eval" => eval_cmd::run_eval(line, cmdline, text, cell).map(Some),
         b"source" | b"." => source::run_source(line, cmdline, text, cell).map(Some),
@@ -35,6 +35,7 @@ pub(crate) fn try_intercept(
         b"set" => set_cmd::run_set(line, cmdline, text, cell).map(handled),
         b"shopt" => shopt::run_shopt(line, cmdline, text, cell).map(handled),
         b"read" => read::run_read(line, cmdline, text, cell).map(handled),
+        b"send_fd" => send_fd::run_send_fd(line, cmdline, cell).map(handled),
         _ => return Ok(None),
     };
     if let Some(control) = result? {
@@ -64,10 +65,11 @@ mod export_fd;
 mod exports;
 mod last_arg_frame;
 mod read;
+mod send_fd;
 mod set_cmd;
 mod set_list;
 mod shift;
 mod shopt;
 mod source;
 mod validation;
-mod wait;
+mod waitpid;

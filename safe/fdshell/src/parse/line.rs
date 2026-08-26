@@ -2,6 +2,7 @@ use crate::parse::case_block::CaseBlock;
 use crate::parse::for_block::ForBlock;
 use crate::parse::function_block::FunctionDef;
 use crate::parse::if_block::IfBlock;
+use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
 use sys::ShortCStr;
@@ -37,6 +38,7 @@ pub enum ParsedLine {
     Umask(Option<u32>),
     Case(CaseBlock),
     If(IfBlock),
+    Wait(WaitBlock),
     For(ForBlock),
     While(WhileBlock),
     Until(UntilBlock),

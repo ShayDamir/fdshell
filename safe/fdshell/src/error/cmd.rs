@@ -35,6 +35,8 @@ pub enum CmdError {
     CmdSubst,
     /// task management failed
     Task,
+    /// a `wait` round failed
+    Wait,
     /// envfilter: missing arguments (try --help)
     EnvfilterNoArgs,
     /// envfilter: unknown flag

@@ -5,7 +5,7 @@ mod bg_redirect;
 mod builtin;
 mod capture;
 pub(crate) mod case_block;
-mod case_clause;
+pub(crate) mod case_clause;
 mod classify;
 mod cmdline;
 mod command;
@@ -31,6 +31,7 @@ mod semi;
 pub(crate) mod token;
 mod token_pipe;
 mod token_subst;
+pub(crate) mod wait_block;
 pub(crate) mod while_block;
 
 pub use cmdline::{CommandLine, Pipeline};

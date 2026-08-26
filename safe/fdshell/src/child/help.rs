@@ -11,8 +11,9 @@ const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"export_fd", b"Export fd to variable"),
     (b"shift", b"Shift positional parameters"),
     (b"umask", b"Set or show file mode mask"),
+    (b"send_fd", b"Send an fd to the capture socket"),
     (b"unset", b"Remove variable"),
-    (b"wait", b"Wait for background tasks"),
+    (b"waitpid", b"Wait for a background task"),
 ];
 
 const BUILTINS: &[(&[u8], &[u8])] = &[

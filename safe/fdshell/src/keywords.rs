@@ -24,7 +24,7 @@ pub(super) fn function_def_name(word: &[u8]) -> Option<&[u8]> {
 
 /// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers.
 ///
-/// Recognized: `case`, `esac`, `if`, `fi`, `for`, `while`, `until`, `done`.
+/// Recognized: `case`, `esac`, `if`, `fi`, `for`, `wait`, `while`, `until`, `done`.
 /// Each check requires a word boundary after the keyword to avoid
 /// matching prefixes like `ifconfig` or `donec`.
 pub(super) fn keyword_delta(word: &[u8]) -> Option<i32> {
@@ -41,6 +41,9 @@ pub(super) fn keyword_delta(word: &[u8]) -> Option<i32> {
         return Some(-1);
     }
     if word.starts_with(b"for") && boundary(word, 3, b"") {
+        return Some(1);
+    }
+    if word.starts_with(b"wait") && boundary(word, 4, b"") {
         return Some(1);
     }
     if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
