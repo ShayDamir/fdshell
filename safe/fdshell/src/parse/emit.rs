@@ -11,8 +11,15 @@ pub fn emit_token(
     token_start: usize,
     end: usize,
     fully_quoted: bool,
+    mask: &mut Vec<bool>,
 ) {
     if !cur.is_empty() {
-        tokens.push((core::mem::take(cur), token_start, end, fully_quoted));
+        tokens.push((
+            core::mem::take(cur),
+            token_start,
+            end,
+            fully_quoted,
+            core::mem::take(mask),
+        ));
     }
 }

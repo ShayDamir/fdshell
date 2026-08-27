@@ -43,15 +43,24 @@ use sys::ScriptText;
 use sys::ShortCStr;
 
 /// A token: its unquoted word, the byte range `(start, end)` of its raw text,
-/// and whether it was fully quoted.
-pub(crate) type Token = (ShortCStr, usize, usize, bool);
+/// whether it was fully quoted, and the per-byte quote mask (parallel to the
+/// word; `true` marks bytes that were inside double quotes and are protected
+/// from IFS word splitting).
+pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>);
 
 fn tokens_only(tokens: &[Token]) -> Vec<ShortCStr> {
-    tokens.iter().map(|(t, _, _, _)| t.clone()).collect()
+    tokens.iter().map(|(t, _, _, _, _)| t.clone()).collect()
 }
 
 fn fully_quoted_only(tokens: &[Token]) -> Vec<bool> {
-    tokens.iter().map(|(_, _, _, fq)| *fq).collect()
+    tokens.iter().map(|(_, _, _, fq, _)| *fq).collect()
+}
+
+fn quote_masks_only(tokens: &[Token]) -> Vec<Vec<bool>> {
+    tokens
+        .iter()
+        .map(|(_, _, _, _, mask)| mask.clone())
+        .collect()
 }
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
@@ -71,14 +80,16 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
         return Ok(pl);
     }
 
-    if raw.iter().any(|(t, _, _, _)| t.eq_bytes(b"|")) {
+    if raw.iter().any(|(t, _, _, _, _)| t.eq_bytes(b"|")) {
         return pipeline::parse_pipeline(&raw, text.start);
     }
 
     let fully_quoted = fully_quoted_only(&raw);
+    let quote_masks = quote_masks_only(&raw);
     Ok(ParsedLine::Cmd(command::parse_command(
         &tokens,
         fully_quoted,
+        quote_masks,
         text.start,
     )?))
 }

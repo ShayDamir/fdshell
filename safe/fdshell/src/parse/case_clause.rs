@@ -20,7 +20,10 @@ pub fn parse_clauses(
     let mut clauses = Vec::new();
     let mut pos = start;
     while pos < esac_idx {
-        if tokens.get(pos).is_some_and(|(t, _, _, _)| t.eq_bytes(b";")) {
+        if tokens
+            .get(pos)
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";"))
+        {
             pos += 1;
             continue;
         }

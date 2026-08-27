@@ -58,7 +58,7 @@ pub fn run_child(
         cell,
         cmd,
         &cmd_data.args,
-        &cmd_data.args_fq,
+        &cmd_data.args_mask,
         &redirects,
     )
 }

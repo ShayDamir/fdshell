@@ -12,7 +12,14 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<Token>, Report<ParseError>> {
     while let Some(b) = bytes.next() {
         st.pos += 1;
         if st.in_quotes {
-            if !super::quotes::handle_quoted_char(b, &mut st.cur, &mut bytes, line, &mut st.pos)? {
+            if !super::quotes::handle_quoted_char(
+                b,
+                &mut st.cur,
+                &mut st.mask,
+                &mut bytes,
+                line,
+                &mut st.pos,
+            )? {
                 st.in_quotes = false;
                 st.quote_start = None;
             }
@@ -27,6 +34,9 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<Token>, Report<ParseError>> {
 pub(super) struct State {
     pub(super) tokens: Vec<Token>,
     pub(super) cur: ShortCStr,
+    /// Per-byte quote mask, parallel to `cur`: `true` for bytes consumed
+    /// inside double quotes (protected from IFS word splitting).
+    pub(super) mask: Vec<bool>,
     pub(super) in_quotes: bool,
     pub(super) quote_start: Option<usize>,
     pub(super) fq: bool,
@@ -40,6 +50,7 @@ impl State {
         Self {
             tokens: Vec::new(),
             cur: ShortCStr::new(),
+            mask: Vec::new(),
             in_quotes: false,
             quote_start: None,
             fq: false,
@@ -56,7 +67,7 @@ impl State {
         }
         if !self.cur.is_empty() {
             self.tokens
-                .push((self.cur, self.start, line.len(), self.fq));
+                .push((self.cur, self.start, line.len(), self.fq, self.mask));
         }
         Ok(self.tokens)
     }

@@ -11,6 +11,7 @@ pub fn parse_here_string(
     fq: bool,
     iter: &mut core::iter::Peekable<core::slice::Iter<'_, ShortCStr>>,
     fq_iter: &mut vec::IntoIter<bool>,
+    mask_iter: &mut vec::IntoIter<vec::Vec<bool>>,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
     if fq || !t.starts_with(b"<<<") {
         return Ok(None);
@@ -31,6 +32,7 @@ pub fn parse_here_string(
             }
             Some(next) => {
                 let _ = fq_iter.next();
+                let _ = mask_iter.next();
                 next.clone()
             }
             None => ShortCStr::new(),

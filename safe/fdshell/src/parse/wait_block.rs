@@ -46,13 +46,13 @@ pub(crate) fn tokens_to_wait(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"wait")),
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"wait")),
         ParseError::MalformedWaitBlock
     );
     ensure!(
         tokens
             .last()
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"done")),
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
     );
 
@@ -60,13 +60,16 @@ pub(crate) fn tokens_to_wait(
     let mut arms = Vec::new();
     let mut pos = 1;
     while pos < done_idx {
-        if tokens.get(pos).is_some_and(|(t, _, _, _)| t.eq_bytes(b";")) {
+        if tokens
+            .get(pos)
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";"))
+        {
             pos += 1;
             continue;
         }
         let pat_end = tokens
             .get(pos..done_idx)
-            .and_then(|s| s.iter().position(|(t, _, _, _)| t.eq_bytes(b")")))
+            .and_then(|s| s.iter().position(|(t, _, _, _, _)| t.eq_bytes(b")")))
             .map(|i| pos + i)
             .ok_or(ParseError::WaitMissingCloseParen)?;
         let (pattern, captures) = pattern::parse_pattern(

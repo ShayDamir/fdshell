@@ -32,7 +32,7 @@ pub(super) fn expand_positional_word(
         if fq {
             result.push(p.value.clone());
         } else {
-            result.extend(split_word(&p.value, &state.ifs)?);
+            result.extend(split_word(&p.value, &[], &state.ifs)?);
         }
     }
     Ok(())

@@ -31,7 +31,7 @@ fn make_cmdline(args: &[&str]) -> CommandLine {
         builtin: false,
         command: c"cd".into(),
         args: args_vec,
-        args_fq: vec![false; args.len()],
+        args_mask: vec![vec![]; args.len()],
         captures: vec![],
         redirects: vec![],
         pidvar: None,

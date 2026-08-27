@@ -11,7 +11,7 @@ pub(super) fn parse_pattern(
     start: sys::Position,
 ) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let (kw, rest) = match tokens.first() {
-        Some((kw, _, _, _)) => (kw, rest_from(tokens, 1)?),
+        Some((kw, _, _, _, _)) => (kw, rest_from(tokens, 1)?),
         None => bail!(ParseError::WaitEmptyPattern),
     };
     if let Some(make) = wait_kind(kw) {
@@ -45,7 +45,7 @@ fn arm(
     start: sys::Position,
 ) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let (fd_tok, caps) = match rest.first() {
-        Some((fd, _, _, _)) => (fd, rest_from(rest, 1)?),
+        Some((fd, _, _, _, _)) => (fd, rest_from(rest, 1)?),
         None => bail!(ParseError::WaitMissingFd),
     };
     let ref_ = parse_fdref(fd_tok)?;
@@ -87,7 +87,7 @@ fn parse_captures(
     start: sys::Position,
 ) -> Result<Vec<Capture>, Report<ParseError>> {
     let mut out = Vec::new();
-    for (t, _, _, _) in toks {
+    for (t, _, _, _, _) in toks {
         match crate::parse::capture::parse_capture(t, start)? {
             Some(c) => out.push(c),
             None => bail!(ParseError::WaitUnexpectedToken),

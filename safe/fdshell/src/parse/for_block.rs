@@ -20,7 +20,7 @@ pub(crate) fn tokens_to_for(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"for")),
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"for")),
         ParseError::ExpectedFor
     );
     let var = tokens
@@ -31,7 +31,7 @@ pub(crate) fn tokens_to_for(
     let in_pos = tokens
         .iter()
         .skip(2)
-        .position(|(t, _, _, _)| t.eq_bytes(b"in"))
+        .position(|(t, _, _, _, _)| t.eq_bytes(b"in"))
         .ok_or(ParseError::ExpectedIn)?
         + 2;
 
@@ -41,13 +41,13 @@ pub(crate) fn tokens_to_for(
     ensure!(
         tokens
             .last()
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"done")),
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
     );
     ensure!(
         tokens
             .get(done_idx - 1)
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b";")),
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")),
         ParseError::ExpectedSemicolonBeforeDone
     );
 
@@ -65,7 +65,10 @@ pub(crate) fn tokens_to_for(
             .get(in_pos + 1..do_idx)
             .ok_or(ParseError::ExpectedWordList)?,
     );
-    let words: Vec<ShortCStr> = word_tokens.iter().map(|(t, _, _, _)| t.clone()).collect();
+    let words: Vec<ShortCStr> = word_tokens
+        .iter()
+        .map(|(t, _, _, _, _)| t.clone())
+        .collect();
 
     Ok(ForBlock { var, words, body })
 }

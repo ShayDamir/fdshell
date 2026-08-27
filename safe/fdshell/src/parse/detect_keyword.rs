@@ -19,7 +19,7 @@ pub(crate) fn detect_unset(tokens: &[Token]) -> Result<Option<ParsedLine>, Repor
 
 pub(crate) fn detect_umask(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let mask = match tokens.get(1) {
-        Some((arg, _, _, _)) => {
+        Some((arg, _, _, _, _)) => {
             let s = arg.as_bytes().change_context(ParseError::Never)?;
             let s = core::str::from_utf8(s).change_context(ParseError::InvalidChar { ch: 0 })?;
             let s = s.strip_prefix("0o").unwrap_or(s);
@@ -35,7 +35,7 @@ pub(crate) fn detect_umask(tokens: &[Token]) -> Result<Option<ParsedLine>, Repor
 
 pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
-        Some((t, _, _, _)) => t,
+        Some((t, _, _, _, _)) => t,
         None => return Ok(None),
     };
 
@@ -67,7 +67,7 @@ pub(crate) fn detect_return(tokens: &[Token]) -> Result<Option<ParsedLine>, Repo
     }
     let code = match tokens.get(1) {
         None => None,
-        Some((t, _, _, _)) => Some(parse_status(t)?),
+        Some((t, _, _, _, _)) => Some(parse_status(t)?),
     };
     Ok(Some(ParsedLine::Return(code)))
 }

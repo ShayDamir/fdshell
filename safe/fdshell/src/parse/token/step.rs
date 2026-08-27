@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use super::super::{
     backtick::read_backtick, comment::skip_comment, emit::emit_token, token_pipe::handle_pipe,
     token_subst::read_dollar_paren,
@@ -17,16 +19,31 @@ pub(super) fn unquoted(
         b' ' | b'\t' | b';' | b'\n' | b')' => {
             let needs_sep = b == b';' || b == b'\n' || b == b')';
             let sep = if b == b')' { c")" } else { c";" };
-            emit_token(&mut st.tokens, &mut st.cur, st.start, st.pos - 1, st.fq);
+            emit_token(
+                &mut st.tokens,
+                &mut st.cur,
+                st.start,
+                st.pos - 1,
+                st.fq,
+                &mut st.mask,
+            );
             st.fq = false;
             st.word_started = false;
             st.start = st.pos;
             if needs_sep {
-                st.tokens.push((sep.into(), st.pos - 1, st.pos, false));
+                st.tokens
+                    .push((sep.into(), st.pos - 1, st.pos, false, Vec::new()));
             }
         }
         b'|' => {
-            if handle_pipe(&mut st.tokens, &mut st.cur, st.start, st.fq, st.pos)? {
+            if handle_pipe(
+                &mut st.tokens,
+                &mut st.cur,
+                st.start,
+                st.fq,
+                st.pos,
+                &mut st.mask,
+            )? {
                 st.fq = false;
                 st.word_started = false;
             }
@@ -42,12 +59,12 @@ pub(super) fn unquoted(
         b'$' if bytes.peek() == Some(&b'(') => {
             st.fq = false;
             st.word_started = true;
-            read_dollar_paren(line, &mut st.cur, bytes, &mut st.pos)?;
+            read_dollar_paren(line, &mut st.cur, &mut st.mask, bytes, &mut st.pos)?;
         }
         b'`' => {
             st.fq = false;
             st.word_started = true;
-            read_backtick(line, &mut st.cur, bytes, &mut st.pos)?;
+            read_backtick(line, &mut st.cur, &mut st.mask, bytes, &mut st.pos)?;
         }
         // `#` starts a comment only at the beginning of a word; inside a
         // word it is a literal byte (colors, URLs, `${#var}`, …).
@@ -65,6 +82,7 @@ pub(super) fn unquoted(
             st.cur
                 .push_byte(b)
                 .change_context(ParseError::InvalidChar { ch: 0 })?;
+            st.mask.push(false);
         }
     }
     Ok(())

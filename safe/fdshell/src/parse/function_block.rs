@@ -15,9 +15,11 @@ pub struct FunctionDef {
 pub(crate) fn is_function_def(tokens: &[Token]) -> bool {
     let first = tokens
         .first()
-        .is_some_and(|(t, _, _, _)| t.len() > 1 && t.ends_with(b"("));
-    let second = tokens.get(1).is_some_and(|(t, _, _, _)| t.eq_bytes(b")"));
-    let open = tokens.iter().any(|(t, _, _, _)| t.eq_bytes(b"{"));
+        .is_some_and(|(t, _, _, _, _)| t.len() > 1 && t.ends_with(b"("));
+    let second = tokens
+        .get(1)
+        .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b")"));
+    let open = tokens.iter().any(|(t, _, _, _, _)| t.eq_bytes(b"{"));
     first && second && open
 }
 
@@ -29,11 +31,11 @@ pub(crate) fn tokens_to_function(
     // `is_function_def` guarantees an opening `{` exists, so this cannot fail.
     let open = tokens
         .iter()
-        .position(|(t, _, _, _)| t.eq_bytes(b"{"))
+        .position(|(t, _, _, _, _)| t.eq_bytes(b"{"))
         .ok_or(ParseError::Never)?;
     let close = tokens
         .iter()
-        .rposition(|(t, _, _, _)| t.eq_bytes(b"}"))
+        .rposition(|(t, _, _, _, _)| t.eq_bytes(b"}"))
         .ok_or(ParseError::FunctionMissingCloseBrace)?;
     let body_tokens = tokens
         .get(open + 1..close)

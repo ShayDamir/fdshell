@@ -15,7 +15,7 @@ pub(crate) fn run_case(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let word = crate::substitute::substitute_arg(&caseblock.word, &mut cache, cell)
+    let (word, _) = crate::substitute::substitute_arg(&caseblock.word, &[], &mut cache, cell)
         .change_context(CmdError::Resolve)?;
     let word_bytes = word.as_bytes().change_context(CmdError::Never)?;
 

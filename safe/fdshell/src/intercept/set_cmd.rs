@@ -49,7 +49,7 @@ fn run_set_positional(
     super::validation::validate_intercept(line, "set", cmdline)?;
     let expanded = crate::substitute::substitute_args(
         cmdline.args.get(1..).unwrap_or(&[]),
-        cmdline.args_fq.get(1..).unwrap_or(&[]),
+        cmdline.args_mask.get(1..).unwrap_or(&[]),
         cell,
     )
     .change_context(CmdError::Resolve)?;

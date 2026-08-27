@@ -9,11 +9,11 @@ pub(crate) fn find_preceded_by_semi(
     start: usize,
     needle: &[u8],
 ) -> Option<usize> {
-    for (i, (t, _, _, _)) in tokens.iter().enumerate().skip(start) {
+    for (i, (t, _, _, _, _)) in tokens.iter().enumerate().skip(start) {
         let preceded = i > 0
             && tokens
                 .get(i - 1)
-                .is_some_and(|(p, _, _, _)| p.eq_bytes(b";"));
+                .is_some_and(|(p, _, _, _, _)| p.eq_bytes(b";"));
         if t.eq_bytes(needle) && preceded {
             return Some(i);
         }
@@ -24,12 +24,12 @@ pub(crate) fn find_preceded_by_semi(
 pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
     let start = tokens
         .iter()
-        .take_while(|(t, _, _, _)| t.eq_bytes(b";"))
+        .take_while(|(t, _, _, _, _)| t.eq_bytes(b";"))
         .count();
     let end = tokens
         .iter()
         .rev()
-        .take_while(|(t, _, _, _)| t.eq_bytes(b";"))
+        .take_while(|(t, _, _, _, _)| t.eq_bytes(b";"))
         .count();
     let end = tokens.len().saturating_sub(end);
     tokens.get(start..end).unwrap_or(&[])
@@ -37,7 +37,7 @@ pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
 
 pub(crate) fn try_join(tokens: &[Token]) -> ShortCStr {
     let mut out = ShortCStr::new();
-    for (t, _, _, _) in tokens {
+    for (t, _, _, _, _) in tokens {
         if !out.is_empty() {
             out.push(c" ");
         }

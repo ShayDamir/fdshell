@@ -9,7 +9,7 @@ fn make_exec_cmdline(redirects: Vec<RedirectDef>) -> CommandLine {
         builtin: false,
         command: c"exec".into(),
         args: vec![],
-        args_fq: vec![],
+        args_mask: vec![],
         captures: vec![],
         redirects,
         pidvar: None,

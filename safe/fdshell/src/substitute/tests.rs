@@ -50,7 +50,7 @@ fn dollar_substitutes_matching_var() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$hello");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"world");
 }
 
@@ -59,7 +59,7 @@ fn dollar_unknown_var_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$nope");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"$nope");
 }
 
@@ -72,7 +72,7 @@ fn percent_question_substitutes_bound_fd() {
         .set_fd_var(ShortCStr::from(c"?"), fdvar(rd));
     let arg = ShortCStr::from(c"%?");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     // A bound `?` substitutes to its fd number, not the literal `%?` or `?`.
     let bytes = res.as_bytes().unwrap();
     assert!(!bytes.is_empty());
@@ -85,7 +85,7 @@ fn percent_question_unbound_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"%?");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"%?");
 }
 
@@ -104,7 +104,7 @@ fn dollar_resolves_inherited_env_var() {
         .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
     let arg = ShortCStr::from(c"$FOO");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"bar");
 }
 
@@ -121,7 +121,7 @@ fn shell_string_shadows_inherited_env_var() {
         .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
     let arg = ShortCStr::from(c"$FOO");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"shell");
 }
 
@@ -134,7 +134,7 @@ fn brace_resolves_inherited_env_var() {
         .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
     let arg = ShortCStr::from(c"${FOO}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"bar");
 }
 
@@ -147,7 +147,7 @@ fn brace_len_of_inherited_env_var() {
         .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
     let arg = ShortCStr::from(c"${#FOO}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"3");
 }
 
@@ -164,7 +164,7 @@ fn brace_len_shadows_inherited_env_var() {
         .push((ShortCStr::from(c"FOO"), ShortCStr::from(c"bar")));
     let arg = ShortCStr::from(c"${#FOO}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"1");
 }
 
@@ -173,7 +173,7 @@ fn dollar_double_dollar_is_pid() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$$");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     let pid_str = format!("{}", cell.borrow().unwrap().shell_pid);
     assert_eq!(res.as_bytes().unwrap(), pid_str.as_bytes());
 }
@@ -183,7 +183,7 @@ fn dollar_at_end_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"a$");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a$");
 }
 
@@ -192,7 +192,7 @@ fn dollar_in_middle_of_text() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"prefix.$hello/suffix");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"prefix.world/suffix");
 }
 
@@ -201,7 +201,7 @@ fn dollar_then_percent_handled_separately() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$%");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"$%");
 }
 
@@ -210,7 +210,7 @@ fn dollar_empty_value_produces_nothing() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"x$empty y");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"x y");
 }
 
@@ -219,7 +219,7 @@ fn dollar_multi_word_value() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"echo $multi_word");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"echo two words");
 }
 
@@ -228,7 +228,7 @@ fn dollar_followed_by_non_ident_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$.");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"$.");
 }
 
@@ -237,10 +237,10 @@ fn dollar_dash_expands_active_option_flags() {
     let cell = dummy_cell();
     let mut cache = HashMap::new();
     // `expand_aliases` is on by default but has no short flag, so `$-` is empty.
-    let res = substitute_arg(&ShortCStr::from(c"x$-y"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"x$-y"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"xy");
     cell.borrow_mut().unwrap().options |= crate::options::NOCLOBBER;
-    let res = substitute_arg(&ShortCStr::from(c"$-"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"$-"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"C");
 }
 
@@ -248,9 +248,9 @@ fn dollar_dash_expands_active_option_flags() {
 fn backslash_dollar_is_literal_unexpanded() {
     let cell = dummy_cell();
     let mut cache = HashMap::new();
-    let res = substitute_arg(&ShortCStr::from(c"a\\$_b"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"a\\$_b"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a$_b");
-    let res = substitute_arg(&ShortCStr::from(c"\\$hello"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"\\$hello"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"$hello");
 }
 
@@ -258,10 +258,10 @@ fn backslash_dollar_is_literal_unexpanded() {
 fn backslash_backslash_folds_to_single() {
     let cell = dummy_cell();
     let mut cache = HashMap::new();
-    let res = substitute_arg(&ShortCStr::from(c"a\\\\b"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"a\\\\b"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a\\b");
     // `\\` before a live `$var` keeps the variable expanded (bash).
-    let res = substitute_arg(&ShortCStr::from(c"\\\\$hello"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"\\\\$hello"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"\\world");
 }
 
@@ -269,7 +269,7 @@ fn backslash_backslash_folds_to_single() {
 fn backslash_other_char_kept() {
     let cell = dummy_cell();
     let mut cache = HashMap::new();
-    let res = substitute_arg(&ShortCStr::from(c"a\\nb"), &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&ShortCStr::from(c"a\\nb"), &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a\\nb");
 }
 
@@ -278,7 +278,7 @@ fn combined_percent_and_dollar() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$var and %var");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"value and %var");
 }
 
@@ -291,7 +291,7 @@ fn dollar_underscore_var() {
         .insert(ShortCStr::from(c"_my_var"), is_(c"underscore"));
     let arg = ShortCStr::from(c"$_my_var");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"underscore");
 }
 
@@ -300,7 +300,7 @@ fn brace_substitutes_matching_var() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${hello}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"world");
 }
 
@@ -313,7 +313,7 @@ fn brace_bang_indirect_expands_target() {
         .insert(ShortCStr::from(c"p"), is_(c"var"));
     let arg = ShortCStr::from(c"${!p}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"value");
 }
 
@@ -322,7 +322,7 @@ fn brace_bang_indirect_unset_name_is_literal() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${!nope}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${!nope}");
 }
 
@@ -335,7 +335,7 @@ fn brace_bang_indirect_unset_target_shows_target() {
         .insert(ShortCStr::from(c"q"), is_(c"missing"));
     let arg = ShortCStr::from(c"${!q}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${missing}");
 }
 
@@ -348,7 +348,7 @@ fn brace_bang_indirect_empty_target_is_empty() {
         .insert(ShortCStr::from(c"e"), is_(c"empty"));
     let arg = ShortCStr::from(c"${!e}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
@@ -357,7 +357,7 @@ fn brace_unknown_var_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${nope}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${nope}");
 }
 
@@ -366,7 +366,7 @@ fn brace_empty_name_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${}");
 }
 
@@ -375,7 +375,7 @@ fn brace_no_closing_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${hello");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${hello");
 }
 
@@ -384,7 +384,7 @@ fn brace_hash_no_closing_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${#hello");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${#hello");
 }
 
@@ -393,7 +393,7 @@ fn param_dash_colon_unset_gives_word() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${nope:-d}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"d");
 }
 
@@ -402,7 +402,7 @@ fn param_dash_colon_set_gives_value() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${var:-d}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"value");
 }
 
@@ -411,7 +411,7 @@ fn param_dash_colon_empty_gives_word() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${empty:-d}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"d");
 }
 
@@ -420,7 +420,7 @@ fn param_plus_colon_set_gives_word() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${var:+alt}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"alt");
 }
 
@@ -429,7 +429,7 @@ fn param_plus_colon_unset_gives_empty() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${nope:+alt}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
@@ -438,7 +438,7 @@ fn param_plus_colon_empty_gives_empty() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${empty:+alt}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
@@ -447,7 +447,7 @@ fn param_assign_colon_sets_and_reuses() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${Z:=v} [$Z]");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"v [v]");
     let state = cell.borrow().unwrap();
     assert_eq!(
@@ -467,7 +467,7 @@ fn param_assign_colon_empty_resets_to_word() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${empty:=w}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"w");
     let state = cell.borrow().unwrap();
     assert_eq!(
@@ -487,7 +487,7 @@ fn param_assign_colon_set_keeps_value() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${var:=other}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"value");
     let state = cell.borrow().unwrap();
     assert_eq!(
@@ -507,7 +507,7 @@ fn param_question_colon_set_gives_value() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${var:?err}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"value");
 }
 
@@ -516,7 +516,7 @@ fn param_question_colon_unset_errors_with_word() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${nope:?boom}");
     let mut cache = HashMap::new();
-    let err = substitute_arg(&arg, &mut cache, &cell).unwrap_err();
+    let err = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
     assert!(matches!(
         err.current_context(),
         crate::error::resolve::ResolveError::ParamNullOrNotSet { word, .. }
@@ -529,7 +529,7 @@ fn param_question_colon_empty_errors() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${empty:?boom}");
     let mut cache = HashMap::new();
-    let err = substitute_arg(&arg, &mut cache, &cell).unwrap_err();
+    let err = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
     assert!(matches!(
         err.current_context(),
         crate::error::resolve::ResolveError::ParamNullOrNotSet { word, .. }
@@ -542,7 +542,7 @@ fn param_question_colon_unset_uses_default_message() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${nope:?}");
     let mut cache = HashMap::new();
-    let err = substitute_arg(&arg, &mut cache, &cell).unwrap_err();
+    let err = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
     assert!(matches!(
         err.current_context(),
         crate::error::resolve::ResolveError::ParamNullOrNotSet { word, .. }
@@ -557,7 +557,7 @@ fn param_operator_on_environ_var_counts_set() {
         vec![(ShortCStr::from(c"ENVV"), ShortCStr::from(c"envval"))];
     let arg = ShortCStr::from(c"${ENVV:-d}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"envval");
 }
 
@@ -566,7 +566,7 @@ fn param_operator_scan_skips_non_operator_colon() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${var:x:-w}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"w");
 }
 
@@ -575,7 +575,7 @@ fn brace_inside_text() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"a${hello}b");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"aworldb");
 }
 
@@ -584,7 +584,7 @@ fn tilde_expands_to_home() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"~");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     let home = std::env::var("HOME").unwrap();
     assert_eq!(res.as_bytes().unwrap(), home.as_bytes());
 }
@@ -594,7 +594,7 @@ fn tilde_slash_expands() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"~/foo");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     let home = std::env::var("HOME").unwrap();
     assert_eq!(res.as_bytes().unwrap(), format!("{}/foo", home).as_bytes());
 }
@@ -604,7 +604,7 @@ fn tilde_user_remains_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"~nobody/bar");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"~nobody/bar");
 }
 
@@ -613,8 +613,26 @@ fn tilde_mid_word_untouched() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"a~");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a~");
+}
+
+// Tilde expansion must keep the quote mask aligned: the expansion inherits
+// the tilde's bit, and later original bytes keep their own bits even though
+// the expansion consumed input from the shared peekable.
+#[test]
+fn tilde_expansion_keeps_mask_alignment() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"~/a");
+    let mut cache = HashMap::new();
+    let (res, mask_out) = substitute_arg(&arg, &[true, false, false], &mut cache, &cell).unwrap();
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(res.as_bytes().unwrap(), format!("{}/a", home).as_bytes());
+    assert!(mask_out.iter().take(home.len()).all(|&q| q));
+    assert!(
+        !mask_out.get(home.len()).copied().unwrap_or(true),
+        "the byte after the expansion must keep its own (unquoted) bit"
+    );
 }
 
 #[test]
@@ -622,7 +640,7 @@ fn dollar_bang_returns_last_bg_pid() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$!");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"12345");
 }
 
@@ -637,7 +655,7 @@ fn dollar_bang_no_bg_returns_empty() {
     s_cell.borrow_mut().unwrap().last_bg_pid = None;
     let arg = ShortCStr::from(c"$!");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &s_cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &s_cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
@@ -646,7 +664,7 @@ fn dollar_bang_in_text() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"job=$! done");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"job=12345 done");
 }
 
@@ -655,7 +673,7 @@ fn brace_hash_known_var_returns_length() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${#hello}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"5");
 }
 
@@ -664,7 +682,7 @@ fn brace_hash_empty_var_returns_zero() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${#empty}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"0");
 }
 
@@ -673,7 +691,7 @@ fn brace_hash_unknown_var_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${#nope}");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"${#nope}");
 }
 
@@ -682,7 +700,7 @@ fn brace_hash_in_text() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"len=${#hello} end");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"len=5 end");
 }
 
@@ -728,7 +746,7 @@ fn dollar_hash_returns_positional_count() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$#");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"3");
 }
 
@@ -738,7 +756,7 @@ fn dollar_hash_empty_positional() {
     cell.borrow_mut().unwrap().set_positional(VecDeque::new());
     let arg = ShortCStr::from(c"$#");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"0");
 }
 
@@ -747,7 +765,7 @@ fn dollar_at_expands_positional() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$@");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg0 arg1 arg2");
 }
 
@@ -756,7 +774,7 @@ fn dollar_star_expands_positional() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$*");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg0 arg1 arg2");
 }
 
@@ -772,7 +790,7 @@ fn dollar_at_single_positional() {
     );
     let arg = ShortCStr::from(c"$@");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"only");
 }
 
@@ -782,7 +800,7 @@ fn dollar_at_empty_positional() {
     cell.borrow_mut().unwrap().set_positional(VecDeque::new());
     let arg = ShortCStr::from(c"$@");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
@@ -791,7 +809,7 @@ fn dollar_zero_is_first_positional() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$0");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg0");
 }
 
@@ -800,7 +818,7 @@ fn dollar_one_is_second_positional() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$1");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg1");
 }
 
@@ -809,7 +827,7 @@ fn dollar_n_is_third_positional() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$2");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg2");
 }
 
@@ -818,7 +836,7 @@ fn dollar_n_out_of_range_is_empty() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$9");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
@@ -827,7 +845,7 @@ fn dollar_positional_in_text() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$0-$1-$2");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg0-arg1-arg2");
 }
 
@@ -836,7 +854,7 @@ fn dollar_multi_digit_index() {
     let cell = positional_cell_with_n(15);
     let arg = ShortCStr::from(c"$10");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg10");
 }
 
@@ -845,7 +863,7 @@ fn dollar_multi_digit_index_in_text() {
     let cell = positional_cell_with_n(20);
     let arg = ShortCStr::from(c"$1-$10-$19");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg1-arg10-arg19");
 }
 
@@ -854,7 +872,7 @@ fn percent_double_percent_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"a%%b");
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a%b");
 }
 
@@ -863,7 +881,7 @@ fn percent_single_percent_unknown_fd_is_literal() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"%unknown_fd");
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"%unknown_fd");
 }
 
@@ -881,16 +899,16 @@ fn percent_fd_cache_hit_returns_same_value() {
 
     // First call — should lookup FD and cache it
     let arg1 = ShortCStr::from(c"%testfd");
-    let res1 = substitute_arg(&arg1, &mut cache, &cell).unwrap();
+    let (res1, _) = substitute_arg(&arg1, &[], &mut cache, &cell).unwrap();
 
     // Second call — should hit cache and return same value
     let arg2 = ShortCStr::from(c"%testfd");
-    let res2 = substitute_arg(&arg2, &mut cache, &cell).unwrap();
+    let (res2, _) = substitute_arg(&arg2, &[], &mut cache, &cell).unwrap();
     assert_eq!(res1.as_bytes().unwrap(), res2.as_bytes().unwrap());
 
     // Third call with surrounding text — still hits cache
     let arg3 = ShortCStr::from(c"prefix-%testfd-suffix");
-    let res3 = substitute_arg(&arg3, &mut cache, &cell).unwrap();
+    let (res3, _) = substitute_arg(&arg3, &[], &mut cache, &cell).unwrap();
     let fd_str = alloc::string::String::from_utf8_lossy(res1.as_bytes().unwrap());
     let expected = format!("prefix-{fd_str}-suffix");
     assert_eq!(res3.as_bytes().unwrap(), expected.as_bytes());
@@ -909,7 +927,7 @@ fn percent_leading_underscore_name_resolves() {
         .insert(ShortCStr::from(c"_fd"), fdvar(dev_null));
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let arg = ShortCStr::from(c"%_fd");
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert!(res.as_bytes().unwrap().iter().all(|b| b.is_ascii_digit()));
 }
 
@@ -923,7 +941,7 @@ fn percent_hyphen_after_percent_is_literal() {
         .insert(ShortCStr::from(c"-testfd"), fdvar(dev_null));
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let arg = ShortCStr::from(c"%-testfd");
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"%-testfd");
 }
 
@@ -942,8 +960,8 @@ fn dollar_at_fq_true_expands_separate_args() {
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"$@")];
-    let args_fq = alloc::vec![true];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0");
     assert_eq!(result[1].as_bytes().unwrap(), b"arg1");
@@ -963,8 +981,8 @@ fn dollar_at_unquoted_splits_on_ifs() {
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"$@")];
-    let args_fq = alloc::vec![false];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"a");
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
@@ -983,8 +1001,8 @@ fn dollar_star_fq_true_joins_positional() {
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"$*")];
-    let args_fq = alloc::vec![true];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1");
 }
@@ -1006,8 +1024,8 @@ fn dollar_at_unquoted_custom_ifs_splits_per_positional() {
         );
     }
     let args = alloc::vec![ShortCStr::from(c"$@")];
-    let args_fq = alloc::vec![false];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"a");
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
@@ -1030,8 +1048,8 @@ fn dollar_at_unquoted_empty_ifs_keeps_positionals_separate() {
         );
     }
     let args = alloc::vec![ShortCStr::from(c"$@")];
-    let args_fq = alloc::vec![false];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_bytes().unwrap(), b"a b");
     assert_eq!(result[1].as_bytes().unwrap(), b"c");
@@ -1053,8 +1071,8 @@ fn dollar_star_unquoted_custom_ifs_splits_per_positional() {
         );
     }
     let args = alloc::vec![ShortCStr::from(c"$*")];
-    let args_fq = alloc::vec![false];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_bytes().unwrap(), b"a");
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
@@ -1075,8 +1093,8 @@ fn dollar_star_quoted_custom_ifs_joins_with_first_ifs_byte() {
         );
     }
     let args = alloc::vec![ShortCStr::from(c"$*")];
-    let args_fq = alloc::vec![true];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"a:b");
 }
@@ -1096,8 +1114,8 @@ fn dollar_star_quoted_empty_ifs_joins_with_nothing() {
         );
     }
     let args = alloc::vec![ShortCStr::from(c"$*")];
-    let args_fq = alloc::vec![true];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"ab");
 }
@@ -1106,8 +1124,8 @@ fn dollar_star_quoted_empty_ifs_joins_with_nothing() {
 fn unquoted_var_with_spaces_splits_on_ifs() {
     let cell = dummy_cell();
     let args = alloc::vec![ShortCStr::from(c"$multi_word")];
-    let args_fq = alloc::vec![false];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_bytes().unwrap(), b"two");
     assert_eq!(result[1].as_bytes().unwrap(), b"words");
@@ -1117,8 +1135,8 @@ fn unquoted_var_with_spaces_splits_on_ifs() {
 fn quoted_var_with_spaces_does_not_split() {
     let cell = dummy_cell();
     let args = alloc::vec![ShortCStr::from(c"$multi_word")];
-    let args_fq = alloc::vec![true];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![true; 11]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"two words");
 }
@@ -1135,8 +1153,8 @@ fn literal_arg_with_fq_true_not_routed_to_positional() {
             .collect(),
     );
     let args = alloc::vec![ShortCStr::from(c"hello")];
-    let args_fq = alloc::vec![true];
-    let result = super::substitute_args(&args, &args_fq, &cell).unwrap();
+    let args_mask = alloc::vec![alloc::vec![true; 5]];
+    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"hello");
 }
@@ -1277,7 +1295,7 @@ fn dollar_underscore_expands_to_last_arg_var() {
         .insert(ShortCStr::from(c"_"), is_(c"lastword"));
     let arg = ShortCStr::from(c"a $_ b");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a lastword b");
 }
 
@@ -1289,6 +1307,115 @@ fn dollar_underscore_unset_is_empty_not_literal() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"[$_]");
     let mut cache = HashMap::new();
-    let res = substitute_arg(&arg, &mut cache, &cell).unwrap();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"[]");
+}
+
+// Quote-mask propagation: copied bytes keep their bit, expansion inherits
+// the trigger byte's bit.
+#[test]
+fn copied_bytes_keep_unquoted_mask() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"hello");
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg(&arg, &[false; 5], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"hello");
+    assert_eq!(mask, vec![false; 5]);
+}
+
+#[test]
+fn expansion_inherits_trigger_mask_bit() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"x$multi_word");
+    let mut cache = HashMap::new();
+    let mask = vec![
+        false, true, true, true, true, true, true, true, true, true, true, true,
+    ];
+    let (res, mask_out) = substitute_arg(&arg, &mask, &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"xtwo words");
+    assert_eq!(
+        mask_out,
+        vec![false, true, true, true, true, true, true, true, true, true]
+    );
+}
+
+#[test]
+fn unquoted_expansion_yields_unprotected_mask() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"x$multi_word");
+    let mut cache = HashMap::new();
+    let (res, mask_out) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"xtwo words");
+    assert!(mask_out.iter().all(|&q| !q));
+}
+
+// Mask-index alignment: substitution helpers consume several input bytes
+// (the variable name, the paren body); later original bytes must keep their
+// own mask bit, not the bit of the byte the helper stopped at.
+#[test]
+fn backslash_escape_keeps_mask_alignment() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"\\\\ab");
+    let mut cache = HashMap::new();
+    let (res, mask_out) =
+        substitute_arg(&arg, &[true, true, false, false], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"\\ab");
+    assert_eq!(mask_out, vec![true, false, false]);
+}
+
+#[test]
+fn dollar_escape_keeps_mask_alignment() {
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"\\$ab");
+    let mut cache = HashMap::new();
+    let (res, mask_out) =
+        substitute_arg(&arg, &[true, true, false, false], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"$ab");
+    assert_eq!(mask_out, vec![true, false, false]);
+}
+
+#[test]
+fn backslash_plain_char_keeps_mask_alignment() {
+    // A backslash before a non-special char is kept and consumes no extra
+    // byte; later bytes keep their own mask bits, not a shifted index.
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"\\ab");
+    let mut cache = HashMap::new();
+    let (res, mask_out) = substitute_arg(&arg, &[true, false, false], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"\\ab");
+    assert_eq!(mask_out, vec![true, false, false]);
+}
+
+#[test]
+fn var_name_consumption_keeps_mask_alignment() {
+    // The name `v` is consumed by the substitution; the trailing `:` must
+    // keep its own (unquoted) bit, not the name's quoted bit.
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"x$v:");
+    let mut cache = HashMap::new();
+    let (res, mask_out) =
+        substitute_arg(&arg, &[false, true, true, false], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"x$v:");
+    assert_eq!(mask_out, vec![false, true, true, false]);
+}
+
+#[test]
+fn percent_expansion_inherits_trigger_mask_bit() {
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"_fd"), fdvar(dev_null));
+    let arg = ShortCStr::from(c"a%_fd");
+    let mut cache = HashMap::new();
+    let (res, mask_out) =
+        substitute_arg(&arg, &[false, true, true, true, true], &mut cache, &cell).unwrap();
+    assert!(
+        res.as_bytes()
+            .unwrap()
+            .iter()
+            .all(|b| b.is_ascii_digit() || *b == b'a')
+    );
+    assert!(mask_out.iter().enumerate().all(|(i, &q)| i == 0 || q));
 }

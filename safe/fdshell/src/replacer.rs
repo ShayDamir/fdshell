@@ -11,7 +11,7 @@ use sys::fork_cell::ForkCell;
 
 pub fn execute(
     args: &[ShortCStr],
-    args_fq: &[bool],
+    args_mask: &[Vec<bool>],
     redirects: &[crate::redirect::RedirectDef],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
@@ -29,7 +29,7 @@ pub fn execute(
     if args.first().is_some_and(|a| a.eq_bytes(b"builtin")) {
         let builtin_name = args.get(1).ok_or(ChildProcessError::MissingArg)?;
         let builtin_args = args.get(2..).unwrap_or(&[]);
-        let substituted = substitute_args(builtin_args, &[], cell)
+        let substituted = substitute_args(builtin_args, args_mask.get(2..).unwrap_or(&[]), cell)
             .change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
@@ -48,7 +48,7 @@ pub fn execute(
             .change_context(ChildProcessError::ExecFailed)?;
         if child::dispatch::builtin_first(binary, &state) {
             let rest = args.get(1..).unwrap_or(&[]);
-            let substituted = substitute_args(rest, args_fq, cell)
+            let substituted = substitute_args(rest, args_mask, cell)
                 .change_context(ChildProcessError::ExecFailed)?;
             let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
             let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
@@ -61,7 +61,7 @@ pub fn execute(
         let fd = exec::resolve_path(binary).change_context(ChildProcessError::ExecFailed)?;
         let binary_exported = binary.export();
         let binary_cstr = binary_exported.as_ref();
-        let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_fq, cell)
+        let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_mask, cell)
             .change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];

@@ -28,8 +28,9 @@ pub(crate) fn run_simple(
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
-            let expanded = crate::substitute::substitute_arg(value, &mut HashMap::new(), cell)
-                .change_context(CmdError::Resolve)?;
+            let (expanded, _) =
+                crate::substitute::substitute_arg(value, &[], &mut HashMap::new(), cell)
+                    .change_context(CmdError::Resolve)?;
             let origin = crate::run_origin::assign_origin(value, text.origin.clone(), cell)?;
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.set_var(

@@ -24,7 +24,9 @@ pub(crate) fn tokens_to_if(
     text: &ScriptText,
 ) -> Result<IfBlock, Report<ParseError>> {
     ensure!(
-        tokens.first().is_some_and(|(t, _, _, _)| t.eq_bytes(b"if")),
+        tokens
+            .first()
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"if")),
         ParseError::MalformedIfBlock
     );
 
@@ -36,7 +38,9 @@ pub(crate) fn tokens_to_if(
 
     let fi_idx = tokens.len() - 1;
     ensure!(
-        tokens.last().is_some_and(|(t, _, _, _)| t.eq_bytes(b"fi")),
+        tokens
+            .last()
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"fi")),
         ParseError::MissingFi
     );
 

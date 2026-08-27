@@ -21,7 +21,7 @@ fn make_cmdline(command: &[u8], args: &[&str]) -> CommandLine {
         builtin: false,
         command: ShortCStr::from_vec(command.to_vec()).unwrap(),
         args: args_vec,
-        args_fq: vec![false; args.len()],
+        args_mask: vec![vec![]; args.len()],
         captures: vec![],
         redirects: vec![],
         pidvar: None,

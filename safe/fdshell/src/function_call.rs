@@ -21,7 +21,7 @@ pub(crate) fn try_call(
         cmdline.redirects.is_empty(),
         CmdError::FunctionRedirectNotSupported
     );
-    let substituted = crate::substitute::substitute_args(&cmdline.args, &cmdline.args_fq, cell)
+    let substituted = crate::substitute::substitute_args(&cmdline.args, &cmdline.args_mask, cell)
         .change_context(CmdError::Resolve)?;
     let saved = swap_positional(cell, &cmdline.command, &substituted, text)?;
     let script = ScriptText::new(body, text.start, text.origin.clone());

@@ -161,3 +161,57 @@ fn embedded_dollar_at_uses_first_ifs_byte_join() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "xa\nb\n");
 }
+
+#[test]
+fn mixed_quoted_token_stays_one_word() {
+    // TODO.md regression: quoted IFS inside a mixed token used to split the
+    // word (one argv entry silently became two).
+    let (out, err, code) = run(r#"builtin printf "[%s]" x"a b"c"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[xa bc]");
+}
+
+#[test]
+fn mixed_quoted_expansion_stays_one_word() {
+    let (out, err, code) = run(r#"x="a b"; builtin printf "[%s]" y"$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[ya b]");
+}
+
+#[test]
+fn mixed_unquoted_expansion_still_splits() {
+    let (out, err, code) = run(r#"x="a b"; builtin printf "[%s]" y$x z"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[ya][b][z]");
+}
+
+#[test]
+fn mixed_quoted_non_whitespace_ifs_protected() {
+    let (out, err, code) = run(r#"IFS=:; x=a:b; builtin printf "[%s]" y"$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[ya:b]");
+}
+
+#[test]
+fn quoted_ifs_after_cmd_subst_stays_one_word() {
+    // The quoted `:` after the substitution must keep its protection even
+    // though the `$( )` span consumed several input bytes.
+    let (out, err, code) = run(r#"IFS=:; builtin printf "[%s]" x$(true)":z""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[x:z]");
+}
+
+#[test]
+fn unquoted_ifs_after_cmd_subst_still_splits() {
+    let (out, err, code) = run(r#"IFS=:; builtin printf "[%s]" x$(true):y"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[x][y]");
+}
+
+#[test]
+fn quoted_middle_of_word_keeps_ifs_and_splits_around_it() {
+    // Unquoted IFS outside the quotes still delimits; quoted IFS stays.
+    let (out, err, code) = run(r#"x="a b"; builtin printf "[%s]" "$x" c"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a b][c]");
+}

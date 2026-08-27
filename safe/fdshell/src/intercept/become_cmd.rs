@@ -54,10 +54,10 @@ fn run_replace(
     super::validation::check_captures_not_supported(line, name, &cmdline.captures)?;
 
     let args = cmdline.args.clone();
-    let args_fq = cmdline.args_fq.clone();
+    let args_mask = cmdline.args_mask.clone();
     let redirects = &cmdline.redirects;
 
-    match crate::replacer::execute(&args, &args_fq, redirects, cell) {
+    match crate::replacer::execute(&args, &args_mask, redirects, cell) {
         Ok(code) => sys::exit(code),
         Err(report) => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");

@@ -42,7 +42,7 @@ pub fn launch(
             cell,
             cmd,
             &cmdline.args,
-            &cmdline.args_fq,
+            &cmdline.args_mask,
             &resolved,
         ) {
             Ok(code) => sys::exit(code),

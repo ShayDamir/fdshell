@@ -37,7 +37,7 @@ fn command_positions(tokens: &[Token]) -> alloc::vec::Vec<(&ShortCStr, &usize, &
     if let Some(first) = tokens.first() {
         out.push((&first.0, &first.1, &first.2, &first.3));
     }
-    for (i, (t, _, _, _)) in tokens.iter().enumerate() {
+    for (i, (t, _, _, _, _)) in tokens.iter().enumerate() {
         if t.eq_bytes(b"|")
             && let Some(n) = tokens.get(i + 1)
         {

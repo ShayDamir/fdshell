@@ -46,7 +46,13 @@ fn test_mkdirat_capture() {
                 c"%CWD".into(),
                 c"foo".into(),
             ],
-            args_fq: vec![false, false, false, false, false],
+            args_mask: vec![
+                vec![false; 6],
+                vec![false; 3],
+                vec![false; 7],
+                vec![false; 4],
+                vec![false; 3],
+            ],
             captures: vec![Capture {
                 var: c"foo".into(),
                 tag: None,
@@ -872,7 +878,7 @@ fn tokenize_if_newline_separators() {
     ];
     let expected_pos: &[usize] = &[0, 3, 7, 8, 12, 13, 19, 24, 25];
     assert_eq!(tokens.len(), expected.len());
-    for (i, (token, pos, _, _)) in tokens.iter().enumerate() {
+    for (i, (token, pos, _, _, _)) in tokens.iter().enumerate() {
         assert_eq!(token.as_bytes().unwrap(), expected[i]);
         assert_eq!(*pos, expected_pos[i]);
     }
@@ -1228,7 +1234,7 @@ fn while_not_starting_with_while_is_a_cmd() {
     assert!(
         !tokens
             .first()
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"while"))
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"while"))
     );
 }
 
@@ -1295,7 +1301,7 @@ fn until_not_starting_with_until_is_a_cmd() {
     assert!(
         !tokens
             .first()
-            .is_some_and(|(t, _, _, _)| t.eq_bytes(b"until"))
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"until"))
     );
 }
 
@@ -1888,7 +1894,10 @@ fn tokenize_caret_pipe_position() {
 #[test]
 fn tokenize_close_paren_position() {
     let tokens = token::tokenize(b"case x in a) echo one;; esac").unwrap();
-    let paren_token = tokens.iter().find(|(t, _, _, _)| t.eq_bytes(b")")).unwrap();
+    let paren_token = tokens
+        .iter()
+        .find(|(t, _, _, _, _)| t.eq_bytes(b")"))
+        .unwrap();
     assert_eq!(paren_token.0, c")".into());
     assert_eq!(paren_token.1, 11);
 }
@@ -2110,6 +2119,33 @@ fn tokenize_empty_adjacent_quotes() {
 }
 
 #[test]
+fn tokenize_mixed_quotes_mark_quoted_bytes() {
+    // `x"a b"c`: the quote boundaries are erased from the text but the mask
+    // keeps them — those bytes must survive IFS splitting intact.
+    let tokens = token::tokenize(b"x\"a b\"c").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"xa bc");
+    assert!(!tokens[0].3);
+    assert_eq!(tokens[0].4, vec![false, true, true, true, false]);
+}
+
+#[test]
+fn tokenize_fully_quoted_word_has_all_true_mask() {
+    let tokens = token::tokenize(b"\"a b\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert!(tokens[0].3);
+    assert_eq!(tokens[0].4, vec![true; 3]);
+}
+
+#[test]
+fn tokenize_unquoted_word_has_all_false_mask() {
+    let tokens = token::tokenize(b"abc").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert!(!tokens[0].3);
+    assert_eq!(tokens[0].4, vec![false; 3]);
+}
+
+#[test]
 fn parse_fully_quoted_dollar_at_preserves_flag() {
     // Regression: end-to-end test that "$@" through parse → CommandLine gets fq=true
     let ParsedLine::Cmd(cmd) = parse(b"printf \"%s\\n\" \"$@\"").unwrap() else {
@@ -2118,9 +2154,9 @@ fn parse_fully_quoted_dollar_at_preserves_flag() {
     assert_eq!(cmd.args.len(), 2);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%s\\n");
     assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
-    assert_eq!(cmd.args_fq.len(), 2);
-    assert!(cmd.args_fq[0]);
-    assert!(cmd.args_fq[1]);
+    assert_eq!(cmd.args_mask.len(), 2);
+    assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert!(cmd.args_mask[1].iter().all(|&q| q));
 }
 
 #[test]
@@ -2133,10 +2169,10 @@ fn parse_fully_quoted_dollar_at_middle_preserves_flag() {
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%s\\n");
     assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args[2].as_bytes().unwrap(), b"extra");
-    assert_eq!(cmd.args_fq.len(), 3);
-    assert!(cmd.args_fq[0]);
-    assert!(cmd.args_fq[1]);
-    assert!(!cmd.args_fq[2]);
+    assert_eq!(cmd.args_mask.len(), 3);
+    assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert!(cmd.args_mask[1].iter().all(|&q| q));
+    assert!(cmd.args_mask[2].iter().all(|&q| !q));
 }
 
 #[test]
@@ -2146,8 +2182,8 @@ fn parse_fully_quoted_dollar_star_preserves_flag() {
     };
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$*");
-    assert_eq!(cmd.args_fq.len(), 1);
-    assert!(cmd.args_fq[0]);
+    assert_eq!(cmd.args_mask.len(), 1);
+    assert!(cmd.args_mask[0].iter().all(|&q| q));
 }
 
 #[test]
@@ -2157,8 +2193,8 @@ fn parse_unquoted_dollar_at_has_false_flag() {
     };
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$@");
-    assert_eq!(cmd.args_fq.len(), 1);
-    assert!(!cmd.args_fq[0]);
+    assert_eq!(cmd.args_mask.len(), 1);
+    assert!(cmd.args_mask[0].iter().all(|&q| !q));
 }
 
 #[test]
@@ -2168,8 +2204,8 @@ fn parse_fully_quoted_literal_preserves_flag() {
     };
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"hello world");
-    assert_eq!(cmd.args_fq.len(), 1);
-    assert!(cmd.args_fq[0]);
+    assert_eq!(cmd.args_mask.len(), 1);
+    assert!(cmd.args_mask[0].iter().all(|&q| q));
 }
 
 #[test]
@@ -2178,10 +2214,10 @@ fn parse_mixed_quoted_args_preserves_flags() {
         panic!("expected Cmd")
     };
     assert_eq!(cmd.args.len(), 3);
-    assert_eq!(cmd.args_fq.len(), 3);
-    assert!(cmd.args_fq[0]);
-    assert!(cmd.args_fq[1]);
-    assert!(!cmd.args_fq[2]);
+    assert_eq!(cmd.args_mask.len(), 3);
+    assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert!(cmd.args_mask[1].iter().all(|&q| q));
+    assert!(cmd.args_mask[2].iter().all(|&q| !q));
 }
 
 #[test]
@@ -2241,7 +2277,10 @@ fn parse_capture_malformed_index_is_plain_name() {
 
 #[test]
 fn find_preceded_by_semi_start_zero_no_match() {
-    let tokens = [(c"echo".into(), 0, 4, false), (c"hi".into(), 5, 7, false)];
+    let tokens = [
+        (c"echo".into(), 0, 4, false, vec![]),
+        (c"hi".into(), 5, 7, false, vec![]),
+    ];
     assert_eq!(
         super::semi::find_preceded_by_semi(&tokens, 0, b"echo"),
         None
@@ -2251,10 +2290,10 @@ fn find_preceded_by_semi_start_zero_no_match() {
 #[test]
 fn find_preceded_by_semi_skips_to_start() {
     let tokens = [
-        (c";".into(), 0, 1, false),
-        (c"done".into(), 1, 5, false),
-        (c";".into(), 6, 7, false),
-        (c"done".into(), 7, 11, false),
+        (c";".into(), 0, 1, false, vec![]),
+        (c"done".into(), 1, 5, false, vec![]),
+        (c";".into(), 6, 7, false, vec![]),
+        (c"done".into(), 7, 11, false, vec![]),
     ];
     assert_eq!(
         super::semi::find_preceded_by_semi(&tokens, 2, b"done"),

@@ -13,6 +13,7 @@ pub(super) fn finish_command(
     command: ShortCStr,
     iter: &mut core::iter::Peekable<core::slice::Iter<'_, ShortCStr>>,
     fq_iter: &mut IntoIter<bool>,
+    mask_iter: &mut IntoIter<Vec<bool>>,
     set_at: Position,
 ) -> Result<CommandLine, Report<ParseError>> {
     let mut args: Vec<ShortCStr> = Vec::new();
@@ -20,9 +21,10 @@ pub(super) fn finish_command(
     let mut redirects: Vec<RedirectDef> = Vec::new();
     let mut pidvar: Option<ShortCStr> = None;
     let mut bg_force = false;
-    let mut args_fq = Vec::new();
+    let mut args_mask = Vec::new();
     while let Some(t) = iter.next() {
         let fq = fq_iter.next().unwrap_or(false);
+        let mask = mask_iter.next().unwrap_or_default();
         if t.eq_bytes(b"&") {
             bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
@@ -40,24 +42,26 @@ pub(super) fn finish_command(
                 Ok(Some(c)) => captures.push(c),
                 Ok(None) => {
                     args.push(t.clone());
-                    args_fq.push(fq);
+                    args_mask.push(mask);
                 }
                 Err(e) => return Err(e),
             }
-        } else if let Some(r) = crate::parse::classify::parse_here_string(t, fq, iter, fq_iter)? {
+        } else if let Some(r) =
+            crate::parse::classify::parse_here_string(t, fq, iter, fq_iter, mask_iter)?
+        {
             bg_redirect::insert_redirect(&mut redirects, r)?;
         } else if let Some(r) = crate::parse::classify::parse_redirect(t, fq)? {
             bg_redirect::insert_redirect(&mut redirects, r)?;
         } else {
             args.push(t.clone());
-            args_fq.push(fq);
+            args_mask.push(mask);
         }
     }
     Ok(CommandLine {
         builtin,
         command,
         args,
-        args_fq,
+        args_mask,
         captures,
         redirects,
         pidvar,
