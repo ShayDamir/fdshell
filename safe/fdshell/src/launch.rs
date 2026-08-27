@@ -23,6 +23,8 @@ pub fn launch(
     let resolved = crate::redirect::resolve_redirects(&cmdline.redirects, &opened, cell)
         .change_context(crate::error::launch::LaunchError::Redirect)?;
 
+    prehash(&cmd, cell);
+
     // Foreground commands always get a capture socket so the child can report
     // its last expanded word for `$_`; background commands only need one for
     // captures (bash does not update `$_` for background commands).
@@ -56,5 +58,38 @@ pub fn launch(
             capture_fd,
             child_pid,
         }),
+    }
+}
+
+/// Best-effort: resolve an external command name (hash table, then PATH) and
+/// store the result, so real runs populate the table like bash. A failure
+/// here is not an error — the child re-resolves and reports it.
+fn prehash(cmd: &Command, cell: &ForkCell<ShellState>) {
+    if cmd.builtin || cmd.name.contains(b'/') {
+        return;
+    }
+    let is_builtin = {
+        let Ok(state) = cell.borrow() else {
+            return;
+        };
+        child::dispatch::builtin_first(&cmd.name, &state)
+    };
+    if is_builtin {
+        return;
+    }
+    let path = {
+        let Ok(state) = cell.borrow() else {
+            return;
+        };
+        crate::exec::resolve_path_str(&cmd.name, &state.hash_table).ok()
+    };
+    let Some(path) = path else {
+        return;
+    };
+    let Ok(mut state) = cell.borrow_mut() else {
+        return;
+    };
+    if state.hash_table.get(&cmd.name) != Some(&path) {
+        state.hash_table.insert(cmd.name.clone(), path);
     }
 }

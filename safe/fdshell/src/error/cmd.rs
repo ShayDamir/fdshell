@@ -88,6 +88,8 @@ pub enum CmdError {
         flag: &'static str,
         value: sys::ShortCStr,
     },
+    /// hash: bad usage (hash [-r] [name [path]])
+    HashUsage,
 }
 
 impl core::error::Error for CmdError {}

@@ -43,6 +43,7 @@ pub struct ShellState {
     pub(crate) ifs: ShortCStr,
     pub(crate) options: u32,
     pub(crate) capture_limit: usize,
+    pub(crate) hash_table: HashMap<ShortCStr, ShortCStr>,
     pub(crate) aliases: HashMap<ShortCStr, ShortCStr>,
     pub(crate) functions: HashMap<ShortCStr, ShortCStr>,
 }
@@ -67,6 +68,7 @@ impl ShellState {
             ifs: c" \t\n".into(),
             options: crate::options::DEFAULTS,
             capture_limit: crate::cmd_subst::MAX_CAPTURED,
+            hash_table: HashMap::new(),
             aliases: HashMap::new(),
             functions: HashMap::new(),
         }

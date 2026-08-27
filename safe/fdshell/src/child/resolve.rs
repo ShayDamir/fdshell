@@ -18,7 +18,7 @@ pub(super) fn handle_resolve(
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
     let mut name_short = ShortCStr::new();
     name_short.push(*name_cstr);
-    let fd = crate::exec::resolve_path(&name_short)
+    let fd = crate::exec::resolve_path(&name_short, &state.hash_table)
         .change_context(builtins::error::BuiltinError::InvalidArgument("path"))?;
     sys::shellfd::send_fd(sock, &fd, c"resolve")
         .change_context(builtins::error::BuiltinError::SendFdFailed)?;

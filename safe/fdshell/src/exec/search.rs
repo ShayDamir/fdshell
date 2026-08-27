@@ -1,4 +1,5 @@
 use error_stack::{Report, ResultExt, bail};
+use hashbrown::HashMap;
 use sys::fcntl::O_PATH;
 use sys::{LocalFd, ShortCStr};
 
@@ -24,20 +25,28 @@ fn open_path_str(pathname: &ShortCStr) -> Result<LocalFd, Report<ChildProcessErr
         .change_context_lazy(|| ChildProcessError::NotFound(pathname.clone()))
 }
 
-pub fn resolve_path(bin: &ShortCStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    if bin.contains(b'/') {
-        open_path_str(bin)
-    } else {
-        open_path_str(&search_path_str(bin)?)
-    }
-}
-
-/// The path `resolve_path` would exec, for display (e.g. `type`).
-pub fn resolve_path_str(bin: &ShortCStr) -> Result<ShortCStr, Report<ChildProcessError>> {
+/// The path `bin` would exec, honoring the hash table: a bare name with a
+/// table entry opens the pinned path; a pin that no longer exists falls back
+/// to the PATH search (self-heal). Names containing `/` bypass the table.
+pub fn resolve_path_str(
+    bin: &ShortCStr,
+    table: &HashMap<ShortCStr, ShortCStr>,
+) -> Result<ShortCStr, Report<ChildProcessError>> {
     if bin.contains(b'/') {
         open_path_str(bin)?;
-        Ok(bin.clone())
-    } else {
-        search_path_str(bin)
+        return Ok(bin.clone());
     }
+    if let Some(pinned) = table.get(bin)
+        && sys::openat2::open(pinned.export(), O_PATH).is_ok()
+    {
+        return Ok(pinned.clone());
+    }
+    search_path_str(bin)
+}
+
+pub fn resolve_path(
+    bin: &ShortCStr,
+    table: &HashMap<ShortCStr, ShortCStr>,
+) -> Result<LocalFd, Report<ChildProcessError>> {
+    open_path_str(&resolve_path_str(bin, table)?)
 }

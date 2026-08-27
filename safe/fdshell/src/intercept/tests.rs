@@ -451,3 +451,48 @@ fn try_intercept_set_capture_limit_accepts_zero_and_leading_zeros() {
         assert_eq!(cell.borrow().unwrap().capture_limit, expected);
     }
 }
+
+#[test]
+fn try_intercept_hash_pin_and_clear() {
+    let cell = make_cell();
+    let args = ["mybin", "/bin/mybin"];
+    assert!(
+        try_intercept(
+            &text(&make_line("hash", &args)),
+            &make_cmdline(b"hash", &args),
+            &cell
+        )
+        .unwrap()
+        .is_some(),
+        "hash name path must be handled"
+    );
+    let name: ShortCStr = c"mybin".into();
+    let path: ShortCStr = c"/bin/mybin".into();
+    assert_eq!(cell.borrow().unwrap().hash_table.get(&name).unwrap(), &path);
+    let args = ["-r"];
+    assert!(
+        try_intercept(
+            &text(&make_line("hash", &args)),
+            &make_cmdline(b"hash", &args),
+            &cell
+        )
+        .unwrap()
+        .is_some()
+    );
+    assert!(cell.borrow().unwrap().hash_table.is_empty());
+}
+
+#[test]
+fn try_intercept_hash_extra_args_is_usage_error() {
+    let cell = make_cell();
+    let args = ["a", "b", "c"];
+    let report = try_intercept(
+        &text(&make_line("hash", &args)),
+        &make_cmdline(b"hash", &args),
+        &cell,
+    );
+    assert!(matches!(
+        report.unwrap_err().current_context(),
+        CmdError::HashUsage
+    ));
+}

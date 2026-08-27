@@ -12,7 +12,7 @@ pub(super) fn run_external(
     state: &ShellState,
 ) -> Result<i32, Report<ChildProcessError>> {
     let name_exported = cmd.name.export();
-    let fd = exec::resolve_path(&cmd.name)
+    let fd = exec::resolve_path(&cmd.name, &state.hash_table)
         .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
     let name_cstr = name_exported.as_ref();
     let mut full_argv: Vec<&CStr> = alloc::vec![name_cstr];

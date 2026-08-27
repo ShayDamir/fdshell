@@ -54,7 +54,7 @@ fn resolve_path_finds_absolute() {
     let abs = setup(&dir);
     let mut bin = ShortCStr::new();
     bin.push(abs.as_ref());
-    let fd = resolve_path(&bin).unwrap();
+    let fd = resolve_path(&bin, &HashMap::new()).unwrap();
     fd.verify().unwrap();
     teardown(&dir);
 }
@@ -65,7 +65,7 @@ fn resolve_path_finds_dot_slash() {
     setup(&dir);
     let old = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
-    let fd = resolve_path(&c"./mybin".into()).unwrap();
+    let fd = resolve_path(&c"./mybin".into(), &HashMap::new()).unwrap();
     fd.verify().unwrap();
     std::env::set_current_dir(&old).unwrap();
     teardown(&dir);
@@ -79,7 +79,7 @@ fn exec_fd_with_exports() {
     let abs = setup(&dir);
     let mut bin = ShortCStr::new();
     bin.push(abs.as_ref());
-    let fd = resolve_path(&bin).unwrap();
+    let fd = resolve_path(&bin, &HashMap::new()).unwrap();
 
     let mut exports_map = HashMap::new();
     exports_map.insert(
@@ -100,7 +100,7 @@ fn exec_fd_with_exports() {
 fn resolve_path_missing_absolute() {
     let dir = test_dir();
     setup(&dir);
-    let report = match resolve_path(&c"/nonexistent-xxxxxxxx/binary".into()) {
+    let report = match resolve_path(&c"/nonexistent-xxxxxxxx/binary".into(), &HashMap::new()) {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
@@ -117,7 +117,7 @@ fn resolve_path_missing_dot_slash() {
     std::fs::create_dir_all(&dir).unwrap();
     let old = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
-    let report = match resolve_path(&c"./nope-xxxxxxxx".into()) {
+    let report = match resolve_path(&c"./nope-xxxxxxxx".into(), &HashMap::new()) {
         Err(report) => report,
         Ok(_) => panic!("expected Err"),
     };
@@ -139,7 +139,7 @@ fn exec_with_paths() {
     exec_child(|| {
         let mut bin = ShortCStr::new();
         bin.push(abs.as_ref());
-        let fd = resolve_path(&bin).unwrap();
+        let fd = resolve_path(&bin, &HashMap::new()).unwrap();
         match exec_fd(
             &fd,
             &[&abs],
@@ -156,7 +156,7 @@ fn exec_with_paths() {
     let cd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
     exec_child(|| {
-        let fd = resolve_path(&c"./mybin".into()).unwrap();
+        let fd = resolve_path(&c"./mybin".into(), &HashMap::new()).unwrap();
         match exec_fd(
             &fd,
             &[c"mybin"],
@@ -190,7 +190,7 @@ fn exec_script_via_resolve_fd() {
     exec_child(|| {
         let mut script_bin = ShortCStr::new();
         script_bin.push(script_cs.as_ref());
-        let fd = resolve_path(&script_bin).unwrap();
+        let fd = resolve_path(&script_bin, &HashMap::new()).unwrap();
         match exec_fd(
             &fd,
             &[&script_cs],
@@ -204,5 +204,45 @@ fn exec_script_via_resolve_fd() {
         }
     });
 
+    teardown(&dir);
+}
+
+#[test]
+fn resolve_path_hash_pin_hit_without_path_entry() {
+    let dir = test_dir();
+    let abs = setup(&dir);
+    let mut name = ShortCStr::new();
+    name.push(c"mybin");
+    let mut path = ShortCStr::new();
+    path.push(abs.as_ref());
+    let mut table = HashMap::new();
+    table.insert(name.clone(), path);
+    // No `mybin` on PATH: resolution succeeds only through the pin.
+    let report = match resolve_path(&name, &HashMap::new()) {
+        Err(report) => report,
+        Ok(_) => panic!("without a table entry the bare name must not resolve"),
+    };
+    assert!(matches!(
+        report.current_context(),
+        ChildProcessError::NotFound(_)
+    ));
+    let fd = resolve_path(&name, &table).unwrap();
+    fd.verify().unwrap();
+    teardown(&dir);
+}
+
+#[test]
+fn resolve_path_hash_bypassed_for_paths() {
+    let dir = test_dir();
+    let abs = setup(&dir);
+    let mut name = ShortCStr::new();
+    name.push(abs.as_ref());
+    let mut table = HashMap::new();
+    let mut junk = ShortCStr::new();
+    junk.push(c"/nonexistent-hash-pin");
+    table.insert(name.clone(), junk);
+    // A name containing `/` bypasses the table: the pin must be ignored.
+    let fd = resolve_path(&name, &table).unwrap();
+    fd.verify().unwrap();
     teardown(&dir);
 }

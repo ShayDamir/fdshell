@@ -65,7 +65,7 @@ fn eof_is_ignored_when_ignoreeof_is_on() {
     {
         let n = child.stdout.as_mut().unwrap().read(&mut buf).unwrap();
         assert!(n > 0, "shell exited on EOF: {data:?}");
-        data.extend_from_slice(&buf[..n]);
+        data.extend_from_slice(buf.get(..n).unwrap());
     }
     assert!(
         data.windows(19).any(|w| w == b"use `exit' to leave"),

@@ -1,6 +1,7 @@
+mod external;
+
 use crate::child;
 use crate::error::child_process::ChildProcessError;
-use crate::exec;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
 use alloc::vec::Vec;
@@ -42,43 +43,6 @@ pub fn execute(
             Err(report) => crate::child::handle_builtin_error(builtin_name.clone(), report),
         }
     } else {
-        let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
-        let state = cell
-            .borrow()
-            .change_context(ChildProcessError::ExecFailed)?;
-        if child::dispatch::builtin_first(binary, &state) {
-            let rest = args.get(1..).unwrap_or(&[]);
-            let substituted = substitute_args(rest, args_mask, cell)
-                .change_context(ChildProcessError::ExecFailed)?;
-            let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
-            let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
-            crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
-            return match child::dispatch::dispatch_builtin(binary.clone(), &refs, rest, &state) {
-                Ok(code) => Ok(code),
-                Err(report) => crate::child::handle_builtin_error(binary.clone(), report),
-            };
-        }
-        let fd = exec::resolve_path(binary).change_context(ChildProcessError::ExecFailed)?;
-        let binary_exported = binary.export();
-        let binary_cstr = binary_exported.as_ref();
-        let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_mask, cell)
-            .change_context(ChildProcessError::ExecFailed)?;
-        let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
-        let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];
-        for s in &sealed {
-            argv.push(s.as_ref());
-        }
-        crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
-        match exec::exec_fd(
-            &fd,
-            &argv,
-            &state.environ,
-            &state.exports,
-            &state.env_filter,
-            None,
-        ) {
-            Ok(()) => Ok(0),
-            Err(report) => Err(report),
-        }
+        external::run(args, args_mask, cell)
     }
 }

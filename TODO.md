@@ -16,7 +16,7 @@
 
 ### P1 — Major functionality gaps (moderate effort)
 
-- [ ] `hash` — PATH lookup cache
+- [x] `hash` — PATH lookup cache (done: `ShellState.hash_table` name→path; `exec::resolve_path_str` consults it before PATH, stale pins self-heal via PATH; `hash [-r] [name [path]]` intercept in `intercept/hash_cmd.rs` pins/lists/clears; `launch::prehash` best-effort populates the table on real external runs; `type` shows cached paths)
 - [ ] `ulimit` — resource limit get/set
 
 ### P2 — Important for bash compatibility (hard)
@@ -49,7 +49,7 @@
 
 ## Refactoring
 
-- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `intercept/set_list.rs` (89), `repl.rs` (88), `comment.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `replacer.rs` (80)
+- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `intercept/set_list.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80)
 - [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
 - [ ] `ShortCStr` has no byte-search API — several call sites do `as_bytes().ok().and_then(|b| b.iter().position(…))` instead (STYLE.md §6.4): `intercept/alias_cmd/args.rs:14` (`position(|&c| c == b'=')`), `parse/redirect.rs:40` (`position(|&b| b == b'>' || b == b'<')`), `busybox.rs:17` (`rposition(|&c| c == b'/')`). Add `find_byte(byte: u8) -> Option<usize>` next to `contains` in `unsafe/sys/src/shortcstr/eq.rs` (plus `rfind_byte` / a byte-set variant if the other sites need them), cover with tests in `unsafe/sys/tests/`, and switch all call sites off `as_bytes()`
 
