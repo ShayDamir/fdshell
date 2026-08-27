@@ -5,7 +5,8 @@ use error_stack::{Report, ResultExt, bail};
 use sys::LocalFd;
 use sys::fork_cell::ForkCell;
 
-/// Maximum number of bytes a command substitution may capture.
+/// Default maximum number of bytes a command substitution may capture;
+/// configurable per shell with `set --stdout-capture-limit <bytes>`.
 ///
 /// Without a cap, an unbounded producer such as `$(yes)` grows the buffer
 /// until the process runs out of memory. Exceeding the cap aborts the
@@ -17,6 +18,12 @@ pub(crate) fn run_and_capture(
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<u8>, Report<CmdSubstError>> {
     crate::nest::deeper(cell, CmdSubstError::NestingTooDeep, || {
+        // The cap is read before the fork so the child's (forked) state can
+        // never change the parent's limit mid-capture.
+        let limit = cell
+            .borrow()
+            .change_context(CmdSubstError::Never)?
+            .capture_limit;
         let (r, w) = sys::pipe::pipe2(0).change_context(CmdSubstError::Pipe)?;
         match sys::fork_pidfd::fork_pidfd_cell(cell).change_context(CmdSubstError::Fork)? {
             (_, None) => {
@@ -35,7 +42,7 @@ pub(crate) fn run_and_capture(
             }
             (_, Some(pidfd)) => {
                 drop(w);
-                let out = drain(&r, MAX_CAPTURED);
+                let out = drain(&r, limit);
                 if out.is_err() {
                     // Abandon the pipe so an orphaned producer (e.g. `yes`)
                     // gets SIGPIPE on its next write, and kill the child so

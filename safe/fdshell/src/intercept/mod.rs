@@ -67,6 +67,7 @@ mod last_arg_frame;
 mod read;
 mod send_fd;
 mod set_cmd;
+mod set_limit;
 mod set_list;
 mod shift;
 mod shopt;

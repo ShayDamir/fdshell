@@ -82,6 +82,12 @@ pub enum CmdError {
     ArrayIndexOutOfRange { name: sys::ShortCStr, index: usize },
     /// redirections on a function call are not supported
     FunctionRedirectNotSupported,
+    /// {command} {flag}: '{value}' is not a byte count
+    CaptureLimitBad {
+        command: &'static str,
+        flag: &'static str,
+        value: sys::ShortCStr,
+    },
 }
 
 impl core::error::Error for CmdError {}

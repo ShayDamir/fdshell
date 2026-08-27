@@ -37,6 +37,11 @@ pub(crate) fn run_set(
         crate::xtrace::trace_cmd(b"set", cmdline, cell);
         return super::set_list::list_fds(cell).map(|_| true);
     }
+    if first.eq_bytes(b"--stdout-capture-limit") {
+        super::validation::validate_intercept(line, "set", cmdline)?;
+        crate::xtrace::trace_cmd(b"set", cmdline, cell);
+        return super::set_limit::run_set_capture_limit(cmdline, cell).map(|_| true);
+    }
     Ok(false)
 }
 

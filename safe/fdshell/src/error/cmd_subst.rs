@@ -11,6 +11,8 @@ pub(crate) enum CmdSubstError {
     NestingTooDeep,
     /// command substitution output exceeds the capture limit; produce less output or write to a file
     OutputTooLarge,
+    /// impossible error state (should never occur)
+    Never,
 }
 
 impl core::error::Error for CmdSubstError {}

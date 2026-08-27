@@ -400,3 +400,54 @@ fn redirect_pos_found_at_correct_position() {
         .pos;
     assert_eq!(pos2, 4, "> should be detected at position 4");
 }
+
+#[test]
+fn try_intercept_set_capture_limit_updates_state() {
+    let args = ["--stdout-capture-limit", "1234"];
+    let cmdline = make_cmdline(b"set", &args);
+    let line = make_line("set", &args);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some(),
+        "set --stdout-capture-limit must be handled"
+    );
+    assert_eq!(cell.borrow().unwrap().capture_limit, 1234);
+}
+
+#[test]
+fn try_intercept_set_capture_limit_rejects_bad_values() {
+    for value in ["", "abc", "12x", "-5", "99999999999999999999999999"] {
+        let args = ["--stdout-capture-limit", value];
+        let cmdline = make_cmdline(b"set", &args);
+        let line = make_line("set", &args);
+        let cell = make_cell();
+        assert!(
+            try_intercept(&text(&line), &cmdline, &cell).is_err(),
+            "{value:?} must be rejected"
+        );
+    }
+    let cell = make_cell();
+    assert_eq!(
+        cell.borrow().unwrap().capture_limit,
+        crate::cmd_subst::MAX_CAPTURED,
+        "the default must be the 64 MiB cap"
+    );
+}
+
+#[test]
+fn try_intercept_set_capture_limit_accepts_zero_and_leading_zeros() {
+    for (value, expected) in [("0", 0usize), ("007", 7usize)] {
+        let args = ["--stdout-capture-limit", value];
+        let cmdline = make_cmdline(b"set", &args);
+        let line = make_line("set", &args);
+        let cell = make_cell();
+        assert!(
+            try_intercept(&text(&line), &cmdline, &cell)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(cell.borrow().unwrap().capture_limit, expected);
+    }
+}

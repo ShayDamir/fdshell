@@ -64,6 +64,11 @@ impl ShellState {
         }
     }
 
+    /// Set the `$(…)` stdout capture cap in bytes.
+    pub fn set_capture_limit(&mut self, bytes: usize) {
+        self.capture_limit = bytes;
+    }
+
     /// Enter an `eval`/`source` frame, where inner commands must not update `_`.
     pub fn begin_eval(&mut self) {
         self.eval_depth += 1;
