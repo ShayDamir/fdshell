@@ -38,7 +38,7 @@
   ```
    Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
 
-- [ ] A shell keyword appearing as a *quoted* word inside a block body breaks parsing — `scan_block` (`comment.rs:48`) applies `depth_delta` to every word regardless of quote state, so a block-opening keyword (`for` / `while` / `case` / `if` …) inside a quoted string is counted as a nested block opening and the enclosing block is never seen as closed (`run_script` `ensure!(closed)` → parse error). Affects every block, not just `wait`:
+- [x] A shell keyword appearing as a *quoted* word inside a block body breaks parsing — `scan_block` (`comment.rs:48`) applies `depth_delta` to every word regardless of quote state, so a block-opening keyword (`for` / `while` / `case` / `if` …) inside a quoted string is counted as a nested block opening and the enclosing block is never seen as closed (`run_script` `ensure!(closed)` → parse error). Affects every block, not just `wait`:
   ```
   fdshell -c 'while true; do echo "for x"; done'   # parse error
   fdshell -c 'wait
@@ -49,7 +49,7 @@
 
 ## Refactoring
 
-- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `intercept/set_list.rs` (89), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `replacer.rs` (80)
+- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `intercept/set_list.rs` (89), `repl.rs` (88), `comment.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `replacer.rs` (80)
 - [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
 - [ ] `ShortCStr` has no byte-search API — several call sites do `as_bytes().ok().and_then(|b| b.iter().position(…))` instead (STYLE.md §6.4): `intercept/alias_cmd/args.rs:14` (`position(|&c| c == b'=')`), `parse/redirect.rs:40` (`position(|&b| b == b'>' || b == b'<')`), `busybox.rs:17` (`rposition(|&c| c == b'/')`). Add `find_byte(byte: u8) -> Option<usize>` next to `contains` in `unsafe/sys/src/shortcstr/eq.rs` (plus `rfind_byte` / a byte-set variant if the other sites need them), cover with tests in `unsafe/sys/tests/`, and switch all call sites off `as_bytes()`
 

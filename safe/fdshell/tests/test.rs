@@ -253,3 +253,29 @@ fn test_in_conditional_list() {
     assert_eq!(code, 0);
     assert_eq!(out, "ab");
 }
+
+#[test]
+fn quoted_keyword_in_block_body_does_not_break_parse() {
+    // TODO.md regression: a block-opening keyword inside a quoted word used
+    // to count as a nested block opener, leaving the block unclosed.
+    let (out, err, code) = run(r#"while false; do echo "a for b"; done; printf ok"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "ok");
+}
+
+#[test]
+fn quoted_keyword_in_wait_body_does_not_break_parse() {
+    let script = "wait\n  after 0) printf \"idle for a second\" ;;\ndone";
+    let (out, err, code) = run(script);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "idle for a second");
+}
+
+#[test]
+fn dollar_paren_keyword_in_block_body_does_not_break_parse() {
+    // TODO.md regression: a block-opening keyword inside `$( )` in the body
+    // used to count as a nested opener, leaving the block unclosed.
+    let (out, err, code) = run(r#"while false; do echo $(echo for); done; printf ok"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "ok");
+}

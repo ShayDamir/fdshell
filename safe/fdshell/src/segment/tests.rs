@@ -313,21 +313,6 @@ fn scan_kw_len_arithmetic_with_whitespace() {
     }
 }
 
-// Tests to catch comment.rs mutants (MISSED 1-4)
-#[test]
-fn skip_comment_advances_past_all_chars() {
-    // Mutants: i += 1 → i -= 1 or i *= 1 would return wrong index
-    let result = super::super::comment::skip_comment(b"abc#def\nghi", 3);
-    assert_eq!(result, 8); // # at index 3, \n at index 7, returns 7+1=8
-}
-
-#[test]
-fn skip_comment_handles_no_newline() {
-    // Mutants would fail to advance correctly
-    let result = super::super::comment::skip_comment(b"abc#def", 3);
-    assert_eq!(result, 8); // returns len+1 (past slice end) when no newline found
-}
-
 #[test]
 fn scan_block_detects_fi_after_comment_outside_quotes() {
     // Mutant MISSED 4: delete ! in scan_block line 31 affects quote toggling

@@ -1,6 +1,5 @@
-use crate::comment::skip_comment;
 use crate::keywords::function_def_name;
-use crate::scan::{Boundary, ScanState, boundary};
+use crate::scan::{Boundary, ScanState, boundary, skip_comment};
 
 /// If `part` opens a `name() { … }` block, return the exclusive end position
 /// and whether the block was closed. `in_quote` is the quote state at `start`.

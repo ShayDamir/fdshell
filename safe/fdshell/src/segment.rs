@@ -1,9 +1,8 @@
 mod block;
 
 use crate::brace::scan_function_block;
-use crate::comment::skip_comment;
 use crate::keywords::keyword_delta;
-use crate::scan::{Boundary, ScanState, boundary};
+use crate::scan::{Boundary, ScanState, boundary, skip_comment};
 use alloc::vec::Vec;
 
 /// A segment of a script line extracted by the scanner.
