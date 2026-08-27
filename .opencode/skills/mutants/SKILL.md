@@ -11,6 +11,7 @@ description: Kill all mutants in this repo with cargo mutants. Runs the full mut
 cargo mutants -j4 --test-tool nextest          # full run (up to 20 min)
 cargo mutants -j4 --test-tool nextest -F <dir>  # focus on a directory
 cargo mutants -j4 --test-tool nextest -f <file> # focus on a single file
+cargo mutants -j4 --test-tool nextest -f <file1> -f <file2> ... -f <fileN>  # run on multiple files
 ```
 
 `--iterate` mode re-runs only previously missed mutants — use it to speed up
