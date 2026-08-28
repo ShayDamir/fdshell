@@ -83,10 +83,10 @@
 
 ### P1 — Core syscall builtins
 
-- [ ] `timerfd` syscall wrapper + builtin (the `wait --any` + `--timeout` half is subsumed by the `wait` keyword's `after N` arm)
-- [ ] `signalfd` builtin — traps as another fd source
-- [ ] `eventfd` builtin — counters between background tasks
-- [ ] `timeout N` builtin — run a command with a wall-clock limit; after N seconds signal the child (SIGTERM, then SIGKILL) and fail the command; pairs with the `timerfd` item above
+- [x] `timerfd` syscall wrapper + builtin (`unsafe/sys/src/timerfd.rs`; `safe/builtins/src/timerfd/` CLI `timerfd <seconds> [nanos] [--periodic] [--flags F]`)
+- [x] `signalfd` builtin — traps as another fd source (in-shell intercept `safe/fdshell/src/intercept/signalfd_cmd.rs`; `unsafe/sys/src/signalfd.rs` + `kill.rs`)
+- [x] `eventfd` builtin — counters between background tasks (`unsafe/sys/src/eventfd.rs`; `safe/builtins/src/eventfd/` CLI `eventfd [init] [--flags F]`)
+- [x] `timeout N` builtin — run a command with a wall-clock limit; after N seconds signal the child (SIGTERM, then SIGKILL) and fail the command (in-shell intercept `safe/fdshell/src/intercept/timeout_cmd.rs`, returns 124; pairs with the `timerfd` item above)
 - [ ] Landlock syscall wrappers + builtin (`landlock --allow-rw %src --restrict`)
 - [ ] `pidfd_send_signal` builtin — kill background jobs by pidfd var
 - [ ] fs-verity ioctls (verify binary before execveat)
