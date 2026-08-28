@@ -19,6 +19,7 @@ pub(crate) fn try_intercept(
         crate::xtrace::trace_cmd(cmd, cmdline, cell);
     }
     let result = match cmd {
+        // Add new commands here AND to `INTERCEPTED_COMMANDS` (commands.rs).
         b"alias" => alias_cmd::run_alias(line, cmdline, text, cell).map(handled),
         b"unalias" => alias_cmd::run_unalias(line, cmdline, text, cell).map(handled),
         b"cd" => cd::run_cd(line, cmdline, text, cell).map(handled),
@@ -61,6 +62,7 @@ mod tests;
 mod alias_cmd;
 mod become_cmd;
 mod cd;
+pub(crate) mod commands;
 mod envfilter;
 mod envfilter_display;
 mod eval_cmd;

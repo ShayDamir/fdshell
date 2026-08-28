@@ -18,7 +18,7 @@ use super::type_cmd;
 type Handler =
     fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32, Report<BuiltinError>>;
 
-const DISPATCH: &[(&[u8], Handler)] = &[
+pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"true", simple::handle_true),
     (b"false", simple::handle_false),
     (b"help", simple::handle_help),

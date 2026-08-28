@@ -1,41 +1,9 @@
 use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
 
-const SHELL_CMDS: &[(&[u8], &[u8])] = &[
-    (b"become", b"Replace shell with command"),
-    (b"cd", b"Change directory"),
-    (b"exec", b"Replace shell with command (alias for become)"),
-    (b"envfilter", b"Filter env vars for child processes"),
-    (b"exit", b"Exit shell"),
-    (b"export", b"Set or list exports"),
-    (b"export_fd", b"Export fd to variable"),
-    (b"shift", b"Shift positional parameters"),
-    (b"umask", b"Set or show file mode mask"),
-    (b"send_fd", b"Send an fd to the capture socket"),
-    (b"unset", b"Remove variable"),
-    (b"waitpid", b"Wait for a background task"),
-];
+use self::commands::{BUILTINS, SHELL_CMDS};
 
-const BUILTINS: &[(&[u8], &[u8])] = &[
-    (b"echo", b"Print arguments"),
-    (b"explain", b"Show provenance of a variable"),
-    (b"exec_at", b"Execute with path lookup"),
-    (b"exec_fd", b"Execute with fd lookup"),
-    (b"false", b"Exit with failure status"),
-    (b"fchmod", b"Change file mode"),
-    (b"fdexplain", b"Show provenance of an fd variable"),
-    (b"help", b"List available commands"),
-    (b"mkdirat", b"Create directory"),
-    (b"openat2", b"Open file"),
-    (b"pipe", b"Create pipe"),
-    (b"printf", b"Format and print arguments"),
-    (b"pwd", b"Print working directory"),
-    (b"renameat2", b"Rename/move file"),
-    (b"resolve", b"Resolve fd variables"),
-    (b"test", b"Test expression (also '[')"),
-    (b"true", b"Exit with success status"),
-    (b"type", b"Show how a command name resolves"),
-];
+mod commands;
 
 pub(crate) fn print_help() -> Result<i32, Report<BuiltinError>> {
     sys::OUT
@@ -66,3 +34,6 @@ fn print_list(entries: &[(&[u8], &[u8])]) -> Result<(), Report<BuiltinError>> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
