@@ -100,6 +100,14 @@ pub enum CmdError {
     UlimitGet,
     /// ulimit: failed to set the limit
     UlimitSet,
+    /// signalfd: '{value}' is not a signal (name or number)
+    SignalfdBadSignal { value: sys::ShortCStr },
+    /// signalfd: missing %var argument (usage: signalfd %var <sig1> [sig2 ...])
+    SignalfdNoVar,
+    /// signalfd: '{value}' is not a valid flag
+    SignalfdBadFlag { value: sys::ShortCStr },
+    /// signalfd: failed to create the signalfd
+    SignalfdSyscall,
 }
 
 impl core::error::Error for CmdError {}
