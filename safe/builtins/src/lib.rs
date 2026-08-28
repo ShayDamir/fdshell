@@ -6,6 +6,7 @@ extern crate alloc;
 
 pub mod argparse;
 pub mod error;
+pub mod eventfd;
 pub mod execat;
 pub mod execfd;
 pub mod fchmod;

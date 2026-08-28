@@ -69,6 +69,20 @@ pub(super) fn handle_timerfd(
     builtins::timerfd::timerfd_exec(&cfg, sock).map(|()| 0)
 }
 
+pub(super) fn handle_eventfd(
+    _: ShortCStr,
+    refs: &[&CStr],
+    _: &[ShortCStr],
+    state: &ShellState,
+) -> Result<i32, Report<builtins::error::BuiltinError>> {
+    let sock = state
+        .shell_sock
+        .as_ref()
+        .ok_or(builtins::error::BuiltinError::SendFdFailed)?;
+    let cfg = builtins::eventfd::parse::eventfd_parse(refs)?;
+    builtins::eventfd::eventfd_exec(&cfg, sock).map(|()| 0)
+}
+
 pub(super) fn handle_renameat2(
     _: ShortCStr,
     refs: &[&CStr],

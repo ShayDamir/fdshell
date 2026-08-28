@@ -61,6 +61,7 @@ pub mod cmdline;
 pub mod dup;
 pub mod env;
 pub mod errno;
+pub mod eventfd;
 pub mod execveat;
 mod exit;
 pub mod exportedfd;
