@@ -31,6 +31,7 @@ const DISPATCH: &[(&[u8], Handler)] = &[
     (b"openat2", delegated::handle_openat2),
     (b"printf", printf::handle_printf),
     (b"renameat2", delegated::handle_renameat2),
+    (b"timerfd", delegated::handle_timerfd),
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),
     (b"resolve", resolve::handle_resolve),
