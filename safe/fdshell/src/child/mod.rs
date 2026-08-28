@@ -5,6 +5,7 @@ pub(crate) mod exec_fd;
 mod explain;
 pub(crate) mod external;
 mod fdexplain;
+mod fdops;
 pub(crate) mod fdpass;
 mod help;
 mod printf;

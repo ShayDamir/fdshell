@@ -19,3 +19,12 @@ fn handle_builtin_error_unknown_is_err() {
     let report = Report::new(BuiltinError::Unknown);
     assert!(handle_builtin_error(ShortCStr::from(c"nope"), report).is_err());
 }
+
+#[test]
+fn handle_builtin_error_fd_var_not_found_returns_one() {
+    let report = Report::new(BuiltinError::FdVarNotFound);
+    assert!(matches!(
+        handle_builtin_error(ShortCStr::from(c"lseek"), report),
+        Ok(1)
+    ));
+}

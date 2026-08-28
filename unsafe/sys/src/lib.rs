@@ -70,6 +70,8 @@ pub mod fchmod;
 pub mod fcntl;
 pub mod fork_cell;
 pub mod fork_pidfd;
+pub mod fsync;
+pub mod ftruncate;
 pub mod importedfd;
 pub mod importedfd_error;
 pub mod importedfd_try;

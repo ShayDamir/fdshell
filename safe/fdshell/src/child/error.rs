@@ -11,7 +11,9 @@ pub(crate) fn handle_builtin_error(
     match *report.current_context() {
         BuiltinError::Unknown => bail!(ChildProcessError::NotABuiltin(name)),
         BuiltinError::Help => Ok(0),
-        BuiltinError::InvalidArgument(_) | BuiltinError::MissingArgument(_) => {
+        BuiltinError::InvalidArgument(_)
+        | BuiltinError::MissingArgument(_)
+        | BuiltinError::FdVarNotFound => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }
