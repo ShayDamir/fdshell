@@ -74,3 +74,10 @@
 7.2 Every unsafe block needs // SAFETY: comment, stating why the unsafe block is safe to use.
 7.3 Every unsafe function needs `# Safety` rustdoc section that explains which invariants must be upheld by the caller.
 7.4 Owned types with `unsafe` constructors must provide  `verify(&self)` methods that can check the invariants during runtime.
+
+## 8 Commits
+
+8.1 One line only — no body, no trailers. The rationale for a change lives in the subject.
+8.2 Capitalized present-imperative verb, no trailing period.
+8.3 Use the established shapes from `git log`, e.g. `Add <name> builtin: <semantics>`, `Catch all mutants in <target>`, `Mark <item> done in TODO`, `Fix`/`Track`/`Use`/`Preserve` `<x> so <why>`, `Refactor`/`Extract`/`Split` `<x> into <y>`, `Document <x> in README`.
+8.4 One logical change per commit; join the few clauses of one topic with `;`. Keep the `: <why>` detail — with no body it is the whole rationale.
