@@ -20,7 +20,7 @@ fn kill_delivers_signal_to_child() {
             sys::rw::write_all(&wr, b"r").unwrap();
             let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
             let n = sys::poll::poll(&mut pfd, 5000).unwrap();
-            let got = n > 0 && pfd.get(0).unwrap().revents & sys::poll::POLLIN != 0;
+            let got = n > 0 && pfd.first().unwrap().revents & sys::poll::POLLIN != 0;
             // Exit 42 only if the signal actually arrived; a stub `kill` that
             // never sends would leave the poll empty and the child exits 0.
             sys::exit(if got { 42 } else { 0 });

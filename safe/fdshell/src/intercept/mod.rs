@@ -38,6 +38,7 @@ pub(crate) fn try_intercept(
         b"read" => read::run_read(line, cmdline, text, cell).map(handled),
         b"ulimit" => ulimit_cmd::run_ulimit(line, cmdline, cell).map(handled),
         b"signalfd" => signalfd_cmd::run_signalfd(line, cmdline, cell).map(handled),
+        b"timeout" => timeout_cmd::run_timeout(line, cmdline, cell).map(handled),
         b"send_fd" => send_fd::run_send_fd(line, cmdline, cell).map(handled),
         _ => return Ok(None),
     };
@@ -77,6 +78,7 @@ mod shift;
 mod shopt;
 mod signalfd_cmd;
 mod source;
+mod timeout_cmd;
 mod ulimit_cmd;
 mod validation;
 mod waitpid;

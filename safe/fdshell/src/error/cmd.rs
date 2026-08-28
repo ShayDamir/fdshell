@@ -108,6 +108,22 @@ pub enum CmdError {
     SignalfdBadFlag { value: sys::ShortCStr },
     /// signalfd: failed to create the signalfd
     SignalfdSyscall,
+    /// timeout: '{value}' is not a seconds value
+    TimeoutBadSeconds { value: sys::ShortCStr },
+    /// timeout: missing seconds argument (usage: timeout <seconds> <cmd> [args ...])
+    TimeoutMissingSeconds,
+    /// timeout: missing command argument (usage: timeout <seconds> <cmd> [args ...])
+    TimeoutMissingCommand,
+    /// timeout: failed to launch the command
+    TimeoutLaunch,
+    /// timeout: failed to create the deadline timer
+    TimeoutTimer,
+    /// timeout: failed to poll the command or the deadline
+    TimeoutPoll,
+    /// timeout: failed to signal the command
+    TimeoutSignal,
+    /// timeout: failed to wait for the command
+    TimeoutWait,
 }
 
 impl core::error::Error for CmdError {}

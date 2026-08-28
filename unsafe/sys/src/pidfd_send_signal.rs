@@ -1,6 +1,7 @@
 use crate::LocalFd;
 
 pub const SIGKILL: i32 = libc::SIGKILL;
+pub const SIGTERM: i32 = libc::SIGTERM;
 
 /// Send signal `sig` to the process referenced by `pidfd`.
 ///

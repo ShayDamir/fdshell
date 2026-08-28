@@ -171,7 +171,7 @@ fn test_timerfd_exec() {
     let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
     let n = sys::poll::poll(&mut pfd, 2000).unwrap();
     assert_eq!(n, 1);
-    let revents = pfd.get(0).unwrap().revents;
+    let revents = pfd.first().unwrap().revents;
     assert_ne!(revents & sys::poll::POLLIN, 0);
 
     drop(fd);
