@@ -90,6 +90,16 @@ pub enum CmdError {
     },
     /// hash: bad usage (hash [-r] [name [path]])
     HashUsage,
+    /// ulimit: invalid option -{flag}
+    UlimitInvalidOption { flag: char },
+    /// ulimit: '{value}' is not a limit value
+    UlimitBadValue { value: sys::ShortCStr },
+    /// ulimit: at most one resource option
+    UlimitUsage,
+    /// ulimit: failed to read the limit
+    UlimitGet,
+    /// ulimit: failed to set the limit
+    UlimitSet,
 }
 
 impl core::error::Error for CmdError {}

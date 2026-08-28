@@ -86,6 +86,7 @@ pub mod pipe;
 pub mod poll;
 pub mod recv_fd_error;
 pub mod renameat2;
+pub mod rlimit;
 pub mod rw;
 pub mod shellfd;
 pub mod shortcstr;
