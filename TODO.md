@@ -49,7 +49,7 @@
 
 ## Refactoring
 
-- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `child/dispatch.rs` (84), `intercept/set_list.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80)
+- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `child/dispatch.rs` (84), `intercept/set_list.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80), `child/test/filetest.rs` (84), `sys/lib.rs` (88)
 - [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
 - [ ] `ShortCStr` has no byte-search API — several call sites do `as_bytes().ok().and_then(|b| b.iter().position(…))` instead (STYLE.md §6.4): `intercept/alias_cmd/args.rs:14` (`position(|&c| c == b'=')`), `parse/redirect.rs:40` (`position(|&b| b == b'>' || b == b'<')`), `busybox.rs:17` (`rposition(|&c| c == b'/')`). Add `find_byte(byte: u8) -> Option<usize>` next to `contains` in `unsafe/sys/src/shortcstr/eq.rs` (plus `rfind_byte` / a byte-set variant if the other sites need them), cover with tests in `unsafe/sys/tests/`, and switch all call sites off `as_bytes()`
 
@@ -99,12 +99,8 @@
 - [ ] `statx` builtin — metadata by dirfd + relative path, superseding the `stat` / `fstat` wrappers; `AT_SYMLINK_NOFOLLOW` for TOCTOU-safe symlink checks, re-stat the same open handle after open
 - [ ] `readlinkat` builtin — resolve symlink targets by dirfd without escaping the resolution root (pairs with `statx` for symlink-safe open)
 - [ ] `openat2 --path` (O_PATH) — hold a handle to a file without open permission; combine with `fstat` / `fchdir` / `faccessat2` for inspect-then-act on files the user may not be able to read
-- [ ] `test`: every bash operator that takes a path also takes a `%fd` — fstat the fd var instead of stat'ing a path; the `%var` lookup exists for `-e -f -d` already (`child/test/mod.rs:57-61`), extend to the rest:
-  - kinds: `-f -d -b -c -p -S` (st_mode); `-t` is fd-native in bash (`test -t 1`) — accept a fd var; `-L` only meaningful for O_PATH fds opened on a symlink
-  - permissions: `-r -w -x -g -k` (mode bits vs uid/gid, or faccessat via `/proc/self/fd/N`)
-  - size: `-s` (exists and size > 0)
-  - binary: `%fd1 -nt %fd2` / `-ot` (mtime); `%fd1 -fdeq %fd2` / `-fdne` — same `(st_dev, st_ino)`, the fd version of bash's `-ef` (ino alone is ambiguous across filesystems; both pipe ends share one inode, so this also answers "same pipe?"); use case: TOCTOU guard — reopen a path, verify it still resolves to the same inode as a previously held fd var
-  - fdshell extras beyond bash: `-fdsize +/-N` (size compare); `openat2 --same-as %fd` (verify inode at open time instead of a separate test step)
+- [x] `test`: every bash operator that takes a path also takes a `%fd` — fstat the fd var instead of stat'ing a path (done: `%var` lookup in `child/test/` for all unary file operators — kinds `-f -d -b -c -p -S -L`, `-s` size, mode bits `-g -k`, `-t` tty, permissions `-r -w -x` via `access(2)` on `/proc/self/fd/N` — plus binary `-nt -ot -ef -fdeq -fdne` via `stat_operand`; new `lstat` for `-L`, `isatty` + `openpty` wrappers in sys; see `child/test/filetest.rs` + `perm.rs` + `stat.rs`, `unsafe/sys/tests/{tty,access,pipe}.rs`)
+- [ ] `test` fdshell extras beyond bash: `-fdsize +/-N` (size compare); `openat2 --same-as %fd` (verify inode at open time instead of a separate test step)
 - [ ] `fallocate` syscall wrapper + builtin — preallocate space on a file fd var
 - [ ] `mkfifoat` syscall wrapper + builtin — create a fifo inside a dirfd var; underpins coprocess / message-passing scripts without temp files
 

@@ -2,26 +2,36 @@ use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
+use sys::{LocalFd, ShortCStr};
 
-/// Stat the operand: a `%var` original argument is resolved through the fd
-/// table; anything else is a path. `None` means unset or nonexistent.
+/// Stat an operand. A `%var` original is an fd var (fstat it); anything else
+/// is a path. `follow_symlink` picks `stat` (follow) vs `lstat` for paths.
+/// `None` means the var is unset or the path does not exist.
 pub(super) fn stat_operand(
     arg: &CStr,
     orig: Option<&ShortCStr>,
     state: &ShellState,
+    follow_symlink: bool,
 ) -> Result<Option<sys::stat::FileStat>, Report<BuiltinError>> {
-    if let Some(var) = orig.and_then(|o| o.strip_prefix(b"%")) {
-        return match state.fds.get(&var) {
-            Some(v) => Ok(Some(
-                sys::stat::fstat(&v.fd).change_context(BuiltinError::Syscall)?,
-            )),
-            None => Ok(None),
-        };
+    if let Some(fd) = fd_var(orig, state) {
+        return Ok(Some(
+            sys::stat::fstat(fd).change_context(BuiltinError::Syscall)?,
+        ));
     }
-    // A stat failure (e.g. ENOENT) is false, matching bash.
-    match sys::stat::stat(arg) {
+    let res = if follow_symlink {
+        sys::stat::stat(arg)
+    } else {
+        sys::stat::lstat(arg)
+    };
+    match res {
         Ok(st) => Ok(Some(st)),
         Err(_) => Ok(None),
     }
+}
+
+/// The `LocalFd` backing a `%name` operand, if it names a set fd variable.
+pub(super) fn fd_var<'a>(orig: Option<&ShortCStr>, state: &'a ShellState) -> Option<&'a LocalFd> {
+    orig.and_then(|o| o.strip_prefix(b"%"))
+        .and_then(|name| state.fds.get(&name))
+        .map(|var| &var.fd)
 }

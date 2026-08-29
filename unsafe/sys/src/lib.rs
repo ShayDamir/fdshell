@@ -55,6 +55,7 @@ pub static OUT: ImportedFd = std_fd(1);
 /// Standard error (fd 2).
 pub static ERR: ImportedFd = std_fd(2);
 
+pub mod access;
 pub mod atfd;
 pub mod close;
 pub mod cmdline;
@@ -88,6 +89,7 @@ pub mod pid;
 pub mod pidfd_send_signal;
 pub mod pipe;
 pub mod poll;
+pub mod pty;
 pub mod recv_fd_error;
 pub mod renameat2;
 pub mod rlimit;
@@ -101,6 +103,7 @@ pub mod stat;
 pub mod syscall_error;
 pub mod syscall_error_from;
 pub mod timerfd;
+pub mod tty;
 pub mod umask;
 pub mod unlinkat;
 pub mod wait_pidfd;

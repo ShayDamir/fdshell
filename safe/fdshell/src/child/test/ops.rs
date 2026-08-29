@@ -1,13 +1,39 @@
-//! Expression operators of `test`.
+//! String/integer operators of `test` and the operator predicates. File-system
+//! operators live in `filetest.rs`.
 
-use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
+/// Every unary operator: file-system kinds, size, mode bits, tty, permissions,
+/// and the string tests.
 pub(super) fn is_unary(op: &[u8]) -> bool {
-    matches!(op, b"-e" | b"-f" | b"-d" | b"-z" | b"-n")
+    matches!(
+        op,
+        b"-e"
+            | b"-f"
+            | b"-d"
+            | b"-b"
+            | b"-c"
+            | b"-p"
+            | b"-S"
+            | b"-L"
+            | b"-s"
+            | b"-r"
+            | b"-w"
+            | b"-x"
+            | b"-g"
+            | b"-k"
+            | b"-t"
+            | b"-z"
+            | b"-n"
+    )
+}
+
+/// Two-operand file comparisons.
+pub(super) fn is_file_binary(op: &[u8]) -> bool {
+    matches!(op, b"-nt" | b"-ot" | b"-ef" | b"-fdeq" | b"-fdne")
 }
 
 /// String tests `-z` (empty) and `-n` (non-empty) on the substituted value.
@@ -18,25 +44,6 @@ pub(super) fn string_test(op: &[u8], arg: &CStr) -> Result<i32, Report<BuiltinEr
         b"-n" => !empty,
         // `is_unary` restricts `op`; `-z`/`-n` are the only string tests.
         _ => bail!(BuiltinError::Never),
-    };
-    Ok(usize::from(!ok) as i32)
-}
-
-pub(super) fn file_test(
-    op: &[u8],
-    arg: &CStr,
-    orig: Option<&ShortCStr>,
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    let ok = match super::stat::stat_operand(arg, orig, state)? {
-        Some(st) => match op {
-            b"-e" => true,
-            b"-d" => st.mode & sys::stat::S_IFMT == sys::stat::S_IFDIR,
-            b"-f" => st.mode & sys::stat::S_IFMT == sys::stat::S_IFREG,
-            // `is_unary` restricts `op` to -e/-f/-d.
-            _ => bail!(BuiltinError::Never),
-        },
-        None => false,
     };
     Ok(usize::from(!ok) as i32)
 }

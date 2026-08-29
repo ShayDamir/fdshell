@@ -1,8 +1,10 @@
 //! `test EXPR` / `[ EXPR ]` — bash-compatible expression tests.
 //!
-//! A single string is true when non-empty. File tests `-e -f -d` take a path
-//! or a `%var` fd variable. String tests `= !=`. Integer tests
-//! `-eq -ne -lt -le -gt -ge`. Malformed expressions exit 2.
+//! A single string is true when non-empty. File tests take a path or a `%var`
+//! fd variable: kinds, size, mode bits, tty, permissions (`-e -f -d -b -c -p
+//! -S -L -s -g -k -t -r -w -x`) and binary comparisons (`-nt -ot -ef -fdeq
+//! -fdne`). String tests `= !=` and `-z -n`. Integer tests `-eq -ne -lt -le
+//! -gt -ge`. Malformed expressions exit 2.
 
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
@@ -10,7 +12,8 @@ use core::ffi::CStr;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
-use ops::is_unary;
+use filetest::{file_binary_test, file_test};
+use ops::{is_file_binary, is_unary, string_or_int_test, string_test};
 
 pub(super) fn handle_test(
     name: ShortCStr,
@@ -52,18 +55,27 @@ pub(super) fn eval(
                 bail!(BuiltinError::TestUsage);
             }
             if op == b"-z" || op == b"-n" {
-                return ops::string_test(op, arg);
+                return string_test(op, arg);
             }
             // `arg` is `expr[1]`; its original token is `orig[1]` (the two
             // slices are parallel). A `%var` original means fd-table lookup.
-            ops::file_test(op, arg, orig.get(1), state)
+            file_test(op, arg, orig.get(1), state)
         }
-        (lhs, [op, rhs]) => ops::string_or_int_test(lhs, op, rhs),
+        (lhs, [op, rhs]) => {
+            let opb = op.to_bytes();
+            if is_file_binary(opb) {
+                file_binary_test(lhs, opb, orig.first(), rhs, orig.get(2), state)
+            } else {
+                string_or_int_test(lhs, op, rhs)
+            }
+        }
         _ => bail!(BuiltinError::TestUsage),
     }
 }
 
+mod filetest;
 mod ops;
+mod perm;
 mod stat;
 
 #[cfg(test)]

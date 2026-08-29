@@ -112,6 +112,12 @@ The child wrote the `$_` word into a memfd (offset left at EOF) and sent the fd 
 ## Test tty-gated behavior from safe-crate integration tests via `script`
 `safe/fdshell` has no `libc` dev-dep (safe crates forbid unsafe), so a pty can't be opened in its tests. To exercise code gated on stdin being a terminal, spawn the binary under util-linux `script -qec <bin> /dev/null` with piped stdin — `script` attaches a pty and forwards the pipe into it, making `isatty(0)` true. util-linux is already a test-environment requirement (the nextest wrapper's `prlimit`), so this costs nothing. The REPL's tty-default `ignoreeof` (`|=`→`&=` mutant) was unkillable by any piped-stdin test — only the `script`-wrapped test reaches that branch.
 
+## `cargo mutants` runs only the mutated package's own tests unless `--test-workspace true`
+By default cargo-mutants runs only the test targets of the package being mutated. This repo's `unsafe/sys` wrappers are exercised mostly through `safe/fdshell` / `safe/builtins` tests, so a mutation in a sys function no `unsafe/sys/tests/` test covers is reported MISSED even when an fdshell test would kill it — and the fdshell test binary is not rebuilt for a sys mutation (symptom: the sys mutant's line shows `0s test` while an fdshell-only mutant shows `~2s test`). Two fixes: pass `--test-workspace true` (slower — every mutant runs the whole ~1800-test suite), or give each sys wrapper its own integration test in `unsafe/sys/tests/` (preferred — keeps per-crate runs fast and tests the wrapper at its own layer). The latter is the convention; e.g. `unsafe/sys/tests/{access,tty,pipe}.rs` cover the `test` builtin's sys side. When a tty is an *fd var* rather than stdin, `sys::pty::openpty()` (returns CLOEXEC `LocalFd`s) is cleaner than the `script` wrapper above: register the slave as an fd var and drive it through the normal `%var` path.
+
+## `cargo clippy` (no `--all-targets`) skips the lib test target; CI lints it
+Plain `cargo clippy -- -D warnings` does not lint `#[cfg(test)]` code, so a `suspicious_open_options` / `needless_borrows_for_generic_args` in a `tests.rs` passes locally but fails `nix flake check --build-all` (which runs `cargo clippy --all-targets`). Lint test files like source: run `cargo clippy --all-targets -- -D warnings`. `open`/`openat2` take `P: AsRef<CStr>`, so pass `cstr(&p)` by value — `&cstr(&p)` trips `needless_borrows_for_generic_args`.
+
 <!-- Trimmed — covered by STYLE.md §2-7:
 - "or" in Display → variants too coarse (§4.7)
 - Never add #[allow(clippy::...)] in production (§4.9, §7.1)
