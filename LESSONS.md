@@ -130,3 +130,6 @@ Plain `cargo clippy -- -D warnings` does not lint `#[cfg(test)]` code, so a `sus
 - Do not use unreachable!() (§4.10)
 - Use ensure!() / bail!() (§4.4, §4.5)
 -->
+
+## Redirect source fds must be allocated above the command's highest target
+`resolve_path`/`resolve_dup` cloned sources with `F_DUPFD_CLOEXEC(0)` (lowest free fd), which can land exactly on a redirect target. The `dup2(local, target)` then no-ops and the local's `Drop` closes the target fd — silent truncation (data to fd N is lost, targets closed, multi-redirect interleave clobbers the pre-opened `open_redirect_files` temp). Fix: compute `min_fd = max(export_to)` over the whole redirect list + 1, and allocate/clone open fds (`open.rs` re-home, `resolve.rs` path/dup/var arms) strictly above it. Empirical note: the same hazard in `pipeline/child.rs` pipe clones does NOT reproduce — children inherit the low pipe-fd numbers, so a clone never lands on a file target.

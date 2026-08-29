@@ -11,6 +11,13 @@ pub struct RedirectDef {
 }
 
 impl RedirectDef {
+    /// The highest fd this command redirects to. Redirect sources must be
+    /// cloned/duplicated above it, otherwise a source landing on a target fd
+    /// turns the `dup2` into a no-op whose source drop then closes the target.
+    pub fn max_target(redirects: &[RedirectDef]) -> i32 {
+        redirects.iter().map(|r| r.export_to).max().unwrap_or(0)
+    }
+
     pub fn var(export_to: i32, name: impl Into<ShortCStr>) -> Self {
         RedirectDef {
             export_to,

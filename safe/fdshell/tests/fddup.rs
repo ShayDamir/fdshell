@@ -49,6 +49,45 @@ fn close_redirect_closes_fd_in_shell() {
     assert!(err.contains("fd 3 is not open"), "stderr={err:?}");
 }
 
+/// A dup onto the first free fd (here 4) must stay open for later use. A
+/// source dup landing on the target makes `dup2` a no-op whose drop closes
+/// the redirected fd.
+#[test]
+fn exec_dup_onto_first_free_fd_stays_open() {
+    let (out, err, code) = run("exec 4>&1; echo via-4 >&4; exec 4>&-; echo done");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "via-4\ndone\n", "stdout={out:?}");
+}
+
+/// A path redirect whose target equals the first free fd must not end up
+/// closed; data written through the fd must reach the file.
+#[test]
+fn exec_path_redirect_onto_first_free_fd_survives() {
+    let path = temp_path("first_free");
+    let (out, err, code) = run(&format!(
+        "exec 5>{path}; echo via-5 >&5; exec 5>&-; cat {path}"
+    ));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "via-5\n", "stdout={out:?}");
+}
+
+/// Two path redirects whose targets interleave with the pre-opened fd
+/// numbers must both keep their targets: one redirect's dup2 must not close
+/// the other's target via a pre-opened descriptor that shared its number.
+#[test]
+fn exec_multi_redirect_targets_keep_their_files() {
+    let a = temp_path("multi_a");
+    let b = temp_path("multi_b");
+    let (out, err, code) = run(&format!(
+        "exec 5>{a} 4>{b}; echo to-fd4 >&4; echo to-fd5 >&5; exec 4>&-; exec 5>&-; cat {b} {a}"
+    ));
+    let _ = std::fs::remove_file(&a);
+    let _ = std::fs::remove_file(&b);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "to-fd4\nto-fd5\n", "stdout={out:?}");
+}
+
 fn temp_path(tag: &str) -> String {
     let path = std::env::temp_dir().join(format!("fddup_{tag}_{}.txt", std::process::id()));
     path.to_str().unwrap().to_string()

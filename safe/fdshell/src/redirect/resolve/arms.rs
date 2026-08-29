@@ -23,28 +23,30 @@ pub(super) fn resolve_var(
     Ok(Redirect::Dup { export_to, local })
 }
 
-/// Path source: take the next pre-opened fd and clone it.
+/// Path source: take the next pre-opened fd and clone it above the targets.
 pub(super) fn resolve_path(
     export_to: i32,
+    min_fd: i32,
     opened_iter: &mut core::slice::Iter<'_, LocalFd>,
 ) -> Result<Redirect, Report<OpenRedirectError>> {
     let local = opened_iter
         .next()
         .ok_or(OpenRedirectError::Open)?
-        .try_clone()
+        .try_clone_above(min_fd)
         .change_context(OpenRedirectError::Open)?;
     Ok(Redirect::Dup { export_to, local })
 }
 
-/// `N>&M` source: dup the imported fd.
+/// `N>&M` source: dup the imported fd above the targets.
 pub(super) fn resolve_dup(
     export_to: i32,
+    min_fd: i32,
     from: i32,
 ) -> Result<Redirect, Report<OpenRedirectError>> {
     let imported = ImportedFd::from_number(from)
         .change_context_lazy(|| OpenRedirectError::FdNotOpen { n: from })?;
     let local = imported
-        .try_dup()
+        .try_dup_above(min_fd)
         .change_context_lazy(|| OpenRedirectError::DupFdFailed { n: from })?;
     Ok(Redirect::Dup { export_to, local })
 }

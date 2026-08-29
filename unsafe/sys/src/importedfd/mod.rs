@@ -42,14 +42,20 @@ impl ImportedFd {
         d.verify().map(|_| d)
     }
 
-    /// Duplicate this borrowed fd into a new owned fd with `CLOEXEC` set,
-    /// leaving the original untouched.
-    pub fn try_dup(&self) -> Result<crate::LocalFd, Report<crate::ImportedFdError>> {
+    /// Duplicate this borrowed fd into a new owned `CLOEXEC` fd with a number
+    /// strictly above `min_fd`, leaving the original untouched. Used for
+    /// redirect sources so a dup never lands on the redirect target it will
+    /// later be `dup2`'d to (a no-op that the copy's drop would close).
+    pub fn try_dup_above(
+        &self,
+        min_fd: i32,
+    ) -> Result<crate::LocalFd, Report<crate::ImportedFdError>> {
         // SAFETY: `self.0` is a valid open fd; `F_DUPFD_CLOEXEC` on an invalid
         // fd safely returns -1/EBADF, handled by `cvt`.
-        let ret = crate::cvt(unsafe { libc::fcntl(self.0, libc::F_DUPFD_CLOEXEC, 0) as isize })
-            .change_context(crate::ImportedFdError::SetFlags)?;
-        // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd >= 0 with CLOEXEC atomically set.
+        let ret =
+            crate::cvt(unsafe { libc::fcntl(self.0, libc::F_DUPFD_CLOEXEC, min_fd) as isize })
+                .change_context(crate::ImportedFdError::SetFlags)?;
+        // SAFETY: `F_DUPFD_CLOEXEC` returns a new fd >= min_fd with CLOEXEC atomically set.
         Ok(unsafe { crate::LocalFd::from_raw(ret as i32) })
     }
 

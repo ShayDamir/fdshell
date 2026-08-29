@@ -15,18 +15,27 @@ pub fn open_redirect_files(
 ) -> Result<Vec<LocalFd>, Report<OpenRedirectError>> {
     let state = cell.borrow().change_context(OpenRedirectError::Never)?;
     let noclobber = state.options & crate::options::NOCLOBBER != 0;
+    let min_fd = RedirectDef::max_target(redirects)
+        .checked_add(1)
+        .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
     let mut fds = Vec::new();
     for r in redirects {
         if let super::RedirectSource::Path(path) = &r.source {
             let name = path.export();
-            if noclobber && matches!(r.direction, super::RedirectDirection::Write) {
-                fds.push(open_noclobber(&name, path)?);
-                continue;
-            }
-            fds.push(
+            let opened = if noclobber && matches!(r.direction, super::RedirectDirection::Write) {
+                open_noclobber(&name, path)?
+            } else {
                 sys::openat2::open(&name, r.direction.open_flags())
-                    .change_context(OpenRedirectError::Open)?,
-            );
+                    .change_context(OpenRedirectError::Open)?
+            };
+            // Re-home the freshly opened fd above every redirect target of this
+            // command: a `dup2` of another redirect must never clobber the open
+            // fd and then have this descriptor's drop close the target.
+            let rehomed = opened
+                .try_clone_above(min_fd)
+                .change_context(OpenRedirectError::Open)?;
+            drop(opened);
+            fds.push(rehomed);
         }
     }
     Ok(fds)
