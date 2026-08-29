@@ -21,4 +21,9 @@ impl ShortCStr {
     pub fn find_byte(&self, byte: u8) -> Option<usize> {
         self.as_bytes().ok()?.iter().position(|&b| b == byte)
     }
+
+    /// Index of the last occurrence of `byte`, or `None` if absent.
+    pub fn rfind_byte(&self, byte: u8) -> Option<usize> {
+        self.as_bytes().ok()?.iter().rposition(|&b| b == byte)
+    }
 }

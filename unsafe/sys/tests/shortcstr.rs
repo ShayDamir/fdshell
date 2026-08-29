@@ -781,6 +781,21 @@ fn find_byte_absent() {
 }
 
 #[test]
+fn rfind_byte_last_occurrence() {
+    let s = ShortCStr::from(c"a/b/c");
+    assert_eq!(s.rfind_byte(b'/'), Some(3));
+    assert_eq!(s.rfind_byte(b'a'), Some(0));
+    assert_eq!(s.rfind_byte(b'c'), Some(4));
+}
+
+#[test]
+fn rfind_byte_absent_and_empty() {
+    let s = ShortCStr::from(c"plain");
+    assert_eq!(s.rfind_byte(b'/'), None);
+    assert_eq!(ShortCStr::new().rfind_byte(b'a'), None);
+}
+
+#[test]
 fn strip_suffix_matching() {
     let s = ShortCStr::from(c"arr+");
     assert_eq!(s.strip_suffix(b"+"), Some(ShortCStr::from(c"arr")));

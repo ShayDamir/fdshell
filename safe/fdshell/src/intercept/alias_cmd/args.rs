@@ -11,11 +11,7 @@ pub(super) fn apply_alias_arg(
     arg: &ShortCStr,
     out: &mut Vec<u8>,
 ) -> Result<(), Report<CmdError>> {
-    match arg
-        .as_bytes()
-        .ok()
-        .and_then(|b| b.iter().position(|&c| c == b'='))
-    {
+    match arg.find_byte(b'=') {
         Some(i) => {
             let name = arg.get(..i).ok_or(CmdError::Never)?;
             let value = arg.get(i + 1..).ok_or(CmdError::Never)?;

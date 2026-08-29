@@ -14,10 +14,8 @@ pub fn builtin_name(argv0: &ShortCStr) -> Option<ShortCStr> {
 }
 
 fn base_name(path: &ShortCStr) -> Option<ShortCStr> {
-    let bytes = path.as_bytes().ok()?;
-    let start = bytes.iter().rposition(|&c| c == b'/').map_or(0, |i| i + 1);
-    let rest = bytes.get(start..)?;
-    ShortCStr::from_vec(rest.to_vec()).ok()
+    let start = path.rfind_byte(b'/').map_or(0, |i| i + 1);
+    path.get(start..)
 }
 
 /// Run `name` as a builtin in busybox mode; returns the process exit code.
