@@ -37,6 +37,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"fsync", fdops::handle_fsync),
     (b"ftruncate", fdops::handle_ftruncate),
     (b"lseek", fdops::handle_lseek),
+    (b"fallocate", fdops::handle_fallocate),
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),
     (b"resolve", resolve::handle_resolve),

@@ -1,8 +1,10 @@
-//! `lseek`, `ftruncate`, `fsync` — file ops on an existing `%var` fd.
+//! `lseek`, `ftruncate`, `fsync`, `fallocate` — file ops on an existing `%var`
+//! fd.
 //!
 //! The first argument is always a `%var` fd-variable name (`lseek %fd OFFSET
-//! [WHENCE]`, `ftruncate %fd [LENGTH]`, `fsync %fd`). `lseek` prints the new
-//! offset; `ftruncate` without LENGTH truncates at the current offset.
+//! [WHENCE]`, `ftruncate %fd [LENGTH]`, `fsync %fd`, `fallocate %fd OFFSET
+//! LEN`). `lseek` prints the new offset; `ftruncate` without LENGTH truncates
+//! at the current offset; `fallocate` preallocates space.
 
 mod args;
 mod parse;
@@ -54,6 +56,18 @@ pub(super) fn handle_fsync(
     let cfg = parse::fsync_parse(refs, args)?;
     let fd = resolve(&cfg.var, state)?;
     sys::fsync::fsync(fd).change_context(BuiltinError::Syscall)?;
+    Ok(0)
+}
+
+pub(super) fn handle_fallocate(
+    _: ShortCStr,
+    refs: &[&CStr],
+    args: &[ShortCStr],
+    state: &ShellState,
+) -> Result<i32, Report<BuiltinError>> {
+    let cfg = parse::fallocate_parse(refs, args)?;
+    let fd = resolve(&cfg.var, state)?;
+    sys::fallocate::fallocate(fd, 0, cfg.offset, cfg.len).change_context(BuiltinError::Syscall)?;
     Ok(0)
 }
 

@@ -66,6 +66,7 @@ pub mod eventfd;
 pub mod execveat;
 mod exit;
 pub mod exportedfd;
+pub mod fallocate;
 pub mod fchdir;
 pub mod fchmod;
 pub mod fcntl;

@@ -40,6 +40,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"exec_at", b"Execute with path lookup"),
     (b"exec_fd", b"Execute with fd lookup"),
     (b"explain", b"Show provenance of a variable"),
+    (b"fallocate", b"Reserve disk space for a file"),
     (b"false", b"Exit with failure status"),
     (b"fchmod", b"Change file mode"),
     (b"fdexplain", b"Show provenance of an fd variable"),

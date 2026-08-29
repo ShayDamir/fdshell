@@ -25,6 +25,13 @@ pub(crate) struct FsyncConfig {
     pub(crate) var: ShortCStr,
 }
 
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct FallocateConfig {
+    pub(crate) var: ShortCStr,
+    pub(crate) offset: i64,
+    pub(crate) len: i64,
+}
+
 pub(crate) fn var_arg(args: &[ShortCStr]) -> Result<ShortCStr, Report<BuiltinError>> {
     let first = args
         .first()

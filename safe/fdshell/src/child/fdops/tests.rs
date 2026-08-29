@@ -10,8 +10,8 @@ use sys::{Origin, ShortCStr, Trace};
 use crate::state::{FdVar, ShellState};
 
 use super::args::FtruncateConfig;
-use super::parse::{fsync_parse, ftruncate_parse, lseek_parse};
-use super::{handle_fsync, handle_ftruncate};
+use super::parse::{fallocate_parse, fsync_parse, ftruncate_parse, lseek_parse};
+use super::{handle_fallocate, handle_fsync, handle_ftruncate};
 
 fn with_refs<R, F>(args: &[&str], f: F) -> R
 where
@@ -190,5 +190,82 @@ fn handlers_succeed_on_real_fd_var() {
             handle_fsync(c"fsync".into(), refs, origs, &state).unwrap(),
             0
         );
+    });
+}
+
+#[test]
+fn fallocate_parses_offset_and_len() {
+    with_refs(&["%f", "0", "4096"], |refs, origs| {
+        let cfg = fallocate_parse(refs, origs).unwrap();
+        assert_eq!(cfg.var.as_bytes().unwrap(), b"f");
+        assert_eq!(cfg.offset, 0);
+        assert_eq!(cfg.len, 4096);
+    });
+}
+
+#[test]
+fn fallocate_requires_offset_and_len() {
+    for args in [&["%f"][..], &["%f", "10"][..]] {
+        with_refs(args, |refs, origs| {
+            let e = fallocate_parse(refs, origs).unwrap_err();
+            assert!(
+                matches!(e.current_context(), BuiltinError::MissingArgument(_)),
+                "{args:?}"
+            );
+        });
+    }
+}
+
+#[test]
+fn fallocate_rejects_bad_offset_or_len() {
+    for args in [
+        &["%f", "-1", "10"][..],
+        &["%f", "0", "0"][..],
+        &["%f", "0", "-1"][..],
+        &["%f", "0", "x"][..],
+    ] {
+        with_refs(args, |refs, origs| {
+            let e = fallocate_parse(refs, origs).unwrap_err();
+            assert!(
+                is_invalid(&e, "offset") || is_invalid(&e, "len"),
+                "{args:?}"
+            );
+        });
+    }
+}
+
+#[test]
+fn fallocate_rejects_extra_arguments() {
+    with_refs(&["%f", "0", "4096", "8"], |refs, origs| {
+        let e = fallocate_parse(refs, origs).unwrap_err();
+        assert!(is_invalid(&e, "arg"));
+    });
+}
+
+#[test]
+fn fallocate_help() {
+    with_refs(&["--help"], |refs, origs| {
+        let e = fallocate_parse(refs, origs).unwrap_err();
+        assert!(matches!(e.current_context(), BuiltinError::Help));
+    });
+}
+
+#[test]
+fn fallocate_handler_succeeds_on_memfd() {
+    let state = state_with_memfd();
+    with_refs(&["%f", "0", "4096"], |refs, origs| {
+        assert_eq!(
+            handle_fallocate(c"fallocate".into(), refs, origs, &state).unwrap(),
+            0
+        );
+    });
+}
+
+#[test]
+fn fallocate_handler_unset_var_is_fdvar_not_found() {
+    let state = state_with_memfd();
+    with_refs(&["%missing", "0", "4096"], |refs, origs| {
+        let e = handle_fallocate(c"fallocate".into(), refs, origs, &state).unwrap_err();
+        assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }

@@ -40,6 +40,7 @@ const BUILTINS: &[&str] = &[
     "exec_at",
     "exec_fd",
     "explain",
+    "fallocate",
     "false",
     "fchmod",
     "fdexplain",

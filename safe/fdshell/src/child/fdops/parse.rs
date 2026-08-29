@@ -1,5 +1,6 @@
-//! Per-builtin argument parsing for `lseek`, `ftruncate`, `fsync`. Numbers
-//! come from `refs` (substituted); the `%var` comes from `args` (original).
+//! Per-builtin argument parsing for `lseek`, `ftruncate`, `fsync`,
+//! `fallocate`. Numbers come from `refs` (substituted); the `%var` comes from
+//! `args` (original).
 
 use core::ffi::CStr;
 use error_stack::{Report, bail};
@@ -8,7 +9,8 @@ use sys::ShortCStr;
 use builtins::error::BuiltinError;
 
 use super::args::{
-    FsyncConfig, FtruncateConfig, LseekConfig, length, no_extra, number, var_arg, whence,
+    FallocateConfig, FsyncConfig, FtruncateConfig, LseekConfig, length, no_extra, number, var_arg,
+    whence,
 };
 
 pub(crate) fn lseek_parse(
@@ -61,4 +63,30 @@ pub(crate) fn fsync_parse(
     let var = var_arg(args)?;
     no_extra(refs.len(), 1)?;
     Ok(FsyncConfig { var })
+}
+
+pub(crate) fn fallocate_parse(
+    refs: &[&CStr],
+    args: &[ShortCStr],
+) -> Result<FallocateConfig, Report<BuiltinError>> {
+    if builtins::argparse::wants_help(refs) {
+        bail!(BuiltinError::Help);
+    }
+    let var = var_arg(args)?;
+    let offset = match refs.get(1) {
+        Some(o) => number(o, "offset")?,
+        None => bail!(BuiltinError::MissingArgument("offset")),
+    };
+    if offset < 0 {
+        bail!(BuiltinError::InvalidArgument("offset"));
+    }
+    let len = match refs.get(2) {
+        Some(l) => number(l, "len")?,
+        None => bail!(BuiltinError::MissingArgument("len")),
+    };
+    if len <= 0 {
+        bail!(BuiltinError::InvalidArgument("len"));
+    }
+    no_extra(refs.len(), 3)?;
+    Ok(FallocateConfig { var, offset, len })
 }

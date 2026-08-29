@@ -49,7 +49,7 @@
 
 ## Refactoring
 
-- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `child/dispatch.rs` (84), `intercept/set_list.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80), `child/test/filetest.rs` (84), `sys/lib.rs` (88)
+- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `child/dispatch.rs` (84), `intercept/set_list.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80), `child/test/filetest.rs` (84), `sys/lib.rs` (89), `child/fdops/parse.rs` (82)
 - [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
 - [x] `ShortCStr` byte-search API (done: `find_byte` + `rfind_byte` in `shortcstr/eq.rs`, tested in `unsafe/sys/tests/shortcstr.rs`; switched the two genuine `ShortCStr` sites — `intercept/alias_cmd/args.rs` (`=`) and `busybox.rs` (`/` basename) — off `as_bytes()`. The remaining `position`/`rposition` sites operate on raw `&[u8]` input lines (`brace.rs`, `keywords.rs`, `debug.rs`, `intercept/validation.rs`) or a `CStr` (`builtins/argparse.rs`), and `parse/redirect.rs` needs the matched operator byte itself, so the `ShortCStr` API does not apply there)
 
@@ -101,7 +101,7 @@
 - [ ] `openat2 --path` (O_PATH) — hold a handle to a file without open permission; combine with `fstat` / `fchdir` / `faccessat2` for inspect-then-act on files the user may not be able to read
 - [x] `test`: every bash operator that takes a path also takes a `%fd` — fstat the fd var instead of stat'ing a path (done: `%var` lookup in `child/test/` for all unary file operators — kinds `-f -d -b -c -p -S -L`, `-s` size, mode bits `-g -k`, `-t` tty, permissions `-r -w -x` via `access(2)` on `/proc/self/fd/N` — plus binary `-nt -ot -ef -fdeq -fdne` via `stat_operand`; new `lstat` for `-L`, `isatty` + `openpty` wrappers in sys; see `child/test/filetest.rs` + `perm.rs` + `stat.rs`, `unsafe/sys/tests/{tty,access,pipe}.rs`)
 - [ ] `test` fdshell extras beyond bash: `-fdsize +/-N` (size compare); `openat2 --same-as %fd` (verify inode at open time instead of a separate test step)
-- [ ] `fallocate` syscall wrapper + builtin — preallocate space on a file fd var
+- [x] `fallocate` syscall wrapper + builtin (done: `sys::fallocate` wrapper; in-shell `fallocate %fd OFFSET LEN` in `child/fdops.rs` preallocating with mode 0, offset ≥ 0 and len > 0 validated; sys tests in `unsafe/sys/tests/fallocate.rs`)
 - [ ] `mkfifoat` syscall wrapper + builtin — create a fifo inside a dirfd var; underpins coprocess / message-passing scripts without temp files
 
 ### P1 — Language features
