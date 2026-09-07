@@ -49,10 +49,7 @@ pub(crate) fn run_and_capture(
                     // it can't keep running while the parent is idle. Both
                     // are best-effort.
                     drop(r);
-                    let _ = sys::pidfd_send_signal::send_signal(
-                        &pidfd,
-                        sys::pidfd_send_signal::SIGKILL,
-                    );
+                    let _ = sys::signal::send_signal(&pidfd, sys::signal::SIGKILL);
                 }
                 // Reap child; stdout already consumed (or abandoned) above.
                 let _ = sys::wait_pidfd::wait_pidfd(&pidfd);

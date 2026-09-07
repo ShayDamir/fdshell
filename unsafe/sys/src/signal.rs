@@ -1,7 +1,15 @@
-use crate::LocalFd;
+use crate::{LocalFd, Pid};
 
 pub const SIGKILL: i32 = libc::SIGKILL;
 pub const SIGTERM: i32 = libc::SIGTERM;
+
+/// Send signal `sig` to process `pid`.
+pub fn kill(pid: Pid, sig: i32) -> Result<(), crate::SyscallError> {
+    // SAFETY: `pid` is a valid pid; `sig` is a signal number; an unknown pid
+    // returns -1/`ESRCH`, caught by `cvt`.
+    crate::cvt(unsafe { libc::kill(pid.as_raw(), sig) as isize })?;
+    Ok(())
+}
 
 /// Send signal `sig` to the process referenced by `pidfd`.
 ///

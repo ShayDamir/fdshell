@@ -30,7 +30,7 @@ fn renameat2_renames_file() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("a"), b"x").unwrap();
     let dirfd = open_dir(&dir);
-    sys::renameat2::renameat2(dirfd.at(), c"a", dirfd.at(), c"b", 0).unwrap();
+    sys::fileat::renameat2(dirfd.at(), c"a", dirfd.at(), c"b", 0).unwrap();
     // A stub returning Ok(()) without acting would leave "a" and drop "b".
     assert!(!dir.join("a").exists());
     assert!(dir.join("b").exists());
@@ -42,6 +42,6 @@ fn renameat2_missing_source_errors() {
     let dir = test_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let dirfd = open_dir(&dir);
-    assert!(sys::renameat2::renameat2(dirfd.at(), c"nope", dirfd.at(), c"b", 0).is_err());
+    assert!(sys::fileat::renameat2(dirfd.at(), c"nope", dirfd.at(), c"b", 0).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }

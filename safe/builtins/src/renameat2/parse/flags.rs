@@ -13,9 +13,9 @@ pub(crate) fn parse_rename_flags(s: &CStr) -> Result<u32, Report<FlagParseError>
         b.split(|&c| c == b'|')
             .try_fold(0, |acc, name| {
                 let v = match name {
-                    b"RENAME_NOREPLACE" => sys::renameat2::RENAME_NOREPLACE,
-                    b"RENAME_EXCHANGE" => sys::renameat2::RENAME_EXCHANGE,
-                    b"RENAME_WHITEOUT" => sys::renameat2::RENAME_WHITEOUT,
+                    b"RENAME_NOREPLACE" => sys::fileat::RENAME_NOREPLACE,
+                    b"RENAME_EXCHANGE" => sys::fileat::RENAME_EXCHANGE,
+                    b"RENAME_WHITEOUT" => sys::fileat::RENAME_WHITEOUT,
                     _ => return Err(FlagParseError::Unknown),
                 };
                 Ok(acc + v)

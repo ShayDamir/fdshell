@@ -7,7 +7,7 @@ use sys::rw::{lseek, read, write_all};
 fn fsync_flushes_memfd() {
     let fd = memfd_create().unwrap();
     write_all(&fd, b"data").unwrap();
-    sys::fsync::fsync(&fd).unwrap();
+    sys::fileops::fsync(&fd).unwrap();
     lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
     let mut buf = [0u8; 8];
     let n = read(&fd, &mut buf).unwrap();
@@ -19,8 +19,8 @@ fn fsync_flushes_memfd() {
 fn fsync_after_truncate_succeeds() {
     let fd = memfd_create().unwrap();
     write_all(&fd, b"longer").unwrap();
-    sys::ftruncate::ftruncate(&fd, 3).unwrap();
-    sys::fsync::fsync(&fd).unwrap();
+    sys::fileops::ftruncate(&fd, 3).unwrap();
+    sys::fileops::fsync(&fd).unwrap();
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn fsync_on_invalid_fd_is_ebadf() {
     // guarantees no live LocalFd owns it, so wrapping it in a LocalFd never
     // double-frees. The wrapped number is invalid, so `fsync` sees EBADF.
     let ghost = unsafe { sys::LocalFd::from_raw(raw) };
-    let err = sys::fsync::fsync(&ghost).unwrap_err();
+    let err = sys::fileops::fsync(&ghost).unwrap_err();
     assert_eq!(err.errno(), libc::EBADF);
     let _ = ghost;
 }

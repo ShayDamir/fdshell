@@ -57,6 +57,7 @@ const BUILTINS: &[&str] = &[
     "pwd",
     "renameat2",
     "resolve",
+    "statx",
     "test",
     "timerfd",
     "true",

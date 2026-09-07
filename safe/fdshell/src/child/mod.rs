@@ -13,6 +13,7 @@ mod printf;
 mod resolve;
 mod run;
 mod simple;
+mod statx;
 mod test;
 mod type_cmd;
 use crate::parse::CommandLine;

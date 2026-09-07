@@ -34,7 +34,7 @@ impl Redirect {
                 .export_to(*export_to)
                 .change_context(OpenRedirectError::Open)
                 .map(|_| ()),
-            Self::Close { export_to } => sys::close::close(*export_to)
+            Self::Close { export_to } => sys::dup::close(*export_to)
                 .change_context_lazy(|| OpenRedirectError::CloseFd { n: *export_to }),
         }
     }

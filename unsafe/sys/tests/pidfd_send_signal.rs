@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-use sys::pidfd_send_signal::{SIGKILL, send_signal};
 use sys::pipe::pipe2;
+use sys::signal::{SIGKILL, send_signal};
 
 #[test]
 fn send_signal_non_pidfd_errors() {

@@ -1,6 +1,6 @@
 use super::CmsgBuf;
+use super::iovec::IoVec;
 use crate::LocalFd;
-use crate::iovec::IoVec;
 use core::ffi::CStr;
 
 pub fn send_fd<T: AsRef<CStr>>(

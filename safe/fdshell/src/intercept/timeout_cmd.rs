@@ -57,13 +57,13 @@ fn bounded_wait(pidfd: &sys::LocalFd, seconds: i64) -> Result<i32, Report<CmdErr
         .get(1)
         .is_some_and(|p| p.revents & sys::poll::POLLIN != 0);
     if timed_out {
-        sys::pidfd_send_signal::send_signal(pidfd, sys::pidfd_send_signal::SIGTERM)
+        sys::signal::send_signal(pidfd, sys::signal::SIGTERM)
             .change_context(CmdError::TimeoutSignal)?;
         // Grace period: give the child a chance to exit on SIGTERM.
         let mut grace = [sys::poll::PollFd::new(pidfd.as_raw(), sys::poll::POLLIN)];
         let n2 = sys::poll::poll(&mut grace, 1000).change_context(CmdError::TimeoutPoll)?;
         if n2 == 0 {
-            sys::pidfd_send_signal::send_signal(pidfd, sys::pidfd_send_signal::SIGKILL)
+            sys::signal::send_signal(pidfd, sys::signal::SIGKILL)
                 .change_context(CmdError::TimeoutSignal)?;
         }
         let _ = sys::wait_pidfd::wait_pidfd(pidfd).change_context(CmdError::TimeoutWait)?;

@@ -3,7 +3,7 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use sys::renameat2::{RENAME_EXCHANGE, RENAME_NOREPLACE, RENAME_WHITEOUT};
+use sys::fileat::{RENAME_EXCHANGE, RENAME_NOREPLACE, RENAME_WHITEOUT};
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();

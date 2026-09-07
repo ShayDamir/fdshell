@@ -28,7 +28,7 @@ fn signalfd_catches_delivered_signal() {
     assert_eq!(first, "ready", "first line must be the ready marker");
 
     // Deliver SIGUSR1 to the shell; the signalfd must catch it.
-    let status = sys::kill::kill(sys::Pid::from_raw(pid as i32), sys::signalfd::SIGUSR1);
+    let status = sys::signal::kill(sys::Pid::from_raw(pid as i32), sys::signalfd::SIGUSR1);
     assert!(status.is_ok(), "failed to send SIGUSR1: {status:?}");
 
     let second = lines.next().unwrap().unwrap();

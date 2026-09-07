@@ -20,7 +20,7 @@ fn fchmod_changes_mode() {
     assert!(raw >= 0);
     // SAFETY: `raw` is a valid open fd with CLOEXEC clear (opened above).
     let fd = unsafe { ImportedFd::from_raw(raw) };
-    sys::fchmod::fchmod(&fd, 0o640).unwrap();
+    sys::fileops::fchmod(&fd, 0o640).unwrap();
     // SAFETY: `raw` is the valid open fd created above.
     unsafe { libc::close(raw) };
 
@@ -34,5 +34,5 @@ fn fchmod_changes_mode() {
 fn fchmod_bad_fd_errors() {
     // SAFETY: -1 is never a valid fd; fchmod returns EBADF.
     let fd = unsafe { ImportedFd::from_raw(-1) };
-    assert!(sys::fchmod::fchmod(&fd, 0o640).is_err());
+    assert!(sys::fileops::fchmod(&fd, 0o640).is_err());
 }

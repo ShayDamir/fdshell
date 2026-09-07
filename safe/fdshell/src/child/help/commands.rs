@@ -57,6 +57,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"pwd", b"Print working directory"),
     (b"renameat2", b"Rename/move file"),
     (b"resolve", b"Resolve fd variables"),
+    (b"statx", b"File metadata by path or fd"),
     (b"test", b"Test expression (also '[')"),
     (b"timerfd", b"Timer as an fd source"),
     (b"true", b"Exit with success status"),

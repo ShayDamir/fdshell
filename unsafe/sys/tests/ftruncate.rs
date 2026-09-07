@@ -7,7 +7,7 @@ use sys::rw::{lseek, read, write_all};
 fn ftruncate_shrinks_and_reads_prefix() {
     let fd = memfd_create().unwrap();
     write_all(&fd, b"hello").unwrap();
-    sys::ftruncate::ftruncate(&fd, 2).unwrap();
+    sys::fileops::ftruncate(&fd, 2).unwrap();
     lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
     let mut buf = [0u8; 8];
     let n = read(&fd, &mut buf).unwrap();
@@ -21,7 +21,7 @@ fn ftruncate_shrinks_and_reads_prefix() {
 fn ftruncate_extends_with_zeroes() {
     let fd = memfd_create().unwrap();
     write_all(&fd, b"abc").unwrap();
-    sys::ftruncate::ftruncate(&fd, 6).unwrap();
+    sys::fileops::ftruncate(&fd, 6).unwrap();
     lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
     let mut buf = [0u8; 8];
     let n = read(&fd, &mut buf).unwrap();
@@ -32,8 +32,8 @@ fn ftruncate_extends_with_zeroes() {
 fn ftruncate_extends_then_shrinks() {
     let fd = memfd_create().unwrap();
     write_all(&fd, b"xy").unwrap();
-    sys::ftruncate::ftruncate(&fd, 4).unwrap();
-    sys::ftruncate::ftruncate(&fd, 1).unwrap();
+    sys::fileops::ftruncate(&fd, 4).unwrap();
+    sys::fileops::ftruncate(&fd, 1).unwrap();
     lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
     let mut buf = [0u8; 8];
     let n = read(&fd, &mut buf).unwrap();
@@ -45,7 +45,7 @@ fn ftruncate_extends_then_shrinks() {
 fn ftruncate_zero_length_empties_file() {
     let fd = memfd_create().unwrap();
     write_all(&fd, b"hello").unwrap();
-    sys::ftruncate::ftruncate(&fd, 0).unwrap();
+    sys::fileops::ftruncate(&fd, 0).unwrap();
     let mut buf = [0u8; 8];
     assert_eq!(read(&fd, &mut buf).unwrap(), 0);
 }
@@ -53,7 +53,7 @@ fn ftruncate_zero_length_empties_file() {
 #[test]
 fn ftruncate_on_pipe_is_einval() {
     let (rd, wr) = sys::pipe::pipe2(0).unwrap();
-    let err = sys::ftruncate::ftruncate(&rd, 4).unwrap_err();
+    let err = sys::fileops::ftruncate(&rd, 4).unwrap_err();
     assert_eq!(err.errno(), libc::EINVAL);
     let _ = wr;
 }
@@ -61,6 +61,6 @@ fn ftruncate_on_pipe_is_einval() {
 #[test]
 fn ftruncate_negative_length_is_einval() {
     let fd = memfd_create().unwrap();
-    let err = sys::ftruncate::ftruncate(&fd, -1).unwrap_err();
+    let err = sys::fileops::ftruncate(&fd, -1).unwrap_err();
     assert_eq!(err.errno(), libc::EINVAL);
 }

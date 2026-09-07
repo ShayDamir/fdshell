@@ -13,6 +13,7 @@ use super::flock;
 use super::printf;
 use super::resolve;
 use super::simple;
+use super::statx;
 use super::test;
 use super::type_cmd;
 
@@ -40,6 +41,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"lseek", fdops::handle_lseek),
     (b"fallocate", fdops::handle_fallocate),
     (b"flock", flock::handle_flock),
+    (b"statx", statx::handle_statx),
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),
     (b"resolve", resolve::handle_resolve),

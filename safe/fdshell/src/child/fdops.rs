@@ -43,7 +43,7 @@ pub(super) fn handle_ftruncate(
             sys::rw::lseek(fd, 0, sys::fcntl::SEEK_CUR).change_context(BuiltinError::Syscall)?
         }
     };
-    sys::ftruncate::ftruncate(fd, length).change_context(BuiltinError::Syscall)?;
+    sys::fileops::ftruncate(fd, length).change_context(BuiltinError::Syscall)?;
     Ok(0)
 }
 
@@ -55,7 +55,7 @@ pub(super) fn handle_fsync(
 ) -> Result<i32, Report<BuiltinError>> {
     let cfg = parse::fsync_parse(refs, args)?;
     let fd = resolve(&cfg.var, state)?;
-    sys::fsync::fsync(fd).change_context(BuiltinError::Syscall)?;
+    sys::fileops::fsync(fd).change_context(BuiltinError::Syscall)?;
     Ok(0)
 }
 
@@ -67,7 +67,7 @@ pub(super) fn handle_fallocate(
 ) -> Result<i32, Report<BuiltinError>> {
     let cfg = parse::fallocate_parse(refs, args)?;
     let fd = resolve(&cfg.var, state)?;
-    sys::fallocate::fallocate(fd, 0, cfg.offset, cfg.len).change_context(BuiltinError::Syscall)?;
+    sys::fileops::fallocate(fd, 0, cfg.offset, cfg.len).change_context(BuiltinError::Syscall)?;
     Ok(0)
 }
 

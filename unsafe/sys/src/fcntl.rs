@@ -15,6 +15,8 @@ pub use libc::O_SYNC;
 pub use libc::O_TRUNC;
 pub use libc::O_WRONLY;
 
+pub use libc::AT_EMPTY_PATH;
+pub use libc::AT_SYMLINK_NOFOLLOW;
 pub use libc::F_DUPFD_CLOEXEC;
 pub use libc::F_GETFD;
 pub use libc::FD_CLOEXEC;

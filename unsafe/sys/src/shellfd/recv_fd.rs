@@ -1,7 +1,7 @@
 use error_stack::{Report, ResultExt, bail, ensure};
 
+use super::iovec::IoVecMut;
 use crate::LocalFd;
-use crate::iovec::IoVecMut;
 use core::ffi::CStr;
 
 #[repr(align(8))]

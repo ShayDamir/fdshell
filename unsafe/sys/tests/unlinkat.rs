@@ -22,7 +22,7 @@ fn unlinkat_file() {
     assert!(file.exists());
 
     let path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
-    sys::unlinkat::unlinkat(sys::AtFd::cwd(), &path, 0).unwrap();
+    sys::fileat::unlinkat(sys::AtFd::cwd(), &path, 0).unwrap();
     assert!(!file.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -36,7 +36,7 @@ fn unlinkat_dir() {
     assert!(sub.exists());
 
     let path = std::ffi::CString::new(sub.to_str().unwrap()).unwrap();
-    sys::unlinkat::unlinkat(sys::AtFd::cwd(), &path, sys::unlinkat::AT_REMOVEDIR).unwrap();
+    sys::fileat::unlinkat(sys::AtFd::cwd(), &path, sys::fileat::AT_REMOVEDIR).unwrap();
     assert!(!sub.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -47,7 +47,7 @@ fn unlinkat_enoent() {
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("does-not-exist");
     let path = std::ffi::CString::new(missing.to_str().unwrap()).unwrap();
-    let err = sys::unlinkat::unlinkat(sys::AtFd::cwd(), &path, 0).unwrap_err();
+    let err = sys::fileat::unlinkat(sys::AtFd::cwd(), &path, 0).unwrap_err();
     assert_eq!(err, sys::SyscallError::ENOENT("unknown"));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -61,7 +61,7 @@ fn unlinkat_notdir() {
     // AT_REMOVEDIR on a regular file should fail with ENOTDIR
     let path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
     let err =
-        sys::unlinkat::unlinkat(sys::AtFd::cwd(), &path, sys::unlinkat::AT_REMOVEDIR).unwrap_err();
+        sys::fileat::unlinkat(sys::AtFd::cwd(), &path, sys::fileat::AT_REMOVEDIR).unwrap_err();
     assert_eq!(
         err,
         sys::SyscallError::Other {

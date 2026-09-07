@@ -29,7 +29,7 @@ fn mkdirat_creates_dir() {
     let dir = test_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let dirfd = open_dir(&dir);
-    sys::mkdirat::mkdirat(dirfd.at(), c"subdir", 0o755).unwrap();
+    sys::fileat::mkdirat(dirfd.at(), c"subdir", 0o755).unwrap();
     // A stub returning Ok(()) without acting would leave the dir absent.
     assert!(dir.join("subdir").is_dir());
     let _ = std::fs::remove_dir_all(&dir);
@@ -40,6 +40,6 @@ fn mkdirat_missing_parent_errors() {
     let dir = test_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let dirfd = open_dir(&dir);
-    assert!(sys::mkdirat::mkdirat(dirfd.at(), c"no/such/dir", 0o755).is_err());
+    assert!(sys::fileat::mkdirat(dirfd.at(), c"no/such/dir", 0o755).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -30,7 +30,7 @@ fn kill_delivers_signal_to_child() {
             drop(wr);
             let mut buf = [0u8; 1];
             sys::rw::read(&rd, &mut buf).unwrap();
-            sys::kill::kill(child_pid, SIGUSR1).unwrap();
+            sys::signal::kill(child_pid, SIGUSR1).unwrap();
             let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
             assert!(
                 matches!(status, WaitStatus::Exited(42)),

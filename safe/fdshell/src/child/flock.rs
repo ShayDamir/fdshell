@@ -22,7 +22,7 @@ pub(super) fn handle_flock(
 ) -> Result<i32, Report<BuiltinError>> {
     let cfg = parse::flock_parse(refs, args)?;
     let fd = resolve(&cfg.var, state)?;
-    sys::flock::flock(fd, cfg.operation).change_context(BuiltinError::Syscall)?;
+    sys::fileops::flock(fd, cfg.operation).change_context(BuiltinError::Syscall)?;
     Ok(0)
 }
 
