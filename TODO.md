@@ -4,20 +4,7 @@
 
 ### P0 — Easy wins
 
-- [x] `$-` — shell option flags (`options.rs` `flags()`, `substitute/dollar.rs`)
-- [x] `set -o ignoreeof` / `set +o ignoreeof` — prevent shell from exiting on EOF (`Ctrl+D`), P0; add `IGNOREEOF` shell option (`options.rs`); default `off` for scripts, `on` for interactive use; pairs with the `$-` item (shows `i` when on)
-- [x] `type` builtin — show command type (builtin, external, fd var, etc.) (`child/type_cmd.rs`)
-- [x] `command` builtin — bypass function lookup (alias for `builtin` prefix, `parse/command.rs:19`)
-- [x] `set` listing — bare `set` lists all variables (bash compat); `set -F` lists fd variables (`intercept/set_list.rs`); `-f` left free for `noglob`
-- [x] `set -x` / `set +x` (xtrace) — `XTRACE` bit in `options.rs`, `xtrace.rs` prints `+ <name> <args>` to stderr at dispatch entry; pairs with the `$-` item (shows `x` when on); open follow-up: a mode that traces unresolved references (`$VAR` / `%fd`) instead of expanded values, which can carry secrets into stderr
-- [x] Builtin-first lookup — `set -o builtin_first` option (`options.rs`): bare command names resolve against the builtin table (`child/dispatch.rs:49`) before PATH lookup; PATH can no longer swap which `test` / `printf` / `openat2` runs; explicit `/path/...` still reaches externals; candidate default under strict mode (P3); note: the hardcoded parse-level list (`parse/builtin.rs:3`) still exists for fq-flag handling
-
-- [x] `\$` inside double quotes — `\$` is now a literal, unexpanded `$` and `\\` folds to `\` (`substitute/arg.rs:33-45`); end-to-end coverage in `tests/dollar_escape.rs` incl. the `eval_depth` gating case `true hello; eval "true x y; builtin echo [\$_]"`
-
-### P1 — Major functionality gaps (moderate effort)
-
-- [x] `hash` — PATH lookup cache (done: `ShellState.hash_table` name→path; `exec::resolve_path_str` consults it before PATH, stale pins self-heal via PATH; `hash [-r] [name [path]]` intercept in `intercept/hash_cmd.rs` pins/lists/clears; `launch::prehash` best-effort populates the table on real external runs; `type` shows cached paths)
-- [x] `ulimit` — resource limit get/set (done: `sys::rlimit` get/set wrappers; `intercept/ulimit_cmd.rs` bash-compatible `ulimit [-HSa] [-cdeflmnstuv] [limit]` over 10 resources with per-resource units (CPU in seconds, rest ×1024), `unlimited`, EPERM raise → actionable suggestion)
+- [x] `set -x` / `set +x` (xtrace) — `XTRACE` bit in `options.rs`, `xtrace.rs` prints `+ <name> <args>` to stderr at dispatch entry; open follow-up: a mode that traces unresolved references (`$VAR` / `%fd`) instead of expanded values, which can carry secrets into stderr
 
 ### P2 — Important for bash compatibility (hard)
 
@@ -30,34 +17,15 @@
 - [ ] `"$@"` preservation — expand to multiple words preserving empty args
 - [ ] History expansion (`!!`, `!echo`) — readline-style history
 
-## Parser & expansion bugs
-
-- [x] Word splitting cuts through quoted sections of mixed tokens — quote boundaries are erased during tokenize and "fully quoted" is one bit per token (`parse/token.rs:43-49`), so `split_word` (`substitute/mod.rs:41-47`) splits on IFS chars *inside* what was quoted; one argv entry silently becomes two (argument smuggling — callees can be made to act on attacker-chosen fragments):
-  ```
-  fdshell -c 'builtin printf "[%s]" x"a b"c'   # → [xa][bc]; bash/POSIX: [xa bc] (one word)
-  ```
-   Carry per-character quoting through to the splitter, or keep quote spans alongside the token like bash's word structure
-
-- [x] A shell keyword appearing as a *quoted* word inside a block body breaks parsing — `scan_block` (`comment.rs:48`) applies `depth_delta` to every word regardless of quote state, so a block-opening keyword (`for` / `while` / `case` / `if` …) inside a quoted string is counted as a nested block opening and the enclosing block is never seen as closed (`run_script` `ensure!(closed)` → parse error). Affects every block, not just `wait`:
-  ```
-  fdshell -c 'while true; do echo "for x"; done'   # parse error
-  fdshell -c 'wait
-      after 1) echo "idle for a second" ;;
-  done'      # parse error
-  ```
-  A block keyword must only count when its word is unquoted — track per-word quote state in `scan_block` and skip `depth_delta` for quoted words
-
 ## Refactoring
 
 - [ ] Files in the 80-90 line zone (STYLE.md §2.3): `parse/wait_block/pattern.rs` (90), `intercept/set_list.rs` (89), `child/statx/parse.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `child/dispatch.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80), `child/test/filetest.rs` (84), `sys/lib.rs` (81), `child/fdops/parse.rs` (82)
 - [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
-- [x] `ShortCStr` byte-search API (done: `find_byte` + `rfind_byte` in `shortcstr/eq.rs`, tested in `unsafe/sys/tests/shortcstr.rs`; switched the two genuine `ShortCStr` sites — `intercept/alias_cmd/args.rs` (`=`) and `busybox.rs` (`/` basename) — off `as_bytes()`. The remaining `position`/`rposition` sites operate on raw `&[u8]` input lines (`brace.rs`, `keywords.rs`, `debug.rs`, `intercept/validation.rs`) or a `CStr` (`builtins/argparse.rs`), and `parse/redirect.rs` needs the matched operator byte itself, so the `ShortCStr` API does not apply there)
 
 ## Security / hardening
 
 ### P1 — DoS / hardening
 
-- [x] `set --stdout-capture-limit <bytes>` — make the `$(…)` stdout capture cap configurable; `MAX_CAPTURED` is hardcoded at 64 MiB (`cmd_subst.rs:13`); bash has no such limit, so this is an fdshell-specific escape hatch for scripts that legitimately capture more than the default (done: `ShellState.capture_limit` defaulting to `MAX_CAPTURED`, set via `set --stdout-capture-limit <bytes>` in `intercept/set_limit.rs`, read before the fork in `run_and_capture`; `0` caps any non-empty output)
 - [ ] `FDSHELL_PID`/`FDSHELL_SOCKET` trust — wrapper can spoof nested-shell env and capture exported fds (`init.rs`); document/limit trust boundary
 - [ ] Pipeline builtin children hold every pipe/socketpair/pidfd open — `pipeline/mod.rs:27-57` copies `pipes`/`capture_pairs` into each forked child as borrows that are never dropped; external-command exec hides this via CLOEXEC, but builtins run their whole lifetime with the full inheritance (verified via `/proc/<pid>/fd`: a stage-3 builtin in a 3-stage pipeline holds ~15 fds, incl. sibling pipe ends, capture socketpair, sibling pidfds). Latent risk: any long-running/blocking builtin mid-pipeline keeps upstream write ends alive → upstream readers never see EOF → pipeline deadlock. In the child, before running a builtin, close all pipe ends except the two cloned ones and drop sibling capture pairs/pidfds
 - [ ] `~` / `$HOME` escape the capability model — the shell operates on fd-vars (`%CWD`) but `~` expansion (`substitute/arg.rs:24`) and `cd_home` (`cd/mod.rs:20`) open the inherited `$HOME` via *absolute* path with default `openat2` flags (no `RESOLVE_BENEATH`, no `O_NOFOLLOW`); a symlink at `$HOME` (or inside it) silently redirects file ops / `cd` to an attacker-controlled location, and `~` reaches outside any `RESOLVE_BENEATH` sandbox. Resolve `~` against a controlled dirfd, or drop `~` in strict mode
@@ -81,27 +49,17 @@
 
 ### P1 — Core syscall builtins
 
-- [x] `timerfd` syscall wrapper + builtin (`unsafe/sys/src/timerfd.rs`; `safe/builtins/src/timerfd/` CLI `timerfd <seconds> [nanos] [--periodic] [--flags F]`)
-- [x] `signalfd` builtin — traps as another fd source (in-shell intercept `safe/fdshell/src/intercept/signalfd_cmd.rs`; `unsafe/sys/src/signalfd.rs` + `kill.rs`)
-- [x] `eventfd` builtin — counters between background tasks (`unsafe/sys/src/eventfd.rs`; `safe/builtins/src/eventfd/` CLI `eventfd [init] [--flags F]`)
-- [x] `timeout N` builtin — run a command with a wall-clock limit; after N seconds signal the child (SIGTERM, then SIGKILL) and fail the command (in-shell intercept `safe/fdshell/src/intercept/timeout_cmd.rs`, returns 124; pairs with the `timerfd` item above)
 - [ ] Landlock syscall wrappers + builtin (`landlock --allow-rw %src --restrict`)
 - [ ] fs-verity ioctls (verify binary before execveat)
 - [ ] `getdents64` syscall wrapper + builtin — list a directory by dirfd; the foundation for TOCTOU-free glob expansion (feeds the P2 glob item)
 - [ ] `memfd` builtin — heredocs without temp files, sealed secrets by fd (wrapper exists in `unsafe/sys/src/memfd.rs`; add `F_SEAL_*` / `memfd_set_seal` support and a name/size argument)
-- [x] `flock` builtin — advisory locking on existing fd vars (`flock %lock --wait`); coordinate processes by handle, never by path (done: `sys::flock` wrapper; `flock %var [--shared] [--wait] [--nowait] [--unlock]` in `child/flock.rs` — the lock sits on the fd var's open file description, so it outlives the builtin's child and is held by the shell until `--unlock`; `--nowait` exits with the EWOULDBLOCK errno)
 - [ ] `sendmsg` / `recvmsg` builtins — raw AF_UNIX payload + SCM_RIGHTS fd transfer for *custom* protocols (the existing wrappers are FDSHELL-protocol-only, `shellfd/send_fd.rs` / `shellfd/recv_fd.rs`): send a byte payload (arg or file fd) plus any number of fd vars; receive a payload into a var plus N named fd vars (script declares the slots); optional cred surfacing (SO_PASSCRED + pid/uid into a var) so custom protocols can enforce the same pid-verification rule as the `recv_fd` item
 - [ ] Socket lifecycle builtins on fd vars — `bind` (socket + bind), `listen` (socket + bind + listen, backlog arg, `--type stream|dgram`; AF_UNIX with a path or abstract-namespace address (`@…` — no filesystem socket file, no path TOCTOU, fits the capability model; define who unlinks a filesystem socket path), or AF_INET via `--bind ADDR --port N`), `accept` (blocking accept on a listening fd var → new fd var, captured with the existing `%>%var` form); `accept %fd %>%array[N]` — bounded-capture form: if the array is full, accept and close immediately (reject; RST if unread data is buffered — acceptable for a cap), bounding the concurrent `wait` arm children, the real unbounded resource; the event-loop form of the same cap + parent-side append is the implemented bounded capture (`%>%arr[N]` / `%tag>%arr[N]`, `readable %listener` arm); `accept` blocks, so it is a top-level command (mid-pipeline it hits the pipeline fd-leak item above)
 - [ ] `setsockopt` builtin — named options on an existing fd var (`PASSCRED`, `PASSFD`, …), replacing the hardcoded `SO_PASSCRED` helper in `net.rs:5-12`
-- [x] `ftruncate` / `lseek` / `fsync` builtins on existing fd vars (`lseek` wrapper exists in `rw.rs`; add `ftruncate` / `fsync` wrappers)
 - [ ] `splice` / `copy_file_range` / `sendfile` builtins → zero-copy cat/cp between fd vars, no path re-lookup on the hot path
 - [ ] `O_TMPFILE` + `linkat` atomic file creation — write to an unlinked tempfd, `linkat` into the target dirfd only when complete, so the target path is never observable half-written (needs `linkat` wrapper + builtin)
-- [x] `statx` builtin — metadata by dirfd + relative path, superseding the `stat` / `fstat` wrappers; `AT_SYMLINK_NOFOLLOW` for TOCTOU-safe symlink checks, re-stat the same open handle after open (done: `sys::statx` wrapper (raw `SYS_statx`); `statx PATH [--dir %d] [--nofollow]` or `statx %fd` in `child/statx.rs` — the fd form re-stats the same open handle via `AT_EMPTY_PATH`, so the handle is never re-resolved by path; `--dir %d` takes the dirfd fd var, `--nofollow` stats the link itself; prints one line `kind=… size=… mode=… ino=… dev=M:m mtime=…`)
-- [x] `readlinkat` builtin — resolve symlink targets by dirfd without escaping the resolution root (pairs with `statx` for symlink-safe open) (done: `sys::statx::readlinkat` wrapper; `readlink PATH [--dir %d]` or `readlink %fd` in `child/readlink.rs` — the fd form reads the link behind the handle via an empty path, so an `O_PATH|O_NOFOLLOW` fd on the link itself works; `--dir` / `--dir=%d` share the validated fd-var form with `statx` via `child/flags.rs`; the target is printed verbatim)
 - [ ] `openat2 --path` (O_PATH) — hold a handle to a file without open permission; combine with `fstat` / `fchdir` / `faccessat2` for inspect-then-act on files the user may not be able to read (`O_PATH` is now a named `--flags` constant, so `--flags O_PATH|O_NOFOLLOW` works; the `--path` shorthand remains)
-- [x] `test`: every bash operator that takes a path also takes a `%fd` — fstat the fd var instead of stat'ing a path (done: `%var` lookup in `child/test/` for all unary file operators — kinds `-f -d -b -c -p -S -L`, `-s` size, mode bits `-g -k`, `-t` tty, permissions `-r -w -x` via `access(2)` on `/proc/self/fd/N` — plus binary `-nt -ot -ef -fdeq -fdne` via `stat_operand`; new `lstat` for `-L`, `isatty` + `openpty` wrappers in sys; see `child/test/filetest.rs` + `perm.rs` + `stat.rs`, `unsafe/sys/tests/{tty,access,pipe}.rs`)
 - [ ] `test` fdshell extras beyond bash: `-fdsize +/-N` (size compare); `openat2 --same-as %fd` (verify inode at open time instead of a separate test step)
-- [x] `fallocate` syscall wrapper + builtin (done: `sys::fallocate` wrapper; in-shell `fallocate %fd OFFSET LEN` in `child/fdops.rs` preallocating with mode 0, offset ≥ 0 and len > 0 validated; sys tests in `unsafe/sys/tests/fallocate.rs`)
 - [ ] `mkfifoat` syscall wrapper + builtin — create a fifo inside a dirfd var; underpins coprocess / message-passing scripts without temp files
 
 ### P1 — Language features
