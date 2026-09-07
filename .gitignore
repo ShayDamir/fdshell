@@ -3,3 +3,4 @@ result
 *.profraw
 PLAN.md
 /mutants.out*
+.opencode/goals
