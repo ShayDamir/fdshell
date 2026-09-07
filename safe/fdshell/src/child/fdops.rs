@@ -6,7 +6,7 @@
 //! LEN`). `lseek` prints the new offset; `ftruncate` without LENGTH truncates
 //! at the current offset; `fallocate` preallocates space.
 
-mod args;
+pub(super) mod args;
 mod parse;
 
 use crate::state::ShellState;

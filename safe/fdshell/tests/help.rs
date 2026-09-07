@@ -44,6 +44,7 @@ const BUILTINS: &[&str] = &[
     "false",
     "fchmod",
     "fdexplain",
+    "flock",
     "fsync",
     "ftruncate",
     "help",

@@ -44,6 +44,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"false", b"Exit with failure status"),
     (b"fchmod", b"Change file mode"),
     (b"fdexplain", b"Show provenance of an fd variable"),
+    (b"flock", b"Advisory lock on an fd var"),
     (b"fsync", b"Flush an fd to storage"),
     (b"ftruncate", b"Truncate a file to a length"),
     (b"help", b"List available commands"),

@@ -7,6 +7,7 @@ pub(crate) mod external;
 mod fdexplain;
 mod fdops;
 pub(crate) mod fdpass;
+mod flock;
 mod help;
 mod printf;
 mod resolve;

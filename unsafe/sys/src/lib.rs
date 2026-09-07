@@ -70,6 +70,7 @@ pub mod fallocate;
 pub mod fchdir;
 pub mod fchmod;
 pub mod fcntl;
+pub mod flock;
 pub mod fork_cell;
 pub mod fork_pidfd;
 pub mod fsync;
