@@ -53,12 +53,10 @@ fn parse_flag(bytes: &[u8], val: &ShortCStr) -> Result<i32, Report<CmdError>> {
     if let Some(hex) = bytes.strip_prefix(b"0x") {
         let h = core::str::from_utf8(hex).change_context(CmdError::Never)?;
         return i32::from_str_radix(h, 16)
-            .map_err(|_| Report::new(CmdError::SignalfdBadFlag { value: val.clone() }));
+            .change_context(CmdError::SignalfdBadFlag { value: val.clone() });
     }
     match bytes {
         b"SFD_NONBLOCK" => Ok(sys::signalfd::SFD_NONBLOCK),
-        _ => Err(Report::new(CmdError::SignalfdBadFlag {
-            value: val.clone(),
-        })),
+        _ => bail!(CmdError::SignalfdBadFlag { value: val.clone() }),
     }
 }

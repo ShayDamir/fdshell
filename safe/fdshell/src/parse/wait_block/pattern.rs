@@ -3,7 +3,7 @@ use crate::capture::Capture;
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use alloc::vec::Vec;
-use error_stack::{Report, bail, ensure};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
 
 pub(super) fn parse_pattern(
@@ -60,7 +60,7 @@ fn after(rest: &[Token]) -> Result<(WaitPattern, Vec<Capture>), Report<ParseErro
         .ok_or(ParseError::WaitMissingTimeout)?;
     let ms = ms_tok
         .parse::<usize>()
-        .map_err(|_| Report::new(ParseError::WaitInvalidTimeout))?;
+        .change_context(ParseError::WaitInvalidTimeout)?;
     ensure!(rest.len() <= 1, ParseError::WaitUnexpectedToken);
     Ok((WaitPattern::After(ms), Vec::new()))
 }

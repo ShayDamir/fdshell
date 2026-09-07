@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
 use crate::error::cmd::CmdError;
@@ -33,15 +33,13 @@ pub fn parse(
 
 fn parse_seconds(s: &ShortCStr) -> Result<i64, Report<CmdError>> {
     let b = s.as_bytes().change_context(CmdError::Never)?;
-    let n = core::str::from_utf8(b)
-        .map_err(|_| Report::new(CmdError::TimeoutBadSeconds { value: s.clone() }))?;
+    let n =
+        core::str::from_utf8(b).change_context(CmdError::TimeoutBadSeconds { value: s.clone() })?;
     let v = n
         .parse::<i64>()
-        .map_err(|_| Report::new(CmdError::TimeoutBadSeconds { value: s.clone() }))?;
+        .change_context(CmdError::TimeoutBadSeconds { value: s.clone() })?;
     if v < 0 {
-        return Err(Report::new(CmdError::TimeoutBadSeconds {
-            value: s.clone(),
-        }));
+        bail!(CmdError::TimeoutBadSeconds { value: s.clone() });
     }
     Ok(v)
 }
