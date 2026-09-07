@@ -1,7 +1,7 @@
-//! `statx` argument parsing. The path or `%var` comes from the first token
-//! (`args`, originals); the flags come from `args` too, because the `--dir`
-//! value is an fd-variable reference that must stay `%d` (in `refs` it would
-//! already be substituted to the fd number).
+//! `readlink` argument parsing. The path or `%var` comes from the first token
+//! (`args`, originals); the `--dir` flag is parsed from `args` too, because
+//! its value is an fd-variable reference that must stay `%d` (in `refs` it
+//! would already be substituted to the fd number).
 
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail, ensure};
@@ -14,17 +14,16 @@ use crate::child::flags::{dir_var, split_eq};
 
 #[cfg_attr(test, derive(Debug))]
 pub(crate) enum Target<'a> {
-    /// `statx PATH [--dir %d] [--nofollow]`
+    /// `readlink PATH [--dir %d]`
     Path {
         path: &'a CStr,
         dir: Option<ShortCStr>,
-        nofollow: bool,
     },
-    /// `statx %fd [--nofollow]` — re-stat the open handle.
-    Fd { var: ShortCStr, nofollow: bool },
+    /// `readlink %fd` — read the link behind the open handle.
+    Fd { var: ShortCStr },
 }
 
-pub(crate) fn statx_parse<'a>(
+pub(crate) fn readlink_parse<'a>(
     refs: &[&'a CStr],
     args: &[ShortCStr],
 ) -> Result<Target<'a>, Report<BuiltinError>> {
@@ -32,27 +31,22 @@ pub(crate) fn statx_parse<'a>(
         bail!(BuiltinError::Help);
     }
     let first = args.first().ok_or(BuiltinError::MissingArgument("path"))?;
-    let (nofollow, dir) = parse_flags(args)?;
+    let dir = parse_dir(args)?;
     if first.starts_with(b"%") {
         ensure!(dir.is_none(), BuiltinError::InvalidArgument("--dir"));
         let var = var_arg(args)?;
-        return Ok(Target::Fd { var, nofollow });
+        return Ok(Target::Fd { var });
     }
     let path = refs.first().ok_or(BuiltinError::MissingArgument("path"))?;
     ensure!(
         !path.to_bytes().is_empty(),
         BuiltinError::InvalidArgument("path")
     );
-    Ok(Target::Path {
-        path,
-        dir,
-        nofollow,
-    })
+    Ok(Target::Path { path, dir })
 }
 
-/// The flags after the first token: `--nofollow` and `--dir %d`.
-fn parse_flags(args: &[ShortCStr]) -> Result<(bool, Option<ShortCStr>), Report<BuiltinError>> {
-    let mut nofollow = false;
+/// The flags after the first token: `--dir %d` (or `--dir=%d`).
+fn parse_dir(args: &[ShortCStr]) -> Result<Option<ShortCStr>, Report<BuiltinError>> {
     let mut dir: Option<ShortCStr> = None;
     let mut i = 1;
     while i < args.len() {
@@ -60,10 +54,6 @@ fn parse_flags(args: &[ShortCStr]) -> Result<(bool, Option<ShortCStr>), Report<B
         let (key, val) = split_eq(arg)?;
         i += 1;
         match key {
-            b"--nofollow" => {
-                ensure!(val.is_none(), BuiltinError::InvalidArgument("--nofollow"));
-                nofollow = true;
-            }
             b"--dir" => {
                 ensure!(dir.is_none(), BuiltinError::InvalidArgument("--dir"));
                 dir = Some(match val {
@@ -78,5 +68,5 @@ fn parse_flags(args: &[ShortCStr]) -> Result<(bool, Option<ShortCStr>), Report<B
             _ => bail!(BuiltinError::InvalidArgument("flag")),
         }
     }
-    Ok((nofollow, dir))
+    Ok(dir)
 }

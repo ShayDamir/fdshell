@@ -4,7 +4,7 @@ use std::ffi::CString;
 use sys::fcntl::{AT_EMPTY_PATH, AT_SYMLINK_NOFOLLOW};
 use sys::openat2::open;
 use sys::stat::{S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
-use sys::statx::statx;
+use sys::statx::{readlinkat, statx};
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -95,4 +95,83 @@ fn regular_file_dirfd_is_enotdir() {
     .unwrap();
     let err = statx(fd.at(), c"g", 0).unwrap_err();
     assert_eq!(err.errno(), libc::ENOTDIR);
+}
+
+#[test]
+fn readlinkat_returns_the_link_target() {
+    let dir = scratch();
+    std::os::unix::fs::symlink("f", dir.join("link")).unwrap();
+    let mut buf = [0u8; 128];
+    let n = readlinkat(
+        sys::AtFd::cwd(),
+        cstr(&dir.join("link")).as_c_str(),
+        &mut buf,
+    )
+    .unwrap();
+    assert_eq!(&buf[..n], b"f");
+}
+
+#[test]
+fn readlinkat_resolves_against_dirfd() {
+    let dir = scratch();
+    std::os::unix::fs::symlink("g", dir.join("sub").join("slink")).unwrap();
+    let sub = open(
+        cstr(&dir.join("sub")).as_c_str(),
+        libc::O_RDONLY | libc::O_CLOEXEC,
+    )
+    .unwrap();
+    let mut buf = [0u8; 128];
+    let n = readlinkat(sub.at(), c"slink", &mut buf).unwrap();
+    assert_eq!(&buf[..n], b"g");
+}
+
+#[test]
+fn readlinkat_empty_path_reads_the_open_handle() {
+    let dir = scratch();
+    std::os::unix::fs::symlink("f", dir.join("link")).unwrap();
+    // O_PATH + O_NOFOLLOW keeps the fd on the link itself, not its target.
+    let fd = open(
+        cstr(&dir.join("link")).as_c_str(),
+        libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+    )
+    .unwrap();
+    let mut buf = [0u8; 128];
+    let n = readlinkat(fd.at(), c"", &mut buf).unwrap();
+    assert_eq!(&buf[..n], b"f");
+}
+
+#[test]
+fn readlinkat_empty_path_non_link_is_enoent() {
+    let dir = scratch();
+    let fd = open(
+        cstr(&dir.join("f")).as_c_str(),
+        libc::O_RDWR | libc::O_CLOEXEC,
+    )
+    .unwrap();
+    let mut buf = [0u8; 128];
+    let err = readlinkat(fd.at(), c"", &mut buf).unwrap_err();
+    // Unlike the path form (EINVAL), an empty path behind a non-link fd is
+    // reported by the kernel as ENOENT.
+    assert_eq!(err.errno(), libc::ENOENT);
+}
+
+#[test]
+fn readlinkat_non_link_is_einval() {
+    let dir = scratch();
+    let mut buf = [0u8; 128];
+    let err = readlinkat(sys::AtFd::cwd(), cstr(&dir.join("f")).as_c_str(), &mut buf).unwrap_err();
+    assert_eq!(err.errno(), libc::EINVAL);
+}
+
+#[test]
+fn readlinkat_missing_path_is_enoent() {
+    let dir = scratch();
+    let mut buf = [0u8; 128];
+    let err = readlinkat(
+        sys::AtFd::cwd(),
+        cstr(&dir.join("nope")).as_c_str(),
+        &mut buf,
+    )
+    .unwrap_err();
+    assert_eq!(err.errno(), libc::ENOENT);
 }

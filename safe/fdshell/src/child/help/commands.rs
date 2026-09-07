@@ -55,6 +55,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"pipe", b"Create pipe"),
     (b"printf", b"Format and print arguments"),
     (b"pwd", b"Print working directory"),
+    (b"readlink", b"Symlink target by path or fd"),
     (b"renameat2", b"Rename/move file"),
     (b"resolve", b"Resolve fd variables"),
     (b"statx", b"File metadata by path or fd"),

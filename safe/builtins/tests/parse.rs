@@ -5,7 +5,7 @@ use core::ffi::CStr;
 use std::ffi::CString;
 use sys::fcntl::{
     O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_NONBLOCK,
-    O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
+    O_PATH, O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
 };
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -287,6 +287,18 @@ fn pipe_flags_nofollow() {
     assert_ok(&["--flags", "O_RDONLY|O_NOFOLLOW", "x"], |cfg| {
         assert_eq!(cfg.how.flags, (O_RDONLY | O_NOFOLLOW) as u64);
     });
+}
+
+#[test]
+fn pipe_flags_path() {
+    assert_ok(&["--flags", "O_PATH|O_NOFOLLOW", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_PATH | O_NOFOLLOW) as u64);
+    });
+}
+
+#[test]
+fn pipe_flags_unknown_name() {
+    assert_invalid_arg(&["--flags", "O_BOGUS", "x"]);
 }
 
 #[test]

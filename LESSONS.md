@@ -133,3 +133,9 @@ Plain `cargo clippy -- -D warnings` does not lint `#[cfg(test)]` code, so a `sus
 
 ## Redirect source fds must be allocated above the command's highest target
 `resolve_path`/`resolve_dup` cloned sources with `F_DUPFD_CLOEXEC(0)` (lowest free fd), which can land exactly on a redirect target. The `dup2(local, target)` then no-ops and the local's `Drop` closes the target fd — silent truncation (data to fd N is lost, targets closed, multi-redirect interleave clobbers the pre-opened `open_redirect_files` temp). Fix: compute `min_fd = max(export_to)` over the whole redirect list + 1, and allocate/clone open fds (`open.rs` re-home, `resolve.rs` path/dup/var arms) strictly above it. Empirical note: the same hazard in `pipeline/child.rs` pipe clones does NOT reproduce — children inherit the low pipe-fd numbers, so a clone never lands on a file target.
+
+## `readlinkat` empty path on a non-link fd is ENOENT, not EINVAL
+The path form of `readlinkat` fails with `EINVAL` on a non-symlink, but the fd form (empty path behind an open handle) fails with `ENOENT` — so `readlink %fd` on a regular file exits 2, not 22. Don't assume both forms share an errno; assert each against real kernel behavior (C repro: `open("f", O_RDWR); readlinkat(fd, "", buf)` → ENOENT).
+
+## Tests in one binary share the process: pid-only temp paths collide
+nextest runs each test binary in its own process, but tests *within* a binary run on parallel threads sharing one pid — a scratch dir named `fdshell-foo-{pid}` is shared by every test in that binary, so one test's `Drop` can remove another test's dir mid-run (nondeterministic ENOENTs). Name per-test scratch with pid + an atomic counter (see `scratch()` in `unsafe/sys/tests/statx.rs`).

@@ -45,3 +45,25 @@ pub fn statx(dirfd: AtFd<'_>, path: &CStr, flags: i32) -> Result<Statx, SyscallE
         mtime_sec: raw.stx_mtime.tv_sec,
     })
 }
+
+/// `readlinkat(2)`: the target of the symlink at `path` relative to `dirfd`,
+/// written to `buf` without a NUL terminator; returns the target's length.
+///
+/// A 4 KiB `buf` always fits: the kernel caps a symlink target below 4096
+/// bytes. An empty `path` reads the symlink behind the open handle in
+/// `dirfd` (the `AT_EMPTY_PATH` semantics, which `readlinkat` has no flag
+/// for — the empty path implies it).
+pub fn readlinkat(dirfd: AtFd<'_>, path: &CStr, buf: &mut [u8]) -> Result<usize, SyscallError> {
+    // SAFETY: `dirfd` is AT_FDCWD or an open fd by the `AtFd` invariant;
+    // `path` is a valid NUL-terminated C string the kernel reads only;
+    // `buf` is a valid buffer of the given length.
+    let n = cvt(unsafe {
+        libc::readlinkat(
+            dirfd.as_raw(),
+            path.as_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+        ) as isize
+    })?;
+    Ok(n as usize)
+}

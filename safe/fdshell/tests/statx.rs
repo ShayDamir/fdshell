@@ -80,6 +80,16 @@ fn dir_fd_changes_resolution_base() {
         stdout(&out)
     );
     assert!(stdout(&out).contains("rc=0"), "stderr={}", stderr(&out));
+    // The inline `--dir=%d` form resolves the same way.
+    let script = "builtin openat2 --flags O_RDONLY sub %>%d; \
+                  builtin statx g --dir=%d; builtin echo rc=$?";
+    let out = run(&dir, script);
+    assert!(
+        stdout(&out).contains("kind=file size=5"),
+        "stdout={:?}",
+        stdout(&out)
+    );
+    assert!(stdout(&out).contains("rc=0"), "stderr={}", stderr(&out));
     // `g` does not exist in the CWD, so the same path without `--dir` fails.
     let out = run(&dir, "builtin statx g; builtin echo rc=$?");
     assert!(stdout(&out).contains("rc=2"), "stdout={:?}", stdout(&out));

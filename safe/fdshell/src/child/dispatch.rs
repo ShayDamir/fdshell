@@ -11,6 +11,7 @@ use super::fdexplain;
 use super::fdops;
 use super::flock;
 use super::printf;
+use super::readlink;
 use super::resolve;
 use super::simple;
 use super::statx;
@@ -44,6 +45,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"statx", statx::handle_statx),
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),
+    (b"readlink", readlink::handle_readlink),
     (b"resolve", resolve::handle_resolve),
     (b"test", test::handle_test),
     (b"[", test::handle_test),

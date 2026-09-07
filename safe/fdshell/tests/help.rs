@@ -55,6 +55,7 @@ const BUILTINS: &[&str] = &[
     "pipe",
     "printf",
     "pwd",
+    "readlink",
     "renameat2",
     "resolve",
     "statx",

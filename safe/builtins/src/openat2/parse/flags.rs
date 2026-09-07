@@ -2,7 +2,7 @@ use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::fcntl::{
     O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_DSYNC, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_NONBLOCK,
-    O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
+    O_PATH, O_RDONLY, O_RDWR, O_SYNC, O_TRUNC, O_WRONLY,
 };
 
 use crate::error::FlagParseError;
@@ -29,6 +29,7 @@ pub(crate) fn parse_open_flags(s: &CStr) -> Result<i32, Report<FlagParseError>> 
                     b"O_DSYNC" => O_DSYNC,
                     b"O_DIRECTORY" => O_DIRECTORY,
                     b"O_NOFOLLOW" => O_NOFOLLOW,
+                    b"O_PATH" => O_PATH,
                     b"O_CLOEXEC" => O_CLOEXEC,
                     b"O_SYNC" => O_SYNC,
                     _ => return Err(FlagParseError::Unknown),

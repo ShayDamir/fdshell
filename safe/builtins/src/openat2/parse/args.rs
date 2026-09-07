@@ -31,8 +31,8 @@ pub(crate) fn parse_arg<'a>(
                 .change_context(BuiltinError::InvalidArgument("flags"))
                 .attach_opaque(Suggestion(
                     "Use O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOCTTY, O_TRUNC, O_APPEND, \
-                    O_NONBLOCK, O_DSYNC, O_DIRECTORY, O_NOFOLLOW, O_CLOEXEC, O_SYNC, or a \
-                    hex value (e.g. 0x4000)",
+                    O_NONBLOCK, O_DSYNC, O_DIRECTORY, O_NOFOLLOW, O_PATH, O_CLOEXEC, O_SYNC, \
+                    or a hex value (e.g. 0x4000)",
                 ))?;
         }
         b"--mode" => {
