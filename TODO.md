@@ -49,7 +49,7 @@
 
 ## Refactoring
 
-- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `intercept/set_list.rs` (89), `child/statx/parse.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `child/dispatch.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80), `child/test/filetest.rs` (84), `sys/lib.rs` (81), `child/fdops/parse.rs` (82)
+- [ ] Files in the 80-90 line zone (STYLE.md §2.3): `parse/wait_block/pattern.rs` (90), `intercept/set_list.rs` (89), `child/statx/parse.rs` (89), `intercept/hash_cmd.rs` (88), `comment.rs` (88), `repl.rs` (88), `parse/token/step.rs` (86), `parse/if_block.rs` (82), `launch.rs` (81), `intercept/validation.rs` (81), `parse/mod.rs` (81), `child/dispatch.rs` (81), `parse/wait_block.rs` (80), `intercept/ulimit_cmd/parse.rs` (80), `child/test/filetest.rs` (84), `sys/lib.rs` (81), `child/fdops/parse.rs` (82)
 - [ ] `replacer.rs` `builtin_first` branch duplicates the substitute → seal → trace → dispatch pattern of the `builtin` keyword branch (`replacer.rs:44-59` vs `child/run.rs:36-42`) — extract a shared helper
 - [x] `ShortCStr` byte-search API (done: `find_byte` + `rfind_byte` in `shortcstr/eq.rs`, tested in `unsafe/sys/tests/shortcstr.rs`; switched the two genuine `ShortCStr` sites — `intercept/alias_cmd/args.rs` (`=`) and `busybox.rs` (`/` basename) — off `as_bytes()`. The remaining `position`/`rposition` sites operate on raw `&[u8]` input lines (`brace.rs`, `keywords.rs`, `debug.rs`, `intercept/validation.rs`) or a `CStr` (`builtins/argparse.rs`), and `parse/redirect.rs` needs the matched operator byte itself, so the `ShortCStr` API does not apply there)
 
@@ -145,5 +145,6 @@
 - [ ] aarch64/riscv64 ports (sys crate already isolates syscall numbers); static musl builds
 - [ ] Kernel feature detection with documented degradation (openat2 needs 5.6+, pidfds 5.3+)
 - [ ] Parser fuzzing
+- [ ] `wait` arm-parser paths show 0% in `nix build .#coverage` — `parse/wait_block/pattern.rs` `after()` / `arm()` / `parse_fdref()` / `parse_captures()` (incl. the `WaitInvalidTimeout` line ~63) report no hits: the 14 `wait::tests::*` unit tests run and pass, but the coverage checkPhase doesn't attribute bin-target unit-test coverage, so only integration tests drive the numbers for these three files. Add a process-level `safe/fdshell/tests/wait.rs` integration test driving `wait … readable` / `wait … after <ms>` scripts through the binary (mirroring `tests/signalfd.rs` / `tests/timeout.rs`, the files that cover the changed lines of their parsers), or fix the coverage checkPhase to include bin unit tests
 - [ ] ShellCheck-style linter (fd leaks, unset-in-branch, missing wait)
 - [ ] "Writing TOCTOU-free scripts" guide
