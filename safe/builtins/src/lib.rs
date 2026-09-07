@@ -10,6 +10,7 @@ pub mod eventfd;
 pub mod execat;
 pub mod execfd;
 pub mod fchmod;
+pub mod memfd;
 pub mod mkdirat;
 pub mod openat2;
 pub mod pipe;

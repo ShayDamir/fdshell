@@ -51,6 +51,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"import_fd", b"Import an fd from the parent"),
     (b"ls", b"List a directory's entry names"),
     (b"lseek", b"Move the offset of an fd"),
+    (b"memfd", b"Create an in-memory file by fd"),
     (b"mkdirat", b"Create directory"),
     (b"openat2", b"Open file"),
     (b"pipe", b"Create pipe"),

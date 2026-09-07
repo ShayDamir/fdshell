@@ -41,6 +41,20 @@ pub(super) fn handle_mkdirat(
     builtins::mkdirat::mkdirat_exec(&cfg, sock).map(|()| 0)
 }
 
+pub(super) fn handle_memfd(
+    _: ShortCStr,
+    refs: &[&CStr],
+    _: &[ShortCStr],
+    state: &ShellState,
+) -> Result<i32, Report<builtins::error::BuiltinError>> {
+    let sock = state
+        .shell_sock
+        .as_ref()
+        .ok_or(builtins::error::BuiltinError::SendFdFailed)?;
+    let cfg = builtins::memfd::parse::memfd_parse(refs)?;
+    builtins::memfd::memfd_exec(&cfg, sock).map(|()| 0)
+}
+
 pub(super) fn handle_openat2(
     _: ShortCStr,
     refs: &[&CStr],
