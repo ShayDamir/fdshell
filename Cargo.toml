@@ -16,4 +16,7 @@ undocumented_unsafe_blocks = "deny"
 unwrap_used = "deny"
 expect_used = "deny"
 indexing_slicing = "deny"
+map_err_ignore = "deny"
+result_unit_err = "deny"
+unused_io_amount = "deny"
 

@@ -6,7 +6,7 @@ Read [`STYLE.md`] and [`LESSONS.md`] before changing code; add new lessons there
 `resolver = "2"`; three `#![no_std]` crates: `safe/fdshell/` (bin, `forbid(unsafe_code)`, shell logic), `safe/builtins/` (lib, `forbid(unsafe_code)`, builtins), `unsafe/sys/` (lib, unsafe, syscalls — the only crate with raw fds). Safe crates never call libc. Syscall wrappers return `Result<_, SyscallError>` via `cvt()`. Platform: Linux x86_64 only.
 
 ## Lints
-Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`. Allow: `dead_code`, `clippy::todo`.
+Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`, `map_err_ignore`, `result_unit_err`, `unused_io_amount`. Allow: `dead_code`, `clippy::todo`.
 
 ## Commands
 `cargo build`; `cargo fmt`; `cargo clippy -- -D warnings`; `nix build` (→ `result/bin/fdshell`); `nix flake check --build-all` (fmt + clippy + nextest). Version from `safe/fdshell/Cargo.toml`; `git add` nix files first. `package.nix` params: `doFmt`, `doClippy`, `doTests`, `doCoverage`.

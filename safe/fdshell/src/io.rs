@@ -6,6 +6,10 @@
 /// Writer backed by standard error (fd 2).
 pub struct Stderr;
 
+// `fmt::Write::write_str` must return `fmt::Error`; the underlying
+// `SyscallError` cannot be propagated through the trait signature, only
+// discarded — see STYLE.md §4.4.
+#[allow(clippy::map_err_ignore)]
 impl core::fmt::Write for Stderr {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         sys::ERR

@@ -30,7 +30,7 @@
 4.1 Error handling is done by using custom enum types. Fallible functions use `Report` from `error_stack` to wrap those custom enums.
 4.2 Plain enum variants are preferred instead of variants with associated data. Possible exceptions - flag/argument name for InvalidFlag/InvalidArgument.
 4.3 Encapsulating one error type into another is strictly forbidden.
-4.4 Using `.map_err()` and dropping error types without propagating or handling is strictly forbidden.
+4.4 Using `.map_err()` and dropping error types without propagating or handling is strictly forbidden. Enforced by the `clippy::map_err_ignore` deny lint; the only sanctioned exceptions are `core::fmt::Write` impls whose trait signature forces `fmt::Error`, and those carry an `#[allow(clippy::map_err_ignore)]` with a rationale comment. Related deny guards: `clippy::result_unit_err` (a `()` error carries no fixable information) and `clippy::unused_io_amount` (partial read/write byte counts must not be ignored).
 4.5 Conversion of one error type to another is done via `ResultExt` trait from `error_stack` and using `Report::change_context()`.
 4.6 For custom enum types, derive `Debug` and `displaydoc::Display`, then `impl core::error::Error for Error {}`.
 4.7 Error variant description must be precise and actionable by user.

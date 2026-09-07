@@ -39,6 +39,11 @@ impl fmt::Debug for ShortCStr {
     }
 }
 
+// `fmt::Write::write_str` must return `fmt::Error`; the underlying
+// `ShortCStrError` (NUL byte) cannot be propagated through the trait
+// signature, only discarded — see STYLE.md §4.4. Reachable only when
+// a NUL byte is written, which formatting use does not do.
+#[allow(clippy::map_err_ignore)]
 impl fmt::Write for ShortCStr {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.push_checked(s.as_bytes()).map_err(|_| fmt::Error)
