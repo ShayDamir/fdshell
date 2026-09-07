@@ -55,6 +55,9 @@ A limit that must be visible to both the block executors and `$(…)` (the `nest
 ## `|` on disjoint bit flags produces equivalent mutants
 `O_WRONLY | O_CREAT | O_TRUNC` mutates `|`→`^`, which is unkillable because the O_* flags are disjoint single bits (`|` ≡ `^` ≡ `+` on them). Sum the flags with `+` instead: same value, but `+`→`-`/`*` mutants change the value and are killable by an exact-value test. See `RedirectDirection::open_flags`.
 
+## An `O_RDONLY` (== 0) flag is inert and makes a `|` flag expression unkillable
+`O_RDONLY` is `0`, so `O_RDONLY | O_DIRECTORY` ≡ `O_DIRECTORY` but carries a mutable `|`: the `|`→`^` mutant is unkillable (disjoint bits, `0 ^ X` ≡ `0 | X`) and the `|`→`&` mutant (`0 & X = 0`) still opens the same object and passes the test. The fix is the same species as "redundant open flags: drop them" — drop the `0` flag and keep only the meaningful `O_DIRECTORY`. A single flag needs no operator, so there is no equivalent mutant to chase. If two *non-zero* flags must combine, sum them with `+` instead of `|` (LESSONS: "`|` on disjoint bit flags produces equivalent mutants") so the `+`→`-`/`*` mutants change the value and are killable.
+
 ## Redundant open flags on a just-created path: drop them
 In `mkdirat_exec`, the openat2 call that re-opens the just-created directory used `(O_DIRECTORY | O_NOFOLLOW)`. Both flags are redundant: mkdirat guarantees the path is a real directory, so the open succeeds regardless. The `|`→`^` mutant was unkillable (disjoint bits, same value) and the `|`→`&` mutant (flags=0) was also unkillable (open still succeeds). The fix is to pass `0`: no flags means no redundant flags to mutate, and the code honestly reflects that the flags have no observable effect. If the flags ever do matter (e.g. to reject a symlink race), add them back with a test that exercises the failure mode.
 

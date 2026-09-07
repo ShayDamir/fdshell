@@ -10,6 +10,7 @@ pub(crate) mod fdpass;
 mod flags;
 mod flock;
 mod help;
+mod ls;
 mod printf;
 mod readlink;
 mod resolve;

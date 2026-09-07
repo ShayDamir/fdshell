@@ -10,6 +10,7 @@ use super::explain;
 use super::fdexplain;
 use super::fdops;
 use super::flock;
+use super::ls;
 use super::printf;
 use super::readlink;
 use super::resolve;
@@ -42,6 +43,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"lseek", fdops::handle_lseek),
     (b"fallocate", fdops::handle_fallocate),
     (b"flock", flock::handle_flock),
+    (b"ls", ls::handle_ls),
     (b"statx", statx::handle_statx),
     (b"exec_fd", exec_fd::handle_exec_fd),
     (b"exec_at", exec_fd::handle_exec_at),

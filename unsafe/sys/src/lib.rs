@@ -71,6 +71,7 @@ pub mod fileat;
 pub mod fileops;
 pub mod fork_cell;
 pub mod fork_pidfd;
+pub mod getdents64;
 pub mod importedfd;
 pub mod importedfd_error;
 pub mod importedfd_try;

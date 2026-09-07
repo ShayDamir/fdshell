@@ -49,6 +49,7 @@ const BUILTINS: &[&str] = &[
     "ftruncate",
     "help",
     "import_fd",
+    "ls",
     "lseek",
     "mkdirat",
     "openat2",

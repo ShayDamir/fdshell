@@ -49,6 +49,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"ftruncate", b"Truncate a file to a length"),
     (b"help", b"List available commands"),
     (b"import_fd", b"Import an fd from the parent"),
+    (b"ls", b"List a directory's entry names"),
     (b"lseek", b"Move the offset of an fd"),
     (b"mkdirat", b"Create directory"),
     (b"openat2", b"Open file"),
