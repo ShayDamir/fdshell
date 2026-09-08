@@ -1,3 +1,4 @@
+mod copy_file_range;
 mod delegated;
 pub(crate) mod dispatch;
 mod error;

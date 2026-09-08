@@ -35,6 +35,7 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
 
 pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"[", b"Test expression (alias for test)"),
+    (b"copy_file_range", b"Zero-copy copy between two fd vars"),
     (b"echo", b"Print arguments"),
     (b"eventfd", b"Counter fd that arms on non-zero"),
     (b"exec_at", b"Execute with path lookup"),

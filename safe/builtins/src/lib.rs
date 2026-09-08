@@ -5,6 +5,7 @@
 extern crate alloc;
 
 pub mod argparse;
+pub mod copy_file_range;
 pub mod error;
 pub mod eventfd;
 pub mod execat;

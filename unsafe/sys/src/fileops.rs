@@ -45,3 +45,31 @@ pub fn fsync(fd: &LocalFd) -> Result<(), SyscallError> {
     cvt(unsafe { libc::fsync(fd.as_raw()) as isize })?;
     Ok(())
 }
+
+/// Zero-copy `copy_file_range(2)`: copy up to `count` bytes from `in_fd` to
+/// `out_fd`, advancing both file offsets. Returns the number of bytes actually
+/// copied (`0` means nothing to copy). When the fd pair cannot use the kernel
+/// copy (cross-filesystem `EXDEV`, a pipe, …) the kernel returns that errno so
+/// the caller can fall back to a read/write loop.
+pub fn copy_file_range(
+    in_fd: &LocalFd,
+    out_fd: &LocalFd,
+    count: usize,
+) -> Result<usize, SyscallError> {
+    // off64_t offsets: passing `null_mut()` lets the kernel use and advance each
+    // fd's current position. The count is `size_t`; the kernel caps it to the
+    // bytes available at `in_fd` and the space left in `out_fd`.
+    // SAFETY: `in_fd` and `out_fd` are valid open fds; `copy_file_range` reads
+    // only the fd numbers and scalar arguments, no memory is dereferenced.
+    cvt(unsafe {
+        libc::copy_file_range(
+            in_fd.as_raw(),
+            core::ptr::null_mut(),
+            out_fd.as_raw(),
+            core::ptr::null_mut(),
+            count,
+            0,
+        ) as isize
+    })
+    .map(|n| n as usize)
+}

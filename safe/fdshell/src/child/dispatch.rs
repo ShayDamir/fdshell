@@ -4,6 +4,7 @@ use core::ffi::CStr;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
+use super::copy_file_range;
 use super::delegated;
 use super::exec_fd;
 use super::explain;
@@ -29,6 +30,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"pwd", simple::handle_pwd),
     (b"fchmod", delegated::handle_fchmod),
     (b"echo", simple::handle_echo),
+    (b"copy_file_range", copy_file_range::handle_copy_file_range),
     (b"explain", explain::handle_explain),
     (b"fdexplain", fdexplain::handle_fdexplain),
     (b"pipe", delegated::handle_pipe),
