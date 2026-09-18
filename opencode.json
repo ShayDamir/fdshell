@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "orchestrator",
+  "mcp": {
+    "yask": {
+      "type": "local",
+      "command": ["nix", "run", "/home/damir/js/yask", "--", "mcp"],
+      "enabled": true
+    }
+  }
+}

@@ -13,7 +13,7 @@
 2.2 Each source file except tests must not contain more than 90 lines of code (counted by `tokei`).
 2.3 Files with 80-90 lines of code must be flagged for future refactoring.
 2.4 If code requires more than 4 levels of logical depth (not counting impl block), it must be flagged for future refactoring.
-2.5 Code flagged for refactoring is placed into refactoring section in `TODO.md`.
+2.5 Code flagged for refactoring is recorder as a task for refactoring in yask fdshell project..
 2.6 Refactoring includes extracting complex logic into helper functions, extracting types/functions/impl blocks into separate files.
 2.7 `tokei` metric is authoritative, `wc -l` includes comments, empty lines etc etc.
 2.8 Unit tests must live in a separate file in a directory named after the module file (`foo.rs` → `foo/tests.rs`), declared at the end of the source file as `#[cfg(test)] mod tests;`. Inline `#[cfg(test)] mod tests { ... }` blocks are forbidden — they bloat the source file and defeat the §2.2 line limit.
@@ -79,5 +79,5 @@
 
 8.1 One line only — no body, no trailers. The rationale for a change lives in the subject.
 8.2 Capitalized present-imperative verb, no trailing period.
-8.3 Use the established shapes from `git log`, e.g. `Add <name> builtin: <semantics>`, `Catch all mutants in <target>`, `Mark <item> done in TODO`, `Fix`/`Track`/`Use`/`Preserve` `<x> so <why>`, `Refactor`/`Extract`/`Split` `<x> into <y>`, `Document <x> in README`.
+8.3 Use the established shapes from `git log`, e.g. `Add <name> builtin: <semantics>`, `Catch all mutants in <target>`, `Fix`/`Track`/`Use`/`Preserve` `<x> so <why>`, `Refactor`/`Extract`/`Split` `<x> into <y>`, `Document <x> in README`.
 8.4 One logical change per commit; join the few clauses of one topic with `;`. Keep the `: <why>` detail — with no body it is the whole rationale.
