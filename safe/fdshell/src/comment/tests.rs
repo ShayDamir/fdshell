@@ -294,7 +294,7 @@ fn excess_closers_saturate_depth() {
 }
 
 // A block-opening keyword inside a double-quoted word is data, not a nested
-// block opener (TODO.md repro: `echo "a for b"` used to leave the block open).
+// block opener (`echo "a for b"` used to leave the block open).
 #[test]
 fn quoted_keyword_does_not_open_nested_block() {
     let r = scan(b"echo \"a for b\"; done", 0);
@@ -312,7 +312,7 @@ fn backtick_keyword_does_not_open_nested_block() {
     assert!(r.closed, "for inside backticks must not count as an opener");
 }
 
-// TODO.md repro: a quoted `for` inside a `wait` arm used to count as a nested
+// a quoted `for` inside a `wait` arm used to count as a nested
 // block opener, so the `wait` was never seen as closed.
 #[test]
 fn quoted_keyword_in_wait_arm_does_not_block_closer() {

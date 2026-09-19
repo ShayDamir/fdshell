@@ -164,7 +164,7 @@ fn embedded_dollar_at_uses_first_ifs_byte_join() {
 
 #[test]
 fn mixed_quoted_token_stays_one_word() {
-    // TODO.md regression: quoted IFS inside a mixed token used to split the
+    // regression: quoted IFS inside a mixed token used to split the
     // word (one argv entry silently became two).
     let (out, err, code) = run(r#"builtin printf "[%s]" x"a b"c"#);
     assert_eq!(code, 0, "stderr={err:?}");
