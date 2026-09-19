@@ -24,8 +24,7 @@ where
 }
 
 /// A fresh shell state with no fd vars; used for error-path assertions that
-/// need no backing fd (avoiding `memfd_create`, which is unavailable in this
-/// dev container).
+/// need no backing fd.
 fn empty_state() -> ShellState {
     ShellState::new()
 }

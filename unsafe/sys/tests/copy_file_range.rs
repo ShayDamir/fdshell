@@ -2,9 +2,8 @@
 
 use sys::LocalFd;
 
-/// A fresh temp dir for one test; removed on drop. Keeps the regular-file
-/// tests independent of `memfd_create`, which is unavailable in this dev
-/// container.
+/// A fresh temp dir for one test; removed on drop. The regular-file tests
+/// exist to exercise on-disk paths.
 struct Dir(std::path::PathBuf);
 
 impl Dir {
