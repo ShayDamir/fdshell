@@ -1,7 +1,7 @@
 ---
 description: "Subagent that reviews a fdshell task after the Executor: fetches the relevant attachments, verifies the code against the plan, runs the fdshell QA checklist (STYLE.md/LESSONS.md compliance, unsafe discipline, mutation coverage), flags findings and deviations, and attaches the review as review.md."
 mode: subagent
-model: opencode/big-pickle
+#model: opencode/big-pickle
 permission:
   edit: allow
   write: allow
