@@ -137,17 +137,17 @@ fn count_must_not_overflow() {
 // Exec path (`copy_file_range_exec`): driven with real `LocalFds`.
 //
 // These create the files on the real filesystem via the openat2 / write /
-// lseek syscalls (fd-copying needs real fds; `memfd_create` is unavailable in
-// this dev container, so those fds come from openat2 rather than memfd). The
-// two files are cleaned up at the end of each test, leaving no trace behind.
+// lseek syscalls: the tests exercise regular files, so the fds come from
+// openat2 rather than memfd. The two files are cleaned up at the end of each
+// test, leaving no trace behind.
 // ---------------------------------------------------------------------------
 
 use alloc::format;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use sys::fcntl::{O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY};
+use sys::fcntl::{O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, SEEK_SET};
 use sys::fileat::unlinkat;
-use sys::rw::write_all;
+use sys::rw::{lseek, read_all, write_all};
 
 use super::copy_file_range_exec;
 use sys::AtFd;
@@ -281,6 +281,91 @@ fn count_exceeding_available_is_invalid_argument() {
         e.current_context(),
         BuiltinError::InvalidArgument("count")
     ));
+    cleanup(&src);
+    cleanup(&dst);
+}
+
+/// Create (or truncate) `path` containing `bytes`, opened read-write at
+/// offset 0 — a pre-filled destination the restore path must undo.
+fn dest_with(path: &str, bytes: &[u8]) -> LocalFd {
+    let fd = open(path, O_RDWR | O_CREAT | O_TRUNC);
+    write_all(&fd, bytes).unwrap();
+    lseek(&fd, 0, SEEK_SET).unwrap();
+    fd
+}
+
+/// The current offset of `fd`.
+fn offset_of(fd: &LocalFd) -> i64 {
+    lseek(fd, 0, sys::fcntl::SEEK_CUR).unwrap()
+}
+
+/// Re-open `path` read-only and read its whole content (tests stay small).
+fn contents(path: &str) -> Vec<u8> {
+    let fd = open(path, O_RDONLY);
+    let mut buf = [0u8; 256];
+    let n = read_all(&fd, &mut buf).unwrap();
+    buf.iter().take(n).copied().collect()
+}
+
+/// A `COUNT` larger than the available bytes fails with `count`, and the
+/// destination is left unchanged: size truncated back, offset restored.
+#[test]
+fn short_exact_copy_restores_size_and_offset() {
+    let src = unique("cfra_src");
+    let dst = unique("cfra_dst");
+    let in_fd = source(&src, b"hello world");
+    let out_fd = dest_with(&dst, b"hi");
+    let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
+    assert!(is(&e, "count"));
+    assert_eq!(offset_of(&out_fd), 0);
+    assert_eq!(contents(&dst), b"hi");
+    cleanup(&src);
+    cleanup(&dst);
+}
+
+/// A short exact copy started at a non-zero destination offset restores that
+/// offset and truncates the file back to its pre-copy size.
+#[test]
+fn short_exact_copy_restores_nonzero_offset() {
+    let src = unique("cfra_src");
+    let dst = unique("cfra_dst");
+    let in_fd = source(&src, b"hello world");
+    let out_fd = dest_with(&dst, b"0123456789");
+    lseek(&out_fd, 5, SEEK_SET).unwrap();
+    let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
+    assert!(is(&e, "count"));
+    assert_eq!(offset_of(&out_fd), 5);
+    assert_eq!(contents(&dst), b"0123456789");
+    cleanup(&src);
+    cleanup(&dst);
+}
+
+/// A `COUNT` copy into a destination the kernel copy cannot write to
+/// (`/dev/null`, like a pipe) is a `copy_file_range` syscall failure — the
+/// syscall is rejected before any copy, so no restore (and no `count` error)
+/// is reached.
+#[test]
+fn copy_to_dev_null_is_syscall_error() {
+    let src = unique("cfra_src");
+    let in_fd = source(&src, b"hello world");
+    let out_fd = open("/dev/null", O_WRONLY);
+    let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
+    assert!(matches!(e.current_context(), BuiltinError::Syscall));
+    cleanup(&src);
+}
+
+/// An empty source with a `COUNT` fails with `count`; the destination is
+/// left unchanged (a no-op restore).
+#[test]
+fn empty_source_with_count_is_count_error() {
+    let src = unique("cfra_src");
+    let dst = unique("cfra_dst");
+    let in_fd = source(&src, b"");
+    let out_fd = dest_with(&dst, b"xy");
+    let e = copy_file_range_exec(&cfg(Some(5)), &in_fd, &out_fd).unwrap_err();
+    assert!(is(&e, "count"));
+    assert_eq!(offset_of(&out_fd), 0);
+    assert_eq!(contents(&dst), b"xy");
     cleanup(&src);
     cleanup(&dst);
 }
