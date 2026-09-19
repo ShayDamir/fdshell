@@ -27,6 +27,16 @@ fn is_cmd_subst_minimal_backtick() {
 }
 
 #[test]
+fn is_arith_requires_both_ends() {
+    // Kill the && → || mutant: a word matching only one end must not be
+    // arithmetic (e.g. `for i in hello))` must not evaluate `hello))`).
+    assert!(!is_arith(b"hello"));
+    assert!(!is_arith(b"$((1+1")); // prefix only
+    assert!(!is_arith(b"hello))")); // suffix only
+    assert!(is_arith(b"$((1+1))")); // both ends
+}
+
+#[test]
 fn split_whitespace_splits_on_all_whitespace_types() {
     // Mutant MISSED 8,9: replace || with && in split_whitespace line 46
     // If || → &&, no single byte can be both space AND tab simultaneously

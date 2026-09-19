@@ -1287,6 +1287,21 @@ fn paren_trailing_escape_in_quotes_is_error() {
 }
 
 #[test]
+fn dollar_paren_arith_unclosed_is_error() {
+    // `$((` routes to the arithmetic body scan (depth 2), which needs both
+    // closing parens; a missing one is `UnclosedParen`, not a command
+    // substitution.
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"$((1+1");
+    let mut cache = HashMap::new();
+    let res = substitute_arg(&arg, &[], &mut cache, &cell);
+    assert!(matches!(
+        res.unwrap_err().current_context(),
+        crate::error::resolve::ResolveError::UnclosedParen
+    ));
+}
+
+#[test]
 fn dollar_underscore_expands_to_last_arg_var() {
     let cell = dummy_cell();
     cell.borrow_mut()

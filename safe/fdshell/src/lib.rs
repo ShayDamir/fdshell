@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod alias_expand;
 mod app;
+mod arith;
 mod brace;
 pub mod busybox;
 mod capture;

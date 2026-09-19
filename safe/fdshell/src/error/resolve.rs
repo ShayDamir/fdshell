@@ -15,6 +15,14 @@ pub(crate) enum ResolveError {
     UnclosedParen,
     /// index or value too large for type
     TooLarge,
+    /// arithmetic expression has a syntax error
+    ArithSyntax,
+    /// division or modulo by zero in arithmetic expression
+    ArithDivZero,
+    /// variable {var} is not an integer
+    ArithNotInteger { var: ShortCStr },
+    /// variable {var} refers to itself (circular reference)
+    ArithCircular { var: ShortCStr },
     /// resolution failed
     Resolve,
     /// impossible error state (should never occur)

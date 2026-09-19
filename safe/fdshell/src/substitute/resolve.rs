@@ -5,7 +5,8 @@ use crate::state::ShellState;
 use sys::ShortCStr;
 
 /// Value of `name` in the shell's strings, then the inherited environment.
-pub(super) fn var_value<'a>(name: &'a ShortCStr, state: &'a ShellState) -> Option<&'a ShortCStr> {
+/// `crate::arith` resolves arithmetic variables through the same lookup.
+pub(crate) fn var_value<'a>(name: &'a ShortCStr, state: &'a ShellState) -> Option<&'a ShortCStr> {
     state.strings.get(name).map(|v| &v.value).or_else(|| {
         state
             .environ

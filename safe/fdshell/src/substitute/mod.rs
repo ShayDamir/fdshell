@@ -6,8 +6,9 @@ mod param_op;
 mod paren;
 mod percent;
 mod positional;
-mod resolve;
+pub(crate) mod resolve;
 mod split;
+mod subst_paren;
 mod tilde;
 use alloc::vec::Vec;
 

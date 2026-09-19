@@ -1,4 +1,4 @@
-//! Single-argument substitution — handles ~, %, $(), and $.
+//! Single-argument substitution — handles ~, %, $(), $((…)), and $.
 
 use alloc::vec::Vec;
 use core::cell::Cell;
@@ -8,7 +8,7 @@ use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-use super::mask::{Counting, push_byte, push_expanded, realign};
+use super::mask::{Counting, push_byte, realign};
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
@@ -64,10 +64,13 @@ pub(crate) fn substitute_arg(
             }
             b'$' if peek.peek() == Some(&b'(') => {
                 peek.next();
-                let inner = crate::substitute::paren::read_paren_expr(&mut peek)?;
-                let expanded = crate::cmd_subst::run_and_capture(&inner, cell)
-                    .change_context(ResolveError::Resolve)?;
-                push_expanded(&mut out, &mut out_mask, &expanded, quoted)?;
+                super::subst_paren::handle_dollar_paren(
+                    &mut peek,
+                    cell,
+                    &mut out,
+                    &mut out_mask,
+                    quoted,
+                )?;
                 idx = consumed.get();
             }
             b'$' => {

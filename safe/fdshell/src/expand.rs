@@ -15,7 +15,9 @@ pub(crate) fn expand_for_words(
     let mut out = Vec::new();
     for word in words {
         let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
-        if is_cmd_subst(bs) {
+        if is_arith(bs) {
+            out.push(expand_arith_word(bs, text, cell)?);
+        } else if is_cmd_subst(bs) {
             let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)
                 .change_context(ResolveError::Resolve)?;
             for w in split_whitespace(&expanded)? {
@@ -32,6 +34,26 @@ pub(crate) fn expand_for_words(
         }
     }
     Ok(out)
+}
+
+/// Whole-word `$((expr))` in a for list: evaluate in-process; the decimal
+/// result is one word (no splitting, unlike command substitution).
+fn expand_arith_word(
+    bs: &[u8],
+    text: &ScriptText,
+    cell: &ForkCell<ShellState>,
+) -> Result<ImportedStr, Report<ResolveError>> {
+    let body = bs.get(3..bs.len() - 2).unwrap_or(b"");
+    let value = crate::arith::eval(body, cell).change_context(ResolveError::Resolve)?;
+    let rendered = crate::arith::render(value)?;
+    Ok(ImportedStr::new(
+        rendered,
+        Trace::at(text.start, Origin::Shell),
+    ))
+}
+
+fn is_arith(bs: &[u8]) -> bool {
+    bs.len() >= 4 && bs.starts_with(b"$((") && bs.ends_with(b"))")
 }
 
 fn is_cmd_subst(bs: &[u8]) -> bool {
