@@ -17,6 +17,7 @@
 2.6 Refactoring includes extracting complex logic into helper functions, extracting types/functions/impl blocks into separate files.
 2.7 `tokei` metric is authoritative, `wc -l` includes comments, empty lines etc etc.
 2.8 Unit tests must live in a separate file in a directory named after the module file (`foo.rs` → `foo/tests.rs`), declared at the end of the source file as `#[cfg(test)] mod tests;`. Inline `#[cfg(test)] mod tests { ... }` blocks are forbidden — they bloat the source file and defeat the §2.2 line limit.
+2.9 Module `foo::bar` is always located at `src/foo/bar.rs` (sibling file layout); `src/foo/bar/mod.rs` is forbidden. Submodules and the test file (§2.8) of such a module live in the directory next to the module file, e.g. `src/foo/bar/baz.rs` and `src/foo/bar/tests.rs`. Crate roots remain `src/lib.rs` (library) / `src/main.rs` (binary).
 
 ## 3 Use directives
 

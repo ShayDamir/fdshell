@@ -1,6 +1,6 @@
 //! Intercepted command names — the shell-command half of the `help` output.
 //!
-//! Every command matched in `intercept/mod.rs::try_intercept` (except the
+//! Every command matched in `intercept.rs::try_intercept` (except the
 //! `quit`/`.` aliases of `exit`/`source`) must appear here so `help` and its
 //! tests can enumerate them.
 

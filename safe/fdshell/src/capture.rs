@@ -13,7 +13,7 @@ pub use commit::{CapturedFd, capture_and_commit};
 #[cfg(test)]
 mod tests;
 
-// Clone required by pipeline/mod.rs (cmd.captures.clone()).
+// Clone required by pipeline.rs (cmd.captures.clone()).
 // Debug + PartialEq are test-only — quarantined behind cfg_attr.
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq))]

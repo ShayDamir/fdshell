@@ -945,7 +945,7 @@ fn percent_hyphen_after_percent_is_literal() {
     assert_eq!(res.as_bytes().unwrap(), b"%-testfd");
 }
 
-// Mutant-catching tests for substitute/mod.rs (MISSED 25-31)
+// Mutant-catching tests for substitute.rs (MISSED 25-31)
 #[test]
 fn dollar_at_fq_true_expands_separate_args() {
     // Regression: quoted "$@" must expand to separate arguments (not joined)

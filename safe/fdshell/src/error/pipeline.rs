@@ -1,4 +1,4 @@
-//! Pipeline execution errors (pipeline/mod.rs).
+//! Pipeline execution errors (pipeline.rs).
 
 /// [PipelineError] Pipeline execution errors
 #[derive(displaydoc::Display, Debug)]

@@ -1,7 +1,7 @@
 //! The `help` command's two lists, kept in sync with the dispatch tables:
 //!
 //! - `SHELL_CMDS`: commands the shell handles in-process (the `intercept`
-//!   table in `intercept/mod.rs` plus the parse-level `umask`/`unset`).
+//!   table in `intercept.rs` plus the parse-level `umask`/`unset`).
 //! - `BUILTINS`: the `DISPATCH` table in `child/dispatch.rs` plus the
 //!   `import_fd`/`export_fd` fd-pass builtins in `child/fdpass.rs`.
 //!

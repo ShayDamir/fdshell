@@ -1,4 +1,4 @@
-//! cd command errors (cd/mod.rs).
+//! cd command errors (cd.rs).
 
 /// [CdError] Directory change errors
 #[derive(displaydoc::Display, Debug)]
