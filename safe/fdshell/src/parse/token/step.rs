@@ -25,9 +25,11 @@ pub(super) fn unquoted(
                 st.start,
                 st.pos - 1,
                 st.fq,
+                st.word_quoted,
                 &mut st.mask,
             );
             st.fq = false;
+            st.word_quoted = false;
             st.word_started = false;
             st.start = st.pos;
             if needs_sep {
@@ -41,10 +43,12 @@ pub(super) fn unquoted(
                 &mut st.cur,
                 st.start,
                 st.fq,
+                st.word_quoted,
                 st.pos,
                 &mut st.mask,
             )? {
                 st.fq = false;
+                st.word_quoted = false;
                 st.word_started = false;
             }
         }
@@ -52,6 +56,7 @@ pub(super) fn unquoted(
             if st.cur.is_empty() {
                 st.fq = true;
             }
+            st.word_quoted = true;
             st.in_quotes = true;
             st.word_started = true;
             st.quote_start = Some(st.pos - 1);

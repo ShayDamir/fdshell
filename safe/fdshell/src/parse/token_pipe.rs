@@ -13,6 +13,7 @@ pub(crate) fn handle_pipe(
     cur: &mut ShortCStr,
     token_start: usize,
     token_fully_quoted: bool,
+    word_quoted: bool,
     pos: usize,
     mask: &mut Vec<bool>,
 ) -> Result<bool, Report<ParseError>> {
@@ -23,7 +24,15 @@ pub(crate) fn handle_pipe(
         mask.push(false);
         Ok(false)
     } else {
-        emit_token(tokens, cur, token_start, pos - 1, token_fully_quoted, mask);
+        emit_token(
+            tokens,
+            cur,
+            token_start,
+            pos - 1,
+            token_fully_quoted,
+            word_quoted,
+            mask,
+        );
         tokens.push((c"|".into(), pos - 1, pos, false, Vec::new()));
         Ok(true)
     }

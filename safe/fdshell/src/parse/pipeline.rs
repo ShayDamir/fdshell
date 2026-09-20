@@ -18,6 +18,7 @@ pub fn parse_pipeline(raw: &[Token], set_at: Position) -> Result<ParsedLine, Rep
             commands.push(parse_command(
                 &super::tokens_only(cmd_tokens),
                 super::fully_quoted_only(cmd_tokens),
+                super::word_quoted_only(cmd_tokens),
                 super::quote_masks_only(cmd_tokens),
                 set_at,
             )?);
@@ -31,6 +32,7 @@ pub fn parse_pipeline(raw: &[Token], set_at: Position) -> Result<ParsedLine, Rep
     commands.push(parse_command(
         &super::tokens_only(cmd_tokens),
         super::fully_quoted_only(cmd_tokens),
+        super::word_quoted_only(cmd_tokens),
         super::quote_masks_only(cmd_tokens),
         set_at,
     )?);

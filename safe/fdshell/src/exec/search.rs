@@ -6,6 +6,11 @@ use sys::{LocalFd, ShortCStr};
 use crate::error::child_process::ChildProcessError;
 
 fn search_path_str(bin: &ShortCStr) -> Result<ShortCStr, Report<ChildProcessError>> {
+    // An empty name resolves to no file: `dir/` is openable, so without this
+    // the PATH search would "find" a directory and fail later in execveat.
+    if bin.is_empty() {
+        bail!(ChildProcessError::NotFound(bin.clone()));
+    }
     let path_str = sys::env::getenv(c"PATH").unwrap_or(c"/usr/local/bin:/usr/bin:/bin".into());
     let slash: ShortCStr = c"/".into();
     for dir in path_str.split(b':') {

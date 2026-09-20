@@ -1,6 +1,6 @@
 mod step;
 
-use super::Token;
+use super::{Token, emit::emit_token};
 use crate::error::parse::{ParseError, report_unbalanced_quote};
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -40,6 +40,9 @@ pub(super) struct State {
     pub(super) in_quotes: bool,
     pub(super) quote_start: Option<usize>,
     pub(super) fq: bool,
+    /// The current word contained double quotes, so it counts as one word
+    /// even when it accumulated no bytes (e.g. `""`).
+    pub(super) word_quoted: bool,
     pub(super) word_started: bool,
     pub(super) start: usize,
     pub(super) pos: usize,
@@ -54,6 +57,7 @@ impl State {
             in_quotes: false,
             quote_start: None,
             fq: false,
+            word_quoted: false,
             word_started: false,
             start: 0,
             pos: 0,
@@ -65,10 +69,15 @@ impl State {
         if self.in_quotes {
             return Err(report_unbalanced_quote(line, self.quote_start.unwrap_or(0)));
         }
-        if !self.cur.is_empty() {
-            self.tokens
-                .push((self.cur, self.start, line.len(), self.fq, self.mask));
-        }
+        emit_token(
+            &mut self.tokens,
+            &mut self.cur,
+            self.start,
+            line.len(),
+            self.fq,
+            self.word_quoted,
+            &mut self.mask,
+        );
         Ok(self.tokens)
     }
 }

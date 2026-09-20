@@ -2114,8 +2114,102 @@ fn tokenize_dollar_paren_not_fully_quoted() {
 
 #[test]
 fn tokenize_empty_adjacent_quotes() {
+    // Adjacent empty quotes are one quoted empty word, not nothing.
     let tokens = token::tokenize(b"\"\"\"\"").unwrap();
-    assert_eq!(tokens.len(), 0);
+    assert_eq!(tokens.len(), 1);
+    assert!(tokens[0].0.is_empty());
+    assert!(tokens[0].3);
+    assert!(tokens[0].4.is_empty());
+}
+
+#[test]
+fn tokenize_empty_quotes_are_one_empty_token() {
+    let tokens = token::tokenize(b"\"\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert!(tokens[0].0.is_empty());
+    assert!(tokens[0].3, "a bare `\"\"` word is fully quoted");
+    assert!(tokens[0].4.is_empty());
+}
+
+#[test]
+fn tokenize_empty_quote_then_word() {
+    let tokens = token::tokenize(b"\"\" x").unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert!(tokens[0].0.is_empty());
+    assert!(tokens[0].3);
+    assert!(tokens[0].4.is_empty());
+    assert_eq!(tokens[1].0, c"x".into());
+    assert_eq!(tokens[1].4, vec![false]);
+}
+
+#[test]
+fn tokenize_empty_quote_before_separators() {
+    // The flag resets at separators, so a later unquoted word is unaffected.
+    let tokens = token::tokenize(b"\"\"; x").unwrap();
+    assert_eq!(tokens.len(), 3);
+    assert!(tokens[0].0.is_empty());
+    assert!(tokens[0].3);
+    assert_eq!(tokens[1].0, c";".into());
+    assert_eq!(tokens[2].0, c"x".into());
+    assert!(!tokens[2].3);
+}
+
+#[test]
+fn tokenize_dollar_paren_alone_stays_one_token() {
+    // Unchanged: a `$()` word is literal text at tokenization time.
+    let tokens = token::tokenize(b"$(true)").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"$(true)".into());
+    assert!(!tokens[0].3);
+}
+
+#[test]
+fn tokenize_quoted_dollar_paren_is_all_true_mask() {
+    // Unchanged: the quotes protect every byte, mask is all-true.
+    let tokens = token::tokenize(b"\"$(true)\"").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].0, c"$(true)".into());
+    assert!(tokens[0].3);
+    assert_eq!(tokens[0].4, vec![true; 7]);
+}
+
+#[test]
+fn parse_empty_quoted_arg_kept_with_empty_mask() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd \"\" x").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.command, c"cmd".into());
+    assert_eq!(cmd.args, vec![c"".into(), c"x".into()]);
+    assert_eq!(cmd.args_mask, vec![vec![], vec![false]]);
+}
+
+#[test]
+fn parse_empty_quoted_command_is_empty_command() {
+    // A leading `""` is an empty command word, not a silent skip.
+    let ParsedLine::Cmd(cmd) = parse(b"\"\" true").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.command.is_empty());
+    assert_eq!(cmd.args, vec![c"true".into()]);
+}
+
+#[test]
+fn parse_here_string_empty_quoted_word() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<\"\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"")]);
+    assert!(cmd.args.is_empty());
+}
+
+#[test]
+fn parse_here_string_empty_quoted_word_keeps_later_args() {
+    // `""` is the here-string word; `b` stays an argument.
+    let ParsedLine::Cmd(cmd) = parse(b"echo a <<<\"\" b").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"")]);
+    assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
 }
 
 #[test]

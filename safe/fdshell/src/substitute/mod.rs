@@ -61,9 +61,12 @@ pub fn substitute_args(
     Ok(result)
 }
 
-/// A word is fully quoted when every byte was consumed inside double quotes.
+/// A word is fully quoted when every byte was consumed inside double quotes,
+/// or when the word is empty — an empty mask only arises from quoted
+/// material (a quoted empty word like `""`, or a quoted expansion that
+/// produced nothing), which is one word even when empty.
 fn fully_quoted(mask: &[bool]) -> bool {
-    !mask.is_empty() && mask.iter().all(|&q| q)
+    mask.is_empty() || mask.iter().all(|&q| q)
 }
 
 #[cfg(test)]

@@ -129,6 +129,20 @@ fn resolve_path_missing_dot_slash() {
     teardown(&dir);
 }
 
+#[test]
+fn resolve_path_empty_name_is_not_found() {
+    // A bare PATH directory is openable, so an empty name must not resolve to
+    // one; it fails like any unknown command.
+    let report = match resolve_path(&ShortCStr::new(), &HashMap::new()) {
+        Err(report) => report,
+        Ok(_) => panic!("expected Err"),
+    };
+    assert!(matches!(
+        report.current_context(),
+        ChildProcessError::NotFound(_)
+    ));
+}
+
 // -- exec tests (fork + exec_fd) -- sequential in one test to avoid races
 
 #[test]

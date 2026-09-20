@@ -76,6 +76,15 @@ fn here_string_empty_word_is_one_newline() {
 }
 
 #[test]
+fn here_string_empty_quoted_word_keeps_later_args() {
+    // `""` is the here-string word, not a no-op: `b` stays an argument
+    // (bash: `echo a <<<"" b` → `a b`).
+    let (out, _err, code) = run("echo a <<<\"\" b");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a b\n");
+}
+
+#[test]
 fn here_string_with_builtin_command() {
     // printf does not read stdin, but the redirect must apply without error.
     let (out, _err, code) = run("printf \"%s\" a <<<hi");

@@ -42,10 +42,11 @@ use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::ShortCStr;
 
-/// A token: its unquoted word, the byte range `(start, end)` of its raw text,
-/// whether it was fully quoted, and the per-byte quote mask (parallel to the
-/// word; `true` marks bytes that were inside double quotes and are protected
-/// from IFS word splitting).
+/// A token: its unquoted word (empty for a quoted empty word such as `""`),
+/// the byte range `(start, end)` of its raw text, whether it was fully
+/// quoted, and the per-byte quote mask (parallel to the word; `true` marks
+/// bytes that were inside double quotes and are protected from IFS word
+/// splitting).
 pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>);
 
 fn tokens_only(tokens: &[Token]) -> Vec<ShortCStr> {
@@ -60,6 +61,16 @@ fn quote_masks_only(tokens: &[Token]) -> Vec<Vec<bool>> {
     tokens
         .iter()
         .map(|(_, _, _, _, mask)| mask.clone())
+        .collect()
+}
+
+/// Whether each word contained double quotes: its raw span is then longer
+/// than the word itself (quote boundaries contribute raw bytes, never word
+/// bytes).
+fn word_quoted_only(tokens: &[Token]) -> Vec<bool> {
+    tokens
+        .iter()
+        .map(|(t, start, end, _, _)| end - start > t.len())
         .collect()
 }
 
@@ -85,10 +96,12 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     }
 
     let fully_quoted = fully_quoted_only(&raw);
+    let word_quoted = word_quoted_only(&raw);
     let quote_masks = quote_masks_only(&raw);
     Ok(ParsedLine::Cmd(command::parse_command(
         &tokens,
         fully_quoted,
+        word_quoted,
         quote_masks,
         text.start,
     )?))

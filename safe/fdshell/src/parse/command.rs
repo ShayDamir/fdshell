@@ -9,6 +9,7 @@ use sys::ShortCStr;
 pub fn parse_command(
     tokens: &[ShortCStr],
     fully_quoted: Vec<bool>,
+    word_quoted: Vec<bool>,
     quote_masks: Vec<Vec<bool>>,
     set_at: Position,
 ) -> Result<CommandLine, Report<ParseError>> {
@@ -28,10 +29,13 @@ pub fn parse_command(
     let command = iter.next().ok_or(ParseError::ExpectedCommand)?.clone();
     let mut fq_iter = fully_quoted.into_iter();
     fq_iter.next();
+    let mut word_quoted_iter = word_quoted.into_iter();
+    word_quoted_iter.next();
     let mut mask_iter = quote_masks.into_iter();
     mask_iter.next();
     if builtin_kw {
         fq_iter.next();
+        word_quoted_iter.next();
         mask_iter.next();
     }
     super::command_args::finish_command(
@@ -39,6 +43,7 @@ pub fn parse_command(
         command,
         &mut iter,
         &mut fq_iter,
+        &mut word_quoted_iter,
         &mut mask_iter,
         set_at,
     )

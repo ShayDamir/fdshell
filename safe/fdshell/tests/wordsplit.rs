@@ -215,3 +215,79 @@ fn quoted_middle_of_word_keeps_ifs_and_splits_around_it() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[a b][c]");
 }
+
+#[test]
+fn empty_quoted_word_counts_as_positional() {
+    let (out, _err, code) = run(r#"set -- a "" b; echo $#"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "3\n");
+}
+
+#[test]
+fn quoted_dollar_at_preserves_empty_positional() {
+    let (out, _err, code) = run(r#"set -- a "" b; printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[]\n[b]\n");
+}
+
+#[test]
+fn unquoted_dollar_at_drops_empty_positional() {
+    // Unquoted $@ word-splits each positional; empty ones vanish (bash).
+    let (out, _err, code) = run(r#"set -- a "" b; printf "[%s] " $@; echo"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a] [b] \n");
+}
+
+#[test]
+fn unquoted_dollar_at_reassignment_drops_empty_positional() {
+    // Guard: `set -- $@` re-splits the positionals, so the empty one is lost.
+    let (out, _err, code) = run(r#"set -- a "" b; set -- $@; echo $#"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "2\n");
+}
+
+#[test]
+fn quoted_dollar_star_keeps_empty_element() {
+    // `a` + sep + `` + sep + `b` → two spaces between `a` and `b`.
+    let (out, _err, code) = run(r#"set -- a "" b; printf "[%s] " "$*"; echo"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a  b] \n");
+}
+
+#[test]
+fn empty_quoted_arg_stays_one_empty_word() {
+    let (out, _err, code) = run(r#"printf "[%s]\n" "" x"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n[x]\n");
+}
+
+#[test]
+fn empty_quoted_arg_builtin_form_stays_one_empty_word() {
+    let (out, _err, code) = run(r#"builtin printf "[%s]\n" "" x"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n[x]\n");
+}
+
+#[test]
+fn for_list_keeps_empty_quoted_word() {
+    let (out, _err, code) = run(r#"for w in "" x; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n[x]\n");
+}
+
+#[test]
+fn shift_past_empty_first_positional() {
+    let (out, _err, code) = run(r#"set -- "" a b; shift; printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[b]\n");
+}
+
+#[test]
+fn empty_quoted_command_fails_like_unknown_command() {
+    // `"" cmd` no longer silently runs `cmd`; the empty command word is
+    // unresolvable (bash: `: command not found`, exit 127).
+    let (out, err, code) = run(r#""" true"#);
+    assert_ne!(code, 0);
+    assert!(err.contains("not found"), "stderr={err:?}");
+    assert!(out.is_empty());
+}
