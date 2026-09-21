@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::ffi::CStr;
 
 use crate::shortcstr::{INLINE_CAP, INLINE_MAX, InlineSize, ShortCStr, ShortCStrError};
 
@@ -27,5 +28,11 @@ impl ShortCStr {
             offset: 0,
             length,
         }))
+    }
+}
+
+impl From<&'static CStr> for ShortCStr {
+    fn from(s: &'static CStr) -> Self {
+        ShortCStr::Static(s, 0, s.count_bytes())
     }
 }

@@ -1,94 +1,83 @@
 use alloc::vec::Vec;
 
-use super::super::{
-    backtick::read_backtick, comment::skip_comment, emit::emit_token, token_pipe::handle_pipe,
-    token_subst::read_dollar_paren,
-};
+use super::super::comment::skip_comment;
 use super::State;
 use crate::error::parse::ParseError;
 use error_stack::{Report, ResultExt};
 
-/// Handle one unquoted byte of the line, updating the token state.
-pub(super) fn unquoted(
-    b: u8,
-    st: &mut State,
-    line: &[u8],
-    bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
-) -> Result<(), Report<ParseError>> {
-    match b {
-        b' ' | b'\t' | b';' | b'\n' | b')' => {
-            let needs_sep = b == b';' || b == b'\n' || b == b')';
-            let sep = if b == b')' { c")" } else { c";" };
-            emit_token(
-                &mut st.tokens,
-                &mut st.cur,
-                st.start,
-                st.pos - 1,
-                st.fq,
-                st.word_quoted,
-                &mut st.mask,
-            );
-            st.fq = false;
-            st.word_quoted = false;
-            st.word_started = false;
-            st.start = st.pos;
-            if needs_sep {
-                st.tokens
-                    .push((sep.into(), st.pos - 1, st.pos, false, Vec::new()));
+impl State {
+    /// Handle one unquoted byte of the line, updating the token state.
+    pub(super) fn unquoted(
+        &mut self,
+        b: u8,
+        line: &[u8],
+        bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    ) -> Result<(), Report<ParseError>> {
+        match b {
+            b' ' | b'\t' | b';' | b'\n' | b')' => {
+                let needs_sep = b == b';' || b == b'\n' || b == b')';
+                let sep = if b == b')' { c")" } else { c";" };
+                self.emit(self.pos - 1);
+                self.word_reset();
+                self.start = self.pos;
+                if needs_sep {
+                    self.tokens
+                        .push((sep.into(), self.pos - 1, self.pos, false, Vec::new()));
+                }
+            }
+            b'|' => {
+                if self.pipe_token()? {
+                    self.word_reset();
+                }
+            }
+            b'"' => {
+                if self.cur.is_empty() {
+                    self.fq = true;
+                }
+                self.word_quoted = true;
+                self.in_quotes = true;
+                self.word_started = true;
+                self.quote_start = Some(self.pos - 1);
+            }
+            b'$' if bytes.peek() == Some(&b'(') => {
+                self.word_start();
+                self.read_dollar_paren(bytes, line)?;
+            }
+            b'`' => {
+                self.word_start();
+                self.read_backtick(bytes, line)?;
+            }
+            // `#` starts a comment only at the beginning of a word; inside a
+            // word it is a literal byte (colors, URLs, `${#var}`, …).
+            b'#' if !self.word_started => {
+                // No token has accumulated yet, so there is nothing to emit.
+                let consumed = skip_comment(bytes);
+                self.pos += consumed - 1;
+                self.fq = false;
+                self.word_started = false;
+                self.start = self.pos;
+            }
+            _ => {
+                self.word_start();
+                self.cur
+                    .push_byte(b)
+                    .change_context(ParseError::InvalidChar { ch: 0 })?;
+                self.mask.push(false);
             }
         }
-        b'|' => {
-            if handle_pipe(
-                &mut st.tokens,
-                &mut st.cur,
-                st.start,
-                st.fq,
-                st.word_quoted,
-                st.pos,
-                &mut st.mask,
-            )? {
-                st.fq = false;
-                st.word_quoted = false;
-                st.word_started = false;
-            }
-        }
-        b'"' => {
-            if st.cur.is_empty() {
-                st.fq = true;
-            }
-            st.word_quoted = true;
-            st.in_quotes = true;
-            st.word_started = true;
-            st.quote_start = Some(st.pos - 1);
-        }
-        b'$' if bytes.peek() == Some(&b'(') => {
-            st.fq = false;
-            st.word_started = true;
-            read_dollar_paren(line, &mut st.cur, &mut st.mask, bytes, &mut st.pos)?;
-        }
-        b'`' => {
-            st.fq = false;
-            st.word_started = true;
-            read_backtick(line, &mut st.cur, &mut st.mask, bytes, &mut st.pos)?;
-        }
-        // `#` starts a comment only at the beginning of a word; inside a
-        // word it is a literal byte (colors, URLs, `${#var}`, …).
-        b'#' if !st.word_started => {
-            // No token has accumulated yet, so there is nothing to emit.
-            let consumed = skip_comment(bytes);
-            st.pos += consumed - 1;
-            st.fq = false;
-            st.word_started = false;
-            st.start = st.pos;
-        }
-        _ => {
-            st.fq = false;
-            st.word_started = true;
-            st.cur
-                .push_byte(b)
-                .change_context(ParseError::InvalidChar { ch: 0 })?;
-            st.mask.push(false);
-        }
+        Ok(())
     }
-    Ok(())
+
+    /// Word state after a separator: the next byte starts a fresh word.
+    fn word_reset(&mut self) {
+        self.fq = false;
+        self.word_quoted = false;
+        self.word_started = false;
+    }
+
+    /// The current word starts unquoted.
+    fn word_start(&mut self) {
+        self.fq = false;
+        self.word_started = true;
+    }
 }

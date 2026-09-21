@@ -1,6 +1,6 @@
 mod step;
 
-use super::{Token, emit::emit_token};
+use super::Token;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -12,19 +12,12 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<Token>, Report<ParseError>> {
     while let Some(b) = bytes.next() {
         st.pos += 1;
         if st.in_quotes {
-            if !super::quotes::handle_quoted_char(
-                b,
-                &mut st.cur,
-                &mut st.mask,
-                &mut bytes,
-                line,
-                &mut st.pos,
-            )? {
+            if !st.quoted_char(b, &mut bytes, line)? {
                 st.in_quotes = false;
                 st.quote_start = None;
             }
         } else {
-            step::unquoted(b, &mut st, line, &mut bytes)?;
+            st.unquoted(b, line, &mut bytes)?;
         }
     }
     st.finish(line)
@@ -69,15 +62,7 @@ impl State {
         if self.in_quotes {
             return Err(report_unbalanced_quote(line, self.quote_start.unwrap_or(0)));
         }
-        emit_token(
-            &mut self.tokens,
-            &mut self.cur,
-            self.start,
-            line.len(),
-            self.fq,
-            self.word_quoted,
-            &mut self.mask,
-        );
+        self.emit(line.len());
         Ok(self.tokens)
     }
 }

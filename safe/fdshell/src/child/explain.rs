@@ -1,22 +1,18 @@
-use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
 use sys::Origin;
 use sys::ShortCStr;
 
+use super::Ctx;
+
 /// `explain NAME` / `explain N` — print the provenance of a variable or
 /// positional parameter. Read-only; unset names report `unset` with exit 0.
-pub(super) fn handle_explain(
-    _: ShortCStr,
-    _refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    if args.len() > 1 {
+pub(super) fn handle_explain(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    if ctx.args.len() > 1 {
         bail!(BuiltinError::InvalidArgument("name"));
     }
-    let name = args
+    let name = ctx
+        .args
         .first()
         .ok_or(BuiltinError::MissingArgument("var or index"))?;
     let bytes = name
@@ -25,9 +21,9 @@ pub(super) fn handle_explain(
     let (display, traced) = if is_all_digits(bytes) {
         let idx = parse_index(bytes).ok_or(BuiltinError::InvalidArgument("index"))?;
         let d = sys::format!("${idx}").change_context(BuiltinError::Io)?;
-        (d, state.positional.get(idx))
+        (d, ctx.state.positional.get(idx))
     } else {
-        (name.clone(), state.strings.get(name))
+        (name.clone(), ctx.state.strings.get(name))
     };
     match traced {
         Some(v) => write_trace(&display, v),

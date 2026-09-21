@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use builtins::error::BuiltinError;
 use sys::ShortCStr;
 
+use crate::child::Ctx;
 use crate::state::ShellState;
 
 use super::handle_copy_file_range;
@@ -33,7 +34,8 @@ fn empty_state() -> ShellState {
 fn handle_missing_args_propagates_missing_argument() {
     let state = empty_state();
     with_refs(&[], |refs, origs| {
-        let e = handle_copy_file_range(c"copy_file_range".into(), refs, origs, &state).unwrap_err();
+        let e = handle_copy_file_range(&Ctx::new(c"copy_file_range".into(), refs, origs, &state))
+            .unwrap_err();
         assert!(matches!(
             e.current_context(),
             BuiltinError::MissingArgument("in fd var")
@@ -45,7 +47,8 @@ fn handle_missing_args_propagates_missing_argument() {
 fn handle_unset_var_is_fdvar_not_found() {
     let state = empty_state();
     with_refs(&["%in", "%out"], |refs, origs| {
-        let e = handle_copy_file_range(c"copy_file_range".into(), refs, origs, &state).unwrap_err();
+        let e = handle_copy_file_range(&Ctx::new(c"copy_file_range".into(), refs, origs, &state))
+            .unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }

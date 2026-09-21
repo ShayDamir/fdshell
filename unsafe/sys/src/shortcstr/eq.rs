@@ -1,4 +1,25 @@
+use core::hash::{Hash, Hasher};
+
 use crate::shortcstr::ShortCStr;
+
+impl PartialEq for ShortCStr {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.as_bytes(), other.as_bytes()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ShortCStr {}
+
+impl Hash for ShortCStr {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        if let Ok(b) = self.as_bytes() {
+            b.hash(state);
+        }
+    }
+}
 
 impl ShortCStr {
     pub fn eq_bytes(&self, other: &[u8]) -> bool {

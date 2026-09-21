@@ -7,6 +7,7 @@ use builtins::error::BuiltinError;
 use error_stack::Report;
 use sys::{Origin, ShortCStr, Trace};
 
+use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 
 use super::emit::{kind, line};
@@ -151,7 +152,7 @@ fn bare_percent_resolves_to_unset_var() {
     // An empty var name parses; it simply resolves to nothing.
     let state = state_with_memfd();
     with_refs(&["%"], |refs, origs| {
-        let e = handle_statx(c"statx".into(), refs, origs, &state).unwrap_err();
+        let e = handle_statx(&Ctx::new(c"statx".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -271,7 +272,7 @@ fn handler_fd_form_succeeds() {
     let state = state_with_memfd();
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
-            handle_statx(c"statx".into(), refs, origs, &state).unwrap(),
+            handle_statx(&Ctx::new(c"statx".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -281,7 +282,7 @@ fn handler_fd_form_succeeds() {
 fn handler_unset_fd_var() {
     let state = state_with_memfd();
     with_refs(&["%missing"], |refs, origs| {
-        let e = handle_statx(c"statx".into(), refs, origs, &state).unwrap_err();
+        let e = handle_statx(&Ctx::new(c"statx".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -290,7 +291,7 @@ fn handler_unset_fd_var() {
 fn handler_unset_dir_var() {
     let state = state_with_memfd();
     with_refs(&["a.txt", "--dir", "%missing"], |refs, origs| {
-        let e = handle_statx(c"statx".into(), refs, origs, &state).unwrap_err();
+        let e = handle_statx(&Ctx::new(c"statx".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -299,7 +300,7 @@ fn handler_unset_dir_var() {
 fn handler_missing_path_errors() {
     let state = state_with_memfd();
     with_refs(&[], |refs, origs| {
-        let e = handle_statx(c"statx".into(), refs, origs, &state).unwrap_err();
+        let e = handle_statx(&Ctx::new(c"statx".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(
             e.current_context(),
             BuiltinError::MissingArgument("path")
@@ -311,7 +312,7 @@ fn handler_missing_path_errors() {
 fn handler_missing_file_is_syscall_error() {
     let state = state_with_memfd();
     with_refs(&["no-such-file-xyz"], |refs, origs| {
-        let e = handle_statx(c"statx".into(), refs, origs, &state).unwrap_err();
+        let e = handle_statx(&Ctx::new(c"statx".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::Syscall));
     });
 }

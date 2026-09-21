@@ -4,6 +4,7 @@ use core::ffi::CStr;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
+use super::Ctx;
 use super::copy_file_range;
 use super::delegated;
 use super::exec_fd;
@@ -20,8 +21,7 @@ use super::statx;
 use super::test;
 use super::type_cmd;
 
-type Handler =
-    fn(ShortCStr, &[&CStr], &[ShortCStr], &ShellState) -> Result<i32, Report<BuiltinError>>;
+type Handler = fn(&Ctx) -> Result<i32, Report<BuiltinError>>;
 
 pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"true", simple::handle_true),
@@ -76,13 +76,14 @@ pub fn dispatch_builtin(
     args: &[ShortCStr],
     state: &ShellState,
 ) -> Result<i32, Report<BuiltinError>> {
+    let ctx = Ctx::new(name, refs, args, state);
     for (known, handler) in DISPATCH {
-        if name.eq_bytes(known) {
-            return handler(name, refs, args, state);
+        if ctx.name.eq_bytes(known) {
+            return handler(&ctx);
         }
     }
 
-    match crate::child::fdpass::dispatch(name.as_bytes().unwrap_or(&[]), args, state) {
+    match crate::child::fdpass::dispatch(ctx.name.as_bytes().unwrap_or(&[]), ctx.args, ctx.state) {
         Some(Ok(v)) => Ok(v),
         Some(Err(report)) => Ok(match report.current_context() {
             crate::error::fdpass::FdPassError::SendFailed

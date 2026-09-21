@@ -10,18 +10,14 @@ mod parse;
 
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::{LocalFd, ShortCStr};
 
-pub(super) fn handle_flock(
-    _: ShortCStr,
-    refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    let cfg = parse::flock_parse(refs, args)?;
-    let fd = resolve(&cfg.var, state)?;
+use super::Ctx;
+
+pub(super) fn handle_flock(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let cfg = parse::flock_parse(ctx.refs, ctx.args)?;
+    let fd = resolve(&cfg.var, ctx.state)?;
     sys::fileops::flock(fd, cfg.operation).change_context(BuiltinError::Syscall)?;
     Ok(0)
 }

@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use builtins::error::BuiltinError;
 use sys::{Origin, ShortCStr, Trace};
 
+use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 use std::format;
 
@@ -217,7 +218,7 @@ fn handler_fd_form_reads_the_link() {
     let state = state_with_symlink();
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
-            handle_readlink(c"readlink".into(), refs, origs, &state).unwrap(),
+            handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -235,7 +236,7 @@ fn handler_non_link_fd_is_syscall_error() {
         },
     );
     with_refs(&["%f"], |refs, origs| {
-        let e = handle_readlink(c"readlink".into(), refs, origs, &state).unwrap_err();
+        let e = handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::Syscall));
     });
 }
@@ -244,7 +245,7 @@ fn handler_non_link_fd_is_syscall_error() {
 fn handler_unset_fd_var() {
     let state = ShellState::new();
     with_refs(&["%missing"], |refs, origs| {
-        let e = handle_readlink(c"readlink".into(), refs, origs, &state).unwrap_err();
+        let e = handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -253,7 +254,7 @@ fn handler_unset_fd_var() {
 fn handler_unset_dir_var() {
     let state = ShellState::new();
     with_refs(&["a.txt", "--dir", "%missing"], |refs, origs| {
-        let e = handle_readlink(c"readlink".into(), refs, origs, &state).unwrap_err();
+        let e = handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -263,7 +264,7 @@ fn handler_dir_var_resolves_against_fd() {
     let state = state_with_dir_link();
     with_refs(&["g.txt", "--dir", "%d"], |refs, origs| {
         assert_eq!(
-            handle_readlink(c"readlink".into(), refs, origs, &state).unwrap(),
+            handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -274,7 +275,7 @@ fn handler_long_target_fits_the_buffer() {
     let state = state_with_long_link();
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
-            handle_readlink(c"readlink".into(), refs, origs, &state).unwrap(),
+            handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -284,7 +285,7 @@ fn handler_long_target_fits_the_buffer() {
 fn handler_missing_path_is_syscall_error() {
     let state = ShellState::new();
     with_refs(&["no-such-file-xyz"], |refs, origs| {
-        let e = handle_readlink(c"readlink".into(), refs, origs, &state).unwrap_err();
+        let e = handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::Syscall));
     });
 }

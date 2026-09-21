@@ -39,3 +39,24 @@ pub(crate) fn copy_to_shortcstr(
         }
     }
 }
+
+impl Clone for ShortCStr {
+    fn clone(&self) -> Self {
+        match self {
+            ShortCStr::Inline { len, buf } => ShortCStr::Inline {
+                len: *len,
+                buf: *buf,
+            },
+            ShortCStr::Static(s, offset, length) => ShortCStr::Static(s, *offset, *length),
+            ShortCStr::Arc {
+                arc,
+                offset,
+                length,
+            } => ShortCStr::Arc {
+                arc: Arc::clone(arc),
+                offset: *offset,
+                length: *length,
+            },
+        }
+    }
+}

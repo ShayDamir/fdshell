@@ -5,21 +5,16 @@
 //! unsupported (printed as-is). Numeric arguments are plain decimal
 //! integers (no `0x`, no surrounding whitespace).
 
-use crate::state::ShellState;
 use alloc::vec::Vec;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
 
-pub(super) fn handle_printf(
-    _: ShortCStr,
-    refs: &[&CStr],
-    _: &[ShortCStr],
-    _: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
+use super::Ctx;
+
+pub(super) fn handle_printf(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let mut out = Vec::new();
-    match refs.split_first() {
+    match ctx.refs.split_first() {
         Some((fmt, args)) => render(fmt.to_bytes(), args, &mut out)?,
         // Bash `printf` with no arguments prints the default `%s\n` format.
         None => out.push(b'\n'),

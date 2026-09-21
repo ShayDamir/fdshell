@@ -11,28 +11,24 @@ mod parse;
 
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::{AtFd, ShortCStr};
 
-pub(super) fn handle_statx(
-    _: ShortCStr,
-    refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    let target = parse::statx_parse(refs, args)?;
+use super::Ctx;
+
+pub(super) fn handle_statx(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let target = parse::statx_parse(ctx.refs, ctx.args)?;
     let st = match target {
         parse::Target::Path {
             path,
             dir,
             nofollow,
         } => {
-            let dirfd = dirfd(dir.as_ref(), state)?;
+            let dirfd = dirfd(dir.as_ref(), ctx.state)?;
             sys::statx::statx(dirfd, path, flags(nofollow, false))
         }
         parse::Target::Fd { var, nofollow } => {
-            let fd = resolve(&var, state)?;
+            let fd = resolve(&var, ctx.state)?;
             sys::statx::statx(fd.at(), c"", flags(nofollow, true))
         }
     }

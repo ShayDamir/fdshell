@@ -7,6 +7,7 @@ use builtins::error::BuiltinError;
 use error_stack::Report;
 use sys::{Origin, ShortCStr, Trace};
 
+use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 
 use super::args::FtruncateConfig;
@@ -171,7 +172,7 @@ fn extra_arguments_error() {
 fn unset_fd_var_is_fdvar_not_found() {
     let state = state_with_memfd();
     with_refs(&["%missing"], |refs, origs| {
-        let e = handle_fsync(c"fsync".into(), refs, origs, &state).unwrap_err();
+        let e = handle_fsync(&Ctx::new(c"fsync".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -181,13 +182,13 @@ fn handlers_succeed_on_real_fd_var() {
     let state = state_with_memfd();
     with_refs(&["%f", "3"], |refs, origs| {
         assert_eq!(
-            handle_ftruncate(c"ftruncate".into(), refs, origs, &state).unwrap(),
+            handle_ftruncate(&Ctx::new(c"ftruncate".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
-            handle_fsync(c"fsync".into(), refs, origs, &state).unwrap(),
+            handle_fsync(&Ctx::new(c"fsync".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -255,7 +256,7 @@ fn fallocate_handler_succeeds_on_memfd() {
     let state = state_with_memfd();
     with_refs(&["%f", "0", "4096"], |refs, origs| {
         assert_eq!(
-            handle_fallocate(c"fallocate".into(), refs, origs, &state).unwrap(),
+            handle_fallocate(&Ctx::new(c"fallocate".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -265,7 +266,7 @@ fn fallocate_handler_succeeds_on_memfd() {
 fn fallocate_handler_unset_var_is_fdvar_not_found() {
     let state = state_with_memfd();
     with_refs(&["%missing", "0", "4096"], |refs, origs| {
-        let e = handle_fallocate(c"fallocate".into(), refs, origs, &state).unwrap_err();
+        let e = handle_fallocate(&Ctx::new(c"fallocate".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }

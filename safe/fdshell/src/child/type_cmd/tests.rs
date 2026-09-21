@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use crate::child::Ctx;
 use crate::state::ShellState;
 
 use super::handle_type;
@@ -21,7 +22,7 @@ where
 
 fn run(args: &[&str], state: &ShellState) -> i32 {
     with_refs(args, state, |refs, st| {
-        handle_type(ShortCStr::from(c"type"), refs, &[], st).unwrap_or(1)
+        handle_type(&Ctx::new(ShortCStr::from(c"type"), refs, &[], st)).unwrap_or(1)
     })
 }
 
@@ -84,7 +85,7 @@ fn not_found_returns_1_and_others_still_print() {
 fn no_argument_is_usage_error() {
     let state = ShellState::new();
     let res = with_refs(&[], &state, |refs, st| {
-        handle_type(ShortCStr::from(c"type"), refs, &[], st)
+        handle_type(&Ctx::new(ShortCStr::from(c"type"), refs, &[], st))
     });
     let err = match res {
         Ok(_) => panic!("expected usage error"),

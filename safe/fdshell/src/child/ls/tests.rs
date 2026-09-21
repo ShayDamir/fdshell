@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use builtins::error::BuiltinError;
 use sys::{Origin, ShortCStr, Trace};
 
+use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 use std::format;
 
@@ -163,7 +164,10 @@ fn help() {
 fn handler_fd_form_lists_the_dir() {
     let state = state_with_dir();
     with_refs(&["%d"], |refs, origs| {
-        assert_eq!(handle_ls(c"ls".into(), refs, origs, &state).unwrap(), 0);
+        assert_eq!(
+            handle_ls(&Ctx::new(c"ls".into(), refs, origs, &state)).unwrap(),
+            0
+        );
     });
 }
 
@@ -174,7 +178,7 @@ fn handler_path_form_lists_the_dir() {
     std::fs::create_dir_all(&dir).unwrap();
     with_refs(&[dir.to_str().unwrap()], |refs, origs| {
         assert_eq!(
-            handle_ls(c"ls".into(), refs, origs, &ShellState::new()).unwrap(),
+            handle_ls(&Ctx::new(c"ls".into(), refs, origs, &ShellState::new())).unwrap(),
             0
         );
     });
@@ -183,7 +187,7 @@ fn handler_path_form_lists_the_dir() {
 #[test]
 fn handler_unset_fd_var() {
     with_refs(&["%missing"], |refs, origs| {
-        let e = handle_ls(c"ls".into(), refs, origs, &ShellState::new()).unwrap_err();
+        let e = handle_ls(&Ctx::new(c"ls".into(), refs, origs, &ShellState::new())).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }
@@ -200,7 +204,7 @@ fn handler_non_directory_is_syscall_error() {
         },
     );
     with_refs(&["%f"], |refs, origs| {
-        let e = handle_ls(c"ls".into(), refs, origs, &state).unwrap_err();
+        let e = handle_ls(&Ctx::new(c"ls".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::Syscall));
     });
 }
@@ -208,7 +212,7 @@ fn handler_non_directory_is_syscall_error() {
 #[test]
 fn handler_missing_path_is_syscall_error() {
     with_refs(&["no-such-dir-xyz"], |refs, origs| {
-        let e = handle_ls(c"ls".into(), refs, origs, &ShellState::new()).unwrap_err();
+        let e = handle_ls(&Ctx::new(c"ls".into(), refs, origs, &ShellState::new())).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::Syscall));
     });
 }

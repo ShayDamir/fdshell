@@ -9,21 +9,17 @@ mod parse;
 
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::openat2::OpenHow;
 use sys::{AtFd, LocalFd, OUT, ShortCStr};
 
-pub(super) fn handle_ls(
-    _: ShortCStr,
-    refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    match parse::ls_parse(refs, args)? {
-        parse::Target::Fd { var } => list(resolve(&var, state)?),
+use super::Ctx;
+
+pub(super) fn handle_ls(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    match parse::ls_parse(ctx.refs, ctx.args)? {
+        parse::Target::Fd { var } => list(resolve(&var, ctx.state)?),
         parse::Target::Path { path, dir } => {
-            let dirfd = dirfd(dir.as_ref(), state)?;
+            let dirfd = dirfd(dir.as_ref(), ctx.state)?;
             let how = OpenHow::new(sys::fcntl::O_DIRECTORY as u64, 0);
             let fd =
                 sys::openat2::openat2(dirfd, path, &how).change_context(BuiltinError::Syscall)?;

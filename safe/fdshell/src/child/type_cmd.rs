@@ -10,6 +10,8 @@ use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
+use super::Ctx;
+
 const KEYWORDS: &[&[u8]] = &[
     b"break",
     b"case",
@@ -28,18 +30,13 @@ const KEYWORDS: &[&[u8]] = &[
     b"while",
 ];
 
-pub(super) fn handle_type(
-    _: ShortCStr,
-    refs: &[&CStr],
-    _: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    if refs.is_empty() {
+pub(super) fn handle_type(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    if ctx.refs.is_empty() {
         bail!(BuiltinError::MissingArgument("name"));
     }
     let mut found = true;
-    for name in refs {
-        found = describe(name, state)? && found;
+    for name in ctx.refs {
+        found = describe(name, ctx.state)? && found;
     }
     Ok((!found) as i32)
 }

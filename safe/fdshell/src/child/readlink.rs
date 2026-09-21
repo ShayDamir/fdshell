@@ -10,22 +10,18 @@ mod parse;
 
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
-use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::{AtFd, ShortCStr};
+
+use super::Ctx;
 
 /// A symlink target fits in 4 KiB: the kernel caps targets below 4096 bytes.
 const BUF: usize = 4096;
 
-pub(super) fn handle_readlink(
-    _: ShortCStr,
-    refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    let (dirfd, path) = match parse::readlink_parse(refs, args)? {
-        parse::Target::Path { path, dir } => (dirfd(dir.as_ref(), state)?, path),
-        parse::Target::Fd { var } => (resolve(&var, state)?.at(), c""),
+pub(super) fn handle_readlink(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let (dirfd, path) = match parse::readlink_parse(ctx.refs, ctx.args)? {
+        parse::Target::Path { path, dir } => (dirfd(dir.as_ref(), ctx.state)?, path),
+        parse::Target::Fd { var } => (resolve(&var, ctx.state)?.at(), c""),
     };
     let mut buf = [0u8; BUF];
     let n = sys::statx::readlinkat(dirfd, path, &mut buf).change_context(BuiltinError::Syscall)?;

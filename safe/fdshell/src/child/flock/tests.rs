@@ -7,6 +7,7 @@ use builtins::error::BuiltinError;
 use error_stack::Report;
 use sys::{Origin, ShortCStr, Trace};
 
+use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 
 use super::handle_flock;
@@ -122,19 +123,19 @@ fn flock_handler_locks_and_unlocks_memfd() {
     let state = state_with_memfd();
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
-            handle_flock(c"flock".into(), refs, origs, &state).unwrap(),
+            handle_flock(&Ctx::new(c"flock".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
     with_refs(&["%f", "--shared"], |refs, origs| {
         assert_eq!(
-            handle_flock(c"flock".into(), refs, origs, &state).unwrap(),
+            handle_flock(&Ctx::new(c"flock".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
     with_refs(&["%f", "--unlock"], |refs, origs| {
         assert_eq!(
-            handle_flock(c"flock".into(), refs, origs, &state).unwrap(),
+            handle_flock(&Ctx::new(c"flock".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -146,7 +147,7 @@ fn flock_handler_nowait_on_own_lock_succeeds() {
     let state = state_with_memfd();
     with_refs(&["%f", "--nowait"], |refs, origs| {
         assert_eq!(
-            handle_flock(c"flock".into(), refs, origs, &state).unwrap(),
+            handle_flock(&Ctx::new(c"flock".into(), refs, origs, &state)).unwrap(),
             0
         );
     });
@@ -156,7 +157,7 @@ fn flock_handler_nowait_on_own_lock_succeeds() {
 fn flock_handler_unset_var_is_fdvar_not_found() {
     let state = state_with_memfd();
     with_refs(&["%missing"], |refs, origs| {
-        let e = handle_flock(c"flock".into(), refs, origs, &state).unwrap_err();
+        let e = handle_flock(&Ctx::new(c"flock".into(), refs, origs, &state)).unwrap_err();
         assert!(matches!(e.current_context(), BuiltinError::FdVarNotFound));
     });
 }

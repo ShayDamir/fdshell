@@ -12,27 +12,23 @@ use core::ffi::CStr;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
+use super::Ctx;
 use filetest::{file_binary_test, file_test};
 use ops::{is_file_binary, is_unary, string_or_int_test, string_test};
 
-pub(super) fn handle_test(
-    name: ShortCStr,
-    refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<BuiltinError>> {
-    let (expr, orig) = if name.eq_bytes(b"[") {
-        match refs.split_last() {
+pub(super) fn handle_test(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let (expr, orig) = if ctx.name.eq_bytes(b"[") {
+        match ctx.refs.split_last() {
             Some((closer, body)) if closer.to_bytes() == b"]" => {
                 // Drop the trailing `]` so `orig` stays parallel to `expr`.
-                (body, args.get(..body.len()).unwrap_or(&[]))
+                (body, ctx.args.get(..body.len()).unwrap_or(&[]))
             }
             _ => bail!(BuiltinError::TestMissingCloseBracket),
         }
     } else {
-        (refs, args)
+        (ctx.refs, ctx.args)
     };
-    eval(expr, orig, state)
+    eval(expr, orig, ctx.state)
 }
 
 pub(super) fn eval(
