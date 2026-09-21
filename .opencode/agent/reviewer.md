@@ -57,9 +57,10 @@ access to inspect the change; you never edit inside the repository.
    `safe/` or `unsafe/` (this is the project's QA standard):
 
    ### 5a. File length and test layout (§2)
-   - Source files ≤90 code lines (excl. tests), measured by `tokei`
-     (authoritative per STYLE.md §2.7). Flag 80–90 zone entries as a task (the
-     `Refactoring` epic). Measure after `cargo fmt`.
+    - Source files ≤90 code lines (excl. tests), measured by
+      `python3 tools/complexity.py` (authoritative for all agents — it wraps
+      `tokei` per STYLE.md §2.7; never `wc -l`/awk). Flag 80–90 zone entries
+      as a task (the `Refactoring` epic). Measure after `cargo fmt`.
    - Tests must live in a separate `<module>/tests.rs` file, declared at the
      end of the source file as `#[cfg(test)] mod tests;` — flag inline
      `#[cfg(test)] mod tests { ... }` blocks (§2.8).

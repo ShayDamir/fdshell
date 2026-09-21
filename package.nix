@@ -8,6 +8,7 @@
   cargo-llvm-cov,
   cargo-nextest,
   doClippy ? false,
+  doComplexity ? false,
   doTests ? false,
   doFmt ? false,
   doCoverage ? false,
@@ -30,6 +31,7 @@
     cargoTestFlags = lib.optionals doTests [];
     nativeBuildInputs =
       lib.optionals doClippy [clippy]
+      ++ lib.optionals doComplexity [pkgs.python3 pkgs.tokei]
       ++ lib.optionals doFmt [rustfmt]
       # prlimit: nextest wrapper script (.config/nextest.toml) caps test VA
       ++ lib.optionals (doTests || doCoverage) [pkgs.util-linux]
@@ -40,6 +42,10 @@
       ''
       + lib.optionalString doClippy ''
         cargo clippy --all-targets -- -D warnings
+      ''
+      + lib.optionalString doComplexity ''
+        # Line budget gate: no non-test Rust file over 90 tokei LoC (STYLE.md 2.2)
+        python3 tools/complexity.py --check
       '';
   };
 in

@@ -42,6 +42,7 @@
         src = lib.cleanSource ./.;
         doFmt = true;
         doClippy = true;
+        doComplexity = true;
         doTests = true;
       };
     });

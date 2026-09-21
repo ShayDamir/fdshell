@@ -36,20 +36,25 @@ produces no code, so it reaches `Done` **without a commit** (see step 3).
 
    - **No significant findings** (per the review's overall verdict and your
      own reading) → the task is **Done**:
-     1. Move the task to `Done` (`yask_move_task`; confirm the cascade if
+     1. Run `python3 tools/complexity.py --check` (the authoritative
+        line-budget gate). It checks the whole tree — if it fails, the tree
+        violates STYLE.md §2.2 and the task is not Done: go to the
+        **back to `In progress`** branch below with a verdict naming the
+        over-budget file(s).
+     2. Move the task to `Done` (`yask_move_task`; confirm the cascade if
         asked).
-     2. Commit: inspect `git status` and `git diff` first. Stage and commit
-        **only the files belonging to this task** (implementation + tests +
-        docs), including new untracked files (`git add -N`/`git add` as
-        appropriate — new files must be staged so nix's `lib.cleanSource`
-        sees them; if the commit touches `flake.nix`/`package.nix`, `git add`
-        those first per AGENTS.md). Use a concise conventional message (match
-        recent `git log` style). Do not commit unrelated work.
+     3. Commit: inspect `git status` and `git diff` first. Stage and commit
+       **only the files belonging to this task** (implementation + tests +
+       docs), including new untracked files (`git add -N`/`git add` as
+       appropriate — new files must be staged so nix's `lib.cleanSource`
+       sees them; if the commit touches `flake.nix`/`package.nix`, `git add`
+       those first per AGENTS.md). Use a concise conventional message (match
+       recent `git log` style). Do not commit unrelated work.
 
-        **Exception — `Investigation` tasks: do not commit.** Check `git
-        status` for changes belonging to this task; there should be none — if
-        there are, flag and block rather than committing someone else's work.
-     3. Report the task number, state (`Done`) and the commit hash (or, for
+       **Exception — `Investigation` tasks: do not commit.** Check `git
+       status` for changes belonging to this task; there should be none — if
+       there are, flag and block rather than committing someone else's work.
+     4. Report the task number, state (`Done`) and the commit hash (or, for
         an `Investigation`, that no commit was made).
 
    - **Significant findings to rectify** (review verdict says fix, and you

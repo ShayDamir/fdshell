@@ -51,9 +51,14 @@ stop.
    `cargo clippy -- -D warnings`; `cargo nextest run --status-level fail
    --show-progress none` — **never `cargo test`** (its shared harness breaks
    `fork()`-based tests); then the hermetic check `nix flake check
-   --build-all`. For coverage-sensitive work run `nix build .#coverage` and
-   check `result/coverage-report.txt`. Fix what your own checks surface; make
-   sure the change is clean, tested, and matches the plan.
+   --build-all`. File length is measured with `python3 tools/complexity.py`
+   — the authoritative measurement for all agents (never `wc -l`, awk, or raw
+   `tokei`): if a non-test file touched by this change is >90 LoC (STYLE.md
+   §2.2), split it before moving on, and mention any 80–90 band entries
+   introduced in the session summary. For coverage-sensitive work run
+   `nix build .#coverage` and check `result/coverage-report.txt`. Fix what
+   your own checks surface; make sure the change is clean, tested, and matches
+   the plan.
 
 6. **Attach the session summary.** Write `/tmp/opencode/summary-<n>.md` and
    attach it with `yask_add_attachment` (`file_path`,
