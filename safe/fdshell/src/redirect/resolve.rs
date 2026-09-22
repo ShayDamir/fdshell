@@ -45,6 +45,10 @@ fn resolve_one(
             export_to: r.export_to,
             local: super::herestring::here_string(word, cache, cell)?,
         }),
+        super::RedirectSource::HereDoc { body, expand } => Ok(Redirect::Dup {
+            export_to: r.export_to,
+            local: super::heredoc::here_doc(body, *expand, cache, cell)?,
+        }),
         super::RedirectSource::Dup(from) => arms::resolve_dup(r.export_to, min_fd, *from),
         super::RedirectSource::Close => Ok(Redirect::Close {
             export_to: r.export_to,

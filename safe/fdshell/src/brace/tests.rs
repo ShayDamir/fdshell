@@ -49,3 +49,18 @@ fn comment_runs_to_end_and_leaves_block_unclosed() {
 fn non_function_is_rejected() {
     assert_eq!(scan(b"plain command"), None);
 }
+
+// A `}`-shaped heredoc body line must not close the block; only the real
+// `}` does.
+#[test]
+fn heredoc_body_brace_does_not_close() {
+    let line = b"f() { cat <<EOF\n}\nEOF\n}";
+    assert_eq!(scan(line), Some((line.len(), true)));
+}
+
+// A nested `{`-shaped body line must not open a brace depth level.
+#[test]
+fn heredoc_body_open_brace_does_not_open_depth() {
+    let line = b"f() { cat <<EOF\n{\nEOF\n}";
+    assert_eq!(scan(line), Some((line.len(), true)));
+}

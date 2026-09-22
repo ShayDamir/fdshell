@@ -110,6 +110,8 @@ pub(crate) enum ParseError {
     WaitInvalidTimeout,
     /// `wait`: unexpected token in arm pattern
     WaitUnexpectedToken,
+    /// here-doc: missing terminating delimiter line '{delim}'
+    UnterminatedHeredoc { delim: sys::ShortCStr },
 }
 
 impl core::error::Error for ParseError {}

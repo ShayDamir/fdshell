@@ -400,3 +400,24 @@ fn nested_plain_paren_inside_dollar_paren() {
     assert!(r.closed, "the block must close at the real fi");
     assert_eq!(r.end, 33, "done inside the nested ( ) must not count");
 }
+
+// A heredoc body line shaped like `fi` does not close the block; only the
+// real `fi` does.
+#[test]
+fn heredoc_body_fi_does_not_close() {
+    let r = scan(b"if true; then cat <<EOF\nfi\nEOF\nfi", 2);
+    assert!(r.closed, "the block must close at the real fi");
+    assert_eq!(r.end, 34);
+}
+
+// A `for`-shaped body line (with no `done` in the body) must not open a
+// nested depth level.
+#[test]
+fn heredoc_body_for_does_not_open_depth() {
+    let r = scan(b"if true; then cat <<EOF\nfor x in y\nEOF\nfi", 2);
+    assert!(
+        r.closed,
+        "a for-shaped body line must not open a depth level"
+    );
+    assert_eq!(r.end, 42);
+}

@@ -54,6 +54,7 @@ pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
 }
 
 mod advance;
+pub(crate) mod heredoc;
 mod skip;
 
 pub(crate) use skip::skip_comment;

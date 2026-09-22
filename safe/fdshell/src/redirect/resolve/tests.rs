@@ -144,3 +144,66 @@ fn here_string_reads_back_to_eof() {
     let n = dup_of(r).read(&mut buf).unwrap();
     assert_eq!(n, 0);
 }
+
+#[test]
+fn here_doc_writes_body_verbatim_without_newline() {
+    let c = cell();
+    let redirects = vec![RedirectDef::here_doc(c"ab\n", true)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let r = resolved.first().unwrap();
+    assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
+    let mut buf = [0u8; 16];
+    let n = dup_of(r).read(&mut buf).unwrap();
+    assert_eq!(
+        buf.get(..n).unwrap(),
+        b"ab\n",
+        "the body is written verbatim, with no extra newline"
+    );
+    assert_eq!(dup_of(r).read(&mut buf).unwrap(), 0);
+}
+
+#[test]
+fn here_doc_empty_body_is_zero_bytes() {
+    let c = cell();
+    let redirects = vec![RedirectDef::here_doc(c"", false)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let r = resolved.first().unwrap();
+    let mut buf = [0u8; 16];
+    assert_eq!(dup_of(r).read(&mut buf).unwrap(), 0);
+}
+
+#[test]
+fn here_doc_unquoted_delimiter_expands() {
+    let c = cell();
+    {
+        let mut state = c.borrow_mut().unwrap();
+        state.strings.insert(
+            c"x".into(),
+            sys::ImportedStr::new(c"world".into(), sys::Trace::boundary(sys::Origin::Shell)),
+        );
+    }
+    let redirects = vec![RedirectDef::here_doc(c"hi $x\n", true)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let r = resolved.first().unwrap();
+    let mut buf = [0u8; 16];
+    let n = dup_of(r).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"hi world\n");
+}
+
+#[test]
+fn here_doc_quoted_delimiter_is_literal() {
+    let c = cell();
+    {
+        let mut state = c.borrow_mut().unwrap();
+        state.strings.insert(
+            c"x".into(),
+            sys::ImportedStr::new(c"world".into(), sys::Trace::boundary(sys::Origin::Shell)),
+        );
+    }
+    let redirects = vec![RedirectDef::here_doc(c"hi $x\n", false)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let r = resolved.first().unwrap();
+    let mut buf = [0u8; 16];
+    let n = dup_of(r).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"hi $x\n");
+}

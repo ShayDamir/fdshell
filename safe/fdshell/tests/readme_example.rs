@@ -200,6 +200,16 @@ fn c_and_operator_chain_short_circuit() {
 }
 
 #[test]
+fn c_quoted_or_in_failed_and_branch() {
+    // After a failing `&&` part the scan skips to the next `||`; a quoted
+    // `||` inside that skipped branch must not desync the quote state.
+    let dir = tmpdir();
+    let output = run_c("false && \"a||b\" || echo WIN", &dir);
+    assert_ok(&output, "c_quoted_or_in_failed_and_branch");
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "WIN");
+}
+
+#[test]
 fn c_empty_string() {
     let dir = tmpdir();
     let output = run_c("", &dir);

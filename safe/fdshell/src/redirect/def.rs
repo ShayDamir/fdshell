@@ -59,6 +59,16 @@ impl RedirectDef {
         }
     }
 
+    /// Here-doc: the body (expanded when `expand`) becomes the stdin of the
+    /// command.
+    pub fn here_doc(body: impl Into<ShortCStr>, expand: bool) -> Self {
+        RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::here_doc(body, expand),
+        }
+    }
+
     /// Dup redirect: copy the already-open fd `from` to `export_to` (`2>&1`).
     pub fn dup(export_to: i32, from: i32) -> Self {
         RedirectDef {

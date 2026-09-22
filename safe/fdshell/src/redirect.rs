@@ -1,5 +1,6 @@
 mod def;
 mod direction;
+mod heredoc;
 mod herestring;
 mod open;
 mod resolve;

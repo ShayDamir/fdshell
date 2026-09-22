@@ -1,5 +1,5 @@
 use crate::keywords::function_def_name;
-use crate::scan::{Boundary, ScanState, boundary, skip_comment};
+use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
 
 /// If `part` opens a `name() { … }` block, return the exclusive end position
 /// and whether the block was closed. `in_quote` is the quote state at `start`.
@@ -32,6 +32,7 @@ fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, b
         word_active: false,
     };
     let mut depth = 1;
+    let mut run_start = i;
     while let Some(&b) = line.get(i) {
         let bare = !state.in_quote && !state.in_backtick && state.dollar_paren_depth == 0;
         if bare && b == b'{' {
@@ -55,9 +56,13 @@ fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, b
         state.word_active = false;
         if kind == Boundary::Comment {
             i = skip_comment(line, i);
+        } else if let Some(resume) = heredoc::skip(line, run_start, i) {
+            // A heredoc body is opaque: braces in it do not close the block.
+            i = resume;
         } else {
             i += 1;
         }
+        run_start = i;
     }
     *in_quote = state.in_quote;
     (i, depth == 0)

@@ -481,3 +481,87 @@ fn scan_statement_nested_paren_inside_dollar_paren_protects_semicolon() {
         _ => panic!("expected two Statement segments"),
     }
 }
+
+// A heredoc statement spans its command line and body lines: one Statement
+// segment from the command line through the last delimiter line (without the
+// terminating newline).
+#[test]
+fn scan_statement_heredoc_spans_body() {
+    let segments = scan_segments(b"cat <<EOF\nbody\nEOF\necho after", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (Segment::Statement(s1, off1), Segment::Statement(s2, off2)) => {
+            assert_eq!(s1, b"cat <<EOF\nbody\nEOF");
+            assert_eq!(*off1, 0);
+            assert_eq!(s2, b"echo after");
+            assert_eq!(*off2, 19);
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
+
+// The statement after a heredoc starts just past the body's terminating
+// newline.
+#[test]
+fn scan_statement_after_heredoc() {
+    let segments = scan_segments(b"a\ncat <<Q\nx\nQ\nb", false);
+    assert_eq!(segments.len(), 3);
+    match (&segments[1], &segments[2]) {
+        (Segment::Statement(s1, off1), Segment::Statement(s2, off2)) => {
+            assert_eq!(s1, b"cat <<Q\nx\nQ");
+            assert_eq!(*off1, 2);
+            assert_eq!(s2, b"b");
+            assert_eq!(*off2, 14);
+        }
+        _ => panic!("expected Statement segments"),
+    }
+}
+
+// A bare `<<` with no delimiter word does not extend the statement.
+#[test]
+fn scan_statement_bare_heredoc_at_eol_not_extended() {
+    let segments = scan_segments(b"cat <<\necho after", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+            assert_eq!(s1, b"cat <<");
+            assert_eq!(s2, b"echo after");
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
+
+// `;` after the operator ends the run before any newline: no extension, the
+// whole run is one (single-line) statement.
+#[test]
+fn scan_statement_heredoc_before_semicolon_not_extended() {
+    let segments = scan_segments(b"cat <<EOF ; echo x", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+            assert_eq!(s1, b"cat <<EOF");
+            assert_eq!(s2, b"echo x");
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
+
+// A keyword-shaped body line does not close a surrounding if block; only the
+// real `fi` does.
+#[test]
+fn scan_block_heredoc_body_fi_does_not_close() {
+    let segments = scan_segments(b"if true; then cat <<EOF\nfi\nEOF\nfi", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+        } => {
+            assert_eq!(*block_start, 0);
+            assert_eq!(*end_pos, 33);
+            assert!(*closed);
+        }
+        _ => panic!("expected Block segment"),
+    }
+}

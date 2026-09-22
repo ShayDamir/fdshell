@@ -37,6 +37,46 @@ parallel to script invocation.
 Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
 `0x`-prefixed hex values. Repeat `--flags` to combine multiple flags.
 
+## Heredocs
+
+A here-doc feeds a command's stdin from the script body: the lines after the
+command line, up to (not including) the first line that byte-exactly equals the
+delimiter. The body is delivered through an anonymous memfd.
+
+```shell
+cat <<EOF
+line one
+line two
+EOF
+```
+
+Forms: `cmd <<DELIM` (attached), `cmd << DELIM` (separate word), and
+`cmd <<"DELIM"` (quoted). An unquoted delimiter runs `$` / `$(…)` / backtick
+expansion in the body; a quoted delimiter makes the body literal.
+`<<""` (empty quoted delimiter) reads a body up to the next empty line.
+The body is otherwise opaque: `;`, `&&`, `|`, `#`, `$(…)`, quotes, and
+keyword-shaped lines (`fi`, `done`, `}`) are all body content. An empty body
+is zero bytes, and no trailing newline is appended — the body keeps the last
+line's own newline (`ab\n` is 3 bytes). A here-doc works in pipelines
+(`cat <<EOF | wc -l`) and in block bodies (if/while/for/case/function), like
+any other command.
+
+Limitations:
+
+- `<<-DELIM` (tab-stripping form) is not supported.
+- A here-doc in a block condition or cond-list position (`if cat <<EOF; then`,
+  `cat <<EOF && x`) is rejected with `here-doc: missing terminating delimiter
+  line`.
+- The REPL reads line-based input, so a here-doc at the prompt must be entered
+  as one block.
+- Here-docs inside `$( )` / backticks, an `N<<EOF` fd prefix (like `N<<<`
+  today), and a `# comment` after the operator on the same line are not
+  supported.
+- A body line that is exactly `elif` / `else` (in an if body) or `;;` (in a
+  case / wait body) is misread as block structure.
+- A second stdin redirect on one command (two here-docs, or a here-doc plus
+  `< file`) is rejected with `duplicate redirect target`.
+
 ## How it works?
 
 ### Passing file descriptors from subprocess back to fdshell

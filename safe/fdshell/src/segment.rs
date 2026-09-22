@@ -2,7 +2,7 @@ mod block;
 
 use crate::brace::scan_function_block;
 use crate::keywords::keyword_delta;
-use crate::scan::{Boundary, ScanState, boundary, skip_comment};
+use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
 use alloc::vec::Vec;
 
 /// A segment of a script line extracted by the scanner.
@@ -55,6 +55,13 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                 closed,
             });
             i = end;
+        } else if let Some((_, resume, span_end)) = heredoc::skip_region(line, start, i) {
+            // A heredoc statement spans its command line and body lines; an
+            // empty final delimiter includes the blank line that ends it.
+            let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
+            let stmt = line.get(start + lead..span_end).unwrap_or(b"");
+            segments.push(Segment::Statement(stmt, start + lead));
+            i = resume;
         } else if !part.is_empty() {
             let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
             segments.push(Segment::Statement(part, start + lead));

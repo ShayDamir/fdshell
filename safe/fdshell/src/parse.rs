@@ -21,6 +21,7 @@ mod fd_path;
 pub(crate) mod for_block;
 pub(crate) mod function_block;
 mod here_string;
+mod heredoc;
 pub(crate) mod if_block;
 mod line;
 mod pipeline;
@@ -49,39 +50,13 @@ use sys::ShortCStr;
 /// splitting).
 pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>);
 
-fn tokens_only(tokens: &[Token]) -> Vec<ShortCStr> {
-    tokens.iter().map(|(t, _, _, _, _)| t.clone()).collect()
-}
-
-fn fully_quoted_only(tokens: &[Token]) -> Vec<bool> {
-    tokens.iter().map(|(_, _, _, fq, _)| *fq).collect()
-}
-
-fn quote_masks_only(tokens: &[Token]) -> Vec<Vec<bool>> {
-    tokens
-        .iter()
-        .map(|(_, _, _, _, mask)| mask.clone())
-        .collect()
-}
-
-/// Whether each word contained double quotes: its raw span is then longer
-/// than the word itself (quote boundaries contribute raw bytes, never word
-/// bytes).
-fn word_quoted_only(tokens: &[Token]) -> Vec<bool> {
-    tokens
-        .iter()
-        .map(|(t, start, end, _, _)| end - start > t.len())
-        .collect()
-}
-
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     inner_parse(text)
 }
 
 fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let raw = token::tokenize(line)?;
-    let tokens = tokens_only(&raw);
+    let raw = token::tokenize_statement(line)?;
 
     if let Some(pl) = detect::detect(&raw)? {
         return Ok(pl);
@@ -91,19 +66,14 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
         return Ok(pl);
     }
 
+    let heredocs = heredoc::layout(line, &raw)?;
+
     if raw.iter().any(|(t, _, _, _, _)| t.eq_bytes(b"|")) {
-        return pipeline::parse_pipeline(&raw, text.start);
+        return pipeline::parse_pipeline(&raw, line, &heredocs, text.start);
     }
 
-    let fully_quoted = fully_quoted_only(&raw);
-    let word_quoted = word_quoted_only(&raw);
-    let quote_masks = quote_masks_only(&raw);
     Ok(ParsedLine::Cmd(command::parse_command(
-        &tokens,
-        fully_quoted,
-        word_quoted,
-        quote_masks,
-        text.start,
+        &raw, line, &heredocs, text.start,
     )?))
 }
 

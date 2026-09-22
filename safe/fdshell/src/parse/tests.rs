@@ -280,6 +280,82 @@ fn test_here_string_keeps_unquoted_spaces() {
 }
 
 #[test]
+fn test_heredoc_basic() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<EOF\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.command, c"cat".into());
+    assert!(cmd.args.is_empty());
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(c"body\n", true)]);
+}
+
+#[test]
+fn test_heredoc_quoted_delimiter_is_literal() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<\"Q\"\n$x\nQ").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(c"$x\n", false)]);
+}
+
+#[test]
+fn test_heredoc_empty_body() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<EOF\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(c"", true)]);
+}
+
+#[test]
+fn test_heredoc_args_and_redirect_after_operator() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo a <<EOF b >out\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::here_doc(c"body\n", true),
+            RedirectDef::write_path(1, c"out"),
+        ]
+    );
+}
+
+// The exact variants (UnterminatedHeredoc / InvalidRedirect) are pinned in
+// parse/heredoc/tests.rs, where the layout result is test-Debug.
+#[test]
+fn test_heredoc_unterminated_is_parse_error() {
+    assert!(parse(b"cat <<EOF").is_err());
+    assert!(parse(b"cat <<NOPE\nbody\nnothing").is_err());
+}
+
+#[test]
+fn test_heredoc_bare_operator_is_invalid_redirect() {
+    assert!(parse(b"cat <<").is_err());
+    assert!(parse(b"cat << ;").is_err());
+}
+
+#[test]
+fn test_heredoc_twice_is_duplicate_redirect() {
+    assert!(parse(b"cat <<A <<B\nx\nA\ny\nB").is_err());
+}
+
+#[test]
+fn test_heredoc_pipeline_stage_trimmed() {
+    let ParsedLine::Pipeline(pl) = parse(b"cat <<EOF | wc -l\nbody\nEOF").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pl.commands.len(), 2);
+    // Stage 2 must not see the body tokens.
+    assert_eq!(pl.commands[1].command, c"wc".into());
+    assert_eq!(pl.commands[1].args, vec![c"-l".into()]);
+    assert_eq!(
+        pl.commands[0].redirects,
+        vec![RedirectDef::here_doc(c"body\n", true)]
+    );
+    assert!(pl.commands[1].redirects.is_empty());
+}
+
+#[test]
 fn test_here_string_bare_takes_next_token() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<< word").unwrap() else {
         panic!("expected Cmd")

@@ -13,6 +13,10 @@ pub(crate) enum OpenRedirectError {
     HereStringExpand,
     /// here-string: failed to create the stdin file
     HereStringCreate,
+    /// here-doc: failed to expand the body
+    HereDocExpand,
+    /// here-doc: failed to create the stdin file
+    HereDocCreate,
     /// fd {n} is not open; `>&{n}` has nothing to duplicate
     FdNotOpen { n: i32 },
     /// cannot overwrite existing file '{name}': noclobber is set

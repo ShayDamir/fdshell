@@ -6,6 +6,12 @@ pub enum RedirectSource {
     Var(ShortCStr),
     Path(ShortCStr),
     HereString(ShortCStr),
+    /// Here-doc (`<<EOF`): the body bytes become the stdin of the command.
+    /// `expand` runs `$` / backtick expansion in the body (unquoted delimiter).
+    HereDoc {
+        body: ShortCStr,
+        expand: bool,
+    },
     /// Dup from an already-open fd number (`2>&1`).
     Dup(i32),
     /// Close the target fd (`2>&-`).
@@ -21,6 +27,12 @@ impl RedirectSource {
     }
     pub fn here_string(word: impl Into<ShortCStr>) -> Self {
         Self::HereString(word.into())
+    }
+    pub fn here_doc(body: impl Into<ShortCStr>, expand: bool) -> Self {
+        Self::HereDoc {
+            body: body.into(),
+            expand,
+        }
     }
     pub fn dup(from: i32) -> Self {
         Self::Dup(from)

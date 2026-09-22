@@ -1,7 +1,7 @@
 mod expand_at;
 
 use crate::error::cmd::CmdError;
-use crate::parse::{Token, token::tokenize};
+use crate::parse::{Token, token::tokenize_statement};
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
@@ -21,7 +21,7 @@ pub(crate) fn expand_alias(
     }
     drop(state);
     let line = text.as_bytes().change_context(CmdError::Never)?;
-    let tokens = tokenize(line).change_context(CmdError::Parse)?;
+    let tokens = tokenize_statement(line).change_context(CmdError::Parse)?;
     let mut current = ShortCStr::from_vec(line.to_vec()).change_context(CmdError::Never)?;
     let mut delta: isize = 0;
     for position in command_positions(&tokens) {
