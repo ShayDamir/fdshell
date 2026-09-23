@@ -1186,12 +1186,11 @@ fn expand_positional_word_quoted_at_pushes_all_positional() {
             .map(ImportedStr::shell)
             .collect(),
     );
-    let mut result = Vec::new();
-    super::positional::expand_positional_word(false, true, &cell, &mut result).unwrap();
+    let result = super::positional::expand_positional_word(false, true, &cell).unwrap();
     assert_eq!(result.len(), 3);
-    assert_eq!(result[0].as_bytes().unwrap(), b"arg0");
-    assert_eq!(result[1].as_bytes().unwrap(), b"arg1");
-    assert_eq!(result[2].as_bytes().unwrap(), b"arg2");
+    assert_eq!(result[0].0.as_bytes().unwrap(), b"arg0");
+    assert_eq!(result[1].0.as_bytes().unwrap(), b"arg1");
+    assert_eq!(result[2].0.as_bytes().unwrap(), b"arg2");
 }
 
 #[test]
@@ -1237,12 +1236,11 @@ fn empty_quoted_arg_is_one_empty_word() {
 fn quoted_dollar_at_keeps_empty_positional() {
     // Quoted "$@": one word per positional, empty ones included.
     let cell = empty_masked_positional_cell();
-    let mut result = Vec::new();
-    super::positional::expand_positional_word(false, true, &cell, &mut result).unwrap();
+    let result = super::positional::expand_positional_word(false, true, &cell).unwrap();
     assert_eq!(result.len(), 3);
-    assert_eq!(result[0].as_bytes().unwrap(), b"a");
-    assert!(result[1].is_empty());
-    assert_eq!(result[2].as_bytes().unwrap(), b"b");
+    assert_eq!(result[0].0.as_bytes().unwrap(), b"a");
+    assert!(result[1].0.is_empty());
+    assert_eq!(result[2].0.as_bytes().unwrap(), b"b");
 }
 
 #[test]
@@ -1250,11 +1248,10 @@ fn unquoted_dollar_at_drops_empty_positional() {
     // Unquoted $@: each positional is IFS-split separately; an empty one
     // contributes no words (bash: `set -- a "" b; set -- $@` → `$#` = 2).
     let cell = empty_masked_positional_cell();
-    let mut result = Vec::new();
-    super::positional::expand_positional_word(false, false, &cell, &mut result).unwrap();
+    let result = super::positional::expand_positional_word(false, false, &cell).unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].as_bytes().unwrap(), b"a");
-    assert_eq!(result[1].as_bytes().unwrap(), b"b");
+    assert_eq!(result[0].0.as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].0.as_bytes().unwrap(), b"b");
 }
 
 #[test]

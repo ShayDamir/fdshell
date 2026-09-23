@@ -14,7 +14,7 @@ fn split(word: &str, ifs: &str) -> Vec<Vec<u8>> {
     )
     .unwrap()
     .iter()
-    .map(|s| s.as_bytes().unwrap().to_vec())
+    .map(|(s, _)| s.as_bytes().unwrap().to_vec())
     .collect()
 }
 
@@ -27,7 +27,7 @@ fn split_masked(word: &str, mask: &[bool], ifs: &str) -> Vec<Vec<u8>> {
     )
     .unwrap()
     .iter()
-    .map(|s| s.as_bytes().unwrap().to_vec())
+    .map(|(s, _)| s.as_bytes().unwrap().to_vec())
     .collect()
 }
 
@@ -113,6 +113,27 @@ fn masked_non_whitespace_ifs_never_delimits() {
     assert_eq!(
         split_masked("a:b", &[false, true, false], ":"),
         vec![b"a:b".to_vec()]
+    );
+}
+
+#[test]
+fn split_fields_carry_their_mask() {
+    // `a"*"b c` (the quoted `*` is masked): each field keeps its span's bits.
+    let pairs = split_word(
+        &ShortCStr::from_vec(b"a*b c".to_vec()).unwrap(),
+        &[false, true, false, false, false],
+        &ShortCStr::from_vec(" \t\n".as_bytes().to_vec()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        pairs
+            .iter()
+            .map(|(s, m)| (s.as_bytes().unwrap().to_vec(), m.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (b"a*b".to_vec(), vec![false, true, false]),
+            (b"c".to_vec(), vec![false]),
+        ]
     );
 }
 

@@ -2,7 +2,7 @@
 
 use sys::ShortCStr;
 
-use super::{EXPAND_ALIASES, NOCLOBBER, flags, lookup, name_of, set};
+use super::{EXPAND_ALIASES, NOCLOBBER, NULLGLOB, flags, lookup, name_of, set};
 
 #[test]
 fn lookup_known_names() {
@@ -11,11 +11,12 @@ fn lookup_known_names() {
         lookup(&ShortCStr::from(c"expand_aliases")),
         Some(EXPAND_ALIASES)
     );
+    assert_eq!(lookup(&ShortCStr::from(c"nullglob")), Some(NULLGLOB));
 }
 
 #[test]
 fn lookup_unknown_name_is_none() {
-    assert_eq!(lookup(&ShortCStr::from(c"nullglob")), None);
+    assert_eq!(lookup(&ShortCStr::from(c"bogus_option")), None);
     assert_eq!(lookup(&ShortCStr::from(c"")), None);
 }
 
@@ -23,6 +24,7 @@ fn lookup_unknown_name_is_none() {
 fn name_of_round_trips() {
     assert_eq!(name_of(NOCLOBBER), Some(b"noclobber".as_slice()));
     assert_eq!(name_of(EXPAND_ALIASES), Some(b"expand_aliases".as_slice()));
+    assert_eq!(name_of(NULLGLOB), Some(b"nullglob".as_slice()));
     assert_eq!(name_of(0), None);
     assert_eq!(name_of(1 << 8), None);
 }

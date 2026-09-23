@@ -10,6 +10,7 @@ pub(crate) mod resolve;
 mod split;
 mod subst_paren;
 mod tilde;
+use alloc::vec;
 use alloc::vec::Vec;
 
 pub(crate) use arg::substitute_arg;
@@ -39,26 +40,48 @@ pub fn substitute_args(
     for (i, arg) in args.iter().enumerate() {
         let mask = args_mask.get(i).cloned().unwrap_or_default();
         if arg.eq_bytes(b"$@") || arg.eq_bytes(b"$*") {
-            positional::expand_positional_word(
-                arg.eq_bytes(b"$*"),
-                fully_quoted(&mask),
-                cell,
-                &mut result,
-            )?;
-        } else {
-            // A fully quoted word is exactly one word — kept even when the
-            // expansion is empty (`"${Y:+a}"` → one empty argument).
-            let fq = fully_quoted(&mask);
-            let (expanded, mask) = arg::substitute_arg(arg, &mask, &mut cache, cell)?;
-            if fq {
-                result.push(expanded);
-            } else {
-                let state = borrow_state(cell)?;
-                result.extend(split::split_word(&expanded, &mask, &state.ifs)?);
+            for (word, mask) in
+                positional::expand_positional_word(arg.eq_bytes(b"$*"), fully_quoted(&mask), cell)?
+            {
+                push_word(&mut result, &word, &mask, cell)?;
             }
+            continue;
+        }
+        // A fully quoted word is exactly one word — kept even when the
+        // expansion is empty (`"${Y:+a}"` → one empty argument).
+        let fq = fully_quoted(&mask);
+        let (expanded, mask) = arg::substitute_arg(arg, &mask, &mut cache, cell)?;
+        // The IFS borrow must end before the glob reborrows the cell for
+        // `nullglob` (RefCell, LESSONS.md).
+        let fields = if fq {
+            vec![(expanded, mask)]
+        } else {
+            let state = borrow_state(cell)?;
+            split::split_word(&expanded, &mask, &state.ifs)?
+        };
+        for (word, mask) in fields {
+            push_word(&mut result, &word, &mask, cell)?;
         }
     }
     Ok(result)
+}
+
+/// One word after IFS splitting: a fully quoted word is kept as-is (even
+/// empty), any other word is pathname-expanded first.
+fn push_word(
+    result: &mut Vec<ShortCStr>,
+    word: &ShortCStr,
+    mask: &[bool],
+    cell: &ForkCell<ShellState>,
+) -> Result<(), Report<ResolveError>> {
+    if fully_quoted(mask) {
+        result.push(word.clone());
+        return Ok(());
+    }
+    for expanded in crate::glob::expand(word, mask, cell)? {
+        result.push(expanded);
+    }
+    Ok(())
 }
 
 /// A word is fully quoted when every byte was consumed inside double quotes,

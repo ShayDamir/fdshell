@@ -77,6 +77,43 @@ Limitations:
 - A second stdin redirect on one command (two here-docs, or a here-doc plus
   `< file`) is rejected with `duplicate redirect target`.
 
+## Glob expansion
+
+A word containing an unquoted `*`, `?`, or a valid `[...]` bracket expression
+is expanded against the filesystem (bash pathname-expansion semantics):
+
+- `*` matches any run of bytes except `/`; `?` matches exactly one byte;
+  `[...]` matches one byte from a set — with `a-z` ranges, `!` negation,
+  and a leading `]` as a literal member.
+- Matching is per path component: `*` never crosses a `/`. Unquoted `/`
+  separates pattern components, which are walked literally (`echo sub/*`).
+  A leading `/` makes the pattern absolute; a trailing `/` matches
+  directories only and is kept in the results (`echo */` → `sub/`).
+- `.` and `..` are never matched by a pattern component, and a pattern
+  cannot consume a name's leading `.` unless the pattern starts with a
+  literal `.` (`echo *` skips `.hidden`; `echo .h*` matches it).
+- Symlinks to directories are followed at intermediate positions
+  (`ln -s sub link; echo link/*` works).
+- Results are sorted bytewise. A pattern with no matches is passed through
+  verbatim (bash default); `shopt -s nullglob` makes it disappear.
+
+Quoting: double-quoted bytes always match literally; a fully quoted word is
+never expanded. Expansion happens for command arguments (external, builtins,
+`builtin`, `become`), `set --` words, user-function arguments, unquoted
+`$@` / `$*` fields (which re-glob, like bash), and literal `for … in` words.
+`$(…)` / `$((…))` outputs, `case` words, redirect targets, and command names
+are not expanded (v1).
+
+Limitations:
+
+- No `[:class:]` character classes inside brackets.
+- No `dotglob` / `failglob` (bash defaults are off; shopt follow-up planned).
+- Redirect target words and command names (word 0) are not globbed.
+- Backslash: fdshell keeps `\X` in the word (argv semantics — `echo \*`
+  passes `\*` to the program), so an escaped pattern character does not
+  trigger expansion: `echo a\*` prints `a\*` verbatim where bash prints
+  `a*`.
+
 ## How it works?
 
 ### Passing file descriptors from subprocess back to fdshell

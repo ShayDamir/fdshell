@@ -10,11 +10,13 @@ use crate::error::resolve::ResolveError;
 /// each non-whitespace IFS char delimits a field, empty fields included
 /// (a trailing one is kept). An empty IFS disables splitting. An IFS char
 /// whose mask bit is `true` was inside double quotes and never delimits.
+/// Each field comes back with the per-byte quote mask of the same span,
+/// so later pattern detection can skip quoted bytes.
 pub(crate) fn split_word(
     word: &ShortCStr,
     mask: &[bool],
     ifs: &ShortCStr,
-) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
+) -> Result<Vec<(ShortCStr, Vec<bool>)>, Report<ResolveError>> {
     let bytes = word.as_bytes().change_context(ResolveError::RefNotFound)?;
     let ifs_bytes = ifs.as_bytes().change_context(ResolveError::RefNotFound)?;
     let is_ifs_ws = |b: u8| (b == b' ' || b == b'\t' || b == b'\n') && ifs_bytes.contains(&b);
@@ -22,12 +24,13 @@ pub(crate) fn split_word(
     let quoted = |i: usize| mask.get(i).copied().unwrap_or(false);
     let mut fields = Vec::new();
     let mut cur = ShortCStr::new();
+    let mut cur_mask = Vec::new();
     let mut trailing = false;
     let mut i = 0usize;
     while let Some(&b) = bytes.get(i) {
         if is_ifs_ws(b) && !quoted(i) {
             if !cur.is_empty() {
-                fields.push(core::mem::take(&mut cur));
+                fields.push((core::mem::take(&mut cur), core::mem::take(&mut cur_mask)));
             }
             trailing = false;
             while let Some(&n) = bytes.get(i + 1) {
@@ -37,16 +40,17 @@ pub(crate) fn split_word(
                 i += 1;
             }
         } else if is_ifs(b) && !quoted(i) {
-            fields.push(core::mem::take(&mut cur));
+            fields.push((core::mem::take(&mut cur), core::mem::take(&mut cur_mask)));
             trailing = true;
         } else {
             cur.push_byte(b).change_context(ResolveError::NulByte)?;
+            cur_mask.push(quoted(i));
             trailing = false;
         }
         i += 1;
     }
     if !cur.is_empty() || trailing {
-        fields.push(cur);
+        fields.push((cur, cur_mask));
     }
     Ok(fields)
 }

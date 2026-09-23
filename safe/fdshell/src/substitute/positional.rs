@@ -1,3 +1,4 @@
+use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ImportedStr;
@@ -15,27 +16,32 @@ use super::split::split_word;
 /// `"$@"` yields one word per positional; `"$*"` yields one word joined by the
 /// first IFS byte (nothing if IFS is empty). Unquoted, each positional is
 /// word-split on IFS separately, so a custom IFS cannot leave injected
-/// separators behind.
+/// separators behind. Each result word comes back with the per-byte quote
+/// mask (all quoted for a quoted expansion, all unquoted otherwise) so
+/// later pattern detection can skip quoted bytes.
 pub(super) fn expand_positional_word(
     is_star: bool,
     fq: bool,
     cell: &ForkCell<ShellState>,
-    result: &mut Vec<ShortCStr>,
-) -> Result<(), Report<ResolveError>> {
+) -> Result<Vec<(ShortCStr, Vec<bool>)>, Report<ResolveError>> {
     let state = borrow_state(cell)?;
     if fq && is_star {
         let sep = first_ifs_byte(&state.ifs)?;
-        result.push(join(&state.positional, sep)?);
-        return Ok(());
+        let word = join(&state.positional, sep)?;
+        let mask = vec![true; word.len()];
+        return Ok(vec![(word, mask)]);
     }
+    let mut out = Vec::new();
     for p in &state.positional {
         if fq {
-            result.push(p.value.clone());
+            out.push((p.value.clone(), vec![true; p.value.len()]));
         } else {
-            result.extend(split_word(&p.value, &[], &state.ifs)?);
+            for (field, mask) in split_word(&p.value, &[], &state.ifs)? {
+                out.push((field, vec![false; mask.len()]));
+            }
         }
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Joins positional parameters with the first IFS byte, or a space if IFS is

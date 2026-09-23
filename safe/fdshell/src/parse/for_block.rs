@@ -10,6 +10,8 @@ use sys::ShortCStr;
 pub struct ForBlock {
     pub var: ShortCStr,
     pub words: Vec<ShortCStr>,
+    /// Per-byte quote masks, parallel to `words`.
+    pub words_mask: Vec<Vec<bool>>,
     pub body: ScriptText,
 }
 
@@ -69,6 +71,15 @@ pub(crate) fn tokens_to_for(
         .iter()
         .map(|(t, _, _, _, _)| t.clone())
         .collect();
+    let words_mask: Vec<Vec<bool>> = word_tokens
+        .iter()
+        .map(|(_, _, _, _, m)| m.clone())
+        .collect();
 
-    Ok(ForBlock { var, words, body })
+    Ok(ForBlock {
+        var,
+        words,
+        words_mask,
+        body,
+    })
 }

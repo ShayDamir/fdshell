@@ -9,11 +9,12 @@ use crate::state::ShellState;
 
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
+    words_mask: &[Vec<bool>],
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ImportedStr>, Report<ResolveError>> {
     let mut out = Vec::new();
-    for word in words {
+    for (i, word) in words.iter().enumerate() {
         let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
         if is_arith(bs) {
             out.push(expand_arith_word(bs, text, cell)?);
@@ -27,10 +28,12 @@ pub(crate) fn expand_for_words(
                 ));
             }
         } else {
-            out.push(ImportedStr::new(
-                word.clone(),
-                Trace::at(text.start, text.origin.clone()),
-            ));
+            // Literal for-list words are pathname-expanded (whole-word
+            // `$((…))`/`$(…)` are exempt); each result is a new shell word.
+            let mask = words_mask.get(i).cloned().unwrap_or_default();
+            for w in crate::glob::expand(word, &mask, cell)? {
+                out.push(ImportedStr::new(w, Trace::at(text.start, Origin::Shell)));
+            }
         }
     }
     Ok(out)
