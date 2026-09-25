@@ -21,6 +21,8 @@ pub enum AppError {
     CloexecFailed,
     /// failed to read script file
     ScriptRead,
+    /// script exceeds the size limit; use a smaller script
+    ScriptTooLarge,
     /// missing script path after --dirfd
     MissingScriptPath,
     /// impossible

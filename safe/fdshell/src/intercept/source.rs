@@ -3,7 +3,7 @@ use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ImportedStr;
 use sys::Origin;
 use sys::Position;
@@ -63,7 +63,7 @@ fn run_sourced(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let fd = sys::openat2::open(path.export(), sys::fcntl::O_RDONLY)
         .change_context(CmdError::SourceOpen)?;
-    let content = read_to_end(&fd)?;
+    let content = read_to_end(&fd, crate::cmd_subst::MAX_CAPTURED)?;
     let data = ShortCStr::from_vec(content).change_context(CmdError::SourceNul)?;
     let script = ScriptText::new(data, Position::new(1, 1), Origin::File(path.clone()));
     // Count each source level toward the nesting cap: a self-sourcing file
@@ -73,8 +73,9 @@ fn run_sourced(
     })
 }
 
-/// Read `fd` to EOF.
-fn read_to_end(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<CmdError>> {
+/// Read `fd` to EOF, failing with [`CmdError::SourceTooLarge`] once `limit`
+/// bytes would be read.
+fn read_to_end(fd: &sys::LocalFd, limit: usize) -> Result<Vec<u8>, Report<CmdError>> {
     let mut content = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
@@ -83,6 +84,9 @@ fn read_to_end(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<CmdError>> {
             break;
         }
         let slice = buf.get(..n).ok_or(CmdError::Never)?;
+        if content.len() + slice.len() > limit {
+            bail!(CmdError::SourceTooLarge);
+        }
         content.extend_from_slice(slice);
     }
     Ok(content)

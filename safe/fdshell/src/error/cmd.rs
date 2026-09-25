@@ -53,6 +53,8 @@ pub enum CmdError {
     SourceRead,
     /// source: file contains NUL bytes
     SourceNul,
+    /// source: file exceeds the size limit; use a smaller file
+    SourceTooLarge,
     /// 'break' is not inside a loop
     BreakOutsideLoop,
     /// 'continue' is not inside a loop

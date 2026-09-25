@@ -1,7 +1,11 @@
 #![allow(clippy::unwrap_used)]
 
 use fdshell::{load_script, parse_cli_args};
+use std::process::Command;
+use std::str;
 use sys::pipe::pipe2;
+
+const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
 #[test]
 fn parse_dirfd_without_value_is_usage_error() {
@@ -171,7 +175,34 @@ fn load_script_reads_data_until_eof() {
         s.spawn(move || {
             sys::rw::write(&wr, &data).unwrap();
         });
-        let content = load_script(&rd).unwrap();
+        let content = load_script(&rd, expected.len()).unwrap();
         assert_eq!(content.as_slice(), &expected[..]);
     });
+}
+
+/// A script file larger than the 64 MiB cap must fail with a clean,
+/// actionable error instead of allocating until OOM.
+#[test]
+fn oversized_script_fails_with_size_limit_error() {
+    let path = std::env::temp_dir().join(format!("fdshell-it-big-script-{}", std::process::id()));
+    // Sparse file: set_len allocates nothing in the test process.
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(64 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+
+    let output = Command::new(BIN)
+        .arg(path.to_str().unwrap())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        stderr.contains("script exceeds the size limit"),
+        "expected the script size-limit error, exit={:?} stderr={stderr}",
+        output.status.code(),
+    );
+    assert!(!output.status.success());
 }

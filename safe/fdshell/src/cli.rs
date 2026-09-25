@@ -1,10 +1,11 @@
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 
 use crate::AppError;
 
-/// Read script content from a LocalFd into a Vec<u8>.
-pub fn load_script(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<AppError>> {
+/// Read script content from a LocalFd into a Vec<u8>, failing with
+/// [`AppError::ScriptTooLarge`] once `limit` bytes would be read.
+pub fn load_script(fd: &sys::LocalFd, limit: usize) -> Result<Vec<u8>, Report<AppError>> {
     let mut content = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
@@ -13,6 +14,9 @@ pub fn load_script(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<AppError>> {
             break;
         }
         let slice = buf.get(..n).ok_or(AppError::ScriptRead)?;
+        if content.len() + slice.len() > limit {
+            bail!(AppError::ScriptTooLarge);
+        }
         content.extend_from_slice(slice);
     }
     Ok(content)
@@ -77,3 +81,6 @@ pub fn parse_cli_args(all_args: &[sys::ShortCStr]) -> Result<CliArgs, Report<App
         positional,
     })
 }
+
+#[cfg(test)]
+mod tests;

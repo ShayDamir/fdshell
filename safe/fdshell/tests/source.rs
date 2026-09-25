@@ -93,3 +93,23 @@ fn source_no_argument_fails() {
     let stderr = str::from_utf8(&output.stderr).unwrap();
     assert!(stderr.contains("missing file argument"), "stderr={stderr}");
 }
+
+/// Sourcing an unbounded file (`/dev/zero`) must hit the size cap with a
+/// clean, actionable error instead of allocating until OOM.
+#[test]
+fn source_unbounded_file_is_capped() {
+    let output = Command::new(BIN)
+        .args(["-c", "source /dev/zero"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert!(
+        stderr.contains("source: file exceeds the size limit"),
+        "expected the source size-limit error, exit={:?} stderr={stderr}",
+        output.status.code(),
+    );
+    assert!(!output.status.success());
+}

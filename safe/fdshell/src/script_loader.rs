@@ -14,7 +14,7 @@ pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppEr
     if let Some(fd) = &parsed.script_fd {
         let origin = parsed.script_origin.clone().unwrap_or(Origin::Stdin);
         return Ok(Some((
-            crate::cli::load_script(fd).change_context(AppError::ScriptRead)?,
+            crate::cli::load_script(fd, crate::cmd_subst::MAX_CAPTURED)?,
             positional,
             origin,
         )));
@@ -33,7 +33,7 @@ pub fn load_script_source(parsed: &CliArgs) -> Result<ScriptResult, Report<AppEr
             sys::openat2::open(&cstr, sys::fcntl::O_RDONLY).change_context(AppError::ScriptRead)?
         };
         return Ok(Some((
-            crate::cli::load_script(&fd).change_context(AppError::ScriptRead)?,
+            crate::cli::load_script(&fd, crate::cmd_subst::MAX_CAPTURED)?,
             positional,
             Origin::File(path.value.clone()),
         )));

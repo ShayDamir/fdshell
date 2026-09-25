@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::run_source;
+use super::{read_to_end, run_source};
 use crate::error::cmd::CmdError;
 use crate::intercept::try_intercept;
 use crate::loop_control::LoopControl;
@@ -269,4 +269,34 @@ fn try_intercept_dot_returns_some() {
             .unwrap()
             .is_some()
     );
+}
+
+/// A memfd pre-filled with `data` and seeked back to the start, so
+/// `read_to_end` reads from byte 0.
+fn memfd_bytes(data: &[u8]) -> sys::LocalFd {
+    let fd = sys::memfd::memfd_create().unwrap();
+    sys::rw::write(&fd, data).unwrap();
+    sys::rw::lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
+    fd
+}
+
+#[test]
+fn read_to_end_under_limit_returns_all() {
+    let fd = memfd_bytes(b"hello");
+    let out = read_to_end(&fd, 8).unwrap();
+    assert_eq!(out.as_slice(), b"hello");
+}
+
+#[test]
+fn read_to_end_at_limit_returns_all() {
+    let fd = memfd_bytes(b"hello");
+    let out = read_to_end(&fd, 5).unwrap();
+    assert_eq!(out.as_slice(), b"hello");
+}
+
+#[test]
+fn read_to_end_over_limit_fails() {
+    let fd = memfd_bytes(b"hello");
+    let e = read_to_end(&fd, 4).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::SourceTooLarge));
 }
