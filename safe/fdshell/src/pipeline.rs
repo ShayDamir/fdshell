@@ -45,13 +45,15 @@ pub fn launch_pipeline(
         let (child_pid, pidfd_opt) =
             sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
-            None => match child::run_child(i, &pipes, &mut capture_pairs, &commands, cell) {
-                Ok(code) => sys::exit(code),
-                Err(report) => {
-                    let _ = writeln!(crate::io::Stderr, "{report:?}");
-                    sys::exit(report.current_context().exit_code());
+            None => {
+                match child::run_child(i, &pipes, &mut capture_pairs, &children, &commands, cell) {
+                    Ok(code) => sys::exit(code),
+                    Err(report) => {
+                        let _ = writeln!(crate::io::Stderr, "{report:?}");
+                        sys::exit(report.current_context().exit_code());
+                    }
                 }
-            },
+            }
             Some(pidfd) => children.push((child_pid, pidfd)),
         }
     }

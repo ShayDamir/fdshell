@@ -4,15 +4,18 @@ use crate::parse::CommandLine;
 use crate::redirect::Redirect;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::LocalFd;
 use sys::fork_cell::ForkCell;
+use sys::{LocalFd, Pid};
 
 use crate::state::ShellState;
+
+mod close_inherited;
 
 pub fn run_child(
     i: usize,
     pipes: &[(LocalFd, LocalFd)],
     capture_pairs: &mut [Option<(LocalFd, LocalFd)>],
+    children: &[(Pid, LocalFd)],
     commands: &[CommandLine],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
@@ -20,11 +23,10 @@ pub fn run_child(
 
     let mut redirects: Vec<Redirect> = Vec::new();
 
-    // Clone needed pipe fds for stdin/stdout redirects. Each child inherits all
-    // pipe fds from the parent; we clone only the ones this command needs and
-    // redirect to them. Pipe fds have CLOEXEC set, so they auto-close on exec.
-    // Closing cloned fds via scope exit ensures proper EOF signaling when writers
-    // exit.
+    // Clone the pipe ends this stage needs for its stdin/stdout redirects.
+    // The clones use try_clone() (lowest free fd), which relies on the
+    // inherited pipe ends still occupying the low fd numbers, so the
+    // close_inherited cleanup runs after this loop.
     for (j, (read_end, write_end)) in pipes.iter().enumerate() {
         if j == i.saturating_sub(1) {
             let fd = read_end
@@ -39,6 +41,11 @@ pub fn run_child(
             redirects.push(Redirect::new(1, fd));
         }
     }
+
+    // Builtin stages never exec, so the inherited pipe ends, sibling
+    // capture pairs and sibling pidfds would stay open for the whole
+    // builtin run; close them here (external stages shed them at exec).
+    close_inherited::close_inherited(pipes, capture_pairs, children, i)?;
 
     let opened = crate::redirect::open_redirect_files(&cmd_data.redirects, cell)
         .change_context(ChildProcessError::RedirectFailed)?;
