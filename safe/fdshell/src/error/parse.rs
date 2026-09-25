@@ -34,6 +34,8 @@ pub(crate) enum ParseError {
     UnexpectedChar { ch: u8 },
     /// invalid redirect syntax
     InvalidRedirect,
+    /// brace expansion produced too many words
+    BraceExpansionTooManyWords,
     /// break takes no arguments
     BreakTakesNoArguments,
     /// continue takes no arguments

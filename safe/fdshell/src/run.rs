@@ -11,6 +11,7 @@ pub(crate) fn run_one(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let text = crate::alias_expand::expand_alias(text, cell)?;
+    let text = crate::brace_expand::expand(&text)?;
     let parsed = crate::parse::parse(&text).change_context(CmdError::Parse)?;
     match &parsed {
         crate::parse::ParsedLine::Cmd(cmdline) => {

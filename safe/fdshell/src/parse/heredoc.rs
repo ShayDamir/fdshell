@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
-pub(crate) use operator::{is_operator, operator_count};
+pub(crate) use operator::{delimiter_token_indices, is_operator, operator_count};
 
 /// One parsed heredoc, in command order.
 #[derive(Clone)]

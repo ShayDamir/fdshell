@@ -1,6 +1,7 @@
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::redirect::RedirectDef;
+use alloc::vec::Vec;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
@@ -41,3 +42,24 @@ pub fn parse_here_string(
     };
     Ok(Some((RedirectDef::here_string(word), extra)))
 }
+
+/// The token index of every here-string word: the operator token in the
+/// attached form (`<<<word`, `<<<""`) and the following token in the bare
+/// `<<<` form.
+pub(crate) fn word_indices(tokens: &[Token]) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    for (i, (t, start, end, fq, _mask)) in tokens.iter().enumerate() {
+        if *fq || !t.starts_with(b"<<<") {
+            continue;
+        }
+        if t.len() > 3 || end - start > t.len() {
+            out.push(i);
+        } else if tokens.get(i + 1).is_some() {
+            out.push(i + 1);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests;

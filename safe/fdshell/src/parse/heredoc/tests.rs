@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::{is_operator, layout, operator_count};
+use super::{delimiter_token_indices, is_operator, layout, operator_count};
 use crate::error::parse::ParseError;
 use crate::parse::token::tokenize_statement;
+use alloc::vec;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -207,4 +208,26 @@ fn is_operator_bounds_guard() {
     let tokens = tokenize_statement(line).unwrap();
     assert!(!is_operator(&tokens, 0));
     assert!(!is_operator(&tokens, tokens.len() + 1));
+}
+
+#[test]
+fn delimiter_indices_bare_form_takes_next_token() {
+    let line = b"cat << {a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(delimiter_token_indices(&tokens), vec![2]);
+}
+
+#[test]
+fn delimiter_indices_attached_form_is_operator_token() {
+    let line = b"cat <<{a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(delimiter_token_indices(&tokens), vec![1]);
+}
+
+#[test]
+fn delimiter_indices_bare_form_at_end_of_input() {
+    // A bare `<<` with no following word protects nothing.
+    let line = b"cat <<";
+    let tokens = tokenize_statement(line).unwrap();
+    assert!(delimiter_token_indices(&tokens).is_empty());
 }

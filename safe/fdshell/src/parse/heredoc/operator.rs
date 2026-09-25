@@ -33,6 +33,29 @@ pub(crate) fn operator_count(tokens: &[Token]) -> usize {
         .count()
 }
 
+/// The token index of every heredoc delimiter: the operator token in the
+/// attached form (`<<WORD`, `<<"Q"`, `<<""`) and the following token in the
+/// bare `<<` form.
+pub(crate) fn delimiter_token_indices(tokens: &[Token]) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    for (i, (t, start, end, _fq, _mask)) in tokens.iter().enumerate() {
+        if !is_operator(tokens, i) {
+            continue;
+        }
+        if attached(t, *start, *end) {
+            out.push(i);
+        } else if tokens.get(i + 1).is_some() {
+            out.push(i + 1);
+        }
+    }
+    out
+}
+
+/// The attached `<<` form: the raw span is longer than the unquoted word.
+fn attached(t: &ShortCStr, start: usize, end: usize) -> bool {
+    t.len() > 2 || end - start > t.len()
+}
+
 /// The `(raw delimiter span, quoted)` of every operator, in token order.
 pub(super) fn operators<'a>(
     line: &'a [u8],
@@ -59,7 +82,7 @@ pub(super) fn operator_raw<'a>(
     let Some((t, start, end, _fq, _mask)) = tokens.get(i) else {
         bail!(ParseError::Never);
     };
-    if t.len() > 2 || *end - *start > t.len() {
+    if attached(t, *start, *end) {
         // Attached form: `<<WORD`, `<<"Q"`, `<<""` — the raw span after `<<`.
         // The token offsets are within the line by construction.
         Ok((line.get(*start + 2..*end).ok_or(ParseError::Never)?, 0))

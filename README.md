@@ -114,6 +114,47 @@ Limitations:
   trigger expansion: `echo a\*` prints `a\*` verbatim where bash prints
   `a*`.
 
+## Brace expansion
+
+A word containing an unquoted brace group is expanded before tokenization
+(bash brace-expansion semantics):
+
+- `{a,b,c}` — a comma group: one word per unquoted top-level comma.
+- `{start..end[.incr]}` — a sequence: decimal integers, one-byte values
+  (`{a..c}`), and zero-padded integers (`{01..03}`, `{-01..1}`). `incr` may
+  be negative (`{1..5..-2}`); `0` means `1` (`{1..10..0}`). Direction follows
+  the sign of `end - start`; the step sign is corrected to match.
+- Several groups in one word form a cartesian product (`{a,b}{c,d}` →
+  `ac ad bc bd`), and a group may nest inside another (`{1..{a,b}3}` →
+  `{1..a3} {1..b3}`).
+
+Not expanded (kept verbatim, like bash): quoted braces (`"{a,b}"`,
+`a"{b,c}"d`); a group with neither a comma nor a valid sequence (`{a}`);
+incomplete sequences (`{..5}`, `{1..}`, `{a..b..c}`); non-decimal terms
+(`{0x1..0x3}`, `{1.5..3}`); and `i64` overflow (`{1..100000000000000000000}`).
+An unquoted `..` directly before the closing brace does not start a sequence
+(`{1..}` stays literal). Empty expanded words drop out on re-tokenization
+(`echo {,}` runs `echo` with no arguments; `echo x{,}` → `x x`).
+
+Protected contexts (no expansion, like bash): the assignment word
+(`x={a,b}`), `case` words and pattern lists, here-string words, and heredoc
+delimiters — both the `<<` operator word and the terminating delimiter line.
+Redirect target words *are* expanded (`echo hi > {a,b}` is an ambiguous
+redirect in bash; here it is a duplicate-redirect parse error).
+
+Limitations / deviations from bash:
+
+- The expanded words are re-tokenized, so a generated `#` or shell keyword is
+  re-recognized: `echo {#a,#b}` starts a comment at `#a` (running `echo` with
+  no arguments), and `{if,fi} hi` treats the generated `if` as the `if`
+  keyword (a parse error). bash keeps the expanded bytes literal for both
+  (`echo {#a,#b}` prints `#a #b`; `{if,fi} hi` runs `if` as a command).
+- A single source word that would produce more than 65536 words is a clean
+  parse error (`brace expansion produced too many words`) rather than bash's
+  allocate-then-fall-back-to-literal.
+- Backslash is an ordinary byte outside quotes (see Glob expansion), so it
+  never quotes a brace.
+
 ## How it works?
 
 ### Passing file descriptors from subprocess back to fdshell

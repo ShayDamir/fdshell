@@ -7,6 +7,7 @@ mod alias_expand;
 mod app;
 mod arith;
 mod brace;
+mod brace_expand;
 pub mod busybox;
 mod capture;
 mod caret;
