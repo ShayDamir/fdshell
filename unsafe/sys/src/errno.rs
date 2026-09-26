@@ -9,3 +9,4 @@ pub const EPERM: i32 = libc::EPERM;
 pub const EAGAIN: i32 = libc::EAGAIN;
 pub const EBADF: i32 = libc::EBADF;
 pub const EMFILE: i32 = libc::EMFILE;
+pub const ENODATA: i32 = libc::ENODATA;

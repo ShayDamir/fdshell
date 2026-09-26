@@ -66,6 +66,7 @@ const BUILTINS: &[&str] = &[
     "timerfd",
     "true",
     "type",
+    "verity",
 ];
 
 /// The names listed by `help`, in its own words.

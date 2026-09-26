@@ -20,6 +20,7 @@ mod simple;
 mod statx;
 mod test;
 mod type_cmd;
+mod verity;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
 use core::ffi::CStr;

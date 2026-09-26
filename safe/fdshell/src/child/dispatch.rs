@@ -20,6 +20,7 @@ use super::simple;
 use super::statx;
 use super::test;
 use super::type_cmd;
+use super::verity;
 
 type Handler = fn(&Ctx) -> Result<i32, Report<BuiltinError>>;
 
@@ -55,6 +56,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"test", test::handle_test),
     (b"[", test::handle_test),
     (b"type", type_cmd::handle_type),
+    (b"verity", verity::handle_verity),
 ];
 
 pub(crate) fn is_dispatched(name: &ShortCStr) -> bool {
