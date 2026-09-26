@@ -5,9 +5,12 @@
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
-use crate::SyscallError;
 use crate::pid::Pid;
 use crate::shortcstr::ShortCStr;
+
+mod getcwd;
+
+pub use getcwd::getcwd;
 
 /// Return the current process ID.
 pub fn getpid() -> Pid {
@@ -28,28 +31,6 @@ pub fn getenv(name: &CStr) -> Option<ShortCStr> {
     // SAFETY: `ptr` points to a NUL-terminated C string (the environment).
     let cstr = unsafe { CStr::from_ptr(ptr) };
     ShortCStr::from_vec(cstr.to_bytes().to_vec()).ok()
-}
-
-/// Return the current working directory.
-///
-/// Uses a 4096-byte buffer (sufficient for PATH_MAX on Linux).
-pub fn getcwd() -> Result<Vec<u8>, SyscallError> {
-    let mut buf = [0u8; 4096];
-    // SAFETY: `buf` is a valid, sufficiently-sized buffer; `getcwd` writes at
-    // most PATH_MAX bytes and NUL-terminates. On success the returned pointer
-    // equals `buf`; on failure it returns NULL and sets errno.
-    let ret = unsafe { libc::getcwd(buf.as_mut_ptr().cast(), buf.len()) };
-    if ret.is_null() {
-        // SAFETY: __errno_location returns a valid pointer to thread-local errno.
-        let errno = unsafe { *libc::__errno_location() };
-        return Err(crate::SyscallError::Other {
-            errno,
-            syscall: "getcwd",
-        });
-    }
-    // SAFETY: `ret` points into `buf`, which is valid memory.
-    let len = unsafe { CStr::from_ptr(ret).to_bytes().len() };
-    Ok(buf.get(..len).ok_or(SyscallError::Never)?.to_vec())
 }
 
 /// Parse the C `environ` array into a `Vec` of `(key, value)` pairs.

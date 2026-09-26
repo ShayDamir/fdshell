@@ -12,7 +12,7 @@ pub(super) fn handle_false(_: &Ctx) -> Result<i32, Report<BuiltinError>> {
 }
 
 pub(super) fn handle_pwd(_: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cwd = sys::env::getcwd().change_context(BuiltinError::Io)?;
+    let cwd = sys::env::getcwd().change_context(BuiltinError::Syscall)?;
     sys::OUT.write_all(&cwd).change_context(BuiltinError::Io)?;
     sys::OUT.write_all(b"\n").change_context(BuiltinError::Io)?;
     Ok(0)
