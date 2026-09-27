@@ -20,7 +20,15 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"export_fd", b"Export fd to variable"),
     (b"hash", b"Show or cache path lookups"),
     (b"read", b"Read a line into a variable"),
+    (
+        b"recvmsg",
+        b"Receive a payload and fd vars from an AF_UNIX socket",
+    ),
     (b"send_fd", b"Send an fd to the capture socket"),
+    (
+        b"sendmsg",
+        b"Send a byte payload plus fd vars over an AF_UNIX socket",
+    ),
     (b"set", b"Set or show options and variables"),
     (b"shift", b"Shift positional parameters"),
     (b"shopt", b"Toggle shell options"),

@@ -126,6 +126,38 @@ pub enum CmdError {
     TimeoutSignal,
     /// timeout: failed to wait for the command
     TimeoutWait,
+    /// sendmsg: socket must be an fd variable or a valid fd number
+    SendmsgBadSocket,
+    /// sendmsg: unknown argument (usage: sendmsg %sock [--msg TEXT | --msgfd %var COUNT] [--fd %var]... [--passcred])
+    SendmsgUsage,
+    /// sendmsg: use --msg or --msgfd, not both
+    SendmsgPayloadConflict,
+    /// sendmsg: --msgfd payload contains NUL bytes
+    SendmsgBadPayload,
+    /// sendmsg: an empty payload cannot carry --fd vars (stream sockets drop them)
+    SendmsgEmptyPayload,
+    /// sendmsg: at most 64 --fd vars per message
+    SendmsgTooManyFds,
+    /// sendmsg: failed to dup an fd variable
+    SendmsgFds,
+    /// sendmsg: failed to enable SO_PASSCRED
+    SendmsgCred,
+    /// sendmsg: failed to send the message
+    SendmsgSyscall,
+    /// recvmsg: usage: recvmsg [--cred VAR] %sock VAR [%fdvar ...]
+    RecvmsgBadUsage,
+    /// recvmsg: failed to dup the socket fd
+    RecvmsgSocketSyscall,
+    /// recvmsg: failed to enable SO_PASSCRED
+    RecvmsgCred,
+    /// recvmsg: failed to receive a message
+    RecvmsgSyscall,
+    /// recvmsg: the peer sent more fds than declared
+    RecvmsgTooManyFds,
+    /// recvmsg: the peer sent fewer fds than declared
+    RecvmsgFdCountMismatch,
+    /// recvmsg: payload contains NUL bytes
+    RecvmsgPayloadNul,
 }
 
 impl core::error::Error for CmdError {}

@@ -263,6 +263,56 @@ echo "wait exited $?"
 Wrap it in a loop (`while true; do wait … done`) to re-poll each round. Arms run in
 separate children, so a slow arm (a blocking read) cannot stall the others or the parent.
 
+### Custom AF_UNIX protocols (`sendmsg` / `recvmsg`)
+
+`sendmsg` and `recvmsg` move a **byte payload** together with **any number of fd
+variables** in a single AF_UNIX `sendmsg`/`recvmsg` (SCM_RIGHTS) message. They are the
+primitive for bespoke socket protocols.
+
+```shell
+sendmsg %sock [--msg TEXT | --msgfd %var COUNT] [--fd %var]... [--passcred]
+recvmsg [--cred VAR] %sock VAR [%fdvar ...]
+```
+
+* `%sock` is a connected socket: an fd variable (`%sock`), or a raw fd number (as in
+  `read -u`). Sockets must be **pre-connected** — `sendmsg`/`recvmsg` do not create or
+  accept them (socket lifecycle is a separate feature).
+* `--msg TEXT` sends the inline payload; `--msgfd %var COUNT` sends the first `COUNT`
+  bytes read from an fd variable. Omitting both sends an empty payload (a no-op
+  send, useful for readiness signaling).
+* `--fd %var` (repeatable) appends that fd to the message; the receiver declares a
+  matching `%fdvar` slot per fd, in order.
+* `--passcred` enables `SO_PASSCRED` on the sender's socket before the send, so the
+  message carries the sender's real credentials (see below).
+* `recvmsg` stores the payload in the string variable `VAR`, each received fd in its
+  declared slot, and (with `--cred CRED`) the sender's identity in `CRED`.
+
+Sender identity is surfaced as `PID:UID:GID`. Credentials require **both** sides to
+opt in: the sender with `--passcred` and the receiver with `--cred CRED` (which
+enables `SO_PASSCRED` and harvests the kernel's `SCM_CREDENTIALS`). The kernel
+attaches the credentials at send time based on whichever socket had `SO_PASSCRED`
+then, so a script can verify the peer's pid (e.g. against the pid it spawned) only
+when the sender opted in: a foreign sender that never set `SO_PASSCRED` makes
+`recvmsg --cred` silently leave `CRED` unset.
+
+```shell
+builtin import_fd 0 %>%peer          # peer's end arrived as our stdin
+wait
+    readable %peer)
+        recvmsg --cred CRED %peer PAYLOAD %data
+        echo "peer said $PAYLOAD from ${CRED%%:*}" ;;
+    after 2000)
+        echo "peer timed out" ;;
+done
+```
+
+Because `recvmsg` blocks the current shell (like `read`), use a `wait` readable arm — or
+backgrounding — to wait for readiness. On EOF (peer closed) `recvmsg` sets `VAR` empty
+and exits `1`, so `||`, `if`, and `wait` arms can all observe it.
+
+Payloads are strings: a payload containing a NUL byte is a clean error (binary data
+belongs in the fd-transfer path, which these commands already provide).
+
 ### Security concerns
 
 The file descriptors are received from the spawned subprocesses using `MSG_CMSG_CLOEXEC` flag passed

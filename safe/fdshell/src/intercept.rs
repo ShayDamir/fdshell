@@ -41,6 +41,8 @@ pub(crate) fn try_intercept(
         b"signalfd" => signalfd_cmd::run_signalfd(line, cmdline, cell).map(handled),
         b"timeout" => timeout_cmd::run_timeout(line, cmdline, cell).map(handled),
         b"send_fd" => send_fd::run_send_fd(line, cmdline, cell).map(handled),
+        b"sendmsg" => sendmsg::run_sendmsg(line, cmdline, cell).map(handled),
+        b"recvmsg" => recvmsg::run_recvmsg(line, cmdline, text, cell).map(handled),
         _ => return Ok(None),
     };
     if let Some(control) = result? {
@@ -72,7 +74,9 @@ mod exports;
 mod hash_cmd;
 mod last_arg_frame;
 mod read;
+mod recvmsg;
 mod send_fd;
+mod sendmsg;
 mod set_cmd;
 mod set_limit;
 mod set_list;

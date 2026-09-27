@@ -1,3 +1,11 @@
+mod cmsg;
+mod recvmsg;
+mod sendmsg;
+
+pub use cmsg::MAX_FDS;
+pub use recvmsg::{Msg, recvmsg};
+pub use sendmsg::sendmsg;
+
 use crate::{LocalFd, cvt};
 
 pub fn set_passcred(sock: &LocalFd) -> Result<(), crate::SyscallError> {
