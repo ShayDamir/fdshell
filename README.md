@@ -29,13 +29,16 @@ parallel to script invocation.
 
 | Command | Description |
 |---|---|
-| `openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] path` | Open or create a file via `openat2`. Returns one fd. |
+| `openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] [--path] path` | Open or create a file via `openat2`. Returns one fd. |
 | `mkdirat [--dirfd N] [--mode MODE] [--resolve FLAGS] path` | Create a directory via `mkdirat` + `openat2`. Returns one fd. |
 | `pipe [--flags FLAGS]` | Create an anonymous pipe via `pipe2`. Returns two fds tagged `rd` and `wr`. |
 | `renameat2 [--olddirfd N] [--newdirfd N] [--flags FLAGS] oldpath newpath` | Rename or exchange files via `renameat2`. Returns no fd. |
 
 Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
 `0x`-prefixed hex values. Repeat `--flags` to combine multiple flags.
+
+`openat2 --path` opens with `O_PATH` — a handle with no read/write permission on the file
+itself; combine with `statx %fd` to inspect files the user cannot open.
 
 ## Heredocs
 

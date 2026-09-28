@@ -369,3 +369,29 @@ fn pipe_flags_single_nofollow() {
         assert_eq!(cfg.how.flags, O_NOFOLLOW as u64);
     });
 }
+
+#[test]
+fn path_shorthand() {
+    assert_ok(&["--path", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_PATH as u64);
+    });
+}
+
+#[test]
+fn path_shorthand_combines() {
+    assert_ok(&["--path", "--flags", "O_NOFOLLOW", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, (O_PATH | O_NOFOLLOW) as u64);
+    });
+}
+
+#[test]
+fn path_shorthand_repeat() {
+    assert_ok(&["--path", "--path", "x"], |cfg| {
+        assert_eq!(cfg.how.flags, O_PATH as u64);
+    });
+}
+
+#[test]
+fn path_shorthand_eq_rejected() {
+    assert_invalid_arg(&["--path=1", "x"]);
+}

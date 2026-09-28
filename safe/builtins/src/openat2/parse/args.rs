@@ -1,6 +1,7 @@
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ImportedFd;
+use sys::fcntl::O_PATH;
 
 use crate::argparse;
 use crate::error::{BuiltinError, Suggestion};
@@ -41,6 +42,10 @@ pub(crate) fn parse_arg<'a>(
                 .attach_opaque(Suggestion(
                     "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
                 ))? as u64;
+        }
+        b"--path" => {
+            ensure!(val.is_none(), BuiltinError::InvalidArgument("--path"));
+            acc.open_flags |= O_PATH;
         }
         b"--resolve" => {
             acc.resolve = parse_resolve_flags(argparse::next_val(args, i, val)?)
