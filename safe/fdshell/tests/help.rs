@@ -58,6 +58,7 @@ const BUILTINS: &[&str] = &[
     "ls",
     "lseek",
     "mkdirat",
+    "mkfifoat",
     "memfd",
     "openat2",
     "pipe",

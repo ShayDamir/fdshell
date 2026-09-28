@@ -29,6 +29,12 @@ pub(super) fn handle_mkdirat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     builtins::mkdirat::mkdirat_exec(&cfg, sock).map(|()| 0)
 }
 
+pub(super) fn handle_mkfifoat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let sock = sock(ctx.state)?;
+    let cfg = builtins::mkfifoat::parse::mkfifoat_parse(ctx.refs)?;
+    builtins::mkfifoat::mkfifoat_exec(&cfg, sock).map(|()| 0)
+}
+
 pub(super) fn handle_memfd(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let sock = sock(ctx.state)?;
     let cfg = builtins::memfd::parse::memfd_parse(ctx.refs)?;

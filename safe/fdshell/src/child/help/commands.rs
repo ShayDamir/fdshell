@@ -65,6 +65,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"lseek", b"Move the offset of an fd"),
     (b"memfd", b"Create an in-memory file by fd"),
     (b"mkdirat", b"Create directory"),
+    (b"mkfifoat", b"Create fifo and open it read-write"),
     (b"openat2", b"Open file"),
     (b"pipe", b"Create pipe"),
     (b"printf", b"Format and print arguments"),

@@ -14,6 +14,14 @@ pub fn mkdirat(dirfd: AtFd<'_>, pathname: &CStr, mode: u32) -> Result<(), crate:
     Ok(())
 }
 
+pub fn mkfifoat(dirfd: AtFd<'_>, pathname: &CStr, mode: u32) -> Result<(), crate::SyscallError> {
+    let dirfd = dirfd.as_raw();
+    // SAFETY: `mkfifoat` with an invalid dirfd/path returns the appropriate errno.
+    // `mode` is a bitmask; the kernel keeps only the permission bits.
+    crate::cvt(unsafe { libc::mkfifoat(dirfd, pathname.as_ptr(), mode as libc::mode_t) as isize })?;
+    Ok(())
+}
+
 pub fn renameat2(
     olddirfd: AtFd<'_>,
     oldpath: &CStr,

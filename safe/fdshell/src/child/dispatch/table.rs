@@ -40,6 +40,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"fdexplain", fdexplain::handle_fdexplain),
     (b"pipe", delegated::handle_pipe),
     (b"mkdirat", delegated::handle_mkdirat),
+    (b"mkfifoat", delegated::handle_mkfifoat),
     (b"memfd", delegated::handle_memfd),
     (b"openat2", delegated::handle_openat2),
     (b"printf", printf::handle_printf),
