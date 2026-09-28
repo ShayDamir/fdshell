@@ -197,6 +197,26 @@ REQUEST=$(cat <%server) # REQUEST="request"
 
 If the received file descriptors are not assigned to a variable, they're immediately closed.
 
+A capture target may also be a **bounded array** `var[N]` (tagged: `tagvar[N]`):
+received fds then append to the fd array `var` instead of a scalar fd var, up to
+`N` entries **in total** — entries captured by earlier runs count toward the cap,
+and any fd that no longer fits (or whose tag does not match) is closed
+immediately. The form is usable by any command: foreground, background
+(`cmd %>%arr[N] &>&x; waitpid &x`), and `wait` arms. Tag matching follows the
+scalar form: `%>%arr[N]` accepts an fd of any tag, `%tag>%arr[N]` only fds sent
+with tag `tag`. With several captures on one command, each received fd goes to
+the **first declared** capture that still has room and whose tag matches — an
+untagged capture declared before a tagged one takes the tagged fd:
+
+```shell
+# each accepted connection appends to %conns (cap 2); the third
+# accepted connection is closed by the shell
+builtin accept %l %accept>%conns[2]
+builtin accept %l %accept>%conns[2]
+builtin accept %l %accept>%conns[2]
+for %c in %conns; do handle %c; done
+```
+
 ### Passing file descriptors to subprocess
 
 File descriptor variables can be passed in several ways:

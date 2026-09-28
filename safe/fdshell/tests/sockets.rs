@@ -337,6 +337,59 @@ fn bounded_capture_closes_overflow_connections() {
     drop(c2);
 }
 
+/// Tagged bounded capture, the general form: `%accept>%conns[2]` only takes
+/// fds sent with tag `accept` (from `builtin accept`) and caps `%conns` at
+/// 2 entries in total. `builtin pipe` runs while the cap has room: its
+/// `rd`/`wr` fds must stay out of `%conns`. The third accepted connection is
+/// beyond the cap, so it is closed (clean EOF) while c1/c2 are held.
+#[test]
+fn tagged_bounded_capture_via_accept() {
+    let n = uniq("captag");
+    let child = spawn_server(&format!(
+        "builtin listen @{n} %>%s; echo ready; \
+         builtin pipe %accept>%conns[2] %rd>%r %wr>%w; echo piped; \
+         builtin accept %s %accept>%conns[2]; \
+         builtin accept %s %accept>%conns[2]; \
+         builtin accept %s %accept>%conns[2]; \
+         for %x in %conns; do echo conn; done; \
+         sleep 2"
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let mut c1 = connect_abstract(&n);
+    let c2 = connect_abstract(&n);
+    let mut c3 = connect_abstract(&n);
+    // c3 was beyond the cap: EOF while the shell still holds c1/c2.
+    c3.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    let mut buf = [0u8; 1];
+    assert_eq!(c3.read(&mut buf).unwrap(), 0, "c3 should see EOF");
+    // c1 is still open: a timed read sees neither data nor EOF.
+    c1.set_read_timeout(Some(std::time::Duration::from_millis(300)))
+        .unwrap();
+    assert!(
+        matches!(
+            c1.read(&mut buf),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+        ),
+        "c1 should still be open"
+    );
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={:?}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    // `conn` exactly twice: the pipe's rd/wr fds stayed out of `%conns`
+    // (tag mismatch, cap had room), and the cap held at 2.
+    assert_eq!(
+        str::from_utf8(&out.stdout).unwrap(),
+        "ready\npiped\nconn\nconn\n"
+    );
+    drop(c1);
+    drop(c2);
+}
+
 /// Backgrounding is the non-blocking accept form: `&>&x` returns at once,
 /// `waitpid &x` reaps + commits, and `%c` is usable.
 #[test]
