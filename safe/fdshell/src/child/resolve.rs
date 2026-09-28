@@ -17,7 +17,7 @@ pub(super) fn handle_resolve(ctx: &Ctx) -> Result<i32, Report<builtins::error::B
     name_short.push(*name_cstr);
     let fd = crate::exec::resolve_path(&name_short, &ctx.state.hash_table)
         .change_context(builtins::error::BuiltinError::InvalidArgument("path"))?;
-    sys::shellfd::send_fd(sock, &fd, c"resolve")
+    sock.send_fd(&fd, c"resolve")
         .change_context(builtins::error::BuiltinError::SendFdFailed)?;
     Ok(0)
 }

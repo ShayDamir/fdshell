@@ -18,26 +18,28 @@ pub use libc::{AF_INET, AF_UNIX, SOCK_DGRAM, SOCK_STREAM};
 
 use crate::{LocalFd, cvt};
 
-pub fn set_passcred(sock: &LocalFd) -> Result<(), crate::SyscallError> {
-    let val: libc::c_int = 1;
-    // SAFETY: `sock` is a valid open socket. `SO_PASSCRED` enables
-    // `SCM_CREDENTIALS` delivery, which the kernel always provides
-    // truthfully — the sender cannot spoof credentials.
-    cvt(unsafe {
-        libc::setsockopt(
-            sock.as_raw(),
-            libc::SOL_SOCKET,
-            libc::SO_PASSCRED,
-            (&raw const val).cast(),
-            core::mem::size_of_val(&val) as libc::socklen_t,
-        ) as isize
-    })?;
-    Ok(())
+impl LocalFd {
+    pub fn set_passcred(&self) -> Result<(), crate::SyscallError> {
+        let val: libc::c_int = 1;
+        // SAFETY: `self` is a valid open socket. `SO_PASSCRED` enables
+        // `SCM_CREDENTIALS` delivery, which the kernel always provides
+        // truthfully — the sender cannot spoof credentials.
+        cvt(unsafe {
+            libc::setsockopt(
+                self.as_raw(),
+                libc::SOL_SOCKET,
+                libc::SO_PASSCRED,
+                (&raw const val).cast(),
+                core::mem::size_of_val(&val) as libc::socklen_t,
+            ) as isize
+        })?;
+        Ok(())
+    }
 }
 
 pub fn socketpair_with_passcred() -> Result<(LocalFd, LocalFd), crate::SyscallError> {
     let (a, b) = socketpair()?;
-    set_passcred(&a)?;
+    a.set_passcred()?;
     Ok((a, b))
 }
 

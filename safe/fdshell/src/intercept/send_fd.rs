@@ -19,7 +19,8 @@ pub(crate) fn run_send_fd(
         let state = cell.borrow().change_context(CmdError::Never)?;
         let sock = state.shell_sock.as_ref().ok_or(CmdError::FdPass)?;
         let fdvar = state.fds.get(&vname).ok_or(CmdError::FdNotSet)?;
-        sys::shellfd::send_fd(sock, &fdvar.fd, tag.export()).change_context(CmdError::FdPass)?;
+        sock.send_fd(&fdvar.fd, tag.export())
+            .change_context(CmdError::FdPass)?;
     }
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(0);

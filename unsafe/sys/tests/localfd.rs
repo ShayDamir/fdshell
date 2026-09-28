@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use sys::pipe::pipe2;
-use sys::rw::write;
 use sys::{LocalFd, LocalFdError};
 
 #[test]
@@ -37,7 +36,7 @@ fn read_returns_bytes() {
     rd.verify().unwrap();
     wr.verify().unwrap();
     let data = b"hello world";
-    write(&wr, data).unwrap();
+    wr.write(data).unwrap();
     let mut buf = [0u8; 128];
     let n = rd.read(&mut buf).unwrap();
     assert_eq!(n, data.len());
@@ -50,7 +49,7 @@ fn read_all_fills_buffer() {
     rd.verify().unwrap();
     wr.verify().unwrap();
     let data = [0xABu8; 256];
-    write(&wr, &data).unwrap();
+    wr.write(&data).unwrap();
     let mut buf = [0u8; 256];
     let n = rd.read_all(&mut buf).unwrap();
     assert_eq!(n, 256);
@@ -73,10 +72,10 @@ fn read_all_partial() {
     std::thread::scope(move |t| {
         t.spawn(move || {
             let data = [0xABu8; 256];
-            write(&wr, &data).unwrap();
+            wr.write(&data).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(20));
             let data = [0xCDu8; 256];
-            write(&wr, &data).unwrap();
+            wr.write(&data).unwrap();
         });
         t.spawn(move || {
             let mut buf = [0u8; 512];

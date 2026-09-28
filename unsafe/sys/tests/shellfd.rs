@@ -2,10 +2,9 @@
 
 use sys::Pid;
 use sys::SyscallError;
-use sys::net::{set_passcred, socketpair};
+use sys::net::socketpair;
 use sys::pipe::pipe2;
-use sys::rw::{read, write};
-use sys::shellfd::{RecvFdError, TAG_MAX, recv_fd, send_fd, set_capture_active};
+use sys::shellfd::{RecvFdError, TAG_MAX, set_capture_active};
 
 #[repr(C)]
 struct CmsgBuf {
@@ -151,24 +150,21 @@ fn test_send_recv_fd() -> Result<(), SyscallError> {
         let (test_a, test_b) = socketpair()?;
         test_a.verify().expect("fd must have CLOEXEC");
         test_b.verify().expect("fd must have CLOEXEC");
-        send_fd(&shell_sock, &test_a, c"test")?;
+        shell_sock.send_fd(&test_a, c"test")?;
         drop(test_a);
-        write(&test_b, b"42")?;
+        test_b.write(b"42")?;
         drop(test_b);
 
         let mut tag = [0u8; TAG_MAX];
-        let (test_fd, _tag) = recv_fd(
-            &receiver,
-            &mut tag,
-            Pid::from_raw(std::process::id() as i32),
-        )
-        .expect("recv_fd should succeed");
+        let (test_fd, _tag) = receiver
+            .recv_fd(&mut tag, Pid::from_raw(std::process::id() as i32))
+            .expect("recv_fd should succeed");
         test_fd.verify().expect("fd must have CLOEXEC");
 
         let mut buf = [0u8; 8];
-        assert_eq!(read(&test_fd, &mut buf)?, 2);
+        assert_eq!(test_fd.read(&mut buf)?, 2);
         assert_eq!(&buf[..2], b"42");
-        assert_eq!(read(&test_fd, &mut buf)?, 0);
+        assert_eq!(test_fd.read(&mut buf)?, 0);
 
         drop(test_fd);
         drop(receiver);
@@ -193,15 +189,17 @@ fn test_recv_fd_keeps_first_closes_rest() -> Result<(), SyscallError> {
     drop(wr2);
 
     let mut buf = [0u8; TAG_MAX];
-    let (kept, _tag) = recv_fd(&b, &mut buf, Pid::from_raw(0)).expect("recv_fd should succeed");
+    let (kept, _tag) = b
+        .recv_fd(&mut buf, Pid::from_raw(0))
+        .expect("recv_fd should succeed");
     kept.verify().expect("fd must have CLOEXEC");
 
-    write(&kept, b"hi")?;
+    kept.write(b"hi")?;
     let mut out = [0u8; 2];
-    assert_eq!(read(&rd1, &mut out)?, 2);
+    assert_eq!(rd1.read(&mut out)?, 2);
     assert_eq!(&out[..2], b"hi");
     drop(kept);
-    assert_eq!(read(&rd1, &mut out)?, 0);
+    assert_eq!(rd1.read(&mut out)?, 0);
 
     let mut pfd = libc::pollfd {
         fd: rd2.as_raw(),
@@ -214,7 +212,7 @@ fn test_recv_fd_keeps_first_closes_rest() -> Result<(), SyscallError> {
         n > 0 && (pfd.revents & (libc::POLLIN | libc::POLLHUP)) != 0,
         "second fd leaked: read end still open"
     );
-    assert_eq!(read(&rd2, &mut out)?, 0);
+    assert_eq!(rd2.read(&mut out)?, 0);
 
     drop(rd1);
     drop(rd2);
@@ -237,7 +235,7 @@ fn test_recv_fd_truncated() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagTooLong) => {}
         _other => panic!("expected TagTooLong"),
     }
@@ -262,7 +260,7 @@ fn test_recv_fd_exact_size_no_null() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
         _other => panic!("expected TagNotNul"),
     }
@@ -286,7 +284,7 @@ fn test_recv_fd_short_no_null() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
         _other => panic!("expected TagNotNul"),
     }
@@ -310,7 +308,7 @@ fn test_recv_fd_interior_null() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagNotNul) => {}
         _other => panic!("expected TagNotNul"),
     }
@@ -329,7 +327,7 @@ fn test_recv_fd_truncated_creds() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    set_passcred(&b)?;
+    b.set_passcred()?;
     let (dummy_rd, mut dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
@@ -390,7 +388,7 @@ fn test_recv_fd_null_at_end_of_buffer() -> Result<(), SyscallError> {
     drop(dummy_wr);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::TagTooLong) => {}
         _other => panic!("expected TagTooLong"),
     }
@@ -406,7 +404,7 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    set_passcred(&b)?;
+    b.set_passcred()?;
     let (dummy_rd, dummy_wr) = pipe2(0)?;
     dummy_rd.verify().expect("fd must have CLOEXEC");
     dummy_wr.verify().expect("fd must have CLOEXEC");
@@ -419,7 +417,7 @@ fn test_recv_fd_pid_mismatch() -> Result<(), SyscallError> {
     drop(fd_b);
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(0)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(0)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::PidMismatch(_, _)) => {}
         _other => panic!("expected PidMismatch"),
     }
@@ -435,7 +433,7 @@ fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
     let (a, b) = socketpair()?;
     a.verify().expect("fd must have CLOEXEC");
     b.verify().expect("fd must have CLOEXEC");
-    set_passcred(&b)?;
+    b.set_passcred()?;
 
     // Send a message without SCM_RIGHTS (msg_controllen == 0) to trigger NoFd.
     let mut iov = libc::iovec {
@@ -456,7 +454,7 @@ fn test_recv_fd_no_fd() -> Result<(), SyscallError> {
     sys::cvt(unsafe { libc::sendmsg(a.as_raw(), &msg, 0) })?;
 
     let mut buf = [0u8; TAG_MAX];
-    match recv_fd(&b, &mut buf, Pid::from_raw(std::process::id() as i32)) {
+    match b.recv_fd(&mut buf, Pid::from_raw(std::process::id() as i32)) {
         Err(e) if matches!(*e.current_context(), RecvFdError::NoFd) => {}
         _other => panic!("expected NoFd"),
     }
@@ -473,7 +471,7 @@ fn test_send_fd_requires_capture_active() -> Result<(), SyscallError> {
     set_capture_active(false);
     // Without capture enabled, send_fd must refuse to send.
     assert!(matches!(
-        send_fd(&a, &fd_a, c"tag"),
+        a.send_fd(&fd_a, c"tag"),
         Err(SyscallError::ENOENT(_))
     ));
     Ok(())
@@ -486,7 +484,7 @@ fn test_send_fd_tag_at_max_proceeds() -> Result<(), SyscallError> {
     set_capture_active(true);
     // TAG_MAX data bytes would overflow; TAG_MAX - 1 data bytes + NUL == TAG_MAX is allowed.
     let tag = std::ffi::CString::new(vec![b'a'; TAG_MAX - 1]).unwrap();
-    send_fd(&a, &fd_a, &tag)?;
+    a.send_fd(&fd_a, &tag)?;
     set_capture_active(false);
     Ok(())
 }
@@ -498,7 +496,7 @@ fn test_send_fd_tag_over_max_is_e2big() -> Result<(), SyscallError> {
     set_capture_active(true);
     // TAG_MAX data bytes + NUL == TAG_MAX + 1 exceeds the limit.
     let tag = std::ffi::CString::new(vec![b'a'; TAG_MAX]).unwrap();
-    let err = send_fd(&a, &fd_a, &tag).unwrap_err();
+    let err = a.send_fd(&fd_a, &tag).unwrap_err();
     assert!(matches!(err, SyscallError::E2BIG(_)));
     set_capture_active(false);
     Ok(())

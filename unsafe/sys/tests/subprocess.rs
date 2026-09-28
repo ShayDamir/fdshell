@@ -14,7 +14,7 @@ fn fork_exit_0() -> Result<(), SyscallError> {
         syscall: "fork_pidfd",
     })?;
     pidfd.verify().expect("pidfd must have CLOEXEC");
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,
@@ -34,7 +34,7 @@ fn fork_exit_42() -> Result<(), SyscallError> {
         syscall: "fork_pidfd",
     })?;
     pidfd.verify().expect("pidfd must have CLOEXEC");
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(42) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,
@@ -56,7 +56,7 @@ fn fork_signaled() -> Result<(), SyscallError> {
         syscall: "fork_pidfd",
     })?;
     pidfd.verify().expect("pidfd must have CLOEXEC");
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Signaled(libc::SIGKILL) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,

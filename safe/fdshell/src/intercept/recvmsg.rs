@@ -31,7 +31,7 @@ pub(crate) fn run_recvmsg(
 
     let sock = io::resolve_socket(&parsed.sock, cell)?;
     if parsed.cred.is_some() {
-        sys::net::set_passcred(&sock).change_context(CmdError::RecvmsgCred)?;
+        sock.set_passcred().change_context(CmdError::RecvmsgCred)?;
     }
 
     let mut buf = vec![0u8; MAX_PAYLOAD];

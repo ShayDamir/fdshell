@@ -16,10 +16,7 @@ pub(crate) fn handle_brace(
         peek.next();
         let state = super::borrow_state(cell)?;
         let (name, closed) = read_until_close(peek)?;
-        match (
-            closed,
-            super::resolve::var_value(&name, &state).map(|v| v.len()),
-        ) {
+        match (closed, state.var_value(&name).map(|v| v.len())) {
             (true, Some(len)) => {
                 core::write!(out, "{len}").change_context(ResolveError::Never)?;
             }
@@ -46,10 +43,10 @@ pub(crate) fn handle_brace(
     }
     let state = super::borrow_state(cell)?;
     if let Some(name) = content.strip_prefix(b"!") {
-        super::resolve::resolve_indirect(&name, &state, out);
+        state.resolve_indirect(&name, out);
         return Ok(());
     }
-    match super::resolve::var_value(&content, &state) {
+    match state.var_value(&content) {
         Some(val) => out.push(val),
         None => super::resolve::literal_braced(false, &content, out),
     }

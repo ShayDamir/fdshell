@@ -2,9 +2,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use sys::SyscallError;
-use sys::net::{recvmsg, sendmsg, set_passcred, socketpair};
+use sys::net::{recvmsg, sendmsg, socketpair};
 use sys::poll::{POLLIN, PollFd, poll};
-use sys::rw::write;
 
 const BUF: usize = 64 * 1024;
 
@@ -36,7 +35,7 @@ fn test_sendmsg_recvmsg_fd_roundtrip() {
     assert_eq!(&buf[..msg.payload_len], b"x");
     assert_eq!(msg.fds.len(), 1);
     // The received fd is a live dup of `c`: writing through it reaches the peer.
-    write(&msg.fds[0], b"ping").unwrap();
+    msg.fds[0].write(b"ping").unwrap();
     let mut out = [0u8; 4];
     let n = peer.read(&mut out).unwrap();
     assert_eq!(&out[..n], b"ping");
@@ -148,7 +147,7 @@ fn test_recvmsg_large_payload_chunked() {
 fn test_recvmsg_creds() {
     // SO_PASSCRED is a receiver-side option: enable it on the reading end.
     let (a, b) = socketpair().unwrap();
-    set_passcred(&b).unwrap();
+    b.set_passcred().unwrap();
     sendmsg(&a, b"cred", &[]).unwrap();
     let mut buf = buf();
     let msg = recvmsg(&b, &mut buf, 0, true).unwrap();
@@ -179,7 +178,7 @@ fn test_recvmsg_ctrunc_on_unreserved_cred_cmsg() {
     // every message. Without reserved space the kernel cannot deliver it and
     // sets MSG_CTRUNC, which the wrapper surfaces as E2BIG.
     let (a, b) = socketpair().unwrap();
-    set_passcred(&b).unwrap();
+    b.set_passcred().unwrap();
     sendmsg(&a, b"skip-cred", &[]).unwrap();
     let mut buf = buf();
     let err = recvmsg(&b, &mut buf, 0, false).unwrap_err();
@@ -193,13 +192,13 @@ fn test_recvmsg_creds_with_fd() {
     // and the legitimate receive fails with E2BIG.
     let (a, b) = socketpair().unwrap();
     let (c, peer) = socketpair().unwrap();
-    set_passcred(&b).unwrap();
+    b.set_passcred().unwrap();
     sendmsg(&a, b"cf", &[c]).unwrap();
     let mut buf = buf();
     let msg = recvmsg(&b, &mut buf, 1, true).unwrap();
     assert_eq!(&buf[..msg.payload_len], b"cf");
     assert_eq!(msg.fds.len(), 1);
-    write(&msg.fds[0], b"q").unwrap();
+    msg.fds[0].write(b"q").unwrap();
     let mut out = [0u8; 1];
     let n = peer.read(&mut out).unwrap();
     assert_eq!(&out[..n], b"q");

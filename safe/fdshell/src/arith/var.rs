@@ -22,7 +22,7 @@ pub(super) fn eval_var(
     // may itself reference shell state.
     let value = {
         let state = crate::substitute::borrow_state(cell)?;
-        crate::substitute::resolve::var_value(name, &state).cloned()
+        state.var_value(name).cloned()
     };
     let Some(value) = value else {
         return Ok(0);

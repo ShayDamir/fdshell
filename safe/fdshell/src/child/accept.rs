@@ -23,7 +23,8 @@ pub(super) fn handle_accept(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let found = ctx.state.fds.get(&var).ok_or(BuiltinError::FdVarNotFound)?;
     let conn = sys::net::accept(&found.fd).change_context(BuiltinError::Syscall)?;
     let sock = shell_sock(ctx)?;
-    sys::shellfd::send_fd(sock, &conn, c"accept").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&conn, c"accept")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(0)
 }
 

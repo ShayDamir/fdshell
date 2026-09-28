@@ -18,7 +18,8 @@ use super::Ctx;
 pub(super) fn handle_flock(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let cfg = parse::flock_parse(ctx.refs, ctx.args)?;
     let fd = resolve(&cfg.var, ctx.state)?;
-    sys::fileops::flock(fd, cfg.operation).change_context(BuiltinError::Syscall)?;
+    fd.flock(cfg.operation)
+        .change_context(BuiltinError::Syscall)?;
     Ok(0)
 }
 

@@ -19,20 +19,24 @@ pub(crate) fn run_hash(
     crate::xtrace::trace_cmd(b"hash", cmdline, cell);
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     let exit = match cmdline.args.first() {
-        None => list(&state),
-        Some(flag) if flag.eq_bytes(b"-r") => remove(&mut state, cmdline),
+        None => state.list_hash(),
+        Some(flag) if flag.eq_bytes(b"-r") => {
+            state.remove_hash(cmdline.args.get(1..).unwrap_or(&[]))
+        }
         Some(name) => lookup_or_pin(name, cmdline, &mut state)?,
     };
     state.set_last_exit(exit);
     Ok(true)
 }
 
-/// Bare `hash`: one `name<TAB>path` line per entry.
-fn list(state: &ShellState) -> i32 {
-    for (name, path) in &state.hash_table {
-        let _ = write_line(name, path);
+impl ShellState {
+    /// Bare `hash`: one `name<TAB>path` line per entry.
+    fn list_hash(&self) -> i32 {
+        for (name, path) in &self.hash_table {
+            let _ = write_line(name, path);
+        }
+        0
     }
-    0
 }
 
 fn write_line(name: &ShortCStr, path: &ShortCStr) -> Result<(), Report<CmdError>> {
@@ -44,17 +48,19 @@ fn write_line(name: &ShortCStr, path: &ShortCStr) -> Result<(), Report<CmdError>
     Ok(())
 }
 
-/// `hash -r [name…]`: clear the given entries, or the whole table.
-fn remove(state: &mut ShellState, cmdline: &crate::parse::CommandLine) -> i32 {
-    match cmdline.args.get(1..).unwrap_or(&[]) {
-        [] => state.hash_table.clear(),
-        names => {
-            for name in names {
-                state.hash_table.remove(name);
+impl ShellState {
+    /// `hash -r [name…]`: clear the given entries, or the whole table.
+    fn remove_hash(&mut self, names: &[ShortCStr]) -> i32 {
+        match names {
+            [] => self.hash_table.clear(),
+            names => {
+                for name in names {
+                    self.hash_table.remove(name);
+                }
             }
         }
+        0
     }
-    0
 }
 
 /// `hash name` prints the entry (PATH-searching and storing on a miss);

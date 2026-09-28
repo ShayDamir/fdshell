@@ -1,16 +1,15 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 
 use sys::memfd::memfd_create;
-use sys::rw::{lseek, read, write_all};
 
 #[test]
 fn fsync_flushes_memfd() {
     let fd = memfd_create().unwrap();
-    write_all(&fd, b"data").unwrap();
-    sys::fileops::fsync(&fd).unwrap();
-    lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
+    fd.write_all(b"data").unwrap();
+    fd.fsync().unwrap();
+    fd.lseek(0, sys::fcntl::SEEK_SET).unwrap();
     let mut buf = [0u8; 8];
-    let n = read(&fd, &mut buf).unwrap();
+    let n = fd.read(&mut buf).unwrap();
     assert_eq!(n, 4);
     assert_eq!(&buf[..n], b"data");
 }
@@ -18,9 +17,9 @@ fn fsync_flushes_memfd() {
 #[test]
 fn fsync_after_truncate_succeeds() {
     let fd = memfd_create().unwrap();
-    write_all(&fd, b"longer").unwrap();
-    sys::fileops::ftruncate(&fd, 3).unwrap();
-    sys::fileops::fsync(&fd).unwrap();
+    fd.write_all(b"longer").unwrap();
+    fd.ftruncate(3).unwrap();
+    fd.fsync().unwrap();
 }
 
 #[test]
@@ -32,7 +31,7 @@ fn fsync_on_invalid_fd_is_ebadf() {
     // guarantees no live LocalFd owns it, so wrapping it in a LocalFd never
     // double-frees. The wrapped number is invalid, so `fsync` sees EBADF.
     let ghost = unsafe { sys::LocalFd::from_raw(raw) };
-    let err = sys::fileops::fsync(&ghost).unwrap_err();
+    let err = ghost.fsync().unwrap_err();
     assert_eq!(err.errno(), libc::EBADF);
     let _ = ghost;
 }

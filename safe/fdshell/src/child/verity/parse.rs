@@ -34,7 +34,7 @@ pub(super) fn verity_parse(
         algo: sys::fsverity::FS_VERITY_HASH_ALG_SHA256,
         expected: None,
     };
-    parse_flags(&mut cfg, args)?;
+    cfg.parse_flags(args)?;
     ensure!(
         !(cfg.enable && cfg.expected.is_some()),
         BuiltinError::InvalidArgument("--digest")
@@ -42,28 +42,30 @@ pub(super) fn verity_parse(
     Ok(cfg)
 }
 
-fn parse_flags(cfg: &mut VerityConfig, args: &[ShortCStr]) -> Result<(), Report<BuiltinError>> {
-    let mut i = 1;
-    while i < args.len() {
-        let arg = args.get(i).ok_or(BuiltinError::InvalidArgument("arg"))?;
-        let (key, val) = split_eq(arg)?;
-        i += 1;
-        match key {
-            b"--enable" => {
-                ensure!(val.is_none(), BuiltinError::InvalidArgument("--enable"));
-                ensure!(!cfg.enable, BuiltinError::InvalidArgument("--enable"));
-                cfg.enable = true;
+impl VerityConfig {
+    fn parse_flags(&mut self, args: &[ShortCStr]) -> Result<(), Report<BuiltinError>> {
+        let mut i = 1;
+        while i < args.len() {
+            let arg = args.get(i).ok_or(BuiltinError::InvalidArgument("arg"))?;
+            let (key, val) = split_eq(arg)?;
+            i += 1;
+            match key {
+                b"--enable" => {
+                    ensure!(val.is_none(), BuiltinError::InvalidArgument("--enable"));
+                    ensure!(!self.enable, BuiltinError::InvalidArgument("--enable"));
+                    self.enable = true;
+                }
+                b"--algo" => self.algo = parse_algo(flag_val(val, args, &mut i, "--algo")?)?,
+                b"--digest" => {
+                    self.expected = Some(super::hex::parse_hex(flag_val(
+                        val, args, &mut i, "--digest",
+                    )?)?)
+                }
+                _ => bail!(BuiltinError::InvalidArgument("flag")),
             }
-            b"--algo" => cfg.algo = parse_algo(flag_val(val, args, &mut i, "--algo")?)?,
-            b"--digest" => {
-                cfg.expected = Some(super::hex::parse_hex(flag_val(
-                    val, args, &mut i, "--digest",
-                )?)?)
-            }
-            _ => bail!(BuiltinError::InvalidArgument("flag")),
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /// The value of a flag: the inline `--key=value` part, or the next word.

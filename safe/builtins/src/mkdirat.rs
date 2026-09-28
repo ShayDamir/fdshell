@@ -18,6 +18,7 @@ pub fn mkdirat_exec(
         resolve: cfg.resolve,
     };
     let fd = sys::openat2::openat2(dirfd, cfg.path, &how).change_context(BuiltinError::Syscall)?;
-    sys::shellfd::send_fd(sock, &fd, c"dirfd").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"dirfd")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(())
 }

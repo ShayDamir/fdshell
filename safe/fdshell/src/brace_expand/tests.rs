@@ -2,8 +2,7 @@
 use super::expand;
 use super::gobbler::{GroupType, gobble};
 use super::protect::protected;
-use super::seq::mkseq::element_count;
-use super::seq::{MAX_WORDS, SeqKind, SeqSpec, expand_seqterm, mkseq, valid_seqterm};
+use super::seq::{MAX_WORDS, SeqKind, SeqSpec, expand_seqterm, valid_seqterm};
 use super::word::concat::{cross, cross_total};
 use super::word::expand_word;
 use crate::error::cmd::CmdError;
@@ -206,12 +205,12 @@ fn rhs_zero_padding_drives_width() {
     assert_eq!((s.kind, s.width), (SeqKind::ZInt, 3));
     let s = expand_seqterm(b"1..05").unwrap();
     assert_eq!(
-        strings(mkseq(&s).unwrap().unwrap()),
+        strings(s.mkseq().unwrap().unwrap()),
         ["01", "02", "03", "04", "05"]
     );
     let s = expand_seqterm(b"1..-05").unwrap();
     assert_eq!(
-        strings(mkseq(&s).unwrap().unwrap()),
+        strings(s.mkseq().unwrap().unwrap()),
         ["001", "000", "-01", "-02", "-03", "-04", "-05"]
     );
 }
@@ -316,25 +315,25 @@ fn valid_seqterm_gates_groups() {
 #[test]
 fn mkseq_generates_elements() {
     assert_eq!(
-        strings(mkseq(&seq(1, 5, 1)).unwrap().unwrap()),
+        strings(seq(1, 5, 1).mkseq().unwrap().unwrap()),
         ["1", "2", "3", "4", "5"]
     );
     assert_eq!(
-        strings(mkseq(&seq(10, 1, 1)).unwrap().unwrap()),
+        strings(seq(10, 1, 1).mkseq().unwrap().unwrap()),
         ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"]
     );
     assert_eq!(
-        strings(mkseq(&seq(1, 5, 2)).unwrap().unwrap()),
+        strings(seq(1, 5, 2).mkseq().unwrap().unwrap()),
         ["1", "3", "5"]
     );
     assert_eq!(
-        strings(mkseq(&seq(1, 5, -2)).unwrap().unwrap()),
+        strings(seq(1, 5, -2).mkseq().unwrap().unwrap()),
         ["1", "3", "5"]
     );
     let mut spec = seq(1, 3, 1);
     spec.kind = SeqKind::ZInt;
     spec.width = 2;
-    assert_eq!(strings(mkseq(&spec).unwrap().unwrap()), ["01", "02", "03"]);
+    assert_eq!(strings(spec.mkseq().unwrap().unwrap()), ["01", "02", "03"]);
 }
 
 #[test]
@@ -343,13 +342,13 @@ fn mkseq_zero_padding_with_signs() {
     spec.kind = SeqKind::ZInt;
     spec.width = 3;
     assert_eq!(
-        strings(mkseq(&spec).unwrap().unwrap()),
+        strings(spec.mkseq().unwrap().unwrap()),
         ["-01", "000", "001"]
     );
     let mut spec = seq(1, -1, -1);
     spec.kind = SeqKind::ZInt;
     spec.width = 2;
-    assert_eq!(strings(mkseq(&spec).unwrap().unwrap()), ["01", "00", "-1"]);
+    assert_eq!(strings(spec.mkseq().unwrap().unwrap()), ["01", "00", "-1"]);
 }
 
 #[test]
@@ -357,7 +356,7 @@ fn mkseq_char_sequence() {
     let mut spec = seq(97, 99, 1);
     spec.kind = SeqKind::Char;
     assert_eq!(
-        mkseq(&spec).unwrap().unwrap(),
+        spec.mkseq().unwrap().unwrap(),
         vec![vec![97], vec![98], vec![99]]
     );
 }
@@ -365,10 +364,10 @@ fn mkseq_char_sequence() {
 #[test]
 fn mkseq_overflow_is_invalid() {
     // i64::MIN increment: bash treats the sequence as invalid (literal).
-    assert_eq!(mkseq(&seq(1, 5, i64::MIN)).unwrap(), None);
-    assert_eq!(mkseq(&seq(i64::MAX, i64::MIN, 1)).unwrap(), None);
+    assert_eq!(seq(1, 5, i64::MIN).mkseq().unwrap(), None);
+    assert_eq!(seq(i64::MAX, i64::MIN, 1).mkseq().unwrap(), None);
     // `element_count` reports the same overflow as `Ok(None)`.
-    assert_eq!(element_count(&seq(1, 5, i64::MIN)).unwrap(), None);
+    assert_eq!(seq(1, 5, i64::MIN).element_count().unwrap(), None);
 }
 
 #[test]
@@ -376,10 +375,10 @@ fn min_incr_without_flip_is_invalid() {
     // Regression: `i64::MIN` increment when no sign flip is needed
     // (`start >= end`) must be invalid (bash: literal), not a negation
     // overflow. Covers the descending and `start == end` directions.
-    assert_eq!(mkseq(&seq(5, 1, i64::MIN)).unwrap(), None);
-    assert_eq!(mkseq(&seq(5, 5, i64::MIN)).unwrap(), None);
-    assert_eq!(element_count(&seq(5, 1, i64::MIN)).unwrap(), None);
-    assert_eq!(element_count(&seq(5, 5, i64::MIN)).unwrap(), None);
+    assert_eq!(seq(5, 1, i64::MIN).mkseq().unwrap(), None);
+    assert_eq!(seq(5, 5, i64::MIN).mkseq().unwrap(), None);
+    assert_eq!(seq(5, 1, i64::MIN).element_count().unwrap(), None);
+    assert_eq!(seq(5, 5, i64::MIN).element_count().unwrap(), None);
     // End-to-end: the word stays literal.
     assert_eq!(words("{5..1..-9223372036854775808}"), None);
     assert_eq!(words("{5..5..-9223372036854775808}"), None);
@@ -392,14 +391,14 @@ fn min_incr_without_flip_is_invalid() {
 // the cap before any allocation, so the boundary is pinned cheaply.
 #[test]
 fn seq_word_cap() {
-    assert!(element_count(&seq(1, 70_000, 1)).is_err());
+    assert!(seq(1, 70_000, 1).element_count().is_err());
     // Exactly MAX_WORDS is admitted.
     assert_eq!(
-        element_count(&seq(1, MAX_WORDS as i64, 1)).unwrap(),
+        seq(1, MAX_WORDS as i64, 1).element_count().unwrap(),
         Some(MAX_WORDS)
     );
     // One over is an error (pins the boundary).
-    assert!(element_count(&seq(1, MAX_WORDS as i64 + 1, 1)).is_err());
+    assert!(seq(1, MAX_WORDS as i64 + 1, 1).element_count().is_err());
 }
 
 #[test]
@@ -439,7 +438,7 @@ fn cross_two_words_with_empty_first_is_not_identity() {
 fn count_overflow_is_over_cap() {
     // `0..i64::MAX` has i64::MAX + 1 elements: the count itself overflows
     // `i64` before the cap compare (bash: allocation failure + literal).
-    let err = element_count(&seq(0, i64::MAX, 1)).unwrap_err();
+    let err = seq(0, i64::MAX, 1).element_count().unwrap_err();
     assert!(matches!(
         err.downcast_ref::<ParseError>(),
         Some(ParseError::BraceExpansionTooManyWords)

@@ -19,7 +19,8 @@ pub(super) fn handle_bind(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let sock = shell_sock(ctx)?;
     let fd = create_socket(cfg.ty, &cfg.addr)?;
     bind_socket(&fd, &cfg.addr)?;
-    sys::shellfd::send_fd(sock, &fd, c"bind").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"bind")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(0)
 }
 

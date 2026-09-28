@@ -40,10 +40,14 @@ pub fn copy_file_range_exec(
 /// Requires a seekable fd; a non-seekable input (pipe, socket, …) needs an
 /// explicit `COUNT` instead, since there is no size to fall back to.
 fn remaining(fd: &LocalFd) -> Result<u64, Report<BuiltinError>> {
-    let start =
-        sys::rw::lseek(fd, 0, sys::fcntl::SEEK_CUR).change_context(BuiltinError::Syscall)?;
-    let end = sys::rw::lseek(fd, 0, sys::fcntl::SEEK_END).change_context(BuiltinError::Syscall)?;
-    sys::rw::lseek(fd, start, sys::fcntl::SEEK_SET).change_context(BuiltinError::Syscall)?;
+    let start = fd
+        .lseek(0, sys::fcntl::SEEK_CUR)
+        .change_context(BuiltinError::Syscall)?;
+    let end = fd
+        .lseek(0, sys::fcntl::SEEK_END)
+        .change_context(BuiltinError::Syscall)?;
+    fd.lseek(start, sys::fcntl::SEEK_SET)
+        .change_context(BuiltinError::Syscall)?;
     Ok((end - start) as u64)
 }
 
@@ -62,7 +66,8 @@ fn copy_bytes(
     if require_exact {
         return copy_exact(in_fd, out_fd, total);
     }
-    sys::fileops::copy_file_range(in_fd, out_fd, total as usize)
+    in_fd
+        .copy_file_range_to(out_fd, total as usize)
         .change_context(BuiltinError::Syscall)
 }
 
@@ -73,11 +78,14 @@ fn copy_exact(
     out_fd: &LocalFd,
     total: u64,
 ) -> Result<usize, Report<BuiltinError>> {
-    let offset =
-        sys::rw::lseek(out_fd, 0, sys::fcntl::SEEK_CUR).change_context(BuiltinError::Syscall)?;
-    let size =
-        sys::rw::lseek(out_fd, 0, sys::fcntl::SEEK_END).change_context(BuiltinError::Syscall)?;
-    let copied = sys::fileops::copy_file_range(in_fd, out_fd, total as usize)
+    let offset = out_fd
+        .lseek(0, sys::fcntl::SEEK_CUR)
+        .change_context(BuiltinError::Syscall)?;
+    let size = out_fd
+        .lseek(0, sys::fcntl::SEEK_END)
+        .change_context(BuiltinError::Syscall)?;
+    let copied = in_fd
+        .copy_file_range_to(out_fd, total as usize)
         .change_context(BuiltinError::Syscall)?;
     if copied < total as usize {
         restore(out_fd, offset, size)?;
@@ -91,8 +99,9 @@ fn copy_exact(
 /// the destination is a seekable regular file and the truncate cannot fail
 /// with a no-size errno.
 fn restore(out: &LocalFd, offset: i64, size: i64) -> Result<(), Report<BuiltinError>> {
-    sys::fileops::ftruncate(out, size).change_context(BuiltinError::Syscall)?;
-    sys::rw::lseek(out, offset, sys::fcntl::SEEK_SET).change_context(BuiltinError::Syscall)?;
+    out.ftruncate(size).change_context(BuiltinError::Syscall)?;
+    out.lseek(offset, sys::fcntl::SEEK_SET)
+        .change_context(BuiltinError::Syscall)?;
     Ok(())
 }
 

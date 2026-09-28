@@ -26,7 +26,7 @@ pub(crate) fn run_sendmsg(
     if parsed.passcred {
         // Opt in before sending: the kernel captures the sender's credentials
         // at send time, so a receiver's `--cred` then sees the real identity.
-        sys::net::set_passcred(&sock).change_context(CmdError::SendmsgCred)?;
+        sock.set_passcred().change_context(CmdError::SendmsgCred)?;
     }
     let payload = payload::build(&parsed, cell)?;
     let fds = collect_fds(&parsed.fd_vars, cell)?;

@@ -22,7 +22,9 @@ pub fn here_string(
     let mut payload = Vec::with_capacity(data.len() + 1);
     payload.extend_from_slice(data.as_bytes().change_context(OpenRedirectError::Never)?);
     payload.push(b'\n');
-    sys::rw::write_all(&fd, &payload).change_context(OpenRedirectError::HereStringCreate)?;
-    sys::rw::lseek(&fd, 0, SEEK_SET).change_context(OpenRedirectError::HereStringCreate)?;
+    fd.write_all(&payload)
+        .change_context(OpenRedirectError::HereStringCreate)?;
+    fd.lseek(0, SEEK_SET)
+        .change_context(OpenRedirectError::HereStringCreate)?;
     Ok(fd)
 }

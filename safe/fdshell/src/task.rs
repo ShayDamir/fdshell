@@ -21,8 +21,7 @@ pub fn try_wait(
         Some(arg) => {
             let key = arg.strip_prefix(b"&").ok_or(TaskError::BadArg)?;
             let task = state.tasks.remove(&key).ok_or(TaskError::NotFound)?;
-            let status =
-                sys::wait_pidfd::wait_pidfd(&task.pidfd).change_context(TaskError::Wait)?;
+            let status = task.pidfd.wait_pidfd().change_context(TaskError::Wait)?;
             if let WaitStatus::Exited(0) = status
                 && let Some(capture_fd) = task.capture_fd
             {
@@ -43,8 +42,7 @@ pub fn try_wait(
                 let Some(task) = state.tasks.remove(&key) else {
                     continue;
                 };
-                let status =
-                    sys::wait_pidfd::wait_pidfd(&task.pidfd).change_context(TaskError::Wait)?;
+                let status = task.pidfd.wait_pidfd().change_context(TaskError::Wait)?;
                 if let WaitStatus::Exited(0) = status
                     && let Some(capture_fd) = task.capture_fd
                 {

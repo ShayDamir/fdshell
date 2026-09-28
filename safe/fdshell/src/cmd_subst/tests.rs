@@ -9,7 +9,7 @@ fn max_captured_is_64_mib() {
 
 fn drain_bytes(data: &[u8], limit: usize) -> Result<Vec<u8>, Report<CmdSubstError>> {
     let (r, w) = sys::pipe::pipe2(0).unwrap();
-    sys::rw::write(&w, data).unwrap();
+    w.write(data).unwrap();
     drop(w);
     drain(&r, limit)
 }

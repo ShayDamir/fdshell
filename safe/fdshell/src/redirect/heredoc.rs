@@ -27,7 +27,9 @@ pub fn here_doc(
     };
     let fd = sys::memfd::memfd_create().change_context(OpenRedirectError::HereDocCreate)?;
     let bytes = data.as_bytes().change_context(OpenRedirectError::Never)?;
-    sys::rw::write_all(&fd, bytes).change_context(OpenRedirectError::HereDocCreate)?;
-    sys::rw::lseek(&fd, 0, SEEK_SET).change_context(OpenRedirectError::HereDocCreate)?;
+    fd.write_all(bytes)
+        .change_context(OpenRedirectError::HereDocCreate)?;
+    fd.lseek(0, SEEK_SET)
+        .change_context(OpenRedirectError::HereDocCreate)?;
     Ok(fd)
 }

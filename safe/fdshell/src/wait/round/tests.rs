@@ -34,7 +34,7 @@ fn in_child(f: impl FnOnce()) {
             sys::exit(if ok { 0 } else { 100 });
         }
         Some(pidfd) => {
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+            let status = pidfd.wait_pidfd().unwrap();
             match status {
                 WaitStatus::Exited(0) => {}
                 other => panic!("test child failed: {}", other.exit_code()),
@@ -88,7 +88,7 @@ fn readable_arm_waits_for_late_data() {
         match helper_pidfd {
             None => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                let _ = sys::rw::write(&wr, b"hi\n");
+                let _ = wr.write(b"hi\n");
                 sys::exit(0);
             }
             Some(pidfd) => {
@@ -97,7 +97,7 @@ fn readable_arm_waits_for_late_data() {
                 run_script(b"wait\n readable %rd) builtin false ;;\n done", &cell).unwrap();
                 let s = cell.borrow().unwrap();
                 assert_eq!(s.last_status.exit_code(), 1);
-                let _ = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+                let _ = pidfd.wait_pidfd().unwrap();
             }
         }
     });

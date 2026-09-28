@@ -51,7 +51,7 @@ fn fork_pidfd_cell_child_mut_borrow() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd_cell",
     })?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,
@@ -88,7 +88,7 @@ fn fork_pidfd_cell_with_active_borrows() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd_cell",
     })?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,
@@ -118,7 +118,7 @@ fn fork_pidfd_cell_parent_uses_borrow() -> Result<(), SyscallError> {
     })?;
     // Parent can still borrow normally (the child's copy is separate).
     assert_eq!(*cell.borrow().unwrap(), 7);
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(42) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,
@@ -147,7 +147,7 @@ fn fork_pidfd_cell_with_struct() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd_cell",
     })?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,
@@ -190,7 +190,7 @@ fn fork_pidfd_cell_preserves_parent_borrow_state() -> Result<(), SyscallError> {
         errno: sys::errno::EINVAL,
         syscall: "fork_pidfd_cell",
     })?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         _ => Err(SyscallError::Other {
             errno: sys::errno::EINVAL,

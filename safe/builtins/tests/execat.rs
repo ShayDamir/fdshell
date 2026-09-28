@@ -111,7 +111,7 @@ fn exec_child(f: impl FnOnce()) {
             sys::exit(1);
         }
         Some(pidfd) => {
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+            let status = pidfd.wait_pidfd().unwrap();
             match status {
                 WaitStatus::Exited(42) => {}
                 other => panic!("unexpected status {}", other.exit_code()),

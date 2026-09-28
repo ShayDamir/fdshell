@@ -9,7 +9,7 @@ fn fchdir_ok() {
 
     // SAFETY: `raw` is a valid fd with CLOEXEC, guaranteed by the open flags above.
     let fd = unsafe { sys::LocalFd::from_raw(raw) };
-    sys::fchdir::fchdir(&fd).unwrap();
+    fd.fchdir().unwrap();
 
     // fchdir to CWD should leave CWD unchanged.
     assert_eq!(std::env::current_dir().unwrap(), cwd);
@@ -20,6 +20,6 @@ fn fchdir_ok() {
 fn fchdir_ebadf() {
     // SAFETY: -1 is never a valid fd; fchdir returns EBADF.
     let fd = unsafe { sys::LocalFd::from_raw(-1) };
-    let err = sys::fchdir::fchdir(&fd).unwrap_err();
+    let err = fd.fchdir().unwrap_err();
     assert_eq!(err, sys::SyscallError::EBADF("unknown"));
 }

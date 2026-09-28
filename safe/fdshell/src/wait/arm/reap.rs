@@ -54,7 +54,7 @@ pub(super) fn parent_reap(
     pidfd: LocalFd,
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<WaitError>> {
-    let status = sys::wait_pidfd::wait_pidfd(&pidfd).change_context(WaitError::Reap)?;
+    let status = pidfd.wait_pidfd().change_context(WaitError::Reap)?;
     let captures = arm.captures.clone();
     if !captures.is_empty() {
         let mut s = cell.borrow_mut().change_context(WaitError::Never)?;
@@ -64,22 +64,24 @@ pub(super) fn parent_reap(
     let keep = status.exit_code() == 0 && !finished;
     if !keep {
         let mut s = cell.borrow_mut().change_context(WaitError::Never)?;
-        apply_release(release, &mut s);
+        s.apply_release(release);
     }
     Ok(status.exit_code())
 }
 
-/// Close the descriptor an arm chose to release, per the keep/release protocol.
-fn apply_release(key: &ReleaseKey, s: &mut ShellState) {
-    match key {
-        ReleaseKey::None => {}
-        ReleaseKey::Var(name) => {
-            s.fds.remove(name);
-            s.arrays.remove(name);
+impl ShellState {
+    /// Close the descriptor an arm chose to release, per the keep/release protocol.
+    fn apply_release(&mut self, key: &ReleaseKey) {
+        match key {
+            ReleaseKey::None => {}
+            ReleaseKey::Var(name) => {
+                self.fds.remove(name);
+                self.arrays.remove(name);
+            }
+            ReleaseKey::Array { arr, source } => {
+                self.remove_array_entry(arr, source);
+            }
+            ReleaseKey::Task(_) => {}
         }
-        ReleaseKey::Array { arr, source } => {
-            s.remove_array_entry(arr, source);
-        }
-        ReleaseKey::Task(_) => {}
     }
 }

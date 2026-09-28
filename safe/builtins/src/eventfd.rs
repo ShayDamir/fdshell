@@ -10,6 +10,7 @@ pub fn eventfd_exec(
     sock: &sys::LocalFd,
 ) -> Result<(), Report<BuiltinError>> {
     let fd = sys::eventfd::eventfd(cfg.init, cfg.flags).change_context(BuiltinError::Syscall)?;
-    sys::shellfd::send_fd(sock, &fd, c"eventfd").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"eventfd")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(())
 }

@@ -16,6 +16,7 @@ pub fn timerfd_exec(
         (cfg.interval_sec, cfg.interval_nsec),
     )
     .change_context(BuiltinError::Syscall)?;
-    sys::shellfd::send_fd(sock, &fd, c"timerfd").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"timerfd")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(())
 }

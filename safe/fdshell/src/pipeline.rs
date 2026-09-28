@@ -74,12 +74,14 @@ pub fn launch_pipeline(
         .collect();
 
     let last = children.last().ok_or(PipelineError::Pipeline)?;
-    let last_status =
-        sys::wait_pidfd::wait_pidfd(&last.1).change_context(PipelineError::Pipeline)?;
+    let last_status = last
+        .1
+        .wait_pidfd()
+        .change_context(PipelineError::Pipeline)?;
 
     for i in 0..n.saturating_sub(1) {
         if let Some(ch) = children.get(i) {
-            let _ = sys::wait_pidfd::wait_pidfd(&ch.1);
+            let _ = ch.1.wait_pidfd();
         }
     }
 

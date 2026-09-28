@@ -56,7 +56,7 @@ fn listen_handler_sends_listening_socket() {
     });
     let mut buf = [0u8; sys::shellfd::TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = sys::shellfd::recv_fd(&receiver, &mut buf, pid).unwrap();
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
     fd.verify().unwrap();
     assert_eq!(tag.to_bytes(), b"listen");
     // A connected client makes the listening socket readable (POLLIN).
@@ -85,7 +85,7 @@ fn listen_handler_inet_sends_listening_socket() {
     );
     let mut buf = [0u8; sys::shellfd::TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = sys::shellfd::recv_fd(&receiver, &mut buf, pid).unwrap();
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
     fd.verify().unwrap();
     assert_eq!(tag.to_bytes(), b"listen");
     let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -121,7 +121,7 @@ fn listen_handler_default_backlog_accepts_one_client() {
     });
     let mut buf = [0u8; sys::shellfd::TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, _tag) = sys::shellfd::recv_fd(&receiver, &mut buf, pid).unwrap();
+    let (fd, _tag) = receiver.recv_fd(&mut buf, pid).unwrap();
     fd.verify().unwrap();
     // Backlog 1: the first connection queues, a second must block; verify
     // only that the first lands.

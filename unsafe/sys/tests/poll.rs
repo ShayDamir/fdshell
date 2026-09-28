@@ -7,7 +7,7 @@ use sys::poll::{POLLIN, PollFd, poll};
 #[test]
 fn poll_reports_ready_descriptor() {
     let (rd, wr) = pipe2(0).unwrap();
-    sys::rw::write(&wr, b"x").unwrap();
+    wr.write(b"x").unwrap();
     let mut fds = [PollFd::new(rd.as_raw(), POLLIN)];
     let n = poll(&mut fds, 0).unwrap();
     assert_eq!(n, 1);

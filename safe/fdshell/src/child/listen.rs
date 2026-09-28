@@ -18,7 +18,8 @@ pub(super) fn handle_listen(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let fd = create_socket(cfg.ty, &cfg.addr)?;
     bind_socket(&fd, &cfg.addr)?;
     sys::net::listen(&fd, cfg.backlog.unwrap_or(1)).change_context(BuiltinError::Syscall)?;
-    sys::shellfd::send_fd(sock, &fd, c"listen").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"listen")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(0)
 }
 

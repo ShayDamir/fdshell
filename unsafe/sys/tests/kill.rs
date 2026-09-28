@@ -17,7 +17,7 @@ fn kill_delivers_signal_to_child() {
             // child
             drop(rd);
             let fd = sys::signalfd::signalfd(&[SIGUSR1], 0).unwrap();
-            sys::rw::write_all(&wr, b"r").unwrap();
+            wr.write_all(b"r").unwrap();
             let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
             let n = sys::poll::poll(&mut pfd, 5000).unwrap();
             let got = n > 0 && pfd.first().unwrap().revents & sys::poll::POLLIN != 0;
@@ -29,9 +29,9 @@ fn kill_delivers_signal_to_child() {
             // parent
             drop(wr);
             let mut buf = [0u8; 1];
-            sys::rw::read(&rd, &mut buf).unwrap();
+            rd.read(&mut buf).unwrap();
             sys::signal::kill(child_pid, SIGUSR1).unwrap();
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+            let status = pidfd.wait_pidfd().unwrap();
             assert!(
                 matches!(status, WaitStatus::Exited(42)),
                 "child must exit 42 after SIGUSR1"

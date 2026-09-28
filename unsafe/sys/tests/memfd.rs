@@ -2,7 +2,6 @@
 
 use sys::memfd::{
     F_SEAL_WRITE, MFD_ALLOW_SEALING, MFD_CLOEXEC, memfd_create, memfd_create_with_name_and_flags,
-    memfd_set_seal,
 };
 
 /// The anonymous form must succeed. The kernel has no NULL special case — a
@@ -21,7 +20,7 @@ fn named_memfd_is_created() {
 #[test]
 fn seal_succeeds_with_allow_sealing() {
     let fd = memfd_create_with_name_and_flags(None, MFD_CLOEXEC | MFD_ALLOW_SEALING).unwrap();
-    memfd_set_seal(&fd, F_SEAL_WRITE as u32).unwrap();
+    fd.set_seals(F_SEAL_WRITE as u32).unwrap();
 }
 
 /// Without `MFD_ALLOW_SEALING` the memfd starts with `F_SEAL_SEAL` applied,
@@ -30,6 +29,6 @@ fn seal_succeeds_with_allow_sealing() {
 #[test]
 fn seal_fails_without_allow_sealing() {
     let fd = memfd_create_with_name_and_flags(None, MFD_CLOEXEC).unwrap();
-    let err = memfd_set_seal(&fd, F_SEAL_WRITE as u32).unwrap_err();
+    let err = fd.set_seals(F_SEAL_WRITE as u32).unwrap_err();
     assert_eq!(err.errno(), libc::EPERM);
 }

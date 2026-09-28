@@ -4,18 +4,6 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 
-/// Value of `name` in the shell's strings, then the inherited environment.
-/// `crate::arith` resolves arithmetic variables through the same lookup.
-pub(crate) fn var_value<'a>(name: &'a ShortCStr, state: &'a ShellState) -> Option<&'a ShortCStr> {
-    state.strings.get(name).map(|v| &v.value).or_else(|| {
-        state
-            .environ
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v)
-    })
-}
-
 /// Push an unresolved `${name}` — or `${!name}` — as literal text.
 pub(super) fn literal_braced(bang: bool, name: &ShortCStr, out: &mut ShortCStr) {
     out.push(c"${");
@@ -26,30 +14,41 @@ pub(super) fn literal_braced(bang: bool, name: &ShortCStr, out: &mut ShortCStr) 
     out.push(c"}");
 }
 
-/// Indirect reference: expand `name`, then expand its value as a variable name.
-pub(super) fn resolve_indirect(name: &ShortCStr, state: &ShellState, out: &mut ShortCStr) {
-    match var_value(name, state) {
-        Some(target) => match var_value(target, state) {
-            Some(val) => out.push(val),
-            None => literal_braced(false, target, out),
-        },
-        None => literal_braced(true, name, out),
+impl ShellState {
+    /// Value of `name` in the shell's strings, then the inherited environment.
+    /// `crate::arith` resolves arithmetic variables through the same lookup.
+    pub(crate) fn var_value(&self, name: &ShortCStr) -> Option<&ShortCStr> {
+        self.strings
+            .get(name)
+            .map(|v| &v.value)
+            .or_else(|| self.environ.iter().find(|(k, _)| k == name).map(|(_, v)| v))
     }
-}
 
-pub(super) fn resolve_var_name(
-    name: &ShortCStr,
-    state: &ShellState,
-    out: &mut ShortCStr,
-) -> Result<(), Report<ResolveError>> {
-    match var_value(name, state) {
-        Some(val) => out.push(val),
-        None => {
-            out.push(c"$");
-            out.push(name);
+    /// Indirect reference: expand `name`, then expand its value as a variable name.
+    pub(super) fn resolve_indirect(&self, name: &ShortCStr, out: &mut ShortCStr) {
+        match self.var_value(name) {
+            Some(target) => match self.var_value(target) {
+                Some(val) => out.push(val),
+                None => literal_braced(false, target, out),
+            },
+            None => literal_braced(true, name, out),
         }
     }
-    Ok(())
+
+    pub(super) fn resolve_var_name(
+        &self,
+        name: &ShortCStr,
+        out: &mut ShortCStr,
+    ) -> Result<(), Report<ResolveError>> {
+        match self.var_value(name) {
+            Some(val) => out.push(val),
+            None => {
+                out.push(c"$");
+                out.push(name);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn resolve_positional_index(

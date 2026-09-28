@@ -20,7 +20,8 @@ fn import_fd(args: &[ShortCStr], state: &ShellState) -> Result<i32, Report<FdPas
     let fd = sys::ImportedFd::try_from(raw).change_context(FdPassError::InvalidName)?;
     let local = fd.try_into_local().change_context(FdPassError::Cloexec)?;
     let sock = state.shell_sock.as_ref().ok_or(FdPassError::SendFailed)?;
-    sys::shellfd::send_fd(sock, &local, c"import_fd").change_context(FdPassError::SendFailed)?;
+    sock.send_fd(&local, c"import_fd")
+        .change_context(FdPassError::SendFailed)?;
     Ok(0)
 }
 
@@ -44,6 +45,7 @@ pub(crate) fn export_fd(
     };
     let var = state.fds.get(&vname).ok_or(FdPassError::NotFound)?;
     let sock = state.shell_sock.as_ref().ok_or(FdPassError::SendFailed)?;
-    sys::shellfd::send_fd(sock, &var.fd, &tag).change_context(FdPassError::SendFailed)?;
+    sock.send_fd(&var.fd, &tag)
+        .change_context(FdPassError::SendFailed)?;
     Ok(0)
 }

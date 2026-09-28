@@ -147,7 +147,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use sys::fcntl::{O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, SEEK_SET};
 use sys::fileat::unlinkat;
-use sys::rw::{lseek, read_all, write_all};
 
 use super::copy_file_range_exec;
 use sys::AtFd;
@@ -187,7 +186,7 @@ fn open(path: &str, flags: i32) -> LocalFd {
 /// read-only at offset 0.
 fn source(path: &str, bytes: &[u8]) -> LocalFd {
     let w = open(path, O_WRONLY | O_CREAT | O_TRUNC);
-    write_all(&w, bytes).unwrap();
+    w.write_all(bytes).unwrap();
     drop(w);
     open(path, O_RDONLY)
 }
@@ -289,21 +288,21 @@ fn count_exceeding_available_is_invalid_argument() {
 /// offset 0 — a pre-filled destination the restore path must undo.
 fn dest_with(path: &str, bytes: &[u8]) -> LocalFd {
     let fd = open(path, O_RDWR | O_CREAT | O_TRUNC);
-    write_all(&fd, bytes).unwrap();
-    lseek(&fd, 0, SEEK_SET).unwrap();
+    fd.write_all(bytes).unwrap();
+    fd.lseek(0, SEEK_SET).unwrap();
     fd
 }
 
 /// The current offset of `fd`.
 fn offset_of(fd: &LocalFd) -> i64 {
-    lseek(fd, 0, sys::fcntl::SEEK_CUR).unwrap()
+    fd.lseek(0, sys::fcntl::SEEK_CUR).unwrap()
 }
 
 /// Re-open `path` read-only and read its whole content (tests stay small).
 fn contents(path: &str) -> Vec<u8> {
     let fd = open(path, O_RDONLY);
     let mut buf = [0u8; 256];
-    let n = read_all(&fd, &mut buf).unwrap();
+    let n = fd.read_all(&mut buf).unwrap();
     buf.iter().take(n).copied().collect()
 }
 
@@ -331,7 +330,7 @@ fn short_exact_copy_restores_nonzero_offset() {
     let dst = unique("cfra_dst");
     let in_fd = source(&src, b"hello world");
     let out_fd = dest_with(&dst, b"0123456789");
-    lseek(&out_fd, 5, SEEK_SET).unwrap();
+    out_fd.lseek(5, SEEK_SET).unwrap();
     let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
     assert!(is(&e, "count"));
     assert_eq!(offset_of(&out_fd), 5);

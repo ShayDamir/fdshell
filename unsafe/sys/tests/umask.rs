@@ -34,7 +34,7 @@ fn umask_save_restore() -> Result<(), SyscallError> {
         sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
             WaitStatus::Exited(n) => SyscallError::Other {
@@ -68,7 +68,7 @@ fn umask_set_get() -> Result<(), SyscallError> {
         sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
             WaitStatus::Exited(n) => SyscallError::Other {
@@ -97,7 +97,7 @@ fn umask_set_get_zero() -> Result<(), SyscallError> {
         sys::exit(0);
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
             WaitStatus::Exited(n) => SyscallError::Other {
@@ -124,7 +124,7 @@ fn umask_init_fallback_no_proc() -> Result<(), SyscallError> {
         sys::exit(if ok { 0 } else { 1 });
     }
     let pidfd = pidfd_opt.ok_or(sys::errno::EINVAL)?;
-    match sys::wait_pidfd::wait_pidfd(&pidfd)? {
+    match pidfd.wait_pidfd()? {
         WaitStatus::Exited(0) => Ok(()),
         other => Err(match other {
             WaitStatus::Exited(n) => SyscallError::Other {

@@ -146,9 +146,9 @@ fn test_pipe_exec() {
     let mut buf_a = [0u8; TAG_MAX];
     let mut buf_b = [0u8; TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd_a, tag_a) = sys::shellfd::recv_fd(&receiver, &mut buf_a, pid).unwrap();
+    let (fd_a, tag_a) = receiver.recv_fd(&mut buf_a, pid).unwrap();
     fd_a.verify().unwrap();
-    let (fd_b, tag_b) = sys::shellfd::recv_fd(&receiver, &mut buf_b, pid).unwrap();
+    let (fd_b, tag_b) = receiver.recv_fd(&mut buf_b, pid).unwrap();
     fd_b.verify().unwrap();
 
     let (rd, wr) = match (tag_a.to_bytes(), tag_b.to_bytes()) {
@@ -157,9 +157,9 @@ fn test_pipe_exec() {
         _ => panic!("unexpected tags"),
     };
 
-    sys::rw::write(&wr, b"hello").unwrap();
+    wr.write(b"hello").unwrap();
     let mut buf = [0u8; 5];
-    let n = sys::rw::read(&rd, &mut buf).unwrap();
+    let n = rd.read(&mut buf).unwrap();
     assert_eq!(n, 5);
     assert_eq!(buf, *b"hello");
 

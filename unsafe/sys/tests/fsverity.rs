@@ -2,9 +2,7 @@
 
 use std::ffi::CString;
 use sys::fcntl::O_RDONLY;
-use sys::fsverity::{
-    FS_VERITY_HASH_ALG_SHA256, FS_VERITY_HASH_ALG_SHA512, enable_verity, measure_verity,
-};
+use sys::fsverity::{FS_VERITY_HASH_ALG_SHA256, FS_VERITY_HASH_ALG_SHA512};
 use sys::openat2::open;
 
 /// The content the e2e builtin tests pin; its file digest is a pure function of
@@ -45,8 +43,8 @@ fn to_hex(b: &[u8]) -> String {
 fn sha256_enable_measure_roundtrip() {
     let dir = scratch();
     let fd = open_file(&dir, "f", CONTENT);
-    enable_verity(&fd, FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
-    let d = measure_verity(&fd).unwrap();
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let d = fd.measure_verity().unwrap();
     assert_eq!(d.algorithm, 1);
     assert_eq!(d.size, 32);
     assert_eq!(to_hex(&d.digest), SHA256_DIGEST);
@@ -57,8 +55,8 @@ fn sha256_enable_measure_roundtrip() {
 fn sha512_enable_measure_roundtrip() {
     let dir = scratch();
     let fd = open_file(&dir, "f", CONTENT);
-    enable_verity(&fd, FS_VERITY_HASH_ALG_SHA512, 4096).unwrap();
-    let d = measure_verity(&fd).unwrap();
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA512, 4096).unwrap();
+    let d = fd.measure_verity().unwrap();
     assert_eq!(d.algorithm, 2);
     assert_eq!(d.size, 64);
     assert_eq!(to_hex(&d.digest), SHA512_DIGEST);
@@ -70,14 +68,14 @@ fn sha512_enable_measure_roundtrip() {
 fn digest_depends_on_content() {
     let dir = scratch();
     let a = open_file(&dir, "a", CONTENT);
-    enable_verity(&a, FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    a.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
     let b = open_file(&dir, "b", CONTENT);
-    enable_verity(&b, FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    b.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
     let c = open_file(&dir, "c", b"fdshell-verity-OTHER\n");
-    enable_verity(&c, FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
-    let da = measure_verity(&a).unwrap();
-    let db = measure_verity(&b).unwrap();
-    let dc = measure_verity(&c).unwrap();
+    c.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let da = a.measure_verity().unwrap();
+    let db = b.measure_verity().unwrap();
+    let dc = c.measure_verity().unwrap();
     assert_eq!(da.digest, db.digest);
     assert_ne!(da.digest, dc.digest);
 }
@@ -87,8 +85,10 @@ fn digest_depends_on_content() {
 fn double_enable_is_eexist() {
     let dir = scratch();
     let fd = open_file(&dir, "f", CONTENT);
-    enable_verity(&fd, FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
-    let e = enable_verity(&fd, FS_VERITY_HASH_ALG_SHA256, 4096).unwrap_err();
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let e = fd
+        .enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096)
+        .unwrap_err();
     assert_eq!(e.errno(), libc::EEXIST);
 }
 
@@ -97,7 +97,7 @@ fn double_enable_is_eexist() {
 fn unknown_algorithm_is_einval() {
     let dir = scratch();
     let fd = open_file(&dir, "f", CONTENT);
-    let e = enable_verity(&fd, 99, 4096).unwrap_err();
+    let e = fd.enable_verity(99, 4096).unwrap_err();
     assert_eq!(e.errno(), libc::EINVAL);
 }
 
@@ -106,9 +106,11 @@ fn unknown_algorithm_is_einval() {
 fn block_size_bounds() {
     let dir = scratch();
     let ok = open_file(&dir, "ok", CONTENT);
-    enable_verity(&ok, FS_VERITY_HASH_ALG_SHA256, 1024).unwrap();
+    ok.enable_verity(FS_VERITY_HASH_ALG_SHA256, 1024).unwrap();
     let big = open_file(&dir, "big", CONTENT);
-    let e = enable_verity(&big, FS_VERITY_HASH_ALG_SHA256, 8192).unwrap_err();
+    let e = big
+        .enable_verity(FS_VERITY_HASH_ALG_SHA256, 8192)
+        .unwrap_err();
     assert_eq!(e.errno(), libc::EINVAL);
 }
 
@@ -117,6 +119,6 @@ fn block_size_bounds() {
 fn measure_non_verity_is_enodata() {
     let dir = scratch();
     let fd = open_file(&dir, "plain", CONTENT);
-    let e = measure_verity(&fd).unwrap_err();
+    let e = fd.measure_verity().unwrap_err();
     assert_eq!(e.errno(), libc::ENODATA);
 }

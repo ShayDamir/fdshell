@@ -16,8 +16,8 @@ pub fn cd(
         Some(arg) if arg.starts_with(b"%") => cd_var(arg, state)?,
         Some(path) => cd_path(path)?,
     };
-    sys::fchdir::fchdir(&new_fd).change_context(CdError::CdPathOpen)?;
-    move_cwd(state, new_fd, origin, set_at);
+    new_fd.fchdir().change_context(CdError::CdPathOpen)?;
+    state.move_cwd(new_fd, origin, set_at);
     Ok(())
 }
 
@@ -44,18 +44,20 @@ fn open_dir(path: &ShortCStr) -> Result<LocalFd, Report<CdError>> {
     sys::openat2::open(path.export(), O_DIRECTORY + O_NOFOLLOW).change_context(CdError::CdPathOpen)
 }
 
-fn move_cwd(state: &mut ShellState, new_cwd: LocalFd, origin: Origin, set_at: Position) {
-    let cwd_key: ShortCStr = c"CWD".into();
-    if let Some(old) = state.fds.remove(&cwd_key) {
-        state.fds.insert(c"OLDCWD".into(), old);
+impl ShellState {
+    fn move_cwd(&mut self, new_cwd: LocalFd, origin: Origin, set_at: Position) {
+        let cwd_key: ShortCStr = c"CWD".into();
+        if let Some(old) = self.fds.remove(&cwd_key) {
+            self.fds.insert(c"OLDCWD".into(), old);
+        }
+        self.fds.insert(
+            cwd_key,
+            FdVar {
+                fd: new_cwd,
+                trace: Trace::at(set_at, origin),
+            },
+        );
     }
-    state.fds.insert(
-        cwd_key,
-        FdVar {
-            fd: new_cwd,
-            trace: Trace::at(set_at, origin),
-        },
-    );
 }
 
 #[cfg(test)]

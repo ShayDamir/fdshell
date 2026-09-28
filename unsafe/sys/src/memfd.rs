@@ -66,16 +66,19 @@ pub fn memfd_create() -> Result<LocalFd, SyscallError> {
     memfd_create_with_name_and_flags(None, MFD_CLOEXEC)
 }
 
-/// `memfd_set_seal(2)` — apply `seals` (`F_SEAL_*`) to an existing memfd so it
-/// can no longer be modified or deleted in the ways those flags forbid.
-///
-/// Requires the memfd to have been created with `MFD_ALLOW_SEALING`. Returns
-/// `Ok(())` on success.
-pub fn memfd_set_seal(fd: &LocalFd, seals: u32) -> Result<(), SyscallError> {
-    // The mask is a small non-negative bitfield, so the `i32` variadic
-    // argument carries it losslessly.
-    // SAFETY: `F_ADD_SEALS` passes the seal mask by value and dereferences no
-    // pointer; `cvt` maps the -1 return to a `SyscallError`.
-    cvt(unsafe { libc::fcntl(fd.as_raw(), F_ADD_SEALS, seals as i32) as isize })?;
-    Ok(())
+impl LocalFd {
+    /// `memfd_set_seal(2)` — apply `seals` (`F_SEAL_*`) to this existing memfd
+    /// so it can no longer be modified or deleted in the ways those flags
+    /// forbid.
+    ///
+    /// Requires the memfd to have been created with `MFD_ALLOW_SEALING`.
+    /// Returns `Ok(())` on success.
+    pub fn set_seals(&self, seals: u32) -> Result<(), SyscallError> {
+        // The mask is a small non-negative bitfield, so the `i32` variadic
+        // argument carries it losslessly.
+        // SAFETY: `F_ADD_SEALS` passes the seal mask by value and dereferences
+        // no pointer; `cvt` maps the -1 return to a `SyscallError`.
+        cvt(unsafe { libc::fcntl(self.as_raw(), F_ADD_SEALS, seals as i32) as isize })?;
+        Ok(())
+    }
 }

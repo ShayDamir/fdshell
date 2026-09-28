@@ -14,9 +14,7 @@ pub(super) fn stat_operand(
     follow_symlink: bool,
 ) -> Result<Option<sys::stat::FileStat>, Report<BuiltinError>> {
     if let Some(fd) = fd_var(orig, state) {
-        return Ok(Some(
-            sys::stat::fstat(fd).change_context(BuiltinError::Syscall)?,
-        ));
+        return Ok(Some(fd.fstat().change_context(BuiltinError::Syscall)?));
     }
     let res = if follow_symlink {
         sys::stat::stat(arg)

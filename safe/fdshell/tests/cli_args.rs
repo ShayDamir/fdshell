@@ -173,7 +173,7 @@ fn load_script_reads_data_until_eof() {
     let data = expected.clone();
     std::thread::scope(|s| {
         s.spawn(move || {
-            sys::rw::write(&wr, &data).unwrap();
+            wr.write(&data).unwrap();
         });
         let content = load_script(&rd, expected.len()).unwrap();
         assert_eq!(content.as_slice(), &expected[..]);

@@ -18,7 +18,7 @@ pub(crate) fn run_alias(
     super::validation::validate_intercept(line, "alias", cmdline)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     if cmdline.args.is_empty() {
-        list_aliases(&state);
+        state.list_aliases();
     } else {
         let mut out = Vec::new();
         for arg in cmdline.args.iter() {
@@ -48,16 +48,18 @@ pub(crate) fn run_unalias(
     Ok(true)
 }
 
-fn list_aliases(state: &ShellState) {
-    let mut names: Vec<&ShortCStr> = state.aliases.keys().collect();
-    names.sort_unstable_by(|a, b| a.as_bytes().unwrap_or(&[]).cmp(b.as_bytes().unwrap_or(&[])));
-    let mut out = Vec::new();
-    for name in names {
-        if let Some(value) = state.aliases.get(name) {
-            push_definition(name, value, &mut out);
+impl ShellState {
+    fn list_aliases(&self) {
+        let mut names: Vec<&ShortCStr> = self.aliases.keys().collect();
+        names.sort_unstable_by(|a, b| a.as_bytes().unwrap_or(&[]).cmp(b.as_bytes().unwrap_or(&[])));
+        let mut out = Vec::new();
+        for name in names {
+            if let Some(value) = self.aliases.get(name) {
+                push_definition(name, value, &mut out);
+            }
         }
+        sys::OUT.write_all(&out).ok();
     }
-    sys::OUT.write_all(&out).ok();
 }
 
 pub(super) fn push_definition(name: &ShortCStr, value: &ShortCStr, out: &mut Vec<u8>) {

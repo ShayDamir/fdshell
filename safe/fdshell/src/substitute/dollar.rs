@@ -48,11 +48,11 @@ pub(crate) fn dollar_subst(
             if name_scs.eq_bytes(b"_") {
                 // `$_`: the `_` variable set by the shell after each command.
                 // Empty when unset, unlike ordinary variables (literal `$name`).
-                if let Some(val) = super::resolve::var_value(&name_scs, &state) {
+                if let Some(val) = state.var_value(&name_scs) {
                     out.push(val);
                 }
             } else {
-                super::resolve::resolve_var_name(&name_scs, &state, out)?;
+                state.resolve_var_name(&name_scs, out)?;
             }
         }
         Some(b'?') => {

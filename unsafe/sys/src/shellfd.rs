@@ -21,10 +21,8 @@ struct CmsgBuf {
 mod iovec;
 
 mod send_fd;
-pub use send_fd::send_fd;
 
 mod recv_fd;
-pub use recv_fd::recv_fd;
 
 /// Failure to receive a tagged file descriptor over a socket.
 #[derive(Debug, displaydoc::Display)]

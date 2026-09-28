@@ -4,7 +4,7 @@ use core::fmt;
 
 use error_stack::{Report, ResultExt, ensure};
 
-use libc::{close, dup, dup2, dup3, fcntl, read};
+use libc::{close, dup, dup2, dup3, fcntl, isatty, read};
 
 use crate::fcntl::{F_DUPFD_CLOEXEC, F_GETFD, FD_CLOEXEC, O_CLOEXEC};
 
@@ -88,9 +88,36 @@ impl LocalFd {
 
     /// Read until EOF or buffer full.
     pub fn read_all(&self, buf: &mut [u8]) -> Result<usize, SyscallError> {
-        crate::rw::read_all(self, buf)
+        let mut offset = 0;
+        loop {
+            let slice = buf
+                .get_mut(offset..)
+                .ok_or(SyscallError::EINVAL("buffer full"))?;
+            match self.read(slice)? {
+                0 => break,
+                n => offset += n,
+            }
+            if offset >= buf.len() {
+                break;
+            }
+        }
+        Ok(offset)
+    }
+
+    /// True when this fd refers to a terminal device. Returns a `bool` (not a
+    /// `Result` via `cvt`) deliberately: `isatty` signals "not a tty" with `0`,
+    /// not `-1`, so `cvt`'s -1 check would never fire and the `-t` predicate
+    /// wants exactly a bool.
+    pub fn is_tty(&self) -> bool {
+        // SAFETY: `self.as_raw()` is a valid fd by the `LocalFd` invariant;
+        // `isatty` on an invalid fd returns 0 (treated as "not a terminal"),
+        // never panics.
+        unsafe { isatty(self.as_raw()) != 0 }
     }
 }
+
+mod rw;
+mod wait_pidfd;
 
 impl Drop for LocalFd {
     fn drop(&mut self) {

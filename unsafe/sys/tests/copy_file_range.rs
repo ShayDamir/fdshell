@@ -48,7 +48,7 @@ fn copy_all_bytes() {
     let in_fd = open(&src, libc::O_RDONLY, 0);
     let out_fd = open(&dst, libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644);
 
-    let copied = sys::fileops::copy_file_range(&in_fd, &out_fd, 11).unwrap();
+    let copied = in_fd.copy_file_range_to(&out_fd, 11).unwrap();
     assert_eq!(copied, 11);
     assert_eq!(std::fs::read(&dst).unwrap(), b"hello world");
 }
@@ -62,7 +62,7 @@ fn copy_partial_bytes() {
     let in_fd = open(&src, libc::O_RDONLY, 0);
     let out_fd = open(&dst, libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644);
 
-    let copied = sys::fileops::copy_file_range(&in_fd, &out_fd, 5).unwrap();
+    let copied = in_fd.copy_file_range_to(&out_fd, 5).unwrap();
     assert_eq!(copied, 5);
     assert_eq!(std::fs::read(&dst).unwrap(), b"hello");
 }
@@ -76,7 +76,7 @@ fn copy_zero_bytes() {
     let in_fd = open(&src, libc::O_RDONLY, 0);
     let out_fd = open(&dst, libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644);
 
-    let copied = sys::fileops::copy_file_range(&in_fd, &out_fd, 0).unwrap();
+    let copied = in_fd.copy_file_range_to(&out_fd, 0).unwrap();
     assert_eq!(copied, 0);
     assert_eq!(std::fs::read(&dst).unwrap(), b"");
 }
@@ -91,7 +91,7 @@ fn copy_more_than_available_returns_available() {
     let out_fd = open(&dst, libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644);
 
     // The kernel caps the copy to the bytes available at `in_fd`.
-    let copied = sys::fileops::copy_file_range(&in_fd, &out_fd, 1000).unwrap();
+    let copied = in_fd.copy_file_range_to(&out_fd, 1000).unwrap();
     assert_eq!(copied, 11);
     assert_eq!(std::fs::read(&dst).unwrap(), b"hello world");
 }
@@ -100,5 +100,5 @@ fn copy_more_than_available_returns_available() {
 fn copy_bad_fd_errors() {
     // SAFETY: -1 is never a valid fd; copy_file_range returns EBADF.
     let bad = unsafe { LocalFd::from_raw(-1) };
-    assert!(sys::fileops::copy_file_range(&bad, &bad, 10).is_err());
+    assert!(bad.copy_file_range_to(&bad, 10).is_err());
 }

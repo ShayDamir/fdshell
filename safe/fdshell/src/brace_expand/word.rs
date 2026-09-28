@@ -3,7 +3,7 @@
 pub(super) mod concat;
 
 use super::gobbler::{GroupType, gobble};
-use super::seq::{expand_seqterm, mkseq, valid_seqterm};
+use super::seq::{expand_seqterm, valid_seqterm};
 use crate::error::parse::ParseError;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -54,7 +54,7 @@ pub(super) fn expand_word(text: &[u8]) -> Result<Option<Vec<Vec<u8>>>, Report<Pa
     let amble_words = match t {
         GroupType::Comma => expand_amble(amble)?,
         GroupType::Seq => match expand_seqterm(amble) {
-            Some(spec) => match mkseq(&spec)? {
+            Some(spec) => match spec.mkseq()? {
                 Some(words) => words,
                 None => return seq_literal(preamble, group, postamble),
             },

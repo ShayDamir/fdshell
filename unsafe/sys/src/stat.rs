@@ -36,13 +36,15 @@ fn to_filestat(raw: &libc::stat) -> FileStat {
     }
 }
 
-pub fn fstat(fd: &LocalFd) -> Result<FileStat, crate::SyscallError> {
-    // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
-    let mut raw: libc::stat = unsafe { core::mem::zeroed() };
-    // SAFETY: `fd.as_raw()` is a valid fd by the `LocalFd` invariant; `fstat`
-    // on an invalid fd returns `EBADF`, caught by `cvt`.
-    crate::cvt(unsafe { libc::fstat(fd.as_raw(), &mut raw) as isize })?;
-    Ok(to_filestat(&raw))
+impl LocalFd {
+    pub fn fstat(&self) -> Result<FileStat, crate::SyscallError> {
+        // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
+        let mut raw: libc::stat = unsafe { core::mem::zeroed() };
+        // SAFETY: `self.as_raw()` is a valid fd by the `LocalFd` invariant;
+        // `fstat` on an invalid fd returns `EBADF`, caught by `cvt`.
+        crate::cvt(unsafe { libc::fstat(self.as_raw(), &mut raw) as isize })?;
+        Ok(to_filestat(&raw))
+    }
 }
 
 pub fn stat(path: &core::ffi::CStr) -> Result<FileStat, crate::SyscallError> {

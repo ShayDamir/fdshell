@@ -28,12 +28,14 @@ pub fn memfd_exec(
         // Grow before sealing: a grown file can still be sealed, but a sealed
         // file cannot grow, so the order matters.
         let len = i64::try_from(size).change_context(BuiltinError::InvalidArgument("size"))?;
-        sys::fileops::ftruncate(&fd, len).change_context(BuiltinError::Syscall)?;
+        fd.ftruncate(len).change_context(BuiltinError::Syscall)?;
     }
     if cfg.seals != 0 {
-        sys::memfd::memfd_set_seal(&fd, cfg.seals).change_context(BuiltinError::Syscall)?;
+        fd.set_seals(cfg.seals)
+            .change_context(BuiltinError::Syscall)?;
     }
-    sys::shellfd::send_fd(sock, &fd, c"memfd").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"memfd")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(())
 }
 

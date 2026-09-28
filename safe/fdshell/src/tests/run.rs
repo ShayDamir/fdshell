@@ -53,7 +53,7 @@ fn child_test(f: impl FnOnce()) {
             sys::exit(42);
         }
         Some(pidfd) => {
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+            let status = pidfd.wait_pidfd().unwrap();
             match status {
                 WaitStatus::Exited(42) => {}
                 other => panic!("unexpected status {}", other.exit_code()),
@@ -1150,7 +1150,7 @@ fn capture_stdout(f: impl FnOnce()) -> Vec<u8> {
                     out.extend_from_slice(part);
                 }
             }
-            match sys::wait_pidfd::wait_pidfd(&pidfd).unwrap() {
+            match pidfd.wait_pidfd().unwrap() {
                 WaitStatus::Exited(0) => {}
                 other => panic!("child failed: {}", other.exit_code()),
             }
@@ -1216,7 +1216,7 @@ fn script_exit_code(script: &[u8]) -> i32 {
                 Err(_) => sys::exit(43),
             }
         }
-        Some(pidfd) => sys::wait_pidfd::wait_pidfd(&pidfd).unwrap().exit_code(),
+        Some(pidfd) => pidfd.wait_pidfd().unwrap().exit_code(),
     }
 }
 

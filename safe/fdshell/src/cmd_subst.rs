@@ -49,10 +49,10 @@ pub(crate) fn run_and_capture(
                     // it can't keep running while the parent is idle. Both
                     // are best-effort.
                     drop(r);
-                    let _ = sys::signal::send_signal(&pidfd, sys::signal::SIGKILL);
+                    let _ = pidfd.send_signal(sys::signal::SIGKILL);
                 }
                 // Reap child; stdout already consumed (or abandoned) above.
-                let _ = sys::wait_pidfd::wait_pidfd(&pidfd);
+                let _ = pidfd.wait_pidfd();
                 out
             }
         }
@@ -66,7 +66,7 @@ fn drain(r: &LocalFd, limit: usize) -> Result<Vec<u8>, Report<CmdSubstError>> {
     let mut out = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
-        let n = match sys::rw::read(r, &mut buf) {
+        let n = match r.read(&mut buf) {
             // Preserve prior behavior: a read error ends the capture.
             Err(_) => break,
             Ok(0) => break,

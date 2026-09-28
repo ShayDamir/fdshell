@@ -38,8 +38,10 @@ pub fn finish_cmd(
             Ok(WaitStatus::Exited(0))
         }
         None => {
-            let status =
-                sys::wait_pidfd::wait_pidfd(&outcome.pidfd).change_context(LaunchError::Fork)?;
+            let status = outcome
+                .pidfd
+                .wait_pidfd()
+                .change_context(LaunchError::Fork)?;
             if let Some(capture_fd) = &outcome.capture_fd
                 && let Some(arg) = crate::last_arg::recv(capture_fd, outcome.child_pid)?
             {

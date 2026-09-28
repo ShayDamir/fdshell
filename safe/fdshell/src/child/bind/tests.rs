@@ -41,7 +41,7 @@ fn capture_state() -> (ShellState, sys::LocalFd) {
 fn recv(receiver: &sys::LocalFd) -> (sys::LocalFd, Vec<u8>) {
     let mut buf = [0u8; sys::shellfd::TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = sys::shellfd::recv_fd(receiver, &mut buf, pid).unwrap();
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
     fd.verify().unwrap();
     (fd, tag.to_bytes().to_vec())
 }

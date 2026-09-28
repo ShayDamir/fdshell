@@ -7,8 +7,8 @@ use crate::AppError;
 /// `load_script` reads from byte 0.
 fn memfd_bytes(data: &[u8]) -> sys::LocalFd {
     let fd = sys::memfd::memfd_create().unwrap();
-    sys::rw::write(&fd, data).unwrap();
-    sys::rw::lseek(&fd, 0, sys::fcntl::SEEK_SET).unwrap();
+    fd.write(data).unwrap();
+    fd.lseek(0, sys::fcntl::SEEK_SET).unwrap();
     fd
 }
 

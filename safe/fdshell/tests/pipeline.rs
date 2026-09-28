@@ -6,7 +6,6 @@ use std::process::{Command, Output, Stdio};
 use std::str;
 use std::time::{Duration, Instant};
 use sys::fcntl::{LOCK_EX, LOCK_UN, O_CLOEXEC, O_RDWR};
-use sys::fileops::flock;
 use sys::openat2::open;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
@@ -151,7 +150,7 @@ fn builtin_stage_does_not_hold_sibling_fds() {
     // `lock_fd` is open.
     let cpath = std::ffi::CString::new(dir.join("lock").to_str().unwrap()).unwrap();
     let lock_fd = open(cpath.as_c_str(), O_RDWR | O_CLOEXEC).unwrap();
-    flock(&lock_fd, LOCK_EX).unwrap();
+    lock_fd.flock(LOCK_EX).unwrap();
     // The stages inherit the pipes this process holds (harness jobserver
     // pipes etc.); exclude them from the fd-table assertions.
     let inherited = self_pipe_targets();
@@ -204,7 +203,7 @@ fn builtin_stage_does_not_hold_sibling_fds() {
     let _ = shell.kill();
     let _ = shell.wait();
     // Release the lock so the orphaned stage (reparented to init) can finish.
-    let _ = flock(&lock_fd, LOCK_UN);
+    let _ = lock_fd.flock(LOCK_UN);
 }
 
 /// A builtin middle stage must not prevent the downstream external stage

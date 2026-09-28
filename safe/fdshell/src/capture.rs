@@ -45,7 +45,7 @@ pub fn do_captures(
 
     while slots.iter().any(slot::Slot::needs_more) {
         let mut buf = [0u8; sys::shellfd::TAG_MAX];
-        let (fd, rtag) = match sys::shellfd::recv_fd(&capture_fd, &mut buf, expected_pid) {
+        let (fd, rtag) = match capture_fd.recv_fd(&mut buf, expected_pid) {
             Ok(v) => v,
             Err(e) => {
                 let ctx = e.current_context();

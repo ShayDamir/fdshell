@@ -5,7 +5,6 @@ pub(super) mod expand;
 pub(super) mod mkseq;
 
 pub(super) use expand::expand_seqterm;
-pub(super) use mkseq::mkseq;
 
 /// The maximum number of words a single source word may produce.
 pub(super) const MAX_WORDS: usize = 65_536;

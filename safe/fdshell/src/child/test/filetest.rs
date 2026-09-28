@@ -98,5 +98,5 @@ fn same_inode(l: &FileStat, r: &FileStat) -> bool {
 
 /// `-t`: an fd var is true iff it is a terminal; a plain path is never one.
 fn tty_test(_arg: &CStr, orig: Option<&ShortCStr>, state: &ShellState) -> bool {
-    fd_var(orig, state).is_some_and(sys::tty::isatty)
+    fd_var(orig, state).is_some_and(|fd| fd.is_tty())
 }

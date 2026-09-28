@@ -16,6 +16,7 @@ pub fn openat2_exec(
         resolve: cfg.how.resolve,
     };
     let fd = sys::openat2::openat2(dirfd, cfg.path, &how).change_context(BuiltinError::Syscall)?;
-    sys::shellfd::send_fd(sock, &fd, c"openat2").change_context(BuiltinError::SendFdFailed)?;
+    sock.send_fd(&fd, c"openat2")
+        .change_context(BuiltinError::SendFdFailed)?;
     Ok(())
 }

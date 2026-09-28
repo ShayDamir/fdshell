@@ -70,7 +70,7 @@ fn timerfd_success_sends_fd() {
 
     let mut buf = [0u8; sys::shellfd::TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = sys::shellfd::recv_fd(&receiver, &mut buf, pid).unwrap();
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
     fd.verify().unwrap();
     assert_eq!(tag.to_bytes(), b"timerfd");
 
@@ -98,7 +98,7 @@ fn eventfd_success_sends_fd() {
 
     let mut buf = [0u8; sys::shellfd::TAG_MAX];
     let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = sys::shellfd::recv_fd(&receiver, &mut buf, pid).unwrap();
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
     fd.verify().unwrap();
     assert_eq!(tag.to_bytes(), b"eventfd");
 

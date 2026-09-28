@@ -30,7 +30,7 @@ pub(super) fn handle_verity(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
         return Ok(0);
     }
     // `MEASURE`: `ENODATA` means "not a verity file" (a normal outcome), not a fault.
-    let digest = match sys::fsverity::measure_verity(fd) {
+    let digest = match fd.measure_verity() {
         Ok(d) => Some(d),
         Err(e) if e.errno() == sys::errno::ENODATA => None,
         Err(e) => return Err(syscall_err(e)),
@@ -44,7 +44,8 @@ pub(super) fn handle_verity(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
 }
 
 fn enable(fd: &LocalFd, algo: u32) -> Result<(), Report<BuiltinError>> {
-    sys::fsverity::enable_verity(fd, algo, DEFAULT_BLOCK_SIZE).change_context(BuiltinError::Syscall)
+    fd.enable_verity(algo, DEFAULT_BLOCK_SIZE)
+        .change_context(BuiltinError::Syscall)
 }
 
 /// `--digest` check: 0 iff the file is verity and its digest matches, else 1.

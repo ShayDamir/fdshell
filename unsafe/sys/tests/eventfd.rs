@@ -46,7 +46,7 @@ fn init_zero_is_not_readable() {
 fn write_makes_readable() {
     let fd = eventfd::eventfd(0, 0).unwrap();
     // Writing an 8-byte counter increments it, making the fd readable.
-    sys::rw::write(&fd, &1u64.to_ne_bytes()).unwrap();
+    fd.write(&1u64.to_ne_bytes()).unwrap();
     let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
     let n = sys::poll::poll(&mut pfd, 2000).unwrap();
     assert_eq!(n, 1);

@@ -19,8 +19,10 @@ pub(crate) fn send(sock: &sys::LocalFd, word: &ShortCStr) -> Result<(), Report<C
     let bytes = word
         .as_bytes()
         .change_context(ChildProcessError::LastArgSend)?;
-    sys::rw::write_all(&mem, bytes).change_context(ChildProcessError::LastArgSend)?;
-    sys::shellfd::send_fd(sock, &mem, c"$_").change_context(ChildProcessError::LastArgSend)?;
+    mem.write_all(bytes)
+        .change_context(ChildProcessError::LastArgSend)?;
+    sock.send_fd(&mem, c"$_")
+        .change_context(ChildProcessError::LastArgSend)?;
     Ok(())
 }
 
@@ -31,7 +33,7 @@ pub(crate) fn recv(
     child_pid: Pid,
 ) -> Result<Option<ShortCStr>, Report<LaunchError>> {
     let mut tag_buf = [0u8; sys::shellfd::TAG_MAX];
-    let (fd, tag) = match sys::shellfd::recv_fd(sock, &mut tag_buf, child_pid) {
+    let (fd, tag) = match sock.recv_fd(&mut tag_buf, child_pid) {
         Ok(v) => v,
         Err(e) => {
             if matches!(e.current_context(), sys::RecvFdError::Closed) {
@@ -42,7 +44,8 @@ pub(crate) fn recv(
     };
     ensure!(tag.to_bytes() == TAG, LaunchError::Never);
     // The memfd's offset is shared with the sender, which left it at EOF.
-    sys::rw::lseek(&fd, 0, sys::fcntl::SEEK_SET).change_context(LaunchError::LastArg)?;
+    fd.lseek(0, sys::fcntl::SEEK_SET)
+        .change_context(LaunchError::LastArg)?;
     let word = read_all(&fd)?;
     ShortCStr::from_vec(word)
         .map(Some)
@@ -58,7 +61,7 @@ fn read_all(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<LaunchError>> {
     let mut data = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
-        let n = sys::rw::read(fd, &mut buf).change_context(LaunchError::LastArg)?;
+        let n = fd.read(&mut buf).change_context(LaunchError::LastArg)?;
         if n == 0 {
             break;
         }

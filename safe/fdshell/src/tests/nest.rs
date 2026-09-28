@@ -20,7 +20,7 @@ fn child_test(f: impl FnOnce()) {
             sys::exit(42);
         }
         Some(pidfd) => {
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+            let status = pidfd.wait_pidfd().unwrap();
             match status {
                 WaitStatus::Exited(42) => {}
                 other => panic!("unexpected status {}", other.exit_code()),

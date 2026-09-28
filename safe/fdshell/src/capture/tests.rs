@@ -1,13 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 use alloc::vec;
 
-use super::commit::{CapturedValue, commit_captured};
+use super::commit::CapturedValue;
 use super::{Capture, CapturedFd, do_captures};
 use crate::error::capture::CaptureError;
 use crate::state::{FdArrayEntry, FdVar, ShellState};
 use sys::ShortCStr;
 use sys::net::socketpair;
-use sys::shellfd::send_fd;
 
 fn short_cstr(s: &'static [u8]) -> ShortCStr {
     ShortCStr::from_vec(s.to_vec()).unwrap()
@@ -29,7 +28,7 @@ fn send_one(shell: &sys::LocalFd, tag: &core::ffi::CStr) {
     let (a, b) = socketpair().expect("socketpair");
     a.verify().expect("verify a");
     b.verify().expect("verify b");
-    send_fd(shell, &a, tag).expect("send_fd");
+    shell.send_fd(&a, tag).expect("send_fd");
     drop(a);
     drop(b);
 }
@@ -51,7 +50,7 @@ fn test_captures_exists() {
     let (test_a, test_b) = socketpair().expect("socketpair");
     test_a.verify().expect("verify test_a");
     test_b.verify().expect("verify test_b");
-    send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
+    shell_sock.send_fd(&test_a, c"openat2").expect("send_fd");
     drop(test_a);
     drop(test_b);
 
@@ -96,7 +95,7 @@ fn test_captures_success() {
     test_a.verify().expect("verify test_a");
     test_b.verify().expect("verify test_b");
 
-    send_fd(&shell_sock, &test_a, c"openat2").expect("send_fd");
+    shell_sock.send_fd(&test_a, c"openat2").expect("send_fd");
     drop(test_a);
     drop(test_b);
 
@@ -507,7 +506,7 @@ fn test_commit_captured_array() {
             },
         ]),
     }];
-    commit_captured(&mut state, captured);
+    state.commit_captured(captured);
 
     assert!(!state.fds.contains_key(&short_cstr(b"arr")));
     let arr = state

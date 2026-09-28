@@ -36,7 +36,7 @@ pub(super) fn apply_param_op(
         let mut state = cell
             .borrow_mut()
             .change_context(ResolveError::RefNotFound)?;
-        match super::resolve::var_value(name, &state) {
+        match state.var_value(name) {
             Some(val) if !val.is_empty() => out.push(val),
             _ => {
                 state.set_var(
@@ -49,7 +49,7 @@ pub(super) fn apply_param_op(
         return Ok(());
     }
     let state = super::borrow_state(cell)?;
-    let val = super::resolve::var_value(name, &state);
+    let val = state.var_value(name);
     match op {
         b'-' => match val {
             Some(v) if !v.is_empty() => out.push(v),

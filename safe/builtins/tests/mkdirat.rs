@@ -221,16 +221,13 @@ fn test_mkdirat_exec() {
     builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
 
     let mut buf = [0u8; TAG_MAX];
-    let (fd, tag) = sys::shellfd::recv_fd(
-        &receiver,
-        &mut buf,
-        sys::Pid::from_raw(std::process::id() as i32),
-    )
-    .unwrap();
+    let (fd, tag) = receiver
+        .recv_fd(&mut buf, sys::Pid::from_raw(std::process::id() as i32))
+        .unwrap();
     fd.verify().unwrap();
     assert_eq!(tag.to_bytes(), b"dirfd");
 
-    let st = sys::stat::fstat(&fd).unwrap();
+    let st = fd.fstat().unwrap();
     assert!(
         st.mode & sys::stat::S_IFMT == sys::stat::S_IFDIR,
         "expected directory"
@@ -278,15 +275,12 @@ fn test_mkdirat_exec_masks_special_bits() {
     builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
 
     let mut buf = [0u8; TAG_MAX];
-    let (fd, _tag) = sys::shellfd::recv_fd(
-        &receiver,
-        &mut buf,
-        sys::Pid::from_raw(std::process::id() as i32),
-    )
-    .unwrap();
+    let (fd, _tag) = receiver
+        .recv_fd(&mut buf, sys::Pid::from_raw(std::process::id() as i32))
+        .unwrap();
     fd.verify().unwrap();
 
-    let st = sys::stat::fstat(&fd).unwrap();
+    let st = fd.fstat().unwrap();
     assert_eq!(st.mode & 0o7777, 0o755, "special bits must be stripped");
 
     drop(fd);

@@ -36,7 +36,7 @@ fn in_child(f: impl FnOnce()) {
             sys::exit(if ok { 0 } else { 100 });
         }
         Some(pidfd) => {
-            let status = sys::wait_pidfd::wait_pidfd(&pidfd).unwrap();
+            let status = pidfd.wait_pidfd().unwrap();
             match status {
                 WaitStatus::Exited(0) => {}
                 other => panic!("test child failed: {}", other.exit_code()),
@@ -64,7 +64,7 @@ fn insert_rd(cell: &ForkCell<ShellState>, name: &ShortCStr, fd: sys::LocalFd) {
 fn readable_pipe_arm_releases_on_nonzero_exit() {
     in_child(|| {
         let (rd, wr) = sys::pipe::pipe2(0).unwrap();
-        sys::rw::write(&wr, b"hi\n").unwrap();
+        wr.write(b"hi\n").unwrap();
         let cell = make_cell();
         insert_rd(&cell, &ShortCStr::from(c"rd"), rd);
         run_script(b"wait\n readable %rd) builtin false ;;\n done", &cell).unwrap();
@@ -78,7 +78,7 @@ fn readable_pipe_arm_releases_on_nonzero_exit() {
 fn readable_pipe_arm_keeps_on_zero_exit() {
     in_child(|| {
         let (rd, wr) = sys::pipe::pipe2(0).unwrap();
-        sys::rw::write(&wr, b"hi\n").unwrap();
+        wr.write(b"hi\n").unwrap();
         let cell = make_cell();
         insert_rd(&cell, &ShortCStr::from(c"rd"), rd);
         run_script(b"wait\n readable %rd) builtin true ;;\n done", &cell).unwrap();
@@ -92,7 +92,7 @@ fn readable_pipe_arm_keeps_on_zero_exit() {
 fn readable_arm_bounded_capture_appends() {
     in_child(|| {
         let (rd, wr) = sys::pipe::pipe2(0).unwrap();
-        sys::rw::write(&wr, b"hi\n").unwrap();
+        wr.write(b"hi\n").unwrap();
         let cell = make_cell();
         insert_rd(&cell, &ShortCStr::from(c"rd"), rd);
         run_script(
@@ -130,7 +130,7 @@ fn after_arm_fires_when_nothing_ready() {
 fn ready_fd_arm_suppresses_after() {
     in_child(|| {
         let (rd, wr) = sys::pipe::pipe2(0).unwrap();
-        sys::rw::write(&wr, b"hi\n").unwrap(); // %rd ready
+        wr.write(b"hi\n").unwrap(); // %rd ready
         let cell = make_cell();
         insert_rd(&cell, &ShortCStr::from(c"rd"), rd);
         run_script(
@@ -148,7 +148,7 @@ fn ready_fd_arm_suppresses_after() {
 fn unready_fd_arm_does_not_fire() {
     in_child(|| {
         let (a_rd, a_wr) = sys::pipe::pipe2(0).unwrap();
-        sys::rw::write(&a_wr, b"hi\n").unwrap(); // %a ready
+        a_wr.write(b"hi\n").unwrap(); // %a ready
         let (b_rd, b_wr) = sys::pipe::pipe2(0).unwrap();
         // %b stays unready: `b_wr` open, no data.
         let cell = make_cell();
@@ -171,7 +171,7 @@ fn unready_fd_arm_does_not_fire() {
 fn readable_array_wildcard_fires() {
     in_child(|| {
         let (rd, wr) = sys::pipe::pipe2(0).unwrap();
-        sys::rw::write(&wr, b"hi\n").unwrap(); // the array's fd is ready
+        wr.write(b"hi\n").unwrap(); // the array's fd is ready
         let cell = make_cell();
         {
             let mut s = cell.borrow_mut().unwrap();
