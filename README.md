@@ -40,6 +40,15 @@ Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
 `openat2 --path` opens with `O_PATH` — a handle with no read/write permission on the file
 itself; combine with `statx %fd` to inspect files the user cannot open.
 
+`openat2 --same-as %fd` checks the opened file against the `%fd` reference at open time
+(fstat of the just-opened fd, so no path re-lookup between open and check): on mismatch
+the opened fd is dropped and the builtin fails, so the capture is never committed.
+
+```shell
+builtin openat2 --flags O_RDONLY file %>%ref
+builtin openat2 --same-as %ref --flags O_RDONLY file %>%f   # fails if file changed
+```
+
 ## Heredocs
 
 A here-doc feeds a command's stdin from the script body: the lines after the

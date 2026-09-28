@@ -12,6 +12,7 @@ use super::flags;
 #[derive(Default)]
 pub(crate) struct Acc<'a> {
     pub(crate) dirfd: Option<ImportedFd>,
+    pub(crate) same_as: Option<ImportedFd>,
     pub(crate) open_flags: i32,
     pub(crate) mode: u64,
     pub(crate) resolve: u64,
@@ -27,6 +28,13 @@ pub(crate) fn parse_arg<'a>(
     let (key, val) = argparse::split(arg)?;
     match key {
         b"--dirfd" => acc.dirfd = argparse::parse_dirfd(argparse::next_val(args, i, val)?)?,
+        b"--same-as" => {
+            // Numeric fd only: unlike `--dirfd`, `AT_FDCWD` is not a file.
+            acc.same_as = Some(
+                ImportedFd::try_from(argparse::next_val(args, i, val)?)
+                    .change_context(BuiltinError::InvalidArgument("same-as"))?,
+            );
+        }
         b"--flags" => {
             acc.open_flags |= flags::parse_open_flags(argparse::next_val(args, i, val)?)
                 .change_context(BuiltinError::InvalidArgument("flags"))

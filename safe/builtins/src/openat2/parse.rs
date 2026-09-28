@@ -9,6 +9,8 @@ use crate::error::BuiltinError;
 
 pub struct Openat2Config<'a> {
     pub dirfd: Option<ImportedFd>,
+    /// If set, the opened fd must be the same `(dev, ino)` as this reference.
+    pub same_as: Option<ImportedFd>,
     pub path: &'a CStr,
     pub how: OpenHow,
 }
@@ -34,6 +36,7 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<
 
     Ok(Openat2Config {
         dirfd: acc.dirfd,
+        same_as: acc.same_as,
         path,
         how: OpenHow {
             flags: acc.open_flags as u64,

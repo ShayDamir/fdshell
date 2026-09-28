@@ -1,10 +1,11 @@
 //! `test EXPR` / `[ EXPR ]` — bash-compatible expression tests.
 //!
 //! A single string is true when non-empty. File tests take a path or a `%var`
-//! fd variable: kinds, size, mode bits, tty, permissions (`-e -f -d -b -c -p
-//! -S -L -s -g -k -t -r -w -x`) and binary comparisons (`-nt -ot -ef -fdeq
-//! -fdne`). String tests `= !=` and `-z -n`. Integer tests `-eq -ne -lt -le
-//! -gt -ge`. Malformed expressions exit 2.
+//! fd variable: kinds, size, size bounds (`-fdsize+N` / `-fdsize-N`,
+//! fdshell-only), mode bits, tty, permissions (`-e -f -d -b -c -p -S -L -s
+//! -g -k -t -r -w -x`) and binary comparisons (`-nt -ot -ef -fdeq -fdne`).
+//! String tests `= !=` and `-z -n`. Integer tests `-eq -ne -lt -le -gt -ge`.
+//! Malformed expressions exit 2.
 
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
@@ -47,6 +48,10 @@ pub(super) fn eval(
         (s, []) => Ok(usize::from(s.to_bytes().is_empty()) as i32),
         (op, [arg]) => {
             let op = op.to_bytes();
+            // `-fdsize±N` is not in `is_unary`; recognize it first.
+            if let Some(spec) = fdsize::parse(op) {
+                return fdsize::test(spec, arg, orig.get(1), state);
+            }
             if !is_unary(op) {
                 bail!(BuiltinError::TestUsage);
             }
@@ -69,6 +74,7 @@ pub(super) fn eval(
     }
 }
 
+mod fdsize;
 mod filetest;
 mod ops;
 mod perm;

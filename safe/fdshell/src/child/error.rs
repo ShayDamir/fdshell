@@ -13,7 +13,8 @@ pub(crate) fn handle_builtin_error(
         BuiltinError::Help => Ok(0),
         BuiltinError::InvalidArgument(_)
         | BuiltinError::MissingArgument(_)
-        | BuiltinError::FdVarNotFound => {
+        | BuiltinError::FdVarNotFound
+        | BuiltinError::SameAsMismatch => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }

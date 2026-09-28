@@ -279,3 +279,42 @@ fn dollar_paren_keyword_in_block_body_does_not_break_parse() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "ok");
 }
+
+#[test]
+fn fdsize_operators_on_fd_var_and_path() {
+    let path = std::env::temp_dir().join(format!("fdshell_fdsize_{}", std::process::id()));
+    std::fs::write(&path, b"12345").unwrap(); // 5 bytes
+    let p = path.display().to_string();
+    // Size 5 vs bounds: == true for both, < true for `-`, > true for `+`.
+    let script = format!(
+        "builtin openat2 --flags O_RDONLY {p} %>%f; \
+         if test -fdsize+5 %f; then printf a; fi; \
+         if test -fdsize-5 %f; then printf b; fi; \
+         if test -fdsize+4 %f; then printf c; else printf d; fi; \
+         if test -fdsize-6 %f; then printf e; else printf f; fi; \
+         if test -fdsize+6 %f; then printf g; else printf h; fi; \
+         if test -fdsize-4 %f; then printf i; else printf j; fi; \
+         if test -fdsize+5 {p}; then printf k; fi; \
+         if test -fdsize+6 {p}; then printf l; else printf m; fi"
+    );
+    let (out, _err, code) = run(&script);
+    assert_eq!(code, 0);
+    assert_eq!(out, "abcehjkm");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn fdsize_missing_operand_is_false() {
+    let (out, _err, code) =
+        run("if test -fdsize+1 /nonexistent-fdshell-test; then printf n; else printf y; fi");
+    assert_eq!(code, 0);
+    assert_eq!(out, "y");
+}
+
+#[test]
+fn fdsize_malformed_exits_2() {
+    let (out, err, code) = run("test -fdsize+ /proc/self/exe; echo $?");
+    assert_eq!(code, 0);
+    assert_eq!(out, "2\n");
+    assert!(err.contains("test"), "stderr={err:?}");
+}

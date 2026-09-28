@@ -1,4 +1,4 @@
-use crate::LocalFd;
+use crate::{ImportedFd, LocalFd};
 
 pub const S_IFMT: u32 = libc::S_IFMT;
 pub const S_IFSOCK: u32 = libc::S_IFSOCK;
@@ -41,6 +41,17 @@ impl LocalFd {
         // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
         let mut raw: libc::stat = unsafe { core::mem::zeroed() };
         // SAFETY: `self.as_raw()` is a valid fd by the `LocalFd` invariant;
+        // `fstat` on an invalid fd returns `EBADF`, caught by `cvt`.
+        crate::cvt(unsafe { libc::fstat(self.as_raw(), &mut raw) as isize })?;
+        Ok(to_filestat(&raw))
+    }
+}
+
+impl ImportedFd {
+    pub fn fstat(&self) -> Result<FileStat, crate::SyscallError> {
+        // SAFETY: zero-initialized `libc::stat` is valid (all integer fields).
+        let mut raw: libc::stat = unsafe { core::mem::zeroed() };
+        // SAFETY: `self.as_raw()` is a valid fd by the `ImportedFd` invariant;
         // `fstat` on an invalid fd returns `EBADF`, caught by `cvt`.
         crate::cvt(unsafe { libc::fstat(self.as_raw(), &mut raw) as isize })?;
         Ok(to_filestat(&raw))

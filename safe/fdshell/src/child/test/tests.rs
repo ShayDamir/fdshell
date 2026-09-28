@@ -11,13 +11,14 @@ use sys::stat::{
 };
 use sys::{Origin, ShortCStr, Trace};
 
+use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 use std::format;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-use super::eval;
+use super::{eval, handle_test};
 
 /// Build substituted (`refs`) and original (`origs`) argument views for `args`
 /// and call `f`; the backing strings live for the duration of the call.
@@ -518,4 +519,109 @@ fn binary_same_inode_tests() {
     );
     let _ = std::fs::remove_file(&fa);
     let _ = std::fs::remove_file(&fb);
+}
+
+#[test]
+fn fdsize_on_fd_var_boundaries() {
+    let mut state = ShellState::new();
+    let file = tmp("fdsize-fd");
+    std::fs::write(&file, b"12345").unwrap(); // size 5
+    let fd = sys::openat2::open(cstr(&file), O_RDONLY).unwrap();
+    ins(&mut state, c"f", fd);
+    // size == N: equality counts for both operators.
+    assert_eq!(
+        with_refs(&["-fdsize+5", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        0
+    );
+    assert_eq!(
+        with_refs(&["-fdsize-5", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        0
+    );
+    // size < N: only `-` is true; size > N: only `+` is true.
+    assert_eq!(
+        with_refs(&["-fdsize-6", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        0
+    );
+    assert_eq!(
+        with_refs(&["-fdsize+4", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        0
+    );
+    assert_eq!(
+        with_refs(&["-fdsize+6", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        1
+    );
+    assert_eq!(
+        with_refs(&["-fdsize-4", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        1
+    );
+    // An unset var is false, not an error.
+    assert_eq!(
+        with_refs(&["-fdsize+0", "%missing"], |r, o| eval(r, o, &state)).unwrap(),
+        1
+    );
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn fdsize_on_path_operand() {
+    let state = ShellState::new();
+    let file = tmp("fdsize-path");
+    std::fs::write(&file, b"12345").unwrap(); // size 5
+    let p = file.to_str().unwrap();
+    assert_eq!(run(&["-fdsize+5", p], &state).unwrap(), 0);
+    assert_eq!(run(&["-fdsize-5", p], &state).unwrap(), 0);
+    assert_eq!(run(&["-fdsize+6", p], &state).unwrap(), 1);
+    assert_eq!(run(&["-fdsize-4", p], &state).unwrap(), 1);
+    assert_eq!(
+        run(&["-fdsize+0", "/nonexistent-fdshell-test"], &state).unwrap(),
+        1
+    );
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn fdsize_bracket_form() {
+    let mut state = ShellState::new();
+    let file = tmp("fdsize-bracket");
+    std::fs::write(&file, b"12345").unwrap(); // size 5
+    let fd = sys::openat2::open(cstr(&file), O_RDONLY).unwrap();
+    ins(&mut state, c"f", fd);
+    // `ctx.name` is the `[` command; `refs` holds only the arguments.
+    assert_eq!(
+        with_refs(&["-fdsize+5", "%f", "]"], |r, o| {
+            handle_test(&Ctx::new(c"[".into(), r, o, &state))
+        })
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        with_refs(&["-fdsize+6", "%f", "]"], |r, o| {
+            handle_test(&Ctx::new(c"[".into(), r, o, &state))
+        })
+        .unwrap(),
+        1
+    );
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn fdsize_malformed_ops_are_usage_errors() {
+    let state = ShellState::new();
+    let ops = [
+        "-fdsize",
+        "-fdsize+",
+        "-fdsize-",
+        "-fdsize5",
+        "-fdsize+x",
+        "-fdsize+18446744073709551616",
+    ];
+    for op in ops {
+        assert!(
+            matches!(
+                run(&[op, "x"], &state).unwrap_err().current_context(),
+                BuiltinError::TestUsage
+            ),
+            "expected TestUsage for {op:?}"
+        );
+    }
 }
