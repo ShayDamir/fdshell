@@ -37,6 +37,8 @@ const SHELL_COMMANDS: &[&str] = &[
 /// The `DISPATCH` builtins plus the `import_fd`/`export_fd` fd-pass builtins.
 const BUILTINS: &[&str] = &[
     "[",
+    "accept",
+    "bind",
     "copy_file_range",
     "echo",
     "eventfd",
@@ -52,6 +54,7 @@ const BUILTINS: &[&str] = &[
     "ftruncate",
     "help",
     "import_fd",
+    "listen",
     "ls",
     "lseek",
     "mkdirat",

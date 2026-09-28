@@ -43,6 +43,8 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
 
 pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"[", b"Test expression (alias for test)"),
+    (b"accept", b"Accept a connection on a listening fd var"),
+    (b"bind", b"Create a socket and bind it to an address"),
     (b"copy_file_range", b"Zero-copy copy between two fd vars"),
     (b"echo", b"Print arguments"),
     (b"eventfd", b"Counter fd that arms on non-zero"),
@@ -58,6 +60,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"ftruncate", b"Truncate a file to a length"),
     (b"help", b"List available commands"),
     (b"import_fd", b"Import an fd from the parent"),
+    (b"listen", b"Create, bind, and listen on a socket"),
     (b"ls", b"List a directory's entry names"),
     (b"lseek", b"Move the offset of an fd"),
     (b"memfd", b"Create an in-memory file by fd"),

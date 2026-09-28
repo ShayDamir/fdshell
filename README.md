@@ -263,6 +263,46 @@ echo "wait exited $?"
 Wrap it in a loop (`while true; do wait … done`) to re-poll each round. Arms run in
 separate children, so a slow arm (a blocking read) cannot stall the others or the parent.
 
+### Socket lifecycle (`bind` / `listen` / `accept`)
+
+`bind`, `listen`, and `accept` give a script the server side of an AF_UNIX or
+AF_INET v4 socket; each result is captured as an fd variable:
+
+```shell
+builtin bind [--type stream|dgram] ADDRESS
+builtin listen [--type stream|dgram] [--backlog N] ADDRESS
+builtin accept %fd
+```
+
+* `ADDRESS` is the positional: `@name` is the **abstract namespace** (no
+  filesystem object — no path TOCTOU, nothing to clean up); `path` is a
+  filesystem socket resolved against the CWD — the script owns the path and
+  must unlink it after use, or the stale path is `EADDRINUSE` (98) on the
+  next bind; `--bind ADDR --port N` is AF_INET v4. Names and paths are at
+  most 107 bytes.
+* Output uses the usual capture forms: `builtin listen @srv %>%l`, or the
+  bounded form `builtin accept %l %>%conns[8]` to fill an fd array. At the
+  cap, further connections are accepted and closed immediately.
+* `accept` blocks until a connection arrives; kernel failures (e.g. `listen`
+  on a dgram socket) surface as their errno exit code. Without a capture,
+  `accept` accepts and closes immediately (the `pipe` precedent).
+
+Non-blocking forms are the standard ones: backgrounding
+(`builtin accept %l %>%c &>&x; waitpid &x`) or a `wait` arm — the arm child's
+`send_fd` appends the accepted connection to the main shell's bounded array:
+
+```shell
+builtin listen @srv %>%l
+wait
+    readable %l %>%conns[1])
+        builtin accept %l %>%c
+        send_fd %c
+        unset %c ;;
+    after 1000)
+        echo "no connections" ;;
+done
+```
+
 ### Custom AF_UNIX protocols (`sendmsg` / `recvmsg`)
 
 `sendmsg` and `recvmsg` move a **byte payload** together with **any number of fd
@@ -276,7 +316,7 @@ recvmsg [--cred VAR] %sock VAR [%fdvar ...]
 
 * `%sock` is a connected socket: an fd variable (`%sock`), or a raw fd number (as in
   `read -u`). Sockets must be **pre-connected** — `sendmsg`/`recvmsg` do not create or
-  accept them (socket lifecycle is a separate feature).
+  accept them; `bind`, `listen`, and `accept` cover the socket lifecycle (above).
 * `--msg TEXT` sends the inline payload; `--msgfd %var COUNT` sends the first `COUNT`
   bytes read from an fd variable. Omitting both sends an empty payload (a no-op
   send, useful for readiness signaling).

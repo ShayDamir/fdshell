@@ -1,3 +1,5 @@
+mod accept;
+mod bind;
 mod copy_file_range;
 mod delegated;
 pub(crate) mod dispatch;
@@ -11,7 +13,9 @@ pub(crate) mod fdpass;
 mod flags;
 mod flock;
 mod help;
+mod listen;
 mod ls;
+mod netaddr;
 mod printf;
 mod readlink;
 mod resolve;

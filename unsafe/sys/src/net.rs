@@ -1,10 +1,20 @@
+mod accept;
+mod bind;
 mod cmsg;
+mod listen;
 mod recvmsg;
 mod sendmsg;
+mod socket;
 
+pub use accept::accept;
+pub use bind::{bind_inet, bind_uds_abstract, bind_uds_path};
 pub use cmsg::MAX_FDS;
+pub use listen::listen;
 pub use recvmsg::{Msg, recvmsg};
 pub use sendmsg::sendmsg;
+pub use socket::socket;
+
+pub use libc::{AF_INET, AF_UNIX, SOCK_DGRAM, SOCK_STREAM};
 
 use crate::{LocalFd, cvt};
 
