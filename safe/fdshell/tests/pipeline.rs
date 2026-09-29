@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use std::fs::File;
+use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -7,6 +9,7 @@ use std::str;
 use std::time::{Duration, Instant};
 use sys::fcntl::{LOCK_EX, LOCK_UN, O_CLOEXEC, O_RDWR};
 use sys::openat2::open;
+use sys::signal::{SIGKILL, kill};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
@@ -237,4 +240,111 @@ fn builtin_stage_keeps_own_capture_pair() {
         "stderr={:?}",
         str::from_utf8(&out.stderr)
     );
+}
+
+/// Stage 0 must keep the shell's stdin, not the first pipe's read end.
+/// `builtin statx /proc/self/fd/0` reports what fd 0 points at without
+/// reading it: the fed-in file (`kind=file size=6`) when the wiring is
+/// right, the first pipe (`kind=fifo size=0`) when stage 0 was handed its
+/// own output pipe — the state that deadlocks `cat | cat`.
+#[test]
+fn first_stage_keeps_shell_stdin() {
+    let dir = Scratch::new();
+    let inp = dir.join("in");
+    std::fs::write(&inp, b"hello\n").unwrap();
+    let out = Command::new(BIN)
+        .current_dir(&*dir)
+        .args(["-c", "builtin statx /proc/self/fd/0 | cat"])
+        .stdin(Stdio::from(File::open(&inp).unwrap()))
+        .output()
+        .unwrap();
+    let stdout = str::from_utf8(&out.stdout).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={:?}",
+        str::from_utf8(&out.stderr)
+    );
+    assert!(
+        stdout.contains("kind=file size=6"),
+        "stage 0 stdin is not the shell's stdin: {stdout:?}"
+    );
+}
+
+/// A later stage still reads the previous stage's pipe: stage 1's fd 0 is a
+/// fifo even though stage 0 now keeps the shell's stdin.
+#[test]
+fn later_stage_still_reads_the_pipe() {
+    let dir = Scratch::new();
+    let inp = dir.join("in");
+    std::fs::write(&inp, b"hello\n").unwrap();
+    // `builtin statx /proc/self/fd/0` as the *second* stage: its stdin must
+    // be `pipes[0]`, a fifo.
+    let out = Command::new(BIN)
+        .current_dir(&*dir)
+        .args(["-c", "builtin echo x | builtin statx /proc/self/fd/0 | cat"])
+        .stdin(Stdio::from(File::open(&inp).unwrap()))
+        .output()
+        .unwrap();
+    let stdout = str::from_utf8(&out.stdout).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={:?}",
+        str::from_utf8(&out.stderr)
+    );
+    assert!(
+        stdout.contains("kind=fifo"),
+        "stage 1 stdin is not the pipe: {stdout:?}"
+    );
+}
+
+/// Run `script` with `stdin` fed from a pipe, giving up after `limit`.
+/// `cat | cat` deadlocks when stage 0's stdin is the first pipe's read end
+/// (nothing ever writes to it), so the shell and every stage still alive are
+/// SIGKILLed before the panic — otherwise the deadlock would hang the suite.
+fn run_bounded(script: &str, stdin: &str, limit: Duration) -> Output {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut pipe = child.stdin.take().unwrap();
+    pipe.write_all(stdin.as_bytes()).unwrap();
+    drop(pipe); // EOF, so a correctly wired stage 0 sees end of input
+    let deadline = Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(e) => panic!("try_wait failed: {e}"),
+        }
+        if Instant::now() >= deadline {
+            for pid in children_of(child.id()) {
+                let _ = kill(sys::Pid::from_raw(pid as i32), SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("`{script}` did not finish in {limit:?} — a pipeline stage's stdin is miswired");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn cat_pipe_to_cat_completes() {
+    // 5 s: a correctly wired pipeline finishes in milliseconds, while the
+    // bound stays under nextest's 10 s slow-timeout so the diagnostic panic
+    // (not a bare timeout) reports a miswired stdin.
+    let out = run_bounded("cat | cat", "yo\n", Duration::from_secs(5));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={:?}",
+        str::from_utf8(&out.stderr)
+    );
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "yo\n");
 }

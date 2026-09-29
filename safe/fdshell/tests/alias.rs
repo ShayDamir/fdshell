@@ -19,6 +19,15 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// A pipeline whose downstream stage never reads stdin (e.g. `echo | echo`)
+/// can produce a benign "Broken pipe" on the upstream: the downstream exits
+/// before the upstream writes, and nothing else holds the pipe's read end.
+/// The real failure these tests care about is an unexpanded alias ("not
+/// found"), so assert on that instead of requiring empty stderr.
+fn assert_no_alias_error(err: &str) {
+    assert!(!err.contains("not found"), "stderr={err:?}");
+}
+
 #[test]
 fn alias_expands_command_word() {
     let (out, err, code) = run(r#"alias ll="echo aliased"; ll"#);
@@ -110,14 +119,15 @@ fn alias_expands_after_pipe() {
 
 #[test]
 fn alias_expands_after_unspaced_pipe() {
-    // `echo hi|g` rewrites to `echo hi|echo got`: the pre-pipe word and the
+    // `echo hi|g` rewrites to `echo hi|cat`: the pre-pipe word and the
     // pipe survive, the aliased word is replaced in place. Pre-fix the stale
-    // post-pipe span made the rewrite eat `hi|` (line became `echo echo got`,
-    // printing `echo got`).
-    let (out, err, code) = run(r#"alias g="echo got"; echo hi|g"#);
+    // post-pipe span made the rewrite eat `hi|` (line became `echo echo cat`,
+    // printing `echo cat`). The downstream `cat` reads the pipe, so the test
+    // cannot trip the `echo | echo` broken-pipe race.
+    let (out, err, code) = run(r#"alias g=cat; echo hi|g"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert!(err.is_empty(), "stderr={err:?}");
-    assert_eq!(out, "got\n");
+    assert_eq!(out, "hi\n");
 }
 
 #[test]
@@ -126,7 +136,7 @@ fn alias_expands_in_every_pipeline_segment() {
     // would surface as "not found" on stderr.
     let (out, err, code) = run(r#"alias g="echo got"; g x | g y"#);
     assert_eq!(code, 0, "stderr={err:?}");
-    assert!(err.is_empty(), "stderr={err:?}");
+    assert_no_alias_error(&err);
     assert_eq!(out, "got y\n");
 }
 
@@ -134,7 +144,7 @@ fn alias_expands_in_every_pipeline_segment() {
 fn alias_expands_after_pipe_and_cond_operators() {
     let (out, err, code) = run(r#"alias g="echo got"; g x && g y | g z"#);
     assert_eq!(code, 0, "stderr={err:?}");
-    assert!(err.is_empty(), "stderr={err:?}");
+    assert_no_alias_error(&err);
     assert_eq!(out, "got x\ngot z\n");
 }
 
@@ -142,7 +152,7 @@ fn alias_expands_after_pipe_and_cond_operators() {
 fn alias_chains_after_pipe() {
     let (out, err, code) = run(r#"alias a=b; alias b="echo deep"; a | b"#);
     assert_eq!(code, 0, "stderr={err:?}");
-    assert!(err.is_empty(), "stderr={err:?}");
+    assert_no_alias_error(&err);
     assert_eq!(out, "deep\n");
 }
 

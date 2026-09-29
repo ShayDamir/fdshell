@@ -6,9 +6,10 @@
 //! stage never execs, so it would keep the upstream write ends open for
 //! the whole builtin run — readers on those pipes never see EOF, which
 //! deadlocks a pipeline whose builtin stage reads stdin. Close every
-//! inherited pipe end except the two this stage cloned into its redirects,
-//! every sibling capture pair, and every sibling pidfd, before the stage's
-//! command runs.
+//! inherited pipe end, every sibling capture pair, and every sibling pidfd
+//! before the stage's command runs. The stage's own redirect clones are
+//! unaffected: `try_clone` gave them fresh fd numbers, so they are not in
+//! `pipes`/`capture_pairs` and the numeric closes below miss them.
 //!
 //! The closes go by number: in the child, the `LocalFd` values in `pipes`,
 //! `capture_pairs` and `children` (copies of the parent's stack locals) are

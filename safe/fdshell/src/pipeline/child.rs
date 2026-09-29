@@ -24,11 +24,13 @@ pub fn run_child(
     let mut redirects: Vec<Redirect> = Vec::new();
 
     // Clone the pipe ends this stage needs for its stdin/stdout redirects.
+    // Stage 0 keeps the shell's stdin: `j + 1 == i` selects the pipe
+    // immediately before stage i and can only hold for i >= 1.
     // The clones use try_clone() (lowest free fd), which relies on the
     // inherited pipe ends still occupying the low fd numbers, so the
     // close_inherited cleanup runs after this loop.
     for (j, (read_end, write_end)) in pipes.iter().enumerate() {
-        if j == i.saturating_sub(1) {
+        if j + 1 == i {
             let fd = read_end
                 .try_clone()
                 .change_context(ChildProcessError::RedirectFailed)?;
