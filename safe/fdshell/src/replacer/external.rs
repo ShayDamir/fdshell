@@ -29,8 +29,9 @@ pub(super) fn run(
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
         let rest = args.get(1..).unwrap_or(&[]);
+        let mask = args_mask.get(1..).unwrap_or(&[]);
         let substituted =
-            substitute_args(rest, args_mask, cell).change_context(ChildProcessError::ExecFailed)?;
+            substitute_args(rest, mask, cell).change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
         crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
@@ -50,7 +51,8 @@ pub(super) fn run(
     };
     let binary_exported = binary.export();
     let binary_cstr = binary_exported.as_ref();
-    let substituted = substitute_args(args.get(1..).unwrap_or(&[]), args_mask, cell)
+    let mask = args_mask.get(1..).unwrap_or(&[]);
+    let substituted = substitute_args(args.get(1..).unwrap_or(&[]), mask, cell)
         .change_context(ChildProcessError::ExecFailed)?;
     let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
     let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];

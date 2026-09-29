@@ -4,6 +4,7 @@ use std::process::Command;
 use std::str;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
+const ARG_PRINT: &str = env!("ARG_PRINT_PATH");
 
 fn run(script: &str) -> (String, String, i32) {
     let output = Command::new(BIN)
@@ -266,6 +267,34 @@ fn empty_quoted_arg_builtin_form_stays_one_empty_word() {
     let (out, _err, code) = run(r#"builtin printf "[%s]\n" "" x"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[]\n[x]\n");
+}
+
+/// `exec`/`become` drop the binary from the word vector — the quote mask
+/// vector must be sliced by the same offset, or every argument inherits
+/// its predecessor's quoting.
+#[test]
+fn exec_builtin_first_keeps_quoted_arg_whole() {
+    let (out, err, code) = run(r#"exec printf "[%s] " x "a b""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[x] [a b] ");
+}
+
+/// Pins the *offset*, not just the bug: the format word is quoted and the
+/// argument is not, so an off-by-two mask slice word-splits `"a b"`.
+#[test]
+fn exec_builtin_first_masks_stay_aligned_after_binary() {
+    let (out, err, code) = run(r#"exec printf "[%s] " "a b" c"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a b] [c] ");
+}
+
+/// The external branch: the resolved binary is not a builtin, so this goes
+/// through `resolve_path` + `execveat`.
+#[test]
+fn become_external_keeps_quoted_arg_whole() {
+    let (out, err, code) = run(&format!("become {ARG_PRINT} \"a b\" c"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a b] [c] \n");
 }
 
 #[test]
