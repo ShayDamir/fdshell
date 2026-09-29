@@ -628,6 +628,15 @@ fn line_rebuild_expands_words() {
 }
 
 #[test]
+fn brace_group_after_unspaced_pipe() {
+    // A group right after an unspaced `|` must not drag the pre-pipe text
+    // into its span: with a stale post-pipe start the rebuild duplicated the
+    // `echo hi|` prefix. `append_words` space-joins, so the expanded words
+    // follow the `|` with a space.
+    assert_eq!(expand_line("echo hi|b{x,y}"), b"echo hi| bx by");
+}
+
+#[test]
 fn empty_words_drop_on_retokenization() {
     // `{,}` yields two empty words, which vanish: `echo` gets no arguments.
     let tokens = tokenize_statement(&expand_line("echo {,}")).unwrap();

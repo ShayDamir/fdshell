@@ -1951,7 +1951,7 @@ fn tokenize_pipe_position() {
     assert_eq!(tokens[1].0, c"|".into());
     assert_eq!(tokens[1].1, 1);
     assert_eq!(tokens[2].0, c"b".into());
-    assert_eq!(tokens[2].1, 0);
+    assert_eq!(tokens[2].1, 2, "post-pipe word starts after the pipe");
     assert_eq!(tokens[0].2, 1, "pre-pipe token ends at the '|'");
     assert_eq!(tokens[1].2, 2, "pipe token end");
     assert_eq!(tokens[2].2, 3, "final token end");
@@ -1965,6 +1965,7 @@ fn tokenize_caret_pipe_position() {
     assert_eq!(tokens[1].0, c"|".into());
     assert_eq!(tokens[1].1, 5);
     assert_eq!(tokens[2].0, c"cmd".into());
+    assert_eq!(tokens[2].1, 6, "post-pipe word starts after the pipe");
 }
 
 #[test]

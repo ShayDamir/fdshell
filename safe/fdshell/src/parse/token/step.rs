@@ -28,6 +28,7 @@ impl State {
             b'|' => {
                 if self.pipe_token()? {
                     self.word_reset();
+                    self.start = self.pos;
                 }
             }
             b'"' => {

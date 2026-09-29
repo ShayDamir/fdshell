@@ -109,6 +109,18 @@ fn alias_expands_after_pipe() {
 }
 
 #[test]
+fn alias_expands_after_unspaced_pipe() {
+    // `echo hi|g` rewrites to `echo hi|echo got`: the pre-pipe word and the
+    // pipe survive, the aliased word is replaced in place. Pre-fix the stale
+    // post-pipe span made the rewrite eat `hi|` (line became `echo echo got`,
+    // printing `echo got`).
+    let (out, err, code) = run(r#"alias g="echo got"; echo hi|g"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(out, "got\n");
+}
+
+#[test]
 fn alias_expands_in_every_pipeline_segment() {
     // The first segment's stdout flows into the pipe; an unexpanded `g` there
     // would surface as "not found" on stderr.

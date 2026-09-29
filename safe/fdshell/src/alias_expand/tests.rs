@@ -47,6 +47,14 @@ fn shrink_shifts_later_pipeline_word() {
 }
 
 #[test]
+fn alias_after_unspaced_pipe_keeps_preceding_text() {
+    // The word before an unspaced `|` must survive: with a stale post-pipe
+    // start span the replacement range swallowed `hi|` as well (the rewrite
+    // produced `echo echo got`). The `|` byte is its own token and stays.
+    assert_eq!(run("echo hi|g", &[("g", "echo got")]), b"echo hi|echo got");
+}
+
+#[test]
 fn growing_alias_still_replaces_word() {
     assert_eq!(run("l now", &[("l", "ls")]), b"ls now");
 }
