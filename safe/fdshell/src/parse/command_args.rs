@@ -25,9 +25,10 @@ pub(super) fn finish_command(
     let mut pidvar: Option<ShortCStr> = None;
     let mut bg_force = false;
     let mut args_mask = Vec::new();
+    let mut args_quoted = Vec::new();
     let mut spec_at = 0usize;
     let mut i = args_from;
-    while let Some((t, _ts, _te, fq, mask)) = tokens.get(i) {
+    while let Some((t, ts, te, fq, mask)) = tokens.get(i) {
         if t.eq_bytes(b";") {
             break;
         }
@@ -56,6 +57,7 @@ pub(super) fn finish_command(
                 Ok(None) => {
                     args.push(t.clone());
                     args_mask.push(mask.clone());
+                    args_quoted.push(super::word_quoted::word_quoted(t, *ts, *te));
                 }
                 Err(e) => return Err(e),
             }
@@ -67,6 +69,7 @@ pub(super) fn finish_command(
         } else {
             args.push(t.clone());
             args_mask.push(mask.clone());
+            args_quoted.push(super::word_quoted::word_quoted(t, *ts, *te));
         }
         i += 1 + skip;
     }
@@ -75,6 +78,7 @@ pub(super) fn finish_command(
         command,
         args,
         args_mask,
+        args_quoted,
         captures,
         redirects,
         pidvar,

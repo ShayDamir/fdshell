@@ -12,7 +12,8 @@ fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<CmdError>> 
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
         .collect();
     let mask: Vec<Vec<bool>> = args.iter().map(|a| vec![false; a.len()]).collect();
-    parse(&args, &mask)
+    let quoted: Vec<bool> = vec![false; args.len()];
+    parse(&args, &mask, &quoted)
 }
 
 #[test]

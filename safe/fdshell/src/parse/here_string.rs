@@ -13,7 +13,7 @@ pub fn parse_here_string(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
-    let Some((t, _start, _end, fq, _mask)) = tokens.get(i) else {
+    let Some((t, start, end, fq, _mask)) = tokens.get(i) else {
         return Ok(None);
     };
     if *fq || !t.starts_with(b"<<<") {
@@ -24,7 +24,7 @@ pub fn parse_here_string(
     // token as its word; at end of input the word is empty.
     let (word, extra) = if t.len() > 3 {
         (t.get(3..).ok_or(ParseError::Never)?.clone(), 0)
-    } else if _end - _start > t.len() {
+    } else if super::word_quoted::word_quoted(t, *start, *end) {
         (ShortCStr::new(), 0)
     } else {
         match tokens.get(i + 1) {
@@ -52,7 +52,7 @@ pub(crate) fn word_indices(tokens: &[Token]) -> Vec<usize> {
         if *fq || !t.starts_with(b"<<<") {
             continue;
         }
-        if t.len() > 3 || end - start > t.len() {
+        if t.len() > 3 || super::word_quoted::word_quoted(t, *start, *end) {
             out.push(i);
         } else if tokens.get(i + 1).is_some() {
             out.push(i + 1);

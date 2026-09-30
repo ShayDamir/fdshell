@@ -45,6 +45,7 @@ pub fn launch(
             cmd,
             &cmdline.args,
             &cmdline.args_mask,
+            &cmdline.args_quoted,
             &resolved,
         ) {
             Ok(code) => sys::exit(code),

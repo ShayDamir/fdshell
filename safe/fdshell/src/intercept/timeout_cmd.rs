@@ -20,12 +20,13 @@ pub(crate) fn run_timeout(
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "timeout", cmdline)?;
-    let cfg = parse::parse(&cmdline.args, &cmdline.args_mask)?;
+    let cfg = parse::parse(&cmdline.args, &cmdline.args_mask, &cmdline.args_quoted)?;
     let subcmdline = crate::parse::CommandLine {
         builtin: false,
         command: cfg.command,
         args: cfg.args,
         args_mask: cfg.args_mask,
+        args_quoted: cfg.args_quoted,
         captures: vec![],
         redirects: vec![],
         pidvar: None,

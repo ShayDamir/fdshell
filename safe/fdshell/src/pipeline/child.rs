@@ -68,6 +68,7 @@ pub fn run_child(
         cmd,
         &cmd_data.args,
         &cmd_data.args_mask,
+        &cmd_data.args_quoted,
         &redirects,
     )
 }

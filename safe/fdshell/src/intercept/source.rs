@@ -23,8 +23,13 @@ pub(crate) fn run_source(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     super::validation::validate_intercept(line, "source", cmdline)?;
-    let substituted = crate::substitute::substitute_args(&cmdline.args, &cmdline.args_mask, cell)
-        .change_context(CmdError::Resolve)?;
+    let substituted = crate::substitute::substitute_args(
+        &cmdline.args,
+        &cmdline.args_mask,
+        &cmdline.args_quoted,
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     let path = substituted.first().ok_or(CmdError::SourceNoFile)?;
     let extra = substituted.get(1..).unwrap_or(&[]);
     let saved = swap_positional(cell, extra, text)?;

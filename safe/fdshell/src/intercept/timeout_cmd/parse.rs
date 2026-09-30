@@ -11,23 +11,27 @@ pub struct TimeoutConfig {
     pub command: ShortCStr,
     pub args: Vec<ShortCStr>,
     pub args_mask: Vec<Vec<bool>>,
+    pub args_quoted: Vec<bool>,
 }
 
 /// Parses `timeout <seconds> <cmd> [args ...]`.
 pub fn parse(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_quoted: &[bool],
 ) -> Result<TimeoutConfig, Report<CmdError>> {
     let seconds_arg = args.first().ok_or(CmdError::TimeoutMissingSeconds)?;
     let seconds = parse_seconds(seconds_arg)?;
     let command = args.get(1).ok_or(CmdError::TimeoutMissingCommand)?;
     let sub_args: Vec<ShortCStr> = args.get(2..).unwrap_or_default().to_vec();
     let sub_args_mask: Vec<Vec<bool>> = args_mask.get(2..).unwrap_or_default().to_vec();
+    let sub_args_quoted: Vec<bool> = args_quoted.get(2..).unwrap_or_default().to_vec();
     Ok(TimeoutConfig {
         seconds,
         command: command.clone(),
         args: sub_args,
         args_mask: sub_args_mask,
+        args_quoted: sub_args_quoted,
     })
 }
 

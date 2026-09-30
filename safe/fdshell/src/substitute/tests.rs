@@ -961,7 +961,7 @@ fn dollar_at_fq_true_expands_separate_args() {
     );
     let args = alloc::vec![ShortCStr::from(c"$@")];
     let args_mask = alloc::vec![alloc::vec![true, true]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0");
     assert_eq!(result[1].as_bytes().unwrap(), b"arg1");
@@ -982,7 +982,7 @@ fn dollar_at_unquoted_splits_on_ifs() {
     );
     let args = alloc::vec![ShortCStr::from(c"$@")];
     let args_mask = alloc::vec![alloc::vec![false, false]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"a");
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
@@ -1002,7 +1002,7 @@ fn dollar_star_fq_true_joins_positional() {
     );
     let args = alloc::vec![ShortCStr::from(c"$*")];
     let args_mask = alloc::vec![alloc::vec![true, true]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"arg0 arg1");
 }
@@ -1025,7 +1025,7 @@ fn dollar_at_unquoted_custom_ifs_splits_per_positional() {
     }
     let args = alloc::vec![ShortCStr::from(c"$@")];
     let args_mask = alloc::vec![alloc::vec![false, false]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].as_bytes().unwrap(), b"a");
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
@@ -1049,7 +1049,7 @@ fn dollar_at_unquoted_empty_ifs_keeps_positionals_separate() {
     }
     let args = alloc::vec![ShortCStr::from(c"$@")];
     let args_mask = alloc::vec![alloc::vec![false, false]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_bytes().unwrap(), b"a b");
     assert_eq!(result[1].as_bytes().unwrap(), b"c");
@@ -1072,7 +1072,7 @@ fn dollar_star_unquoted_custom_ifs_splits_per_positional() {
     }
     let args = alloc::vec![ShortCStr::from(c"$*")];
     let args_mask = alloc::vec![alloc::vec![false, false]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_bytes().unwrap(), b"a");
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
@@ -1094,7 +1094,7 @@ fn dollar_star_quoted_custom_ifs_joins_with_first_ifs_byte() {
     }
     let args = alloc::vec![ShortCStr::from(c"$*")];
     let args_mask = alloc::vec![alloc::vec![true, true]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"a:b");
 }
@@ -1115,7 +1115,7 @@ fn dollar_star_quoted_empty_ifs_joins_with_nothing() {
     }
     let args = alloc::vec![ShortCStr::from(c"$*")];
     let args_mask = alloc::vec![alloc::vec![true, true]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"ab");
 }
@@ -1125,7 +1125,7 @@ fn unquoted_var_with_spaces_splits_on_ifs() {
     let cell = dummy_cell();
     let args = alloc::vec![ShortCStr::from(c"$multi_word")];
     let args_mask = alloc::vec![alloc::vec![false; 11]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_bytes().unwrap(), b"two");
     assert_eq!(result[1].as_bytes().unwrap(), b"words");
@@ -1136,7 +1136,7 @@ fn quoted_var_with_spaces_does_not_split() {
     let cell = dummy_cell();
     let args = alloc::vec![ShortCStr::from(c"$multi_word")];
     let args_mask = alloc::vec![alloc::vec![true; 11]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"two words");
 }
@@ -1154,7 +1154,7 @@ fn literal_arg_with_fq_true_not_routed_to_positional() {
     );
     let args = alloc::vec![ShortCStr::from(c"hello")];
     let args_mask = alloc::vec![alloc::vec![true; 5]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"hello");
 }
@@ -1227,7 +1227,7 @@ fn empty_quoted_arg_is_one_empty_word() {
     let cell = dummy_cell();
     let args = alloc::vec![ShortCStr::from(c"")];
     let args_mask = alloc::vec![alloc::vec![]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert!(result[0].is_empty());
 }
@@ -1261,9 +1261,150 @@ fn quoted_dollar_star_joins_empty_element_with_two_separators() {
     let cell = empty_masked_positional_cell();
     let args = alloc::vec![ShortCStr::from(c"$*")];
     let args_mask = alloc::vec![alloc::vec![true, true]];
-    let result = super::substitute_args(&args, &args_mask, &cell).unwrap();
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_bytes().unwrap(), b"a  b");
+}
+
+// Quoted-empty words with a runtime-empty expansion (task #76): a word whose
+// raw span contained quotes but whose IFS split produced no fields is one
+// empty word, as in bash.
+#[test]
+fn quoted_empty_cmd_subst_is_one_empty_word() {
+    // `""$(true)`: the quoted part contributes no bytes; the expansion is
+    // empty, so the word must survive as one empty word.
+    let cell = dummy_cell();
+    let args = alloc::vec![ShortCStr::from(c"$(true)")];
+    let args_mask = alloc::vec![alloc::vec![false; 7]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_empty());
+}
+
+#[test]
+fn unquoted_empty_cmd_subst_is_no_words() {
+    // Guard: without quotes in the word, an empty expansion vanishes.
+    let cell = dummy_cell();
+    let args = alloc::vec![ShortCStr::from(c"$(true)")];
+    let args_mask = alloc::vec![alloc::vec![false; 7]];
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn mixed_quoting_empty_expansion_keeps_empty_word() {
+    // `a ""$(true) b`: the flag vector must map to the right words — only the
+    // middle one is quoted, so only it may gain the empty word.
+    let cell = dummy_cell();
+    let args = alloc::vec![
+        ShortCStr::from(c"a"),
+        ShortCStr::from(c"$(true)"),
+        ShortCStr::from(c"b"),
+    ];
+    let args_mask = alloc::vec![
+        alloc::vec![false],
+        alloc::vec![false; 7],
+        alloc::vec![false],
+    ];
+    let args_quoted = alloc::vec![false, true, false];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert!(result[1].is_empty());
+    assert_eq!(result[2].as_bytes().unwrap(), b"b");
+}
+
+#[test]
+fn quoted_dollar_at_no_positionals_is_one_empty_word() {
+    // `""$@` with no positionals: bash keeps one empty word.
+    let cell = ForkCell::new(ShellState::new());
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_mask = alloc::vec![alloc::vec![false, false]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_empty());
+}
+
+#[test]
+fn quoted_dollar_at_single_empty_positional_is_one_empty_word() {
+    // `set -- ""; set -- ""$@`: the empty positional re-splits to nothing,
+    // but the quoted word keeps one empty word.
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c""]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_mask = alloc::vec![alloc::vec![false, false]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_empty());
+}
+
+#[test]
+fn quoted_dollar_at_nonempty_positionals_not_padded() {
+    // Guard: `""$@` over `a b` yields `a b` — no empty word is synthesized
+    // when the expansion produced words.
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"a", c"b"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_mask = alloc::vec![alloc::vec![false, false]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].as_bytes().unwrap(), b"b");
+}
+
+#[test]
+fn quoted_whitespace_only_expansion_is_one_empty_word() {
+    // `""$(echo "  ")` with the default IFS: two spaces split to zero fields,
+    // so the quoted word is one empty word.
+    let cell = dummy_cell();
+    let args = alloc::vec![ShortCStr::from(c"$(echo \"  \")")];
+    let args_mask = alloc::vec![alloc::vec![false; 12]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_empty());
+}
+
+#[test]
+fn quoted_whitespace_only_expansion_empty_ifs_keeps_spaces() {
+    // With `IFS=`, the same word splits to one field `  ` and stays that.
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().ifs = ShortCStr::new();
+    let args = alloc::vec![ShortCStr::from(c"$(echo \"  \")")];
+    let args_mask = alloc::vec![alloc::vec![false; 12]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"  ");
+}
+
+#[test]
+fn quoted_multiword_expansion_still_splits() {
+    // `""$(echo "a b")`: the expansion produces words, so they are kept as-is.
+    let cell = dummy_cell();
+    let args = alloc::vec![ShortCStr::from(c"$(echo \"a b\")")];
+    let args_mask = alloc::vec![alloc::vec![false; 13]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].as_bytes().unwrap(), b"b");
 }
 
 // Mutant-catching tests for substitute/paren.rs

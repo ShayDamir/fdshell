@@ -15,6 +15,7 @@ use sys::fork_cell::ForkCell;
 pub(super) fn run(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_quoted: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
     let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
@@ -30,8 +31,9 @@ pub(super) fn run(
             .change_context(ChildProcessError::ExecFailed)?;
         let rest = args.get(1..).unwrap_or(&[]);
         let mask = args_mask.get(1..).unwrap_or(&[]);
-        let substituted =
-            substitute_args(rest, mask, cell).change_context(ChildProcessError::ExecFailed)?;
+        let quoted = args_quoted.get(1..).unwrap_or(&[]);
+        let substituted = substitute_args(rest, mask, quoted, cell)
+            .change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
         crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
@@ -52,7 +54,8 @@ pub(super) fn run(
     let binary_exported = binary.export();
     let binary_cstr = binary_exported.as_ref();
     let mask = args_mask.get(1..).unwrap_or(&[]);
-    let substituted = substitute_args(args.get(1..).unwrap_or(&[]), mask, cell)
+    let quoted = args_quoted.get(1..).unwrap_or(&[]);
+    let substituted = substitute_args(args.get(1..).unwrap_or(&[]), mask, quoted, cell)
         .change_context(ChildProcessError::ExecFailed)?;
     let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
     let mut argv: Vec<&CStr> = alloc::vec![binary_cstr];

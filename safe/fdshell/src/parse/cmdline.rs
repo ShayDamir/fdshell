@@ -13,6 +13,10 @@ pub struct CommandLine {
     /// parallel to its arg). `true` marks bytes that were inside double
     /// quotes and are protected from IFS word splitting.
     pub args_mask: Vec<Vec<bool>>,
+    /// Whether each arg's raw span contained quotes (parallel to `args`;
+    /// see `parse::word_quoted`). True for a word like `""$(true)` whose
+    /// quoted part expands to nothing — the mask alone cannot say.
+    pub args_quoted: Vec<bool>,
     pub captures: Vec<Capture>,
     pub redirects: Vec<RedirectDef>,
     pub pidvar: Option<ShortCStr>,

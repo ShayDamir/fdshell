@@ -55,9 +55,10 @@ fn run_replace(
 
     let args = cmdline.args.clone();
     let args_mask = cmdline.args_mask.clone();
+    let args_quoted = cmdline.args_quoted.clone();
     let redirects = &cmdline.redirects;
 
-    match crate::replacer::execute(&args, &args_mask, redirects, cell) {
+    match crate::replacer::execute(&args, &args_mask, &args_quoted, redirects, cell) {
         Ok(code) => sys::exit(code),
         Err(report) => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");

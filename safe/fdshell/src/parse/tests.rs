@@ -53,6 +53,7 @@ fn test_mkdirat_capture() {
                 vec![false; 4],
                 vec![false; 3],
             ],
+            args_quoted: vec![false; 5],
             captures: vec![Capture {
                 var: c"foo".into(),
                 tag: None,
@@ -2258,6 +2259,18 @@ fn parse_empty_quoted_arg_kept_with_empty_mask() {
     assert_eq!(cmd.command, c"cmd".into());
     assert_eq!(cmd.args, vec![c"".into(), c"x".into()]);
     assert_eq!(cmd.args_mask, vec![vec![], vec![false]]);
+    assert_eq!(cmd.args_quoted, vec![true, false]);
+}
+
+#[test]
+fn parse_mixed_quoting_args_quoted_flags_stay_aligned() {
+    // `a ""$(true) b ""`: the flag vector must map to the right words — a
+    // mixed list pins the offset (an off-by-one would shift every flag).
+    let ParsedLine::Cmd(cmd) = parse(b"cmd a \"\"$(true) b \"\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args.len(), 4);
+    assert_eq!(cmd.args_quoted, vec![false, true, false, true]);
 }
 
 #[test]
@@ -2328,6 +2341,7 @@ fn parse_fully_quoted_dollar_at_preserves_flag() {
     assert_eq!(cmd.args_mask.len(), 2);
     assert!(cmd.args_mask[0].iter().all(|&q| q));
     assert!(cmd.args_mask[1].iter().all(|&q| q));
+    assert_eq!(cmd.args_quoted, vec![true, true]);
 }
 
 #[test]
@@ -2344,6 +2358,7 @@ fn parse_fully_quoted_dollar_at_middle_preserves_flag() {
     assert!(cmd.args_mask[0].iter().all(|&q| q));
     assert!(cmd.args_mask[1].iter().all(|&q| q));
     assert!(cmd.args_mask[2].iter().all(|&q| !q));
+    assert_eq!(cmd.args_quoted, vec![true, true, false]);
 }
 
 #[test]
@@ -2355,6 +2370,7 @@ fn parse_fully_quoted_dollar_star_preserves_flag() {
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$*");
     assert_eq!(cmd.args_mask.len(), 1);
     assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert_eq!(cmd.args_quoted, vec![true]);
 }
 
 #[test]
@@ -2366,6 +2382,7 @@ fn parse_unquoted_dollar_at_has_false_flag() {
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args_mask.len(), 1);
     assert!(cmd.args_mask[0].iter().all(|&q| !q));
+    assert_eq!(cmd.args_quoted, vec![false]);
 }
 
 #[test]
@@ -2377,6 +2394,7 @@ fn parse_fully_quoted_literal_preserves_flag() {
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"hello world");
     assert_eq!(cmd.args_mask.len(), 1);
     assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert_eq!(cmd.args_quoted, vec![true]);
 }
 
 #[test]
@@ -2389,6 +2407,7 @@ fn parse_mixed_quoted_args_preserves_flags() {
     assert!(cmd.args_mask[0].iter().all(|&q| q));
     assert!(cmd.args_mask[1].iter().all(|&q| q));
     assert!(cmd.args_mask[2].iter().all(|&q| !q));
+    assert_eq!(cmd.args_quoted, vec![true, true, false]);
 }
 
 #[test]

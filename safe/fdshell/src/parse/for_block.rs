@@ -12,6 +12,9 @@ pub struct ForBlock {
     pub words: Vec<ShortCStr>,
     /// Per-byte quote masks, parallel to `words`.
     pub words_mask: Vec<Vec<bool>>,
+    /// Whether each word's raw span contained quotes, parallel to `words`
+    /// (see `parse::word_quoted`).
+    pub words_quoted: Vec<bool>,
     pub body: ScriptText,
 }
 
@@ -75,11 +78,16 @@ pub(crate) fn tokens_to_for(
         .iter()
         .map(|(_, _, _, _, m)| m.clone())
         .collect();
+    let words_quoted: Vec<bool> = word_tokens
+        .iter()
+        .map(|(t, s, e, _, _)| super::word_quoted::word_quoted(t, *s, *e))
+        .collect();
 
     Ok(ForBlock {
         var,
         words,
         words_mask,
+        words_quoted,
         body,
     })
 }

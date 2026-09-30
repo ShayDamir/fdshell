@@ -13,6 +13,7 @@ use sys::fork_cell::ForkCell;
 pub fn execute(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_quoted: &[bool],
     redirects: &[crate::redirect::RedirectDef],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
@@ -30,8 +31,13 @@ pub fn execute(
     if args.first().is_some_and(|a| a.eq_bytes(b"builtin")) {
         let builtin_name = args.get(1).ok_or(ChildProcessError::MissingArg)?;
         let builtin_args = args.get(2..).unwrap_or(&[]);
-        let substituted = substitute_args(builtin_args, args_mask.get(2..).unwrap_or(&[]), cell)
-            .change_context(ChildProcessError::ExecFailed)?;
+        let substituted = substitute_args(
+            builtin_args,
+            args_mask.get(2..).unwrap_or(&[]),
+            args_quoted.get(2..).unwrap_or(&[]),
+            cell,
+        )
+        .change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
         let state = cell
@@ -43,6 +49,6 @@ pub fn execute(
             Err(report) => crate::child::handle_builtin_error(builtin_name.clone(), report),
         }
     } else {
-        external::run(args, args_mask, cell)
+        external::run(args, args_mask, args_quoted, cell)
     }
 }

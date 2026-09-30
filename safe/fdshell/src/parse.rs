@@ -35,6 +35,7 @@ mod token_pipe;
 mod token_subst;
 pub(crate) mod wait_block;
 pub(crate) mod while_block;
+pub(crate) mod word_quoted;
 
 pub(crate) use case_block::literal_indices;
 pub use cmdline::{CommandLine, Pipeline};

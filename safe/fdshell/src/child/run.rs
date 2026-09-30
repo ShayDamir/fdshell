@@ -15,12 +15,13 @@ pub fn child_main(
     cmd: Command,
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_quoted: &[bool],
     redirects: &[Redirect],
 ) -> Result<i32, Report<ChildProcessError>> {
     setup_shellfd(child_sock.as_ref(), cell)?;
     apply_redirects(redirects)?;
 
-    let resolved = substitute_args(args, args_mask, cell)
+    let resolved = substitute_args(args, args_mask, args_quoted, cell)
         .change_context(ChildProcessError::SubstituteFailed)?;
     if let Some(sock) = &child_sock {
         let last = resolved.last().cloned().unwrap_or_else(|| cmd.name.clone());

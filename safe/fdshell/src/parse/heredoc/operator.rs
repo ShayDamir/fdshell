@@ -2,6 +2,7 @@
 //! counterpart of the byte-level rule in `scan::heredoc::operator_delims`.
 
 use super::super::Token;
+use super::super::word_quoted::word_quoted;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
@@ -51,9 +52,10 @@ pub(crate) fn delimiter_token_indices(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-/// The attached `<<` form: the raw span is longer than the unquoted word.
+/// The attached `<<` form: a payload byte follows `<<`, or an empty quoted
+/// region does (the raw span is longer than the unquoted word).
 fn attached(t: &ShortCStr, start: usize, end: usize) -> bool {
-    t.len() > 2 || end - start > t.len()
+    t.len() > 2 || word_quoted(t, start, end)
 }
 
 /// The `(raw delimiter span, quoted)` of every operator, in token order.

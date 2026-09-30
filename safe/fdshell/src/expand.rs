@@ -10,6 +10,7 @@ use crate::state::ShellState;
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
     words_mask: &[Vec<bool>],
+    words_quoted: &[bool],
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ImportedStr>, Report<ResolveError>> {
@@ -21,7 +22,14 @@ pub(crate) fn expand_for_words(
         } else if is_cmd_subst(bs) {
             let expanded = crate::cmd_subst::run_and_capture(strip_delims(bs), cell)
                 .change_context(ResolveError::Resolve)?;
-            for w in split_whitespace(&expanded)? {
+            let quoted = words_quoted.get(i).copied().unwrap_or(false);
+            // bash: a quoted for-list word that expands to nothing is one
+            // empty word (`for w in "$(true)"`); unquoted, it vanishes.
+            let mut fields = split_whitespace(&expanded)?;
+            if fields.is_empty() && quoted {
+                fields.push(ShortCStr::new());
+            }
+            for w in fields {
                 out.push(ImportedStr::new(
                     w,
                     Trace::at(text.start, Origin::CommandOutput),

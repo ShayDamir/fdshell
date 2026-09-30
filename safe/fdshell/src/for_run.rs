@@ -17,8 +17,14 @@ pub(crate) fn run_for(
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
     }
-    let words = crate::expand::expand_for_words(&forblock.words, &forblock.words_mask, text, cell)
-        .change_context(CmdError::Resolve)?;
+    let words = crate::expand::expand_for_words(
+        &forblock.words,
+        &forblock.words_mask,
+        &forblock.words_quoted,
+        text,
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     for word in &words {
         if let Some(control) = run_for_word(forblock, word, cell)? {
             match control {

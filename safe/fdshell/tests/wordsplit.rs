@@ -320,3 +320,152 @@ fn empty_quoted_command_fails_like_unknown_command() {
     assert!(err.contains("not found"), "stderr={err:?}");
     assert!(out.is_empty());
 }
+
+// Quoted-empty words with a runtime-empty expansion (task #76): a word whose
+// raw text contained quotes but whose IFS split produced zero fields must be
+// one empty word, as in bash. One test per word path so a failure localises
+// the slice.
+
+#[test]
+fn quoted_empty_cmd_subst_is_one_positional() {
+    // `set -- ""$(true)`: the `set --` path (intercept/set_cmd.rs slice).
+    let (out, err, code) = run(r#"set -- ""$(true); echo $#; printf "[%s]\n" "$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n[]\n");
+}
+
+#[test]
+fn quoted_empty_var_is_one_positional() {
+    let (out, err, code) = run(r#"zz=; set -- ""$zz; echo $#; printf "[%s]\n" "$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n[]\n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_builtin_form() {
+    // The plain `printf` command: `external::run` builtin-first branch.
+    let (out, err, code) = run(r#"printf "[%s]\n" a ""$(true) b"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a]\n[]\n[b]\n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_builtin_keyword_form() {
+    // The `builtin` keyword form: the offset-2 slice in replacer.rs.
+    let (out, err, code) = run(r#"builtin printf "[%s]\n" ""$(true)"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_function_call() {
+    // The function-call path (function_call.rs). Uses `$1` (not `$@`): a
+    // function's `$1` is correctly 1-based, while `$@` currently also yields
+    // the function name (pre-existing positional-model bug, task #134).
+    let (out, err, code) = run(r#"f() { printf "[%s]\n" "$1"; }; f ""$(true)"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_exec_path() {
+    // The `exec`/`become` path (intercept/become_cmd.rs → replacer::execute).
+    let (out, err, code) = run(r#"exec printf "[%s]\n" ""$(true)"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_external_path() {
+    // The external branch (resolve_path + execveat) in replacer/external.rs.
+    let (out, err, code) = run(&format!("become {ARG_PRINT} \"\"$(true) c"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[] [c] \n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_timeout_path() {
+    // The `timeout` rebuilt-`CommandLine` path.
+    let (out, err, code) = run(r#"timeout 1 printf "[%s]\n" ""$(true)"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n");
+}
+
+#[test]
+fn quoted_empty_cmd_subst_pipeline_stage() {
+    // The flag must survive the pipeline child (pipeline/child.rs).
+    let (out, err, code) = run(r#"printf "[%s]\n" ""$(true) | cat"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n");
+}
+
+#[test]
+fn for_list_quoted_empty_cmd_subst_is_one_empty_iteration() {
+    // The for-list path (expand.rs): one empty iteration, not zero.
+    let (out, err, code) = run(r#"for w in "$(true)"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n");
+}
+
+#[test]
+fn quoted_dollar_at_reassignment_no_positionals() {
+    // `""$@` with no positionals is one empty word (bash).
+    let (out, err, code) = run(r#"set --; set -- ""$@; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn quoted_dollar_at_reassignment_empty_positional() {
+    let (out, err, code) = run(r#"set -- ""; set -- ""$@; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn quoted_dollar_star_reassignment_no_positionals() {
+    let (out, err, code) = run(r#"set --; set -- ""$*; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn quoted_dollar_at_reassignment_keeps_words() {
+    // Guard: words from the positionals are kept, no empty word is added.
+    let (out, err, code) = run(r#"set -- a "" b; set -- ""$@; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "2\n");
+}
+
+// Regression guards: the unquoted spellings must not gain a word.
+
+#[test]
+fn unquoted_empty_cmd_subst_is_no_positionals() {
+    let (out, err, code) = run(r#"set -- $(true); echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n");
+}
+
+#[test]
+fn unquoted_empty_cmd_subst_for_list_is_no_iterations() {
+    let (out, err, code) = run(r#"for w in $(true); do echo hit; done"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "");
+}
+
+#[test]
+fn quoted_whitespace_only_expansion_empty_ifs_keeps_spaces() {
+    // With `IFS=`, the word splits to one field `  ` and must stay that. Uses
+    // `"$@"` (not `"$1"`): `$1` after `set --` is off-by-one today
+    // (pre-existing positional-model bug, task #134).
+    let (out, err, code) = run(r#"IFS=; set -- ""$(echo "  "); printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[  ]\n");
+}
+
+#[test]
+fn quoted_multiword_expansion_splits_positionals() {
+    let (out, err, code) = run(r#"set -- ""$(echo "a b"); echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "2\n");
+}

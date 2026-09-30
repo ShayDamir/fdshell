@@ -33,34 +33,45 @@ pub(crate) fn borrow_state(
 pub fn substitute_args(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_quoted: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let mut result = Vec::new();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     for (i, arg) in args.iter().enumerate() {
         let mask = args_mask.get(i).cloned().unwrap_or_default();
+        let quoted = args_quoted.get(i).copied().unwrap_or(false);
+        let before = result.len();
         if arg.eq_bytes(b"$@") || arg.eq_bytes(b"$*") {
             for (word, mask) in
                 positional::expand_positional_word(arg.eq_bytes(b"$*"), fully_quoted(&mask), cell)?
             {
                 push_word(&mut result, &word, &mask, cell)?;
             }
-            continue;
-        }
-        // A fully quoted word is exactly one word — kept even when the
-        // expansion is empty (`"${Y:+a}"` → one empty argument).
-        let fq = fully_quoted(&mask);
-        let (expanded, mask) = arg::substitute_arg(arg, &mask, &mut cache, cell)?;
-        // The IFS borrow must end before the glob reborrows the cell for
-        // `nullglob` (RefCell, LESSONS.md).
-        let fields = if fq {
-            vec![(expanded, mask)]
         } else {
-            let state = borrow_state(cell)?;
-            split::split_word(&expanded, &mask, &state.ifs)?
-        };
-        for (word, mask) in fields {
-            push_word(&mut result, &word, &mask, cell)?;
+            // A fully quoted word is exactly one word — kept even when the
+            // expansion is empty (`"${Y:+a}"` → one empty argument).
+            let fq = fully_quoted(&mask);
+            let (expanded, mask) = arg::substitute_arg(arg, &mask, &mut cache, cell)?;
+            // The IFS borrow must end before the glob reborrows the cell for
+            // `nullglob` (RefCell, LESSONS.md).
+            let fields = if fq {
+                vec![(expanded, mask)]
+            } else {
+                let state = borrow_state(cell)?;
+                split::split_word(&expanded, &mask, &state.ifs)?
+            };
+            for (word, mask) in fields {
+                push_word(&mut result, &word, &mask, cell)?;
+            }
+        }
+        // bash: a word that contained quotes but expanded to no words is one
+        // empty word (`""$(true)`, `""$@` with no positionals). Push it
+        // directly rather than through `push_word` — an empty mask means
+        // "fully quoted" there, and passing the expansion mask through would
+        // glob it.
+        if quoted && result.len() == before {
+            result.push(ShortCStr::new());
         }
     }
     Ok(result)

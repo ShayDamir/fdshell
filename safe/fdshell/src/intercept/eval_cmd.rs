@@ -13,8 +13,13 @@ pub(crate) fn run_eval(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     super::validation::validate_intercept(line, "eval", cmdline)?;
-    let substituted = crate::substitute::substitute_args(&cmdline.args, &cmdline.args_mask, cell)
-        .change_context(CmdError::Resolve)?;
+    let substituted = crate::substitute::substitute_args(
+        &cmdline.args,
+        &cmdline.args_mask,
+        &cmdline.args_quoted,
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     let script = join_space(&substituted);
     if script.is_empty() {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
