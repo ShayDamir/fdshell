@@ -81,3 +81,6 @@ fn untab_body(span: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests;

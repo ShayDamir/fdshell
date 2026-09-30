@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::{operator_delim, untab, untab_body, Operator};
+use super::{Operator, operator_delim, untab, untab_body};
 
 #[test]
 fn operator_delim_attached_word_is_plain() {
@@ -51,10 +51,7 @@ fn untab_body_strips_leading_tabs_of_every_line() {
     assert_eq!(untab_body(b"").as_slice(), b"" as &[u8]);
     // A tabs-only line becomes empty, keeping its terminating newline.
     assert_eq!(untab_body(b"\t\t\n").as_slice(), b"\n" as &[u8]);
-    assert_eq!(
-        untab_body(b"body\n\t\t\n").as_slice(),
-        b"body\n\n" as &[u8]
-    );
+    assert_eq!(untab_body(b"body\n\t\t\n").as_slice(), b"body\n\n" as &[u8]);
 }
 
 #[test]
