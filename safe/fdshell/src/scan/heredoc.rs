@@ -4,12 +4,14 @@
 //! whole, without folding its bytes into quote or substitution state.
 
 mod lines;
+mod op;
 mod regions;
 
 use super::ScanState;
 use alloc::vec::Vec;
 
-pub(crate) use lines::{body_spans, delimiter_word, first_unquoted_newline};
+pub(crate) use lines::{body_spans, first_unquoted_newline};
+pub(crate) use op::{Operator, operator_delim};
 pub(crate) use regions::body_regions;
 
 /// If `line[run_start..run_end]` is a heredoc command line, return the index
@@ -36,8 +38,7 @@ pub(crate) fn skip_region(
     if delims.is_empty() || !matches!(line.get(run_end), Some(&b'\n') | None) {
         return None;
     }
-    let only: Vec<&[u8]> = delims.iter().map(|(d, _)| *d).collect();
-    let (spans, resume) = body_spans(line, run_end + 1, &only).ok()?;
+    let (spans, resume) = body_spans(line, run_end + 1, &delims).ok()?;
     // Non-empty by construction: `delims` is checked above and `spans` has
     // one entry per found delimiter.
     let first = spans.first()?.0;
@@ -45,15 +46,15 @@ pub(crate) fn skip_region(
     // An empty final delimiter extends the span through the blank line's
     // newline; the blank line always has one (a zero-byte final line never
     // matches), so `span_end` stays in bounds.
-    let span_end = resume + usize::from(delims.last().is_some_and(|(d, _)| d.is_empty()));
+    let span_end = resume + usize::from(delims.last().is_some_and(|o| o.delim.is_empty()));
     Some(((first, last), resume, span_end))
 }
 
-/// The `(delimiter, quoted)` pairs of every `<<` operator in the run, in
-/// order. `None` when a bare `<<` has no delimiter word.
-fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<(&[u8], bool)>> {
+/// The `Operator` of every `<<` in the run, in order. `None` when a bare
+/// `<<` (or `<<-`) has no delimiter word.
+fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator<'_>>> {
     let mut state = ScanState::new();
-    let mut found: Vec<(&[u8], bool)> = Vec::new();
+    let mut found: Vec<Operator> = Vec::new();
     let mut seen_word = false;
     let mut i = from;
     while i < to {
@@ -66,8 +67,9 @@ fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<(&[u8], bo
             && line.get(i + 2) != Some(&b'<')
             && !precedes_pipe(line, i)
         {
-            let (next, raw) = lines::delimiter_span(line, i + 2, to)?;
-            found.push(delimiter_word(raw));
+            let dash = line.get(i + 2) == Some(&b'-');
+            let (next, raw) = lines::delimiter_span(line, i + 2 + usize::from(dash), to)?;
+            found.push(Operator::new(raw, dash));
             while i < next {
                 i = state.advance(line, i);
             }

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::{body_regions, delimiter_word, skip, skip_region};
+use super::lines::delimiter_word;
+use super::{body_regions, skip, skip_region};
 use alloc::vec;
 
 #[test]
@@ -33,6 +34,56 @@ fn skip_resume_positions() {
 #[test]
 fn skip_bare_form_uses_next_word() {
     assert_eq!(skip(b"cat << Q\nbody\nQ", 0, 8), Some(15));
+}
+
+// The `<<-` form strips leading tabs from the body and the terminator line.
+#[test]
+fn skip_dash_form_strips_leading_tabs() {
+    assert_eq!(skip(b"cat <<-EOF\n\tbody\n\tEOF", 0, 10), Some(21));
+    // Tabs-only terminator line: the whole line is stripped away.
+    assert_eq!(skip(b"cat <<-EOF\n\tbody\n\t\t\tEOF", 0, 10), Some(23));
+}
+
+// `<<- WORD` (marker + separate word) reads the next word as the delimiter.
+#[test]
+fn skip_dash_form_separate_word() {
+    assert_eq!(skip(b"cat <<- EOF\nbody\nEOF", 0, 11), Some(20));
+}
+
+// A `<<-` at EOL has no delimiter word: not a heredoc command line.
+#[test]
+fn skip_dash_form_at_eol_is_none() {
+    assert_eq!(skip(b"cat <<-", 0, 7), None);
+}
+
+// `<<---` consumes exactly one `-` as the marker; the delimiter is `--`
+// (not `---` and not `-`), so the body ends at the `--` line.
+#[test]
+fn skip_dash_form_consumes_one_dash() {
+    assert_eq!(skip(b"cat <<---\nbody\n--", 0, 9), Some(17));
+}
+
+// A plain `<<EOF` never strips tabs: a tab-indented terminator does not match.
+#[test]
+fn skip_plain_form_ignores_tab_indented_terminator() {
+    assert_eq!(skip(b"cat <<EOF\n\tEOF", 0, 9), None);
+}
+
+// `<<-""` (empty quoted delimiter) is terminated by a tabs-only line, which
+// strips to empty just like a blank line terminates `<<""`.
+#[test]
+fn skip_dash_empty_quoted_delimiter_ends_at_tabs_only_line() {
+    let line = b"cat <<-\"\"\nbody\n\t\t\necho A";
+    assert_eq!(skip_region(line, 0, 9), Some(((10, 15), 17, 18)));
+    assert_eq!(skip(line, 0, 9), Some(17));
+}
+
+// The dash form's body region ends at the *line* start (tabs included), so
+// the terminator's leading tabs stay part of the unblanked line.
+#[test]
+fn body_regions_dash_form_ends_at_line_start() {
+    let line = b"cat <<-EOF\n\tbody\n\tEOF\necho x";
+    assert_eq!(body_regions(line), vec![(11, 17)]);
 }
 
 // An attached delimiter may start with a non-word byte (`&x`): the attached

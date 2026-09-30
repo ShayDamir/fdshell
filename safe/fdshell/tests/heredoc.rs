@@ -68,6 +68,89 @@ fn heredoc_bare_form_takes_next_word() {
     assert_eq!(out, "body\n");
 }
 
+// --- `<<-` tab-stripping form ----------------------------------------------
+
+#[test]
+fn heredoc_dash_form_strips_leading_tabs() {
+    let (out, _err, code) = run("cat <<-EOF\n\tone\n\t\ttwo\nthree\n\tEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "one\ntwo\nthree\n");
+}
+
+#[test]
+fn heredoc_dash_form_keeps_spaces_and_midline_tabs() {
+    // Leading spaces are never stripped; a mid-line tab is kept.
+    let (out, _err, code) = run("cat <<-EOF\n  sp\n\ttab\n\t\ta\tb\n\tEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "  sp\ntab\na\tb\n");
+}
+
+#[test]
+fn heredoc_dash_quoted_delimiter_is_literal_and_stripped() {
+    let (out, _err, code) = run("X=v; cat <<-\"Q\"\n\t$X\n\tQ");
+    assert_eq!(code, 0);
+    assert_eq!(out, "$X\n");
+}
+
+#[test]
+fn heredoc_dash_unquoted_delimiter_expands() {
+    let (out, _err, code) = run("X=v; cat <<-Q\n\t$X\n\tQ");
+    assert_eq!(code, 0);
+    assert_eq!(out, "v\n");
+}
+
+#[test]
+fn heredoc_dash_separate_word_strips() {
+    let (out, _err, code) = run("cat <<- EOF\n\tbody\n\tEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n");
+}
+
+#[test]
+fn heredoc_dash_form_byte_count_no_trailing_newline() {
+    // The stripped body is `ab\n`: three bytes, no extra newline appended.
+    let (out, _err, code) = run("wc -c <<-EOF\n\tab\n\tEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "3\n");
+}
+
+#[test]
+fn heredoc_plain_form_ignores_tab_indented_terminator() {
+    // The plain `<<` form never strips tabs, so `\tEOF` is not the terminator.
+    let (_out, err, code) = run("cat <<EOF\n\tEOF");
+    assert_ne!(code, 0);
+    assert!(err.contains("terminating"), "stderr={err:?}");
+}
+
+#[test]
+fn heredoc_dash_bare_operator_at_eol_is_error() {
+    let (_out, err, code) = run("cat <<-");
+    assert_ne!(code, 0);
+    assert!(!err.is_empty(), "stderr must carry the error");
+}
+
+#[test]
+fn heredoc_dash_in_if_body() {
+    let (out, _err, code) = run("if true; then cat <<-E\n\tin-if\n\tE\nfi");
+    assert_eq!(code, 0);
+    assert_eq!(out, "in-if\n");
+}
+
+#[test]
+fn heredoc_dash_pipeline_stage() {
+    let (out, _err, code) = run("cat <<-E | wc -l\n\ta\n\tb\n\tE");
+    assert_eq!(code, 0);
+    assert_eq!(out, "2\n");
+}
+
+#[test]
+fn heredoc_dash_body_is_opaque() {
+    // `&&` and `;` in the body are content, not statement structure.
+    let (out, _err, code) = run("cat <<-E\n\tx && y\n\t;\n\tE\necho after");
+    assert_eq!(code, 0);
+    assert_eq!(out, "x && y\n;\nafter\n");
+}
+
 #[test]
 fn heredoc_keeps_other_args_intact() {
     let (out, _err, code) = run("echo a <<EOF b\nbody\nEOF");

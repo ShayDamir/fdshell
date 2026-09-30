@@ -299,6 +299,19 @@ fn test_heredoc_quoted_delimiter_is_literal() {
 }
 
 #[test]
+fn test_heredoc_dash_form_strips_leading_tabs() {
+    // A mixed-indent line is the sharpest pin: leading tabs are dropped, the
+    // spaces that follow them survive.
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<-EOF\n\tone\n\t\t two\n\tEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_doc(c"one\n two\n", true)]
+    );
+}
+
+#[test]
 fn test_heredoc_empty_body() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<EOF\nEOF").unwrap() else {
         panic!("expected Cmd")

@@ -1,6 +1,7 @@
 //! Word and line helpers for heredoc (`<<`) detection.
 
 use super::super::ScanState;
+use super::op::Operator;
 use alloc::vec::Vec;
 
 /// Strip one pair of surrounding double quotes from the raw delimiter word
@@ -74,13 +75,13 @@ pub(crate) fn first_unquoted_newline(line: &[u8]) -> Option<usize> {
 pub(crate) fn body_spans(
     line: &[u8],
     from: usize,
-    delims: &[&[u8]],
+    delims: &[Operator<'_>],
 ) -> Result<(Vec<(usize, usize)>, usize), usize> {
     let mut spans: Vec<(usize, usize)> = Vec::new();
     let mut pos = from;
     let mut resume = from;
-    for (n, delim) in delims.iter().enumerate() {
-        let Some((start, end)) = next_delimiter(line, pos, delim) else {
+    for (n, op) in delims.iter().enumerate() {
+        let Some((start, end)) = next_delimiter(line, pos, op) else {
             return Err(n);
         };
         spans.push((pos, start));
@@ -90,11 +91,12 @@ pub(crate) fn body_spans(
     Ok((spans, resume))
 }
 
-/// The next line equal to `delim` starting at `from`: the delimiter line's
+/// The next line matching `op` starting at `from`: the delimiter line's
 /// start and the index of the newline terminating it (or `line.len()` when
 /// the line is last). A zero-byte final line never matches, so an empty
-/// delimiter needs a real blank line.
-fn next_delimiter(line: &[u8], from: usize, delim: &[u8]) -> Option<(usize, usize)> {
+/// delimiter needs a real blank line (a tabs-only line strips to empty and
+/// does match a `<<-""` body).
+fn next_delimiter(line: &[u8], from: usize, op: &Operator) -> Option<(usize, usize)> {
     let mut i = from;
     while i < line.len() {
         let nl = line
@@ -102,7 +104,7 @@ fn next_delimiter(line: &[u8], from: usize, delim: &[u8]) -> Option<(usize, usiz
             .and_then(|s| s.iter().position(|&b| b == b'\n'))
             .map(|p| i + p);
         let j = nl.unwrap_or(line.len());
-        if line.get(i..j) == Some(delim) {
+        if op.matches(line.get(i..j)?) {
             return Some((i, j));
         }
         let n = nl?;

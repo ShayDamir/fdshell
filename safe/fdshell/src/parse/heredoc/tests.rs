@@ -37,6 +37,52 @@ fn layout_quoted_delimiter_is_literal() {
 }
 
 #[test]
+fn layout_dash_form_strips_leading_tabs_and_expands() {
+    let s = specs(b"cat <<-EOF\n\tone\n\t\ttwo\nthree\n\tEOF");
+    assert_eq!(s.len(), 1);
+    assert_eq!(
+        s[0].body,
+        ShortCStr::from_vec(b"one\ntwo\nthree\n".to_vec()).unwrap()
+    );
+    assert!(s[0].expand);
+}
+
+#[test]
+fn layout_dash_quoted_delimiter_is_literal_and_stripped() {
+    let s = specs(b"cat <<-\"Q\"\n\t$X\n\tQ");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"$X\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
+}
+
+#[test]
+fn layout_dash_separate_word_strips() {
+    let s = specs(b"cat <<- EOF\n\tbody\n\tEOF");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"body\n".to_vec()).unwrap());
+    assert!(s[0].expand);
+}
+
+#[test]
+fn layout_dash_bare_marker_inherited_by_next_word() {
+    // `<<- -`: the marker is inherited by the bare-form delimiter word `-`.
+    let s = specs(b"cat <<- -\n\tX\n\t-");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"X\n".to_vec()).unwrap());
+    assert!(s[0].expand);
+}
+
+#[test]
+fn layout_mixed_dash_and_plain_keep_independent_flags() {
+    let s = specs(b"cat <<-A <<B\n\ta\nb\n\tA\nc\nB");
+    assert_eq!(s.len(), 2);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"a\nb\n".to_vec()).unwrap());
+    assert!(s[0].expand);
+    assert_eq!(s[1].body, ShortCStr::from_vec(b"c\n".to_vec()).unwrap());
+    assert!(s[1].expand);
+}
+
+#[test]
 fn layout_empty_body() {
     let s = specs(b"cat <<EOF\nEOF");
     assert_eq!(s.len(), 1);
@@ -118,6 +164,26 @@ fn layout_bare_operator_at_eol_is_invalid_redirect() {
 #[test]
 fn layout_bare_operator_before_semicolon_is_invalid_redirect() {
     let line = b"cat << ;";
+    let tokens = tokenize_statement(line).unwrap();
+    assert!(matches!(
+        layout(line, &tokens).unwrap_err().current_context(),
+        ParseError::InvalidRedirect
+    ));
+}
+
+#[test]
+fn layout_dash_bare_operator_at_eol_is_invalid_redirect() {
+    let line = b"cat <<-";
+    let tokens = tokenize_statement(line).unwrap();
+    assert!(matches!(
+        layout(line, &tokens).unwrap_err().current_context(),
+        ParseError::InvalidRedirect
+    ));
+}
+
+#[test]
+fn layout_dash_bare_operator_before_semicolon_is_invalid_redirect() {
+    let line = b"cat <<- ;";
     let tokens = tokenize_statement(line).unwrap();
     assert!(matches!(
         layout(line, &tokens).unwrap_err().current_context(),
@@ -214,14 +280,28 @@ fn is_operator_bounds_guard() {
 fn delimiter_indices_bare_form_takes_next_token() {
     let line = b"cat << {a,b}";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(delimiter_token_indices(&tokens), vec![2]);
+    assert_eq!(delimiter_token_indices(line, &tokens), vec![2]);
 }
 
 #[test]
 fn delimiter_indices_attached_form_is_operator_token() {
     let line = b"cat <<{a,b}";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(delimiter_token_indices(&tokens), vec![1]);
+    assert_eq!(delimiter_token_indices(line, &tokens), vec![1]);
+}
+
+#[test]
+fn delimiter_indices_dash_bare_form_takes_next_token() {
+    let line = b"cat <<- {a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(delimiter_token_indices(line, &tokens), vec![2]);
+}
+
+#[test]
+fn delimiter_indices_dash_attached_form_is_operator_token() {
+    let line = b"cat <<-{a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(delimiter_token_indices(line, &tokens), vec![1]);
 }
 
 #[test]
@@ -229,5 +309,5 @@ fn delimiter_indices_bare_form_at_end_of_input() {
     // A bare `<<` with no following word protects nothing.
     let line = b"cat <<";
     let tokens = tokenize_statement(line).unwrap();
-    assert!(delimiter_token_indices(&tokens).is_empty());
+    assert!(delimiter_token_indices(line, &tokens).is_empty());
 }

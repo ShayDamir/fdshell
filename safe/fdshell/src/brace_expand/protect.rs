@@ -20,7 +20,7 @@ pub(super) fn protected(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     for i in word_indices(tokens) {
         out.push(i);
     }
-    for i in delimiter_token_indices(tokens) {
+    for i in delimiter_token_indices(line, tokens) {
         out.push(i);
     }
     for i in heredoc_terminator_indices(line, tokens) {
@@ -35,11 +35,23 @@ pub(super) fn protected(line: &[u8], tokens: &[Token]) -> Vec<usize> {
 fn heredoc_terminator_indices(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     let mut out: Vec<usize> = Vec::new();
     for (_start, end) in body_regions(line) {
-        if let Some(i) = tokens.iter().position(|(_, ts, _, _, _)| *ts == end) {
+        if let Some(i) = tokens
+            .iter()
+            .position(|(_, ts, _, _, _)| terminator_word(line, end, *ts))
+        {
             out.push(i);
         }
     }
     out
+}
+
+/// Whether the token at `ts` is the terminator line's word: it follows the
+/// body-region end `end` across leading tabs only (the `<<-` form indents the
+/// terminator). A blank terminator line is followed by a real statement
+/// across a newline, so it still matches nothing.
+fn terminator_word(line: &[u8], end: usize, ts: usize) -> bool {
+    line.get(end..ts)
+        .is_some_and(|gap| gap.iter().all(|&b| b == b'\t'))
 }
 
 /// The first token is an assignment word (`name=...` with a non-empty name);

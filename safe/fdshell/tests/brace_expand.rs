@@ -399,6 +399,17 @@ fn heredoc_brace_delimiter_is_verbatim() {
     assert_eq!(out, "BODY\n");
 }
 
+#[test]
+fn heredoc_dash_brace_delimiter_is_verbatim() {
+    // The `<<-` terminator line is tab-indented, so its word starts *after*
+    // the tabs; the protection match must allow that gap (regression: a
+    // tab-indented terminator was brace-expanded and the heredoc never
+    // terminated).
+    let (out, err, code) = run("cat <<-{a,b}\n\tBODY\n\t{a,b}");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "BODY\n");
+}
+
 // --- word cap (documented deviation) ---------------------------------------
 
 #[test]

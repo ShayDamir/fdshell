@@ -34,22 +34,18 @@ pub(crate) fn layout(
         return Ok(Vec::new());
     }
     let from = heredoc::first_unquoted_newline(line)
-        .ok_or_else(|| unterminated(ops.first().map(|(d, _)| *d).unwrap_or(b"")))?;
-    let delims: Vec<&[u8]> = ops.iter().map(|(d, _)| *d).collect();
-    let (spans, _) = heredoc::body_spans(line, from, &delims)
-        .map_err(|n| unterminated(ops.get(n).map(|(d, _)| *d).unwrap_or(b"")))?;
+        .ok_or_else(|| unterminated(ops.first().map(|o| o.delim).unwrap_or(b"")))?;
+    let (spans, _) = heredoc::body_spans(line, from, &ops)
+        .map_err(|n| unterminated(ops.get(n).map(|o| o.delim).unwrap_or(b"")))?;
     ops.iter()
         .zip(spans)
-        .map(|((_, quoted), (body_start, body_end))| {
-            let bytes = line
-                .get(body_start..body_end)
-                .ok_or(ParseError::Never)?
-                .to_vec();
+        .map(|(op, (body_start, body_end))| {
+            let bytes = op.body_bytes(line.get(body_start..body_end).ok_or(ParseError::Never)?);
             let body =
                 ShortCStr::from_vec(bytes).change_context(ParseError::InvalidChar { ch: 0 })?;
             Ok(HeredocBody {
                 body,
-                expand: !quoted,
+                expand: !op.quoted,
             })
         })
         .collect()
@@ -62,7 +58,7 @@ pub(crate) fn parse_operator(
     i: usize,
     spec: &HeredocBody,
 ) -> Result<(RedirectDef, usize), Report<ParseError>> {
-    let (_raw, extra) = operator::operator_raw(line, tokens, i)?;
+    let (_op, extra) = operator::operator_at(line, tokens, i)?;
     Ok((RedirectDef::here_doc(spec.body.clone(), spec.expand), extra))
 }
 

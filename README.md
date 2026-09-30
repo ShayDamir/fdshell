@@ -69,10 +69,13 @@ line two
 EOF
 ```
 
-Forms: `cmd <<DELIM` (attached), `cmd << DELIM` (separate word), and
-`cmd <<"DELIM"` (quoted). An unquoted delimiter runs `$` / `$(…)` / backtick
-expansion in the body; a quoted delimiter makes the body literal.
-`<<""` (empty quoted delimiter) reads a body up to the next empty line.
+Forms: `cmd <<DELIM` (attached), `cmd << DELIM` (separate word),
+`cmd <<"DELIM"` (quoted), and `cmd <<-DELIM` (the tab-stripping form: leading
+TABs are dropped from every body line and from the terminator line — spaces are
+kept, and a tab-indented terminator matches; the body is otherwise opaque as
+below). An unquoted delimiter runs `$` / `$(…)` / backtick expansion in the
+body; a quoted delimiter makes the body literal. `<<""` (empty quoted
+delimiter) reads a body up to the next empty line.
 The body is otherwise opaque: `;`, `&&`, `|`, `#`, `$(…)`, quotes, and
 keyword-shaped lines (`fi`, `done`, `}`) are all body content. An empty body
 is zero bytes, and no trailing newline is appended — the body keeps the last
@@ -82,7 +85,6 @@ any other command.
 
 Limitations:
 
-- `<<-DELIM` (tab-stripping form) is not supported.
 - A here-doc in a block condition or cond-list position (`if cat <<EOF; then`,
   `cat <<EOF && x`) is rejected with `here-doc: missing terminating delimiter
   line`.
