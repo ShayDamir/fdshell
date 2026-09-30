@@ -64,5 +64,10 @@ pub(super) fn handle_renameat2(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     builtins::renameat2::renameat2_exec(&cfg).map(|()| 0)
 }
 
+pub(super) fn handle_unlinkat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let cfg = builtins::unlinkat::parse::unlinkat_parse(ctx.refs)?;
+    builtins::unlinkat::unlinkat_exec(&cfg).map(|()| 0)
+}
+
 #[cfg(test)]
 mod tests;

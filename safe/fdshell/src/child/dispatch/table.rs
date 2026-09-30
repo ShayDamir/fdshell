@@ -45,6 +45,7 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"openat2", delegated::handle_openat2),
     (b"printf", printf::handle_printf),
     (b"renameat2", delegated::handle_renameat2),
+    (b"unlinkat", delegated::handle_unlinkat),
     (b"timerfd", delegated::handle_timerfd),
     (b"eventfd", delegated::handle_eventfd),
     (b"fsync", fdops::handle_fsync),

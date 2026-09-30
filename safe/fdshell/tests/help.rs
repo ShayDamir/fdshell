@@ -73,6 +73,7 @@ const BUILTINS: &[&str] = &[
     "timerfd",
     "true",
     "type",
+    "unlinkat",
     "verity",
 ];
 

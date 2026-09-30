@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use super::{handle_eventfd, handle_fchmod, handle_timerfd};
+use super::{handle_eventfd, handle_fchmod, handle_timerfd, handle_unlinkat};
 use crate::child::Ctx;
 use crate::state::ShellState;
 use alloc::format;
@@ -38,6 +38,28 @@ fn fchmod_success_returns_zero() {
 #[test]
 fn fchmod_no_args_is_error() {
     let result = handle_fchmod(&Ctx::new(c"fchmod".into(), &[], &[], &ShellState::new()));
+    assert!(result.is_err());
+}
+
+#[test]
+fn unlinkat_success_returns_zero() {
+    let (local, path) = temp_file();
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let refs: [&CStr; 1] = [path_c.as_c_str()];
+    let result = handle_unlinkat(&Ctx::new(
+        c"unlinkat".into(),
+        &refs,
+        &[],
+        &ShellState::new(),
+    ));
+    assert_eq!(result.unwrap(), 0);
+    drop(local);
+    assert!(!path.exists());
+}
+
+#[test]
+fn unlinkat_no_args_is_error() {
+    let result = handle_unlinkat(&Ctx::new(c"unlinkat".into(), &[], &[], &ShellState::new()));
     assert!(result.is_err());
 }
 

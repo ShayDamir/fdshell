@@ -79,6 +79,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"timerfd", b"Timer as an fd source"),
     (b"true", b"Exit with success status"),
     (b"type", b"Show how a command name resolves"),
+    (b"unlinkat", b"Remove a file or directory entry"),
     (
         b"verity",
         b"fs-verity: query/check/enable a file digest on an fd",

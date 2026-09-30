@@ -19,3 +19,4 @@ pub mod pipe;
 pub mod renameat2;
 pub mod resolve;
 pub mod timerfd;
+pub mod unlinkat;

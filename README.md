@@ -34,9 +34,15 @@ parallel to script invocation.
 | `mkfifoat [--dirfd N] [--mode MODE] [--resolve FLAGS] path` | Create a fifo via `mkfifoat` + `openat2 O_RDWR`. Returns one fd tagged `fifo`. |
 | `pipe [--flags FLAGS]` | Create an anonymous pipe via `pipe2`. Returns two fds tagged `rd` and `wr`. |
 | `renameat2 [--olddirfd N] [--newdirfd N] [--flags FLAGS] oldpath newpath` | Rename or exchange files via `renameat2`. Returns no fd. |
+| `unlinkat [--dirfd N] [--flags AT_REMOVEDIR] path` | Remove a file, or a directory with `AT_REMOVEDIR`, via `unlinkat`. Returns no fd. |
 
 Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
-`0x`-prefixed hex values. Repeat `--flags` to combine multiple flags.
+`0x`-prefixed hex values. Repeat `--flags` to combine multiple flags. `unlinkat`
+accepts only `AT_REMOVEDIR` (or `0x0`).
+
+`unlinkat --dirfd N` pins the *parent* directory to the fd, but the kernel still
+resolves the final path component, so the builtin is not TOCTOU-free: keep the
+trailing name short and the `--dirfd` pinned when it matters.
 
 `openat2 --path` opens with `O_PATH` — a handle with no read/write permission on the file
 itself; combine with `statx %fd` to inspect files the user cannot open.
@@ -350,9 +356,9 @@ builtin accept %fd
 * `ADDRESS` is the positional: `@name` is the **abstract namespace** (no
   filesystem object — no path TOCTOU, nothing to clean up); `path` is a
   filesystem socket resolved against the CWD — the script owns the path and
-  must unlink it after use, or the stale path is `EADDRINUSE` (98) on the
-  next bind; `--bind ADDR --port N` is AF_INET v4. Names and paths are at
-  most 107 bytes.
+  must `unlinkat` it after use (and clear a stale one before re-binding), or
+  the stale path is `EADDRINUSE` (98) on the next bind; `--bind ADDR --port N`
+  is AF_INET v4. Names and paths are at most 107 bytes.
 * Output uses the usual capture forms: `builtin listen @srv %>%l`, or the
   bounded form `builtin accept %l %>%conns[8]` to fill an fd array. At the
   cap, further connections are accepted and closed immediately.
