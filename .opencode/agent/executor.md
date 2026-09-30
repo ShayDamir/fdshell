@@ -1,5 +1,5 @@
 ---
-description: "Subagent that executes a yask task in the fdshell project: reads the task's plan and attachments, implements the code change, verifies it (fmt, clippy, nextest, nix flake check), attaches a session summary, and moves the task to Review."
+description: "Subagent that executes a yask task in the fdshell project: reads the task's plan and attachments, implements the code change on its task branch (taskN), verifies it (fmt, clippy, nextest, nix flake check), commits it, attaches a session summary, and moves the task to Review."
 mode: subagent
 permission:
   task: deny
@@ -39,15 +39,23 @@ stop.
    unclear and you cannot resolve it from the task itself, do not improvise
    the design — block (see "Blocking").
 
-4. **Implement.** Follow the plan; make the smallest change that satisfies
+4. **Set up the task branch.** The working tree must be clean (`git
+   status`) on whatever branch the repository is on — a dirty tree is a
+   flow violation: block (see "Blocking"). Then derive the branch from the
+   task number, never from the current branch: `taskN` missing → `git
+   switch -c taskN master` (create it from `master`); `taskN` exists →
+   `git switch taskN` (re-work round: the branch already holds the previous
+   round's commits — stack your fixes on top of them).
+
+5. **Implement.** Follow the plan; make the smallest change that satisfies
    this task only. Follow AGENTS.md's conventions and quirks (`STYLE.md` §1-7,
    `LESSONS.md`): three `#![no_std]` crates, `forbid(unsafe_code)` in the safe
    crates, no raw fds outside `unsafe/sys`, unit tests in separate
-   `<module>/tests.rs` files (inline `mod tests {}` is forbidden). Run
-   `git add -N <new-files>` for new files so nix builds (`lib.cleanSource`)
-   see them.
+   `<module>/tests.rs` files (inline `mod tests {}` is forbidden). `git add`
+   new files as soon as they are created so nix builds (`lib.cleanSource`)
+   see them; they go into the task branch's commits.
 
-5. **Verify and polish.** Run the AGENTS.md checks in order: `cargo fmt`;
+6. **Verify and polish.** Run the AGENTS.md checks in order: `cargo fmt`;
    `cargo clippy -- -D warnings`; `cargo nextest run --status-level fail
    --show-progress none` — **never `cargo test`** (its shared harness breaks
    `fork()`-based tests); then the hermetic check `nix flake check
@@ -60,15 +68,21 @@ stop.
    your own checks surface; make sure the change is clean, tested, and matches
    the plan.
 
-6. **Attach the session summary.** Write `/tmp/opencode/summary-<n>.md` and
+7. **Commit on the task branch.** Stage and commit exactly this task's files
+   (implementation + tests + docs, including new files) on `taskN` — one or
+   several commits with concise conventional messages (match recent `git log`
+   style). Do not commit unrelated work, never commit on `master`. When you
+   are done the working tree is clean and every change lives on `taskN`.
+
+8. **Attach the session summary.** Write `/tmp/opencode/summary-<n>.md` and
    attach it with `yask_add_attachment` (`file_path`,
    `content_type: text/markdown`, `filename: session-summary.md`): what
-   changed and which files were touched, verification results (exact commands
-   and outcomes), deviations from the plan and why (the Reviewer will judge
-   them), verdict items addressed (re-work round), anything the Reviewer
-   should know.
+   changed and which files were touched, the commits made on `taskN` (hashes +
+   messages), verification results (exact commands and outcomes), deviations
+   from the plan and why (the Reviewer will judge them), verdict items
+   addressed (re-work round), anything the Reviewer should know.
 
-7. **Move the task to `Review`.** `yask_move_task`; confirm the prerequisite
+9. **Move the task to `Review`.** `yask_move_task`; confirm the prerequisite
    cascade if asked.
 
 Report back to the Orchestrator: task number, summary attachment id, final
@@ -92,6 +106,7 @@ this task.
 
 - Only ever move **this** task (its prerequisite cascades are fine and
   expected); don't move, reorder, or restructure other tasks.
-- Don't commit — the Judge commits when the task reaches `Done`.
+- Commit only on `taskN`, never on `master` — the Judge merges the branch
+  when the task reaches `Done`.
 - Don't re-plan: if the plan is wrong, let the review loop catch it, or block
   if it is truly unexecutable.

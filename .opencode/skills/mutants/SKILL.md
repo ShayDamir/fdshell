@@ -45,12 +45,12 @@ Repeat until `missed.txt` contains only unkillable (equivalent) mutants:
    and confirm the file no longer appears in `mutants.out/missed.txt`.
 
 4. **Finish the file.** When the file is fully caught:
-   - `git add -N` new files (so nix builds see them) and `git add` the changed
-     files (source + tests + LESSONS.md)
-   - Run the **reviewer** subagent's QA checklist (`.opencode/agent/reviewer.md`
-     §5) over the changed files and fix what it flags
-   - Do **not** commit — the Judge commits this work when the task reaches
-     `Done` (AGENTS.md).
+    - `git add` new and changed files (source + tests + LESSONS.md) on the
+      task branch `taskN` (so nix builds see them)
+    - Run the **reviewer** subagent's QA checklist (`.opencode/agent/reviewer.md`
+      §5) over the changed files and fix what it flags
+    - Commit the work on `taskN` (AGENTS.md: per-task branches) — the Judge
+      merges the branch when the task reaches `Done`.
 
 5. **Re-run** the mutation check for the next iteration:
    `cargo mutants -j4 --test-tool nextest --iterate`
@@ -60,5 +60,6 @@ Repeat until `missed.txt` contains only unkillable (equivalent) mutants:
 
 Stop the loop when every remaining entry in `mutants.out/missed.txt` is an
 equivalent mutant — document each in `LESSONS.md` with why it is unkillable,
-`git add` those docs and the changed sources (the Judge commits via the
-workflow when the task reaches `Done`), and report the final residual list.
+`git add` and commit those docs and the changed sources on the task branch
+`taskN` (the Judge merges the branch via the workflow when the task reaches
+`Done`), and report the final residual list.

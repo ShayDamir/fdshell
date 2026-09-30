@@ -20,9 +20,10 @@ Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_un
 Environment quirks:
 
 - New untracked files are **silently excluded from nix builds** (`src =
-  lib.cleanSource ./.` reads the git tree). After creating files, run
-  `git add -N <files>` so `nix build` / `nix flake check` / `nix build
-  .#coverage` include them.
+  lib.cleanSource ./.` reads the git tree of the current branch). `git add`
+  new files as soon as they are created so `nix build` / `nix flake check` /
+  `nix build .#coverage` include them, and include them in the task branch's
+  commits.
 - `.opencode/` and `opencode.json` are opencode tool state, tracked in git,
   not part of the build.
 
@@ -64,7 +65,7 @@ reviewer,judge}.md`; this file documents only what every agent must agree on.
 | `In progress` (Investigation)       | Investigator (re-work) | `Review` (session summary attached) |
 | `In progress`                       | Executor            | `Review` (session summary attached) |
 | `Review` (no review yet)            | Reviewer            | stays `Review` (review attached)  |
-| `Review` (review attached)          | Judge               | `Done` (commit) or `In progress` (verdict) |
+| `Review` (review attached)          | Judge               | `Done` (branch rebased + ff-merged) or `In progress` (verdict) |
 | `Todo`/`Planning` blocked on unmet prereqs | (skip until prereqs advance) | — |
 | `Blocked` / `Backlog`               | nobody — waiting on user / unscheduled | — |
 | `Done` / `Archived`                 | nobody — finished    | —                                   |
@@ -155,13 +156,29 @@ is actionable the Orchestrator reports blocked tasks so the user can answer.
 Once the user moves the task out of `Blocked`, it re-enters the pipeline at
 its resume state.
 
-### Commits
+### Branches and commits
 
-Only the **Judge** commits, and only when moving a task to `Done`: stage and
-commit exactly that task's files with a concise conventional message (match
-recent `git log` style). **Exception:** Investigation tasks reach `Done`
-**without a commit** — they produce no code, only epics and documents inside
-yask.
+Every code task is done on its own branch **`taskN`** (N = the task
+number), created from `master` — never from the current HEAD. Only the
+**Executor** creates task branches. Rules for every subagent that touches
+the repository:
+
+- **Never assume the current branch.** Derive it from the task number at
+  startup: `taskN` missing → create it from `master` (Executor only);
+  `taskN` exists → `git switch taskN` immediately.
+- **The working tree is clean at every handoff.** Uncommitted work is a
+  flow violation — flag it and block.
+- The **Executor** commits the work on `taskN`: one or several commits,
+  concise conventional messages (match recent `git log` style), only this
+  task's files.
+- The **Judge never creates commits.** When moving a task to `Done` it
+  rebases `taskN` onto `master` (a conflict is a verdict: abort the rebase,
+  send the task back), then ff-merges it into `master`
+  (`git merge --ff-only`) and deletes the branch. `master` advances only
+  through this ff-merge.
+- **Exception:** Investigation tasks reach `Done` **without a commit** —
+  they produce no code, only epics and documents inside yask; no task
+  branch is expected for them.
 
 ### When a new task arises during implementation
 
