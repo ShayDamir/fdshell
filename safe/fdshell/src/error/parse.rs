@@ -114,6 +114,8 @@ pub(crate) enum ParseError {
     WaitUnexpectedToken,
     /// here-doc: missing terminating delimiter line '{delim}'
     UnterminatedHeredoc { delim: sys::ShortCStr },
+    /// arithmetic command must be `((expr))` with no trailing words
+    MalformedArithCommand,
 }
 
 impl core::error::Error for ParseError {}

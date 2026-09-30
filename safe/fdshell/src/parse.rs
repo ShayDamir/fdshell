@@ -1,3 +1,4 @@
+mod arith_cmd;
 mod array_ref;
 mod backtick;
 use alloc::vec::Vec;
@@ -59,6 +60,9 @@ pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>>
 
 fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;
+    if let Some(parsed) = arith_cmd::detect(text, line)? {
+        return Ok(parsed);
+    }
     let raw = token::tokenize_statement(line)?;
 
     if let Some(pl) = detect::detect(&raw)? {

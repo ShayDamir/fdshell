@@ -1,11 +1,12 @@
 /// Lexer state tracked while scanning a script line.
 ///
 /// Tracks double-quote toggling, backtick spans, and `$( )` command
-/// substitution nesting.
+/// substitution and `(( ))` arithmetic-command nesting.
 pub(crate) struct ScanState {
     pub(crate) in_quote: bool,
     pub(crate) in_backtick: bool,
-    pub(crate) dollar_paren_depth: u32,
+    /// Inside `$( … )` or an arithmetic command `(( … ))`.
+    pub(crate) paren_depth: u32,
     /// A word char was just consumed, so a following `#` is data, not a comment.
     pub(crate) word_active: bool,
 }
@@ -16,7 +17,7 @@ impl ScanState {
         Self {
             in_quote: false,
             in_backtick: false,
-            dollar_paren_depth: 0,
+            paren_depth: 0,
             word_active: false,
         }
     }
@@ -45,7 +46,7 @@ pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
     let is_sep = i == line.len()
         || (!state.in_quote
             && !state.in_backtick
-            && state.dollar_paren_depth == 0
+            && state.paren_depth == 0
             && matches!(line.get(i), Some(&b';') | Some(&b'\n')));
     if is_sep {
         return Boundary::Separator;

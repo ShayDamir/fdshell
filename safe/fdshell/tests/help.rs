@@ -18,6 +18,7 @@ const SHELL_COMMANDS: &[&str] = &[
     "export",
     "export_fd",
     "hash",
+    "let",
     "read",
     "recvmsg",
     "send_fd",

@@ -57,7 +57,7 @@ fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<(&[u8], bo
     let mut seen_word = false;
     let mut i = from;
     while i < to {
-        let bare = !state.in_quote && !state.in_backtick && state.dollar_paren_depth == 0;
+        let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
         if bare
             && seen_word
             && word_start(line, i, &state)

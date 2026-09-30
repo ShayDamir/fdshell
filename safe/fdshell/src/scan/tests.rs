@@ -7,7 +7,7 @@ fn advance_dollar_paren_advances_two() {
     let mut s = ScanState::new();
     let next = s.advance(b"$(x", 0);
     assert_eq!(next, 2, "$ ( must be consumed together");
-    assert_eq!(s.dollar_paren_depth, 1);
+    assert_eq!(s.paren_depth, 1);
 }
 
 // `$var` (no paren) advances one position and does not raise depth.
@@ -16,7 +16,26 @@ fn advance_dollar_var_advances_one() {
     let mut s = ScanState::new();
     let next = s.advance(b"$x", 0);
     assert_eq!(next, 1);
-    assert_eq!(s.dollar_paren_depth, 0);
+    assert_eq!(s.paren_depth, 0);
+}
+
+// A top-level `((` pair is consumed together, advancing two positions and
+// raising the paren depth (the `((…))` arithmetic-command opener).
+#[test]
+fn advance_double_paren_advances_two() {
+    let mut s = ScanState::new();
+    let next = s.advance(b"((x", 0);
+    assert_eq!(next, 2, "( ( must be consumed together");
+    assert_eq!(s.paren_depth, 1);
+}
+
+// A single top-level `(` does not raise the paren depth (ordinary paren).
+#[test]
+fn advance_single_paren_does_not_raise_depth() {
+    let mut s = ScanState::new();
+    let next = s.advance(b"(x", 0);
+    assert_eq!(next, 1);
+    assert_eq!(s.paren_depth, 0);
 }
 
 // A double quote toggles `in_quote` on and off.
@@ -100,7 +119,7 @@ fn boundary_semicolon_is_separator() {
 #[test]
 fn boundary_semicolon_in_dollar_paren_is_char() {
     let s = ScanState {
-        dollar_paren_depth: 1,
+        paren_depth: 1,
         ..ScanState::new()
     };
     assert_eq!(boundary(b";", 0, &s), Boundary::Char);

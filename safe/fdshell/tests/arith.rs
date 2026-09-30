@@ -124,3 +124,209 @@ fn arith_malformed_expression_fails_command() {
     );
     assert!(!output.status.success());
 }
+
+// --- `((expr))` arithmetic command (keyword) ---
+
+/// `((expr))` is a shell keyword: it evaluates `expr` in-process and sets the
+/// exit status to `expr == 0` (0 when the value is non-zero, 1 when it is 0).
+#[test]
+fn arith_command_sets_exit_status() {
+    let ok = run("((1+2)); echo $?");
+    assert!(
+        ok.status.success(),
+        "stderr={}",
+        str::from_utf8(&ok.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&ok.stdout).unwrap().trim(), "0");
+
+    let zero = run("((0)); echo $?");
+    assert_eq!(str::from_utf8(&zero.stdout).unwrap().trim(), "1");
+}
+
+/// `((…))` participates in `&&` / `||` cond lists.
+#[test]
+fn arith_command_in_cond_list() {
+    let big = run("x=5; ((x>3)) && echo big");
+    assert!(big.status.success());
+    assert_eq!(str::from_utf8(&big.stdout).unwrap().trim(), "big");
+
+    let no = run("((0)) || echo no");
+    assert_eq!(str::from_utf8(&no.stdout).unwrap().trim(), "no");
+}
+
+/// `||` / `&&` inside the expression belong to the expression, not the cond
+/// list (the cond-list splitter must not cut them).
+#[test]
+fn arith_command_inner_logical_operators() {
+    let or = run("((1||0)); echo $?");
+    assert!(
+        or.status.success(),
+        "stderr={}",
+        str::from_utf8(&or.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&or.stdout).unwrap().trim(), "0");
+
+    let and = run("((1&&1)); echo $?");
+    assert!(and.status.success());
+    assert_eq!(str::from_utf8(&and.stdout).unwrap().trim(), "0");
+}
+
+/// `|` inside the expression is a bitwise or, not a pipeline split.
+#[test]
+fn arith_command_inner_pipe_is_bitwise() {
+    let pipe = run("((3|4)); echo $?");
+    assert!(
+        pipe.status.success(),
+        "stderr={}",
+        str::from_utf8(&pipe.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&pipe.stdout).unwrap().trim(), "0");
+
+    let var = run("x=6; ((x|1)); echo $?");
+    assert!(var.status.success());
+    assert_eq!(str::from_utf8(&var.stdout).unwrap().trim(), "0");
+}
+
+/// An assignment inside the expression updates the variable (side effect).
+#[test]
+fn arith_command_assignment_side_effect() {
+    let out = run("x=2; ((x=3)); echo $x");
+    assert!(out.status.success());
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "3");
+}
+
+// --- `let` builtin ---
+
+/// `let` evaluates each argument as an arithmetic expression; the exit status
+/// comes from the last one.
+#[test]
+fn let_builtin_evaluates_and_sets_status() {
+    let val = run("let x=3+4; echo $x");
+    assert!(
+        val.status.success(),
+        "stderr={}",
+        str::from_utf8(&val.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&val.stdout).unwrap().trim(), "7");
+
+    let ok = run("let x=3+4; echo $?");
+    assert_eq!(str::from_utf8(&ok.stdout).unwrap().trim(), "0");
+
+    let zero = run("let 0; echo $?");
+    assert_eq!(str::from_utf8(&zero.stdout).unwrap().trim(), "1");
+}
+
+/// `let` takes several expressions and a quoted single-argument form.
+#[test]
+fn let_builtin_multiple_and_quoted_args() {
+    let multi = run("let i=1 j=2; echo $i$j");
+    assert!(multi.status.success());
+    assert_eq!(str::from_utf8(&multi.stdout).unwrap().trim(), "12");
+
+    let quoted = run("let \"a = 2 + 3\"; echo $a");
+    assert!(quoted.status.success());
+    assert_eq!(str::from_utf8(&quoted.stdout).unwrap().trim(), "5");
+}
+
+/// `let` with no argument is a clean "expression expected" error.
+#[test]
+fn let_builtin_no_args_is_error() {
+    let out = run("let");
+    let stderr = str::from_utf8(&out.stderr).unwrap();
+    assert!(stderr.contains("expression expected"), "stderr={stderr}");
+    assert!(!out.status.success());
+}
+
+/// A malformed expression in `((…))` or `let` is a clean syntax error.
+#[test]
+fn arith_command_malformed_expression_is_error() {
+    let cmd = run("((1+))");
+    let stderr = str::from_utf8(&cmd.stderr).unwrap();
+    assert!(
+        stderr.contains("arithmetic expression has a syntax error"),
+        "stderr={stderr}"
+    );
+    assert!(!cmd.status.success());
+
+    let let_out = run("let 1+");
+    let let_stderr = str::from_utf8(&let_out.stderr).unwrap();
+    assert!(
+        let_stderr.contains("arithmetic expression has a syntax error"),
+        "stderr={let_stderr}"
+    );
+    assert!(!let_out.status.success());
+}
+
+/// `((…))` works as a block condition (`while` / `if`); the body round-trips.
+#[test]
+fn arith_command_as_block_condition() {
+    let loop_out = run("i=0; while ((i<3)); do i=$((i+1)); done; echo $i");
+    assert!(
+        loop_out.status.success(),
+        "stderr={}",
+        str::from_utf8(&loop_out.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&loop_out.stdout).unwrap().trim(), "3");
+
+    let if_out = run("if ((1)); then echo t; fi");
+    assert!(if_out.status.success());
+    assert_eq!(str::from_utf8(&if_out.stdout).unwrap().trim(), "t");
+}
+
+/// A `#` comment after a `((…))` command is stripped before the parse.
+#[test]
+fn arith_command_with_trailing_comment() {
+    let out = run("((1)) # comment");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "");
+}
+
+/// `((x)) foo` is a clean parse error that mentions the arithmetic form.
+#[test]
+fn arith_command_trailing_words_is_parse_error() {
+    let out = run("((x)) foo");
+    let stderr = str::from_utf8(&out.stderr).unwrap();
+    assert!(stderr.contains("arithmetic command"), "stderr={stderr}");
+    assert!(!out.status.success());
+}
+
+/// `builtin let` bypasses the lookup and runs the `let` intercept.
+#[test]
+fn builtin_prefix_runs_let() {
+    let out = run("builtin let x=1; echo $x");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "1");
+}
+
+/// Depth-fix regression: `&&` / `||` inside `$(…)` / `$((…))` no longer split
+/// the statement (these failed before the paren-depth scan).
+#[test]
+fn paren_depth_keeps_substitution_intact() {
+    let or = run("x=0; y=5; echo $((x||y))");
+    assert!(
+        or.status.success(),
+        "stderr={}",
+        str::from_utf8(&or.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&or.stdout).unwrap().trim(), "1");
+
+    let cmd = run("echo $(echo a && echo b)");
+    let stdout = str::from_utf8(&cmd.stdout).unwrap();
+    assert!(
+        cmd.status.success(),
+        "stderr={}",
+        str::from_utf8(&cmd.stderr).unwrap()
+    );
+    assert!(
+        stdout.contains('a') && stdout.contains('b'),
+        "stdout={stdout}"
+    );
+}

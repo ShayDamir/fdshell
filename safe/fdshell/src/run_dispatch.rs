@@ -6,6 +6,7 @@ use hashbrown::HashMap;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ScriptText, Trace};
 
+mod arith_cmd;
 mod array_ops;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
@@ -14,6 +15,9 @@ pub(crate) fn run_simple(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    if arith_cmd::run(parsed, cell)? {
+        return Ok(None);
+    }
     if array_ops::run(parsed, text, cell)? {
         return Ok(None);
     }

@@ -15,7 +15,7 @@ pub(crate) fn scan_block(
     let mut state = ScanState {
         in_quote: *in_quote,
         in_backtick: false,
-        dollar_paren_depth: 0,
+        paren_depth: 0,
         word_active: false,
     };
     let mut run_quote = state.in_quote;

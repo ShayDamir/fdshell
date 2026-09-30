@@ -92,6 +92,8 @@ pub enum CmdError {
     },
     /// hash: bad usage (hash [-r] [name [path]])
     HashUsage,
+    /// let: expression expected
+    LetExpressionExpected,
     /// ulimit: invalid option -{flag}
     UlimitInvalidOption { flag: char },
     /// ulimit: '{value}' is not a limit value

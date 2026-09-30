@@ -168,6 +168,46 @@ Limitations / deviations from bash:
 - Backslash is an ordinary byte outside quotes (see Glob expansion), so it
   never quotes a brace.
 
+## Arithmetic
+
+fdshell evaluates C-style integer expressions in-process (no child). Three
+forms share one expression language:
+
+- `$((expr))` — an *expansion*: the word is replaced by the decimal result
+  (`echo $((2+3*4))` → `14`).
+- `((expr))` — a *keyword command*: evaluates `expr` and sets the exit status
+  to `expr == 0` (0 when the value is non-zero, 1 when it is 0), like bash.
+  `((1+2)); echo $?` → `0`; `((0)); echo $?` → `1`.
+- `let expr [expr …]` — a *builtin*: evaluates each argument as a separate
+  expression and sets the exit status from the last one. `let x=3+4; echo $x`
+  → `7`; `let i=1 j=2` sets both.
+
+The expression language:
+
+- C operator precedence and associativity: `**`, unary `!`/`~`/`-`,
+  `*`/`/`/`%`, `+`/`-`, `<<`/`>>`, comparisons, `&`, `^`, `|`, `&&`, `||`,
+  and the ternary `c?t:e`. `&&`/`||` are boolean (result 0 or 1) and
+  short-circuit, like bash.
+- Decimal, hex (`0xff`), and leading-`0` octal (`010`) integer literals.
+- A variable name (`x`) or `$name` both resolve as the variable's value,
+  re-evaluated as an expression (unset/empty is 0); `$$` is the shell pid and
+  `$!` the last background pid.
+- Assignment `x=3` and compound assignment `x+=3` (and `-=`/`*=`/`/=`/`%=`/
+  `&=`/`|=`/`^=`/`<<=`/`>>=`) update the variable and yield the new value.
+
+Limitations / deviations from bash:
+
+- No `++`/`--` increment/decrement and no comma operator.
+- An empty expression (`(( ))`, `let ""`) is a syntax error, not bash's
+  status-1 no-op.
+- `((…))` takes no redirections, captures, background form, or pipeline
+  position: `((x)) >f`, `((x)) | cat`, and `((x)) &` are clean parse errors.
+- A statement that *starts* with `((` is always the arithmetic keyword, so
+  `((x)=1` is a parse error rather than an assignment.
+- No positional parameters, command substitution, or `${…}` inside an
+  arithmetic expression.
+- `let` evaluates each argument as a separate expression (bash-compatible).
+
 ## How it works?
 
 ### Passing file descriptors from subprocess back to fdshell

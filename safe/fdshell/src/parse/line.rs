@@ -5,11 +5,14 @@ use crate::parse::if_block::IfBlock;
 use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
+use sys::ScriptText;
 use sys::ShortCStr;
 
 pub enum ParsedLine {
     Cmd(CommandLine),
     Pipeline(Pipeline),
+    /// The `((expr))` arithmetic command: the raw expression body.
+    ArithCommand(ScriptText),
     AssignFd {
         var: ShortCStr,
         value: ShortCStr,

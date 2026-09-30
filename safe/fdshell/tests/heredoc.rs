@@ -128,6 +128,37 @@ fn heredoc_body_and_is_opaque_in_cond_list() {
 }
 
 #[test]
+fn heredoc_after_semicolon_word_drives_boundary_skip() {
+    // A `;`-separated word with redirect-like bytes before the here-doc: the
+    // here-doc — not the `>`-shaped word bytes — drives the boundary skip, so
+    // the `&&` in the body stays opaque to the cond-list split.
+    let (out, _err, code) = run("echo a>/dev/null; cat <<EOF\nbody && x\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a>/dev/null\nbody && x\n");
+}
+
+#[test]
+fn heredoc_attached_operator_before_semicolon_is_not_a_delimiter() {
+    // The `;` resets the run start, so the here-doc's operator search window
+    // is only `cat <<EOF`: the attached `x<<A` before the `;` is a word, not
+    // a here-doc operator, and the body (with its `&&`) is skipped as one
+    // opaque part.
+    let (out, _err, code) = run("echo a>b x<<A; cat <<EOF\nbody && x\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a>b x<<A\nbody && x\n");
+}
+
+#[test]
+fn block_heredoc_cond_run_and_and_in_body_splits_part() {
+    // A `;`-terminated `<<` run inside a block condition must not widen the
+    // heredoc-skip window: the `&&` in the body line splits the part, so the
+    // if-parse reports the missing `fi`, not a heredoc error.
+    let (_out, err, code) = run("if cat <<X; then\nbody && x\nX\nfi");
+    assert_eq!(code, 1);
+    assert!(err.contains("missing 'fi'"));
+}
+
+#[test]
 fn heredoc_body_comment_and_substitution_text_is_literal() {
     // A quoted delimiter makes the whole body literal: `#` and `$(…)` are
     // never comments or substitutions.

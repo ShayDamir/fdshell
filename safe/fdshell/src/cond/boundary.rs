@@ -9,9 +9,8 @@ use crate::scan::{ScanState, heredoc};
 /// operator's first byte (or `line.len()`) and whether it is `||`.
 pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut run_start = i;
-    while i < line.len() {
-        let b = line.get(i).copied().unwrap_or(0);
-        if !state.in_quote {
+    while let Some(&b) = line.get(i) {
+        if !state.in_quote && state.paren_depth == 0 {
             if (b == b'&' && line.get(i + 1) == Some(&b'&'))
                 || (b == b'|' && line.get(i + 1) == Some(&b'|'))
             {

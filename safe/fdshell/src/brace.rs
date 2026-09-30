@@ -28,13 +28,13 @@ fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, b
     let mut state = ScanState {
         in_quote: *in_quote,
         in_backtick: false,
-        dollar_paren_depth: 0,
+        paren_depth: 0,
         word_active: false,
     };
     let mut depth = 1;
     let mut run_start = i;
     while let Some(&b) = line.get(i) {
-        let bare = !state.in_quote && !state.in_backtick && state.dollar_paren_depth == 0;
+        let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
         if bare && b == b'{' {
             depth += 1;
             i += 1;

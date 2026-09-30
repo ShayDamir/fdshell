@@ -57,7 +57,7 @@ pub(crate) fn first_unquoted_newline(line: &[u8]) -> Option<usize> {
     let mut state = ScanState::new();
     let mut i = 0;
     while i < line.len() {
-        let bare = !state.in_quote && !state.in_backtick && state.dollar_paren_depth == 0;
+        let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
         if bare && line.get(i) == Some(&b'\n') {
             return Some(i + 1);
         }

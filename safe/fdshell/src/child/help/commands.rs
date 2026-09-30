@@ -19,6 +19,7 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"export", b"Set or list exports"),
     (b"export_fd", b"Export fd to variable"),
     (b"hash", b"Show or cache path lookups"),
+    (b"let", b"Evaluate arithmetic expressions"),
     (b"read", b"Read a line into a variable"),
     (
         b"recvmsg",

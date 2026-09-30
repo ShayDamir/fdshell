@@ -2471,3 +2471,63 @@ fn find_preceded_by_semi_skips_to_start() {
         Some(3)
     );
 }
+
+// --- `((expr))` arithmetic command (keyword) ---
+
+/// The raw expression body of an `ArithCommand` parse, or `None`.
+fn arith_body(line: &[u8]) -> Option<Vec<u8>> {
+    let ParsedLine::ArithCommand(body) = parse(line).unwrap() else {
+        return None;
+    };
+    Some(body.as_bytes().unwrap().to_vec())
+}
+
+#[test]
+fn arith_command_detects_body() {
+    assert_eq!(arith_body(b"((1+2))"), Some(b"1+2".to_vec()));
+}
+
+#[test]
+fn arith_command_keeps_inner_spacing() {
+    assert_eq!(arith_body(b"(( 1 + 2 ))"), Some(b" 1 + 2 ".to_vec()));
+}
+
+#[test]
+fn arith_command_skips_leading_whitespace() {
+    assert_eq!(arith_body(b"  ((1+2))"), Some(b"1+2".to_vec()));
+}
+
+#[test]
+fn arith_command_trailing_words_is_malformed() {
+    assert!(parse(b"((x)) foo").is_err());
+}
+
+#[test]
+fn arith_command_unbalanced_is_malformed() {
+    assert!(parse(b"((x").is_err());
+    assert!(parse(b"((").is_err());
+    assert!(parse(b"((x)").is_err());
+}
+
+#[test]
+fn arith_command_redirect_is_malformed() {
+    assert!(parse(b"((x)) >%f").is_err());
+}
+
+#[test]
+fn arith_command_keyword_wins_over_assignment() {
+    // A statement starting with `((` is always the keyword (README), so
+    // `((x)=1` is a malformed arith command, not an assignment.
+    assert!(parse(b"((x)=1").is_err());
+}
+
+#[test]
+fn echo_double_paren_is_plain_command() {
+    // A statement that contains `((…))` but does not *start* with `((` is an
+    // ordinary command (the arith keyword only fires on a leading `((`). The
+    // tokenizer still splits the `)` bytes into separators, as for any word.
+    let ParsedLine::Cmd(cmd) = parse(b"echo ((x))").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.command, c"echo".into());
+}
