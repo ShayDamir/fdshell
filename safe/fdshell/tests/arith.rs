@@ -101,6 +101,81 @@ fn arith_expansion_in_for_list() {
     assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "3\n9");
 }
 
+// --- in-body substitution: `$(…)` and nested `$((…))` ---
+
+/// `$(…)` inside a `$((…))` body runs a child and splices its output, which is
+/// re-parsed as part of the arithmetic expression.
+#[test]
+fn arith_cmd_subst_in_body() {
+    let output = run("echo $(( $(echo 1) + 1 ))");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "2");
+}
+
+/// A nested `$((…))` inside a `$((…))` body is evaluated and spliced in place.
+#[test]
+fn arith_nested_arith_in_body() {
+    let output = run("echo $(( $((1+2)) * 3 ))");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "9");
+}
+
+/// A whole-word `$(( $(…)))` in a `for … in` list expands through the for-list
+/// path (the word arrives with both closers intact).
+#[test]
+fn arith_cmd_subst_in_for_list() {
+    let output = run("for i in $(( $(echo 1) + 1 )); do echo $i; done");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "2");
+}
+
+/// Command output as an operand: the ternary picks the taken branch.
+#[test]
+fn arith_cmd_subst_as_operand() {
+    let output = run("echo $(( $(echo 7) > 2 ? 10 : 20 ))");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "10");
+}
+
+/// Exceeding the capture limit inside an arithmetic substitution is a clean
+/// error that names both the arithmetic substitution and the limit.
+#[test]
+fn arith_cmd_subst_capture_limit_fails() {
+    let output = run("set --stdout-capture-limit 3; echo $(( $(printf abcd) + 1 ))");
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert!(stderr.contains("arithmetic"), "stderr={stderr}");
+    assert!(stderr.contains("capture limit"), "stderr={stderr}");
+    assert!(!output.status.success());
+}
+
+/// `$(…)` inside a `$((…))` also works in a double-quoted word.
+#[test]
+fn arith_cmd_subst_in_quoted_word() {
+    let output = run("echo \"$(( $(echo 1) + 1 ))\"");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "2");
+}
+
 /// Division by zero is a clean error that fails the command.
 #[test]
 fn arith_division_by_zero_fails_command() {

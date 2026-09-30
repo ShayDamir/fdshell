@@ -4,6 +4,7 @@
 mod ast;
 mod binop;
 mod eval;
+mod expand;
 mod expr;
 mod lex;
 mod lex_name;
@@ -22,8 +23,10 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 /// Evaluate the body of a `$((…))` word, replacing it with the decimal result.
+/// `$(…)` and nested `$((…))` in the body are expanded first (bash's model).
 pub(crate) fn eval(body: &[u8], cell: &ForkCell<ShellState>) -> Result<i64, Report<ResolveError>> {
-    eval_body(body, cell, 0)
+    let expanded = expand::expand_body(body, cell)?;
+    eval_body(&expanded, cell, 0)
 }
 
 /// Recursive entry: re-evaluate a variable's value as an expression; `depth`

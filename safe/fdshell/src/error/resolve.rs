@@ -19,6 +19,10 @@ pub(crate) enum ResolveError {
     ArithSyntax,
     /// division or modulo by zero in arithmetic expression
     ArithDivZero,
+    /// command substitution inside an arithmetic expression failed
+    ArithSubst,
+    /// arithmetic expression nested too deeply; reduce the nesting of $((...)) expansions
+    ArithTooDeep,
     /// variable {var} is not an integer
     ArithNotInteger { var: ShortCStr },
     /// variable {var} refers to itself (circular reference)

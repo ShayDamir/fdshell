@@ -37,9 +37,9 @@ pub(super) fn lex_dollar(
             toks.push(Tok::Name(name));
             Ok(j)
         }
-        // `$` before a digit, `(`, `)`, or any other byte is a syntax error
-        // in v1 (no positional parameters, command substitution, or `${…}`
-        // inside arithmetic).
+        // `$` before a digit, `)`, or any other byte is a syntax error in v1
+        // (no positional parameters or `${…}` inside arithmetic). `$(…)` is
+        // expanded before lexing by the `expand` pass, so it never reaches here.
         _ => bail!(ResolveError::ArithSyntax),
     }
 }

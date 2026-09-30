@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
@@ -504,6 +505,118 @@ fn arith_last_bg() {
     assert_eq!(eval(&c, "$!"), 4242);
 }
 
+// --- in-body substitution: `$(…)` and nested `$((…))` ---
+
+#[test]
+fn arith_cmd_subst_in_body() {
+    assert_eq!(eval(&cell(), "$(echo 1) + 1"), 2);
+    // The captured output is re-parsed by the arith parser, not pre-evaluated.
+    assert_eq!(eval(&cell(), "$(echo 1+1)"), 2);
+}
+
+#[test]
+fn arith_nested_arith_in_body() {
+    // Both closers of the nested `$((…))` are consumed by the expansion pass.
+    assert_eq!(eval(&cell(), "$((1+2)) * 3"), 9);
+}
+
+#[test]
+fn arith_percent_not_eaten_by_fd_var() {
+    // The expansion pass is targeted: `%` stays arithmetic modulo, never an
+    // fd-var reference (the reason it is not the generic word-substitution pass).
+    assert_eq!(eval(&cell(), "5 % $(echo 3)"), 2);
+}
+
+#[test]
+fn arith_cmd_subst_in_parens() {
+    assert_eq!(eval(&cell(), "$(echo 1) * ( $(echo 2) + 1 )"), 3);
+}
+
+#[test]
+fn arith_cmd_subst_capture_limit() {
+    let c = cell();
+    c.borrow_mut().unwrap().capture_limit = 2;
+    let err = eval_err(&c, "$(printf abc)");
+    assert!(
+        matches!(err.current_context(), ResolveError::ArithSubst),
+        "expected ArithSubst, got {err:?}"
+    );
+}
+
+#[test]
+fn arith_unclosed_subst_paren() {
+    // `$((1+2)` has one closer (the nested form needs two); `$((1+2` and
+    // `$(echo` have none at all.
+    for body in ["$((1+2)", "$((1+2", "$(echo"] {
+        let err = eval_err(&cell(), body);
+        assert!(
+            matches!(err.current_context(), ResolveError::UnclosedParen),
+            "{body:?} should be UnclosedParen, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn arith_subst_backslash_in_quotes() {
+    // A backslash inside double quotes shields the next byte in the scan;
+    // `true "a\b"` ignores its argument, so the command outputs 5.
+    assert_eq!(eval(&cell(), r#"$(true "a\b" && echo 5) + 1"#), 6);
+}
+
+#[test]
+fn arith_subst_escaped_backslash_in_quotes() {
+    // A backslash escaping a backslash inside double quotes: the scan must
+    // step fully past the escaped byte, not let it re-escape the closing
+    // quote (the `i += 1`→`i *= 1` mutant re-processes the escaped byte,
+    // leaves the quote open, and the scan runs to end-of-input).
+    assert_eq!(eval(&cell(), r#"$(true "a\\" && echo 5) + 1"#), 6);
+}
+
+#[test]
+fn arith_subst_quote_tracking() {
+    // A `)` inside double quotes in the inner `$( )` does not end the scan;
+    // `true "a)"` ignores its argument, so the command outputs 5.
+    assert_eq!(eval(&cell(), "$(true \"a)\" && echo 5) + 1"), 6);
+}
+
+#[test]
+fn arith_subst_open_paren_in_quotes() {
+    // A `(` inside double quotes in the inner `$( )` must not raise the paren
+    // depth (the `!in_quotes`→`true` guard mutant would, so the closer no
+    // longer terminates the scan); `true "a("` ignores its argument, so the
+    // command outputs 5.
+    assert_eq!(eval(&cell(), "$(true \"a(\" && echo 5) + 1"), 6);
+}
+
+#[test]
+fn arith_nested_depth_cap() {
+    let body = |levels: usize| {
+        let mut s = String::from("1");
+        for _ in 0..levels {
+            s = format!("$(({s}))");
+        }
+        s
+    };
+    // 100 nested levels resolve; 101 exceeds the shared nesting cap.
+    assert_eq!(eval(&cell(), &body(100)), 1);
+    assert!(matches!(
+        eval_err(&cell(), &body(101)).current_context(),
+        ResolveError::ArithTooDeep
+    ));
+}
+
+#[test]
+fn arith_var_value_cmd_subst_not_expanded() {
+    // A variable's value is re-evaluated unexpanded, so `$(…)` in it is a
+    // syntax error relabeled "not an integer" (not a command substitution).
+    let c = cell();
+    set_var(&c, c"x", c"$(echo 3)");
+    assert!(matches!(
+        eval_err(&c, "x").current_context(),
+        ResolveError::ArithNotInteger { .. }
+    ));
+}
+
 // --- assignment ---
 
 #[test]
@@ -582,7 +695,7 @@ fn arith_empty_body() {
 #[test]
 fn arith_trailing_garbage() {
     for body in [
-        "1+", "1 2", ")", "+", "$", "$(", "1:2", "1?", "1?2", "(1", "1))", "a=b=c d", "@", "1@2",
+        "1+", "1 2", ")", "+", "$", "1:2", "1?", "1?2", "(1", "1))", "a=b=c d", "@", "1@2",
     ] {
         let err = eval_err(&cell(), body);
         assert!(
@@ -594,8 +707,9 @@ fn arith_trailing_garbage() {
 
 #[test]
 fn arith_unsupported_dollar_forms() {
-    // v1: `$` before `(`, `)` or a non-name byte is a syntax error.
-    for body in ["$1", "$(", "$)", "$-1", "$ x"] {
+    // v1: `$` before a non-`(` byte is a syntax error. `$(` is now a
+    // substitution (an unmatched one is `UnclosedParen`, see above).
+    for body in ["$1", "$)", "$-1", "$ x", "${x}"] {
         let err = eval_err(&cell(), body);
         assert!(
             matches!(err.current_context(), ResolveError::ArithSyntax),

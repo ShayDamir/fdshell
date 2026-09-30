@@ -3,9 +3,10 @@ use sys::fork_cell::ForkCell;
 
 use crate::state::ShellState;
 
-/// Maximum nesting depth of blocks (`if`/`while`/`until`/`for`/`case`) and
-/// command substitutions. Without a cap, each level re-scans and re-parses
-/// the remaining body, making script execution O(n^2) in script size.
+/// Maximum nesting depth of blocks (`if`/`while`/`until`/`for`/`case`),
+/// command substitutions, and nested `$((…))` arithmetic. Without a cap, each
+/// level re-scans and re-parses the remaining body, making script execution
+/// O(n^2) in script size.
 pub(crate) const MAX_NESTING: u32 = 100;
 
 /// Run `f` one nesting level deeper than the current one.
