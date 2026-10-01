@@ -69,5 +69,15 @@ pub(super) fn handle_unlinkat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     builtins::unlinkat::unlinkat_exec(&cfg).map(|()| 0)
 }
 
+pub(super) fn handle_symlinkat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let cfg = builtins::symlinkat::parse::symlinkat_parse(ctx.refs)?;
+    builtins::symlinkat::symlinkat_exec(&cfg).map(|()| 0)
+}
+
+pub(super) fn handle_utimensat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
+    let cfg = builtins::utimensat::parse::utimensat_parse(ctx.refs)?;
+    builtins::utimensat::utimensat_exec(&cfg).map(|()| 0)
+}
+
 #[cfg(test)]
 mod tests;

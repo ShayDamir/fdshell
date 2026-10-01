@@ -35,6 +35,8 @@ parallel to script invocation.
 | `pipe [--flags FLAGS]` | Create an anonymous pipe via `pipe2`. Returns two fds tagged `rd` and `wr`. |
 | `renameat2 [--olddirfd N] [--newdirfd N] [--flags FLAGS] oldpath newpath` | Rename or exchange files via `renameat2`. Returns no fd. |
 | `unlinkat [--dirfd N] [--flags AT_REMOVEDIR] path` | Remove a file, or a directory with `AT_REMOVEDIR`, via `unlinkat`. Returns no fd. |
+| `symlinkat [--dirfd N] target linkpath` | Create a symbolic link via `symlinkat`. Returns no fd. |
+| `utimensat [--dirfd N] [--atime SPEC] [--mtime SPEC] [--flags AT_SYMLINK_NOFOLLOW] path` | Set a file's atime/mtime via `utimensat`. Returns no fd. |
 
 Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
 `0x`-prefixed hex values. Repeat `--flags` to combine multiple flags. `unlinkat`
@@ -43,6 +45,15 @@ accepts only `AT_REMOVEDIR` (or `0x0`).
 `unlinkat --dirfd N` pins the *parent* directory to the fd, but the kernel still
 resolves the final path component, so the builtin is not TOCTOU-free: keep the
 trailing name short and the `--dirfd` pinned when it matters.
+
+`symlinkat target linkpath` stores `target` verbatim (it is never resolved) and
+creates the link entry `linkpath`; `--dirfd N` pins the *parent* directory to the
+fd with the same TOCTOU caveat as `unlinkat`.
+
+`utimensat`'s `SPEC` is `now` (the current time), `omit` (leave that timestamp
+untouched), or a decimal epoch-seconds integer (negative = pre-1970). An omitted
+`--atime`/`--mtime` defaults to `now` (touch semantics). `--flags
+AT_SYMLINK_NOFOLLOW` acts on the link itself, not its target.
 
 `openat2 --path` opens with `O_PATH` — a handle with no read/write permission on the file
 itself; combine with `statx %fd` to inspect files the user cannot open.

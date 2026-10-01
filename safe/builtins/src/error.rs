@@ -67,3 +67,14 @@ pub enum ModeParseError {
 }
 
 impl core::error::Error for ModeParseError {}
+
+/// Errors from parsing time spec values (`now`/`omit`/epoch seconds).
+#[derive(displaydoc::Display, Debug)]
+pub enum TimeParseError {
+    /// failed to parse time spec value
+    ParseFailed,
+    /// invalid UTF-8 in time spec value
+    Utf8,
+}
+
+impl core::error::Error for TimeParseError {}

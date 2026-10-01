@@ -70,11 +70,13 @@ const BUILTINS: &[&str] = &[
     "renameat2",
     "resolve",
     "statx",
+    "symlinkat",
     "test",
     "timerfd",
     "true",
     "type",
     "unlinkat",
+    "utimensat",
     "verity",
 ];
 

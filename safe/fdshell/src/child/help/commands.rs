@@ -76,11 +76,13 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"renameat2", b"Rename/move file"),
     (b"resolve", b"Resolve fd variables"),
     (b"statx", b"File metadata by path or fd"),
+    (b"symlinkat", b"Create a symbolic link"),
     (b"test", b"Test expression (also '[')"),
     (b"timerfd", b"Timer as an fd source"),
     (b"true", b"Exit with success status"),
     (b"type", b"Show how a command name resolves"),
     (b"unlinkat", b"Remove a file or directory entry"),
+    (b"utimensat", b"Set file atime/mtime"),
     (
         b"verity",
         b"fs-verity: query/check/enable a file digest on an fd",

@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-use super::{handle_eventfd, handle_fchmod, handle_timerfd, handle_unlinkat};
+use super::{
+    handle_eventfd, handle_fchmod, handle_symlinkat, handle_timerfd, handle_unlinkat,
+    handle_utimensat,
+};
 use crate::child::Ctx;
 use crate::state::ShellState;
 use alloc::format;
@@ -60,6 +63,59 @@ fn unlinkat_success_returns_zero() {
 #[test]
 fn unlinkat_no_args_is_error() {
     let result = handle_unlinkat(&Ctx::new(c"unlinkat".into(), &[], &[], &ShellState::new()));
+    assert!(result.is_err());
+}
+
+#[test]
+fn symlinkat_success_returns_zero() {
+    static LINK_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let c = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let link = std::env::temp_dir().join(format!(
+        "fdshell-symlinkat-handler-{}-{}",
+        std::process::id(),
+        c
+    ));
+    let link_c = CString::new(link.to_str().unwrap()).unwrap();
+    let refs: [&CStr; 2] = [c"target", link_c.as_c_str()];
+    let result = handle_symlinkat(&Ctx::new(
+        c"symlinkat".into(),
+        &refs,
+        &[],
+        &ShellState::new(),
+    ));
+    assert_eq!(result.unwrap(), 0);
+    assert!(
+        std::fs::symlink_metadata(&link).is_ok(),
+        "link should exist"
+    );
+    let _ = std::fs::remove_file(&link);
+}
+
+#[test]
+fn symlinkat_no_args_is_error() {
+    let result = handle_symlinkat(&Ctx::new(c"symlinkat".into(), &[], &[], &ShellState::new()));
+    assert!(result.is_err());
+}
+
+#[test]
+fn utimensat_success_returns_zero() {
+    let (local, path) = temp_file();
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let refs: [&CStr; 3] = [c"--mtime", c"1234567890", path_c.as_c_str()];
+    let result = handle_utimensat(&Ctx::new(
+        c"utimensat".into(),
+        &refs,
+        &[],
+        &ShellState::new(),
+    ));
+    assert_eq!(result.unwrap(), 0);
+    drop(local);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn utimensat_no_args_is_error() {
+    let result = handle_utimensat(&Ctx::new(c"utimensat".into(), &[], &[], &ShellState::new()));
     assert!(result.is_err());
 }
 
