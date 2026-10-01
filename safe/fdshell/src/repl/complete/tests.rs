@@ -81,6 +81,16 @@ fn trailing_pipe_is_hard_error_not_continuation() {
 }
 
 #[test]
+fn lone_amp_and_pipe_with_trailing_space_are_complete() {
+    // A lone `&` or `|` followed by whitespace is not a two-char trailing
+    // operator (no backgrounding; the pipeline parser cannot span a `|`):
+    // it is a hard parse error, not a continuation. Pins `top_level_op`'s
+    // `&`/`|` guards and the 2-char lengths.
+    assert!(is_complete(b"echo a & "));
+    assert!(is_complete(b"echo a | "));
+}
+
+#[test]
 fn trailing_semicolon_is_complete() {
     assert!(is_complete(b"echo hi;"));
 }
