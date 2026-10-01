@@ -8,6 +8,7 @@ use error_stack::Report;
 
 use crate::error::BuiltinError;
 
+use super::CREATE_FLAGS;
 use super::parse::{MemfdConfig, memfd_parse};
 
 /// Hold the [`CString`]s alive while parsing, since the returned config borrows
@@ -184,4 +185,15 @@ fn rejects_positional_arg() {
     with_refs(&["foo"], |refs| {
         assert!(is_invalid(memfd_parse(refs), "arg"));
     });
+}
+
+/// The creation flags must yield a `CLOEXEC`, sealable memfd: without
+/// `MFD_CLOEXEC` the `LocalFd` invariant breaks and without
+/// `MFD_ALLOW_SEALING` every `--seal` fails with EPERM. Dropping, clearing or
+/// mis-summing either flag fails here (EINVAL / `verify` / `set_seals`).
+#[test]
+fn create_flags_yield_a_cloexec_sealable_memfd() {
+    let fd = sys::memfd::memfd_create_with_name_and_flags(Some(c"t"), CREATE_FLAGS).unwrap();
+    fd.verify().unwrap();
+    fd.set_seals(sys::memfd::F_SEAL_SHRINK as u32).unwrap();
 }

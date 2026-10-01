@@ -1,8 +1,8 @@
 //! `memfd` builtin: create a sealed in-memory file and export it by fd.
 //!
 //! `memfd [--name NAME] [--size BYTES] [--seal FLAG]…` creates an anonymous
-//! memfd with `MFD_CLOEXEC | MFD_ALLOW_SEALING` set, optionally grows it with
-//! `ftruncate` to `--size`, optionally seals it with one or more `--seal`
+//! memfd with `MFD_CLOEXEC` and `MFD_ALLOW_SEALING` set, optionally grows it
+//! with `ftruncate` to `--size`, optionally seals it with one or more `--seal`
 //! `F_SEAL_*` masks, and sends the handle to the parent shell via the capture
 //! socket tagged `memfd`. The parent binds it to a `%>memfd` or `%>%var` fd
 //! variable, giving a temp-file-less, path-less backing store.
@@ -11,19 +11,25 @@ pub mod parse;
 
 use error_stack::{Report, ResultExt};
 use sys::LocalFd;
+use sys::memfd::{MFD_ALLOW_SEALING, MFD_CLOEXEC};
 
 use crate::error::BuiltinError;
+
+/// `memfd_create(2)` flags for every memfd this builtin makes: `CLOEXEC` so
+/// the handle cannot leak across an `exec` (it is a `LocalFd`), and
+/// `ALLOW_SEALING` so the `--seal` arm below has anything to seal. The two
+/// `MFD_*` flags are disjoint single bits, so summing equals OR — `|` would
+/// leave an unkillable `|`→`^` mutant (LESSONS: "`|` on disjoint bit flags
+/// produces equivalent mutants"), `+` does not.
+const CREATE_FLAGS: u32 = MFD_CLOEXEC + MFD_ALLOW_SEALING;
 
 /// Create the memfd, size and seal it, and export it to the parent shell.
 pub fn memfd_exec(
     cfg: &parse::MemfdConfig<'_>,
     sock: &LocalFd,
 ) -> Result<(), Report<BuiltinError>> {
-    let fd = sys::memfd::memfd_create_with_name_and_flags(
-        cfg.name,
-        sys::memfd::MFD_CLOEXEC | sys::memfd::MFD_ALLOW_SEALING,
-    )
-    .change_context(BuiltinError::Syscall)?;
+    let fd = sys::memfd::memfd_create_with_name_and_flags(cfg.name, CREATE_FLAGS)
+        .change_context(BuiltinError::Syscall)?;
     if let Some(size) = cfg.size {
         // Grow before sealing: a grown file can still be sealed, but a sealed
         // file cannot grow, so the order matters.
