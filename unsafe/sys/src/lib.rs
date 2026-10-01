@@ -66,6 +66,7 @@ pub mod execveat;
 mod exit;
 pub mod exportedfd;
 pub mod fcntl;
+pub mod ficlone;
 pub mod fileat;
 pub mod fileops;
 pub mod fork_cell;
