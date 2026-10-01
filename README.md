@@ -67,6 +67,40 @@ builtin openat2 --flags O_RDONLY file %>%ref
 builtin openat2 --same-as %ref --flags O_RDONLY file %>%f   # fails if file changed
 ```
 
+## Strict mode
+
+The `strict` shell option (off by default) turns fdshell into a capability
+shell in the Capsicum spirit: the `*at` file builtins ban the two forms of
+*absolute path resolution* and require every operation to be relative to an
+**explicit `--dirfd`**.
+
+Enable it with `shopt -s strict` (or `set -o strict`); disable it with
+`shopt -u strict` (or `set +o strict`):
+
+```shell
+shopt -s strict
+builtin mkdirat --dirfd %CWD --mode 0755 sub %>%sub
+builtin openat2 --dirfd %sub --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 f %>%f
+shopt -u strict
+```
+
+While `strict` is on, each of these `*at` builtins — `openat2`, `mkdirat`,
+`mkfifoat`, `renameat2`, `unlinkat`, `symlinkat`, `utimensat` — rejects:
+
+- an **omitted `--dirfd`** (or `--dirfd AT_FDCWD`), which would resolve
+  against the process CWD, and
+- an **absolute path** (leading `/`), which the kernel resolves from the
+  filesystem root regardless of `--dirfd`.
+
+`renameat2` pins *both* dirfds and constrains *both* paths. For `symlinkat`,
+only the link *location* `linkpath` is constrained; the link *content*
+`target` is stored verbatim and never resolved, so an absolute `target` is
+still allowed.
+
+Strict mode covers the dirfd-based builtins only. Redirect targets
+(`> file`), external command paths, and `~`/`$HOME` expansion are not
+dirfd-relative in this version and are tracked as follow-up work.
+
 ## Heredocs
 
 A here-doc feeds a command's stdin from the script body: the lines after the

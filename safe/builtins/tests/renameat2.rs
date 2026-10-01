@@ -14,7 +14,7 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(
         args,
-        |a| match builtins::renameat2::parse::renameat2_parse(a) {
+        |a| match builtins::renameat2::parse::renameat2_parse(a, false) {
             Err(e) => {
                 let ctx = e.current_context();
                 match (ctx, expected) {
@@ -35,7 +35,7 @@ fn assert_invalid_arg(args: &[&str]) {
 fn assert_ok<F: FnOnce(&builtins::renameat2::parse::Renameat2Config)>(args: &[&str], f: F) {
     with_args(
         args,
-        |a| match builtins::renameat2::parse::renameat2_parse(a) {
+        |a| match builtins::renameat2::parse::renameat2_parse(a, false) {
             Ok(cfg) => f(&cfg),
             Err(e) => panic!("expected Ok, got Err({e})"),
         },
@@ -212,7 +212,7 @@ fn test_renameat2_exec() {
     let old_cs = CString::new(old_path.to_str().unwrap()).unwrap();
     let new_cs = CString::new(new_path.to_str().unwrap()).unwrap();
     let args = [old_cs.as_c_str(), new_cs.as_c_str()];
-    let cfg = builtins::renameat2::parse::renameat2_parse(&args).unwrap();
+    let cfg = builtins::renameat2::parse::renameat2_parse(&args, false).unwrap();
     builtins::renameat2::renameat2_exec(&cfg).unwrap();
 
     assert!(!old_path.exists(), "old path should not exist after rename");
@@ -220,4 +220,82 @@ fn test_renameat2_exec() {
     assert_eq!(std::fs::read_to_string(&new_path).unwrap(), "hello");
 
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// --- strict (capability) mode ------------------------------------------------
+
+/// Runs `f` with a live numeric fd (a pipe end) usable as an explicit dirfd;
+/// the pipe is held open for the duration of `f`.
+fn with_dirfd<R, F: FnOnce(&str) -> R>(f: F) -> R {
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    rd.verify().unwrap();
+    let s = rd.export().unwrap().as_raw().to_string();
+    f(&s)
+}
+
+/// Parses `args` in strict mode and hands the error context to `f`; panics if
+/// the parse succeeds.
+fn strict_rename_parse(args: &[&str], f: impl FnOnce(&BuiltinError)) {
+    let owned: Vec<CString> = args.iter().map(|s| CString::new(*s).unwrap()).collect();
+    let refs: Vec<&CStr> = owned.iter().map(|cs| cs.as_c_str()).collect();
+    match builtins::renameat2::parse::renameat2_parse(&refs, true) {
+        Err(e) => f(e.current_context()),
+        _ => panic!("expected Err"),
+    }
+}
+
+#[test]
+fn strict_bans_missing_olddirfd() {
+    // `--newdirfd=AT_FDCWD` is `None`; the omitted `--olddirfd` is banned first.
+    strict_rename_parse(&["--newdirfd=AT_FDCWD", "old", "new"], |e| {
+        assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+    });
+}
+
+#[test]
+fn strict_bans_missing_newdirfd() {
+    with_dirfd(|d| {
+        strict_rename_parse(&["--olddirfd", d, "old", "new"], |e| {
+            assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+        });
+    });
+}
+
+#[test]
+fn strict_bans_absolute_oldpath() {
+    with_dirfd(|d| {
+        strict_rename_parse(&["--olddirfd", d, "--newdirfd", d, "/absold", "new"], |e| {
+            assert!(matches!(e, BuiltinError::StrictAbsolutePath));
+        });
+    });
+}
+
+#[test]
+fn strict_bans_absolute_newpath() {
+    with_dirfd(|d| {
+        strict_rename_parse(&["--olddirfd", d, "--newdirfd", d, "old", "/absnew"], |e| {
+            assert!(matches!(e, BuiltinError::StrictAbsolutePath));
+        });
+    });
+}
+
+#[test]
+fn strict_allows_both_dirfd_relative() {
+    with_dirfd(|d| {
+        with_args(&["--olddirfd", d, "--newdirfd", d, "old", "new"], |a| {
+            let cfg = builtins::renameat2::parse::renameat2_parse(a, true).unwrap();
+            assert!(cfg.olddirfd.is_some());
+            assert!(cfg.newdirfd.is_some());
+        });
+    });
+}
+
+#[test]
+fn non_strict_allows_no_dirfd_absolute() {
+    with_args(&["/absold", "/absnew"], |a| {
+        let cfg = builtins::renameat2::parse::renameat2_parse(a, false).unwrap();
+        assert!(cfg.olddirfd.is_none());
+        assert!(cfg.newdirfd.is_none());
+        assert_eq!(cfg.oldpath.to_bytes(), b"/absold");
+    });
 }

@@ -16,7 +16,10 @@ pub struct Openat2Config<'a> {
 }
 
 /// Parses openat2 CLI arguments into an [`Openat2Config`].
-pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<BuiltinError>> {
+pub fn openat2_parse<'a>(
+    args: &[&'a CStr],
+    strict: bool,
+) -> Result<Openat2Config<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
         bail!(BuiltinError::Help);
     }
@@ -33,6 +36,9 @@ pub fn openat2_parse<'a>(args: &[&'a CStr]) -> Result<Openat2Config<'a>, Report<
     if path.to_bytes().is_empty() {
         bail!(BuiltinError::InvalidArgument("path"));
     }
+
+    crate::strict::require_dirfd(strict, acc.dirfd.as_ref())?;
+    crate::strict::require_relative(strict, path)?;
 
     Ok(Openat2Config {
         dirfd: acc.dirfd,

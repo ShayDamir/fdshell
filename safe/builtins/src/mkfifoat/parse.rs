@@ -16,7 +16,10 @@ pub struct MkfifoatConfig<'a> {
 /// Returns:
 /// - `Err(BuiltinError::Help)` -- `--help` or `-h` was passed
 /// - `Err(BuiltinError::InvalidArgument(_))` -- bad flag name, missing value, etc.
-pub fn mkfifoat_parse<'a>(args: &[&'a CStr]) -> Result<MkfifoatConfig<'a>, Report<BuiltinError>> {
+pub fn mkfifoat_parse<'a>(
+    args: &[&'a CStr],
+    strict: bool,
+) -> Result<MkfifoatConfig<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
         bail!(BuiltinError::Help);
     }
@@ -68,6 +71,9 @@ pub fn mkfifoat_parse<'a>(args: &[&'a CStr]) -> Result<MkfifoatConfig<'a>, Repor
     if path.to_bytes().is_empty() {
         bail!(BuiltinError::InvalidArgument("path"));
     }
+
+    crate::strict::require_dirfd(strict, dirfd.as_ref())?;
+    crate::strict::require_relative(strict, path)?;
 
     Ok(MkfifoatConfig {
         dirfd,

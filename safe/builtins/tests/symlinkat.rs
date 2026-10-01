@@ -14,7 +14,7 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(
         args,
-        |a| match builtins::symlinkat::parse::symlinkat_parse(a) {
+        |a| match builtins::symlinkat::parse::symlinkat_parse(a, false) {
             Err(e) => {
                 let ctx = e.current_context();
                 match (ctx, expected) {
@@ -35,7 +35,7 @@ fn assert_invalid_arg(args: &[&str]) {
 fn assert_ok<F: FnOnce(&builtins::symlinkat::parse::SymlinkatConfig)>(args: &[&str], f: F) {
     with_args(
         args,
-        |a| match builtins::symlinkat::parse::symlinkat_parse(a) {
+        |a| match builtins::symlinkat::parse::symlinkat_parse(a, false) {
             Ok(cfg) => f(&cfg),
             Err(e) => panic!("expected Ok, got Err({e})"),
         },
@@ -126,7 +126,7 @@ fn dirfd_numeric() {
 fn run_exec(args: &[&str]) -> Result<(), Report<BuiltinError>> {
     let owned: Vec<CString> = args.iter().map(|s| CString::new(*s).unwrap()).collect();
     let refs: Vec<&CStr> = owned.iter().map(|cs| cs.as_c_str()).collect();
-    let cfg = builtins::symlinkat::parse::symlinkat_parse(&refs).unwrap();
+    let cfg = builtins::symlinkat::parse::symlinkat_parse(&refs, false).unwrap();
     builtins::symlinkat::symlinkat_exec(&cfg)
 }
 
@@ -242,4 +242,63 @@ fn exec_nondirectory_dirfd_is_enotdir() {
     assert_eq!(errno_of(&e), ENOTDIR);
     drop(fd);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- strict (capability) mode ------------------------------------------------
+
+fn with_dirfd<R, F: FnOnce(&str) -> R>(f: F) -> R {
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    rd.verify().unwrap();
+    let s = rd.export().unwrap().as_raw().to_string();
+    f(&s)
+}
+
+/// Parses `args` in strict mode and hands the error context to `f`; panics if
+/// the parse succeeds.
+fn strict_parse(args: &[&str], f: impl FnOnce(&BuiltinError)) {
+    with_args(
+        args,
+        |a| match builtins::symlinkat::parse::symlinkat_parse(a, true) {
+            Err(e) => f(e.current_context()),
+            _ => panic!("expected Err"),
+        },
+    );
+}
+
+#[test]
+fn strict_bans_missing_dirfd() {
+    strict_parse(&["target", "link"], |e| {
+        assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+    });
+}
+
+#[test]
+fn strict_bans_absolute_linkpath() {
+    with_dirfd(|d| {
+        strict_parse(&["--dirfd", d, "target", "/abslink"], |e| {
+            assert!(matches!(e, BuiltinError::StrictAbsolutePath));
+        });
+    });
+}
+
+#[test]
+fn strict_allows_absolute_target() {
+    // `target` is link content (never resolved), so an absolute target is
+    // allowed even in strict mode; only `linkpath` is constrained.
+    with_dirfd(|d| {
+        with_args(&["--dirfd", d, "/abstarget", "link"], |a| {
+            let cfg = builtins::symlinkat::parse::symlinkat_parse(a, true).unwrap();
+            assert!(cfg.dirfd.is_some());
+            assert_eq!(cfg.target.to_bytes(), b"/abstarget");
+            assert_eq!(cfg.linkpath.to_bytes(), b"link");
+        });
+    });
+}
+
+#[test]
+fn non_strict_allows_missing_dirfd_absolute() {
+    with_args(&["/abstarget", "/abslink"], |a| {
+        let cfg = builtins::symlinkat::parse::symlinkat_parse(a, false).unwrap();
+        assert!(cfg.dirfd.is_none());
+    });
 }

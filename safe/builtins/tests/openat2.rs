@@ -28,7 +28,7 @@ fn test_openat2_exec() {
     let shell_sock = shell_a.try_clone().unwrap();
     drop(shell_a);
 
-    let cfg = builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()]).unwrap();
+    let cfg = builtins::openat2::parse::openat2_parse(&[cpath.as_c_str()], false).unwrap();
     builtins::openat2::openat2_exec(&cfg, &shell_sock).unwrap();
 
     let mut tag = [0u8; TAG_MAX];
@@ -75,7 +75,7 @@ fn parse_same_as_numeric() {
     let (num, _fd) = numeric_fd();
     let cpath = CString::new("x").unwrap();
     let args = [c"--same-as", num.as_c_str(), cpath.as_c_str()];
-    let cfg = builtins::openat2::parse::openat2_parse(&args).unwrap();
+    let cfg = builtins::openat2::parse::openat2_parse(&args, false).unwrap();
     assert!(cfg.dirfd.is_none());
     assert_eq!(cfg.same_as.map(|f| f.as_raw()), Some(_fd.as_raw()));
 }
@@ -90,7 +90,7 @@ fn parse_same_as_rejects_non_numeric() {
     ];
     for c in cases {
         let args = [c, cpath.as_c_str()];
-        match builtins::openat2::parse::openat2_parse(&args) {
+        match builtins::openat2::parse::openat2_parse(&args, false) {
             Err(e) => assert!(
                 matches!(e.current_context(), BuiltinError::InvalidArgument(_)),
                 "unexpected error: {e}"
@@ -124,7 +124,7 @@ fn test_openat2_exec_same_as_match() {
     drop(shell_a);
 
     let args = [c"--same-as", num.as_c_str(), ca.as_c_str()];
-    let cfg = builtins::openat2::parse::openat2_parse(&args).unwrap();
+    let cfg = builtins::openat2::parse::openat2_parse(&args, false).unwrap();
     builtins::openat2::openat2_exec(&cfg, &shell_sock).unwrap();
 
     let mut tag = [0u8; TAG_MAX];
@@ -167,7 +167,7 @@ fn test_openat2_exec_same_as_mismatch_sends_nothing() {
     drop(shell_a);
 
     let args = [c"--same-as", num.as_c_str(), cb.as_c_str()];
-    let cfg = builtins::openat2::parse::openat2_parse(&args).unwrap();
+    let cfg = builtins::openat2::parse::openat2_parse(&args, false).unwrap();
     let e = builtins::openat2::openat2_exec(&cfg, &shell_sock).unwrap_err();
     assert!(
         matches!(e.current_context(), BuiltinError::SameAsMismatch),

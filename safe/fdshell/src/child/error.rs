@@ -14,7 +14,9 @@ pub(crate) fn handle_builtin_error(
         BuiltinError::InvalidArgument(_)
         | BuiltinError::MissingArgument(_)
         | BuiltinError::FdVarNotFound
-        | BuiltinError::SameAsMismatch => {
+        | BuiltinError::SameAsMismatch
+        | BuiltinError::StrictRequiresDirfd
+        | BuiltinError::StrictAbsolutePath => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }

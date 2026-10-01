@@ -17,7 +17,10 @@ pub struct UnlinkatConfig<'a> {
 /// Returns:
 /// - `Err(BuiltinError::Help)` -- `--help` or `-h` was passed
 /// - `Err(BuiltinError::InvalidArgument(_))` -- bad flag name, missing value, etc.
-pub fn unlinkat_parse<'a>(args: &[&'a CStr]) -> Result<UnlinkatConfig<'a>, Report<BuiltinError>> {
+pub fn unlinkat_parse<'a>(
+    args: &[&'a CStr],
+    strict: bool,
+) -> Result<UnlinkatConfig<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
         bail!(BuiltinError::Help);
     }
@@ -59,6 +62,9 @@ pub fn unlinkat_parse<'a>(args: &[&'a CStr]) -> Result<UnlinkatConfig<'a>, Repor
     if path.to_bytes().is_empty() {
         bail!(BuiltinError::InvalidArgument("path"));
     }
+
+    crate::strict::require_dirfd(strict, dirfd.as_ref())?;
+    crate::strict::require_relative(strict, path)?;
 
     Ok(UnlinkatConfig { dirfd, path, flags })
 }

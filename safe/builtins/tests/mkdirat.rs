@@ -12,16 +12,18 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 }
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
-    with_args(args, |a| match builtins::mkdirat::parse::mkdirat_parse(a) {
-        Err(e) => {
-            let ctx = e.current_context();
-            match (ctx, expected) {
-                (BuiltinError::Help, BuiltinError::Help) => {}
-                (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
-                _ => panic!("unexpected error: {ctx}"),
+    with_args(args, |a| {
+        match builtins::mkdirat::parse::mkdirat_parse(a, false) {
+            Err(e) => {
+                let ctx = e.current_context();
+                match (ctx, expected) {
+                    (BuiltinError::Help, BuiltinError::Help) => {}
+                    (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                    _ => panic!("unexpected error: {ctx}"),
+                }
             }
+            _ => panic!("expected Err"),
         }
-        _ => panic!("expected Err"),
     });
 }
 
@@ -30,9 +32,11 @@ fn assert_invalid_arg(args: &[&str]) {
 }
 
 fn assert_ok<F: FnOnce(&builtins::mkdirat::parse::MkdiratConfig)>(args: &[&str], f: F) {
-    with_args(args, |a| match builtins::mkdirat::parse::mkdirat_parse(a) {
-        Ok(cfg) => f(&cfg),
-        Err(e) => panic!("expected Ok, got Err({e})"),
+    with_args(args, |a| {
+        match builtins::mkdirat::parse::mkdirat_parse(a, false) {
+            Ok(cfg) => f(&cfg),
+            Err(e) => panic!("expected Ok, got Err({e})"),
+        }
     });
 }
 
@@ -217,7 +221,7 @@ fn test_mkdirat_exec() {
     let mode_arg = CString::from(c"--mode");
     let mode_val = CString::from(c"755");
     let args = [mode_arg.as_c_str(), mode_val.as_c_str(), cpath.as_c_str()];
-    let cfg = builtins::mkdirat::parse::mkdirat_parse(&args).unwrap();
+    let cfg = builtins::mkdirat::parse::mkdirat_parse(&args, false).unwrap();
     builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
 
     let mut buf = [0u8; TAG_MAX];
@@ -271,7 +275,7 @@ fn test_mkdirat_exec_masks_special_bits() {
     let mode_arg = CString::from(c"--mode");
     let mode_val = CString::from(c"0o1755");
     let args = [mode_arg.as_c_str(), mode_val.as_c_str(), cpath.as_c_str()];
-    let cfg = builtins::mkdirat::parse::mkdirat_parse(&args).unwrap();
+    let cfg = builtins::mkdirat::parse::mkdirat_parse(&args, false).unwrap();
     builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
 
     let mut buf = [0u8; TAG_MAX];
@@ -286,4 +290,58 @@ fn test_mkdirat_exec_masks_special_bits() {
     drop(fd);
     drop(receiver);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// --- strict (capability) mode ------------------------------------------------
+
+fn with_dirfd<R, F: FnOnce(&str) -> R>(f: F) -> R {
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    rd.verify().unwrap();
+    let s = rd.export().unwrap().as_raw().to_string();
+    f(&s)
+}
+
+/// Parses `args` in strict mode and hands the error context to `f`; panics if
+/// the parse succeeds.
+fn strict_parse(args: &[&str], f: impl FnOnce(&BuiltinError)) {
+    with_args(args, |a| {
+        match builtins::mkdirat::parse::mkdirat_parse(a, true) {
+            Err(e) => f(e.current_context()),
+            _ => panic!("expected Err"),
+        }
+    });
+}
+
+#[test]
+fn strict_bans_missing_dirfd() {
+    strict_parse(&["newdir"], |e| {
+        assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+    });
+}
+
+#[test]
+fn strict_bans_absolute_path() {
+    with_dirfd(|d| {
+        strict_parse(&["--dirfd", d, "/abs"], |e| {
+            assert!(matches!(e, BuiltinError::StrictAbsolutePath));
+        });
+    });
+}
+
+#[test]
+fn strict_allows_explicit_dirfd_relative() {
+    with_dirfd(|d| {
+        with_args(&["--dirfd", d, "newdir"], |a| {
+            let cfg = builtins::mkdirat::parse::mkdirat_parse(a, true).unwrap();
+            assert!(cfg.dirfd.is_some());
+        });
+    });
+}
+
+#[test]
+fn non_strict_allows_missing_dirfd_absolute() {
+    with_args(&["/abs"], |a| {
+        let cfg = builtins::mkdirat::parse::mkdirat_parse(a, false).unwrap();
+        assert!(cfg.dirfd.is_none());
+    });
 }

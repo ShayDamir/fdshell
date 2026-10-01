@@ -18,6 +18,7 @@ pub mod openat2;
 pub mod pipe;
 pub mod renameat2;
 pub mod resolve;
+pub mod strict;
 pub mod symlinkat;
 pub mod timerfd;
 pub mod unlinkat;

@@ -14,7 +14,7 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
     with_args(args, |a| {
-        match builtins::unlinkat::parse::unlinkat_parse(a) {
+        match builtins::unlinkat::parse::unlinkat_parse(a, false) {
             Err(e) => {
                 let ctx = e.current_context();
                 match (ctx, expected) {
@@ -34,7 +34,7 @@ fn assert_invalid_arg(args: &[&str]) {
 
 fn assert_ok<F: FnOnce(&builtins::unlinkat::parse::UnlinkatConfig)>(args: &[&str], f: F) {
     with_args(args, |a| {
-        match builtins::unlinkat::parse::unlinkat_parse(a) {
+        match builtins::unlinkat::parse::unlinkat_parse(a, false) {
             Ok(cfg) => f(&cfg),
             Err(e) => panic!("expected Ok, got Err({e})"),
         }
@@ -151,7 +151,7 @@ fn flags_unknown() {
 fn run_exec(args: &[&str]) -> Result<(), Report<BuiltinError>> {
     let owned: Vec<CString> = args.iter().map(|s| CString::new(*s).unwrap()).collect();
     let refs: Vec<&CStr> = owned.iter().map(|cs| cs.as_c_str()).collect();
-    let cfg = builtins::unlinkat::parse::unlinkat_parse(&refs).unwrap();
+    let cfg = builtins::unlinkat::parse::unlinkat_parse(&refs, false).unwrap();
     builtins::unlinkat::unlinkat_exec(&cfg)
 }
 
@@ -260,4 +260,58 @@ fn exec_resolves_against_dirfd() {
     assert!(!sub.join("g").exists(), "sub/g should be gone");
     assert!(dir.join("g").exists(), "root g must survive");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- strict (capability) mode ------------------------------------------------
+
+fn with_dirfd<R, F: FnOnce(&str) -> R>(f: F) -> R {
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    rd.verify().unwrap();
+    let s = rd.export().unwrap().as_raw().to_string();
+    f(&s)
+}
+
+/// Parses `args` in strict mode and hands the error context to `f`; panics if
+/// the parse succeeds.
+fn strict_parse(args: &[&str], f: impl FnOnce(&BuiltinError)) {
+    with_args(args, |a| {
+        match builtins::unlinkat::parse::unlinkat_parse(a, true) {
+            Err(e) => f(e.current_context()),
+            _ => panic!("expected Err"),
+        }
+    });
+}
+
+#[test]
+fn strict_bans_missing_dirfd() {
+    strict_parse(&["f"], |e| {
+        assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+    });
+}
+
+#[test]
+fn strict_bans_absolute_path() {
+    with_dirfd(|d| {
+        strict_parse(&["--dirfd", d, "/abs"], |e| {
+            assert!(matches!(e, BuiltinError::StrictAbsolutePath));
+        });
+    });
+}
+
+#[test]
+fn strict_allows_explicit_dirfd_relative() {
+    with_dirfd(|d| {
+        with_args(&["--dirfd", d, "f"], |a| {
+            let cfg = builtins::unlinkat::parse::unlinkat_parse(a, true).unwrap();
+            assert!(cfg.dirfd.is_some());
+        });
+    });
+}
+
+#[test]
+fn non_strict_allows_missing_dirfd_absolute() {
+    with_args(&["/abs"], |a| {
+        let cfg = builtins::unlinkat::parse::unlinkat_parse(a, false).unwrap();
+        assert!(cfg.dirfd.is_none());
+    });
 }

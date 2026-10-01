@@ -15,16 +15,18 @@ fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
 }
 
 fn assert_err(args: &[&str], expected: BuiltinError) {
-    with_args(args, |a| match builtins::openat2::parse::openat2_parse(a) {
-        Err(e) => {
-            let ctx = e.current_context();
-            match (ctx, expected) {
-                (BuiltinError::Help, BuiltinError::Help) => {}
-                (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
-                _ => panic!("unexpected error: {ctx}"),
+    with_args(args, |a| {
+        match builtins::openat2::parse::openat2_parse(a, false) {
+            Err(e) => {
+                let ctx = e.current_context();
+                match (ctx, expected) {
+                    (BuiltinError::Help, BuiltinError::Help) => {}
+                    (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                    _ => panic!("unexpected error: {ctx}"),
+                }
             }
+            _ => panic!("expected Err"),
         }
-        _ => panic!("expected Err"),
     });
 }
 
@@ -33,9 +35,11 @@ fn assert_invalid_arg(args: &[&str]) {
 }
 
 fn assert_ok<F: FnOnce(&builtins::openat2::parse::Openat2Config)>(args: &[&str], f: F) {
-    with_args(args, |a| match builtins::openat2::parse::openat2_parse(a) {
-        Ok(cfg) => f(&cfg),
-        Err(e) => panic!("expected Ok, got Err({e})"),
+    with_args(args, |a| {
+        match builtins::openat2::parse::openat2_parse(a, false) {
+            Ok(cfg) => f(&cfg),
+            Err(e) => panic!("expected Ok, got Err({e})"),
+        }
     });
 }
 
@@ -394,4 +398,88 @@ fn path_shorthand_repeat() {
 #[test]
 fn path_shorthand_eq_rejected() {
     assert_invalid_arg(&["--path=1", "x"]);
+}
+
+// --- strict (capability) mode matrix -----------------------------------------
+
+/// Runs `f` with a live numeric fd (a pipe end) usable as an explicit
+/// `--dirfd`; the pipe is held open for the duration of `f`.
+fn with_dirfd<R, F: FnOnce(&str) -> R>(f: F) -> R {
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    rd.verify().unwrap();
+    let s = rd.export().unwrap().as_raw().to_string();
+    f(&s)
+}
+
+/// Parses `args` (plus an optional `--dirfd`) in strict mode and hands the
+/// error context to `f`; panics if the parse succeeds.
+fn strict_parse(args: &[&str], dirfd: Option<&str>, f: impl FnOnce(&BuiltinError)) {
+    let args: Vec<&str> = dirfd
+        .map(|d| vec!["--dirfd", d])
+        .unwrap_or_default()
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
+    let owned: Vec<CString> = args.iter().map(|s| CString::new(*s).unwrap()).collect();
+    let refs: Vec<&CStr> = owned.iter().map(|cs| cs.as_c_str()).collect();
+    match builtins::openat2::parse::openat2_parse(&refs, true) {
+        Err(e) => f(e.current_context()),
+        _ => panic!("expected Err"),
+    }
+}
+
+#[test]
+fn strict_bans_missing_dirfd_relative() {
+    strict_parse(&["rel"], None, |e| {
+        assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+    });
+}
+
+#[test]
+fn strict_bans_missing_dirfd_absolute() {
+    // The dirfd ban fires before the absolute-path ban.
+    strict_parse(&["/abs"], None, |e| {
+        assert!(matches!(e, BuiltinError::StrictRequiresDirfd));
+    });
+}
+
+#[test]
+fn strict_bans_absolute_path() {
+    with_dirfd(|d| {
+        strict_parse(&["/abs"], Some(d), |e| {
+            assert!(matches!(e, BuiltinError::StrictAbsolutePath));
+        });
+    });
+}
+
+#[test]
+fn strict_allows_explicit_dirfd_relative() {
+    with_dirfd(|d| {
+        with_args(&["--dirfd", d, "rel"], |a| {
+            let cfg = builtins::openat2::parse::openat2_parse(a, true).unwrap();
+            assert!(cfg.dirfd.is_some());
+            assert_eq!(cfg.path.to_bytes(), b"rel");
+        });
+    });
+}
+
+#[test]
+fn non_strict_allows_missing_dirfd() {
+    for path in ["rel", "/abs"] {
+        with_args(&[path], |a| {
+            let cfg = builtins::openat2::parse::openat2_parse(a, false).unwrap();
+            assert!(cfg.dirfd.is_none());
+        });
+    }
+}
+
+#[test]
+fn non_strict_allows_explicit_dirfd_absolute() {
+    with_dirfd(|d| {
+        with_args(&["--dirfd", d, "/abs"], |a| {
+            let cfg = builtins::openat2::parse::openat2_parse(a, false).unwrap();
+            assert!(cfg.dirfd.is_some());
+            assert_eq!(cfg.path.to_bytes(), b"/abs");
+        });
+    });
 }

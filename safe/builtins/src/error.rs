@@ -26,6 +26,10 @@ pub enum BuiltinError {
     SameAsMismatch,
     /// no fd variable with that name is set
     FdVarNotFound,
+    /// strict mode requires an explicit `--dirfd` (the CWD / `AT_FDCWD` is not allowed)
+    StrictRequiresDirfd,
+    /// strict mode forbids absolute paths (use a path relative to `--dirfd`)
+    StrictAbsolutePath,
     /// test: malformed expression (expected a string, `OP ARG`, or `ARG OP ARG`)
     TestUsage,
     /// test: operand is not an integer

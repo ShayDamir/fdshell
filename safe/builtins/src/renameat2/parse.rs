@@ -15,7 +15,10 @@ pub struct Renameat2Config<'a> {
 }
 
 /// Parses renameat2 CLI arguments into an [`Renameat2Config`].
-pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, Report<BuiltinError>> {
+pub fn renameat2_parse<'a>(
+    args: &[&'a CStr],
+    strict: bool,
+) -> Result<Renameat2Config<'a>, Report<BuiltinError>> {
     if args.is_empty() || crate::argparse::wants_help(args) {
         bail!(BuiltinError::Help);
     }
@@ -71,6 +74,11 @@ pub fn renameat2_parse<'a>(args: &[&'a CStr]) -> Result<Renameat2Config<'a>, Rep
     if newpath.to_bytes().is_empty() {
         bail!(BuiltinError::InvalidArgument("newpath"));
     }
+
+    crate::strict::require_dirfd(strict, olddirfd.as_ref())?;
+    crate::strict::require_relative(strict, oldpath)?;
+    crate::strict::require_dirfd(strict, newdirfd.as_ref())?;
+    crate::strict::require_relative(strict, newpath)?;
 
     Ok(Renameat2Config {
         olddirfd,
