@@ -9,6 +9,9 @@ use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
 
+mod complete;
+mod line;
+
 pub(crate) use crate::cond::run_cond_list;
 pub(crate) use crate::script::run_script;
 
@@ -52,31 +55,28 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
         }
     }
     let mut buf = Vec::new();
-    'line: loop {
+    loop {
         buf.clear();
-        sys::OUT
-            .write_all(b"fdshell> ")
-            .change_context(AppError::Read)?;
-        let mut byte = [0u8; 1];
-        loop {
-            let n = sys::IN.read(&mut byte).change_context(AppError::Read)?;
-            if n == 0 {
-                if eof_continues(cell)? {
-                    continue 'line;
-                }
-                return Ok(());
-            }
-            if byte[0] == b'\n' {
+        if !line::read_line(cell, &mut buf, b"fdshell> ")? {
+            return Ok(());
+        }
+        // Buffer incomplete input (open blocks, unterminated heredocs,
+        // trailing operators, unbalanced quotes) until it forms a complete
+        // construct. On EOF with `ignoreeof` off, break and execute what we
+        // have (bash: incomplete input at EOF runs and reports the parse
+        // error); with `ignoreeof` on, `read_line` keeps the shell alive.
+        while !complete::is_complete(&buf) {
+            buf.push(b'\n');
+            if !line::read_line(cell, &mut buf, b"> ")? {
                 break;
             }
-            buf.push(byte[0]);
         }
-        let line = buf.trim_ascii();
-        if line.is_empty() {
+        let input = buf.trim_ascii();
+        if input.is_empty() {
             continue;
         }
         let text = ScriptText::new(
-            ShortCStr::from_vec(line.to_vec()).change_context(AppError::Read)?,
+            ShortCStr::from_vec(input.to_vec()).change_context(AppError::Read)?,
             Position::new(1, 1),
             Origin::Stdin,
         );
@@ -84,19 +84,6 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
             let _ = writeln!(crate::io::Stderr, "{err:?}");
         }
     }
-}
-
-/// End of input: with `ignoreeof` on, hint how to leave and keep the shell
-/// alive (bash compat); otherwise exit.
-fn eof_continues(cell: &ForkCell<ShellState>) -> Result<bool, Report<AppError>> {
-    let state = cell.borrow().change_context(AppError::Borrow)?;
-    if state.options & crate::options::IGNOREEOF == 0 {
-        return Ok(false);
-    }
-    sys::OUT
-        .write_all(b"use `exit' to leave\n")
-        .change_context(AppError::Read)?;
-    Ok(true)
 }
 
 #[cfg(test)]

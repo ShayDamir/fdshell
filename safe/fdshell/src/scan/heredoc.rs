@@ -3,6 +3,7 @@
 //! heredoc bodies and where those bodies end. A body is opaque: it is skipped
 //! whole, without folding its bytes into quote or substitution state.
 
+mod cont;
 mod lines;
 mod op;
 mod regions;
@@ -10,6 +11,7 @@ mod regions;
 use super::ScanState;
 use alloc::vec::Vec;
 
+pub(crate) use cont::unterminated;
 pub(crate) use lines::{body_spans, first_unquoted_newline};
 pub(crate) use op::{Operator, operator_delim};
 pub(crate) use regions::body_regions;

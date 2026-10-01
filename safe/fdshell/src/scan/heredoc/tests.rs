@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::lines::delimiter_word;
-use super::{body_regions, skip, skip_region};
+use super::{body_regions, skip, skip_region, unterminated};
 use alloc::vec;
 
 #[test]
@@ -248,4 +248,43 @@ fn body_regions_inside_block_body() {
 fn body_regions_multiple_commands() {
     let line = b"cat <<A\nx\nA\ncat <<B\ny\nB";
     assert_eq!(body_regions(line), vec![(8, 10), (20, 22)]);
+}
+
+// `unterminated` is the REPL's "keep reading" signal for a `<<` run.
+
+// No `<<` operator: not a heredoc, not unterminated.
+#[test]
+fn unterminated_no_operator_is_false() {
+    assert!(!unterminated(b"echo hi", 0, 7));
+}
+
+// A complete heredoc (delimiter line present): not unterminated.
+#[test]
+fn unterminated_complete_heredoc_is_false() {
+    assert!(!unterminated(b"cat <<EOF\nbody\nEOF", 0, 9));
+}
+
+// A missing delimiter line: unterminated.
+#[test]
+fn unterminated_missing_delimiter_is_true() {
+    assert!(unterminated(b"cat <<EOF\nbody", 0, 9));
+}
+
+// A bare `<<` at EOL has no delimiter word: not continuable.
+#[test]
+fn unterminated_bare_chevron_at_eol_is_false() {
+    assert!(!unterminated(b"cat <<", 0, 6));
+}
+
+// A `;`-terminated run with an operator: the parser rejects it outright, so
+// not a continuation.
+#[test]
+fn unterminated_semicolon_terminated_is_false() {
+    assert!(!unterminated(b"cat <<EOF ;", 0, 10));
+}
+
+// `<<""` (empty quoted delimiter) awaiting its blank line: unterminated.
+#[test]
+fn unterminated_empty_quoted_delimiter_is_true() {
+    assert!(unterminated(b"cat <<\"\"", 0, 8));
 }

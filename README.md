@@ -133,8 +133,9 @@ Limitations:
 - A here-doc in a block condition or cond-list position (`if cat <<EOF; then`,
   `cat <<EOF && x`) is rejected with `here-doc: missing terminating delimiter
   line`.
-- The REPL reads line-based input, so a here-doc at the prompt must be entered
-  as one block.
+- The REPL buffers incomplete input (here-docs, `if`/`while`/`for`/`case`/
+  `function` blocks, a trailing `&&`/`||`, and an unbalanced quote) under a
+  `> ` continuation prompt until the construct is complete, then executes it.
 - Here-docs inside `$( )` / backticks, an `N<<EOF` fd prefix (like `N<<<`
   today), and a `# comment` after the operator on the same line are not
   supported.
