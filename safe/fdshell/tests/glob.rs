@@ -222,3 +222,20 @@ fn unclosed_bracket_is_literal() {
     assert_eq!(out, "x[abc\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn star_lists_directory_larger_than_one_getdents_buffer() {
+    // 200 entries ≈ 6.4 KiB of records, so the glob walk needs more than one
+    // 4 KiB getdents64 pass.
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-glob-big-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..200 {
+        std::fs::write(dir.join(format!("f{i:03}")), b"x").unwrap();
+    }
+    let (out, _err, code) = run(dir.to_str().unwrap(), "echo *");
+    assert_eq!(code, 0);
+    let names: Vec<String> = (0..200).map(|i| format!("f{i:03}")).collect();
+    assert_eq!(out, format!("{}\n", names.join(" ")));
+    let _ = std::fs::remove_dir_all(&dir);
+}

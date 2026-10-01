@@ -5,13 +5,9 @@ use sys::{LocalFd, ShortCStr};
 
 /// All entry names of an open directory, one 4 KiB getdents64 pass at a time.
 pub(super) fn list(dirfd: &LocalFd) -> Vec<Vec<u8>> {
-    let mut buf = [0u8; 4096];
     let mut names = Vec::new();
-    while let Ok(n) = sys::getdents64::getdents(dirfd.as_raw(), &mut buf) {
-        if n == 0 {
-            break;
-        }
-        for entry in sys::getdents64::Iter::new(&buf, n) {
+    while let Ok(Some(batch)) = dirfd.dir_batch() {
+        for entry in batch.iter() {
             names.push(entry.name.to_vec());
         }
     }

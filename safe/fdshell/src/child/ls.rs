@@ -30,14 +30,8 @@ pub(super) fn handle_ls(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
 
 /// Walk the directory, printing one entry name per line.
 fn list(fd: &LocalFd) -> Result<i32, Report<BuiltinError>> {
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = sys::getdents64::getdents(fd.as_raw(), &mut buf)
-            .change_context(BuiltinError::Syscall)?;
-        if n == 0 {
-            break;
-        }
-        for entry in sys::getdents64::Iter::new(&buf, n) {
+    while let Some(batch) = fd.dir_batch().change_context(BuiltinError::Syscall)? {
+        for entry in batch.iter() {
             OUT.write_all(entry.name).change_context(BuiltinError::Io)?;
             OUT.write_all(b"\n").change_context(BuiltinError::Io)?;
         }
