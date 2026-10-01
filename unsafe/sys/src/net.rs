@@ -1,6 +1,8 @@
 mod accept;
+mod addr;
 mod bind;
 mod cmsg;
+mod connect;
 mod listen;
 mod recvmsg;
 mod sendmsg;
@@ -9,6 +11,7 @@ mod socket;
 pub use accept::accept;
 pub use bind::{bind_inet, bind_uds_abstract, bind_uds_path};
 pub use cmsg::MAX_FDS;
+pub use connect::{connect_inet, connect_uds_abstract, connect_uds_path};
 pub use listen::listen;
 pub use recvmsg::{Msg, recvmsg};
 pub use sendmsg::sendmsg;

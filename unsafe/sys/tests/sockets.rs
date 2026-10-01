@@ -1,10 +1,10 @@
 //! Integration tests for the socket-lifecycle wrappers
 //! (`sys::net::{socket, bind_uds_path, bind_uds_abstract, bind_inet,
-//! listen, accept}`).
+//! connect_uds_path, connect_uds_abstract, connect_inet, listen, accept}`).
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{SocketAddr, UnixStream};
@@ -148,4 +148,137 @@ fn test_accept_on_non_listening_is_einval() {
         Err(e) => e,
     };
     assert_eq!(err, sys::SyscallError::EINVAL(UNKNOWN));
+}
+
+#[test]
+fn test_connect_uds_abstract_roundtrip() {
+    let name = abs_name("connect-abs");
+    let listener = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    sys::net::bind_uds_abstract(&listener, cstr(&name)).unwrap();
+    sys::net::listen(&listener, 1).unwrap();
+
+    let client = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    sys::net::connect_uds_abstract(&client, cstr(&name)).unwrap();
+
+    let conn = sys::net::accept(&listener).unwrap();
+    conn.verify().unwrap();
+
+    // The client's `connect` used the exact addrlen the kernel stored at
+    // `bind`; a round-trip proves the two match end to end.
+    client.write_all(b"hi\n").unwrap();
+    let mut buf = [0u8; 3];
+    let mut got = 0;
+    while got < buf.len() {
+        let n = conn.read(&mut buf[got..]).unwrap();
+        assert!(n > 0, "accepted fd must stay readable");
+        got += n;
+    }
+    assert_eq!(&buf, b"hi\n");
+}
+
+#[test]
+fn test_connect_uds_path_roundtrip() {
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-sockets-connect-path-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sock_path = dir.join("sock");
+    let listener = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    sys::net::bind_uds_path(&listener, cstr(sock_path.to_str().unwrap())).unwrap();
+    sys::net::listen(&listener, 1).unwrap();
+
+    let client = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    sys::net::connect_uds_path(&client, cstr(sock_path.to_str().unwrap())).unwrap();
+    let conn = sys::net::accept(&listener).unwrap();
+    conn.verify().unwrap();
+    client.write_all(b"ok\n").unwrap();
+    let mut buf = [0u8; 3];
+    let mut got = 0;
+    while got < buf.len() {
+        let n = conn.read(&mut buf[got..]).unwrap();
+        assert!(n > 0, "accepted fd must stay readable");
+        got += n;
+    }
+    assert_eq!(&buf, b"ok\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `connect` never creates a socket file: a path nobody bound is `ENOENT`.
+#[test]
+fn test_connect_uds_path_to_unbound_path_is_enoent() {
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-sockets-connect-missing-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("never-bound");
+    let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    let err = sys::net::connect_uds_path(&fd, cstr(missing.to_str().unwrap())).unwrap_err();
+    assert_eq!(err, sys::SyscallError::ENOENT(UNKNOWN));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_connect_uds_abstract_max_length() {
+    // 107 bytes fit `sun_path` with the leading NUL: the wrapper lets it
+    // through to the kernel (nothing is bound, so `ECONNREFUSED` — not the
+    // wrapper's `EINVAL`). 108 bytes are rejected by the wrapper itself, so
+    // the error carries the `call` argument, "connect".
+    let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    let ok = "a".repeat(107);
+    let err = sys::net::connect_uds_abstract(&fd, cstr(&ok)).unwrap_err();
+    assert_eq!(
+        err,
+        sys::SyscallError::Other {
+            errno: libc::ECONNREFUSED,
+            syscall: UNKNOWN
+        }
+    );
+    let long = "b".repeat(108);
+    let err = sys::net::connect_uds_abstract(&fd, cstr(&long)).unwrap_err();
+    assert_eq!(err, sys::SyscallError::EINVAL("connect"));
+}
+
+#[test]
+fn test_connect_inet_loopback() {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let client = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
+    sys::net::connect_inet(&client, cstr("127.0.0.1"), port).unwrap();
+
+    let (mut conn, _) = listener.accept().unwrap();
+    client.write_all(b"hi\n").unwrap();
+    let mut buf = [0u8; 3];
+    let mut got = 0;
+    while got < buf.len() {
+        let n = conn.read(&mut buf[got..]).unwrap();
+        assert!(n > 0, "accepted fd must stay readable");
+        got += n;
+    }
+    assert_eq!(&buf, b"hi\n");
+}
+
+#[test]
+fn test_connect_inet_non_numeric_is_einval() {
+    let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
+    let err = sys::net::connect_inet(&fd, cstr("not-an-ip"), 8080).unwrap_err();
+    assert_eq!(err, sys::SyscallError::EINVAL("inet_pton"));
+}
+
+#[test]
+fn test_connect_refused_when_nothing_bound() {
+    let name = abs_name("refused");
+    let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    let err = sys::net::connect_uds_abstract(&fd, cstr(&name)).unwrap_err();
+    assert_eq!(
+        err,
+        sys::SyscallError::Other {
+            errno: libc::ECONNREFUSED,
+            syscall: UNKNOWN
+        }
+    );
 }
