@@ -1,5 +1,6 @@
 mod accept;
 mod bind;
+mod connect;
 mod copy_file_range;
 mod delegated;
 pub(crate) mod dispatch;

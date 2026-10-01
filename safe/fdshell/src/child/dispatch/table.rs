@@ -8,6 +8,7 @@ use crate::child::Ctx;
 
 use crate::child::accept;
 use crate::child::bind;
+use crate::child::connect;
 use crate::child::copy_file_range;
 use crate::child::delegated;
 use crate::child::exec_fd;
@@ -66,4 +67,5 @@ pub(crate) const DISPATCH: &[(&[u8], Handler)] = &[
     (b"bind", bind::handle_bind),
     (b"listen", listen::handle_listen),
     (b"accept", accept::handle_accept),
+    (b"connect", connect::handle_connect),
 ];

@@ -344,15 +344,17 @@ echo "wait exited $?"
 Wrap it in a loop (`while true; do wait … done`) to re-poll each round. Arms run in
 separate children, so a slow arm (a blocking read) cannot stall the others or the parent.
 
-### Socket lifecycle (`bind` / `listen` / `accept`)
+### Socket lifecycle (`bind` / `listen` / `accept` / `connect`)
 
-`bind`, `listen`, and `accept` give a script the server side of an AF_UNIX or
-AF_INET v4 socket; each result is captured as an fd variable:
+`bind`, `listen`, `accept`, and `connect` give a script the server **and**
+client side of an AF_UNIX or AF_INET v4 socket; each result is captured as
+an fd variable:
 
 ```shell
 builtin bind [--type stream|dgram] ADDRESS
 builtin listen [--type stream|dgram] [--backlog N] ADDRESS
 builtin accept %fd
+builtin connect [--type stream|dgram] ADDRESS
 ```
 
 * `ADDRESS` is the positional: `@name` is the **abstract namespace** (no
@@ -367,6 +369,16 @@ builtin accept %fd
 * `accept` blocks until a connection arrives; kernel failures (e.g. `listen`
   on a dgram socket) surface as their errno exit code. Without a capture,
   `accept` accepts and closes immediately (the `pipe` precedent).
+* `connect` is the client side: it creates the socket (default `stream`) and
+  connects it to the ADDRESS — for `connect` the `--bind ADDR --port N` pair
+  names the **peer** endpoint, not a local bind. It returns as soon as the
+  peer is queued in the listener's backlog (no `accept` needed on the
+  other end — a single script can be both client and server), it never
+  creates a filesystem object, and kernel failures surface as their errno
+  (e.g. `ECONNREFUSED` 111 for an unbound address). For a remote peer
+  `connect` blocks until the handshake completes, so background it
+  (`builtin connect … %>%c &>&x; waitpid &x`) when the script has other
+  work.
 
 Non-blocking forms are the standard ones: backgrounding
 (`builtin accept %l %>%c &>&x; waitpid &x`) or a `wait` arm — the arm child's
@@ -397,7 +409,8 @@ recvmsg [--cred VAR] %sock VAR [%fdvar ...]
 
 * `%sock` is a connected socket: an fd variable (`%sock`), or a raw fd number (as in
   `read -u`). Sockets must be **pre-connected** — `sendmsg`/`recvmsg` do not create or
-  accept them; `bind`, `listen`, and `accept` cover the socket lifecycle (above).
+  accept them; `bind`, `listen`, `accept`, and `connect` cover the socket lifecycle
+  (above).
 * `--msg TEXT` sends the inline payload; `--msgfd %var COUNT` sends the first `COUNT`
   bytes read from an fd variable. Omitting both sends an empty payload (a no-op
   send, useful for readiness signaling).

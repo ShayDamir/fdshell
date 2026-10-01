@@ -46,6 +46,7 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"[", b"Test expression (alias for test)"),
     (b"accept", b"Accept a connection on a listening fd var"),
     (b"bind", b"Create a socket and bind it to an address"),
+    (b"connect", b"Create a socket and connect it to a peer"),
     (b"copy_file_range", b"Zero-copy copy between two fd vars"),
     (b"echo", b"Print arguments"),
     (b"eventfd", b"Counter fd that arms on non-zero"),

@@ -1,10 +1,13 @@
-//! E2E: the socket-lifecycle builtins `bind`, `listen`, `accept`.
+//! E2E: the socket-lifecycle builtins `bind`, `listen`, `accept`,
+//! `connect`.
 //!
-//! The test side plays the network peer (abstract or AF_INET), the shell
-//! side plays the server. Abstract names are system-wide, so every address
+//! For `bind`/`listen`/`accept` the test side plays the network peer
+//! (abstract or AF_INET), the shell side plays the server; for `connect`
+//! the script is the client (sometimes of its own server, which is the
+//! point of the builtin). Abstract names are system-wide, so every address
 //! is unique per test run.
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::linux::net::SocketAddrExt;
@@ -443,4 +446,163 @@ fn wait_arm_accept_one_shot() {
     assert!(stdout.contains("got:hi"), "stdout={stdout:?}");
     assert!(!stdout.contains("TIMEOUT"), "stdout={stdout:?}");
     drop(client);
+}
+
+/// One script is both client and server: `connect` returns as soon as the
+/// peer is queued in the listener's backlog, so no backgrounding is needed.
+#[test]
+fn connect_listen_accept_in_one_script_abstract() {
+    let n = uniq("one-abs");
+    let (out, err, code) = run(&format!(
+        "builtin listen @{n} %>%l; \
+         builtin connect @{n} %>%c; \
+         builtin accept %l %>%s; \
+         printf \"hi\\n\" >%c; \
+         read -u %s L; echo \"got:$L\""
+    ));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "got:hi\n");
+}
+
+/// The AF_INET one-script variant.
+#[test]
+fn connect_listen_accept_in_one_script_inet() {
+    let port = inet_port(2);
+    let (out, err, code) = run(&format!(
+        "builtin listen --bind 127.0.0.1 --port {port} %>%l; \
+         builtin connect --bind 127.0.0.1 --port {port} %>%c; \
+         builtin accept %l %>%s; \
+         printf \"hi\\n\" >%c; \
+         read -u %s L; echo \"got:$L\""
+    ));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "got:hi\n");
+}
+
+/// Datagram form, one script: `bind --type dgram` + `connect --type dgram`.
+#[test]
+fn connect_and_bind_in_one_script_dgram() {
+    let n = uniq("one-dgram");
+    let (out, err, code) = run(&format!(
+        "builtin bind --type dgram @{n} %>%s; \
+         builtin connect --type dgram @{n} %>%c; \
+         printf \"ping\\n\" >%c; \
+         read -u %s L; echo \"got:$L\""
+    ));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "got:ping\n");
+}
+
+/// Cross-process pin of the connect-side `addrlen`: the listener lives in
+/// the test process, the *script* is the client (LESSONS: a padded connect
+/// length would fail `ECONNREFUSED` here, while a same-process connect on
+/// both sides would pass either way).
+#[test]
+fn connect_to_script_client_from_test_process() {
+    let n = uniq("xproc");
+    let listener = sys::net::socket(sys::net::AF_UNIX, sys::net::SOCK_STREAM).unwrap();
+    sys::net::bind_uds_abstract(&listener, std::ffi::CString::new(n.as_str()).unwrap()).unwrap();
+    sys::net::listen(&listener, 1).unwrap();
+    let (out, err, code) = run(&format!("builtin connect @{n} %>%c; printf \"hi\\n\" >%c"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    let conn = sys::net::accept(&listener).unwrap();
+    let mut buf = [0u8; 3];
+    let mut got = 0;
+    while got < buf.len() {
+        let n = conn.read(&mut buf[got..]).unwrap();
+        assert!(n > 0, "accepted fd must stay readable");
+        got += n;
+    }
+    assert_eq!(&buf, b"hi\n");
+}
+
+/// The UDS-path form against a non-fdshell peer: the listener is a std
+/// `UnixListener` in the test process, the script connects by path, and
+/// bytes are exchanged both ways.
+#[test]
+fn connect_uds_path_to_external_listener() {
+    let dir = tmpdir("pathpeer");
+    let path = dir.join("sock");
+    let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+    let child = spawn_server(&format!(
+        "builtin connect {} %>%c; \
+         printf \"hi\\n\" >%c; \
+         read -u %c R; echo \"got:$R\"",
+        path.display()
+    ));
+    let (mut conn, _) = listener.accept().unwrap();
+    let mut buf = [0u8; 3];
+    let mut got = 0;
+    while got < buf.len() {
+        let n = conn.read(&mut buf[got..]).unwrap();
+        assert!(n > 0, "connection must stay readable");
+        got += n;
+    }
+    assert_eq!(&buf, b"hi\n");
+    conn.write_all(b"yo\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={:?}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "got:yo\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `connect` to an unbound abstract name: `ECONNREFUSED` (111), matching
+/// how `bind` tests surface kernel errnos.
+#[test]
+fn connect_refused_exits_with_errno() {
+    let n = uniq("refused");
+    let (out, err, code) = run(&format!("builtin connect @{n} %>%c"));
+    assert_eq!(code, 111, "stderr={err:?}");
+    assert!(out.is_empty());
+}
+
+/// Usage errors are exit 1 with a one-line report on stderr.
+#[test]
+fn connect_parse_errors() {
+    let long = "a".repeat(108);
+    let cases = [
+        (
+            "builtin connect",
+            "missing argument address",
+            "Pass an @name, a path, or --bind ADDR --port N",
+        ),
+        (
+            "builtin connect --type bogus x",
+            "invalid argument type",
+            "Use stream or dgram",
+        ),
+        (
+            "builtin connect --bind 127.0.0.1",
+            "invalid argument port",
+            "Pass the port with --port N",
+        ),
+        (
+            "builtin connect sock --bind 1.2.3.4 --port 1",
+            "invalid argument address",
+            "Use the positional ADDRESS or --bind/--port, not both",
+        ),
+        (
+            &format!("builtin connect {long}"),
+            "invalid argument address",
+            "Address must be at most 107 bytes",
+        ),
+        (
+            "builtin connect --bind 127.0.0.1 --port 65536",
+            "invalid argument port",
+            "Port must be a number in 0..=65535",
+        ),
+    ];
+    for (script, msg, suggestion) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "script={script:?} stderr={err:?}");
+        assert!(out.is_empty(), "stdout={out:?}");
+        assert!(err.contains(msg), "script={script:?} stderr={err:?}");
+        assert!(err.contains(suggestion), "script={script:?} stderr={err:?}");
+    }
 }

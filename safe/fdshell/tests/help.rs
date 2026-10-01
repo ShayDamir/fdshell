@@ -40,6 +40,7 @@ const BUILTINS: &[&str] = &[
     "[",
     "accept",
     "bind",
+    "connect",
     "copy_file_range",
     "echo",
     "eventfd",
