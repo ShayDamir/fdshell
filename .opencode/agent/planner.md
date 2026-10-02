@@ -52,8 +52,14 @@ by mistake, report to the Orchestrator and stop.
    unsafe_code)`), `safe/builtins/` (lib), `unsafe/sys/` (the only crate
    allowed raw fds/syscalls).
 
-5. **Block if you cannot plan.** If the task is genuinely ambiguous, too
+5. **Block only if you cannot plan.** If the task is genuinely ambiguous, too
    large, or needs a human decision, do not guess — block (see "Blocking").
+
+   You are read-only, so the state of the working tree is **never** a reason
+   to block. Uncommitted changes left by a crashed Executor are the incoming
+   Executor's problem, not yours. If reading the live tree is awkward, plan
+   against a clean export (`git worktree add /tmp/opencode/… master`) and say
+   so in the plan.
 
 6. **Attach the plan.** Write it to `/tmp/opencode/plan-<n>.md` and attach
    with `yask_add_attachment` (`file_path`, `content_type: text/markdown`,

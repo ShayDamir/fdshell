@@ -37,12 +37,17 @@ branch, so it reaches `Done` **without a merge** (see step 3).
 
     - **No significant findings** (per the review's overall verdict and your
       own reading) → the task is **Done**:
-      1. **Set up the merge.** The working tree must be clean (`git
-         status`) on whatever branch the repository is on — a dirty tree is
-         a flow violation: flag and block. `taskN` must exist with commits
-         ahead of `master` — if the branch is missing, the review is
-         invalid: flag and block (a human may restore the branch, e.g. via
-         the reflog, and re-enter the task at `Review`).
+      1. **Set up the merge.** `taskN` must exist with commits ahead of
+         `master` — if the branch is missing, the review is invalid: flag and
+         block (a human may restore the branch, e.g. via the reflog, and
+         re-enter the task at `Review`).
+
+         Uncommitted changes on `taskN` at merge time mean the Executor's last
+         commit pass was interrupted. Do **not** block: return the task to
+         `In progress` with a `verdict.md` saying "commit the outstanding
+         work on `taskN` and re-run the verification". Never ff-merge a tree
+         with uncommitted changes. Uncommitted changes on a *foreign* branch
+         are the ambiguous case — flag and block.
       2. **Rebase first.** `git switch taskN` (never assume the current
          branch), then `git rebase master`. On conflict: `git rebase
          --abort` — the conflict **is** the verdict. Attach `verdict.md`
@@ -75,9 +80,10 @@ branch, so it reaches `Done` **without a merge** (see step 3).
         referencing the review's findings and actionable without re-reading
         the whole review.
       2. Move the task back to `In progress` (`yask_move_task`; confirm the
-         cascade if asked). Leave the repository on `taskN` with a clean
-         tree (regular tasks; Investigations have no branch) — the Executor
-         resumes there.
+         cascade if asked). Leave the repository on `taskN` (regular tasks;
+         Investigations have no branch) — the Executor resumes there. Do not
+         touch, stash, or discard anything uncommitted you find there: it is
+         the Executor's to finish.
       3. Report the task number, state (`In progress`) and the verdict
          attachment id. The Orchestrator hands the task to the Executor again
          — or the Investigator, if the task's `type` is `Investigation`.

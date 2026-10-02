@@ -40,15 +40,17 @@ access to inspect the change; you never edit inside the repository.
    Investigation review procedure below instead of steps 3–5.
 
 3. **Inspect the change.** The work lives on the task branch `taskN`, not in
-   `master`'s working tree. The working tree must be clean (`git status`) —
-   a dirty tree is a flow violation: block (see "Blocking"). `git switch
-   taskN` immediately (never assume the current branch); if `taskN` does not
-   exist, that is a flow violation too: block. Use `git log master..taskN
-   --oneline` and `git diff master...taskN` (the branch may hold several
-   commits), and read the affected files, to see exactly what changed for
-   this task and whether it matches the plan and the summary. Run the
-   verification yourself against the branch's tree, in order: `cargo fmt`;
-   `cargo clippy -- -D warnings`; `cargo nextest run --status-level fail
+   `master`'s working tree. `git switch taskN` immediately (never assume the
+   current branch); if `taskN` does not exist, block (see "Blocking") — there
+   is nothing to review. Uncommitted changes on `taskN` are also unexpected at
+   review time (the Executor commits before handing over): if you find them,
+   review the committed diff and mention the dirty tree as a finding; do not
+   block on it. Use `git log master..taskN --oneline` and `git diff
+   master...taskN` (the branch may hold several commits), and read the
+   affected files, to see exactly what changed for this task and whether it
+   matches the plan and the summary. Run the verification yourself against the
+   branch's tree, in order: `cargo fmt`; `cargo clippy -- -D warnings`;
+   `cargo nextest run --status-level fail
    --show-progress none` — **never `cargo test`** (its shared harness breaks
    `fork()`-based tests); then `nix flake check --build-all`. For
    coverage-sensitive work, `nix build .#coverage` and check

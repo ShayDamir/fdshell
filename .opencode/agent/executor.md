@@ -39,13 +39,22 @@ stop.
    unclear and you cannot resolve it from the task itself, do not improvise
    the design — block (see "Blocking").
 
-4. **Set up the task branch.** The working tree must be clean (`git
-   status`) on whatever branch the repository is on — a dirty tree is a
-   flow violation: block (see "Blocking"). Then derive the branch from the
-   task number, never from the current branch: `taskN` missing → `git
-   switch -c taskN master` (create it from `master`); `taskN` exists →
-   `git switch taskN` (re-work round: the branch already holds the previous
-   round's commits — stack your fixes on top of them).
+4. **Set up the task branch.** Derive the branch from the task number, never
+   from the current branch: `taskN` missing → `git switch -c taskN master`
+   (create it from `master`); `taskN` exists → `git switch taskN` (re-work
+   round: the branch already holds the previous round's commits — stack your
+   fixes on top of them).
+
+   **Uncommitted work is fine if it is on your own `taskN`.** It means a
+   previous session of *this same task* was interrupted (crash, timeout,
+   cancelled dispatch). Inspect it (`git status`, `git diff`) to see how far
+   it got, then continue from there and commit it as this task's work. Never
+   block on it, never discard it.
+
+   Block only when the dirt belongs to *another* task: the current branch is
+   not `taskN` and it carries uncommitted changes (usually a crashed
+   Executor's leftovers for a different task). That is a real ambiguity —
+   attach `unblock.md` and block (see "Blocking").
 
 5. **Implement.** Follow the plan; make the smallest change that satisfies
    this task only. Follow AGENTS.md's conventions and quirks (`STYLE.md` §1-7,

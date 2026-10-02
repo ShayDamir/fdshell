@@ -166,8 +166,20 @@ the repository:
 - **Never assume the current branch.** Derive it from the task number at
   startup: `taskN` missing → create it from `master` (Executor only);
   `taskN` exists → `git switch taskN` immediately.
-- **The working tree is clean at every handoff.** Uncommitted work is a
-  flow violation — flag it and block.
+- **A dirty working tree is only a problem when it is *not* yours.** Check
+  first: are you on the task's own branch (`taskN` for task #N)?
+  - **Yes → resume it.** Uncommitted work on your own task branch is a
+    previous session of *this task* that was interrupted (crash, timeout,
+    cancelled dispatch), not someone else's work. Read `git status` /
+    `git diff` to see how far it got, finish it, verify it, commit it
+    normally. **Never block on it, never discard it, never ask.**
+  - **No → block.** Work belonging to a *different* task on a foreign
+    branch is a genuine ambiguity (whose work is it? does it overlap?) —
+    attach `unblock.md` and move the task to `Blocked`.
+- **A crashed Executor must not stall the pipeline.** If a dispatch fails or
+  returns nothing, the next dispatch for the same task resumes it; the
+  resume-state rule above is the whole recovery procedure. Blocking is for
+  *missing information*, never for *interrupted work*.
 - The **Executor** commits the work on `taskN`: one or several commits,
   concise conventional messages (match recent `git log` style), only this
   task's files.

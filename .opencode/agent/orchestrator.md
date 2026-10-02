@@ -54,6 +54,14 @@ fetches everything itself. Wait for its final message (outcome, state change,
 or blocking situation). If it reports the task/project missing, re-verify
 with `yask_get_task`/`yask_get_project` and dispatch again.
 
+**If a dispatch fails, is cancelled, or returns an empty result** (a crashed
+model), do not treat it as a blocking situation and do not move the task to
+`Blocked`. The task is still in its current state; the next dispatch for the
+same task resumes it, adopting any uncommitted work left on its own branch
+(see `AGENTS.md` → Branches and commits). Re-dispatch the same role for the
+same task immediately. Only report a stall to the user if the *same* dispatch
+fails repeatedly with no progress, or if the task genuinely needs a decision.
+
 ### 4. Repeat
 
 Re-scan from step 1 until `get_next_task` returns `null`.
