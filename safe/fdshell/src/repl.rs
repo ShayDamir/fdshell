@@ -11,6 +11,7 @@ use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
 
 mod complete;
 mod line;
+mod trailing;
 
 pub(crate) use crate::cond::run_cond_list;
 pub(crate) use crate::script::run_script;
