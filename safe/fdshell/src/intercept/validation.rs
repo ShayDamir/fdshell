@@ -12,19 +12,16 @@ pub(crate) fn err_at(line: &[u8], pos: usize, err: CmdError) -> Report<CmdError>
     })
 }
 
-/// `Ok` when `present` is false; otherwise the `make_err` variant at the
-/// first position `find_pos` reports on the line (0 when none).
-fn not_supported(
-    line: &[u8],
-    command: &'static str,
-    present: bool,
-    find_pos: impl Fn(&[u8]) -> Option<usize>,
-    make_err: impl FnOnce(&'static str) -> CmdError,
-) -> Result<(), Report<CmdError>> {
-    if !present {
-        return Ok(());
-    }
-    Err(err_at(line, find_pos(line).unwrap_or(0), make_err(command)))
+fn is_builtin_kw(w: &[u8]) -> bool {
+    w == b"builtin" || w == b"command"
+}
+
+fn is_capture(w: &[u8]) -> bool {
+    w == b"%>"
+}
+
+fn is_redirect(b: &u8) -> bool {
+    *b == b'<' || *b == b'>'
 }
 
 pub(crate) fn check_builtin_not_supported(
@@ -32,13 +29,15 @@ pub(crate) fn check_builtin_not_supported(
     command: &'static str,
     builtin: bool,
 ) -> Result<(), Report<CmdError>> {
-    not_supported(
+    if !builtin {
+        return Ok(());
+    }
+    let pos = line.windows(7).position(is_builtin_kw).unwrap_or(0);
+    Err(err_at(
         line,
-        command,
-        builtin,
-        |l| l.windows(7).position(|w| w == b"builtin" || w == b"command"),
-        |c| CmdError::BuiltinKeywordNotSupported { command: c },
-    )
+        pos,
+        CmdError::BuiltinKeywordNotSupported { command },
+    ))
 }
 
 pub(crate) fn check_captures_not_supported(
@@ -46,13 +45,15 @@ pub(crate) fn check_captures_not_supported(
     command: &'static str,
     captures: &[Capture],
 ) -> Result<(), Report<CmdError>> {
-    not_supported(
+    if captures.is_empty() {
+        return Ok(());
+    }
+    let pos = line.windows(2).position(is_capture).unwrap_or(0);
+    Err(err_at(
         line,
-        command,
-        !captures.is_empty(),
-        |l| l.windows(2).position(|w| w == b"%>"),
-        |c| CmdError::CapturesNotSupported { command: c },
-    )
+        pos,
+        CmdError::CapturesNotSupported { command },
+    ))
 }
 
 pub(crate) fn check_redirects_not_supported(
@@ -60,13 +61,15 @@ pub(crate) fn check_redirects_not_supported(
     command: &'static str,
     redirects: &[RedirectDef],
 ) -> Result<(), Report<CmdError>> {
-    not_supported(
+    if redirects.is_empty() {
+        return Ok(());
+    }
+    let pos = line.iter().position(is_redirect).unwrap_or(0);
+    Err(err_at(
         line,
-        command,
-        !redirects.is_empty(),
-        |l| l.iter().position(|&b| b == b'<' || b == b'>'),
-        |c| CmdError::RedirectNotSupported { command: c },
-    )
+        pos,
+        CmdError::RedirectNotSupported { command },
+    ))
 }
 
 pub(crate) fn validate_intercept(

@@ -25,9 +25,7 @@ pub(super) fn strip_delims(bs: &[u8]) -> &[u8] {
     }
 }
 
-pub(super) fn split_whitespace(
-    data: &[u8],
-) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
+pub(super) fn split_whitespace(data: &[u8]) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let mut words = Vec::new();
     let mut cur = ShortCStr::new();
     for &b in data {

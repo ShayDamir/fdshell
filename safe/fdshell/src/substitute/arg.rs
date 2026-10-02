@@ -54,7 +54,7 @@ pub(crate) fn substitute_arg(
             b'%' => {
                 let before = out.len();
                 arms::percent(&mut peek, cache, cell, &mut out)?;
-                realign(&mut idx, &consumed, &mut out_mask, before, out.len(), quoted);
+                realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
             }
             b'$' if peek.peek() == Some(&b'(') => {
                 peek.next();
@@ -70,7 +70,7 @@ pub(crate) fn substitute_arg(
             b'$' => {
                 let before = out.len();
                 arms::dollar(&mut peek, cell, &mut out)?;
-                realign(&mut idx, &consumed, &mut out_mask, before, out.len(), quoted);
+                realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
             }
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,
         }

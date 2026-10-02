@@ -54,15 +54,11 @@ pub fn renameat2_parse<'a>(
             a if a.starts_with(b"-") => {
                 bail!(BuiltinError::InvalidArgument("flag"));
             }
-            _ => {
-                if oldpath.is_none() {
-                    oldpath = Some(arg);
-                } else if newpath.is_none() {
-                    newpath = Some(arg);
-                } else {
-                    bail!(BuiltinError::InvalidArgument("arg"));
-                }
-            }
+            _ => match (oldpath.is_none(), newpath.is_none()) {
+                (true, _) => oldpath = Some(arg),
+                (_, true) => newpath = Some(arg),
+                _ => bail!(BuiltinError::InvalidArgument("arg")),
+            },
         }
     }
 

@@ -28,10 +28,18 @@ pub(super) fn collect_words(
             .get(in_pos + 1..do_idx)
             .ok_or(ParseError::ExpectedWordList)?,
     );
-    let words: Vec<ShortCStr> = word_tokens.iter().map(|(t, _, _, _, _)| t.clone()).collect();
-    let words_mask: Vec<Vec<bool>> = word_tokens.iter().map(|(_, _, _, _, m)| m.clone()).collect();
-    let words_quoted: Vec<bool> =
-        word_tokens.iter().map(|(t, s, e, _, _)| word_quoted::word_quoted(t, *s, *e)).collect();
+    let words: Vec<ShortCStr> = word_tokens
+        .iter()
+        .map(|(t, _, _, _, _)| t.clone())
+        .collect();
+    let words_mask: Vec<Vec<bool>> = word_tokens
+        .iter()
+        .map(|(_, _, _, _, m)| m.clone())
+        .collect();
+    let words_quoted: Vec<bool> = word_tokens
+        .iter()
+        .map(|(t, s, e, _, _)| word_quoted::word_quoted(t, *s, *e))
+        .collect();
     Ok(ForWords {
         words,
         words_mask,

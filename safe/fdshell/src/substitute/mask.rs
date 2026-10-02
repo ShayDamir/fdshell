@@ -59,15 +59,15 @@ fn pad_mask(mask: &mut Vec<bool>, before: usize, len: usize, quoted: bool) {
 }
 
 /// After a helper consumed input from the shared peekable, sync `idx` to the
-/// consumption count and pad `mask` to the new output length.
+/// consumption count and pad `mask` to the output's new length.
 pub(super) fn realign(
     idx: &mut usize,
     consumed: &Cell<usize>,
     mask: &mut Vec<bool>,
     before: usize,
-    len: usize,
+    out: &ShortCStr,
     quoted: bool,
 ) {
     *idx = consumed.get();
-    pad_mask(mask, before, len, quoted);
+    pad_mask(mask, before, out.len(), quoted);
 }

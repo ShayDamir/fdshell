@@ -30,11 +30,7 @@ pub(crate) fn tokens_to_if(
         ParseError::MalformedIfBlock
     );
 
-    let first_then = find_preceded_by_semi(tokens, 1, b"then");
-    let first_then = match first_then {
-        Some(idx) => idx,
-        None => return Err(ParseError::MissingThen.into()),
-    };
+    let first_then = find_preceded_by_semi(tokens, 1, b"then").ok_or(ParseError::MissingThen)?;
 
     let fi_idx = tokens.len() - 1;
     ensure!(
@@ -56,7 +52,10 @@ pub(crate) fn tokens_to_if(
     }
     let else_idx = find_preceded_by_semi(tokens, pos, b"else");
 
-    let first_end = elif_pairs.first().map(|&(ei, _)| ei).or(else_idx).unwrap_or(fi_idx);
+    let first_end = match elif_pairs.first() {
+        Some(&(ei, _)) => ei,
+        None => else_idx.unwrap_or(fi_idx),
+    };
     let then_body = span_verbatim(
         text,
         tokens,

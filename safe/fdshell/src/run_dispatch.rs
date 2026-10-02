@@ -15,10 +15,7 @@ pub(crate) fn run_simple(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    if arith_cmd::run(parsed, cell)? {
-        return Ok(None);
-    }
-    if array_ops::run(parsed, text, cell)? {
+    if arith_cmd::run(parsed, cell)? || array_ops::run(parsed, text, cell)? {
         return Ok(None);
     }
     match parsed {
@@ -65,7 +62,9 @@ pub(crate) fn run_simple(
         }
         crate::parse::ParsedLine::Function(def) => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.functions.insert(def.name.clone(), def.body.data.clone());
+            state
+                .functions
+                .insert(def.name.clone(), def.body.data.clone());
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),

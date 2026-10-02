@@ -36,9 +36,17 @@ pub(crate) fn lseek_parse(
     check_help(refs)?;
     let var = var_arg(args)?;
     let offset = number_at(refs, 1, "offset")?;
-    let whence = refs.get(2).map(|w| whence(w)).transpose()?.unwrap_or(sys::fcntl::SEEK_SET);
+    let whence = refs
+        .get(2)
+        .map(|w| whence(w))
+        .transpose()?
+        .unwrap_or(sys::fcntl::SEEK_SET);
     no_extra(refs.len(), 3)?;
-    Ok(LseekConfig { var, offset, whence })
+    Ok(LseekConfig {
+        var,
+        offset,
+        whence,
+    })
 }
 
 pub(crate) fn ftruncate_parse(

@@ -11,9 +11,9 @@ mod lex_name;
 mod lex_num;
 mod lex_op;
 mod op;
+mod parse;
 mod pow;
 mod primary;
-mod parse;
 mod var;
 
 use core::fmt::Write;

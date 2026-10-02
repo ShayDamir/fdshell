@@ -28,7 +28,10 @@ pub(super) fn verity_parse(
         expected: None,
     };
     cfg.parse_flags(args)?;
-    ensure!(!(cfg.enable && cfg.expected.is_some()), BuiltinError::InvalidArgument("--digest"));
+    ensure!(
+        !(cfg.enable && cfg.expected.is_some()),
+        BuiltinError::InvalidArgument("--digest")
+    );
     Ok(cfg)
 }
 

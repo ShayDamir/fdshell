@@ -63,8 +63,8 @@ pub enum CmdError {
     Never,
     /// invalid {arg}
     InvalidArgument { arg: &'static str },
-    /// {command}: unknown option '{name}'
-    ShellOptionUnknown { command: &'static str, name: sys::ShortCStr },
+    /// {0}: unknown option '{1}'
+    ShellOptionUnknown(&'static str, sys::ShortCStr),
     /// alias: '{name}': not found
     AliasNotFound { name: sys::ShortCStr },
     /// fd variable not set
@@ -77,8 +77,8 @@ pub enum CmdError {
     ArrayIndexOutOfRange { name: sys::ShortCStr, index: usize },
     /// redirections on a function call are not supported
     FunctionRedirectNotSupported,
-    /// {command} {flag}: '{value}' is not a byte count
-    CaptureLimitBad { command: &'static str, flag: &'static str, value: sys::ShortCStr },
+    /// {0} {1}: '{2}' is not a byte count
+    CaptureLimitBad(&'static str, &'static str, sys::ShortCStr),
     /// hash: bad usage (hash [-r] [name [path]])
     HashUsage,
     /// let: expression expected

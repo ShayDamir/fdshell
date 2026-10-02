@@ -37,9 +37,8 @@ pub(crate) fn run_for(
     Ok(None)
 }
 
-/// One word of the for list: for an fd for-var (`%name`), an array reference
-/// in the word list expands each entry into the for var as a dup; any other
-/// word binds as a string.
+/// One word of the for list: for an fd for-var, an array reference in the
+/// word list expands each entry as a dup; any other word binds as a string.
 fn run_for_word(
     forblock: &ForBlock,
     word: &sys::ImportedStr,
@@ -55,15 +54,13 @@ fn run_for_word(
             let name = forblock
                 .var
                 .strip_prefix(b"%")
-                .unwrap_or_else(|| forblock.var.clone());
+                .unwrap_or(forblock.var.clone());
             for fdvar in dups {
                 {
                     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
                     state.set_fd_var(name.clone(), fdvar);
                 }
-                if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
-                    crate::repl::run_script(&forblock.body, cell)
-                })? {
+                if let Some(control) = run_body(forblock, cell)? {
                     return Ok(Some(control));
                 }
             }
@@ -74,13 +71,17 @@ fn run_for_word(
                 let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
                 state.set_var(forblock.var.clone(), word.clone());
             }
-            if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
-                crate::repl::run_script(&forblock.body, cell)
-            })? {
-                Ok(Some(control))
-            } else {
-                Ok(None)
-            }
+            run_body(forblock, cell)
         }
     }
+}
+
+/// Run the for body under the nesting cap; `Some` on break/continue/return.
+fn run_body(
+    forblock: &ForBlock,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+        crate::repl::run_script(&forblock.body, cell)
+    })
 }

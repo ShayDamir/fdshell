@@ -66,8 +66,10 @@ pub fn timerfd_parse(args: &[&CStr]) -> Result<TimerfdConfig, Report<BuiltinErro
 
 /// A decimal i64 argument, with the per-argument error context.
 fn parse_value(s: &CStr, what: &'static str) -> Result<i64, Report<BuiltinError>> {
-    let n = core::str::from_utf8(s.to_bytes()).change_context(BuiltinError::InvalidArgument(what))?;
-    n.parse::<i64>().change_context(BuiltinError::InvalidArgument(what))
+    let n =
+        core::str::from_utf8(s.to_bytes()).change_context(BuiltinError::InvalidArgument(what))?;
+    n.parse::<i64>()
+        .change_context(BuiltinError::InvalidArgument(what))
 }
 
 fn parse_seconds(s: &CStr) -> Result<i64, Report<BuiltinError>> {
@@ -78,6 +80,9 @@ fn parse_seconds(s: &CStr) -> Result<i64, Report<BuiltinError>> {
 
 fn parse_nanos(s: &CStr) -> Result<i64, Report<BuiltinError>> {
     let v = parse_value(s, "nanos")?;
-    ensure!((0..1_000_000_000).contains(&v), BuiltinError::InvalidArgument("nanos"));
+    ensure!(
+        (0..1_000_000_000).contains(&v),
+        BuiltinError::InvalidArgument("nanos")
+    );
     Ok(v)
 }

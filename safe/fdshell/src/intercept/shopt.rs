@@ -37,19 +37,11 @@ pub(crate) fn run_shopt(
             }
             state.set_last_exit(0);
         }
-        Some(flag) => bail!(CmdError::ShellOptionUnknown {
-            command: "shopt",
-            name: flag.clone(),
-        }),
+        Some(flag) => bail!(CmdError::ShellOptionUnknown("shopt", flag.clone())),
     }
     Ok(true)
 }
 
 fn lookup_error(name: &ShortCStr, command: &'static str) -> Result<u32, Report<CmdError>> {
-    Ok(
-        crate::options::lookup(name).ok_or(CmdError::ShellOptionUnknown {
-            command,
-            name: name.clone(),
-        })?,
-    )
+    Ok(crate::options::lookup(name).ok_or(CmdError::ShellOptionUnknown(command, name.clone()))?)
 }

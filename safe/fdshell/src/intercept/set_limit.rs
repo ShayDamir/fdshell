@@ -27,29 +27,17 @@ pub(super) fn run_set_capture_limit(
 fn parse_limit(raw: &ShortCStr) -> Result<usize, Report<CmdError>> {
     let bytes = raw.as_bytes().change_context(CmdError::Resolve)?;
     if bytes.is_empty() {
-        bail!(CmdError::CaptureLimitBad {
-            command: "set",
-            flag: FLAG,
-            value: raw.clone(),
-        });
+        bail!(CmdError::CaptureLimitBad("set", FLAG, raw.clone()));
     }
     let mut limit = 0usize;
     for &b in bytes {
         if !b.is_ascii_digit() {
-            bail!(CmdError::CaptureLimitBad {
-                command: "set",
-                flag: FLAG,
-                value: raw.clone(),
-            });
+            bail!(CmdError::CaptureLimitBad("set", FLAG, raw.clone()));
         }
         limit = limit
             .checked_mul(10)
             .and_then(|v| v.checked_add((b - b'0') as usize))
-            .ok_or(CmdError::CaptureLimitBad {
-                command: "set",
-                flag: FLAG,
-                value: raw.clone(),
-            })?;
+            .ok_or(CmdError::CaptureLimitBad("set", FLAG, raw.clone()))?;
     }
     Ok(limit)
 }

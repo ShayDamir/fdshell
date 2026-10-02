@@ -24,6 +24,7 @@ pub(super) fn resolve(
             out.push(entry(
                 fd.fd.as_raw(),
                 e,
+                0,
                 m,
                 arm,
                 ReleaseKey::Var(name.clone()),
@@ -41,7 +42,7 @@ pub(super) fn resolve(
                     arr: name.clone(),
                     source: ent.source.clone(),
                 };
-                out.push(entry(ent.fd.as_raw(), e, m, arm, key, finished));
+                out.push(entry(ent.fd.as_raw(), e, 0, m, arm, key, finished));
             }
         }
         FdRef::Task(name) => {
@@ -53,6 +54,7 @@ pub(super) fn resolve(
             out.push(entry(
                 task.pidfd.as_raw(),
                 e,
+                0,
                 m,
                 arm,
                 ReleaseKey::Task(name.clone()),
@@ -66,7 +68,8 @@ pub(super) fn resolve(
 fn entry(
     raw: i32,
     events: i16,
-    mask: i16,
+    revents: i16,
+    ready_mask: i16,
     arm: usize,
     release: ReleaseKey,
     finished: bool,
@@ -74,8 +77,8 @@ fn entry(
     PollEntry {
         raw,
         events,
-        revents: 0,
-        ready_mask: mask,
+        revents,
+        ready_mask,
         arm,
         release,
         finished,

@@ -79,10 +79,10 @@ fn parse_value(text: &ShortCStr) -> Result<Value, Report<CmdError>> {
     let amount = if text.eq_bytes(b"unlimited") {
         sys::rlimit::UNLIMITED
     } else {
-        text.parse::<u64>()
-            .change_context(CmdError::UlimitBadValue {
-                value: text.clone(),
-            })?
+        let err = CmdError::UlimitBadValue {
+            value: text.clone(),
+        };
+        text.parse::<u64>().change_context(err)?
     };
     Ok(Value {
         amount,

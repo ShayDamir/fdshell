@@ -50,10 +50,8 @@ pub(super) fn run_set_option(
             state.set_last_exit(0);
         }
         Some(name) => {
-            let bit = crate::options::lookup(name).ok_or(CmdError::ShellOptionUnknown {
-                command: "set",
-                name: name.clone(),
-            })?;
+            let bit = crate::options::lookup(name)
+                .ok_or(CmdError::ShellOptionUnknown("set", name.clone()))?;
             state.options = crate::options::set(state.options, bit, enable);
             state.set_last_exit(0);
         }
