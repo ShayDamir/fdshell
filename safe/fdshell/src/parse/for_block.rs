@@ -1,3 +1,5 @@
+mod words;
+
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::semi::{find_preceded_by_semi, trim_semi, verbatim};
@@ -65,29 +67,13 @@ pub(crate) fn tokens_to_for(
         ),
     )?;
 
-    let word_tokens = trim_semi(
-        tokens
-            .get(in_pos + 1..do_idx)
-            .ok_or(ParseError::ExpectedWordList)?,
-    );
-    let words: Vec<ShortCStr> = word_tokens
-        .iter()
-        .map(|(t, _, _, _, _)| t.clone())
-        .collect();
-    let words_mask: Vec<Vec<bool>> = word_tokens
-        .iter()
-        .map(|(_, _, _, _, m)| m.clone())
-        .collect();
-    let words_quoted: Vec<bool> = word_tokens
-        .iter()
-        .map(|(t, s, e, _, _)| super::word_quoted::word_quoted(t, *s, *e))
-        .collect();
+    let ws = words::collect_words(tokens, in_pos, do_idx)?;
 
     Ok(ForBlock {
         var,
-        words,
-        words_mask,
-        words_quoted,
+        words: ws.words,
+        words_mask: ws.words_mask,
+        words_quoted: ws.words_quoted,
         body,
     })
 }

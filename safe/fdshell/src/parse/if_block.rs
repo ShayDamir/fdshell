@@ -44,14 +44,7 @@ pub(crate) fn tokens_to_if(
         ParseError::MissingFi
     );
 
-    let condition = verbatim(
-        text,
-        trim_semi(
-            tokens
-                .get(1..first_then)
-                .ok_or(ParseError::MissingCondition)?,
-        ),
-    )?;
+    let condition = span_verbatim(text, tokens, 1, first_then, ParseError::MissingCondition)?;
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
@@ -63,18 +56,13 @@ pub(crate) fn tokens_to_if(
     }
     let else_idx = find_preceded_by_semi(tokens, pos, b"else");
 
-    let first_end = elif_pairs
-        .first()
-        .map(|&(ei, _)| ei)
-        .or(else_idx)
-        .unwrap_or(fi_idx);
-    let then_body = verbatim(
+    let first_end = elif_pairs.first().map(|&(ei, _)| ei).or(else_idx).unwrap_or(fi_idx);
+    let then_body = span_verbatim(
         text,
-        trim_semi(
-            tokens
-                .get(first_then + 1..first_end - 1)
-                .ok_or(ParseError::MissingThen)?,
-        ),
+        tokens,
+        first_then + 1,
+        first_end - 1,
+        ParseError::MissingThen,
     )?;
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
@@ -88,4 +76,15 @@ pub(crate) fn tokens_to_if(
         elifs,
         else_body,
     })
+}
+
+/// The verbatim text of `tokens[from..to]`; `err` when the range is absent.
+fn span_verbatim(
+    text: &ScriptText,
+    tokens: &[Token],
+    from: usize,
+    to: usize,
+    err: ParseError,
+) -> Result<ScriptText, Report<ParseError>> {
+    verbatim(text, trim_semi(tokens.get(from..to).ok_or(err)?))
 }
