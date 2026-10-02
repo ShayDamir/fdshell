@@ -33,43 +33,30 @@ pub(crate) fn check_builtin_not_supported(
         return Ok(());
     }
     let pos = line.windows(7).position(is_builtin_kw).unwrap_or(0);
-    Err(err_at(
-        line,
-        pos,
-        CmdError::BuiltinKeywordNotSupported { command },
-    ))
+    reject_at(line, pos, CmdError::BuiltinKeywordNotSupported { command })
 }
 
-pub(crate) fn check_captures_not_supported(
+/// Reject the capture (`%>`) and redirection extras an intercepted builtin does
+/// not support; captures are reported first when both are present.
+pub(crate) fn check_extras_not_supported(
     line: &[u8],
     command: &'static str,
     captures: &[Capture],
-) -> Result<(), Report<CmdError>> {
-    if captures.is_empty() {
-        return Ok(());
-    }
-    let pos = line.windows(2).position(is_capture).unwrap_or(0);
-    Err(err_at(
-        line,
-        pos,
-        CmdError::CapturesNotSupported { command },
-    ))
-}
-
-pub(crate) fn check_redirects_not_supported(
-    line: &[u8],
-    command: &'static str,
     redirects: &[RedirectDef],
 ) -> Result<(), Report<CmdError>> {
-    if redirects.is_empty() {
-        return Ok(());
+    if !captures.is_empty() {
+        let pos = line.windows(2).position(is_capture).unwrap_or(0);
+        return reject_at(line, pos, CmdError::CapturesNotSupported { command });
     }
-    let pos = line.iter().position(is_redirect).unwrap_or(0);
-    Err(err_at(
-        line,
-        pos,
-        CmdError::RedirectNotSupported { command },
-    ))
+    if !redirects.is_empty() {
+        let pos = line.iter().position(is_redirect).unwrap_or(0);
+        return reject_at(line, pos, CmdError::RedirectNotSupported { command });
+    }
+    Ok(())
+}
+
+fn reject_at(line: &[u8], pos: usize, err: CmdError) -> Result<(), Report<CmdError>> {
+    Err(err_at(line, pos, err))
 }
 
 pub(crate) fn validate_intercept(
@@ -86,7 +73,5 @@ pub(crate) fn validate_intercept_no_builtin(
     command: &'static str,
     cmdline: &crate::parse::CommandLine,
 ) -> Result<(), Report<CmdError>> {
-    check_captures_not_supported(line, command, &cmdline.captures)?;
-    check_redirects_not_supported(line, command, &cmdline.redirects)?;
-    Ok(())
+    check_extras_not_supported(line, command, &cmdline.captures, &cmdline.redirects)
 }

@@ -56,10 +56,9 @@ fn run_for_word(
                 .strip_prefix(b"%")
                 .unwrap_or(forblock.var.clone());
             for fdvar in dups {
-                {
-                    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-                    state.set_fd_var(name.clone(), fdvar);
-                }
+                cell.borrow_mut()
+                    .change_context(CmdError::Never)?
+                    .set_fd_var(name.clone(), fdvar);
                 if let Some(control) = run_body(forblock, cell)? {
                     return Ok(Some(control));
                 }
@@ -67,10 +66,9 @@ fn run_for_word(
             Ok(None)
         }
         None => {
-            {
-                let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-                state.set_var(forblock.var.clone(), word.clone());
-            }
+            cell.borrow_mut()
+                .change_context(CmdError::Never)?
+                .set_var(forblock.var.clone(), word.clone());
             run_body(forblock, cell)
         }
     }

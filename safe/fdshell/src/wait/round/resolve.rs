@@ -21,10 +21,9 @@ pub(super) fn resolve(
                 .get(name)
                 .ok_or(WaitError::NoFd { name: name.clone() })?;
             let (e, m) = events(kind, false);
-            out.push(entry(
+            out.push(PollEntry::new(
                 fd.fd.as_raw(),
                 e,
-                0,
                 m,
                 arm,
                 ReleaseKey::Var(name.clone()),
@@ -42,7 +41,7 @@ pub(super) fn resolve(
                     arr: name.clone(),
                     source: ent.source.clone(),
                 };
-                out.push(entry(ent.fd.as_raw(), e, 0, m, arm, key, finished));
+                out.push(PollEntry::new(ent.fd.as_raw(), e, m, arm, key, finished));
             }
         }
         FdRef::Task(name) => {
@@ -51,10 +50,9 @@ pub(super) fn resolve(
                 .get(name)
                 .ok_or(WaitError::TaskNotFound { name: name.clone() })?;
             let (e, m) = events(kind, true);
-            out.push(entry(
+            out.push(PollEntry::new(
                 task.pidfd.as_raw(),
                 e,
-                0,
                 m,
                 arm,
                 ReleaseKey::Task(name.clone()),
@@ -63,24 +61,4 @@ pub(super) fn resolve(
         }
     }
     Ok(out)
-}
-
-fn entry(
-    raw: i32,
-    events: i16,
-    revents: i16,
-    ready_mask: i16,
-    arm: usize,
-    release: ReleaseKey,
-    finished: bool,
-) -> PollEntry {
-    PollEntry {
-        raw,
-        events,
-        revents,
-        ready_mask,
-        arm,
-        release,
-        finished,
-    }
 }

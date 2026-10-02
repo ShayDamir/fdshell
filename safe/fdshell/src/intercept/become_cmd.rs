@@ -19,7 +19,7 @@ pub(crate) fn run_exec(
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
     if cmdline.args.is_empty() && !cmdline.redirects.is_empty() {
-        super::validation::check_captures_not_supported(line, "exec", &cmdline.captures)?;
+        super::validation::check_extras_not_supported(line, "exec", &cmdline.captures, &[])?;
         apply_redirects(cmdline, cell)?;
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
@@ -51,7 +51,7 @@ fn run_replace(
     name: &'static str,
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
-    super::validation::check_captures_not_supported(line, name, &cmdline.captures)?;
+    super::validation::check_extras_not_supported(line, name, &cmdline.captures, &[])?;
 
     let args = cmdline.args.clone();
     let args_mask = cmdline.args_mask.clone();

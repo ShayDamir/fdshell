@@ -24,6 +24,28 @@ pub(crate) struct PollEntry {
     pub finished: bool,
 }
 
+impl PollEntry {
+    /// A not-yet-polled entry: `revents` is zero until [`sys::poll`] fills it.
+    pub(super) fn new(
+        raw: i32,
+        events: i16,
+        ready_mask: i16,
+        arm: usize,
+        release: ReleaseKey,
+        finished: bool,
+    ) -> Self {
+        Self {
+            raw,
+            events,
+            revents: 0,
+            ready_mask,
+            arm,
+            release,
+            finished,
+        }
+    }
+}
+
 /// The resolved descriptors, `after` arms, and deadline of one poll round.
 pub(crate) struct Round {
     pub entries: Vec<PollEntry>,

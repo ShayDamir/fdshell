@@ -29,9 +29,7 @@ pub(super) fn parse(args: &[ShortCStr]) -> Result<Parsed, Report<CmdError>> {
     let mut soft = false;
     let mut resource: Option<resources::Resource> = None;
     let mut value: Option<Value> = None;
-    let mut i = 0;
-    while let Some(arg) = args.get(i) {
-        i += 1;
+    for arg in args {
         if arg.eq_bytes(b"--") {
             continue;
         }
