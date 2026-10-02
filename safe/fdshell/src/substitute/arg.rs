@@ -1,5 +1,7 @@
 //! Single-argument substitution — handles ~, %, $(), $((…)), and $.
 
+mod arms;
+
 use alloc::vec::Vec;
 use core::cell::Cell;
 use error_stack::{Report, ResultExt};
@@ -50,17 +52,9 @@ pub(crate) fn substitute_arg(
                 _ => push_byte(&mut out, &mut out_mask, b'\\', quoted)?,
             },
             b'%' => {
-                let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
                 let before = out.len();
-                crate::substitute::percent::percent_subst(&mut peek, cache, &state, &mut out)?;
-                realign(
-                    &mut idx,
-                    &consumed,
-                    &mut out_mask,
-                    before,
-                    out.len(),
-                    quoted,
-                );
+                arms::percent(&mut peek, cache, cell, &mut out)?;
+                realign(&mut idx, &consumed, &mut out_mask, before, out.len(), quoted);
             }
             b'$' if peek.peek() == Some(&b'(') => {
                 peek.next();
@@ -75,15 +69,8 @@ pub(crate) fn substitute_arg(
             }
             b'$' => {
                 let before = out.len();
-                crate::substitute::dollar::dollar_subst(&mut peek, cell, &mut out)?;
-                realign(
-                    &mut idx,
-                    &consumed,
-                    &mut out_mask,
-                    before,
-                    out.len(),
-                    quoted,
-                );
+                arms::dollar(&mut peek, cell, &mut out)?;
+                realign(&mut idx, &consumed, &mut out_mask, before, out.len(), quoted);
             }
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,
         }

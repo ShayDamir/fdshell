@@ -69,19 +69,13 @@ fn prehash(cmd: &Command, cell: &ForkCell<ShellState>) {
     if cmd.builtin || cmd.name.contains(b'/') {
         return;
     }
-    let is_builtin = {
-        let Ok(state) = cell.borrow() else {
-            return;
-        };
-        child::dispatch::builtin_first(&cmd.name, &state)
-    };
-    if is_builtin {
-        return;
-    }
     let path = {
         let Ok(state) = cell.borrow() else {
             return;
         };
+        if child::dispatch::builtin_first(&cmd.name, &state) {
+            return;
+        }
         crate::exec::resolve_path_str(&cmd.name, &state.hash_table).ok()
     };
     let Some(path) = path else {

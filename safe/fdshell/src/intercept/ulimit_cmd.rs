@@ -9,6 +9,7 @@ use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
+mod list;
 mod parse;
 mod resources;
 mod set;
@@ -21,7 +22,7 @@ pub(crate) fn run_ulimit(
     super::validation::validate_intercept(line, "ulimit", cmdline)?;
     let parsed = parse::parse(&cmdline.args)?;
     if parsed.list {
-        let out = resources::list(parsed.hard)?;
+        let out = list::list(parsed.hard)?;
         sys::OUT.write_all(&out).ok();
     } else {
         let res = parsed.resource.unwrap_or(resources::DEFAULT);
@@ -30,7 +31,7 @@ pub(crate) fn run_ulimit(
             None => {
                 let lim = sys::rlimit::get(res.id).change_context(CmdError::UlimitGet)?;
                 let raw = if parsed.hard { lim.hard } else { lim.soft };
-                let mut out = resources::value_bytes(raw, res).into_bytes();
+                let mut out = list::value_bytes(raw, res).into_bytes();
                 out.push(b'\n');
                 sys::OUT.write_all(&out).ok();
             }
