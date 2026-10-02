@@ -1,7 +1,7 @@
 mod flags;
 
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt, bail, ensure};
 
 use crate::error::{BuiltinError, Suggestion};
 
@@ -64,26 +64,20 @@ pub fn timerfd_parse(args: &[&CStr]) -> Result<TimerfdConfig, Report<BuiltinErro
     })
 }
 
+/// A decimal i64 argument, with the per-argument error context.
+fn parse_value(s: &CStr, what: &'static str) -> Result<i64, Report<BuiltinError>> {
+    let n = core::str::from_utf8(s.to_bytes()).change_context(BuiltinError::InvalidArgument(what))?;
+    n.parse::<i64>().change_context(BuiltinError::InvalidArgument(what))
+}
+
 fn parse_seconds(s: &CStr) -> Result<i64, Report<BuiltinError>> {
-    let b = s.to_bytes();
-    let n = core::str::from_utf8(b).change_context(BuiltinError::InvalidArgument("seconds"))?;
-    let v = n
-        .parse::<i64>()
-        .change_context(BuiltinError::InvalidArgument("seconds"))?;
-    if v < 0 {
-        bail!(BuiltinError::InvalidArgument("seconds"));
-    }
+    let v = parse_value(s, "seconds")?;
+    ensure!(v >= 0, BuiltinError::InvalidArgument("seconds"));
     Ok(v)
 }
 
 fn parse_nanos(s: &CStr) -> Result<i64, Report<BuiltinError>> {
-    let b = s.to_bytes();
-    let n = core::str::from_utf8(b).change_context(BuiltinError::InvalidArgument("nanos"))?;
-    let v = n
-        .parse::<i64>()
-        .change_context(BuiltinError::InvalidArgument("nanos"))?;
-    if !(0..1_000_000_000).contains(&v) {
-        bail!(BuiltinError::InvalidArgument("nanos"));
-    }
+    let v = parse_value(s, "nanos")?;
+    ensure!((0..1_000_000_000).contains(&v), BuiltinError::InvalidArgument("nanos"));
     Ok(v)
 }

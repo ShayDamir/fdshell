@@ -65,9 +65,7 @@ pub(crate) fn run_simple(
         }
         crate::parse::ParsedLine::Function(def) => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state
-                .functions
-                .insert(def.name.clone(), def.body.data.clone());
+            state.functions.insert(def.name.clone(), def.body.data.clone());
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),
