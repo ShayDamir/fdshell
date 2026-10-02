@@ -1,19 +1,30 @@
 use crate::loop_control::LoopControl;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::parse::while_block::LoopBlock;
 use crate::state::ShellState;
+use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+
+/// The condition's heredoc bodies as byte vectors (for `run_cond_list`).
+fn body_bytes(bodies: &[ShortCStr]) -> Vec<Vec<u8>> {
+    bodies
+        .iter()
+        .filter_map(|b| b.as_bytes().ok().map(|bytes| bytes.to_vec()))
+        .collect()
+}
 
 pub(crate) fn run_loop(
     block: &LoopBlock,
     invert: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    let cond_bodies = body_bytes(&block.cond_bodies);
     let mut ran_body = false;
     loop {
-        crate::repl::run_cond_list(&block.condition, cell)?;
+        crate::repl::run_cond_list(&block.condition, &cond_bodies, cell)?;
         let exit_code = {
             let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()

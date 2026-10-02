@@ -35,7 +35,7 @@ fn run_cond_list(
     b: &[u8],
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::cond::run_cond_list(&st(b), cell)
+    crate::cond::run_cond_list(&st(b), &[], cell)
 }
 
 fn handle(b: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {

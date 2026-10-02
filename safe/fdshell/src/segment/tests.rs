@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
+use alloc::vec;
 
 #[test]
 fn scan_if_block_end_pos() {
@@ -15,7 +16,7 @@ fn scan_if_block_end_pos() {
             assert_eq!(*end_pos, 16);
             assert!(*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -33,7 +34,7 @@ fn scan_for_block_end_pos() {
             assert_eq!(*end_pos, 30);
             assert!(*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -51,7 +52,7 @@ fn scan_case_block_end_pos() {
             assert_eq!(*end_pos, 26);
             assert!(*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -60,7 +61,7 @@ fn scan_statement_no_block() {
     let segments = scan_segments(b"echo hello", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo hello"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo hello"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -123,7 +124,7 @@ fn scan_if_with_leading_whitespace() {
             assert_eq!(*end_pos, 18);
             assert!(*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -141,7 +142,7 @@ fn scan_for_with_leading_whitespace() {
             assert_eq!(*end_pos, 32);
             assert!(*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -150,7 +151,11 @@ fn scan_in_block_false_keywords() {
     let segments = scan_segments(b"if x; then y; fi", true);
     assert_eq!(segments.len(), 3);
     match (&segments[0], &segments[1], &segments[2]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _), Segment::Statement(s3, _)) => {
+        (
+            Segment::Statement { cmd: s1, .. },
+            Segment::Statement { cmd: s2, .. },
+            Segment::Statement { cmd: s3, .. },
+        ) => {
             assert_eq!(s1, b"if x");
             assert_eq!(s2, b"then y");
             assert_eq!(s3, b"fi");
@@ -164,7 +169,14 @@ fn scan_statement_carries_first_byte_offset() {
     let segments = scan_segments(b"  echo a; echo b", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, o1), Segment::Statement(s2, o2)) => {
+        (
+            Segment::Statement {
+                cmd: s1, off: o1, ..
+            },
+            Segment::Statement {
+                cmd: s2, off: o2, ..
+            },
+        ) => {
             assert_eq!(*s1, b"echo a");
             assert_eq!(*o1, 2);
             assert_eq!(*s2, b"echo b");
@@ -179,7 +191,7 @@ fn scan_semicolon_separated_statements() {
     let segments = scan_segments(b"echo a; echo b", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"echo a");
             assert_eq!(s2, b"echo b");
         }
@@ -192,7 +204,7 @@ fn scan_comment_skipped() {
     let segments = scan_segments(b"echo hello # comment", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(*s, b"echo hello"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(*s, b"echo hello"),
         _ => panic!("expected Statement"),
     }
 }
@@ -203,7 +215,7 @@ fn scan_hash_mid_word_kept() {
     let segments = scan_segments(b"echo a#b", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(*s, b"echo a#b"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(*s, b"echo a#b"),
         _ => panic!("expected Statement"),
     }
 }
@@ -215,14 +227,16 @@ fn scan_hash_after_semicolon_is_comment() {
     let segments = scan_segments(b"echo a;#x", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(*s, b"echo a"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(*s, b"echo a"),
         _ => panic!("expected Statement"),
     }
 }
 
 #[test]
 fn scan_comment_on_block_line() {
-    // Comment after closing keyword should not prevent detection.
+    // Comment after closing keyword should not prevent detection; the block
+    // spans to the end of the line (the comment is part of the span; the
+    // tokenizer skips it).
     let segments = scan_segments(b"if x; then y; fi # comment", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
@@ -235,7 +249,7 @@ fn scan_comment_on_block_line() {
             assert_eq!(*end_pos, 26);
             assert!(*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -256,7 +270,7 @@ fn scan_newline_separated() {
     let segments = scan_segments(b"echo a\necho b", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"echo a");
             assert_eq!(s2, b"echo b");
         }
@@ -277,7 +291,7 @@ fn scan_block_not_closed() {
             assert_eq!(*block_start, 0);
             assert!(!*closed);
         }
-        Segment::Statement(_, _) => panic!("expected Block"),
+        Segment::Statement { .. } => panic!("expected Block"),
     }
 }
 
@@ -335,7 +349,7 @@ fn scan_statement_semicolon_inside_dollar_paren() {
     let segments = scan_segments(b"echo $(a; b)", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo $(a; b)"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a; b)"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -345,7 +359,7 @@ fn scan_statement_semicolon_inside_nested_dollar_paren() {
     let segments = scan_segments(b"echo $(a $(b; c) d)", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo $(a $(b; c) d)"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a $(b; c) d)"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -355,7 +369,7 @@ fn scan_statement_semicolon_inside_backtick() {
     let segments = scan_segments(b"echo `a; b`", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo `a; b`"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo `a; b`"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -365,7 +379,7 @@ fn scan_statement_semicolon_inside_dollar_paren_with_newline() {
     let segments = scan_segments(b"echo $(a\nb)", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo $(a\nb)"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a\nb)"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -391,7 +405,7 @@ fn scan_statement_plain_paren_inside_dollar_paren() {
     let segments = scan_segments(b"echo $(a (b; c) d)", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo $(a (b; c) d)"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a (b; c) d)"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -417,7 +431,7 @@ fn scan_statement_backtick_paren_isolated() {
     let segments = scan_segments(b"echo $(a `b) ; c` d)", false);
     assert_eq!(segments.len(), 1);
     match &segments[0] {
-        Segment::Statement(s, _) => assert_eq!(s, b"echo $(a `b) ; c` d)"),
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a `b) ; c` d)"),
         Segment::Block { .. } => panic!("expected Statement"),
     }
 }
@@ -429,7 +443,7 @@ fn scan_statement_paren_inside_quote_within_dollar_paren() {
     let segments = scan_segments(b"echo $(x \"a(b\"); echo c", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"echo $(x \"a(b\")");
             assert_eq!(s2, b"echo c");
         }
@@ -443,7 +457,7 @@ fn scan_statement_paren_inside_backtick_within_dollar_paren() {
     let segments = scan_segments(b"echo $(x `a(b`); echo c", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"echo $(x `a(b`)");
             assert_eq!(s2, b"echo c");
         }
@@ -458,7 +472,11 @@ fn scan_statement_top_level_paren_splits_on_semicolon() {
     let segments = scan_segments(b"echo (a; b); echo c", false);
     assert_eq!(segments.len(), 3);
     match (&segments[0], &segments[1], &segments[2]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _), Segment::Statement(s3, _)) => {
+        (
+            Segment::Statement { cmd: s1, .. },
+            Segment::Statement { cmd: s2, .. },
+            Segment::Statement { cmd: s3, .. },
+        ) => {
             assert_eq!(s1, b"echo (a");
             assert_eq!(s2, b"b)");
             assert_eq!(s3, b"echo c");
@@ -474,42 +492,59 @@ fn scan_statement_nested_paren_inside_dollar_paren_protects_semicolon() {
     let segments = scan_segments(b"echo $(a (b); c); echo d", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"echo $(a (b); c)");
             assert_eq!(s2, b"echo d");
         }
         _ => panic!("expected two Statement segments"),
     }
 }
-
-// A heredoc statement spans its command line and body lines: one Statement
-// segment from the command line through the last delimiter line (without the
-// terminating newline).
+// A heredoc statement carries its command line (body-less) plus the body
+// region (body lines plus the delimiter line, including its newline).
 #[test]
 fn scan_statement_heredoc_spans_body() {
     let segments = scan_segments(b"cat <<EOF\nbody\nEOF\necho after", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, off1), Segment::Statement(s2, off2)) => {
-            assert_eq!(s1, b"cat <<EOF\nbody\nEOF");
+        (
+            Segment::Statement {
+                cmd: s1,
+                off: off1,
+                bodies: b1,
+            },
+            Segment::Statement {
+                cmd: s2, off: off2, ..
+            },
+        ) => {
+            assert_eq!(s1, b"cat <<EOF");
             assert_eq!(*off1, 0);
+            assert_eq!(b1, &vec![(10, 19)]);
             assert_eq!(s2, b"echo after");
             assert_eq!(*off2, 19);
         }
         _ => panic!("expected two Statement segments"),
     }
 }
-
 // The statement after a heredoc starts just past the body's terminating
-// newline.
+// newline; the heredoc statement is body-less with its body region attached.
 #[test]
 fn scan_statement_after_heredoc() {
     let segments = scan_segments(b"a\ncat <<Q\nx\nQ\nb", false);
     assert_eq!(segments.len(), 3);
     match (&segments[1], &segments[2]) {
-        (Segment::Statement(s1, off1), Segment::Statement(s2, off2)) => {
-            assert_eq!(s1, b"cat <<Q\nx\nQ");
+        (
+            Segment::Statement {
+                cmd: s1,
+                off: off1,
+                bodies: b1,
+            },
+            Segment::Statement {
+                cmd: s2, off: off2, ..
+            },
+        ) => {
+            assert_eq!(s1, b"cat <<Q");
             assert_eq!(*off1, 2);
+            assert_eq!(b1, &vec![(10, 14)]);
             assert_eq!(s2, b"b");
             assert_eq!(*off2, 14);
         }
@@ -523,7 +558,7 @@ fn scan_statement_bare_heredoc_at_eol_not_extended() {
     let segments = scan_segments(b"cat <<\necho after", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"cat <<");
             assert_eq!(s2, b"echo after");
         }
@@ -531,14 +566,14 @@ fn scan_statement_bare_heredoc_at_eol_not_extended() {
     }
 }
 
-// `;` after the operator ends the run before any newline: no extension, the
-// whole run is one (single-line) statement.
+// `;` after the operator: the run is one statement; with no newline there is
+// no body region (the body would follow the whole line).
 #[test]
 fn scan_statement_heredoc_before_semicolon_not_extended() {
     let segments = scan_segments(b"cat <<EOF ; echo x", false);
     assert_eq!(segments.len(), 2);
     match (&segments[0], &segments[1]) {
-        (Segment::Statement(s1, _), Segment::Statement(s2, _)) => {
+        (Segment::Statement { cmd: s1, .. }, Segment::Statement { cmd: s2, .. }) => {
             assert_eq!(s1, b"cat <<EOF");
             assert_eq!(s2, b"echo x");
         }

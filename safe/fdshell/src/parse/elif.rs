@@ -1,4 +1,5 @@
 use super::Token;
+use super::cond_bodies::condition_bodies;
 use super::if_block::ElifArm;
 use super::semi::trim_semi;
 use super::semi::verbatim;
@@ -24,7 +25,9 @@ pub fn parse_elifs(
             if cond.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
                 bail!(ParseError::MalformedIfBlock);
             }
-            let ec = verbatim(text, trim_semi(cond))?;
+            let cond_trimmed = trim_semi(cond);
+            let ec = verbatim(text, cond_trimmed)?;
+            let cond_bodies = condition_bodies(text, cond_trimmed);
             let next = elif_pairs
                 .get(i + 1)
                 .map(|&(ne, _)| ne)
@@ -37,7 +40,11 @@ pub fn parse_elifs(
                 bail!(ParseError::MalformedIfBlock);
             }
             let eb = verbatim(text, trim_semi(body))?;
-            Ok(ElifArm { cond: ec, body: eb })
+            Ok(ElifArm {
+                cond: ec,
+                body: eb,
+                cond_bodies,
+            })
         })
         .collect::<Result<Vec<_>, Report<ParseError>>>()
 }

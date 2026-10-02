@@ -1,16 +1,27 @@
 use crate::loop_control::LoopControl;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::parse::if_block::IfBlock;
 use crate::state::ShellState;
+use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+
+/// The condition's heredoc bodies as byte vectors (for `run_cond_list`).
+fn body_bytes(bodies: &[ShortCStr]) -> Vec<Vec<u8>> {
+    bodies
+        .iter()
+        .filter_map(|b| b.as_bytes().ok().map(|bytes| bytes.to_vec()))
+        .collect()
+}
 
 pub(crate) fn run_if(
     ifblock: &IfBlock,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::repl::run_cond_list(&ifblock.condition, cell)?;
+    let cond_bodies = body_bytes(&ifblock.cond_bodies);
+    crate::repl::run_cond_list(&ifblock.condition, &cond_bodies, cell)?;
     let exit_code = {
         let state = cell.borrow().change_context(CmdError::Never)?;
         state.last_status.exit_code()
@@ -21,7 +32,8 @@ pub(crate) fn run_if(
         });
     }
     for arm in &ifblock.elifs {
-        crate::repl::run_cond_list(&arm.cond, cell)?;
+        let arm_bodies = body_bytes(&arm.cond_bodies);
+        crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell)?;
         let ec_exit = {
             let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()

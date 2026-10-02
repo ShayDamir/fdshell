@@ -1,4 +1,5 @@
 use crate::segment::Segment;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::cmd::CmdError;
@@ -14,9 +15,10 @@ pub(crate) fn run_script(
     let line = text.as_bytes().change_context(CmdError::Never)?;
     for segment in crate::segment::scan_segments(line, false) {
         match segment {
-            Segment::Statement(stmt, off) => {
-                let part = sub(text, off, stmt.len())?;
-                if let Some(control) = crate::cond::run_cond_list(&part, cell)? {
+            Segment::Statement { cmd, off, bodies } => {
+                let part = sub(text, off, cmd.len())?;
+                let body_bytes = extract_bodies(line, &bodies);
+                if let Some(control) = crate::cond::run_cond_list(&part, &body_bytes, cell)? {
                     return Ok(Some(control));
                 }
             }
@@ -29,13 +31,21 @@ pub(crate) fn run_script(
                 let raw = line.get(block_start..end_pos).unwrap_or(b"");
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
                 let full = sub(text, block_start + lead, raw.trim_ascii().len())?;
-                if let Some(control) = crate::cond::run_cond_list(&full, cell)? {
+                if let Some(control) = crate::cond::run_cond_list(&full, &[], cell)? {
                     return Ok(Some(control));
                 }
             }
         }
     }
     Ok(None)
+}
+
+/// Extract the body bytes of a statement's heredoc regions.
+fn extract_bodies(line: &[u8], bodies: &[(usize, usize)]) -> Vec<Vec<u8>> {
+    bodies
+        .iter()
+        .map(|&(s, e)| line.get(s..e).unwrap_or(b"").to_vec())
+        .collect()
 }
 
 /// Subslice of a validated offset range; `None` is an internal invariant breach.

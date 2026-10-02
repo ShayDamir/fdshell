@@ -276,11 +276,12 @@ fn unterminated_bare_chevron_at_eol_is_false() {
     assert!(!unterminated(b"cat <<", 0, 6));
 }
 
-// A `;`-terminated run with an operator: the parser rejects it outright, so
-// not a continuation.
+// A `;`-terminated run with an operator: the body is read after the whole
+// logical line, so a missing delimiter line keeps it a continuation.
 #[test]
-fn unterminated_semicolon_terminated_is_false() {
-    assert!(!unterminated(b"cat <<EOF ;", 0, 10));
+fn unterminated_semicolon_terminated_is_true() {
+    assert!(unterminated(b"cat <<EOF ;", 0, 10));
+    assert!(!unterminated(b"cat <<EOF ;\nbody\nEOF", 0, 10));
 }
 
 // `<<""` (empty quoted delimiter) awaiting its blank line: unterminated.

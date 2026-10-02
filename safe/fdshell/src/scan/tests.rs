@@ -216,5 +216,5 @@ fn skip_comment_advances_past_all_chars() {
 fn skip_comment_handles_no_newline() {
     // Mutants would fail to advance correctly
     let result = skip_comment(b"abc#def", 3);
-    assert_eq!(result, 8); // returns len+1 (past slice end) when no newline found
+    assert_eq!(result, 7); // returns len (slice end) when no newline found
 }

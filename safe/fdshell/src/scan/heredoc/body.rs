@@ -33,7 +33,7 @@ pub(crate) fn body_spans(
 /// the line is last). A zero-byte final line never matches, so an empty
 /// delimiter needs a real blank line (a tabs-only line strips to empty and
 /// does match a `<<-""` body).
-fn next_delimiter(line: &[u8], from: usize, op: &Operator) -> Option<(usize, usize)> {
+pub(super) fn next_delimiter(line: &[u8], from: usize, op: &Operator) -> Option<(usize, usize)> {
     let mut i = from;
     while i < line.len() {
         let nl = line

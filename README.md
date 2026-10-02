@@ -125,14 +125,14 @@ The body is otherwise opaque: `;`, `&&`, `|`, `#`, `$(…)`, quotes, and
 keyword-shaped lines (`fi`, `done`, `}`) are all body content. An empty body
 is zero bytes, and no trailing newline is appended — the body keeps the last
 line's own newline (`ab\n` is 3 bytes). A here-doc works in pipelines
-(`cat <<EOF | wc -l`) and in block bodies (if/while/for/case/function), like
-any other command.
+(`cat <<EOF | wc -l`), in block bodies (if/while/for/case/function), and in
+block conditions and cond-list positions (`if cat <<EOF; then …`,
+`cat <<EOF && x`), like any other command. When a line carries several
+here-docs (`cat <<A && cat <<B`), the bodies are read after the whole logical
+line, in operator order, so a body may contain another here-doc's delimiter.
 
 Limitations:
 
-- A here-doc in a block condition or cond-list position (`if cat <<EOF; then`,
-  `cat <<EOF && x`) is rejected with `here-doc: missing terminating delimiter
-  line`.
 - The REPL buffers incomplete input (here-docs, `if`/`while`/`for`/`case`/
   `function` blocks, a trailing `&&`/`||`, and an unbalanced quote) under a
   `> ` continuation prompt until the construct is complete, then executes it.

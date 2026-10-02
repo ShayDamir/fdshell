@@ -23,7 +23,7 @@ fn blocks_or_heredoc_open(line: &[u8]) -> bool {
     for seg in scan_segments(line, false) {
         match seg {
             Segment::Block { closed: false, .. } => return true,
-            Segment::Statement(_, off)
+            Segment::Statement { off, .. }
                 if heredoc::unterminated(line, off, cmd_line_end(line, off)) =>
             {
                 return true;

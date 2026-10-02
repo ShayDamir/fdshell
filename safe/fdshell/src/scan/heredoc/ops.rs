@@ -1,13 +1,16 @@
-//! The `<<` operator scan: which `<<`s in a run are heredoc operators and
-//! where their delimiter words are.
+//! The byte-level `<<` operator scan for a run, shared by the skip helpers
+//! and the line-body extraction.
+
+use crate::scan::ScanState;
 
 use super::lines::delimiter_span;
 use super::op::Operator;
-use crate::scan::ScanState;
 use alloc::vec::Vec;
 
 /// The `Operator` of every `<<` in the run, in order. `None` when a bare
-/// `<<` (or `<<-`) has no delimiter word.
+/// `<<` (or `<<-`) has no delimiter word. A `#` comment (outside quotes, at
+/// a word start) is skipped whole, so a `<<` in a comment is not an operator
+/// (the tokenizer never yields it, and the two counts must agree).
 pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator<'_>>> {
     let mut state = ScanState::new();
     let mut found: Vec<Operator> = Vec::new();
@@ -15,6 +18,16 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
     let mut i = from;
     while i < to {
         let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
+        if bare && !state.word_active && line.get(i) == Some(&b'#') {
+            match line
+                .get(i..)
+                .and_then(|s| s.iter().position(|&b| b == b'\n'))
+            {
+                Some(p) => i = i + p + 1,
+                None => return Some(found),
+            }
+            continue;
+        }
         if bare
             && seen_word
             && word_start(line, i, &state)

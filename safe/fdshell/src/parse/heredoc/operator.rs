@@ -55,7 +55,7 @@ pub(crate) fn delimiter_token_indices(line: &[u8], tokens: &[Token]) -> Vec<usiz
 }
 
 /// The operator of every `<<` in token order.
-pub(super) fn operators<'a>(
+pub(crate) fn operators<'a>(
     line: &'a [u8],
     tokens: &'a [Token],
 ) -> Result<Vec<Operator<'a>>, Report<ParseError>> {

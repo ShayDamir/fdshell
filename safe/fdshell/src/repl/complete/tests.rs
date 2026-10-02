@@ -56,8 +56,11 @@ fn heredoc_bare_chevron_is_hard_error_not_continuation() {
 }
 
 #[test]
-fn heredoc_semicolon_terminated_is_hard_error_not_continuation() {
-    assert!(is_complete(b"cat <<EOF ;"));
+fn heredoc_semicolon_terminated_continues_for_body() {
+    // A `;` after the operator: the body is read after the whole logical
+    // line, so the REPL buffers until the delimiter line arrives.
+    assert!(!is_complete(b"cat <<EOF ;"));
+    assert!(is_complete(b"cat <<EOF ;\nbody\nEOF"));
 }
 
 #[test]

@@ -265,10 +265,12 @@ fn heredoc_statement_after_body_runs() {
 }
 
 #[test]
-fn heredoc_operator_semicolon_is_error() {
-    let (_out, err, code) = run("cat <<EOF ;\nEOF");
-    assert_ne!(code, 0);
-    assert!(err.contains("here-doc"), "stderr={err:?}");
+fn heredoc_operator_semicolon_reads_body_after_line() {
+    // A `;` after the operator: the body is read after the whole logical
+    // line (bash-compatible).
+    let (out, _err, code) = run("cat <<EOF ;\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
 }
 
 #[test]
@@ -347,4 +349,70 @@ fn heredoc_pipe_position_fails_explicitly() {
     assert_ne!(code, 0);
     assert!(err.contains("\"x\" not found"), "stderr={err:?}");
     assert!(err.contains("\"EOF\" not found"), "stderr={err:?}");
+}
+
+// --- New positions: heredoc operators in cond-list and block-condition
+// positions (bash-compatible: body read after the whole logical line, in
+// operator order). ---
+
+#[test]
+fn heredoc_cond_and_position() {
+    // `<<EOF && true`: the body is read after the whole logical line.
+    let (out, _err, code) = run("cat <<EOF && true\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n");
+}
+
+#[test]
+fn heredoc_cond_or_position() {
+    // `false || cat <<EOF`: the body is read after the whole logical line.
+    let (out, _err, code) = run("false || cat <<EOF\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n");
+}
+
+#[test]
+fn heredoc_semicolon_position() {
+    // `cat <<EOF; echo done`: the body is read after the whole logical line.
+    let (out, _err, code) = run("cat <<EOF; echo done\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\ndone\n");
+}
+
+#[test]
+fn heredoc_if_condition_position() {
+    // `if cat <<EOF; then`: the body is read after the whole logical line.
+    let (out, _err, code) = run("if cat <<EOF; then echo [THEN]; fi\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n[THEN]\n");
+}
+
+#[test]
+fn heredoc_until_condition_position() {
+    // `until cat <<EOF; do`: the body is read after the whole logical line.
+    // (`cat` exits 0, so the until body never runs; a `while` variant would
+    // loop forever on a successful condition, and `&&` in a loop condition
+    // is a separate pre-existing limitation.)
+    let (out, _err, code) = run("until cat <<EOF; do echo [BODY]; done\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n");
+}
+
+#[test]
+fn heredoc_multi_operator_ordering() {
+    // Multiple operators across `;` and `&&`: bodies are read in operator
+    // order.
+    let (out, _err, code) = run("cat <<A && cat <<B; cat <<C\nbodyA\nA\nbodyB\nB\nbodyC\nC");
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyA\nbodyB\nbodyC\n");
+}
+
+#[test]
+fn heredoc_body_contains_other_delimiter() {
+    // A body may contain another operator's delimiter line: the delimiters
+    // are matched in operator order, so `B` inside A's body is data for A,
+    // and B's own body (after A's delimiter) is empty.
+    let (out, _err, code) = run("cat <<A && cat <<B\nB\nA\nB");
+    assert_eq!(code, 0);
+    assert_eq!(out, "B\n");
 }

@@ -12,6 +12,7 @@ mod cmdline;
 mod command;
 mod command_args;
 mod comment;
+mod cond_bodies;
 mod detect;
 mod detect_keyword;
 mod dispatch;

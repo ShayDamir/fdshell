@@ -5,17 +5,20 @@
 
 mod body;
 mod cont;
-mod delims;
+mod full;
+mod line;
 mod lines;
 mod op;
+mod ops;
 mod regions;
-
-use delims::operator_delims;
 
 pub(crate) use body::body_spans;
 pub(crate) use cont::unterminated;
+pub(crate) use full::body_regions_full;
+pub(crate) use line::{line_bodies_for_line, line_end_after, operator_count};
 pub(crate) use lines::first_unquoted_newline;
 pub(crate) use op::{Operator, attached, invalid_delimiter, operator_delim};
+pub(crate) use ops::operator_delims;
 pub(crate) use regions::body_regions;
 
 /// If `line[run_start..run_end]` is a heredoc command line, return the index

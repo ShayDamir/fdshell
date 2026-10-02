@@ -1,4 +1,6 @@
 use super::Token;
+use super::cond_bodies::condition_bodies;
+use super::semi::closing_keyword_index;
 use super::semi::find_preceded_by_semi;
 use super::semi::trim_semi;
 use super::semi::verbatim;
@@ -6,10 +8,13 @@ use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
 use sys::ScriptText;
+use sys::ShortCStr;
 
 pub struct ElifArm {
     pub cond: ScriptText,
     pub body: ScriptText,
+    /// The condition's heredoc bodies (in operator order; empty when none).
+    pub cond_bodies: Vec<ShortCStr>,
 }
 
 pub struct IfBlock {
@@ -17,6 +22,8 @@ pub struct IfBlock {
     pub then_body: ScriptText,
     pub elifs: Vec<ElifArm>,
     pub else_body: Option<ScriptText>,
+    /// The condition's heredoc bodies (in operator order; empty when none).
+    pub cond_bodies: Vec<ShortCStr>,
 }
 
 pub(crate) fn tokens_to_if(
@@ -30,17 +37,25 @@ pub(crate) fn tokens_to_if(
         ParseError::MalformedIfBlock
     );
 
-    let first_then = find_preceded_by_semi(tokens, 1, b"then").ok_or(ParseError::MissingThen)?;
+    // A condition-position heredoc's bodies sit in the block text after the
+    // closing `fi`: the tokens after it are body data, not block structure.
+    let fi_idx = closing_keyword_index(tokens).ok_or(ParseError::MissingFi)?;
+    let tokens = tokens.get(..=fi_idx).ok_or(ParseError::MissingFi)?;
 
-    let fi_idx = tokens.len() - 1;
-    ensure!(
+    let first_then = find_preceded_by_semi(tokens, 1, b"then");
+    let first_then = match first_then {
+        Some(idx) => idx,
+        None => return Err(ParseError::MissingThen.into()),
+    };
+
+    let cond_tokens = trim_semi(
         tokens
-            .last()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"fi")),
-        ParseError::MissingFi
+            .get(1..first_then)
+            .ok_or(ParseError::MissingCondition)?,
     );
 
     let condition = span_verbatim(text, tokens, 1, first_then, ParseError::MissingCondition)?;
+    let cond_bodies = condition_bodies(text, cond_tokens);
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
@@ -74,6 +89,7 @@ pub(crate) fn tokens_to_if(
         then_body,
         elifs,
         else_body,
+        cond_bodies,
     })
 }
 
