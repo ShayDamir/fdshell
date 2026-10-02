@@ -40,3 +40,37 @@ pub(crate) fn scan_dollar_paren_body(
 ) -> Option<Vec<u8>> {
     scan_paren_body(bytes, 1)
 }
+
+/// Scan a parenthesized body from `start` (just past the opening paren(s) the
+/// caller consumed) in a slice, tracking quote state like
+/// `scan_paren_body`. `depth` is how many parens the caller already consumed;
+/// the body ends at the first `)` bringing the count back to `depth`. Returns
+/// the body without that final `)` and the index just past it, or `None` if
+/// the input ends first.
+pub(crate) fn scan_at(body: &[u8], start: usize, depth: u32) -> Option<(Vec<u8>, usize)> {
+    let mut out = Vec::new();
+    let mut d = depth;
+    let mut in_quotes = false;
+    let mut i = start;
+    while let Some(&c) = body.get(i) {
+        i += 1;
+        if in_quotes && c == b'\\' {
+            let escaped = *body.get(i)?;
+            i += 1;
+            out.push(b'\\');
+            out.push(escaped);
+            continue;
+        }
+        if c == b')' && !in_quotes && d == depth {
+            return Some((out, i));
+        }
+        out.push(c);
+        match c {
+            b'"' => in_quotes = !in_quotes,
+            b'(' if !in_quotes => d += 1,
+            b')' if !in_quotes => d -= 1,
+            _ => {}
+        }
+    }
+    None
+}

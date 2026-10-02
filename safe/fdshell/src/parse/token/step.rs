@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use super::super::comment::skip_comment;
 use super::State;
+use crate::bytes::QUOTE;
 use crate::error::parse::ParseError;
 use error_stack::{Report, ResultExt};
 
@@ -31,7 +32,7 @@ impl State {
                     self.start = self.pos;
                 }
             }
-            b'"' => {
+            QUOTE => {
                 if self.cur.is_empty() {
                     self.fq = true;
                 }

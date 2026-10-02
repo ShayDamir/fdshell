@@ -8,6 +8,7 @@ mod app;
 mod arith;
 mod brace;
 mod brace_expand;
+mod bytes;
 pub mod busybox;
 mod capture;
 mod caret;
