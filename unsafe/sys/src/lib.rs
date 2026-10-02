@@ -19,24 +19,19 @@ pub use umask::UmaskError;
 pub use exit::exit;
 
 pub fn cvt(ret: isize) -> Result<isize, SyscallError> {
-    if ret == -1 {
-        // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
-        // guaranteed by the C runtime. Only called immediately after a failed libc call.
-        unsafe { Err((*libc::__errno_location()).into()) }
-    } else {
-        Ok(ret)
-    }
+    (ret != -1).then_some(ret).ok_or_else(errno_err)
 }
 
 /// Like [`cvt`], but for libc calls that return a 64-bit value (e.g. `off_t`).
 pub fn cvt64(ret: i64) -> Result<i64, SyscallError> {
-    if ret == -1 {
-        // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
-        // guaranteed by the C runtime. Only called immediately after a failed libc call.
-        unsafe { Err((*libc::__errno_location()).into()) }
-    } else {
-        Ok(ret)
-    }
+    (ret != -1).then_some(ret).ok_or_else(errno_err)
+}
+
+/// The errno of the last failed libc call.
+fn errno_err() -> SyscallError {
+    // SAFETY: `__errno_location()` returns a valid pointer to thread-local errno,
+    // guaranteed by the C runtime. Only called immediately after a failed libc call.
+    unsafe { (*libc::__errno_location()).into() }
 }
 
 /// Helper to create static ImportedFd instances from raw fds.
