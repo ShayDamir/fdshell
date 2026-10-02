@@ -1,7 +1,7 @@
 //! REPL continuation check for a `<<` run: its delimiter line is still
 //! missing, so more input could complete it.
 
-use super::operator_delims;
+use super::delims::operator_delims;
 use super::skip_region;
 
 /// `true` when `line[run_start..run_end]` carries a `<<` operator whose

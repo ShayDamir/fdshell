@@ -3,6 +3,7 @@
 
 use super::lines::delimiter_word;
 use alloc::vec::Vec;
+use sys::ShortCStr;
 
 /// One `<<` operator: the delimiter word plus the two flags that select how
 /// the body is read. `Operator` is carried through both levels (the byte
@@ -58,6 +59,26 @@ pub(crate) fn operator_delim(line: &[u8], start: usize, end: usize) -> (bool, &[
         [b'-', rest @ ..] => (true, rest),
         raw => (false, raw),
     }
+}
+
+/// The attached `<<` form: a delimiter byte follows `<<` (after an optional
+/// `<<-` marker). `<<` and `<<-` alone are both bare: their delimiter is the
+/// next word, read by the same raw-byte rule the parser uses.
+pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
+    !operator_delim(line, start, end).1.is_empty()
+}
+
+/// A bare `<<` delimiter word may not be a separator or another operator.
+/// A `)` never forms a token (the tokenizer emits a `;` separator instead),
+/// so the `;` arm covers the `<<`-before-`)` case.
+pub(crate) fn invalid_delimiter(word: &ShortCStr) -> bool {
+    word.is_empty()
+        || word.starts_with(b"<")
+        || word.starts_with(b">")
+        || word.starts_with(b"&")
+        || word.starts_with(b"%")
+        || word.eq_bytes(b";")
+        || word.eq_bytes(b"|")
 }
 
 /// `span` without its leading tabs — the form a `<<-` delimiter line is
