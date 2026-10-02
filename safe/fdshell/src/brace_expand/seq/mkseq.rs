@@ -4,7 +4,7 @@ use super::{MAX_WORDS, SeqKind, SeqSpec};
 use crate::error::parse::ParseError;
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::{Report, bail};
+use error_stack::Report;
 
 impl SeqSpec {
     /// The walk step after bash's sign rules: `0` becomes `1`, and the sign is
@@ -16,8 +16,7 @@ impl SeqSpec {
             incr = 1;
         }
         if (self.start < self.end) == (incr < 0) {
-            let flipped = incr.checked_neg()?;
-            incr = flipped;
+            incr = incr.checked_neg()?;
         }
         Some(incr)
     }
@@ -52,12 +51,10 @@ impl SeqSpec {
         else {
             return Ok(None);
         };
-        let Some(count) = (prevn / abs_incr).checked_add(1) else {
-            bail!(ParseError::BraceExpansionTooManyWords);
-        };
-        if count > MAX_WORDS as i64 {
-            bail!(ParseError::BraceExpansionTooManyWords);
-        }
+        let count = (prevn / abs_incr)
+            .checked_add(1)
+            .filter(|&c| c <= MAX_WORDS as i64)
+            .ok_or(ParseError::BraceExpansionTooManyWords)?;
         Ok(Some(count as usize))
     }
 
@@ -87,26 +84,27 @@ impl SeqSpec {
         match self.kind {
             SeqKind::Char => vec![n as u8],
             SeqKind::Int => alloc::format!("{n}").into_bytes(),
-            SeqKind::ZInt => {
-                let text = alloc::format!("{n}");
-                if text.len() >= self.width {
-                    return text.into_bytes();
-                }
-                let mut out: Vec<u8> = Vec::with_capacity(self.width);
-                if n < 0 {
-                    out.push(b'-');
-                    let digits = alloc::format!("{}", n.unsigned_abs());
-                    out.extend(core::iter::repeat_n(
-                        b'0',
-                        self.width - out.len() - digits.len(),
-                    ));
-                    out.extend_from_slice(digits.as_bytes());
-                } else {
-                    out.extend(core::iter::repeat_n(b'0', self.width - text.len()));
-                    out.extend_from_slice(text.as_bytes());
-                }
-                out
-            }
+            SeqKind::ZInt => render_zint(n, self.width),
         }
     }
+}
+
+/// Zero-padded integer (bash's ST_ZINT): pad with `0` to `width`, keeping a
+/// leading `-` for negatives.
+fn render_zint(n: i64, width: usize) -> Vec<u8> {
+    let text = alloc::format!("{n}");
+    if text.len() >= width {
+        return text.into_bytes();
+    }
+    let mut out: Vec<u8> = Vec::with_capacity(width);
+    if n < 0 {
+        out.push(b'-');
+        let digits = alloc::format!("{}", n.unsigned_abs());
+        out.extend(core::iter::repeat_n(b'0', width - out.len() - digits.len()));
+        out.extend_from_slice(digits.as_bytes());
+    } else {
+        out.extend(core::iter::repeat_n(b'0', width - text.len()));
+        out.extend_from_slice(text.as_bytes());
+    }
+    out
 }
