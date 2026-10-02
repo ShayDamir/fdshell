@@ -17,8 +17,6 @@ pub enum CmdError {
     Parse,
     /// launch failed
     Launch,
-    /// capture failed
-    Capture,
     /// pipeline failed
     Pipeline,
     /// redirection failed
@@ -31,8 +29,6 @@ pub enum CmdError {
     ExportName,
     /// fd pass-through failed
     FdPass,
-    /// command substitution failed
-    CmdSubst,
     /// task management failed
     Task,
     /// a `wait` round failed
@@ -68,10 +64,7 @@ pub enum CmdError {
     /// invalid {arg}
     InvalidArgument { arg: &'static str },
     /// {command}: unknown option '{name}'
-    ShellOptionUnknown {
-        command: &'static str,
-        name: sys::ShortCStr,
-    },
+    ShellOptionUnknown { command: &'static str, name: sys::ShortCStr },
     /// alias: '{name}': not found
     AliasNotFound { name: sys::ShortCStr },
     /// fd variable not set
@@ -85,11 +78,7 @@ pub enum CmdError {
     /// redirections on a function call are not supported
     FunctionRedirectNotSupported,
     /// {command} {flag}: '{value}' is not a byte count
-    CaptureLimitBad {
-        command: &'static str,
-        flag: &'static str,
-        value: sys::ShortCStr,
-    },
+    CaptureLimitBad { command: &'static str, flag: &'static str, value: sys::ShortCStr },
     /// hash: bad usage (hash [-r] [name [path]])
     HashUsage,
     /// let: expression expected

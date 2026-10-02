@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::*;
+use super::fields::*;
 
 #[test]
 fn is_cmd_subst_backtick_requires_both_ends() {
