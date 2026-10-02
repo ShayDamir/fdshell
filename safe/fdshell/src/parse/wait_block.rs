@@ -1,8 +1,8 @@
+mod arm;
+mod fdref;
 mod pattern;
 
 use super::Token;
-use super::case_clause::extract;
-use super::semi::trim_semi;
 use crate::capture::Capture;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
@@ -59,30 +59,11 @@ pub(crate) fn tokens_to_wait(
     let done_idx = tokens.len() - 1;
     let mut arms = Vec::new();
     let mut pos = 1;
-    while pos < done_idx {
-        if tokens
-            .get(pos)
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";"))
-        {
-            pos += 1;
-            continue;
-        }
-        let pat_end = tokens
-            .get(pos..done_idx)
-            .and_then(|s| s.iter().position(|(t, _, _, _, _)| t.eq_bytes(b")")))
-            .map(|i| pos + i)
-            .ok_or(ParseError::WaitMissingCloseParen)?;
-        let (pattern, captures) = pattern::parse_pattern(
-            trim_semi(tokens.get(pos..pat_end).unwrap_or(&[])),
-            text.start,
-        )?;
-        pos = pat_end + 1;
-        let (body, next) = extract::body(tokens, text, pos, done_idx)?;
-        arms.push(WaitArm {
-            pattern,
-            captures,
-            body,
-        });
+    loop {
+        let Some((arm, next)) = arm::next_arm(tokens, text, pos, done_idx)? else {
+            break;
+        };
+        arms.push(arm);
         pos = next;
     }
     ensure!(!arms.is_empty(), ParseError::WaitEmptyBlock);

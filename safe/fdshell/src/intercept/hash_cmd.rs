@@ -4,9 +4,11 @@
 //! and successful PATH searches store their result, so a pinned or cached
 //! path skips the scan. Args are not expanded (like `set -o` names).
 
+mod pin;
+
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -23,7 +25,7 @@ pub(crate) fn run_hash(
         Some(flag) if flag.eq_bytes(b"-r") => {
             state.remove_hash(cmdline.args.get(1..).unwrap_or(&[]))
         }
-        Some(name) => lookup_or_pin(name, cmdline, &mut state)?,
+        Some(name) => pin::lookup_or_pin(name, cmdline, &mut state)?,
     };
     state.set_last_exit(exit);
     Ok(true)
@@ -37,18 +39,7 @@ impl ShellState {
         }
         0
     }
-}
 
-fn write_line(name: &ShortCStr, path: &ShortCStr) -> Result<(), Report<CmdError>> {
-    let tab: ShortCStr = c"\t".into();
-    let nl: ShortCStr = c"\n".into();
-    let line = ShortCStr::concat(&[name, &tab, path, &nl]);
-    let bytes = line.as_bytes().change_context(CmdError::Never)?;
-    sys::OUT.write_all(bytes).change_context(CmdError::Never)?;
-    Ok(())
-}
-
-impl ShellState {
     /// `hash -r [name…]`: clear the given entries, or the whole table.
     fn remove_hash(&mut self, names: &[ShortCStr]) -> i32 {
         match names {
@@ -63,43 +54,11 @@ impl ShellState {
     }
 }
 
-/// `hash name` prints the entry (PATH-searching and storing on a miss);
-/// `hash name path` pins the entry.
-fn lookup_or_pin(
-    name: &ShortCStr,
-    cmdline: &crate::parse::CommandLine,
-    state: &mut ShellState,
-) -> Result<i32, Report<CmdError>> {
-    match cmdline.args.get(1) {
-        Some(path) => {
-            if cmdline.args.get(2).is_some() {
-                bail!(CmdError::HashUsage);
-            }
-            state.hash_table.insert(name.clone(), path.clone());
-            Ok(0)
-        }
-        None => {
-            let path = state
-                .hash_table
-                .get(name)
-                .cloned()
-                .or_else(|| crate::exec::resolve_path_str(name, &state.hash_table).ok());
-            match path {
-                Some(p) => {
-                    state.hash_table.insert(name.clone(), p.clone());
-                    let nl: ShortCStr = c"\n".into();
-                    let line = ShortCStr::concat(&[&p, &nl]);
-                    let bytes = line.as_bytes().change_context(CmdError::Never)?;
-                    sys::OUT.write_all(bytes).change_context(CmdError::Never)?;
-                    Ok(0)
-                }
-                None => {
-                    let _ = sys::ERR.write_all(b"hash: ");
-                    let _ = sys::ERR.write_all(name.as_bytes().unwrap_or(&[]));
-                    let _ = sys::ERR.write_all(b": not found\n");
-                    Ok(1)
-                }
-            }
-        }
-    }
+fn write_line(name: &ShortCStr, path: &ShortCStr) -> Result<(), Report<CmdError>> {
+    let tab: ShortCStr = c"\t".into();
+    let nl: ShortCStr = c"\n".into();
+    let line = ShortCStr::concat(&[name, &tab, path, &nl]);
+    let bytes = line.as_bytes().change_context(CmdError::Never)?;
+    sys::OUT.write_all(bytes).change_context(CmdError::Never)?;
+    Ok(())
 }

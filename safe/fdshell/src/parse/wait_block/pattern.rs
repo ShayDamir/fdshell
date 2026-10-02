@@ -1,3 +1,4 @@
+use super::fdref::parse_fdref;
 use super::{FdRef, WaitPattern};
 use crate::capture::Capture;
 use crate::error::parse::ParseError;
@@ -63,23 +64,6 @@ fn after(rest: &[Token]) -> Result<(WaitPattern, Vec<Capture>), Report<ParseErro
         .change_context(ParseError::WaitInvalidTimeout)?;
     ensure!(rest.len() <= 1, ParseError::WaitUnexpectedToken);
     Ok((WaitPattern::After(ms), Vec::new()))
-}
-
-fn parse_fdref(tok: &ShortCStr) -> Result<FdRef, Report<ParseError>> {
-    let rest = tok.strip_prefix(b"%").ok_or(ParseError::WaitFdRefPercent)?;
-    if let Some(task) = rest.strip_prefix(b"&") {
-        ensure!(!task.is_empty(), ParseError::WaitMissingFd);
-        return Ok(FdRef::Task(task));
-    }
-    if rest.ends_with(b"[]") {
-        let base = rest
-            .get(..rest.len() - 2)
-            .ok_or(ParseError::WaitMissingFd)?;
-        ensure!(!base.is_empty(), ParseError::WaitMissingFd);
-        return Ok(FdRef::Array(base));
-    }
-    ensure!(!rest.is_empty(), ParseError::WaitMissingFd);
-    Ok(FdRef::Var(rest))
 }
 
 fn parse_captures(
