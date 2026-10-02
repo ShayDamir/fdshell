@@ -4,44 +4,15 @@
 //! or `ENODATA` when the file is not a verity file. The pre-6.13 interface
 //! (`FS_VERITY_FL` via `FS_IOC_SETFLAGS`) is removed in >= 6.13 and not wrapped.
 
+mod uapi;
+
 use crate::{LocalFd, SyscallError, cvt};
 use alloc::vec::Vec;
 
-/// uapi `fsverity.h` hash-algorithm codes, 1-based (kernel `fsverity_hash_algs`).
-pub const FS_VERITY_HASH_ALG_SHA256: u32 = 1;
-pub const FS_VERITY_HASH_ALG_SHA512: u32 = 2;
-
-/// uapi `struct fsverity_enable_arg` (128 bytes); the `ENABLE` ioctl argument.
-#[repr(C)]
-pub struct FsverityEnableArg {
-    pub version: u32,
-    pub hash_algorithm: u32,
-    pub block_size: u32,
-    pub salt_size: u32,
-    pub salt_ptr: u64,
-    pub sig_size: u32,
-    pub reserved1: u32,
-    pub sig_ptr: u64,
-    pub reserved2: [u64; 11],
-}
-
-/// uapi `struct fsverity_digest` header. The uapi struct ends in a flexible
-/// array member, so `size_of` is this 4-byte header — the value the `MEASURE`
-/// ioctl number encodes (a 64-byte `digest[64]` field encodes the wrong number
-/// and fails `ENOTTY`).
-#[repr(C)]
-pub struct FsverityDigestHead {
-    pub algorithm: u16,
-    pub size: u16,
-}
-
-const _: () = assert!(core::mem::size_of::<FsverityEnableArg>() == 128);
-const _: () = assert!(core::mem::offset_of!(FsverityEnableArg, version) == 0);
-const _: () = assert!(core::mem::offset_of!(FsverityEnableArg, salt_ptr) == 16);
-const _: () = assert!(core::mem::size_of::<FsverityDigestHead>() == 4);
-
-pub const FS_IOC_ENABLE_VERITY: libc::Ioctl = libc::_IOW::<FsverityEnableArg>(b'f' as u32, 133);
-pub const FS_IOC_MEASURE_VERITY: libc::Ioctl = libc::_IOWR::<FsverityDigestHead>(b'f' as u32, 134);
+pub use uapi::{
+    FS_IOC_ENABLE_VERITY, FS_IOC_MEASURE_VERITY, FS_VERITY_HASH_ALG_SHA256,
+    FS_VERITY_HASH_ALG_SHA512, FsverityDigestHead, FsverityEnableArg, MeasureBuf,
+};
 
 /// A measured fs-verity file digest; `digest.len() == size`.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,13 +20,6 @@ pub struct FsverityDigest {
     pub algorithm: u16,
     pub size: u16,
     pub digest: Vec<u8>,
-}
-
-/// `MEASURE` buffer: the 4-byte header followed by the 64-byte digest area.
-#[repr(C)]
-struct MeasureBuf {
-    head: FsverityDigestHead,
-    digest: [u8; 64],
 }
 
 impl LocalFd {
