@@ -1,7 +1,7 @@
 //! Busybox-style dispatch: when the binary is invoked under a builtin's name,
 //! act as that builtin instead of starting a shell.
 
-use crate::child::{self, handle_builtin_error};
+use crate::child;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use core::ffi::CStr;
@@ -26,11 +26,8 @@ pub fn run(name: ShortCStr, args: &[ShortCStr], sock: Option<LocalFd>) -> i32 {
     }
     let sealed: Vec<ExportedCStr> = args.iter().map(|a| a.export()).collect();
     let refs: Vec<&CStr> = sealed.iter().map(|s| s.as_ref()).collect();
-    match child::dispatch::dispatch_builtin(name.clone(), &refs, args, &state) {
+    match child::dispatch::run_builtin(name, &refs, args, &state) {
         Ok(code) => code,
-        Err(report) => match handle_builtin_error(name, report) {
-            Ok(code) => code,
-            Err(e) => e.current_context().exit_code(),
-        },
+        Err(e) => e.current_context().exit_code(),
     }
 }

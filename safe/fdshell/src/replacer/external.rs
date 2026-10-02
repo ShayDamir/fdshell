@@ -37,10 +37,7 @@ pub(super) fn run(
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
         crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
-        return match child::dispatch::dispatch_builtin(binary.clone(), &refs, rest, &state) {
-            Ok(code) => Ok(code),
-            Err(report) => crate::child::handle_builtin_error(binary.clone(), report),
-        };
+        return child::dispatch::run_builtin(binary.clone(), &refs, rest, &state);
     }
     // No caching here: `become`/`exec` exit the shell right after, so the
     // table would never survive — the lookup still honors existing pins.

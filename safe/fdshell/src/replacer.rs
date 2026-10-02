@@ -44,10 +44,7 @@ pub fn execute(
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
         crate::xtrace::trace(builtin_name.as_bytes().unwrap_or(&[]), &substituted, &state);
-        match child::dispatch::dispatch_builtin(builtin_name.clone(), &refs, builtin_args, &state) {
-            Ok(code) => Ok(code),
-            Err(report) => crate::child::handle_builtin_error(builtin_name.clone(), report),
-        }
+        child::dispatch::run_builtin(builtin_name.clone(), &refs, builtin_args, &state)
     } else {
         external::run(args, args_mask, args_quoted, cell)
     }

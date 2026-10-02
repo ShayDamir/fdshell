@@ -1,4 +1,4 @@
-use crate::child::{self, Command, external, handle_builtin_error};
+use crate::child::{self, Command, external};
 use crate::error::child_process::ChildProcessError;
 use crate::redirect::Redirect;
 use crate::state::ShellState;
@@ -37,7 +37,7 @@ pub fn child_main(
     crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), &resolved, &state);
 
     if cmd.builtin || child::dispatch::builtin_first(&cmd.name, &state) {
-        run_builtin(&cmd, &refs, args, &state)
+        child::dispatch::run_builtin(cmd.name.clone(), &refs, args, &state)
     } else {
         external::run_external(&cmd, &refs, &state)
     }
@@ -68,16 +68,4 @@ fn apply_redirects(redirects: &[Redirect]) -> Result<(), Report<ChildProcessErro
             .change_context(ChildProcessError::RedirectFailed)?;
     }
     Ok(())
-}
-
-fn run_builtin(
-    cmd: &Command,
-    refs: &[&CStr],
-    args: &[ShortCStr],
-    state: &ShellState,
-) -> Result<i32, Report<ChildProcessError>> {
-    match child::dispatch::dispatch_builtin(cmd.name.clone(), refs, args, state) {
-        Ok(code) => Ok(code),
-        Err(report) => handle_builtin_error(cmd.name.clone(), report),
-    }
 }

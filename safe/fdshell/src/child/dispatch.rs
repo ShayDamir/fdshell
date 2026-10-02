@@ -1,5 +1,6 @@
 mod table;
 
+use crate::error::child_process::ChildProcessError;
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
@@ -46,5 +47,21 @@ pub fn dispatch_builtin(
             | crate::error::fdpass::FdPassError::MissingArg => sys::errno::EINVAL,
         }),
         None => bail!(BuiltinError::Unknown),
+    }
+}
+
+/// Dispatch a command as a builtin, mapping builtin errors to exit codes.
+/// Shared by the `builtin` keyword (`replacer`), the child's builtin path
+/// (`child::run`), the `builtin_first` exec path (`replacer::external`),
+/// and busybox mode.
+pub(crate) fn run_builtin(
+    name: ShortCStr,
+    refs: &[&CStr],
+    args: &[ShortCStr],
+    state: &ShellState,
+) -> Result<i32, Report<ChildProcessError>> {
+    match dispatch_builtin(name.clone(), refs, args, state) {
+        Ok(code) => Ok(code),
+        Err(report) => super::handle_builtin_error(name, report),
     }
 }
