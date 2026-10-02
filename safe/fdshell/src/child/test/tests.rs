@@ -204,7 +204,7 @@ fn unknown_ops_are_never() {
     ));
     // binary_op only handles the file-binary ops.
     assert!(matches!(
-        super::filetest::binary_op(b"-eq", &s, &s)
+        super::stat::binary_op(b"-eq", &s, &s)
             .unwrap_err()
             .current_context(),
         BuiltinError::Never

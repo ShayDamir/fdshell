@@ -18,35 +18,8 @@ pub(crate) fn try_intercept(
     if !cmd.eq(b"set") {
         crate::xtrace::trace_cmd(cmd, cmdline, cell);
     }
-    let result = match cmd {
-        // Add new commands here AND to `INTERCEPTED_COMMANDS` (commands.rs).
-        b"alias" => alias_cmd::run_alias(line, cmdline, text, cell).map(handled),
-        b"unalias" => alias_cmd::run_unalias(line, cmdline, text, cell).map(handled),
-        b"cd" => cd::run_cd(line, cmdline, text, cell).map(handled),
-        b"exit" | b"quit" => exit::run_exit(line, cmdline, cell).map(handled),
-        b"become" => become_cmd::run_become(line, cmdline, cell).map(handled),
-        b"exec" => become_cmd::run_exec(line, cmdline, cell).map(handled),
-        b"export_fd" => export_fd::run_export_fd(line, cmdline, cell).map(handled),
-        b"waitpid" => waitpid::run_waitpid(line, cmdline, cell).map(handled),
-        b"export" => exports::run_export(line, cmdline, text, cell).map(handled),
-        b"eval" => eval_cmd::run_eval(line, cmdline, text, cell).map(Some),
-        b"source" | b"." => source::run_source(line, cmdline, text, cell).map(Some),
-        b"envfilter" => envfilter::run_envfilter(line, cmdline, cell).map(handled),
-        b"shift" => shift::run_shift(line, cmdline, cell).map(handled),
-        b"hash" => hash_cmd::run_hash(line, cmdline, cell).map(handled),
-        b"let" => let_cmd::run_let(line, cmdline, cell).map(handled),
-        b"set" => set_cmd::run_set(line, cmdline, text, cell).map(handled),
-        b"shopt" => shopt::run_shopt(line, cmdline, text, cell).map(handled),
-        b"read" => read::run_read(line, cmdline, text, cell).map(handled),
-        b"ulimit" => ulimit_cmd::run_ulimit(line, cmdline, cell).map(handled),
-        b"signalfd" => signalfd_cmd::run_signalfd(line, cmdline, cell).map(handled),
-        b"timeout" => timeout_cmd::run_timeout(line, cmdline, cell).map(handled),
-        b"send_fd" => send_fd::run_send_fd(line, cmdline, cell).map(handled),
-        b"sendmsg" => sendmsg::run_sendmsg(line, cmdline, cell).map(handled),
-        b"recvmsg" => recvmsg::run_recvmsg(line, cmdline, text, cell).map(handled),
-        _ => return Ok(None),
-    };
-    if let Some(control) = result? {
+    let result = dispatch::dispatch(cmd, line, cmdline, text, cell)?;
+    if let Some(control) = result {
         last_arg_frame::set_intercepted_last_arg(cmdline, cell)?;
         Ok(Some(control))
     } else {
@@ -54,7 +27,7 @@ pub(crate) fn try_intercept(
     }
 }
 
-fn handled(ran: bool) -> Option<Option<LoopControl>> {
+pub(super) fn handled(ran: bool) -> Option<Option<LoopControl>> {
     if ran { Some(None) } else { None }
 }
 
@@ -66,6 +39,7 @@ mod alias_cmd;
 mod become_cmd;
 mod cd;
 pub(crate) mod commands;
+mod dispatch;
 mod envfilter;
 mod envfilter_display;
 mod eval_cmd;

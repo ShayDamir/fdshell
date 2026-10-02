@@ -1,7 +1,7 @@
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::{LocalFd, ShortCStr};
 
 /// Stat an operand. A `%var` original is an fd var (fstat it); anything else
@@ -32,4 +32,23 @@ pub(super) fn fd_var<'a>(orig: Option<&ShortCStr>, state: &'a ShellState) -> Opt
     orig.and_then(|o| o.strip_prefix(b"%"))
         .and_then(|name| state.fds.get(&name))
         .map(|var| &var.fd)
+}
+
+/// Binary comparison of two stat results (`-nt -ot -ef -fdeq -fdne`).
+pub(super) fn binary_op(
+    op: &[u8],
+    l: &sys::stat::FileStat,
+    r: &sys::stat::FileStat,
+) -> Result<bool, Report<BuiltinError>> {
+    Ok(match op {
+        b"-nt" => l.mtime > r.mtime,
+        b"-ot" => l.mtime < r.mtime,
+        b"-ef" | b"-fdeq" => same_inode(l, r),
+        b"-fdne" => !same_inode(l, r),
+        _ => bail!(BuiltinError::Never),
+    })
+}
+
+fn same_inode(l: &sys::stat::FileStat, r: &sys::stat::FileStat) -> bool {
+    l.dev == r.dev && l.ino == r.ino
 }

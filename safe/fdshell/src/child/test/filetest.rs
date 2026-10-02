@@ -14,7 +14,7 @@ use sys::stat::{
 };
 
 use super::perm::access_test;
-use super::stat::{fd_var, stat_operand};
+use super::stat::{binary_op, fd_var, stat_operand};
 
 /// Unary file tests: `-e -f -d -b -c -p -S -L -s -g -k -t -r -w -x`.
 pub(super) fn file_test(
@@ -75,25 +75,6 @@ pub(super) fn stat_test(op: &[u8], st: Option<&FileStat>) -> Result<bool, Report
 
 pub(super) fn kind(st: &FileStat, file_type: u32) -> bool {
     st.mode & S_IFMT == file_type
-}
-
-/// Binary comparison of two stat results.
-pub(super) fn binary_op(
-    op: &[u8],
-    l: &FileStat,
-    r: &FileStat,
-) -> Result<bool, Report<BuiltinError>> {
-    Ok(match op {
-        b"-nt" => l.mtime > r.mtime,
-        b"-ot" => l.mtime < r.mtime,
-        b"-ef" | b"-fdeq" => same_inode(l, r),
-        b"-fdne" => !same_inode(l, r),
-        _ => bail!(BuiltinError::Never),
-    })
-}
-
-fn same_inode(l: &FileStat, r: &FileStat) -> bool {
-    l.dev == r.dev && l.ino == r.ino
 }
 
 /// `-t`: an fd var is true iff it is a terminal; a plain path is never one.
