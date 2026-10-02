@@ -1,7 +1,7 @@
 //! ADDRESS resolution and value helpers for the `bind`/`listen` parsers.
 
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt, ensure};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
 
 use builtins::error::{BuiltinError, Suggestion};
@@ -73,6 +73,18 @@ pub(super) fn parse_port(v: &CStr) -> Result<u16, Report<BuiltinError>> {
     text.parse::<u16>()
         .change_context(BuiltinError::InvalidArgument("port"))
         .attach_opaque(Suggestion("Port must be a number in 0..=65535"))
+}
+
+/// `stream` or `dgram`; anything else is a usage error (exit 1).
+pub(super) fn parse_type(v: &CStr) -> Result<super::SocketType, Report<BuiltinError>> {
+    match v.to_bytes() {
+        b"stream" => Ok(super::SocketType::Stream),
+        b"dgram" => Ok(super::SocketType::Dgram),
+        _ => bail!(
+            Report::new(BuiltinError::InvalidArgument("type"))
+                .attach_opaque(Suggestion("Use stream or dgram"))
+        ),
+    }
 }
 
 /// Backlog length, `0..=i32::MAX` (the kernel's `listen` cap).

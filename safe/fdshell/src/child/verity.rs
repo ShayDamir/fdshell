@@ -7,6 +7,7 @@
 //! provision verity in-kernel; permanent for the file's life, needs an
 //! `O_RDONLY` fd of an inode the caller can write.
 
+mod config;
 mod emit;
 mod hex;
 mod parse;

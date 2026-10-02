@@ -2,7 +2,6 @@
 //! only, like `statx`); the flags follow. `--algo`/`--digest` values are plain
 //! words read from `args` (originals), so no substitution is involved.
 
-use alloc::vec::Vec;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
@@ -12,13 +11,7 @@ use builtins::error::BuiltinError;
 use crate::child::fdops::args::var_arg;
 use crate::child::flags::split_eq;
 
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct VerityConfig {
-    pub(super) var: ShortCStr,
-    pub(super) enable: bool,
-    pub(super) algo: u32,
-    pub(super) expected: Option<Vec<u8>>,
-}
+pub(super) use super::config::VerityConfig;
 
 pub(super) fn verity_parse(
     refs: &[&CStr],
@@ -35,10 +28,7 @@ pub(super) fn verity_parse(
         expected: None,
     };
     cfg.parse_flags(args)?;
-    ensure!(
-        !(cfg.enable && cfg.expected.is_some()),
-        BuiltinError::InvalidArgument("--digest")
-    );
+    ensure!(!(cfg.enable && cfg.expected.is_some()), BuiltinError::InvalidArgument("--digest"));
     Ok(cfg)
 }
 

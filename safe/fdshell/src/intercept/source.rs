@@ -1,12 +1,11 @@
+mod file;
+
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::ImportedStr;
-use sys::Origin;
-use sys::Position;
 use sys::ScriptText;
 use sys::ShortCStr;
 use sys::Trace;
@@ -33,7 +32,7 @@ pub(crate) fn run_source(
     let path = substituted.first().ok_or(CmdError::SourceNoFile)?;
     let extra = substituted.get(1..).unwrap_or(&[]);
     let saved = swap_positional(cell, extra, text)?;
-    let result = super::last_arg_frame::with_eval_frame(cell, || run_sourced(path, cell));
+    let result = super::last_arg_frame::with_eval_frame(cell, || file::run_sourced(path, cell));
     if let Some(saved) = saved {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_positional(saved);
@@ -59,42 +58,6 @@ fn swap_positional(
         .collect();
     state.set_positional(positional);
     Ok(Some(saved))
-}
-
-/// Open `path`, read its content, and run it as a script in this shell.
-fn run_sourced(
-    path: &ShortCStr,
-    cell: &ForkCell<ShellState>,
-) -> Result<Option<LoopControl>, Report<CmdError>> {
-    let fd = sys::openat2::open(path.export(), sys::fcntl::O_RDONLY)
-        .change_context(CmdError::SourceOpen)?;
-    let content = read_to_end(&fd, crate::cmd_subst::MAX_CAPTURED)?;
-    let data = ShortCStr::from_vec(content).change_context(CmdError::SourceNul)?;
-    let script = ScriptText::new(data, Position::new(1, 1), Origin::File(path.clone()));
-    // Count each source level toward the nesting cap: a self-sourcing file
-    // recurses through run_script and would otherwise overflow the stack.
-    crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
-        crate::script::run_script(&script, cell)
-    })
-}
-
-/// Read `fd` to EOF, failing with [`CmdError::SourceTooLarge`] once `limit`
-/// bytes would be read.
-fn read_to_end(fd: &sys::LocalFd, limit: usize) -> Result<Vec<u8>, Report<CmdError>> {
-    let mut content = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = fd.read(&mut buf).change_context(CmdError::SourceRead)?;
-        if n == 0 {
-            break;
-        }
-        let slice = buf.get(..n).ok_or(CmdError::Never)?;
-        if content.len() + slice.len() > limit {
-            bail!(CmdError::SourceTooLarge);
-        }
-        content.extend_from_slice(slice);
-    }
-    Ok(content)
 }
 
 #[cfg(test)]

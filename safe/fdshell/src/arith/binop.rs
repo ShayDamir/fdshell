@@ -26,7 +26,7 @@ pub(crate) fn binop(op: Op, l: i64, r: i64) -> Result<i64, Report<ResolveError>>
         Op::And => Ok(l & r),
         Op::Or => Ok(l | r),
         Op::Xor => Ok(l ^ r),
-        Op::Pow => Ok(powi(l, r)),
+        Op::Pow => Ok(super::pow::powi(l, r)),
         // `&&`/`||` are short-circuited by the caller; `?`/`:` never appear
         // in `Bin` nodes.
         Op::AndAnd
@@ -59,27 +59,6 @@ fn div_or_rem(op: Op, l: i64, r: i64) -> Result<i64, Report<ResolveError>> {
     } else {
         l.wrapping_rem(r)
     })
-}
-
-/// `base ** exp` with wrapping multiplication; a negative exponent is 0
-/// (the fractional result truncates), `0 ** 0` is 1.
-fn powi(base: i64, exp: i64) -> i64 {
-    if exp < 0 {
-        return 0;
-    }
-    let mut result: i64 = 1;
-    let mut b = base;
-    let mut e = exp;
-    while e > 0 {
-        if e & 1 == 1 {
-            result = result.wrapping_mul(b);
-        }
-        e >>= 1;
-        if e > 0 {
-            b = b.wrapping_mul(b);
-        }
-    }
-    result
 }
 
 /// Compound assignment `cur op rhs`; `Set` discards `cur`.

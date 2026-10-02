@@ -12,7 +12,7 @@ use core::ffi::CStr;
 use error_stack::{Report, bail, ensure};
 use sys::ShortCStr;
 
-use builtins::error::{BuiltinError, Suggestion};
+use builtins::error::BuiltinError;
 
 use address::make_address;
 
@@ -43,18 +43,6 @@ pub(crate) struct NetArgs {
     pub(crate) backlog: Option<i32>,
 }
 
-/// `stream` or `dgram`; anything else is a usage error (exit 1).
-pub(crate) fn parse_type(v: &CStr) -> Result<SocketType, Report<BuiltinError>> {
-    match v.to_bytes() {
-        b"stream" => Ok(SocketType::Stream),
-        b"dgram" => Ok(SocketType::Dgram),
-        _ => bail!(
-            Report::new(BuiltinError::InvalidArgument("type"))
-                .attach_opaque(Suggestion("Use stream or dgram"))
-        ),
-    }
-}
-
 pub(crate) fn parse_net_args(refs: &[&CStr]) -> Result<NetArgs, Report<BuiltinError>> {
     if builtins::argparse::wants_help(refs) {
         bail!(BuiltinError::Help);
@@ -73,7 +61,7 @@ pub(crate) fn parse_net_args(refs: &[&CStr]) -> Result<NetArgs, Report<BuiltinEr
             b"--type" => {
                 ensure!(ty.is_none(), BuiltinError::InvalidArgument("type"));
                 let v = builtins::argparse::next_val(refs, &mut i, val)?;
-                ty = Some(parse_type(v)?);
+                ty = Some(address::parse_type(v)?);
             }
             b"--bind" => {
                 ensure!(bind_addr.is_none(), BuiltinError::InvalidArgument("bind"));
@@ -94,10 +82,7 @@ pub(crate) fn parse_net_args(refs: &[&CStr]) -> Result<NetArgs, Report<BuiltinEr
             }
         }
     }
-    let backlog = match backlog {
-        None => None,
-        Some(v) => Some(address::parse_backlog(v)?),
-    };
+    let backlog = backlog.map(address::parse_backlog).transpose()?;
     Ok(NetArgs {
         ty: ty.unwrap_or(SocketType::Stream),
         addr: make_address(addr, bind_addr, port)?,

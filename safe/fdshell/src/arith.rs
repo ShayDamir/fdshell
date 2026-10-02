@@ -11,6 +11,7 @@ mod lex_name;
 mod lex_num;
 mod lex_op;
 mod op;
+mod pow;
 mod parse;
 mod var;
 

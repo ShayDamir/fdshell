@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
-use super::{read_to_end, run_source};
+use super::file::read_to_end;
+use super::run_source;
 use crate::error::cmd::CmdError;
 use crate::intercept::try_intercept;
 use crate::loop_control::LoopControl;
