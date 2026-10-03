@@ -1,13 +1,18 @@
 //! `verity %fd [--digest HEX]` or `verity %fd --enable [--algo sha256|sha512]`
-//! — fs-verity (Linux >= 6.13) on an fd.
+//! or `verity %fd --dump <type> [--offset N] [--length N]` — fs-verity
+//! (Linux >= 6.13) on an fd.
 //!
 //! Query: print `enabled=yes algo=sha256 digest=<hex>` or `enabled=no`.
 //! Check (`--digest HEX`): exit 0 iff the file is verity and its digest matches
 //! `HEX` (case-insensitive), else 1 (fail-closed). Enable (`--enable`):
 //! provision verity in-kernel; permanent for the file's life, needs an
-//! `O_RDONLY` fd of an inode the caller can write.
+//! `O_RDONLY` fd of an inode the caller can write. Dump (`--dump`): print the
+//! descriptor / Merkle tree / signature of a verity file as hex rows; a
+//! non-verity file is a genuine error (the errno is the exit code).
 
 mod config;
+mod dump;
+mod dump_read;
 mod emit;
 mod hex;
 mod parse;
@@ -26,6 +31,9 @@ const DEFAULT_BLOCK_SIZE: u32 = 4096;
 pub(super) fn handle_verity(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let cfg = parse::verity_parse(ctx.refs, ctx.args)?;
     let fd = resolve(&cfg.var, ctx.state)?;
+    if let Some(spec) = &cfg.dump {
+        return dump_read::dump_metadata(fd, spec);
+    }
     if cfg.enable {
         enable(fd, cfg.algo)?;
         return Ok(0);

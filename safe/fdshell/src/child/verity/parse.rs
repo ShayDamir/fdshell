@@ -3,13 +3,13 @@
 //! words read from `args` (originals), so no substitution is involved.
 
 use core::ffi::CStr;
-use error_stack::{Report, ResultExt, bail, ensure};
+use error_stack::{Report, bail, ensure};
 use sys::ShortCStr;
 
 use builtins::error::BuiltinError;
 
 use crate::child::fdops::args::var_arg;
-use crate::child::flags::split_eq;
+use crate::child::flags::{flag_val, split_eq};
 
 pub(super) use super::config::VerityConfig;
 
@@ -26,11 +26,20 @@ pub(super) fn verity_parse(
         enable: false,
         algo: sys::fsverity::FS_VERITY_HASH_ALG_SHA256,
         expected: None,
+        dump: None,
     };
     cfg.parse_flags(args)?;
     ensure!(
         !(cfg.enable && cfg.expected.is_some()),
         BuiltinError::InvalidArgument("--digest")
+    );
+    ensure!(
+        cfg.dump.is_none() || !cfg.enable,
+        BuiltinError::InvalidArgument("--dump")
+    );
+    ensure!(
+        cfg.dump.is_none() || cfg.expected.is_none(),
+        BuiltinError::InvalidArgument("--dump")
     );
     Ok(cfg)
 }
@@ -54,28 +63,13 @@ impl VerityConfig {
                         val, args, &mut i, "--digest",
                     )?)?)
                 }
+                b"--dump" | b"--offset" | b"--length" => {
+                    super::dump::apply(key, val, args, &mut i, &mut self.dump)?
+                }
                 _ => bail!(BuiltinError::InvalidArgument("flag")),
             }
         }
         Ok(())
-    }
-}
-
-/// The value of a flag: the inline `--key=value` part, or the next word.
-fn flag_val<'a>(
-    val: Option<&'a [u8]>,
-    args: &'a [ShortCStr],
-    i: &mut usize,
-    flag: &'static str,
-) -> Result<&'a [u8], Report<BuiltinError>> {
-    match val {
-        Some(inline) => Ok(inline),
-        None => {
-            let v = args.get(*i).ok_or(BuiltinError::InvalidArgument(flag))?;
-            let bytes = v.as_bytes().change_context(BuiltinError::Never)?;
-            *i += 1;
-            Ok(bytes)
-        }
     }
 }
 

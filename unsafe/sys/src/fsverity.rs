@@ -1,17 +1,22 @@
-//! fs-verity ioctls (Linux >= 6.13): provision verity on an fd and measure the
-//! resulting file digest. `ENABLE` builds the Merkle tree in-kernel; `MEASURE`
-//! returns the file digest (the SHA over the on-disk `fsverity_descriptor`),
-//! or `ENODATA` when the file is not a verity file. The pre-6.13 interface
+//! fs-verity ioctls (Linux >= 6.13): provision verity on an fd, measure the
+//! resulting file digest, and read back the on-disk metadata (descriptor,
+//! Merkle tree, signature). `ENABLE` builds the Merkle tree in-kernel;
+//! `MEASURE` returns the file digest (the SHA over the on-disk
+//! `fsverity_descriptor`); `READ_METADATA` is `pread()`-like over a metadata
+//! item. `ENODATA` when the file is not a verity file. The pre-6.13 interface
 //! (`FS_VERITY_FL` via `FS_IOC_SETFLAGS`) is removed in >= 6.13 and not wrapped.
 
+mod read_metadata;
 mod uapi;
 
 use crate::{LocalFd, SyscallError, cvt};
 use alloc::vec::Vec;
 
 pub use uapi::{
-    FS_IOC_ENABLE_VERITY, FS_IOC_MEASURE_VERITY, FS_VERITY_HASH_ALG_SHA256,
-    FS_VERITY_HASH_ALG_SHA512, FsverityDigestHead, FsverityEnableArg, MeasureBuf,
+    FS_IOC_ENABLE_VERITY, FS_IOC_MEASURE_VERITY, FS_IOC_READ_VERITY_METADATA,
+    FS_VERITY_HASH_ALG_SHA256, FS_VERITY_HASH_ALG_SHA512, FS_VERITY_METADATA_TYPE_DESCRIPTOR,
+    FS_VERITY_METADATA_TYPE_MERKLE_TREE, FS_VERITY_METADATA_TYPE_SIGNATURE, FsverityDigestHead,
+    FsverityEnableArg, FsverityReadMetadataArg, MeasureBuf,
 };
 
 /// A measured fs-verity file digest; `digest.len() == size`.

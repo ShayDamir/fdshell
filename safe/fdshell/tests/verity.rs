@@ -273,3 +273,109 @@ fn error_paths() {
     let help = run(&dir, "builtin verity --help");
     assert_eq!(help.status.code(), Some(0), "stderr={}", stderr(&help));
 }
+
+/// `--dump descriptor`: the 256-byte descriptor as 16 hex rows; the first row
+/// is pinned to the deterministic >= 6.13 descriptor header (version 1,
+/// sha256, log2(4096), no salt, 19-byte content).
+#[test]
+fn dump_descriptor() {
+    let dir = Scratch::new();
+    std::fs::write(dir.join("f"), CONTENT).unwrap();
+    if !enable(&dir, "f") {
+        return;
+    }
+    let out = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY f %>%b; builtin verity %b --dump descriptor",
+    );
+    assert_eq!(out.status.code(), Some(0), "stderr={}", stderr(&out));
+    let s = stdout(&out);
+    let lines: Vec<&str> = s.lines().collect();
+    assert_eq!(lines.len(), 16, "stdout={s:?}");
+    assert_eq!(
+        lines.first().copied(),
+        Some("00000000  01 01 0c 00 00 00 00 00  13 00 00 00 00 00 00 00")
+    );
+}
+
+/// `--dump tree` on a single-block file: the tree item is empty (the root
+/// hash lives in the descriptor), so no rows are printed.
+#[test]
+fn dump_tree_single_block() {
+    let dir = Scratch::new();
+    std::fs::write(dir.join("f"), CONTENT).unwrap();
+    if !enable(&dir, "f") {
+        return;
+    }
+    let out = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY f %>%b; builtin verity %b --dump tree",
+    );
+    assert_eq!(out.status.code(), Some(0), "stderr={}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+}
+
+/// `--dump descriptor --offset 0 --length 16`: exactly one hex row.
+#[test]
+fn dump_offset_length() {
+    let dir = Scratch::new();
+    std::fs::write(dir.join("f"), CONTENT).unwrap();
+    if !enable(&dir, "f") {
+        return;
+    }
+    let out = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY f %>%b; \
+         builtin verity %b --dump descriptor --offset 0 --length 16",
+    );
+    assert_eq!(out.status.code(), Some(0), "stderr={}", stderr(&out));
+    let s = stdout(&out);
+    let lines: Vec<&str> = s.lines().collect();
+    assert_eq!(lines.len(), 1, "stdout={s:?}");
+    assert_eq!(
+        lines.first().copied(),
+        Some("00000000  01 01 0c 00 00 00 00 00  13 00 00 00 00 00 00 00")
+    );
+}
+
+/// `--dump` on a non-verity file is a genuine error: the exit code is
+/// `ENODATA` (61).
+#[test]
+fn dump_non_verity() {
+    let dir = Scratch::new();
+    std::fs::write(dir.join("plain"), CONTENT).unwrap();
+    let out = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY plain %>%b; builtin verity %b --dump descriptor",
+    );
+    assert_eq!(out.status.code(), Some(61), "stderr={}", stderr(&out));
+}
+
+/// `--dump` error paths: a bad type, `--offset` without `--dump`, and
+/// `--dump` combined with `--enable` all exit 1.
+#[test]
+fn dump_error_paths() {
+    let dir = Scratch::new();
+    std::fs::write(dir.join("plain"), CONTENT).unwrap();
+    let badtype = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY plain %>%b; builtin verity %b --dump bogus",
+    );
+    assert_eq!(
+        badtype.status.code(),
+        Some(1),
+        "stderr={}",
+        stderr(&badtype)
+    );
+    let noflag = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY plain %>%b; builtin verity %b --offset 8",
+    );
+    assert_eq!(noflag.status.code(), Some(1), "stderr={}", stderr(&noflag));
+    let both = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY plain %>%b; \
+         builtin verity %b --dump descriptor --enable",
+    );
+    assert_eq!(both.status.code(), Some(1), "stderr={}", stderr(&both));
+}

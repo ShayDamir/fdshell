@@ -12,7 +12,8 @@ use sys::{Origin, ShortCStr, Trace};
 use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 
-use super::emit::{algo_name, line, to_hex};
+use super::dump::{MetadataType, parse_metadata_type, parse_uint};
+use super::emit::{algo_name, line, to_hex, write_hex_rows};
 use super::handle_verity;
 use super::parse::{VerityConfig, verity_parse};
 
@@ -175,6 +176,137 @@ fn help() {
     assert!(matches!(e.current_context(), BuiltinError::Help));
 }
 
+// --- dump parsing (pure) ---------------------------------------------------
+
+#[test]
+fn dump_type_names() {
+    assert_eq!(
+        parse_metadata_type(b"tree").unwrap(),
+        MetadataType::MerkleTree
+    );
+    assert_eq!(
+        parse_metadata_type(b"merkle_tree").unwrap(),
+        MetadataType::MerkleTree
+    );
+    assert_eq!(
+        parse_metadata_type(b"descriptor").unwrap(),
+        MetadataType::Descriptor
+    );
+    assert_eq!(
+        parse_metadata_type(b"signature").unwrap(),
+        MetadataType::Signature
+    );
+}
+
+#[test]
+fn dump_type_unknown_rejected() {
+    let cases: [&[u8]; 3] = [b"bogus", b"root", b"TREE"];
+    for v in cases {
+        let e = parse_metadata_type(v).unwrap_err();
+        assert!(is_invalid(&e, "dump type"), "{v:?}");
+    }
+}
+
+#[test]
+fn parse_uint_valid() {
+    assert_eq!(parse_uint(b"0", "x").unwrap(), 0);
+    assert_eq!(parse_uint(b"42", "x").unwrap(), 42);
+    assert_eq!(parse_uint(b"18446744073709551615", "x").unwrap(), u64::MAX);
+}
+
+#[test]
+fn parse_uint_rejected() {
+    let cases: [&[u8]; 5] = [b"", b"abc", b"-1", b"18446744073709551616", b"1.5"];
+    for v in cases {
+        let e = parse_uint(v, "x").unwrap_err();
+        assert!(is_invalid(&e, "x"), "{v:?}");
+    }
+}
+
+#[test]
+fn dump_spec_parsed() {
+    let cfg = parse(&["%f", "--dump", "descriptor"]).unwrap();
+    let d = cfg.dump.unwrap();
+    assert_eq!(d.r#type, MetadataType::Descriptor);
+    assert_eq!(d.offset, 0);
+    assert!(d.length.is_none());
+}
+
+#[test]
+fn dump_spec_offset_length() {
+    let cfg = parse(&["%f", "--dump", "tree", "--offset", "8", "--length", "16"]).unwrap();
+    let d = cfg.dump.unwrap();
+    assert_eq!(d.r#type, MetadataType::MerkleTree);
+    assert_eq!(d.offset, 8);
+    assert_eq!(d.length, Some(16));
+}
+
+#[test]
+fn dump_inline() {
+    let cfg = parse(&["%f", "--dump=descriptor"]).unwrap();
+    assert_eq!(cfg.dump.unwrap().r#type, MetadataType::Descriptor);
+}
+
+#[test]
+fn dump_and_enable_rejected() {
+    let e = parse(&["%f", "--dump", "descriptor", "--enable"]).unwrap_err();
+    assert!(is_invalid(&e, "--dump"));
+}
+
+#[test]
+fn dump_and_digest_rejected() {
+    let e = parse(&["%f", "--dump", "descriptor", "--digest", "512e"]).unwrap_err();
+    assert!(is_invalid(&e, "--dump"));
+}
+
+#[test]
+fn offset_without_dump_rejected() {
+    let e = parse(&["%f", "--offset", "8"]).unwrap_err();
+    assert!(is_invalid(&e, "--offset"));
+}
+
+#[test]
+fn length_without_dump_rejected() {
+    let e = parse(&["%f", "--length", "8"]).unwrap_err();
+    assert!(is_invalid(&e, "--length"));
+}
+
+#[test]
+fn duplicate_dump_rejected() {
+    let e = parse(&["%f", "--dump", "descriptor", "--dump", "tree"]).unwrap_err();
+    assert!(is_invalid(&e, "--dump"));
+}
+
+#[test]
+fn duplicate_offset_rejected() {
+    let e = parse(&[
+        "%f",
+        "--dump",
+        "descriptor",
+        "--offset",
+        "8",
+        "--offset",
+        "16",
+    ])
+    .unwrap_err();
+    assert!(is_invalid(&e, "--offset"));
+}
+
+#[test]
+fn duplicate_length_rejected() {
+    let e = parse(&[
+        "%f",
+        "--dump",
+        "descriptor",
+        "--length",
+        "8",
+        "--length",
+        "16",
+    ])
+    .unwrap_err();
+    assert!(is_invalid(&e, "--length"));
+}
+
 // --- emit (pure) -----------------------------------------------------------
 
 #[test]
@@ -207,6 +339,41 @@ fn emit_algo_name() {
 #[test]
 fn emit_to_hex_lowercases() {
     assert_eq!(to_hex(&[0x0a, 0xff, 0x1b]), "0aff1b");
+}
+
+#[test]
+fn hex_rows_full_row() {
+    let data: Vec<u8> = (0..16).collect();
+    let got = write_hex_rows(0, &data).unwrap();
+    assert_eq!(
+        got.as_bytes().unwrap(),
+        b"00000000  00 01 02 03 04 05 06 07  08 09 0a 0b 0c 0d 0e 0f\n"
+    );
+}
+
+#[test]
+fn hex_rows_offset_and_padding() {
+    let got = write_hex_rows(0x10, &[0xab, 0xcd]).unwrap();
+    assert_eq!(
+        got.as_bytes().unwrap(),
+        b"00000010  ab cd __ __ __ __ __ __  __ __ __ __ __ __ __ __\n"
+    );
+}
+
+#[test]
+fn hex_rows_multiple_rows() {
+    let data: Vec<u8> = (0..20).collect();
+    let got = write_hex_rows(0, &data).unwrap();
+    let lines: Vec<&[u8]> = got.as_bytes().unwrap().split(|&b| b == b'\n').collect();
+    assert_eq!(lines.len(), 3, "2 rows + trailing empty");
+    assert_eq!(
+        lines.first().copied(),
+        Some(b"00000000  00 01 02 03 04 05 06 07  08 09 0a 0b 0c 0d 0e 0f" as &[u8])
+    );
+    assert_eq!(
+        lines.get(1).copied(),
+        Some(b"00000010  10 11 12 13 __ __ __ __  __ __ __ __ __ __ __ __" as &[u8])
+    );
 }
 
 // --- check (pure) ----------------------------------------------------------

@@ -22,6 +22,25 @@ pub(crate) fn split_eq(arg: &ShortCStr) -> Result<KeyVal<'_>, Report<BuiltinErro
     }
 }
 
+/// The value of a `--key` flag: the inline `--key=value` part, or the next
+/// word of `args` (advancing `i` past it).
+pub(crate) fn flag_val<'a>(
+    val: Option<&'a [u8]>,
+    args: &'a [ShortCStr],
+    i: &mut usize,
+    flag: &'static str,
+) -> Result<&'a [u8], Report<BuiltinError>> {
+    match val {
+        Some(inline) => Ok(inline),
+        None => {
+            let v = args.get(*i).ok_or(BuiltinError::InvalidArgument(flag))?;
+            let bytes = v.as_bytes().change_context(BuiltinError::Never)?;
+            *i += 1;
+            Ok(bytes)
+        }
+    }
+}
+
 /// `--dir` takes an fd variable: `%name` with no further `%`.
 pub(crate) fn dir_var(v: &[u8]) -> Result<ShortCStr, Report<BuiltinError>> {
     let name = v

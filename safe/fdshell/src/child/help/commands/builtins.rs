@@ -44,6 +44,6 @@ pub(crate) const BUILTINS: &[(&[u8], &[u8])] = &[
     (b"utimensat", b"Set file atime/mtime"),
     (
         b"verity",
-        b"fs-verity: query/check/enable a file digest on an fd",
+        b"fs-verity: query/check/enable a file digest, or dump its metadata",
     ),
 ];

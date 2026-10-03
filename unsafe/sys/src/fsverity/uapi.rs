@@ -34,9 +34,31 @@ const _: () = assert!(core::mem::size_of::<FsverityEnableArg>() == 128);
 const _: () = assert!(core::mem::offset_of!(FsverityEnableArg, version) == 0);
 const _: () = assert!(core::mem::offset_of!(FsverityEnableArg, salt_ptr) == 16);
 const _: () = assert!(core::mem::size_of::<FsverityDigestHead>() == 4);
+const _: () = assert!(core::mem::size_of::<FsverityReadMetadataArg>() == 40);
+const _: () = assert!(FS_IOC_READ_VERITY_METADATA == 0xC0286687);
 
 pub const FS_IOC_ENABLE_VERITY: libc::Ioctl = libc::_IOW::<FsverityEnableArg>(b'f' as u32, 133);
 pub const FS_IOC_MEASURE_VERITY: libc::Ioctl = libc::_IOWR::<FsverityDigestHead>(b'f' as u32, 134);
+
+/// uapi `struct fsverity_read_metadata_arg`: fixed 40 bytes, no flexible
+/// array member — the whole struct is the sized prefix the `READ_METADATA`
+/// ioctl number encodes.
+#[repr(C)]
+pub struct FsverityReadMetadataArg {
+    pub metadata_type: u64,
+    pub offset: u64,
+    pub length: u64,
+    pub buf_ptr: u64,
+    pub reserved: u64,
+}
+
+/// uapi `FS_VERITY_METADATA_TYPE_*`: the metadata items `READ_METADATA` reads.
+pub const FS_VERITY_METADATA_TYPE_MERKLE_TREE: u64 = 1;
+pub const FS_VERITY_METADATA_TYPE_DESCRIPTOR: u64 = 2;
+pub const FS_VERITY_METADATA_TYPE_SIGNATURE: u64 = 3;
+
+pub const FS_IOC_READ_VERITY_METADATA: libc::Ioctl =
+    libc::_IOWR::<FsverityReadMetadataArg>(b'f' as u32, 135);
 
 /// `MEASURE` buffer: the 4-byte header followed by the 64-byte digest area.
 #[repr(C)]

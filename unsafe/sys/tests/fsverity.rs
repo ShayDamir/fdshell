@@ -2,7 +2,10 @@
 
 use std::ffi::CString;
 use sys::fcntl::O_RDONLY;
-use sys::fsverity::{FS_VERITY_HASH_ALG_SHA256, FS_VERITY_HASH_ALG_SHA512};
+use sys::fsverity::{
+    FS_VERITY_HASH_ALG_SHA256, FS_VERITY_HASH_ALG_SHA512, FS_VERITY_METADATA_TYPE_DESCRIPTOR,
+    FS_VERITY_METADATA_TYPE_MERKLE_TREE, FS_VERITY_METADATA_TYPE_SIGNATURE,
+};
 use sys::openat2::open;
 
 /// The content the e2e builtin tests pin; its file digest is a pure function of
@@ -120,5 +123,100 @@ fn measure_non_verity_is_enodata() {
     let dir = scratch();
     let fd = open_file(&dir, "plain", CONTENT);
     let e = fd.measure_verity().unwrap_err();
+    assert_eq!(e.errno(), libc::ENODATA);
+}
+
+/// Read `len` bytes of metadata item `item` at `offset`; returns the bytes
+/// actually read (a `pread()`-like short read).
+fn read_meta(
+    fd: &sys::LocalFd,
+    item: u64,
+    offset: u64,
+    len: usize,
+) -> Result<Vec<u8>, sys::SyscallError> {
+    let mut buf = vec![0u8; len];
+    let n = fd.read_verity_metadata_into(item, offset, &mut buf)?;
+    buf.truncate(n);
+    Ok(buf)
+}
+
+/// The >= 6.13 descriptor is a fixed 256 bytes: a header
+/// (version, hash_algorithm, log_blocksize, salt_size, reserved, data_size),
+/// then the 64-byte root-hash area, salt, and reserved zeros. The root hash is
+/// pinned — a pure function of (content, algo, block size, salt).
+#[test]
+fn read_metadata_descriptor_sha256() {
+    let dir = scratch();
+    let fd = open_file(&dir, "f", CONTENT);
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let d = read_meta(&fd, FS_VERITY_METADATA_TYPE_DESCRIPTOR, 0, 256).unwrap();
+    assert_eq!(d.len(), 256);
+    assert_eq!(d[0], 1, "version");
+    assert_eq!(d[1], 1, "sha256");
+    assert_eq!(d[2], 12, "log2(4096)");
+    assert_eq!(d[3], 0, "no salt");
+    assert_eq!(&d[4..8], &[0; 4], "reserved");
+    assert_eq!(
+        u64::from_le_bytes(d[8..16].try_into().unwrap()),
+        19,
+        "data_size"
+    );
+    assert_eq!(
+        to_hex(&d[16..48]),
+        "bfa4acf46954515a2601f0ba6af1598e75724cde045e7263fb2b9b5a007800f3"
+    );
+    assert!(
+        d[48..].iter().all(|&b| b == 0),
+        "root-hash tail + salt + reserved"
+    );
+}
+
+/// A single data block has no Merkle-tree blocks of its own: the tree item is
+/// empty (the root hash lives in the descriptor).
+#[test]
+fn read_metadata_tree_single_block_is_empty() {
+    let dir = scratch();
+    let fd = open_file(&dir, "f", CONTENT);
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let t = read_meta(&fd, FS_VERITY_METADATA_TYPE_MERKLE_TREE, 0, 4096).unwrap();
+    assert!(t.is_empty());
+}
+
+/// The signature item of an unsigned verity file is absent: `ENODATA`.
+#[test]
+fn read_metadata_signature_unsigned_is_enodata() {
+    let dir = scratch();
+    let fd = open_file(&dir, "f", CONTENT);
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let e = read_meta(&fd, FS_VERITY_METADATA_TYPE_SIGNATURE, 0, 4096).unwrap_err();
+    assert_eq!(e.errno(), libc::ENODATA);
+}
+
+/// Reading past the end of an item returns 0 bytes (`pread()`-like).
+#[test]
+fn read_metadata_past_eof_is_zero() {
+    let dir = scratch();
+    let fd = open_file(&dir, "f", CONTENT);
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let d = read_meta(&fd, FS_VERITY_METADATA_TYPE_DESCRIPTOR, 1 << 20, 256).unwrap();
+    assert!(d.is_empty());
+}
+
+/// A zero-length read returns 0 bytes.
+#[test]
+fn read_metadata_zero_length_is_zero() {
+    let dir = scratch();
+    let fd = open_file(&dir, "f", CONTENT);
+    fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096).unwrap();
+    let d = read_meta(&fd, FS_VERITY_METADATA_TYPE_DESCRIPTOR, 0, 0).unwrap();
+    assert!(d.is_empty());
+}
+
+/// Reading metadata of a file that is not verity fails `ENODATA`.
+#[test]
+fn read_metadata_non_verity_is_enodata() {
+    let dir = scratch();
+    let fd = open_file(&dir, "plain", CONTENT);
+    let e = read_meta(&fd, FS_VERITY_METADATA_TYPE_DESCRIPTOR, 0, 256).unwrap_err();
     assert_eq!(e.errno(), libc::ENODATA);
 }
