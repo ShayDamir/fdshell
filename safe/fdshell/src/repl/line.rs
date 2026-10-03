@@ -1,7 +1,7 @@
 //! Reading one line from the REPL's stdin, with the `ignoreeof` EOF policy.
 
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 
 use crate::app::AppError;
 use crate::state::ShellState;
@@ -10,11 +10,15 @@ use sys::fork_cell::ForkCell;
 /// Write `prompt`, then read one line from `sys::IN` into `buf` (up to, not
 /// including, the terminating `\n`). Returns whether the REPL should keep
 /// reading: `true` on a line, or on EOF with `ignoreeof` on (the hint is
-/// printed); `false` on EOF with `ignoreeof` off.
+/// printed); `false` on EOF with `ignoreeof` off. Fails with
+/// [`AppError::LineTooLarge`] once `buf` would grow past `limit` bytes; the
+/// caller reuses `buf` across the continuation loop, so the cap also bounds
+/// the whole accumulated multi-line construct.
 pub(crate) fn read_line(
     cell: &ForkCell<ShellState>,
     buf: &mut Vec<u8>,
     prompt: &[u8],
+    limit: usize,
 ) -> Result<bool, Report<AppError>> {
     sys::OUT.write_all(prompt).change_context(AppError::Read)?;
     let mut byte = [0u8; 1];
@@ -25,6 +29,9 @@ pub(crate) fn read_line(
         }
         if byte[0] == b'\n' {
             return Ok(true);
+        }
+        if buf.len() + 1 > limit {
+            bail!(AppError::LineTooLarge);
         }
         buf.push(byte[0]);
     }

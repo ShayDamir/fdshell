@@ -23,6 +23,8 @@ pub enum AppError {
     ScriptRead,
     /// script exceeds the size limit; use a smaller script
     ScriptTooLarge,
+    /// input line exceeds the size limit; keep lines shorter
+    LineTooLarge,
     /// missing script path after --dirfd
     MissingScriptPath,
     /// impossible

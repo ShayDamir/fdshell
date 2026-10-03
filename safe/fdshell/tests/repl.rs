@@ -30,6 +30,46 @@ fn run_repl(input: &str) -> (String, String, i32) {
     )
 }
 
+/// A single input line beyond the size cap must fail with the size error
+/// instead of growing the line buffer until the process runs out of memory.
+#[test]
+fn oversize_single_line_is_capped() {
+    let mut child = Command::new(BIN)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Write exactly cap + 1 bytes in 4 KiB chunks: no 64 MiB allocation in
+    // this process (nextest caps the test VA at 128 MB), and every byte is
+    // consumed by the child before it bails, so the final write cannot hit
+    // EPIPE after the child exits.
+    let total = 64 * 1024 * 1024 + 1;
+    let chunk = [b'a'; 4096];
+    let mut left = total;
+    while left > 0 {
+        let n = core::cmp::min(left, chunk.len());
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(chunk.get(..n).unwrap())
+            .unwrap();
+        left -= n;
+    }
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert!(
+        !output.status.success(),
+        "an oversize line must fail the REPL run"
+    );
+    assert!(
+        stderr.contains("line exceeds the size limit"),
+        "expected the size-limit error, stderr={stderr}"
+    );
+}
+
 #[test]
 fn if_block_spans_lines() {
     let (out, err, code) = run_repl("if true; then\necho in-if\nfi\nexit\n");

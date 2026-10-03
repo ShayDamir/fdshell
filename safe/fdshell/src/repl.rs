@@ -58,7 +58,7 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     let mut buf = Vec::new();
     loop {
         buf.clear();
-        if !line::read_line(cell, &mut buf, b"fdshell> ")? {
+        if !line::read_line(cell, &mut buf, b"fdshell> ", crate::cmd_subst::MAX_CAPTURED)? {
             return Ok(());
         }
         // Buffer incomplete input (open blocks, unterminated heredocs,
@@ -68,7 +68,7 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
         // error); with `ignoreeof` on, `read_line` keeps the shell alive.
         while !complete::is_complete(&buf) {
             buf.push(b'\n');
-            if !line::read_line(cell, &mut buf, b"> ")? {
+            if !line::read_line(cell, &mut buf, b"> ", crate::cmd_subst::MAX_CAPTURED)? {
                 break;
             }
         }
