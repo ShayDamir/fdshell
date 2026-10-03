@@ -416,3 +416,66 @@ fn heredoc_body_contains_other_delimiter() {
     assert_eq!(code, 0);
     assert_eq!(out, "B\n");
 }
+
+#[test]
+fn heredoc_elif_condition_position() {
+    // `elif cat <<EOF; then`: the body is read after the whole logical line,
+    // before the taken arm runs.
+    let (out, _err, code) =
+        run("if false; then echo a; elif cat <<EOF; then echo b; fi\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\nb\n");
+}
+
+// --- Heredoc statements adjacent to blocks on the same line: a block must
+// neither swallow a trailing heredoc statement nor hand its own body regions
+// to the statements around it. ---
+
+#[test]
+fn heredoc_stmt_after_if_block_same_line() {
+    // The trailing `; cat <<EOF` is a real statement, not part of the `if`
+    // text: the block ends at `fi;` and the heredoc runs after it.
+    let (out, _err, code) = run("if true; then echo y; fi; cat <<EOF\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "y\nbody\n");
+}
+
+#[test]
+fn heredoc_stmt_after_while_block_same_line() {
+    let (out, _err, code) = run("while true; do echo a; break; done; cat <<EOF\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\nbody\n");
+}
+
+#[test]
+fn heredoc_stmt_after_for_block_same_line() {
+    let (out, _err, code) = run("for x in a b; do echo $x; done; cat <<EOF\nbody\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\nb\nbody\n");
+}
+
+#[test]
+fn heredoc_if_condition_and_trailing_stmt_same_line() {
+    // A condition-position heredoc and a trailing heredoc statement on one
+    // line: the condition takes the first body region, the trailing
+    // statement the second (operator order).
+    let (out, _err, code) = run("if cat <<A; then echo y; fi; cat <<B\nbodyA\nA\nbodyB\nB");
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyA\ny\nbodyB\n");
+}
+
+#[test]
+fn heredoc_stmt_before_if_block_same_line() {
+    // A `;`-terminated heredoc statement before the block on the same line:
+    // it runs first with its own body; the block's line starts after it.
+    let (out, _err, code) = run("cat <<A; if true; then echo y; fi\nbody\nA");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\ny\n");
+}
+
+#[test]
+fn heredoc_stmt_before_function_block_same_line() {
+    let (out, _err, code) = run("cat <<A; f() { echo hi; }; f\nbody\nA");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\nhi\n");
+}

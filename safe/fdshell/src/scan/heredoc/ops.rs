@@ -83,3 +83,6 @@ fn precedes_pipe(line: &[u8], i: usize) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests;

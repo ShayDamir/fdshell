@@ -22,13 +22,24 @@ pub(crate) fn flush_line<'a>(
     line_end: usize,
     runs: &mut Vec<(&'a [u8], usize)>,
 ) -> usize {
+    // No runs to emit: the line's body regions (if any) belong to the block
+    // the caller is about to scan, not to a statement — claim nothing.
+    if runs.is_empty() {
+        return line_end;
+    }
     let single_line = runs.first().is_none_or(|(_, off)| *off >= line_start);
     let (bodies, resume) = if single_line {
         heredoc::line_bodies_for_line(line, line_start, line_end)
     } else {
         (Vec::new(), line_end)
     };
-    let mut assigned = 0;
+    // Regions already claimed by operators before the first run: a block's
+    // condition operators, when the runs trail a block on the same line (the
+    // line's body stream is global, in operator order).
+    let mut assigned = runs
+        .first()
+        .map(|(_, off)| heredoc::operator_count(line, line_start, *off))
+        .unwrap_or(0);
     for (cmd, off) in runs.drain(..) {
         let n = heredoc::operator_count(line, off, off + cmd.len());
         let run_bodies: Vec<(usize, usize)> =

@@ -268,6 +268,28 @@ fn operator_count_per_stage() {
     assert_eq!(operator_count(&tokens[3..5]), 1);
 }
 
+/// The byte-level and token-level operator counts agree on every supported
+/// form — attached, bare, `<<-`, quoted — and on `#` comments (the tokenizer
+/// never yields a `<<` from one, so the byte scanner must skip it whole).
+#[test]
+fn operator_count_byte_and_token_levels_agree() {
+    for line in [
+        b"cat <<EOF" as &[u8],
+        b"cat << EOF",
+        b"cat <<-EOF",
+        b"cat <<- EOF",
+        b"cat <<\"Q\"",
+        b"cat <<A && cat <<B",
+        b"cat <<A # <<B\n",
+        b"echo a#b <<X",
+        b"cat <<A | tr <<B",
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+    }
+}
+
 #[test]
 fn is_operator_bounds_guard() {
     let line = b"cat <<EOF";

@@ -3,7 +3,7 @@ mod line;
 
 use crate::brace::scan_function_block;
 use crate::keywords::keyword_delta;
-use crate::scan::{Boundary, ScanState, boundary, skip_comment};
+use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
 use alloc::vec::Vec;
 
 /// A segment of a script line extracted by the scanner.
@@ -37,6 +37,10 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     let mut i = 0;
     let mut line_start = 0;
     let mut runs: Vec<(&[u8], usize)> = Vec::new();
+    // The resume floor: after a block, no flush may resume inside a heredoc
+    // body region of the block's line (or of a statement that precedes the
+    // block on that line).
+    let mut body_floor = 0;
 
     while i <= line.len() {
         let kind = boundary(line, i, &state);
@@ -50,16 +54,30 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         let part = raw.trim_ascii();
 
         if !in_block && !part.is_empty() && keyword_delta(part) == Some(1) {
-            line::flush_line(&mut segments, line, line_start, i, &mut runs);
-            let (segment, end) = block::keyword_block(line, raw, part, start, &state);
+            let pre_resume = line::flush_line(&mut segments, line, line_start, i, &mut runs);
+            let (segment, resume, floor) =
+                block::keyword_block(line, raw, part, start, &state, pre_resume);
             segments.push(segment);
-            i = end + 1;
+            // `resume` is just past the closing keyword (a trailing statement
+            // on the same line is still scanned) or already past the line's
+            // body regions; the floor pulls the line's final flush past any
+            // body region (the block's own or the pre-block statement's).
+            i = resume;
             start = i;
-            line_start = i;
+            // Trailing content shares the block's physical line: the line's
+            // bookkeeping (and its global body stream) continues from the
+            // line's start, so the trailing runs' flush skips the regions
+            // the block's operators claimed.
+            line_start = if i < heredoc::line_end_after(line, start) {
+                line_start
+            } else {
+                i
+            };
+            body_floor = floor;
         } else if !in_block
             && let Some((end, closed)) = scan_function_block(line, part, start, state.in_quote)
         {
-            line::flush_line(&mut segments, line, line_start, i, &mut runs);
+            let pre_resume = line::flush_line(&mut segments, line, line_start, i, &mut runs);
             segments.push(Segment::Block {
                 block_start: start,
                 end_pos: end,
@@ -68,6 +86,7 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             i = end + 1;
             start = i;
             line_start = i;
+            body_floor = pre_resume;
         } else {
             if !part.is_empty() {
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
@@ -75,7 +94,7 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             }
             if line.get(i) == Some(&b'\n') || i == line.len() {
                 let resume = line::flush_line(&mut segments, line, line_start, i, &mut runs);
-                i = resume;
+                i = resume.max(body_floor);
                 line_start = i;
             }
             if kind == Boundary::Comment {

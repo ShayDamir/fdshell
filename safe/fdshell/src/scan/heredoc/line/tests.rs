@@ -17,6 +17,14 @@ fn line_end_after_no_newline_is_len() {
     assert_eq!(line_end_after(line, 0), line.len());
 }
 
+/// `line_end_after` skips a newline inside quotes: the physical line
+/// continues past it (there is no unquoted newline).
+#[test]
+fn line_end_after_quoted_newline_is_not_line_end() {
+    let line = b"echo \"a\nb\"";
+    assert_eq!(line_end_after(line, 0), line.len());
+}
+
 /// `line_bodies_for_line` finds the body regions of a `;`-terminated line.
 #[test]
 fn line_bodies_for_line_semicolon_terminated() {
