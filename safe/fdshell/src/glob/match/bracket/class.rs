@@ -26,6 +26,25 @@ pub(in crate::glob) fn class_end(bytes: &[u8], i: usize) -> Option<usize> {
     None
 }
 
+/// The `(close, member)` pair for the `[:class:]` candidate opened by the
+/// unquoted `[` at `i`, where `close` is the index just past the class.
+/// `None` when the candidate is not a recognized class (an unclosed `[:`,
+/// an unrecognized name) — the caller treats its bytes as literal members.
+pub(in crate::glob) fn class_member(
+    bytes: &[u8],
+    mask: &[bool],
+    i: usize,
+    b: u8,
+) -> Option<(usize, bool)> {
+    let open = i - 1;
+    if !is_class_start(bytes, mask, open) {
+        return None;
+    }
+    let close = class_end(bytes, open)?;
+    let name = bytes.get(open + 2..close - 2)?;
+    class_contains(name, b).map(|member| (close, member))
+}
+
 /// Whether `b` is a member of the named class; `None` for an unrecognized
 /// name (the caller treats the class bytes as literal members).
 pub(in crate::glob) fn class_contains(name: &[u8], b: u8) -> Option<bool> {

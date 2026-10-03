@@ -15,8 +15,8 @@ use super::r#match as m;
 /// All matching full result strings, bytewise-sorted; empty when nothing
 /// matches. A directory that cannot be opened or listed drops its branch
 /// silently (bash behavior: no error, no stderr). `dotglob` lets unquoted
-/// pattern bytes match a name's leading `.`; `.`/`..` are listed only for a
-/// component whose first byte is a literal `.` (bash: `.*` matches them).
+/// pattern bytes match a name's leading `.`; `.`/`..` are never listed, for
+/// any pattern (bash: even `dotglob; echo .*` lists only real dotfiles).
 pub(super) fn walk(word: &ShortCStr, mask: &[bool], dotglob: bool) -> Vec<Vec<u8>> {
     let Ok(bytes) = word.as_bytes() else {
         return Vec::new();
@@ -46,9 +46,9 @@ pub(super) fn walk(word: &ShortCStr, mask: &[bool], dotglob: bool) -> Vec<Vec<u8
             descend::literal_component(&dirfd, idx, &parts, last, &prefix, &mut out, &mut stack);
             continue;
         }
-        let allow_dotdot = comp.pat.first() == Some(&b'.');
         for name in list::list(&dirfd) {
-            if (name == b"." || name == b"..") && !allow_dotdot {
+            // `.`/`..` are never glob results (bash: not even for `.*`).
+            if name == b"." || name == b".." {
                 continue;
             }
             if !m::match_component(&comp.pat, &comp.mask, &name, dotglob) {

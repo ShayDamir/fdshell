@@ -57,3 +57,6 @@ fn split_command(expanded: &[ShortCStr], literal: &ShortCStr) -> (ShortCStr, Vec
     let extra = expanded.iter().skip(1).map(|s| s.export()).collect();
     (first.clone(), extra)
 }
+
+#[cfg(test)]
+mod tests;

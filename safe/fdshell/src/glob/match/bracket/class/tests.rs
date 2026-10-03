@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use super::{class_contains, class_end, is_class_start};
 
 #[test]
@@ -72,6 +70,8 @@ fn space_blank_cntrl_classes() {
     assert_eq!(class_contains(b"cntrl", b'\n'), Some(true));
     assert_eq!(class_contains(b"control", 0x1F), Some(true));
     assert_eq!(class_contains(b"cntrl", b'a'), Some(false));
+    // Space is 0x20 — the cntrl class is strictly below it (guards `b < 0x20`).
+    assert_eq!(class_contains(b"cntrl", b' '), Some(false));
 }
 
 #[test]

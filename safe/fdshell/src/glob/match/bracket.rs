@@ -41,18 +41,22 @@ pub(super) fn contains(bytes: &[u8], mask: &[bool], at_open: usize, b: u8) -> bo
         // (or an unclosed `[:`) falls through and its bytes are literal.
         if plain
             && c == b'['
-            && class::is_class_start(bytes, mask, i - 1)
-            && let Some(close) = class::class_end(bytes, i - 1)
-            && let Some(name) = bytes.get(i + 1..close - 2)
-            && let Some(member) = class::class_contains(name, b)
+            && let Some((close, member)) = class::class_member(bytes, mask, i, b)
         {
             if member {
                 return !negated;
             }
-            c = match bytes.get(close).copied() {
+            // A `]` right after the class closes the expression (the class
+            // was its last member); without this the scan would leak past
+            // the bracket and claim trailing bytes as members.
+            let nxt = match bytes.get(close).copied() {
                 Some(n) => n,
                 None => return negated,
             };
+            if nxt == b']' && !quoted(mask, close) {
+                return negated;
+            }
+            c = nxt;
             i = close + 1;
             continue;
         }

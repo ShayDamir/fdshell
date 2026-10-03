@@ -7,8 +7,9 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use crate::error::resolve::ResolveError;
 use crate::glob::expand;
-use crate::options::NULLGLOB;
+use crate::options::{FAILGLOB, NULLGLOB};
 use crate::state::ShellState;
 
 static COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
@@ -97,6 +98,32 @@ fn no_match_disappears_with_nullglob() {
 }
 
 #[test]
+fn no_match_errors_with_failglob() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().options |= FAILGLOB;
+    let dir = scratch();
+    // failglob errors on a pattern with no matches (the `GlobNoMatch` arm).
+    let report = expand(&word(&format!("{dir}/zzz*")), &[], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        ResolveError::GlobNoMatch { .. }
+    ));
+    // failglob wins over nullglob: it still errors, not empties.
+    cell.borrow_mut().unwrap().options |= NULLGLOB;
+    assert!(expand(&word(&format!("{dir}/zzz*")), &[], &cell).is_err());
+    // A matching pattern is unaffected by failglob.
+    assert_eq!(
+        expand_to_bytes(&cell, &format!("{dir}/a*")),
+        vec![
+            format!("{dir}/a1").into_bytes(),
+            format!("{dir}/a2").into_bytes()
+        ]
+    );
+}
+
+#[test]
 fn question_matches_one_char_but_not_dots() {
     let cell = ForkCell::new(ShellState::new());
     let dir = scratch();
@@ -110,22 +137,18 @@ fn question_matches_one_char_but_not_dots() {
 fn dot_leading_patterns_match_dot_entries() {
     let cell = ForkCell::new(ShellState::new());
     let dir = scratch();
-    // `.*` (a component whose first byte is a literal `.`) matches `.`/`..`
-    // plus the real dotfiles (bash: `echo .*` prints `.` `..` `.hidden`).
+    // `.*` (a component whose first byte is a literal `.`) matches the real
+    // dotfiles only — bash never lists `.`/`..` for any pattern.
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/.*")),
-        vec![
-            format!("{dir}/.").into_bytes(),
-            format!("{dir}/..").into_bytes(),
-            format!("{dir}/.hidden").into_bytes(),
-        ]
+        vec![format!("{dir}/.hidden").into_bytes()]
     );
-    // `.?` matches the two-byte `..` (one literal dot + one `?`).
+    // `.?` cannot match `..` (the walk never lists it): no match, verbatim.
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/.?")),
-        vec![format!("{dir}/..").into_bytes()]
+        vec![format!("{dir}/.?").into_bytes()]
     );
-    // A bare `*` never lists `.`/`..` (the component does not start with `.`).
+    // A bare `*` never lists `.`/`..`.
     assert!(
         !expand_to_bytes(&cell, &format!("{dir}/*"))
             .iter()

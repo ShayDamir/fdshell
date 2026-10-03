@@ -80,3 +80,6 @@ fn open_noclobber(
         Err(e) => Err(Report::new(OpenRedirectError::Open).attach(e)),
     }
 }
+
+#[cfg(test)]
+mod tests;

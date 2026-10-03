@@ -257,10 +257,15 @@ fn dotglob_lists_dotfiles() {
     let (out, _err, code) = run(&dir, "shopt -s dotglob; echo *");
     assert_eq!(code, 0);
     assert_eq!(out, ".hidden a1 a2 b1 file sub x\n");
-    // `.*` (a component whose first byte is a literal `.`) lists `.`/`..` too.
+    // `.*` lists the real dotfiles only — bash never lists `.`/`..`, even
+    // for a dot-leading pattern.
     let (out, _err, code) = run(&dir, "echo .*");
     assert_eq!(code, 0);
-    assert_eq!(out, ". .. .hidden\n");
+    assert_eq!(out, ".hidden\n");
+    // `.?` cannot match `..`: no match, verbatim.
+    let (out, _err, code) = run(&dir, "echo .?");
+    assert_eq!(code, 0);
+    assert_eq!(out, ".?\n");
     // Without dotglob, `*` skips the dotfile.
     let (out, _err, code) = run(&dir, "echo *");
     assert_eq!(code, 0);
@@ -297,6 +302,27 @@ fn posix_class_matches() {
     let (out, _err, code) = run(&dir, "echo [[:digit:]]*");
     assert_eq!(code, 0);
     assert_eq!(out, "[[:digit:]]*\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn class_as_last_member_does_not_leak_past_the_bracket() {
+    // A class that is the bracket's last member must not let the member
+    // scan claim the closing `]` (and trailing pattern bytes) as members:
+    // `echo [[:digit:]]xy` lists only `5xy` (bash parity).
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-glob-classleak-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["]xy", "xxy", "5xy"] {
+        std::fs::write(dir.join(name), b"").unwrap();
+    }
+    let (out, _err, code) = run(dir.to_str().unwrap(), "echo [[:digit:]]xy");
+    assert_eq!(code, 0);
+    assert_eq!(out, "5xy\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -246,9 +246,8 @@ fn dotglob_allows_leading_pattern_bytes_on_dot_names() {
 
 #[test]
 fn dotglob_does_not_match_dot_or_dotdot_via_bare_star() {
-    // Even with dotglob, bare `*`/`?` must not match `.`/`..` (the walk
-    // gates those on a literal `.` first byte); the matcher alone blocks them
-    // via the `.`/`..` names being two-byte / the star crossing nothing.
+    // The walk never lists `.`/`..` (for any pattern), so the matcher is
+    // only asked about real names; a single `?` still cannot eat two bytes.
     assert!(!m_dot(b"?", b".."));
 }
 
@@ -280,6 +279,46 @@ fn posix_class_membership() {
 }
 
 #[test]
+fn class_as_last_member_stops_at_the_closing_bracket() {
+    // A class that is the bracket's last member must not leak the member
+    // scan past the closing `]` (which would claim `]` and trailing pattern
+    // bytes as members).
+    assert!(m(b"[[:digit:]]x", b"5x"));
+    assert!(!m(b"[[:digit:]]x", b"]x"));
+    assert!(!m(b"[[:digit:]]xy", b"xxy"));
+    // A member after the class keeps the scan inside the bracket.
+    assert!(m(b"[[:digit:]x]y", b"xy"));
+    assert!(m(b"[[:digit:]x]y", b"5y"));
+    assert!(!m(b"[[:digit:]x]y", b"]y"));
+}
+
+#[test]
+fn a_non_class_bracket_does_not_open_a_class_span() {
+    // A `[` that is not a class start (no `:` after it) must not let the
+    // span walker jump to a later `:]`: the bracket closes at the first
+    // unquoted `]`, and the rest is trailing literal pattern.
+    assert!(!m(b"[[x:]]", b"x"));
+    assert!(m(b"[[x:]]", b"x]"));
+    // Same for a `[` whose inner `:` is a member, not a class opener.
+    assert!(!m(b"[a[b:]]", b"a"));
+    assert!(m(b"[a[b:]]", b"a]"));
+    // A non-class `[` keeps its bytes literal members (the `[:name:]`-shaped
+    // tail is not a class): `:` stays a member.
+    assert!(m(b"[x[.alpha:]]", b":]"));
+}
+
+#[test]
+fn an_empty_name_class_is_literal_members() {
+    // `[:]` is not a recognized class (empty name): its bytes are literal
+    // members, and the inner `]` closes the bracket (the last `]` is a
+    // trailing literal).
+    assert!(m(b"[[:]]", b":]"));
+    assert!(m(b"[[:]]", b"[]"));
+    assert!(!m(b"[[:]]", b"]"));
+    assert!(!m(b"[[:]]", b"x"));
+}
+
+#[test]
 fn posix_class_quoted_bracket_is_literal() {
     // A quoted `[` does not open a class: the whole word is one literal.
     let mask = [true, false, false, false, false, false, false, false, false];
@@ -296,6 +335,8 @@ fn has_unquoted_pattern_table() {
     assert!(!super::has_unquoted_pattern(b"plain", &[]));
     assert!(!super::has_unquoted_pattern(b"", &[]));
     assert!(!super::has_unquoted_pattern(b"[abc", &[]));
+    // An unclosed `[:` is not a class: the span is unclosed, no pattern.
+    assert!(!super::has_unquoted_pattern(b"x[:b", &[]));
     assert!(!super::has_unquoted_pattern(b"a\\*", &[]));
     assert!(!super::has_unquoted_pattern(b"\\[", &[]));
     assert!(!super::has_unquoted_pattern(b"a*", &[false, true]));
