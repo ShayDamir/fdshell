@@ -64,18 +64,29 @@ stop.
    new files as soon as they are created so nix builds (`lib.cleanSource`)
    see them; they go into the task branch's commits.
 
+   **Complexity / LOC control.** After any code change that might grow file
+   size, assess the line budget using the repository's complexity tool.
+   Immediately load the `complexity` skill (`skill(name="complexity")`) if any
+   non-test Rust file exceeds (or would exceed) the 90 LoC limit, or if
+   `python3 tools/complexity.py --check` fails. Reduce LOC (extract helpers/
+   modules, remove duplication, flatten control flow without changing behavior)
+   until `--check` passes. Complexity violations are blocking and must be
+   resolved before committing.
+
 6. **Verify and polish.** Run the AGENTS.md checks in order: `cargo fmt`;
    `cargo clippy -- -D warnings`; `cargo nextest run --status-level fail
    --show-progress none` — **never `cargo test`** (its shared harness breaks
-   `fork()`-based tests); then the hermetic check `nix flake check
-   --build-all`. File length is measured with `python3 tools/complexity.py`
-   — the authoritative measurement for all agents (never `wc -l`, awk, or raw
-   `tokei`): if a non-test file touched by this change is >90 LoC (STYLE.md
-   §2.2), split it before moving on, and mention any 80–90 band entries
-   introduced in the session summary. For coverage-sensitive work run
-   `nix build .#coverage` and check `result/coverage-report.txt`. Fix what
-   your own checks surface; make sure the change is clean, tested, and matches
-   the plan.
+   `fork()`-based tests); then `python3 tools/complexity.py --check` (must
+   pass with no non-test Rust file >90 LoC); then the hermetic check `nix
+   flake check --build-all`. File length is measured with
+   `python3 tools/complexity.py` — the authoritative measurement for all agents
+   (never `wc -l`, awk, or raw `tokei`): if a non-test file touched by this
+   change is >90 LoC (STYLE.md §2.2), split it before moving on, and mention
+   any 80–90 band entries introduced in the session summary. For
+   coverage-sensitive work run `nix build .#coverage` and check
+   `result/coverage-report.txt`. Fix what your own checks surface; make sure
+   the change is clean, tested, matches the plan, and passes the complexity
+   check.
 
 7. **Commit on the task branch.** Stage and commit exactly this task's files
    (implementation + tests + docs, including new files) on `taskN` — one or
