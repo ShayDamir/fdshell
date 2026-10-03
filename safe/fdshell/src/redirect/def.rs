@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 use super::{RedirectDirection, RedirectSource};
@@ -30,7 +31,7 @@ impl RedirectDef {
         RedirectDef {
             export_to,
             direction: RedirectDirection::Read,
-            source: RedirectSource::path(name),
+            source: RedirectSource::path(name, Vec::new()),
         }
     }
 
@@ -38,7 +39,7 @@ impl RedirectDef {
         RedirectDef {
             export_to,
             direction: RedirectDirection::Write,
-            source: RedirectSource::path(name),
+            source: RedirectSource::path(name, Vec::new()),
         }
     }
 
@@ -46,7 +47,7 @@ impl RedirectDef {
         RedirectDef {
             export_to,
             direction: RedirectDirection::Append,
-            source: RedirectSource::path(name),
+            source: RedirectSource::path(name, Vec::new()),
         }
     }
 

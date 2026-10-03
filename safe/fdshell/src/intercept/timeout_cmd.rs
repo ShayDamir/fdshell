@@ -24,6 +24,7 @@ pub(crate) fn run_timeout(
     let subcmdline = crate::parse::CommandLine {
         builtin: false,
         command: cfg.command,
+        command_mask: cfg.command_mask,
         args: cfg.args,
         args_mask: cfg.args_mask,
         args_quoted: cfg.args_quoted,

@@ -35,11 +35,18 @@ pub fn child_main(
         .change_context(ChildProcessError::BorrowFailed)?;
 
     crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), &resolved, &state);
+    // `run_external` re-borrows the cell to glob the command name, so the
+    // trace borrow must end first (RefCell, LESSONS.md).
+    let builtin = cmd.builtin || child::dispatch::builtin_first(&cmd.name, &state);
+    drop(state);
 
-    if cmd.builtin || child::dispatch::builtin_first(&cmd.name, &state) {
+    if builtin {
+        let state = cell
+            .borrow()
+            .change_context(ChildProcessError::BorrowFailed)?;
         child::dispatch::run_builtin(cmd.name.clone(), &refs, args, &state)
     } else {
-        external::run_external(&cmd, &refs, &state)
+        external::run_external(&cmd, &refs, cell)
     }
 }
 

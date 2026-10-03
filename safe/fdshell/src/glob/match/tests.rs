@@ -4,11 +4,16 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 fn m(pat: &[u8], name: &[u8]) -> bool {
-    super::match_component(pat, &[], name)
+    super::match_component(pat, &[], name, false)
 }
 
 fn m_masked(pat: &[u8], mask: &[bool], name: &[u8]) -> bool {
-    super::match_component(pat, mask, name)
+    super::match_component(pat, mask, name, false)
+}
+
+/// `match_component` with `dotglob` on.
+fn m_dot(pat: &[u8], name: &[u8]) -> bool {
+    super::match_component(pat, &[], name, true)
 }
 
 #[test]
@@ -222,6 +227,64 @@ fn dot_rule_blocks_pattern_leads_on_dot_names() {
     assert!(!m(b"?.", b"ab"));
     // Non-dot names are unaffected.
     assert!(m(b"*", b"visible"));
+}
+
+#[test]
+fn dotglob_allows_leading_pattern_bytes_on_dot_names() {
+    // With dotglob, a leading unquoted `*`/`?` may eat the dot.
+    assert!(m_dot(b"*", b".hidden"));
+    assert!(m_dot(b"?", b"."));
+    // A leading `[...]` may consume the dot only if it contains it: `[ab]`
+    // cannot match `.`, so `[ab]*` still does not match `.x`; `[.a]*` does.
+    assert!(!m_dot(b"[ab]*", b".x"));
+    assert!(m_dot(b"[.a]*", b".x"));
+    // A literal leading byte still matches (as before).
+    assert!(m_dot(b".*", b".hidden"));
+    // dotglob does not affect non-dot names.
+    assert!(m_dot(b"*", b"visible"));
+}
+
+#[test]
+fn dotglob_does_not_match_dot_or_dotdot_via_bare_star() {
+    // Even with dotglob, bare `*`/`?` must not match `.`/`..` (the walk
+    // gates those on a literal `.` first byte); the matcher alone blocks them
+    // via the `.`/`..` names being two-byte / the star crossing nothing.
+    assert!(!m_dot(b"?", b".."));
+}
+
+#[test]
+fn dotglob_quoted_leading_byte_still_literal() {
+    // A quoted leading `*` is literal regardless of dotglob.
+    assert!(!m_masked(b"*", &[true], b".x"));
+    assert!(m_masked(b"*", &[true], b"*"));
+}
+
+#[test]
+fn posix_class_membership() {
+    assert!(m(b"[[:alpha:]]", b"a"));
+    assert!(m(b"[[:alpha:]]", b"Z"));
+    assert!(!m(b"[[:alpha:]]", b"5"));
+    assert!(m(b"[[:digit:]]", b"9"));
+    assert!(!m(b"[[:digit:]]", b"a"));
+    // Negation of a class.
+    assert!(m(b"[![:space:]]", b"x"));
+    assert!(!m(b"[![:space:]]", b" "));
+    // A class mixed with a range and a literal.
+    assert!(m(b"[[:digit:]a-cc]", b"b"));
+    assert!(m(b"[[:digit:]a-cc]", b"7"));
+    assert!(!m(b"[[:digit:]a-cc]", b"d"));
+    // An unknown class is literal members, not a class.
+    assert!(m(b"[[:bogus:]]", b":"));
+    assert!(m(b"[[:bogus:]]", b"b"));
+    assert!(!m(b"[[:bogus:]]", b"5"));
+}
+
+#[test]
+fn posix_class_quoted_bracket_is_literal() {
+    // A quoted `[` does not open a class: the whole word is one literal.
+    let mask = [true, false, false, false, false, false, false, false, false];
+    assert!(m_masked(b"[:alpha:]]", &mask, b"[:alpha:]]"));
+    assert!(!m_masked(b"[:alpha:]]", &mask, b"a"));
 }
 
 #[test]

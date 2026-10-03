@@ -9,6 +9,7 @@ use crate::error::cmd::CmdError;
 pub struct TimeoutConfig {
     pub seconds: i64,
     pub command: ShortCStr,
+    pub command_mask: Vec<bool>,
     pub args: Vec<ShortCStr>,
     pub args_mask: Vec<Vec<bool>>,
     pub args_quoted: Vec<bool>,
@@ -23,12 +24,14 @@ pub fn parse(
     let seconds_arg = args.first().ok_or(CmdError::TimeoutMissingSeconds)?;
     let seconds = parse_seconds(seconds_arg)?;
     let command = args.get(1).ok_or(CmdError::TimeoutMissingCommand)?;
+    let command_mask = args_mask.get(1).cloned().unwrap_or_default();
     let sub_args: Vec<ShortCStr> = args.get(2..).unwrap_or_default().to_vec();
     let sub_args_mask: Vec<Vec<bool>> = args_mask.get(2..).unwrap_or_default().to_vec();
     let sub_args_quoted: Vec<bool> = args_quoted.get(2..).unwrap_or_default().to_vec();
     Ok(TimeoutConfig {
         seconds,
         command: command.clone(),
+        command_mask,
         args: sub_args,
         args_mask: sub_args_mask,
         args_quoted: sub_args_quoted,

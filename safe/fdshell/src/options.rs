@@ -7,6 +7,8 @@ pub const XTRACE: u32 = 8;
 pub const BUILTIN_FIRST: u32 = 16;
 pub const NULLGLOB: u32 = 32;
 pub const STRICT: u32 = 64;
+pub const DOTGLOB: u32 = 128;
+pub const FAILGLOB: u32 = 256;
 
 /// All shell options, bash-compatible names.
 ///
@@ -20,6 +22,8 @@ pub const OPTIONS: &[(&[u8], u32, u8)] = &[
     (b"builtin_first", BUILTIN_FIRST, 0),
     (b"nullglob", NULLGLOB, 0),
     (b"strict", STRICT, 0),
+    (b"dotglob", DOTGLOB, 0),
+    (b"failglob", FAILGLOB, 0),
 ];
 
 /// The options on by default (bash: `expand_aliases` is on in interactive shells).

@@ -17,9 +17,15 @@ pub(super) fn finish_command(
     specs: &[crate::parse::heredoc::HeredocBody],
     set_at: Position,
 ) -> Result<CommandLine, Report<ParseError>> {
+    // The command token precedes the first arg; its mask describes word 0.
+    let command_mask = tokens
+        .get(args_from - 1)
+        .map(|t| t.4.clone())
+        .unwrap_or_default();
     let mut cmd = CommandLine {
         builtin,
         command,
+        command_mask,
         args: Vec::new(),
         args_mask: Vec::new(),
         args_quoted: Vec::new(),
@@ -44,7 +50,7 @@ pub(super) fn finish_command(
             bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
             spec_at += 1;
             skip = extra;
-        } else if let Some(bg) = parse_bg_redirect(t)? {
+        } else if let Some(bg) = parse_bg_redirect(t, mask)? {
             // A pidvar bg redirect carries no redirects, so the loop is a
             // no-op there; the two cases share one straight-line form.
             for r in bg.redirects {
@@ -67,7 +73,7 @@ pub(super) fn finish_command(
         } else if let Some((r, extra)) = super::here_string::parse_here_string(tokens, i)? {
             bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
             skip = extra;
-        } else if let Some(r) = crate::parse::classify::parse_redirect(t, *fq)? {
+        } else if let Some(r) = crate::parse::classify::parse_redirect(t, *fq, mask)? {
             bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
         } else {
             cmd.args.push(t.clone());

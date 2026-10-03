@@ -8,6 +8,9 @@ use sys::ShortCStr;
 pub struct CommandLine {
     pub builtin: bool,
     pub command: ShortCStr,
+    /// Per-byte quote mask for the command word (word 0), parallel to it;
+    /// its unquoted pattern bytes glob the command name (bash field model).
+    pub command_mask: Vec<bool>,
     pub args: Vec<ShortCStr>,
     /// Per-byte quote mask for each arg (parallel to `args`, each mask
     /// parallel to its arg). `true` marks bytes that were inside double

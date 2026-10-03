@@ -26,6 +26,19 @@ fn pos() -> Position {
 fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
     super::parse(&stext(line))
 }
+
+/// A `Path` redirect def with the unquoted quote mask (all `false`), matching
+/// what the parser produces for an unquoted path word.
+fn path_def(export_to: i32, direction: RedirectDirection, path: &str) -> RedirectDef {
+    RedirectDef {
+        export_to,
+        direction,
+        source: RedirectSource::path(
+            sys::ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
+            vec![false; path.len()],
+        ),
+    }
+}
 #[test]
 fn test_mkdirat_capture() {
     let ParsedLine::Cmd(cmd) =
@@ -39,6 +52,7 @@ fn test_mkdirat_capture() {
         CommandLine {
             builtin: true,
             command: c"mkdirat".into(),
+            command_mask: vec![false; 7],
             args: vec![
                 c"--mode".into(),
                 c"755".into(),
@@ -224,7 +238,10 @@ fn test_path_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef::write_path(1, c"out.txt")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Write, "out.txt")]
+    );
 }
 
 #[test]
@@ -233,7 +250,10 @@ fn test_path_redirect_stdin() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef::read_path(0, c"input.txt")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(0, RedirectDirection::Read, "input.txt")]
+    );
 }
 
 #[test]
@@ -242,7 +262,10 @@ fn test_stderr_path_redirect() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef::write_path(2, c"err.log")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(2, RedirectDirection::Write, "err.log")]
+    );
 }
 
 #[test]
@@ -251,7 +274,10 @@ fn test_path_redirect_append() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef::append_path(1, c"out.log")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Append, "out.log")]
+    );
 }
 
 #[test]
@@ -260,7 +286,10 @@ fn test_path_redirect_append_named_fd() {
         panic!("expected Cmd")
     };
 
-    assert_eq!(cmd.redirects, vec![RedirectDef::append_path(2, c"err.log")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(2, RedirectDirection::Append, "err.log")]
+    );
 }
 
 #[test]
@@ -329,7 +358,7 @@ fn test_heredoc_args_and_redirect_after_operator() {
         cmd.redirects,
         vec![
             RedirectDef::here_doc(c"body\n", true),
-            RedirectDef::write_path(1, c"out"),
+            path_def(1, RedirectDirection::Write, "out"),
         ]
     );
 }
@@ -516,7 +545,7 @@ fn test_fd_path_redirect_like_is_path() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::read_path(0, c"/dev/fd/3x")]
+        vec![path_def(0, RedirectDirection::Read, "/dev/fd/3x")]
     );
 }
 
@@ -527,7 +556,7 @@ fn test_fd_path_negative_falls_through_to_path() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::read_path(0, c"/dev/fd/-1")]
+        vec![path_def(0, RedirectDirection::Read, "/dev/fd/-1")]
     );
 }
 
@@ -550,7 +579,7 @@ fn test_rw_redirect_defaults_to_fd_zero() {
         vec![RedirectDef {
             export_to: 0,
             direction: RedirectDirection::Rw,
-            source: RedirectSource::path(c"file"),
+            source: RedirectSource::path(c"file", vec![false; 4]),
         }]
     );
 }
@@ -565,7 +594,7 @@ fn test_rw_redirect_numbered() {
         vec![RedirectDef {
             export_to: 3,
             direction: RedirectDirection::Rw,
-            source: RedirectSource::path(c"file"),
+            source: RedirectSource::path(c"file", vec![false; 4]),
         }]
     );
 }
@@ -609,8 +638,8 @@ fn test_combined_redirect() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::write_path(1, c"out.log"),
-            RedirectDef::write_path(2, c"out.log"),
+            path_def(1, RedirectDirection::Write, "out.log"),
+            path_def(2, RedirectDirection::Write, "out.log"),
         ]
     );
 }
@@ -624,8 +653,8 @@ fn test_combined_redirect_append() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::append_path(1, c"out.log"),
-            RedirectDef::append_path(2, c"out.log"),
+            path_def(1, RedirectDirection::Append, "out.log"),
+            path_def(2, RedirectDirection::Append, "out.log"),
         ]
     );
 }

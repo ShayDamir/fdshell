@@ -21,6 +21,10 @@ pub(crate) enum OpenRedirectError {
     FdNotOpen { n: i32 },
     /// cannot overwrite existing file '{name}': noclobber is set
     Noclobber { name: sys::ShortCStr },
+    /// ambiguous redirect: {name}
+    AmbiguousRedirect { name: sys::ShortCStr },
+    /// failed to glob the redirect target
+    Glob,
     /// failed to duplicate fd {n}; the descriptor table may be full
     DupFdFailed { n: i32 },
     /// failed to close redirection target fd {n}

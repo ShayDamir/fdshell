@@ -15,6 +15,7 @@ fn make_read_cmdline(args: &[ShortCStr]) -> CommandLine {
     CommandLine {
         builtin: false,
         command: c"read".into(),
+        command_mask: vec![],
         args_mask: vec![vec![]; args.len()],
         args_quoted: vec![false; args.len()],
         args: args.to_vec(),

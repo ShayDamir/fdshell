@@ -7,6 +7,7 @@
 //! right after the range end is `]`, otherwise that byte is the next member
 //! (bash `BRACKMATCH` semantics).
 
+mod class;
 mod span;
 
 pub(in crate::glob) use span::{quoted, span};
@@ -35,6 +36,25 @@ pub(super) fn contains(bytes: &[u8], mask: &[bool], at_open: usize, b: u8) -> bo
             end = n;
             plain = false;
             i += 1;
+        }
+        // A recognized `[:class:]` is one atomic member; an unrecognized one
+        // (or an unclosed `[:`) falls through and its bytes are literal.
+        if plain
+            && c == b'['
+            && class::is_class_start(bytes, mask, i - 1)
+            && let Some(close) = class::class_end(bytes, i - 1)
+            && let Some(name) = bytes.get(i + 1..close - 2)
+            && let Some(member) = class::class_contains(name, b)
+        {
+            if member {
+                return !negated;
+            }
+            c = match bytes.get(close).copied() {
+                Some(n) => n,
+                None => return negated,
+            };
+            i = close + 1;
+            continue;
         }
         let Some(nxt) = bytes.get(i).copied() else {
             break;

@@ -26,9 +26,10 @@ pub(super) fn has_unquoted_pattern(bytes: &[u8], mask: &[bool]) -> bool {
 ///
 /// Iterative star-backtracking, no recursion (LESSONS.md). `*` never crosses
 /// `/` because components are matched separately; a leading unquoted `*`, `?`
-/// or valid `[...]` cannot consume a name's leading `.` (bash FNM_PERIOD).
-pub(super) fn match_component(pat: &[u8], mask: &[bool], name: &[u8]) -> bool {
-    if dot_blocked(pat, mask, name) {
+/// or valid `[...]` cannot consume a name's leading `.` (bash FNM_PERIOD)
+/// unless `dotglob` is set.
+pub(super) fn match_component(pat: &[u8], mask: &[bool], name: &[u8], dotglob: bool) -> bool {
+    if dot_blocked(pat, mask, name, dotglob) {
         return false;
     }
     let mut pi = 0usize;
@@ -82,9 +83,10 @@ pub(super) fn match_component(pat: &[u8], mask: &[bool], name: &[u8]) -> bool {
 }
 
 /// A name starting with `.` needs a literal first pattern byte: a leading
-/// unquoted `*`, `?`, or valid `[...]` cannot consume it.
-fn dot_blocked(pat: &[u8], mask: &[bool], name: &[u8]) -> bool {
-    if name.first() != Some(&b'.') {
+/// unquoted `*`, `?`, or valid `[...]` cannot consume it — unless `dotglob`
+/// is set, in which case those pattern bytes may eat the leading `.`.
+fn dot_blocked(pat: &[u8], mask: &[bool], name: &[u8], dotglob: bool) -> bool {
+    if name.first() != Some(&b'.') || dotglob {
         return false;
     }
     match pat.first().copied() {

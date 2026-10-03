@@ -1,8 +1,9 @@
 //! Glob (pathname) expansion: a pattern word becomes its sorted matches.
 //!
 //! A word expands when it holds an unquoted, unescaped `*`, `?`, or valid
-//! bracket expression. A pattern with no matches is passed through verbatim
-//! unless `nullglob` is set, in which case it expands to nothing.
+//! bracket expression. `matches` returns the raw match list; `expand` applies
+//! the shell-option policy on an empty result (`failglob` errors, `nullglob`
+//! empties, otherwise the word passes through).
 
 mod r#match;
 mod walk;
@@ -17,14 +18,13 @@ use crate::error::resolve::ResolveError;
 use crate::options;
 use crate::state::ShellState;
 
-/// Glob-expand `word` (with its quote `mask`) into result words.
+/// Raw pathname matches of `word` (with its quote `mask`), bytewise-sorted.
 ///
-/// A word with no unquoted pattern bytes — and the empty word — passes
-/// through unchanged. A pattern with no matches passes through unchanged
-/// unless `nullglob` is set. Results are bytewise-sorted full paths; callers
-/// assign any trace origin (matches are new shell words, a pass-through is
-/// the input word itself).
-pub(crate) fn expand(
+/// A word with no unquoted pattern bytes — and the empty word — yields
+/// `[word]` without touching the filesystem; a pattern with no matches yields
+/// `[]`. `dotglob` is read from `cell` (block-scoped borrow) and threaded
+/// into the walk.
+pub(crate) fn matches(
     word: &ShortCStr,
     mask: &[bool],
     cell: &ForkCell<ShellState>,
@@ -33,21 +33,42 @@ pub(crate) fn expand(
     if !r#match::has_unquoted_pattern(bytes, mask) {
         return Ok(vec![word.clone()]);
     }
-    let names = walk::walk(word, mask);
-    if names.is_empty() {
-        let nullglob = {
-            let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-            state.options & options::NULLGLOB != 0
-        };
-        if !nullglob {
-            return Ok(vec![word.clone()]);
-        }
-        return Ok(Vec::new());
-    }
-    Ok(names
+    let dotglob = {
+        let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
+        state.options & options::DOTGLOB != 0
+    };
+    Ok(walk::walk(word, mask, dotglob)
         .into_iter()
         .filter_map(|n| ShortCStr::from_vec(n).ok())
         .collect())
+}
+
+/// Glob-expand `word` into result words, applying the option policy on a
+/// pattern with no matches: `failglob` (checked first) errors, `nullglob`
+/// empties the result, otherwise the word passes through unchanged. A
+/// non-pattern word is one word (its own clone); matches are bytewise-sorted
+/// full paths (callers assign any trace origin).
+pub(crate) fn expand(
+    word: &ShortCStr,
+    mask: &[bool],
+    cell: &ForkCell<ShellState>,
+) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
+    let names = matches(word, mask, cell)?;
+    if !names.is_empty() {
+        return Ok(names);
+    }
+    // `matches` released the cell borrow; re-borrow for the option policy.
+    let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
+    let opts = state.options;
+    if opts & options::FAILGLOB != 0 {
+        return Err(Report::new(ResolveError::GlobNoMatch {
+            word: word.clone(),
+        }));
+    }
+    if opts & options::NULLGLOB != 0 {
+        return Ok(Vec::new());
+    }
+    Ok(vec![word.clone()])
 }
 
 #[cfg(test)]

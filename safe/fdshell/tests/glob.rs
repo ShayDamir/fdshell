@@ -239,3 +239,104 @@ fn star_lists_directory_larger_than_one_getdents_buffer() {
     assert_eq!(out, format!("{}\n", names.join(" ")));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Write an executable POSIX script so command-name globbing can exec it.
+fn write_script(dir: &str, name: &str, body: &str) {
+    let path = std::path::Path::new(dir).join(name);
+    std::fs::write(&path, body).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(&path).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&path, perm).unwrap();
+}
+
+#[test]
+fn dotglob_lists_dotfiles() {
+    let dir = scratch("dotglob");
+    // `*` with dotglob includes the dotfile but never `.`/`..`.
+    let (out, _err, code) = run(&dir, "shopt -s dotglob; echo *");
+    assert_eq!(code, 0);
+    assert_eq!(out, ".hidden a1 a2 b1 file sub x\n");
+    // `.*` (a component whose first byte is a literal `.`) lists `.`/`..` too.
+    let (out, _err, code) = run(&dir, "echo .*");
+    assert_eq!(code, 0);
+    assert_eq!(out, ". .. .hidden\n");
+    // Without dotglob, `*` skips the dotfile.
+    let (out, _err, code) = run(&dir, "echo *");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a1 a2 b1 file sub x\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn failglob_errors_on_no_match() {
+    let dir = scratch("failglob");
+    let (out, err, code) = run(&dir, "shopt -s failglob; echo zzz*");
+    assert_ne!(code, 0);
+    assert!(err.contains("no match"), "stderr: {err}");
+    assert_eq!(out, "");
+    // failglob beats nullglob: the pattern is not dropped, it errors.
+    let (out, err, code) = run(&dir, "shopt -s nullglob; shopt -s failglob; echo zzz*");
+    assert_ne!(code, 0);
+    assert!(err.contains("no match"), "stderr: {err}");
+    assert_eq!(out, "");
+    // A matching pattern is unaffected.
+    let (out, _err, code) = run(&dir, "shopt -s failglob; echo a*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a1 a2\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn posix_class_matches() {
+    let dir = scratch("class");
+    let (out, _err, code) = run(&dir, "echo [[:alpha:]]*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a1 a2 b1 file sub x\n");
+    // No file starts with a digit: the pattern stays verbatim.
+    let (out, _err, code) = run(&dir, "echo [[:digit:]]*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[[:digit:]]*\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn redirect_target_globs() {
+    let dir = scratch("redir");
+    // Two `a*` matches: ambiguous redirect, nothing written.
+    let (_out, err, code) = run(&dir, "echo hi >a*");
+    assert_ne!(code, 0);
+    assert!(err.contains("ambiguous redirect"), "stderr: {err}");
+    // A single `b*` match: writes that file.
+    let (_out, _err, code) = run(&dir, "echo hi >b*");
+    assert_eq!(code, 0);
+    assert_eq!(
+        std::fs::read_to_string(dir.as_str().to_owned() + "/b1").unwrap(),
+        "hi\n"
+    );
+    // No match: the literal word is created.
+    let (_out, _err, code) = run(&dir, "echo hi >zzz*");
+    assert_eq!(code, 0);
+    assert_eq!(
+        std::fs::read_to_string(dir.as_str().to_owned() + "/zzz*").unwrap(),
+        "hi\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn command_name_globs() {
+    let dir = scratch("cmdname");
+    write_script(&dir, "run.sh", "#!/bin/sh\necho ran\n");
+    // Sole match: the match is the command.
+    let (out, _err, code) = run(&dir, "./run.s*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "ran\n");
+    // Multi-match: the first is the command, the rest are leading args.
+    write_script(&dir, "c1.sh", "#!/bin/sh\necho got:$1\n");
+    write_script(&dir, "c2.sh", "#!/bin/sh\necho never\n");
+    let (out, _err, code) = run(&dir, "./c*.sh");
+    assert_eq!(code, 0);
+    assert_eq!(out, "got:./c2.sh\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

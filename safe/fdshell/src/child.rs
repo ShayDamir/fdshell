@@ -28,6 +28,7 @@ mod type_cmd;
 mod verity;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use core::ffi::CStr;
 use sys::ShortCStr;
 
@@ -37,6 +38,9 @@ pub use run::child_main;
 pub struct Command {
     pub builtin: bool,
     pub name: ShortCStr,
+    /// Per-byte quote mask for the command word (word 0); its unquoted
+    /// pattern bytes glob the command name (bash field model).
+    pub command_mask: Vec<bool>,
 }
 
 /// Everything a builtin handler may need: the command name, the substituted
@@ -69,6 +73,7 @@ impl From<&CommandLine> for Command {
         Command {
             builtin: cmdline.builtin,
             name: cmdline.command.clone(),
+            command_mask: cmdline.command_mask.clone(),
         }
     }
 }

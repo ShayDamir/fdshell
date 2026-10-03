@@ -20,6 +20,10 @@ pub(in crate::glob) fn span(bytes: &[u8], mask: &[bool], at_open: usize) -> Opti
         match b {
             b'\\' if !quoted(mask, i) => i += 2,
             b']' if !quoted(mask, i) => return Some(i + 1),
+            // The inner `]` of a `[:class:]` must not close the expression.
+            b'[' if super::class::is_class_start(bytes, mask, i) => {
+                i = super::class::class_end(bytes, i).unwrap_or(i + 1);
+            }
             _ => i += 1,
         }
     }

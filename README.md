@@ -151,31 +151,43 @@ is expanded against the filesystem (bash pathname-expansion semantics):
 
 - `*` matches any run of bytes except `/`; `?` matches exactly one byte;
   `[...]` matches one byte from a set — with `a-z` ranges, `!` negation,
-  and a leading `]` as a literal member.
+  a leading `]` as a literal member, and POSIX classes `[[:alpha:]]`,
+  `[[:digit:]]`, `[[:alnum:]]`, `[[:upper:]]`, `[[:lower:]]`, `[[:space:]]`,
+  `[[:punct:]]`, `[[:xdigit:]]` (also `[[:blank:]]`, `[[:print:]]`,
+  `[[:graph:]]`, `[[:cntrl:]]`).
 - Matching is per path component: `*` never crosses a `/`. Unquoted `/`
   separates pattern components, which are walked literally (`echo sub/*`).
   A leading `/` makes the pattern absolute; a trailing `/` matches
   directories only and is kept in the results (`echo */` → `sub/`).
-- `.` and `..` are never matched by a pattern component, and a pattern
-  cannot consume a name's leading `.` unless the pattern starts with a
-  literal `.` (`echo *` skips `.hidden`; `echo .h*` matches it).
+- A pattern cannot consume a name's leading `.` unless the pattern starts
+  with a literal `.` (`echo *` skips `.hidden`; `echo .h*` matches it).
+  `.` and `..` are never matched by an ordinary pattern; a component whose
+  first byte is a literal `.` (as in `.*`) matches them too
+  (`echo .*` → `.` `..` `.hidden`).
 - Symlinks to directories are followed at intermediate positions
   (`ln -s sub link; echo link/*` works).
 - Results are sorted bytewise. A pattern with no matches is passed through
-  verbatim (bash default); `shopt -s nullglob` makes it disappear.
+  verbatim (bash default); `shopt -s nullglob` makes it disappear;
+  `shopt -s failglob` makes the command fail with `no match: <word>`
+  (failglob wins over nullglob).
+- `shopt -s dotglob` makes `*`, `?`, and `[...]` match a leading `.`
+  (`echo *` then lists `.hidden`); it never lists `.`/`..` on its own.
 
 Quoting: double-quoted bytes always match literally; a fully quoted word is
 never expanded. Expansion happens for command arguments (external, builtins,
 `builtin`, `become`), `set --` words, user-function arguments, unquoted
-`$@` / `$*` fields (which re-glob, like bash), and literal `for … in` words.
-`$(…)` / `$((…))` outputs, `case` words, redirect targets, and command names
-are not expanded (v1).
+`$@` / `$*` fields (which re-glob, like bash), literal `for … in` words,
+redirect target words (a `> word` with pattern chars), and the command name
+(word 0) — a sole match runs that file; several matches run the first with
+the rest as leading arguments. `$(…)` / `$((…))` outputs and `case` words
+are not expanded.
+
+A redirect target that globs to more than one file is an error:
+`echo hi >a*` with two `a*` files fails with `ambiguous redirect`; a target
+with no match writes a literal file named after the pattern.
 
 Limitations:
 
-- No `[:class:]` character classes inside brackets.
-- No `dotglob` / `failglob` (bash defaults are off; shopt follow-up planned).
-- Redirect target words and command names (word 0) are not globbed.
 - Backslash: fdshell keeps `\X` in the word (argv semantics — `echo \*`
   passes `\*` to the program), so an escaped pattern character does not
   trigger expansion: `echo a\*` prints `a\*` verbatim where bash prints

@@ -40,7 +40,7 @@ fn resolve_one(
 ) -> Result<Redirect, Report<OpenRedirectError>> {
     match &r.source {
         super::RedirectSource::Var(var) => arms::resolve_var(var, r.export_to, min_fd, cell),
-        super::RedirectSource::Path(_) => arms::resolve_path(r.export_to, min_fd, opened_iter),
+        super::RedirectSource::Path { .. } => arms::resolve_path(r.export_to, min_fd, opened_iter),
         super::RedirectSource::HereString(word) => Ok(Redirect::Dup {
             export_to: r.export_to,
             local: super::herestring::here_string(word, cache, cell)?,

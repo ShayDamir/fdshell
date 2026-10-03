@@ -107,19 +107,29 @@ fn question_matches_one_char_but_not_dots() {
 }
 
 #[test]
-fn dot_leading_patterns_never_match_dot_entries() {
+fn dot_leading_patterns_match_dot_entries() {
     let cell = ForkCell::new(ShellState::new());
     let dir = scratch();
-    // getdents also returns `.`/`..`; the walk drops them, so `.*` lists
-    // only the real dotfiles (bash: `echo .*` never prints `.`/`..`).
+    // `.*` (a component whose first byte is a literal `.`) matches `.`/`..`
+    // plus the real dotfiles (bash: `echo .*` prints `.` `..` `.hidden`).
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/.*")),
-        vec![format!("{dir}/.hidden").into_bytes()]
+        vec![
+            format!("{dir}/.").into_bytes(),
+            format!("{dir}/..").into_bytes(),
+            format!("{dir}/.hidden").into_bytes(),
+        ]
     );
-    // A dot pattern with no real match stays verbatim: `..` must not count.
+    // `.?` matches the two-byte `..` (one literal dot + one `?`).
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/.?")),
-        vec![format!("{dir}/.?").into_bytes()]
+        vec![format!("{dir}/..").into_bytes()]
+    );
+    // A bare `*` never lists `.`/`..` (the component does not start with `.`).
+    assert!(
+        !expand_to_bytes(&cell, &format!("{dir}/*"))
+            .iter()
+            .any(|n| n.ends_with(b"/.") || n.ends_with(b"/.."))
     );
 }
 

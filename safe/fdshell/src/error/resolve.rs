@@ -27,6 +27,8 @@ pub(crate) enum ResolveError {
     ArithNotInteger { var: ShortCStr },
     /// variable {var} refers to itself (circular reference)
     ArithCircular { var: ShortCStr },
+    /// no match: {word}
+    GlobNoMatch { word: ShortCStr },
     /// resolution failed
     Resolve,
     /// impossible error state (should never occur)

@@ -11,7 +11,10 @@ pub struct BgRedirectResult {
     pub bg_force: bool,
 }
 
-pub fn parse_bg_redirect(t: &ShortCStr) -> Result<Option<BgRedirectResult>, Report<ParseError>> {
+pub fn parse_bg_redirect(
+    t: &ShortCStr,
+    mask: &[bool],
+) -> Result<Option<BgRedirectResult>, Report<ParseError>> {
     let Some(rest) = t.strip_prefix(b"&>") else {
         return Ok(None);
     };
@@ -29,6 +32,7 @@ pub fn parse_bg_redirect(t: &ShortCStr) -> Result<Option<BgRedirectResult>, Repo
             bg_force: false,
         }));
     }
+    let rest_len = rest.len();
     let (path, direction) = if let Some(p) = rest.strip_prefix(b">") {
         (p, RedirectDirection::Append)
     } else {
@@ -37,7 +41,10 @@ pub fn parse_bg_redirect(t: &ShortCStr) -> Result<Option<BgRedirectResult>, Repo
     let source = if path.starts_with(b"%") {
         RedirectSource::Var(path.get(1..).ok_or(ParseError::Never)?)
     } else {
-        RedirectSource::path(path)
+        // The path is the token suffix after `&>` (and `>`); align its mask.
+        let path_offset = 2 + (rest_len - path.len());
+        let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
+        RedirectSource::path(path, path_mask)
     };
     let r1 = RedirectDef {
         export_to: 1,

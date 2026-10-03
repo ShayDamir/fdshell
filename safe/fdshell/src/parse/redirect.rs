@@ -15,25 +15,36 @@ pub(super) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
 }
 
 fn parse_path_redirect(
-    after_op: ShortCStr,
-    prefix: ShortCStr,
+    s: &ShortCStr,
+    mask: &[bool],
+    op_pos: usize,
     dir: u8,
+    prefix: &ShortCStr,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    let after_op = s.get(op_pos + 1..).ok_or(ParseError::InvalidRedirect)?;
+    let after_op_len = after_op.len();
     let (rest, direction) = super::redirect_op::redirect_op(dir, after_op)?;
-    let Some(export_to) = parse_fd(&prefix, dir) else {
+    let Some(export_to) = parse_fd(prefix, dir) else {
         return Ok(None);
     };
     if let Some(n) = super::fd_path::fd_path_target(&rest) {
         return Ok(Some(RedirectDef::dup(export_to, n)));
     }
+    // The path is the token suffix after the operator; align its quote mask.
+    let path_offset = op_pos + 1 + (after_op_len - rest.len());
+    let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
     Ok(Some(RedirectDef {
         export_to,
         direction,
-        source: RedirectSource::path(rest),
+        source: RedirectSource::path(rest, path_mask),
     }))
 }
 
-pub fn parse_redirect(s: &ShortCStr, fq: bool) -> Result<Option<RedirectDef>, Report<ParseError>> {
+pub fn parse_redirect(
+    s: &ShortCStr,
+    fq: bool,
+    mask: &[bool],
+) -> Result<Option<RedirectDef>, Report<ParseError>> {
     if fq {
         return Ok(None);
     }
@@ -68,6 +79,6 @@ pub fn parse_redirect(s: &ShortCStr, fq: bool) -> Result<Option<RedirectDef>, Re
             Ok(None)
         }
     } else {
-        parse_path_redirect(after_op, prefix, dir)
+        parse_path_redirect(s, mask, op_pos, dir, &prefix)
     }
 }
