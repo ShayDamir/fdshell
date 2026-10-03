@@ -70,6 +70,46 @@ fn oversize_single_line_is_capped() {
     );
 }
 
+/// A line of exactly the cap (64 MiB) must be accepted: the limit allows
+/// `limit` bytes and fails only on the next one, so this pins the boundary
+/// the oversize test cannot (it pipes cap + 1, which every comparison
+/// operator rejects).
+#[test]
+fn line_at_cap_is_accepted() {
+    let mut child = Command::new(BIN)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Write exactly cap bytes — a comment line (`#` + cap - 1 `a`s) — in 4
+    // KiB chunks (no 64 MiB allocation in this process under the 128 MB
+    // test VA cap), then `exit 0`. The line is a no-op once accepted, so
+    // the run ends cleanly; a 64 MiB command line could not finish under
+    // the cap (line buffer + script copy fill the child's VA, and its
+    // "not found" report would be 134 MB). What this pins is the cap
+    // check itself: under a `>=`/`==` mutant the child bails on the cap-th
+    // byte with the size-limit error before any of that.
+    let cap = 64 * 1024 * 1024;
+    let stdin = child.stdin.as_mut().unwrap();
+    stdin.write_all(b"#").unwrap();
+    let chunk = [b'a'; 4096];
+    let mut left = cap - 1;
+    while left > 0 {
+        let n = core::cmp::min(left, chunk.len());
+        stdin.write_all(chunk.get(..n).unwrap()).unwrap();
+        left -= n;
+    }
+    stdin.write_all(b"\nexit 0\n").unwrap();
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert!(
+        !stderr.contains("line exceeds the size limit"),
+        "a line of exactly the cap must be accepted, stderr={stderr}"
+    );
+}
+
 #[test]
 fn if_block_spans_lines() {
     let (out, err, code) = run_repl("if true; then\necho in-if\nfi\nexit\n");
