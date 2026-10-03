@@ -9,7 +9,8 @@ use builtins::error::BuiltinError;
 use error_stack::{Report, bail, ensure};
 
 /// The `--dump` metadata item (uapi `FS_VERITY_METADATA_TYPE_*` codes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(crate) enum MetadataType {
     MerkleTree,
     Descriptor,
