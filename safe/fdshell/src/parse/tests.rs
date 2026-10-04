@@ -2606,6 +2606,19 @@ fn test_env_assign_prefix_on_command() {
 }
 
 #[test]
+fn test_env_assign_prefix_builtin_detection_runs_on_command_word() {
+    // Builtin recognition runs on the command word after the prefix, not on
+    // the first (assignment) word: `FOO=bar printf hi` is a builtin command.
+    let ParsedLine::Cmd(cmd) = parse(b"FOO=bar printf hi").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.builtin);
+    assert_eq!(cmd.command, c"printf".into());
+    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.args, vec![c"hi".into()]);
+}
+
+#[test]
 fn test_env_assign_compound_prefix() {
     let ParsedLine::Cmd(cmd) = parse(b"FOO=bar BAZ=qux cmd").unwrap() else {
         panic!("expected Cmd")

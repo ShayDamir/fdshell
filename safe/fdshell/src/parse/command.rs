@@ -30,7 +30,7 @@ pub fn parse_command(
         true
     } else {
         tokens
-            .get(prefix + kw)
+            .get(prefix)
             .is_some_and(|(t, _, _, _, _)| is_builtin(t))
     };
     let command = tokens
