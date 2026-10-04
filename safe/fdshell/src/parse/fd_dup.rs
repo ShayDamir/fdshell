@@ -5,7 +5,8 @@ use sys::ShortCStr;
 
 use super::redirect::parse_fd;
 
-/// Parse `>&N` (dup) and `>&-` (close) redirections; other `&…` tails are not redirects.
+/// Parse `>&N` (dup), `>&-` (close), and `>&%var` (dup from an fd variable)
+/// redirections; other `&…` tails are not redirects.
 pub fn parse_fd_dup_redirect(
     after_op: &ShortCStr,
     prefix: &ShortCStr,
@@ -20,6 +21,8 @@ pub fn parse_fd_dup_redirect(
     }
     match rest.parse::<i32>() {
         Ok(from) if from >= 0 => Ok(Some(RedirectDef::dup(export_to, from))),
-        _ => Ok(None),
+        _ => Ok(rest
+            .strip_prefix(b"%")
+            .map(|name| RedirectDef::dup_var(export_to, name))),
     }
 }

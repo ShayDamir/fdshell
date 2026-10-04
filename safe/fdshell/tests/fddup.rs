@@ -129,3 +129,38 @@ fn dup_of_closed_fd_is_actionable() {
     assert_ne!(code, 0);
     assert!(err.contains("fd 99 is not open"), "stderr={err:?}");
 }
+
+/// `>&%var` copies the fd the variable refers to onto the target: echo's
+/// stdout becomes the file, so the file receives the echo.
+#[test]
+fn dup_var_redirect_writes_through_fd_var() {
+    let path = temp_path("dup_var_write");
+    std::fs::write(&path, b"").unwrap();
+    let (out, err, code) = run(&format!(
+        "builtin openat2 --flags O_RDWR {path} %>%f; echo hi >&%f; cat {path}"
+    ));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n", "stdout={out:?}");
+}
+
+/// `<&%var` copies the fd the variable refers to onto stdin: cat reads the
+/// file through the duplicated descriptor.
+#[test]
+fn dup_var_redirect_reads_through_fd_var() {
+    let path = temp_path("dup_var_read");
+    std::fs::write(&path, b"hi\n").unwrap();
+    let (out, err, code) = run(&format!(
+        "builtin openat2 --flags O_RDONLY {path} %>%f; cat <&%f"
+    ));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n", "stdout={out:?}");
+}
+
+#[test]
+fn dup_var_redirect_missing_var_is_actionable() {
+    let (_out, err, code) = run("cat 2>&%nope");
+    assert_ne!(code, 0);
+    assert!(err.contains("fd variable"), "stderr={err:?}");
+}

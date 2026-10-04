@@ -113,8 +113,9 @@ another operator (`>`, `<<`, `&1`, `%var`) — `cmd >` and `cmd > ;` are
 `invalid redirect` parse errors. Targets: a path (globbed like other
 words, with the quote mask applied), `%var` (the variable's fd, attached
 form: `>%var`), and `/dev/fd/N` / `/proc/self/fd/N` (dup of the open fd
-N). `&>file`, `>&1`, `2>&-`, here-docs, and here-strings are the other
-redirect sources; see below. A second redirect to the same fd on one
+N). `&>file`, `>&1`, `>&%var` (dup the fd the variable refers to, e.g.
+`2>&%f`), `2>&-`, here-docs, and here-strings are the other redirect
+sources; see below. A second redirect to the same fd on one
 command is a `duplicate redirect target` parse error.
 
 ## Heredocs

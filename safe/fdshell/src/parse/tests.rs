@@ -484,6 +484,51 @@ fn test_fd_close_redirect() {
 }
 
 #[test]
+fn test_fd_dup_var_redirect_stderr() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&%name").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 2,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(c"name".into()),
+        }]
+    );
+}
+
+#[test]
+fn test_fd_dup_var_redirect_stdin() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 0<&%name").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(c"name".into()),
+        }]
+    );
+}
+
+#[test]
+fn test_fd_dup_var_redirect_bare_prefix() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd >&%name").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(c"name".into()),
+        }]
+    );
+}
+
+#[test]
 fn test_fd_dup_redirect_non_numeric_is_arg() {
     let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&abc").unwrap() else {
         panic!("expected Cmd")

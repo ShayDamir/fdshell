@@ -79,6 +79,16 @@ impl RedirectDef {
         }
     }
 
+    /// Dup-from-variable redirect: copy the fd the fd variable `name` refers
+    /// to into `export_to` (`2>&%f`). Resolves like `>%name`.
+    pub fn dup_var(export_to: i32, name: impl Into<ShortCStr>) -> Self {
+        RedirectDef {
+            export_to,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::var(name),
+        }
+    }
+
     /// Close redirect: drop fd `export_to` (`2>&-`).
     pub fn close(export_to: i32) -> Self {
         RedirectDef {
