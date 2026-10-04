@@ -6,6 +6,7 @@
 //! exits 124 (matching coreutils `timeout`).
 
 use alloc::vec;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
@@ -25,6 +26,9 @@ pub(crate) fn run_timeout(
         builtin: false,
         command: cfg.command,
         command_mask: cfg.command_mask,
+        // A scoped prefix on `timeout` itself rides in the forked child's
+        // inherited state, not in this sub-command line.
+        env_assigns: vec![],
         args: cfg.args,
         args_mask: cfg.args_mask,
         args_quoted: cfg.args_quoted,
@@ -33,8 +37,8 @@ pub(crate) fn run_timeout(
         pidvar: None,
         bg_force: false,
     };
-    let outcome =
-        crate::launch::launch(cell, &subcmdline).change_context(CmdError::TimeoutLaunch)?;
+    let outcome = crate::launch::launch(cell, &subcmdline, &Vec::new())
+        .change_context(CmdError::TimeoutLaunch)?;
     let exit = bounded_wait(&outcome.pidfd, cfg.seconds)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(exit);

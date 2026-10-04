@@ -18,6 +18,7 @@ mod detect_keyword;
 mod dispatch;
 mod elif;
 mod emit;
+mod envassign;
 mod fd_dup;
 mod fd_path;
 pub(crate) mod for_block;

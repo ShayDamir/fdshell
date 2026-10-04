@@ -11,6 +11,9 @@ pub struct CommandLine {
     /// Per-byte quote mask for the command word (word 0), parallel to it;
     /// its unquoted pattern bytes glob the command name (bash field model).
     pub command_mask: Vec<bool>,
+    /// Leading `NAME=value` words scoped to this command (POSIX 2.9.1): raw
+    /// value words, unexpanded; applied to the command's environment only.
+    pub env_assigns: Vec<(ShortCStr, ShortCStr)>,
     pub args: Vec<ShortCStr>,
     /// Per-byte quote mask for each arg (parallel to `args`, each mask
     /// parallel to its arg). `true` marks bytes that were inside double

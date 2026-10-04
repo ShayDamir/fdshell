@@ -1,4 +1,4 @@
-use crate::child::{self, Command};
+use crate::child;
 use crate::error::child_process::ChildProcessError;
 use crate::parse::CommandLine;
 use crate::redirect::Redirect;
@@ -17,9 +17,11 @@ pub fn run_child(
     capture_pairs: &mut [Option<(LocalFd, LocalFd)>],
     children: &[(Pid, LocalFd)],
     commands: &[CommandLine],
+    envs: &[crate::run_env::EnvAssigns],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
     let cmd_data = commands.get(i).ok_or(ChildProcessError::ExecFailed)?;
+    let env = envs.get(i).cloned().ok_or(ChildProcessError::ExecFailed)?;
 
     let mut redirects: Vec<Redirect> = Vec::new();
 
@@ -60,15 +62,5 @@ pub fn run_child(
         .get_mut(i)
         .and_then(|p| p.take().map(|(_, ch)| ch));
 
-    let cmd = Command::from(cmd_data);
-
-    child::child_main(
-        child_sock,
-        cell,
-        cmd,
-        &cmd_data.args,
-        &cmd_data.args_mask,
-        &cmd_data.args_quoted,
-        &redirects,
-    )
+    child::child_main(child_sock, cell, cmd_data, &redirects, env)
 }

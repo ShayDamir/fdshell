@@ -61,8 +61,9 @@ pub fn finish_cmd(
 pub fn run_pipeline(
     pipeline: Pipeline,
     cell: &ForkCell<ShellState>,
+    envs: &[crate::run_env::EnvAssigns],
 ) -> Result<WaitStatus, Report<PipelineError>> {
-    let (status, channels) = crate::pipeline::launch_pipeline(cell, pipeline)?;
+    let (status, channels) = crate::pipeline::launch_pipeline(cell, pipeline, envs)?;
     if let WaitStatus::Exited(0) = status {
         let mut state = cell.borrow_mut().change_context(PipelineError::Pipeline)?;
         for ch in channels {

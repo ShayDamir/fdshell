@@ -2,12 +2,12 @@ use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::{FdVar, ShellState};
 use error_stack::{Report, ResultExt};
-use hashbrown::HashMap;
 use sys::fork_cell::ForkCell;
-use sys::{ImportedStr, ScriptText, Trace};
+use sys::{ScriptText, Trace};
 
 mod arith_cmd;
 mod array_ops;
+mod assign_str;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
 pub(crate) fn run_simple(
@@ -29,18 +29,14 @@ pub(crate) fn run_simple(
             state.set_last_exit(0);
         }
         crate::parse::ParsedLine::AssignStr { var, value } => {
-            let (expanded, _) =
-                crate::substitute::substitute_arg(value, &[], &mut HashMap::new(), cell)
-                    .change_context(CmdError::Resolve)?;
-            let origin = crate::run_origin::assign_origin(value, text.origin.clone(), cell)?;
-            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.set_var(
-                var.clone(),
-                ImportedStr::new(expanded, Trace::at(text.start, origin)),
-            );
-            // Bash clears `$_` for plain assignments.
-            state.clear_last_arg();
-            state.set_last_exit(0);
+            assign_str::set(var, value, text, cell)?;
+            finish_assignment(cell)?;
+        }
+        crate::parse::ParsedLine::AssignStrs { assigns } => {
+            for (var, value) in assigns {
+                assign_str::set(var, value, text, cell)?;
+            }
+            finish_assignment(cell)?;
         }
         crate::parse::ParsedLine::Unset(var) => {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
@@ -79,4 +75,13 @@ pub(crate) fn run_simple(
         _ => {}
     }
     Ok(None)
+}
+
+/// The state a bare assignment statement leaves behind: `$_` cleared (as
+/// bash does) and the exit status zeroed.
+fn finish_assignment(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
+    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+    state.clear_last_arg();
+    state.set_last_exit(0);
+    Ok(())
 }

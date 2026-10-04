@@ -20,6 +20,7 @@ pub struct CaptureChannel {
 pub fn launch_pipeline(
     cell: &ForkCell<ShellState>,
     pipeline: Pipeline,
+    envs: &[crate::run_env::EnvAssigns],
 ) -> Result<(WaitStatus, Vec<CaptureChannel>), Report<PipelineError>> {
     let n = pipeline.commands.len();
     let commands = pipeline.commands;
@@ -46,7 +47,15 @@ pub fn launch_pipeline(
             sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
             None => {
-                match child::run_child(i, &pipes, &mut capture_pairs, &children, &commands, cell) {
+                match child::run_child(
+                    i,
+                    &pipes,
+                    &mut capture_pairs,
+                    &children,
+                    &commands,
+                    envs,
+                    cell,
+                ) {
                     Ok(code) => sys::exit(code),
                     Err(report) => {
                         let _ = writeln!(crate::io::Stderr, "{report:?}");

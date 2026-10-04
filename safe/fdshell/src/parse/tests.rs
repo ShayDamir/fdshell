@@ -53,6 +53,7 @@ fn test_mkdirat_capture() {
             builtin: true,
             command: c"mkdirat".into(),
             command_mask: vec![false; 7],
+            env_assigns: vec![],
             args: vec![
                 c"--mode".into(),
                 c"755".into(),
@@ -2591,4 +2592,131 @@ fn echo_double_paren_is_plain_command() {
         panic!("expected Cmd")
     };
     assert_eq!(cmd.command, c"echo".into());
+}
+
+#[test]
+fn test_env_assign_prefix_on_command() {
+    let ParsedLine::Cmd(cmd) = parse(b"FOO=bar cmd arg").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(!cmd.builtin);
+    assert_eq!(cmd.command, c"cmd".into());
+    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.args, vec![c"arg".into()]);
+}
+
+#[test]
+fn test_env_assign_compound_prefix() {
+    let ParsedLine::Cmd(cmd) = parse(b"FOO=bar BAZ=qux cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.env_assigns,
+        vec![
+            (c"FOO".into(), c"bar".into()),
+            (c"BAZ".into(), c"qux".into()),
+        ]
+    );
+    assert_eq!(cmd.command, c"cmd".into());
+}
+
+#[test]
+fn test_env_assign_bare_statement_is_assign_strs() {
+    let ParsedLine::AssignStrs { assigns } = parse(b"FOO=bar BAZ=qux").unwrap() else {
+        panic!("expected AssignStrs")
+    };
+    assert_eq!(
+        assigns,
+        vec![
+            (c"FOO".into(), c"bar".into()),
+            (c"BAZ".into(), c"qux".into()),
+        ]
+    );
+}
+
+#[test]
+fn test_env_assign_single_bare_statement_is_assign_str() {
+    let ParsedLine::AssignStr { var, value } = parse(b"FOO=bar").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(var, c"FOO".into());
+    assert_eq!(value, c"bar".into());
+}
+
+#[test]
+fn test_env_assign_bare_before_semicolon_token_is_assign_str() {
+    // A raw `;` token (unit-parse level; the statement splitter removes it
+    // in the production flow): the assignment word before it stays a bare
+    // assignment.
+    let ParsedLine::AssignStr { var, value } = parse(b"FOO=bar ;").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(var, c"FOO".into());
+    assert_eq!(value, c"bar".into());
+}
+
+#[test]
+fn test_env_assign_prefix_bare_value() {
+    let ParsedLine::Cmd(cmd) = parse(b"FOO= cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"".into())]);
+    assert_eq!(cmd.command, c"cmd".into());
+}
+
+#[test]
+fn test_env_assign_quoted_prefix_is_scoped() {
+    let ParsedLine::Cmd(cmd) = parse(b"\"FOO=bar\" cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.command, c"cmd".into());
+}
+
+#[test]
+fn test_env_assign_prefix_before_pipeline_is_parse_error() {
+    // Divergence from bash: a scoped prefix cannot head a pipeline stage;
+    // `|` after an assignment word leaves no command word for the prefix.
+    assert!(parse(b"FOO=bar | cat").is_err());
+}
+
+#[test]
+fn test_env_assign_prefix_before_keyword_runs_keyword_as_command() {
+    // Divergence from bash: `FOO=bar if …` treats `if` as a plain command
+    // word, so the prefix scopes onto it.
+    let ParsedLine::Cmd(cmd) = parse(b"FOO=bar if").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.command, c"if".into());
+}
+
+#[test]
+fn test_word_with_equals_not_leading_is_arg() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd FOO=bar").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.env_assigns.is_empty());
+    assert_eq!(cmd.args, vec![c"FOO=bar".into()]);
+}
+
+#[test]
+fn test_fdstyle_word_after_prefix_ends_the_prefix() {
+    // A `%`-prefixed word after the assignment prefix is a command word, not
+    // an assignment word: the prefix keeps only the words before it.
+    let ParsedLine::Cmd(cmd) = parse(b"FOO=bar %foo=baz").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.command, c"%foo=baz".into());
+}
+
+#[test]
+fn test_fdstyle_word_leading_is_arg_not_prefix() {
+    // `%foo=bar` is not an assignment word (`%` names a file descriptor).
+    let ParsedLine::Cmd(cmd) = parse(b"%foo=bar cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.env_assigns.is_empty());
+    assert_eq!(cmd.command, c"%foo=bar".into());
 }

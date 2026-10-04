@@ -1,32 +1,36 @@
 use crate::child::{self, Command, external};
 use crate::error::child_process::ChildProcessError;
+use crate::parse::CommandLine;
 use crate::redirect::Redirect;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 pub fn child_main(
     child_sock: Option<sys::LocalFd>,
     cell: &ForkCell<ShellState>,
-    cmd: Command,
-    args: &[ShortCStr],
-    args_mask: &[Vec<bool>],
-    args_quoted: &[bool],
+    cmdline: &CommandLine,
     redirects: &[Redirect],
+    env: crate::run_env::EnvAssigns,
 ) -> Result<i32, Report<ChildProcessError>> {
+    let cmd = Command::from(cmdline);
+    let args = &cmdline.args;
     setup_shellfd(child_sock.as_ref(), cell)?;
     apply_redirects(redirects)?;
 
-    let resolved = substitute_args(args, args_mask, args_quoted, cell)
+    let resolved = substitute_args(args, &cmdline.args_mask, &cmdline.args_quoted, cell)
         .change_context(ChildProcessError::SubstituteFailed)?;
     if let Some(sock) = &child_sock {
         let last = resolved.last().cloned().unwrap_or_else(|| cmd.name.clone());
         crate::last_arg::send(sock, &last).change_context(ChildProcessError::LastArgSend)?;
     }
+    // The scoped prefix applies after substitution: the command's own words
+    // were split with the parent's IFS; only its execution environment sees
+    // a scoped `IFS` (`IFS=: echo a:b` → `a:b`).
+    crate::run_env::apply_child(&env, cell).change_context(ChildProcessError::BorrowFailed)?;
     let sealed: Vec<sys::ExportedCStr> = resolved.iter().map(|cs| cs.export()).collect();
     let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
 

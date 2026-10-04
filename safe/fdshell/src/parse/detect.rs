@@ -2,6 +2,7 @@ use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::array_ref;
 use crate::parse::detect_keyword;
+use crate::parse::envassign;
 use crate::parse::line::ParsedLine;
 use error_stack::Report;
 use sys::ShortCStr;
@@ -19,14 +20,8 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<Pars
         return Ok(Some(line));
     }
 
-    if let Some((lhs, rhs)) = first.split_once_byte(b'=')
-        && !lhs.is_empty()
-        && !lhs.starts_with(b"%")
-    {
-        return Ok(Some(ParsedLine::AssignStr {
-            var: lhs,
-            value: rhs,
-        }));
+    if envassign::is_env_assign(first) {
+        return detect_assigns(tokens);
     }
 
     if first.eq_bytes(b"unset") {
@@ -38,6 +33,23 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<Pars
     }
 
     detect_keyword::detect_control(tokens)
+}
+
+/// A statement of `NAME=value` words: one word is a persistent `AssignStr`,
+/// several an `AssignStrs`; a non-assignment word following the assignments
+/// is a command with a scoped prefix — not an assignment statement.
+fn detect_assigns(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
+    let assigns = match envassign::collect_all(tokens) {
+        Some(assigns) => assigns,
+        None => return Ok(None),
+    };
+    match assigns.len() {
+        1 => {
+            let (var, value) = assigns.into_iter().next().ok_or(ParseError::Never)?;
+            Ok(Some(ParsedLine::AssignStr { var, value }))
+        }
+        _ => Ok(Some(ParsedLine::AssignStrs { assigns })),
+    }
 }
 
 /// `%var=%name` fd copy, `%var=%arr[N]` indexed read-out, `%var=[]` empty

@@ -15,18 +15,29 @@ pub(crate) fn run_one(
     let parsed = crate::parse::parse(&text).change_context(CmdError::Parse)?;
     match &parsed {
         crate::parse::ParsedLine::Cmd(cmdline) => {
-            // A user function shadows builtins and interceptors (as in bash); a
-            // `builtin` prefix bypasses the lookup inside `try_call`.
-            if let Some(control) = crate::function_call::try_call(&text, cmdline, cell)? {
-                return Ok(control);
-            }
-            if let Some(control) = crate::intercept::try_intercept(&text, cmdline, cell)? {
+            // A scoped `NAME=value` prefix: expanded once, applied around the
+            // parent-side handlers, and handed to the forked child (which
+            // applies it itself after arg substitution).
+            let env = crate::run_env::expand(cmdline, &text, cell)?;
+            let save = crate::run_env::apply(&env, cell)?;
+            let control = match parent_command(&text, cmdline, cell) {
+                Ok(control) => {
+                    crate::run_env::restore(save, cell)?;
+                    control
+                }
+                Err(e) => {
+                    let _ = crate::run_env::restore(save, cell);
+                    return Err(e);
+                }
+            };
+            if let Some(control) = control {
                 return Ok(control);
             }
             // Forked commands must expand their args against the previous `$_`,
             // so the child (not the parent) reports the new value via the
             // capture socket, consumed by `finish_cmd`.
-            let outcome = crate::launch::launch(cell, cmdline).change_context(CmdError::Launch)?;
+            let outcome =
+                crate::launch::launch(cell, cmdline, &env).change_context(CmdError::Launch)?;
             {
                 let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
                 state.last_status =
@@ -36,7 +47,8 @@ pub(crate) fn run_one(
             Ok(None)
         }
         crate::parse::ParsedLine::Pipeline(pipeline) => {
-            let status = crate::postlaunch::run_pipeline(pipeline.clone(), cell)
+            let envs = crate::run_env::expand_pipeline(pipeline, &text, cell)?;
+            let status = crate::postlaunch::run_pipeline(pipeline.clone(), cell, &envs)
                 .change_context(CmdError::Pipeline)?;
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.last_status = status;
@@ -65,4 +77,19 @@ pub(crate) fn run_one(
         crate::parse::ParsedLine::Wait(waitblock) => crate::wait::run_wait(waitblock, cell),
         _ => crate::run_dispatch::run_simple(&parsed, &text, cell),
     }
+}
+
+/// The parent-side handlers of a command (a user function shadows builtins
+/// and interceptors, as in bash; a `builtin` prefix bypasses the function
+/// lookup), run inside the scoped-assignment window. `None` when neither
+/// handled the command.
+fn parent_command(
+    text: &ScriptText,
+    cmdline: &crate::parse::CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<Option<LoopControl>>, Report<CmdError>> {
+    if let Some(control) = crate::function_call::try_call(text, cmdline, cell)? {
+        return Ok(Some(control));
+    }
+    crate::intercept::try_intercept(text, cmdline, cell)
 }

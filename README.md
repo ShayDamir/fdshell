@@ -277,6 +277,36 @@ Limitations / deviations from bash:
   arithmetic expression.
 - `let` evaluates each argument as a separate expression (bash-compatible).
 
+## Shell variables
+
+Plain `NAME=value` statements persist in the shell (`FOO=bar; echo $FOO` →
+`bar`); several on one line set them all (`FOO=bar BAZ=qux` persists both).
+
+Leading `NAME=value` words on a *command* are scoped to that one command
+(POSIX 2.9.1): the values are expanded against the shell, set for the
+command's execution environment, and exported to external children — but
+they never persist (`FOO=bar env` shows `FOO=bar`; a following
+`echo ${FOO:-unset}` prints `unset`). A scoped `IFS` does not re-split the
+command's own words (`IFS=: echo a:b` → `a:b`); the command's environment
+does see it. Functions and intercepts (`eval`, `source`, …) run inside the
+scoped window, so their bodies see the values, then the shell's previous
+values are restored (first-touch restore: `FOO=pre; FOO=1 FOO=2 cd /tmp;
+echo $FOO` → `pre`).
+
+Accepted divergences from bash:
+
+- `FOO=bar | cat` is a parse error (`expected command`); bash runs a no-op
+  subshell component.
+- `FOO=bar if …` runs `if` as a plain (not found) command; bash is a syntax
+  error.
+- A quoted `"FOO=bar" cmd` is treated as a scoped prefix (fdshell keys on
+  the unquoted word, as for bare assignments); bash would exec a command
+  literally named `FOO=bar`.
+- `eval`/`source` bodies expand against the scoped window (fdshell expands
+  intercept arguments at run time, inside the window); bash expands the
+  intercept's own words before scoping, so `FOO=bar eval "echo $FOO"` prints
+  `bar` here and empty in bash.
+
 ## How it works?
 
 ### Passing file descriptors from subprocess back to fdshell

@@ -15,6 +15,7 @@ fn make_cmdline(args: &[&str]) -> CommandLine {
         builtin: false,
         command: c"envfilter".into(),
         command_mask: vec![],
+        env_assigns: vec![],
         args: args_vec,
         args_mask: vec![vec![]; args.len()],
         args_quoted: vec![false; args.len()],

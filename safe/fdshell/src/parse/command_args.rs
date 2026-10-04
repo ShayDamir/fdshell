@@ -17,15 +17,18 @@ pub(super) fn finish_command(
     specs: &[crate::parse::heredoc::HeredocBody],
     set_at: Position,
 ) -> Result<CommandLine, Report<ParseError>> {
-    // The command token precedes the first arg; its mask describes word 0.
+    // The command token precedes the first arg; its mask describes word 0,
+    // and the words before it are the command's scoped `NAME=value` prefix.
     let command_mask = tokens
         .get(args_from - 1)
         .map(|t| t.4.clone())
         .unwrap_or_default();
+    let env_assigns = super::envassign::collect_range(tokens, args_from - 1);
     let mut cmd = CommandLine {
         builtin,
         command,
         command_mask,
+        env_assigns,
         args: Vec::new(),
         args_mask: Vec::new(),
         args_quoted: Vec::new(),

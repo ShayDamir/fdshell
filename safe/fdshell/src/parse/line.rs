@@ -5,6 +5,7 @@ use crate::parse::if_block::IfBlock;
 use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
+use alloc::vec::Vec;
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -32,6 +33,10 @@ pub enum ParsedLine {
     AssignStr {
         var: ShortCStr,
         value: ShortCStr,
+    },
+    /// A bare statement of several `NAME=value` words; all persist.
+    AssignStrs {
+        assigns: Vec<(ShortCStr, ShortCStr)>,
     },
     Unset(ShortCStr),
     UnsetArrayEntry {

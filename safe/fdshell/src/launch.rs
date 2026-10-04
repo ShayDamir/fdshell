@@ -15,6 +15,7 @@ pub struct LaunchOutcome {
 pub fn launch(
     cell: &ForkCell<ShellState>,
     cmdline: &CommandLine,
+    env: &crate::run_env::EnvAssigns,
 ) -> Result<LaunchOutcome, Report<crate::error::launch::LaunchError>> {
     let cmd = Command::from(cmdline);
 
@@ -39,15 +40,7 @@ pub fn launch(
         .change_context(crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {
-        None => match child::child_main(
-            child_fd,
-            cell,
-            cmd,
-            &cmdline.args,
-            &cmdline.args_mask,
-            &cmdline.args_quoted,
-            &resolved,
-        ) {
+        None => match child::child_main(child_fd, cell, cmdline, &resolved, env.clone()) {
             Ok(code) => sys::exit(code),
             Err(report) => {
                 let _ = writeln!(crate::io::Stderr, "{report:?}");
