@@ -24,7 +24,7 @@ pub(crate) fn run_loop(
     let cond_bodies = body_bytes(&block.cond_bodies);
     let mut ran_body = false;
     loop {
-        crate::repl::run_cond_list(&block.condition, &cond_bodies, cell)?;
+        crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true)?;
         let exit_code = {
             let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()
@@ -40,6 +40,7 @@ pub(crate) fn run_loop(
                 LoopControl::Break => break,
                 LoopControl::Continue => continue,
                 LoopControl::Return => return Ok(Some(LoopControl::Return)),
+                LoopControl::Exit => return Ok(Some(LoopControl::Exit)),
             }
         }
     }

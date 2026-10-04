@@ -171,6 +171,9 @@ is expanded against the filesystem (bash pathname-expansion semantics):
   (failglob wins over nullglob).
 - `shopt -s dotglob` makes `*`, `?`, and `[...]` match a leading `.`
   (`echo *` then lists `.hidden`); it never lists `.`/`..` on its own.
+- `set -f` (`shopt -s noglob`) disables pathname expansion entirely: a
+  pattern word is passed through verbatim (`set -f; echo *` prints `*`);
+  `set +f` re-enables it.
 
 Quoting: double-quoted bytes always match literally; a fully quoted word is
 never expanded. Expansion happens for command arguments (external, builtins,

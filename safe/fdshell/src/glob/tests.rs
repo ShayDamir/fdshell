@@ -9,7 +9,7 @@ use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
 use crate::glob::expand;
-use crate::options::{FAILGLOB, NULLGLOB};
+use crate::options::{FAILGLOB, NOGLOB, NULLGLOB};
 use crate::state::ShellState;
 
 static COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
@@ -76,6 +76,20 @@ fn no_match_keeps_word_verbatim_by_default() {
         expand_to_bytes(&cell, &format!("{dir}/zzz*")),
         vec![format!("{dir}/zzz*").into_bytes()]
     );
+}
+
+#[test]
+fn noglob_passes_pattern_through_verbatim() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().options |= NOGLOB;
+    let dir = scratch();
+    // A matching pattern is not expanded: the word passes through unchanged.
+    assert_eq!(
+        expand_to_bytes(&cell, &format!("{dir}/*")),
+        vec![format!("{dir}/*").into_bytes()]
+    );
+    // Non-pattern words are unaffected by noglob.
+    assert_eq!(expand_to_bytes(&cell, "plain"), vec![b"plain".to_vec()]);
 }
 
 #[test]

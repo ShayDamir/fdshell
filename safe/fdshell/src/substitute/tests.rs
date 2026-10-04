@@ -8,6 +8,7 @@ use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use crate::error::resolve::ResolveError;
 use crate::state::{FdVar, ShellState};
 
 use super::substitute_arg;
@@ -61,6 +62,43 @@ fn dollar_unknown_var_is_literal() {
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"$nope");
+}
+
+#[test]
+fn nounset_unbound_var_errors() {
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"$nope");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { .. }
+    ));
+}
+
+#[test]
+fn nounset_bound_var_is_unaffected() {
+    let cell = dummy_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"$hello");
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"world");
+}
+
+#[test]
+fn nounset_out_of_range_positional_errors() {
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"$1");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var }
+            if var.as_bytes().unwrap() == b"1".as_slice()
+    ));
 }
 
 #[test]

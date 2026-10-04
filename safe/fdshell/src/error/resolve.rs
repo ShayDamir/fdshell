@@ -9,6 +9,8 @@ pub(crate) enum ResolveError {
     RefNotFound,
     /// {var}: {word}
     ParamNullOrNotSet { var: ShortCStr, word: ShortCStr },
+    /// {var}: unbound variable
+    UnboundVariable { var: ShortCStr },
     /// NUL byte in variable name
     NulByte,
     /// unclosed subexpression parenthesis

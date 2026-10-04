@@ -1,4 +1,4 @@
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
@@ -43,6 +43,10 @@ impl ShellState {
         match self.var_value(name) {
             Some(val) => out.push(val),
             None => {
+                // nounset: an unbound variable is an error, not an empty value.
+                if self.options & crate::options::NOUNSET != 0 {
+                    bail!(ResolveError::UnboundVariable { var: name.clone() });
+                }
                 out.push(c"$");
                 out.push(name);
             }
@@ -69,8 +73,13 @@ pub(super) fn resolve_positional_index(
         }
     }
     let idx: usize = num.parse().change_context(ResolveError::TooLarge)?;
-    if let Some(pos) = state.positional.get(idx) {
-        out.push(pos);
+    match state.positional.get(idx) {
+        Some(pos) => out.push(pos),
+        // nounset: an out-of-range `$N` is an unbound variable (bash: `N: unbound variable`).
+        None if state.options & crate::options::NOUNSET != 0 => {
+            bail!(ResolveError::UnboundVariable { var: num });
+        }
+        None => {}
     }
     Ok(())
 }

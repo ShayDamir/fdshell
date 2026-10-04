@@ -21,7 +21,7 @@ pub(crate) fn run_if(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let cond_bodies = body_bytes(&ifblock.cond_bodies);
-    crate::repl::run_cond_list(&ifblock.condition, &cond_bodies, cell)?;
+    crate::repl::run_cond_list(&ifblock.condition, &cond_bodies, cell, true)?;
     let exit_code = {
         let state = cell.borrow().change_context(CmdError::Never)?;
         state.last_status.exit_code()
@@ -33,7 +33,7 @@ pub(crate) fn run_if(
     }
     for arm in &ifblock.elifs {
         let arm_bodies = body_bytes(&arm.cond_bodies);
-        crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell)?;
+        crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell, true)?;
         let ec_exit = {
             let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()

@@ -6,7 +6,8 @@ use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ShortCStr, Trace};
 
 /// Replace positional parameters with the args after `--`, set/clear a shell
-/// option with `-o`/`+o`, or list variables (bare `set`) / fd variables
+/// option with `-o`/`+o` or the POSIX short flags `-e`/`-u`/`-f`/`-v`
+/// (and `+e`/`+u`/`+f`/`+v`), or list variables (bare `set`) / fd variables
 /// (`set -F`). Other `set` forms fall through to external lookup.
 pub(crate) fn run_set(
     line: &[u8],
@@ -31,6 +32,11 @@ pub(crate) fn run_set(
     if first.eq_bytes(b"-x") || first.eq_bytes(b"+x") {
         super::validation::validate_intercept(line, "set", cmdline)?;
         return run_set_xtrace(first, cmdline, cell).map(|_| true);
+    }
+    if let Some((bit, enable)) = super::set_short::short_flag(first) {
+        super::validation::validate_intercept(line, "set", cmdline)?;
+        crate::xtrace::trace_cmd(b"set", cmdline, cell);
+        return super::set_short::run_set_short(bit, enable, cell).map(|_| true);
     }
     if first.eq_bytes(b"-F") {
         super::validation::validate_intercept(line, "set", cmdline)?;

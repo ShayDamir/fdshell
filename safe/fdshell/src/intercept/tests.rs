@@ -233,7 +233,9 @@ fn run_eval_empty_script_sets_zero_status() {
 
 #[test]
 fn try_intercept_set_unhandled_forms_return_false() {
-    for args in [&["-e"] as &[&str], &["a", "b"] as &[&str]] {
+    // Combined short flags (`-eu`) are not intercepted (tracked separately);
+    // bare words after `set` fall through to external lookup.
+    for args in [&["-eu"] as &[&str], &["a", "b"] as &[&str]] {
         let cmdline = make_cmdline(b"set", args);
         let line = make_line("set", args);
         let cell = make_cell();
@@ -242,6 +244,22 @@ fn try_intercept_set_unhandled_forms_return_false() {
                 .unwrap()
                 .is_none(),
             "set {args:?} should fall through to external lookup"
+        );
+    }
+}
+
+#[test]
+fn try_intercept_set_posix_short_flags_are_handled() {
+    for flag in ["-e", "+e", "-u", "+u", "-f", "+f", "-v", "+v"] {
+        let args = [flag];
+        let cmdline = make_cmdline(b"set", &args);
+        let line = make_line("set", &args);
+        let cell = make_cell();
+        assert!(
+            try_intercept(&text(&line), &cmdline, &cell)
+                .unwrap()
+                .is_some(),
+            "set {flag:?} should be intercepted"
         );
     }
 }

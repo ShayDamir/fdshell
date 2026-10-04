@@ -33,10 +33,17 @@ pub(crate) fn matches(
     if !r#match::has_unquoted_pattern(bytes, mask) {
         return Ok(vec![word.clone()]);
     }
-    let dotglob = {
+    let (dotglob, noglob) = {
         let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-        state.options & options::DOTGLOB != 0
+        (
+            state.options & options::DOTGLOB != 0,
+            state.options & options::NOGLOB != 0,
+        )
     };
+    if noglob {
+        // `set -f`: the pattern word passes through verbatim (no filesystem).
+        return Ok(vec![word.clone()]);
+    }
     Ok(walk::walk(word, mask, dotglob)
         .into_iter()
         .filter_map(|n| ShortCStr::from_vec(n).ok())

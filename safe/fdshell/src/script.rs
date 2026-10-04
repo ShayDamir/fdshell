@@ -16,9 +16,11 @@ pub(crate) fn run_script(
     for segment in crate::segment::scan_segments(line, false) {
         match segment {
             Segment::Statement { cmd, off, bodies } => {
+                crate::verbose::trace(line.get(off..off + cmd.len()).unwrap_or(b""), cell);
                 let part = sub(text, off, cmd.len())?;
                 let body_bytes = extract_bodies(line, &bodies);
-                if let Some(control) = crate::cond::run_cond_list(&part, &body_bytes, cell)? {
+                if let Some(control) = crate::cond::run_cond_list(&part, &body_bytes, cell, false)?
+                {
                     return Ok(Some(control));
                 }
             }
@@ -29,9 +31,10 @@ pub(crate) fn run_script(
             } => {
                 ensure!(closed, CmdError::Parse);
                 let raw = line.get(block_start..end_pos).unwrap_or(b"");
+                crate::verbose::trace(raw.trim_ascii(), cell);
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
                 let full = sub(text, block_start + lead, raw.trim_ascii().len())?;
-                if let Some(control) = crate::cond::run_cond_list(&full, &[], cell)? {
+                if let Some(control) = crate::cond::run_cond_list(&full, &[], cell, false)? {
                     return Ok(Some(control));
                 }
             }

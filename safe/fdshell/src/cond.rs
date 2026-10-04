@@ -1,4 +1,5 @@
 mod boundary;
+mod errexit;
 mod part;
 
 use crate::error::cmd::CmdError;
@@ -10,10 +11,13 @@ use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
+/// `exempt` disables errexit on the list's final segment (the conditions of
+/// `if`/`while`/`until` are exempt, as in bash).
 pub(crate) fn run_cond_list(
     text: &ScriptText,
     bodies: &[Vec<u8>],
     cell: &ForkCell<ShellState>,
+    exempt: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let mut state = ScanState::new();
@@ -25,6 +29,12 @@ pub(crate) fn run_cond_list(
         if i == line.len() {
             if let Some(control) = part::run_part(text, line, start, i, &part_bodies, cell)? {
                 return Ok(Some(control));
+            }
+            // Errexit only for a final part that actually ran: a list that
+            // ended on a skipped `&&` chain keeps the failure in the exempt
+            // preceding part and must not stop the shell.
+            if !exempt && !is_empty_part(line, start, i) && errexit::should_exit(cell)? {
+                return Ok(Some(LoopControl::Exit));
             }
             break;
         }

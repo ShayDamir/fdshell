@@ -56,6 +56,7 @@ mod sendmsg;
 mod set_cmd;
 mod set_limit;
 mod set_list;
+mod set_short;
 mod shift;
 mod shopt;
 mod signalfd_cmd;

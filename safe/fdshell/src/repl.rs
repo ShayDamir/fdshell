@@ -22,6 +22,8 @@ pub fn handle(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<(), Repo
             LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
             LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
+            // Interactive shells do not exit on errexit: stop this input.
+            LoopControl::Exit => {}
         }
     }
     Ok(())
@@ -33,6 +35,8 @@ pub fn exec_cmd(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<i32, R
             LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
             LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
             LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
+            // Errexit: fall through to the failing status in `last_status`.
+            LoopControl::Exit => {}
         }
     }
     let state = cell.borrow().change_context(CmdError::Never)?;

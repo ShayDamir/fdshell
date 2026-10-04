@@ -31,6 +31,7 @@ pub(crate) fn run_for(
                 LoopControl::Break => break,
                 LoopControl::Continue => {}
                 LoopControl::Return => return Ok(Some(LoopControl::Return)),
+                LoopControl::Exit => return Ok(Some(LoopControl::Exit)),
             }
         }
     }

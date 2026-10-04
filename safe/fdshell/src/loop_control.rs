@@ -5,4 +5,6 @@ pub(crate) enum LoopControl {
     Continue,
     /// Leave the current function (status already set by the `return` that raised it).
     Return,
+    /// Leave the shell (errexit); the failing status is already in `last_status`.
+    Exit,
 }

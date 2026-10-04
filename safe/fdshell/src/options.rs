@@ -9,6 +9,10 @@ pub const NULLGLOB: u32 = 32;
 pub const STRICT: u32 = 64;
 pub const DOTGLOB: u32 = 128;
 pub const FAILGLOB: u32 = 256;
+pub const ERREXIT: u32 = 512;
+pub const NOUNSET: u32 = 1024;
+pub const NOGLOB: u32 = 2048;
+pub const VERBOSITY: u32 = 4096;
 
 /// All shell options, bash-compatible names.
 ///
@@ -24,6 +28,10 @@ pub const OPTIONS: &[(&[u8], u32, u8)] = &[
     (b"strict", STRICT, 0),
     (b"dotglob", DOTGLOB, 0),
     (b"failglob", FAILGLOB, 0),
+    (b"errexit", ERREXIT, b'e'),
+    (b"nounset", NOUNSET, b'u'),
+    (b"noglob", NOGLOB, b'f'),
+    (b"verbose", VERBOSITY, b'v'),
 ];
 
 /// The options on by default (bash: `expand_aliases` is on in interactive shells).

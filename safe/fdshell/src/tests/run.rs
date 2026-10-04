@@ -35,7 +35,7 @@ fn run_cond_list(
     b: &[u8],
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::cond::run_cond_list(&st(b), &[], cell)
+    crate::cond::run_cond_list(&st(b), &[], cell, false)
 }
 
 fn handle(b: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
@@ -909,6 +909,58 @@ fn empty_part_between_operators_is_separator() {
         run_cond_list(b"false || && builtin true", &cell).unwrap();
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
+    });
+}
+
+#[test]
+fn errexit_failing_final_command_exits() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_cond_list(b"false", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Exit)));
+    });
+}
+
+#[test]
+fn errexit_off_leaves_control_none() {
+    child_test(|| {
+        let cell = make_cell();
+        let control = run_cond_list(b"false", &cell).unwrap();
+        assert!(control.is_none());
+    });
+}
+
+#[test]
+fn errexit_exempt_final_part_does_not_exit() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        // Exempt (an `if`/`while` condition): the failure does not stop.
+        let control = crate::cond::run_cond_list(&st(b"false"), &[], &cell, true).unwrap();
+        assert!(control.is_none());
+    });
+}
+
+#[test]
+fn errexit_skipped_and_chain_does_not_exit() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        // `false && …`: the failing `false` is not the final command.
+        let control = run_cond_list(b"false && builtin echo skipped", &cell).unwrap();
+        assert!(control.is_none());
+    });
+}
+
+#[test]
+fn errexit_failing_final_and_command_exits() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        // `true && false`: the final command fails.
+        let control = run_cond_list(b"true && false", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Exit)));
     });
 }
 
