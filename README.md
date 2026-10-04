@@ -101,6 +101,22 @@ Strict mode covers the dirfd-based builtins only. Redirect targets
 (`> file`), external command paths, and `~`/`$HOME` expansion are not
 dirfd-relative in this version and are tracked as follow-up work.
 
+## Redirection
+
+Operators: `>` (write), `>>` (append), `<` (read), `<>` (read and write),
+each with an optional numeric fd prefix (`2> file`, `1< file`, `3<> file`;
+no prefix means fd 1 for `>`/`>>` and fd 0 for `<`/`<>`). The operator is
+either attached to its target (`>file.txt`) or space-separated (a bare
+operator takes the next word as its target: `> file.txt`). A bare
+operator's target must be a plain word: not a separator (`;`, `|`) and not
+another operator (`>`, `<<`, `&1`, `%var`) — `cmd >` and `cmd > ;` are
+`invalid redirect` parse errors. Targets: a path (globbed like other
+words, with the quote mask applied), `%var` (the variable's fd, attached
+form: `>%var`), and `/dev/fd/N` / `/proc/self/fd/N` (dup of the open fd
+N). `&>file`, `>&1`, `2>&-`, here-docs, and here-strings are the other
+redirect sources; see below. A second redirect to the same fd on one
+command is a `duplicate redirect target` parse error.
+
 ## Heredocs
 
 A here-doc feeds a command's stdin from the script body: the lines after the
@@ -224,8 +240,10 @@ An unquoted `..` directly before the closing brace does not start a sequence
 Protected contexts (no expansion, like bash): the assignment word
 (`x={a,b}`), `case` words and pattern lists, here-string words, and heredoc
 delimiters — both the `<<` operator word and the terminating delimiter line.
-Redirect target words *are* expanded (`echo hi > {a,b}` is an ambiguous
-redirect in bash; here it is a duplicate-redirect parse error).
+Redirect target words *are* expanded: `echo hi >{a,b}` (attached) becomes
+two redirects and a `duplicate redirect target` parse error, and
+`echo hi > {a,b}` (separated) redirects to the first expanded word with
+the rest as arguments — bash reports an ambiguous redirect for both.
 
 Limitations / deviations from bash:
 

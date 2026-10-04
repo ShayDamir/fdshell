@@ -1,4 +1,7 @@
+mod bare;
+
 use crate::error::parse::ParseError;
+use crate::parse::Token;
 use crate::redirect::{RedirectDef, RedirectSource};
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
@@ -11,6 +14,62 @@ pub(super) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
         })
     } else {
         prefix.parse().ok()
+    }
+}
+
+/// A redirect token: a bare operator (`>`, `>>`, `<`, `<>`, with an optional
+/// numeric fd prefix) takes the next token as its path operand; an attached
+/// operator is parsed in place. Returns the redirect and how many following
+/// tokens the operator consumes (1 for the bare form).
+pub fn parse_redirect(
+    tokens: &[Token],
+    i: usize,
+) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
+    let Some((t, _start, _end, fq, mask)) = tokens.get(i) else {
+        return Ok(None);
+    };
+    if *fq {
+        return Ok(None);
+    }
+    if bare::is_bare(t) {
+        return bare::parse_bare(tokens, i).map(|def| def.map(|d| (d, 1)));
+    }
+    Ok(attached(t, mask)?.map(|def| (def, 0)))
+}
+
+/// The attached form: the operator byte is followed by its target inside the
+/// same token (`>file`, `2>&1`, `3>%var`). A token whose first `>`/`<` is its
+/// last byte is bare and is handled before this.
+fn attached(s: &ShortCStr, mask: &[bool]) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    let bytes = s.as_bytes().change_context(ParseError::Never)?;
+    let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let dir = match bytes.get(op_pos) {
+        Some(&d) => d,
+        None => return Ok(None),
+    };
+    let after_op = match s.get(op_pos + 1..) {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+    let prefix = match s.get(..op_pos) {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    if after_op.starts_with(b"&") {
+        return super::fd_dup::parse_fd_dup_redirect(&after_op, &prefix, dir);
+    }
+    if after_op.starts_with(b"%") {
+        let source = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
+        if let Some(export_to) = parse_fd(&prefix, dir) {
+            Ok(Some(RedirectDef::var(export_to, source)))
+        } else {
+            Ok(None)
+        }
+    } else {
+        parse_path_redirect(s, mask, op_pos, dir, &prefix)
     }
 }
 
@@ -38,47 +97,4 @@ fn parse_path_redirect(
         direction,
         source: RedirectSource::path(rest, path_mask),
     }))
-}
-
-pub fn parse_redirect(
-    s: &ShortCStr,
-    fq: bool,
-    mask: &[bool],
-) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    if fq {
-        return Ok(None);
-    }
-    let bytes = s.as_bytes().change_context(ParseError::Never)?;
-    let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-    let dir = match bytes.get(op_pos) {
-        Some(&d) => d,
-        None => return Ok(None),
-    };
-    let after_op = match s.get(op_pos + 1..) {
-        Some(r) => r,
-        None => return Ok(None),
-    };
-    if after_op.is_empty() {
-        return Ok(None);
-    }
-    let prefix = match s.get(..op_pos) {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-    if after_op.starts_with(b"&") {
-        return super::fd_dup::parse_fd_dup_redirect(&after_op, &prefix, dir);
-    }
-    if after_op.starts_with(b"%") {
-        let source = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
-        if let Some(export_to) = parse_fd(&prefix, dir) {
-            Ok(Some(RedirectDef::var(export_to, source)))
-        } else {
-            Ok(None)
-        }
-    } else {
-        parse_path_redirect(s, mask, op_pos, dir, &prefix)
-    }
 }

@@ -607,6 +607,136 @@ fn test_rw_redirect_without_path_is_error() {
 }
 
 #[test]
+fn test_space_separated_write_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi > out.txt").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Write, "out.txt")]
+    );
+    assert_eq!(cmd.args, vec![c"hi".into()]);
+}
+
+#[test]
+fn test_space_separated_stdin_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat < in.txt").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(0, RedirectDirection::Read, "in.txt")]
+    );
+    assert!(cmd.args.is_empty());
+}
+
+#[test]
+fn test_space_separated_named_fd_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2> err.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(2, RedirectDirection::Write, "err.log")]
+    );
+}
+
+#[test]
+fn test_space_separated_append_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi >> out.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Append, "out.log")]
+    );
+}
+
+#[test]
+fn test_space_separated_rw_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 3<> rw.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(3, RedirectDirection::Rw, "rw.log")]
+    );
+}
+
+#[test]
+fn test_space_separated_redirect_quoted_path() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi > \"my file\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Write,
+            source: RedirectSource::path(c"my file", vec![true; 7]),
+        }]
+    );
+}
+
+#[test]
+fn test_space_separated_redirect_fd_path_dups() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat < /dev/fd/3").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::dup(0, 3)]);
+}
+
+#[test]
+fn test_space_separated_redirect_without_operand_is_error() {
+    assert!(parse(b"cmd >").is_err());
+    assert!(parse(b"cmd <").is_err());
+    assert!(parse(b"cmd > ;").is_err());
+}
+
+#[test]
+fn test_space_separated_redirect_before_operator_is_error() {
+    assert!(parse(b"cmd > <file").is_err());
+    assert!(parse(b"cmd < >file").is_err());
+    assert!(parse(b"cmd > &1").is_err());
+    assert!(parse(b"cmd > %v").is_err());
+}
+
+#[test]
+fn test_space_separated_redirect_non_numeric_prefix_is_arg() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd a> file").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.redirects.is_empty());
+    assert_eq!(cmd.args, vec![c"a>".into(), c"file".into()]);
+}
+
+#[test]
+fn test_space_separated_redirect_in_pipeline_stage() {
+    let ParsedLine::Pipeline(pl) = parse(b"echo a > out | cat").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(
+        pl.commands[0].redirects,
+        vec![path_def(1, RedirectDirection::Write, "out")]
+    );
+    assert!(pl.commands[1].redirects.is_empty());
+}
+
+#[test]
+fn test_space_separated_redirect_with_heredoc() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo a <<EOF > out\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::here_doc(c"body\n", true),
+            path_def(1, RedirectDirection::Write, "out"),
+        ]
+    );
+}
+
+#[test]
 fn test_fd_dup_redirect_negative_tail_is_arg() {
     let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&-5").unwrap() else {
         panic!("expected Cmd")

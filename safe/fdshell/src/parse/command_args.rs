@@ -39,7 +39,7 @@ pub(super) fn finish_command(
     };
     let mut spec_at = 0usize;
     let mut i = args_from;
-    while let Some((t, ts, te, fq, mask)) = tokens.get(i) {
+    while let Some((t, ts, te, _fq, mask)) = tokens.get(i) {
         if t.eq_bytes(b";") {
             break;
         }
@@ -76,8 +76,9 @@ pub(super) fn finish_command(
         } else if let Some((r, extra)) = super::here_string::parse_here_string(tokens, i)? {
             bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
             skip = extra;
-        } else if let Some(r) = crate::parse::classify::parse_redirect(t, *fq, mask)? {
+        } else if let Some((r, extra)) = crate::parse::classify::parse_redirect(tokens, i)? {
             bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
+            skip = extra;
         } else {
             cmd.args.push(t.clone());
             cmd.args_mask.push(mask.clone());
