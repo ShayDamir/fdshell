@@ -517,3 +517,77 @@ fn try_intercept_hash_extra_args_is_usage_error() {
         CmdError::HashUsage
     ));
 }
+
+#[test]
+fn try_intercept_wait_returns_true() {
+    let line = make_line("wait", &[]);
+    let cmdline = make_cmdline(b"wait", &[]);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn try_intercept_times_returns_true() {
+    let line = make_line("times", &[]);
+    let cmdline = make_cmdline(b"times", &[]);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn try_intercept_builtin_wait_accepted() {
+    let line = make_line("builtin wait", &[]);
+    let mut cmdline = make_cmdline(b"wait", &[]);
+    cmdline.builtin = true;
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some(),
+        "`builtin wait` must be accepted (no_builtin validation)"
+    );
+}
+
+#[test]
+fn try_intercept_wait_capture_rejected() {
+    let line = make_line("wait", &[]);
+    let mut cmdline = make_cmdline(b"wait", &[]);
+    cmdline.captures = vec![Capture {
+        var: c"fd".into(),
+        tag: None,
+        force: false,
+        cap: None,
+        set_at: sys::Position::new(1, 1),
+    }];
+    let cell = make_cell();
+    let report = try_intercept(&text(&line), &cmdline, &cell);
+    assert!(matches!(
+        report.unwrap_err().current_context(),
+        CmdError::CapturesNotSupported { .. }
+    ));
+}
+
+#[test]
+fn try_intercept_wait_redirect_rejected() {
+    let line = make_line("wait", &[]);
+    let mut cmdline = make_cmdline(b"wait", &[]);
+    cmdline.redirects = vec![RedirectDef {
+        export_to: 1,
+        direction: RedirectDirection::Write,
+        source: RedirectSource::Var(c"test".into()),
+    }];
+    let cell = make_cell();
+    let report = try_intercept(&text(&line), &cmdline, &cell);
+    assert!(matches!(
+        report.unwrap_err().current_context(),
+        CmdError::RedirectNotSupported { .. }
+    ));
+}

@@ -68,6 +68,7 @@ pub mod fork_cell;
 pub mod fork_pidfd;
 pub mod fsverity;
 pub mod getdents64;
+pub mod getrusage;
 pub mod importedfd;
 pub mod importedfd_error;
 pub mod importedfd_try;

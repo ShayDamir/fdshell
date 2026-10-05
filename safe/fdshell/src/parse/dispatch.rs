@@ -27,7 +27,7 @@ pub(super) fn dispatch_keyword(
     if is(b"for") {
         return Ok(Some(ParsedLine::For(for_block::tokens_to_for(raw, text)?)));
     }
-    if is(b"wait") {
+    if is(b"wait") && wait_block::is_block(raw, text) {
         return Ok(Some(ParsedLine::Wait(wait_block::tokens_to_wait(
             raw, text,
         )?)));

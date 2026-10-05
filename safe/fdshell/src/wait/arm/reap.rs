@@ -54,7 +54,11 @@ pub(super) fn parent_reap(
     pidfd: LocalFd,
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<WaitError>> {
-    let status = pidfd.wait_pidfd().change_context(WaitError::Reap)?;
+    let (status, times) = pidfd.wait_pidfd_rusage().change_context(WaitError::Reap)?;
+    {
+        let mut s = cell.borrow_mut().change_context(WaitError::Never)?;
+        s.add_child_times(times);
+    }
     let captures = arm.captures.clone();
     if !captures.is_empty() {
         let mut s = cell.borrow_mut().change_context(WaitError::Never)?;

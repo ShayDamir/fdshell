@@ -25,8 +25,10 @@ pub(crate) const INTERCEPTED_COMMANDS: &[&[u8]] = &[
     b"shopt",
     b"signalfd",
     b"source",
+    b"times",
     b"timeout",
     b"ulimit",
     b"unalias",
+    b"wait",
     b"waitpid",
 ];

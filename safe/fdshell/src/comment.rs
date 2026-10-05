@@ -28,8 +28,20 @@ pub(crate) fn scan_block(
         }
         // A separator or comment boundary ends the current word.
         state.word_active = false;
-        let raw = line.get(*start..i).unwrap_or(b"").trim_ascii();
-        depth = depth.saturating_add_signed(depth_delta::depth_delta(raw, run_quote, run_backtick));
+        let raw_untrimmed = line.get(*start..i).unwrap_or(b"");
+        let lead = raw_untrimmed
+            .iter()
+            .take_while(|&&b| b.is_ascii_whitespace())
+            .count();
+        let raw = raw_untrimmed.trim_ascii();
+        let base = *start + lead;
+        depth = depth.saturating_add_signed(depth_delta::depth_delta(
+            line,
+            raw,
+            base,
+            run_quote,
+            run_backtick,
+        ));
         if kind == Boundary::Comment {
             i = skip_comment(line, i);
             *start = i;

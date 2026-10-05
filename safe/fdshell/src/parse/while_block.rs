@@ -3,7 +3,7 @@ use crate::error::parse::ParseError;
 use crate::parse::cond_bodies::condition_bodies;
 use crate::parse::semi::{closing_keyword_index, find_preceded_by_semi, trim_semi, verbatim};
 use alloc::vec::Vec;
-use error_stack::{Report, ensure};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -32,7 +32,8 @@ pub(crate) fn tokens_to_loop(
 
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `done`: the tokens after it are body data, not block structure.
-    let done_idx = closing_keyword_index(tokens).ok_or(ParseError::ExpectedDone)?;
+    let line = text.as_bytes().change_context(ParseError::Never)?;
+    let done_idx = closing_keyword_index(tokens, line).ok_or(ParseError::ExpectedDone)?;
     let tokens = tokens.get(..=done_idx).ok_or(ParseError::ExpectedDone)?;
 
     let do_idx = find_preceded_by_semi(tokens, 1, b"do").ok_or(ParseError::ExpectedDo)?;

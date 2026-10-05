@@ -10,7 +10,17 @@ use alloc::vec::Vec;
 /// `ScanState::advance` so the per-word state matches the surrounding scan.
 /// A run always starts at substitution depth 0 (separators only exist at
 /// depth 0), so only the caller's quote state is taken as a parameter.
-pub(crate) fn depth_delta(raw: &[u8], in_quote: bool, in_backtick: bool) -> i32 {
+///
+/// `line` and `base` (the run's offset in `line`) let a `wait` at the run's
+/// end look ahead across the newline for its pattern keyword, matching the
+/// segment scanner's disambiguation.
+pub(crate) fn depth_delta(
+    line: &[u8],
+    raw: &[u8],
+    base: usize,
+    in_quote: bool,
+    in_backtick: bool,
+) -> i32 {
     let mut sum = 0;
     let mut frag = Vec::new();
     let mut in_quote = in_quote;
@@ -39,7 +49,7 @@ pub(crate) fn depth_delta(raw: &[u8], in_quote: bool, in_backtick: bool) -> i32 
             // A split only exists outside quotes and substitutions, so the
             // next word always starts unquoted.
             if !frag_quoted {
-                sum += crate::keywords::keyword_delta(&frag).unwrap_or(0);
+                sum += crate::keywords::keyword_delta(&frag, line, base + i).unwrap_or(0);
             }
             frag.clear();
             frag_quoted = false;
@@ -50,7 +60,7 @@ pub(crate) fn depth_delta(raw: &[u8], in_quote: bool, in_backtick: bool) -> i32 
         i += step;
     }
     if !frag_quoted {
-        sum += crate::keywords::keyword_delta(&frag).unwrap_or(0);
+        sum += crate::keywords::keyword_delta(&frag, line, base + raw.len()).unwrap_or(0);
     }
     sum
 }

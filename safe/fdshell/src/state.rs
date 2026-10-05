@@ -35,6 +35,10 @@ pub struct ShellState {
     pub(crate) last_status: WaitStatus,
     pub(crate) shell_pid: sys::Pid,
     pub(crate) last_bg_pid: Option<sys::Pid>,
+    /// Reaped-children CPU times (microseconds), accumulated at each reap for
+    /// `times` (Linux's `getrusage` carries no children fields).
+    pub(crate) child_utime: u64,
+    pub(crate) child_stime: u64,
     pub(crate) env_filter: EnvFilter,
     pub(crate) shell_sock: Option<LocalFd>,
     pub(crate) environ: Vec<(ShortCStr, ShortCStr)>,
@@ -60,6 +64,8 @@ impl ShellState {
             last_status: WaitStatus::Exited(0),
             shell_pid: sys::env::getpid(),
             last_bg_pid: None,
+            child_utime: 0,
+            child_stime: 0,
             env_filter: EnvFilter::new(),
             shell_sock: None,
             environ: sys::env::environ_snapshot(),

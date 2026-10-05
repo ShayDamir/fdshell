@@ -34,6 +34,13 @@ impl ShellState {
         self.last_status = WaitStatus::Exited(code);
     }
 
+    /// Fold a reaped child's CPU times (microseconds) into the shell's
+    /// children totals for `times`.
+    pub fn add_child_times(&mut self, times: sys::getrusage::CpuTimes) {
+        self.child_utime = self.child_utime.saturating_add(times.utime);
+        self.child_stime = self.child_stime.saturating_add(times.stime);
+    }
+
     pub fn set_shell_sock(&mut self, sock: LocalFd) {
         self.shell_sock = Some(sock);
     }

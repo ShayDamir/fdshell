@@ -28,10 +28,12 @@ const SHELL_COMMANDS: &[&str] = &[
     "shopt",
     "signalfd",
     "source",
+    "times",
     "timeout",
     "ulimit",
     "umask",
     "unset",
+    "wait",
     "waitpid",
 ];
 

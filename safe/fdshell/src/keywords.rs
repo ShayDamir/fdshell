@@ -22,12 +22,17 @@ pub(super) fn function_def_name(word: &[u8]) -> Option<&[u8]> {
     Some(name)
 }
 
+mod wait;
+
+pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
+
 /// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers.
 ///
 /// Recognized: `case`, `esac`, `if`, `fi`, `for`, `wait`, `while`, `until`, `done`.
 /// Each check requires a word boundary after the keyword to avoid
-/// matching prefixes like `ifconfig` or `donec`.
-pub(super) fn keyword_delta(word: &[u8]) -> Option<i32> {
+/// matching prefixes like `ifconfig` or `donec`. `wait` opens a block only
+/// when [`wait_opens_block`] holds (otherwise it is the POSIX builtin, `0`).
+pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
     if word.starts_with(b"case") && boundary(word, 4, b"") {
         return Some(1);
     }
@@ -44,7 +49,7 @@ pub(super) fn keyword_delta(word: &[u8]) -> Option<i32> {
         return Some(1);
     }
     if word.starts_with(b"wait") && boundary(word, 4, b"") {
-        return Some(1);
+        return Some(i32::from(wait_opens_block(line, word_end)));
     }
     if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
         return Some(1);

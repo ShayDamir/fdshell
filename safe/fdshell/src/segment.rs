@@ -2,7 +2,7 @@ mod block;
 mod line;
 
 use crate::brace::scan_function_block;
-use crate::keywords::keyword_delta;
+use crate::keywords::{first_word_end, keyword_delta};
 use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
 use alloc::vec::Vec;
 
@@ -52,8 +52,12 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
 
         let raw = line.get(start..i).unwrap_or(b"");
         let part = raw.trim_ascii();
+        let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
 
-        if !in_block && !part.is_empty() && keyword_delta(part) == Some(1) {
+        if !in_block
+            && !part.is_empty()
+            && keyword_delta(part, line, first_word_end(part, start + lead)) == Some(1)
+        {
             let pre_resume = line::flush_line(&mut segments, line, line_start, i, &mut runs);
             let (segment, resume, floor) =
                 block::keyword_block(line, raw, part, start, &state, pre_resume);
@@ -89,7 +93,6 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             body_floor = pre_resume;
         } else {
             if !part.is_empty() {
-                let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
                 runs.push((part, start + lead));
             }
             if line.get(i) == Some(&b'\n') || i == line.len() {

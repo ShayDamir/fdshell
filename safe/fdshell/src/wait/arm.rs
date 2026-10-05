@@ -55,7 +55,11 @@ fn reap_task(name: &ShortCStr, cell: &ForkCell<ShellState>) -> Result<(), Report
         .tasks
         .remove(name)
         .ok_or(WaitError::TaskNotFound { name: name.clone() })?;
-    let status = task.pidfd.wait_pidfd().change_context(WaitError::Reap)?;
+    let (status, times) = task
+        .pidfd
+        .wait_pidfd_rusage()
+        .change_context(WaitError::Reap)?;
+    s.add_child_times(times);
     if matches!(status, WaitStatus::Exited(0))
         && let Some(capture_fd) = task.capture_fd
     {

@@ -1524,6 +1524,43 @@ fn while_parse_newline_separator() {
 }
 
 #[test]
+fn wait_builtin_bare_is_cmd() {
+    let ParsedLine::Cmd(cmd) = parse(b"wait").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.command.eq_bytes(b"wait"));
+    assert!(cmd.args.is_empty());
+}
+
+#[test]
+fn wait_builtin_with_pid_is_cmd() {
+    let ParsedLine::Cmd(cmd) = parse(b"wait 123").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.command.eq_bytes(b"wait"));
+    assert_eq!(cmd.args.len(), 1);
+    assert!(cmd.args[0].eq_bytes(b"123"));
+}
+
+#[test]
+fn wait_builtin_quoted_pattern_is_cmd() {
+    let ParsedLine::Cmd(cmd) = parse(b"wait \"readable\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.command.eq_bytes(b"wait"));
+    assert_eq!(cmd.args.len(), 1);
+    assert!(cmd.args[0].eq_bytes(b"readable"));
+}
+
+#[test]
+fn wait_block_is_wait() {
+    let ParsedLine::Wait(wb) = parse(b"wait\n readable %rd) echo hi ;;\ndone").unwrap() else {
+        panic!("expected Wait")
+    };
+    assert_eq!(wb.arms.len(), 1);
+}
+
+#[test]
 fn while_not_starting_with_while_is_a_cmd() {
     let tokens = token::tokenize(b"while_true; do body; done").unwrap();
     assert!(

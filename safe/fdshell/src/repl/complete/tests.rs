@@ -27,6 +27,19 @@ fn case_block_open_and_closed() {
 }
 
 #[test]
+fn wait_builtin_statement_is_complete() {
+    assert!(is_complete(b"wait"));
+    assert!(is_complete(b"wait 123"));
+    assert!(is_complete(b"wait \"readable\""));
+}
+
+#[test]
+fn wait_block_open_and_closed() {
+    assert!(!is_complete(b"wait\n readable %rd) echo hi ;;"));
+    assert!(is_complete(b"wait\n readable %rd) echo hi ;;\ndone"));
+}
+
+#[test]
 fn function_block_open_and_closed() {
     assert!(!is_complete(b"f() {"));
     assert!(is_complete(b"f() {\necho hi\n}"));

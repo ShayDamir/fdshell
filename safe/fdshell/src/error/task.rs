@@ -7,6 +7,8 @@ pub(crate) enum TaskError {
     BadArg,
     /// task not found
     NotFound,
+    /// wait: '{arg}' is not a pid of a background task
+    BadPid { arg: sys::ShortCStr },
     /// wait syscall failed
     Wait,
     /// failed to collect captured output

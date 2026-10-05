@@ -38,10 +38,11 @@ pub fn finish_cmd(
             Ok(WaitStatus::Exited(0))
         }
         None => {
-            let status = outcome
+            let (status, times) = outcome
                 .pidfd
-                .wait_pidfd()
+                .wait_pidfd_rusage()
                 .change_context(LaunchError::Fork)?;
+            state.add_child_times(times);
             if let Some(capture_fd) = &outcome.capture_fd
                 && let Some(arg) = crate::last_arg::recv(capture_fd, outcome.child_pid)?
             {
@@ -63,9 +64,10 @@ pub fn run_pipeline(
     cell: &ForkCell<ShellState>,
     envs: &[crate::run_env::EnvAssigns],
 ) -> Result<WaitStatus, Report<PipelineError>> {
-    let (status, channels) = crate::pipeline::launch_pipeline(cell, pipeline, envs)?;
+    let (status, channels, times) = crate::pipeline::launch_pipeline(cell, pipeline, envs)?;
+    let mut state = cell.borrow_mut().change_context(PipelineError::Pipeline)?;
+    state.add_child_times(times);
     if let WaitStatus::Exited(0) = status {
-        let mut state = cell.borrow_mut().change_context(PipelineError::Pipeline)?;
         for ch in channels {
             apply_captures(ch.capture_fd, ch.child_pid, ch.captures, &mut state)
                 .change_context(PipelineError::Pipeline)?;

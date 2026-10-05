@@ -429,6 +429,23 @@ cmd %>output &>&x; waitpid &x   # same, via explicit background + wait
 This avoids race conditions possible with traditional `$!` / PID-based background tracking,
 since pidfds remain valid and unique for the lifetime of the tracked child.
 
+The POSIX `wait [pid…]` builtin reaps background tasks **by pid** (every task when given
+no argument) and sets `$?` to the last reaped exit status — the pid-based complement to the
+name-keyed `waitpid &name`. `$!` holds the last background pid:
+
+```shell
+builtin false &>&j
+wait $!            # reap by pid; $? is the child's exit status
+wait               # reap every background task
+```
+
+Because `wait` is also the event-case block keyword, the shell disambiguates by what
+follows it: a `wait` opens a block when the next word is on a subsequent line, or is a
+same-line pattern keyword (`readable` / `writable` / `finished` / `after`); a same-line
+pid/`$!`/name, a `;`, a quoted word, or end-of-line is the POSIX builtin. In the REPL,
+`wait` + Enter therefore runs the builtin (bash-compatible) — start a multi-line block
+with the pattern keyword on the line after `wait`.
+
 ### Event-case `wait`
 
 `wait` runs one poll round over fd variables. For every descriptor that is ready it runs
@@ -456,6 +473,22 @@ echo "wait exited $?"
 
 Wrap it in a loop (`while true; do wait … done`) to re-poll each round. Arms run in
 separate children, so a slow arm (a blocking read) cannot stall the others or the parent.
+
+### `times`
+
+`times` prints the shell's and the reaped children's accumulated user/sys CPU times in
+bash's layout:
+
+```
+	User time	System time
+	0.00	0.01
+	Children user time	Children system time
+	1.23	0.05
+```
+
+The children times accumulate as children are reaped (each reap reads the child's `rusage`
+and adds it to the running total), so `times` after a `wait` reflects the work those
+children did.
 
 ### Socket lifecycle (`bind` / `listen` / `accept` / `connect`)
 

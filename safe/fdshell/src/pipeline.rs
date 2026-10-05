@@ -1,4 +1,5 @@
 mod child;
+mod reap;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::iter::Iterator;
@@ -21,7 +22,7 @@ pub fn launch_pipeline(
     cell: &ForkCell<ShellState>,
     pipeline: Pipeline,
     envs: &[crate::run_env::EnvAssigns],
-) -> Result<(WaitStatus, Vec<CaptureChannel>), Report<PipelineError>> {
+) -> Result<(WaitStatus, Vec<CaptureChannel>, sys::getrusage::CpuTimes), Report<PipelineError>> {
     let n = pipeline.commands.len();
     let commands = pipeline.commands;
 
@@ -82,17 +83,7 @@ pub fn launch_pipeline(
         })
         .collect();
 
-    let last = children.last().ok_or(PipelineError::Pipeline)?;
-    let last_status = last
-        .1
-        .wait_pidfd()
-        .change_context(PipelineError::Pipeline)?;
+    let (last_status, times) = reap::reap_children(&children)?;
 
-    for i in 0..n.saturating_sub(1) {
-        if let Some(ch) = children.get(i) {
-            let _ = ch.1.wait_pidfd();
-        }
-    }
-
-    Ok((last_status, channels))
+    Ok((last_status, channels, times))
 }

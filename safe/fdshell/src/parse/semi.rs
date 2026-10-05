@@ -8,13 +8,13 @@ use sys::ShortCStr;
 /// depth (starting at 1 for the opening keyword) first returns to 0. Tokens
 /// after it are heredoc body data (a condition-position heredoc's bodies sit
 /// in the block text after the closing keyword), not block structure.
-pub(crate) fn closing_keyword_index(tokens: &[Token]) -> Option<usize> {
+pub(crate) fn closing_keyword_index(tokens: &[Token], line: &[u8]) -> Option<usize> {
     let mut depth: i32 = 1;
-    for (i, (t, _, _, _, _)) in tokens.iter().enumerate().skip(1) {
+    for (i, (t, _, end, _, _)) in tokens.iter().enumerate().skip(1) {
         let Some(word) = t.as_bytes().ok() else {
             continue;
         };
-        if let Some(delta) = crate::keywords::keyword_delta(word) {
+        if let Some(delta) = crate::keywords::keyword_delta(word, line, *end) {
             depth += delta;
             if depth == 0 {
                 return Some(i);

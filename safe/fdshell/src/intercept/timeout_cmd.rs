@@ -39,16 +39,20 @@ pub(crate) fn run_timeout(
     };
     let outcome = crate::launch::launch(cell, &subcmdline, &Vec::new())
         .change_context(CmdError::TimeoutLaunch)?;
-    let exit = bounded_wait(&outcome.pidfd, cfg.seconds)?;
+    let (exit, times) = bounded_wait(&outcome.pidfd, cfg.seconds)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+    state.add_child_times(times);
     state.set_last_exit(exit);
     Ok(true)
 }
 
 /// Poll the child's pidfd against a one-shot deadline timer. Returns the
-/// child's exit code, or 124 if the deadline fired first (after SIGTERM, then
-/// SIGKILL).
-fn bounded_wait(pidfd: &sys::LocalFd, seconds: i64) -> Result<i32, Report<CmdError>> {
+/// child's exit code (or 124 if the deadline fired first, after SIGTERM, then
+/// SIGKILL) plus the child's CPU times for `times` accounting.
+fn bounded_wait(
+    pidfd: &sys::LocalFd,
+    seconds: i64,
+) -> Result<(i32, sys::getrusage::CpuTimes), Report<CmdError>> {
     let timer = sys::timerfd::timerfd_create(0).change_context(CmdError::TimeoutTimer)?;
     sys::timerfd::timerfd_settime(&timer, (seconds, 0), (0, 0))
         .change_context(CmdError::TimeoutTimer)?;
@@ -74,11 +78,15 @@ fn bounded_wait(pidfd: &sys::LocalFd, seconds: i64) -> Result<i32, Report<CmdErr
                 .send_signal(sys::signal::SIGKILL)
                 .change_context(CmdError::TimeoutSignal)?;
         }
-        let _ = pidfd.wait_pidfd().change_context(CmdError::TimeoutWait)?;
-        Ok(124)
+        let (_, times) = pidfd
+            .wait_pidfd_rusage()
+            .change_context(CmdError::TimeoutWait)?;
+        Ok((124, times))
     } else {
-        let status = pidfd.wait_pidfd().change_context(CmdError::TimeoutWait)?;
-        Ok(status.exit_code())
+        let (status, times) = pidfd
+            .wait_pidfd_rusage()
+            .change_context(CmdError::TimeoutWait)?;
+        Ok((status.exit_code(), times))
     }
 }
 

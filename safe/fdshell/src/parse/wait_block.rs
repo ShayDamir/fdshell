@@ -39,6 +39,38 @@ pub enum FdRef {
     Task(ShortCStr),
 }
 
+/// Whether the `wait` tokens open an event-case block: the first non-`;`
+/// token after `wait` is an unquoted word on a subsequent line, or a same-line
+/// pattern keyword. A same-line pid/`$!`/name, a quoted word, or nothing is
+/// the POSIX `wait` builtin (it falls through to a command).
+pub(super) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
+    let Some((_wt, _ws, we, _wq, _wm)) = tokens.first() else {
+        return false;
+    };
+    let mut pos = 1;
+    while let Some((t, _, _, _, _)) = tokens.get(pos) {
+        if !t.eq_bytes(b";") {
+            break;
+        }
+        pos += 1;
+    }
+    let Some((t, ts, _te, quoted, _tm)) = tokens.get(pos) else {
+        return false;
+    };
+    if *quoted {
+        return false;
+    }
+    let Some(word) = t.as_bytes().ok() else {
+        return false;
+    };
+    let crossed = text
+        .as_bytes()
+        .ok()
+        .and_then(|b| b.get(*we..*ts))
+        .is_some_and(|between| between.contains(&b'\n'));
+    crossed || crate::keywords::is_wait_pattern_keyword(word)
+}
+
 pub(crate) fn tokens_to_wait(
     tokens: &[Token],
     text: &ScriptText,

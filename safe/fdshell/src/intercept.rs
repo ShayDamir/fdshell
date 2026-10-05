@@ -62,6 +62,8 @@ mod shopt;
 mod signalfd_cmd;
 mod source;
 mod timeout_cmd;
+mod times;
 mod ulimit_cmd;
 mod validation;
+mod wait_cmd;
 mod waitpid;

@@ -33,6 +33,8 @@ pub enum CmdError {
     Task,
     /// a `wait` round failed
     Wait,
+    /// times: failed to read resource usage
+    TimesUsage,
     /// envfilter: missing arguments (try --help)
     EnvfilterNoArgs,
     /// envfilter: unknown flag

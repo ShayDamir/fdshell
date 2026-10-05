@@ -27,6 +27,8 @@ pub(crate) fn dispatch(
         b"exec" => super::become_cmd::run_exec(line, cmdline, cell).map(super::handled),
         b"export_fd" => super::export_fd::run_export_fd(line, cmdline, cell).map(super::handled),
         b"waitpid" => super::waitpid::run_waitpid(line, cmdline, cell).map(super::handled),
+        b"wait" => super::wait_cmd::run_wait(line, cmdline, cell).map(super::handled),
+        b"times" => super::times::run_times(line, cmdline, cell).map(super::handled),
         b"export" => super::exports::run_export(line, cmdline, text, cell).map(super::handled),
         b"eval" => super::eval_cmd::run_eval(line, cmdline, text, cell).map(Some),
         b"source" | b"." => super::source::run_source(line, cmdline, text, cell).map(Some),

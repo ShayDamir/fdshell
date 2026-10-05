@@ -52,7 +52,11 @@ pub(crate) fn run_and_capture(
                     let _ = pidfd.send_signal(sys::signal::SIGKILL);
                 }
                 // Reap child; stdout already consumed (or abandoned) above.
-                let _ = pidfd.wait_pidfd();
+                if let Ok((_, times)) = pidfd.wait_pidfd_rusage()
+                    && let Ok(mut s) = cell.borrow_mut()
+                {
+                    s.add_child_times(times);
+                }
                 out
             }
         }

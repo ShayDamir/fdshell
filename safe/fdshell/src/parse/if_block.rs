@@ -6,7 +6,7 @@ use super::semi::trim_semi;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
-use error_stack::{Report, ensure};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -39,7 +39,8 @@ pub(crate) fn tokens_to_if(
 
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `fi`: the tokens after it are body data, not block structure.
-    let fi_idx = closing_keyword_index(tokens).ok_or(ParseError::MissingFi)?;
+    let line = text.as_bytes().change_context(ParseError::Never)?;
+    let fi_idx = closing_keyword_index(tokens, line).ok_or(ParseError::MissingFi)?;
     let tokens = tokens.get(..=fi_idx).ok_or(ParseError::MissingFi)?;
 
     let first_then = find_preceded_by_semi(tokens, 1, b"then");

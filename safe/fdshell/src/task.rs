@@ -1,8 +1,10 @@
+mod reap;
+
 use crate::capture::Capture;
 use crate::error::task::TaskError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
@@ -21,42 +23,39 @@ pub fn try_wait(
         Some(arg) => {
             let key = arg.strip_prefix(b"&").ok_or(TaskError::BadArg)?;
             let task = state.tasks.remove(&key).ok_or(TaskError::NotFound)?;
-            let status = task.pidfd.wait_pidfd().change_context(TaskError::Wait)?;
-            if let WaitStatus::Exited(0) = status
-                && let Some(capture_fd) = task.capture_fd
-            {
-                crate::capture::capture_and_commit(
-                    capture_fd,
-                    task.child_pid,
-                    task.captures,
-                    state,
-                )
-                .change_context(TaskError::Capture)?;
-            }
-            Ok(status)
+            reap::reap(task, state)
         }
-        None => {
-            let mut last = WaitStatus::Exited(0);
-            let keys: Vec<ShortCStr> = state.tasks.keys().cloned().collect();
-            for key in keys {
-                let Some(task) = state.tasks.remove(&key) else {
-                    continue;
-                };
-                let status = task.pidfd.wait_pidfd().change_context(TaskError::Wait)?;
-                if let WaitStatus::Exited(0) = status
-                    && let Some(capture_fd) = task.capture_fd
-                {
-                    crate::capture::capture_and_commit(
-                        capture_fd,
-                        task.child_pid,
-                        task.captures,
-                        state,
-                    )
-                    .change_context(TaskError::Capture)?;
-                }
-                last = status;
-            }
-            Ok(last)
-        }
+        None => reap::wait_all(state),
     }
 }
+
+/// POSIX `wait [pid…]`: reap the named pids (every task when no argument) and
+/// return the last reaped status. A non-numeric argument is `BadPid`; an
+/// unknown pid is `NotFound`.
+pub fn posix_wait(
+    args: &[ShortCStr],
+    state: &mut ShellState,
+) -> Result<WaitStatus, Report<TaskError>> {
+    if args.is_empty() {
+        return reap::wait_all(state);
+    }
+    let mut last = WaitStatus::Exited(0);
+    for arg in args {
+        let pid: i32 = arg
+            .parse()
+            .map_err(|_e| TaskError::BadPid { arg: arg.clone() })?;
+        let target = sys::Pid::from_raw(pid);
+        let key = state
+            .tasks
+            .iter()
+            .find(|(_, t)| t.child_pid == target)
+            .map(|(k, _)| k.clone())
+            .ok_or(TaskError::NotFound)?;
+        let task = state.tasks.remove(&key).ok_or(TaskError::NotFound)?;
+        last = reap::reap(task, state)?;
+    }
+    Ok(last)
+}
+
+#[cfg(test)]
+mod tests;
