@@ -42,7 +42,11 @@ pub enum FdRef {
 /// Whether the `wait` tokens open an event-case block: the first non-`;`
 /// token after `wait` is an unquoted word on a subsequent line, or a same-line
 /// pattern keyword. A same-line pid/`$!`/name, a quoted word, or nothing is
-/// the POSIX `wait` builtin (it falls through to a command).
+/// the POSIX `wait` builtin (it falls through to a command). The `;`-skip is
+/// load-bearing: a `wait` on its own line tokenizes the following newline as
+/// a `;` separator before the arm's first word (`wait\n readable …` yields
+/// `wait`, `;`, `readable`, …), so the loop is reachable (a same-line `;`
+/// never arrives — the statement splitter claims it first).
 pub(super) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
     let Some((_wt, _ws, we, _wq, _wm)) = tokens.first() else {
         return false;

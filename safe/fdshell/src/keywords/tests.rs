@@ -37,6 +37,18 @@ fn wait_opens_block_cases() {
     assert!(wait_opens_block(b"wait\nsleeping", 4));
 }
 
+/// The lookahead edge cases a single-byte mutation would flip: a bare
+/// `wait\n` (EOF after the newline) is the builtin, a `;` after the newline
+/// is skipped (the subsequent-line word still opens a block), and a quoted
+/// word on a subsequent line is data.
+#[test]
+fn wait_opens_block_lookahead_edges() {
+    assert!(!wait_opens_block(b"wait\n", 4));
+    assert!(wait_opens_block(b"wait\n; readable", 4));
+    assert!(!wait_opens_block(b"wait\n\"readable\"", 4));
+    assert!(!wait_opens_block(b"wait\n'readable'", 4));
+}
+
 /// `keyword_delta` for `wait` is `Some(1)` (block) or `Some(0)` (builtin).
 #[test]
 fn keyword_delta_wait_block_vs_builtin() {

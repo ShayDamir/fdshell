@@ -442,9 +442,10 @@ wait               # reap every background task
 Because `wait` is also the event-case block keyword, the shell disambiguates by what
 follows it: a `wait` opens a block when the next word is on a subsequent line, or is a
 same-line pattern keyword (`readable` / `writable` / `finished` / `after`); a same-line
-pid/`$!`/name, a `;`, a quoted word, or end-of-line is the POSIX builtin. In the REPL,
-`wait` + Enter therefore runs the builtin (bash-compatible) — start a multi-line block
-with the pattern keyword on the line after `wait`.
+pid/`$!`/name, a `;`, a quoted word, or end-of-input is the POSIX builtin (a bare `wait`
+at end-of-line in a multi-line script opens a block). In the REPL, `wait` + Enter
+therefore runs the builtin (bash-compatible) — start a multi-line block with the pattern
+keyword on the line after `wait`.
 
 ### Event-case `wait`
 

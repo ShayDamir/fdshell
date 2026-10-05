@@ -4,7 +4,7 @@ use crate::capture::Capture;
 use crate::error::task::TaskError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
@@ -43,7 +43,7 @@ pub fn posix_wait(
     for arg in args {
         let pid: i32 = arg
             .parse()
-            .map_err(|_e| TaskError::BadPid { arg: arg.clone() })?;
+            .change_context(TaskError::BadPid { arg: arg.clone() })?;
         let target = sys::Pid::from_raw(pid);
         let key = state
             .tasks

@@ -421,3 +421,39 @@ fn heredoc_body_for_does_not_open_depth() {
     );
     assert_eq!(r.end, 42);
 }
+
+// An indented `wait` at the end of a run in a block body opens a nested
+// block: the `line`+`base` threading must let the lookahead see the pattern
+// keyword on the next line, so the nested `done` closes it and the outer
+// `fi` closes the block (a wrong base flips the `wait` to the builtin and
+// the block closes early at `done`).
+#[test]
+fn indented_wait_at_run_end_opens_nested_block() {
+    let line = b"if x; then\n  wait\n  readable %rd) y ;;\ndone\nfi";
+    let r = scan(line, 2);
+    assert!(r.closed, "the outer if must close at the real fi");
+    assert_eq!(r.end, 47, "the nested wait must close at its own done");
+}
+
+// The same with the pattern keyword on the `wait` line (a mid-run word): the
+// split-position lookahead (`base + i`) must land just past `wait`.
+#[test]
+fn indented_wait_mid_run_opens_nested_block() {
+    let line = b"if x; then\n  wait readable %rd) y ;;\ndone\nfi";
+    let r = scan(line, 2);
+    assert!(r.closed, "the outer if must close at the real fi");
+    assert_eq!(r.end, 45, "the nested wait must close at its own done");
+}
+
+// A POSIX `wait <pid>` in a block body is the builtin (same-line pid), not a
+// nested block opener: the body's `done` must close the block.
+#[test]
+fn posix_wait_in_body_does_not_open_nested_block() {
+    let line = b"wait\n  readable %rd) wait 123 ;;\ndone";
+    let r = scan(line, 4);
+    assert!(
+        r.closed,
+        "a same-line pid after wait must not open a nested block"
+    );
+    assert_eq!(r.end, 38);
+}

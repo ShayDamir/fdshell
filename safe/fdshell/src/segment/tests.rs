@@ -600,3 +600,110 @@ fn scan_block_heredoc_body_fi_does_not_close() {
         _ => panic!("expected Block segment"),
     }
 }
+
+// A same-line pid after `wait` is the POSIX builtin: a statement segment,
+// not a block.
+#[test]
+fn scan_wait_pid_is_statement() {
+    let segments = scan_segments(b"wait 123", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"wait 123"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+// A bare `wait` at end of input is the POSIX builtin.
+#[test]
+fn scan_bare_wait_is_statement() {
+    let segments = scan_segments(b"wait", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement { cmd: s, .. } => assert_eq!(s, b"wait"),
+        Segment::Block { .. } => panic!("expected Statement"),
+    }
+}
+
+// A `wait` whose next word is on a subsequent line opens a block.
+#[test]
+fn scan_wait_block_opens_on_subsequent_line() {
+    let segments = scan_segments(b"wait\n readable %rd) x ;;\ndone", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+        } => {
+            assert_eq!(*block_start, 0);
+            assert_eq!(*end_pos, 29);
+            assert!(*closed);
+        }
+        Segment::Statement { .. } => panic!("expected Block"),
+    }
+}
+
+// A same-line pattern keyword after `wait` opens a block too.
+#[test]
+fn scan_wait_block_opens_on_same_line_keyword() {
+    let segments = scan_segments(b"wait readable %rd) x ;;\ndone", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+        } => {
+            assert_eq!(*block_start, 0);
+            assert_eq!(*end_pos, 28);
+            assert!(*closed);
+        }
+        Segment::Statement { .. } => panic!("expected Block"),
+    }
+}
+
+// After a function-definition block the scan resumes just past the closing
+// `}`; the trailing statement's offset is measured from there.
+#[test]
+fn scan_function_block_trailing_statement_offset() {
+    let segments = scan_segments(b"f() { :; } echo hi", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (
+            Segment::Block {
+                end_pos, closed, ..
+            },
+            Segment::Statement { cmd, off, .. },
+        ) => {
+            assert_eq!(*end_pos, 10);
+            assert!(*closed);
+            assert_eq!(cmd, b"echo hi");
+            assert_eq!(*off, 11);
+        }
+        _ => panic!("expected Block + Statement"),
+    }
+}
+
+// The block's exclusive end is the byte after the `}` and the scan resumes
+// one byte further: with no separating space, the first byte of the next
+// word sits in the resume gap (`}echo` yields the statement `cho hi` — a
+// degenerate input both fdshell and bash reject, pinned to pin the resume).
+#[test]
+fn scan_function_block_resume_gap_eats_glued_byte() {
+    let segments = scan_segments(b"f() { :; }echo hi", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (
+            Segment::Block {
+                end_pos, closed, ..
+            },
+            Segment::Statement { cmd, off, .. },
+        ) => {
+            assert_eq!(*end_pos, 10);
+            assert!(*closed);
+            assert_eq!(cmd, b"cho hi");
+            assert_eq!(*off, 11);
+        }
+        _ => panic!("expected Block + Statement"),
+    }
+}

@@ -5,10 +5,36 @@ use sys::getrusage;
 /// `self_usage()` succeeds and reports a positive own-user time.
 #[test]
 fn self_usage_succeeds() {
+    // Burn a little CPU so the reported user time is deterministically
+    // non-zero (a freshly started process can read `utime: 0`).
+    let mut n = 0u64;
+    while n < 50_000_000 {
+        n = n.wrapping_add(1);
+    }
+    core::hint::black_box(n);
     let t = getrusage::self_usage().unwrap();
     // u64 fields are finite by construction; the process has burned user time
     // by now, so `utime` must be positive.
     assert!(t.utime > 0, "utime must be positive: {t:?}");
+}
+
+/// `CpuTimes::from_rusage` converts the `timeval` fields to total
+/// microseconds.
+#[test]
+fn from_rusage_converts_timeval_to_microseconds() {
+    // SAFETY: `libc::rusage` is all-integer; zeroed memory is valid.
+    let mut raw: libc::rusage = unsafe { core::mem::zeroed() };
+    raw.ru_utime = libc::timeval {
+        tv_sec: 1,
+        tv_usec: 12345,
+    };
+    raw.ru_stime = libc::timeval {
+        tv_sec: 2,
+        tv_usec: 34567,
+    };
+    let t = getrusage::CpuTimes::from_rusage(&raw);
+    assert_eq!(t.utime, 1_012_345);
+    assert_eq!(t.stime, 2_034_567);
 }
 
 /// `wait_pidfd_rusage` reports the reaped child's own CPU times through the
