@@ -27,6 +27,15 @@ fn colon_is_a_noop_returning_zero() {
 }
 
 #[test]
+fn colon_resets_failed_status() {
+    // `:` returns 0 even after a failure (POSIX special builtin semantics):
+    // the status reset is the builtin's purpose.
+    let (out, _err, code) = run("false; :; echo $?");
+    assert_eq!(code, 0);
+    assert_eq!(out, "0\n");
+}
+
+#[test]
 fn colon_accepts_and_discards_args() {
     let (out, _err, code) = run(": a b c; echo done");
     assert_eq!(code, 0);

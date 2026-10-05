@@ -24,6 +24,9 @@ fn make_cmdline() -> crate::parse::CommandLine {
 #[test]
 fn run_colon_is_handled_and_sets_zero() {
     let cell = ForkCell::new(ShellState::new());
+    // Seed a nonzero status so the assertion below is not tautological:
+    // `:` must reset a failed status to 0.
+    cell.borrow_mut().unwrap().set_last_exit(1);
     let cmdline = make_cmdline();
     assert!(run_colon(b":", &cmdline, &cell).unwrap());
     let state = cell.borrow().unwrap();
