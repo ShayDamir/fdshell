@@ -38,6 +38,7 @@ mod tests;
 mod alias_cmd;
 mod become_cmd;
 mod cd;
+mod colon;
 pub(crate) mod commands;
 mod dispatch;
 mod envfilter;

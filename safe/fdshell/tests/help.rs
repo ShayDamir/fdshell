@@ -7,6 +7,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 /// Commands the shell runs in-process: the `intercept` table plus the
 /// parse-level `umask` / `unset`.
 const SHELL_COMMANDS: &[&str] = &[
+    ":",
     "alias",
     "unalias",
     "become",

@@ -2,6 +2,7 @@
 //! `intercept.rs` plus the parse-level `umask`/`unset`).
 
 pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
+    (b":", b"Null utility: do nothing, return 0"),
     (b"alias", b"Define or list aliases"),
     (b"unalias", b"Remove aliases"),
     (b"become", b"Replace shell with command"),

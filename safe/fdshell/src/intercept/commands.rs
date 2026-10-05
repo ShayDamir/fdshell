@@ -5,6 +5,7 @@
 //! tests can enumerate them.
 
 pub(crate) const INTERCEPTED_COMMANDS: &[&[u8]] = &[
+    b":",
     b"alias",
     b"become",
     b"cd",

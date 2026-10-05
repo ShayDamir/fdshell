@@ -22,6 +22,7 @@ pub(crate) fn dispatch(
         b"alias" => super::alias_cmd::run_alias(line, cmdline, text, cell).map(super::handled),
         b"unalias" => super::alias_cmd::run_unalias(line, cmdline, text, cell).map(super::handled),
         b"cd" => super::cd::run_cd(line, cmdline, text, cell).map(super::handled),
+        b":" => super::colon::run_colon(line, cmdline, cell).map(super::handled),
         b"exit" | b"quit" => super::exit::run_exit(line, cmdline, cell).map(super::handled),
         b"become" => super::become_cmd::run_become(line, cmdline, cell).map(super::handled),
         b"exec" => super::become_cmd::run_exec(line, cmdline, cell).map(super::handled),
