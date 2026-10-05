@@ -1,6 +1,6 @@
 use super::*;
 use crate::capture::Capture;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::vec;
@@ -13,7 +13,7 @@ fn make_cmdline(command: &[u8], args: &[&str]) -> CommandLine {
         .map(|s| ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap())
         .collect();
     CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(command.to_vec()).unwrap(),
         command_mask: vec![],
         env_assigns: vec![],
@@ -341,7 +341,7 @@ fn try_intercept_export_fd_with_redirects_returns_error() {
 fn builtin_pos_found_at_correct_position() {
     let line = make_line("builtin envfilter", &["--allow", "PATH"]);
     let mut cmdline = make_cmdline(b"envfilter", &["--allow", "PATH"]);
-    cmdline.builtin = true;
+    cmdline.prefix = BuiltinPrefix::Builtin;
     let cell = make_cell();
     let result = try_intercept(&text(&line), &cmdline, &cell);
     assert!(result.is_err());
@@ -358,7 +358,7 @@ fn builtin_pos_found_at_correct_position() {
     // Test with builtin in the middle — position should be 4
     let line2 = make_line("cmd builtin envfilter", &["--allow", "PATH"]);
     let mut cmdline2 = make_cmdline(b"envfilter", &["--allow", "PATH"]);
-    cmdline2.builtin = true;
+    cmdline2.prefix = BuiltinPrefix::Builtin;
     let result2 = try_intercept(&text(&line2), &cmdline2, &cell);
     assert!(result2.is_err());
     let e2 = result2.unwrap_err();
@@ -546,7 +546,7 @@ fn try_intercept_times_returns_true() {
 fn try_intercept_builtin_wait_accepted() {
     let line = make_line("builtin wait", &[]);
     let mut cmdline = make_cmdline(b"wait", &[]);
-    cmdline.builtin = true;
+    cmdline.prefix = BuiltinPrefix::Builtin;
     let cell = make_cell();
     assert!(
         try_intercept(&text(&line), &cmdline, &cell)

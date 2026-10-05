@@ -1,6 +1,6 @@
 use crate::error::parse::ParseError;
 use crate::parse::bg_redirect::parse_bg_redirect;
-use crate::parse::{CommandLine, Token, bg_redirect};
+use crate::parse::{BuiltinPrefix, CommandLine, Token, bg_redirect};
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
 use sys::{Position, ShortCStr};
@@ -9,7 +9,7 @@ use sys::{Position, ShortCStr};
 /// redirects, returning the finished `CommandLine`. Tokens after the first
 /// `;` are the heredoc body region: they belong to the body, not the command.
 pub(super) fn finish_command(
-    builtin: bool,
+    prefix: BuiltinPrefix,
     command: ShortCStr,
     tokens: &[Token],
     args_from: usize,
@@ -25,7 +25,7 @@ pub(super) fn finish_command(
         .unwrap_or_default();
     let env_assigns = super::envassign::collect_range(tokens, args_from - 1);
     let mut cmd = CommandLine {
-        builtin,
+        prefix,
         command,
         command_mask,
         env_assigns,

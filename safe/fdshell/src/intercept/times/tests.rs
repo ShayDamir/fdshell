@@ -15,7 +15,7 @@ fn centis_formats_microseconds() {
 
 fn make_cmdline() -> crate::parse::CommandLine {
     crate::parse::CommandLine {
-        builtin: false,
+        prefix: crate::parse::BuiltinPrefix::None,
         command: ShortCStr::from(c"times"),
         command_mask: vec![],
         env_assigns: vec![],

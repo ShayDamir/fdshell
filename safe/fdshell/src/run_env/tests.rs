@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr, Trace};
 
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 
 use super::{EnvAssign, apply, apply_child, expand, restore};
@@ -131,7 +131,7 @@ fn apply_child_sets_strings_and_exports() {
 fn expand_expands_value_words_against_state() {
     let cell = cell_with(&[("A", "1")]);
     let cl = CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
         command_mask: vec![],
         env_assigns: vec![(

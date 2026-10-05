@@ -2,7 +2,7 @@ use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 
 use crate::child::{self, Command};
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
@@ -59,7 +59,7 @@ pub fn launch(
 /// store the result, so real runs populate the table like bash. A failure
 /// here is not an error — the child re-resolves and reports it.
 fn prehash(cmd: &Command, cell: &ForkCell<ShellState>) {
-    if cmd.builtin || cmd.name.contains(b'/') {
+    if cmd.prefix == BuiltinPrefix::Builtin || cmd.name.contains(b'/') {
         return;
     }
     let path = {

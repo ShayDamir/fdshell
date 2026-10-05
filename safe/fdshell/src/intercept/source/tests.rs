@@ -4,7 +4,7 @@ use super::run_source;
 use crate::error::cmd::CmdError;
 use crate::intercept::try_intercept;
 use crate::loop_control::LoopControl;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -19,7 +19,7 @@ fn make_cmdline(command: &[u8], args: &[&str]) -> CommandLine {
         .map(|s| ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap())
         .collect();
     CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(command.to_vec()).unwrap(),
         command_mask: vec![],
         env_assigns: vec![],
@@ -147,7 +147,7 @@ fn run_source_with_redirects_fails() {
 fn run_source_with_builtin_prefix_fails() {
     let (_tmp, path) = TempFile::new("builtin", b"A=1\n");
     let mut cmdline = make_cmdline(b"source", &[&path]);
-    cmdline.builtin = true;
+    cmdline.prefix = BuiltinPrefix::Builtin;
     let cell = make_cell();
     assert!(
         run_source(

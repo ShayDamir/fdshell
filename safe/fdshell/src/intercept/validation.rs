@@ -3,6 +3,7 @@ use error_stack::Report;
 use crate::capture::Capture;
 use crate::error::cmd::CmdError;
 use crate::error::parse::ParsePosition;
+use crate::parse::BuiltinPrefix;
 use crate::redirect::RedirectDef;
 
 pub(crate) fn err_at(line: &[u8], pos: usize, err: CmdError) -> Report<CmdError> {
@@ -27,9 +28,9 @@ fn is_redirect(b: &u8) -> bool {
 pub(crate) fn check_builtin_not_supported(
     line: &[u8],
     command: &'static str,
-    builtin: bool,
+    prefix: BuiltinPrefix,
 ) -> Result<(), Report<CmdError>> {
-    if !builtin {
+    if prefix == BuiltinPrefix::None {
         return Ok(());
     }
     let pos = line.windows(7).position(is_builtin_kw).unwrap_or(0);
@@ -64,7 +65,7 @@ pub(crate) fn validate_intercept(
     command: &'static str,
     cmdline: &crate::parse::CommandLine,
 ) -> Result<(), Report<CmdError>> {
-    check_builtin_not_supported(line, command, cmdline.builtin)?;
+    check_builtin_not_supported(line, command, cmdline.prefix)?;
     validate_intercept_no_builtin(line, command, cmdline)
 }
 

@@ -1,7 +1,7 @@
 use super::read_from_fd::read_line_from_fd;
 use super::*;
 use crate::capture::Capture;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::ToString;
@@ -13,7 +13,7 @@ use sys::siginfo::WaitStatus;
 
 fn make_read_cmdline(args: &[ShortCStr]) -> CommandLine {
     CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: c"read".into(),
         command_mask: vec![],
         env_assigns: vec![],
@@ -643,7 +643,7 @@ fn run_read_builtin_not_supported() {
     let line = make_read_line(&["builtin", "read", "var1"]);
     let cmdline = make_read_cmdline(&[c"var1".into()]);
     let mut cmdline = cmdline;
-    cmdline.builtin = true;
+    cmdline.prefix = BuiltinPrefix::Builtin;
     let cell = make_read_cell();
     let result = run_read(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_err());

@@ -3,10 +3,25 @@ use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
+/// How a command name is dispatched, set by a leading `builtin`/`command`
+/// keyword (or a bare name the parser already knows to be a builtin).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuiltinPrefix {
+    /// No keyword; normal resolution (function, intercept, builtin, external).
+    None,
+    /// `builtin NAME`, or a bare known-builtin name: dispatch as a builtin
+    /// only; a non-builtin is an error.
+    Builtin,
+    /// `command NAME`: dispatch as a builtin if the name is one, otherwise
+    /// fall through to the external (PATH) search.
+    Command,
+}
+
 #[cfg_attr(test, derive(Debug, PartialEq))]
 #[derive(Clone)]
 pub struct CommandLine {
-    pub builtin: bool,
+    /// Dispatch prefix for the command word (`builtin`/`command` keyword).
+    pub prefix: BuiltinPrefix,
     pub command: ShortCStr,
     /// Per-byte quote mask for the command word (word 0), parallel to it;
     /// its unquoted pattern bytes glob the command name (bash field model).

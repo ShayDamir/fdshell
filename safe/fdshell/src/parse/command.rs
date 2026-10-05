@@ -1,4 +1,5 @@
 use crate::error::parse::ParseError;
+use crate::parse::BuiltinPrefix;
 use crate::parse::CommandLine;
 use crate::parse::Token;
 use crate::parse::builtin::is_builtin;
@@ -20,18 +21,14 @@ pub fn parse_command(
     // Leading `NAME=value` words are scoped to this command (POSIX 2.9.1);
     // the keyword and builtin checks run on the first word after the prefix.
     let prefix = envassign::prefix_len(tokens);
-    // `command` (bash) is an alias for the `builtin` prefix: it bypasses
-    // user-function lookup.
-    let builtin_kw = tokens
-        .get(prefix)
-        .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"builtin") || t.eq_bytes(b"command"));
-    let kw = if builtin_kw { 1 } else { 0 };
-    let builtin = if builtin_kw {
-        true
-    } else {
-        tokens
-            .get(prefix)
-            .is_some_and(|(t, _, _, _, _)| is_builtin(t))
+    // `builtin NAME` dispatches as a builtin only; `command NAME` (bash:
+    // bypasses user functions) dispatches as a builtin if the name is one,
+    // else falls through to the external (PATH) search.
+    let (kw, cmd_prefix) = match tokens.get(prefix) {
+        Some(t) if t.0.eq_bytes(b"builtin") => (1usize, BuiltinPrefix::Builtin),
+        Some(t) if t.0.eq_bytes(b"command") => (1usize, BuiltinPrefix::Command),
+        Some(t) if is_builtin(&t.0) => (0usize, BuiltinPrefix::Builtin),
+        _ => (0usize, BuiltinPrefix::None),
     };
     let command = tokens
         .get(prefix + kw)
@@ -39,7 +36,7 @@ pub fn parse_command(
         .0
         .clone();
     super::command_args::finish_command(
-        builtin,
+        cmd_prefix,
         command,
         tokens,
         prefix + kw + 1,

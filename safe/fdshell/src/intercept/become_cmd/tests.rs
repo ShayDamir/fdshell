@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 fn make_exec_cmdline(redirects: Vec<RedirectDef>) -> CommandLine {
     CommandLine {
-        builtin: false,
+        prefix: crate::parse::BuiltinPrefix::None,
         command: c"exec".into(),
         command_mask: vec![],
         env_assigns: vec![],

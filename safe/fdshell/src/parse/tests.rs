@@ -50,7 +50,7 @@ fn test_mkdirat_capture() {
     assert_eq!(
         cmd,
         CommandLine {
-            builtin: true,
+            prefix: BuiltinPrefix::Builtin,
             command: c"mkdirat".into(),
             command_mask: vec![false; 7],
             env_assigns: vec![],
@@ -92,7 +92,7 @@ fn test_openat2_capture() {
         panic!("expected Cmd")
     };
 
-    assert!(cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
     assert_eq!(cmd.command, c"openat2".into());
     assert_eq!(
         cmd.args,
@@ -128,7 +128,7 @@ fn test_pipe_tagged_captures() {
         panic!("expected Cmd")
     };
 
-    assert!(cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
     assert_eq!(cmd.command, c"pipe".into());
     assert!(cmd.args.is_empty());
     assert_eq!(
@@ -155,16 +155,16 @@ fn test_pipe_tagged_captures() {
 }
 
 #[test]
-fn test_command_keyword_is_builtin_prefix() {
+fn test_command_keyword_is_command_prefix() {
     let ParsedLine::Cmd(cmd) = parse(b"command openat2 --dirfd %foo %>%baz").unwrap() else {
         panic!("expected Cmd")
     };
-    assert!(cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::Command);
     assert_eq!(cmd.command, c"openat2".into());
     let ParsedLine::Cmd(plain) = parse(b"openat2 --dirfd %foo %>%baz").unwrap() else {
         panic!("expected Cmd")
     };
-    assert!(!plain.builtin);
+    assert_eq!(plain.prefix, BuiltinPrefix::None);
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn test_background() {
         panic!("expected Cmd")
     };
 
-    assert!(!cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::None);
     assert_eq!(cmd.command, c"run_server".into());
     assert_eq!(cmd.args, vec![c"params".into()]);
     assert!(cmd.captures.is_empty());
@@ -888,7 +888,7 @@ fn test_renameat2() {
         panic!("expected Cmd")
     };
 
-    assert!(cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
     assert_eq!(cmd.command, c"renameat2".into());
     assert_eq!(
         cmd.args,
@@ -1046,7 +1046,7 @@ fn test_execveat2_builtin() {
         panic!("expected Cmd")
     };
 
-    assert!(cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
     assert_eq!(cmd.command, c"execveat2".into());
     assert_eq!(
         cmd.args,
@@ -2811,7 +2811,7 @@ fn test_env_assign_prefix_on_command() {
     let ParsedLine::Cmd(cmd) = parse(b"FOO=bar cmd arg").unwrap() else {
         panic!("expected Cmd")
     };
-    assert!(!cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::None);
     assert_eq!(cmd.command, c"cmd".into());
     assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
     assert_eq!(cmd.args, vec![c"arg".into()]);
@@ -2824,7 +2824,7 @@ fn test_env_assign_prefix_builtin_detection_runs_on_command_word() {
     let ParsedLine::Cmd(cmd) = parse(b"FOO=bar printf hi").unwrap() else {
         panic!("expected Cmd")
     };
-    assert!(cmd.builtin);
+    assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
     assert_eq!(cmd.command, c"printf".into());
     assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
     assert_eq!(cmd.args, vec![c"hi".into()]);

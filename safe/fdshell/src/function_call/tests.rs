@@ -4,7 +4,7 @@ use alloc::vec;
 use sys::fork_cell::ForkCell;
 use sys::{Origin, Position, ScriptText, ShortCStr};
 
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 
 fn text(b: &[u8]) -> ScriptText {
@@ -17,7 +17,7 @@ fn text(b: &[u8]) -> ScriptText {
 
 fn cmdline(command: &[u8]) -> CommandLine {
     CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(command.to_vec()).unwrap(),
         command_mask: vec![],
         env_assigns: vec![],
@@ -63,7 +63,17 @@ fn builtin_prefix_bypasses_function() {
     let cell = make_cell();
     crate::script::run_script(&text(b"f() { v=hi; }"), &cell).unwrap();
     let mut cl = cmdline(b"f");
-    cl.builtin = true;
+    cl.prefix = BuiltinPrefix::Builtin;
     let r = crate::function_call::try_call(&text(b"builtin f"), &cl, &cell).unwrap();
+    assert!(r.is_none());
+}
+
+#[test]
+fn command_prefix_bypasses_function() {
+    let cell = make_cell();
+    crate::script::run_script(&text(b"f() { v=hi; }"), &cell).unwrap();
+    let mut cl = cmdline(b"f");
+    cl.prefix = BuiltinPrefix::Command;
+    let r = crate::function_call::try_call(&text(b"command f"), &cl, &cell).unwrap();
     assert!(r.is_none());
 }

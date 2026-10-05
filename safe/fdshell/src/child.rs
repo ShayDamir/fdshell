@@ -26,7 +26,7 @@ mod statx;
 mod test;
 mod type_cmd;
 mod verity;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use core::ffi::CStr;
@@ -36,7 +36,7 @@ pub(crate) use error::handle_builtin_error;
 pub use run::child_main;
 
 pub struct Command {
-    pub builtin: bool,
+    pub prefix: BuiltinPrefix,
     pub name: ShortCStr,
     /// Per-byte quote mask for the command word (word 0); its unquoted
     /// pattern bytes glob the command name (bash field model).
@@ -71,7 +71,7 @@ impl<'a> Ctx<'a> {
 impl From<&CommandLine> for Command {
     fn from(cmdline: &CommandLine) -> Self {
         Command {
-            builtin: cmdline.builtin,
+            prefix: cmdline.prefix,
             name: cmdline.command.clone(),
             command_mask: cmdline.command_mask.clone(),
         }

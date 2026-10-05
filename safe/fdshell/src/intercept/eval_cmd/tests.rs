@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::{join_space, run_eval};
 use crate::error::cmd::CmdError;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -26,7 +26,7 @@ fn make_cmdline(command: &[u8], args: &[&str]) -> CommandLine {
         .map(|s| ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap())
         .collect();
     CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(command.to_vec()).unwrap(),
         command_mask: vec![],
         env_assigns: vec![],

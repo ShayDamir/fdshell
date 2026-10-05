@@ -1,6 +1,6 @@
 use crate::child::{self, Command, external};
 use crate::error::child_process::ChildProcessError;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::redirect::Redirect;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
@@ -40,8 +40,14 @@ pub fn child_main(
 
     crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), &resolved, &state);
     // `run_external` re-borrows the cell to glob the command name, so the
-    // trace borrow must end first (RefCell, LESSONS.md).
-    let builtin = cmd.builtin || child::dispatch::builtin_first(&cmd.name, &state);
+    // trace borrow must end first (RefCell, LESSONS.md). `command NAME`
+    // dispatches as a builtin only when the name is in the dispatch table;
+    // otherwise it falls through to the external (PATH) search (POSIX #6.6).
+    let builtin = match cmd.prefix {
+        BuiltinPrefix::Builtin => true,
+        BuiltinPrefix::Command => child::dispatch::is_dispatched(&cmd.name),
+        BuiltinPrefix::None => child::dispatch::builtin_first(&cmd.name, &state),
+    };
     drop(state);
 
     if builtin {

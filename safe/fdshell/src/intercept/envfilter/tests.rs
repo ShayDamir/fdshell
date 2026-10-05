@@ -1,6 +1,6 @@
 use super::*;
 use crate::capture::Capture;
-use crate::parse::CommandLine;
+use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -12,7 +12,7 @@ fn make_cmdline(args: &[&str]) -> CommandLine {
         .map(|s| ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap())
         .collect();
     CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: c"envfilter".into(),
         command_mask: vec![],
         env_assigns: vec![],
@@ -241,7 +241,7 @@ fn redirects_not_supported() {
 fn builtin_keyword_not_supported() {
     let line = make_line(&["builtin", "envfilter", "--allow", "PATH"]);
     let mut cmdline = make_cmdline(&["--allow", "PATH"]);
-    cmdline.builtin = true;
+    cmdline.prefix = BuiltinPrefix::Builtin;
     let cell = make_cell();
     let result = run_envfilter(&line, &cmdline, &cell);
     assert!(result.is_err());

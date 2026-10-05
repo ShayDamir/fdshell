@@ -1,5 +1,6 @@
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
+use crate::parse::BuiltinPrefix;
 use crate::state::ShellState;
 use alloc::collections::VecDeque;
 use error_stack::{Report, ResultExt, ensure};
@@ -43,13 +44,13 @@ pub(crate) fn try_call(
     Ok(Some(control))
 }
 
-/// The stored body of the function named by `cmdline`, or `None`. A `builtin`
-/// prefix bypasses function lookup.
+/// The stored body of the function named by `cmdline`, or `None`. A
+/// `builtin`/`command` prefix bypasses function lookup.
 fn look_up(
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<ShortCStr>, Report<CmdError>> {
-    if cmdline.builtin {
+    if cmdline.prefix != BuiltinPrefix::None {
         return Ok(None);
     }
     let state = cell.borrow().change_context(CmdError::Never)?;

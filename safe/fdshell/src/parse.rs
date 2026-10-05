@@ -40,7 +40,7 @@ pub(crate) mod while_block;
 pub(crate) mod word_quoted;
 
 pub(crate) use case_block::literal_indices;
-pub use cmdline::{CommandLine, Pipeline};
+pub use cmdline::{BuiltinPrefix, CommandLine, Pipeline};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;

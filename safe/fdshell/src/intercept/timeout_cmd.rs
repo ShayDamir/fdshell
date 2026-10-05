@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
+use crate::parse::BuiltinPrefix;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
@@ -23,7 +24,7 @@ pub(crate) fn run_timeout(
     super::validation::validate_intercept(line, "timeout", cmdline)?;
     let cfg = parse::parse(&cmdline.args, &cmdline.args_mask, &cmdline.args_quoted)?;
     let subcmdline = crate::parse::CommandLine {
-        builtin: false,
+        prefix: BuiltinPrefix::None,
         command: cfg.command,
         command_mask: cfg.command_mask,
         // A scoped prefix on `timeout` itself rides in the forked child's
