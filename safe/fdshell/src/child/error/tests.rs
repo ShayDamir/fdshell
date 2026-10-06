@@ -28,3 +28,12 @@ fn handle_builtin_error_fd_var_not_found_returns_one() {
         Ok(1)
     ));
 }
+
+#[test]
+fn handle_builtin_error_invalid_format_returns_one() {
+    let report = Report::new(BuiltinError::InvalidFormat);
+    assert!(matches!(
+        handle_builtin_error(ShortCStr::from(c"printf"), report),
+        Ok(1)
+    ));
+}

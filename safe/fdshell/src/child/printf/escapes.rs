@@ -61,3 +61,17 @@ fn emit_octal(fmt: &[u8], i: usize, out: &mut Vec<u8>) -> usize {
 fn octal_digit(c: u8) -> Option<u32> {
     (b'0'..=b'7').contains(&c).then_some((c - b'0') as u32)
 }
+
+/// Expand the backslash escapes in an argument (for `%b`) into `out`, using the
+/// same rules as the format string.
+pub(super) fn emit_arg(bytes: &[u8], out: &mut Vec<u8>) {
+    let mut i = 0;
+    while let Some(&b) = bytes.get(i) {
+        if b == b'\\' {
+            i = emit_escape(bytes, i, out);
+        } else {
+            out.push(b);
+            i += 1;
+        }
+    }
+}

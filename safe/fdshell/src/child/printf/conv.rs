@@ -1,87 +1,87 @@
-//! Conversion specifiers of `printf`.
+//! Conversion dispatch: resolve the fields, parse the argument, and route to
+//! the matching formatter. Numeric failures are reported to the `Sink` (the
+//! value falls back to 0 or the clamped bound) rather than aborting.
+
+mod num;
 
 use alloc::vec::Vec;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
-use core::str::FromStr;
-use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
+use error_stack::Report;
 
-pub(super) fn is_conv(c: u8) -> bool {
-    matches!(c, b's' | b'd' | b'i' | b'u' | b'o' | b'x' | b'X' | b'c')
-}
+use super::Sink;
+use super::conv_str::{byte_conv, char_conv, quote_conv, string_conv};
+use super::fmt_float;
+use super::fmt_g;
+use super::fmt_hexfloat;
+use super::fmt_int;
+use super::spec::{Field, Fmt, Spec};
 
-/// Apply one conversion; returns `true` when an argument was consumed.
-pub(super) fn apply_conv(
-    c: u8,
+/// Apply one fully-parsed specifier, consuming its `*` fields and its argument.
+/// Returns `true` when at least one argument was consumed.
+pub(super) fn apply_spec(
+    spec: &Spec,
     rest: &mut &[&CStr],
-    out: &mut Vec<u8>,
+    sink: &mut Sink,
 ) -> Result<bool, Report<BuiltinError>> {
-    match c {
-        b's' | b'c' => string_conv(c, rest, out),
-        b'd' | b'i' => num_conv::<i64>(rest, out, |v| alloc::format!("{v}")),
-        b'u' => num_conv::<i64>(rest, out, |v| alloc::format!("{}", v as u64)),
-        b'o' => num_conv::<i64>(rest, out, |v| alloc::format!("{:o}", v as u64)),
-        b'x' => num_conv::<i64>(rest, out, |v| alloc::format!("{:x}", v as u64)),
-        b'X' => num_conv::<i64>(rest, out, |v| alloc::format!("{:X}", v as u64)),
-        // `is_conv` guarantees a known conversion character.
-        _ => Err(Report::new(BuiltinError::Never)),
+    let before = rest.len();
+    let width = resolve_field(spec.width, rest, sink, false);
+    let precision = resolve_field(spec.precision, rest, sink, true);
+    let fmt = Fmt {
+        conv: spec.conv,
+        left: spec.left,
+        plus: spec.plus,
+        space: spec.space,
+        alt: spec.alt,
+        zero: spec.zero,
+        width,
+        precision,
+    };
+    match spec.conv {
+        b'd' | b'i' | b'u' | b'o' | b'x' | b'X' => {
+            fmt_int::render(num::next_int(rest, sink), &fmt, &mut sink.out);
+        }
+        b'f' | b'F' | b'e' | b'E' => {
+            fmt_float::render(num::next_float(rest, sink), &fmt, &mut sink.out)
+        }
+        b'g' | b'G' => fmt_g::render(num::next_float(rest, sink), &fmt, &mut sink.out),
+        b'a' | b'A' => fmt_hexfloat::render(num::next_float(rest, sink), &fmt, &mut sink.out),
+        b's' => string_conv(rest, &fmt, &mut sink.out),
+        b'c' => char_conv(rest, &fmt, &mut sink.out),
+        b'b' => byte_conv(rest, &fmt, &mut sink.out),
+        b'q' => quote_conv(rest, &fmt, &mut sink.out),
+        // `spec::is_conv` guarantees a known conversion character.
+        _ => {}
     }
+    Ok(before != rest.len())
 }
 
-/// `%s` / `%c` take one argument, or print nothing when the arguments are
-/// exhausted (bash semantics).
-fn string_conv(
-    c: u8,
+/// Resolve a width/precision field: a literal value, or `*` (the next argument,
+/// parsed as an integer; a negative precision means "absent").
+fn resolve_field(
+    field: Option<Field>,
     rest: &mut &[&CStr],
-    out: &mut Vec<u8>,
-) -> Result<bool, Report<BuiltinError>> {
-    match rest.split_first() {
-        Some((a, tail)) => {
-            *rest = tail;
-            match c {
-                b'c' => {
-                    if let Some(b) = a.to_bytes().first() {
-                        out.push(*b);
-                    }
-                }
-                _ => out.extend_from_slice(a.to_bytes()),
+    sink: &mut Sink,
+    is_precision: bool,
+) -> Option<usize> {
+    let f = field?;
+    match f {
+        Field::Lit(n) => Some(n),
+        Field::Star => {
+            let v = num::next_int(rest, sink);
+            if is_precision && v < 0 {
+                None
+            } else {
+                Some(v.max(0) as usize)
             }
-            Ok(true)
         }
-        None => Ok(false),
     }
 }
 
-/// Numeric conversions take one argument, or `0` when the arguments are
-/// exhausted (bash semantics).
-fn num_conv<T>(
-    rest: &mut &[&CStr],
-    out: &mut Vec<u8>,
-    f: impl FnOnce(T) -> alloc::string::String,
-) -> Result<bool, Report<BuiltinError>>
-where
-    T: FromStr + Default,
-    T::Err: core::error::Error + Send + Sync + 'static,
-{
-    let v = take(rest)?;
-    out.extend_from_slice(f(v).as_bytes());
-    Ok(true)
-}
-
-fn take<T>(rest: &mut &[&CStr]) -> Result<T, Report<BuiltinError>>
-where
-    T: FromStr + Default,
-    T::Err: core::error::Error + Send + Sync + 'static,
-{
-    match rest.split_first() {
-        Some((a, tail)) => {
-            *rest = tail;
-            let mut s = ShortCStr::new();
-            s.push(a);
-            s.parse::<T>()
-                .change_context(BuiltinError::InvalidArgument("number"))
-        }
-        None => Ok(T::default()),
-    }
+/// The next argument's bytes (owned), consumed from `rest`; `None` when the
+/// arguments are exhausted.
+pub(super) fn next_arg_bytes(rest: &mut &[&CStr]) -> Option<Vec<u8>> {
+    let a = rest.first().copied()?;
+    *rest = rest.get(1..).unwrap_or(&[]);
+    Some(a.to_bytes().to_vec())
 }

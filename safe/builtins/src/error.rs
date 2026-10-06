@@ -14,6 +14,8 @@ pub enum BuiltinError {
     MissingArgument(&'static str),
     /// invalid argument {0}
     InvalidArgument(&'static str),
+    /// invalid format string
+    InvalidFormat,
     /// syscall failed
     Syscall,
     /// unknown builtin

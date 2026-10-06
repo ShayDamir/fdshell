@@ -12,7 +12,7 @@ pub use localfd::LocalFd;
 pub use localfd_error::LocalFdError;
 pub use pid::Pid;
 pub use shellfd::RecvFdError;
-pub use shortcstr::{ExportedCStr, NoNul, ShortCStr, ShortCStrError};
+pub use shortcstr::{ExportedCStr, FloatParse, IntParse, NoNul, ShortCStr, ShortCStrError};
 pub use syscall_error::SyscallError;
 pub use umask::UmaskError;
 

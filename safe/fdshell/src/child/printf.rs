@@ -1,80 +1,95 @@
 //! `printf FMT [ARG...]` — format-string output.
 //!
-//! Bash-compatible subset: `%s %d %i %u %o %x %X %c %%` plus backslash
-//! escapes in the format string. Width, precision, flags and `%b` are
-//! unsupported (printed as-is). Numeric arguments are plain decimal
-//! integers (no `0x`, no surrounding whitespace).
+//! POSIX/XCU conversion table: `%s %c %d %i %u %o %x %X %b %q %a %A %e %E
+//! %f %F %g %G %%` with width, precision and flags. Numeric arguments use C
+//! `strtol`/`strtod` prefix semantics; a numeric failure prints a diagnostic to
+//! stderr (the value falls back to 0 / the clamped bound) and sets the exit
+//! status, while a malformed format specifier stops the render with an error.
 
-use alloc::vec::Vec;
+mod sink;
+
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 
 use super::Ctx;
+pub(super) use sink::Sink;
 
 pub(super) fn handle_printf(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let mut out = Vec::new();
+    let mut sink = Sink::new();
     match ctx.refs.split_first() {
-        Some((fmt, args)) => render(fmt.to_bytes(), args, &mut out)?,
+        Some((fmt, args)) => render(fmt.to_bytes(), args, &mut sink)?,
         // Bash `printf` with no arguments prints the default `%s\n` format.
-        None => out.push(b'\n'),
+        None => sink.out.push(b'\n'),
     }
-    sys::OUT.write_all(&out).change_context(BuiltinError::Io)?;
-    Ok(0)
+    if !sink.err.is_empty() {
+        sys::ERR
+            .write_all(&sink.err)
+            .change_context(BuiltinError::Io)?;
+    }
+    sys::OUT
+        .write_all(&sink.out)
+        .change_context(BuiltinError::Io)?;
+    Ok(i32::from(sink.failed))
 }
 
-/// Render `fmt` against `args` into `out`. The format string is reused while
+/// Render `fmt` against `args` into `sink`. The format string is reused while
 /// arguments remain, matching bash; a round that consumes nothing ends it.
-pub(super) fn render(
-    fmt: &[u8],
-    args: &[&CStr],
-    out: &mut Vec<u8>,
-) -> Result<(), Report<BuiltinError>> {
+fn render(fmt: &[u8], args: &[&CStr], sink: &mut Sink) -> Result<(), Report<BuiltinError>> {
     let mut rest = args;
     loop {
-        let consumed = round(fmt, &mut rest, out)?;
+        let consumed = round(fmt, &mut rest, sink)?;
         if rest.is_empty() || !consumed {
             return Ok(());
         }
     }
 }
 
-fn round(fmt: &[u8], rest: &mut &[&CStr], out: &mut Vec<u8>) -> Result<bool, Report<BuiltinError>> {
+fn round(fmt: &[u8], rest: &mut &[&CStr], sink: &mut Sink) -> Result<bool, Report<BuiltinError>> {
     let mut consumed = false;
     let mut i = 0;
     while let Some(&b) = fmt.get(i) {
         if b != b'%' {
             if b == b'\\' {
-                i = escapes::emit_escape(fmt, i, out);
+                i = escapes::emit_escape(fmt, i, &mut sink.out);
                 continue;
             }
-            out.push(b);
+            sink.out.push(b);
             i += 1;
             continue;
         }
         match fmt.get(i + 1).copied() {
-            None => out.push(b'%'),
+            None => return Err(invalid_format()),
             Some(b'%') => {
-                out.push(b'%');
-                i += 1;
+                sink.out.push(b'%');
+                i += 2;
             }
-            Some(c) if conv::is_conv(c) => {
-                consumed = conv::apply_conv(c, rest, out)? || consumed;
-                i += 1;
-            }
-            Some(c) => {
-                out.push(b'%');
-                out.push(c);
-                i += 1;
+            Some(_) => {
+                let (s, j) = spec::parse(fmt, i + 1).ok_or_else(invalid_format)?;
+                consumed = conv::apply_spec(&s, rest, sink)? || consumed;
+                i = j;
             }
         }
-        i += 1;
     }
     Ok(consumed)
 }
 
+fn invalid_format() -> Report<BuiltinError> {
+    Report::new(BuiltinError::InvalidFormat)
+}
+
 mod conv;
+mod conv_q;
+mod conv_str;
 mod escapes;
+mod fmt_field;
+mod fmt_float;
+mod fmt_g;
+mod fmt_hexfloat;
+mod fmt_hexfloat_prec;
+mod fmt_int;
+mod spec;
+mod spec_helper;
 
 #[cfg(test)]
 mod tests;

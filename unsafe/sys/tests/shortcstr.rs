@@ -1502,3 +1502,195 @@ fn split_once_sep_equals_data() {
     assert_eq!(l.as_bytes().unwrap(), b"");
     assert_eq!(r.as_bytes().unwrap(), b"");
 }
+
+// --- parse_base0_int ---
+
+fn ics(b: &[u8]) -> ShortCStr {
+    ShortCStr::from_vec(b.to_vec()).unwrap()
+}
+
+#[test]
+fn base0_int_exact() {
+    use sys::IntParse::*;
+    assert_eq!(ics(b"42").parse_base0_int(), Exact(42));
+    assert_eq!(ics(b"+7").parse_base0_int(), Exact(7));
+    assert_eq!(ics(b"-7").parse_base0_int(), Exact(-7));
+    assert_eq!(ics(b"  42").parse_base0_int(), Exact(42));
+    assert_eq!(ics(b"0x1f").parse_base0_int(), Exact(31));
+    assert_eq!(ics(b"0X1F").parse_base0_int(), Exact(31));
+    assert_eq!(ics(b"010").parse_base0_int(), Exact(8));
+    assert_eq!(ics(b"0b101").parse_base0_int(), Exact(5));
+    assert_eq!(ics(b"0B11").parse_base0_int(), Exact(3));
+    assert_eq!(ics(b"+0b101").parse_base0_int(), Exact(5));
+    assert_eq!(ics(b"0").parse_base0_int(), Exact(0));
+    assert_eq!(ics(b"00").parse_base0_int(), Exact(0));
+    assert_eq!(ics(b"0x0").parse_base0_int(), Exact(0));
+    assert_eq!(ics(b"0b0").parse_base0_int(), Exact(0));
+    assert_eq!(
+        ics(b"9223372036854775807").parse_base0_int(),
+        Exact(i64::MAX)
+    );
+    assert_eq!(
+        ics(b"-9223372036854775808").parse_base0_int(),
+        Exact(i64::MIN)
+    );
+}
+
+#[test]
+fn base0_int_trailing() {
+    use sys::IntParse::*;
+    assert_eq!(ics(b"42x").parse_base0_int(), Trailing(42));
+    assert_eq!(ics(b"1.5").parse_base0_int(), Trailing(1));
+    assert_eq!(ics(b"5 ").parse_base0_int(), Trailing(5));
+    assert_eq!(ics(b"0x1g").parse_base0_int(), Trailing(1));
+    assert_eq!(ics(b"08").parse_base0_int(), Trailing(0));
+    assert_eq!(ics(b"018").parse_base0_int(), Trailing(1));
+    assert_eq!(ics(b"0b101x").parse_base0_int(), Trailing(5));
+    assert_eq!(ics(b"-08").parse_base0_int(), Trailing(0));
+}
+
+#[test]
+fn base0_int_nothing() {
+    use sys::IntParse::*;
+    assert_eq!(ics(b"").parse_base0_int(), Nothing);
+    assert_eq!(ics(b"abc").parse_base0_int(), Nothing);
+    assert_eq!(ics(b"+ 5").parse_base0_int(), Nothing);
+    assert_eq!(ics(b"--").parse_base0_int(), Nothing);
+    assert_eq!(ics(b"0x").parse_base0_int(), Nothing);
+    assert_eq!(ics(b"0b").parse_base0_int(), Nothing);
+    assert_eq!(ics(b"  ").parse_base0_int(), Nothing);
+}
+
+#[test]
+fn base0_int_overflow() {
+    use sys::IntParse::*;
+    assert_eq!(
+        ics(b"99999999999999999999").parse_base0_int(),
+        Overflow(i64::MAX)
+    );
+    assert_eq!(
+        ics(b"-18446744073709551617").parse_base0_int(),
+        Overflow(i64::MIN)
+    );
+    assert_eq!(
+        ics(b"-9223372036854775809").parse_base0_int(),
+        Overflow(i64::MIN)
+    );
+    // A very long input must not panic on `u128` accumulation.
+    let long = vec![b'9'; 40];
+    assert_eq!(ics(&long).parse_base0_int(), Overflow(i64::MAX));
+}
+
+// --- parse_float ---
+
+#[test]
+fn float_decimal() {
+    let p = ics(b"42").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (42.0, 2, false));
+    let p = ics(b"42x").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (42.0, 2, false));
+    let p = ics(b".5").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.5, 2, false));
+    let p = ics(b"5.").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (5.0, 2, false));
+    let p = ics(b"1e").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.0, 1, false));
+    let p = ics(b"1e+5").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (100_000.0, 4, false));
+    let p = ics(b".5e-1").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.05, 5, false));
+    let p = ics(b"5.e1").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (50.0, 4, false));
+    let p = ics(b" 3.5").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (3.5, 4, false));
+    let p = ics(b"+2.5").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (2.5, 4, false));
+    let p = ics(b"08").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (8.0, 2, false));
+}
+
+#[test]
+fn float_hex() {
+    let p = ics(b"0x1.8p1").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (3.0, 7, false));
+    let p = ics(b"0x1.8").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.5, 5, false));
+    let p = ics(b"0x.8p1").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.0, 6, false));
+    let p = ics(b"0x1p3").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (8.0, 5, false));
+    let p = ics(b"0x1p-1").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.5, 6, false));
+    let p = ics(b"0X.8P1").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.0, 6, false));
+    // `p` without digits is not consumed.
+    let p = ics(b"0x1p").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.0, 3, false));
+    let p = ics(b"0x1p-").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.0, 3, false));
+    let p = ics(b"0x").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 2, false));
+    let p = ics(b"0x1g").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (1.0, 3, false));
+}
+
+#[test]
+fn float_inf_nan() {
+    let p = ics(b"inf").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (f64::INFINITY, 3, false));
+    let p = ics(b"-inf").parse_float();
+    assert_eq!(
+        (p.value, p.consumed, p.range),
+        (f64::NEG_INFINITY, 4, false)
+    );
+    let p = ics(b"INFINITY").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (f64::INFINITY, 8, false));
+    let p = ics(b"infy").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (f64::INFINITY, 3, false));
+    let p = ics(b"NaN").parse_float();
+    assert!(p.value.is_nan());
+    assert_eq!((p.consumed, p.range), (3, false));
+    let p = ics(b"-nan").parse_float();
+    assert!(p.value.is_nan());
+    assert_eq!((p.consumed, p.range), (4, false));
+    let p = ics(b"nan(1)").parse_float();
+    assert!(p.value.is_nan());
+    assert_eq!((p.consumed, p.range), (6, false));
+    let p = ics(b"nanny").parse_float();
+    assert!(p.value.is_nan());
+    assert_eq!((p.consumed, p.range), (3, false));
+}
+
+#[test]
+fn float_range() {
+    let p = ics(b"1e400").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (f64::INFINITY, 5, true));
+    let p = ics(b"1e-400").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 6, true));
+    let p = ics(b"0x1p1024").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (f64::INFINITY, 8, true));
+    let p = ics(b"0x1p-1075").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 9, true));
+}
+
+#[test]
+fn float_nothing() {
+    let p = ics(b"").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 0, false));
+    let p = ics(b"abc").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 0, false));
+    let p = ics(b"-").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 0, false));
+    let p = ics(b"e5").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 0, false));
+    // C `strtod` has no `0b` binary prefix: `0` is parsed, then it stops.
+    let p = ics(b"0b101").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (0.0, 1, false));
+}
+
+#[test]
+fn float_negative_zero() {
+    let p = ics(b"-0.0").parse_float();
+    assert_eq!(p.value, 0.0);
+    assert!(p.value.is_sign_negative());
+}

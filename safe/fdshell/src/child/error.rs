@@ -13,6 +13,7 @@ pub(crate) fn handle_builtin_error(
         BuiltinError::Help => Ok(0),
         BuiltinError::InvalidArgument(_)
         | BuiltinError::MissingArgument(_)
+        | BuiltinError::InvalidFormat
         | BuiltinError::FdVarNotFound
         | BuiltinError::SameAsMismatch
         | BuiltinError::StrictRequiresDirfd
