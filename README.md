@@ -328,6 +328,10 @@ Accepted divergences from bash:
   intercept arguments at run time, inside the window); bash expands the
   intercept's own words before scoping, so `FOO=bar eval "echo $FOO"` prints
   `bar` here and empty in bash.
+- `test`/`[` grouping uses unquoted or quoted parens (`[ ( … ) ]`,
+  `[ "(" … ")" ]`); the POSIX escaped form `\(` `\)` does not group (fdshell
+  keeps the backslash in `\(` and splits `\)` into `\` and `)`, consistent
+  with the `\X`-kept backslash behavior above).
 
 ## How it works?
 
