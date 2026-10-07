@@ -25,11 +25,11 @@ pub(super) fn apply_spec(
     sink: &mut Sink,
 ) -> Result<bool, Report<BuiltinError>> {
     let before = rest.len();
-    let width = resolve_field(spec.width, rest, sink, false);
-    let precision = resolve_field(spec.precision, rest, sink, true);
+    let (width, width_left) = resolve_field(spec.width, rest, sink, false);
+    let (precision, _) = resolve_field(spec.precision, rest, sink, true);
     let fmt = Fmt {
         conv: spec.conv,
-        left: spec.left,
+        left: spec.left || width_left,
         plus: spec.plus,
         space: spec.space,
         alt: spec.alt,
@@ -38,8 +38,9 @@ pub(super) fn apply_spec(
         precision,
     };
     match spec.conv {
-        b'd' | b'i' | b'u' | b'o' | b'x' | b'X' => {
-            fmt_int::render(num::next_int(rest, sink), &fmt, &mut sink.out);
+        b'd' | b'i' => fmt_int::render_signed(num::next_int(rest, sink), &fmt, &mut sink.out),
+        b'u' | b'o' | b'x' | b'X' => {
+            fmt_int::render_unsigned(num::next_uint(rest, sink), &fmt, &mut sink.out)
         }
         b'f' | b'F' | b'e' | b'E' => {
             fmt_float::render(num::next_float(rest, sink), &fmt, &mut sink.out)
@@ -56,23 +57,32 @@ pub(super) fn apply_spec(
     Ok(before != rest.len())
 }
 
-/// Resolve a width/precision field: a literal value, or `*` (the next argument,
-/// parsed as an integer; a negative precision means "absent").
+/// Resolve a width/precision field to its value and whether a negative `*`
+/// width forced left-justification. A negative `*` precision means "absent".
 fn resolve_field(
     field: Option<Field>,
     rest: &mut &[&CStr],
     sink: &mut Sink,
     is_precision: bool,
-) -> Option<usize> {
-    let f = field?;
+) -> (Option<usize>, bool) {
+    let Some(f) = field else {
+        return (None, false);
+    };
     match f {
-        Field::Lit(n) => Some(n),
+        Field::Lit(n) => (Some(n), false),
         Field::Star => {
             let v = num::next_int(rest, sink);
-            if is_precision && v < 0 {
-                None
+            if is_precision {
+                if v < 0 {
+                    (None, false)
+                } else {
+                    (Some(v as usize), false)
+                }
+            } else if v < 0 {
+                // A negative `*` width left-justifies at `|width|`.
+                (Some(v.unsigned_abs() as usize), true)
             } else {
-                Some(v.max(0) as usize)
+                (Some(v as usize), false)
             }
         }
     }

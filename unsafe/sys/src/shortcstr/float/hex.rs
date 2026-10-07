@@ -1,6 +1,6 @@
 //! Hex-float (`0x[hex.][pP±digits]`) parsing.
 
-use super::dec::parse_exp;
+use crate::shortcstr::exp::parse_exp;
 
 /// `0x[hex.][pP±digits]`; at least one hex digit is required.
 pub(super) fn parse_hex(rest: &[u8]) -> (f64, usize, bool) {

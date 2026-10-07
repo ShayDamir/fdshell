@@ -5,10 +5,14 @@
 //! at the first invalid digit; overflow clamps to `i64::MAX`/`i64::MIN`.
 
 mod scan;
+pub(crate) mod uint;
 
 use crate::shortcstr::ShortCStr;
 
 /// Outcome of [`ShortCStr::parse_base0_int`].
+///
+/// `Debug`/`PartialEq` are unconditional: the `sys` integration tests
+/// (`tests/shortcstr.rs`) assert on these values from a separate crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntParse {
     /// The whole string is a valid number.

@@ -9,7 +9,8 @@ pub(super) const MAX_FIELD: usize = 1 << 20;
 
 /// A field operand: a literal value from the format, or `*` (taken from the
 /// argument list at render time).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(super) enum Field {
     /// A literal field value.
     Lit(usize),
@@ -19,7 +20,8 @@ pub(super) enum Field {
 
 /// A parsed `%` specifier: the flags, the (unresolved) fields, and the
 /// conversion character.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Spec {
     pub(super) left: bool,
     pub(super) plus: bool,
@@ -47,7 +49,8 @@ impl Spec {
 }
 
 /// A specifier with its fields resolved to concrete values, ready to render.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Fmt {
     pub(super) conv: u8,
     pub(super) left: bool,

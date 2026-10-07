@@ -7,57 +7,65 @@ use alloc::vec::Vec;
 /// minus trailing zeros; with precision `p`, `p` digits rounded half-to-even.
 pub(super) fn apply_precision(
     h: u8,
-    exact: &[u8; 13],
+    frac60: u64,
     exp2: i32,
     prec: Option<usize>,
 ) -> (u8, Vec<u8>, i32) {
     match prec {
         None => {
-            let mut n = 13;
-            while n > 0 && exact.get(n - 1) == Some(&0) {
+            let digits = digits_of(frac60);
+            let mut n = 15;
+            while n > 0 && digits.get(n - 1) == Some(&0) {
                 n -= 1;
             }
-            (h, exact.get(..n).unwrap_or(&[]).to_vec(), exp2)
+            (h, digits.get(..n).unwrap_or(&[]).to_vec(), exp2)
         }
-        Some(p) if p >= 13 => {
-            let mut d = exact.to_vec();
-            d.extend(core::iter::repeat_n(0, p - 13));
+        Some(p) if p >= 15 => {
+            let mut d = digits_of(frac60).to_vec();
+            d.extend(core::iter::repeat_n(0, p - 15));
             (h, d, exp2)
         }
-        Some(p) => round(h, exact, exp2, p),
+        Some(p) => {
+            let (h, frac, exp2) = round_frac(frac60, h, exp2, p);
+            (h, expand(frac, p), exp2)
+        }
     }
 }
 
-/// Round the exact digits to `p`, half-to-even. A mantissa that rounds up to 16
-/// renormalizes to 8 with `exp2 + 1`.
-fn round(h: u8, exact: &[u8; 13], exp2: i32, p: usize) -> (u8, Vec<u8>, i32) {
-    let keep = exact.get(..p).unwrap_or(&[]);
-    let dropped = exact.get(p..).unwrap_or(&[]);
-    let d0 = dropped.first().copied().unwrap_or(0);
-    let rest_nz = dropped.get(1..).is_some_and(|r| r.iter().any(|&d| d != 0));
-    let last = keep.last().copied().unwrap_or(h);
-    if !(d0 > 8 || (d0 == 8 && (rest_nz || last % 2 == 1))) {
-        return (h, keep.to_vec(), exp2);
+/// Round the 15-digit significand to `p` fractional digits, half-to-even. A
+/// mantissa that rounds up to `0x10` renormalizes to `0x1` with `exp2 + 4`.
+fn round_frac(frac60: u64, h: u8, exp2: i32, p: usize) -> (u8, u64, i32) {
+    let shift = 60 - 4 * p;
+    let unit = 1u128 << shift;
+    let half = unit >> 1;
+    let c = (h as u128) << 60 | frac60 as u128;
+    let rem = c & (unit - 1);
+    let mut kept = c & !(unit - 1);
+    // A tie rounds so the last kept digit is even.
+    if rem > half || (rem == half && (kept >> shift) & 1 == 1) {
+        kept += unit;
     }
-    let mut fv = 0u64;
-    for &d in keep {
-        fv = fv * 16 + u64::from(d);
-    }
-    let carry = (fv >> (4 * p)) as u8;
-    let newfrac = fv & ((1u64 << (4 * p)) - 1);
-    let mut h = h + carry;
+    let mut h = (kept >> 60) as u8;
+    // The kept fraction's top `p` digits, aligned to the low positions.
+    let frac = ((kept & ((1u128 << 60) - 1)) as u64) >> shift;
     let mut exp2 = exp2;
     if h == 16 {
-        h = 8;
-        exp2 += 1;
+        h = 1;
+        exp2 += 4;
     }
-    (h, expand(newfrac, p), exp2)
+    (h, frac, exp2)
 }
 
-/// Expand `v` into `p` hex digits (most significant first).
-fn expand(v: u64, p: usize) -> Vec<u8> {
+/// The 15 fractional hex digits of `frac60` (most significant first).
+fn digits_of(frac60: u64) -> [u8; 15] {
+    core::array::from_fn(|i| ((frac60 >> (4 * (14 - i))) & 0xF) as u8)
+}
+
+/// Expand `frac` (the kept fraction) into `p` hex digits (most significant
+/// first), zero-filling the high positions.
+fn expand(frac: u64, p: usize) -> Vec<u8> {
     (0..p)
-        .map(|i| ((v >> (4 * (p - 1 - i))) & 0xF) as u8)
+        .map(|i| ((frac >> (4 * (p - 1 - i))) & 0xF) as u8)
         .collect()
 }
 

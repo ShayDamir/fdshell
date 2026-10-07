@@ -7,6 +7,7 @@ mod concat;
 mod copy;
 mod eq;
 mod error;
+mod exp;
 mod float;
 mod fmt;
 mod format;
@@ -25,6 +26,7 @@ pub use error::ShortCStrError;
 pub use float::FloatParse;
 pub(crate) use from::from_inline;
 pub use int::IntParse;
+pub use int::uint::UintParse;
 pub use size::InlineSize;
 pub use traits::NoNul;
 

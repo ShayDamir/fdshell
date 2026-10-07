@@ -1581,6 +1581,86 @@ fn base0_int_overflow() {
     assert_eq!(ics(&long).parse_base0_int(), Overflow(i64::MAX));
 }
 
+#[test]
+fn base0_int_overflow_at_max_prefix() {
+    use sys::IntParse::*;
+    // `i64::MAX` followed by one more digit overflows (not `Trailing`): the
+    // `i64::MAX + 1` accumulation limit is what makes the 19-digit prefix a
+    // full overflow rather than a stop at `i64::MAX`.
+    assert_eq!(
+        ics(b"92233720368547758071").parse_base0_int(),
+        Overflow(i64::MAX)
+    );
+}
+
+// --- parse_base0_uint ---
+
+#[test]
+fn base0_uint_exact() {
+    use sys::UintParse::*;
+    assert_eq!(ics(b"42").parse_base0_uint(), Exact(42));
+    assert_eq!(ics(b"+7").parse_base0_uint(), Exact(7));
+    assert_eq!(ics(b"  42").parse_base0_uint(), Exact(42));
+    assert_eq!(ics(b"0x1f").parse_base0_uint(), Exact(31));
+    assert_eq!(ics(b"010").parse_base0_uint(), Exact(8));
+    assert_eq!(ics(b"0").parse_base0_uint(), Exact(0));
+    // The full `u64` range is valid for unsigned conversions.
+    assert_eq!(
+        ics(b"18446744073709551615").parse_base0_uint(),
+        Exact(u64::MAX)
+    );
+    // A negative input wraps in two's complement (C `strtoull`).
+    assert_eq!(ics(b"-1").parse_base0_uint(), Exact(u64::MAX));
+    assert_eq!(ics(b"-2").parse_base0_uint(), Exact(u64::MAX - 1));
+}
+
+#[test]
+fn base0_uint_trailing() {
+    use sys::UintParse::*;
+    assert_eq!(ics(b"42x").parse_base0_uint(), Trailing(42));
+    assert_eq!(ics(b"1.5").parse_base0_uint(), Trailing(1));
+    assert_eq!(ics(b"0x1g").parse_base0_uint(), Trailing(1));
+    assert_eq!(ics(b"5 ").parse_base0_uint(), Trailing(5));
+}
+
+#[test]
+fn base0_uint_nothing() {
+    use sys::UintParse::*;
+    assert_eq!(ics(b"").parse_base0_uint(), Nothing);
+    assert_eq!(ics(b"abc").parse_base0_uint(), Nothing);
+    assert_eq!(ics(b"+ 5").parse_base0_uint(), Nothing);
+    assert_eq!(ics(b"0x").parse_base0_uint(), Nothing);
+}
+
+#[test]
+fn base0_uint_overflow() {
+    use sys::UintParse::*;
+    // `u64::MAX + 1` saturates to `u64::MAX`.
+    assert_eq!(
+        ics(b"18446744073709551616").parse_base0_uint(),
+        Overflow(u64::MAX)
+    );
+    // The plan pin: a negative magnitude past `2^64` wraps to `u64::MAX`.
+    assert_eq!(
+        ics(b"-18446744073709551617").parse_base0_uint(),
+        Overflow(u64::MAX)
+    );
+    let long = vec![b'9'; 40];
+    assert_eq!(ics(&long).parse_base0_uint(), Overflow(u64::MAX));
+}
+
+#[test]
+fn base0_uint_overflow_at_max_prefix() {
+    use sys::UintParse::*;
+    // `u64::MAX` followed by one more digit overflows (not `Trailing`): the
+    // `2^64` accumulation limit is what makes the 20-digit prefix a full
+    // overflow rather than a stop at `u64::MAX`.
+    assert_eq!(
+        ics(b"184467440737095516151").parse_base0_uint(),
+        Overflow(u64::MAX)
+    );
+}
+
 // --- parse_float ---
 
 #[test]
@@ -1623,6 +1703,13 @@ fn float_hex() {
     assert_eq!((p.value, p.consumed, p.range), (0.5, 6, false));
     let p = ics(b"0X.8P1").parse_float();
     assert_eq!((p.value, p.consumed, p.range), (1.0, 6, false));
+    // The `a`-`f` and `A`-`F` hex-digit arms (not just `0`-`9`).
+    let p = ics(b"0x1.afp2").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (6.734375, 8, false));
+    let p = ics(b"0x1.AFP2").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (6.734375, 8, false));
+    let p = ics(b"0xabcdefp0").parse_float();
+    assert_eq!((p.value, p.consumed, p.range), (11259375.0, 10, false));
     // `p` without digits is not consumed.
     let p = ics(b"0x1p").parse_float();
     assert_eq!((p.value, p.consumed, p.range), (1.0, 3, false));
@@ -1632,6 +1719,15 @@ fn float_hex() {
     assert_eq!((p.value, p.consumed, p.range), (0.0, 2, false));
     let p = ics(b"0x1g").parse_float();
     assert_eq!((p.value, p.consumed, p.range), (1.0, 3, false));
+}
+
+#[test]
+fn float_hex_sig_16_digit_cap() {
+    // Only 16 hex significand digits are accumulated; a 17th digit is ignored
+    // (not folded into `sig`), so the value is the 16-digit significand.
+    let p = ics(b"0x1234567890abcdef0").parse_float();
+    assert_eq!(p.value, 0x1234567890abcdefu64 as f64);
+    assert_eq!((p.consumed, p.range), (19, false));
 }
 
 #[test]
@@ -1671,6 +1767,24 @@ fn float_range() {
     assert_eq!((p.value, p.consumed, p.range), (f64::INFINITY, 8, true));
     let p = ics(b"0x1p-1075").parse_float();
     assert_eq!((p.value, p.consumed, p.range), (0.0, 9, true));
+}
+
+#[test]
+fn float_correctly_rounded() {
+    // The parsed value must be the correctly-rounded `f64` (a `sig * 10^exp`
+    // multiply double-rounds past 15 digits); these pins kill that mutant.
+    assert_eq!(ics(b"0.95").parse_float().value, 0.95f64);
+    assert_eq!(ics(b"1.005").parse_float().value, 1.005f64);
+    assert_eq!(ics(b"2.675").parse_float().value, 2.675f64);
+    // A 20-digit significand round-trips to the same `f64` as core's parser.
+    assert_eq!(
+        ics(b"0.30000000000000004").parse_float().value,
+        0.30000000000000004f64
+    );
+    assert_eq!(
+        ics(b"12345678901234567.0").parse_float().value,
+        12345678901234567.0f64
+    );
 }
 
 #[test]

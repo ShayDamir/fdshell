@@ -1,4 +1,4 @@
-//! Integer conversion rendering (`d i u o x X`).
+//! Integer conversion rendering (`d i` signed, `u o x X` unsigned).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -6,29 +6,43 @@ use alloc::vec::Vec;
 use super::fmt_field::pad;
 use super::spec::Fmt;
 
-/// Render an integer conversion (the value is already parsed) into `out`.
-pub(super) fn render(value: i64, fmt: &Fmt, out: &mut Vec<u8>) {
-    let (sign, digits) = body(value, fmt);
-    let mut core = String::with_capacity(sign.len() + digits.len());
-    core.push_str(sign);
-    core.push_str(&digits);
+/// Render a signed integer conversion (`d`/`i`, the value already parsed).
+pub(super) fn render_signed(value: i64, fmt: &Fmt, out: &mut Vec<u8>) {
+    let (sign, digits) = signed(value, fmt);
     let zero = fmt.zero && fmt.precision.is_none();
-    pad(fmt.left, zero, fmt.width.unwrap_or(0), core.as_bytes(), out);
+    pad(
+        fmt.left,
+        zero,
+        fmt.width.unwrap_or(0),
+        sign.as_bytes(),
+        digits.as_bytes(),
+        out,
+    );
+}
+
+/// Render an unsigned integer conversion (`u`/`o`/`x`/`X`, the value parsed as
+/// a full `u64`).
+pub(super) fn render_unsigned(value: u64, fmt: &Fmt, out: &mut Vec<u8>) {
+    let digits = match fmt.conv {
+        b'u' => unsigned(value, fmt),
+        b'o' => octal(value, fmt),
+        b'x' => hex(value, false, fmt),
+        b'X' => hex(value, true, fmt),
+        // The dispatcher only calls this for unsigned conversions.
+        _ => String::new(),
+    };
+    let zero = fmt.zero && fmt.precision.is_none();
+    pad(
+        fmt.left,
+        zero,
+        fmt.width.unwrap_or(0),
+        b"",
+        digits.as_bytes(),
+        out,
+    );
 }
 
 /// The sign string and the precision-applied magnitude digits.
-fn body(value: i64, fmt: &Fmt) -> (&'static str, String) {
-    match fmt.conv {
-        b'd' | b'i' => signed(value, fmt),
-        b'u' => unsigned(value as u64, fmt),
-        b'o' => octal(value as u64, fmt),
-        b'x' => hex(value as u64, false, fmt),
-        b'X' => hex(value as u64, true, fmt),
-        // The dispatcher only calls this for integer conversions.
-        _ => ("", String::new()),
-    }
-}
-
 fn signed(value: i64, fmt: &Fmt) -> (&'static str, String) {
     let mag = value.unsigned_abs();
     let mut digits = alloc::format!("{mag}");
@@ -45,22 +59,22 @@ fn signed(value: i64, fmt: &Fmt) -> (&'static str, String) {
     (sign, digits)
 }
 
-fn unsigned(value: u64, fmt: &Fmt) -> (&'static str, String) {
+fn unsigned(value: u64, fmt: &Fmt) -> String {
     let mut digits = alloc::format!("{value}");
     min_digits(&mut digits, value, fmt);
-    ("", digits)
+    digits
 }
 
-fn octal(value: u64, fmt: &Fmt) -> (&'static str, String) {
+fn octal(value: u64, fmt: &Fmt) -> String {
     let mut digits = alloc::format!("{value:o}");
     if fmt.alt && value != 0 {
         digits.insert(0, '0');
     }
     min_digits(&mut digits, value, fmt);
-    ("", digits)
+    digits
 }
 
-fn hex(value: u64, upper: bool, fmt: &Fmt) -> (&'static str, String) {
+fn hex(value: u64, upper: bool, fmt: &Fmt) -> String {
     let mut digits = if upper {
         alloc::format!("{value:X}")
     } else {
@@ -70,7 +84,7 @@ fn hex(value: u64, upper: bool, fmt: &Fmt) -> (&'static str, String) {
     if fmt.alt && value != 0 {
         digits.insert_str(0, if upper { "0X" } else { "0x" });
     }
-    ("", digits)
+    digits
 }
 
 /// Apply the precision as a minimum digit count (zero-padded on the left).

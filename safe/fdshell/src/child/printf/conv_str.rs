@@ -24,7 +24,7 @@ pub(super) fn string_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
     if let Some(p) = fmt.precision {
         b.truncate(p);
     }
-    pad(fmt.left, false, fmt.width.unwrap_or(0), &b, out);
+    pad(fmt.left, false, fmt.width.unwrap_or(0), b"", &b, out);
 }
 
 /// `%c`: the argument's first byte (NUL when empty or exhausted), padded.
@@ -35,6 +35,7 @@ pub(super) fn char_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
         fmt.left,
         false,
         fmt.width.unwrap_or(0),
+        b"",
         core::slice::from_ref(&c),
         out,
     );
@@ -49,7 +50,7 @@ pub(super) fn byte_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
     }
     let mut core = Vec::new();
     emit_arg(&b, &mut core);
-    pad(fmt.left, false, fmt.width.unwrap_or(0), &core, out);
+    pad(fmt.left, false, fmt.width.unwrap_or(0), b"", &core, out);
 }
 
 /// `%q`: the argument shell-quoted (the precision truncates the raw bytes
@@ -60,5 +61,5 @@ pub(super) fn quote_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
         b.truncate(p);
     }
     let core = quote(&b);
-    pad(fmt.left, false, fmt.width.unwrap_or(0), &core, out);
+    pad(fmt.left, false, fmt.width.unwrap_or(0), b"", &core, out);
 }

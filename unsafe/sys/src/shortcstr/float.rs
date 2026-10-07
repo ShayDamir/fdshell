@@ -12,6 +12,9 @@ mod hex;
 use crate::shortcstr::ShortCStr;
 
 /// Outcome of [`ShortCStr::parse_float`].
+///
+/// `Debug`/`PartialEq` are unconditional: the `sys` integration tests
+/// (`tests/shortcstr.rs`) assert on these values from a separate crate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FloatParse {
     /// The parsed value (`inf`/`0.0` on range overflow/underflow).
@@ -86,7 +89,7 @@ fn parse_body(rest: &[u8]) -> (f64, usize, bool) {
 }
 
 /// `inf`/`infinity` and `nan([payload])`, any case; `None` otherwise.
-fn inf_nan(rest: &[u8]) -> Option<(f64, usize)> {
+pub(super) fn inf_nan(rest: &[u8]) -> Option<(f64, usize)> {
     let ci = |s: &[u8], t: &[u8]| {
         s.len() >= t.len() && s.get(..t.len()).is_some_and(|p| p.eq_ignore_ascii_case(t))
     };
@@ -106,7 +109,7 @@ fn inf_nan(rest: &[u8]) -> Option<(f64, usize)> {
     None
 }
 
-fn skip_space(bytes: &[u8]) -> usize {
+pub(super) fn skip_space(bytes: &[u8]) -> usize {
     let mut i = 0;
     while let Some(&c) = bytes.get(i) {
         if !matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {

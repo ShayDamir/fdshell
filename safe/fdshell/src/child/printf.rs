@@ -2,9 +2,20 @@
 //!
 //! POSIX/XCU conversion table: `%s %c %d %i %u %o %x %X %b %q %a %A %e %E
 //! %f %F %g %G %%` with width, precision and flags. Numeric arguments use C
-//! `strtol`/`strtod` prefix semantics; a numeric failure prints a diagnostic to
-//! stderr (the value falls back to 0 / the clamped bound) and sets the exit
-//! status, while a malformed format specifier stops the render with an error.
+//! `strtol`/`strtod` prefix semantics; a numeric failure (junk after the parsed
+//! prefix, or nothing parsed) prints a diagnostic to stderr, sets the exit
+//! status, and the value is the parsed prefix (0 when nothing parsed), while an
+//! out-of-range value is the clamped bound; a malformed format specifier stops
+//! the render with an error.
+//!
+//! **Documented deviations** (f64-based, C locale):
+//! - No positional arguments (`%1$s` is not supported).
+//! - Floats are `f64`: out-of-range values render as `inf`/`0` with a range
+//!   diagnostic (bash's bignum `%f` for `|x| > 1.8e308` is not reproduced).
+//! - `%a`/`%A` mantissa digits are the `f64` value's, zero-extended to 15; for
+//!   inputs whose decimal→binary mapping differs between `f64` and glibc's
+//!   long double (e.g. `0.1`, `5e-324`) the trailing digits are the `f64`
+//!   form, not bash's long-double digits.
 
 mod sink;
 

@@ -27,6 +27,7 @@ pub(super) enum Unit {
 
 /// The quoting form chosen for the whole argument.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(test, derive(Debug))]
 enum Style {
     Unquoted,
     Escaped,
