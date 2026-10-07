@@ -36,6 +36,11 @@ pub(super) fn is_file_binary(op: &[u8]) -> bool {
     matches!(op, b"-nt" | b"-ot" | b"-ef" | b"-fdeq" | b"-fdne")
 }
 
+/// Every binary operator: string, integer, and file comparisons.
+pub(super) fn is_binary(op: &[u8]) -> bool {
+    op == b"=" || op == b"!=" || is_int_op(op) || is_file_binary(op)
+}
+
 /// String tests `-z` (empty) and `-n` (non-empty) on the substituted value.
 pub(super) fn string_test(op: &[u8], arg: &CStr) -> Result<i32, Report<BuiltinError>> {
     let empty = arg.to_bytes().is_empty();

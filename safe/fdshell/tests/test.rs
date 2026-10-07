@@ -318,3 +318,85 @@ fn fdsize_malformed_exits_2() {
     assert_eq!(out, "2\n");
     assert!(err.contains("test"), "stderr={err:?}");
 }
+
+#[test]
+fn test_logical_or() {
+    let (out, _err, code) = run("[ 1 -lt 2 -o 3 -lt 2 ] && echo ok");
+    assert_eq!(code, 0, "true -o false");
+    assert_eq!(out, "ok\n");
+    let (out, _err, code) = run("[ 3 -lt 2 -o 1 -lt 2 ] && echo ok");
+    assert_eq!(code, 0, "false -o true");
+    assert_eq!(out, "ok\n");
+    let (out, _err, code) = run("[ 3 -lt 2 -o 3 -lt 2 ] && echo no || echo ok");
+    assert_eq!(code, 0, "false -o false");
+    assert_eq!(out, "ok\n");
+}
+
+#[test]
+fn test_logical_and() {
+    let (out, _err, code) = run("[ -f /proc/self/exe -a -r /proc/self/exe ] && echo ok");
+    assert_eq!(code, 0, "true -a true");
+    assert_eq!(out, "ok\n");
+    let (out, _err, code) = run("[ -f /proc/self/exe -a -d /proc/self/exe ] && echo no || echo ok");
+    assert_eq!(code, 0, "true -a false");
+    assert_eq!(out, "ok\n");
+}
+
+#[test]
+fn test_paren_grouping_unquoted() {
+    let (out, _err, code) = run("[ ( 1 -eq 1 ) -a ( 2 -eq 2 ) ] && echo ok");
+    assert_eq!(code, 0, "unquoted groups");
+    assert_eq!(out, "ok\n");
+    // A group overrides the operator precedence around it.
+    let (out, _err, code) = run("[ ( 1 -eq 2 -o 1 -eq 1 ) -a 1 -eq 2 ] && echo no || echo ok");
+    assert_eq!(code, 0, "grouped -o inside -a");
+    assert_eq!(out, "ok\n");
+}
+
+#[test]
+fn test_paren_grouping_quoted() {
+    let (out, _err, code) = run(r#"[ "(" 1 -eq 1 ")" -o "(" 0 -eq 1 ")" ] && echo ok"#);
+    assert_eq!(code, 0, "quoted groups");
+    assert_eq!(out, "ok\n");
+}
+
+#[test]
+fn test_negation_with_and() {
+    let (out, _err, code) =
+        run("test ! -f /nonexistent-fdshell-test -a -f /proc/self/exe && echo ok");
+    assert_eq!(code, 0);
+    assert_eq!(out, "ok\n");
+}
+
+#[test]
+fn test_logical_precedence_and_binds_tighter() {
+    // `t -o f -a f` = `t -o (f -a f)` = true.
+    let (out, _err, code) = run("[ 1 -eq 1 -o 1 -eq 2 -a 1 -eq 3 ] && echo ok");
+    assert_eq!(code, 0);
+    assert_eq!(out, "ok\n");
+}
+
+#[test]
+fn test_logical_no_short_circuit() {
+    // Both sides of `-o` are evaluated: the right side's integer error wins.
+    let (out, err, code) = run("test 2 -eq 2 -o 1 -eq a; echo $?");
+    assert_eq!(code, 0);
+    assert_eq!(out, "2\n");
+    assert!(err.contains("test"), "stderr={err:?}");
+}
+
+#[test]
+fn test_malformed_logical_expressions_exit_2() {
+    let cases = [
+        "test ( 1 -eq 1; echo $?", // unclosed group
+        "test 1 -o; echo $?",      // no right operand of -o
+        "test 1 -o -f; echo $?",   // unary op with no operand
+        "test 1 -eq 1 x; echo $?", // stray trailing token
+    ];
+    for script in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "script={script:?}");
+        assert_eq!(out, "2\n", "script={script:?}");
+        assert!(err.contains("test"), "stderr={err:?}");
+    }
+}
