@@ -84,6 +84,35 @@ fn arith_hex_and_octal_literals() {
     assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "255 8");
 }
 
+/// `base#number` literals (POSIX #5.3), like bash: `16#ff` is 255. The
+/// `((…))` keyword form shares the lexer, and a digit outside the base is a
+/// clean syntax error.
+#[test]
+fn arith_radix_literals() {
+    let output = run("echo $((16#ff)) $((2#1010)) $((8#17)) $((36#zz))");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(
+        str::from_utf8(&output.stdout).unwrap().trim(),
+        "255 10 15 1295"
+    );
+
+    let bad = run("echo $((2#2))");
+    let stderr = str::from_utf8(&bad.stderr).unwrap();
+    assert!(
+        stderr.contains("arithmetic expression has a syntax error"),
+        "stderr={stderr}"
+    );
+    assert!(!bad.status.success());
+
+    let kw = run("((16#ff)); echo $?");
+    assert!(kw.status.success());
+    assert_eq!(str::from_utf8(&kw.stdout).unwrap().trim(), "0");
+}
+
 /// Compound assignment returns the new value and updates the variable.
 #[test]
 fn arith_compound_assignment_updates_variable() {

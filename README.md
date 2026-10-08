@@ -279,7 +279,9 @@ The expression language:
   `*`/`/`/`%`, `+`/`-`, `<<`/`>>`, comparisons, `&`, `^`, `|`, `&&`, `||`,
   and the ternary `c?t:e`. `&&`/`||` are boolean (result 0 or 1) and
   short-circuit, like bash.
-- Decimal, hex (`0xff`), and leading-`0` octal (`010`) integer literals.
+- Decimal, hex (`0xff`), leading-`0` octal (`010`), and `base#number`
+  literals (`16#ff`, `2#1010`; base 2–64, digits `0–9a–zA–Z`, no
+  leading-zero base).
 - A variable name (`x`) or `$name` both resolve as the variable's value,
   re-evaluated as an expression (unset/empty is 0); `$$` is the shell pid and
   `$!` the last background pid.

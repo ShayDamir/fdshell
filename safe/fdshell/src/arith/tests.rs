@@ -294,6 +294,37 @@ fn arith_bare_x_is_error() {
 }
 
 #[test]
+fn arith_radix_literal() {
+    assert_eq!(eval(&cell(), "16#ff"), 255);
+    assert_eq!(eval(&cell(), "2#1010"), 10);
+    assert_eq!(eval(&cell(), "8#17"), 15);
+    // 35·36+35 (bash prints 1295; the task's 1195 was a typo).
+    assert_eq!(eval(&cell(), "36#zz"), 1295);
+    assert_eq!(eval(&cell(), "36#ZZ"), 1295);
+    assert_eq!(eval(&cell(), "36#z"), 35);
+    assert_eq!(eval(&cell(), "10#8"), 8);
+    // Bash's base range is 2–64, not POSIX's 2–36.
+    assert_eq!(eval(&cell(), "64#zz"), 2275);
+    assert_eq!(eval(&cell(), "16#ff+1"), 256);
+    assert_eq!(eval(&cell(), "-16#ff"), -255);
+    assert_eq!(eval(&cell(), "16#FFFFFFFFFFFFFFFF"), -1);
+}
+
+#[test]
+fn arith_radix_errors() {
+    for body in [
+        "0#1", "1#0", "1#5", "65#z", "100#10", "16#", "2#2", "5#ff", "16#g", "16#1g", "16# ff",
+        "2#102", "08#1", "02#1", "00#1", "016#ff",
+    ] {
+        let err = eval_err(&cell(), body);
+        assert!(
+            matches!(err.current_context(), ResolveError::ArithSyntax),
+            "{body:?} should be a syntax error, got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn arith_decimal_overflow_wraps() {
     assert_eq!(eval(&cell(), "9999999999999999999999"), 1864712049423024127);
 }
