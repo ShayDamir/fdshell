@@ -226,6 +226,22 @@ fn test_parse_flags_t_overflow_saturates_infinite() {
 }
 
 #[test]
+fn test_parse_flags_t_saturation_boundary() {
+    // `i32::MAX as u32 / 1000`: the largest `-t` whose millisecond product
+    // fits in `i32` (one past it saturates to `-1`).
+    let args = vec![c"-t".into(), c"2147483".into()];
+    let flags = parse_flags(&args).unwrap();
+    assert_eq!(flags.timeout_ms(), Some(2147483000));
+}
+
+#[test]
+fn test_parse_flags_t_well_below_saturation_boundary() {
+    let args = vec![c"-t".into(), c"1000".into()];
+    let flags = parse_flags(&args).unwrap();
+    assert_eq!(flags.timeout_ms(), Some(1000000));
+}
+
+#[test]
 fn test_parse_flags_t_invalid() {
     let args = vec![c"-t".into(), c"abc".into()];
     let result = parse_flags(&args);
@@ -415,7 +431,6 @@ fn test_line_backslash_newline_continuation_dropped() {
     for &b in b"a\\\nb" {
         line.feed(b);
     }
-    line.end_eof();
     assert_eq!(line.buf, b"ab");
     assert_eq!(line.end(), LineEnd::Eof);
 }
@@ -426,7 +441,6 @@ fn test_line_backslash_drops_backslash_keeps_byte() {
     for &b in b"a\\:b" {
         line.feed(b);
     }
-    line.end_eof();
     assert_eq!(line.buf, b"a:b");
 }
 
@@ -436,7 +450,6 @@ fn test_line_trailing_backslash_at_eof_dropped() {
     for &b in b"a\\" {
         line.feed(b);
     }
-    line.end_eof();
     // bash: a backslash at EOF is dropped, not kept.
     assert_eq!(line.buf, b"a");
     assert_eq!(line.end(), LineEnd::Eof);
@@ -448,7 +461,6 @@ fn test_line_raw_keeps_all_backslashes() {
     for &b in b"a\\nb" {
         line.feed(b);
     }
-    line.end_eof();
     assert_eq!(line.buf, b"a\\nb");
 }
 
@@ -481,7 +493,6 @@ fn test_line_empty_delim_reads_to_eof() {
         line.feed(b);
     }
     assert!(!line.finished());
-    line.end_eof();
     assert_eq!(line.buf, b"a:b:c");
     // bash: EOF is still a failure even when the delimiter set is empty.
     assert_eq!(line.end(), LineEnd::Eof);

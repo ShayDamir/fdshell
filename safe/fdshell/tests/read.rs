@@ -150,6 +150,22 @@ fn colon_delimiter() {
     assert_eq!(stdout(&out), "[a] rc=0\n", "script={script}");
 }
 
+/// `-d ':|'` stops at the first byte of the set: `ab|cd` → `ab`, status 0.
+#[test]
+fn multi_char_delimiter_set() {
+    let dir = Scratch::new();
+    let script =
+        r#"printf "ab|cd" > in; exec < in; read -d ":|" x; printf "[%s] rc=%s\n" "$x" "$?""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "[ab] rc=0\n", "script={script}");
+}
+
 /// `-d ''` reads the whole stream; EOF is still a failure (status 1), data kept.
 #[test]
 fn empty_delim_reads_to_eof() {

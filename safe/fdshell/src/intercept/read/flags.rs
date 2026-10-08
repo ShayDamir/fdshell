@@ -1,5 +1,5 @@
 /// Parsed `read` flags.
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub(crate) struct ReadFlags<'a> {
     pub source: SourceFd,
     pub max_bytes: Option<usize>,

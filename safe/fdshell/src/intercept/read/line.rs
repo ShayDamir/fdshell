@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 /// How the line ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug, Clone, Copy, PartialEq, Eq))]
 pub(crate) enum LineEnd {
     /// The delimiter or the `-n` cap was reached.
     Delim,
@@ -60,11 +60,6 @@ impl<'a> Line<'a> {
             return;
         }
         self.store(b);
-    }
-
-    /// Mark end of input; a pending backslash is dropped (bash behavior).
-    pub fn end_eof(&mut self) {
-        self.esc = false;
     }
 
     /// True once the delimiter, the `-n` cap, or `-n 0` finished the line.

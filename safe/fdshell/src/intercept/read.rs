@@ -3,6 +3,9 @@
 //! `-t` is a one-shot `poll` gate (see `io::read_line`): bash re-polls per
 //! byte, so a peer stalling mid-line past the timeout still blocks here;
 //! ready data is read to completion like bash.
+//!
+//! Unlike bash, a ready `-t 0` reads the line; bash's `-t 0` is a readiness
+//! probe that never reads.
 
 use error_stack::{Report, ResultExt};
 

@@ -13,7 +13,6 @@ pub(crate) fn read_line_from_fd(
     while !line.finished() {
         let n = read(&mut temp).change_context(CmdError::Read)?;
         if n == 0 {
-            line.end_eof();
             break;
         }
         for &b in temp.get(..n).ok_or(CmdError::Never)? {
