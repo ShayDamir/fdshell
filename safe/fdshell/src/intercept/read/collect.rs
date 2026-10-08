@@ -13,9 +13,10 @@ pub(crate) fn collect_targets(args: &[ShortCStr]) -> Result<Vec<ShortCStr>, Repo
     while let Some(arg) = iter.next() {
         let bytes = arg.as_bytes().change_context(CmdError::Read)?;
         match bytes {
-            b"-u" | b"-n" | b"-p" => {
+            b"-u" | b"-n" | b"-p" | b"-d" | b"-t" => {
                 iter.next();
             }
+            b"-r" => {}
             _ => {
                 if bytes.starts_with(b"%") {
                     return Err(Report::new(ReadError::FdVarUnsupported)
@@ -32,7 +33,7 @@ pub(crate) fn collect_targets(args: &[ShortCStr]) -> Result<Vec<ShortCStr>, Repo
     if targets.is_empty() {
         return Err(Report::new(ReadError::NoTarget)
             .attach_opaque(Suggestion(
-                "usage: read [-u fd] [-n count] [-p prompt] var ...",
+                "usage: read [-r] [-u fd] [-n count] [-p prompt] [-d delim] [-t secs] var ...",
             ))
             .change_context(CmdError::Read));
     }

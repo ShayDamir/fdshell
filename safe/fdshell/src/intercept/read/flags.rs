@@ -1,65 +1,28 @@
-use crate::error::cmd::CmdError;
-use crate::error::read::ReadError;
-use builtins::error::Suggestion;
-use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
-
-type ReadResult<T> = Result<T, Report<CmdError>>;
-
-type ReadFlags<'a> = (SourceFd, Option<usize>, Option<&'a [u8]>);
-
-pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> ReadResult<ReadFlags<'a>> {
-    let mut iter = args.iter();
-    let mut source = SourceFd::Stdin;
-    let mut max_bytes: Option<usize> = None;
-    let mut prompt: Option<&[u8]> = None;
-
-    while let Some(arg) = iter.next() {
-        let bytes = arg.as_bytes().change_context(CmdError::Read)?;
-        match bytes {
-            b"-u" => {
-                let fd_arg = iter
-                    .next()
-                    .ok_or(ReadError::MissingArgument('u'))
-                    .change_context(CmdError::Read)?;
-                if let Some(name) = fd_arg.strip_prefix(b"%") {
-                    source = SourceFd::FdVar(name);
-                } else {
-                    source = SourceFd::RawFd(fd_arg.clone());
-                }
-            }
-            b"-n" => {
-                let n_arg = iter
-                    .next()
-                    .ok_or(ReadError::MissingArgument('n'))
-                    .change_context(CmdError::Read)?;
-                match n_arg.parse::<usize>() {
-                    Ok(n) => max_bytes = Some(n),
-                    Err(_) => {
-                        return Err(Report::new(ReadError::InvalidArgument('n'))
-                            .attach_opaque(Suggestion("-n value must be a non-negative integer"))
-                            .change_context(CmdError::Read));
-                    }
-                }
-            }
-            b"-p" => {
-                let p_arg = iter
-                    .next()
-                    .ok_or(ReadError::MissingArgument('p'))
-                    .change_context(CmdError::Read)?;
-                let p_bytes = p_arg.as_bytes().change_context(CmdError::Read)?;
-                prompt = Some(p_bytes);
-            }
-            _ => {}
-        }
-    }
-
-    Ok((source, max_bytes, prompt))
-}
-
+/// Parsed `read` flags.
 #[derive(Debug)]
-pub(crate) enum SourceFd {
-    Stdin,
-    RawFd(ShortCStr),
-    FdVar(ShortCStr),
+pub(crate) struct ReadFlags<'a> {
+    pub source: SourceFd,
+    pub max_bytes: Option<usize>,
+    pub prompt: Option<&'a [u8]>,
+    pub raw: bool,
+    pub delim: Option<&'a [u8]>,
+    pub timeout: Option<u32>,
 }
+
+impl<'a> ReadFlags<'a> {
+    /// The `-t` value in milliseconds, saturating to `-1` (infinite) when
+    /// the product would overflow `i32`.
+    pub fn timeout_ms(&self) -> Option<i32> {
+        let secs = self.timeout?;
+        if secs > i32::MAX as u32 / 1000 {
+            return Some(-1);
+        }
+        Some(secs as i32 * 1000)
+    }
+}
+
+pub(crate) use parse::parse_flags;
+pub(crate) use source::SourceFd;
+
+mod parse;
+mod source;
