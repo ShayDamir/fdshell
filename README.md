@@ -318,6 +318,14 @@ Limitations / deviations from bash:
   position: `((x)) >f`, `((x)) | cat`, and `((x)) &` are clean parse errors.
 - A statement that *starts* with `((` is always the arithmetic keyword, so
   `((x)=1` is a parse error rather than an assignment.
+- The `$((…))` body is scanned by paren depth and closes at the first `)`
+  that brings the depth back to 2, so an inner `(` stays inside the body:
+  fdshell accepts `echo $((1,2)+3)` → `5`, `echo $((1,2)*3)` → `6`,
+  `echo $((1,2,3)+1)` → `4`, and `echo $((1+2)*3)` → `9` (the `+` form
+  predates the comma operator), where bash reports a command-substitution
+  syntax error. The `((…))` keyword form stays strict (`((1,2)+3)` →
+  "arithmetic command must be `((expr))` with no trailing words") and
+  `let "1,2,3)+1"` is a syntax error, like bash.
 - No positional parameters, command substitution, or `${…}` inside an
   arithmetic expression.
 - `let` evaluates each argument as a separate expression (bash-compatible).

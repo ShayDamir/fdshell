@@ -342,6 +342,56 @@ fn arith_increment_side_effect_stays_in_the_command() {
     assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "3\n3");
 }
 
+/// Deviation (pinned): the `$((…))` body scan closes at the first `)` that
+/// brings the depth back to 2, so an inner `(` stays inside the body and
+/// fdshell accepts bodies where bash reports a command-substitution syntax
+/// error. The `+` form (`$((1+2)*3)` → 9) is verified pre-existing on master;
+/// the comma forms extend the same leniency.
+#[test]
+fn arith_inner_paren_body_is_accepted_by_paren_scan() {
+    for (script, want) in [
+        ("echo $((1,2)+3)", "5"),
+        ("echo $((1,2)*3)", "6"),
+        ("echo $((1,2,3)+1)", "4"),
+        ("echo $((1+2)*3)", "9"),
+    ] {
+        let out = run(script);
+        assert!(
+            out.status.success(),
+            "{script} stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+        assert_eq!(
+            str::from_utf8(&out.stdout).unwrap().trim(),
+            want,
+            "{script}"
+        );
+    }
+}
+
+/// Deviation (pinned): the leniency is confined to `$((…))` bodies. The
+/// `((…))` keyword form stays strict — trailing words after the closing `))`
+/// are a parse error, as in bash — and `let` reports the raw trailing-garbage
+/// body as the syntax error bash also reports.
+#[test]
+fn arith_paren_leniency_leaves_strict_forms() {
+    let cmd = run("((1,2)+3)");
+    let cmd_err = str::from_utf8(&cmd.stderr).unwrap();
+    assert!(
+        cmd_err.contains("arithmetic command must be `((expr))` with no trailing words"),
+        "stderr={cmd_err}"
+    );
+    assert!(!cmd.status.success());
+
+    let out = run("let \"1,2,3)+1\"");
+    let stderr = str::from_utf8(&out.stderr).unwrap();
+    assert!(
+        stderr.contains("arithmetic expression has a syntax error"),
+        "stderr={stderr}"
+    );
+    assert!(!out.status.success());
+}
+
 // --- `((expr))` arithmetic command (keyword) ---
 
 /// `((expr))` is a shell keyword: it evaluates `expr` in-process and sets the
