@@ -39,6 +39,9 @@ pub(crate) enum Op {
     XorAssign,
     ShlAssign,
     ShrAssign,
+    Incr,
+    Decr,
+    Comma,
 }
 
 impl Op {

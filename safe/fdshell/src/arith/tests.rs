@@ -361,6 +361,9 @@ fn arith_binop_rejects_non_binary_ops() {
         Op::Colon,
         Op::Bang,
         Op::Tilde,
+        Op::Incr,
+        Op::Decr,
+        Op::Comma,
         Op::Assign,
         Op::AddAssign,
         Op::SubAssign,
@@ -706,9 +709,241 @@ fn arith_assign_lhs_must_be_name() {
 }
 
 #[test]
+fn arith_assign_reads_lhs_before_rhs() {
+    // bash reads the LHS value before evaluating the RHS, so an increment in
+    // the RHS does not feed the compound assignment (`x+=++x` is 3+4 = 7).
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "x+=++x"), 7);
+    assert_eq!(var_bytes(&c, c"x"), b"7");
+    let d = cell();
+    set_var(&d, c"x", c"3");
+    assert_eq!(eval(&d, "x+=x++"), 6);
+    assert_eq!(var_bytes(&d, c"x"), b"6");
+}
+
+#[test]
 fn arith_assign_div_by_zero() {
     assert!(matches!(
         eval_err(&cell(), "x/=0").current_context(),
+        ResolveError::ArithDivZero
+    ));
+}
+
+// --- increment / decrement ---
+
+#[test]
+fn arith_post_inc_yields_old_value() {
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "x++"), 3);
+    assert_eq!(var_bytes(&c, c"x"), b"4");
+}
+
+#[test]
+fn arith_pre_inc_yields_new_value() {
+    let c = cell();
+    set_var(&c, c"y", c"3");
+    assert_eq!(eval(&c, "++y"), 4);
+    assert_eq!(var_bytes(&c, c"y"), b"4");
+}
+
+#[test]
+fn arith_post_dec_yields_old_value() {
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "x--"), 3);
+    assert_eq!(var_bytes(&c, c"x"), b"2");
+}
+
+#[test]
+fn arith_pre_dec_yields_new_value() {
+    let c = cell();
+    set_var(&c, c"y", c"3");
+    assert_eq!(eval(&c, "--y"), 2);
+    assert_eq!(var_bytes(&c, c"y"), b"2");
+}
+
+#[test]
+fn arith_inc_unset_var() {
+    let c = cell();
+    assert_eq!(eval(&c, "x++"), 0);
+    assert_eq!(var_bytes(&c, c"x"), b"1");
+}
+
+#[test]
+fn arith_inc_wraps_at_i64_max() {
+    // Post-fix yields the old value; the wrap shows in the stored variable.
+    let c = cell();
+    set_var(&c, c"x", c"9223372036854775807");
+    assert_eq!(eval(&c, "x++"), i64::MAX);
+    assert_eq!(var_bytes(&c, c"x"), b"-9223372036854775808");
+    set_var(&c, c"x", c"-9223372036854775808");
+    assert_eq!(eval(&c, "x--"), i64::MIN);
+    assert_eq!(var_bytes(&c, c"x"), b"9223372036854775807");
+    // Pre-fix yields the wrapped value.
+    set_var(&c, c"x", c"9223372036854775807");
+    assert_eq!(eval(&c, "++x"), i64::MIN);
+}
+
+#[test]
+fn arith_post_inc_binds_tighter_than_mul() {
+    let c = cell();
+    set_var(&c, c"x", c"1");
+    // `x++*2` is `(x++)*2` = 2, and the increment lands.
+    assert_eq!(eval(&c, "x++*2"), 2);
+    assert_eq!(var_bytes(&c, c"x"), b"2");
+}
+
+#[test]
+fn arith_pre_inc_binds_tighter_than_mul() {
+    let c = cell();
+    set_var(&c, c"x", c"1");
+    assert_eq!(eval(&c, "++x*2"), 4);
+}
+
+#[test]
+fn arith_post_inc_binds_tighter_than_pow() {
+    let c = cell();
+    set_var(&c, c"x", c"2");
+    assert_eq!(eval(&c, "x++**2"), 4);
+    assert_eq!(var_bytes(&c, c"x"), b"3");
+}
+
+#[test]
+fn arith_inc_evaluates_left_to_right() {
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "x++ + x++"), 7);
+    assert_eq!(var_bytes(&c, c"x"), b"5");
+}
+
+#[test]
+fn arith_inc_in_ternary_and_logic() {
+    let c = cell();
+    set_var(&c, c"x", c"1");
+    assert_eq!(eval(&c, "x++ ? 1 : 2"), 1);
+    assert_eq!(eval(&c, "x++ && 1"), 1);
+    set_var(&c, c"x", c"0");
+    assert_eq!(eval(&c, "x++ || 1"), 1);
+}
+
+#[test]
+fn arith_inc_of_non_variable_is_evaluated() {
+    // bash lexes `++`/`--` only next to a name, so `++1` is `+ (+1)` = 1 and
+    // `++(1+2)` is `+ (1+2)` = 3.
+    assert_eq!(eval(&cell(), "++1"), 1);
+    assert_eq!(eval(&cell(), "++(1+2)"), 3);
+    assert_eq!(eval(&cell(), "++1 + 1"), 2);
+    assert_eq!(eval(&cell(), "++0"), 0);
+    let c = cell();
+    set_var(&c, c"x", c"1");
+    assert_eq!(eval(&c, "~x++"), -2);
+    assert_eq!(eval(&c, "!x++"), 0);
+}
+
+#[test]
+fn arith_inc_needs_a_name_neighbor() {
+    // A spaced prefix (`++ x`) and a spaced postfix (`x ++`) are both the
+    // increment token; `1--1`/`1++1` are two separate `-`/`+` tokens.
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "++ x"), 4);
+    let d = cell();
+    set_var(&d, c"x", c"3");
+    assert_eq!(eval(&d, "x ++"), 3);
+    assert_eq!(var_bytes(&d, c"x"), b"4");
+    assert_eq!(eval(&cell(), "1--1"), 2);
+    assert_eq!(eval(&cell(), "1++1"), 2);
+    let e = cell();
+    set_var(&e, c"x", c"1");
+    assert_eq!(eval(&e, "x++--1"), 2);
+    let f = cell();
+    set_var(&f, c"x", c"1");
+    assert_eq!(eval(&f, "x+++-1"), 0);
+    assert_eq!(eval(&cell(), "1 + ++1"), 2);
+}
+
+#[test]
+fn arith_inc_re_evaluates_var_value() {
+    // A variable's value is re-evaluated as an expression, then incremented.
+    let c = cell();
+    set_var(&c, c"x", c"1+1");
+    assert_eq!(eval(&c, "++x"), 3);
+    assert_eq!(var_bytes(&c, c"x"), b"3");
+    let d = cell();
+    set_var(&d, c"x", c"1+1");
+    assert_eq!(eval(&d, "x++"), 2);
+    assert_eq!(var_bytes(&d, c"x"), b"3");
+    let e = cell();
+    set_var(&e, c"x", c"y");
+    set_var(&e, c"y", c"9");
+    assert_eq!(eval(&e, "++x"), 10);
+}
+
+#[test]
+fn arith_dollar_name_post_inc() {
+    // Deviation: fdshell treats `$x` as a variable node, so `$x++` increments
+    // `x`; bash expands `$x` textually first and reports a syntax error.
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "$x++"), 3);
+    assert_eq!(var_bytes(&c, c"x"), b"4");
+}
+
+#[test]
+fn arith_inc_of_inc_is_accepted_without_outer_write() {
+    // Deviation: bash rejects `++x++` ("assignment requires lvalue"). fdshell
+    // evaluates the operand chain and stores only the inner variable write.
+    let c = cell();
+    set_var(&c, c"x", c"3");
+    assert_eq!(eval(&c, "++x++"), 4);
+    assert_eq!(var_bytes(&c, c"x"), b"4");
+}
+
+// --- comma operator ---
+
+#[test]
+fn arith_comma_yields_last() {
+    assert_eq!(eval(&cell(), "1,2,3"), 3);
+    let c = cell();
+    assert_eq!(eval(&c, "i=1, j=2, i+j"), 3);
+    assert_eq!(var_bytes(&c, c"i"), b"1");
+    assert_eq!(var_bytes(&c, c"j"), b"2");
+}
+
+#[test]
+fn arith_comma_evaluates_left_for_effect() {
+    let c = cell();
+    assert_eq!(eval(&c, "x=5, x*=2, x"), 10);
+    assert_eq!(var_bytes(&c, c"x"), b"10");
+    // Assignment outranks the comma: `x=1,2` assigns 1, then yields 2.
+    let d = cell();
+    assert_eq!(eval(&d, "x=1,2"), 2);
+    assert_eq!(var_bytes(&d, c"x"), b"1");
+}
+
+#[test]
+fn arith_comma_is_lowest_precedence() {
+    assert_eq!(eval(&cell(), "1,2+3"), 5);
+    assert_eq!(eval(&cell(), "1?2:3,4"), 4);
+    assert_eq!(eval(&cell(), "1,2?3:4"), 3);
+}
+
+#[test]
+fn arith_comma_in_parens() {
+    // A paren group takes the comma level, so the group's value is its last
+    // operand and the outer operator applies to it.
+    assert_eq!(eval(&cell(), "(1,2)+3"), 5);
+    assert_eq!(eval(&cell(), "(1,2)*3"), 6);
+    assert_eq!(eval(&cell(), "(1,2,3)+1"), 4);
+}
+
+#[test]
+fn arith_comma_left_error_propagates() {
+    // The left operand is evaluated for its side effects, so its error wins.
+    assert!(matches!(
+        eval_err(&cell(), "1/0,2").current_context(),
         ResolveError::ArithDivZero
     ));
 }
@@ -726,7 +961,36 @@ fn arith_empty_body() {
 #[test]
 fn arith_trailing_garbage() {
     for body in [
-        "1+", "1 2", ")", "+", "$", "1:2", "1?", "1?2", "(1", "1))", "a=b=c d", "@", "1@2",
+        "1+", "1 2", ")", "+", "$", "1:2", "1?", "1?2", "(1", "1))", "a=b=c d", "@", "1@2", "1,",
+        ",1", "1,,2", "1,2,3)+1",
+    ] {
+        let err = eval_err(&cell(), body);
+        assert!(
+            matches!(err.current_context(), ResolveError::ArithSyntax),
+            "{body:?} should be a syntax error, got {err:?}"
+        );
+    }
+}
+
+/// `++`/`--` need a variable name next to them, and an operand after them.
+#[test]
+fn arith_malformed_inc_dec_is_syntax_error() {
+    for body in [
+        "x--1",
+        "x-- 1",
+        "x++++",
+        "x++ +",
+        "x++y",
+        "x ++x",
+        "x++x",
+        "x+ +",
+        "1++",
+        "1--",
+        "++",
+        "--",
+        "x++ *",
+        "x++ ,",
+        "x++ + x++ +",
     ] {
         let err = eval_err(&cell(), body);
         assert!(

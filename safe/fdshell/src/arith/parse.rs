@@ -1,5 +1,6 @@
 //! Parser entry point: an expression (see `expr.rs`) with assignment and
-//! ternary on top (both right-associative, lowest precedence).
+//! ternary on top (both right-associative, lowest precedence), and the comma
+//! operator above them (left-associative, lowest of all).
 
 use alloc::boxed::Box;
 use error_stack::bail;
@@ -15,11 +16,23 @@ pub(crate) fn parse(toks: &[Tok]) -> R {
         bail!(ResolveError::ArithSyntax);
     }
     let mut pos = 0usize;
-    let ast = parse_assign(toks, &mut pos)?;
+    let ast = parse_comma(toks, &mut pos)?;
     if pos != toks.len() {
         bail!(ResolveError::ArithSyntax);
     }
     Ok(ast)
+}
+
+/// The comma operator: the value is the last operand, the earlier ones are
+/// evaluated for their side effects (bash: `1,2,3` is `3`).
+pub(crate) fn parse_comma(toks: &[Tok], pos: &mut usize) -> R {
+    let mut lhs = parse_assign(toks, pos)?;
+    while expr::peek_op(toks, *pos) == Some(Op::Comma) {
+        *pos += 1;
+        let rhs = parse_assign(toks, pos)?;
+        lhs = Ast::Comma(Box::new(lhs), Box::new(rhs));
+    }
+    Ok(lhs)
 }
 
 pub(crate) fn parse_assign(toks: &[Tok], pos: &mut usize) -> R {

@@ -1,7 +1,8 @@
-//! Arithmetic primaries: unary prefixes and the leaf tokens.
+//! Arithmetic primaries: unary prefixes, postfix `++`/`--`, and the leaf tokens.
 
 use alloc::boxed::Box;
 use error_stack::bail;
+use sys::ShortCStr;
 
 use super::ast::Ast;
 use super::expr::{R, parse_expr, peek_op};
@@ -20,6 +21,8 @@ pub(super) fn parse_unary(toks: &[Tok], pos: &mut usize) -> R {
         Some(Op::Plus) => Some(Ast::Pos),
         Some(Op::Bang) => Some(Ast::Not),
         Some(Op::Tilde) => Some(Ast::BitNot),
+        Some(Op::Incr) => Some(Ast::PreInc),
+        Some(Op::Decr) => Some(Ast::PreDec),
         _ => None,
     };
     let Some(make) = make else {
@@ -36,11 +39,12 @@ fn parse_primary(toks: &[Tok], pos: &mut usize) -> R {
     *pos += 1;
     match tok {
         Tok::Num(n) => Ok(Ast::Lit(n)),
-        Tok::Name(n) => Ok(Ast::Var(n)),
+        Tok::Name(n) => parse_postfix(toks, pos, n),
         Tok::Pid => Ok(Ast::Pid),
         Tok::LastBg => Ok(Ast::LastBg),
         Tok::LParen => {
-            let inner = super::parse::parse_assign(toks, pos)?;
+            // A paren group takes the comma level, so `(1,2)+3` is `2+3` = 5.
+            let inner = super::parse::parse_comma(toks, pos)?;
             match toks.get(*pos) {
                 Some(Tok::RParen) => {
                     *pos += 1;
@@ -50,5 +54,21 @@ fn parse_primary(toks: &[Tok], pos: &mut usize) -> R {
             }
         }
         Tok::RParen | Tok::Op(_) => bail!(ResolveError::ArithSyntax),
+    }
+}
+
+/// Postfix `++`/`--` bind tightest, so `x++*2` is `(x++)*2` (bash).
+fn parse_postfix(toks: &[Tok], pos: &mut usize, name: ShortCStr) -> R {
+    let make: Option<fn(Box<Ast>) -> Ast> = match peek_op(toks, *pos) {
+        Some(Op::Incr) => Some(Ast::PostInc),
+        Some(Op::Decr) => Some(Ast::PostDec),
+        _ => None,
+    };
+    match make {
+        Some(make) => {
+            *pos += 1;
+            Ok(make(Box::new(Ast::Var(name))))
+        }
+        None => Ok(Ast::Var(name)),
     }
 }

@@ -1,5 +1,6 @@
 //! AST evaluation: wrapping arithmetic, short-circuiting `&&`/`||` and the
-//! ternary, variable resolution in `var.rs`.
+//! ternary, `++`/`--` side effects, the comma operator, and variable
+//! resolution in `var.rs`.
 
 use error_stack::Report;
 
@@ -10,6 +11,9 @@ use super::var;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
+
+/// An arithmetic evaluation result.
+type E = Result<i64, Report<ResolveError>>;
 
 pub(crate) fn eval_ast(
     node: &Ast,
@@ -31,6 +35,16 @@ pub(crate) fn eval_ast(
         Ast::Pos(a) => eval_ast(a, cell, depth),
         Ast::Not(a) => Ok(i64::from(eval_ast(a, cell, depth)? == 0)),
         Ast::BitNot(a) => Ok(!eval_ast(a, cell, depth)?),
+        Ast::PreInc(a) => update(a, 1, true, cell, depth),
+        Ast::PostInc(a) => update(a, 1, false, cell, depth),
+        Ast::PreDec(a) => update(a, -1, true, cell, depth),
+        Ast::PostDec(a) => update(a, -1, false, cell, depth),
+        // The comma evaluates its left operand for the side effect only and
+        // yields the right operand; the left-to-right order is the same as `Bin`.
+        Ast::Comma(l, r) => {
+            eval_ast(l, cell, depth)?;
+            eval_ast(r, cell, depth)
+        }
         // `&&`/`||` are boolean like in C: the result is 0 or 1, not the
         // operand's value (bash: `1&&2` is 1, not 2).
         Ast::Bin(Op::AndAnd, l, r) => {
@@ -60,11 +74,26 @@ pub(crate) fn eval_ast(
             }
         }
         Ast::Assign(ass, name, rhs) => {
-            let rhs_v = eval_ast(rhs, cell, depth)?;
+            // The LHS value is read before the RHS is evaluated, so an
+            // increment in the RHS sees bash's order (`x+=++x` is 3+4 = 7).
             let cur = var::eval_var(name, cell, depth)?;
+            let rhs_v = eval_ast(rhs, cell, depth)?;
             let value = binop::apply(*ass, cur, rhs_v)?;
             var::set_var(name, value, cell)?;
             Ok(value)
         }
     }
+}
+
+/// `++`/`--` on an operand: evaluate it, and write the new value back when the
+/// operand is a variable. `pre` yields the new value, `post` the old one.
+/// A non-variable operand is just evaluated with no side effect, which is
+/// bash's rule (`++1` is `1`, `++(1+2)` is `3`).
+fn update(operand: &Ast, delta: i64, pre: bool, cell: &ForkCell<ShellState>, depth: u32) -> E {
+    let old = eval_ast(operand, cell, depth)?;
+    let new = old.wrapping_add(delta);
+    if let Ast::Var(name) = operand {
+        var::set_var(name, new, cell)?;
+    }
+    Ok(if pre { new } else { old })
 }

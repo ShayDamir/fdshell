@@ -27,14 +27,17 @@ pub(crate) fn binop(op: Op, l: i64, r: i64) -> Result<i64, Report<ResolveError>>
         Op::Or => Ok(l | r),
         Op::Xor => Ok(l ^ r),
         Op::Pow => Ok(super::pow::powi(l, r)),
-        // `&&`/`||` are short-circuited by the caller; `?`/`:` never appear
-        // in `Bin` nodes.
+        // `&&`/`||` are short-circuited by the caller; `?`/`:`, `++`/`--` and
+        // `,` never appear in `Bin` nodes.
         Op::AndAnd
         | Op::OrOr
         | Op::Question
         | Op::Colon
         | Op::Bang
         | Op::Tilde
+        | Op::Incr
+        | Op::Decr
+        | Op::Comma
         | Op::Assign
         | Op::AddAssign
         | Op::SubAssign

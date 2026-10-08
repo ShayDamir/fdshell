@@ -229,6 +229,119 @@ fn arith_malformed_expression_fails_command() {
     assert!(!output.status.success());
 }
 
+// --- `++`/`--` and the comma operator ---
+
+/// Post-fix `x++` yields the old value and writes the new one back; the side
+/// effect is visible to the rest of the same command's words.
+#[test]
+fn arith_post_increment_expansion() {
+    let output = run("x=3; echo $((x++)) $x");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "3 4");
+}
+
+/// Pre-fix `++y` yields the new value.
+#[test]
+fn arith_pre_increment_expansion() {
+    let output = run("y=3; echo $((++y)) $y");
+    assert!(output.status.success());
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "4 4");
+}
+
+/// Post-fix yields the old value, pre-fix the new one, and both write back.
+#[test]
+fn arith_decrement_expansion() {
+    let output = run("x=3; echo $((x--)) $((--x)) $x");
+    assert!(output.status.success());
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "3 1 1");
+}
+
+/// The comma operator yields its last operand; the earlier ones run for their
+/// side effects.
+#[test]
+fn arith_comma_operator_expansion() {
+    let output = run("echo $(( (i=1, j=2, i+j) ))");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "3");
+}
+
+/// A comma chain of assignments runs every operand, so the last one sees them.
+#[test]
+fn arith_comma_side_effects_persist() {
+    let output = run("echo $((x=5, x*=2, x))");
+    assert!(output.status.success());
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "10");
+}
+
+/// `((…))` runs in-process, so an increment persists; its exit status is
+/// `value == 0` (`x++` on unset `x` yields 0 → status 1).
+#[test]
+fn arith_increment_in_arith_command() {
+    let out = run("x=0; ((x++)); echo $? $x");
+    assert!(out.status.success());
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "1 1");
+
+    let comma = run("((1,2)); echo $?");
+    assert!(comma.status.success());
+    assert_eq!(str::from_utf8(&comma.stdout).unwrap().trim(), "0");
+}
+
+/// `let` evaluates its argument with the new operators and takes its exit
+/// status from the value.
+#[test]
+fn arith_increment_in_let() {
+    let out = run("x=3; let x++; echo $? $x");
+    assert!(out.status.success());
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "0 4");
+
+    let comma = run("let \"1,2\"; echo $?");
+    assert!(comma.status.success());
+    assert_eq!(str::from_utf8(&comma.stdout).unwrap().trim(), "0");
+}
+
+/// Postfix `++` in a `while` condition: the loop runs while the old value is
+/// below the bound, so the body sees 1, 2, 3. (The loop's own exit status is
+/// the failing condition's, a pre-existing `while` deviation from bash, so the
+/// status is not asserted here.)
+#[test]
+fn arith_increment_in_loop() {
+    let out = run("i=0; while ((i++ < 3)); do echo $i; done");
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "1\n2\n3");
+}
+
+/// A `++`/`--` with no operand, or a number glued after a postfix, is a clean
+/// syntax error that fails the command.
+#[test]
+fn arith_malformed_increment_is_syntax_error() {
+    for script in ["echo $((x--1))", "echo $((x++++))", "echo $((x++ +))"] {
+        let out = run(script);
+        let stderr = str::from_utf8(&out.stderr).unwrap();
+        assert!(
+            stderr.contains("arithmetic expression has a syntax error"),
+            "{script:?} stderr={stderr}"
+        );
+        assert!(!out.status.success(), "{script:?} should fail");
+    }
+}
+
+/// Deviation (pinned): a command's arguments are substituted in the forked
+/// child, so a `$((…))` side effect does not reach the next statement. The
+/// same-command form above (`echo $((x++)) $x`) sees it.
+#[test]
+fn arith_increment_side_effect_stays_in_the_command() {
+    let out = run("x=3; echo $((x++)); echo $x");
+    assert!(out.status.success());
+    assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "3\n3");
+}
+
 // --- `((expr))` arithmetic command (keyword) ---
 
 /// `((expr))` is a shell keyword: it evaluates `expr` in-process and sets the

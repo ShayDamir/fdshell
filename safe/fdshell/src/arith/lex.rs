@@ -59,7 +59,9 @@ fn lex_one(
         toks.push(Tok::RParen);
         return Ok(i + 1);
     }
-    match lex_op(body, i) {
+    // A name before `++`/`--` makes it a postfix increment/decrement.
+    let prev_name = matches!(toks.last(), Some(Tok::Name(_)));
+    match lex_op(body, i, prev_name) {
         Some((op, len)) => {
             toks.push(Tok::Op(op));
             Ok(i + len)

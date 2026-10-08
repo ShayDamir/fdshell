@@ -36,6 +36,11 @@ pub(crate) enum Ast {
     Bin(Op, Box<Ast>, Box<Ast>),
     Tern(Box<Ast>, Box<Ast>, Box<Ast>),
     Assign(AssOp, ShortCStr, Box<Ast>),
+    PreInc(Box<Ast>),
+    PostInc(Box<Ast>),
+    PreDec(Box<Ast>),
+    PostDec(Box<Ast>),
+    Comma(Box<Ast>, Box<Ast>),
 }
 
 impl Ast {

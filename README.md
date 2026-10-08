@@ -279,6 +279,15 @@ The expression language:
   `*`/`/`/`%`, `+`/`-`, `<<`/`>>`, comparisons, `&`, `^`, `|`, `&&`, `||`,
   and the ternary `c?t:e`. `&&`/`||` are boolean (result 0 or 1) and
   short-circuit, like bash.
+- `++`/`--` increment/decrement on a variable, pre- or post-fix: `x=3;
+  echo $((x++)) $x` → `3 4`, `echo $((++x))` → `4`. Postfix binds tightest
+  (`x++*2` is `(x++)*2`), prefix binds tighter than `*`. `++`/`--` lex as one
+  token only next to a variable name, so `++1` is `+ (+1)` = 1 and `x++--1` is
+  `x++ - (-1)` = 2, exactly as bash lexes them.
+- The comma operator, lowest precedence: the value is the last operand and the
+  earlier ones are evaluated for their side effects. `echo $(( (i=1, j=2, i+j)
+  ))` → `3`; `echo $((x=5, x*=2, x))` → `10`. A paren group takes the comma
+  level, so `(1,2)+3` → `5`.
 - Decimal, hex (`0xff`), leading-`0` octal (`010`), and `base#number`
   literals (`16#ff`, `2#1010`; base 2–64, digits `0–9a–zA–Z`, no
   leading-zero base).
@@ -286,11 +295,23 @@ The expression language:
   re-evaluated as an expression (unset/empty is 0); `$$` is the shell pid and
   `$!` the last background pid.
 - Assignment `x=3` and compound assignment `x+=3` (and `-=`/`*=`/`/=`/`%=`/
-  `&=`/`|=`/`^=`/`<<=`/`>>=`) update the variable and yield the new value.
+  `&=`/`|=`/`^=`/`<<=`/`>>=`) update the variable and yield the new value. The
+  LHS value is read before the RHS is evaluated, so `x+=++x` with `x=3` is
+  `3+4` = `7` (bash order).
 
 Limitations / deviations from bash:
 
-- No `++`/`--` increment/decrement and no comma operator.
+- `++`/`--` on a non-variable operand is evaluated with no side effect, so
+  `++x++` is accepted (it yields the incremented inner value) where bash
+  errors with "assignment requires lvalue".
+- `$x++` increments the variable named by `$x`, because fdshell treats `$x` as
+  a variable node; bash expands `$x` textually first, so `$(( $x++ ))` is a
+  syntax error there.
+- A command's arguments are substituted in the forked child, so a `$((…))`
+  side effect does not reach the next statement: `x=3; echo $((x++)); echo $x`
+  prints `3` then `3` (bash prints `4`). The same command sees it
+  (`echo $((x++)) $x` → `3 4`), and the `((…))` keyword and `let` forms run
+  in-process, so they persist.
 - An empty expression (`(( ))`, `let ""`) is a syntax error, not bash's
   status-1 no-op.
 - `((…))` takes no redirections, captures, background form, or pipeline
