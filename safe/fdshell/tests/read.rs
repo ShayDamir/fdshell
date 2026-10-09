@@ -242,6 +242,7 @@ fn timeout_zero_no_data_fifo() {
         "script={script} stderr={}",
         stderr(&out)
     );
-    // status 1 and the variable left unset (an unset `$L` prints literal).
-    assert_eq!(stdout(&out), "1:$L\n", "script={script}");
+    // status 1 and the variable left unset: an unset `$L` expands to empty, so
+    // the word collapses to `1:`.
+    assert_eq!(stdout(&out), "1:\n", "script={script}");
 }

@@ -623,7 +623,9 @@ fn string_assign_dollar_brace() {
 }
 
 #[test]
-fn string_assign_unknown_var_preserves_literal() {
+fn string_assign_unknown_var_is_empty() {
+    // POSIX 2.6.2: an unset parameter expands to empty, so `x=$nonexistent`
+    // assigns the empty string (bash prints `[]` for `echo "[$x]"`).
     let cell = make_cell();
     run_script(b"x=$nonexistent", &cell).unwrap();
     let state = borrow_state(&cell);
@@ -632,7 +634,7 @@ fn string_assign_unknown_var_preserves_literal() {
             .strings
             .get::<sys::ShortCStr>(&c"x".into())
             .map(|v| &v.value),
-        Some(&c"$nonexistent".into())
+        Some(&c"".into())
     );
 }
 

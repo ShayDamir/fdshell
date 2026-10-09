@@ -1,5 +1,5 @@
 use core::fmt::Write;
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -20,11 +20,12 @@ pub(crate) fn handle_brace(
             (true, Some(len)) => {
                 core::write!(out, "{len}").change_context(ResolveError::Never)?;
             }
-            (true, None) => {
-                out.push(c"${#");
-                out.push(&name);
-                out.push(c"}");
+            // nounset bails on `${#name}` like bash's `x: unbound variable`.
+            (true, None) if state.options & crate::options::NOUNSET != 0 => {
+                bail!(ResolveError::UnboundVariable { var: name });
             }
+            // POSIX 2.7.1: an unset parameter has length 0.
+            (true, None) => out.push(c"0"),
             (false, _) => {
                 out.push(c"${#");
                 out.push(&name);
@@ -42,15 +43,16 @@ pub(crate) fn handle_brace(
         return super::param_op::apply_param_op(&name, op, &word, cell, out);
     }
     let state = super::borrow_state(cell)?;
-    if let Some(name) = content.strip_prefix(b"!") {
-        state.resolve_indirect(&name, out);
+    if content.strip_prefix(b"!").is_some() {
+        return state.resolve_indirect(&content, out);
+    }
+    // `${}` stays literal: bash rejects it (`bad substitution`, rc 1), and
+    // fdshell's leniency is a documented divergence.
+    if content.is_empty() {
+        out.push(c"${}");
         return Ok(());
     }
-    match state.var_value(&content) {
-        Some(val) => out.push(val),
-        None => super::resolve::literal_braced(false, &content, out),
-    }
-    Ok(())
+    state.resolve_var_name(&content, out)
 }
 
 fn read_until_close(

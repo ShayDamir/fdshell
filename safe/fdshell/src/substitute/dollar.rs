@@ -47,7 +47,9 @@ pub(crate) fn dollar_subst(
             let state = super::borrow_state(cell)?;
             if name_scs.eq_bytes(b"_") {
                 // `$_`: the `_` variable set by the shell after each command.
-                // Empty when unset, unlike ordinary variables (literal `$name`).
+                // Empty when unset, like every other parameter; `$_` is not
+                // nounset-checked (accepted divergence: bash never reports `_`
+                // unbound in `-c` mode, because `set -u` itself binds it).
                 if let Some(val) = state.var_value(&name_scs) {
                     out.push(val);
                 }

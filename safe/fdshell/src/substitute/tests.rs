@@ -56,12 +56,12 @@ fn dollar_substitutes_matching_var() {
 }
 
 #[test]
-fn dollar_unknown_var_is_literal() {
+fn dollar_unknown_var_is_empty() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$nope");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"$nope");
+    assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
 #[test]
@@ -98,6 +98,68 @@ fn nounset_out_of_range_positional_errors() {
         e.current_context(),
         ResolveError::UnboundVariable { var }
             if var.as_bytes().unwrap() == b"1".as_slice()
+    ));
+}
+
+#[test]
+fn nounset_brace_var_errors() {
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"${nope}");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"nope"
+    ));
+}
+
+#[test]
+fn nounset_brace_length_errors() {
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"${#nope}");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"nope"
+    ));
+}
+
+#[test]
+fn nounset_indirect_target_unbound_errors() {
+    // The message carries the whole `${!q}` body, as bash's `!q: unbound variable`.
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"q"), is_(c"missing"));
+    let arg = ShortCStr::from(c"${!q}");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"!q"
+    ));
+}
+
+#[test]
+fn indirect_empty_name_errors() {
+    // A name bound to the empty string has no target: bash reports
+    // `: invalid variable name`, fdshell the same rc with its own message.
+    let cell = dummy_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"p"), is_(c""));
+    let arg = ShortCStr::from(c"${!p}");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::InvalidIndirect { var } if var.is_empty()
     ));
 }
 
@@ -433,16 +495,19 @@ fn brace_bang_indirect_expands_target() {
 }
 
 #[test]
-fn brace_bang_indirect_unset_name_is_literal() {
+fn brace_bang_indirect_unset_name_errors() {
     let cell = env_cell();
     let arg = ShortCStr::from(c"${!nope}");
     let mut cache = HashMap::new();
-    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"${!nope}");
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::InvalidIndirect { var } if var.as_bytes().unwrap() == b"nope"
+    ));
 }
 
 #[test]
-fn brace_bang_indirect_unset_target_shows_target() {
+fn brace_bang_indirect_unset_target_is_empty() {
     let cell = dummy_cell();
     cell.borrow_mut()
         .unwrap()
@@ -451,7 +516,7 @@ fn brace_bang_indirect_unset_target_shows_target() {
     let arg = ShortCStr::from(c"${!q}");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"${missing}");
+    assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
 #[test]
@@ -468,12 +533,12 @@ fn brace_bang_indirect_empty_target_is_empty() {
 }
 
 #[test]
-fn brace_unknown_var_is_literal() {
+fn brace_unknown_var_is_empty() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${nope}");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"${nope}");
+    assert_eq!(res.as_bytes().unwrap(), b"");
 }
 
 #[test]
@@ -802,12 +867,12 @@ fn brace_hash_empty_var_returns_zero() {
 }
 
 #[test]
-fn brace_hash_unknown_var_is_literal() {
+fn brace_hash_unknown_var_is_zero() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"${#nope}");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"${#nope}");
+    assert_eq!(res.as_bytes().unwrap(), b"0");
 }
 
 #[test]
@@ -1628,10 +1693,10 @@ fn dollar_underscore_expands_to_last_arg_var() {
 }
 
 #[test]
-fn dollar_underscore_unset_is_empty_not_literal() {
-    // Unset ordinary variables expand to literal text (`$nope`), but an unset
-    // `_` expands to empty — it needs a pristine environ without an inherited
-    // `_`, so reuse env_cell's cleared-environ setup.
+fn dollar_underscore_unset_is_empty() {
+    // An unset `_` expands to empty, like every other parameter — it needs a
+    // pristine environ without an inherited `_`, so reuse env_cell's
+    // cleared-environ setup.
     let cell = env_cell();
     let arg = ShortCStr::from(c"[$_]");
     let mut cache = HashMap::new();
@@ -1717,14 +1782,20 @@ fn backslash_plain_char_keeps_mask_alignment() {
 #[test]
 fn var_name_consumption_keeps_mask_alignment() {
     // The name `v` is consumed by the substitution; the trailing `:` must
-    // keep its own (unquoted) bit, not the name's quoted bit.
+    // keep its own (unquoted) bit, not the name's quoted bit. `v` is bound so
+    // the expansion has bytes to align: an unset name expands to nothing and
+    // asserts nothing about the trailing byte's bit.
     let cell = dummy_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"v"), is_(c"W"));
     let arg = ShortCStr::from(c"x$v:");
     let mut cache = HashMap::new();
     let (res, mask_out) =
         substitute_arg(&arg, &[false, true, true, false], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"x$v:");
-    assert_eq!(mask_out, vec![false, true, true, false]);
+    assert_eq!(res.as_bytes().unwrap(), b"xW:");
+    assert_eq!(mask_out, vec![false, true, false]);
 }
 
 #[test]

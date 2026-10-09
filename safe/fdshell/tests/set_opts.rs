@@ -134,10 +134,11 @@ fn nounset_bound_var_is_fine() {
 }
 
 #[test]
-fn nounset_off_keeps_literal() {
+fn nounset_off_expands_empty() {
+    // `set +u` restores the POSIX rule: an unset parameter expands to empty.
     let (out, _err, code) = run("set -u; set +u; echo $x");
     assert_eq!(code, 0, "out={out:?}");
-    assert_eq!(out, "$x\n");
+    assert_eq!(out, "\n");
 }
 
 #[test]

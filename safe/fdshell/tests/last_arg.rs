@@ -143,8 +143,8 @@ fn run_without_env_underscore(script: &str) -> (String, String, i32) {
 
 #[test]
 fn last_arg_empty_when_never_set() {
-    // Inherited `_` is removed: an ordinary unset variable expands to literal
-    // text, but `$_` must expand to empty.
+    // Inherited `_` is removed: an unset parameter expands to empty, so `$_`
+    // prints nothing (the same rule as every other parameter).
     let (out, err, code) = run_without_env_underscore("builtin echo [$_]");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[]\n");
@@ -152,10 +152,12 @@ fn last_arg_empty_when_never_set() {
 
 #[test]
 fn dollar_underscore_longer_name_stays_variable() {
-    // `$_y` is the variable `_y`, not the special `$_` followed by `y`.
-    let (out, err, code) = run_without_env_underscore("builtin echo x=$_y");
+    // `$_y` is the variable `_y`, not the special `$_` followed by `y`. The
+    // name is bound so the longest-match probe is observable (an unset name
+    // expands to empty and would print the same `x=`).
+    let (out, err, code) = run_without_env_underscore("_y=full; builtin echo x=$_y");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "x=$_y\n");
+    assert_eq!(out, "x=full\n");
 }
 
 #[test]

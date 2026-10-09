@@ -11,6 +11,8 @@ pub(crate) enum ResolveError {
     ParamNullOrNotSet { var: ShortCStr, word: ShortCStr },
     /// {var}: unbound variable
     UnboundVariable { var: ShortCStr },
+    /// {var}: invalid indirect expansion
+    InvalidIndirect { var: ShortCStr },
     /// NUL byte in variable name
     NulByte,
     /// unclosed subexpression parenthesis
