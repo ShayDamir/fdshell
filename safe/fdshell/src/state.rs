@@ -10,6 +10,7 @@ use sys::siginfo::WaitStatus;
 
 use crate::envfilter::EnvFilter;
 use crate::task::Task;
+use frames::VarFrame;
 
 /// An fd variable: an owned descriptor together with its provenance trace.
 pub struct FdVar {
@@ -32,6 +33,8 @@ pub struct ShellState {
     pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
     pub(crate) exports: HashMap<ShortCStr, ImportedStr>,
     pub(crate) positional: VecDeque<ImportedStr>,
+    /// One frame per active function call: the `local` shadows to restore on return.
+    pub(crate) frames: Vec<VarFrame>,
     pub(crate) last_status: WaitStatus,
     pub(crate) shell_pid: sys::Pid,
     pub(crate) last_bg_pid: Option<sys::Pid>,
@@ -61,6 +64,7 @@ impl ShellState {
             strings: HashMap::new(),
             exports: HashMap::new(),
             positional: VecDeque::new(),
+            frames: Vec::new(),
             last_status: WaitStatus::Exited(0),
             shell_pid: sys::env::getpid(),
             last_bg_pid: None,
@@ -88,6 +92,7 @@ impl Default for ShellState {
 }
 
 mod arrays;
+pub(crate) mod frames;
 mod setters;
 
 #[cfg(test)]
