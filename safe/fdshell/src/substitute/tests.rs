@@ -189,6 +189,17 @@ fn percent_question_unbound_is_literal() {
     assert_eq!(res.as_bytes().unwrap(), b"%?");
 }
 
+#[test]
+fn percent_named_fd_unbound_is_literal() {
+    // The named form keeps its literal text when the fd is unbound: the fd
+    // namespace is a fdshell extension, not a POSIX parameter (README).
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"%nosuchfd");
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%nosuchfd");
+}
+
 fn env_cell() -> ForkCell<ShellState> {
     let cell = dummy_cell();
     cell.borrow_mut().unwrap().environ = Vec::new();
@@ -530,6 +541,17 @@ fn brace_bang_indirect_empty_target_is_empty() {
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"");
+}
+
+#[test]
+fn brace_bang_empty_name_is_literal() {
+    // `${!}` has an empty indirect name: the same literal case as `${}`, and
+    // rc 0 (bash expands it to empty, a documented divergence).
+    let cell = env_cell();
+    let arg = ShortCStr::from(c"${!}");
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"${!}");
 }
 
 #[test]

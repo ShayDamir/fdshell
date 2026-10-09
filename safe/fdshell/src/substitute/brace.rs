@@ -43,14 +43,18 @@ pub(crate) fn handle_brace(
         return super::param_op::apply_param_op(&name, op, &word, cell, out);
     }
     let state = super::borrow_state(cell)?;
-    if content.strip_prefix(b"!").is_some() {
-        return state.resolve_indirect(&content, out);
-    }
-    // `${}` stays literal: bash rejects it (`bad substitution`, rc 1), and
-    // fdshell's leniency is a documented divergence.
-    if content.is_empty() {
-        out.push(c"${}");
+    // An empty braced name stays literal: bash rejects `${}` (`bad
+    // substitution`, rc 1) and expands `${!}` (an empty indirect name) to
+    // empty at rc 0; fdshell prints both literally — a documented divergence.
+    let indirect = content.strip_prefix(b"!");
+    if content.is_empty() || indirect.as_ref().is_some_and(|name| name.is_empty()) {
+        out.push(c"${");
+        out.push(&content);
+        out.push(c"}");
         return Ok(());
+    }
+    if indirect.is_some() {
+        return state.resolve_indirect(&content, out);
     }
     state.resolve_var_name(&content, out)
 }

@@ -426,11 +426,15 @@ Accepted divergences from bash:
 - `${}` (an empty name) stays literal (`echo "[${}]"` → `[${}]`); bash rejects
   it (`bad substitution`, rc 1). An unclosed `${name` stays literal too; bash
   is a parse error (rc 2).
+- `${!}` (an empty indirect name) stays literal too, at rc 0
+  (`echo "[${!}]"` → `[${!}]`, `[${!}x]` → `[${!}x]`); bash expands it to the
+  empty string (`[]` and `[x]`).
 - `${!name}` of a name bound to the empty string is an error on both
   (`[${!p}]` with `p=""`), but the wording differs: bash says
   `: invalid variable name`, fdshell `: invalid indirect expansion`. Same rc 1.
-- `$_` is not nounset-checked. `set -u` itself binds `_` in bash, so bash never
-  reports it unbound in `-c` mode; fdshell expands it to empty under `set -u`.
+- The `$_` arm is not nounset-checked (unobservable in `-c` mode: `set -u`
+  binds `_` exactly as bash does, so `set -u; builtin echo "[$_]"` prints
+  `[-u]` on both).
 - Arithmetic variables are not nounset-checked: `set -u; echo $((unsetv + 1))`
   prints `1` here, where bash exits with `unsetv: unbound variable` (tracked by
   task #170).

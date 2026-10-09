@@ -169,6 +169,16 @@ fn set_option_updates_last_arg() {
 }
 
 #[test]
+fn nounset_binds_last_arg_so_underscore_is_never_unbound() {
+    // The `$_` arm has no nounset check, and that is unobservable in `-c` mode:
+    // `set -u` binds `_` to its own argument in fdshell exactly as in bash, so
+    // `$_` is bound and prints `-u` on both.
+    let (out, err, code) = run(r#"set -u; builtin echo "[$_]""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[-u]\n");
+}
+
+#[test]
 fn eval_inner_commands_do_not_update_last_arg() {
     let (out, err, code) = run("true hello; eval \"true x y; builtin echo [$_]\"");
     assert_eq!(code, 0, "stderr={err:?}");

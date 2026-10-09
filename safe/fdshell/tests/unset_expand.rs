@@ -193,6 +193,19 @@ fn empty_brace_name_stays_literal() {
 }
 
 #[test]
+fn empty_indirect_name_stays_literal() {
+    // `${!}` has an empty indirect name. Bash expands it to empty (`[]`, rc 0)
+    // and `[${!}x]` to `[x]`; fdshell keeps the braced text literal at rc 0,
+    // like the `${}` divergence.
+    let (out, err, code) = run(r#"echo "[${!}]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[${!}]\n");
+    let (out, err, code) = run(r#"echo "[${!}x]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[${!}x]\n");
+}
+
+#[test]
 fn unclosed_brace_stays_literal() {
     // bash is a parse error (rc 2); fdshell keeps the text literal.
     let (out, _err, code) = run(r#"echo "[${x]""#);

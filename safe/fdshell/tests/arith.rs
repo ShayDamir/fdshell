@@ -57,9 +57,18 @@ fn arith_ternary_branches() {
 }
 
 /// An unset variable in arithmetic is 0 (no error, no word-splitting).
+/// `set -u` does not change it: bash exits 127 with `unsetv: unbound
+/// variable`, fdshell prints `1` at rc 0 (the README divergence, task #170).
 #[test]
 fn arith_unset_variable_is_zero() {
     let output = run("echo $((unsetv+1))");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "1");
+    let output = run("set -u; echo $((unsetv+1))");
     assert!(
         output.status.success(),
         "stderr={}",
