@@ -57,14 +57,14 @@ pub(super) fn finish_command(
         if super::heredoc::is_operator(tokens, i) {
             let spec = specs.get(spec_at).ok_or(ParseError::InvalidRedirect)?;
             let (r, extra) = super::heredoc::parse_operator(line, tokens, i, spec)?;
-            bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
+            bg_redirect::insert_redirect(&mut cmd.redirects, r);
             spec_at += 1;
             skip = extra;
         } else if let Some(bg) = parse_bg_redirect(t, mask)? {
             // A pidvar bg redirect carries no redirects, so the loop is a
             // no-op there; the two cases share one straight-line form.
             for r in bg.redirects {
-                bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
+                bg_redirect::insert_redirect(&mut cmd.redirects, r);
             }
             if let Some(p) = bg.pidvar {
                 cmd.pidvar = Some(p);
@@ -81,10 +81,10 @@ pub(super) fn finish_command(
                 }
             }
         } else if let Some((r, extra)) = super::here_string::parse_here_string(tokens, i)? {
-            bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
+            bg_redirect::insert_redirect(&mut cmd.redirects, r);
             skip = extra;
         } else if let Some((r, extra)) = crate::parse::classify::parse_redirect(tokens, i)? {
-            bg_redirect::insert_redirect(&mut cmd.redirects, r)?;
+            bg_redirect::insert_redirect(&mut cmd.redirects, r);
             skip = extra;
         } else {
             cmd.args.push(t.clone());

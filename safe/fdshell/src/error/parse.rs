@@ -26,8 +26,6 @@ pub(crate) enum ParseError {
     CaseMissingCloseParen,
     /// internal invariant violated
     Never,
-    /// duplicate redirect target
-    DuplicateRedirect,
     /// not a valid octal number
     InvalidOctal,
     /// unexpected character in this context

@@ -479,3 +479,22 @@ fn heredoc_stmt_before_function_block_same_line() {
     assert_eq!(code, 0);
     assert_eq!(out, "body\nhi\n");
 }
+
+#[test]
+fn heredoc_twice_last_wins() {
+    // POSIX #2.5: both bodies are kept in operator order and the last redirect
+    // to stdin wins, so `cat` prints the second body. bash 5.3.9 prints `y`.
+    let (out, _err, code) = run("cat <<A <<B\nx\nA\ny\nB");
+    assert_eq!(code, 0);
+    assert_eq!(out, "y\n");
+}
+
+#[test]
+fn heredoc_bodies_of_one_command_are_read_in_operator_order() {
+    // The byte count pins that each `<<` operator consumes its OWN spec: the
+    // second body is `yy\n` (3 bytes). A spec walk that re-reads the first spec
+    // yields `x\n` (2 bytes).
+    let (out, _err, code) = run("wc -c <<A <<B\nx\nA\nyy\nB");
+    assert_eq!(code, 0);
+    assert_eq!(out, "3\n");
+}

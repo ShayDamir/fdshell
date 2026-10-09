@@ -2,7 +2,7 @@ use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::{Report, bail};
+use error_stack::Report;
 use sys::ShortCStr;
 
 pub struct BgRedirectResult {
@@ -63,15 +63,14 @@ pub fn parse_bg_redirect(
     }))
 }
 
-pub fn insert_redirect(
-    redirects: &mut Vec<RedirectDef>,
-    r: RedirectDef,
-) -> Result<(), Report<ParseError>> {
-    match redirects.binary_search_by_key(&r.export_to, |x| x.export_to) {
-        Ok(_) => bail!(ParseError::DuplicateRedirect),
-        Err(i) => {
-            redirects.insert(i, r);
-            Ok(())
-        }
-    }
+/// Insert `r` keeping the list sorted by target fd, and the entries of one
+/// target fd in command-line order. POSIX #2.5 applies every redirection of a
+/// command in the order written, so a second redirect to a fd is not an error:
+/// the last one to that fd wins, and the earlier ones still take effect (their
+/// files are opened/truncated, and a failing earlier open aborts the command).
+/// `partition_point` is the stable insertion point; `binary_search_by_key`
+/// returns an arbitrary equal-key index, which cannot express "last wins".
+pub fn insert_redirect(redirects: &mut Vec<RedirectDef>, r: RedirectDef) {
+    let at = redirects.partition_point(|x| x.export_to <= r.export_to);
+    redirects.insert(at, r);
 }

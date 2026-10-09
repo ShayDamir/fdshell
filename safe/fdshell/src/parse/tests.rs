@@ -378,9 +378,35 @@ fn test_heredoc_bare_operator_is_invalid_redirect() {
     assert!(parse(b"cat << ;").is_err());
 }
 
+// POSIX #2.5: both bodies are kept, in operator order, and the apply loop makes
+// the last one win. The two bodies must be *distinct*: a spec walk that reads
+// `specs[0]` for every operator yields ["x\n", "x\n"] and fails here.
 #[test]
-fn test_heredoc_twice_is_duplicate_redirect() {
-    assert!(parse(b"cat <<A <<B\nx\nA\ny\nB").is_err());
+fn test_heredoc_twice_keeps_both_bodies_in_order() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<A <<B\nx\nA\ny\nB").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::here_doc(c"x\n", true),
+            RedirectDef::here_doc(c"y\n", true),
+        ]
+    );
+}
+
+#[test]
+fn test_heredoc_then_read_redirect_keeps_both() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<EOF <f1\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::here_doc(c"body\n", true),
+            path_def(0, RedirectDirection::Read, "f1"),
+        ]
+    );
 }
 
 #[test]
@@ -848,13 +874,103 @@ fn test_combined_redirect_var() {
 }
 
 #[test]
-fn test_combined_redirect_duplicate_stderr() {
-    assert!(parse(b"cmd &>file 2>other").is_err());
+fn test_combined_redirect_then_stderr_redirect() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &>file 2>other").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "file"),
+            path_def(2, RedirectDirection::Write, "file"),
+            path_def(2, RedirectDirection::Write, "other"),
+        ]
+    );
 }
 
 #[test]
-fn test_combined_redirect_duplicate_stdout() {
-    assert!(parse(b"cmd 1>other &>file").is_err());
+fn test_fd1_redirect_then_combined_last_wins() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 1>other &>file").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "other"),
+            path_def(1, RedirectDirection::Write, "file"),
+            path_def(2, RedirectDirection::Write, "file"),
+        ]
+    );
+}
+
+#[test]
+fn test_duplicate_read_redirects_keep_source_order() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat <a <b <c").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(0, RedirectDirection::Read, "a"),
+            path_def(0, RedirectDirection::Read, "b"),
+            path_def(0, RedirectDirection::Read, "c"),
+        ]
+    );
+}
+
+#[test]
+fn test_duplicate_write_redirects_last_is_last() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi >a >b").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "a"),
+            path_def(1, RedirectDirection::Write, "b"),
+        ]
+    );
+}
+
+// A duplicate key arriving after a larger key is inserted inside the equal-key
+// block, never after it: the list stays sorted by target fd and stable within it.
+#[test]
+fn test_duplicate_targets_stay_sorted_across_fds() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd >a 2>e 1>b").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "a"),
+            path_def(1, RedirectDirection::Write, "b"),
+            path_def(2, RedirectDirection::Write, "e"),
+        ]
+    );
+}
+
+#[test]
+fn test_close_and_reopen_keep_order() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat 0>&- <f1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::close(0),
+            path_def(0, RedirectDirection::Read, "f1"),
+        ]
+    );
+    let ParsedLine::Cmd(cmd) = parse(b"cat <f1 0>&-").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(0, RedirectDirection::Read, "f1"),
+            RedirectDef::close(0),
+        ]
+    );
 }
 
 #[test]
