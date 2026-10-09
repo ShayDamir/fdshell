@@ -367,6 +367,19 @@ scoped window, so their bodies see the values, then the shell's previous
 values are restored (first-touch restore: `FOO=pre; FOO=1 FOO=2 cd /tmp;
 echo $FOO` → `pre`).
 
+`local NAME[=value] …` scopes string variables to the current function call.
+The value is expanded with no field splitting and no pathname expansion (the
+bare-assignment rule, so `local x=*` stores the literal `*`); a bare `NAME`
+declares the variable unset for the call; and every shadowed value — `IFS` and
+the exported copy included — is restored when the call returns, first-touch
+(`v=pre; f(){ local v=1; local v=2; echo $v; }; f; echo $v` → `2` then `pre`).
+A local is visible to children forked inside the call
+(`export E=env; f(){ local E=loc; env | grep ^E=; }; f` → `E=loc`), and the
+scoping is dynamic: a callee sees its caller-call's local unless it shadows it
+(`v=1; g(){ echo $v; }; f(){ local v=2; g; }; f` → `2`). `local` with no
+arguments lists the call's locals, and `local` outside a function is an error
+(rc 1, `local: can only be used in a function`).
+
 Accepted divergences from bash:
 
 - `FOO=bar | cat` is a parse error (`expected command`); bash runs a no-op
@@ -383,6 +396,25 @@ Accepted divergences from bash:
 - `test`/`[` grouping uses unquoted, quoted, or escaped parens (`[ ( … ) ]`,
   `[ "(" … ")" ]`, `[ \( … \) ]`): the escape pair folds to the literal `(`/`)`
   at substitution, so the POSIX escaped form groups exactly as bash does.
+- `local` with no arguments prints `local NAME=value` lines (the POSIX/dash
+  form); bash prints `declare -- NAME="value"`. A declared-unset local prints
+  `local NAME`.
+- `local` scopes string variables and their exported copies only. fd vars, fd
+  arrays and tasks are untouched (fd scoping is task #46), so `local %x` is
+  rejected as an invalid name rather than silently doing nothing.
+- bash validates identifiers (`local a*b=1` → "not a valid identifier");
+  fdshell keeps its assignment-name leniency (any non-empty name without the
+  `%` prefix), so `local a*b=1` is accepted.
+- `local -x` (a bash option word) is rejected as a name: fdshell rc 1, bash
+  enables `-x` for the call and returns rc 0.
+- a `$(…)` fork inherits the function frame, so `local` works inside a command
+  substitution in a function; bash refuses it in a subshell.
+- a user function named `local` shadows the builtin (fdshell resolves functions
+  before intercepts, as it does for every other command word).
+- redirects/captures on `local` are rejected (`RedirectNotSupported` /
+  `CapturesNotSupported`), as for every other intercepted builtin.
+- `local NAME` (no `=`) leaves the variable unset for the call, and `local`
+  outside a function is an error (rc 1), as bash.
 
 ## How it works?
 
