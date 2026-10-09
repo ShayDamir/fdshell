@@ -1,8 +1,9 @@
+use crate::bytes::fold::fold_word;
 use crate::error::parse::ParseError;
 use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::{BuiltinPrefix, CommandLine, Token, bg_redirect};
 use alloc::vec::Vec;
-use error_stack::{Report, bail};
+use error_stack::{Report, ResultExt, bail};
 use sys::{Position, ShortCStr};
 
 /// Collect the tokens after the command word into args, captures and
@@ -23,6 +24,12 @@ pub(super) fn finish_command(
         .get(args_from - 1)
         .map(|t| t.4.clone())
         .unwrap_or_default();
+    // Word 0 is folded here, once: it is never substituted, so every surface
+    // that consumes `CommandLine.command` (glob, PATH lookup, builtin/function
+    // and intercept dispatch, `set --`, argv[0]) sees the folded name, as bash
+    // folds it at tokenization.
+    let (command, command_mask) =
+        fold_word(&command, &command_mask).change_context(ParseError::Never)?;
     let env_assigns = super::envassign::collect_range(tokens, args_from - 1);
     let mut cmd = CommandLine {
         prefix,

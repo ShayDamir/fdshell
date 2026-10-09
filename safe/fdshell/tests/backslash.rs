@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::str;
 use std::sync::atomic::Ordering;
@@ -46,6 +47,49 @@ fn run_in(dir: &std::path::PathBuf, script: &str) -> (String, String, i32) {
         str::from_utf8(&output.stderr).unwrap().to_string(),
         output.status.code().unwrap_or(-1),
     )
+}
+
+/// A scratch dir of executable files, used as a scratch `PATH` so the folded
+/// command name is looked up as a real file (bash runs `a\*` for a file `a*`).
+fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
+    let dir = scratch(names);
+    for name in names {
+        let path = dir.join(name);
+        std::fs::write(&path, "#!/bin/sh\necho ran\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
+/// Run in `dir` with `bin_dir` prepended to `PATH`.
+fn run_with_path(
+    dir: &std::path::Path,
+    bin_dir: &std::path::Path,
+    script: &str,
+) -> (String, String, i32) {
+    let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap());
+    let output = Command::new(BIN)
+        .current_dir(dir)
+        .env("PATH", path)
+        .args(["-c", script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+fn names_in(dir: &std::path::PathBuf) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    v.sort();
+    v
 }
 
 /// POSIX #4.1: the escape pair `\X` is the literal `X` (the backslash is
@@ -280,4 +324,112 @@ fn alias_body_takes_the_same_escape_rule() {
     let (out, _err, code) = run("alias e=echo; e a\\*");
     assert_eq!(code, 0);
     assert_eq!(out, "a*\n");
+}
+
+/// Word 0 is folded at parse, so the command name matches the folded text on
+/// every lookup surface: builtin dispatch, `command`/`builtin` keywords, `if`
+/// body, and `exec` (whose command word is also folded). Bash folds word 0 at
+/// tokenization, so `e\cho hi` runs `echo` — fdshell runs the same name.
+#[test]
+fn command_name_folds_escape_pairs() {
+    for script in ["e\\cho hi", "command e\\cho hi", "builtin e\\cho hi"] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err:?}");
+        assert_eq!(out, "hi\n", "{script}");
+    }
+    let (out, _err, code) = run("if e\\cho hi; then builtin echo t; fi");
+    assert_eq!(code, 0);
+    assert_eq!(out, "hi\nt\n");
+    // `exec` replaces the shell with the folded command word.
+    let (out, err, code) = run("exec e\\cho hi");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n");
+    // `exec builtin` folds the builtin name word (fdshell-only surface: bash
+    // has no `builtin` command, so it reports `builtin` not found, rc 127).
+    let (out, err, code) = run("exec builtin e\\cho hi");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n");
+    // With `builtin_first` on, the folded `exec` word is matched against the
+    // builtin table before the `PATH` lookup (a fdshell-only option).
+    let (out, err, code) = run("set -o builtin_first; exec e\\cho hi");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n");
+    // The fold reads word 0's own quote mask: a quoted command word keeps its
+    // pair, so the literal name `e\cho` is looked up and not found (bash
+    // reports `e\cho: command not found` with rc 127; fdshell's missing-command
+    // exit is rc 1 — README "Limitations").
+    let (_out, err, code) = run("\"e\\cho\" hi");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("e\\cho"), "stderr={err:?}");
+}
+
+/// The folded command name is what the glob and the `PATH` lookup see, so an
+/// escaped star matches a file literally named `a*`, and an escaped `=` reaches
+/// the executable named `X=1` (bash runs it, rc 0).
+#[test]
+fn folded_command_name_is_looked_up_in_path() {
+    let cwd = scratch(&[]);
+    let bin = scratch_bin(&["a*", "X=1"]);
+    let (out, err, code) = run_with_path(&cwd, &bin, "a\\*");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "ran\n");
+    // A `NAME=value`-shaped word with an escaped `=` is a command, not an
+    // assignment: the folded `X=1` is the file that runs.
+    let (out, err, code) = run_with_path(&cwd, &bin, "\\X=1");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "ran\n");
+    let _ = std::fs::remove_dir_all(&cwd);
+    let _ = std::fs::remove_dir_all(&bin);
+}
+
+/// A redirect target is folded at open time: `> a\*b` writes the file named
+/// `a*b`, never a file named `a\*b` (bash folds the target word).
+#[test]
+fn redirect_target_folds_escape_pairs() {
+    let dir = scratch(&[]);
+    let (out, err, code) = run_in(&dir, "echo hi > a\\*b");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "");
+    assert_eq!(names_in(&dir), vec!["a*b".to_string()]);
+    assert_eq!(std::fs::read(dir.join("a*b")).unwrap(), b"hi\n");
+    // `>>` appends to the same folded name.
+    let (out, err, code) = run_in(&dir, "echo yo >> a\\*b");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "");
+    assert_eq!(names_in(&dir), vec!["a*b".to_string()]);
+    assert_eq!(std::fs::read(dir.join("a*b")).unwrap(), b"hi\nyo\n");
+    // The read form opens the folded name too (external `cat`).
+    let (out, err, code) = run_in(&dir, "cat < a\\*b");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\nyo\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The `for … in` list words are folded before globbing: `a\ b` is one word,
+/// and an escaped star is a literal member that globs nothing.
+#[test]
+fn for_list_words_fold_escape_pairs() {
+    let dir = scratch(&["a*", "a1"]);
+    let (out, _err, code) = run_in(&dir, "for x in a\\ b; do printf \"[%s]\" \"$x\"; done");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a b]");
+    let (out, _err, code) = run_in(&dir, "for x in a\\* b; do printf \"[%s]\" \"$x\"; done");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a*][b]");
+    // An unescaped star in the list still globs (only the pair is folded).
+    let (out, _err, code) = run_in(&dir, "for x in a*; do printf \"[%s]\" \"$x\"; done");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a*][a1]");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Accepted divergence, pinned: fdshell matches alias names on the raw token
+/// text, so `alias a\*=echo` stores the name `a\*` and `a\* hi` finds it.
+/// bash folds the name, stores `a*`, and the lookup misses, so it reports
+/// `a*: command not found` (rc 127).
+#[test]
+fn alias_name_keeps_the_escape_pair() {
+    let (out, _err, code) = run("alias a\\*=echo; a\\* hi");
+    assert_eq!(code, 0);
+    assert_eq!(out, "hi\n");
 }

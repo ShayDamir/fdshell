@@ -6,6 +6,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, ScriptText, Trace};
 
+use crate::bytes::fold::fold_word;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
@@ -40,8 +41,11 @@ pub(crate) fn expand_for_words(
         } else {
             // Literal for-list words are pathname-expanded (whole-word
             // `$((…))`/`$(…)` are exempt); each result is a new shell word.
+            // The escape pair is folded here (POSIX #4.1): a for-list word is
+            // never substituted, so `for x in a\ b` binds the single word `a b`.
             let mask = words_mask.get(i).cloned().unwrap_or_default();
-            for w in crate::glob::expand(word, &mask, cell)? {
+            let (word, word_mask) = fold_word(word, &mask).change_context(ResolveError::Never)?;
+            for w in crate::glob::expand(&word, &word_mask, cell)? {
                 out.push(ImportedStr::new(w, Trace::at(text.start, Origin::Shell)));
             }
         }

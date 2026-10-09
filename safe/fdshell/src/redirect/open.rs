@@ -1,4 +1,5 @@
 use super::RedirectDef;
+use crate::bytes::fold::fold_word;
 use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
@@ -49,14 +50,20 @@ pub fn open_redirect_files(
 /// Glob a redirect target: `> 1` match is ambiguous, `0` matches open the
 /// literal word (bash passes unmatched redirect patterns through; `failglob`
 /// does not apply to redirects), `1` match opens that match.
+///
+/// The target word is folded first (POSIX #4.1): bash folds every unquoted
+/// escape pair at tokenization, and a redirect target is never substituted,
+/// so `> a\*b` opens the file named `a*b`.
 fn redirect_target(
     path: &ShortCStr,
     mask: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<ShortCStr, Report<OpenRedirectError>> {
-    let matches = crate::glob::matches(path, mask, cell).change_context(OpenRedirectError::Glob)?;
+    let (target, target_mask) = fold_word(path, mask).change_context(OpenRedirectError::Never)?;
+    let matches = crate::glob::matches(&target, &target_mask, cell)
+        .change_context(OpenRedirectError::Glob)?;
     match matches.len() {
-        0 => Ok(path.clone()),
+        0 => Ok(target),
         1 => matches
             .first()
             .cloned()

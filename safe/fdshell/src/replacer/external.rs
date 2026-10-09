@@ -1,6 +1,7 @@
 //! The non-`builtin` branch of `replacer::execute`: the `builtin_first`
 //! option dispatch, then external commands (hash-table aware).
 
+use crate::bytes::fold::fold_word;
 use crate::child;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
@@ -18,12 +19,16 @@ pub(super) fn run(
     args_quoted: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
-    let binary = args.first().ok_or(ChildProcessError::MissingArg)?;
+    // The `exec`/`become` command word is never substituted, so its unquoted
+    // escape pairs are folded here (POSIX #4.1): `exec e\cho hi` runs `echo`.
+    let raw = args.first().ok_or(ChildProcessError::MissingArg)?;
+    let (binary, _) = fold_word(raw, args_mask.first().map(Vec::as_slice).unwrap_or(&[]))
+        .change_context(ChildProcessError::ExecFailed)?;
     let is_builtin = {
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        child::dispatch::builtin_first(binary, &state)
+        child::dispatch::builtin_first(&binary, &state)
     };
     if is_builtin {
         let state = cell
@@ -45,7 +50,7 @@ pub(super) fn run(
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        exec::resolve_path(binary, &state.hash_table)
+        exec::resolve_path(&binary, &state.hash_table)
             .change_context(ChildProcessError::ExecFailed)?
     };
     let binary_exported = binary.export();
