@@ -442,22 +442,35 @@ Accepted divergences from bash:
   `%nosuchfd`). The fd namespace is a fdshell extension, not a POSIX parameter.
 - The pattern word of `${name#pat}` and friends is **not** expanded:
   `${v#$(printf abc)}` and `${v#$v}` stay literal (the pattern bytes are matched
-  as written). bash expands `$…`/`$(…)`/`$((…))` inside `${…}` first (task #174).
+  as written), and the brace reader stops at the first `}`, so a pattern
+  containing `}` is unreachable: with `v=abcabc`, `${v#a\}b}` prints
+  `[abcabcb}]` (the `}` closes the brace, so the `b}` tail is literal) where
+  bash prints `[abcabc]`. bash expands `$…`/`$(…)`/`$((…))` inside `${…}` first
+  (task #174).
 - fdshell's quote rule is byte-level, so a quoted pattern byte is literal and a
   fully quoted word masks every pattern byte: `printf "[%s]" "${v#a*c}"` prints
   the whole value, where bash (which removes the enclosing quotes before
   matching) prints `abc`. The unquoted forms match bash.
+- A pattern word must quote its spaces, because fdshell splits words at an
+  unquoted space: `sp="a b"` with `printf "[%s]" "[${sp#* }]"` prints `[[a b]]`
+  where bash prints `[b]`, and the unquoted form `r=${sp#* }` ends the word at
+  the space, so the trailing `}` is run as a command
+  (`failed to resolve command path: "}"`). A pattern containing a space is
+  unreachable.
 - The bare-assignment path expands its value with no quote mask, so a quoted
   `[` in `${x#"["a]}` is treated as unquoted there and strips; bash keeps it
   literal.
-- Single-character operators are not implemented (`${v+a#y}` reads the name
-  `v+a`, so it expands to empty; bash has the `+` operator with the word `x#y`).
-  Only the colon-prefixed forms (`:-` `:=` `:+` `:?`) and the pattern forms
-  (`#` `##` `%` `%%`) are operators.
-- `${%x}` (an empty name with a pattern operator) expands to the empty string at
-  rc 0; bash rejects it (`bad substitution`, rc 1). `${#v#a}` reads the name
-  `v#a` and prints `0` at rc 0, where bash is a `bad substitution` (task #173
-  owns the `${#name}` arm).
+- Single-character operators are not implemented: bash `${v+x#y}` prints `x#y`
+  (the `+` operator with the word `x#y`), while fdshell reads the whole name
+  `v+x`, which is unset and expands to empty. Only the colon-prefixed forms
+  (`:-` `:=` `:+` `:?`) and the pattern forms (`#` `##` `%` `%%`) are operators.
+- A pattern operator at index 0 (`${%x}`, `${%x#y}`, `${%}`) leaves an empty
+  name, so the braced content is read as the parameter name: nounset off expands
+  it to the empty string at rc 0 where bash rejects every form (`bad
+  substitution`, rc 1); under `set -u` fdshell bails rc 1 naming the content
+  (`%x: unbound variable`) where bash says `bad substitution` — same rc,
+  different wording. `${#v#a}` reads the name `v#a` and prints `0` at rc 0,
+  where bash is a `bad substitution` (task #173 owns the `${#name}` arm).
 - `${!name}` inside the **colon** operators is not resolved (bash `${!v:-z}`
   prints the indirect target's value; fdshell prints the word `z`) — task #176.
 - A positional parameter is not a braced name: `${1}` and `${1#a}` expand to

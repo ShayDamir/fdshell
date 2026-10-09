@@ -401,21 +401,68 @@ fn assignment_value_drops_the_quote_mask() {
 
 #[test]
 fn unquoted_space_inside_the_braces_splits_the_word() {
-    // fdshell splits words at an unquoted space, so a pattern with a space
-    // needs the byte quoted; a fully quoted word keeps the pattern literal.
-    // bash keeps the space inside `${…}` and strips, so `[b]` is the bash value.
+    // Accepted divergence (README): fdshell splits words at an unquoted space,
+    // so a pattern word must quote its spaces and a pattern containing a space
+    // is unreachable; a fully quoted word keeps the pattern literal. bash keeps
+    // the space inside `${…}` and strips, so `[b]` is bash's value.
     let (out, err, code) = run("sp=\"a b\"; printf \"[%s]\" \"[${sp#* }]\"");
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[[a b]]");
+    // The unquoted form ends the word at the space, so the trailing `}` is read
+    // as a command path (bash runs the strip and prints `[b]`).
+    let (out, err, code) = run("sp=\"a b\"; r=${sp#* }; printf \"[%s]\" \"$r\"");
+    assert_eq!(code, 0, "stderr={err}");
+    assert!(
+        err.contains("failed to resolve command path: \"}\""),
+        "stderr={err}"
+    );
+    assert_eq!(out, "[]");
 }
 
 #[test]
-fn empty_name_with_a_pattern_operator_is_empty() {
-    // bash rejects `${%x}` (`bad substitution`, rc 1); fdshell strips the empty
-    // parameter, which expands to the empty string at rc 0.
-    let (out, err, code) = run("printf \"[%s]\" \"${%x}\"");
+fn escaped_brace_in_a_pattern_is_unreachable() {
+    // Accepted divergence (README, task #174): the brace reader stops at the
+    // first `}`, so a pattern containing `}` cannot be written — the escaped
+    // `\}` pair is matched as `}` and the rest of the word is literal.
+    // bash expands the escape and strips the whole prefix (`[abcabc]`).
+    let (out, err, code) = run("v=abcabc; printf \"[%s]\" \"${v#a\\}b}\"");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out, "[]");
+    assert_eq!(out, "[abcabcb}]");
+}
+
+#[test]
+fn empty_name_with_a_pattern_operator_is_a_name() {
+    // A pattern operator at index 0 leaves an empty name, so the braced content
+    // is read as the parameter name: the nounset message names it (master's
+    // `%x: unbound variable`, STYLE §4.7) and the unset parameter expands to
+    // the empty string at rc 0. bash rejects every form (`bad substitution`,
+    // rc 1) — the rc-1 nounset parity is fdshell's only shape of these inputs.
+    let (out, err, code) = run("printf \"[%s]\" \"${%x}\" \"${%x#y}\" \"${%}\"");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[][][]");
+    for (script, name) in [
+        ("set -u; printf \"[%s]\" \"${%x}\"", "%x"),
+        ("set -u; printf \"[%s]\" \"${%x#y}\"", "%x#y"),
+        ("set -u; printf \"[%s]\" \"${%}\"", "%"),
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "stderr={err}");
+        let want = format!("{name}: unbound variable");
+        assert!(err.contains(&want), "stderr={err}");
+    }
+}
+
+#[test]
+fn literal_braced_guards_stay_green_under_nounset() {
+    // The degenerate-name guard runs ahead of the operator dispatch, so `set -u`
+    // keeps every accepted rc-0 literal, including the length arm's `[0]`
+    // (bash measures `${#}` as `[0]` rc 0 under `set -u` too).
+    let (out, err, code) = run("set -u; printf \"[%s]\" \"${}\" \"${!}\" \"${#}\"");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[${}][${!}][0]");
+    let (out, err, code) = run("printf \"[%s]\" \"${}\" \"${!}\" \"${#}\"");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[${}][${!}][0]");
 }
 
 #[test]

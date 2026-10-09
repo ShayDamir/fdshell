@@ -1906,7 +1906,10 @@ fn pattern_operator_scan_is_positional() {
     // forms only), so `+` stays inside the name.
     assert_eq!(scan(c"v+a#y"), Some((b(c"v+a"), ShortestPrefix, b(c"y"))));
     // A `#`/`%` at index 0 gives the empty name, and a lone `:` is no operator.
+    // The empty scan name never reaches a dispatch: brace.rs resolves the whole
+    // content as the parameter name (pinned by scan_empty_name_resolves_the_content).
     assert_eq!(scan(c"#x"), Some((b(c""), ShortestPrefix, b(c"x"))));
+    assert_eq!(scan(c"%x"), Some((b(c""), ShortestSuffix, b(c"x"))));
     assert_eq!(scan(c"v:a"), None);
     assert_eq!(scan(c"v:a:-w"), Some((b(c"v:a"), Default, b(c"w"))));
 }
@@ -2119,4 +2122,35 @@ fn indirect_empty_target_with_a_pattern_errors() {
         e.current_context(),
         ResolveError::InvalidIndirect { var } if var.as_bytes().unwrap() == b""
     ));
+}
+
+#[test]
+fn scan_empty_name_resolves_the_content() {
+    // A pattern operator at index 0 (`${%x}`, `${%x#y}`) leaves the scan name
+    // empty, so the braced content is read as the parameter name: an unset
+    // parameter expands to empty at rc 0, and under `set -u` the message names
+    // the content (`%x: unbound variable`), never an empty name (STYLE §4.7).
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${%x}", &[false; 5]), b"");
+    assert_eq!(expand(&cell, c"${%x#y}", &[false; 7]), b"");
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let cases: [(&'static core::ffi::CStr, &[u8]); 2] = [(c"${%x}", b"%x"), (c"${%x#y}", b"%x#y")];
+    for (arg, want) in cases {
+        let e = substitute_arg(
+            &ShortCStr::from(arg),
+            &[false; 8],
+            &mut HashMap::new(),
+            &cell,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            e.current_context(),
+            ResolveError::UnboundVariable { var }
+                if var.as_bytes().unwrap() == want
+        ));
+    }
+    // `set -u` keeps the degenerate literals and the length arm's rc-0 `0`.
+    assert_eq!(expand(&cell, c"${}", &[false; 3]), b"${}");
+    assert_eq!(expand(&cell, c"${!}", &[false; 4]), b"${!}");
+    assert_eq!(expand(&cell, c"${#}", &[false; 3]), b"0");
 }

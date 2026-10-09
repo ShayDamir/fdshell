@@ -48,15 +48,12 @@ pub(crate) fn handle_brace(
         out.push(&content);
         return Ok(());
     }
-    if let Some((name, op, word)) = super::param_op::split_operator(&content) {
-        // `start` is the word index of the `{` byte, so the braced content
-        // begins at `start + 1` and the pattern arm can slice its mask.
-        return super::param_op::apply_param_op(&name, op, &word, mask, start + 1, cell, out);
-    }
-    let state = super::borrow_state(cell)?;
-    // An empty braced name stays literal: bash rejects `${}` (`bad
-    // substitution`, rc 1) and expands `${!}` (an empty indirect name) to
-    // empty at rc 0; fdshell prints both literally — a documented divergence.
+    // Degenerate braced names never reach a param-op dispatch, so a bail never
+    // sees an empty name it cannot print (STYLE §4.7): `${}` and `${!}` (an
+    // empty indirect name) stay literal — bash rejects `${}` (`bad
+    // substitution`, rc 1) and expands `${!}` to empty at rc 0 — and the
+    // operator scan's empty name (`${%x#y}`: a pattern operator at index 0)
+    // reads the content as the parameter name, as master does.
     let indirect = content.strip_prefix(b"!");
     if content.is_empty() || indirect.as_ref().is_some_and(|name| name.is_empty()) {
         out.push(c"${");
@@ -64,6 +61,15 @@ pub(crate) fn handle_brace(
         out.push(c"}");
         return Ok(());
     }
+    match super::param_op::split_operator(&content) {
+        // `start` is the word index of the `{` byte, so the braced content
+        // begins at `start + 1` and the pattern arm can slice its mask.
+        Some((name, op, word)) if !name.is_empty() => {
+            return super::param_op::apply_param_op(&name, op, &word, mask, start + 1, cell, out);
+        }
+        _ => {}
+    }
+    let state = super::borrow_state(cell)?;
     if indirect.is_some() {
         return state.resolve_indirect(&content, out);
     }
