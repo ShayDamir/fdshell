@@ -213,3 +213,71 @@ fn escaped_name_is_not_an_assignment() {
     assert_eq!(code, 0);
     assert_eq!(out, "[a b]\n");
 }
+
+/// An escaped separator byte is a word byte: the field count proves the word
+/// is one (`set -- a\ b` is one positional), and `a\&&b` prints `a&&b` (the
+/// accepted divergence — bash backgrounds `a&`, no job control in fdshell).
+#[test]
+fn escaped_separators_keep_one_field() {
+    let (out, _err, code) = run("set -- a\\ b; builtin echo $#");
+    assert_eq!(code, 0);
+    assert_eq!(out, "1\n");
+    let (out, _err, code) = run("builtin echo a\\&b");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a&b\n");
+    let (out, _err, code) = run("builtin echo a\\&&b");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a&&b\n");
+}
+
+/// An escape pair inside a `case` pattern is a literal member: `f\*o` matches
+/// the name `f*o` and never `foobar` (envfilter `glob_match` is `*`-only, so
+/// `?`/`[...]` stay out of scope — task #165).
+#[test]
+fn case_pattern_escape_is_literal() {
+    let (out, _err, code) = run("case f*o in f\\*o) builtin echo y;; esac");
+    assert_eq!(code, 0);
+    assert_eq!(out, "y\n");
+    let (out, _err, code) = run("case foobar in f\\*o) builtin echo y;; esac");
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
+}
+
+/// The arith lexers do not fold escape pairs, so `$((1\+2))` is an arithmetic
+/// syntax error (as in bash), rc 1.
+#[test]
+fn escape_pair_in_arith_is_a_syntax_error() {
+    let (_out, err, code) = run("builtin echo $((1\\+2))");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("arithmetic expression has a syntax error"),
+        "stderr={err:?}"
+    );
+}
+
+/// POSIX #4.2: inside double quotes every `\<char>` other than `\$`/`\\` keeps
+/// the backslash, and `\"` yields a literal quote.
+#[test]
+fn in_quote_escape_rules_are_unchanged() {
+    let (out, _err, code) = run("builtin echo \"a\\ b\"");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\\ b\n");
+    let (out, _err, code) = run("builtin echo \"a\\nc\"");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\\nc\n");
+    let (out, _err, code) = run("X=hi; builtin echo \"a\\$X\"");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a$X\n");
+    let (out, _err, code) = run("builtin echo \"a\\\\b\"");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\\b\n");
+}
+
+/// An alias body runs the normal tokenizer, so an escape pair after the alias
+/// is folded by the same rule: `alias e=echo; e a\*` prints `a*`.
+#[test]
+fn alias_body_takes_the_same_escape_rule() {
+    let (out, _err, code) = run("alias e=echo; e a\\*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a*\n");
+}
