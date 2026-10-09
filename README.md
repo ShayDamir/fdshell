@@ -137,7 +137,9 @@ TABs are dropped from every body line and from the terminator line — spaces ar
 kept, and a tab-indented terminator matches; the body is otherwise opaque as
 below). An unquoted delimiter runs `$` / `$(…)` / backtick expansion in the
 body; a quoted delimiter makes the body literal. `<<""` (empty quoted
-delimiter) reads a body up to the next empty line.
+delimiter) reads a body up to the next empty line. The delimiter word folds its
+unquoted escape pairs (`<<E\OF` delimits `EOF`), and a quoted delimiter keeps
+the pair (`<<"E\OF"` delimits the literal `E\OF`).
 The body is otherwise opaque: `;`, `&&`, `|`, `#`, `$(…)`, quotes, and
 keyword-shaped lines (`fi`, `done`, `}`) are all body content. An empty body
 is zero bytes, and no trailing newline is appended — the body keeps the last
@@ -208,10 +210,17 @@ with no match writes a literal file named after the pattern.
 
 Limitations:
 
-- Backslash: fdshell keeps `\X` in the word (argv semantics — `echo \*`
-  passes `\*` to the program), so an escaped pattern character does not
-  trigger expansion: `echo a\*` prints `a\*` verbatim where bash prints
-  `a*`.
+- Backslash follows POSIX #4.1: outside quotes the pair `\X` removes the
+  backslash and `X` loses its special meaning, so it is a literal word byte
+  protected from word splitting and globbing — `echo a\*` prints `a*`,
+  `echo f\oo\.*` globs the literal prefix `foo.` only, `\<newline>` is a line
+  continuation, and a trailing `\` at end of input keeps its backslash.
+  Accepted divergences (the escape pair is folded at substitution, so the
+  word's syntax position is where the pair sits): `echo a\&&b` prints `a&&b`
+  (bash backgrounds `a&`), `echo 2\>&1` prints `2>&1` (bash redirects `2>`),
+  `echo a\<<X` prints `a<<X` (bash starts a heredoc), `echo \$(echo hi)`
+  prints `$(echo hi )` (bash is a syntax error), and `\X=1` runs the command
+  `X=1` (fdshell exits 1, bash 127).
 - With `nullglob`, an unmatched command name falls back to the literal word
   (`shopt -s nullglob; zzz*` tries to run `zzz*` and fails with `not
   found`); bash drops the command and exits 0.
@@ -359,10 +368,9 @@ Accepted divergences from bash:
   intercept arguments at run time, inside the window); bash expands the
   intercept's own words before scoping, so `FOO=bar eval "echo $FOO"` prints
   `bar` here and empty in bash.
-- `test`/`[` grouping uses unquoted or quoted parens (`[ ( … ) ]`,
-  `[ "(" … ")" ]`); the POSIX escaped form `\(` `\)` does not group (fdshell
-  keeps the backslash in `\(` and splits `\)` into `\` and `)`, consistent
-  with the `\X`-kept backslash behavior above).
+- `test`/`[` grouping uses unquoted, quoted, or escaped parens (`[ ( … ) ]`,
+  `[ "(" … ")" ]`, `[ \( … \) ]`): the escape pair folds to the literal `(`/`)`
+  at substitution, so the POSIX escaped form groups exactly as bash does.
 
 ## How it works?
 

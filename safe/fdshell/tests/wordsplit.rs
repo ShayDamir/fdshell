@@ -46,49 +46,51 @@ fn run_stdin(script: &str, stdin: &str) -> (String, String, i32) {
 
 #[test]
 fn unquoted_expansion_splits_on_default_ifs() {
-    let (out, err, code) = run(r#"x="a b"; printf %s\n $x"#);
+    // The format is quoted so `printf` interprets `\n` itself: POSIX #4.1
+    // removes the backslash of an unquoted `\n`, so `printf %s\n` prints `n`.
+    let (out, err, code) = run(r#"x="a b"; printf "%s\n" $x"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn word_splitting_collapses_whitespace_runs() {
-    let (out, err, code) = run(r#"x="  a  b "; printf %s\n $x"#);
+    let (out, err, code) = run(r#"x="  a  b "; printf "%s\n" $x"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn custom_ifs_delimits_fields() {
-    let (out, err, code) = run(r"IFS=:; x=a:b; printf %s\n $x");
+    let (out, err, code) = run(r#"IFS=:; x=a:b; printf "%s\n" $x"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn custom_ifs_keeps_empty_fields() {
-    let (out, err, code) = run(r#"IFS=:; x="a::b"; printf %s\n $x"#);
+    let (out, err, code) = run(r#"IFS=:; x="a::b"; printf "%s\n" $x"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\n\nb\n");
 }
 
 #[test]
 fn empty_ifs_disables_word_splitting() {
-    let (out, err, code) = run(r#"x="a b"; IFS=; printf %s\n $x"#);
+    let (out, err, code) = run(r#"x="a b"; IFS=; printf "%s\n" $x"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a b\n");
 }
 
 #[test]
 fn quoted_expansion_does_not_split() {
-    let (out, err, code) = run(r#"x="a b"; printf %s\n "$x""#);
+    let (out, err, code) = run(r#"x="a b"; printf "%s\n" "$x""#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a b\n");
 }
 
 #[test]
 fn unquoted_dollar_at_splits_positional_args() {
-    let (out, err, code) = run(r"set -- a b; printf %s\n $@; set --");
+    let (out, err, code) = run(r#"set -- a b; printf "%s\n" $@; set --"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
@@ -102,63 +104,63 @@ fn set_dash_dash_splits_expansion() {
 
 #[test]
 fn read_ifs_updates_word_splitting() {
-    let (out, err, code) = run_stdin(r"read IFS; x=a:b; printf %s\n $x", ":\n");
+    let (out, err, code) = run_stdin(r#"read IFS; x=a:b; printf "%s\n" $x"#, ":\n");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn export_ifs_updates_word_splitting() {
-    let (out, err, code) = run(r"export IFS=:; x=a:b; printf %s\n $x");
+    let (out, err, code) = run(r#"export IFS=:; x=a:b; printf "%s\n" $x"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn param_op_ifs_assign_updates_word_splitting() {
-    let (out, err, code) = run(r"IFS=; y=a,b; x=${IFS:=,}; printf %s\n $y");
+    let (out, err, code) = run(r#"IFS=; y=a,b; x=${IFS:=,}; printf "%s\n" $y"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn for_ifs_updates_word_splitting() {
-    let (out, err, code) = run(r"for IFS in ,; do x=a,b; printf %s\n $x; done");
+    let (out, err, code) = run(r#"for IFS in ,; do x=a,b; printf "%s\n" $x; done"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\n");
 }
 
 #[test]
 fn unquoted_dollar_at_custom_ifs_splits_per_positional() {
-    let (out, err, code) = run(r"IFS=:; set -- a:b c; printf %s\n $@");
+    let (out, err, code) = run(r#"IFS=:; set -- a:b c; printf "%s\n" $@"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a\nb\nc\n");
 }
 
 #[test]
 fn unquoted_dollar_at_empty_ifs_keeps_positionals() {
-    let (out, err, code) = run(r#"set -- "a b" c; IFS=; printf %s\n $@"#);
+    let (out, err, code) = run(r#"set -- "a b" c; IFS=; printf "%s\n" $@"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a b\nc\n");
 }
 
 #[test]
 fn quoted_dollar_star_custom_ifs_joins_with_first_ifs_byte() {
-    let (out, err, code) = run(r#"IFS=:; set -- a b; printf %s\n "$*""#);
+    let (out, err, code) = run(r#"IFS=:; set -- a b; printf "%s\n" "$*""#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a:b\n");
 }
 
 #[test]
 fn quoted_dollar_star_empty_ifs_joins_with_nothing() {
-    let (out, err, code) = run(r#"IFS=; set -- a b; printf %s\n "$*""#);
+    let (out, err, code) = run(r#"IFS=; set -- a b; printf "%s\n" "$*""#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "ab\n");
 }
 
 #[test]
 fn embedded_dollar_at_uses_first_ifs_byte_join() {
-    let (out, err, code) = run(r"IFS=:; set -- a b; printf %s\n x$@");
+    let (out, err, code) = run(r#"IFS=:; set -- a b; printf "%s\n" x$@"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "xa\nb\n");
 }

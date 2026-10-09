@@ -28,8 +28,14 @@ fn printf_basic_format() {
 
 #[test]
 fn printf_with_explicit_newline() {
-    // Unquoted: inside double quotes the tokenizer would eat the backslash.
+    // POSIX #4.1: outside quotes `\n` is the escape pair `n`, so the unquoted
+    // format word is `%sn` — bash prints `hellon` for the same script, and the
+    // quoted form `"%s\n"` (POSIX #4.2 keeps the pair for printf to interpret)
+    // is what prints the newline.
     let (out, _err, code) = run(r"printf %s\n hello");
+    assert_eq!(code, 0);
+    assert_eq!(out, "hellon");
+    let (out, _err, code) = run(r#"printf "%s\n" hello"#);
     assert_eq!(code, 0);
     assert_eq!(out, "hello\n");
 }

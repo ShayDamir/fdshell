@@ -166,7 +166,7 @@ fn more_fds_than_declared_is_hard_error() {
 fn nul_payload_is_hard_error() {
     let (a_sock, b_sock) = UnixStream::pair().unwrap();
     let a = spawn(a_sock, "recvmsg 0 MSG; echo UNREACHED");
-    let mut b = spawn(b_sock, "builtin printf 'a\\000b' >&0");
+    let mut b = spawn(b_sock, "builtin printf \"a\\000b\" >&0");
     let (out, err, code) = output(a);
     let _ = b.wait();
 

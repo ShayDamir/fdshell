@@ -102,16 +102,16 @@ fn quoted_bytes_are_literal() {
 
 #[test]
 fn escaped_star_is_not_a_pattern() {
-    // Documented divergence (README, plan rule 11): fdshell keeps `\X` in the
-    // word, so `a\*` is not a pattern and is passed through verbatim. Bash
-    // strips the backslash during tokenization and prints `a*` here.
+    // POSIX #4.1: the escape pair `\*` is the literal `*` and the backslash is
+    // removed, so `a\*` is a literal word (the escaped star is mask-protected):
+    // it prints `a*` and never globs the `a*` file in the scratch dir.
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-glob-esc-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("a*"), b"star").unwrap();
     let (out, _err, code) = run(dir.to_str().unwrap(), "echo a\\*");
     assert_eq!(code, 0);
-    assert_eq!(out, "a\\*\n");
+    assert_eq!(out, "a*\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
