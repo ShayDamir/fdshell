@@ -680,3 +680,25 @@ fn quoted_brace_word_unchanged() {
 fn cap_error_at_line_level() {
     assert_too_many_words("echo {1..300}{1..300}");
 }
+
+/// POSIX #4.1: the gobbler skips an escape pair whole, so an escaped
+/// `{`/`}`/`,` never opens a group or separates one, and the word stays
+/// literal through the brace stage.
+#[test]
+fn escaped_braces_never_open_a_group() {
+    // The word scanner never sees the escaped `{`: the pair `\{` is skipped.
+    let (len, found_open, _) = gobble(b"a\\{b,c\\}", 0, b'{');
+    assert!(!found_open, "the escaped open brace never opens a group");
+    assert_eq!(len, 8);
+    // The unescaped form opens a group and closes it as a comma group.
+    let (gi, found_open, _) = gobble(b"a{b,c}", 0, b'{');
+    assert!(found_open);
+    let (close, found_close, etype) = gobble(b"a{b,c}", gi + 1, b'}');
+    assert_eq!(
+        (close, found_close, etype),
+        (5, true, Some(GroupType::Comma))
+    );
+    // Brace expansion leaves the escaped word verbatim.
+    assert_eq!(expand_line("echo \\{a,b\\}"), b"echo \\{a,b\\}".to_vec());
+    assert_eq!(expand_line("echo a\\{b,c\\}"), b"echo a\\{b,c\\}".to_vec());
+}

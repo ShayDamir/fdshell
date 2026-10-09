@@ -1,11 +1,13 @@
 use alloc::vec::Vec;
 
 /// Scan the body of a parenthesized expression from a byte stream positioned
-/// just after an opening `(`, tracking quote state: a backslash inside double
-/// quotes shields the next byte, and quotes and parens inside double quotes
-/// are data. `depth` counts the parens the caller already consumed, so the
-/// body ends at the first `)` bringing the count back to `depth`. Returns the
-/// body without that final `)`, or `None` if the input ends first.
+/// just after an opening `(`, tracking quote state: an escape pair `\X` shields
+/// the next byte (inside double quotes too), so an escaped `)`, `(`, `"` never
+/// counts, and the pair is kept in the body for the recursive parse. Quotes and
+/// parens inside double quotes are data. `depth` counts the parens the caller
+/// already consumed, so the body ends at the first `)` bringing the count back
+/// to `depth`. Returns the body without that final `)`, or `None` if the input
+/// ends first.
 pub(crate) fn scan_paren_body(
     bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     depth: u32,
@@ -14,7 +16,7 @@ pub(crate) fn scan_paren_body(
     let mut d = depth;
     let mut in_quotes = false;
     while let Some(c) = bytes.next() {
-        if in_quotes && c == b'\\' {
+        if c == b'\\' {
             let escaped = bytes.next()?;
             body.push(b'\\');
             body.push(escaped);
@@ -54,7 +56,9 @@ pub(crate) fn scan_at(body: &[u8], start: usize, depth: u32) -> Option<(Vec<u8>,
     let mut i = start;
     while let Some(&c) = body.get(i) {
         i += 1;
-        if in_quotes && c == b'\\' {
+        if c == b'\\' {
+            // The escape pair is kept in the body (the recursive parse sees
+            // it), so an escaped `)`/`(`/`"` never counts.
             let escaped = *body.get(i)?;
             i += 1;
             out.push(b'\\');
@@ -74,3 +78,6 @@ pub(crate) fn scan_at(body: &[u8], start: usize, depth: u32) -> Option<(Vec<u8>,
     }
     None
 }
+
+#[cfg(test)]
+mod tests;

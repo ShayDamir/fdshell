@@ -59,6 +59,13 @@ impl State {
                 self.word_started = false;
                 self.start = self.pos;
             }
+            // An unquoted escape pair: the pair is a word byte pair, so an
+            // escaped `#` never starts a comment and a leading `\if` is never
+            // a keyword token.
+            b'\\' => {
+                self.word_start();
+                self.read_escape(bytes)?;
+            }
             _ => {
                 self.word_start();
                 self.cur

@@ -45,6 +45,12 @@ pub(super) fn gobble(text: &[u8], from: usize, satisfy: u8) -> (usize, bool, Opt
         match c {
             QUOTE => in_quote = true,
             b'`' => in_backtick = true,
+            // An unquoted escape pair is skipped whole: an escaped `{`, `}` or
+            // `,` never opens a group or separates one.
+            b'\\' => {
+                i += 2;
+                continue;
+            }
             b'$' if text.get(i + 1) == Some(&b'{') => {
                 i += 2;
                 level += 1;

@@ -218,3 +218,54 @@ fn skip_comment_handles_no_newline() {
     let result = skip_comment(b"abc#def", 3);
     assert_eq!(result, 7); // returns len (slice end) when no newline found
 }
+
+// POSIX #4.1: an unquoted escape pair `\X` is consumed together, so the
+// escaped byte never triggers a byte-level rule.
+#[test]
+fn escape_pair_does_not_break_the_word() {
+    let mut s = ScanState::new();
+    s.advance(b"a\\;b", 0);
+    // The pair at index 1..3 is consumed together, landing on `b`.
+    assert_eq!(s.advance(b"a\\;b", 1), 3);
+    assert!(s.word_active, "the escaped `;` must not end the word");
+}
+
+#[test]
+fn escaped_newline_is_a_line_continuation() {
+    let mut s = ScanState::new();
+    // The pair `\<newline>` is consumed together, so the newline is data.
+    assert_eq!(s.advance(b"a\\\nb", 1), 3);
+    assert!(s.word_active, "the escaped newline must not end the line");
+}
+
+#[test]
+fn escaped_quote_does_not_toggle_quote_state() {
+    let mut s = ScanState::new();
+    assert_eq!(s.advance(b"a\\\"b", 1), 3);
+    assert!(!s.in_quote, "the escaped quote is data, not a quote toggle");
+}
+
+#[test]
+fn trailing_backslash_clamps_to_the_line_end() {
+    let mut s = ScanState::new();
+    // The jump clamps to `line.len()` so the caller's end-of-line boundary
+    // still fires and flushes the word.
+    assert_eq!(s.advance(b"a\\", 1), 2);
+    assert_eq!(s.advance(b"\\", 0), 1);
+}
+
+#[test]
+fn escaped_paren_never_nests_a_substitution() {
+    let mut s = ScanState::new();
+    let line = b"$(";
+    s.advance(line, 0);
+    assert_eq!(s.paren_depth, 1);
+    // `$(a\)b)` — the escaped `)` is data, so only the real `)` closes.
+    let line = b"$(a\\)b)";
+    assert_eq!(s.advance(line, 2), 3, "the word byte advances one");
+    assert_eq!(s.advance(line, 3), 5, "the pair `\\)` is consumed together");
+    assert_eq!(s.paren_depth, 1, "the escaped `)` must not close the body");
+    s.advance(line, 5);
+    s.advance(line, 6);
+    assert_eq!(s.paren_depth, 0, "the unescaped `)` closes the body");
+}

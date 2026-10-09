@@ -6,10 +6,19 @@ impl ScanState {
     ///
     /// Toggles quotes and backticks and tracks `$( )` / `(( ))` depth. A `$(`
     /// pair and a top-level `((` pair are consumed together, advancing two
-    /// positions.
+    /// positions. So is an escape pair `\X`: the backslash shields the next
+    /// byte from every byte-level rule, so it never toggles a quote, ends a
+    /// word, or closes a paren.
     pub(crate) fn advance(&mut self, line: &[u8], i: usize) -> usize {
         let b = line.get(i).copied().unwrap_or(0);
         let bare = !self.in_quote && !self.in_backtick;
+        if b == b'\\' {
+            // The pair is consumed together; a trailing `\` at end of line
+            // clamps to `line.len()` so the caller's end-of-line boundary
+            // still fires and flushes the word.
+            self.word_active = true;
+            return (i + 2).min(line.len());
+        }
         if b == b'"' {
             self.in_quote = !self.in_quote;
             self.word_active = true;

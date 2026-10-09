@@ -1,3 +1,4 @@
+mod escape;
 mod step;
 
 use super::Token;
@@ -85,3 +86,6 @@ impl State {
         Ok(self.tokens)
     }
 }
+
+#[cfg(test)]
+mod tests;
