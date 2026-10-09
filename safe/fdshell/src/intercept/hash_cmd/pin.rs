@@ -1,13 +1,16 @@
 //! `hash`'s pin/lookup path: `hash name` prints the entry (PATH-searching and
 //! storing on a miss); `hash name path` pins the entry.
 
+use crate::bytes::fold::fold_word;
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
 /// `hash name` prints the entry (PATH-searching and storing on a miss);
-/// `hash name path` pins the entry.
+/// `hash name path` pins the entry. `name` is the folded word (the caller folds
+/// it, POSIX #4.1).
 pub(super) fn lookup_or_pin(
     name: &ShortCStr,
     cmdline: &crate::parse::CommandLine,
@@ -18,7 +21,12 @@ pub(super) fn lookup_or_pin(
             if cmdline.args.get(2).is_some() {
                 bail!(CmdError::HashUsage);
             }
-            state.hash_table.insert(name.clone(), path.clone());
+            // The pinned path is raw word text as well, so store the folded form.
+            let path_mask = cmdline.args_mask.get(1).map(Vec::as_slice).unwrap_or(&[]);
+            let path = fold_word(path, path_mask)
+                .change_context(CmdError::Never)?
+                .0;
+            state.hash_table.insert(name.clone(), path);
             Ok(0)
         }
         None => {

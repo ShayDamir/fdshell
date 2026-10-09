@@ -6,8 +6,10 @@
 
 mod pin;
 
+use crate::bytes::fold::fold_word;
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -20,15 +22,46 @@ pub(crate) fn run_hash(
     super::validation::validate_intercept(line, "hash", cmdline)?;
     crate::xtrace::trace_cmd(b"hash", cmdline, cell);
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+    // `hash`'s words never go through substitution, so they are folded here
+    // (POSIX #4.1): the table is keyed by the *folded* command name (`prehash`
+    // stores word 0 folded), so `hash a\*` queries the key `a*` as bash's does.
     let exit = match cmdline.args.first() {
         None => state.list_hash(),
-        Some(flag) if flag.eq_bytes(b"-r") => {
-            state.remove_hash(cmdline.args.get(1..).unwrap_or(&[]))
+        Some(raw) => {
+            let name = fold_name(raw, mask_at(&cmdline.args_mask, 0))?;
+            if name.eq_bytes(b"-r") {
+                state.remove_hash(&fold_names(
+                    cmdline.args.get(1..).unwrap_or(&[]),
+                    cmdline.args_mask.get(1..).unwrap_or(&[]),
+                )?)
+            } else {
+                pin::lookup_or_pin(&name, cmdline, &mut state)?
+            }
         }
-        Some(name) => pin::lookup_or_pin(name, cmdline, &mut state)?,
     };
     state.set_last_exit(exit);
     Ok(true)
+}
+
+fn mask_at(masks: &[Vec<bool>], i: usize) -> &[bool] {
+    masks.get(i).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The folded name word, as the table's key.
+fn fold_name(word: &ShortCStr, mask: &[bool]) -> Result<ShortCStr, Report<CmdError>> {
+    Ok(fold_word(word, mask).change_context(CmdError::Never)?.0)
+}
+
+/// Every name of `hash -r name…`, folded to match the table's folded keys.
+fn fold_names(
+    words: &[ShortCStr],
+    masks: &[Vec<bool>],
+) -> Result<Vec<ShortCStr>, Report<CmdError>> {
+    words
+        .iter()
+        .zip(masks)
+        .map(|(w, m)| fold_name(w, m))
+        .collect()
 }
 
 impl ShellState {

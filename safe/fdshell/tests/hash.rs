@@ -143,3 +143,70 @@ fn hash_builtin_not_cached() {
         "the builtin pwd must not be cached, stdout={out:?}"
     );
 }
+
+/// A scratch `PATH` dir of executable files, so `hash`'s folded name matches a real
+/// file (bash `hash a\*` finds the file named `a*`).
+fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("fdshell-hash-esc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in names {
+        let path = dir.join(name);
+        std::fs::write(&path, "#!/bin/sh\necho ran\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
+fn run_with_bin(bin_dir: &std::path::Path, script: &str) -> (String, String, i32) {
+    let path = format!("{}:{}", bin_dir.display(), test_path());
+    let output = Command::new(BIN)
+        .env("PATH", path)
+        .args(["-c", script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// POSIX #4.1: `hash`'s name word is folded, so it matches the table's folded keys
+/// (`prehash` stores the folded command word): `hash a\*` finds the `PATH` file
+/// named `a*` and prints its path rc 0, and the pin form stores the folded key with
+/// the folded path. A quoted name keeps the pair, so the literal `a\*` is not found
+/// (rc 1, as bash reports `a\*: not found` for the quoted form).
+#[test]
+fn hash_name_folds_escape_pairs() {
+    let bin = scratch_bin(&["a*"]);
+    let want = format!("{}/a*", bin.display());
+    let (out, err, code) = run_with_bin(&bin, "hash a\\*");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out.trim(), want, "the folded name must find the file a*");
+    // The pin form keys the table by the folded name and folds the path word.
+    let (out, err, code) = run_with_bin(&bin, "hash a\\* /tmp/a\\*b; hash");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(
+        out.lines().any(|l| l == "a*\t/tmp/a*b"),
+        "the folded key and path must be stored, stdout={out:?}"
+    );
+    // A quoted name keeps its pair: the literal `a\*` is looked up, not found.
+    let (out, err, code) = run_with_bin(&bin, "hash \"a\\*\"");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty());
+    assert!(
+        err.contains("a\\*"),
+        "the raw name is reported, stderr={err:?}"
+    );
+    // fdshell's own surface (bash ignores `hash -r`'s name list): the removal matches
+    // the folded keys, so `hash -r a\*` clears the entry stored under `a*`.
+    let (out, err, code) = run_with_bin(&bin, &format!("hash a\\* {HELPER}; hash -r a\\*; hash"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(
+        out.is_empty(),
+        "the folded key must be removed, stdout={out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&bin);
+}

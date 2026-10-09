@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
+use crate::bytes::fold::fold_word;
 use crate::error::cmd::CmdError;
 
 /// Parsed `timeout` arguments: the deadline and the command to run.
@@ -23,14 +24,19 @@ pub fn parse(
 ) -> Result<TimeoutConfig, Report<CmdError>> {
     let seconds_arg = args.first().ok_or(CmdError::TimeoutMissingSeconds)?;
     let seconds = parse_seconds(seconds_arg)?;
-    let command = args.get(1).ok_or(CmdError::TimeoutMissingCommand)?;
-    let command_mask = args_mask.get(1).cloned().unwrap_or_default();
+    // The target word never goes through substitution, so its unquoted escape
+    // pairs are folded here (POSIX #4.1): `timeout 1 e\cho hi` runs `echo`, and
+    // `timeout 1 a\*` runs the `PATH` file named `a*` (bash folds word 0).
+    let raw = args.get(1).ok_or(CmdError::TimeoutMissingCommand)?;
+    let (command, command_mask) =
+        fold_word(raw, args_mask.get(1).map(Vec::as_slice).unwrap_or(&[]))
+            .change_context(CmdError::Never)?;
     let sub_args: Vec<ShortCStr> = args.get(2..).unwrap_or_default().to_vec();
     let sub_args_mask: Vec<Vec<bool>> = args_mask.get(2..).unwrap_or_default().to_vec();
     let sub_args_quoted: Vec<bool> = args_quoted.get(2..).unwrap_or_default().to_vec();
     Ok(TimeoutConfig {
         seconds,
-        command: command.clone(),
+        command,
         command_mask,
         args: sub_args,
         args_mask: sub_args_mask,
