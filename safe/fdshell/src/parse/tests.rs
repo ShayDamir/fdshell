@@ -2945,3 +2945,33 @@ fn test_fdstyle_word_leading_is_arg_not_prefix() {
     assert!(cmd.env_assigns.is_empty());
     assert_eq!(cmd.command, c"%foo=bar".into());
 }
+
+/// POSIX #4.1: an escape pair in the name makes the word a plain command word,
+/// never an assignment — `\X=1` and `X\=1` are words.
+#[test]
+fn test_env_assign_escaped_name_is_not_an_assignment() {
+    let ParsedLine::Cmd(cmd) = parse(b"\\X=1 cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.env_assigns.is_empty());
+    assert_eq!(cmd.command, c"\\X=1".into());
+    assert_eq!(cmd.args, vec![c"cmd".into()]);
+
+    let ParsedLine::Cmd(cmd) = parse(b"X\\=1 cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.env_assigns.is_empty());
+    assert_eq!(cmd.command, c"X\\=1".into());
+    assert_eq!(cmd.args, vec![c"cmd".into()]);
+}
+
+/// The assignment value keeps the escape pair: substitution drops the backslash
+/// later and the escaped space stays inside the value (never an IFS split).
+#[test]
+fn test_env_assign_value_keeps_the_escape_pair() {
+    let ParsedLine::Cmd(cmd) = parse(b"X=a\\ b cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns, vec![(c"X".into(), c"a\\ b".into())]);
+    assert_eq!(cmd.command, c"cmd".into());
+}

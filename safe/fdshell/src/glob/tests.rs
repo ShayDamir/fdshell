@@ -42,6 +42,18 @@ fn expand_to_bytes(cell: &ForkCell<ShellState>, w: &str) -> Vec<Vec<u8>> {
         .collect()
 }
 
+fn expand_to_bytes_masked(
+    cell: &ForkCell<ShellState>,
+    w: &ShortCStr,
+    mask: &[bool],
+) -> Vec<Vec<u8>> {
+    expand(w, mask, cell)
+        .unwrap()
+        .iter()
+        .map(|s| s.as_bytes().unwrap().to_vec())
+        .collect()
+}
+
 #[test]
 fn star_matches_sorted_and_excludes_dots() {
     let cell = ForkCell::new(ShellState::new());
@@ -200,5 +212,30 @@ fn nested_pattern_walks_intermediate_components() {
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/*/gamma")),
         vec![format!("{dir}/sub/gamma").into_bytes()]
+    );
+}
+
+/// POSIX #4.1: the token text `a\*` has no pattern byte (the `\` skip shields
+/// the star), and the substituted word `a*` with the escaped byte mask-
+/// protected is not a pattern either — both pass through without the FS.
+#[test]
+fn escaped_star_word_is_not_a_pattern() {
+    let cell = ForkCell::new(ShellState::new());
+    let dir = scratch();
+    std::fs::write(format!("{dir}/ax"), b"").unwrap();
+    // The token text keeps the pair.
+    assert_eq!(
+        expand_to_bytes(&cell, &format!("{dir}/a\\*")),
+        vec![format!("{dir}/a\\*").into_bytes()]
+    );
+    // The substituted word: the `*` is mask-protected, so it never globs the
+    // `ax` file.
+    let w = word(&format!("{dir}/a*"));
+    // Bytes: the dir, then `/`, `a`, `*` — only the `*` is mask-protected.
+    let mut mask = vec![false; dir.len() + 3];
+    *mask.get_mut(dir.len() + 2).unwrap() = true;
+    assert_eq!(
+        expand_to_bytes_masked(&cell, &w, &mask),
+        vec![format!("{dir}/a*").into_bytes()]
     );
 }

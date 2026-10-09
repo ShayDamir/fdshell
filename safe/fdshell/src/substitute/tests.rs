@@ -307,8 +307,50 @@ fn backslash_backslash_folds_to_single() {
 fn backslash_other_char_kept() {
     let cell = dummy_cell();
     let mut cache = HashMap::new();
-    let (res, _) = substitute_arg(&ShortCStr::from(c"a\\nb"), &[], &mut cache, &cell).unwrap();
+    // Quoted (mask all-`true`): POSIX #4.2 keeps the backslash of `\<char>`.
+    let quoted = [true; 4];
+    let (res, _) = substitute_arg(&ShortCStr::from(c"a\\nb"), &quoted, &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"a\\nb");
+}
+
+#[test]
+fn unquoted_escape_pair_drops_the_backslash() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    // POSIX #4.1: the backslash is removed and the escaped byte is protected
+    // (mask `true`), so `a\*` is a literal word, not a pattern.
+    let (res, mask) = substitute_arg(&ShortCStr::from(c"a\\*b"), &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a*b");
+    assert_eq!(mask, vec![false, true, false]);
+}
+
+#[test]
+fn unquoted_escaped_space_is_one_word() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg(&ShortCStr::from(c"a\\ b"), &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a b");
+    // The escaped space is protected, so IFS splitting never breaks the word.
+    assert_eq!(mask, vec![false, true, false]);
+}
+
+#[test]
+fn unquoted_escaped_newline_is_a_line_continuation() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    // Both bytes of `\<newline>` are dropped.
+    let (res, mask) = substitute_arg(&ShortCStr::from(c"a\\\nb"), &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"ab");
+    assert_eq!(mask, vec![false, false]);
+}
+
+#[test]
+fn trailing_unquoted_backslash_is_kept() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg(&ShortCStr::from(c"a\\"), &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a\\");
+    assert_eq!(mask, vec![false, false]);
 }
 
 #[test]

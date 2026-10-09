@@ -376,3 +376,30 @@ fn heavy_star_backtracking_stays_finite() {
     pat.push(b'c');
     assert!(!m(&pat, &name));
 }
+
+/// POSIX #4.1: an escaped pair is a literal byte, so `f\oo\.*` substitutes to
+/// `foo.*` with the escaped bytes mask-protected: the escaped `.` is literal
+/// and the trailing `*` is the only pattern byte.
+#[test]
+fn escaped_pairs_are_literal_and_the_rest_globs() {
+    // The substituted word: the `.` pair is folded to `.` and mask-protected,
+    // so the star globs the tail only after a literal `.`.
+    let mask = [false, true, false, true, false];
+    assert!(m_masked(b"foo.*", &mask, b"foo.bar"));
+    assert!(!m_masked(b"foo.*", &mask, b"foo2"));
+    // The token text keeps the pairs: the escaped `.` is literal, the star
+    // after it is a pattern byte.
+    assert!(m(b"f\\oo\\.*", b"foo.bar"));
+    assert!(!m(b"f\\o\\.*", b"fooXbar"));
+}
+
+#[test]
+fn masked_star_is_not_a_pattern_byte() {
+    assert!(!super::has_unquoted_pattern(b"a*", &[false, true]));
+    assert!(super::has_unquoted_pattern(b"a*", &[false, false]));
+    // The token text keeps the pair, and the `\` skip makes the escaped byte
+    // literal: `a\*` has no pattern byte, `a\\*` has a literal `\` pair
+    // followed by a pattern `*`.
+    assert!(!super::has_unquoted_pattern(b"a\\*", &[]));
+    assert!(super::has_unquoted_pattern(b"a\\\\*", &[]));
+}

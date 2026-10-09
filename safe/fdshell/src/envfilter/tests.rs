@@ -91,3 +91,24 @@ fn is_allowed_deny_wins_over_allow() {
     f.deny.push(c"PATH".into());
     assert!(!f.is_allowed(&c"PATH".into()));
 }
+
+/// POSIX #4.1: the escape pair `\X` in a pattern is the literal `X` (the
+/// backslash is dropped), so `a\*` matches the name `a*` and never wildcards.
+#[test]
+fn glob_escape_pair_is_the_literal_byte() {
+    assert!(glob_match(b"a\\*", b"a*"));
+    assert!(!glob_match(b"a\\*", b"ab"));
+    assert!(!glob_match(b"a\\*", b"a"));
+    assert!(glob_match(b"a\\*b", b"a*b"));
+    assert!(!glob_match(b"a\\*b", b"aXXb"));
+    // A star before the pair still wildcards.
+    assert!(glob_match(b"*a\\*", b"xxa*"));
+}
+
+/// A trailing `\` in the pattern matches a literal backslash in the name.
+#[test]
+fn glob_trailing_backslash_is_literal() {
+    assert!(glob_match(b"a\\", b"a\\"));
+    assert!(!glob_match(b"a\\", b"a"));
+    assert!(glob_match(b"\\\\", b"\\"));
+}

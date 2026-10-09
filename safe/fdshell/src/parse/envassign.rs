@@ -5,10 +5,12 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 
 /// A `NAME=value` word: non-empty lhs, no `%` prefix (the same leniency as
-/// the bare-assignment detection — no new name validation).
+/// the bare-assignment detection — no new name validation), and no `\` in the
+/// name (an escape pair is not a name byte: `\X=1` is a command word, not an
+/// assignment, as in bash).
 pub(crate) fn is_env_assign(word: &ShortCStr) -> bool {
     word.split_once_byte(b'=')
-        .is_some_and(|(lhs, _)| !lhs.is_empty() && !lhs.starts_with(b"%"))
+        .is_some_and(|(lhs, _)| !lhs.is_empty() && !lhs.starts_with(b"%") && !lhs.contains(b'\\'))
 }
 
 /// A non-assignment word up to the first `;` — a command word that a
@@ -41,7 +43,7 @@ fn assign_at(tokens: &[Token], i: usize) -> Option<(ShortCStr, ShortCStr)> {
         return None;
     }
     let (name, value) = t.split_once_byte(b'=')?;
-    if name.is_empty() || name.starts_with(b"%") {
+    if name.is_empty() || name.starts_with(b"%") || name.contains(b'\\') {
         return None;
     }
     Some((name, value))
@@ -55,6 +57,7 @@ pub(crate) fn collect_range(tokens: &[Token], end: usize) -> Vec<(ShortCStr, Sho
         if let Some((name, value)) = t.split_once_byte(b'=')
             && !name.is_empty()
             && !name.starts_with(b"%")
+            && !name.contains(b'\\')
         {
             out.push((name, value));
         }
@@ -71,7 +74,7 @@ pub(crate) fn collect_all(tokens: &[Token]) -> Option<Vec<(ShortCStr, ShortCStr)
             break;
         }
         let (name, value) = t.split_once_byte(b'=')?;
-        if name.is_empty() || name.starts_with(b"%") {
+        if name.is_empty() || name.starts_with(b"%") || name.contains(b'\\') {
             return None;
         }
         out.push((name, value));

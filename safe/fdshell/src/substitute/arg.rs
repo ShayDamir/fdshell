@@ -42,7 +42,22 @@ pub(crate) fn substitute_arg(
         let quoted = mask.get(idx).copied().unwrap_or(false);
         idx += 1;
         match b {
-            // `\$` and `\\` drop the backslash; any other `\<char>` keeps it.
+            // Unquoted POSIX #4.1: `\X` removes the backslash and the escaped
+            // byte becomes protected (mask `true` — it never splits or globs).
+            // `\<newline>` is a line continuation: both bytes are dropped. A
+            // trailing `\` at end of word keeps the backslash.
+            b'\\' if !quoted => match peek.next() {
+                Some(b'\n') => {
+                    idx += 1;
+                }
+                Some(c) => {
+                    idx += 1;
+                    push_byte(&mut out, &mut out_mask, c, true)?;
+                }
+                None => push_byte(&mut out, &mut out_mask, b'\\', false)?,
+            },
+            // Quoted POSIX #4.2: `\$` and `\\` drop the backslash; any other
+            // `\<char>` keeps it.
             b'\\' => match peek.peek() {
                 Some(&c @ (b'$' | b'\\')) => {
                     peek.next();
