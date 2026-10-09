@@ -115,8 +115,12 @@ words, with the quote mask applied), `%var` (the variable's fd, attached
 form: `>%var`), and `/dev/fd/N` / `/proc/self/fd/N` (dup of the open fd
 N). `&>file`, `>&1`, `>&%var` (dup the fd the variable refers to, e.g.
 `2>&%f`), `2>&-`, here-docs, and here-strings are the other redirect
-sources; see below. A second redirect to the same fd on one
-command is a `duplicate redirect target` parse error.
+sources; see below. A command may carry several redirections to the same fd;
+all of them are applied in the order written, so the **last one to that fd
+wins** and it is not an error: `echo hi >a >b` writes `hi` to `b` and creates
+`a` empty (the first redirect opened and truncated its target), and
+`cat <f1 <f2` reads `f2`. A failing redirection aborts the command, so the
+order matters: `cat <missing <f2` exits 1 without reading `f2`.
 
 ## Heredocs
 
@@ -160,8 +164,6 @@ Limitations:
   supported.
 - A body line that is exactly `elif` / `else` (in an if body) or `;;` (in a
   case / wait body) is misread as block structure.
-- A second stdin redirect on one command (two here-docs, or a here-doc plus
-  `< file`) is rejected with `duplicate redirect target`.
 
 ## Glob expansion
 
@@ -262,10 +264,11 @@ An unquoted `..` directly before the closing brace does not start a sequence
 Protected contexts (no expansion, like bash): the assignment word
 (`x={a,b}`), `case` words and pattern lists, here-string words, and heredoc
 delimiters — both the `<<` operator word and the terminating delimiter line.
-Redirect target words *are* expanded: `echo hi >{a,b}` (attached) becomes
-two redirects and a `duplicate redirect target` parse error, and
-`echo hi > {a,b}` (separated) redirects to the first expanded word with
-the rest as arguments — bash reports an ambiguous redirect for both.
+Redirect target words *are* expanded: `echo hi >{a,b}` (attached) becomes two
+redirects to fd 1 applied in order, so the last one wins (`b` gets `hi`, `a` is
+created empty); `echo hi > {a,b}` (separated) redirects to the first expanded
+word with the rest as arguments. bash brace-expands neither form: a redirect
+target is not brace-expanded there, so both report `ambiguous redirect` (rc 1).
 
 Limitations / deviations from bash:
 
