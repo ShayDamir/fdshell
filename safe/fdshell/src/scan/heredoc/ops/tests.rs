@@ -44,3 +44,46 @@ fn comment_skip_resumes_on_next_line() {
     assert_eq!(ops[0].delim, b"A");
     assert_eq!(ops[1].delim, b"B");
 }
+
+/// POSIX #4.1: the escape pair `\<` folds to a literal `<`, so `echo a\<<X`
+/// keeps the word `a<<X` and has no operator (the tokenizer agrees: the word
+/// is one token, no `<<` is emitted).
+#[test]
+fn escaped_operator_byte_is_not_an_operator() {
+    let line = b"echo a\\<<X";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 0, "the `\\<` pair shields the `<`");
+    // A real operator after the word is still found.
+    let line = b"echo a\\< <<X";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"X");
+}
+
+/// A bare delimiter word folds its unquoted escape pairs (`<<E\OF` delimits
+/// `EOF`), and a trailing `\` in the delimiter keeps its backslash.
+#[test]
+fn delimiter_folds_escape_pairs() {
+    let line = b"cat <<E\\OF\n";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops[0].delim, b"EOF");
+    assert!(!ops[0].strip);
+    let line = b"cat <<\\!EOF\n";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops[0].delim, b"!EOF");
+}
+
+/// A quoted delimiter keeps the pair inside the quotes (POSIX #4.2), and the
+/// `<<-` marker folds the escape pairs outside the quotes.
+#[test]
+fn quoted_delimiter_keeps_the_pair() {
+    let line = b"cat <<\"E\\OF\"\n";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops[0].delim, b"E\\OF");
+    assert!(ops[0].quoted);
+    let line = b"cat <<-E\\OF\n";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops[0].delim, b"EOF");
+    assert!(ops[0].strip);
+    assert!(!ops[0].quoted);
+}

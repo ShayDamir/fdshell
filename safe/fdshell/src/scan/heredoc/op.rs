@@ -2,40 +2,45 @@
 //! it is read — `<<-` tab stripping and a quoted (literal) delimiter.
 
 use super::lines::delimiter_word;
+use crate::bytes::fold::fold;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
 /// One `<<` operator: the delimiter word plus the two flags that select how
 /// the body is read. `Operator` is carried through both levels (the byte
-/// scanner and the token parser) so the `<<-` / quoted decision is made once
-/// and cannot diverge between them.
-#[derive(Clone, Copy)]
-pub(crate) struct Operator<'a> {
-    /// The delimiter word, quotes stripped.
-    pub(crate) delim: &'a [u8],
+/// scanner and the token parser) so the `<<-` / quoted / escape-folding
+/// decision is made once and cannot diverge between them.
+#[derive(Clone)]
+pub(crate) struct Operator {
+    /// The delimiter word: quotes stripped, unquoted escape pairs folded.
+    pub(crate) delim: Vec<u8>,
     /// A quoted delimiter: the body is literal.
     pub(crate) quoted: bool,
     /// The `<<-` form: strip leading tabs from the body and the terminator.
     pub(crate) strip: bool,
 }
 
-impl<'a> Operator<'a> {
-    /// The operator of a raw delimiter word: one pair of double quotes is
-    /// stripped (`<<"Q"` → literal `Q`) and `strip` is the `<<-` marker.
-    pub(crate) fn new(raw: &'a [u8], strip: bool) -> Self {
-        let (delim, quoted) = delimiter_word(raw);
+impl Operator {
+    /// The operator of a raw delimiter word: the raw bytes fold first (POSIX
+    /// #4.1: an unquoted `\X` pair folds to `X`, so `<<E\OF` delimits `EOF`),
+    /// then one pair of surrounding double quotes is stripped (`<<"Q"` →
+    /// literal `Q`), and `strip` is the `<<-` marker.
+    pub(crate) fn new(raw: &[u8], strip: bool) -> Self {
+        let raw = fold(raw);
+        let (delim, quoted) = delimiter_word(&raw);
         Self {
-            delim,
+            delim: delim.to_vec(),
             quoted,
             strip,
         }
     }
 
     /// Whether the delimiter line `words` (no newline) ends this operator's
-    /// body: byte-exact, or leading-tab-stripped in the `<<-` form.
+    /// body: byte-exact against the folded delimiter, or leading-tab-stripped
+    /// in the `<<-` form.
     pub(crate) fn matches(&self, words: &[u8]) -> bool {
         let words = if self.strip { untab(words) } else { words };
-        words == self.delim
+        words == self.delim.as_slice()
     }
 
     /// The body bytes of `span`: the `<<-` form drops the leading tabs of

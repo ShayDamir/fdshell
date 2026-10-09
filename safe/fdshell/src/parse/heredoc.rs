@@ -34,9 +34,9 @@ pub(crate) fn layout(
         return Ok(Vec::new());
     }
     let from = heredoc::first_unquoted_newline(line)
-        .ok_or_else(|| unterminated(ops.first().map(|o| o.delim).unwrap_or(b"")))?;
+        .ok_or_else(|| unterminated(ops.first().map(|o| o.delim.as_slice()).unwrap_or(b"")))?;
     let (spans, _) = heredoc::body_spans(line, from, &ops)
-        .map_err(|n| unterminated(ops.get(n).map(|o| o.delim).unwrap_or(b"")))?;
+        .map_err(|n| unterminated(ops.get(n).map(|o| o.delim.as_slice()).unwrap_or(b"")))?;
     ops.iter()
         .zip(spans)
         .map(|(op, (body_start, body_end))| {

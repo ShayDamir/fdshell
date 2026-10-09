@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 pub(crate) fn body_regions_full(
     line: &[u8],
     from: usize,
-    delims: &[Operator<'_>],
+    delims: &[Operator],
 ) -> Result<(Vec<(usize, usize)>, usize), usize> {
     let mut regions: Vec<(usize, usize)> = Vec::new();
     let mut pos = from;

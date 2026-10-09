@@ -333,3 +333,40 @@ fn delimiter_indices_bare_form_at_end_of_input() {
     let tokens = tokenize_statement(line).unwrap();
     assert!(delimiter_token_indices(line, &tokens).is_empty());
 }
+
+/// POSIX #4.1: the delimiter word folds its unquoted escape pairs, so
+/// `<<E\OF` delimits `EOF` and the delimiter line `EOF` ends the body.
+#[test]
+fn layout_escaped_delimiter_folds() {
+    let s = specs(b"cat <<E\\OF\nbody\nEOF\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"body\n".to_vec()).unwrap());
+    assert!(s[0].expand);
+    // A delimiter line keeps its raw bytes, so `E\OF` never matches the folded
+    // delimiter `EOF`: the statement is unterminated, not silently cut.
+    let line = b"cat <<EOF\nbody\nE\\OF\n";
+    let tokens = tokenize_statement(line).unwrap();
+    assert!(layout(line, &tokens).is_err());
+}
+
+/// A quoted delimiter keeps the pair inside the quotes, so `<<"E\OF"`
+/// delimits the literal `E\OF` and the body is literal.
+#[test]
+fn layout_quoted_escaped_delimiter_is_literal() {
+    let s = specs(b"cat <<\"E\\OF\"\nbody\nE\\OF\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"body\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
+}
+
+/// POSIX #4.1: the escape pair `\<` folds to a literal `<`, so `echo a\<<X`
+/// is one word with no operator (the byte-level scan agrees, `ops.rs`).
+#[test]
+fn layout_escaped_operator_byte_is_not_an_operator() {
+    let tokens = tokenize_statement(b"echo a\\<<X").unwrap();
+    assert_eq!(operator_count(&tokens), 0);
+    assert!(specs(b"echo a\\<<X").is_empty());
+    // A real operator after an escaped `<` is still found.
+    let tokens = tokenize_statement(b"echo a\\< <<X").unwrap();
+    assert_eq!(operator_count(&tokens), 1);
+}

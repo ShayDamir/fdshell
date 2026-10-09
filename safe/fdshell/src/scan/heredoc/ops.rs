@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 /// `<<` (or `<<-`) has no delimiter word. A `#` comment (outside quotes, at
 /// a word start) is skipped whole, so a `<<` in a comment is not an operator
 /// (the tokenizer never yields it, and the two counts must agree).
-pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator<'_>>> {
+pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator>> {
     let mut state = ScanState::new();
     let mut found: Vec<Operator> = Vec::new();
     let mut seen_word = false;

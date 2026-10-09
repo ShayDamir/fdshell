@@ -55,10 +55,10 @@ pub(crate) fn delimiter_token_indices(line: &[u8], tokens: &[Token]) -> Vec<usiz
 }
 
 /// The operator of every `<<` in token order.
-pub(crate) fn operators<'a>(
-    line: &'a [u8],
-    tokens: &'a [Token],
-) -> Result<Vec<Operator<'a>>, Report<ParseError>> {
+pub(crate) fn operators(
+    line: &[u8],
+    tokens: &[Token],
+) -> Result<Vec<Operator>, Report<ParseError>> {
     let mut found = Vec::new();
     for i in operator_indices(tokens) {
         let (op, _extra) = operator_at(line, tokens, i)?;
@@ -70,11 +70,11 @@ pub(crate) fn operators<'a>(
 /// The operator at `i`: its delimiter and how many following tokens it
 /// consumes (1 for the bare `<<` / `<<-` form, whose delimiter is the next
 /// word). The `<<-` marker is inherited by that word, so `<<- -` strips.
-pub(super) fn operator_at<'a>(
-    line: &'a [u8],
-    tokens: &'a [Token],
+pub(super) fn operator_at(
+    line: &[u8],
+    tokens: &[Token],
     i: usize,
-) -> Result<(Operator<'a>, usize), Report<ParseError>> {
+) -> Result<(Operator, usize), Report<ParseError>> {
     let Some((_t, start, end, _fq, _mask)) = tokens.get(i) else {
         bail!(ParseError::Never);
     };
