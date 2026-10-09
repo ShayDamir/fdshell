@@ -380,6 +380,14 @@ scoping is dynamic: a callee sees its caller-call's local unless it shadows it
 arguments lists the call's locals, and `local` outside a function is an error
 (rc 1, `local: can only be used in a function`).
 
+An unset parameter expands to the empty string (POSIX 2.6.2), in every form:
+`echo "[$undefined]"` → `[]`, `echo ${unset}x` → `x`, and `${#undefined}` → `0`
+(the length of an unset parameter is 0). `set -u` (`nounset`) makes an unbound
+parameter an error instead (rc 1, `x: unbound variable`), for `$name`, `${name}`,
+`${#name}` and `${!name}`; `set +u` restores the empty rule. An indirect
+`${!name}` whose name is itself unset is an error (rc 1,
+`undefined: invalid indirect expansion`), as bash.
+
 Accepted divergences from bash:
 
 - `FOO=bar | cat` is a parse error (`expected command`); bash runs a no-op
@@ -415,6 +423,19 @@ Accepted divergences from bash:
   `CapturesNotSupported`), as for every other intercepted builtin.
 - `local NAME` (no `=`) leaves the variable unset for the call, and `local`
   outside a function is an error (rc 1), as bash.
+- `${}` (an empty name) stays literal (`echo "[${}]"` → `[${}]`); bash rejects
+  it (`bad substitution`, rc 1). An unclosed `${name` stays literal too; bash
+  is a parse error (rc 2).
+- `${!name}` of a name bound to the empty string is an error on both
+  (`[${!p}]` with `p=""`), but the wording differs: bash says
+  `: invalid variable name`, fdshell `: invalid indirect expansion`. Same rc 1.
+- `$_` is not nounset-checked. `set -u` itself binds `_` in bash, so bash never
+  reports it unbound in `-c` mode; fdshell expands it to empty under `set -u`.
+- Arithmetic variables are not nounset-checked: `set -u; echo $((unsetv + 1))`
+  prints `1` here, where bash exits with `unsetv: unbound variable` (tracked by
+  task #170).
+- A `%name` fd variable that is unbound stays literal (`%nosuchfd` prints
+  `%nosuchfd`). The fd namespace is a fdshell extension, not a POSIX parameter.
 
 ## How it works?
 
