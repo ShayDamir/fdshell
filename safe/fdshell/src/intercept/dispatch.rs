@@ -37,6 +37,7 @@ pub(crate) fn dispatch(
         b"shift" => super::shift::run_shift(line, cmdline, cell).map(super::handled),
         b"hash" => super::hash_cmd::run_hash(line, cmdline, cell).map(super::handled),
         b"let" => super::let_cmd::run_let(line, cmdline, cell).map(super::handled),
+        b"local" => super::local::run_local(line, cmdline, text, cell).map(super::handled),
         b"set" => super::set_cmd::run_set(line, cmdline, text, cell).map(super::handled),
         b"shopt" => super::shopt::run_shopt(line, cmdline, text, cell).map(super::handled),
         b"read" => super::read::run_read(line, cmdline, text, cell).map(super::handled),

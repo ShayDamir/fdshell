@@ -20,6 +20,7 @@ const SHELL_COMMANDS: &[&str] = &[
     "export_fd",
     "hash",
     "let",
+    "local",
     "read",
     "recvmsg",
     "send_fd",

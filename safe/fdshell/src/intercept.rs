@@ -50,6 +50,7 @@ mod exports;
 mod hash_cmd;
 mod last_arg_frame;
 mod let_cmd;
+mod local;
 mod read;
 mod recvmsg;
 mod send_fd;

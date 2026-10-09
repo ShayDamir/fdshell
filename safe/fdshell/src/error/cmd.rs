@@ -85,6 +85,10 @@ pub enum CmdError {
     HashUsage,
     /// let: expression expected
     LetExpressionExpected,
+    /// local: can only be used in a function
+    LocalOutsideFunction,
+    /// local: '{name}' is not a valid variable name
+    LocalBadName { name: sys::ShortCStr },
     /// ulimit: invalid option -{flag}
     UlimitInvalidOption { flag: char },
     /// ulimit: '{value}' is not a limit value
