@@ -354,6 +354,41 @@ fn trailing_unquoted_backslash_is_kept() {
 }
 
 #[test]
+fn unquoted_pair_leaves_the_mask_aligned_for_the_next_byte() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    // Word text `a\*bc`: only the trailing `c` was inside double quotes. The
+    // unquoted pair must consume exactly two mask bytes, so `c` reads its own
+    // bit (the escaped-byte arm's `idx` bump).
+    let (res, out_mask) = substitute_arg(
+        &ShortCStr::from(c"a\\*bc"),
+        &[false, false, false, false, true],
+        &mut cache,
+        &cell,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a*bc");
+    assert_eq!(out_mask, vec![false, true, false, true]);
+}
+
+#[test]
+fn line_continuation_leaves_the_mask_aligned_for_the_next_byte() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    // Word text `a\<newline>b`: the `\<newline>` pair drops both bytes, and
+    // the `b` that follows was quoted, so its own mask bit must be read.
+    let (res, out_mask) = substitute_arg(
+        &ShortCStr::from(c"a\\\nb"),
+        &[false, false, false, true],
+        &mut cache,
+        &cell,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"ab");
+    assert_eq!(out_mask, vec![false, true]);
+}
+
+#[test]
 fn combined_percent_and_dollar() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"$var and %var");
