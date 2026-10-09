@@ -22,8 +22,10 @@ pub(super) fn run(
     // The `exec`/`become` command word is never substituted, so its unquoted
     // escape pairs are folded here (POSIX #4.1): `exec e\cho hi` runs `echo`.
     let raw = args.first().ok_or(ChildProcessError::MissingArg)?;
+    // The word text is NUL-free by construction, so the fold's error is the
+    // internal-invariant variant, not a syscall failure.
     let (binary, _) = fold_word(raw, args_mask.first().map(Vec::as_slice).unwrap_or(&[]))
-        .change_context(ChildProcessError::ExecFailed)?;
+        .change_context(ChildProcessError::Never)?;
     let is_builtin = {
         let state = cell
             .borrow()

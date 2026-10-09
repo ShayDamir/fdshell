@@ -33,9 +33,11 @@ pub fn execute(
         let raw_name = args.get(1).ok_or(ChildProcessError::MissingArg)?;
         // The builtin name is raw word text, never substituted: fold its
         // unquoted escape pairs (POSIX #4.1) before the dispatch-table match.
+        // The word text is NUL-free by construction, so the fold's error is the
+        // internal-invariant variant, not a syscall failure.
         let (builtin_name, _) =
             fold_word(raw_name, args_mask.get(1).map(Vec::as_slice).unwrap_or(&[]))
-                .change_context(ChildProcessError::ExecFailed)?;
+                .change_context(ChildProcessError::Never)?;
         let builtin_args = args.get(2..).unwrap_or(&[]);
         let substituted = substitute_args(
             builtin_args,
