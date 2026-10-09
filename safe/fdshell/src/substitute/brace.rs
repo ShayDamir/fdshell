@@ -8,6 +8,8 @@ use crate::state::ShellState;
 
 pub(crate) fn handle_brace(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    mask: &[bool],
+    start: usize,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
@@ -47,7 +49,9 @@ pub(crate) fn handle_brace(
         return Ok(());
     }
     if let Some((name, op, word)) = super::param_op::split_operator(&content) {
-        return super::param_op::apply_param_op(&name, op, &word, cell, out);
+        // `start` is the word index of the `{` byte, so the braced content
+        // begins at `start + 1` and the pattern arm can slice its mask.
+        return super::param_op::apply_param_op(&name, op, &word, mask, start + 1, cell, out);
     }
     let state = super::borrow_state(cell)?;
     // An empty braced name stays literal: bash rejects `${}` (`bad

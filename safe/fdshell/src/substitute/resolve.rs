@@ -4,6 +4,8 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 
+mod param_value;
+
 impl ShellState {
     /// Value of `name` in the shell's strings, then the inherited environment.
     /// `crate::arith` resolves arithmetic variables through the same lookup.
@@ -14,37 +16,16 @@ impl ShellState {
             .or_else(|| self.environ.iter().find(|(k, _)| k == name).map(|(_, v)| v))
     }
 
-    /// Indirect reference: expand `name`, then expand its value as a variable name.
-    /// `content` is the whole `${…}` body, so the nounset message carries the
-    /// `!` and matches bash's `!q: unbound variable`.
+    /// Indirect reference: expand `name`, then expand its value as a variable
+    /// name. `content` is the whole `${…}` body, so the nounset message carries
+    /// the `!` and matches bash's `!q: unbound variable`.
     pub(super) fn resolve_indirect(
         &self,
         content: &ShortCStr,
         out: &mut ShortCStr,
     ) -> Result<(), Report<ResolveError>> {
-        // The caller reached this arm by stripping the `!`, so it is present.
-        let name = content.strip_prefix(b"!").ok_or(ResolveError::Never)?;
-        match self.var_value(&name) {
-            // bash: `undefined: invalid indirect expansion` (rc 1).
-            None => bail!(ResolveError::InvalidIndirect { var: name.clone() }),
-            // A name bound to the empty string names no target: bash says
-            // `: invalid variable name` (same rc, its own wording).
-            Some(target) if target.is_empty() => {
-                bail!(ResolveError::InvalidIndirect {
-                    var: target.clone()
-                })
-            }
-            Some(target) => match self.var_value(target) {
-                Some(val) => out.push(val),
-                // nounset uses the full content, so the message is bash's
-                // `!q: unbound variable`.
-                None if self.options & crate::options::NOUNSET != 0 => {
-                    bail!(ResolveError::UnboundVariable {
-                        var: content.clone()
-                    });
-                }
-                None => {}
-            },
+        if let Some(val) = self.param_value(content)? {
+            out.push(val);
         }
         Ok(())
     }
@@ -54,15 +35,8 @@ impl ShellState {
         name: &ShortCStr,
         out: &mut ShortCStr,
     ) -> Result<(), Report<ResolveError>> {
-        match self.var_value(name) {
-            Some(val) => out.push(val),
-            None => {
-                // nounset: an unbound variable is an error, not an empty value.
-                if self.options & crate::options::NOUNSET != 0 {
-                    bail!(ResolveError::UnboundVariable { var: name.clone() });
-                }
-                // POSIX 2.6.2: an unset parameter expands to the empty string.
-            }
+        if let Some(val) = self.param_value(name)? {
+            out.push(val);
         }
         Ok(())
     }

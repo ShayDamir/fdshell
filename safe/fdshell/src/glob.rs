@@ -8,6 +8,8 @@
 mod r#match;
 mod walk;
 
+pub(crate) use r#match::match_component;
+
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};

@@ -22,11 +22,15 @@ pub(super) fn percent(
     crate::substitute::percent::percent_subst(peek, cache, &state, out)
 }
 
-/// The `$` arm (the `$(` arm is handled separately in the loop).
+/// The `$` arm (the `$(` arm is handled separately in the loop). `start` is the
+/// word index of the byte after `$`, so the `${…}` arm sees the mask under its
+/// own content bytes.
 pub(super) fn dollar(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
+    mask: &[bool],
+    start: usize,
 ) -> Result<(), Report<ResolveError>> {
-    crate::substitute::dollar::dollar_subst(peek, cell, out)
+    crate::substitute::dollar::dollar_subst(peek, cell, out, mask, start)
 }

@@ -10,6 +10,8 @@ pub(crate) fn dollar_subst(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
+    mask: &[bool],
+    start: usize,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'$') => {
@@ -24,7 +26,7 @@ pub(crate) fn dollar_subst(
                 core::write!(out, "{pid}").change_context(ResolveError::Never)?;
             }
         }
-        Some(b'{') => super::brace::handle_brace(peek, cell, out)?,
+        Some(b'{') => super::brace::handle_brace(peek, mask, start, cell, out)?,
         Some(b'#') => {
             peek.next();
             let state = super::borrow_state(cell)?;

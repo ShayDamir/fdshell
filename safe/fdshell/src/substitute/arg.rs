@@ -84,7 +84,9 @@ pub(crate) fn substitute_arg(
             }
             b'$' => {
                 let before = out.len();
-                arms::dollar(&mut peek, cell, &mut out)?;
+                // `idx` is the word index of the byte after `$` — the `{` of a
+                // `${…}` arm; `realign` re-syncs it to the consumed count.
+                arms::dollar(&mut peek, cell, &mut out, mask, idx)?;
                 realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
             }
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,

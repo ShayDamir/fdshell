@@ -417,3 +417,18 @@ The plan's grep over `tests/` found the three integration tests that printed lit
 
 ## A new bail must not steal an accepted literal divergence: guard the degenerate name before dispatching
 `${!}` (an empty indirect name) reached `resolve_indirect` because the `!` dispatch in `brace.rs` ran **before** the `${}` empty-name guard, so the new `InvalidIndirect` bail turned a pinned rc-0 literal divergence into an rc-1 divergence. Rule: when a task adds a bail, walk the dispatch order for each degenerate input (an empty name, an empty body), and keep accepted divergences rc-identical to master. Write the literal guard **once, before** the dispatch, so every arm shares it (`${}` and `${!}` are the same case), and give every accepted divergence both a README bullet and a test pin — a divergence in neither is an undocumented rc change.
+
+## Verify bash's real output before pinning a test, not the task text
+Task #106's description claimed `${v#a*c}` → `bcabc` and `${v##a*c}` → `bc`; bash 5.3.9 gives `abc` and the empty string. The plan's measured table had two more wrong rows (`${!ind%bc}` → `abcab` is really `abca`, `${v+x#y}` → `x` is really `x#y`). Shortest/longest anchored matching is a rule you can compute by hand, so check every claimed example against `bash -c` on this machine before writing the assertion, and pin the measured value.
+
+## Word patterns have no `FNM_PERIOD` rule
+`${d#*c}` on `d=.abc` strips the whole value, while the pathname glob with `dotglob` off refuses the leading dot. A word pattern is not a pathname: pass `dotglob = true` into `match_component` from `substitute/param_op/pattern.rs` and pin the leading-dot case, or the shared matcher's glob rule leaks into the expansion.
+
+## The nounset rule is operator-family-dependent
+`set -u` bails `${undef#q}` (rc 1, `undef: unbound variable`) but prints `x` for `${undef:-x}`: the colon family carries its own word, so it never needs the parameter, and the pattern family has no fallback. Do not share one lookup helper between the two families — `param_value` (nounset-checked) serves the pattern arms, `var_value` (exempt) serves the colon arms.
+
+## The pattern's quote mask is the word's mask slice
+The tokenizer strips `"` bytes from the word text, so a pattern byte is a *masked* byte, never a `"` byte, and the mask index is `content_start + name.len() + op.word_offset()` (`word_offset` is 1 for `#`/`%`, 2 for `##`/`%%`). Two consequences to pin: a fully quoted word makes every pattern byte literal (`"${v#a*c}"` does not strip), and the bare-assignment path expands with an empty mask, so `${x#"["a]}` treats the quoted `[` as unquoted there. A mask-alignment test must bind the variable it probes — an expansion of an unset name prints empty and asserts nothing (existing rule).
+
+## `printf` emits no trailing newline and `echo` drops empty unquoted words
+Pinning an expansion that can be empty needs the assignment form: `r0=${v##a*}; printf "[%s]" "$r0"` keeps the empty result visible as `[]`, while `echo ${v##a*}` drops the word and `printf "[%s]" ${v##a*}` collapses the fields. Write pattern/expansion tests as `defs; rN=<expr>; printf "[%s]" "$rN" ...` and expect no trailing newline.

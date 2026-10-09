@@ -1853,3 +1853,270 @@ fn percent_expansion_inherits_trigger_mask_bit() {
     );
     assert!(mask_out.iter().enumerate().all(|(i, &q)| i == 0 || q));
 }
+
+// --- the `#`/`##`/`%`/`%%` pattern operators (task #106) ---
+
+use super::param_op::{ParamOp, split_operator};
+
+/// `split_operator` on a braced body, as bytes (the scan is positional).
+fn scan(body: &'static core::ffi::CStr) -> Option<(Vec<u8>, ParamOp, Vec<u8>)> {
+    let (name, op, word) = split_operator(&ShortCStr::from(body))?;
+    Some((
+        name.as_bytes().unwrap().to_vec(),
+        op,
+        word.as_bytes().unwrap().to_vec(),
+    ))
+}
+
+/// Expand `arg` with the `mask` (parallel to the word text) against `cell`.
+fn expand(cell: &ForkCell<ShellState>, arg: &'static core::ffi::CStr, mask: &[bool]) -> Vec<u8> {
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(&ShortCStr::from(arg), mask, &mut cache, cell).unwrap();
+    res.as_bytes().unwrap().to_vec()
+}
+
+fn bind(
+    cell: &ForkCell<ShellState>,
+    name: &'static core::ffi::CStr,
+    value: &'static core::ffi::CStr,
+) {
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(name), is_(value));
+}
+
+#[test]
+fn pattern_operator_scan_is_positional() {
+    use ParamOp::{Assign, Default, LongestPrefix, LongestSuffix, ShortestPrefix, ShortestSuffix};
+    let b = |s: &'static core::ffi::CStr| ShortCStr::from(s).as_bytes().unwrap().to_vec();
+    assert_eq!(scan(c"v#a"), Some((b(c"v"), ShortestPrefix, b(c"a"))));
+    assert_eq!(scan(c"v##a"), Some((b(c"v"), LongestPrefix, b(c"a"))));
+    assert_eq!(scan(c"v%a"), Some((b(c"v"), ShortestSuffix, b(c"a"))));
+    assert_eq!(scan(c"v%%a"), Some((b(c"v"), LongestSuffix, b(c"a"))));
+    // The operator byte at the body end is an operator with the empty pattern.
+    assert_eq!(scan(c"v#"), Some((b(c"v"), ShortestPrefix, b(c""))));
+    // The first operator byte wins, so the colon after `#` is pattern content.
+    assert_eq!(scan(c"v#a:"), Some((b(c"v"), ShortestPrefix, b(c"a:"))));
+    assert_eq!(scan(c"v:-x#y"), Some((b(c"v"), Default, b(c"x#y"))));
+    // A colon that is not an operator byte does not stop the scan.
+    assert_eq!(scan(c"v:a#b"), Some((b(c"v:a"), ShortestPrefix, b(c"b"))));
+    assert_eq!(scan(c"v:=a"), Some((b(c"v"), Assign, b(c"a"))));
+    // A single-char operator is not an operator (fdshell implements the colon
+    // forms only), so `+` stays inside the name.
+    assert_eq!(scan(c"v+a#y"), Some((b(c"v+a"), ShortestPrefix, b(c"y"))));
+    // A `#`/`%` at index 0 gives the empty name, and a lone `:` is no operator.
+    assert_eq!(scan(c"#x"), Some((b(c""), ShortestPrefix, b(c"x"))));
+    assert_eq!(scan(c"v:a"), None);
+    assert_eq!(scan(c"v:a:-w"), Some((b(c"v:a"), Default, b(c"w"))));
+}
+
+#[test]
+fn pattern_operators_strip_the_anchored_match() {
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abcabc");
+    let m = &[false; 8];
+    assert_eq!(expand(&cell, c"${v#a}", m), b"bcabc");
+    assert_eq!(expand(&cell, c"${v##a}", m), b"bcabc");
+    // Shortest `a*c` = `abc`, longest = the whole value.
+    assert_eq!(expand(&cell, c"${v#a*c}", m), b"abc");
+    assert_eq!(expand(&cell, c"${v##a*c}", m), b"");
+    assert_eq!(expand(&cell, c"${v%?}", m), b"abcab");
+    assert_eq!(expand(&cell, c"${v%%abc}", m), b"abc");
+}
+
+#[test]
+fn pattern_direction_and_bounds() {
+    // `#`/`%` direction on a value that starts and ends with `a`, and the
+    // longest-star bounds that take the whole value (`n - k` suffix slice).
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abca");
+    let m = &[false; 9];
+    assert_eq!(expand(&cell, c"${v#a}", m), b"bca");
+    assert_eq!(expand(&cell, c"${v%a}", m), b"abc");
+    assert_eq!(expand(&cell, c"${v##a*}", m), b"");
+    assert_eq!(expand(&cell, c"${v%%*a}", m), b"");
+    bind(&cell, c"s", c"aXbXc");
+    assert_eq!(expand(&cell, c"${s#*X}", m), b"bXc");
+    assert_eq!(expand(&cell, c"${s##*X}", m), b"c");
+    assert_eq!(expand(&cell, c"${s%X*}", m), b"aXb");
+    assert_eq!(expand(&cell, c"${s%%X*}", m), b"a");
+}
+
+#[test]
+fn no_match_and_empty_pattern_leave_the_value_whole() {
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abcabc");
+    let m = &[false; 7];
+    assert_eq!(expand(&cell, c"${v#z}", m), b"abcabc");
+    assert_eq!(expand(&cell, c"${v#}", m), b"abcabc");
+    assert_eq!(expand(&cell, c"${v#[]}", m), b"abcabc");
+    // An unclosed `[` is a literal byte, so nothing matches.
+    assert_eq!(expand(&cell, c"${v#[a}", m), b"abcabc");
+    assert_eq!(expand(&cell, c"${v#*x}", m), b"abcabc");
+}
+
+#[test]
+fn word_pattern_has_no_dot_rule() {
+    // A leading `*` may consume a leading `.` (no FNM_PERIOD in a word pattern).
+    let cell = dummy_cell();
+    bind(&cell, c"d", c".abc");
+    assert_eq!(expand(&cell, c"${d#*c}", &[false; 7]), b"");
+    assert_eq!(expand(&cell, c"${d#c*}", &[false; 7]), b".abc");
+    assert_eq!(expand(&cell, c"${d#.*}", &[false; 7]), b"abc");
+}
+
+#[test]
+fn bracket_ranges_and_negation_in_a_pattern() {
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abcabc");
+    let m = &[false; 10];
+    assert_eq!(expand(&cell, c"${v#[ab]*}", m), b"bcabc");
+    assert_eq!(expand(&cell, c"${v#[a-b]*}", m), b"bcabc");
+    assert_eq!(expand(&cell, c"${v#[!b]*}", m), b"bcabc");
+    assert_eq!(expand(&cell, c"${v#[a-c]bc}", m), b"abc");
+}
+
+#[test]
+fn quoted_pattern_bytes_are_literal_by_the_mask() {
+    // A masked pattern byte is literal, so a quoted `*` matches nothing.
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abcabc");
+    assert_eq!(expand(&cell, c"${v#*c}", &[false; 7]), b"abc");
+    assert_eq!(expand(&cell, c"${v#*c}", &[true; 7]), b"abcabc");
+    // The mask slice is the pattern's own bytes: the first pattern byte quoted
+    // and the second live (`${v#"a"b}` strips `ab`). The tokenizer strips the
+    // `"` bytes, so the word text is `${v#ab}` with the `a` bit set.
+    assert_eq!(
+        expand(
+            &cell,
+            c"${v#ab}",
+            &[false, false, false, false, true, false, false]
+        ),
+        b"cabc"
+    );
+    // A quoted `[` is a literal byte, not a bracket opening (`${v#"["a]}`).
+    assert_eq!(
+        expand(
+            &cell,
+            c"${v#[a]}",
+            &[false, false, false, false, true, false, false]
+        ),
+        b"abcabc"
+    );
+}
+
+#[test]
+fn mask_shorter_than_the_pattern_pads_unquoted() {
+    // The mask is parallel to the word text; a mask that stops before the
+    // pattern pads the pattern bytes as unquoted, so the star stays live.
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abcx");
+    assert_eq!(expand(&cell, c"${v#*x}", &[false, false, false]), b"");
+    assert_eq!(expand(&cell, c"${v#*x}", &[true, true, true]), b"");
+}
+
+#[test]
+fn word_offset_positions_the_pattern_mask() {
+    // `${v##*x}` has two operator bytes, so its pattern mask starts one byte
+    // later than `${v#*x}`: the same mask bit is the `*` of the short operator
+    // and the second `#` of the long one.
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"abcx");
+    // `$` `{` `v` `#` `#` `*` `x` `}` — the bit set at index 4.
+    let quoted_at_4 = [false, false, false, false, true, false, false, false];
+    // The short operator reads mask[4] = its `*`: quoted, so the pattern is
+    // literal bytes and nothing matches.
+    assert_eq!(expand(&cell, c"${v#*x}", &quoted_at_4[0..7]), b"abcx");
+    // The long operator reads mask[5] = its `*`: unquoted, so `*x` strips the
+    // whole value.
+    assert_eq!(expand(&cell, c"${v##*x}", &quoted_at_4), b"");
+}
+
+#[test]
+fn indirect_name_with_a_pattern() {
+    let cell = dummy_cell();
+    bind(&cell, c"ind", c"v");
+    bind(&cell, c"v", c"abcabc");
+    let m = &[false; 10];
+    assert_eq!(expand(&cell, c"${!ind#a}", m), b"bcabc");
+    assert_eq!(expand(&cell, c"${!ind%bc}", m), b"abca");
+    assert_eq!(expand(&cell, c"${!ind}", m), b"abcabc");
+}
+
+#[test]
+fn pattern_arm_expands_an_unset_parameter_to_empty() {
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${undef#q}", &[false; 8]), b"");
+    assert_eq!(expand(&cell, c"${undef%%*}", &[false; 9]), b"");
+    // The colon family keeps its nounset exemption: its word supplies the value.
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(
+        &ShortCStr::from(c"${undef:-x}"),
+        &[false; 10],
+        &mut cache,
+        &cell,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"x");
+}
+
+#[test]
+fn nounset_bails_a_pattern_parameter() {
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let e = substitute_arg(
+        &ShortCStr::from(c"${undef#q}"),
+        &[false; 8],
+        &mut HashMap::new(),
+        &cell,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"undef"
+    ));
+    // An unbound indirect name keeps bash's `nope: invalid indirect expansion`,
+    // and a bound indirect name whose target is unbound reports the `!` body.
+    let e = substitute_arg(
+        &ShortCStr::from(c"${!nope#a}"),
+        &[false; 9],
+        &mut HashMap::new(),
+        &cell,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::InvalidIndirect { var } if var.as_bytes().unwrap() == b"nope"
+    ));
+    bind(&cell, c"p", c"n");
+    let e = substitute_arg(
+        &ShortCStr::from(c"${!p#a}"),
+        &[false; 7],
+        &mut HashMap::new(),
+        &cell,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"!p"
+    ));
+}
+
+#[test]
+fn indirect_empty_target_with_a_pattern_errors() {
+    // `p` is bound to the empty string, so it names no target.
+    let cell = dummy_cell();
+    let e = substitute_arg(
+        &ShortCStr::from(c"${!empty#a}"),
+        &[false; 9],
+        &mut HashMap::new(),
+        &cell,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::InvalidIndirect { var } if var.as_bytes().unwrap() == b""
+    ));
+}

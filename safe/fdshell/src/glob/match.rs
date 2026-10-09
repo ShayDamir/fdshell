@@ -28,7 +28,12 @@ pub(super) fn has_unquoted_pattern(bytes: &[u8], mask: &[bool]) -> bool {
 /// `/` because components are matched separately; a leading unquoted `*`, `?`
 /// or valid `[...]` cannot consume a name's leading `.` (bash FNM_PERIOD)
 /// unless `dotglob` is set.
-pub(super) fn match_component(pat: &[u8], mask: &[bool], name: &[u8], dotglob: bool) -> bool {
+///
+/// Word patterns (`${name#pat}` and friends) pass `dotglob = true`: a word
+/// pattern has no `FNM_PERIOD` rule, so `d=.abc` with `${d#*c}` strips the
+/// whole value — measured against bash 5.3.9, where the pathname glob with
+/// `dotglob` off refuses the leading dot.
+pub(crate) fn match_component(pat: &[u8], mask: &[bool], name: &[u8], dotglob: bool) -> bool {
     if dot_blocked(pat, mask, name, dotglob) {
         return false;
     }

@@ -440,6 +440,74 @@ Accepted divergences from bash:
   task #170).
 - A `%name` fd variable that is unbound stays literal (`%nosuchfd` prints
   `%nosuchfd`). The fd namespace is a fdshell extension, not a POSIX parameter.
+- The pattern word of `${name#pat}` and friends is **not** expanded:
+  `${v#$(printf abc)}` and `${v#$v}` stay literal (the pattern bytes are matched
+  as written). bash expands `$…`/`$(…)`/`$((…))` inside `${…}` first (task #174).
+- fdshell's quote rule is byte-level, so a quoted pattern byte is literal and a
+  fully quoted word masks every pattern byte: `printf "[%s]" "${v#a*c}"` prints
+  the whole value, where bash (which removes the enclosing quotes before
+  matching) prints `abc`. The unquoted forms match bash.
+- The bare-assignment path expands its value with no quote mask, so a quoted
+  `[` in `${x#"["a]}` is treated as unquoted there and strips; bash keeps it
+  literal.
+- Single-character operators are not implemented (`${v+a#y}` reads the name
+  `v+a`, so it expands to empty; bash has the `+` operator with the word `x#y`).
+  Only the colon-prefixed forms (`:-` `:=` `:+` `:?`) and the pattern forms
+  (`#` `##` `%` `%%`) are operators.
+- `${%x}` (an empty name with a pattern operator) expands to the empty string at
+  rc 0; bash rejects it (`bad substitution`, rc 1). `${#v#a}` reads the name
+  `v#a` and prints `0` at rc 0, where bash is a `bad substitution` (task #173
+  owns the `${#name}` arm).
+- `${!name}` inside the **colon** operators is not resolved (bash `${!v:-z}`
+  prints the indirect target's value; fdshell prints the word `z`) — task #176.
+- A positional parameter is not a braced name: `${1}` and `${1#a}` expand to
+  empty; bash gives the positional `1` (task #177).
+
+## Parameter expansion
+
+`${name}` is the braced form of `$name` (an unset parameter expands to the empty
+string, POSIX 2.6.2). Eight operators follow the name; the first operator byte
+in the body decides which one, so `${v#a:}` is the pattern `a:` and `${v:-x#y}`
+is the colon word `x#y`.
+
+The colon family supplies its own word:
+
+| form | result |
+| --- | --- |
+| `${name:-word}` | the word when `name` is unset or empty |
+| `${name:=word}` | the word, assigned to `name` (and printed) |
+| `${name:+word}` | the word when `name` is set and non-empty |
+| `${name:?word}` | `word` as the error message (`parameter null or not set` when the word is empty), rc 1 |
+
+The pattern family removes an **anchored** match from the value: `${name#pat}`
+strips the shortest matching prefix, `${name##pat}` the longest, `${name%pat}`
+the shortest matching suffix, `${name%%pat}` the longest. No match leaves the
+value whole (rc 0), and an empty pattern matches nothing, so it strips nothing.
+
+```
+v=abcabc    ${v#a}→bcabc  ${v#a*c}→abc  ${v##a*c}→(empty)  ${v%?}→abcab
+p=/a/b/c.txt  ${p##*/}→c.txt  ${p%.*}→/a/b/c  ${p%%/*}→(empty)  ${p#*/}→a/b/c.txt
+s=aXbXc     ${s#*X}→bXc  ${s##*X}→c  ${s%X*}→aXb  ${s%%X*}→a
+```
+
+`pat` is a *word* pattern, not a pathname glob: `*`, `?`, `[a-z]`, `[!a]`,
+`[[:alpha:]]`, the escape pair `\X`, and quoted bytes as literals. It is never
+expanded, there is no filesystem, so `set -f` (`noglob`) does not affect it, and
+there is no `FNM_PERIOD` dot rule — a leading `*`/`?`/`[...]` may consume a
+leading `.` (`d=.abc` with `${d#*c}` strips the whole value). A quoted pattern
+byte is literal (`esc=a*c` with `${esc#"*"}` and `${esc#\*}` both print `a*c`).
+
+`set -u` (`nounset`) bails an unbound parameter in the pattern family
+(rc 1, `undef: unbound variable`), because a pattern has no word to fall back
+on. The colon family stays exempt: its word supplies the value, so
+`set -u; echo "${undef:-x}"` prints `x` and `${undef:-x#a}` prints `x#a`. An
+indirect name takes the pattern form too: `${!ind#a}` strips the value that
+`ind` names, and under `set -u` an unbound indirect name bails with bash's
+`!p: unbound variable` / `nope: invalid indirect expansion` (rc 1).
+
+The stripped result is a normal word: it goes through field splitting and
+pathname expansion afterwards, so `v=a*x` with `echo ${v#a}` prints the file `*x`
+matches (`zx`), while a fully quoted word keeps the stripped text literal.
 
 ## How it works?
 
