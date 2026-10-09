@@ -176,6 +176,36 @@ fn list_form_is_handled_and_keeps_the_status_zero() {
 }
 
 #[test]
+fn the_list_form_prints_the_shadowed_names_with_their_values() {
+    // Prints `local p=1` and `local q=2` (sorted by bytes) on stdout; the
+    // in-process assertions cover the state the print path must leave behind.
+    let cell = make_cell();
+    assert!(run(&["q=2", "p=1"], &cell).unwrap());
+    assert!(run(&[], &cell).unwrap());
+    assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
+    assert_eq!(stored(&cell, &s(b"p")), Some(s(b"1")));
+    assert_eq!(stored(&cell, &s(b"q")), Some(s(b"2")));
+}
+
+#[test]
+fn the_list_form_prints_a_declared_name_without_a_value() {
+    // `local p` prints as `local p` (the POSIX/dash form, an accepted
+    // divergence from bash's `declare -- p="..."`), leaving the name unset.
+    let cell = make_cell();
+    set_caller_var(&cell, &s(b"p"), &s(b"pre"));
+    assert!(run(&["p"], &cell).unwrap());
+    assert!(run(&[], &cell).unwrap());
+    assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
+    assert_eq!(stored(&cell, &s(b"p")), None);
+    {
+        // The declare form touches nothing outside `strings`, so a caller value
+        // that was never exported stays unexported (bash parity).
+        let state = cell.borrow().unwrap();
+        assert_eq!(state.exports.get(&s(b"p")).map(|v| v.value.clone()), None);
+    }
+}
+
+#[test]
 fn local_ifs_syncs_the_splitting_and_is_recorded() {
     let cell = make_cell();
     let caller_ifs = cell.borrow().unwrap().ifs.clone();
