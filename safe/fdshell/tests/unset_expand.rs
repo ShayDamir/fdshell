@@ -82,6 +82,21 @@ fn unset_length_is_zero() {
     assert_eq!(out, "0x\n");
 }
 
+#[test]
+fn empty_length_name_is_zero_under_nounset() {
+    // `${#}` is the length of the empty name. Bash prints `0` at rc 0 with and
+    // without `set -u`, so the empty name must not reach the nounset bail.
+    let (out, err, code) = run(r#"printf "%s\n" "[${#}]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[0]\n");
+    let (out, err, code) = run(r#"set -u; printf "%s\n" "[${#}]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[0]\n");
+    let (out, err, code) = run(r#"set -u; echo "[${#}y]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[0y]\n");
+}
+
 // --- `${!name}`: indirect expansion ---
 
 #[test]

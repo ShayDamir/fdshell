@@ -128,6 +128,19 @@ fn nounset_brace_length_errors() {
 }
 
 #[test]
+fn nounset_empty_length_name_is_zero() {
+    // `${#}` is the length of the empty name, so there is no parameter to be
+    // unbound: bash prints `0` at rc 0 even under `set -u` (brace.rs guards it
+    // before the nounset bail).
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"${#}");
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"0");
+}
+
+#[test]
 fn nounset_indirect_target_unbound_errors() {
     // The message carries the whole `${!q}` body, as bash's `!q: unbound variable`.
     let cell = env_cell();

@@ -16,6 +16,13 @@ pub(crate) fn handle_brace(
         peek.next();
         let state = super::borrow_state(cell)?;
         let (name, closed) = read_until_close(peek)?;
+        // `${#}` is the length of the empty name: bash prints `0` at rc 0 even
+        // under `set -u`, so this case must not reach the nounset bail (an
+        // `UnboundVariable` with an empty name names nothing, STYLE §4.7).
+        if closed && name.is_empty() {
+            out.push(c"0");
+            return Ok(());
+        }
         match (closed, state.var_value(&name).map(|v| v.len())) {
             (true, Some(len)) => {
                 core::write!(out, "{len}").change_context(ResolveError::Never)?;
