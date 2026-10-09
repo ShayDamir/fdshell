@@ -215,12 +215,21 @@ Limitations:
   protected from word splitting and globbing — `echo a\*` prints `a*`,
   `echo f\oo\.*` globs the literal prefix `foo.` only, `\<newline>` is a line
   continuation, and a trailing `\` at end of input keeps its backslash.
-  Accepted divergences (the escape pair is folded at substitution, so the
-  word's syntax position is where the pair sits): `echo a\&&b` prints `a&&b`
-  (bash backgrounds `a&`), `echo 2\>&1` prints `2>&1` (bash redirects `2>`),
+  The pair is folded at every word surface, not only at substitution, so a
+  word that never goes through substitution looks up its folded text:
+  `e\cho hi` runs `echo`, `echo hi > a\*b` writes the file `a*b`,
+  `for x in a\ b` binds the one word `a b`, `exec e\cho hi` replaces the shell
+  with `echo`, and `\X=1` runs the `PATH` file named `X=1` (when it is missing
+  fdshell exits 1, bash 127).
+  Accepted divergences (the pair stays in the token text, so the word's syntax
+  position is where the pair sits): `echo a\&&b` prints `a&&b` (bash
+  backgrounds `a&`), `echo 2\>&1` prints `2>&1` (bash redirects `2>`),
   `echo a\<<X` prints `a<<X` (bash starts a heredoc), `echo \$(echo hi)`
-  prints `$(echo hi )` (bash is a syntax error), and `\X=1` runs the command
-  `X=1` (fdshell exits 1, bash 127).
+  prints `$(echo hi )` (bash is a syntax error), `alias a\*=echo` stores the
+  alias name `a\*` so `a\* hi` runs it (bash stores `a*`, the lookup misses and
+  it reports `a*: command not found`), and an identifier carrying a pair is
+  accepted here (`for x\y in a; do …` and `export x\*` run; bash rejects them
+  as not valid identifiers — task #166).
 - With `nullglob`, an unmatched command name falls back to the literal word
   (`shopt -s nullglob; zzz*` tries to run `zzz*` and fails with `not
   found`); bash drops the command and exits 0.
