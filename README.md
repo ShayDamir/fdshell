@@ -219,17 +219,20 @@ Limitations:
   word that never goes through substitution looks up its folded text:
   `e\cho hi` runs `echo`, `echo hi > a\*b` writes the file `a*b`,
   `for x in a\ b` binds the one word `a b`, `exec e\cho hi` replaces the shell
-  with `echo`, and `\X=1` runs the `PATH` file named `X=1` (when it is missing
-  fdshell exits 1, bash 127).
+  with `echo`, `timeout 1 e\cho hi` runs `echo`, `hash a\*` prints the path of
+  the `PATH` file named `a*`, and `\X=1` runs the `PATH` file named `X=1` (when
+  it is missing fdshell exits 1, bash 127).
   Accepted divergences (the pair stays in the token text, so the word's syntax
   position is where the pair sits): `echo a\&&b` prints `a&&b` (bash
   backgrounds `a&`), `echo 2\>&1` prints `2>&1` (bash redirects `2>`),
   `echo a\<<X` prints `a<<X` (bash starts a heredoc), `echo \$(echo hi)`
   prints `$(echo hi )` (bash is a syntax error), `alias a\*=echo` stores the
   alias name `a\*` so `a\* hi` runs it (bash stores `a*`, the lookup misses and
-  it reports `a*: command not found`), and an identifier carrying a pair is
-  accepted here (`for x\y in a; do …` and `export x\*` run; bash rejects them
-  as not valid identifiers — task #166).
+  it reports `a*: command not found`), the `builtin`/`command` keyword and the
+  `if` keyword are recognized on the raw token so `b\uiltin echo hi` looks up
+  the command `builtin` and fails (bash prints `hi`), and an identifier
+  carrying a pair is accepted here (`for x\y in a; do …` and `export x\*` run;
+  bash rejects them as not valid identifiers — task #166).
 - With `nullglob`, an unmatched command name falls back to the literal word
   (`shopt -s nullglob; zzz*` tries to run `zzz*` and fails with `not
   found`); bash drops the command and exits 0.

@@ -61,6 +61,17 @@ fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
     dir
 }
 
+/// A scratch `PATH` dir of executable files with given script bodies.
+fn scratch_bins(named: &[(&str, &str)]) -> std::path::PathBuf {
+    let dir = scratch(&[]);
+    for (name, body) in named {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
 /// Run in `dir` with `bin_dir` prepended to `PATH`.
 fn run_with_path(
     dir: &std::path::Path,
@@ -432,4 +443,47 @@ fn alias_name_keeps_the_escape_pair() {
     let (out, _err, code) = run("alias a\\*=echo; a\\* hi");
     assert_eq!(code, 0);
     assert_eq!(out, "hi\n");
+}
+
+/// Accepted divergence, pinned: keyword recognition runs on the raw token text,
+/// so an escaped keyword word is not a keyword. `b\uiltin echo hi` and
+/// `comm\and echo hi` look the folded name (`builtin`/`command`) up on `PATH` and
+/// fail (rc 1), while bash recognizes the folded word as the keyword and prints
+/// `hi` rc 0; `i\if` is not the `if` keyword, so `if`/`then`/`fi` run as commands
+/// (bash reports a syntax error rc 2). This follows the plan's design: the word's
+/// syntax position is where the pair sits (LESSONS rule 5).
+#[test]
+fn keyword_recognition_runs_on_the_raw_token() {
+    for (script, name) in [
+        ("b\\uiltin echo hi", "builtin"),
+        ("comm\\and echo hi", "command"),
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(err.contains(name), "{script}: stderr={err:?}");
+    }
+    let (_out, err, code) = run("i\\if true; then builtin echo yes; fi");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("iif"),
+        "the folded name runs as a command, stderr={err:?}"
+    );
+}
+
+/// The `command` keyword path (`kw = 1`) must keep the command *name* word out of
+/// the scoped-assignment range: `command X=1` runs the `PATH` file named `X=1` with
+/// `X` unset, so it prints `[]` (bash prints `[]`). A range widened by one word
+/// (`args_from` instead of `args_from - 1`) treats the name as the assignment
+/// `X=1` and prints `[1]`.
+#[test]
+fn command_keyword_keeps_the_name_word_out_of_the_env_prefix() {
+    let cwd = scratch(&[]);
+    let bin = scratch_bins(&[("X=1", "#!/bin/sh\necho \"[$X]\"\n")]);
+    for script in ["command X=1", "A=2 command X=1"] {
+        let (out, err, code) = run_with_path(&cwd, &bin, script);
+        assert_eq!(code, 0, "{script}: stderr={err:?}");
+        assert_eq!(out, "[]\n", "{script}: bash prints []");
+    }
+    let _ = std::fs::remove_dir_all(&cwd);
+    let _ = std::fs::remove_dir_all(&bin);
 }
