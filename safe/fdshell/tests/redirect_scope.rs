@@ -244,6 +244,33 @@ fn closed_fd_redirect_is_restored_after_the_call() {
     assert_eq!(body(&a), "x\n");
 }
 
+/// The scope's saved copy is a script-nameable fd, so a body can close it and
+/// the parent's `scope.restore()?` (`run/parent.rs:40`) fails the command.
+/// Measured with strace: `f(){ :; }; f >copy_probe` saves fd 1 with
+/// `fcntl(1, F_DUPFD_CLOEXEC, 2) = 6` — the copy lands at fd 6, inside the
+/// range a script can name. So `f(){ echo ok; exec 6>&-; }; f >q` restores with
+/// no source: rc 1, a two-frame `redirection failed` + `EBADF` at
+/// `redirect/scope.rs:60` (no `redirect.rs:48` middle frame, so the EBADF is the
+/// restore's `dup2`, not the `exec`'s own close), and `q` holds the body. bash
+/// 5.3.9 gives rc 0 for the same script: its `-c` fd table is 0-2,3 and its save
+/// is at fd >= 10, outside the script-visible range. The fd floor that makes the
+/// copy unreachable is task #184; until then this rc-1 divergence is accepted.
+#[test]
+fn body_that_closes_the_saved_copy_fails_the_call() {
+    let a = temp_path("lost_save_a");
+    let (out, err, code) = run(&format!("f(){{ echo ok; exec 6>&-; }}; f > {a}"));
+    assert_eq!(
+        code, 1,
+        "the restore failure fails the command; stderr={err:?}"
+    );
+    assert_eq!(out, "");
+    assert!(
+        err.contains("redirection failed"),
+        "the report is the redirect error: stderr={err:?}"
+    );
+    assert_eq!(body(&a), "ok\n", "the body ran under the redirection");
+}
+
 /// A failing redirection open fails the command before its handler runs: the
 /// `cd` does not happen. Bash reports rc 1 for the command and continues;
 /// fdshell stops the `-c` script at rc 1, so `pwd` never prints.

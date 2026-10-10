@@ -51,3 +51,6 @@ pub(crate) fn run_parent(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

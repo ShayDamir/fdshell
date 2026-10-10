@@ -265,11 +265,12 @@ fn resolve_failure_is_a_redirect_error() {
 #[test]
 fn restore_of_a_lost_saved_copy_is_a_redirect_error() {
     // The restore's `dup2` needs its source: once the saved copy is gone the
-    // export fails, and the failure surfaces as a redirect error. This arm is
-    // pinned here because a script cannot name the saved copy's number (inside a
-    // function body the shell's fd table is only 0-2 plus its own CLOEXEC fds),
-    // so `run/parent.rs`'s `scope.restore()?` is unreachable from the `-c`
-    // harness — an accepted coverage gap.
+    // export fails, and the failure surfaces as a redirect error. The same arm
+    // is reached from a script (`f(){ echo ok; exec 6>&-; }; f >q` closes the
+    // copy at fd 6, see `run/parent/tests.rs` and
+    // `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`);
+    // this unit pin is the deterministic version, independent of where the copy
+    // lands.
     let a = temp_path("lost_copy_a");
     let cell = cell();
     let scope = Scope::open(&[RedirectDef::write_path(1, cstr(&a))], &cell).unwrap();

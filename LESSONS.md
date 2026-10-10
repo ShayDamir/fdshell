@@ -460,12 +460,26 @@ Pins, all through `Scope::restore()` and never through a copy of it:
 `reverse_restore_leaves_the_shell_fd_on_its_original_target` and
 `post_restore_write_lands_on_the_restored_target` (a write after the restore
 must land on the restored target, so a forward restore leaves the loser's file
-holding that write). **Accepted coverage gap:** `run/parent.rs`'s
-`scope.restore()?` arm is unreachable from a script — a script cannot name the
-saved copy's fd (measured: `f(){ exec 4>&-; }; f >a` fails at the `exec` close
-with EBADF, so the copy is not at fd 4; inside a function body the shell's fd
-table is 0-2 plus its own CLOEXEC fds), so the restore-failure path is pinned at
-the scope level by `restore_of_a_lost_saved_copy_is_a_redirect_error`.
+holding that write).
+
+**The saved copy is a script-nameable fd, so the parent-level restore failure is
+constructible.** For target fd 1 the copy lands at **fd 6**
+(`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes land 6 then 7), inside the
+script-visible range, where bash's save sits at fd >= 10. A body closes it with
+`exec 6>&-`, so the parent's `scope.restore()?` (`run/parent.rs:40`) fails: rc 1,
+`redirection failed` + `EBADF`, the two-frame `scope.rs:60` report with **no**
+`redirect.rs:48` middle frame. Pins:
+`run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command` (the
+copy fd measured by opening the same scope once) and
+`tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`.
+Know the distinction a fd sweep misses: `exec 4>&-`, `5>&-` and `7..11>&-` also
+exit rc 1, but they fail at the `exec`'s **own** close (`become_cmd.rs:41` plus
+the middle frame `failed to close redirection target fd N` at `redirect.rs:48`),
+not at the restore — rc 1 alone does not identify the restore arm. The shell's
+`-c` fd table is `0,1,2,3,8,9`, not "0-2 plus its own CLOEXEC fds". The copy is
+script-nameable **today**; the fix that makes it unreachable is task **#184**
+(`min_fd = max(max_target + 1, 10)`), which owns the floor and its own
+README/LESSONS rewrite.
 
 ## A test that hand-copies the implementation pins the copy, not the code
 Four `redirect/scope/tests.rs` pins copied `Scope::restore`'s loop by hand
