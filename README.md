@@ -158,10 +158,11 @@ Clobber deviations from bash:
   `> %x` is today.
 - Parse errors exit 1 with `parse error:` on stderr, where bash exits 2 with a
   syntax error (repo-wide convention).
-- `cmd &> | f` is not rejected: `&>` has no operand of its own, so the `|` stays a
-  pipeline pipe and `f` is the second stage (fdshell rc 1 from the child `f`, bash
-  rc 2 syntax error). `cmd &>|f` (one token) is an `invalid redirect` parse error.
-  The bare `&>` operand rule is tracked as task #145.
+- `cmd &> | f` is not rejected: the bare `&>` takes the `|` as its operand path,
+  the child's redirect fails, and fdshell exits 1 with `redirect in child failed`
+  — the same rc and message as master, so `>|` changes nothing here. bash exits 2
+  with a syntax error. `cmd &>|f` (one token) is an `invalid redirect` parse
+  error. The bare `&>` operand rule is tracked as task #145.
 
 ## Heredocs
 
