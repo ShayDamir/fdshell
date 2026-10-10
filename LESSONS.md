@@ -693,3 +693,18 @@ word and never consumed. Consuming the glued `)` claimed `function)f g { … }` 
 (rc 0, killed by `keywords/function/tests.rs::glued_close_paren_after_the_keyword_is_its_own_word`).
 The same alignment makes `function f ( ) {`
 work, and keeps `f ( ) {` (POSIX form, split parens) rejected by both layers.
+
+## `cargo mutants` dies with a nutmeg "View mutex" panic when the filesystem is full
+Symptom: the run aborts in its first two minutes with
+`thread '<unnamed>' panicked at .../nutmeg-*/src/lib.rs: View mutex is not poisoned: PoisonError { .. }`,
+and `mutants.out/outcomes.json` stops after ~10 outcomes (`success: false`). The
+run's `missed.txt` is then empty, so a crashed run *looks* like "0 missed": the
+only honest completion signal is the `N mutants tested in ...m: ... caught, ...
+unviable` summary line. cargo-mutants builds every mutant in a fresh copy of the
+tree under `$TMPDIR` (default `/tmp`), so a full filesystem makes its child
+processes fail to write, one worker thread panics, and the progress view takes
+the whole run down (with `-j1` too — parallelism is not the trigger). Rule:
+`df -h` the whole filesystem (not just `/tmp`) before a mutant run; if it is at
+100%, free the space the crash itself leaves behind (`/tmp/cargo-mutants-*.tmp`
+lab dirs, stale `/tmp/nix-shell.*`, an old `CARGO_TARGET_DIR`) or send the labs
+to a roomy filesystem: `TMPDIR=/path/to/space cargo mutants ...`.
