@@ -133,4 +133,42 @@ fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
     let line = b">| <<EOF";
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops.len(), 0);
+
+    // The shared rule reads the word's raw bytes, so a quoted `>` does not
+    // terminate an operator word: `cat "a>"| <<EOF` counts 0 at both levels
+    // (`echo "a>"|b` is a pipeline on master and bash, rc 1 and 127), and with
+    // a word after the pipe the `<<` is an operator: `echo "a>"|b <<EOF` counts 1.
+    let line = b"cat \"a>\"| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 0, "the quoted `>` is not an operator byte");
+    let line = b"echo \"a>\"|b <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
+
+    // An escape pair shields its second byte, and an unquoted operator byte
+    // earlier in the word disqualifies it, so neither word is `>`-terminated
+    // and the `|` is a pipeline position: 0 at both levels (bash is a syntax
+    // error at `<<`, rc 2; master measures rc 1 for both lines).
+    let line = b"cat x\\>| <<EOF";
+    assert_eq!(operator_delims(line, 0, line.len()).unwrap().len(), 0);
+    let line = b"cat a>b>| <<EOF";
+    assert_eq!(operator_delims(line, 0, line.len()).unwrap().len(), 0);
+    // A word that carries an escape pair and ends at a real `>` is
+    // `>`-terminated, so the `|` is absorbed and the `<<` counts 1 (the token
+    // layer counts 1 for the same line).
+    let line = b"cat x\\>a>| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
+
+    // The mask is read from the line start, not from the word's start: the word
+    // here begins with the closing `"`, and the quoted `>` inside `"a>"` is not
+    // an operator byte, so `x\y>` terminates the word and the `|` is absorbed
+    // (count 1 at both levels). A word-local mask scan would read that closing
+    // quote as opening and count 0 at the byte level.
+    let line = b"cat \"a>\"x\\y>| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
 }

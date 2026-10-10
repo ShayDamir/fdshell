@@ -7,13 +7,17 @@ use error_stack::{Report, ResultExt};
 impl State {
     /// Handle pipe character `|`. Returns whether a pipe token was emitted.
     pub(super) fn pipe_token(&mut self) -> Result<bool, Report<ParseError>> {
-        // A `|` whose current word ends at a `>` operator byte is absorbed into
-        // that word: `%>`/`&>` (capture / background operator) and the `>|`
-        // clobber operator. The same byte rule is applied byte-by-byte by
-        // `scan/heredoc/ops.rs` (LESSONS: byte-level and token-level rules
-        // must agree), so both key on one `>`-terminated operator test.
-        let is_redir = (self.cur.starts_with(b"%") && self.cur.ends_with(b">"))
-            || crate::parse::redirect::clobber_prefix(&self.cur);
+        // A `|` whose current word is `>`-terminated is absorbed into that word:
+        // the `%>`/`&>` capture and background operators and the `>|` clobber
+        // operator. The rule is `parse::redirect::clobber_word`, the ONE test
+        // the byte-level heredoc scan applies to the same raw bytes
+        // (`scan/heredoc/ops.rs`), so the two layers cannot disagree (LESSONS:
+        // byte-level and token-level rules must agree). The word's quote mask
+        // is passed with it, so a quoted `>` never terminates an operator word.
+        let is_redir = self
+            .cur
+            .as_bytes()
+            .is_ok_and(|bytes| crate::parse::clobber_word(bytes, &self.mask));
         if is_redir {
             self.cur
                 .push_byte(b'|')

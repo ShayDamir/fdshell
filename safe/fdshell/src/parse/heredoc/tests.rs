@@ -306,6 +306,16 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
         (b"a >| b | <<EOF", 0),
         (b"cat >| q <<EOF && cat <<A", 2),
         (b"| <<EOF", 0),
+        // The shared rule (`parse::redirect::clobber_word`) is applied to the
+        // raw word bytes with the quote mask: a quoted `>` never terminates an
+        // operator word, an escape pair shields its second byte, and an
+        // unquoted `>`/`<` earlier in the word disqualifies it.
+        (b"cat \"a>\"| <<EOF", 0),
+        (b"echo \"a>\"|b <<EOF", 1),
+        (b"cat x\\>| <<EOF", 0),
+        (b"cat a>b>| <<EOF", 0),
+        (b"cat x\\>a>| <<EOF", 1),
+        (b"cat \"a>\"x\\y>| <<EOF", 1),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

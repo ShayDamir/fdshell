@@ -188,6 +188,42 @@ fn prefix_word_absorbs_pipe_is_one_word() {
             ShortCStr::from(c"a>|b")
         ]
     );
+    // The shared rule skips escape pairs, so `x\>a>` is `>`-terminated (the
+    // pair's `>` is not the operator byte) and keeps the absorbed `|`; bash
+    // 5.3.9 breaks the word at `>` (rc 0, empty stdout), fdshell prints the
+    // word `x>a>|b` at rc 0.
+    assert_eq!(
+        text(b"echo x\\>a>|b"),
+        [ShortCStr::from(c"echo"), ShortCStr::from(c"x\\>a>|b")]
+    );
+    // `x\>` is not: its last byte is the escape pair's second byte, so the `|`
+    // stays a pipeline pipe, exactly as on master (rc 1, `"b" not found`; bash
+    // rc 127).
+    assert_eq!(
+        text(b"echo x\\>|b"),
+        [
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"x\\>"),
+            ShortCStr::from(c"|"),
+            ShortCStr::from(c"b"),
+        ]
+    );
+}
+
+// A quoted word is not `>`-terminated: its last byte is inside double quotes,
+// so the `|` right after it is the pipeline pipe. `echo "a>"|b` is a pipeline
+// on master and on bash 5.3.9 (fdshell rc 1 `"b" not found`, bash rc 127).
+#[test]
+fn quoted_word_is_not_terminated_by_the_operator_byte() {
+    assert_eq!(
+        text(b"echo \"a>\"|b"),
+        [
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"a>"),
+            ShortCStr::from(c"|"),
+            ShortCStr::from(c"b"),
+        ]
+    );
 }
 
 // The absorbed `|` byte is unquoted (mask `false`), so the target's mask stays

@@ -1,5 +1,6 @@
 mod bare;
-pub(crate) use bare::clobber_prefix;
+mod clobber;
+pub(crate) use clobber::{clobber_pipe, clobber_word};
 
 use crate::error::parse::ParseError;
 use crate::parse::Token;
@@ -18,10 +19,10 @@ pub(super) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
     }
 }
 
-/// A redirect token: a bare operator (`>`, `>>`, `<`, `<>`, with an optional
-/// numeric fd prefix) takes the next token as its path operand; an attached
-/// operator is parsed in place. Returns the redirect and how many following
-/// tokens the operator consumes (1 for the bare form).
+/// A redirect token: a bare operator (`>`, `>>`, `<`, `<>`, `>|`, with an
+/// optional numeric fd prefix) takes the next token as its path operand; an
+/// attached operator is parsed in place. Returns the redirect and how many
+/// following tokens the operator consumes (1 for the bare form).
 pub fn parse_redirect(
     tokens: &[Token],
     i: usize,

@@ -62,8 +62,9 @@ fn word_start(line: &[u8], i: usize, state: &ScanState) -> bool {
     }
     match line.get(i - 1).copied() {
         Some(b')') => !state.word_active,
-        // A `|` absorbed into a `>|` clobber operator does not break the word.
-        Some(b'|') => !clobber_pipe(line, i - 1),
+        // The `_` arm excludes `|`: a `|` byte never starts a word here, so a
+        // `<<` right after `|` (absorbed into a `>|` operator or a pipeline
+        // pipe) is never an operator; `precedes_pipe` decides the pipe.
         _ => matches!(
             line.get(i - 1).copied(),
             Some(b' ') | Some(b'\t') | Some(b';') | Some(b'\n')
@@ -72,30 +73,23 @@ fn word_start(line: &[u8], i: usize, state: &ScanState) -> bool {
 }
 
 /// A `|` with only whitespace between it and `i`: a pipeline position, where
-/// `<<` is a command word, not an operator.
+/// `<<` is a command word, not an operator. A `|` absorbed into a `>|` clobber
+/// operator is not a pipeline position: `parse::redirect::clobber_pipe` is the
+/// ONE rule, the same `>`-terminated word test the tokenizer applies to the
+/// word's raw bytes + mask (`parse/token_pipe.rs`), so the byte and token
+/// counts cannot diverge (LESSONS: byte-level and token-level rules must
+/// agree).
 fn precedes_pipe(line: &[u8], i: usize) -> bool {
     let mut k = i;
     while k > 0 {
         k -= 1;
         match line.get(k) {
             Some(&b' ') | Some(b'\t') => continue,
-            Some(b'|') => return !clobber_pipe(line, k),
+            Some(b'|') => return !crate::parse::clobber_pipe(line, k),
             _ => return false,
         }
     }
     false
-}
-
-/// The `|` at `k` is the byte of a `>|` clobber operator (a `>` sits right
-/// before it), so it is an operator byte, not a pipeline pipe, and it does not
-/// break a word. Callers pass a `k` they have already matched to a `|`. The
-/// `k > 0` guard is the word-start edge: a `|` at the run start has no
-/// preceding byte. The tokenizer absorbs it into the operator word
-/// (`parse/token_pipe.rs`, keyed on the same `>`-terminated operator rule), so
-/// the byte-level scan must see it the same way — the two counts have to agree
-/// (LESSONS: byte-level and token-level rules must agree).
-fn clobber_pipe(line: &[u8], k: usize) -> bool {
-    k > 0 && line.get(k - 1) == Some(&b'>')
 }
 
 #[cfg(test)]

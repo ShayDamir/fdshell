@@ -44,6 +44,7 @@ pub use cmdline::{BuiltinPrefix, CommandLine, Pipeline};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;
+pub(crate) use redirect::{clobber_pipe, clobber_word};
 
 use crate::error::parse::ParseError;
 use error_stack::{Report, ResultExt};

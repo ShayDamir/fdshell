@@ -353,7 +353,7 @@ fn heredoc_then_file_stdin_redirect_wins() {
 
 #[test]
 fn file_stdin_redirect_then_heredoc_wins() {
-    // The reverse order: the heredoc is last, so the file wins.
+    // The reverse order: the heredoc is last, so the body wins.
     let path = temp_path("file_heredoc");
     std::fs::write(&path, b"F1\n").unwrap();
     let (out, err, code) = run(&format!("cat <{path} <<EOF\nbody\nEOF"));
@@ -498,6 +498,37 @@ fn clobber_before_a_heredoc_is_a_redirect_error_not_a_delimiter_error() {
         !err.contains("missing terminating delimiter"),
         "stderr={err:?}"
     );
+}
+
+// A quoted word is not `>`-terminated, so `cat "a>"| <<EOF` keeps the `|` as
+// the pipeline pipe: `<<EOF` is the second stage's command word, the body lines
+// are their own commands, and the two `<<` counts agree at 0 (no body region).
+// bash 5.3.9: rc 0, `cat: 'a>': No such file`; fdshell exits 1 because `body`
+// is not a command, and master measures the same rc 1 with the same stderr.
+#[test]
+fn quoted_operator_word_keeps_the_pipe_and_the_body_free() {
+    let (out, err, code) = run("cat \"a>\"| <<EOF\nbody\nEOF");
+    assert_eq!(code, 1, "stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("\"body\" not found"),
+        "the body line must stay a command, stderr={err:?}"
+    );
+    assert!(
+        !err.contains("missing terminating delimiter"),
+        "stderr={err:?}"
+    );
+}
+
+// The agreement at 0 keeps the next heredoc's body where it belongs: a
+// divergence shifts the body regions, so `body1` would be eaten by the `<<A`
+// span and the script would fail with `missing terminating delimiter line 'A'`
+// (measured on the pre-fix tree). bash 5.3.9: rc 0, stdout `hi`; master rc 0.
+#[test]
+fn quoted_operator_word_does_not_shift_the_next_heredoc_body() {
+    let (out, err, code) = run("cat \"a>\"| <<A\nbody1\nA\necho hi <<B\nbody2\nB");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n", "stdout={out:?}");
 }
 
 // `cmd &>|f` is rejected (bash: syntax error rc 2) and creates no file; the

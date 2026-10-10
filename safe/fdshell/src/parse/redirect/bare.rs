@@ -15,16 +15,6 @@ pub(super) fn operator_suffix(s: &ShortCStr) -> Option<ShortCStr> {
     s.get(pos..)
 }
 
-/// Whether `s` is a word whose operator suffix is exactly `>` — i.e. the word
-/// ends at a bare `>` operator, so a `|` right after it is the `>|` clobber
-/// operator's byte, not a pipeline pipe. The tokenizer's `|` absorption rule
-/// and `scan/heredoc/ops.rs`'s byte-level word-break rule are the same byte
-/// rule (LESSONS: byte-level and token-level rules must agree), so both call
-/// this one test.
-pub(crate) fn clobber_prefix(s: &ShortCStr) -> bool {
-    operator_suffix(s).is_some_and(|op| op.eq_bytes(b">"))
-}
-
 /// Whether the token is a bare operator: its suffix from the first `>`/`<`
 /// byte is exactly `>`, `>>`, `<>`, `>|` (an optional all-digit fd prefix
 /// precedes it). `>>` and `<>` are bare even though a byte follows the first
