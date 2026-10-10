@@ -321,6 +321,9 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
         // is absorbed. A pair skip inside quotes would read the quoted `>` as an
         // unquoted operator byte and count 0.
         (b"cat \"a\\>\"x>| <<EOF", 1),
+        // A `%`-leading capture word absorbs the `|` (the `%` rule ignores earlier
+        // operator bytes), so the `<<` counts 1 at both levels.
+        (b"cat %>>| <<EOF", 1),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

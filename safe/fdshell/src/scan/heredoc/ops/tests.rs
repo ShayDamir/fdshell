@@ -45,6 +45,15 @@ fn comment_skip_resumes_on_next_line() {
     assert_eq!(ops[1].delim, b"B");
 }
 
+/// A comment at the run start is skipped whole: the skip lands past its
+/// newline, never inside the comment text, so a word-start `<<` in the comment
+/// is not an operator.
+#[test]
+fn comment_at_run_start_skips_its_text() {
+    let line = b"# a <<EOF\ncat";
+    assert_eq!(operator_delims(line, 0, line.len()).unwrap().len(), 0);
+}
+
 /// POSIX #4.1: the escape pair `\<` folds to a literal `<`, so `echo a\<<X`
 /// keeps the word `a<<X` and has no operator (the tokenizer agrees: the word
 /// is one token, no `<<` is emitted).
@@ -177,6 +186,15 @@ fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
     // absorbed (count 1 at both levels). Skipping the pair inside quotes would
     // make the quoted `>` an unquoted operator byte and count 0.
     let line = b"cat \"a\\>\"x>| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
+
+    // A `%`-leading capture word keeps its own absorption, so the earlier `>`
+    // does not disqualify it and the `|` is absorbed: count 1 at both levels.
+    // The word's first byte is what the `%` rule reads, so a scan that starts
+    // one byte late loses the `%` and counts 0.
+    let line = b"cat %>>| <<EOF";
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops.len(), 1);
     assert_eq!(ops[0].delim, b"EOF");
