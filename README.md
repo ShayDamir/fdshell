@@ -249,6 +249,14 @@ Accepted divergences from bash:
   every statement at execution time); bash prints it when it parses the group.
 - Nesting is capped at 100 groups in one construct (`nesting too deep`, rc 1),
   as for the other nested constructs.
+- A literal `}` argument inside a block body consumes the block's closing keyword
+  (`if true; then echo }; fi` → rc 1, `"fi" not found`), where bash prints `}`; a
+  literal `{` argument prints `{` as bash does. The cost of counting every
+  `{`/`}` word as the block depth, which is what makes a nested group inside a
+  block body close at the block's own keyword.
+- `wait` at the end of a line absorbs the group on the next line as its
+  event-case body (`wait` + newline + `{ echo a; }` → rc 1 parse error), where
+  bash prints `a`.
 
 ## Glob expansion
 

@@ -268,3 +268,94 @@ fn unclosed_group_is_a_parse_error() {
     assert_eq!((out.as_str(), rc), ("", 1));
     assert!(err.contains("parse error"), "{err}");
 }
+/// A body command that writes to stderr lands its message in the group's `2>`
+/// file, and the process's own stderr stays clean.
+#[test]
+fn body_stderr_goes_to_the_group_file() {
+    let f = temp_path("body_err");
+    let (out, err, rc) = run(&format!("{{ cat missing; }} 2>{f}"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 1));
+    assert!(
+        body(&f).contains("cat: missing"),
+        "the message is in the file"
+    );
+}
+
+/// `break` in the group body breaks the enclosing loop, and the shell continues
+/// after the loop (the group is not the loop boundary).
+#[test]
+fn break_in_the_group_body_breaks_the_loop() {
+    let (out, err, rc) = run("while :; do { break; }; done; echo after");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("after\n", "", 0));
+}
+
+/// A nested group in a function body runs in the shell at call time.
+#[test]
+fn nested_group_in_a_function_body() {
+    let (out, err, rc) = run("f() { { echo nested; }; }; f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("nested\n", "", 0));
+}
+
+/// `||` after the group: the group's failing status selects the right part.
+#[test]
+fn or_after_the_group() {
+    let (out, err, rc) = run("{ false; } || echo c");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("c\n", "", 0));
+}
+
+/// The glued `}>out` form writes the group's output to the file.
+#[test]
+fn glued_redirect_after_the_brace_writes_the_file() {
+    let a = temp_path("glued");
+    let (out, err, rc) = run(&format!("{{ echo a; }}>{a}"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
+    assert_eq!(body(&a), "a\n");
+}
+
+/// A brace-shaped word at top level stays a word: `echo {}` prints the braces
+/// (brace expansion leaves `{}` literal), as bash prints `{}`.
+#[test]
+fn brace_shaped_words_at_top_level_are_data() {
+    let (out, err, rc) = run("echo {} ; echo { ; echo }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("{}\n{\n}\n", "", 0));
+}
+
+/// A literal `{` argument inside a block body prints the brace, as bash does. A
+/// literal `}` argument consumes the block's closing keyword: `if true; then
+/// echo }; fi` reports `"fi" not found` (rc 1) where bash prints `}` — the
+/// accepted cost of counting every brace word as the block depth.
+#[test]
+fn literal_brace_argument_in_a_block_body() {
+    let (out, err, rc) = run("if true; then echo {; fi");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
+    let (out, err, rc) = run("if true; then echo }; fi");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("\"fi\" not found"), "{err}");
+    let (out, err, rc) = run("case x in x) echo {;; esac");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
+}
+
+/// `wait` at the end of a line absorbs the group on the next line as an
+/// event-case body, so the group never runs: rc 1 parse error, where bash prints
+/// `a` (accepted divergence, pinned).
+#[test]
+fn wait_line_absorbs_the_next_line_group() {
+    let (out, err, rc) = run("wait\n{ echo a; }");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("parse error"), "{err}");
+}
+
+/// Nesting is capped at 100 groups per construct: 100 nested groups run, 101
+/// report `nesting too deep` with rc 1, as the other nested constructs do.
+#[test]
+fn nesting_cap_applies_to_groups() {
+    let open = "{ ";
+    let close = "; }";
+    let ok = format!("{}echo deep{}", open.repeat(100), close.repeat(100));
+    let (out, err, rc) = run(&ok);
+    assert_eq!((out.as_str(), err.as_str(), rc), ("deep\n", "", 0));
+    let deep = format!("{}echo deep{}", open.repeat(101), close.repeat(101));
+    let (out, err, rc) = run(&deep);
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("nesting too deep"), "{err}");
+}

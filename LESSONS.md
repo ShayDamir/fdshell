@@ -602,3 +602,17 @@ redirections at the group end, and must not be "fixed" to undo `exec`. Pinned by
 `tests/group.rs::exec_in_a_group_is_persistent` (stdout empty, the file holds
 `after`). The same fact makes the group's assignment persist
 (`group_body_runs_in_the_current_shell`), which is the fork-free proof.
+
+## Count brace depth per exact `{`/`}` word, not per clause position
+The POSIX grammar puts `{` in clause position (`;`/`then`/`else`/`do`), so a
+depth rule that counted braces only in clause position would drop the `+1` for a
+group in a keyword-block body, and `closing_keyword_index`/`comment::depth_delta`
+would close `if`/`case`/`function` at the group's `}`. `keyword_delta` gives
+`+1` for the `{` word and `-1` for the `}` word with the same boundary set the
+scanner uses, so `if { true; }; then echo yes; fi` and
+`f() { { echo nested; }; }; f` close at their own keyword. The accepted cost is a
+literal brace argument inside a block body: `if true; then echo {; fi` prints `{`
+(bash agrees), and `if true; then echo }; fi` reports `"fi" not found` rc 1
+because the `}` word eats the `fi` at depth — pinned by
+`tests/group.rs::literal_brace_argument_in_a_block_body` with both sides measured
+against bash. A clause-position-aware rule is a separate task.
