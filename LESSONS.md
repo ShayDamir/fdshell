@@ -574,3 +574,31 @@ tests (`shopt.rs::clobber_bypasses_noclobber_on_an_existing_file` sets the optio
 and measures both the `>|` bypass and the `>` control), so the noclobber half of
 the suite is what makes the shared arm observable. `matches!(r.direction, Write)`
 → matching `Clobber` is killable by the same pair.
+
+## Recognize the `{ …; }` group at the byte level, and skip a nested group whole
+`segment/group/word.rs` holds one boundary rule (`is_opener_boundary`) used by
+the word predicate `opens(word, line, word_end)` (the `keyword_delta` `+1`) and
+by the byte predicate `opens_at(line, i)` (the scanner, `cond/boundary`). A word
+predicate alone is not enough for the scanner: the first version passed a
+hard-coded `b"{"` word to `opens`, so the byte at `i` was never checked and
+`local v=1; g` started a "group" at `g` (`function_call::tests::nested_calls_restore_the_inner_frame`
+failed with a parse error). `opens_at` checks the byte; `ScanState::at_word_start()`
+is the shared four-guard (`!in_quote && !in_backtick && paren_depth == 0 &&
+!word_active`) the scanner, `statement_end`, and `cond/boundary` all need.
+
+The group's span is the **statement** it opens (`group_block` → `statement_end`),
+so `} > out`, `} && echo b`, `} | cat` stay inside the group and the parse layer
+decides the trailing operators. `statement_end` must treat a **second group in
+the same statement as opaque** (`skip_group` jumps past its closing brace): with
+the plain `;`-based scan, `{ echo a; } && { echo b; }` spanned only up to the
+first `;` after the closing brace, cutting the second group, and the cond split
+reported `group is missing a closing brace` for `{ echo b`. The `cond/boundary`
+group-depth counter (`&&`/`||` only split at `group_depth == 0`) is correct only
+when every group in the statement is a whole span.
+
+A group is the current shell, not a subshell, so `exec >file` inside the body is
+**permanent** (bash agrees): `Scope::restore` undoes the group's own trailing
+redirections at the group end, and must not be "fixed" to undo `exec`. Pinned by
+`tests/group.rs::exec_in_a_group_is_persistent` (stdout empty, the file holds
+`after`). The same fact makes the group's assignment persist
+(`group_body_runs_in_the_current_shell`), which is the fork-free proof.

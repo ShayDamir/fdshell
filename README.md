@@ -211,6 +211,45 @@ Limitations:
 - A body line that is exactly `elif` / `else` (in an if body) or `;;` (in a
   case / wait body) is misread as block structure.
 
+## Group command
+
+`{ list; }` (POSIX #1.2) is the group command: the body runs in the current
+shell, with no fork, so its assignment, `cd`, `export` and `exec` survive the
+group (`{ x=1; echo $x; }; echo $x` → `1 1`). The body is the statements up to
+bash's required `;` before `}`, and the trailing redirections apply to the group
+and are undone at its end, so the shell's own fds come back
+(`{ echo a; } > out; echo b` puts `a` in `out` and prints `b` on stdout). The
+group's status is the status of its last body command, `return` in the body
+returns from the calling function, `break` breaks the enclosing loop, `set -e`
+exits inside the body, `set -x` traces the body commands (not the braces), and
+`eval "{ echo a; }"` runs the group. `{` and `}` are the block-depth `+1`/`-1`,
+so a group inside an `if`/`for`/`case`/function body closes at the block's own
+keyword, and `echo "$( { echo a; } )"` captures the group output.
+
+A group is a cond-list part, so `{ echo a; } && { echo b; }` prints `a b` and
+`{ false; } && echo b` prints nothing (rc 1). A brace glued to a word
+(`{echo`, `{a,b}`, `{1..5}`, `{}`) is a command name or brace expansion, and a
+brace in an argument position (`echo {` prints `{`) or after a pipeline `|` is a
+command word, as in bash. `exec >file` inside a group is permanent: the group is
+the current shell, so the redirection is not undone at the group end, as in bash.
+
+Accepted divergences from bash:
+
+- A group as a pipeline stage (`{ echo a; } | cat`, `echo a| { echo b; }`) and a
+  background group (`{ echo a; } &`) are parse errors; bash forks the stage.
+- A here-doc or here-string on a group (`{ echo a; } <<EOF`, `{ echo a; } <<<x`)
+  is a parse error; bash feeds the body to the group.
+- A word after the closing brace (`{ echo a; } echo b`) is a parse error; bash's
+  syntax error names the token.
+- The unclosed group (`{ echo a`), the empty group (`{ }`) and the missing `;`
+  before `}` (`{ echo a }`) are parse errors with fdshell's own messages, and
+  `{; echo a; }` fails as `group is missing a closing brace` because the scanner
+  splits `{;` into the word `{` and `;` (bash: rc 2 syntax error).
+- `set -v` prints the group line as it is read (fdshell prints the input line of
+  every statement at execution time); bash prints it when it parses the group.
+- Nesting is capped at 100 groups in one construct (`nesting too deep`, rc 1),
+  as for the other nested constructs.
+
 ## Glob expansion
 
 A word containing an unquoted `*`, `?`, or a valid `[...]` bracket expression
