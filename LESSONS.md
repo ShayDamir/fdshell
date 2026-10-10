@@ -373,12 +373,13 @@ Task #109 implements "outside quotes `\X` removes the backslash and `X` loses it
 4. `printf %s\n` is not a newline emitter: POSIX #4.1 folds `\n` to `n`, so bash prints `n` and fdshell now agrees. Integration tests that used `printf %s\n` to print one line per argument were pinning the old fdshell deviation; they now use the quoted `printf "%s\n"` form, which is what bash needs for the same result.
 5. **The escape pair must be folded at every word surface, not only at substitution.** bash folds the pair in *every* word at tokenization, so any surface that consumes raw word text and never substitutes it sees the folded text: `e\cho hi` runs `echo`, `echo hi > a\*b` writes `a*b`, `for x in a\ b` binds one word, `exec e\cho hi` replaces the shell with `echo`, `timeout 1 e\cho hi` runs `echo`, `hash a\*` finds the `PATH` file `a*`. The tool is `bytes::fold::fold_mask(bytes, mask)` / `fold_word(word, mask)` — the raw `fold` cannot be used on word text, because the tokenizer strips the `"` bytes from it, so the quote state must come from the word's mask. Surfaces folded (each folds the word *and* its aligned mask): `parse/command_args.rs::finish_command` (word 0, folded once at parse — that single point feeds the command-name glob, `exec::resolve_path`, builtin/`command`/`builtin`-keyword dispatch, `intercept` dispatch, the function lookup, `set --`, `prehash`, xtrace and `argv[0]`), `redirect/open.rs::redirect_target`, `expand.rs::expand_for_words` (the `for … in` literal words), `replacer/external.rs` + `replacer.rs` (the `exec`/`become` command word and the `builtin` keyword's name), `intercept/timeout_cmd/parse.rs` (`timeout`'s target word, which the sub-`CommandLine` looks up), and `intercept/hash_cmd.rs` + `hash_cmd/pin.rs` (`hash`'s name word, its pin path, and the `hash -r` name list — the table is keyed by the *folded* name because `prehash` stores word 0 folded, so a raw `a\*` query misses the key). Surfaces deliberately NOT folded: the arith lexers (`$((1\+2))` stays a syntax error, as in bash) and the whole-word `$((…))`/`$(…)` branches of the for-list — fold only the literal branch, and never before a check that keys on the raw bytes. A folded word must carry mask `true` on the escaped byte, otherwise the folded `*` becomes a pattern again. The fold's `ShortCStrError` is a NUL-free invariant, so it chains onto the domain's `Never` variant (never `ExecFailed`). Pin every surface with a bash-parity test (see `tests/backslash.rs`); the accepted divergences of the same design are the alias name lookup, the `builtin`/`command`/`if` keyword recognition, and the identifier grammar — all three run on the raw token text, so an escaped keyword word is a command name (`b\uiltin echo hi` looks up `builtin`, rc 1, where bash prints `hi`), pinned by `alias_name_keeps_the_escape_pair` and `keyword_recognition_runs_on_the_raw_token`.
 
-## `scan/heredoc/ops.rs`'s four loop-bound mutants are equivalent (accepted, do not chase)
-The `<<` operator scan walks the run with `advance`-driven bounds, and four of its mutants are unobservable, verified by the review's analysis and `cargo mutants` (they are on lines untouched by task #109). Recorded so future mutant runs do not re-flag them. Verify them with a **focused** `cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs --iterate` run: this file's build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores them as *caught* (the per-mutant timeout expires before the mutant is tested) — the sweep's count is not the truth for this file.
+## `scan/heredoc/ops.rs`'s three loop-bound mutants are equivalent (accepted, do not chase)
+The `<<` operator scan walks the run with `advance`-driven bounds, and three of its mutants are unobservable, verified by the review's analysis and `cargo mutants` (they are on lines untouched by task #109). Recorded so future mutant runs do not re-flag them. Verify them with a **focused** `cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs --iterate` run: this file's build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores them as *caught* (the per-mutant timeout expires before the mutant is tested) — the sweep's count is not the truth for this file.
 
 1. `ops.rs:19:13` `while i < to` → `i <= to`, and `ops.rs:42:21` `while i < next` → `i <= next` — the extra iteration processes one word-break byte (`\n`, `;`, `|`, space, or EOF) that `advance` classifies identically, so `seen_word`/`word_start` and the operator list are unchanged.
-2. `ops.rs:26:38` `i = i + p + 1` → `i + p * 1` — the comment skip lands one byte earlier, on the `\n` itself; the next `advance` consumes that newline as the same word break, so the scan resumes at the same word.
-3. `ops.rs:76:13` `while k > 0` → `k >= 0` — the extra step reads `line.get(0)` after `k` has already been decremented to 0. Under the `seen_word` guard a word-start `<<` can never be preceded only by spaces (all bytes before it would have to be whitespace, which makes `seen_word` false), so the loop always returns from the body before `k` reaches 0 and the extra step is unreachable.
+2. `ops.rs:77:13` `while k > 0` → `k >= 0` (the `precedes_pipe` walk back to the `|`, now line 84 after task #103's `clobber_pipe` call) — the extra step reads `line.get(0)` after `k` has already been decremented to 0. Under the `seen_word` guard a word-start `<<` can never be preceded only by spaces (all bytes before it would have to be whitespace, which makes `seen_word` false), so the loop always returns from the body before `k` reaches 0 and the extra step is unreachable.
+
+`ops.rs:26:38` `i = i + p + 1` → `i + p * 1` is **killable, not equivalent** — recorded because the first analysis got it wrong. A comment mid-line (`i > 0`) lands on the comment's `\n`, which `advance` consumes as the same word break, so that case is equivalent; a comment **at the run start** (`i = 0`) lands at index 1, inside the comment text, where a word-start `<<` in the comment is counted. Killed by `comment_at_run_start_skips_its_text` (`# a <<EOF\ncat` → 0 operators). Rule: an "unobservable because the byte lands on a word break" claim must be checked at the run start, where `advance` never gets to consume the landing byte.
 
 ## `finish_command`'s `spec_at += 1` mutant became killable when duplicate redirect targets became legal; its `args_from - 1` neighbour is killable too
 `cargo mutants` on `parse/command_args.rs` (task #109 re-work) found two mutants on lines that are not escape-fold code:
@@ -510,20 +511,51 @@ panic messages: libtest reports FAILED with an empty failure block, and later
 `eprintln!`/`println!` diagnostics vanish. Reopen fd 2 (`/dev/null`) before the
 remaining assertions.
 
-## A `|` preceded by `>` is the `>|` operator byte, and the byte-level and token-level rules must key on the same test
+## A `|` preceded by `>` is the `>|` operator byte, and the byte-level and token-level rules must call ONE predicate
+
 POSIX #2.2 `>|` (clobber: a write that bypasses `noclobber`) makes the tokenizer's
-`|` rule load-bearing: a `|` whose current word ends at a `>` operator byte is
-absorbed into that word (`parse/token_pipe.rs::pipe_token`), and the byte-level
-heredoc scan must see the same byte the same way (`scan/heredoc/ops.rs`), or the
-two `<<` counts diverge: `cat >| <<EOF` counts 1 token-level and 0 byte-level
-(`precedes_pipe` hits the absorbed `|`), and `echo a>|<<EOF` counts 1 byte-level
-(the `|` looks like a word break) vs 0 token-level. Both layers now key on one
-test — `bare::clobber_prefix`, "the word's operator suffix is exactly `>`" — so
-the rule cannot drift. Pins: `parse/token/tests.rs::clobber_pipe_absorbed_into_operator`
-and the `parse/heredoc/tests.rs::operator_count_clobber_forms_agree_at_both_levels`
-pair of counts. The corollary is the same as the "bare is a suffix test" rule:
-a `|` separated by whitespace from a bare `>` stays a pipeline pipe (`> | f`),
-and `>>`/`>&`/`<` never absorb a `|` (their suffix is not exactly `>`).
+`|` rule load-bearing: a `|` absorbed into a `>`-terminated word is an operator
+byte, not a pipeline pipe, and the byte-level heredoc scan must see the same byte
+the same way, or the two `<<` counts drift silently. `cat >| <<EOF` counts 1
+token-level and 0 byte-level (the scan hits the absorbed `|`), `echo a>|<<EOF` 1
+byte-level vs 0 token-level, and a real script breaks observably: `cat "a>"| <<EOF`
+then the body then `EOF` reports `missing terminating delimiter` on the divergent
+tree, where master and bash read the body (rc 1 / rc 0).
+
+ONE predicate decides both layers: `parse/redirect/clobber.rs::clobber_word`, over
+the word's RAW bytes + quote mask — the word's last byte is `>`, unquoted and not
+the second byte of an escape pair, and no unquoted `>`/`<` byte comes before it; a
+`%`-leading word (the capture operator) keeps its own absorption, where earlier
+operator bytes do not disqualify it. The tokenizer passes its word text and mask
+(`parse/token_pipe.rs`); the byte scan rebuilds the word from the line with the mask
+scanned from the line start (`scan/heredoc/ops.rs` → `clobber_pipe` + `quote_mask`),
+so a word that begins with a closing `"` gets the quote state it really has.
+Reading the *unquoted* word text, or the byte right before the `|`, is NOT the same
+rule: `echo "a>"|b` absorbs the pipe (one word, rc 0) where master and bash give a
+pipeline (rc 1, 127); `cat "a>"| <<EOF` measures byte=0 token=1; `cat x\>a>| <<EOF`
+measures byte=1 token=0 under the word-text rule — the same trap as "a token-text
+predicate that decides raw-byte structure".
+
+Corollaries: a `|` separated by whitespace from a bare `>` stays a pipeline pipe
+(`> | f`); `>>`, `>&`, `<>` and `a>b` never absorb (an unquoted operator byte
+precedes the last byte); a quoted `>` never terminates a word, and `x\>` never does.
+
+Pins: `parse/token/tests.rs::clobber_pipe_absorbed_into_operator`,
+`quoted_word_is_not_terminated_by_the_operator_byte` and
+`prefix_word_absorbs_pipe_is_one_word` (`echo x\>a>|b` is one word — the word-break
+deviation from bash, recorded in README), the byte/token count agreement list in
+`parse/heredoc/tests.rs::operator_count_clobber_forms_agree_at_both_levels` with
+`scan/heredoc/ops/tests.rs::clobber_pipe_is_an_operator_byte_not_a_pipeline`, and
+the real-script pair `tests/redirect.rs::quoted_operator_word_keeps_the_pipe_and_the_body_free`
+/ `quoted_operator_word_does_not_shift_the_next_heredoc_body`.
+
+Residual equivalent mutants (accepted, do not chase): `clobber.rs:50:13` `i < e` →
+`i <= e` — the extra step appends one mask entry at index `e`, which is outside
+every word slice; `clobber.rs:57:28` guard `!in_quote` → `false` — the pair push is
+index alignment only (the predicate's escape-pair skip lives in `clobber_word`), so
+no reachable word distinguishes it; `clobber.rs:77:13` `s > 0` → `s >= 0` — `usize`
+is never negative, and the guard exists so a debug build cannot panic on the
+`s - 1` underflow at `s = 0`.
 
 ## Model a redirect bypass as a `RedirectDirection` variant, not a flag on the def
 `>|` clobber is the direction `Clobber`: `redirect/open.rs` gates the noclobber
