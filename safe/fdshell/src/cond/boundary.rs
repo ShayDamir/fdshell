@@ -3,7 +3,7 @@
 //! not split it.
 
 use crate::scan::{ScanState, heredoc};
-use crate::segment::group::{closes, opens_at};
+use crate::segment::group::{group_at_run, opens_at};
 
 /// Scan from `i` to the next unquoted `&&` / `||` (or end of line). Heredoc
 /// command lines are skipped whole along with their bodies. A `{ …; }` group
@@ -22,11 +22,17 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             {
                 return (i, b == b'|');
             }
-            if opens_at(line, i) {
+            // Only a brace that opens a group counts: at a cond-list part start
+            // (the run is empty, or the run ends with `&&` / `||`). A brace in an
+            // argument position (`echo x{`, `echo {`) is word data, exactly as the
+            // segment scanner's `group_at_run` rule requires.
+            if opens_at(line, i) && group_at_run(line, run_start, i).is_some() {
                 group_depth += 1;
-            } else if b == b'}' && closes(b"}") {
-                // A stray closer cannot drive the depth below zero.
-                group_depth = group_depth.saturating_sub(1);
+            } else if b == b'}' {
+                // A stray closer must clamp at 0, not go negative: a negative
+                // depth would make the `group_depth == 0` test false for every
+                // later `&&`/`||` and swallow the operator into the arguments.
+                group_depth = group_depth.saturating_sub(1).max(0);
             }
             if b == b'\n'
                 && let Some(resume) = heredoc::skip(line, run_start, i)

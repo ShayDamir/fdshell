@@ -48,20 +48,25 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     while i <= line.len() {
         let kind = boundary(line, i, &state);
         if kind == Boundary::Char {
-            if !in_block
-                && state.at_word_start()
-                && group::opens_at(line, i)
-                && group::group_at_part_start(line, start, i)
-            {
-                // The group starts a cond-list part mid-line (at the statement
-                // start, or right after `&&` / `||`): the text before it is
-                // flushed as the preceding statement, then the group's own span.
-                let (resume, floor) =
-                    group::open(line, i, start, line_start, &state, &mut segments, &mut runs);
-                i = resume;
-                start = i;
-                line_start = i;
-                body_floor = floor;
+            if !in_block && state.at_word_start() && group::opens_at(line, i) {
+                match group::group_at_run(line, start, i) {
+                    // A group at a run start is a block; the cond layer owns any
+                    // `&&` / `||` before it, so each part's group short-circuits.
+                    Some(true) => {
+                        let (resume, floor) =
+                            group::open(line, i, line_start, &state, &mut segments, &mut runs);
+                        i = resume;
+                        start = i;
+                        line_start = i;
+                        body_floor = floor;
+                    }
+                    // A group at a cond-part start mid-run: skip its span whole so
+                    // the body's `;` is not a top-level separator. The run keeps the
+                    // group's text, and the cond layer splits the operator.
+                    Some(false) => i = group::skip_group(line, i, &mut state),
+                    // A brace in an argument position is word data.
+                    None => i = state.advance(line, i),
+                }
             } else {
                 i = state.advance(line, i);
             }

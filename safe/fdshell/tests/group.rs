@@ -345,6 +345,101 @@ fn wait_line_absorbs_the_next_line_group() {
     assert!(err.contains("parse error"), "{err}");
 }
 
+/// A brace in an argument position, and a `}` that closes nothing, leave the
+/// cond-list group depth at 0, so `&&` / `||` split the line as bash and `master`
+/// do — the operator is never swallowed into the command's arguments. Every case
+/// is measured against bash.
+#[test]
+fn argument_position_braces_do_not_swallow_the_cond_operators() {
+    let (out, err, rc) = run("echo { && echo b");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("{\nb\n", "", 0));
+    let (out, err, rc) = run("echo x} && echo y");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("x}\ny\n", "", 0));
+    let (out, _, rc) = run("echo {a,b} && echo ok");
+    assert_eq!((out.as_str(), rc), ("a b\nok\n", 0));
+    let (out, _, rc) = run("echo {1..3} && echo ok");
+    assert_eq!((out.as_str(), rc), ("1 2 3\nok\n", 0));
+    let (out, _, rc) = run("echo x{ && echo y");
+    assert_eq!((out.as_str(), rc), ("x{\ny\n", 0));
+    let (out, _, rc) = run("echo -n x{ && echo y");
+    assert_eq!((out.as_str(), rc), ("x{y\n", 0));
+    let (out, _, rc) = run("echo -n x} && echo y");
+    assert_eq!((out.as_str(), rc), ("x}y\n", 0));
+    // `||` short-circuits on the successful part, so only `{` is printed.
+    let (out, err, rc) = run("echo { || echo b");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
+    let (out, _, rc) = run("x=1; echo { && echo $x");
+    assert_eq!((out.as_str(), rc), ("{\n1\n", 0));
+}
+
+/// `&&` / `||` inside a group body is the body's own cond list: the group's span
+/// keeps the operator inside, so the split is the operator after the closing
+/// brace, and a trailing redirect on a nested group stays with that group.
+#[test]
+fn cond_operator_inside_the_group_body_is_the_bodys() {
+    let (out, err, rc) = run("{ echo a && echo b; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\n", "", 0));
+    let (out, _, rc) = run("{ echo a && false; echo c; }");
+    assert_eq!((out.as_str(), rc), ("a\nc\n", 0));
+    let a = temp_path("nested_and");
+    let (out, _, rc) = run(&format!("{{ echo a; }} && {{ echo b; }}>{a}; echo c"));
+    assert_eq!((out.as_str(), rc), ("a\nc\n", 0));
+    assert_eq!(body(&a), "b\n");
+    let (out, _, rc) = run("{ echo a; } && { echo b; } && echo c");
+    assert_eq!((out.as_str(), rc), ("a\nb\nc\n", 0));
+    let f = temp_path("tail_and");
+    let (out, _, rc) = run(&format!("{{ echo a; }}>{f} && echo b"));
+    assert_eq!((out.as_str(), rc), ("b\n", 0));
+    assert_eq!(body(&f), "a\n");
+}
+
+/// The group opener needs a word start, so a quoted brace, a brace inside
+/// `$( … )`, a brace glued to a word, and a brace inside a backtick body are all
+/// word data and never open a group.
+#[test]
+fn group_opener_needs_a_word_start() {
+    let (out, err, rc) = run("echo \"{ echo a; }\" && echo b");
+    assert_eq!(
+        (out.as_str(), err.as_str(), rc),
+        ("{ echo a; }\nb\n", "", 0)
+    );
+    // The group inside `$( … )` is the substitution's own body; `&& echo c` is
+    // text inside the double quotes, so bash and fdshell print the same line.
+    let (out, _, rc) = run("echo \"$( { echo a; echo b; } ) && echo c\"");
+    assert_eq!((out.as_str(), rc), ("a\nb && echo c\n", 0));
+    // A brace glued to a word is that word's data; the `}` after `;` is a command.
+    let (out, err, rc) = run("echo a{ b; }");
+    assert_eq!((out.as_str(), rc), ("a{ b\n", 1));
+    assert!(err.contains("\"}\" not found"), "{err}");
+    // A brace inside a backtick body is data. fdshell has no backtick command
+    // substitution, so the body text is printed (a pre-existing gap, pinned here
+    // for the scan-level guard).
+    let (out, _, rc) = run("echo `{ echo a; echo b; }` && echo c");
+    assert_eq!((out.as_str(), rc), ("`{ echo a; echo b; }`\nc\n", 0));
+}
+
+/// A function name that is also a block keyword wins the scan: `if()` / `case()`
+/// are function definitions, and the bare keyword after `;` is a command (both
+/// rc 1, as `master` and bash agree, bash rc 2).
+#[test]
+fn function_def_beats_the_block_keyword() {
+    let (out, err, rc) = run("if() { echo iffunc; }; if");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("parse error"), "{err}");
+    let (out, err, rc) = run("case() { echo casefunc; }; case");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("parse error"), "{err}");
+}
+
+/// `fdshell` has no bad-substitution diagnostic: `${{a}` expands to an empty
+/// word, so the line prints an empty line then `b` rc 0 where bash reports
+/// `bad substitution` rc 1 (accepted divergence; `master` agrees).
+#[test]
+fn bad_substitution_has_no_diagnostic() {
+    let (out, err, rc) = run("echo ${{a} && echo b");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("\nb\n", "", 0));
+}
+
 /// Nesting is capped at 100 groups per construct: 100 nested groups run, 101
 /// report `nesting too deep` with rc 1, as the other nested constructs do.
 #[test]
@@ -358,4 +453,35 @@ fn nesting_cap_applies_to_groups() {
     let (out, err, rc) = run(&deep);
     assert_eq!((out.as_str(), rc), ("", 1));
     assert!(err.contains("nesting too deep"), "{err}");
+}
+
+/// A group opener after `&&` inside a command substitution must not truncate the
+/// statement flushed before it: the substitution's inner text starts with a
+/// space, so the run's offset has to skip that whitespace. Pins the offset fix;
+/// output matches bash.
+#[test]
+fn substitution_group_after_operator_keeps_the_run_before_it() {
+    let (out, err, rc) = run("echo \"$( echo inner && { echo g; } )\"");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("inner\ng\n", "", 0));
+}
+
+/// The same truncation after a separator: `inner` survives whole and the group
+/// runs, so three lines print (the run cut at the trailing `&` parses as a
+/// statement ending in `&` — an error).
+#[test]
+fn separator_before_the_group_keeps_the_run_offset() {
+    let (out, err, rc) = run("echo a;  echo inner && { echo g; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\ninner\ng\n", "", 0));
+}
+
+/// A group is a cond part, so the `&&` / `||` short-circuit applies to it: a
+/// failing left side skips the group, a failing left side before `||` runs it.
+#[test]
+fn group_part_respects_the_cond_short_circuit() {
+    let (out, err, rc) = run("false && { echo g; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 1));
+    let (out, err, rc) = run("true && { echo g; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("g\n", "", 0));
+    let (out, err, rc) = run("false || { echo g; } && echo d");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("g\nd\n", "", 0));
 }

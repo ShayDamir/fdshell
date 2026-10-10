@@ -616,3 +616,45 @@ literal brace argument inside a block body: `if true; then echo {; fi` prints `{
 because the `}` word eats the `fi` at depth — pinned by
 `tests/group.rs::literal_brace_argument_in_a_block_body` with both sides measured
 against bash. A clause-position-aware rule is a separate task.
+
+## A group after `&&` is a cond part: skip its span, never flush the run before it
+Round 1 flushed the text before a mid-run group opener as a statement and pushed
+the group as its own `Segment::Block`. Both halves were wrong. `false && { echo g; }`
+ran the group (bash skips it, rc 1): the group left the cond list, so the
+short-circuit could not skip it. And the flushed run's offset was the *raw* run
+start, not the trimmed part's first byte, so a leading space shifted the
+statement slice and cut its tail: inside `$( echo inner && { echo g; } )` the
+substitution body starts with a space, the statement became `echo inner &`, and
+the parse reported `unexpected character`. The fix: `group_at_run` classifies the
+brace (empty run → block; run ends with `&&`/`||` → cond part; else word data),
+and a cond part's group is **skipped whole inside the run** (the same `skip_group`
+`statement_end` uses), so the body's `;` is never a top-level separator, the run
+keeps the group's text, `cond` splits the operator into one part per group, and
+`&&`/`||` short-circuit apply to the group. Pinned by
+`tests/group.rs::group_part_respects_the_cond_short_circuit` and
+`substitution_group_after_operator_keeps_the_run_before_it` (both fail on the
+flushing version), and by `segment/group/tests.rs::group_after_and_stays_a_cond_part_not_a_block`.
+
+## Depth tested only by `== 0` under a `max(0)` clamp makes `+=`→`-=` equivalent
+`cond/boundary` counts group depth as `max(0, opens - closers)` and the only
+observation is `group_depth == 0`. The `+=`→`-=` mutant gives
+`max(0, closers - opens)`, which is zero in exactly the same states, so no input
+separates them: the mutant is unkillable. Say what the depth means (`opens` and
+`closers`, clamped) and check the predicate directly; do not add a test for a
+depth whose sign is never read.
+
+## A guard duplicated inside the callee is an equivalent mutant
+`cond/boundary` skips a heredoc body with `if b == b'\n' && let Some(resume) =
+heredoc::skip(line, run_start, i)`. `skip_region` already returns `None` unless
+`line[run_end]` is `'\n'` (or the line end), so the `b == b'\n'` test adds no
+behavior: the `==`→`!=` mutant is unkillable. It is **pre-existing on `master`**
+(`cond/boundary.rs:19:18`), not task #97 work — the same mutant is missed in the
+`master` mutation run. Delete the outer test when the callee guards the same byte.
+
+## An unclosed brace scan ends at the line length, so `min(len, close + 1)` and `min(len, close)` agree
+`scan_brace_block` reports `close = line.len()` when the group never closes, so
+in `group_block` the `close + 1`→`close * 1` mutant gives the same `open_end`
+(`line.len().min(len)` = `line.len()`), and the suite passes under it: an accepted
+equivalent mutant. The `+1` is still required for the closed case (the `+1`→`-1`
+mutant is killed by `segment/group/tests.rs::span_ends_past_the_closing_brace`),
+so keep the offset and record the `*` survivor rather than chasing it.

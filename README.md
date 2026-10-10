@@ -236,7 +236,16 @@ the current shell, so the redirection is not undone at the group end, as in bash
 Accepted divergences from bash:
 
 - A group as a pipeline stage (`{ echo a; } | cat`, `echo a| { echo b; }`) and a
-  background group (`{ echo a; } &`) are parse errors; bash forks the stage.
+  background group (`{ echo a; } &`) are parse errors (`unexpected pipe` /
+  `unexpected character`, rc 1, where bash forks the stage and exits 0); in
+  `echo a| { echo b; }` the brace after `|` is a command word, so the stage fails
+  as `"{" not found` rc 1.
+- A brace glued to a word is not a group: `{echo hi; }` runs the command `{echo`
+  and reports `"{echo" not found` then `"}" not found` (rc 1); bash's syntax error
+  exits 2. `master` agrees.
+- `fdshell` has no `bad substitution` diagnostic: in `echo ${{a} && echo b` the
+  `${{a}` expands to an empty word, so fdshell prints an empty line then `b`
+  (rc 0) where bash reports `bad substitution` (rc 1); `master` agrees.
 - A here-doc or here-string on a group (`{ echo a; } <<EOF`, `{ echo a; } <<<x`)
   is a parse error; bash feeds the body to the group.
 - A word after the closing brace (`{ echo a; } echo b`) is a parse error; bash's

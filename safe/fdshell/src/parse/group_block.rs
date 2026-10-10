@@ -38,9 +38,10 @@ pub(crate) fn tokens_to_group(
     );
     // POSIX #1.2: `}` must be preceded by `;` or a newline. The tokenizer
     // emits a `;` token for a newline, so `{ echo a` newline `}` is accepted.
+    // `closing_keyword_index` skips token 0 (the `{`), so `close` is never 0.
     ensure!(
         tokens
-            .get(close - 1)
+            .get(close.saturating_sub(1))
             .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")),
         ParseError::ExpectedSemicolonBeforeCloseBrace
     );
