@@ -272,8 +272,8 @@ Accepted divergences from bash:
   `{`/`}` word as the block depth, which is what makes a nested group inside a
   block body close at the block's own keyword.
 - `wait` at the end of a line absorbs the group on the next line as its
-   event-case body (`wait` + newline + `{ echo a; }` → rc 1 parse error), where
-   bash prints `a`.
+  event-case body (`wait` + newline + `{ echo a; }` → rc 1 parse error), where
+  bash prints `a`.
 
 ## Loop control (`break` / `continue`)
 
@@ -283,12 +283,14 @@ iteration (`break` alone is `break 1`). The count is clamped to the loop nesting
 depth at the call site, so `break 5` in one loop exits that loop silently, as
 bash (`for a in 1 2 3; do j=$((j+1)); break 5; done` → one iteration). The loop
 levels are `for`, `while` and `until`; `if`, `case`, a `{ …; }` group, a
-cond-list/pipeline part and a `wait` block are transparent, so `break` inside a
-`while` condition counts that loop. `eval`, `source` and a group share the
-caller's depth, so `eval "break 2"` in a nested loop exits both loops, and a
-`break` in a forked child (`$( … )`, a pipeline stage) is consumed by that
-child's own loops. A leading `+` and leading zeros are accepted (`break +2`,
-`break 0100`), as bash's `atoi` is.
+cond-list/pipeline part and a `wait` block in the **loop body** are transparent,
+as in bash (`case_clause_is_not_a_loop_level`,
+`group_and_if_do_not_count_as_loop_levels`). A `break`/`continue` inside a loop
+**condition** is ignored today; see the divergence below. `eval`, `source` and a
+group share the caller's depth, so `eval "break 2"` in a nested loop exits both
+loops, and a `break` in a forked child (`$( … )`, a pipeline stage) is consumed
+by that child's own loops. A leading `+` and leading zeros are accepted
+(`break +2`, `break 0100`), as bash's `atoi` is.
 
 Accepted divergences from bash:
 
@@ -302,15 +304,32 @@ Accepted divergences from bash:
   expands `$n` (consistent with `return $n`, which also parses the raw token).
 - More than one argument (`break 2 3`) aborts rc 1, matching bash's rc 1 (the
   message differs: bash says `too many arguments`).
-- `break`/`continue` outside any loop is an rc-1 abort here (`break' is not
-  inside a loop`), where bash warns `only meaningful in a … loop` and continues
-  with rc 0. This is fdshell's existing accepted outside-loop behavior.
+- `break`/`continue` outside any loop is an rc-1 abort here (`'break' is not
+  inside a loop`, `'continue' is not inside a loop`), where bash warns `only
+  meaningful in a … loop` and continues with rc 0. This is fdshell's existing
+  accepted outside-loop behavior, and the depth-0 bail fires uniformly: it also
+  aborts for a `break`/`continue` nested inside an `if` condition —
+  `if break; then echo y; fi; echo after` is rc 1 here, where master printed
+  `y` `after` with rc 0 (the control was dropped) and bash warns with rc 0.
+  Pinned by `tests/loops.rs::break_in_if_condition_at_depth_zero_aborts_rc1` and
+  `…::continue_in_if_condition_at_depth_zero_aborts_rc1`.
 - A function body is not a loop boundary here: `break N` inside a function
   crosses it and exits the caller's loops (`f() { break 2; }; for a in 1 2; do
   for b in 1 2; do f; done; done` → both loops exit), where bash reports `only
   meaningful in a … loop` for each call and keeps running. Task #203 owns this
   change; `tests/loops.rs::break_2_in_function_body_crosses_the_boundary_current_fdshell_behavior`
   pins the current behavior as its drift alarm.
+- A `break`/`continue` inside a loop **condition** is ignored: the condition is
+  run as a cond-list and its loop control is dropped when the condition
+  finishes, so `while if true; then break; fi; do echo body; done` prints `body`
+  forever (measured 2026-10-11: fdshell runs to the timeout, rc 124, where bash
+  exits the loop with rc 0 and prints `end`; `while break; do echo body; done`
+  and `while :; do if break; then :; fi; echo body; done` hang the same way,
+  identically on master), and `i=0; for x in 1 2 3; do if break; then :; fi;
+  i=$((i+1)); done` prints `i=3` where bash prints `i=0`. The `&&` spelling
+  (`while [ $i -lt 3 ] && break; do …`) is a parse error rc 1 (task #137). Task
+  #205 owns the fix; the hang is deliberately unpinned (an infinite loop is not
+  a test) and #205 owns the pins for this shape.
 
 ## Glob expansion
 
