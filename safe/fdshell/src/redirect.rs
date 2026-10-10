@@ -4,12 +4,14 @@ mod heredoc;
 mod herestring;
 mod open;
 mod resolve;
+mod scope;
 mod source;
 
 pub use def::*;
 pub use direction::*;
 pub use open::*;
 pub use resolve::*;
+pub use scope::*;
 pub use source::*;
 
 use error_stack::{Report, ResultExt};
@@ -27,6 +29,13 @@ pub enum Redirect {
 impl Redirect {
     pub fn new(export_to: i32, local: LocalFd) -> Self {
         Redirect::Dup { export_to, local }
+    }
+
+    /// The fd this redirection lands on.
+    pub fn target(&self) -> i32 {
+        match self {
+            Self::Dup { export_to, .. } | Self::Close { export_to } => *export_to,
+        }
     }
 
     pub fn export(&self) -> Result<(), Report<OpenRedirectError>> {
