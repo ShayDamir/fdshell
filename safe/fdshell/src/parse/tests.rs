@@ -229,8 +229,16 @@ fn test_stdin_redirect() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <%input").unwrap() else {
         panic!("expected Cmd")
     };
-
-    assert_eq!(cmd.redirects, vec![RedirectDef::var(0, c"input")]);
+    // A var source resolves by cloning the table fd, so its `direction` is the
+    // operator's (`<` reads); it is inert at resolve time.
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(c"input".into()),
+        }]
+    );
 }
 
 #[test]
@@ -762,6 +770,13 @@ fn test_space_separated_redirect_without_operand_is_error() {
     assert!(parse(b"cmd >").is_err());
     assert!(parse(b"cmd <").is_err());
     assert!(parse(b"cmd > ;").is_err());
+    // `>|` is a bare operator, so its operand rules are the same ones.
+    assert!(parse(b"cmd >|").is_err());
+    assert!(parse(b"cmd >| ;").is_err());
+    assert!(parse(b"cmd >| | f").is_err());
+    assert!(parse(b"cmd >| >| g").is_err());
+    assert!(parse(b"cmd >| %v").is_err());
+    assert!(parse(b"cmd >| <<EOF").is_err());
 }
 
 #[test]
@@ -770,6 +785,15 @@ fn test_space_separated_redirect_before_operator_is_error() {
     assert!(parse(b"cmd < >file").is_err());
     assert!(parse(b"cmd > &1").is_err());
     assert!(parse(b"cmd > %v").is_err());
+    // A clobber operator with no operand: the bare form takes the next word,
+    // so these are operand rejections, not operator rejections.
+    assert!(parse(b"cmd >| >file").is_err());
+    assert!(parse(b"cmd >| &1").is_err());
+    assert!(parse(b"cmd &>|f").is_err());
+    // Append and read have no clobber form; the `|` after them is a pipeline
+    // pipe, so the bare `>>`/`<` operator has no operand and is rejected.
+    assert!(parse(b"cmd >>|f").is_err());
+    assert!(parse(b"cmd <|f").is_err());
 }
 
 #[test]
@@ -805,6 +829,144 @@ fn test_space_separated_redirect_with_heredoc() {
             path_def(1, RedirectDirection::Write, "out"),
         ]
     );
+}
+
+// POSIX #2.2 `>|` (clobber: bypasses `noclobber`) in every operator position
+// the existing operators occupy, measured against bash 5.3.9.
+
+#[test]
+fn test_clobber_attached() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi >|out.txt").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Clobber, "out.txt")]
+    );
+    assert_eq!(cmd.args, vec![c"hi".into()]);
+}
+
+#[test]
+fn test_clobber_bare() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi >| out.txt").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Clobber, "out.txt")]
+    );
+    assert_eq!(cmd.args, vec![c"hi".into()]);
+}
+
+#[test]
+fn test_clobber_stderr() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>|err.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(2, RedirectDirection::Clobber, "err.log")]
+    );
+}
+
+#[test]
+fn test_clobber_var_form() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd >|%log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Clobber,
+            source: RedirectSource::Var(c"log".into()),
+        }]
+    );
+}
+
+#[test]
+fn test_clobber_bare_fd_path() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat >| /dev/fd/3").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::dup(1, 3)]);
+}
+
+#[test]
+fn test_clobber_bare_quoted_path() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo hi >| \"my file\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 1,
+            direction: RedirectDirection::Clobber,
+            source: RedirectSource::path(c"my file", vec![true; 7]),
+        }]
+    );
+}
+
+#[test]
+fn test_clobber_bare_in_pipeline_stage() {
+    let ParsedLine::Pipeline(pl) = parse(b"echo a >| out | cat").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(
+        pl.commands[0].redirects,
+        vec![path_def(1, RedirectDirection::Clobber, "out")]
+    );
+    assert!(pl.commands[1].redirects.is_empty());
+}
+
+// `>&|f`: `>&` is the fd-dup operator, its `&…` tail is empty so no redirect
+// is produced, and the `|` (not absorbed: the word ends at `&`, not at `>`) is
+// the pipeline pipe. Measured: bash is a syntax error (rc 2); fdshell parses it
+// as a pipeline, which exits non-zero on the second stage.
+#[test]
+fn test_amp_clobber_tail_is_a_pipeline_pipe() {
+    let ParsedLine::Pipeline(pl) = parse(b"cmd 2>&|f").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert!(pl.commands[0].redirects.is_empty());
+    assert_eq!(pl.commands[0].args, vec![c"2>&".into()]);
+    assert_eq!(pl.commands[1].command, c"f".into());
+}
+
+// The `%`-target arm is evaluated after the operator is interpreted, so every
+// write form takes the fd variable: `>%x` and `3<%x` are byte-identical to
+// before `>|` existed, and `<>%x` follows the same rule as its operator.
+#[test]
+fn test_fd_var_target_after_each_operator() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd >%x").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.redirects, vec![RedirectDef::var(1, c"x")]);
+    let ParsedLine::Cmd(cmd) = parse(b"cmd 3<%x").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 3,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Var(c"x".into()),
+        }]
+    );
+    let ParsedLine::Cmd(cmd) = parse(b"cmd <>%x").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef {
+            export_to: 0,
+            direction: RedirectDirection::Rw,
+            source: RedirectSource::Var(c"x".into()),
+        }]
+    );
+    // Append-to-fd-var stays rejected (a `>>` has nothing to append to a fd).
+    assert!(parse(b"cmd >>%x").is_err());
+    assert!(parse(b"cmd >>|%x").is_err());
 }
 
 #[test]

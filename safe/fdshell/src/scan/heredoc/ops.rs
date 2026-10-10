@@ -62,9 +62,11 @@ fn word_start(line: &[u8], i: usize, state: &ScanState) -> bool {
     }
     match line.get(i - 1).copied() {
         Some(b')') => !state.word_active,
+        // A `|` absorbed into a `>|` clobber operator does not break the word.
+        Some(b'|') => !clobber_pipe(line, i - 1),
         _ => matches!(
             line.get(i - 1).copied(),
-            Some(b' ') | Some(b'\t') | Some(b';') | Some(b'\n') | Some(b'|')
+            Some(b' ') | Some(b'\t') | Some(b';') | Some(b'\n')
         ),
     }
 }
@@ -77,11 +79,23 @@ fn precedes_pipe(line: &[u8], i: usize) -> bool {
         k -= 1;
         match line.get(k) {
             Some(&b' ') | Some(b'\t') => continue,
-            Some(b'|') => return true,
+            Some(b'|') => return !clobber_pipe(line, k),
             _ => return false,
         }
     }
     false
+}
+
+/// The `|` at `k` is the byte of a `>|` clobber operator (a `>` sits right
+/// before it), so it is an operator byte, not a pipeline pipe, and it does not
+/// break a word. Callers pass a `k` they have already matched to a `|`. The
+/// `k > 0` guard is the word-start edge: a `|` at the run start has no
+/// preceding byte. The tokenizer absorbs it into the operator word
+/// (`parse/token_pipe.rs`, keyed on the same `>`-terminated operator rule), so
+/// the byte-level scan must see it the same way — the two counts have to agree
+/// (LESSONS: byte-level and token-level rules must agree).
+fn clobber_pipe(line: &[u8], k: usize) -> bool {
+    k > 0 && line.get(k - 1) == Some(&b'>')
 }
 
 #[cfg(test)]

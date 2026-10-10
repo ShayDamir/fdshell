@@ -2,7 +2,7 @@ use crate::error::parse::ParseError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::Report;
+use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
 pub struct BgRedirectResult {
@@ -32,6 +32,10 @@ pub fn parse_bg_redirect(
             bg_force: false,
         }));
     }
+    // `&>|f` is not a background redirect: a `|` after `&>` is the clobber
+    // operator's byte absorbed into this token, and bash rejects it as a
+    // syntax error, so the `|` tail is rejected here.
+    ensure!(!rest.starts_with(b"|"), ParseError::InvalidRedirect);
     let rest_len = rest.len();
     let (path, direction) = if let Some(p) = rest.strip_prefix(b">") {
         (p, RedirectDirection::Append)

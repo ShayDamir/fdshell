@@ -290,6 +290,30 @@ fn operator_count_byte_and_token_levels_agree() {
     }
 }
 
+/// POSIX #2.2 `>|`: the `|` absorbed into a clobber operator is an operator
+/// byte, so it is neither a pipeline position nor a word break. The two counts
+/// must agree on every clobber form, including `cat >| <<EOF` (one operator:
+/// the token-level `<<EOF` is an operator, and the byte scan must not treat the
+/// absorbed `|` as a pipe) and `echo a>|<<EOF` (no operator: the `<<` bytes are
+/// inside one word). A divergence shifts the body regions and the per-command
+/// spec allocation silently.
+#[test]
+fn operator_count_clobber_forms_agree_at_both_levels() {
+    for (line, want) in [
+        (b"cat >| q <<EOF" as &[u8], 1usize),
+        (b"cat >| <<EOF", 1),
+        (b"echo a>|<<EOF", 0),
+        (b"a >| b | <<EOF", 0),
+        (b"cat >| q <<EOF && cat <<A", 2),
+        (b"| <<EOF", 0),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+        assert_eq!(operator_count(&tokens), want, "line={:?}", line);
+    }
+}
+
 #[test]
 fn is_operator_bounds_guard() {
     let line = b"cat <<EOF";

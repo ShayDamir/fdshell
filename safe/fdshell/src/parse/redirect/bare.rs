@@ -1,4 +1,4 @@
-//! Bare redirect operator tokens: `>`, `>>`, `<`, `<>` (with an optional
+//! Bare redirect operator tokens: `>`, `>>`, `<`, `<>`, `>|` (with an optional
 //! numeric fd prefix) as standalone words. Each takes the next token as its
 //! path operand — the token-level counterpart of the bare `<<`/`<<<` forms.
 
@@ -15,15 +15,29 @@ pub(super) fn operator_suffix(s: &ShortCStr) -> Option<ShortCStr> {
     s.get(pos..)
 }
 
+/// Whether `s` is a word whose operator suffix is exactly `>` — i.e. the word
+/// ends at a bare `>` operator, so a `|` right after it is the `>|` clobber
+/// operator's byte, not a pipeline pipe. The tokenizer's `|` absorption rule
+/// and `scan/heredoc/ops.rs`'s byte-level word-break rule are the same byte
+/// rule (LESSONS: byte-level and token-level rules must agree), so both call
+/// this one test.
+pub(crate) fn clobber_prefix(s: &ShortCStr) -> bool {
+    operator_suffix(s).is_some_and(|op| op.eq_bytes(b">"))
+}
+
 /// Whether the token is a bare operator: its suffix from the first `>`/`<`
-/// byte is exactly `>`, `>>`, `<`, or `<>` (an optional all-digit fd prefix
+/// byte is exactly `>`, `>>`, `<>`, `>|` (an optional all-digit fd prefix
 /// precedes it). `>>` and `<>` are bare even though a byte follows the first
 /// operator byte, so "bare" is a suffix test, not an emptiness test.
 pub(super) fn is_bare(s: &ShortCStr) -> bool {
     let Some(op) = operator_suffix(s) else {
         return false;
     };
-    op.eq_bytes(b">") || op.eq_bytes(b">>") || op.eq_bytes(b"<") || op.eq_bytes(b"<>")
+    op.eq_bytes(b">")
+        || op.eq_bytes(b">>")
+        || op.eq_bytes(b"<")
+        || op.eq_bytes(b"<>")
+        || op.eq_bytes(b">|")
 }
 
 /// The bare operator at `i`: its operand is the next token. A non-numeric
@@ -64,10 +78,12 @@ pub(super) fn parse_bare(
 }
 
 /// The direction of a bare operator suffix: `>` writes, `>>` appends, `<`
-/// reads, `<>` reads and writes.
+/// reads, `<>` reads and writes, `>|` clobbers (bypasses `noclobber`).
 fn direction(op: &ShortCStr) -> RedirectDirection {
     if op.eq_bytes(b">>") {
         RedirectDirection::Append
+    } else if op.eq_bytes(b">|") {
+        RedirectDirection::Clobber
     } else if op.eq_bytes(b"<") {
         RedirectDirection::Read
     } else if op.eq_bytes(b">") {

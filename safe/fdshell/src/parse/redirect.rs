@@ -1,4 +1,5 @@
 mod bare;
+pub(crate) use bare::clobber_prefix;
 
 use crate::error::parse::ParseError;
 use crate::parse::Token;
@@ -38,8 +39,8 @@ pub fn parse_redirect(
 }
 
 /// The attached form: the operator byte is followed by its target inside the
-/// same token (`>file`, `2>&1`, `3>%var`). A token whose first `>`/`<` is its
-/// last byte is bare and is handled before this.
+/// same token (`>file`, `2>&1`, `>|file`, `3<%var`). A token whose first
+/// `>`/`<` is its last byte is bare and is handled before this.
 fn attached(s: &ShortCStr, mask: &[bool]) -> Result<Option<RedirectDef>, Report<ParseError>> {
     let bytes = s.as_bytes().change_context(ParseError::Never)?;
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
@@ -61,16 +62,7 @@ fn attached(s: &ShortCStr, mask: &[bool]) -> Result<Option<RedirectDef>, Report<
     if after_op.starts_with(b"&") {
         return super::fd_dup::parse_fd_dup_redirect(&after_op, &prefix, dir);
     }
-    if after_op.starts_with(b"%") {
-        let source = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
-        if let Some(export_to) = parse_fd(&prefix, dir) {
-            Ok(Some(RedirectDef::var(export_to, source)))
-        } else {
-            Ok(None)
-        }
-    } else {
-        parse_path_redirect(s, mask, op_pos, dir, &prefix)
-    }
+    parse_path_redirect(s, mask, op_pos, dir, &prefix)
 }
 
 fn parse_path_redirect(
@@ -86,6 +78,16 @@ fn parse_path_redirect(
     let Some(export_to) = parse_fd(prefix, dir) else {
         return Ok(None);
     };
+    if rest.starts_with(b"%") {
+        let name = rest.get(1..).ok_or(ParseError::InvalidRedirect)?;
+        // The direction is inert for a var source (resolve clones the table fd),
+        // so the operator's direction is kept here only to carry `>|` through.
+        return Ok(Some(RedirectDef {
+            export_to,
+            direction,
+            source: RedirectSource::var(name),
+        }));
+    }
     if let Some(n) = super::fd_path::fd_path_target(&rest) {
         return Ok(Some(RedirectDef::dup(export_to, n)));
     }

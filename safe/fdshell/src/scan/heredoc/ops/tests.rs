@@ -87,3 +87,50 @@ fn quoted_delimiter_keeps_the_pair() {
     assert!(ops[0].strip);
     assert!(!ops[0].quoted);
 }
+
+/// POSIX #2.2 `>|`: the `|` absorbed into the clobber operator is an operator
+/// byte, so it neither breaks a word nor forms a pipeline position. The
+/// token-level agreement of these lines is asserted in
+/// `parse/heredoc/tests.rs` (the byte scan cannot reach the token layer).
+#[test]
+fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
+    // `cat`, `>|`, `q`, `<<EOF` — the `<<` word starts at the space after `q`.
+    let line = b"cat >| q <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
+
+    // The `<<` word starts at the space after the absorbed `>|` token, and the
+    // absorbed `|` is not a pipeline position.
+    let line = b"cat >| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
+
+    // `a>|<<EOF` is one token: no word-break byte precedes the `<<`.
+    let line = b"echo a>|<<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 0);
+
+    // A pipeline pipe that is not `>`-preceded keeps `<<` a command word.
+    let line = b"a | <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 0);
+
+    // The `k == 0` edge: a `|` at the run start (with only whitespace between
+    // it and the `<<`) is a pipeline position, so the `>`-preceded test must
+    // not underflow.
+    let line = b"| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 0);
+
+    // A `>|` at the run start: the absorbed `|` is not a pipeline position (the
+    // `k == 0` guard is not reached, and `clobber_pipe` sees the `>` at k-1),
+    // but the count is 0 for the pre-existing `seen_word` reason — `is_word_break`
+    // ends the word at `>`/`|`, so no command word has been seen. The token
+    // layer counts 1 here; that divergence predates `>|` and is the same class
+    // as the bare `> <<EOF` line.
+    let line = b">| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 0);
+}
