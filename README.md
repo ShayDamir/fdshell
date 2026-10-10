@@ -104,11 +104,12 @@ dirfd-relative in this version and are tracked as follow-up work.
 ## Redirection
 
 Operators: `>` (write), `>>` (append), `<` (read), `<>` (read and write),
-each with an optional numeric fd prefix (`2> file`, `1< file`, `3<> file`;
-no prefix means fd 1 for `>`/`>>` and fd 0 for `<`/`<>`). The operator is
-either attached to its target (`>file.txt`) or space-separated (a bare
-operator takes the next word as its target: `> file.txt`). A bare
-operator's target must be a plain word: not a separator (`;`, `|`) and not
+`>|` (clobber: a write that bypasses `noclobber`), each with an optional
+numeric fd prefix (`2> file`, `1< file`, `3<> file`, `2>|file`;
+no prefix means fd 1 for `>`/`>>`/`>|` and fd 0 for `<`/`<>`). The operator is
+either attached to its target (`>file.txt`, `>|file.txt`) or space-separated (a
+bare operator takes the next word as its target: `> file.txt`, `>| file.txt`). A
+bare operator's target must be a plain word: not a separator (`;`, `|`) and not
 another operator (`>`, `<<`, `&1`, `%var`) — `cmd >` and `cmd > ;` are
 `invalid redirect` parse errors. Targets: a path (globbed like other
 words, with the quote mask applied), `%var` (the variable's fd, attached
@@ -121,6 +122,16 @@ wins** and it is not an error: `echo hi >a >b` writes `hi` to `b` and creates
 `a` empty (the first redirect opened and truncated its target), and
 `cat <f1 <f2` reads `f2`. A failing redirection aborts the command, so the
 order matters: `cat <missing <f2` exits 1 without reading `f2`.
+
+`set -o noclobber` (`shopt -s noclobber`) blocks a `>` write over an existing
+file (`echo hi >f` fails with `cannot overwrite existing file`, and the command
+aborts). `>|` is the bypass: `echo hi >|f` truncates an existing `f`, in the
+attached, bare, fd-prefix (`2>|f`), `%var` (`>|%f`) and `/dev/fd/N` forms, and
+on `exec >|f` (permanent). It opens the file with the same flags as `>` and
+never changes the `noclobber` option, so the next `>` is still blocked.
+`>&|f` is not a clobber form (bash rejects it; fdshell leaves `>&` as a
+non-redirect word and the `|` a pipeline pipe), and `>>|f`, `<|f`, `>||f`,
+`> | f`, `&>|f` and a `>|` with no operand are `invalid redirect` parse errors.
 
 A redirection belongs to the simple command it is written on, and a simple
 command includes a **user-function call** and an **in-process builtin** (`cd`,
@@ -135,6 +146,18 @@ the call). `exec >file` has no command to run, so its redirection stays: the
 shell's fd 1 is the file for the rest of the script. Inside a function body the
 restore applies at the call end, so `f() { exec >a; }; f; echo after >b` leaves
 `a` empty and `b` holding `after`.
+
+Clobber deviations from bash:
+
+- fdshell never breaks a word at an operator byte, so `echo x a>|b` passes the
+  single argument `a>|b` and creates no file (bash breaks the word at `>` and
+  clobbers `b` with `x a`). Same class as the existing `a>b` / `echo 2>&1`
+  word-break deviations.
+- `>|%x` is an fd-variable redirect (fdshell's `%` convention); bash writes to a
+  file named `%x`. `>| %x` (spaced) is an `invalid redirect` operand error, as
+  `> %x` is today.
+- Parse errors exit 1 with `parse error:` on stderr, where bash exits 2 with a
+  syntax error (repo-wide convention).
 
 ## Heredocs
 

@@ -509,3 +509,36 @@ A test that closes fd 2 (e.g. to leave a low fd hole for a scope test) loses its
 panic messages: libtest reports FAILED with an empty failure block, and later
 `eprintln!`/`println!` diagnostics vanish. Reopen fd 2 (`/dev/null`) before the
 remaining assertions.
+
+## A `|` preceded by `>` is the `>|` operator byte, and the byte-level and token-level rules must key on the same test
+POSIX #2.2 `>|` (clobber: a write that bypasses `noclobber`) makes the tokenizer's
+`|` rule load-bearing: a `|` whose current word ends at a `>` operator byte is
+absorbed into that word (`parse/token_pipe.rs::pipe_token`), and the byte-level
+heredoc scan must see the same byte the same way (`scan/heredoc/ops.rs`), or the
+two `<<` counts diverge: `cat >| <<EOF` counts 1 token-level and 0 byte-level
+(`precedes_pipe` hits the absorbed `|`), and `echo a>|<<EOF` counts 1 byte-level
+(the `|` looks like a word break) vs 0 token-level. Both layers now key on one
+test — `bare::clobber_prefix`, "the word's operator suffix is exactly `>`" — so
+the rule cannot drift. Pins: `parse/token/tests.rs::clobber_pipe_absorbed_into_operator`
+and the `parse/heredoc/tests.rs::operator_count_clobber_forms_agree_at_both_levels`
+pair of counts. The corollary is the same as the "bare is a suffix test" rule:
+a `|` separated by whitespace from a bare `>` stays a pipeline pipe (`> | f`),
+and `>>`/`>&`/`<` never absorb a `|` (their suffix is not exactly `>`).
+
+## Model a redirect bypass as a `RedirectDirection` variant, not a flag on the def
+`>|` clobber is the direction `Clobber`: `redirect/open.rs` gates the noclobber
+check on `matches!(r.direction, RedirectDirection::Write)`, so a direction that
+is not `Write` *structurally* cannot be gated, and the bypass needs no change in
+`open.rs`. A `clobber: bool` field on `RedirectDef` would have touched the def
+struct, `insert_redirect`, the `Scope`, and every `RedirectDef` constructor
+(`var`/`dup`/`heredoc`/…), and clearing the `NOCLOBBER` bit during the redirect
+would mutate shell state (the `set -o` / `shopt -q` contract, pinned by
+`tests/shopt.rs`, and reentrancy). The mutation cost of the design is recorded so
+future mutant runs do not re-flag it: `Clobber.open_flags()` shares the
+`Self::Write | Self::Clobber` flag arm, so `bare::direction`'s `Write`→`Clobber`
+mutant (and `redirect_op`'s `Write`→`Clobber`) is **equivalent when noclobber is
+off** — identical flags, identical open path. It is killed only by the noclobber
+tests (`shopt.rs::clobber_bypasses_noclobber_on_an_existing_file` sets the option
+and measures both the `>|` bypass and the `>` control), so the noclobber half of
+the suite is what makes the shared arm observable. `matches!(r.direction, Write)`
+→ matching `Clobber` is killable by the same pair.
