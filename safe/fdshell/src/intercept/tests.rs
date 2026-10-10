@@ -1,7 +1,6 @@
 use super::*;
 use crate::capture::Capture;
 use crate::parse::{BuiltinPrefix, CommandLine};
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -321,23 +320,6 @@ fn try_intercept_export_fd_with_captures_returns_error() {
 }
 
 #[test]
-fn try_intercept_export_fd_with_redirects_returns_error() {
-    let line = make_line("export_fd", &["%tag", "%var"]);
-    let mut cmdline = make_cmdline(b"export_fd", &["%tag", "%var"]);
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(c"test".into()),
-    }];
-    let cell = make_cell();
-    let result = try_intercept(&text(&line), &cmdline, &cell);
-    assert!(
-        result.is_err(),
-        "export_fd with redirects should return an error"
-    );
-}
-
-#[test]
 fn builtin_pos_found_at_correct_position() {
     let line = make_line("builtin envfilter", &["--allow", "PATH"]);
     let mut cmdline = make_cmdline(b"envfilter", &["--allow", "PATH"]);
@@ -391,35 +373,6 @@ fn capture_pos_found_at_correct_position() {
         .unwrap()
         .pos;
     assert_eq!(pos, 18, "%> should be detected at position 18");
-}
-
-#[test]
-fn redirect_pos_found_at_correct_position() {
-    let mut cmdline = make_cmdline(b"envfilter", &["--allow", "PATH"]);
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(c"test".into()),
-    }];
-    let cell = make_cell();
-
-    let result = try_intercept(&text(b"envfilter --allow PATH < input"), &cmdline, &cell);
-    assert!(result.is_err());
-    let e = result.unwrap_err();
-    let pos: usize = e
-        .downcast_ref::<crate::error::parse::ParsePosition>()
-        .unwrap()
-        .pos;
-    assert_eq!(pos, 23, "< should be detected at position 23");
-
-    let result2 = try_intercept(&text(b"cmd > output"), &cmdline, &cell);
-    assert!(result2.is_err());
-    let e2 = result2.unwrap_err();
-    let pos2: usize = e2
-        .downcast_ref::<crate::error::parse::ParsePosition>()
-        .unwrap()
-        .pos;
-    assert_eq!(pos2, 4, "> should be detected at position 4");
 }
 
 #[test]
@@ -575,19 +528,27 @@ fn try_intercept_wait_capture_rejected() {
     ));
 }
 
+/// `run/parent.rs` decides between the parent-side handler and the forked
+/// launch path with `commands::is_intercepted`, so a command added to the
+/// dispatch table must be recognized here, and only the process-replacing
+/// `exec`/`become` family opt out of the redirect scope restore.
 #[test]
-fn try_intercept_wait_redirect_rejected() {
-    let line = make_line("wait", &[]);
-    let mut cmdline = make_cmdline(b"wait", &[]);
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(c"test".into()),
-    }];
-    let cell = make_cell();
-    let report = try_intercept(&text(&line), &cmdline, &cell);
-    assert!(matches!(
-        report.unwrap_err().current_context(),
-        CmdError::RedirectNotSupported { .. }
-    ));
+fn intercepted_commands_are_in_process_except_the_replacers() {
+    for cmd in commands::INTERCEPTED_COMMANDS {
+        assert!(
+            commands::is_intercepted(cmd),
+            "not recognized as intercepted"
+        );
+        assert_eq!(
+            commands::is_in_process(cmd),
+            cmd != b"exec" && cmd != b"become",
+            "in-process set must exclude the process-replacing family",
+        );
+    }
+    // The `quit`/`.` aliases dispatch, and `help` does not list them.
+    assert!(commands::is_intercepted(b"quit") && commands::is_in_process(b"quit"));
+    assert!(commands::is_intercepted(b".") && commands::is_in_process(b"."));
+    // A command word the dispatch table does not handle goes to the child.
+    assert!(!commands::is_intercepted(b"echo"));
+    assert!(!commands::is_intercepted(b"true"));
 }

@@ -1,7 +1,6 @@
 use super::*;
 use crate::capture::Capture;
 use crate::parse::{BuiltinPrefix, CommandLine};
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::ShortCStr;
@@ -215,25 +214,6 @@ fn captures_not_supported() {
     assert!(matches!(
         report.current_context(),
         CmdError::CapturesNotSupported { .. }
-    ));
-}
-
-#[test]
-fn redirects_not_supported() {
-    let line = make_line(&["envfilter", "--allow", "PATH"]);
-    let mut cmdline = make_cmdline(&["--allow", "PATH"]);
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(c"test".into()),
-    }];
-    let cell = make_cell();
-    let result = run_envfilter(&line, &cmdline, &cell);
-    assert!(result.is_err());
-    let report = result.unwrap_err();
-    assert!(matches!(
-        report.current_context(),
-        CmdError::RedirectNotSupported { .. }
     ));
 }
 

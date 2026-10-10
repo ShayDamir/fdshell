@@ -4,7 +4,6 @@ use super::read_from_fd::read_line_from_fd;
 use super::*;
 use crate::capture::Capture;
 use crate::parse::{BuiltinPrefix, CommandLine};
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::ToString;
 use alloc::vec;
@@ -1083,26 +1082,6 @@ fn run_read_captures_not_supported() {
     assert!(matches!(
         report.current_context(),
         CmdError::CapturesNotSupported { .. }
-    ));
-}
-
-#[test]
-fn run_read_redirects_not_supported() {
-    let line = make_read_line(&["read", "var1"]);
-    let cmdline = make_read_cmdline(&[c"var1".into()]);
-    let mut cmdline = cmdline;
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(c"test".into()),
-    }];
-    let cell = make_read_cell();
-    let result = run_read(&line, &cmdline, &text(&line), &cell);
-    assert!(result.is_err());
-    let report = result.unwrap_err();
-    assert!(matches!(
-        report.current_context(),
-        CmdError::RedirectNotSupported { .. }
     ));
 }
 

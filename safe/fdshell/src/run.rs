@@ -6,6 +6,8 @@ use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 
+mod parent;
+
 pub(crate) fn run_one(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
@@ -20,7 +22,7 @@ pub(crate) fn run_one(
             // applies it itself after arg substitution).
             let env = crate::run_env::expand(cmdline, &text, cell)?;
             let save = crate::run_env::apply(&env, cell)?;
-            let control = match parent_command(&text, cmdline, cell) {
+            let control = match parent::run_parent(&text, cmdline, cell) {
                 Ok(control) => {
                     crate::run_env::restore(save, cell)?;
                     control
@@ -77,19 +79,4 @@ pub(crate) fn run_one(
         crate::parse::ParsedLine::Wait(waitblock) => crate::wait::run_wait(waitblock, cell),
         _ => crate::run_dispatch::run_simple(&parsed, &text, cell),
     }
-}
-
-/// The parent-side handlers of a command (a user function shadows builtins
-/// and interceptors, as in bash; a `builtin` prefix bypasses the function
-/// lookup), run inside the scoped-assignment window. `None` when neither
-/// handled the command.
-fn parent_command(
-    text: &ScriptText,
-    cmdline: &crate::parse::CommandLine,
-    cell: &ForkCell<ShellState>,
-) -> Result<Option<Option<LoopControl>>, Report<CmdError>> {
-    if let Some(control) = crate::function_call::try_call(text, cmdline, cell)? {
-        return Ok(Some(control));
-    }
-    crate::intercept::try_intercept(text, cmdline, cell)
 }

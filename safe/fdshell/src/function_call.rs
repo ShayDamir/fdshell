@@ -3,25 +3,19 @@ use crate::loop_control::LoopControl;
 use crate::parse::BuiltinPrefix;
 use crate::state::ShellState;
 use alloc::collections::VecDeque;
-use error_stack::{Report, ResultExt, ensure};
+use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ScriptText, ShortCStr, Trace};
 
-/// Run `cmdline` if its command names a user-defined function, executing the
-/// body in this shell. Arguments replace the positional parameters for the
-/// duration of the call. Returns `None` when the command is not a function.
-pub(crate) fn try_call(
+/// Run a user function call, executing `body` in this shell. Arguments replace
+/// the positional parameters for the duration of the call. `look_up` resolves
+/// the body once in the caller, which owns the command's redirect scope.
+pub(crate) fn call(
     text: &ScriptText,
     cmdline: &crate::parse::CommandLine,
+    body: &ShortCStr,
     cell: &ForkCell<ShellState>,
-) -> Result<Option<Option<LoopControl>>, Report<CmdError>> {
-    let Some(body) = look_up(cmdline, cell)? else {
-        return Ok(None);
-    };
-    ensure!(
-        cmdline.redirects.is_empty(),
-        CmdError::FunctionRedirectNotSupported
-    );
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let substituted = crate::substitute::substitute_args(
         &cmdline.args,
         &cmdline.args_mask,
@@ -31,7 +25,7 @@ pub(crate) fn try_call(
     .change_context(CmdError::Resolve)?;
     let saved = swap_positional(cell, &cmdline.command, &substituted, text)?;
     crate::state::frames::push_frame(cell)?;
-    let script = ScriptText::new(body, text.start, text.origin.clone());
+    let script = ScriptText::new(body.clone(), text.start, text.origin.clone());
     let result = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
         crate::script::run_script(&script, cell)
     });
@@ -43,12 +37,12 @@ pub(crate) fn try_call(
     if matches!(control, Some(LoopControl::Return)) {
         control = None;
     }
-    Ok(Some(control))
+    Ok(control)
 }
 
 /// The stored body of the function named by `cmdline`, or `None`. A
 /// `builtin`/`command` prefix bypasses function lookup.
-fn look_up(
+pub(crate) fn look_up(
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<ShortCStr>, Report<CmdError>> {

@@ -4,7 +4,6 @@ use crate::capture::Capture;
 use crate::error::cmd::CmdError;
 use crate::error::parse::ParsePosition;
 use crate::parse::BuiltinPrefix;
-use crate::redirect::RedirectDef;
 
 pub(crate) fn err_at(line: &[u8], pos: usize, err: CmdError) -> Report<CmdError> {
     Report::new(err).attach_opaque(ParsePosition {
@@ -21,10 +20,6 @@ fn is_capture(w: &[u8]) -> bool {
     w == b"%>"
 }
 
-fn is_redirect(b: &u8) -> bool {
-    *b == b'<' || *b == b'>'
-}
-
 pub(crate) fn check_builtin_not_supported(
     line: &[u8],
     command: &'static str,
@@ -37,23 +32,21 @@ pub(crate) fn check_builtin_not_supported(
     reject_at(line, pos, CmdError::BuiltinKeywordNotSupported { command })
 }
 
-/// Reject the capture (`%>`) and redirection extras an intercepted builtin does
-/// not support; captures are reported first when both are present.
-pub(crate) fn check_extras_not_supported(
+/// Reject the capture (`%>`) extra an intercepted builtin does not support. A
+/// capture needs a forked child to send the fd over the shell socket
+/// (`capture.rs::do_captures` reads from the child-end socketpair), so it stays
+/// a genuine design limit for in-process commands; their redirections are
+/// applied by `redirect::Scope` in `run/parent.rs`.
+pub(crate) fn check_captures_not_supported(
     line: &[u8],
     command: &'static str,
     captures: &[Capture],
-    redirects: &[RedirectDef],
 ) -> Result<(), Report<CmdError>> {
-    if !captures.is_empty() {
-        let pos = line.windows(2).position(is_capture).unwrap_or(0);
-        return reject_at(line, pos, CmdError::CapturesNotSupported { command });
+    if captures.is_empty() {
+        return Ok(());
     }
-    if !redirects.is_empty() {
-        let pos = line.iter().position(is_redirect).unwrap_or(0);
-        return reject_at(line, pos, CmdError::RedirectNotSupported { command });
-    }
-    Ok(())
+    let pos = line.windows(2).position(is_capture).unwrap_or(0);
+    reject_at(line, pos, CmdError::CapturesNotSupported { command })
 }
 
 fn reject_at(line: &[u8], pos: usize, err: CmdError) -> Result<(), Report<CmdError>> {
@@ -69,10 +62,13 @@ pub(crate) fn validate_intercept(
     validate_intercept_no_builtin(line, command, cmdline)
 }
 
+/// The same check without the `builtin`/`command` keyword arm. The split is
+/// load-bearing: `builtin local`/`builtin let`/`builtin times`/`builtin wait`/
+/// `builtin export_fd` are accepted, `builtin cd`/`builtin eval` are rejected.
 pub(crate) fn validate_intercept_no_builtin(
     line: &[u8],
     command: &'static str,
     cmdline: &crate::parse::CommandLine,
 ) -> Result<(), Report<CmdError>> {
-    check_extras_not_supported(line, command, &cmdline.captures, &cmdline.redirects)
+    check_captures_not_supported(line, command, &cmdline.captures)
 }

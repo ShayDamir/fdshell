@@ -2,7 +2,6 @@
 use super::*;
 use crate::capture::Capture;
 use crate::parse::{BuiltinPrefix, CommandLine};
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use crate::state::frames::{pop_frame, push_frame};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -132,22 +131,6 @@ fn value_is_expanded_without_splitting_or_glob() {
     assert!(run(&["x=*", "y=$v"], &cell).unwrap());
     assert_eq!(stored(&cell, &s(b"x")), Some(s(b"*")));
     assert_eq!(stored(&cell, &s(b"y")), Some(s(b"a b")));
-}
-
-#[test]
-fn redirects_are_rejected() {
-    let cell = make_cell();
-    let mut cmdline = make_cmdline(&["v=1"]);
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(s(b"out")),
-    }];
-    let report = run_local(&make_line(&["v=1"]), &cmdline, &text(b"local v=1"), &cell).unwrap_err();
-    assert!(matches!(
-        report.current_context(),
-        CmdError::RedirectNotSupported { .. }
-    ));
 }
 
 #[test]

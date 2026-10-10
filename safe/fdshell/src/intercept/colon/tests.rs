@@ -32,3 +32,23 @@ fn run_colon_is_handled_and_sets_zero() {
     let state = cell.borrow().unwrap();
     assert_eq!(state.last_status.exit_code(), 0);
 }
+
+/// `:` is an intercept, so a capture stays rejected (`CapturesNotSupported`):
+/// a capture needs a forked child to send the fd over the shell socket.
+#[test]
+fn captures_are_rejected() {
+    let cell = ForkCell::new(ShellState::new());
+    let mut cmdline = make_cmdline();
+    cmdline.captures = vec![crate::capture::Capture {
+        var: c"x".into(),
+        tag: None,
+        force: false,
+        cap: None,
+        set_at: sys::Position::new(1, 1),
+    }];
+    let report = run_colon(b": %>%x", &cmdline, &cell).unwrap_err();
+    assert!(matches!(
+        report.current_context(),
+        crate::error::cmd::CmdError::CapturesNotSupported { .. }
+    ));
+}

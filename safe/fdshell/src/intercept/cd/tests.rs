@@ -2,7 +2,6 @@ use super::*;
 use crate::capture::Capture;
 use crate::cd::cd;
 use crate::parse::{BuiltinPrefix, CommandLine};
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::Origin;
@@ -146,25 +145,5 @@ fn cd_captures_not_supported() {
     assert!(matches!(
         report.current_context(),
         CmdError::CapturesNotSupported { .. }
-    ));
-}
-
-#[test]
-fn cd_redirects_not_supported() {
-    let line = make_line(&["cd", "/tmp"]);
-    let cmdline = make_cmdline(&["/tmp"]);
-    let mut cmdline = cmdline;
-    cmdline.redirects = vec![RedirectDef {
-        export_to: 1,
-        direction: RedirectDirection::Write,
-        source: RedirectSource::Var(c"test".into()),
-    }];
-    let cell = make_cell();
-    let result = run_cd(&line, &cmdline, &text(&line), &cell);
-    assert!(result.is_err());
-    let report = result.unwrap_err();
-    assert!(matches!(
-        report.current_context(),
-        CmdError::RedirectNotSupported { .. }
     ));
 }

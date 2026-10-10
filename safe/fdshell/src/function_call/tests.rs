@@ -5,8 +5,12 @@ use sys::fork_cell::ForkCell;
 use sys::{Origin, Position, ScriptText, ShortCStr};
 
 use crate::error::cmd::CmdError;
+use crate::loop_control::LoopControl;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
+use error_stack::Report;
+
+use super::{call, look_up};
 
 fn text(b: &[u8]) -> ScriptText {
     ScriptText::new(
@@ -36,10 +40,24 @@ fn make_cell() -> ForkCell<ShellState> {
     ForkCell::new(ShellState::new())
 }
 
+/// The parent-side path of a function call: `look_up` the body, then `call` it
+/// (the caller owns the redirect scope, so the tests drive the two steps the
+/// way `run/parent.rs` does).
+fn try_call(
+    text: &ScriptText,
+    cmdline: &CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<Option<LoopControl>>, Report<CmdError>> {
+    match look_up(cmdline, cell).unwrap() {
+        Some(body) => call(text, cmdline, &body, cell).map(Some),
+        None => Ok(None),
+    }
+}
+
 #[test]
 fn unknown_command_is_not_intercepted() {
     let cell = make_cell();
-    let r = crate::function_call::try_call(&text(b"ls"), &cmdline(b"ls"), &cell).unwrap();
+    let r = try_call(&text(b"ls"), &cmdline(b"ls"), &cell).unwrap();
     assert!(r.is_none());
 }
 
@@ -47,7 +65,7 @@ fn unknown_command_is_not_intercepted() {
 fn defined_function_is_intercepted_and_runs_body() {
     let cell = make_cell();
     crate::script::run_script(&text(b"f() { v=hi; }"), &cell).unwrap();
-    let r = crate::function_call::try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
+    let r = try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
     assert!(r.is_some());
     let state = cell.borrow().unwrap();
     assert_eq!(
@@ -65,7 +83,7 @@ fn builtin_prefix_bypasses_function() {
     crate::script::run_script(&text(b"f() { v=hi; }"), &cell).unwrap();
     let mut cl = cmdline(b"f");
     cl.prefix = BuiltinPrefix::Builtin;
-    let r = crate::function_call::try_call(&text(b"builtin f"), &cl, &cell).unwrap();
+    let r = try_call(&text(b"builtin f"), &cl, &cell).unwrap();
     assert!(r.is_none());
 }
 
@@ -75,7 +93,7 @@ fn command_prefix_bypasses_function() {
     crate::script::run_script(&text(b"f() { v=hi; }"), &cell).unwrap();
     let mut cl = cmdline(b"f");
     cl.prefix = BuiltinPrefix::Command;
-    let r = crate::function_call::try_call(&text(b"command f"), &cl, &cell).unwrap();
+    let r = try_call(&text(b"command f"), &cl, &cell).unwrap();
     assert!(r.is_none());
 }
 
@@ -83,7 +101,7 @@ fn command_prefix_bypasses_function() {
 fn local_variable_does_not_leak_into_the_caller() {
     let cell = make_cell();
     crate::script::run_script(&text(b"v=pre; f() { local v=1; }"), &cell).unwrap();
-    let r = crate::function_call::try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
+    let r = try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
     assert!(r.is_some());
     assert_eq!(strings(&cell, b"v"), Some(c"pre".into()));
 }
@@ -92,7 +110,7 @@ fn local_variable_does_not_leak_into_the_caller() {
 fn failed_body_restores_the_frame() {
     let cell = make_cell();
     crate::script::run_script(&text(b"v=pre; f() { local v=1; local %x=1; }"), &cell).unwrap();
-    let report = crate::function_call::try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap_err();
+    let report = try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap_err();
     assert!(matches!(
         report.current_context(),
         CmdError::LocalBadName { .. }
@@ -105,7 +123,7 @@ fn failed_body_restores_the_frame() {
 fn return_in_body_restores_the_frame() {
     let cell = make_cell();
     crate::script::run_script(&text(b"v=pre; f() { local v=1; return 3; }"), &cell).unwrap();
-    let r = crate::function_call::try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
+    let r = try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
     assert!(r.is_some());
     assert_eq!(strings(&cell, b"v"), Some(c"pre".into()));
     assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 3);
@@ -119,7 +137,7 @@ fn nested_calls_restore_the_inner_frame() {
         &cell,
     )
     .unwrap();
-    crate::function_call::try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
+    try_call(&text(b"f"), &cmdline(b"f"), &cell).unwrap();
     assert_eq!(strings(&cell, b"v"), Some(c"pre".into()));
     assert!(!cell.borrow().unwrap().in_frame());
 }

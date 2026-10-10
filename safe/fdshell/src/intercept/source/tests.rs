@@ -131,19 +131,6 @@ fn run_source_with_captures_fails() {
 }
 
 #[test]
-fn run_source_with_redirects_fails() {
-    let (_tmp, path) = TempFile::new("redirects", b"A=1\n");
-    let mut cmdline = make_cmdline(b"source", &[&path]);
-    cmdline.redirects = vec![crate::redirect::RedirectDef {
-        export_to: 1,
-        direction: crate::redirect::RedirectDirection::Write,
-        source: crate::redirect::RedirectSource::Var(c"out".into()),
-    }];
-    let cell = make_cell();
-    assert!(run_source(b"source f", &cmdline, &text(b"source f"), &cell).is_err());
-}
-
-#[test]
 fn run_source_with_builtin_prefix_fails() {
     let (_tmp, path) = TempFile::new("builtin", b"A=1\n");
     let mut cmdline = make_cmdline(b"source", &[&path]);

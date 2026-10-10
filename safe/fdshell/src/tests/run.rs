@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use alloc::format;
 use alloc::vec::Vec;
 
 use crate::error::cmd::CmdError;
@@ -2206,4 +2207,24 @@ fn unclosed_function_brace_is_parse_error() {
     let cell = make_cell();
     let e = run_script(b"foo() { a=1", &cell).unwrap_err();
     assert!(matches!(e.current_context(), CmdError::Parse));
+}
+
+/// POSIX #2.4 on the parent-side handler: `cd` runs in the shell, its
+/// redirection is applied by `redirect::Scope`, and the shell's fd 1 comes back
+/// when the command finishes, so the next command writes to the original stdout.
+/// The `cd` itself persists (a scoped redirect does not undo the builtin).
+#[test]
+fn in_process_command_applies_its_redirect_and_is_restored() {
+    let path = std::env::temp_dir().join(format!("fdshell_scope_cd_{}", std::process::id()));
+    let cmd = format!("cd /tmp > {}", path.to_str().unwrap());
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        run_one(cmd.as_bytes(), &cell).unwrap();
+        run_one(b"pwd", &cell).unwrap();
+        run_one(b"echo after", &cell).unwrap();
+    });
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(body, "");
+    assert_eq!(out, b"/tmp\nafter\n");
 }

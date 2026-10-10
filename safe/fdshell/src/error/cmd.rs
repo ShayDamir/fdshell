@@ -9,8 +9,6 @@ pub enum CmdError {
     ExitArgInvalid,
     /// {command}: captures are not supported
     CapturesNotSupported { command: &'static str },
-    /// {command}: redirects are not supported
-    RedirectNotSupported { command: &'static str },
     /// {command}: `builtin`/`command` prefix is not supported
     BuiltinKeywordNotSupported { command: &'static str },
     /// parse error
@@ -77,8 +75,6 @@ pub enum CmdError {
     NotAnArray { name: sys::ShortCStr },
     /// {name}[{index}]: index out of range
     ArrayIndexOutOfRange { name: sys::ShortCStr, index: usize },
-    /// redirections on a function call are not supported
-    FunctionRedirectNotSupported,
     /// {0} {1}: '{2}' is not a byte count
     CaptureLimitBad(&'static str, &'static str, sys::ShortCStr),
     /// hash: bad usage (hash [-r] [name [path]])
