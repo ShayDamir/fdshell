@@ -46,6 +46,16 @@ pub(crate) enum ParseError {
     FunctionEmptyName,
     /// function definition is missing a closing brace
     FunctionMissingCloseBrace,
+    /// group is missing a closing brace
+    GroupMissingCloseBrace,
+    /// group is empty
+    GroupEmpty,
+    /// expected ';' before '}}'
+    ExpectedSemicolonBeforeCloseBrace,
+    /// group: unexpected word after '}}'
+    GroupTrailingWord,
+    /// group: here-doc on a group is not supported
+    GroupHereDocNotSupported,
     /// expected ';' before 'done'
     ExpectedSemicolonBeforeDone,
     /// expected command
@@ -70,6 +80,8 @@ pub(crate) enum ParseError {
     ExpectedWordList,
     /// malformed case block
     MalformedCaseBlock,
+    /// malformed group block
+    MalformedGroupBlock,
     /// malformed if block
     MalformedIfBlock,
     /// missing condition

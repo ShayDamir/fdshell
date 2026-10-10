@@ -145,3 +145,27 @@ fn balanced_substitution_across_lines_is_complete() {
 fn empty_line_is_complete() {
     assert!(is_complete(b""));
 }
+
+/// A `{ …; }` group: an unclosed group keeps the REPL reading lines; a closed
+/// one (with its trailing redirection, `&&`, or here-doc body) is complete.
+#[test]
+fn group_open_and_closed() {
+    assert!(!is_complete(b"{ echo a"));
+    assert!(!is_complete(b"{ cat <<EOF"));
+    assert!(!is_complete(b"{ echo a; } &&"));
+    assert!(is_complete(b"{ echo a; }"));
+    assert!(is_complete(b"{ echo a\n}"));
+    assert!(is_complete(b"{ echo a; } > out"));
+    assert!(is_complete(b"{ cat <<EOF\nhi\nEOF\n; }"));
+    assert!(is_complete(b"{ { echo n; }; }"));
+    assert!(!is_complete(b"{ { echo n; }"));
+}
+
+/// A group inside a keyword block nets out of the depth: the `if` still needs
+/// its `fi`, and the braces do not close it early.
+#[test]
+fn group_inside_block_needs_its_closing_keyword() {
+    assert!(!is_complete(b"if true; then { echo a; }"));
+    assert!(is_complete(b"if true; then { echo a; }; fi"));
+    assert!(!is_complete(b"if true; then { echo a; };"));
+}

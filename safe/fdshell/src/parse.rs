@@ -23,6 +23,7 @@ mod fd_dup;
 mod fd_path;
 pub(crate) mod for_block;
 pub(crate) mod function_block;
+pub(crate) mod group_block;
 mod here_string;
 mod heredoc;
 pub(crate) mod if_block;

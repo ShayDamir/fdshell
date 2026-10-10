@@ -1,11 +1,14 @@
-use super::{Token, case_block, for_block, function_block, if_block, wait_block, while_block};
+use super::{
+    Token, case_block, for_block, function_block, group_block, if_block, wait_block, while_block,
+};
 use crate::error::parse::ParseError;
 use crate::parse::line::ParsedLine;
 use error_stack::Report;
 use sys::ScriptText;
 
 /// Dispatch on a `name() { … }` opener or a leading block keyword
-/// (`case`/`if`/`for`/`while`/`until`), returning `None` for an ordinary command.
+/// (`{`/`case`/`if`/`for`/`while`/`until`), returning `None` for an ordinary
+/// command.
 pub(super) fn dispatch_keyword(
     raw: &[Token],
     text: &ScriptText,
@@ -16,6 +19,11 @@ pub(super) fn dispatch_keyword(
         )));
     }
     let is = |kw: &[u8]| raw.first().is_some_and(|(t, _, _, _, _)| t.eq_bytes(kw));
+    if is(b"{") {
+        return Ok(Some(ParsedLine::Group(group_block::tokens_to_group(
+            raw, text,
+        )?)));
+    }
     if is(b"case") {
         return Ok(Some(ParsedLine::Case(case_block::tokens_to_case(
             raw, text,

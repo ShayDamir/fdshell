@@ -28,6 +28,7 @@ mod exports;
 mod for_run;
 mod function_call;
 mod glob;
+mod group_exec;
 mod if_exec;
 mod init;
 mod intercept;

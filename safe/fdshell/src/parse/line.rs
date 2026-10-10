@@ -1,6 +1,7 @@
 use crate::parse::case_block::CaseBlock;
 use crate::parse::for_block::ForBlock;
 use crate::parse::function_block::FunctionDef;
+use crate::parse::group_block::GroupBlock;
 use crate::parse::if_block::IfBlock;
 use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
@@ -44,6 +45,9 @@ pub enum ParsedLine {
         source: ShortCStr,
     },
     Umask(Option<u32>),
+    /// The `{ …; }` group command: the body text and the redirections written
+    /// after the closing brace.
+    Group(GroupBlock),
     Case(CaseBlock),
     If(IfBlock),
     Wait(WaitBlock),
