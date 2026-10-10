@@ -316,6 +316,11 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
         (b"cat a>b>| <<EOF", 0),
         (b"cat x\\>a>| <<EOF", 1),
         (b"cat \"a>\"x\\y>| <<EOF", 1),
+        // The escape pair is skipped only outside quotes: inside `"a\>"` the `>`
+        // stays quoted, so the word ends at the real `>` after `x` and the `|`
+        // is absorbed. A pair skip inside quotes would read the quoted `>` as an
+        // unquoted operator byte and count 0.
+        (b"cat \"a\\>\"x>| <<EOF", 1),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

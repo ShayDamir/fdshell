@@ -171,4 +171,13 @@ fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops.len(), 1);
     assert_eq!(ops[0].delim, b"EOF");
+
+    // The escape pair is skipped only outside quotes: inside `"a\>"` the `>` is
+    // quoted, so the word runs to the real `>` after `x` and the `|` is
+    // absorbed (count 1 at both levels). Skipping the pair inside quotes would
+    // make the quoted `>` an unquoted operator byte and count 0.
+    let line = b"cat \"a\\>\"x>| <<EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
 }

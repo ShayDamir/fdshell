@@ -2,8 +2,8 @@
 //! (POSIX #2.2), shared by the tokenizer's `|` absorption
 //! (`parse/token_pipe.rs`) and the byte-level heredoc word scan
 //! (`scan/heredoc/ops.rs`): the two layers decide raw-byte structure from the
-//! same predicate, so their counts cannot diverge (LESSONS: byte-level and
-//! token-level rules must agree).
+//! same predicate over the word's raw bytes + quote mask, so their `<<` counts
+//! cannot diverge (LESSONS: byte-level and token-level rules must agree).
 
 use alloc::vec::Vec;
 
@@ -38,24 +38,27 @@ pub(crate) fn clobber_word(bytes: &[u8], quoted: &[bool]) -> bool {
 }
 
 /// Per-byte double-quote mask of `line[0..e]`: `true` for a byte inside `"…"`.
-/// The quote delimiters and the bytes of an unquoted escape pair are `false`.
-/// It is scanned from the line start, so a word's mask slice knows the quote
-/// state at the word's first byte.
+/// The quote delimiters and the bytes of an unquoted escape pair are `false`,
+/// and the mask is parallel to the bytes. It is scanned from the line start, so
+/// a word's mask slice knows the quote state at its first byte (a word that
+/// begins with the closing `"` of a quoted span is the case that a word-local
+/// scan gets wrong).
 pub(crate) fn quote_mask(line: &[u8], e: usize) -> Vec<bool> {
     let mut mask = Vec::new();
     let mut in_quote = false;
     let mut i = 0;
     while i < e {
-        let Some(&b) = line.get(i) else { break };
         mask.push(in_quote);
-        if b == b'"' {
-            in_quote = !in_quote;
-            i += 1;
-        } else if b == b'\\' && !in_quote {
-            mask.push(in_quote);
-            i += 2;
-        } else {
-            i += 1;
+        match line.get(i) {
+            Some(b'"') => {
+                in_quote = !in_quote;
+                i += 1;
+            }
+            Some(b'\\') if !in_quote => {
+                mask.push(false);
+                i += 2;
+            }
+            _ => i += 1,
         }
     }
     mask
@@ -67,8 +70,7 @@ pub(crate) fn quote_mask(line: &[u8], e: usize) -> Vec<bool> {
 /// at `k - 1`, back to a byte that ends a word: whitespace, `;`, newline, or
 /// `)` — `scan::advance::is_word_break` without `|`, `<` and `>`, because an
 /// absorbed `|` is part of the operator word and operator bytes never break a
-/// word (as in the tokenizer). The mask slice is the word's bytes of the
-/// full-prefix quote mask, so the word's quote state is aligned with the line.
+/// word (as in the tokenizer).
 pub(crate) fn clobber_pipe(line: &[u8], k: usize) -> bool {
     let mask = quote_mask(line, k);
     let mut s = k;
