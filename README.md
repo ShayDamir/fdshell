@@ -122,6 +122,20 @@ wins** and it is not an error: `echo hi >a >b` writes `hi` to `b` and creates
 `cat <f1 <f2` reads `f2`. A failing redirection aborts the command, so the
 order matters: `cat <missing <f2` exits 1 without reading `f2`.
 
+A redirection belongs to the simple command it is written on, and a simple
+command includes a **user-function call** and an **in-process builtin** (`cd`,
+`eval`, `source`, `local`, `shift`, `times`, `timeout`, `:`, …). For those the
+shell applies the redirections to its own fds before the command runs and puts
+the fds back when it finishes, in reverse order, so the shell's fds survive the
+command: `f() { echo in-f; }; f >a; echo after >b` writes `in-f` to `a` and
+`after` to `b`, and `cd /tmp >a` creates `a` in the pre-`cd` directory while the
+`cd` itself persists. A `N>&-` target is closed for the command and reopened at
+the restore (`f >a 3>&-` runs with fd 3 closed, and fd 3 is usable again after
+the call). `exec >file` has no command to run, so its redirection stays: the
+shell's fd 1 is the file for the rest of the script. Inside a function body the
+restore applies at the call end, so `f() { exec >a; }; f; echo after >b` leaves
+`a` empty and `b` holding `after`.
+
 ## Heredocs
 
 A here-doc feeds a command's stdin from the script body: the lines after the
@@ -422,8 +436,22 @@ Accepted divergences from bash:
   substitution in a function; bash refuses it in a subshell.
 - a user function named `local` shadows the builtin (fdshell resolves functions
   before intercepts, as it does for every other command word).
-- redirects/captures on `local` are rejected (`RedirectNotSupported` /
-  `CapturesNotSupported`), as for every other intercepted builtin.
+- redirects on `local` are applied for the command (and restored when it
+  finishes); captures on it are rejected (`CapturesNotSupported`), as for every
+  other intercepted builtin.
+- captures (`%>%x`) on the in-process commands stay rejected, while their
+  redirections are applied: a capture needs a forked child to send the fd over
+  the shell socket, and these commands do not fork.
+- a redirection on a **function definition** is not stored and not applied:
+  `f() { echo x; } > a` parses `> a` as its own command word (rc 1,
+  `">" not found`) where bash applies it to the definition; `2> a` after the
+  closing brace behaves the same. The same holds for a scoped assignment
+  (`a=1 > a` → the redirect word becomes a command) and for `unset`/`umask`,
+  whose redirect word is read as a keyword argument (parse error, rc 1).
+- within one command `> a 2>&1` copies the fd 1 the shell had **before** the
+  command: every redirect source is resolved up front, so `2>&1` cannot see the
+  `> a` target. Bash applies as it goes and `2>&1` lands on the file `a`
+  (tracked by task #183).
 - `local NAME` (no `=`) leaves the variable unset for the call, and `local`
   outside a function is an error (rc 1), as bash.
 - `${}` (an empty name) stays literal (`echo "[${}]"` → `[${}]`); bash rejects

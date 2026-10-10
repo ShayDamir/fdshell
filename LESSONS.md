@@ -441,3 +441,32 @@ Pinning an expansion that can be empty needs the assignment form: `r0=${v##a*}; 
 
 ## POSIX redirect order is observable at the filesystem: pin the created-empty-file fact
 `echo hi >a >b` does not merely write `hi` to `b`; the first redirect **opens and truncates `a`**, so `a` exists and is empty. bash 5.3.9 measures exactly that, and so does fdshell once every entry is kept. A last-wins design that deletes the earlier entry at parse time passes the "b contains hi" test and fails `a`-exists, `cat <missing <f2` (rc 1 — the earlier open aborts the command), `set -o noclobber; echo hi >x >y` (rc 1, `y` absent, because the first target blocks) and `set -o noclobber; echo hi >y >x` (rc 1, `y` created empty). Rule: when a spec says "all of them take effect", test the *side effects of the losers*, not only the winner's output — integration tests must read the files the earlier redirects created (`tests/redirect.rs::duplicate_write_redirect_last_wins_and_first_is_created`, `noclobber_duplicate_write_first_target_blocks`).
+
+## A command's fds must be saved above every redirect target of that command
+Saving a target fd with `dup_cloexec` returns the **lowest** free fd, which can
+be a hole below a later target; the next `dup2` (e.g. `2>&1`) closes its target
+fd and clobbers the saved copy, so the restore resurrects the wrong fd. Fix:
+`try_dup_above(max_target + 1)` — the same rule the redirect sources already
+follow (`resolve_redirects`' `min_fd`). A closed target saves as `None`.
+
+## The redirect scope restores in reverse apply order, on every exit path
+The last redirection to a fd is its winner, so restoring forward leaves the
+loser in charge. `Scope::restore` iterates `saved.iter().rev()`, exports the
+copy (`Drop` closes it) and closes a `None` target. Like `run_env::restore`, the
+restore runs on the success path with `?` and on the handler's error path as
+`let _ =` (the handler's report is the actionable error).
+
+## `exec`/`become` must opt out of the redirect scope restore
+They replace the process image, so `exec >file` stays permanent. `run/parent.rs`
+gates on `is_in_process` (the intercepted set minus the process-replacing
+family), so the in-process set and the dispatch table must stay in sync:
+`is_intercepted` includes the `quit`/`.` aliases that `INTERCEPTED_COMMANDS`
+(`help`) does not list; a dispatch-table word missing from the set is silently
+sent to the forked launch path. Pinned by
+`intercept/tests.rs::intercepted_commands_are_in_process_except_the_replacers`.
+
+## Closing fd 2 in a test silences the harness
+A test that closes fd 2 (e.g. to leave a low fd hole for a scope test) loses its
+panic messages: libtest reports FAILED with an empty failure block, and later
+`eprintln!`/`println!` diagnostics vanish. Reopen fd 2 (`/dev/null`) before the
+remaining assertions.
