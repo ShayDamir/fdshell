@@ -38,7 +38,11 @@ fn definer_shapes_agree() {
         ("function f ( ) { echo paren; }; f", "paren\n"),
     ] {
         let (out, err, rc) = run(script);
-        assert_eq!((out.as_str(), err.as_str(), rc), (want, "", 0), "script={script}");
+        assert_eq!(
+            (out.as_str(), err.as_str(), rc),
+            (want, "", 0),
+            "script={script}"
+        );
     }
 }
 
@@ -97,7 +101,10 @@ fn function_keyword_is_not_aliased() {
 #[test]
 fn type_reports_the_keyword_definition() {
     let (out, err, rc) = run("function f { echo hi; }; type f");
-    assert_eq!((out.as_str(), err.as_str(), rc), ("f is a shell function\n", "", 0));
+    assert_eq!(
+        (out.as_str(), err.as_str(), rc),
+        ("f is a shell function\n", "", 0)
+    );
 }
 
 /// `function f` with no brace on the line claims an open block, and the missing
@@ -120,7 +127,10 @@ fn keyword_form_without_a_brace_is_a_parse_error() {
 fn keyword_form_without_a_definer_name_is_a_command() {
     let (out, err, rc) = run("function f(x) { echo hi; }; f");
     assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains(r#"failed to resolve command path: "function""#), "stderr={err}");
+    assert!(
+        err.contains(r#"failed to resolve command path: "function""#),
+        "stderr={err}"
+    );
     assert!(err.contains(r#""function" not found"#), "stderr={err}");
     assert!(err.contains(r#""}" not found"#), "stderr={err}");
     assert!(err.contains(r#""f" not found"#), "stderr={err}");
@@ -182,7 +192,10 @@ fn glued_brace_after_the_name_is_not_a_block() {
 #[test]
 fn function_words_in_argument_position_are_data() {
     let (out, err, rc) = run("echo function f { x }");
-    assert_eq!((out.as_str(), err.as_str(), rc), ("function f { x }\n", "", 0));
+    assert_eq!(
+        (out.as_str(), err.as_str(), rc),
+        ("function f { x }\n", "", 0)
+    );
 }
 
 /// A mid-run definition is the inherited cond-list gap (task #168): the cond part
