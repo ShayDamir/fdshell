@@ -322,3 +322,46 @@ fn capture_on_function_call_is_accepted() {
     assert_eq!(out, "");
     assert_eq!(body(&a), "x\n");
 }
+
+/// POSIX #2.2 + #2.4: a clobber redirect applies to the function call (and
+/// bypasses `noclobber`), and the scope restore puts the shell's stdout back so
+/// the next command writes to its own target. bash 5.3.9 measures `q1` = `in`,
+/// `q2` = `after`.
+#[test]
+fn clobber_applies_to_the_call_and_the_scope_restores() {
+    let q1 = temp_path("clobber_call_q1");
+    let q2 = temp_path("clobber_call_q2");
+    std::fs::write(&q1, b"old1\n").unwrap();
+    std::fs::write(&q2, b"old2\n").unwrap();
+    let (out, err, code) = run(&format!(
+        "set -o noclobber; g(){{ echo in; }}; g >| {q1}; echo after >| {q2}"
+    ));
+    let first = std::fs::read_to_string(&q1).unwrap();
+    let second = std::fs::read_to_string(&q2).unwrap();
+    let _ = std::fs::remove_file(&q1);
+    let _ = std::fs::remove_file(&q2);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!(first, "in\n", "the call's clobber target");
+    assert_eq!(second, "after\n", "the next command's clobber target");
+}
+
+/// A clobber write and a `N>&-` close on the same call: the write applies for
+/// the call, fd 3 is closed inside it, and the restore reopens fd 3 on its
+/// original file afterwards.
+#[test]
+fn clobber_call_restores_the_closed_fd_target() {
+    let in_path = temp_path("clobber_closed_in");
+    let q = temp_path("clobber_closed_q");
+    write_file(&in_path, "hello\n");
+    std::fs::write(&q, b"old\n").unwrap();
+    let (out, err, code) = run(&format!(
+        "set -o noclobber; exec 3< {in_path}; g(){{ echo x; }}; g >| {q} 3>&-; cat <&3; echo after"
+    ));
+    let body = std::fs::read_to_string(&q).unwrap();
+    let _ = std::fs::remove_file(&in_path);
+    let _ = std::fs::remove_file(&q);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hello\nafter\n", "stdout={out:?}");
+    assert_eq!(body, "x\n");
+}

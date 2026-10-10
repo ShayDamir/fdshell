@@ -7,6 +7,10 @@ pub enum RedirectDirection {
     Write,
     Append,
     Rw,
+    /// `>|` — a write that bypasses `noclobber` (POSIX #2.2). Same flags as
+    /// [`Self::Write`]: the bypass is the `open.rs` gate, which keys on
+    /// `Write` alone, so a direction that is not `Write` opens freely.
+    Clobber,
 }
 
 impl RedirectDirection {
@@ -15,7 +19,7 @@ impl RedirectDirection {
     pub fn open_flags(&self) -> i32 {
         match self {
             Self::Read => O_RDONLY,
-            Self::Write => O_WRONLY + O_CREAT + O_TRUNC,
+            Self::Write | Self::Clobber => O_WRONLY + O_CREAT + O_TRUNC,
             Self::Append => O_WRONLY + O_CREAT + O_APPEND,
             Self::Rw => O_RDWR + O_CREAT,
         }

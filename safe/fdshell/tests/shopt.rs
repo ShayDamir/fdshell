@@ -35,6 +35,98 @@ fn noclobber_blocks_overwrite() {
     assert!(out.is_empty(), "stdout={out:?}");
 }
 
+// POSIX #2.2 `>|`: the clobber operator opens the same file `>` does, but
+// bypasses `noclobber`. bash 5.3.9: `set -o noclobber; echo NEW >|f` (f exists)
+// exits 0 with `f` = `NEW`; the `>` control exits 1 and leaves `f` unchanged.
+#[test]
+fn clobber_bypasses_noclobber_on_an_existing_file() {
+    let path = temp_path("clobber");
+    std::fs::write(&path, b"keep\n").unwrap();
+    let (out, err, code) = run(&format!("set -o noclobber; echo NEW >|{path}"));
+    let content = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!(content, "NEW\n");
+
+    // The `>` control: noclobber still blocks, so the bypass is the operator.
+    std::fs::write(&path, b"keep\n").unwrap();
+    let (_out2, err2, code2) = run(&format!("set -o noclobber; echo NEW >{path}"));
+    let content2 = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code2, 1, "stderr={err2:?}");
+    assert!(err2.contains("noclobber"), "stderr={err2:?}");
+    assert_eq!(content2, "keep\n");
+}
+
+// `>|` also creates a file that does not exist (bash 5.3.9: rc 0, `hi\n`).
+#[test]
+fn clobber_creates_a_new_file_under_noclobber() {
+    let path = temp_path("clobber_new");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!("set -o noclobber; echo hi >|{path}"));
+    let content = std::fs::read_to_string(&path);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(content.unwrap(), "hi\n");
+    assert!(out.is_empty(), "stdout={out:?}");
+}
+
+// `2>|` bypasses noclobber on stderr. bash 5.3.9: `exec 2>|f` with `f` existing
+// succeeds and `echo e >&2` lands in `f`.
+#[test]
+fn clobber_bypasses_noclobber_on_stderr() {
+    let path = temp_path("clobber_stderr");
+    std::fs::write(&path, b"keep\n").unwrap();
+    let (out, err, code) = run(&format!(
+        "set -o noclobber; exec 2>|{path}; echo e >&2; echo out; cat {path}"
+    ));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "out\ne\n", "stdout={out:?}");
+}
+
+// `exec >|file` is permanent, and noclobber does not block it (bash 5.3.9: rc 0,
+// later output lands in the file). The `exec >file` control fails under
+// noclobber and leaves the file unchanged.
+#[test]
+fn exec_clobber_is_permanent_and_bypasses_noclobber() {
+    let path = temp_path("clobber_exec");
+    std::fs::write(&path, b"keep\n").unwrap();
+    let (out, err, code) = run(&format!("set -o noclobber; exec >|{path}; echo hi"));
+    let content = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!(content, "hi\n");
+
+    std::fs::write(&path, b"keep\n").unwrap();
+    let (_out2, err2, code2) = run(&format!("set -o noclobber; exec >{path}; echo hi"));
+    let content2 = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code2, 1, "stderr={err2:?}");
+    assert_eq!(content2, "keep\n");
+}
+
+// The bypass is the direction, not the option: a `>|` redirect never mutates
+// the `noclobber` state, so the following `>` is still blocked and `set -o`
+// still reports the option on (bash 5.3.9: `set -o` prints `noclobber on`).
+#[test]
+fn clobber_does_not_change_the_noclobber_option() {
+    let path = temp_path("clobber_state");
+    std::fs::write(&path, b"keep\n").unwrap();
+    let (out, err, code) = run(&format!(
+        "set -o noclobber; echo NEW >|{path}; set -o; echo hi >{path}"
+    ));
+    let content = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.contains("noclobber on"), "stdout={out:?}");
+    // `>|` truncated the file, then the `>` control blocked on the (now
+    // existing) file, so the command aborts with the file left at `NEW`.
+    assert_eq!(content, "NEW\n");
+}
+
 #[test]
 fn noclobber_allows_new_files() {
     let path = temp_path("newfile");
