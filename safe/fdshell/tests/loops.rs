@@ -194,5 +194,26 @@ fn break_count_is_not_expanded() {
 fn break_2_outside_loop_aborts_rc1() {
     let (_out, err, code) = run("break 2; echo end");
     assert_eq!(code, 1);
-    assert!(err.contains("break"));
+    assert!(err.contains("'break' is not inside a loop"));
+}
+
+/// Accepted divergence + rc change vs master: the depth-0 bail also fires for a
+/// `break` nested in an `if` **condition**. master printed `y` `after` rc 0 (the
+/// condition's control was dropped), bash warns "only meaningful in a … loop"
+/// with rc 0; here rc 1 with the outside-loop message. README "Accepted
+/// divergences"; the condition-control fix is task #205.
+#[test]
+fn break_in_if_condition_at_depth_zero_aborts_rc1() {
+    let (_out, err, code) = run("if break; then echo y; fi; echo after");
+    assert_eq!(code, 1);
+    assert!(err.contains("'break' is not inside a loop"));
+}
+
+/// Same shape with `continue`: master printed `after` rc 0, bash warns rc 0,
+/// here rc 1 with the outside-loop message.
+#[test]
+fn continue_in_if_condition_at_depth_zero_aborts_rc1() {
+    let (_out, err, code) = run("if continue; then :; fi; echo after");
+    assert_eq!(code, 1);
+    assert!(err.contains("'continue' is not inside a loop"));
 }
