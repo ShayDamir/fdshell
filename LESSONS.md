@@ -46,6 +46,9 @@ Rename `mod become` to `mod become_cmd` (file: `become_cmd.rs`). Only the module
 ## Keep execution-context counters in ShellState, not threaded parameters
 A limit that must be visible to both the block executors and `$(…)` (the `nesting` depth cap) should live in `ShellState`: a forked `$(…)` child inherits the state copy, so the counter propagates for free. Threading a parameter would have forced it through `substitute_arg` and its many callers.
 
+## Clamp a `break`/`continue` count at the call site, not at the top-level handler
+`loop_depth` lives in `ShellState` (the `nesting`/`eval_depth` precedent), so a `break`/`continue` at the call site knows the loop nesting depth and can clamp `n` to it. bash clamps silently (`break 2` in depth 1 and `break 5` in depth 1 both exit that one loop with no warning — measured), which the top-level handler cannot reproduce because by the time a leftover count reaches `repl.rs` the loop levels are gone. Clamping at the site makes `repl.rs`'s `Break(_)`/`Continue(_)` outside-loop arms unreachable (depth 0 bails in `run_simple`), and `cargo mutants` kills all 9 of `repl.rs`'s mutants through the `BreakOutsideLoop`/`ContinueOutsideLoop` pins, so the dead arms are not an accepted-equivalent-mutant source. See `run_dispatch.rs` (`n.min(&depth)`) and `loop_control.rs` (`in_loop`, `consume`).
+
 ## Never hold a ForkCell borrow across a recursive call that re-borrows
 `nest::deeper` increments the depth, drops the borrow, runs the body (which borrows the same cell), then re-borrows to decrement. Holding the `RefMut` across the body would clash with the body's own borrows.
 

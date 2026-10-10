@@ -272,8 +272,45 @@ Accepted divergences from bash:
   `{`/`}` word as the block depth, which is what makes a nested group inside a
   block body close at the block's own keyword.
 - `wait` at the end of a line absorbs the group on the next line as its
-  event-case body (`wait` + newline + `{ echo a; }` → rc 1 parse error), where
-  bash prints `a`.
+   event-case body (`wait` + newline + `{ echo a; }` → rc 1 parse error), where
+   bash prints `a`.
+
+## Loop control (`break` / `continue`)
+
+`break` and `continue` take an optional positive loop count: `break n` exits `n`
+enclosing loops, `continue n` advances `n` enclosing loops to their next
+iteration (`break` alone is `break 1`). The count is clamped to the loop nesting
+depth at the call site, so `break 5` in one loop exits that loop silently, as
+bash (`for a in 1 2 3; do j=$((j+1)); break 5; done` → one iteration). The loop
+levels are `for`, `while` and `until`; `if`, `case`, a `{ …; }` group, a
+cond-list/pipeline part and a `wait` block are transparent, so `break` inside a
+`while` condition counts that loop. `eval`, `source` and a group share the
+caller's depth, so `eval "break 2"` in a nested loop exits both loops, and a
+`break` in a forked child (`$( … )`, a pipeline stage) is consumed by that
+child's own loops. A leading `+` and leading zeros are accepted (`break +2`,
+`break 0100`), as bash's `atoi` is.
+
+Accepted divergences from bash:
+
+- A count of 0, a negative count, a non-numeric count (`break abc`, `break 1.5`)
+  or a value over `u32` is rejected: `break/continue count must be a positive
+  integer`, rc 1, the script aborts. bash warns `loop count out of range` and
+  breaks one level for 0 and negatives (rc 1 from the warning, the shell keeps
+  running), and aborts with `numeric argument required` rc 2 for the non-numeric
+  case. Pinned by `tests/loops.rs`.
+- The count is not expanded: `break $n` is rejected rc 1 here, where bash
+  expands `$n` (consistent with `return $n`, which also parses the raw token).
+- More than one argument (`break 2 3`) aborts rc 1, matching bash's rc 1 (the
+  message differs: bash says `too many arguments`).
+- `break`/`continue` outside any loop is an rc-1 abort here (`break' is not
+  inside a loop`), where bash warns `only meaningful in a … loop` and continues
+  with rc 0. This is fdshell's existing accepted outside-loop behavior.
+- A function body is not a loop boundary here: `break N` inside a function
+  crosses it and exits the caller's loops (`f() { break 2; }; for a in 1 2; do
+  for b in 1 2; do f; done; done` → both loops exit), where bash reports `only
+  meaningful in a … loop` for each call and keeps running. Task #203 owns this
+  change; `tests/loops.rs::break_2_in_function_body_crosses_the_boundary_current_fdshell_behavior`
+  pins the current behavior as its drift alarm.
 
 ## Glob expansion
 
