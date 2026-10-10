@@ -166,7 +166,11 @@ line's own newline (`ab\n` is 3 bytes). A here-doc works in pipelines
 block conditions and cond-list positions (`if cat <<EOF; then …`,
 `cat <<EOF && x`), like any other command. When a line carries several
 here-docs (`cat <<A && cat <<B`), the bodies are read after the whole logical
-line, in operator order, so a body may contain another here-doc's delimiter.
+line, in operator order, so a body may contain another here-doc's delimiter. A
+here-doc on a **user-function call** delivers the body to the call, because a
+function call is a simple command: `f() { cat; }; f <<EOF` prints the body, and
+the shell's stdin is back when the call finishes, so `echo after` after it
+prints on the terminal (as bash).
 
 Limitations:
 
@@ -452,6 +456,8 @@ Accepted divergences from bash:
   command: every redirect source is resolved up front, so `2>&1` cannot see the
   `> a` target. Bash applies as it goes and `2>&1` lands on the file `a`
   (tracked by task #183).
+- `shift` with no arguments returns 0 (`shift >a` creates `a` at rc 0); bash
+  returns 1 for the shift itself (`rc=1`) and still creates the file.
 - `local NAME` (no `=`) leaves the variable unset for the call, and `local`
   outside a function is an error (rc 1), as bash.
 - `${}` (an empty name) stays literal (`echo "[${}]"` → `[${}]`); bash rejects

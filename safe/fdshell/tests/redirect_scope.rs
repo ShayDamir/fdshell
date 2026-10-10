@@ -155,12 +155,19 @@ fn colon_applies_redirect() {
     );
 }
 
-/// `shift` is in-process, so its redirect is applied by the scope.
+/// `shift` is in-process, so its redirect is applied by the scope: `a` is
+/// created and empty. Measured on bash 5.3.9, `bash -c 'shift > /tmp/s1; echo
+/// rc=$?'` creates the empty file and prints `rc=1` — bash fails a `shift` with
+/// no arguments. fdshell runs the empty shift successfully, so rc 0 is pinned;
+/// the rc divergence is accepted and documented in README.
 #[test]
 fn shift_applies_redirect() {
     let a = temp_path("shift_a");
     let (out, err, code) = run(&format!("shift > {a}"));
-    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        code, 0,
+        "fdshell runs the empty shift at rc 0, bash at rc 1; stderr={err:?}"
+    );
     assert_eq!(out, "");
     assert_eq!(body(&a), "");
 }

@@ -455,6 +455,31 @@ loser in charge. `Scope::restore` iterates `saved.iter().rev()`, exports the
 copy (`Drop` closes it) and closes a `None` target. Like `run_env::restore`, the
 restore runs on the success path with `?` and on the handler's error path as
 `let _ =` (the handler's report is the actionable error).
+Pins, all through `Scope::restore()` and never through a copy of it:
+`last_wins_within_one_scope` (fd 1 comes back past the loser),
+`reverse_restore_leaves_the_shell_fd_on_its_original_target` and
+`post_restore_write_lands_on_the_restored_target` (a write after the restore
+must land on the restored target, so a forward restore leaves the loser's file
+holding that write). **Accepted coverage gap:** `run/parent.rs`'s
+`scope.restore()?` arm is unreachable from a script — a script cannot name the
+saved copy's fd (measured: `f(){ exec 4>&-; }; f >a` fails at the `exec` close
+with EBADF, so the copy is not at fd 4; inside a function body the shell's fd
+table is 0-2 plus its own CLOEXEC fds), so the restore-failure path is pinned at
+the scope level by `restore_of_a_lost_saved_copy_is_a_redirect_error`.
+
+## A test that hand-copies the implementation pins the copy, not the code
+Four `redirect/scope/tests.rs` pins copied `Scope::restore`'s loop by hand
+(`saved.iter().rev()` in the test body) and asserted through that copy, so they
+never called `Scope::restore()`. Deleting `.rev()` from the implementation — the
+exact regression the reverse-order rule exists to prevent — left **all 3760 tests
+green**, and `cargo mutants` cannot catch it (it generates no `rev` mutator).
+Fix: assert through the real entry point, and make the assertion observable at
+the fd level (a `/proc/self/fd/N` readlink plus a post-restore write into a
+file), not through the data structure the code walks. Prove an ordering pin by
+mutating the order and watching the suite fail; a green suite means the pin is
+tautological. The same session committed 30 `dbg` `eprintln!` lines: `cargo
+clippy -- -D warnings` does not see them, `cargo nextest run <filter>
+--no-capture` does — debug scaffolding never goes into a commit.
 
 ## `exec`/`become` must opt out of the redirect scope restore
 They replace the process image, so `exec >file` stays permanent. `run/parent.rs`
