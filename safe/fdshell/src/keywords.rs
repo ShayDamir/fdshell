@@ -26,12 +26,18 @@ mod wait;
 
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
+use crate::segment::group::{closes, opens};
+
 /// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers.
 ///
-/// Recognized: `case`, `esac`, `if`, `fi`, `for`, `wait`, `while`, `until`, `done`.
+/// Recognized: `case`, `esac`, `if`, `fi`, `for`, `wait`, `while`, `until`,
+/// `done`, `{`, `}`.
 /// Each check requires a word boundary after the keyword to avoid
 /// matching prefixes like `ifconfig` or `donec`. `wait` opens a block only
 /// when [`wait_opens_block`] holds (otherwise it is the POSIX builtin, `0`).
+/// `{`/`}` are the group command's delimiters and use the predicates the
+/// segment scanner uses for its group opener, so the depth rule and the
+/// segment opener cannot drift.
 pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
     if word.starts_with(b"case") && boundary(word, 4, b"") {
         return Some(1);
@@ -55,6 +61,12 @@ pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option
         return Some(1);
     }
     if word.starts_with(b"done") && boundary(word, 4, b"&|") {
+        return Some(-1);
+    }
+    if opens(word, line, word_end) {
+        return Some(1);
+    }
+    if closes(word) {
         return Some(-1);
     }
     None

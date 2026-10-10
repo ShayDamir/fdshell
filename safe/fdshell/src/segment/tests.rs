@@ -707,3 +707,87 @@ fn scan_function_block_resume_gap_eats_glued_byte() {
         _ => panic!("expected Block + Statement"),
     }
 }
+
+/// The `{ …; }` group span: the `{` to the end of the statement it opens, so
+/// the trailing redirection, `&&`, and `#` comment are outside the block's own
+/// text and the next statement starts after them.
+#[test]
+fn scan_group_statement_span() {
+    check_block(b"{ echo a; }", (0, 11, true));
+    check_block(b"{ echo a; } && echo b", (0, 21, true));
+    check_block(b"{ { echo n; }; }", (0, 16, true));
+    check_block(b"{ cat <<EOF\nhi\nEOF\n; }", (0, 22, true));
+    check_block(b"{ echo a", (0, 8, false));
+    check_segments(b"echo a; { echo b; }", &[(8, 19, true)]);
+    check_segments(b"{ echo a; } > out; echo b", &[(0, 17, true)]);
+    check_segments(b"{ echo a; } ; echo b", &[(0, 12, true)]);
+    check_segments(b"{ echo a; } # note", &[(0, 12, true)]);
+    check_segments(b"f() { { echo n; }; }", &[(0, 20, true)]);
+}
+
+/// A group at the start of the line, with the span end and closed flag.
+fn check_block(line: &[u8], want: (usize, usize, bool)) {
+    let segments = scan_segments(line, false);
+    assert_eq!(segments.len(), 1, "{line:?}");
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+        } => assert_eq!((*block_start, *end_pos, *closed), want, "{line:?}"),
+        Segment::Statement { .. } => panic!("{line:?} must be a group block"),
+    }
+}
+
+/// The block spans a line produces, in order (statements are not listed).
+fn check_segments(line: &[u8], want: &[(usize, usize, bool)]) {
+    let blocks: Vec<(usize, usize, bool)> = scan_segments(line, false)
+        .iter()
+        .filter_map(|s| match s {
+            Segment::Block {
+                block_start,
+                end_pos,
+                closed,
+            } => Some((*block_start, *end_pos, *closed)),
+            Segment::Statement { .. } => None,
+        })
+        .collect();
+    assert_eq!(blocks, want, "{line:?}");
+}
+
+/// A brace-shaped word is a command word, never a group opener: brace
+/// expansion, the glued command name, and the glued `{;` (a bash syntax
+/// error) stay statements, as does a group inside a pipeline stage.
+#[test]
+fn scan_brace_words_are_statements() {
+    let lines: &[&[u8]] = &[
+        b"echo {",
+        b"echo }",
+        b"{echo hi; }",
+        b"{; echo a; }",
+        b"{a,b} echo x",
+        b"{1..5} echo x",
+        b"{}; echo hi",
+        b"echo a| { echo b; }",
+    ];
+    for line in lines {
+        let segments = scan_segments(line, false);
+        assert!(
+            segments
+                .iter()
+                .all(|s| matches!(s, Segment::Statement { .. })),
+            "{line:?} must be statements"
+        );
+        assert!(!segments.is_empty(), "{line:?}");
+    }
+}
+
+/// Inside a block body (`in_block = true`) the group braces are plain words:
+/// the body's own statements run as written.
+#[test]
+fn scan_group_in_block_is_statements() {
+    let segments = scan_segments(b"{ echo a; }", true);
+    // The braces are words: the body's runs flush as the line's statements.
+    assert_eq!(segments.len(), 2);
+    assert!(matches!(segments[0], Segment::Statement { .. }));
+}

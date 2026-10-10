@@ -65,3 +65,42 @@ fn first_word_end_stops_at_separator() {
     assert_eq!(first_word_end(b"wait", 0), 4);
     assert_eq!(first_word_end(b"wait x", 2), 6);
 }
+
+/// `{`/`}` are the group command's delimiters: a `{` with a boundary after it
+/// (whitespace, `&`, `|`, end of input) is `+1`, `}` with a boundary (incl. the
+/// glued redirect forms) is `-1`, and a glued brace word is neither.
+#[test]
+fn keyword_delta_group_delimiters() {
+    assert_eq!(keyword_delta(b"{", b"{ echo a; }", 1), Some(1));
+    assert_eq!(keyword_delta(b"{ echo a; }", b"{ echo a; }", 8), Some(1));
+    assert_eq!(keyword_delta(b"{\n", b"{\n echo a", 1), Some(1));
+    assert_eq!(keyword_delta(b"{&x", b"{&x", 2), Some(1));
+    assert_eq!(keyword_delta(b"{|x", b"{|x", 2), Some(1));
+    // A glued brace word (command name or brace expansion) is not an opener.
+    assert_eq!(keyword_delta(b"{a,b}", b"{a,b}", 5), None);
+    assert_eq!(keyword_delta(b"{1..5}", b"{1..5}", 6), None);
+    assert_eq!(keyword_delta(b"{echo", b"{echo hi; }", 5), None);
+    assert_eq!(keyword_delta(b"{}", b"{}; echo hi", 2), None);
+    assert_eq!(keyword_delta(b"{;", b"{; echo a; }", 2), None);
+    // A bare `{` glued to `;` is the word `{;`, so the line byte rules it out.
+    assert_eq!(keyword_delta(b"{", b"{; echo a; }", 1), None);
+    // Closers, including the glued fd-qualified redirect forms.
+    assert_eq!(keyword_delta(b"}", b"{ echo a; }", 11), Some(-1));
+    assert_eq!(keyword_delta(b"};", b"{ echo a; };", 2), Some(-1));
+    assert_eq!(keyword_delta(b"}>out", b"{ echo a; }>out", 10), Some(-1));
+    assert_eq!(keyword_delta(b"}2>err", b"{ echo a; }2>err", 10), Some(-1));
+    assert_eq!(keyword_delta(b"}echo", b"}echo", 5), None);
+    assert_eq!(keyword_delta(b"}a", b"}a", 2), None);
+}
+
+/// Nested groups net out of the depth, so an inner group never closes an
+/// enclosing keyword block.
+#[test]
+fn keyword_delta_group_nests_to_zero() {
+    let line = b"{ { echo n; }; }";
+    let mut depth = 0;
+    for word in [b"{", b"{", b"}", b"}"] {
+        depth += keyword_delta(word, line, word.len()).unwrap_or(0);
+    }
+    assert_eq!(depth, 0);
+}

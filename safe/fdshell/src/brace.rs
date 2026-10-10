@@ -24,7 +24,10 @@ pub(crate) fn scan_function_block(
 /// Scan forward from `i` (just after an opening `{`) to the matching `}`,
 /// tracking quotes, backticks, `$( )` and nested braces. Updates `in_quote`.
 /// Returns `(closing_brace_position, block_was_closed)`.
-fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, bool) {
+///
+/// Two callers share it: the `name() { … }` function body above, and the
+/// `{ …; }` group command in `segment/group.rs`.
+pub(crate) fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, bool) {
     let mut state = ScanState {
         in_quote: *in_quote,
         in_backtick: false,

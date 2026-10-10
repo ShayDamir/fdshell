@@ -21,6 +21,12 @@ impl ScanState {
             word_active: false,
         }
     }
+
+    /// The scan is at a byte where a new word can start: outside a quote, a
+    /// backtick body, and `$( … )`, and no word is being read.
+    pub(crate) fn at_word_start(&self) -> bool {
+        !self.in_quote && !self.in_backtick && self.paren_depth == 0 && !self.word_active
+    }
 }
 
 /// What sits at position `i`: a comment, a separator, or an ordinary char.
