@@ -2228,3 +2228,139 @@ fn in_process_command_applies_its_redirect_and_is_restored() {
     assert_eq!(body, "");
     assert_eq!(out, b"/tmp\nafter\n");
 }
+
+/// The string value of a variable as bytes (`i=0` -> `b"0"`).
+fn var_bytes(cell: &ForkCell<ShellState>, name: &[u8]) -> Vec<u8> {
+    let name = ShortCStr::from_vec(name.to_vec()).unwrap();
+    let state = borrow_state(cell);
+    state
+        .strings
+        .get(&name)
+        .map(|v| v.value.as_bytes().unwrap().to_vec())
+        .unwrap_or_default()
+}
+
+#[test]
+fn break_2_exits_both_nested_for_loops() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"i=0; for a in 1 2 3; do for b in 1 2 3; do i=$((i+1)); break 2; done; echo inner; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(borrow_state(&cell).loop_depth, 0);
+        assert_eq!(var_bytes(&cell, b"i"), b"1");
+    });
+}
+
+#[test]
+fn break_2_exits_inner_while_and_outer_for() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"j=0; for a in 1 2 3; do while :; do j=$((j+1)); break 2; done; echo body; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(var_bytes(&cell, b"j"), b"1");
+    });
+}
+
+#[test]
+fn continue_2_advances_the_outer_loop() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"k=0; for a in 1 2 3; do for b in 1 2 3; do k=$((k+1)); continue 2; done; echo inner; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(var_bytes(&cell, b"k"), b"3");
+    });
+}
+
+#[test]
+fn break_count_clamped_to_depth() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"j=0; for a in 1 2 3; do j=$((j+1)); break 5; done", &cell).unwrap();
+        assert_eq!(var_bytes(&cell, b"j"), b"1");
+    });
+}
+
+#[test]
+fn break_count_beyond_depth_is_silent() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        handle(b"for a in 1; do break 2; done; echo ok", &cell).unwrap();
+    });
+    assert_eq!(out, b"ok\n");
+}
+
+#[test]
+fn loop_depth_restored_after_loop_before_outside_break() {
+    child_test(|| {
+        let cell = make_cell();
+        let e = handle(b"for a in 1; do break; done; break 2", &cell).unwrap_err();
+        assert!(matches!(e.current_context(), CmdError::BreakOutsideLoop));
+    });
+}
+
+#[test]
+fn case_clause_is_not_a_loop_level() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"m=0; for a in 1 2 3; do case $a in 1) for b in 1 2 3; do m=$((m+1)); break 2; done;; esac; echo after; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(var_bytes(&cell, b"m"), b"1");
+    });
+}
+
+#[test]
+fn group_and_if_do_not_count_as_loop_levels() {
+    child_test(|| {
+        let cell = make_cell();
+        // `break 2` inside a group counts only the enclosing `for` (clamped to 1),
+        // so the `for` exits and `g=9` in the body is never reached.
+        run_script(
+            b"g=0; for a in 1 2 3; do { g=$((g+1)); break 2; }; g=9; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(var_bytes(&cell, b"g"), b"1");
+    });
+}
+
+#[test]
+fn eval_break_2_counts_the_parent_loops() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"n=0; for a in 1 2 3; do for b in 1 2 3; do n=$((n+1)); eval \"break 2\"; done; echo inner; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(var_bytes(&cell, b"n"), b"1");
+    });
+}
+
+#[test]
+fn break_in_for_fd_array_list_exits_both_loops() {
+    child_test(|| {
+        let cell = make_cell();
+        insert_fd_var(&cell, b"src");
+        run_one(b"%arr=[]", &cell).unwrap();
+        run_one(b"%arr+=%src", &cell).unwrap();
+        run_one(b"%arr+=%src", &cell).unwrap();
+        run_script(
+            b"for %fd in %arr; do for b in 1 2; do g=$((g+1)); break 2; done; g=99; done",
+            &cell,
+        )
+        .unwrap();
+        assert_eq!(var_bytes(&cell, b"g"), b"1");
+    });
+}

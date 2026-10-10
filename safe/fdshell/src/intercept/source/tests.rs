@@ -207,9 +207,11 @@ fn run_source_without_extras_keeps_positional_parameters() {
 fn run_source_break_propagates_loop_control() {
     let (_tmp, path) = TempFile::new("break", b"break\n");
     let cell = make_cell();
+    // One loop level so `break` is inside a loop and propagates the clamped count.
+    cell.borrow_mut().unwrap().loop_depth = 1;
     let cmdline = make_cmdline(b"source", &[&path]);
     let control = run_source(b"source f", &cmdline, &text(b"source f"), &cell).unwrap();
-    assert!(matches!(control, Some(LoopControl::Break)));
+    assert!(matches!(control, Some(LoopControl::Break(1))));
 }
 
 #[test]

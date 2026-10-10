@@ -55,7 +55,9 @@ pub enum ParsedLine {
     While(WhileBlock),
     Until(UntilBlock),
     Function(FunctionDef),
-    Break,
-    Continue,
+    /// `break n`: exit `n` enclosing loops, `n >= 1`.
+    Break(u32),
+    /// `continue n`: advance `n` enclosing loops, `n >= 1`.
+    Continue(u32),
     Return(Option<i32>),
 }

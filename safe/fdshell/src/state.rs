@@ -46,6 +46,9 @@ pub struct ShellState {
     pub(crate) shell_sock: Option<LocalFd>,
     pub(crate) environ: Vec<(ShortCStr, ShortCStr)>,
     pub(crate) nesting: u32,
+    /// Number of `for`/`while`/`until` loops enclosing the command being executed
+    /// (`break n` / `continue n` counts against it; `if`, `case` and groups are transparent).
+    pub(crate) loop_depth: u32,
     pub(crate) eval_depth: u32,
     pub(crate) ifs: ShortCStr,
     pub(crate) options: u32,
@@ -74,6 +77,7 @@ impl ShellState {
             shell_sock: None,
             environ: sys::env::environ_snapshot(),
             nesting: 0,
+            loop_depth: 0,
             eval_depth: 0,
             ifs: c" \t\n".into(),
             options: crate::options::DEFAULTS,

@@ -182,12 +182,14 @@ fn run_eval_executes_assignment_in_current_state() {
 #[test]
 fn run_eval_break_propagates_loop_control() {
     let cell = make_cell();
+    // One loop level so `break` is inside a loop and propagates the clamped count.
+    cell.borrow_mut().unwrap().loop_depth = 1;
     let cmdline = make_cmdline(b"eval", &[r"break"]);
     let line = make_line("eval", &[r"break"]);
     let control = eval_cmd::run_eval(&line, &cmdline, &text(&line), &cell).unwrap();
     assert!(matches!(
         control,
-        Some(crate::loop_control::LoopControl::Break)
+        Some(crate::loop_control::LoopControl::Break(1))
     ));
 }
 

@@ -1,7 +1,7 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::line::ParsedLine;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
 
 pub(crate) fn detect_unset(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
@@ -40,17 +40,19 @@ pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Rep
     };
 
     if first.eq_bytes(b"break") {
-        if tokens.get(1).is_some() {
-            bail!(ParseError::BreakTakesNoArguments);
-        }
-        return Ok(Some(ParsedLine::Break));
+        ensure!(
+            tokens.get(2).is_none(),
+            ParseError::BreakTakesAtMostOneArgument
+        );
+        return Ok(Some(ParsedLine::Break(loop_count(tokens)?)));
     }
 
     if first.eq_bytes(b"continue") {
-        if tokens.get(1).is_some() {
-            bail!(ParseError::ContinueTakesNoArguments);
-        }
-        return Ok(Some(ParsedLine::Continue));
+        ensure!(
+            tokens.get(2).is_none(),
+            ParseError::ContinueTakesAtMostOneArgument
+        );
+        return Ok(Some(ParsedLine::Continue(loop_count(tokens)?)));
     }
 
     if first.eq_bytes(b"return") {
@@ -58,6 +60,23 @@ pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Rep
     }
 
     Ok(None)
+}
+
+/// The optional `break`/`continue` count: 1 when absent. `u32::from_str` accepts
+/// a leading `+` and leading zeros (bash's `atoi` agrees) and rejects `-1`,
+/// `1.5`, `0x2` and overflow; `0` is rejected here (POSIX `break 0` means "exit
+/// the shell execution environment", which this shell cannot express).
+fn loop_count(tokens: &[Token]) -> Result<u32, Report<ParseError>> {
+    match tokens.get(1) {
+        None => Ok(1),
+        Some((t, _, _, _, _)) => {
+            let n = t
+                .parse::<u32>()
+                .change_context(ParseError::LoopCountInvalid)?;
+            ensure!(n > 0, ParseError::LoopCountInvalid);
+            Ok(n)
+        }
+    }
 }
 
 /// `return` with an optional integer status.
@@ -75,3 +94,6 @@ pub(crate) fn detect_return(tokens: &[Token]) -> Result<Option<ParsedLine>, Repo
 fn parse_status(t: &ShortCStr) -> Result<i32, Report<ParseError>> {
     t.parse::<i32>().change_context(ParseError::InvalidInt)
 }
+
+#[cfg(test)]
+mod tests;

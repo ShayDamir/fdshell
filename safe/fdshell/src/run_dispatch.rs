@@ -1,7 +1,7 @@
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::{FdVar, ShellState};
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, ensure};
 use sys::fork_cell::ForkCell;
 use sys::{ScriptText, Trace};
 
@@ -63,8 +63,16 @@ pub(crate) fn run_simple(
                 .insert(def.name.clone(), def.body.data.clone());
             state.set_last_exit(0);
         }
-        crate::parse::ParsedLine::Break => return Ok(Some(LoopControl::Break)),
-        crate::parse::ParsedLine::Continue => return Ok(Some(LoopControl::Continue)),
+        crate::parse::ParsedLine::Break(n) => {
+            let depth = cell.borrow().change_context(CmdError::Never)?.loop_depth;
+            ensure!(depth > 0, CmdError::BreakOutsideLoop);
+            return Ok(Some(LoopControl::Break(*n.min(&depth))));
+        }
+        crate::parse::ParsedLine::Continue(n) => {
+            let depth = cell.borrow().change_context(CmdError::Never)?.loop_depth;
+            ensure!(depth > 0, CmdError::ContinueOutsideLoop);
+            return Ok(Some(LoopControl::Continue(*n.min(&depth))));
+        }
         crate::parse::ParsedLine::Return(code) => {
             if let Some(n) = code {
                 let mut state = cell.borrow_mut().change_context(CmdError::Never)?;

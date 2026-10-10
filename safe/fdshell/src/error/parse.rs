@@ -34,10 +34,12 @@ pub(crate) enum ParseError {
     InvalidRedirect,
     /// brace expansion produced too many words
     BraceExpansionTooManyWords,
-    /// break takes no arguments
-    BreakTakesNoArguments,
-    /// continue takes no arguments
-    ContinueTakesNoArguments,
+    /// break takes at most one argument (a positive loop count)
+    BreakTakesAtMostOneArgument,
+    /// continue takes at most one argument (a positive loop count)
+    ContinueTakesAtMostOneArgument,
+    /// break/continue count must be a positive integer
+    LoopCountInvalid,
     /// return takes at most one argument
     ReturnTakesAtMostOneArgument,
     /// 'return' status must be an integer

@@ -18,9 +18,12 @@ pub(crate) use crate::script::run_script;
 
 pub fn handle(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
     if let Some(control) = run_script(text, cell)? {
+        // The count is clamped to `loop_depth` at the call site, so a `Break(_)`
+        // / `Continue(_)` reaching here means depth 0, which `run_simple` already
+        // bails on; these arms are unreachable defensive arms.
         match control {
-            LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
-            LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
+            LoopControl::Break(_) => bail!(CmdError::BreakOutsideLoop),
+            LoopControl::Continue(_) => bail!(CmdError::ContinueOutsideLoop),
             LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
             // Interactive shells do not exit on errexit: stop this input.
             LoopControl::Exit => {}
@@ -31,9 +34,11 @@ pub fn handle(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<(), Repo
 
 pub fn exec_cmd(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<i32, Report<CmdError>> {
     if let Some(control) = run_script(text, cell)? {
+        // Unreachable defensive arms, as in `handle`: the clamped count cannot
+        // outlive the loops it was counted against.
         match control {
-            LoopControl::Break => bail!(CmdError::BreakOutsideLoop),
-            LoopControl::Continue => bail!(CmdError::ContinueOutsideLoop),
+            LoopControl::Break(_) => bail!(CmdError::BreakOutsideLoop),
+            LoopControl::Continue(_) => bail!(CmdError::ContinueOutsideLoop),
             LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
             // Errexit: fall through to the failing status in `last_status`.
             LoopControl::Exit => {}

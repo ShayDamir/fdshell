@@ -81,8 +81,10 @@ fn cond_list_semantics_inside_the_body() {
 #[test]
 fn loop_control_propagates_out_of_the_body() {
     let cell = make_cell();
+    // One loop level so `break` is inside a loop and propagates the clamped count.
+    cell.borrow_mut().unwrap().loop_depth = 1;
     let control = run_group(&group_of(b"{ break; }"), &cell).unwrap();
-    assert!(matches!(control, Some(LoopControl::Break)));
+    assert!(matches!(control, Some(LoopControl::Break(1))));
 
     let cell = make_cell();
     let control = run_group(&group_of(b"{ return 3; }"), &cell).unwrap();

@@ -1,4 +1,4 @@
-use crate::loop_control::LoopControl;
+use crate::loop_control::{LoopControl, consume};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
@@ -21,6 +21,14 @@ pub(crate) fn run_loop(
     invert: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::loop_control::in_loop(cell, || run_loop_body(block, invert, cell))
+}
+
+fn run_loop_body(
+    block: &LoopBlock,
+    invert: bool,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let cond_bodies = body_bytes(&block.cond_bodies);
     let mut ran_body = false;
     loop {
@@ -37,8 +45,10 @@ pub(crate) fn run_loop(
             crate::repl::run_script(&block.body, cell)
         })? {
             match control {
-                LoopControl::Break => break,
-                LoopControl::Continue => continue,
+                LoopControl::Break(1) => break,
+                LoopControl::Break(n) => return Ok(consume(LoopControl::Break(n))),
+                LoopControl::Continue(1) => continue,
+                LoopControl::Continue(n) => return Ok(consume(LoopControl::Continue(n))),
                 LoopControl::Return => return Ok(Some(LoopControl::Return)),
                 LoopControl::Exit => return Ok(Some(LoopControl::Exit)),
             }

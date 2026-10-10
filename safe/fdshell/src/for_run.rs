@@ -1,7 +1,7 @@
 mod array_word;
 
 use crate::error::cmd::CmdError;
-use crate::loop_control::LoopControl;
+use crate::loop_control::{LoopControl, consume};
 use crate::parse::for_block::ForBlock;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -9,6 +9,14 @@ use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
 pub(crate) fn run_for(
+    forblock: &ForBlock,
+    text: &ScriptText,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::loop_control::in_loop(cell, || run_for_body(forblock, text, cell))
+}
+
+fn run_for_body(
     forblock: &ForBlock,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
@@ -28,8 +36,10 @@ pub(crate) fn run_for(
     for word in &words {
         if let Some(control) = run_for_word(forblock, word, cell)? {
             match control {
-                LoopControl::Break => break,
-                LoopControl::Continue => {}
+                LoopControl::Break(1) => break,
+                LoopControl::Break(n) => return Ok(consume(LoopControl::Break(n))),
+                LoopControl::Continue(1) => {}
+                LoopControl::Continue(n) => return Ok(consume(LoopControl::Continue(n))),
                 LoopControl::Return => return Ok(Some(LoopControl::Return)),
                 LoopControl::Exit => return Ok(Some(LoopControl::Exit)),
             }
