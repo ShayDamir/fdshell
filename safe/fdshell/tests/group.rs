@@ -1,0 +1,270 @@
+#![allow(clippy::unwrap_used)]
+
+use std::process::Command;
+use std::str;
+
+const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
+
+fn run(script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+fn temp_path(tag: &str) -> String {
+    let path = std::env::temp_dir().join(format!("group_{tag}_{}.txt", std::process::id()));
+    path.to_str().unwrap().to_string()
+}
+
+/// Read the redirect target and remove it.
+fn body(path: &str) -> String {
+    let text = std::fs::read_to_string(path).unwrap();
+    let _ = std::fs::remove_file(path);
+    text
+}
+
+/// POSIX #1.2: the group body runs in the current shell, so its assignment is
+/// visible after the group. A subshell fork would lose it, so the persisting `x`
+/// is the proof the group is not forked.
+#[test]
+fn group_body_runs_in_the_current_shell() {
+    let (out, err, rc) = run("{ x=1; echo $x; }; echo after:$x");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("1\nafter:1\n", "", 0));
+}
+
+/// POSIX #1.2 + #2.4: the trailing redirect applies to the group and the shell's
+/// own fds come back at the group end, so the next command writes to stdout.
+#[test]
+fn group_redirect_is_scoped_to_the_group() {
+    let (a, b) = (temp_path("out"), temp_path("after"));
+    let (out, err, rc) = run(&format!("{{ echo a; }} > {a}; echo after > {b}"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
+    assert_eq!(body(&a), "a\n");
+    assert_eq!(body(&b), "after\n");
+}
+
+/// The group's status is the status of its last body command, and the shell
+/// continues with the next statement (`$?` is read after the failing group).
+#[test]
+fn group_status_is_the_last_body_command() {
+    let (out, err, rc) = run("true; { true; }; { false; }; echo rc=$?");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("rc=1\n", "", 0));
+}
+
+/// A `2>` redirect on the group is scoped, so the process's own stderr stays
+/// clean and the target file is what the group wrote to fd 2.
+#[test]
+fn stderr_redirect_is_scoped() {
+    let a = temp_path("err");
+    let (out, err, rc) = run(&format!("{{ echo a; }} 2>{a}"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\n", "", 0));
+    assert_eq!(body(&a), "");
+}
+
+/// bash: `{ echo a; } && { echo b; }` — two groups as cond-list parts. The
+/// second group runs only when the first succeeds; the group is not a subshell.
+#[test]
+fn groups_are_cond_list_parts() {
+    let (out, err, rc) = run("{ echo a; } && { echo b; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\n", "", 0));
+    let (out, err, rc) = run("{ false; } && echo b");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 1));
+    let (out, err, rc) = run("{ echo a; } || echo b");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\n", "", 0));
+    let (out, err, rc) = run("false || { echo b; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("b\n", "", 0));
+}
+
+/// The group's `>` redirect is scoped, so a trailing `&&` part after the group
+/// writes to the shell's stdout: `b` is printed, `a` is in the file.
+#[test]
+fn trailing_redirect_then_and_part() {
+    let a = temp_path("and");
+    let (out, err, rc) = run(&format!("{{ echo a; }}>{a} && echo b"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("b\n", "", 0));
+    assert_eq!(body(&a), "a\n");
+}
+
+/// Nested groups: the inner group is one body statement, and the outer group's
+/// span ends at the statement, past the inner closing brace.
+#[test]
+fn nested_groups_run_their_bodies() {
+    let (out, err, rc) = run("{ { echo a; }; echo b; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\n", "", 0));
+}
+
+/// POSIX #1.2: `cd` inside the group persists in the shell, so `pwd` after the
+/// group reports the new directory (bash agrees).
+#[test]
+fn cd_in_the_group_persists() {
+    let (out, err, rc) = run("cd /; { cd /tmp; pwd; }; pwd");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("/tmp\n/tmp\n", "", 0));
+}
+
+/// `exec >file` inside a group is permanent: a group is the current shell, not a
+/// subshell, so the redirection is not undone at the group end (bash agrees).
+#[test]
+fn exec_in_a_group_is_persistent() {
+    let a = temp_path("exec");
+    let (out, err, rc) = run(&format!("{{ exec >{a} ; }}; echo after"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
+    assert_eq!(body(&a), "after\n");
+}
+
+/// `return` in the group body returns from the calling function: the group is a
+/// shell construct, not a function boundary.
+#[test]
+fn return_in_the_group_returns_from_the_function() {
+    let (out, err, rc) = run("f() { { return 3; }; }; f; echo rc=$?");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("rc=3\n", "", 0));
+}
+
+/// `set -e` exits the shell inside the group body, so the next statement never
+/// runs and the shell exits with the failing command's status.
+#[test]
+fn errexit_exits_inside_the_group_body() {
+    let (out, err, rc) = run("set -e; { echo a; false; }; echo notreached");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\n", "", 1));
+}
+
+/// `set -x` traces the group's body commands, not the braces: the group line is
+/// not a command, and bash prints only the body command traces.
+#[test]
+fn set_x_traces_the_group_body() {
+    let (out, err, rc) = run("set -x; { echo a; }");
+    assert_eq!((out.as_str(), rc), ("a\n", 0));
+    assert!(err.contains("+ echo a"), "{err}");
+    assert!(!err.contains("+ {"), "{err}");
+}
+
+/// A here-doc inside the group body is read by the body command (POSIX #2.5).
+#[test]
+fn here_doc_inside_the_group_body() {
+    let (out, err, rc) = run("{ cat <<EOF\nhi\nEOF\n; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+}
+
+/// `eval` parses the group from the evaluated text, so the group is recognized
+/// in the eval'd statement, not run as a command named `{`.
+#[test]
+fn eval_runs_a_group() {
+    let (out, err, rc) = run("eval \"{ echo evaled; }\"");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("evaled\n", "", 0));
+}
+
+/// A group inside `$( … )` is a command-substitution body: its stdout is
+/// captured, and the group body keeps its own redirect scope.
+#[test]
+fn group_inside_command_substitution() {
+    let (out, err, rc) = run("echo \"$( { echo a; echo b; } )\"");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\n", "", 0));
+}
+
+/// Brace expansion inside the body is an ordinary body command, so the group
+/// braces are not brace expansion (bash prints `a b`).
+#[test]
+fn brace_expansion_inside_the_body() {
+    let (out, err, rc) = run("{ echo {a,b}; }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a b\n", "", 0));
+}
+
+/// `{`/`}` are the block-depth `+1`/`-1`, so a keyword block that holds a group
+/// closes at its own keyword: the `if` body and the `while` condition group run.
+#[test]
+fn group_delimiters_keep_block_depth_balanced() {
+    let (out, err, rc) = run("if { true; }; then echo yes; fi");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("yes\n", "", 0));
+    let (out, err, rc) = run("while { echo w; false; }; do echo body; done");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("w\n", "", 0));
+}
+
+/// A group in a function body, an `if` body and a `case` arm runs its statements
+/// in the shell, so the assignment is visible after the block.
+#[test]
+fn group_in_block_bodies() {
+    let (out, err, rc) = run("f() { x=1; { y=2; }; }; f; echo $x $y");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("1 2\n", "", 0));
+    let (out, err, rc) = run("case x in x) { x=1; };; esac; echo $x");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("1\n", "", 0));
+    let (out, err, rc) = run("if true; then { v=5; }; echo $v; fi");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("5\n", "", 0));
+}
+
+/// `{echo` is a command name, not a group opener (the byte after `{` is not a
+/// boundary), so it is command-not-found, as bash's syntax error is there too.
+#[test]
+fn glued_brace_stays_a_command_word() {
+    let (out, err, rc) = run("{echo hi; }");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("\"{echo\" not found"), "{err}");
+}
+
+/// A brace in an argument position is a word: `echo {` prints the brace, and the
+/// `{` after a pipeline `|` is a command word, not a group.
+#[test]
+fn brace_in_argument_or_pipeline_position_is_a_word() {
+    let (out, err, rc) = run("echo {");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
+    let (out, err, rc) = run("echo a| { echo b; }");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("\"{\" not found"), "{err}");
+}
+
+/// `{ …; } | cat` is unsupported: a pipeline stage is not a group, and the parse
+/// error names the pipe.
+#[test]
+fn pipeline_stage_group_is_a_parse_error() {
+    let (out, err, rc) = run("{ echo a; } | cat");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("unexpected pipe"), "{err}");
+}
+
+/// A background group (`{ …; } &`) and a here-doc on a group are unsupported;
+/// each pinned parse error names what is missing.
+#[test]
+fn background_and_here_doc_on_group_are_parse_errors() {
+    let (out, err, rc) = run("{ echo a; } &");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(
+        err.contains("unexpected character in this context"),
+        "{err}"
+    );
+    let (out, err, rc) = run("{ echo a; } <<EOF");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(
+        err.contains("here-doc on a group is not supported"),
+        "{err}"
+    );
+}
+
+/// bash requires the `;` before `}`, an empty group is a syntax error, and a word
+/// after the closing brace is not part of the group.
+#[test]
+fn malformed_groups_are_parse_errors() {
+    let (out, err, rc) = run("{ echo a }");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("expected ';' before '}'"), "{err}");
+    let (out, err, rc) = run("{ }");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("group is empty"), "{err}");
+    let (out, err, rc) = run("{ echo a; } echo b");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("unexpected word after '}'"), "{err}");
+}
+
+/// An unclosed group reaches the end of input: the script-level parse error,
+/// not a command named `{`.
+#[test]
+fn unclosed_group_is_a_parse_error() {
+    let (out, err, rc) = run("{ echo a");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("parse error"), "{err}");
+}
