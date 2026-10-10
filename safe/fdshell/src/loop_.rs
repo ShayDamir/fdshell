@@ -1,4 +1,4 @@
-use crate::loop_control::{LoopControl, consume};
+use crate::loop_control::{LoopControl, consume, in_loop};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
@@ -21,7 +21,7 @@ pub(crate) fn run_loop(
     invert: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::loop_control::in_loop(cell, || run_loop_body(block, invert, cell))
+    in_loop(cell, || run_loop_body(block, invert, cell))
 }
 
 fn run_loop_body(

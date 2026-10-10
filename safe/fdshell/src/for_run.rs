@@ -1,7 +1,7 @@
 mod array_word;
 
 use crate::error::cmd::CmdError;
-use crate::loop_control::{LoopControl, consume};
+use crate::loop_control::{LoopControl, consume, in_loop};
 use crate::parse::for_block::ForBlock;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -13,7 +13,7 @@ pub(crate) fn run_for(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::loop_control::in_loop(cell, || run_for_body(forblock, text, cell))
+    in_loop(cell, || run_for_body(forblock, text, cell))
 }
 
 fn run_for_body(
