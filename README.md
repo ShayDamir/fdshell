@@ -544,6 +544,23 @@ Accepted divergences from bash:
   closing brace behaves the same. The same holds for a scoped assignment
   (`a=1 > a` → the redirect word becomes a command) and for `unset`/`umask`,
   whose redirect word is read as a keyword argument (parse error, rc 1).
+- the bash/ksh keyword form `function f { echo hi; }` is accepted, in every definer
+  shape (`function f {`, `function f() {`, `function f () {`, `function f ( ) {`),
+  and its divergences are the POSIX `f() { … }` form's, verbatim: `function f` with
+  no brace is rc 1 `parse error` (bash rc 2), an empty body `function f { }` runs
+  rc 0 (bash rc 2), a trailing run after the closing brace
+  (`function f { echo hi; } f`) is dropped (bash rc 2), a definer word after the
+  name is ignored (`function f x { echo hi; }; f` → `hi` rc 0, bash rc 2),
+  `function() { echo fn; }` defines the function `function` (bash rc 2), and the
+  name leniency keeps an option-shaped word (`function -a f { echo hi; }` defines
+  `-a`, rc 0) and a quoted name (`function "f" { echo hi; }; f` → `hi` rc 0; bash
+  rejects both).
+- `function` is a reserved word, so `alias function=echo` never replaces the keyword
+  position (as bash); a `function` word with no definer name is the missing command
+  (`"function" not found`, rc 1) and `function f; echo after` is rc 1 `parse error`
+  (bash rc 2 syntax error for both). `function f }{ echo hi; }` is pathological:
+  the byte layer claims the span, the token layer sees no `{` token, so the text
+  runs as commands (rc 1, `"function" not found`; bash rc 2, as `f() }{ … }`).
 - within one command `> a 2>&1` copies the fd 1 the shell had **before** the
   command: every redirect source is resolved up front, so `2>&1` cannot see the
   `> a` target. Bash applies as it goes and `2>&1` lands on the file `a`

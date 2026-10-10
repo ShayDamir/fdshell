@@ -669,3 +669,18 @@ in `group_block` the `close + 1`→`close * 1` mutant gives the same `open_end`
 equivalent mutant. The `+1` is still required for the closed case (the `+1`→`-1`
 mutant is killed by `segment/group/tests.rs::span_ends_past_the_closing_brace`),
 so keep the offset and record the `*` survivor rather than chasing it.
+
+## Byte-level definer words must be the tokenizer's tokens
+The `function name { … }` definer rule is one implementation (`keywords/function.rs`:
+`name_len` + `function_def_name`) shared by the byte-level span scanner
+(`brace::scan_function_block`) and the token-level parse dispatch
+(`parse::function_block`), so the segment span and the dispatch accept exactly the
+same shapes. The byte word split must equal the tokenizer's word split, and the
+tokenizer emits `)` as a separator **token** (`(` is a word char): a lone `)` is a
+word of its own, not a terminator to skip. Skipping it shifts the following words,
+so `function ) f {` would pair `function` with `f` at the byte level while the token
+layer pairs `function` with `)` and rejects it — the span would be claimed by text
+the parser runs as commands. A definer word `)` is therefore produced by the byte
+split and rejected by `name_len` (which rejects `)`, `{`, `}`, whitespace, and any
+`(` that is not the word's last byte). The same alignment makes `function f ( ) {`
+work, and keeps `f ( ) {` (POSIX form, split parens) rejected by both layers.
