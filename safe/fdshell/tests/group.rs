@@ -485,3 +485,21 @@ fn group_part_respects_the_cond_short_circuit() {
     let (out, err, rc) = run("false || { echo g; } && echo d");
     assert_eq!((out.as_str(), err.as_str(), rc), ("g\nd\n", "", 0));
 }
+
+/// The group depth in the cond-boundary scan must stay **positive** across a
+/// nested open, because the `max(0)` clamp is applied per closer, not to the
+/// running total: an open that `-= 1` runs negative, and the next closer resets
+/// it to `0` while the true counter is still positive. That divergence is only
+/// observable on the *counted-open, counted-open, closer, then operator*
+/// sequence, so the split must land on the operator after the outer `}`. `&&`
+/// runs every part; `||` short-circuits after `echo a` succeeds, so only `a`
+/// prints. Both are measured against bash 5.3.9 and kill the `+=`→`-=` mutant
+/// on `cond/boundary.rs:30` (the mutant splits at the inner `&&`/`||` and
+/// reports `group is missing a closing brace` rc 1).
+#[test]
+fn nested_group_at_a_cond_part_start_keeps_the_body_depth() {
+    let (out, err, rc) = run("{ echo a && { echo b; } && echo c; } && echo d");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\nc\nd\n", "", 0));
+    let (out, err, rc) = run("{ echo a || { echo b; } || echo c; } || echo d");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\n", "", 0));
+}

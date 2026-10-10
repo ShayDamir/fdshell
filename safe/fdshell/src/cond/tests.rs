@@ -45,7 +45,7 @@ fn stray_closer_clamps_the_depth_at_zero() {
 
 /// A `{` in an argument position is word data, not a group opener: the depth
 /// stays 0 and the `&&` / `||` splits as it does in bash. The same clause-position
-/// rule the segment scanner uses (`group_at_part_start`) governs the counter.
+/// rule the segment scanner uses (`group_at_run`) governs the counter.
 #[test]
 fn brace_in_argument_position_is_not_a_group() {
     // `echo { && echo b` — the brace at 5 is an argument; split at the `&&` (7).
