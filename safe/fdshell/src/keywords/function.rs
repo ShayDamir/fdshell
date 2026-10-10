@@ -47,8 +47,10 @@ fn def_words(word: &[u8]) -> (Option<&[u8]>, Option<&[u8]>) {
 }
 
 /// The first definer word, and the text after it. A `)` is the tokenizer's own
-/// separator token, so it is a word of its own and never joins the word before
-/// it. Leading whitespace is skipped; an empty body gives `None`.
+/// separator token, so it is a word of its own: it never joins the word before
+/// it, and it is never consumed as a terminator, so a `)` glued after a word is
+/// the start of the text returned with it. Leading whitespace is skipped; an
+/// empty body gives `None`.
 fn skip_word(word: &[u8]) -> (Option<&[u8]>, &[u8]) {
     let start = word.iter().take_while(|b| b.is_ascii_whitespace()).count();
     let body = word.get(start..).unwrap_or(b"");
@@ -60,7 +62,7 @@ fn skip_word(word: &[u8]) -> (Option<&[u8]>, &[u8]) {
         .get(..end)
         .filter(|w| !w.is_empty())
         .or_else(|| body.get(..1));
-    (word, body.get(end + 1..).unwrap_or(b""))
+    (word, body.get(end..).unwrap_or(b""))
 }
 
 #[cfg(test)]

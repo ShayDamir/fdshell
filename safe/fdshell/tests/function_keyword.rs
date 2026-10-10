@@ -198,6 +198,36 @@ fn function_words_in_argument_position_are_data() {
     );
 }
 
+/// A `)` glued to `function` is the tokenizer's own separator token, so the
+/// definer pair is `function` + `)` and no block is claimed: the text runs as
+/// commands, the `&&` part is skipped by the failed first part, and nothing is
+/// silently dropped (bash rc 2 syntax error).
+#[test]
+fn glued_close_paren_after_the_keyword_runs_as_commands() {
+    let (out, err, rc) = run("function)f g { echo hi; } && echo done");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains(r#""function" not found"#), "stderr={err}");
+    assert!(err.contains(r#""}" not found"#), "stderr={err}");
+    let (out, err, rc) = run("function)f g { echo hi; }; f");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains(r#""function" not found"#), "stderr={err}");
+    assert!(err.contains(r#""f" not found"#), "stderr={err}");
+    // The spaced twin behaves identically: the tokens are the same.
+    let (out, rc) = {
+        let (out, _, rc) = run("function ) f g { echo hi; } && echo done");
+        (out, rc)
+    };
+    assert_eq!((out.as_str(), rc), ("", 1));
+    let (out, rc) = {
+        let (out, _, rc) = run("function ) f g { echo hi; }; f");
+        (out, rc)
+    };
+    assert_eq!((out.as_str(), rc), ("", 1));
+    // A `)` after the name word ends the definer pair, as in the POSIX form.
+    let (out, err, rc) = run("function f)g { echo hi; }; f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+}
+
 /// A mid-run definition is the inherited cond-list gap (task #168): the cond part
 /// has no closing brace, so it is a parse error rc 1 where bash runs it.
 #[test]

@@ -552,9 +552,15 @@ Accepted divergences from bash:
   (`function f { echo hi; } f`) is dropped (bash rc 2), a definer word after the
   name is ignored (`function f x { echo hi; }; f` → `hi` rc 0, bash rc 2),
   `function() { echo fn; }` defines the function `function` (bash rc 2), and the
-  name leniency keeps an option-shaped word (`function -a f { echo hi; }` defines
-  `-a`, rc 0) and a quoted name (`function "f" { echo hi; }; f` → `hi` rc 0; bash
-  rejects both).
+   name leniency keeps an option-shaped word (`function -a f { echo hi; }` defines
+   `-a`, rc 0) and a quoted name (`function "f" { echo hi; }; f` → `hi` rc 0; bash
+   rejects both).
+- a `)` is the tokenizer's separator token, so a definer word ends at a glued `)`
+   and `)` is always a word of its own: `function f)g { echo hi; }; f` defines `f`
+   (`hi`, rc 0; bash rc 2), while a `)` glued to the keyword leaves no definer name
+   and the text runs as commands (`function)f g { echo hi; } && echo done` → rc 1,
+   `"function" not found` + `"}" not found`, nothing dropped; bash rc 2), exactly as
+   the spaced twin `function ) f g { echo hi; } && echo done` does.
 - `function` is a reserved word, so `alias function=echo` never replaces the keyword
   position (as bash); a `function` word with no definer name is the missing command
   (`"function" not found`, rc 1) and `function f; echo after` is rc 1 `parse error`

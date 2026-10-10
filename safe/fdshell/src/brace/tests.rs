@@ -89,6 +89,18 @@ fn keyword_form_without_a_definer_name_is_rejected() {
     assert_eq!(scan(&b"function ) f { echo hi; }"[..]), None);
 }
 
+/// A `)` glued to `function` is its own word (the tokenizer's separator token),
+/// so the definer pair is `function` + `)`, which is not a name: no span is
+/// claimed, and the text is not claimed by a def the token layer rejects.
+#[test]
+fn glued_close_paren_after_the_keyword_is_not_a_block() {
+    assert_eq!(scan(&b"function)f g { echo hi; }"[..]), None);
+    assert_eq!(scan(&b"function)f { echo hi; }"[..]), None);
+    // A `)` after the name word ends the definer pair; the span is unchanged.
+    let glued_name = &b"function f)g { echo hi; }"[..];
+    assert_eq!(scan(glued_name), Some((glued_name.len(), true)));
+}
+
 // A nested `{`-shaped body line must not open a brace depth level.
 #[test]
 fn heredoc_body_open_brace_does_not_open_depth() {

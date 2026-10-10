@@ -682,5 +682,11 @@ so `function ) f {` would pair `function` with `f` at the byte level while the t
 layer pairs `function` with `)` and rejects it — the span would be claimed by text
 the parser runs as commands. A definer word `)` is therefore produced by the byte
 split and rejected by `name_len` (which rejects `)`, `{`, `}`, whitespace, and any
-`(` that is not the word's last byte). The same alignment makes `function f ( ) {`
+`(` that is not the word's last byte). The same rule covers a `)` **glued to the
+preceding word**: `function)f` splits into `function` + `)`, the rest returned with
+a word must start at the `)` (never past it), so `)` is always emitted as the next
+word and never consumed. Consuming the glued `)` claimed `function)f g { … }` as a
+`g`-named block that the token layer rejects, so `echo hi` was silently dropped
+(rc 0, killed by `keywords/function/tests.rs::glued_close_paren_after_the_keyword_is_its_own_word`).
+The same alignment makes `function f ( ) {`
 work, and keeps `f ( ) {` (POSIX form, split parens) rejected by both layers.

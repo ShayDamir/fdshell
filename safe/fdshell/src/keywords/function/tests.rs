@@ -75,3 +75,15 @@ fn close_paren_is_a_word_terminator() {
     // The `)` after a POSIX `name(` ends the definer word.
     assert_eq!(def(b"f() { x }"), Some(b"f".to_vec()));
 }
+
+/// A `)` glued to the preceding word is never consumed as a terminator: it is
+/// the tokenizer's own separator token, so it is the next word, and the byte
+/// split stays aligned with the token split at every position.
+#[test]
+fn glued_close_paren_after_the_keyword_is_its_own_word() {
+    // `function` + `)` + `f`: the name word is `)`, which is not a definer name.
+    assert_eq!(def(b"function)f g {"), None);
+    assert_eq!(def(b"function)f {"), None);
+    // A `)` after the name word ends the definer pair, as in the POSIX form.
+    assert_eq!(def(b"function f)g {"), Some(b"f".to_vec()));
+}

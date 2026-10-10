@@ -125,6 +125,9 @@ fn keyword_form_without_a_name_is_not_a_function() {
         &b"function"[..],
         &b"function f"[..],
         &b"function ) f { echo hi; }"[..],
+        // The tokenizer emits `)` as its own separator token, so the definer
+        // pair of `function)f` is `function` + `)`: no name, not a definition.
+        &b"function)f g { echo hi; }"[..],
     ] {
         assert!(
             !matches!(parse(text), crate::parse::ParsedLine::Function(_)),
