@@ -45,6 +45,16 @@ fn function_block_open_and_closed() {
     assert!(is_complete(b"f() {\necho hi\n}"));
 }
 
+/// The `function name { … }` keyword form continues on an open brace.
+#[test]
+fn function_keyword_block_open_and_closed() {
+    assert!(!is_complete(b"function f {"));
+    assert!(!is_complete(b"function f() {"));
+    assert!(is_complete(b"function f { echo hi; }"));
+    assert!(is_complete(b"function f ( ) { echo hi; }"));
+    assert!(!is_complete(b"function f"));
+}
+
 #[test]
 fn nested_if_needs_matching_fi() {
     assert!(!is_complete(b"if a; then\nif b; then\nfi"));

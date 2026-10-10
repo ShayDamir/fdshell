@@ -1,6 +1,7 @@
 use super::Token;
 use super::semi::{trim_semi, verbatim};
 use crate::error::parse::ParseError;
+use crate::keywords::name_len;
 use error_stack::Report;
 use sys::{ScriptText, ShortCStr};
 
@@ -10,17 +11,48 @@ pub struct FunctionDef {
     pub body: ScriptText,
 }
 
-/// A `name() { … }` opener: the first token is `name(`, the second is `)`,
-/// and a `{` token follows.
+/// A function-definition opener: a `{` token, and either the POSIX `name() {`
+/// definer (`name(` then `)`) or the bash/ksh `function name [()] {` definer.
 pub(crate) fn is_function_def(tokens: &[Token]) -> bool {
-    let first = tokens
-        .first()
-        .is_some_and(|(t, _, _, _, _)| t.len() > 1 && t.ends_with(b"("));
-    let second = tokens
+    let open = tokens.iter().any(|(t, _, _, _, _)| t.eq_bytes(b"{"));
+    open && (posix_def(tokens) || keyword_def(tokens))
+}
+
+/// POSIX `name() {`: token 0 is `name(` with a non-empty name, token 1 is `)`.
+fn posix_def(tokens: &[Token]) -> bool {
+    let parens = tokens
         .get(1)
         .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b")"));
-    let open = tokens.iter().any(|(t, _, _, _, _)| t.eq_bytes(b"{"));
-    first && second && open
+    parens
+        && tokens
+            .first()
+            .is_some_and(|(t, _, _, _, _)| t.ends_with(b"(") && def_len(t).is_some())
+}
+
+/// bash/ksh `function name [()] {`: token 0 is `function`, token 1 is a definer name.
+fn keyword_def(tokens: &[Token]) -> bool {
+    let keyword = tokens
+        .first()
+        .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"function"));
+    keyword
+        && tokens
+            .get(1)
+            .is_some_and(|(t, _, _, _, _)| def_len(t).is_some())
+}
+
+/// The definer word: the name token after `function` in the keyword form, the
+/// first token (`name(`) in the POSIX form.
+fn definer(tokens: &[Token]) -> Option<&ShortCStr> {
+    let first = tokens.first().map(|(t, _, _, _, _)| t);
+    if first.is_some_and(|t| t.eq_bytes(b"function")) {
+        return tokens.get(1).map(|(t, _, _, _, _)| t);
+    }
+    first
+}
+
+/// The definer name length of a token; `None` = not a definer word.
+fn def_len(word: &ShortCStr) -> Option<usize> {
+    name_len(word.as_bytes().ok()?)
 }
 
 pub(crate) fn tokens_to_function(
@@ -44,17 +76,12 @@ pub(crate) fn tokens_to_function(
     Ok(FunctionDef { name, body })
 }
 
-/// The `name(` first token with its trailing `(` stripped.
+/// The definer word with its trailing POSIX `(` stripped.
 fn function_name(tokens: &[Token]) -> Result<ShortCStr, Report<ParseError>> {
-    let head = tokens
-        .first()
-        .ok_or(ParseError::FunctionEmptyName)?
-        .0
-        .clone();
-    let name = head
-        .get(..head.len() - 1)
-        .ok_or(ParseError::FunctionEmptyName)?;
-    Ok(name)
+    let word = definer(tokens).ok_or(ParseError::FunctionEmptyName)?;
+    let bytes = word.as_bytes().ok().ok_or(ParseError::FunctionEmptyName)?;
+    let len = name_len(bytes).ok_or(ParseError::FunctionEmptyName)?;
+    Ok(word.get(..len).ok_or(ParseError::FunctionEmptyName)?)
 }
 
 #[cfg(test)]

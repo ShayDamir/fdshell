@@ -77,6 +77,15 @@ fn partially_quoted_word_not_expanded() {
     assert_eq!(run("ab\"x\" now", &[("abx", "z")]), b"ab\"x\" now");
 }
 
+/// `function` is a reserved keyword word, so an alias never replaces it (as bash).
+#[test]
+fn function_keyword_is_reserved() {
+    assert_eq!(
+        run("function f now", &[("function", "echo")]),
+        b"function f now"
+    );
+}
+
 fn aliased_cell() -> ForkCell<ShellState> {
     ForkCell::new({
         let mut state = ShellState::new();

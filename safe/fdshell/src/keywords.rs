@@ -4,26 +4,10 @@ fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
         .is_none_or(|&b| b.is_ascii_whitespace() || b == b';' || extra.contains(&b))
 }
 
-/// Return the name if `word` starts with a `name()` function-definition opener.
-///
-/// `name` must be a non-empty run with no whitespace, immediately followed by `()`.
-pub(super) fn function_def_name(word: &[u8]) -> Option<&[u8]> {
-    let open = word.iter().position(|&b| b == b'(')?;
-    if open == 0 {
-        return None;
-    }
-    let name = word.get(..open)?;
-    if name.iter().any(|&b| b.is_ascii_whitespace()) {
-        return None;
-    }
-    if word.get(open + 1) != Some(&b')') {
-        return None;
-    }
-    Some(name)
-}
-
+mod function;
 mod wait;
 
+pub(crate) use function::{function_def_name, name_len};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
 use crate::segment::group::{closes, opens};

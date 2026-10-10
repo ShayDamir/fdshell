@@ -58,6 +58,37 @@ fn heredoc_body_brace_does_not_close() {
     assert_eq!(scan(line), Some((line.len(), true)));
 }
 
+/// The `function name [()] {` keyword forms: the span is the definer text to the
+/// closing `}`, exactly as the POSIX form's.
+#[test]
+fn keyword_form_spans_close_at_brace() {
+    for line in [
+        &b"function f { echo hi; }"[..],
+        &b"function f() { echo hi; }"[..],
+        &b"function f () { echo hi; }"[..],
+        &b"function f ( ) { echo hi; }"[..],
+    ] {
+        assert_eq!(scan(line), Some((line.len(), true)), "{line:?}");
+    }
+}
+
+/// `function f` with no `{` on the line: the span search finds no brace, so the
+/// block is claimed open (`false`), as the POSIX `f()` form does.
+#[test]
+fn keyword_form_without_a_brace_is_open() {
+    assert_eq!(scan(&b"function f"[..]), Some((10, false)));
+    let next_line = &b"function f\n{ echo hi; }"[..];
+    assert_eq!(scan(next_line), Some((next_line.len(), true)));
+}
+
+#[test]
+fn keyword_form_without_a_definer_name_is_rejected() {
+    assert_eq!(scan(&b"function f(x) { echo hi; }"[..]), None);
+    assert_eq!(scan(&b"function { echo hi; }"[..]), None);
+    assert_eq!(scan(&b"function"[..]), None);
+    assert_eq!(scan(&b"function ) f { echo hi; }"[..]), None);
+}
+
 // A nested `{`-shaped body line must not open a brace depth level.
 #[test]
 fn heredoc_body_open_brace_does_not_open_depth() {

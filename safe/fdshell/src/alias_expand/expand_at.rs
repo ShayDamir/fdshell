@@ -6,7 +6,15 @@ use sys::fork_cell::ForkCell;
 
 const MAX_ALIAS_DEPTH: u32 = 16;
 const RESERVED: &[&[u8]] = &[
-    b"case", b"esac", b"if", b"fi", b"for", b"while", b"until", b"done",
+    b"case",
+    b"esac",
+    b"if",
+    b"fi",
+    b"for",
+    b"while",
+    b"until",
+    b"done",
+    b"function",
 ];
 
 /// Expand one command position, skipping fully quoted, double-quoted and

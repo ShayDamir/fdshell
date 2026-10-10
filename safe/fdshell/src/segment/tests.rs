@@ -662,6 +662,32 @@ fn scan_wait_block_opens_on_same_line_keyword() {
     }
 }
 
+/// The `function name { … }` keyword form claims the same span as the POSIX
+/// `name() { … }` form: the definer word starts the block, and the trailing
+/// statement is scanned from just past the closing `}`.
+#[test]
+fn scan_function_block_keyword_form_span() {
+    let segments = scan_segments(b"function f { echo hi; }; f", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (
+            Segment::Block {
+                block_start,
+                end_pos,
+                closed,
+            },
+            Segment::Statement { cmd, off, .. },
+        ) => {
+            assert_eq!(*block_start, 0);
+            assert_eq!(*end_pos, 23);
+            assert!(*closed);
+            assert_eq!(cmd, b"f");
+            assert_eq!(*off, 25);
+        }
+        _ => panic!("expected Block + Statement"),
+    }
+}
+
 // After a function-definition block the scan resumes just past the closing
 // `}`; the trailing statement's offset is measured from there.
 #[test]
