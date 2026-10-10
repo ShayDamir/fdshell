@@ -593,8 +593,11 @@ the same statement as opaque** (`skip_group` jumps past its closing brace): with
 the plain `;`-based scan, `{ echo a; } && { echo b; }` spanned only up to the
 first `;` after the closing brace, cutting the second group, and the cond split
 reported `group is missing a closing brace` for `{ echo b`. The `cond/boundary`
-group-depth counter (`&&`/`||` only split at `group_depth == 0`) is correct only
-when every group in the statement is a whole span.
+group-depth counter (`&&`/`||` only split at `group_depth == 0`) relies on every
+group in the statement being a whole span — and the `group_at_run` + `skip_group`
+design **enforces** that span: a cond-part group is skipped whole inside the run, so
+its inner `;` is never a top-level separator and the counter sees balanced
+open/close pairs.
 
 A group is the current shell, not a subshell, so `exec >file` inside the body is
 **permanent** (bash agrees): `Scope::restore` undoes the group's own trailing
@@ -635,13 +638,21 @@ keeps the group's text, `cond` splits the operator into one part per group, and
 `substitution_group_after_operator_keeps_the_run_before_it` (both fail on the
 flushing version), and by `segment/group/tests.rs::group_after_and_stays_a_cond_part_not_a_block`.
 
-## Depth tested only by `== 0` under a `max(0)` clamp makes `+=`→`-=` equivalent
-`cond/boundary` counts group depth as `max(0, opens - closers)` and the only
-observation is `group_depth == 0`. The `+=`→`-=` mutant gives
-`max(0, closers - opens)`, which is zero in exactly the same states, so no input
-separates them: the mutant is unkillable. Say what the depth means (`opens` and
-`closers`, clamped) and check the predicate directly; do not add a test for a
-depth whose sign is never read.
+## A `max(0)` clamp on the closer does NOT make `+=`→`-=` on the opener equivalent
+`cond/boundary` counts group depth: the opener is `group_depth += 1`
+(**unclamped**), the closer is `group_depth = group_depth.saturating_sub(1).max(0)`
+(clamp on the **closer only**). The `+=`→`-=` mutant drives the depth negative;
+the next closer clamps `max(0, -n)` back to `0`, so a negative depth is
+indistinguishable from `0` **at that closer** — the true and mutated counters agree
+on every *single-open* statement. They diverge only on the **counted-open,
+counted-open, closer, then operator** sequence: true depth is `+1` at the operator
+(no split) while mutated depth is `0` (split), so the mutant splits inside the body
+and reports `group is missing a closing brace` rc 1. Kill it with
+`tests/group.rs::nested_group_at_a_cond_part_start_keeps_the_body_depth`
+(`{ echo a && { echo b; } && echo c; } && echo d` → bash `a b c d`, plus the `||`
+variant). The rule: a per-closer clamp keeps the depth's **sign observable through
+the clamp**, so the test must cover the nested-open sequence — not just the
+`== 0` predicate. Do not assume an unclamped counter is sign-blind.
 
 ## A guard duplicated inside the callee is an equivalent mutant
 `cond/boundary` skips a heredoc body with `if b == b'\n' && let Some(resume) =

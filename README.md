@@ -248,6 +248,14 @@ Accepted divergences from bash:
   (rc 0) where bash reports `bad substitution` (rc 1); `master` agrees.
 - A here-doc or here-string on a group (`{ echo a; } <<EOF`, `{ echo a; } <<<x`)
   is a parse error; bash feeds the body to the group.
+- A here-doc as the group's **last** body command, followed by `; }` on its own
+  line (`{ cat <<EOF` + `hi` + `EOF` + `; }`, run from a script file), prints `hi`
+  rc 0: fdshell keeps the `;` as the body's separator so the group runs, where
+  bash 5.3.9 reports `syntax error near unexpected token ';'` rc 2. Pinned by
+  `tests/group.rs::here_doc_inside_the_group_body`.
+- A comment glued to the closing brace (`{ echo a; }# note`) ends the statement:
+  fdshell prints `a` rc 0, where bash reports rc 2. Pinned by
+  `segment/group/tests.rs::glued_comment_after_the_closing_brace_ends_the_statement`.
 - A word after the closing brace (`{ echo a; } echo b`) is a parse error; bash's
   syntax error names the token.
 - The unclosed group (`{ echo a`), the empty group (`{ }`) and the missing `;`
