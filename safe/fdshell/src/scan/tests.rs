@@ -269,3 +269,91 @@ fn escaped_paren_never_nests_a_substitution() {
     s.advance(line, 6);
     assert_eq!(s.paren_depth, 0, "the unescaped `)` closes the body");
 }
+
+// Task #130: inside double quotes a nested region is consumed whole, so its
+// `;`, `|`, `&&`, `<`/`>` and `"` are never seen by the byte-level scanners.
+#[test]
+fn quoted_dollar_paren_region_is_skipped_whole() {
+    let line = b"echo \"$(echo \"a; b\")\"";
+    let mut s = ScanState::new();
+    assert_eq!(s.advance(line, 5), 6, "the opening quote toggles");
+    assert!(s.in_quote);
+    assert_eq!(s.advance(line, 6), 20, "the `$(` jumps past the `)` at 19");
+    assert!(s.in_quote, "the outer quote stays open across the region");
+    assert_eq!(s.paren_depth, 0, "the region is not nested, it is consumed");
+    assert!(s.word_active, "the region is word content");
+    assert_eq!(s.advance(line, 20), 21);
+    assert!(!s.in_quote);
+}
+
+#[test]
+fn quoted_brace_region_is_skipped_whole() {
+    let line = b"echo \"${u:-\"a; b\"}\"";
+    let mut s = ScanState::new();
+    s.advance(line, 5);
+    assert_eq!(s.advance(line, 6), 18, "past the closing brace at 17");
+    assert!(s.in_quote);
+    assert_eq!(s.advance(line, 18), 19);
+    assert!(!s.in_quote);
+}
+
+#[test]
+fn quoted_backtick_region_is_skipped_whole() {
+    let line = b"echo \"`printf \"q;\"`\"";
+    let mut s = ScanState::new();
+    s.advance(line, 5);
+    assert_eq!(s.advance(line, 6), 19, "past the closing backtick at 18");
+    assert!(s.in_quote);
+    assert!(!s.in_backtick, "the region is consumed, not entered");
+    assert_eq!(s.advance(line, 19), 20);
+    assert!(!s.in_quote);
+}
+
+// An unbalanced region is not a skip: the scanner falls back to the
+// byte-at-a-time path, exactly as before task #130.
+#[test]
+fn unbalanced_quoted_region_falls_back_to_byte_scanning() {
+    let mut s = ScanState::new();
+    s.advance(b"echo \"$(echo a\"", 5);
+    assert_eq!(s.advance(b"echo \"$(echo a\"", 6), 7, "unclosed `$( … )`");
+    let mut s = ScanState::new();
+    s.advance(b"echo \"${x", 5);
+    assert_eq!(s.advance(b"echo \"${x", 6), 7, "unclosed brace expansion");
+    let mut s = ScanState::new();
+    s.advance(b"echo \"`a", 5);
+    assert_eq!(s.advance(b"echo \"`a", 6), 7, "unclosed backtick region");
+}
+
+// The unquoted path is untouched: a `$(` outside quotes still raises the depth.
+#[test]
+fn unquoted_regions_keep_the_incremental_tracking() {
+    let mut s = ScanState::new();
+    assert_eq!(s.advance(b"echo $(x)", 5), 7);
+    assert_eq!(s.paren_depth, 1);
+    assert_eq!(s.advance(b"echo $(x)", 8), 9);
+    assert_eq!(s.paren_depth, 0);
+}
+
+// A full walk of each evidence line ends balanced: no open quote, no open
+// substitution, so statement splitting and `is_bare` see a complete word.
+#[test]
+fn full_walk_of_quoted_regions_ends_balanced() {
+    for line in [
+        b"echo \"$(echo \"a; b\")\"".as_slice(),
+        b"echo \"${u:-\"a; b\"}\"".as_slice(),
+        b"echo \"`printf \"q;\"`\"".as_slice(),
+        b"echo \"$(echo \"$(echo deep)\")\"".as_slice(),
+        b"echo \"$(printf \"x && y\")\" && echo ok".as_slice(),
+        b"echo \"$(printf \"a | b\")\"".as_slice(),
+        b"echo \"$(printf \"<<EOF\")\"".as_slice(),
+    ] {
+        let mut s = ScanState::new();
+        let mut i = 0usize;
+        while i < line.len() {
+            i = s.advance(line, i);
+        }
+        assert!(!s.in_quote, "{line:?}: the quote closes");
+        assert!(!s.in_backtick, "{line:?}: no backtick is left open");
+        assert_eq!(s.paren_depth, 0, "{line:?}: no substitution is left open");
+    }
+}

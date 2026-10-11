@@ -179,3 +179,41 @@ fn group_inside_block_needs_its_closing_keyword() {
     assert!(is_complete(b"if true; then { echo a; }; fi"));
     assert!(!is_complete(b"if true; then { echo a; };"));
 }
+
+// Task #130: a quoted `$( … )`, `${ … }` or backtick region is one unit, so the
+// separators inside it (`;`, `|`, `&&`, `<`/`>`) neither split the line nor make
+// it look incomplete — the buffer is executed as written, with no continuation.
+#[test]
+fn quoted_regions_with_inner_separators_are_complete() {
+    for line in [
+        b"echo \"$(printf \"a; b\")\"".as_slice(),
+        b"echo \"`printf \"a; b\"`\"".as_slice(),
+        b"echo \"${u:-\"a; b\"}\"".as_slice(),
+        b"echo \"$(printf \"a && b\")\" && echo ok".as_slice(),
+        b"echo \"$(printf \"a | b\")\" | cat".as_slice(),
+        b"echo \"$(printf \"<<EOF\")\"".as_slice(),
+        b"echo \"$(echo \"$(printf \"x && y\")\")\" && echo ok".as_slice(),
+        b"echo \"$(printf \"a; b\")\" > out".as_slice(),
+        b"if true; then echo \"$(echo \"x; y\")\"; fi".as_slice(),
+        b"while true; do echo \"$(echo \"a; b\")\"; done".as_slice(),
+    ] {
+        assert!(
+            is_complete(line),
+            "{line:?} must execute without continuation"
+        );
+    }
+}
+
+// The other side of the same rule: a region that never closes is incomplete,
+// exactly as an unbalanced quote is, so the REPL keeps reading.
+#[test]
+fn unterminated_quoted_regions_need_a_continuation() {
+    for line in [
+        b"echo \"$(echo a".as_slice(),
+        b"echo \"${u:-x".as_slice(),
+        b"echo \"`a".as_slice(),
+        b"echo \"$(printf \"a; b\")\" &&".as_slice(),
+    ] {
+        assert!(!is_complete(line), "{line:?} needs a continuation line");
+    }
+}

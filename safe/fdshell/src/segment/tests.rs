@@ -866,3 +866,52 @@ fn scan_group_in_block_is_statements() {
     assert_eq!(segments.len(), 2);
     assert!(matches!(segments[0], Segment::Statement { .. }));
 }
+
+// Task #130: a `;` (or a newline) written inside a quoted `$( … )`, `${ … }`
+// or backtick region is region content, so the statement is not split there.
+#[test]
+fn separator_inside_a_quoted_region_does_not_split_a_statement() {
+    let cases: &[(&[u8], &[&[u8]])] = &[
+        (
+            b"echo \"$(printf \"a; b\")\"",
+            &[b"echo \"$(printf \"a; b\")\""],
+        ),
+        (
+            b"echo \"`printf \"a; b\"`\"",
+            &[b"echo \"`printf \"a; b\"`\""],
+        ),
+        (b"echo \"${u:-\"a; b\"}\"", &[b"echo \"${u:-\"a; b\"}\""]),
+        (
+            b"echo \"$(printf \"a; b\")\"; echo after",
+            &[b"echo \"$(printf \"a; b\")\"", b"echo after"],
+        ),
+        (
+            b"echo \"$(printf \"a; b\")\" && echo ok",
+            &[b"echo \"$(printf \"a; b\")\" && echo ok"],
+        ),
+        (
+            b"echo \"$(printf \"a\nb\")\"",
+            &[b"echo \"$(printf \"a\nb\")\""],
+        ),
+    ];
+    for (line, want) in cases {
+        let got = statements(line);
+        let want: Vec<Vec<u8>> = want.iter().map(|w| w.to_vec()).collect();
+        assert_eq!(got, want, "{line:?}");
+    }
+}
+
+/// Each segment's bytes: a statement's command text, a block's whole span.
+fn statements(line: &[u8]) -> Vec<Vec<u8>> {
+    scan_segments(line, false)
+        .iter()
+        .map(|segment| match segment {
+            Segment::Statement { cmd, .. } => cmd.to_vec(),
+            Segment::Block {
+                block_start,
+                end_pos,
+                ..
+            } => line.get(*block_start..*end_pos).unwrap_or(b"").to_vec(),
+        })
+        .collect()
+}

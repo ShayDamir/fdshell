@@ -1,5 +1,7 @@
 use super::ScanState;
 
+mod subst;
+
 impl ScanState {
     /// Fold the character at `i` into the state and return the next position
     /// to scan.
@@ -9,6 +11,10 @@ impl ScanState {
     /// positions. So is an escape pair `\X`: the backslash shields the next
     /// byte from every byte-level rule, so it never toggles a quote, ends a
     /// word, or closes a paren.
+    ///
+    /// Inside double quotes a nested `$( … )`, `${ … }` or `` ` … ` `` region
+    /// is consumed whole (task #130): the region is one unit, so its inner
+    /// quote, `;`, `|`, `&&`, `<`/`>` and `<<` are data, never separators.
     pub(crate) fn advance(&mut self, line: &[u8], i: usize) -> usize {
         let b = line.get(i).copied().unwrap_or(0);
         let bare = !self.in_quote && !self.in_backtick;
@@ -18,6 +24,15 @@ impl ScanState {
             // still fires and flushes the word.
             self.word_active = true;
             return (i + 2).min(line.len());
+        }
+        if self.in_quote
+            && let Some(resume) = subst::skip_quoted_region(line, i)
+        {
+            // The region's bytes are word content; the outer quote stays
+            // open across the region, and `paren_depth` is untouched (the region
+            // is consumed whole, not nested).
+            self.word_active = true;
+            return resume;
         }
         if b == b'"' {
             self.in_quote = !self.in_quote;

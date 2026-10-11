@@ -85,3 +85,38 @@ fn take_bodies_no_operators_gets_none() {
     assert!(out.is_empty());
     assert_eq!(idx, 0);
 }
+
+// Task #130: `&&` / `||` inside a quoted `$( … )` / `${ … }` / backtick region
+// is region content, not a cond-list operator: the split is the operator
+// written outside the quotes.
+#[test]
+fn operator_inside_a_quoted_region_is_not_a_boundary() {
+    // `echo "$(printf "a && b")" && echo ok` — inner `&&` at 18, split at 26.
+    assert_eq!(
+        boundary_of(b"echo \"$(printf \"a && b\")\" && echo ok"),
+        (26, false)
+    );
+    // No operator outside the quotes: the whole line is one cond-list part.
+    assert_eq!(boundary_of(b"echo \"$(printf \"a && b\")\""), (25, false));
+    // `${ … }` region: `||` at 14 is data, the split is the `||` at 22.
+    assert_eq!(
+        boundary_of(b"echo \"${u:-\"a || b\"}\" || echo ok"),
+        (22, true)
+    );
+    // Backtick region: `&&` at 17 is data, the split is the `&&` at 25.
+    assert_eq!(
+        boundary_of(b"echo \"`printf \"a && b\"`\" && echo ok"),
+        (25, false)
+    );
+    // A nested region keeps the same rule: the split is the outer `&&` at 36.
+    assert_eq!(
+        boundary_of(b"echo \"$(echo \"$(printf \"x && y\")\")\" && echo ok"),
+        (36, false)
+    );
+    // A `;` inside a quoted region does not end the run either: the split after
+    // it is the unquoted `&&` at 32.
+    assert_eq!(
+        boundary_of(b"echo \"$(printf \"a; b\")\"; echo x && echo y"),
+        (32, false)
+    );
+}
