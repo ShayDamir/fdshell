@@ -17,7 +17,8 @@ pub(crate) fn handle_builtin_error(
         | BuiltinError::FdVarNotFound
         | BuiltinError::SameAsMismatch
         | BuiltinError::StrictRequiresDirfd
-        | BuiltinError::StrictAbsolutePath => {
+        | BuiltinError::StrictAbsolutePath
+        | BuiltinError::ModeReopenDenied => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(1)
         }

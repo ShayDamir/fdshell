@@ -14,6 +14,7 @@ pub mod fchmod;
 pub mod memfd;
 pub mod mkdirat;
 pub mod mkfifoat;
+pub mod mode;
 pub mod openat2;
 pub mod pipe;
 pub mod renameat2;

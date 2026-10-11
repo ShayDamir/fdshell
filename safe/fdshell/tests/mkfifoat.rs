@@ -94,10 +94,12 @@ fn fifo_round_trip_delivers_the_line() {
 
 /// A second `mkfifoat` on the same path fails EEXIST (17) and the capture is
 /// never committed: no incomplete-capture machinery runs for a failing child.
+/// `umask 0o022` pins the mode-less second invocation's default (`0666 & ~umask
+/// = 0644`) so the mode guard cannot fire before `mkfifoat` reports EEXIST.
 #[test]
 fn existing_path_is_eexist() {
     let dir = Scratch::new();
-    let script = "builtin mkfifoat --mode 0600 ch %>%ch; builtin mkfifoat ch %>%x";
+    let script = "umask 0o022; builtin mkfifoat --mode 0600 ch %>%ch; builtin mkfifoat ch %>%x";
     let out = run(&dir, script);
     assert_eq!(
         out.status.code(),
@@ -161,5 +163,91 @@ fn tagged_capture_binds_the_fifo() {
         stdout(&out).contains("kind=fifo"),
         "script={script} stdout={}",
         stdout(&out)
+    );
+}
+
+/// The reported trap, exactly as filed: `builtin mkfifoat ch %>%ch` with no
+/// `--mode` used to fail `EACCES` (13) on its own `O_RDWR` reopen.
+#[test]
+fn mode_less_fifo_round_trip() {
+    let dir = Scratch::new();
+    let script = "umask 0o022; builtin mkfifoat ch %>%ch; \
+                  echo \"ping\" >%ch; \
+                  read -u %ch L; \
+                  echo \"got $L\"";
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "got ping\n", "script={script}");
+}
+
+/// The mode-less default is `mkfifo(1)`'s `0666`, masked by the pinned umask.
+#[test]
+fn mode_less_fifo_mode_is_644() {
+    let dir = Scratch::new();
+    let script = "umask 0o022; builtin mkfifoat ch %>%ch; builtin statx %ch";
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    let out = stdout(&out);
+    assert!(
+        out.contains("kind=fifo ") && out.contains("mode=644 "),
+        "script={script} stdout={out}"
+    );
+}
+
+/// A mode the `O_RDWR` reopen cannot survive is rejected in parse: rc 1, a
+/// message naming `--mode`, and nothing created on disk.
+#[test]
+fn denied_mode_reports_mode_and_leaves_nothing() {
+    let dir = Scratch::new();
+    let script = "builtin mkfifoat --mode 400 ch %>%ch";
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("--mode"),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert!(
+        !dir.join("ch").exists(),
+        "script={script} littered the disk"
+    );
+}
+
+/// The guard applies the umask the kernel would: `umask 0777` masks the `0666`
+/// default down to `000` and is refused, naming `--mode`.
+#[test]
+fn umask_masked_default_is_refused() {
+    let dir = Scratch::new();
+    let script = "umask 0o777; builtin mkfifoat ch %>%ch";
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("--mode"),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert!(
+        !dir.join("ch").exists(),
+        "script={script} littered the disk"
     );
 }

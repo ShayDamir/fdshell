@@ -22,6 +22,7 @@ fn assert_err(args: &[&str], expected: BuiltinError) {
                 match (ctx, expected) {
                     (BuiltinError::Help, BuiltinError::Help) => {}
                     (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                    (BuiltinError::ModeReopenDenied, BuiltinError::ModeReopenDenied) => {}
                     _ => panic!("unexpected error: {ctx}"),
                 }
             }
@@ -143,6 +144,40 @@ fn mode_overflow() {
     assert_invalid_arg(&["--mode", "0x100000000", "x"])
 }
 
+/// A mode-less invocation gets `mkfifo(1)`'s default, so the `O_RDWR` reopen
+/// of the new FIFO succeeds (the reported mode-0 trap).
+#[test]
+fn mode_default_is_the_create_mode() {
+    assert_ok(&["pipe"], |cfg| {
+        assert_eq!(cfg.mode, builtins::mode::CREATE_MODE);
+    });
+}
+
+#[test]
+fn mode_boundary_owner_read_write_is_accepted() {
+    assert_ok(&["--mode", "600", "x"], |cfg| {
+        assert_eq!(cfg.mode, 0o600);
+    });
+    assert_ok(&["--mode", "666", "x"], |cfg| {
+        assert_eq!(cfg.mode, 0o666);
+    });
+}
+
+/// The unit-test cache holds the umask at 0, so these are pure bit checks: a
+/// mode without the owner `w` (or `r`) bit is refused before `mkfifoat` runs.
+#[test]
+fn mode_without_owner_read_write_is_denied() {
+    assert_err(&["--mode", "500", "x"], BuiltinError::ModeReopenDenied);
+    assert_err(&["--mode", "200", "x"], BuiltinError::ModeReopenDenied);
+    assert_err(&["--mode", "400", "x"], BuiltinError::ModeReopenDenied);
+    assert_err(&["--mode", "077", "x"], BuiltinError::ModeReopenDenied);
+}
+
+#[test]
+fn explicit_mode_zero_is_denied() {
+    assert_err(&["--mode", "0", "x"], BuiltinError::ModeReopenDenied);
+}
+
 #[test]
 fn resolve_single() {
     assert_ok(&["--resolve", "RESOLVE_BENEATH", "x"], |cfg| {
@@ -253,6 +288,31 @@ fn mkfifoat_exec_sends_fifo_handle() {
     let st2 = sys::stat::stat(&cpath).unwrap();
     assert_eq!(st.ino, st2.ino);
     assert_eq!(st.dev, st2.dev);
+
+    drop(fd);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Regression for the mode-0 trap: `mkfifoat` with no `--mode` must create the
+/// FIFO *and* hand back the handle (it used to fail `EACCES` on its own reopen
+/// and leave the FIFO on disk with no fd).
+#[test]
+fn mkfifoat_exec_without_mode() {
+    let dir = test_dir();
+    std::fs::create_dir(&dir).unwrap();
+    let cpath = CString::new(dir.join("pipe").to_str().unwrap()).unwrap();
+
+    let fd = run_exec(&[cpath.as_c_str()], b"fifo");
+
+    let st = fd.fstat().unwrap();
+    assert_eq!(
+        st.mode & sys::stat::S_IFMT,
+        sys::stat::S_IFIFO,
+        "expected fifo"
+    );
+    // The default carries the owner `w` bit under every normal umask
+    // (`0666 & ~umask`), which is what makes the `O_RDWR` reopen work.
+    assert_eq!(st.mode & 0o200, 0o200, "owner must keep the w bit");
 
     drop(fd);
     std::fs::remove_dir_all(&dir).unwrap();

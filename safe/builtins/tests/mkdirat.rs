@@ -19,6 +19,7 @@ fn assert_err(args: &[&str], expected: BuiltinError) {
                 match (ctx, expected) {
                     (BuiltinError::Help, BuiltinError::Help) => {}
                     (BuiltinError::InvalidArgument(_), BuiltinError::InvalidArgument(_)) => {}
+                    (BuiltinError::ModeReopenDenied, BuiltinError::ModeReopenDenied) => {}
                     _ => panic!("unexpected error: {ctx}"),
                 }
             }
@@ -140,6 +141,39 @@ fn mode_overflow() {
     assert_invalid_arg(&["--mode", "0x100000000", "x"])
 }
 
+/// A mode-less invocation gets `mkdir(1)`'s default, so the builtin's own
+/// reopen of the new directory succeeds (the reported mode-0 trap).
+#[test]
+fn mode_default_is_the_dir_mode() {
+    assert_ok(&["newdir"], |cfg| {
+        assert_eq!(cfg.mode, builtins::mode::DIR_MODE);
+    });
+}
+
+#[test]
+fn mode_boundary_owner_read_execute_is_accepted() {
+    assert_ok(&["--mode", "500", "x"], |cfg| {
+        assert_eq!(cfg.mode, 0o500);
+    });
+    assert_ok(&["--mode", "700", "x"], |cfg| {
+        assert_eq!(cfg.mode, 0o700);
+    });
+}
+
+/// The unit-test cache holds the umask at 0, so these are pure bit checks:
+/// a mode without the owner `x` (or `r`) bit is refused before `mkdirat` runs.
+#[test]
+fn mode_without_owner_read_execute_is_denied() {
+    assert_err(&["--mode", "400", "x"], BuiltinError::ModeReopenDenied);
+    assert_err(&["--mode", "100", "x"], BuiltinError::ModeReopenDenied);
+    assert_err(&["--mode", "077", "x"], BuiltinError::ModeReopenDenied);
+}
+
+#[test]
+fn explicit_mode_zero_is_denied() {
+    assert_err(&["--mode", "0", "x"], BuiltinError::ModeReopenDenied);
+}
+
 #[test]
 fn resolve_single() {
     assert_ok(&["--resolve", "RESOLVE_BENEATH", "x"], |cfg| {
@@ -241,6 +275,56 @@ fn test_mkdirat_exec() {
     let st2 = sys::stat::stat(&cpath).unwrap();
     assert_eq!(st.ino, st2.ino);
     assert_eq!(st.dev, st2.dev);
+
+    drop(fd);
+    drop(receiver);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Regression for the mode-0 trap: `mkdirat` with no `--mode` must create the
+/// directory *and* hand back the `dirfd` handle (it used to fail `EACCES` on
+/// its own reopen and leave the directory on disk with no fd).
+#[test]
+fn test_mkdirat_exec_without_mode() {
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-test-mkdirat-modeless-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    let cpath = CString::new(dir.join("subdir").to_str().unwrap()).unwrap();
+
+    let (shell_a, shell_b) = sys::net::socketpair().unwrap();
+    shell_a.verify().unwrap();
+    shell_b.verify().unwrap();
+    let receiver = shell_b;
+    sys::shellfd::set_capture_active(true);
+
+    shell_a.export().unwrap();
+    let shell_sock = shell_a.try_clone().unwrap();
+    drop(shell_a);
+
+    let cfg = builtins::mkdirat::parse::mkdirat_parse(&[cpath.as_c_str()], false).unwrap();
+    assert_eq!(cfg.mode, builtins::mode::DIR_MODE);
+    builtins::mkdirat::mkdirat_exec(&cfg, &shell_sock).unwrap();
+
+    let mut buf = [0u8; TAG_MAX];
+    let (fd, tag) = receiver
+        .recv_fd(&mut buf, sys::Pid::from_raw(std::process::id() as i32))
+        .unwrap();
+    fd.verify().unwrap();
+    assert_eq!(tag.to_bytes(), b"dirfd");
+
+    let st = fd.fstat().unwrap();
+    assert!(
+        st.mode & sys::stat::S_IFMT == sys::stat::S_IFDIR,
+        "expected directory"
+    );
+    // The default carries the owner `x` bit under any umask (0777 & ~umask).
+    assert_eq!(st.mode & 0o100, 0o100, "owner must keep the x bit");
 
     drop(fd);
     drop(receiver);

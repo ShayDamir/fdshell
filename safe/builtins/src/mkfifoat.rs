@@ -5,6 +5,8 @@
 //! `open` on a FIFO with `O_RDWR` succeeds with no peer end, and the handle
 //! reads back what is written to it. The handle is sent to the capture
 //! socket tagged `fifo`, giving a temp-file-less message-passing channel.
+//! An omitted `--mode` is `0666`, which the kernel masks with the umask
+//! (`umask 022` → `0644`); see [`crate::mode`].
 
 pub mod parse;
 

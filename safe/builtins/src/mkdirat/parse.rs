@@ -16,6 +16,8 @@ pub struct MkdiratConfig<'a> {
 /// Returns:
 /// - `Err(BuiltinError::Help)` -- `--help` or `-h` was passed
 /// - `Err(BuiltinError::InvalidArgument(_))` -- bad flag name, missing value, etc.
+/// - `Err(BuiltinError::ModeReopenDenied)` -- the mode, as the umask leaves it,
+///   denies the `openat2` that reopens the directory about to be created
 pub fn mkdirat_parse<'a>(
     args: &[&'a CStr],
     strict: bool,
@@ -25,7 +27,7 @@ pub fn mkdirat_parse<'a>(
     }
 
     let mut dirfd = None;
-    let mut mode: u32 = 0;
+    let mut mode: Option<u32> = None;
     let mut resolve: u64 = 0;
     let mut path: Option<&'a CStr> = None;
     let mut i = 0;
@@ -40,11 +42,13 @@ pub fn mkdirat_parse<'a>(
             }
             b"--mode" => {
                 let s = crate::argparse::next_val(args, &mut i, val)?;
-                mode = crate::argparse::parse_mode(s)
-                    .change_context(BuiltinError::InvalidArgument("mode"))
-                    .attach_opaque(Suggestion(
-                        "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
-                    ))?;
+                mode = Some(
+                    crate::argparse::parse_mode(s)
+                        .change_context(BuiltinError::InvalidArgument("mode"))
+                        .attach_opaque(Suggestion(
+                            "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
+                        ))?,
+                );
             }
             b"--resolve" => {
                 let s = crate::argparse::next_val(args, &mut i, val)?;
@@ -74,6 +78,14 @@ pub fn mkdirat_parse<'a>(
 
     crate::strict::require_dirfd(strict, dirfd.as_ref())?;
     crate::strict::require_relative(strict, path)?;
+
+    // A mode-less invocation creates the directory with the `mkdir(1)` default;
+    // the guard below rejects modes the reopen cannot survive, before mkdirat runs.
+    let mode = mode.unwrap_or(crate::mode::DIR_MODE);
+    crate::mode::require_reopenable(mode, crate::mode::DIR_REOPEN).attach_opaque(Suggestion(
+        "Pass --mode with the owner read+execute bits (e.g. 755), or widen the umask's effect: \
+            the kernel stores the mode as `mode & ~umask` and the directory is reopened read-only",
+    ))?;
 
     Ok(MkdiratConfig {
         dirfd,

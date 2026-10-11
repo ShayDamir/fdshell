@@ -32,6 +32,8 @@ pub enum BuiltinError {
     StrictRequiresDirfd,
     /// strict mode forbids absolute paths (use a path relative to `--dirfd`)
     StrictAbsolutePath,
+    /// the created object's mode (after the umask) denies the builtin's own reopen — check --mode and umask
+    ModeReopenDenied,
     /// test: malformed expression (expected a string, `OP ARG`, or `ARG OP ARG`)
     TestUsage,
     /// test: operand is not an integer

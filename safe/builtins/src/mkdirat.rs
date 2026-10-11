@@ -1,3 +1,10 @@
+//! `mkdirat` builtin: create a directory inside a directory and open it.
+//!
+//! `mkdirat [--dirfd N] [--mode MODE] [--resolve FLAGS] path` creates the
+//! directory via `mkdirat`, reopens it read-only, and exports the handle to
+//! the parent shell tagged `dirfd`. An omitted `--mode` is `0777`, which the
+//! kernel masks with the umask (`umask 022` → `0755`); see [`crate::mode`].
+
 use error_stack::{Report, ResultExt};
 use sys::{AtFd, ImportedFd};
 

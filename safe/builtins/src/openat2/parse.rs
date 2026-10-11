@@ -3,6 +3,7 @@ mod flags;
 
 use core::ffi::CStr;
 use error_stack::{Report, bail};
+use sys::fcntl::O_CREAT;
 use sys::{ImportedFd, openat2::OpenHow};
 
 use crate::error::BuiltinError;
@@ -40,13 +41,24 @@ pub fn openat2_parse<'a>(
     crate::strict::require_dirfd(strict, acc.dirfd.as_ref())?;
     crate::strict::require_relative(strict, path)?;
 
+    // Without `--mode`, only `O_CREAT` has a mode: it gets the POSIX `open(2)`
+    // default (`sys::openat2::open` passes the same), which the kernel masks
+    // with the umask. An explicit `--mode 0` stays 0; without `O_CREAT` the
+    // kernel ignores the mode, so it stays 0.
+    let creating = acc.open_flags & O_CREAT != 0;
+    let mode = if acc.mode_given || !creating {
+        acc.mode
+    } else {
+        u64::from(crate::mode::CREATE_MODE)
+    };
+
     Ok(Openat2Config {
         dirfd: acc.dirfd,
         same_as: acc.same_as,
         path,
         how: OpenHow {
             flags: acc.open_flags as u64,
-            mode: acc.mode,
+            mode,
             resolve: acc.resolve,
         },
     })

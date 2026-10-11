@@ -15,6 +15,8 @@ pub(crate) struct Acc<'a> {
     pub(crate) same_as: Option<ImportedFd>,
     pub(crate) open_flags: i32,
     pub(crate) mode: u64,
+    /// `--mode` was given; distinguishes an explicit `--mode 0` from no `--mode`.
+    pub(crate) mode_given: bool,
     pub(crate) resolve: u64,
     pub(crate) path: Option<&'a CStr>,
 }
@@ -50,6 +52,7 @@ pub(crate) fn parse_arg<'a>(
                 .attach_opaque(Suggestion(
                     "Use octal without prefix (e.g. 755) or hex with 0x prefix (e.g. 0x1ff)",
                 ))? as u64;
+            acc.mode_given = true;
         }
         b"--path" => {
             ensure!(val.is_none(), BuiltinError::InvalidArgument("--path"));

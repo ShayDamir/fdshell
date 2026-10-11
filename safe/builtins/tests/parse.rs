@@ -146,6 +146,33 @@ fn mode_boundary() {
     });
 }
 
+/// `O_CREAT` without `--mode` gets the POSIX `open(2)` default instead of the
+/// mode-000 file the kernel would otherwise create.
+#[test]
+fn create_mode_default_applies_to_o_creat() {
+    assert_ok(&["--flags", "O_CREAT|O_RDWR", "x"], |cfg| {
+        assert_eq!(cfg.how.mode, u64::from(builtins::mode::CREATE_MODE));
+    });
+    assert_ok(&["--flags", "O_CREAT", "x"], |cfg| {
+        assert_eq!(cfg.how.mode, u64::from(builtins::mode::CREATE_MODE));
+    });
+}
+
+/// The default is a `--mode` default only: without `O_CREAT` the kernel
+/// ignores the mode, so it stays 0; an explicit `--mode 0` stays 0.
+#[test]
+fn create_mode_default_does_not_override() {
+    assert_ok(&["--flags", "O_CREAT", "--mode", "0", "x"], |cfg| {
+        assert_eq!(cfg.how.mode, 0);
+    });
+    assert_ok(&["--flags", "O_RDWR", "x"], |cfg| {
+        assert_eq!(cfg.how.mode, 0);
+    });
+    assert_ok(&["--flags", "O_CREAT", "--mode", "600", "x"], |cfg| {
+        assert_eq!(cfg.how.mode, 0o600);
+    });
+}
+
 #[test]
 fn bad_flag() {
     assert_invalid_arg(&["--bad", "x"])
