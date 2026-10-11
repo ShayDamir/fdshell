@@ -12,6 +12,7 @@ use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+use sys::signal;
 
 pub(super) fn run(
     args: &[ShortCStr],
@@ -70,6 +71,11 @@ pub(super) fn run(
         .borrow()
         .change_context(ChildProcessError::ExecFailed)?;
     crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &substituted, &state);
+    // `exec`/`become` replace *this* image, and this process is the shell:
+    // Rust std's `SIG_IGN` for `SIGPIPE` is ours, not the program's. Clear it
+    // so the program dies of the signal on a closed pipe, as in bash.
+    // Best-effort: a failing sigaction leaves the inherited disposition.
+    let _ = signal::reset_sigpipe();
     match exec::exec_fd(
         &fd,
         &argv,

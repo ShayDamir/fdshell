@@ -1,4 +1,5 @@
 use crate::fork_cell::ForkCell;
+use crate::signal;
 use crate::{LocalFd, Pid, cvt};
 
 pub fn fork_pidfd() -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
@@ -42,6 +43,12 @@ pub fn fork_pidfd() -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
 /// Fork a subprocess and return a pidfd in the parent. Same return type as
 /// [`fork_pidfd`], but calls `cell.reset_after_fork()` in the child process so
 /// that `borrow_mut()` succeeds there.
+///
+/// In the child it also restores `SIGPIPE` to its default disposition and
+/// unblocks it: this is the single choke point of every shell fork site
+/// (pipeline stages, launched commands, `$(…)`, `wait` arms), and a stage that
+/// writes to a pipe with no readers must die of `SIGPIPE` silently, like a
+/// shell stage should, instead of getting `EPIPE` and printing a write error.
 pub fn fork_pidfd_cell<T>(
     cell: &ForkCell<T>,
 ) -> Result<(Pid, Option<LocalFd>), crate::SyscallError> {
@@ -50,6 +57,9 @@ pub fn fork_pidfd_cell<T>(
     if ret.as_raw() == 0 {
         // SAFETY: we are in the forked child — exclusive ownership of memory.
         unsafe { cell.reset_after_fork() };
+        // Best-effort: a `sigaction` failure leaves the inherited disposition,
+        // and there is nothing the user can do about it from a forked child.
+        let _ = signal::reset_sigpipe();
     }
     Ok((ret, pidfd_opt))
 }
