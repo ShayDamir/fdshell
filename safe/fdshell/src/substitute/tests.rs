@@ -1111,13 +1111,14 @@ fn positional_cell() -> ForkCell<ShellState> {
     positional_cell_with_n(3)
 }
 
+/// The bash model: `$0` is the program name (`arg0`, a parameter of its own)
+/// and `$1..` are the deque (`arg1..arg(n-1)`), so `$#` is `n - 1`.
 fn positional_cell_with_n(n: usize) -> ForkCell<ShellState> {
     let cell = ForkCell::new(ShellState::new());
     let mut positional: alloc::collections::VecDeque<ImportedStr> =
         alloc::collections::VecDeque::new();
-    for i in 0..n {
+    for i in 1..n {
         positional.push_back(ImportedStr::shell(match i {
-            0 => ShortCStr::from(c"arg0"),
             1 => ShortCStr::from(c"arg1"),
             2 => ShortCStr::from(c"arg2"),
             3 => ShortCStr::from(c"arg3"),
@@ -1140,7 +1141,11 @@ fn positional_cell_with_n(n: usize) -> ForkCell<ShellState> {
             _ => ShortCStr::from(c"argx"),
         }));
     }
-    cell.borrow_mut().unwrap().set_positional(positional);
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.set_program_name(ImportedStr::shell(ShortCStr::from(c"arg0")));
+        state.set_positional(positional);
+    }
     cell
 }
 
@@ -1150,7 +1155,7 @@ fn dollar_hash_returns_positional_count() {
     let arg = ShortCStr::from(c"$#");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"3");
+    assert_eq!(res.as_bytes().unwrap(), b"2");
 }
 
 #[test]
@@ -1169,7 +1174,7 @@ fn dollar_at_expands_positional() {
     let arg = ShortCStr::from(c"$@");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"arg0 arg1 arg2");
+    assert_eq!(res.as_bytes().unwrap(), b"arg1 arg2");
 }
 
 #[test]
@@ -1178,7 +1183,7 @@ fn dollar_star_expands_positional() {
     let arg = ShortCStr::from(c"$*");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"arg0 arg1 arg2");
+    assert_eq!(res.as_bytes().unwrap(), b"arg1 arg2");
 }
 
 #[test]
@@ -1208,7 +1213,7 @@ fn dollar_at_empty_positional() {
 }
 
 #[test]
-fn dollar_zero_is_first_positional() {
+fn dollar_zero_is_program_name() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$0");
     let mut cache = HashMap::new();
@@ -1217,12 +1222,39 @@ fn dollar_zero_is_first_positional() {
 }
 
 #[test]
-fn dollar_one_is_second_positional() {
+fn dollar_one_is_first_positional() {
     let cell = positional_cell();
     let arg = ShortCStr::from(c"$1");
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
     assert_eq!(res.as_bytes().unwrap(), b"arg1");
+}
+
+#[test]
+fn dollar_zero_survives_nounset() {
+    // `$0` is always bound (bash: `set -u; echo $0` prints the program name).
+    let cell = positional_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"$0");
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"arg0");
+}
+
+#[test]
+fn nounset_positional_one_past_the_end_names_the_index() {
+    // 3 parameters means `$#` = 2: `$3` is the first out-of-range index and
+    // bash names it verbatim (`3: unbound variable`).
+    let cell = positional_cell_with_n(3);
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let arg = ShortCStr::from(c"$3");
+    let mut cache = HashMap::new();
+    let e = substitute_arg(&arg, &[], &mut cache, &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var }
+            if var.as_bytes().unwrap() == b"3".as_slice()
+    ));
 }
 
 #[test]

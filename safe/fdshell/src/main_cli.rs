@@ -20,11 +20,15 @@ pub fn run_cmd_mode(
         .collect();
     {
         let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
-        if positional.is_empty() {
-            state.set_positional(VecDeque::from([ImportedStr::shell(ShortCStr::from(c"sh"))]));
+        // bash argv semantics: `$0` is the invocation name and never a
+        // positional; the words after the command string are `$1..`.
+        let name = if positional.is_empty() {
+            c"sh"
         } else {
-            state.set_positional(positional);
-        }
+            c"fdshell"
+        };
+        state.set_program_name(ImportedStr::shell(ShortCStr::from(name)));
+        state.set_positional(positional);
     }
     let text = ScriptText::new(cmd.clone(), Position::new(1, 1), Origin::CliArgument(2));
     match exec_cmd(&text, state) {

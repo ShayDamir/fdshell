@@ -97,7 +97,7 @@ fn unquoted_dollar_at_splits_positional_args() {
 
 #[test]
 fn set_dash_dash_splits_expansion() {
-    let (out, err, code) = run(r#"x="a b"; set -- $x; printf "%s|%s" $0 $1"#);
+    let (out, err, code) = run(r#"x="a b"; set -- $x; printf "%s|%s" $1 $2"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "a|b");
 }
@@ -361,10 +361,9 @@ fn quoted_empty_cmd_subst_builtin_keyword_form() {
 
 #[test]
 fn quoted_empty_cmd_subst_function_call() {
-    // The function-call path (function_call.rs). Uses `$1` (not `$@`): a
-    // function's `$1` is correctly 1-based, while `$@` currently also yields
-    // the function name (pre-existing positional-model bug, task #134).
-    let (out, err, code) = run(r#"f() { printf "[%s]\n" "$1"; }; f ""$(true)"#);
+    // The function-call path (function_call.rs). The probe is `"$@"`: a call
+    // rebinds `$1..` only, so `$@` is honest inside the body.
+    let (out, err, code) = run(r#"f() { printf "[%s]\n" "$@"; }; f ""$(true)"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[]\n");
 }
@@ -457,9 +456,8 @@ fn unquoted_empty_cmd_subst_for_list_is_no_iterations() {
 
 #[test]
 fn quoted_whitespace_only_expansion_empty_ifs_keeps_spaces() {
-    // With `IFS=`, the word splits to one field `  ` and must stay that. Uses
-    // `"$@"` (not `"$1"`): `$1` after `set --` is off-by-one today
-    // (pre-existing positional-model bug, task #134).
+    // With `IFS=`, the word splits to one field `  ` and must stay that; the
+    // value is read with `"$@"`.
     let (out, err, code) = run(r#"IFS=; set -- ""$(echo "  "); printf "[%s]\n" "$@""#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[  ]\n");
@@ -474,9 +472,8 @@ fn quoted_multiword_expansion_splits_positionals() {
 
 // Task #130: a quoted region's bytes are marked quoted, so its multi-word
 // output stays ONE word. The values are read with `builtin printf "[%s]"`
-// (`$1` after `set --` is off-by-one today — pre-existing positional-model bug,
-// task #134; the literal-IFS byte after an embedded expansion cuts the word in
-// pieces is task #222).
+// (the literal-IFS byte after an embedded expansion cuts the word in pieces is
+// task #222).
 #[test]
 fn quoted_region_expansion_stays_one_word() {
     let cases: &[(&str, &str)] = &[

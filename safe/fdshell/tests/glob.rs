@@ -201,13 +201,10 @@ fn for_list_globbed_after_expansion() {
 #[test]
 fn set_words_glob_and_dollar_at_reglobs() {
     let dir = scratch("setwords");
-    // `set --` words glob. The plan's `echo $1` line assumes bash's
-    // 1-indexed positionals; fdshell's are deliberately 0-indexed ($0 is
-    // the first `set --` word, LESSONS.md "Positional parameters are
-    // 0-indexed"), so `$#` proves the expansion instead.
-    let (out, _err, code) = run(&dir, "set -- b*; echo $#");
+    // `set --` words glob, and `$1` is the first globbed word.
+    let (out, _err, code) = run(&dir, "set -- b*; echo $1");
     assert_eq!(code, 0);
-    assert_eq!(out, "1\n");
+    assert_eq!(out, "b1\n");
     let (out, _err, code) = run(&dir, "set -- b*; echo $@");
     assert_eq!(code, 0);
     assert_eq!(out, "b1\n");

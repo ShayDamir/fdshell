@@ -13,8 +13,9 @@ use sys::fork_cell::ForkCell;
 
 /// `source` / `.`: read a file and run its content as a script in this shell.
 ///
-/// Extra arguments replace the positional parameters (as `set --` does) for
-/// the duration of the sourced script; the previous ones are restored after.
+/// Extra arguments replace `$1..` (as `set --` does) for the duration of the
+/// sourced script; the previous ones are restored after. `$0` survives the
+/// swap, as in bash.
 pub(crate) fn run_source(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
@@ -40,8 +41,8 @@ pub(crate) fn run_source(
     result
 }
 
-/// Replace the positional parameters with `extra` and return the saved ones.
-/// Returns `None` when `extra` is empty (positional parameters stay as-is).
+/// Replace `$1..` with `extra` and return the saved ones. Returns `None` when
+/// `extra` is empty (positional parameters stay as-is).
 fn swap_positional(
     cell: &ForkCell<ShellState>,
     extra: &[ShortCStr],

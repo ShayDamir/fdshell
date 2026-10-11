@@ -1313,6 +1313,42 @@ fn cmd_mode_positional_origins_are_argv_indexed() {
     });
 }
 
+/// The `-c` seeds: the words after the command string are `$1..`, and `$0`
+/// names the invocation (`fdshell` with extras, `sh` without). Both pins run
+/// in-process so they reach gcov (LESSONS: integration children contribute none).
+#[test]
+fn cmd_mode_seeds_program_name_with_extras() {
+    let cell = make_cell();
+    let args: [ShortCStr; 3] = [
+        ShortCStr::from(c"fdshell"),
+        ShortCStr::from(c"builtin true"),
+        ShortCStr::from(c"first"),
+    ];
+    crate::main_cli::run_cmd_mode(&args, &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(
+        state.program_name.value.as_bytes().unwrap(),
+        b"fdshell".as_slice()
+    );
+    assert_eq!(state.positional.len(), 1);
+}
+
+#[test]
+fn cmd_mode_without_extras_seeds_sh_and_no_positionals() {
+    let cell = make_cell();
+    let args: [ShortCStr; 2] = [
+        ShortCStr::from(c"fdshell"),
+        ShortCStr::from(c"builtin true"),
+    ];
+    crate::main_cli::run_cmd_mode(&args, &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(
+        state.program_name.value.as_bytes().unwrap(),
+        b"sh".as_slice()
+    );
+    assert!(state.positional.is_empty());
+}
+
 #[test]
 fn shebang_is_skipped() {
     child_test(|| {
@@ -1902,7 +1938,6 @@ fn explain_positional_shows_argv_origin() {
         {
             let mut state = borrow_state_mut(&cell);
             let mut positional = alloc::collections::VecDeque::new();
-            positional.push_back(sys::ImportedStr::shell(ShortCStr::from(c"sh")));
             positional.push_back(sys::ImportedStr::new(
                 ShortCStr::from(c"first"),
                 sys::Trace::boundary(sys::Origin::CliArgument(2)),
@@ -1921,7 +1956,6 @@ fn explain_assignment_is_transitive() {
         {
             let mut state = borrow_state_mut(&cell);
             let mut positional = alloc::collections::VecDeque::new();
-            positional.push_back(sys::ImportedStr::shell(ShortCStr::from(c"sh")));
             positional.push_back(sys::ImportedStr::new(
                 ShortCStr::from(c"first"),
                 sys::Trace::boundary(sys::Origin::CliArgument(2)),
@@ -1957,7 +1991,6 @@ fn explain_second_positional_uses_index() {
         {
             let mut state = borrow_state_mut(&cell);
             let mut positional = alloc::collections::VecDeque::new();
-            positional.push_back(sys::ImportedStr::shell(ShortCStr::from(c"sh")));
             positional.push_back(sys::ImportedStr::new(
                 ShortCStr::from(c"one"),
                 sys::Trace::boundary(sys::Origin::CliArgument(2)),
@@ -1971,6 +2004,23 @@ fn explain_second_positional_uses_index() {
         run_one(b"explain 2", &cell).unwrap();
     });
     assert_eq!(out, b"$2=\"two\" (from argv[3])\n");
+}
+
+#[test]
+fn explain_zero_shows_the_program_name() {
+    // `$0` is a parameter of its own; in script mode its seed trace is argv[1].
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        {
+            let mut state = borrow_state_mut(&cell);
+            state.set_program_name(sys::ImportedStr::new(
+                ShortCStr::from(c"s.sh"),
+                sys::Trace::boundary(sys::Origin::CliArgument(1)),
+            ));
+        }
+        run_one(b"explain 0", &cell).unwrap();
+    });
+    assert_eq!(out, b"$0=\"s.sh\" (from argv[1])\n");
 }
 
 #[test]
@@ -2154,7 +2204,7 @@ fn function_args_become_positional_params() {
 #[test]
 fn function_call_restores_caller_positional_params() {
     let cell = make_cell();
-    run_script(b"set -- sh A B; foo() { inner=$1; } foo X; first=$1", &cell).unwrap();
+    run_script(b"set -- A B; foo() { inner=$1; } foo X; first=$1", &cell).unwrap();
     let state = borrow_state(&cell);
     assert_eq!(string_of(&state, "inner"), Some(c"X".into()));
     assert_eq!(string_of(&state, "first"), Some(c"A".into()));

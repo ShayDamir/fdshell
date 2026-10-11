@@ -2,6 +2,8 @@
 use super::*;
 use alloc::{format, vec};
 
+/// CLI level: the deque starts with the script path. `main.rs` pops that front
+/// and seeds `$0` with it, so the script sees `$1..` = the words after the path.
 #[test]
 fn load_script_source_reads_file_and_sets_positional() {
     let path = std::env::temp_dir().join(format!("fdshell_script_test_{}.sh", std::process::id()));

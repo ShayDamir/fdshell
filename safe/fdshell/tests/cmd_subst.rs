@@ -243,8 +243,7 @@ fn quoted_region_separators_are_data() {
 }
 
 /// The region's bytes are marked quoted, so its output is one word and is not
-/// split on IFS. The value is read with `printf "[%s]"` (`$1` after `set --` is
-/// off-by-one today — pre-existing positional-model bug, task #134).
+/// split on IFS. The value is read with `printf "[%s]"`.
 #[test]
 fn quoted_region_expansion_is_one_word() {
     let cases: &[(&str, &str)] = &[

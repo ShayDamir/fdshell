@@ -6,6 +6,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use fdshell::{AppError, ShellState, init_shellfd, install_debug_hooks, parse_cli_args, run};
+use sys::Origin;
 use sys::fcntl::O_DIRECTORY;
 use sys::fork_cell::ForkCell;
 
@@ -64,9 +65,16 @@ fn run_main() -> Result<(), Report<AppError>> {
     }
 
     match fdshell::script_loader::load_script_source(&parsed) {
-        Ok(Some((script_content, positional, origin))) => {
+        Ok(Some((script_content, mut positional, origin))) => {
             {
                 let mut state = state.borrow_mut().change_context(AppError::Borrow)?;
+                // bash: in file mode `$0` is the script path (argv[1]) and is
+                // not a positional; `--fd` mode leaves the default `$0`.
+                if matches!(origin, Origin::File(_))
+                    && let Some(path) = positional.pop_front()
+                {
+                    state.set_program_name(path);
+                }
                 state.set_positional(positional);
             }
             fdshell::main_cli::execute_script(&script_content, origin, &state)

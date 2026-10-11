@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use sys::Origin;
 
 #[test]
 fn shift_removes_n_positional() {
@@ -12,6 +13,27 @@ fn shift_removes_n_positional() {
     assert_eq!(
         state.positional.front().unwrap().value.as_bytes().unwrap(),
         b"c"
+    );
+}
+
+#[test]
+fn program_name_defaults_to_fdshell() {
+    let state = ShellState::new();
+    assert_eq!(
+        state.program_name.value.as_bytes().unwrap(),
+        b"fdshell".as_slice()
+    );
+    assert!(matches!(state.program_name.trace.origin, Origin::Shell));
+    assert!(state.positional.is_empty());
+}
+
+#[test]
+fn set_program_name_replaces_it() {
+    let mut state = ShellState::new();
+    state.set_program_name(ImportedStr::shell(c"s.sh".into()));
+    assert_eq!(
+        state.program_name.value.as_bytes().unwrap(),
+        b"s.sh".as_slice()
     );
 }
 

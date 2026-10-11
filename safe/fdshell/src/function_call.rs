@@ -8,7 +8,7 @@ use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ScriptText, ShortCStr, Trace};
 
 /// Run a user function call, executing `body` in this shell. Arguments replace
-/// the positional parameters for the duration of the call. `look_up` resolves
+/// `$1..` for the duration of the call (`$0` is not rebound). `look_up` resolves
 /// the body once in the caller, which owns the command's redirect scope.
 pub(crate) fn call(
     text: &ScriptText,
@@ -23,7 +23,7 @@ pub(crate) fn call(
         cell,
     )
     .change_context(CmdError::Resolve)?;
-    let saved = swap_positional(cell, &cmdline.command, &substituted, text)?;
+    let saved = swap_positional(cell, &substituted, text)?;
     crate::state::frames::push_frame(cell)?;
     let script = ScriptText::new(body.clone(), text.start, text.origin.clone());
     let result = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
@@ -53,22 +53,20 @@ pub(crate) fn look_up(
     Ok(state.functions.get(&cmdline.command).cloned())
 }
 
-/// Replace the positional parameters so the function sees `$0` as its name and
-/// `$1..` as its arguments, returning the saved parameters.
+/// Replace `$1..` with the call's arguments, returning the saved parameters.
+/// `$0` is not rebound (bash: a function call keeps the program name).
 fn swap_positional(
     cell: &ForkCell<ShellState>,
-    name: &ShortCStr,
     args: &[ShortCStr],
     text: &ScriptText,
 ) -> Result<VecDeque<ImportedStr>, Report<CmdError>> {
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     let saved = core::mem::take(&mut state.positional);
     let trace = Trace::at(text.start, text.origin.clone());
-    let mut positional = VecDeque::new();
-    positional.push_back(ImportedStr::new(name.clone(), trace.clone()));
-    for s in args {
-        positional.push_back(ImportedStr::new(s.clone(), trace.clone()));
-    }
+    let positional = args
+        .iter()
+        .map(|s| ImportedStr::new(s.clone(), trace.clone()))
+        .collect();
     state.set_positional(positional);
     Ok(saved)
 }

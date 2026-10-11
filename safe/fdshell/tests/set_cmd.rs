@@ -58,10 +58,12 @@ fn set_dash_f_is_empty_without_fd_vars() {
 fn set_lists_variables_in_sorted_order() {
     let (out, err, code) = run("ZED=1; ALPHA=2; export MID=9; set");
     assert_eq!(code, 0, "stderr={err:?}");
+    // Bare `set` lists `$1..` only, and `-c` with no extra args has none
+    // (bash lists `$0` first — accepted divergence).
     // IFS's default value is " \t\n", so its line is followed by a blank one.
     assert_eq!(
         out.lines().collect::<Vec<_>>(),
-        ["sh", "ALPHA=2", "IFS= \t", "", "MID=9", "ZED=1", "_=MID=9"]
+        ["ALPHA=2", "IFS= \t", "", "MID=9", "ZED=1", "_=MID=9"]
     );
 }
 
@@ -69,11 +71,11 @@ fn set_lists_variables_in_sorted_order() {
 fn set_lists_ifs_exactly_once() {
     let (out, err, code) = run("set");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out.lines().collect::<Vec<_>>(), ["sh", "IFS= \t", ""]);
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS= \t", ""]);
     // IFS already assigned: still listed exactly once.
     let (out, err, code) = run("IFS=z; set");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out.lines().collect::<Vec<_>>(), ["sh", "IFS=z", "_="]);
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS=z", "_="]);
 }
 
 #[test]

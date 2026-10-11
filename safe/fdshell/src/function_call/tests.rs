@@ -157,6 +157,47 @@ fn break_out_of_the_body_restores_the_frame() {
     assert!(!cell.borrow().unwrap().in_frame());
 }
 
+/// The call rebinds `$1..` only: the function name is never a positional, so
+/// `$0`, `$#`, `$@` and `$*` are bash-identical inside the body.
+#[test]
+fn function_args_rebind_positionals_without_the_name() {
+    let cell = make_cell();
+    crate::script::run_script(
+        &text(b"foo() { first=$1; second=$2; count=$#; star=$*; at=$@; name=$0; } foo alpha beta"),
+        &cell,
+    )
+    .unwrap();
+    assert_eq!(strings(&cell, b"first"), Some(c"alpha".into()));
+    assert_eq!(strings(&cell, b"second"), Some(c"beta".into()));
+    assert_eq!(strings(&cell, b"count"), Some(c"2".into()));
+    assert_eq!(strings(&cell, b"star"), Some(c"alpha beta".into()));
+    assert_eq!(strings(&cell, b"at"), Some(c"alpha beta".into()));
+    assert_eq!(strings(&cell, b"name"), Some(c"fdshell".into()));
+}
+
+/// `f` with no arguments empties `$1..` (bash: `$#` 0, `$1` empty) — the
+/// caller's positionals must not leak into the body.
+#[test]
+fn function_without_args_has_empty_positionals() {
+    let cell = make_cell();
+    crate::script::run_script(&text(b"set -- A B; f() { count=$#; first=$1; } f"), &cell).unwrap();
+    assert_eq!(strings(&cell, b"count"), Some(c"0".into()));
+    assert_eq!(strings(&cell, b"first"), Some(c"".into()));
+}
+
+/// The saved `$1..` come back when the call returns.
+#[test]
+fn function_call_restores_caller_positionals() {
+    let cell = make_cell();
+    crate::script::run_script(
+        &text(b"set -- A B; foo() { inner=$1; } foo X; first=$1"),
+        &cell,
+    )
+    .unwrap();
+    assert_eq!(strings(&cell, b"inner"), Some(c"X".into()));
+    assert_eq!(strings(&cell, b"first"), Some(c"A".into()));
+}
+
 fn strings(cell: &ForkCell<ShellState>, name: &[u8]) -> Option<ShortCStr> {
     let state = cell.borrow().unwrap();
     state

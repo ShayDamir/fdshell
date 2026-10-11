@@ -30,7 +30,13 @@ pub(crate) fn assign_origin(
         }
         if let Some(idx) = parse_index(rest) {
             let state = cell.borrow().change_context(CmdError::Never)?;
-            if let Some(pos) = state.positional.get(idx) {
+            // `$0` is the program name; `$1..` are the deque (`get(idx - 1)`).
+            let traced = if idx == 0 {
+                Some(&state.program_name)
+            } else {
+                state.positional.get(idx - 1)
+            };
+            if let Some(pos) = traced {
                 return Ok(pos.trace.origin.clone());
             }
         }
@@ -65,7 +71,7 @@ fn is_var_name(name: &[u8]) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || *c == b'_')
 }
 
-/// `rest` is a positional index (`1`, `12`, …); `$` already stripped.
+/// `rest` is a positional index (`0`, `1`, `12`, …); `$` already stripped.
 fn parse_index(rest: &[u8]) -> Option<usize> {
     if rest.is_empty() || !rest.iter().all(|b| b.is_ascii_digit()) {
         return None;

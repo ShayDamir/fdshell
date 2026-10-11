@@ -304,9 +304,7 @@ fn for_list_quoted_cmd_subst_is_one_word() {
 }
 
 /// `$@` in a for list iterates over the positionals; quoted `"$@"` keeps a
-/// positional containing a space whole. `set --` runs at top level — inside a
-/// function the name leaks into `$@` (task #134). Measured: `[a] [b]` and
-/// `[a b] [c]`.
+/// positional containing a space whole. Measured: `[a] [b]` and `[a b] [c]`.
 #[test]
 fn for_list_dollar_at_iterates_positionals() {
     let (out, err, code) = run(r#"set -- a b; for w in $@; do printf "[%s]\n" "$w"; done"#);

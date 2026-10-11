@@ -6,7 +6,8 @@ use sys::ShortCStr;
 use super::Ctx;
 
 /// `explain NAME` / `explain N` — print the provenance of a variable or
-/// positional parameter. Read-only; unset names report `unset` with exit 0.
+/// positional parameter (`0` is the program name). Read-only; unset names
+/// report `unset` with exit 0.
 pub(super) fn handle_explain(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     if ctx.args.len() > 1 {
         bail!(BuiltinError::InvalidArgument("name"));
@@ -21,7 +22,13 @@ pub(super) fn handle_explain(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let (display, traced) = if is_all_digits(bytes) {
         let idx = parse_index(bytes).ok_or(BuiltinError::InvalidArgument("index"))?;
         let d = sys::format!("${idx}").change_context(BuiltinError::Io)?;
-        (d, ctx.state.positional.get(idx))
+        // `0` is the program name; `1..` are the deque (`get(idx - 1)`).
+        let traced = if idx == 0 {
+            Some(&ctx.state.program_name)
+        } else {
+            ctx.state.positional.get(idx - 1)
+        };
+        (d, traced)
     } else {
         (name.clone(), ctx.state.strings.get(name))
     };

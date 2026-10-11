@@ -66,12 +66,19 @@ fn positional_is_transitive() {
     {
         let mut state = cell.borrow_mut().unwrap();
         let mut positional = VecDeque::new();
-        positional.push_back(ImportedStr::shell(ShortCStr::from(c"sh")));
         positional.push_back(var(Origin::CliArgument(3)));
         state.positional = positional;
     }
     let origin = assign_origin(&from("$1"), Origin::Stdin, &cell).unwrap();
     assert_eq!(origin, Origin::CliArgument(3));
+}
+
+#[test]
+fn program_name_is_shell_origin() {
+    // `$0` is a parameter of its own; its seed trace says "shell default".
+    let cell = cell();
+    let origin = assign_origin(&from("$0"), Origin::Stdin, &cell).unwrap();
+    assert_eq!(origin, Origin::Shell);
 }
 
 #[test]
@@ -154,7 +161,6 @@ fn trailing_non_digit_keeps_line_origin() {
     {
         let mut state = cell.borrow_mut().unwrap();
         let mut positional = VecDeque::new();
-        positional.push_back(ImportedStr::shell(ShortCStr::from(c"sh")));
         positional.push_back(var(Origin::CliArgument(3)));
         state.positional = positional;
     }
@@ -168,7 +174,6 @@ fn second_positional_uses_index_value() {
     {
         let mut state = cell.borrow_mut().unwrap();
         let mut positional = VecDeque::new();
-        positional.push_back(ImportedStr::shell(ShortCStr::from(c"sh")));
         positional.push_back(var(Origin::CliArgument(3)));
         positional.push_back(var(Origin::CliArgument(4)));
         state.positional = positional;

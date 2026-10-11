@@ -10,6 +10,7 @@ use sys::siginfo::WaitStatus;
 use super::{FdVar, ShellState};
 
 impl ShellState {
+    /// Drop the first `n` of `$1..$N`. `$0` is never shifted (bash).
     pub fn shift(&mut self, n: usize) {
         for _ in 0..n.min(self.positional.len()) {
             self.positional.pop_front();
@@ -28,6 +29,12 @@ impl ShellState {
 
     pub fn set_positional(&mut self, positional: VecDeque<ImportedStr>) {
         self.positional = positional;
+    }
+
+    /// Set `$0`, the program name. Only the CLI seeds write it: `set --`,
+    /// function calls, `source` and `shift` never rebind it (bash).
+    pub fn set_program_name(&mut self, name: ImportedStr) {
+        self.program_name = name;
     }
 
     pub fn set_last_exit(&mut self, code: i32) {

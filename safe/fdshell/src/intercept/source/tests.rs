@@ -159,7 +159,7 @@ fn run_source_executes_in_current_shell() {
 
 #[test]
 fn run_source_extras_become_positional_parameters() {
-    let (_tmp, path) = TempFile::new("pos", b"A=$0\nB=$1\n");
+    let (_tmp, path) = TempFile::new("pos", b"A=$1\nB=$2\n");
     let cell = make_cell();
     let cmdline = make_cmdline(b"source", &[&path, "x", "y"]);
     let control = run_source(b"source f x y", &cmdline, &text(b"source f x y"), &cell).unwrap();
@@ -188,16 +188,29 @@ fn run_source_restores_positional_parameters() {
     );
 }
 
+/// bash: `source f x y` rebinds `$1..` and leaves `$0` alone; fdshell does the
+/// same, so the program name survives the swap and the restore.
 #[test]
-fn run_source_without_extras_keeps_positional_parameters() {
+fn run_source_keeps_program_name() {
     let (_tmp, path) = TempFile::new("keep", b"A=$0\n");
     let cell = make_cell();
-    {
-        let mut state = cell.borrow_mut().unwrap();
-        state
-            .positional
-            .push_back(sys::ImportedStr::shell(c"kept".into()));
-    }
+    cell.borrow_mut()
+        .unwrap()
+        .set_program_name(sys::ImportedStr::shell(c"kept".into()));
+    let cmdline = make_cmdline(b"source", &[&path, "x"]);
+    let _ = run_source(b"source f x", &cmdline, &text(b"source f x"), &cell).unwrap();
+    assert_eq!(get_string(&cell, &c"A".into()), b"kept".to_vec());
+}
+
+/// `source f` with no extras leaves `$1..` untouched (the swap is skipped).
+#[test]
+fn run_source_without_extras_keeps_positional_parameters() {
+    let (_tmp, path) = TempFile::new("keep1", b"A=$1\n");
+    let cell = make_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .positional
+        .push_back(sys::ImportedStr::shell(c"kept".into()));
     let cmdline = make_cmdline(b"source", &[&path]);
     let _ = run_source(b"source f", &cmdline, &text(b"source f"), &cell).unwrap();
     assert_eq!(get_string(&cell, &c"A".into()), b"kept".to_vec());

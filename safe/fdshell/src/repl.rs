@@ -49,14 +49,11 @@ pub fn exec_cmd(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<i32, R
 }
 
 pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
-    // Set $0 to "fdshell" for interactive mode
-    // Safe to call here because main.rs returns/exits before reaching this path
-    // when in -c or script file mode (positional args already set)
+    // Seed `$0` with the invocation name for interactive mode. Only this path
+    // needs it: `-c` and script-file modes seed it before dispatching.
     {
         let mut state = cell.borrow_mut().change_context(AppError::Borrow)?;
-        state
-            .positional
-            .push_back(ImportedStr::shell(ShortCStr::from(c"fdshell")));
+        state.set_program_name(ImportedStr::shell(ShortCStr::from(c"fdshell")));
         // Like bash, `ignoreeof` is on only when stdin is a terminal, so a
         // stray Ctrl+D does not kill an interactive shell; piped input
         // still exits on EOF.

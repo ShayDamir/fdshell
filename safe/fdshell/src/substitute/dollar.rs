@@ -39,7 +39,7 @@ pub(crate) fn dollar_subst(
             out.push(&joined);
         }
         Some(c @ b'0'..=b'9') => {
-            // $0, $1, ... $N
+            // `$0` is the program name; `$1, $2, ... $N` are the positionals.
             peek.next();
             let state = super::borrow_state(cell)?;
             super::resolve::resolve_positional_index(c, peek, &state, out)?;

@@ -172,12 +172,11 @@ fn nounset_off_restores_empty_for_every_arm() {
 
 #[test]
 fn positional_concatenation_drops_out_of_range() {
-    // fdshell is 0-indexed (LESSONS), so `$1` is `b` and `$2`/`$3` are out of
-    // range: bash prints `[ab]`, fdshell `[b]`. Out-of-range `$N` expands to
-    // empty on both.
+    // `$1..` are the `set --` words in order, so `$3` is the out-of-range one:
+    // out-of-range `$N` expands to empty on both, and the line matches bash.
     let (out, _err, code) = run(r#"set -- a b; echo "[$1$2$3]""#);
     assert_eq!(code, 0);
-    assert_eq!(out, "[b]\n");
+    assert_eq!(out, "[ab]\n");
 }
 
 #[test]
@@ -248,7 +247,7 @@ fn assignment_of_unset_uses_the_default_form() {
 // Task #130: a `${ … }` region inside double quotes is one unit, so its inner
 // quotes do not close the outer quote. The default value keeps its spaces
 // (bash parity), the word stays one word, and the `;`/`&&` inside the region
-// are data. `$1`-based shapes are avoided: the `set --` off-by-one is task #134.
+// are data.
 #[test]
 fn quoted_brace_default_value_matches_bash() {
     let cases: &[(&str, &str)] = &[

@@ -65,7 +65,7 @@ fn test_string_empty_with_variables() {
 
 #[test]
 fn set_dashdash_replaces_positional() {
-    let (out, _err, code) = run(r#"X=old; set -- $X two; printf "$0 $1""#);
+    let (out, _err, code) = run(r#"X=old; set -- $X two; printf "$1 $2""#);
     assert_eq!(code, 0);
     assert_eq!(out, "old two");
 }

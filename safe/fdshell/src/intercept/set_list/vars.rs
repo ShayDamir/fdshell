@@ -1,5 +1,6 @@
-//! Bare `set`: positional parameters (raw values) followed by `NAME=value`
-//! lines for all string variables and exports, sorted by name.
+//! Bare `set`: `$1..` (raw values) followed by `NAME=value` lines for all
+//! string variables and exports, sorted by name. bash lists `$0` first;
+//! fdshell does not (accepted divergence, README).
 
 use alloc::vec::Vec;
 
@@ -9,8 +10,8 @@ use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-/// Positional parameters (raw values) followed by `NAME=value` lines for all
-/// string variables and exports, sorted by name.
+/// `$1..` (raw values) followed by `NAME=value` lines for all string variables
+/// and exports, sorted by name.
 pub fn list_vars(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     let mut out = Vec::new();

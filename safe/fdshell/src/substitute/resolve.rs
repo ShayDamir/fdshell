@@ -42,6 +42,9 @@ impl ShellState {
     }
 }
 
+/// Expand `$N` from the digit run starting at `first_digit`: `$0` is the
+/// program name, `$1..$N` are `positional.get(N - 1)` (1-based parameters,
+/// 0-based storage).
 pub(super) fn resolve_positional_index(
     first_digit: u8,
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
@@ -60,7 +63,12 @@ pub(super) fn resolve_positional_index(
         }
     }
     let idx: usize = num.parse().change_context(ResolveError::TooLarge)?;
-    match state.positional.get(idx) {
+    // `$0` is the program name: always bound, so nounset never fires on it.
+    if idx == 0 {
+        out.push(&state.program_name);
+        return Ok(());
+    }
+    match state.positional.get(idx - 1) {
         Some(pos) => out.push(pos),
         // nounset: an out-of-range `$N` is an unbound variable (bash: `N: unbound variable`).
         None if state.options & crate::options::NOUNSET != 0 => {

@@ -32,7 +32,10 @@ pub struct ShellState {
     pub(crate) tasks: HashMap<ShortCStr, Task>,
     pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
     pub(crate) exports: HashMap<ShortCStr, ImportedStr>,
+    /// `$1..$N` only; 0-based storage (`get(k)` is `$(k + 1)`).
     pub(crate) positional: VecDeque<ImportedStr>,
+    /// `$0`: the program name, never a slot of `positional` (bash's argv[0]).
+    pub(crate) program_name: ImportedStr,
     /// One frame per active function call: the `local` shadows to restore on return.
     pub(crate) frames: Vec<VarFrame>,
     pub(crate) last_status: WaitStatus,
@@ -67,6 +70,7 @@ impl ShellState {
             strings: HashMap::new(),
             exports: HashMap::new(),
             positional: VecDeque::new(),
+            program_name: ImportedStr::shell(ShortCStr::from(c"fdshell")),
             frames: Vec::new(),
             last_status: WaitStatus::Exited(0),
             shell_pid: sys::env::getpid(),
