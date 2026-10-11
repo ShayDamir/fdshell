@@ -475,7 +475,8 @@ fn quoted_multiword_expansion_splits_positionals() {
 // Task #130: a quoted region's bytes are marked quoted, so its multi-word
 // output stays ONE word. The values are read with `builtin printf "[%s]"`
 // (`$1` after `set --` is off-by-one today — pre-existing positional-model bug,
-// task #134; the literal-IFS split of unquoted words is task #133).
+// task #134; the literal-IFS byte after an embedded expansion cuts the word in
+// pieces is task #222).
 #[test]
 fn quoted_region_expansion_stays_one_word() {
     let cases: &[(&str, &str)] = &[
@@ -504,6 +505,122 @@ fn quoted_region_expansion_stays_one_word() {
         let (out, err, code) = run(script);
         assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
         assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+// Task #133: field splitting applies to the result of an expansion only
+// (POSIX 2.6.5), so a literal word — no `$`, no `%`, no leading `~` — is one
+// field whatever `IFS` is. Measured against `bash -c` 5.3.9.
+
+#[test]
+fn literal_word_with_non_whitespace_ifs_stays_one_arg() {
+    let (out, err, code) = run(r#"IFS=,; builtin printf "[%s]\n" a,b"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a,b]\n");
+}
+
+#[test]
+fn literal_word_with_ifs_byte_is_one_positional() {
+    let (out, err, code) = run(r#"IFS=:; set -- a:b; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn literal_leading_ifs_byte_is_no_leading_empty_positional() {
+    let (out, err, code) = run(r#"IFS=,; set -- ,a; printf "[%s]" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[,a]");
+}
+
+#[test]
+fn literal_leading_tilde_user_word_with_ifs_byte_stays_one_arg() {
+    // `~user` is literal here (README), so the word performed no expansion:
+    // bash splits nothing. fdshell keeps `~nobody` literal, so its field is
+    // `~nobody:x` where bash's is `/var/empty:x` (the same field count).
+    let (out, err, code) = run(r#"IFS=:; builtin printf "[%s]" ~nobody:x"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~nobody:x]");
+}
+
+// Task #133, defect 2: a non-whitespace `IFS` delimiter at the very end of an
+// expansion produces no trailing empty field; leading and middle empties stay.
+// Measured against `bash -c` 5.3.9.
+
+#[test]
+fn cmd_subst_trailing_ifs_delimiter_is_no_trailing_positional() {
+    let (out, err, code) = run(r#"IFS=,; set -- $(echo "a,"); printf "[%s]" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a]");
+    let (out, _err, code) = run(r#"IFS=,; set -- $(printf ","); echo $#"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn cmd_subst_all_delimiters_keeps_leading_empties() {
+    // `,,,`: two leading empty fields, the trailing one elided.
+    let (out, err, code) = run(r#"IFS=,; set -- $(echo ",,,"); printf "[%s]" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[][][]");
+}
+
+#[test]
+fn positional_re_split_elides_trailing_empty_field() {
+    // The unquoted `$@` re-split path (`positional.rs`): each positional is
+    // split on `IFS`, so its trailing delimiter loses its empty field.
+    let (out, err, code) = run(r#"IFS=,; set -- "a,"; printf "[%s]" $@"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a]");
+}
+
+#[test]
+fn whitespace_delimiter_run_after_ifs_delimiter_trims_it() {
+    // `IFS=" ,"`: the delimiter merges with the trailing whitespace run and
+    // both are trimmed — one field `a`, not `a, ` nor `a, []`.
+    let (out, err, code) = run(r#"IFS=" ,"; builtin printf "[%s]" $(printf "a, ")"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a]");
+}
+
+#[test]
+fn leading_and_middle_empty_fields_stay() {
+    // Regression guard for the elision rule: only the very end of the
+    // expansion is affected.
+    let (out, err, code) = run(r#"IFS=,; set -- $(echo ",a"); printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n[a]\n");
+    let (out, _err, code) = run(r#"IFS=,; set -- $(echo "a,,"); printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[]\n");
+}
+
+// Task #222 (accepted divergence, next to task #133's fix): the mask model
+// splits the whole concatenation of a literal part and an expansion, while
+// bash splits only the expansion part — a literal `IFS` byte placed after an
+// unquoted embedded expansion cuts between the expansion's last field and the
+// literal text.
+
+#[test]
+fn literal_ifs_byte_after_expansion_cuts_the_word() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; v=$(echo "b c"); builtin printf "[%s]" x$v,y"#,
+            "[xb c][y]",
+        ),
+        (
+            r#"IFS=,; set -- $(echo "b c"); builtin printf "[%s]" x$@,y"#,
+            "[xb c][y]",
+        ),
+        (
+            r#"IFS=,; set -- "$(echo "b c")"; builtin printf "[%s]" x"$@"z,y"#,
+            "[xb cz][y]",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
         assert_eq!(&out, want, "{script:?}");
     }
 }

@@ -11,7 +11,7 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
-use super::arg::substitute_arg;
+use super::arg::substitute_arg_marked;
 use super::borrow_state;
 use super::positional::expand_positional_word;
 use super::split::split_word;
@@ -38,14 +38,18 @@ pub fn substitute_args(
             // A fully quoted word is exactly one word — kept even when the
             // expansion is empty (`"${Y:+a}"` → one empty argument).
             let fq = super::fully_quoted(&mask);
-            let (expanded, mask) = substitute_arg(arg, &mask, &mut cache, cell)?;
-            // The IFS borrow must end before the glob reborrows the cell for
-            // `nullglob` (RefCell, LESSONS.md).
-            let fields = if fq {
-                vec![(expanded, mask)]
+            let mut expanded = false;
+            let (text, mask) = substitute_arg_marked(arg, &mask, &mut cache, cell, &mut expanded)?;
+            // Field splitting applies to the result of expansion only (POSIX
+            // 2.6.5): a word that performed no expansion is one field, so a
+            // literal `IFS` byte inside it never delimits.
+            let fields = if fq || !expanded {
+                vec![(text, mask)]
             } else {
+                // The IFS borrow must end before the glob reborrows the cell
+                // for `nullglob` (RefCell, LESSONS.md).
                 let state = borrow_state(cell)?;
-                split_word(&expanded, &mask, &state.ifs)?
+                split_word(&text, &mask, &state.ifs)?
             };
             for (word, mask) in fields {
                 push_word(&mut result, &word, &mask, cell)?;

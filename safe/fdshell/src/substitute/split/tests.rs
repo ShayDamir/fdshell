@@ -77,13 +77,38 @@ fn non_whitespace_ifs_keeps_empty_fields() {
 }
 
 #[test]
-fn non_whitespace_ifs_keeps_trailing_empty_field() {
-    assert_eq!(split("a:", ":"), vec![b"a".to_vec(), b"".to_vec()]);
+fn non_whitespace_ifs_elides_trailing_empty_field() {
+    // A delimiter at the very end of the word produces no trailing empty
+    // field (bash: `IFS=,; set -- $(printf "a,")` is one positional).
+    assert_eq!(split("a:", ":"), vec![b"a".to_vec()]);
+    assert_eq!(split("a,,", ","), vec![b"a".to_vec(), b"".to_vec()]);
+}
+
+#[test]
+fn leading_empty_field_survives_trailing_elision() {
+    // Leading empties are not elided: the lone delimiter of `:` delimits the
+    // leading empty field, and the word end produces no second one (bash:
+    // `IFS=:; set -- $(printf ":")` → `$#` = 1).
+    assert_eq!(split(":", ":"), vec![b"".to_vec()]);
+    assert_eq!(split(",,", ","), vec![b"".to_vec(), b"".to_vec()]);
 }
 
 #[test]
 fn non_whitespace_ifs_keeps_leading_empty_field() {
     assert_eq!(split(":a", ":"), vec![b"".to_vec(), b"a".to_vec()]);
+}
+
+#[test]
+fn delimiter_then_trailing_whitespace_merges() {
+    // A non-whitespace delimiter at the end of a field merges with the
+    // whitespace run that follows it: the field is not flushed and the
+    // delimiter is trimmed with the run (`IFS=" ,": "a, "` is `a`).
+    assert_eq!(split("a, ", " ,"), vec![b"a".to_vec()]);
+    assert_eq!(split("a,, ", " ,"), vec![b"a".to_vec(), b"".to_vec()]);
+    assert_eq!(split("a,   ", " ,"), vec![b"a".to_vec()]);
+    // `IFS="a "`: `a` delimits, the space is the whitespace byte.
+    assert_eq!(split("xaya ", "a "), vec![b"x".to_vec(), b"y".to_vec()]);
+    assert_eq!(split("xaa ", "a "), vec![b"x".to_vec(), b"".to_vec()]);
 }
 
 #[test]

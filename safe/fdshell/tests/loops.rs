@@ -400,3 +400,26 @@ fn for_list_backtick_output_splits_on_ifs() {
     assert_eq!(code, 0);
     assert_eq!(out, "[a]\n[b]\n");
 }
+
+/// A for-list word that performed no expansion is one iteration (task #133,
+/// POSIX 2.6.5): its own `IFS` bytes are not split points.
+/// Measured against `bash -c` 5.3.9: `[a,b]` (one iteration).
+#[test]
+fn for_list_literal_word_with_ifs_byte_is_one_iteration() {
+    let (out, err, code) = run(r#"IFS=,; for w in a,b; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a,b]\n");
+}
+
+/// A trailing `IFS` delimiter at the end of an expansion produces no trailing
+/// empty field (task #133): the whole-word backtick's output goes through the
+/// same splitter. Measured: `[a]` (one iteration), `[]` `[]` (two).
+#[test]
+fn for_list_backtick_output_elides_trailing_empty_field() {
+    let (out, err, code) = run(r#"IFS=,; for w in `echo "a,"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a]\n");
+    let (out, _err, code) = run(r#"IFS=,; for w in `echo ",,"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n[]\n");
+}

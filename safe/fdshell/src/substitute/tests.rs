@@ -11,6 +11,7 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::state::{FdVar, ShellState};
 
+use super::arg::substitute_arg_marked;
 use super::substitute_arg;
 
 fn fdvar(fd: sys::LocalFd) -> FdVar {
@@ -850,6 +851,193 @@ fn tilde_expansion_keeps_mask_alignment() {
     );
 }
 
+// The `expanded` signal (task #133): field splitting applies to the result of
+// an expansion only (POSIX 2.6.5), so `substitute_args` gates the split on it.
+// A word is expanded when an expansion arm ran, not when the output differs
+// from the raw text: `IFS=,; a=,; set -- $a` is one word whose expansion has
+// exactly the raw word's length. The pins below start the flag at the wrong
+// value, so they fail if any arm (or the literal path) flips it.
+#[test]
+fn literal_word_marks_no_expansion() {
+    let cell = dummy_cell();
+    let mut expanded = true;
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg_marked(
+        &ShortCStr::from(c"a,b"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a,b");
+    assert!(!expanded, "a literal word performed no expansion");
+}
+
+#[test]
+fn backslash_protected_delimiter_marks_no_expansion() {
+    // `a\,b`: `\X` removes the backslash and protects the byte through the
+    // mask (POSIX #4.1) — no expansion ran, and the protected delimiter never
+    // delimits, so the splitter keeps the word whole on its own.
+    let cell = dummy_cell();
+    let mut expanded = true;
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"a\\,b"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a,b");
+    assert_eq!(mask, vec![false, true, false]);
+    assert!(!expanded);
+}
+
+#[test]
+fn dollar_var_marks_expansion() {
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"$hello"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded);
+}
+
+#[test]
+fn bare_dollar_marks_expansion() {
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"$"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded);
+}
+
+#[test]
+fn positional_dollar_at_marks_expansion() {
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"$@"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded);
+}
+
+#[test]
+fn empty_command_subst_marks_expansion() {
+    // The flag means "an arm ran", not "the arm produced bytes": `$(true)`
+    // expands to nothing and is still an expansion — bash splits its empty
+    // result (`unquoted_empty_cmd_subst_is_no_words`).
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"$(true)"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded);
+}
+
+#[test]
+fn bound_percent_fd_marks_expansion() {
+    let cell = dummy_cell();
+    let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .set_fd_var(ShortCStr::from(c"?"), fdvar(rd));
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"%?"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded);
+}
+
+#[test]
+fn unbound_percent_fd_marks_expansion() {
+    // Guard for the reading above: the literal `%?` output also counts as a
+    // run arm, so such a word keeps going through the splitter exactly as
+    // before task #133.
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"%nosuchfd"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded);
+}
+
+#[test]
+fn leading_tilde_with_home_marks_expansion() {
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    substitute_arg_marked(
+        &ShortCStr::from(c"~"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert!(expanded, "`~` pushed $HOME");
+}
+
+#[test]
+fn tilde_user_marks_no_expansion() {
+    // `~user` is literal here (README), so the word performed no expansion
+    // and a literal `IFS` byte inside it must not split it. An unset `HOME`
+    // is the other literal arm: `tilde::expand` sets the flag only when the
+    // home bytes are pushed.
+    let cell = dummy_cell();
+    let mut expanded = true;
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg_marked(
+        &ShortCStr::from(c"~nobody:x"),
+        &[],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"~nobody:x");
+    assert!(!expanded);
+}
+
 #[test]
 fn dollar_bang_returns_last_bg_pid() {
     let cell = dummy_cell();
@@ -1445,6 +1633,77 @@ fn empty_quoted_arg_is_one_empty_word() {
     let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
     assert_eq!(result.len(), 1);
     assert!(result[0].is_empty());
+}
+
+// A word that performed no expansion is one field (task #133, POSIX 2.6.5):
+// its own bytes are never split on `IFS`.
+#[test]
+fn literal_word_with_ifs_byte_is_one_word() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().ifs = ShortCStr::from(c",");
+    let args = alloc::vec![ShortCStr::from(c"a,b")];
+    let args_mask = alloc::vec![alloc::vec![false; 3]];
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a,b");
+}
+
+#[test]
+fn expansion_with_space_still_splits_on_default_ifs() {
+    // `x="a b"; set -- $x` — bash: two positionals. Guard: the gate
+    // suppresses the splitting of unexpanded words, not the splitting of an
+    // expansion's own whitespace. This is also the case that the
+    // `out.len() != arg.len()` proxy flips: the expansion has exactly the raw
+    // word's length (3 bytes) and must still split.
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"x"), is_(c"a b"));
+    let args = alloc::vec![ShortCStr::from(c"$x")];
+    let args_mask = alloc::vec![alloc::vec![false; 2]];
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert_eq!(result[1].as_bytes().unwrap(), b"b");
+}
+
+// The `expanded` flag must be tracked, not inferred from the text: these two
+// words have an expansion of exactly the raw word's length and go both ways.
+#[test]
+fn equal_length_expansion_of_comma_splits_to_one_empty_word() {
+    // `IFS=,; a=,; set -- $a` — bash: one empty positional.
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = ShortCStr::from(c",");
+        state.strings.insert(ShortCStr::from(c"a"), is_(c","));
+    }
+    let args = alloc::vec![ShortCStr::from(c"$a")];
+    let args_mask = alloc::vec![alloc::vec![false; 2]];
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_empty());
+}
+
+#[test]
+fn equal_length_expansion_of_delimited_pair_splits_to_one_word() {
+    // `IFS=,; a=b,; set -- $a` — bash: one positional `b` (the delimiter at
+    // the end of the expansion produces no trailing empty field). A
+    // byte-comparison `expanded` proxy would call this word unexpanded
+    // (3 bytes in, 1 byte out of the same length as the raw `b,`) and keep
+    // the raw text whole: `b,`.
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.ifs = ShortCStr::from(c",");
+        state.strings.insert(ShortCStr::from(c"a"), is_(c"b,"));
+    }
+    let args = alloc::vec![ShortCStr::from(c"$a")];
+    let args_mask = alloc::vec![alloc::vec![false; 2]];
+    let result = super::substitute_args(&args, &args_mask, &[], &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].as_bytes().unwrap(), b"b");
 }
 
 #[test]

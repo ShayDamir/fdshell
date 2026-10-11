@@ -17,13 +17,17 @@ use crate::state::ShellState;
 /// Substitute one word, returning the expanded text plus a parallel quote
 /// mask. Bytes copied from the word keep their mask bit; bytes produced by
 /// an expansion inherit the mask bit of the expansion's trigger byte.
+/// `expanded` is an output: it reports that an expansion arm ran (even an
+/// empty one) — field splitting applies only to a word that expanded
+/// (POSIX 2.6.5). It is cleared here, so the caller's value is irrelevant.
 ///
 /// Invariant: at the top of each loop iteration `idx == consumed.get()`.
-pub(crate) fn substitute_arg(
+pub(super) fn substitute_arg_marked(
     arg: &ShortCStr,
     mask: &[bool],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
+    expanded: &mut bool,
 ) -> Result<(ShortCStr, Vec<bool>), Report<ResolveError>> {
     let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
     let mut out = ShortCStr::new();
@@ -35,8 +39,9 @@ pub(crate) fn substitute_arg(
     }
     .peekable();
     let mut idx = 0usize;
+    *expanded = false;
     if bytes.first() == Some(&b'~') {
-        super::tilde::expand(&mut peek, &mut idx, mask, &mut out, &mut out_mask)?;
+        super::tilde::expand(&mut peek, &mut idx, mask, expanded, &mut out, &mut out_mask)?;
     }
     while let Some(b) = peek.next() {
         let quoted = mask.get(idx).copied().unwrap_or(false);
@@ -70,6 +75,7 @@ pub(crate) fn substitute_arg(
                 let before = out.len();
                 arms::percent(&mut peek, cache, cell, &mut out)?;
                 realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
+                *expanded = true;
             }
             b'$' if peek.peek() == Some(&b'(') => {
                 peek.next();
@@ -81,6 +87,7 @@ pub(crate) fn substitute_arg(
                     quoted,
                 )?;
                 idx = consumed.get();
+                *expanded = true;
             }
             b'$' => {
                 let before = out.len();
@@ -88,6 +95,7 @@ pub(crate) fn substitute_arg(
                 // `${…}` arm; `realign` re-syncs it to the consumed count.
                 arms::dollar(&mut peek, cell, &mut out, mask, idx)?;
                 realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
+                *expanded = true;
             }
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,
         }

@@ -930,8 +930,53 @@ contained quotes", so it cannot express partial quoting (it would split
 `"\`echo a b\`"x`) and it exists only for the quoted-empty rule.
 
 Test design for `IFS` pins: quote the value inside the substitution body
-(`IFS=:` + `` `printf %s "a:b"` ``, never `` `printf a:b` `` — fdshell splits
-literal `IFS` bytes, divergence #133); single quotes are unavailable; a real TAB
+(`IFS=:` + `` `printf %s "a:b"` ``, never `` `printf a:b` `` — a literal word is
+never split, task #133); single quotes are unavailable; a real TAB
 needs `printf %b` (`%s` keeps `\t` as text in both shells); and a **quoted**
 backtick body must not nest quotes (the scanner drops them — #216), so get a
 newline from several commands: `` `printf x; echo; printf y` ``.
+
+## Field splitting is an expansion-only rule; a text-comparison proxy for "did it expand" is unsound
+`IFS=,; printf "[%s]\n" a,b` printed `[a] [b]` and `IFS=:; set -- a:b; echo $#`
+printed `2`: `substitute/words.rs` ran `split_word` on *every* non-fully-quoted
+word, so a literal word's own bytes split on the current `IFS`. A mask of all
+`false` means "nothing is protected", not "this word is splittable" — POSIX 2.6.5
+splits the **result of an expansion**, and a word with no `$`, no `%` and no
+leading `~` has no result to split: it is one field.
+
+Rule: track the signal, never infer it from the text. `substitute_arg_marked`
+takes `expanded: &mut bool` as an **output** and sets it in exactly the four
+expansion arms (`~` only when `$HOME` was pushed, `%`, `$(`, `$`). Every text
+proxy flips a real case: with `IFS=,` and `a=,`, the word `$a` (2 bytes) expands
+to 1 byte, so `out.len() != arg.len()` calls it unexpanded and yields `$,`
+where bash yields one empty field; with `a=b,` the word `$a` (2 bytes) expands
+to `b,` (2 bytes), so the length proxy, `mask.len() != arg.len()` and
+`expanded_text != arg` all call *that* word unexpanded and keep `b,` whole
+where bash yields `b`. Pin both directions: `equal_length_expansion_of_*` plus
+`expansion_with_space_still_splits_on_default_ifs` (a 3-byte word whose
+3-byte expansion must split).
+
+Rule: an output flag is cleared by the callee, and its negative test starts at
+the *wrong* value. The wrapper's `let mut expanded = false` is invisible to a
+test that also starts at `false` — the assertion `!expanded` then passes without
+the callee writing anything (the first `literal_word` pin passed for exactly
+this reason). `substitute_arg_marked` clears the flag at its entry, and every
+"marks no expansion" pin starts at `true`.
+
+Rule: the trailing-empty rule is only about the very end of the expansion. The
+`trailing` flag in `split_word` is load-bearing in the whitespace arm — a
+non-whitespace delimiter at the end of a field merges with the whitespace run
+that follows it and is trimmed with it (`IFS=" ,"; set -- $v` with `v="a, "` →
+one field `a`), so drop only its use in the *final* flush
+(`if !cur.is_empty()`, not `|| trailing`) and keep the flag and its three
+assignments; `delimiter_then_trailing_whitespace_merges` is the pin that kills
+the "delete the flag" shortcut. `split(":")` is one empty field, not none: the
+leading delimiter delimits it, and the word end adds no second one (bash:
+`IFS=:; set -- $(printf ":")` → `$#` = 1).
+
+Flag `safe/fdshell/src/substitute/arg.rs` (83 LoC, STYLE.md §2.3 80–90 band) for
+refactoring. The structural fix — splitting each expansion part separately and
+concatenating it with the literal parts, so a literal `IFS` byte after an
+embedded expansion stops cutting the word (`IFS=,; v=$(echo "b c"); printf
+"[%s]" x$v,y` → `[xb c][y]` here, `[xb c,y]` in bash) — is task #222; the
+`expanded` bit added here is exactly the information that refactor needs.

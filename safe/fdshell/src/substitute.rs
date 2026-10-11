@@ -12,15 +12,29 @@ mod subst_paren;
 mod tilde;
 mod words;
 
-pub(crate) use arg::substitute_arg;
 pub(crate) use split::split_word;
 pub use words::substitute_args;
 
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
+use hashbrown::HashMap;
 use sys::fork_cell::{ForkCell, Ref};
+use sys::{ExportedFd, ShortCStr};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
+
+/// Substitute one word without caring whether it expanded: the wrapper for
+/// every caller that does not gate on the `expanded` signal.
+pub(crate) fn substitute_arg(
+    arg: &ShortCStr,
+    mask: &[bool],
+    cache: &mut HashMap<ShortCStr, ExportedFd>,
+    cell: &ForkCell<ShellState>,
+) -> Result<(ShortCStr, Vec<bool>), Report<ResolveError>> {
+    let mut expanded = false;
+    arg::substitute_arg_marked(arg, mask, cache, cell, &mut expanded)
+}
 
 pub(crate) fn borrow_state(
     cell: &ForkCell<ShellState>,

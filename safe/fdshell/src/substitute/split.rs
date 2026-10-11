@@ -7,8 +7,10 @@ use crate::error::resolve::ResolveError;
 /// Split a word on the shell's IFS characters.
 ///
 /// Runs of IFS whitespace collapse to one delimiter and trim the ends;
-/// each non-whitespace IFS char delimits a field, empty fields included
-/// (a trailing one is kept). An empty IFS disables splitting. An IFS char
+/// each non-whitespace IFS char delimits a field, empty fields included.
+/// A non-whitespace delimiter merges with an IFS-whitespace run that
+/// follows it, and a delimiter at the very end of the word produces no
+/// trailing empty field. An empty IFS disables splitting. An IFS char
 /// whose mask bit is `true` was inside double quotes and never delimits.
 /// Each field comes back with the per-byte quote mask of the same span,
 /// so later pattern detection can skip quoted bytes.
@@ -29,7 +31,11 @@ pub(crate) fn split_word(
     let mut i = 0usize;
     while let Some(&b) = bytes.get(i) {
         if is_ifs_ws(b) && !quoted(i) {
-            if !cur.is_empty() {
+            // `trailing` marks a non-whitespace delimiter at the end of the
+            // field just closed: it merges with this whitespace run, so the
+            // field is not flushed and the delimiter is trimmed with the run
+            // (`IFS=" ,": "a, "` is one field `a`).
+            if !cur.is_empty() && !trailing {
                 fields.push((core::mem::take(&mut cur), core::mem::take(&mut cur_mask)));
             }
             trailing = false;
@@ -49,7 +55,7 @@ pub(crate) fn split_word(
         }
         i += 1;
     }
-    if !cur.is_empty() || trailing {
+    if !cur.is_empty() {
         fields.push((cur, cur_mask));
     }
     Ok(fields)

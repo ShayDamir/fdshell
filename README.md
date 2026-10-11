@@ -623,6 +623,38 @@ scoping is dynamic: a callee sees its caller-call's local unless it shadows it
 arguments lists the call's locals, and `local` outside a function is an error
 (rc 1, `local: can only be used in a function`).
 
+### Word splitting (`IFS`)
+
+Field splitting applies to the *result of an expansion* (POSIX 2.6.5), never to
+the bytes of a word that performed none: `IFS=,; echo a,b` prints `a,b`, and
+`IFS=:; set -- a:b` has one positional.
+
+- runs of `IFS` whitespace collapse to one delimiter and are trimmed at both
+  ends of the expansion;
+- every non-whitespace `IFS` byte delimits a field, empty fields included:
+  leading and middle empties are kept, and a delimiter at the very end of the
+  expansion produces no trailing empty field;
+- a delimiter merged with an `IFS` whitespace run is trimmed with it
+  (`IFS=" ,"; set -- $v` with `v="a, "` → one field `a`);
+- bytes produced by an expansion inherit the mask bit of its trigger byte, so a
+  quoted byte never delimits, and a fully quoted word is one word;
+- `IFS=` disables splitting: the expansion is one field, spaces included;
+- an unquoted expansion producing no fields produces no words at all
+  (`IFS=,; set -- $(true)` → `$#` = 0), while a word containing quotes keeps
+  one empty word (see the quoted-empty rule under "For-list words").
+
+```
+IFS=,;  builtin printf "[%s] " a,b          → [a,b]        (literal: no split)
+IFS=,;  builtin printf "[%s] " x"a,b"       → [xa,b]       (quoted bytes never delimit)
+IFS=,;  builtin printf "[%s] " $(printf "a,,b")  → [a] [] [b]   (middle empty kept)
+IFS=,;  builtin printf "[%s] " $(printf "a,")    → [a]     (trailing delimiter elided)
+IFS=" ,"; builtin printf "[%s] " $(printf "a, b, ")  → [a] [b]  (runs collapse, ends trim)
+IFS=;   x="a b"; builtin printf "[%s] " $x  → [a b]        (`IFS=` disables)
+```
+
+The same splitter serves command arguments, the unquoted `$@`/`$*` re-split and
+the `for … in` list (see "For-list words").
+
 An unset parameter expands to the empty string (POSIX 2.6.2), in every form:
 `echo "[$undefined]"` → `[]`, `echo ${unset}x` → `x`, and `${#undefined}` → `0`
 (the length of an unset parameter is 0). `set -u` (`nounset`) makes an unbound
@@ -838,11 +870,14 @@ bytes included, with `IFS=` disabling the split.
 
 The quoted-empty rule is the argument rule: `for w in "$(true)"` is one empty
 iteration, `for w in $(true)` is none, `for w in "" x` iterates over `""` then
-`x`. A `%name` word expands to the fd number when `name` is a scalar fd
-variable; when it is an fd array (`for %x in %arr`) the list keeps the array
-reference and the loop binds an fd variable per entry. A word's provenance is
-kept for `explain NAME`: a leading `~` reports `HOME`, a word carrying a
-substitution reports command output, a literal word reports the script.
+`x`. A list word that performed no expansion is one iteration:
+`IFS=,; for w in a,b` iterates once over `a,b` (the splitting rule of
+"Word splitting (`IFS`)"). A `%name` word expands to the fd number when `name`
+is a scalar fd variable; when it is an fd array (`for %x in %arr`) the list
+keeps the array reference and the loop binds an fd variable per entry. A
+word's provenance is kept for `explain NAME`: a leading `~` reports `HOME`, a
+word carrying a substitution reports command output, a literal word reports the
+script.
 
 ### Nested regions inside double quotes
 
@@ -883,10 +918,13 @@ Accepted divergences (scanning is fixed, expansion is not):
 - a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
   literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
   is taken verbatim (task #174);
-- `IFS=:; set -- "a b":z` yields two words here and one in bash: fdshell splits
-  literal `IFS` bytes in a mixed-quote word (task #133), and `$1` after `set --`
-  is off-by-one (task #134), so positional values are read with `"$@"` or
-  `printf "[%s]"`.
+- `IFS=,; printf "[%s]" x$v,y` (with `v=$(echo "b c")`) yields two words here
+  and one in bash: fdshell splits the whole word — the literal part included —
+  on `IFS`, bash splits only the expansion part, so a literal `IFS` byte placed
+  after an unquoted embedded expansion cuts between the expansion's last field
+  and the literal text (task #222);
+- `$1` after `set --` is off-by-one (task #134), so positional values are read
+  with `"$@"` or `printf "[%s]"`.
 
 Other accepted divergences of the `for … in` word pipeline (task #131):
 

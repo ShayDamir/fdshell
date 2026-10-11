@@ -83,6 +83,17 @@ fn scoped_ifs_does_not_split_the_commands_own_words() {
 }
 
 #[test]
+fn scoped_ifs_leaves_a_literal_word_whole() {
+    // Task #133 pin: the scoped value is installed when the command runs, and
+    // the word performed no expansion, so its `:` is no split point — one
+    // argument reaches the builtin (`IFS=:; builtin printf "[%s]" a:b` in bash
+    // prints `[a:b]`).
+    let (out, err, code) = run(r#"IFS=: builtin printf "[%s]" a:b"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a:b]");
+}
+
+#[test]
 fn scoped_ifs_is_restored_afterward() {
     let (out, err, code) = run("IFS=: true; x=a:b; builtin echo $x");
     assert_eq!(code, 0, "stderr={err:?}");
