@@ -876,6 +876,52 @@ echo "wait exited $?"
 Wrap it in a loop (`while true; do wait … done`) to re-poll each round. Arms run in
 separate children, so a slow arm (a blocking read) cannot stall the others or the parent.
 
+### `time`
+
+`time [-p] <statement>` runs the statement and reports its real, user and sys times on
+**stderr**, keeping the statement's own exit status:
+
+```console
+$ fdshell -c 'time sleep 0.2'
+
+real	0m0.204s
+user	0m0.003s
+sys	0m0.000s
+$ fdshell -c 'time -p sleep 1.2'
+real 1.20
+user 0.01
+sys 0.01
+$ fdshell -c 'time false; echo $?'
+1
+```
+
+The default layout is bash's (a leading blank line, tab-separated `N m N.NNN s` fields);
+`-p` selects the POSIX layout (three `name value` lines, values in seconds). The report
+inherits the shell's stdout/stderr, so the inner's own output is untouched.
+
+Real time is `CLOCK_MONOTONIC` elapsed while the statement ran; user/sys are CPU times,
+measured with `getrusage(RUSAGE_SELF)` before and after the statement plus the `rusage`
+of the children reaped inside it — so a forked command's CPU (and a `wait`ed background
+job's) is counted. The report covers exactly the timed statement: no fork happens for
+builtins, user functions, `if`/`while`/`for`/`case` blocks, groups, pipelines,
+assignments, loops, or control flow, and the statement's status and control flow
+(`break`/`continue`/`return`) pass through the report untouched.
+
+`time` is a reserved word, so it is recognized as the first word of a statement with
+**none of its characters quoted** (`"time" ls`, `t"i"me ls`, `\time ls` are the
+`/usr/bin/time` utility, as in bash; fdshell does not strip single quotes yet, so
+`'time' ls` fails to resolve a command named `'time'`). Every leading `time [-p]`
+prefix collapses into one statement (`time time -p ls` prints one report), and a `-p`
+written after the statement is one of its arguments. A quoted `-p` is an argument too,
+so `time "-p" ls` runs `ls` in the default layout.
+A `time` alias is not expanded: `time` is in the reserved-word list the alias expander
+skips, exactly like `if` or `done`.
+
+A statement that ends the shell (`exit`, `quit`, `.`, `exec`, `become`) prints its report
+*before* it runs, because nothing runs after it (`time exit 3` reports, then exits 3).
+`exit` inside a pipeline (`exit | cat`) runs in a child, and a `source`d script that
+exits is not anticipated: in both cases the report covers the timed statement itself.
+
 ### `times`
 
 `times` prints the shell's and the reaped children's accumulated user/sys CPU times in

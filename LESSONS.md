@@ -708,3 +708,46 @@ the whole run down (with `-j1` too — parallelism is not the trigger). Rule:
 100%, free the space the crash itself leaves behind (`/tmp/cargo-mutants-*.tmp`
 lab dirs, stale `/tmp/nix-shell.*`, an old `CARGO_TARGET_DIR`) or send the labs
 to a roomy filesystem: `TMPDIR=/path/to/space cargo mutants ...`.
+
+## A statement-prefix keyword must be transparent in *every* first-word scorer
+`time [-p] <statement>` only stays one statement if each place that scores a
+statement's first word sees through the prefix: the segment scanner's block-keyword
+test (`keywords::keyword_delta`), the group opener's run test
+(`segment::group::group_at_run`), and the group span's start (`prefix_start`). The
+token list of a statement stops at the first `;`, so a prefix missed anywhere in
+that set splits the block and the parse hook never sees it: `time while x; do y;
+done` scanned as `Stmt "time while false"` produced `expected 'done'`. Rule: when a
+new prefix form is added, enumerate the scorers of the statement's first word and
+make each one strip it, then pin each with a test.
+
+## A verbatim token span cannot reach a block's closing keyword
+`parse::semi::verbatim(text, tokens)` spans the first token's start to the last
+token's end, which is right for commands and pipelines (and carries their heredoc
+bodies). For a block it is wrong: tokenization stops at the first separator, so
+`while false` is all the tokens cover and the span ends long before `done`. A
+timed block's text must be the *segment* span minus the prefix (`text.subslice`
+from the block keyword to the text's end). Rule: use the token span for
+statement-level text, the segment span for block-level text.
+
+## `saturating_sub` hides an inverted time delta as a silent zero
+`start.saturating_sub(now)` for an elapsed time compiles, passes every test that
+only checks the layout, and prints `real 0.00` for a 3-second sleep. The delta is
+`now - start`; with saturating subtraction the inverted order is invisible. Pin
+the direction with a lower bound on a sleeping statement (`time -p sleep 1` →
+`real >= 1.00`), not with a layout-only assertion.
+
+## A CPU-time delta measured around a forked child is the fork's CPU
+`time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`: the
+fork/exec of the child (PATH walk, arg substitution) is the shell's own CPU and is
+inside the measurement window. So a unit or integration test may pin `user`/`sys`
+to `0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` with
+an in-process body). Asserting `user == 0.00` around a fork is a timing coin flip.
+
+## A CPU-burn timing test measures nothing in a release build
+`monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop,
+`core::hint::black_box`) passed every local debug run and failed under
+`nix flake check`, where the crate is built in release: LLVM computes the loop's
+result directly and the burn costs ~0 ms, so the clock test asserted a 5 ms
+elapsed time for work that never ran. Rule: measure elapsed time against a syscall
+that blocks (`libc::nanosleep`), which cannot be folded away, and bound it on both
+sides (at least 10 ms slept, far less than the clock reads).
