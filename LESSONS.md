@@ -910,3 +910,28 @@ can only be pre-armed per word too. Cost: a fresh `%fd` export cache per word �
 nothing cross-word depends on it. The per-word loop must not hold a `RefCell`
 borrow across the call (LESSONS.md #56/#119): `substitute_args` forks inside a
 `$(…)` and reborrows for `nullglob`.
+
+## Command-substitution output takes its split protection from the word's quote mask
+`for w in "`echo a b`"` iterated twice. The whole-word backtick arm of the for
+list split its output with its own `split_whitespace`, hardcoded to space, tab,
+CR and LF, which was wrong twice over: it split **quoted** output (bash keeps a
+quoted substitution whole, spaces *and* newlines), and it ignored `IFS`
+entirely — `IFS=:; for w in \`printf %s "a:b"\`` gave one word where bash gives
+two, `IFS=; for w in \`echo a b\`` gave two where bash gives one, and CR split
+where bash keeps it.
+
+Rule: the **word's** quote mask decides, never the output's bytes — command
+output carries no quote protection of its own, so an unquoted substitution goes
+through the pipeline's own splitter with an empty mask
+(`split_word(&out, &[], &ifs)`: nothing protected, all `IFS` bytes delimiting)
+and a fully quoted one (`fully_quoted(mask)`) is one field with no split at all.
+Do not key the rule on the per-word `quoted` flag: it means "the raw span
+contained quotes", so it cannot express partial quoting (it would split
+`"\`echo a b\`"x`) and it exists only for the quoted-empty rule.
+
+Test design for `IFS` pins: quote the value inside the substitution body
+(`IFS=:` + `` `printf %s "a:b"` ``, never `` `printf a:b` `` — fdshell splits
+literal `IFS` bytes, divergence #133); single quotes are unavailable; a real TAB
+needs `printf %b` (`%s` keeps `\t` as text in both shells); and a **quoted**
+backtick body must not nest quotes (the scanner drops them — #216), so get a
+newline from several commands: `` `printf x; echo; printf y` ``.

@@ -825,7 +825,16 @@ for w in ~                 → $HOME
 for w in 1$((1+2))         → 13
 for w in $(echo a*)        → the files matching `a*`
 for w in "a$(printf " b")c" → [a bc]     (one word, substituted)
+for w in "`echo a b`"      → [a b]       (a quoted substitution is one word)
+for w in `echo a b`        → [a] [b]     (unquoted: the output is IFS-split)
 ```
+
+The whole-word backtick arm (`` ` … ` `` as the entire word) is the one form
+the pipeline does not expand itself, and it follows the same split rule as
+every other expansion (task #132): a **fully quoted** substitution is exactly
+one iteration — its spaces, tabs and newlines are data and `IFS` never applies
+— and an unquoted one is split by the same `IFS` splitter, non-whitespace `IFS`
+bytes included, with `IFS=` disabling the split.
 
 The quoted-empty rule is the argument rule: `for w in "$(true)"` is one empty
 iteration, `for w in $(true)` is none, `for w in "" x` iterates over `""` then
@@ -867,7 +876,10 @@ quote (the enclosing quote is what stays open); `echo "$"`, `echo "${"` and
 Accepted divergences (scanning is fixed, expansion is not):
 
 - a backtick body is expanded **only** as a whole-word `for … in` list word
-   (task #131); everywhere else a backtick stays literal (task #216);
+    (task #131) and its fields are never pathname-expanded (task #220); its
+    split rule is the pipeline's (task #132: a quoted substitution is one word,
+    an unquoted one splits on `IFS`); everywhere else a backtick stays literal
+    (task #216, which also owns moving the arm into the pipeline);
 - a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
   literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
   is taken verbatim (task #174);
