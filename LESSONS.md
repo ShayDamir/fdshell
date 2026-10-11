@@ -73,8 +73,12 @@ In `tokens_to_for`, `get(in_pos + 1..do_idx - 1)` adjusted bounds the surroundin
 ## Block-keyword length only seeds the scan start: a ±1 offset is equivalent
 `keyword_block` computes `kw_len` (the opening keyword's length) and starts the block scan at `start + leading_ws + kw_len`. Because `keyword_delta` only reports a keyword at a real boundary (the next byte is whitespace or `;`), `kw_len` lands the scan start inside the whitespace after the keyword, and `scan_block` skips leading whitespace — so a ±1 shift (e.g. the `||`→`&&` mutant that sends `case`/`wait` down the `else` 5-char branch) is unobservable: the whole suite passes under it. Don't chase it with a test (no input makes the offset matter, since the char after the keyword is always whitespace/`;`); it's an accepted equivalent mutant. Splitting the shared `4` into two arms to dodge it trips `clippy::if_same_then_else`, and production `#[allow]` is forbidden, so the combined `||` form stays.
 
+**The premise is "the length measures the keyword".** Score `kw_len` on the *prefix-stripped* word: with a `time [-p]` prefix in front of the keyword, testing `starts_with` on the raw run sends `if`/`for` down the 5-char `else` branch, so the scan starts 3 bytes *past* the keyword and skips the head of the condition. There the equivalence breaks — a nested keyword lives there: `time for fi in 1; do echo $fi; done` scanned the seed after the nested `fi` and closed the block at `done` (the unprefixed form closes at the nested `fi`). `segment/block/keyword/tests.rs` pins the prefixed scan to end exactly where the unprefixed one does (`+ time_prefix_len`), which makes the seed measurable.
+
 ## Re-deriving an already-set flag is dead code with equivalent mutants
 In `depth_delta` (quote-aware block scan in `comment.rs`), a per-char `frag_quoted |= in_quote || in_backtick || depth > 0;` could never change the result: a fragment that contains any quote, backtick, or paren byte can never *exactly* match a keyword, so only the run-start state (caller mid-quote/mid-backtick) can taint a keyword-shaped fragment, and that is covered by the `frag_quoted` initialization. The dead line carried four replacement mutants of its own and masked the initialization's `||`→`&&` mutant (the tail re-tainted after the broken init). Drop the redundant derivation instead of chasing tests; the init is killable by a unit test that calls `scan_block` with `in_quote = true` and a closer inside the open quote. Same species: a delegating `Iterator::size_hint` override (`Counting` in `substitute/mask.rs`) is unobservable because no consumer consults the hint — six replacement mutants all survived; removing the override removed the source.
+
+The `time_prefix_len`/`one_prefix_len` pair is the same species in *length* form: `one_prefix_len` returned `4 + ws`/`6 + ws + ws2` (it had already consumed the whitespace closing the prefix) and the caller's loop added its own whitespace step on top of it, a term that was always 0. The dead step masked the `4 + ws` mutants (`* ws` was rescued by the outer `+= ws`). Fix: the helper returns the prefix's own length and the loop owns the closing whitespace, so every term is load-bearing. Two more rules came out of it: derive the shared word lengths from the matched bytes (`const TIME_LEN: usize = b"time".len();`) so there is no integer literal for `cargo mutants` to move, and pin each whitespace term with an exact length (`time \t-p  ls` → 10).
 
 ## Cap test memory with a nextest wrapper script, not shell `ulimit`
 `ulimit -v` in the shell caps cargo/rustc too, which need more VA than the tests. Nextest wrapper scripts (`.config/nextest.toml` with `experimental = ["wrapper-scripts"]`) wrap only each test binary: `prlimit --as=134217728 --`. An allocation blow-up (infinite-allocation mutants under cargo-mutants) then aborts that one test instead of tripping the host OOM killer, which was killing unrelated processes and corrupting whole mutant runs. The cap must stay above legitimate peak VA (this suite peaks well under 128MB). Nix builds need `util-linux` in `nativeBuildInputs` — stdenv has no `prlimit`, and its absence fails every test with exec ENOENT.
@@ -720,6 +724,25 @@ done` scanned as `Stmt "time while false"` produced `expected 'done'`. Rule: whe
 new prefix form is added, enumerate the scorers of the statement's first word and
 make each one strip it, then pin each with a test.
 
+**Sharing the scorer is not enough — the *strip* must be the same rule.**
+`segment::group::prefix.rs` stripped the whole prefix run with `time_prefix_len` for
+the statement case and hand-stripped one `-p` plus one `time` for the cond-part case,
+so `true && time time -p { sleep 0.2; }` left `time` at the end of the run: the cond
+test said "not a cond part", the `{` became word data, and the group split at `;`
+("group is missing a closing brace"). All three spellings work in bash. Rule: one
+strip helper used by both scorers (`strip_prefix` / `strip_trailing_prefix`), pinned
+per spelling of the run (`&& time {`, `&& time -p {`, `&& time time -p {`).
+
+The scorer that *consumes* the run is the third one to keep in step, and it drifts the
+same way: `parse/time_block.rs` took every `time` token plus a *single* `-p`, so
+`time -p time -p :` consumed `time -p time`, left `-p` as the inner statement, and ran a
+command named `-p` (exit 1; bash consumes each `time` with its own flag, exit 0). Rule:
+the consuming loop must accept `time` + its own optional `-p` as a *pair*, repeated, and
+pin the agreement in bytes against the measuring helper —
+`parse_prefix_run_matches_time_prefix_len` asserts the inner text is exactly the line
+behind `time_prefix_len(line)`, so a run of four prefixes with two flags cannot leave a
+word behind in one scorer and not the other.
+
 ## A verbatim token span cannot reach a block's closing keyword
 `parse::semi::verbatim(text, tokens)` spans the first token's start to the last
 token's end, which is right for commands and pipelines (and carries their heredoc
@@ -750,4 +773,22 @@ an in-process body). Asserting `user == 0.00` around a fork is a timing coin fli
 result directly and the burn costs ~0 ms, so the clock test asserted a 5 ms
 elapsed time for work that never ran. Rule: measure elapsed time against a syscall
 that blocks (`libc::nanosleep`), which cannot be folded away, and bound it on both
-sides (at least 10 ms slept, far less than the clock reads).
+sides (at least 10 ms slept, far less than the clock reads). The same fold hits
+`utime` assertions: `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burns
+`n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so release
+builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox and
+`nix flake check --build-all` fails the suite intermittently (task #208). A burn
+must be un-foldable to be assertable: keep the accumulator inside the loop under
+`black_box`, and never assert a positive CPU count for folded-away work.
+
+## Measure every spelling of a command you put in a classification list
+`time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
+report prints *before* them") carried `.`. `.` is the `source` alias: it runs the script
+in the *current* shell and returns, so `time -p . slowsrc.sh` printed `real 0.00`
+*before* the sourced output, while the identical `time -p source slowsrc.sh` printed
+`real 0.30` after it (bash prints `sourced`, then `real 0.30`). The same list, the same
+builtin, two spellings, opposite behavior — and the comment justifying the entry ("the
+statement itself returns, so its own report prints normally") contradicted the entry
+under it, which the README then repeated. Rule: a list that classifies commands by their
+first word is a claim about each command's *behavior* — measure each one (and each alias
+of it) against the shell, and never record a claim like "not anticipated" in its place.
