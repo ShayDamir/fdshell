@@ -338,7 +338,65 @@ fn for_list_whole_word_backtick_still_expands() {
     let (out, _err, code) = run(r#"for w in "`true`"; do printf "[%s]\n" "$w"; done"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[]\n");
+    let (out, _err, code) = run(r#"for w in "`echo a`"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n");
     let (out, _err, code) = run(r#"for w in `true`; do echo hit; done"#);
     assert_eq!(code, 0);
     assert_eq!(out, "");
+}
+
+/// A fully quoted command substitution in a for list is ONE word: its spaces
+/// and newlines are data, never split points (task #132, measured against
+/// `bash -c` 5.3.9 with `od -c`). `IFS` is irrelevant there — the third case
+/// sets it to `,` and the word still stays whole.
+/// Measured: `[a b]`, `[x LF y]` (one iteration), `[a b]`.
+#[test]
+fn for_list_quoted_backtick_is_never_split() {
+    let (out, err, code) = run(r#"for w in "`echo a b`"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a b]\n");
+    // The newline comes from a third command in the body: no escape is needed
+    // (a `\n` inside a quoted backtick body loses its backslash here — #216).
+    let (out, _err, code) =
+        run(r#"for w in "`printf x; echo; printf y`"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[x\ny]\n");
+    let (out, _err, code) = run(r#"IFS=,; for w in "`echo a b`"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a b]\n");
+}
+
+/// An unquoted whole-word backtick's output is split on `IFS` exactly like any
+/// other expansion (task #132): every IFS byte delimits (space, TAB, LF, and
+/// non-whitespace bytes such as `:`), `IFS=` disables the split, CR is not an
+/// `IFS` whitespace byte, and runs of `IFS` whitespace collapse.
+/// Measured: `[a b]`, `[a] [b]`, `[a⇥b]`, `[a⇥b]`, `[a\rb]`, `[x] [y]`, `[a] [b]`.
+#[test]
+fn for_list_backtick_output_splits_on_ifs() {
+    let (out, err, code) = run(r#"IFS=; for w in `echo a b`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a b]\n");
+    let (out, _err, code) =
+        run(r#"IFS=:; for w in `printf %s "a:b"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[b]\n");
+    // `%b` turns the escape into a real TAB in both shells; `%s` keeps it text.
+    let (out, _err, code) =
+        run(r#"IFS=" "; for w in `printf %b "a\tb"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a\tb]\n");
+    let (out, _err, code) =
+        run(r#"IFS=:; for w in `printf %b "a\tb"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a\tb]\n");
+    let (out, _err, code) = run(r#"for w in `printf "a\rb"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a\rb]\n");
+    let (out, _err, code) = run(r#"for w in `printf "x\ny"`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[x]\n[y]\n");
+    let (out, _err, code) = run(r#"for w in `echo a  b`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[b]\n");
 }
