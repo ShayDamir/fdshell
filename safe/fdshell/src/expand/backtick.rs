@@ -8,7 +8,7 @@ use sys::fork_cell::ForkCell;
 use crate::cmd_subst;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
-use crate::substitute::borrow_state;
+use crate::substitute::{borrow_state, fully_quoted, split_word};
 
 pub(super) use super::fields::strip_delims;
 
@@ -37,11 +37,11 @@ pub(super) fn expand(
     // any other expansion — with an empty mask, since command output carries
     // no quote protection of its own. The `ifs` borrow ends before returning
     // (RefCell, LESSONS.md).
-    let mut fields = if crate::substitute::fully_quoted(mask) {
+    let mut fields = if fully_quoted(mask) {
         alloc::vec![out]
     } else {
         let ifs = borrow_state(cell)?.ifs.clone();
-        crate::substitute::split_word(&out, &[], &ifs)?
+        split_word(&out, &[], &ifs)?
             .into_iter()
             .map(|(field, _)| field)
             .collect::<Vec<ShortCStr>>()
