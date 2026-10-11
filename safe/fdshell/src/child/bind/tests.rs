@@ -162,3 +162,15 @@ fn bind_handler_bad_type_is_invalid_argument() {
         ));
     });
 }
+
+#[test]
+fn bind_handler_backlog_is_invalid_argument() {
+    // `bind` never calls `listen(2)`: a flag it ignores is a usage error.
+    with_refs(&["--backlog", "1", "x"], |refs| {
+        let e = handle_bind(&Ctx::new(c"bind".into(), refs, &[], &ShellState::new())).unwrap_err();
+        assert!(matches!(
+            e.current_context(),
+            BuiltinError::InvalidArgument("backlog")
+        ));
+    });
+}

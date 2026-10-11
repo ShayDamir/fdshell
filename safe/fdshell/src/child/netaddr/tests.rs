@@ -17,12 +17,25 @@ where
 }
 
 fn parsed(args: &[&str]) -> NetArgs {
-    with_refs(args, |refs| netaddr::parse_net_args(refs).unwrap())
+    with_refs(args, |refs| netaddr::parse_net_args(refs, true).unwrap())
 }
 
 fn fails(args: &[&str], is_expected: impl Fn(&BuiltinError) -> bool) {
     with_refs(args, |refs| {
-        let e = netaddr::parse_net_args(refs).unwrap_err();
+        let e = netaddr::parse_net_args(refs, true).unwrap_err();
+        assert!(is_expected(e.current_context()), "unexpected error: {e:?}");
+    });
+}
+
+/// `bind`/`connect` parse with no backlog capability: they never call
+/// `listen(2)`, so `--backlog` is a usage error there.
+fn parsed_plain(args: &[&str]) -> NetArgs {
+    with_refs(args, |refs| netaddr::parse_net_args(refs, false).unwrap())
+}
+
+fn fails_plain(args: &[&str], is_expected: impl Fn(&BuiltinError) -> bool) {
+    with_refs(args, |refs| {
+        let e = netaddr::parse_net_args(refs, false).unwrap_err();
         assert!(is_expected(e.current_context()), "unexpected error: {e:?}");
     });
 }
@@ -165,4 +178,61 @@ fn parse_duplicate_flags() {
     ] {
         fails(args, |e| matches!(e, BuiltinError::InvalidArgument(_)));
     }
+}
+
+#[test]
+fn parse_backlog_needs_listen_capability() {
+    fails_plain(&["--backlog", "1", "x"], |e| is_what(e, "backlog"));
+}
+
+#[test]
+fn parse_backlog_equals_form_needs_capability() {
+    fails_plain(&["--backlog=1", "x"], |e| is_what(e, "backlog"));
+}
+
+#[test]
+fn parse_backlog_rejected_before_missing_address() {
+    // The capability check runs before the address is resolved, so the
+    // useless flag is what the user is told about first.
+    fails_plain(&["--backlog", "1"], |e| is_what(e, "backlog"));
+}
+
+#[test]
+fn parse_plain_accepts_uds_address() {
+    // No capability means no `--backlog`, not no address: the ordinary
+    // forms parse exactly as they do for `listen`.
+    let cfg = parsed_plain(&["--type", "dgram", "x"]);
+    assert_eq!(cfg.ty, SocketType::Dgram);
+    assert_eq!(cfg.backlog, None);
+}
+
+#[test]
+fn parse_addr_alias_is_inet() {
+    match parsed_plain(&["--addr", "127.0.0.1", "--port", "80"]).addr {
+        Address::Inet { addr, port } => {
+            assert_eq!(addr.as_bytes().unwrap(), b"127.0.0.1");
+            assert_eq!(port, 80);
+        }
+        other => panic!("expected Inet, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_addr_alias_without_port() {
+    fails(&["--addr", "127.0.0.1"], |e| is_what(e, "port"));
+}
+
+#[test]
+fn parse_addr_alias_duplicate_with_bind() {
+    fails(
+        &["--addr", "1.2.3.4", "--bind", "1.2.3.4", "--port", "1"],
+        |e| is_what(e, "bind"),
+    );
+}
+
+#[test]
+fn parse_addr_alias_conflicts_with_positional() {
+    fails(&["sock", "--addr", "1.2.3.4", "--port", "1"], |e| {
+        is_what(e, "address")
+    });
 }

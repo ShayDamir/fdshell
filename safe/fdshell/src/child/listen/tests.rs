@@ -99,6 +99,35 @@ fn listen_handler_inet_sends_listening_socket() {
 }
 
 #[test]
+fn listen_handler_addr_alias_sends_listening_socket() {
+    // `--addr` is the address-shaped spelling of the AF_INET endpoint.
+    let (state, receiver) = capture_state();
+    let port: u16 = (30000 + std::process::id() % 10000) as u16;
+    with_refs(
+        &["--addr", "127.0.0.1", "--port", &format!("{port}")],
+        |refs| {
+            assert_eq!(
+                handle_listen(&Ctx::new(c"listen".into(), refs, &[], &state)).unwrap(),
+                0
+            );
+        },
+    );
+    let mut buf = [0u8; sys::shellfd::TAG_MAX];
+    let pid = sys::Pid::from_raw(std::process::id() as i32);
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
+    fd.verify().unwrap();
+    assert_eq!(tag.to_bytes(), b"listen");
+    let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
+    let nready = sys::poll::poll(&mut pfd, 2000).unwrap();
+    assert_eq!(nready, 1);
+    let revents = pfd.first().unwrap().revents;
+    assert_ne!(revents & sys::poll::POLLIN, 0);
+    drop(client);
+    drop(fd);
+}
+
+#[test]
 fn listen_handler_dgram_socket_is_syscall_error() {
     // `listen` on a dgram socket is EOPNOTSUPP (verified on this kernel).
     let (state, _receiver) = capture_state();

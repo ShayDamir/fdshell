@@ -190,7 +190,7 @@ fn bind_parse_errors() {
         (
             "builtin bind",
             "missing argument address",
-            "Pass an @name, a path, or --bind ADDR --port N",
+            "Pass an @name, a path, or --addr ADDR --port N",
         ),
         (
             "builtin bind --type bogus x",
@@ -201,6 +201,16 @@ fn bind_parse_errors() {
             "builtin bind --bind 127.0.0.1",
             "invalid argument port",
             "Pass the port with --port N",
+        ),
+        (
+            "builtin bind --addr 127.0.0.1",
+            "invalid argument port",
+            "Pass the port with --port N",
+        ),
+        (
+            "builtin bind --backlog 1 x",
+            "invalid argument backlog",
+            "--backlog is accepted only by listen",
         ),
         (
             "builtin bind sock --bind 1.2.3.4 --port 1",
@@ -479,6 +489,23 @@ fn connect_listen_accept_in_one_script_inet() {
     assert_eq!(out, "got:hi\n");
 }
 
+/// The `--addr` alias, one script: it is the peer-shaped spelling for
+/// `connect`, and `listen` keeps accepting `--backlog` (the only builtin
+/// that calls `listen(2)`).
+#[test]
+fn connect_listen_accept_in_one_script_inet_addr_alias() {
+    let port = inet_port(3);
+    let (out, err, code) = run(&format!(
+        "builtin listen --backlog 4 --addr 127.0.0.1 --port {port} %>%l; \
+         builtin connect --addr 127.0.0.1 --port {port} %>%c; \
+         builtin accept %l %>%s; \
+         printf \"hi\\n\" >%c; \
+         read -u %s L; echo \"got:$L\""
+    ));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "got:hi\n");
+}
+
 /// Datagram form, one script: `bind --type dgram` + `connect --type dgram`.
 #[test]
 fn connect_and_bind_in_one_script_dgram() {
@@ -570,7 +597,7 @@ fn connect_parse_errors() {
         (
             "builtin connect",
             "missing argument address",
-            "Pass an @name, a path, or --bind ADDR --port N",
+            "Pass an @name, a path, or --addr ADDR --port N",
         ),
         (
             "builtin connect --type bogus x",
@@ -581,6 +608,16 @@ fn connect_parse_errors() {
             "builtin connect --bind 127.0.0.1",
             "invalid argument port",
             "Pass the port with --port N",
+        ),
+        (
+            "builtin connect --addr 127.0.0.1",
+            "invalid argument port",
+            "Pass the port with --port N",
+        ),
+        (
+            "builtin connect --backlog 1 x",
+            "invalid argument backlog",
+            "--backlog is accepted only by listen",
         ),
         (
             "builtin connect sock --bind 1.2.3.4 --port 1",

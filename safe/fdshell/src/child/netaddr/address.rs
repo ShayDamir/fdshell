@@ -1,4 +1,4 @@
-//! ADDRESS resolution and value helpers for the `bind`/`listen` parsers.
+//! ADDRESS resolution and value helpers for the netaddr parsers.
 
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail, ensure};
@@ -8,9 +8,9 @@ use builtins::error::{BuiltinError, Suggestion};
 
 use super::{Address, SUN_PATH_MAX};
 
-/// Exactly one ADDRESS form: the positional (UDS) or `--bind`/`--port`
-/// (AF_INET v4). Mixing a positional address with `--bind`/`--port` is a
-/// usage error.
+/// Exactly one ADDRESS form: the positional (UDS) or the AF_INET v4
+/// `--addr`/`--bind` + `--port` pair. Mixing a positional address with
+/// `--bind`/`--port` is a usage error.
 pub(super) fn make_address(
     addr: Option<&CStr>,
     bind_addr: Option<&CStr>,
@@ -32,9 +32,9 @@ pub(super) fn make_address(
         (None, Some(_), None) => Err(Report::new(BuiltinError::InvalidArgument("port"))
             .attach_opaque(Suggestion("Pass the port with --port N"))),
         (None, None, Some(_)) => Err(Report::new(BuiltinError::InvalidArgument("bind"))
-            .attach_opaque(Suggestion("Pass the address with --bind ADDR"))),
+            .attach_opaque(Suggestion("Pass the address with --addr ADDR (or --bind)"))),
         (None, None, None) => Err(Report::new(BuiltinError::MissingArgument("address"))
-            .attach_opaque(Suggestion("Pass an @name, a path, or --bind ADDR --port N"))),
+            .attach_opaque(Suggestion("Pass an @name, a path, or --addr ADDR --port N"))),
         // The `(Some(_), Some(_), _)` mix is rejected by the early return.
         _ => Err(Report::new(BuiltinError::Never)),
     }

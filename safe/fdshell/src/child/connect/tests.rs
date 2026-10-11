@@ -199,3 +199,45 @@ fn connect_handler_missing_address_is_missing_argument() {
         ));
     });
 }
+
+#[test]
+fn connect_handler_backlog_is_invalid_argument() {
+    // `connect` never calls `listen(2)`: a flag it ignores is a usage error.
+    with_refs(&["--backlog", "1", "x"], |refs| {
+        let e = handle_connect(&Ctx::new(c"connect".into(), refs, &[], &ShellState::new()))
+            .unwrap_err();
+        assert!(matches!(
+            e.current_context(),
+            BuiltinError::InvalidArgument("backlog")
+        ));
+    });
+}
+
+#[test]
+fn connect_handler_addr_alias_sends_connected_socket() {
+    // `--addr` is the peer-shaped spelling of the AF_INET endpoint.
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (state, receiver) = capture_state();
+    with_refs(
+        &["--addr", "127.0.0.1", "--port", &format!("{port}")],
+        |refs| {
+            assert_eq!(
+                handle_connect(&Ctx::new(c"connect".into(), refs, &[], &state)).unwrap(),
+                0
+            );
+        },
+    );
+    let (fd, tag) = recv(&receiver);
+    assert_eq!(tag, b"connect");
+    let (mut conn, _) = listener.accept().unwrap();
+    assert_eq!(fd.write(b"hi\n").unwrap(), 3);
+    let mut buf = [0u8; 3];
+    let mut got = 0;
+    while got < buf.len() {
+        let n = conn.read(&mut buf[got..]).unwrap();
+        assert!(n > 0, "accepted fd must stay readable");
+        got += n;
+    }
+    assert_eq!(&buf, b"hi\n");
+}

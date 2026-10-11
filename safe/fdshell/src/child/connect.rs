@@ -5,8 +5,9 @@
 //! ADDRESS: `@name` is an AF_UNIX abstract-namespace name (the peer must be
 //! bound and, for stream sockets, listening); `path` is an AF_UNIX
 //! filesystem socket that must already exist (`connect` never creates one);
-//! `--bind ADDR --port N` is AF_INET v4. For `connect` that pair names the
-//! **peer** endpoint, not a local bind.
+//! `--addr ADDR --port N` is the AF_INET v4 **peer** endpoint
+//! (`--bind ADDR` is accepted as the historical, bind-shaped spelling).
+//! `connect` never calls `listen(2)`, so `--backlog` is rejected here.
 
 use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
@@ -17,7 +18,7 @@ use super::bind::{create_socket, shell_sock};
 use super::netaddr::{self, Address};
 
 pub(super) fn handle_connect(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cfg = netaddr::parse_net_args(ctx.refs)?;
+    let cfg = netaddr::parse_net_args(ctx.refs, false)?; // connect never calls listen(2)
     let sock = shell_sock(ctx)?;
     let fd = create_socket(cfg.ty, &cfg.addr)?;
     connect_socket(&fd, &cfg.addr)?;

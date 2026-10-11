@@ -5,7 +5,9 @@
 //! ADDRESS: `@name` is an AF_UNIX abstract-namespace name (no filesystem
 //! object); `path` is an AF_UNIX filesystem socket resolved against the
 //! CWD (the script owns the path and must unlink it after use);
-//! `--bind ADDR --port N` is AF_INET v4.
+//! `--addr ADDR --port N` is AF_INET v4 (`--bind ADDR` is the accepted
+//! historical spelling). `bind` never calls `listen(2)`, so `--backlog`
+//! is rejected here — use `listen`.
 
 use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
@@ -15,7 +17,7 @@ use super::Ctx;
 use super::netaddr::{self, Address, SocketType};
 
 pub(super) fn handle_bind(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cfg = netaddr::parse_net_args(ctx.refs)?;
+    let cfg = netaddr::parse_net_args(ctx.refs, false)?; // bind never calls listen(2)
     let sock = shell_sock(ctx)?;
     let fd = create_socket(cfg.ty, &cfg.addr)?;
     bind_socket(&fd, &cfg.addr)?;
