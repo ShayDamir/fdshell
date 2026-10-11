@@ -244,3 +244,37 @@ fn assignment_of_unset_uses_the_default_form() {
     assert_eq!(code, 0);
     assert_eq!(out, "[unset]\n");
 }
+
+// Task #130: a `${ … }` region inside double quotes is one unit, so its inner
+// quotes do not close the outer quote. The default value keeps its spaces
+// (bash parity), the word stays one word, and the `;`/`&&` inside the region
+// are data. `$1`-based shapes are avoided: the `set --` off-by-one is task #134.
+#[test]
+fn quoted_brace_default_value_matches_bash() {
+    let cases: &[(&str, &str)] = &[
+        (r#"u=""; echo "[${u:-"z w"}]""#, "[z w]\n"),
+        (r#"u=""; builtin printf "[%s]" "${u:-"z w"}""#, "[z w]"),
+        (r#"echo "${u:-"a; b"}""#, "a; b\n"),
+        (r#"echo "${u:-"a && b"}" && echo ok"#, "a && b\nok\n"),
+        (
+            r#"if echo "${u:-"a && b"}"; then echo yes; fi"#,
+            "a && b\nyes\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+/// Accepted divergence (owner task #174): the substitution pass takes a `${ … }`
+/// body verbatim, so a nested `$( … )` inside it is *scanned* as one unit by
+/// #130 (one word, exit 0, no parse error) but is not expanded.
+#[test]
+fn nested_paren_inside_a_brace_region_is_scanned_but_not_expanded() {
+    let (out, err, code) = run(r#"echo "x${u:-"$(echo "p q")"}y""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(err, "");
+    assert_eq!(out, "x$(echo p q)y\n");
+}

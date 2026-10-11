@@ -217,3 +217,25 @@ fn continue_in_if_condition_at_depth_zero_aborts_rc1() {
     assert_eq!(code, 1);
     assert!(err.contains("'continue' is not inside a loop"));
 }
+
+// Task #130: a quoted region in a loop condition is one word — its `;` does not
+// end the statement, so the condition runs once. (`&&` in a `while` condition is
+// task #137 and stays out of these shapes.)
+#[test]
+fn quoted_region_in_a_loop_condition_runs_once() {
+    let (out, err, code) = run(r#"while echo "$(echo "x; y")"; do break; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(err, "");
+    assert_eq!(out, "x; y\n");
+}
+
+/// Accepted divergence (owner tasks #131/#132): for-list words are bound
+/// verbatim — no substitution runs there — so the quoted region is scanned as
+/// one word (task #130: one iteration, no parse error) and printed literally.
+#[test]
+fn quoted_region_in_a_for_list_is_one_verbatim_iteration() {
+    let (out, err, code) = run(r#"for w in "a$(printf " b")c"; do echo "[$w]"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(err, "");
+    assert_eq!(out, "[a$(printf \" b\")c]\n");
+}

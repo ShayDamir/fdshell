@@ -503,3 +503,35 @@ fn nested_group_at_a_cond_part_start_keeps_the_body_depth() {
     let (out, err, rc) = run("{ echo a || { echo b; } || echo c; } || echo d");
     assert_eq!((out.as_str(), err.as_str(), rc), ("a\n", "", 0));
 }
+
+// Task #130: a quoted region is one unit inside a group and inside an `if`
+// condition — its `;` and `&&` are region data, so the group's body and the
+// condition stay intact.
+#[test]
+fn quoted_region_inside_groups_and_conditions() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"{ echo "$(echo "a; b")"; echo second; }"#,
+            "a; b\nsecond\n",
+        ),
+        (
+            r#"if echo "$(echo "a; b")"; then echo yes; fi"#,
+            "a; b\nyes\n",
+        ),
+        (
+            r#"if echo "${u:-"a && b"}"; then echo yes; fi"#,
+            "a && b\nyes\n",
+        ),
+        (
+            r#"{ echo "$(printf "x && y")"; } && echo after"#,
+            "x && y\nafter\n",
+        ),
+        (r#"echo "$(echo "a; b")" > /dev/null; echo done"#, "done\n"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}

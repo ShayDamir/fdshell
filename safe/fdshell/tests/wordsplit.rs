@@ -471,3 +471,39 @@ fn quoted_multiword_expansion_splits_positionals() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "2\n");
 }
+
+// Task #130: a quoted region's bytes are marked quoted, so its multi-word
+// output stays ONE word. The values are read with `builtin printf "[%s]"`
+// (`$1` after `set --` is off-by-one today — pre-existing positional-model bug,
+// task #134; the literal-IFS split of unquoted words is task #133).
+#[test]
+fn quoted_region_expansion_stays_one_word() {
+    let cases: &[(&str, &str)] = &[
+        (r#"builtin printf "[%s]" "$(printf "a b")""#, "[a b]"),
+        (r#"builtin printf "[%s]" a"$(echo "x y")""#, "[ax y]"),
+        (r#"builtin printf "[%s]" "a$(printf " b")c""#, "[a bc]"),
+        (r#"builtin printf "[%s]" "${u:-"z w"}""#, "[z w]"),
+        (
+            r#"builtin printf "[%s]" "$(echo "$(printf "p q")")""#,
+            "[p q]",
+        ),
+        (
+            r#"builtin printf "[%s]" "a$(printf " b")c" second"#,
+            "[a bc][second]",
+        ),
+        // The region's own inner quotes are quoted data: `xa bz` is one word.
+        (
+            r#"IFS=:; builtin printf "[%s]" "x$(printf "a b")"z"#,
+            "[xa bz]",
+        ),
+        // Guard (the quote closes *before* `$(`): the region is unquoted, so
+        // the word splits on IFS exactly as before task #130.
+        (r#"IFS=:; builtin printf "[%s]" x$(true)":z""#, "[x:z]"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
