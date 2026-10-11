@@ -5,14 +5,6 @@ use alloc::vec;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-#[test]
-fn centis_formats_microseconds() {
-    assert_eq!(centis(0), "0.00");
-    assert_eq!(centis(10_000), "1.00");
-    assert_eq!(centis(12_345), "1.23");
-    assert_eq!(centis(1_234_567), "123.45");
-}
-
 fn make_cmdline() -> crate::parse::CommandLine {
     crate::parse::CommandLine {
         prefix: crate::parse::BuiltinPrefix::None,

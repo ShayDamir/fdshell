@@ -33,6 +33,10 @@ pub enum CmdError {
     Wait,
     /// times: failed to read resource usage
     TimesUsage,
+    /// time: failed to read the clock
+    TimeClock,
+    /// time: failed to read resource usage
+    TimeUsage,
     /// envfilter: missing arguments (try --help)
     EnvfilterNoArgs,
     /// envfilter: unknown flag

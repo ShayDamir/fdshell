@@ -1,9 +1,9 @@
 use alloc::format;
-use alloc::string::String;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
+use crate::time_exec::report::centis;
 use sys::fork_cell::ForkCell;
 
 /// `times` — the shell's and the reaped children's accumulated user/sys CPU
@@ -26,11 +26,6 @@ pub(crate) fn run_times(
     sys::OUT.write_all(out.as_bytes()).ok();
     state.set_last_exit(0);
     Ok(true)
-}
-
-/// Microseconds as bash's `N.NN` centiseconds.
-fn centis(us: u64) -> String {
-    format!("{}.{:02}", us / 10_000, (us / 100) % 100)
 }
 
 #[cfg(test)]

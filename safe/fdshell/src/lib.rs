@@ -59,6 +59,7 @@ mod segment;
 mod state;
 mod substitute;
 mod task;
+mod time_exec;
 mod verbose;
 mod wait;
 mod xtrace;
