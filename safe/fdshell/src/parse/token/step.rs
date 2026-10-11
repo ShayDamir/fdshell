@@ -43,7 +43,7 @@ impl State {
             }
             b'$' if bytes.peek() == Some(&b'(') => {
                 self.word_start();
-                self.read_dollar_paren(bytes, line)?;
+                self.read_dollar_paren(bytes, line, false)?;
             }
             b'`' => {
                 self.word_start();

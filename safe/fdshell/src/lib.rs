@@ -46,6 +46,7 @@ mod parse;
 mod pipeline;
 mod postlaunch;
 mod redirect;
+mod region_scan;
 mod repl;
 mod replacer;
 mod run;
