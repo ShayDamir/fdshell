@@ -59,7 +59,8 @@ fn set_lists_variables_in_sorted_order() {
     let (out, err, code) = run("ZED=1; ALPHA=2; export MID=9; set");
     assert_eq!(code, 0, "stderr={err:?}");
     // Bare `set` lists `$1..` only, and `-c` with no extra args has none
-    // (bash lists `$0` first — accepted divergence).
+    // (bash 5.3.9 lists only variables and functions, no positionals at all —
+    // accepted divergence).
     // IFS's default value is " \t\n", so its line is followed by a blank one.
     assert_eq!(
         out.lines().collect::<Vec<_>>(),

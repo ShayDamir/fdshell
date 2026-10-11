@@ -1,6 +1,7 @@
 //! Bare `set`: `$1..` (raw values) followed by `NAME=value` lines for all
-//! string variables and exports, sorted by name. bash lists `$0` first;
-//! fdshell does not (accepted divergence, README).
+//! string variables and exports, sorted by name. bash (measured 5.3.9) lists
+//! only variables and functions, and no positional parameters at all —
+//! fdshell's leading `$1..` is an accepted divergence (README).
 
 use alloc::vec::Vec;
 

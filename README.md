@@ -757,7 +757,9 @@ Accepted divergences from bash:
   prints the indirect target's value; fdshell prints the word `z`) — task #176.
 - A positional parameter is not a braced name: `${1}` and `${1#a}` expand to
   empty; bash gives the positional `1` (task #177).
-- Bare `set` lists `$1..` then the variables; bash lists `$0` before `$1..`.
+- Bare `set` lists `$1..` (raw values) before the variables; bash (measured
+  5.3.9, in `-c`, script and `-i` modes) lists only variables and functions,
+  no positional parameters at all.
 - `$0` names the invocation (`fdshell`, or `sh` for `-c` with no extra args);
   bash's `-c` mode puts `bash` there, and with extra args bash's `$0` is the
   **first extra argument** (argv semantics). fdshell keeps every extra argument
@@ -770,8 +772,9 @@ Accepted divergences from bash:
 program name, seeded by the CLI — the script path in file mode (argv[1]),
 `sh` for `-c` with no extra args, `fdshell` for `-c` with extras and for the
 REPL. Nothing rebinds it: `set -- words`, a function call, `source f words` and
-`shift` all rebind `$1..` and leave `$0` alone, and `$0` is always bound, so
-`set -u` never reports it.
+`shift` all rebind `$1..` and leave `$0` alone. The bare `$0` is always bound,
+so `set -u` never reports it; the braced `${0}` is task #177's divergence (it
+expands to the empty string and nounset reports it).
 
 `$#` counts the positionals and `$@`/`$*` iterate exactly them, so a function
 sees its arguments and never its own name
@@ -949,7 +952,7 @@ Accepted divergences (scanning is fixed, expansion is not):
   and one in bash: fdshell splits the whole word — the literal part included —
   on `IFS`, bash splits only the expansion part, so a literal `IFS` byte placed
   after an unquoted embedded expansion cuts between the expansion's last field
-  and the literal text (task #222);
+  and the literal text (task #222).
 
 Other accepted divergences of the `for … in` word pipeline (task #131):
 
