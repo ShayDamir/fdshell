@@ -52,7 +52,7 @@ fn expand_word(
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
     if fields::is_backtick(bs) {
-        return backtick::expand(word, quoted, cell);
+        return backtick::expand(word, mask, quoted, cell);
     }
     substitute_args(
         core::slice::from_ref(word),

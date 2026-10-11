@@ -13,6 +13,7 @@ mod tilde;
 mod words;
 
 pub(crate) use arg::substitute_arg;
+pub(crate) use split::split_word;
 pub use words::substitute_args;
 
 use error_stack::{Report, ResultExt};
