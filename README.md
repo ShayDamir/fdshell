@@ -1086,6 +1086,34 @@ and allows the subprocess to access the passed file descriptors.
 The shellfd is reserved with CLOEXEC on startup, so it is automatically closed at exec boundaries. In nested shells, `try_into_local()` sets CLOEXEC on the inherited capture socket to prevent it from leaking through subsequent execs.
 
 
+### Broken pipes (`SIGPIPE`)
+
+Every program fdshell hands off to runs with `SIGPIPE` at its default disposition and unblocked:
+that is every forked child (pipeline stages, launched commands, `$(…)` bodies, `wait` arms) and
+every program that replaces the shell's image through `exec`/`become`.
+
+A write to a pipe that has no readers left therefore kills the writer *silently*, exactly as a
+shell stage should:
+
+```sh
+seq 1000000 | echo got   # prints got, nothing on stderr
+echo hi | echo got       # prints got, nothing on stderr
+```
+
+The killed stage reports status `141` (`128 + 13`), and the pipeline's status is the last stage's,
+so `seq 1000000 | cat` with a closed stdout exits `141` and `seq 1000000 | echo got` exits `0`.
+`exec seq 1000000` with a closed stdout leaves the process signaled by `SIGPIPE` (bash does the
+same), because after the hand-off the process *is* `seq`.
+
+`signalfd %v PIPE` blocks `SIGPIPE` in the shell process — that is how the signalfd receives it —
+and the shell clears the block for every child it forks.
+
+The shell process itself keeps `SIGPIPE` ignored (Rust's std installs `SIG_IGN` at startup, and
+`bash -c` has `SigIgn=0`): fdshell's own writes to a closed stdout do not kill the shell. This is
+deliberate — an interactive shell must survive a closed stdout — and it is the only place where
+fdshell diverges from bash here.
+
+
 ### Implementation philosophy
 
 The fdshell binary is a dynamically linked Linux x86_64 binary (glibc + libgcc_s). It has no dependencies beyond the OS kernel APIs it calls directly via syscalls.
