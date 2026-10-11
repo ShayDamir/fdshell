@@ -373,8 +373,8 @@ is expanded against the filesystem (bash pathname-expansion semantics):
 
 Quoting: double-quoted bytes always match literally; a fully quoted word is
 never expanded. Expansion happens for command arguments (external, builtins,
-`builtin`, `become`), `set --` words, user-function arguments, unquoted
-`$@` / `$*` fields (which re-glob, like bash), literal `for … in` words,
+`builtin`, `become`, `exec`), `set --` words, user-function arguments,
+unquoted `$@` / `$*` fields (which re-glob, like bash), literal `for … in`
 redirect target words (a `> word` with pattern chars), and the command name
 (word 0) — a sole match runs that file; several matches run the first with
 the rest as leading arguments. A glob matching a file with the same name as
