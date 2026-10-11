@@ -1,15 +1,24 @@
+mod backtick;
 mod fields;
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
-use sys::{ImportedStr, Origin, ScriptText, Trace};
+use sys::{ImportedStr, Origin, ScriptText, ShortCStr, Trace};
 
-use crate::bytes::fold::fold_word;
 use crate::error::resolve::ResolveError;
+use crate::run_origin::has_cmd_subst;
 use crate::state::ShellState;
+use crate::substitute::substitute_args;
 
+/// The `for … in` word list, expanded word by word: each word goes through
+/// the argument substitution pipeline (tilde, parameter, command,
+/// arithmetic, `%fd`, `$@`), is IFS-split by its own quote mask, and every
+/// field is pathname-expanded — each resulting field is one iteration.
+///
+/// The list is expanded per word, never whole: `substitute_args` returns a
+/// flat field vector, so a whole-list call would lose the word→fields
+/// mapping the per-word quote mask, quoted flag and provenance need.
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
     words_mask: &[Vec<bool>],
@@ -19,54 +28,51 @@ pub(crate) fn expand_for_words(
 ) -> Result<Vec<ImportedStr>, Report<ResolveError>> {
     let mut out = Vec::new();
     for (i, word) in words.iter().enumerate() {
+        let mask = words_mask.get(i).cloned().unwrap_or_default();
+        let quoted = words_quoted.get(i).copied().unwrap_or(false);
         let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
-        if fields::is_arith(bs) {
-            out.push(expand_arith_word(bs, text, cell)?);
-        } else if fields::is_cmd_subst(bs) {
-            let expanded = crate::cmd_subst::run_and_capture(fields::strip_delims(bs), cell)
-                .change_context(ResolveError::Resolve)?;
-            let quoted = words_quoted.get(i).copied().unwrap_or(false);
-            // bash: a quoted for-list word that expands to nothing is one
-            // empty word (`for w in "$(true)"`); unquoted, it vanishes.
-            let mut fields = fields::split_whitespace(&expanded)?;
-            if fields.is_empty() && quoted {
-                fields.push(ShortCStr::new());
-            }
-            for w in fields {
-                out.push(ImportedStr::new(
-                    w,
-                    Trace::at(text.start, Origin::CommandOutput),
-                ));
-            }
-        } else {
-            // Literal for-list words are pathname-expanded (whole-word
-            // `$((…))`/`$(…)` are exempt); each result is a new shell word.
-            // The escape pair is folded here (POSIX #4.1): a for-list word is
-            // never substituted, so `for x in a\ b` binds the single word `a b`.
-            let mask = words_mask.get(i).cloned().unwrap_or_default();
-            let (word, word_mask) = fold_word(word, &mask).change_context(ResolveError::Never)?;
-            for w in crate::glob::expand(&word, &word_mask, cell)? {
-                out.push(ImportedStr::new(w, Trace::at(text.start, Origin::Shell)));
-            }
-        }
+        let origin = word_origin(bs);
+        let fields = expand_word(word, &mask, quoted, cell)?;
+        out.extend(
+            fields
+                .into_iter()
+                .map(|field| ImportedStr::new(field, Trace::at(text.start, origin.clone()))),
+        );
     }
     Ok(out)
 }
 
-/// Whole-word `$((expr))` in a for list: evaluate in-process; the decimal
-/// result is one word (no splitting, unlike command substitution).
-fn expand_arith_word(
-    bs: &[u8],
-    text: &ScriptText,
+/// One for-list word: a whole-word backtick is the only form the argument
+/// pipeline does not expand (task #216); every other word is substituted.
+fn expand_word(
+    word: &ShortCStr,
+    mask: &Vec<bool>,
+    quoted: bool,
     cell: &ForkCell<ShellState>,
-) -> Result<ImportedStr, Report<ResolveError>> {
-    let body = bs.get(3..bs.len() - 2).unwrap_or(b"");
-    let value = crate::arith::eval(body, cell).change_context(ResolveError::Resolve)?;
-    let rendered = crate::arith::render(value)?;
-    Ok(ImportedStr::new(
-        rendered,
-        Trace::at(text.start, Origin::Shell),
-    ))
+) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
+    let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
+    if fields::is_backtick(bs) {
+        return backtick::expand(word, quoted, cell);
+    }
+    substitute_args(
+        core::slice::from_ref(word),
+        core::slice::from_ref(mask),
+        core::slice::from_ref(&quoted),
+        cell,
+    )
+}
+
+/// Provenance of a for-list word, classified on its source bytes (user-visible
+/// through `explain NAME`): a leading `~` comes from `HOME`, a word carrying a
+/// command substitution is command output, anything else is the script.
+fn word_origin(bs: &[u8]) -> Origin {
+    if bs.first() == Some(&b'~') {
+        return Origin::EnvVar(ShortCStr::from(c"HOME"));
+    }
+    if has_cmd_subst(bs) {
+        return Origin::CommandOutput;
+    }
+    Origin::Shell
 }
 
 #[cfg(test)]

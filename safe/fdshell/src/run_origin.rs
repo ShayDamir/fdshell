@@ -42,7 +42,7 @@ pub(crate) fn assign_origin(
     Ok(line_origin)
 }
 
-fn has_cmd_subst(bytes: &[u8]) -> bool {
+pub(crate) fn has_cmd_subst(bytes: &[u8]) -> bool {
     bytes.windows(2).any(|w| w == b"$(") || bytes.contains(&b'`')
 }
 
