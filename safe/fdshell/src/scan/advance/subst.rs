@@ -21,3 +21,6 @@ pub(super) fn skip_quoted_region(line: &[u8], i: usize) -> Option<usize> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests;
