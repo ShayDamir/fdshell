@@ -1,7 +1,7 @@
 use crate::SyscallError;
 
 /// CPU times in microseconds: `utime` (user) and `stime` (system).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CpuTimes {
     pub utime: u64,
     pub stime: u64,

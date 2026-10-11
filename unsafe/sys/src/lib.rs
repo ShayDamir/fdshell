@@ -54,6 +54,7 @@ pub static ERR: ImportedFd = std_fd(2);
 
 pub mod access;
 pub mod atfd;
+pub mod clock;
 pub mod cmdline;
 pub mod dup;
 pub mod env;
