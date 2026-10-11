@@ -42,6 +42,15 @@ Flags are named constants (`O_CREAT`, `O_NONBLOCK`, `RENAME_NOREPLACE`, etc.) or
 `0x`-prefixed hex values. Repeat `--flags` to combine multiple flags. `unlinkat`
 accepts only `AT_REMOVEDIR` (or `0x0`).
 
+`--mode` defaults to `mkdir(1)`'s `0777` for `mkdirat` and to `mkfifo(1)` /
+POSIX `open(2)`'s `0666` for `mkfifoat` and for `openat2` with `O_CREAT`. The
+kernel masks the mode with the process umask, so under `umask 022` a mode-less
+`mkdirat` yields a `0755` directory and a mode-less `mkfifoat` / `openat2
+O_CREAT` a `0644` file. An explicit `--mode` overrides the default. Each create
+builtin reopens the object it just created, so a mode whose masked value lacks
+the owner bits that reopen needs (`r|x` for `mkdirat`, `r|w` for `mkfifoat`) is
+rejected with an error naming `--mode` and `umask`, and nothing is created.
+
 `unlinkat --dirfd N` pins the *parent* directory to the fd, but the kernel still
 resolves the final path component, so the builtin is not TOCTOU-free: keep the
 trailing name short and the `--dirfd` pinned when it matters.
