@@ -983,8 +983,12 @@ builtin connect [--type stream|dgram] ADDRESS
   filesystem object — no path TOCTOU, nothing to clean up); `path` is a
   filesystem socket resolved against the CWD — the script owns the path and
   must `unlinkat` it after use (and clear a stale one before re-binding), or
-  the stale path is `EADDRINUSE` (98) on the next bind; `--bind ADDR --port N`
-  is AF_INET v4. Names and paths are at most 107 bytes.
+  the stale path is `EADDRINUSE` (98) on the next bind; `--addr ADDR --port N`
+  is AF_INET v4 (`--bind ADDR` is accepted as the historical spelling of the
+  same flag). Names and paths are at most 107 bytes.
+* `--backlog N` belongs to `listen` alone — it is the only builtin that calls
+  `listen(2)`, so `bind` and `connect` reject the flag (`invalid argument
+  backlog`) instead of silently ignoring it.
 * Output uses the usual capture forms: `builtin listen @srv %>%l`, or the
   bounded form `builtin accept %l %>%conns[8]` to fill an fd array. At the
   cap, further connections are accepted and closed immediately.
@@ -992,7 +996,7 @@ builtin connect [--type stream|dgram] ADDRESS
   on a dgram socket) surface as their errno exit code. Without a capture,
   `accept` accepts and closes immediately (the `pipe` precedent).
 * `connect` is the client side: it creates the socket (default `stream`) and
-  connects it to the ADDRESS — for `connect` the `--bind ADDR --port N` pair
+  connects it to the ADDRESS — for `connect` the `--addr ADDR --port N` pair
   names the **peer** endpoint, not a local bind. It returns as soon as the
   peer is queued in the listener's backlog (no `accept` needed on the
   other end — a single script can be both client and server), it never

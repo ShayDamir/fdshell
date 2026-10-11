@@ -792,3 +792,21 @@ statement itself returns, so its own report prints normally") contradicted the e
 under it, which the README then repeated. Rule: a list that classifies commands by their
 first word is a claim about each command's *behavior* — measure each one (and each alias
 of it) against the shell, and never record a claim like "not anticipated" in its place.
+
+## A shared parser must gate the flag only one builtin honors — a flag that parses and does nothing is a usage error
+`netaddr::parse_net_args` is shared by `bind`, `listen` and `connect`, and it accepted
+`--backlog` for all three. `bind`/`connect` never call `listen(2)`, so `builtin bind
+--backlog 99 @x` succeeded with the flag silently discarded — the user reads "exit 0" as
+"the backlog is 99". A flag that parses and does nothing is worse than a rejection
+(STYLE.md §4.7: the error must be actionable). Rule: when a parser is shared, a flag whose
+effect depends on the caller is passed in as a capability (`allows_backlog`), checked
+*before* the value is consumed, and rejected with a `Suggestion` naming the builtin that
+accepts it. The same file also shows the flag-shape half of the lesson: `--bind ADDR
+--port N` reads as a local bind, which is exactly wrong for `connect`, where the pair names
+the **peer**; the fix is a neutral alias (`--addr`) accepted by all three, not a
+peer-shaped flag that would be nonsense on `bind`/`listen`.
+**Corollary (mechanical):** `Suggestion` strings are pinned by the `tests/sockets.rs`
+parse-error tables via `err.contains(suggestion)`, so changing one (the
+missing-address text moved to `--addr ADDR --port N`) must update every pin **in the same
+commit**, or the integration suite fails for a wording change.
+
