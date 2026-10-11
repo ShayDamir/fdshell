@@ -377,12 +377,13 @@ is expanded against the filesystem (bash pathname-expansion semantics):
 Quoting: double-quoted bytes always match literally; a fully quoted word is
 never expanded. Expansion happens for command arguments (external, builtins,
 `builtin`, `become`, `exec`), `set --` words, user-function arguments,
-unquoted `$@` / `$*` fields (which re-glob, like bash), literal `for … in`
-redirect target words (a `> word` with pattern chars), and the command name
-(word 0) — a sole match runs that file; several matches run the first with
-the rest as leading arguments. A glob matching a file with the same name as
-a function or builtin runs the file (dispatch sees the raw word, not the
-expansion). `$(…)` / `$((…))` outputs and `case` words are not expanded.
+unquoted `$@` / `$*` fields (which re-glob, like bash), `for … in` list words
+(after their substitution — see "For-list words"), redirect target words (a
+`> word` with pattern chars), and the command name (word 0) — a sole match
+runs that file; several matches run the first with the rest as leading
+arguments. A glob matching a file with the same name as a function or builtin
+runs the file (dispatch sees the raw word, not the expansion). `case` words
+are patterns, never pathnames.
 
 A redirect target that globs to more than one file is an error:
 `echo hi >a*` with two `a*` files fails with `ambiguous redirect`; a target
@@ -511,11 +512,14 @@ is re-evaluated as an expression and never word-expanded: `x=1+1; echo $((x))`
 `variable x is not an integer` (rc 1), and `$(…)` written in a value is
 never run as a command.
 
-In a `for … in` list only a **whole-word** `$((…))` is expanded: it is
-evaluated in-process and is exactly one word, with no field splitting and no
-pathname expansion (`for i in $((1+2)) $((3*3)); do echo $i; done` prints `3`
-then `9`; `i=1; for x in $((i++)); do :; done; echo $i` → `2`). A form glued to
-other text in the word is not expanded.
+In a `for … in` list a `$((…))` is expanded wherever it sits in the word,
+exactly as in a command argument (the list runs the same substitution
+pipeline — see "For-list words"): `for i in $((1+2)) $((3*3))` iterates over
+`3` then `9`; `i=1; for x in $((i++)); do :; done; echo $i` → `2`;
+`for i in 1$((1+2))` → `13` and `for i in $((1+1))$((2+2))` → `24`. A
+whole-word `$((…))` is always exactly one iteration, because a rendered
+number contains no `IFS` byte and no pattern char, so it neither splits nor
+globs.
 
 The expression language:
 
@@ -578,11 +582,6 @@ Limitations / deviations from bash:
 - No positional parameters and no `${…}` inside an arithmetic expression: with
   `set -- 5`, `echo $(( $1 ))` and `echo $(( ${1} ))` are syntax errors, where
   bash expands both to `5`.
-- A `for … in` word that only *contains* a `$((…))` is not expanded:
-  `for i in 1$((1+2))` and `for i in $((1+2))x` print the word verbatim (bash
-  `13` and `3x`), and two glued forms in one word fail with
-  `unclosed subexpression parenthesis` (`for i in $((1+1))$((2+2))`; bash `24`)
-  — task #215.
 - A redirect target word and the command name (word 0) are not
   arithmetic-expanded: `echo hi >f$((1))` writes the file `f$((1))` (bash
   writes `f1`), and `$((1+1))` as the command name is a `"$((1+1))" not found`
@@ -805,6 +804,37 @@ The stripped result is a normal word: it goes through field splitting and
 pathname expansion afterwards, so `v=a*x` with `echo ${v#a}` prints the file `*x`
 matches (`zx`), while a fully quoted word keeps the stripped text literal.
 
+### For-list words
+
+Every word of a `for … in` list goes through the same pipeline a command
+argument goes through (task #131), in bash's order:
+
+1. braces are rewritten at text level, before tokenization (see "Brace
+   expansion"), so they never re-expand the result of a substitution;
+2. tilde, parameter, command, and arithmetic substitution and `%fd` / `$@`
+   expansion run in-process;
+3. the expansion is split on `IFS` bytes, driven by the word's own quote mask —
+   a quoted byte never splits;
+4. every field is pathname-expanded (`$(…)` output included), and each
+   resulting field is one iteration of the loop.
+
+```
+x="a b";  for w in $x      → [a] [b]      IFS-split, each field globbed
+x=a*b;    for w in "$x"    → the value, quoted bytes never glob
+for w in ~                 → $HOME
+for w in 1$((1+2))         → 13
+for w in $(echo a*)        → the files matching `a*`
+for w in "a$(printf " b")c" → [a bc]     (one word, substituted)
+```
+
+The quoted-empty rule is the argument rule: `for w in "$(true)"` is one empty
+iteration, `for w in $(true)` is none, `for w in "" x` iterates over `""` then
+`x`. A `%name` word expands to the fd number when `name` is a scalar fd
+variable; when it is an fd array (`for %x in %arr`) the list keeps the array
+reference and the loop binds an fd variable per entry. A word's provenance is
+kept for `explain NAME`: a leading `~` reports `HOME`, a word carrying a
+substitution reports command output, a literal word reports the script.
+
 ### Nested regions inside double quotes
 
 A `$( … )`, `${ … }` or `` ` … ` `` written **inside double quotes** is scanned as
@@ -836,18 +866,25 @@ quote (the enclosing quote is what stays open); `echo "$"`, `echo "${"` and
 
 Accepted divergences (scanning is fixed, expansion is not):
 
-- backtick bodies stay literal — fdshell does not expand backticks at all
-  (task #216);
+- a backtick body is expanded **only** as a whole-word `for … in` list word
+   (task #131); everywhere else a backtick stays literal (task #216);
 - a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
   literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
   is taken verbatim (task #174);
-- a for-list word is bound verbatim (no substitution runs in a `for … in` list),
-  so `for w in "a$(printf " b")c"` iterates once over the literal text
-  (tasks #131/#132);
 - `IFS=:; set -- "a b":z` yields two words here and one in bash: fdshell splits
   literal `IFS` bytes in a mixed-quote word (task #133), and `$1` after `set --`
   is off-by-one (task #134), so positional values are read with `"$@"` or
   `printf "[%s]"`.
+
+Other accepted divergences of the `for … in` word pipeline (task #131):
+
+- `"$@"` with no positionals is **one empty iteration** here, where bash gives
+  none (the quoted-empty rule of `substitute_args`; task #219);
+- `~` and `~/…` expand to `$HOME`, `~user` stays literal (bash resolves it via
+  the password database);
+- `set -u` with an unbound word (`for w in $undef`) and a `${zz:?}` word bail
+  the statement at rc 1 with the same messages as everywhere else in fdshell;
+  bash's `-c` mode exits 127 (LESSONS.md accepts the rc asymmetry).
 
 ## How it works?
 
