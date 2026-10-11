@@ -216,7 +216,10 @@ Limitations:
   `> ` continuation prompt until the construct is complete, then executes it.
 - Here-docs inside `$( )` / backticks, an `N<<EOF` fd prefix (like `N<<<`
   today), and a `# comment` after the operator on the same line are not
-  supported.
+  supported. A `<<` written inside a double-quoted region opens no heredoc at
+  all (`echo "$(printf "<<EOF")"` prints `<<EOF`), and a multi-line `$( … )`
+  body that carries its own heredoc (`echo "$(cat <<EOF` + body + `EOF` + `)"`)
+  does work: the body is the child's own text.
 - A body line that is exactly `elif` / `else` (in an if body) or `;;` (in a
   case / wait body) is misread as block structure.
 
@@ -801,6 +804,50 @@ indirect name takes the pattern form too: `${!ind#a}` strips the value that
 The stripped result is a normal word: it goes through field splitting and
 pathname expansion afterwards, so `v=a*x` with `echo ${v#a}` prints the file `*x`
 matches (`zx`), while a fully quoted word keeps the stripped text literal.
+
+### Nested regions inside double quotes
+
+A `$( … )`, `${ … }` or `` ` … ` `` written **inside double quotes** is scanned as
+one unit, everywhere the shell scans bytes (statement and cond-list splitting,
+pipelines, redirects, heredoc operators, block scanning, the REPL's
+completeness check): the region's own `"` are markers of the *inner* region and
+never close the outer quote, its `;`, `|`, `&&`, `<`/`>` and `<<` are data, and
+its bytes are marked quoted, so its expansion is one word and is never split on
+`IFS`. Quote bytes inside the region are kept verbatim in a `$( … )` body (the
+body is re-parsed by the substitution) and dropped in a `${ … }` or backtick body
+(taken verbatim by the expansion):
+
+```
+echo "$(echo "a; b")"                        → a; b        (`;` is region data)
+echo "$(printf "x && y")" && echo ok         → x && y, ok  (the inner `&&` is not an operator)
+echo "$(printf "a | b")"                     → a | b       (no pipeline)
+echo "$(printf "a > /dev/null")"             → a > /dev/null
+echo "$(printf "<<EOF")"                     → <<EOF       (no heredoc opens)
+builtin printf "[%s]" "$(printf "a b")"      → [a b]       (one word)
+"$(printf "a b")" in `"a$(printf " b")c"`    → a bc        (text around it stays in the word)
+echo "${u:-"z w"}"                           → z w         (quotes dropped, spaces kept)
+echo "$(echo "$(printf "x && y")")"          → x && y      (region inside a region)
+echo "`printf "q r"`"                        → `printf q r` (scanned as a unit, literal)
+```
+
+An unterminated region is a clean parse error whose caret is on the *outer*
+quote (the enclosing quote is what stays open); `echo "$"`, `echo "${"` and
+`echo "${x"` keep printing `$`, `${` and `${x` literally.
+
+Accepted divergences (scanning is fixed, expansion is not):
+
+- backtick bodies stay literal — fdshell does not expand backticks at all
+  (task #216);
+- a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
+  literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
+  is taken verbatim (task #174);
+- a for-list word is bound verbatim (no substitution runs in a `for … in` list),
+  so `for w in "a$(printf " b")c"` iterates once over the literal text
+  (tasks #131/#132);
+- `IFS=:; set -- "a b":z` yields two words here and one in bash: fdshell splits
+  literal `IFS` bytes in a mixed-quote word (task #133), and `$1` after `set --`
+  is off-by-one (task #134), so positional values are read with `"$@"` or
+  `printf "[%s]"`.
 
 ## How it works?
 

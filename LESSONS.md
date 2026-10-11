@@ -817,3 +817,80 @@ commit**, or the integration suite fails for a wording change.
 Rule: the reset lives at the two boundaries where fdshell hands off to another program — the fork wrapper `fork_pidfd_cell` (the single choke point of all four shell fork sites: pipeline, launch, `$(…)`, `wait` arm) and the parent-side image replacement in `replacer/external` (which runs **in the shell process**, so `exec seq 1000000` with a closed stdout is signaled by SIGPIPE, as in bash). Per-site resets in `child_main`/`launch`/`cmd_subst`/`wait/arm` are four call sites to remember forever, one of them easy to miss; the plain test-only `fork_pidfd` deliberately stays untouched. The shell process keeps its own ignore on purpose (the REPL must survive a closed stdout; `bash -c` has `SigIgn=0` — an accepted divergence, in the README). Pin std's install in a test (`sigpipe_disposition() == SIG_IGN` in the parent): a toolchain that stops installing it must fail loudly, not silently un-fix the bug.
 
 Test corollary: a deterministic broken-pipe test must make the writer emit **more than the pipe capacity** (64 KiB default, so ≥128 KiB here), otherwise the writer finishes before the reader closes and every assertion is a coin flip — the reported `echo hi | echo got` was noisy in 14 of 40 runs. A 50-run loop of the racy shape is a *detector*, not a flaky assertion: post-fix every interleaving is silent (the stage either writes cleanly or dies of the signal), so it fails on the broken build and cannot flake on the fixed one.
+
+## A quoted region is a unit for *every* byte scanner, not just the tokenizer
+`"$(echo "a; b")"` failed in two independent layers. The tokenizer's quoted
+scanner (`parse/quotes.rs::quoted_char`) knew only `"`, `\\` and "literal byte",
+so the inner `"` closed the outer region and the bytes after it went through the
+*unquoted* step arm, where `)`, ` `, `|` and `<`/`>` do their normal damage. The
+byte-level scanner (`scan/advance.rs::advance`) computed `bare = !in_quote &&
+!in_backtick`, so inside a quote a `$(` never raised `paren_depth` and the inner
+`"` toggled `in_quote` off — and `scan.rs::boundary`, `cond/boundary.rs`,
+`segment.rs`, `segment/group.rs`, `comment.rs`, `brace.rs`, `repl/trailing.rs`
+and `scan/heredoc` all consume `advance`. Fixing only the tokenizer made
+`echo "$(echo "a; b")"` tokenize and then split the *statement* at the region's
+`;`; `echo "$(printf "x && y")" && echo ok` split the cond list;
+`echo "$(printf "<<EOF")"` opened a heredoc; `if echo "${u:-"a && b"}"; then
+echo yes; fi` lost its `fi`.
+
+Rule: the rule "a region is a unit" is expressed in **both** scanners, fed by one
+shared scanner pair (`paren_scan::scan_at` + `region_scan::{scan_brace_at,
+scan_backtick_at}`), exactly like `scan::heredoc::skip` feeds every scanner with
+one helper (LESSONS #183). A fix in the tokenizer alone leaves every byte scanner
+blind; a fix in `advance` alone leaves the words mis-tokenized.
+
+Corollaries measured here: `advance`'s skip must **not** touch `in_quote` (the
+outer quote stays open across the region) and must **not** touch `paren_depth`
+(the region is consumed whole, not nested); and an unbalanced region returns
+`None`, so the scanner falls back to byte-at-a-time — which is exactly the
+pre-existing behavior for unbalanced input, never a new error class.
+(`parse/quotes/subst.rs` mirrors it: an unterminated `${ … }`/backtick pushes what
+it got and lets `State::finish` report the *outer* quote.)
+
+## `pos` counts raw bytes, `cur`/`mask` count token bytes
+A region reader that drops quote bytes (the `${ … }` and backtick bodies drop
+them) advances `self.pos` by the **raw** consumed count while `cur`/`mask`
+shorten by the dropped bytes. Getting these apart breaks two things at once:
+token spans `(start, end)` feed the pre-parse rewriters (`alias_expand`,
+`brace_expand::rebuild`, LESSONS #255) and `word_quoted`'s span test
+`end - start > len` (#253), and the per-byte mask goes out of parity with the
+word text, so a later slice indexes the wrong bit.
+
+Rule: in the tokenizer's word state, `pos` is a raw-line offset and `cur`/`mask`
+are token bytes; every new code path must keep `mask.len() == cur.len()` (one bit
+per pushed byte, no bit for a dropped quote) and `pos == raw exclusive end`.
+Unit-test both — do not assume them. The region scanners return the consumed byte
+count (`scan_brace`/`scan_backtick` return `(body, consumed, closed)`) precisely
+so the caller can advance `pos` by the raw count while pushing the shorter body.
+
+## Quote bytes inside a region: kept in `$( … )`, dropped in `${ … }` and backticks
+Whether a nested region's quote bytes belong in the word text is a **per-region
+decision**, set by what consumes the body downstream:
+* `$( … )` — kept verbatim: `cmd_subst` re-parses the body quote-aware, so the
+  quotes are markers *there* (the existing `cmd_subst_paren_in_quotes_is_data`
+  pins it); `echo a"$(echo "x y")"` → `ax y`.
+* `${ … }` — dropped: `substitute/brace.rs::read_until_close` takes the braced
+  content verbatim and `param_op::colon::apply` pushes it verbatim, so kept
+  quotes would print literally. `"${u:-"z w"}"` must expand to `z w` (bash
+  parity); kept quotes give `z w` with literal `"` around it.
+* backtick — dropped, for the same reason (the body is taken verbatim; the
+  expansion itself is task #216).
+
+Rule: write the reason next to the choice. The same byte is a marker in one
+region type and content in another; a "consistent" rule applied to all three
+breaks one of them.
+
+## Mask bits, not just text: a quoted region's bytes must carry mask `true`
+`"$(printf "a b")"` tokenizes to one word with the right text, and still became
+two words. `substitute/words.rs` decides field splitting from `fully_quoted(mask)
+== false` → split on IFS, so a region whose bytes carry mask `false` (the
+unquoted path's bit) re-splits its expansion. `set -- "$(printf "a b")"` printed
+`n=2`; `"${u:-"z w"}"` and `"a$(printf " b")c"` behaved the same way.
+
+Rule: the mask bit is a *parameter of the reader*, not a constant:
+`read_dollar_paren(bytes, line, quoted)` takes it from the call site — `false` on
+the unquoted path (`token/step.rs`), `true` from `parse/quotes/subst.rs` (inside
+double quotes). Pin the split-count divergence with words of *different* quoting
+around the region (`IFS=:; builtin printf "[%s]" x$(true)":z"` → `[x:z]` stays
+2 words, `"x$(printf "a b")"z` → `[xa bz]` is one): a test with only fully quoted
+words cannot tell a correct mask from an inverted one.
