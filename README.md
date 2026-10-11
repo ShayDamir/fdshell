@@ -623,38 +623,6 @@ scoping is dynamic: a callee sees its caller-call's local unless it shadows it
 arguments lists the call's locals, and `local` outside a function is an error
 (rc 1, `local: can only be used in a function`).
 
-### Word splitting (`IFS`)
-
-Field splitting applies to the *result of an expansion* (POSIX 2.6.5), never to
-the bytes of a word that performed none: `IFS=,; echo a,b` prints `a,b`, and
-`IFS=:; set -- a:b` has one positional.
-
-- runs of `IFS` whitespace collapse to one delimiter and are trimmed at both
-  ends of the expansion;
-- every non-whitespace `IFS` byte delimits a field, empty fields included:
-  leading and middle empties are kept, and a delimiter at the very end of the
-  expansion produces no trailing empty field;
-- a delimiter merged with an `IFS` whitespace run is trimmed with it
-  (`IFS=" ,"; set -- $v` with `v="a, "` → one field `a`);
-- bytes produced by an expansion inherit the mask bit of its trigger byte, so a
-  quoted byte never delimits, and a fully quoted word is one word;
-- `IFS=` disables splitting: the expansion is one field, spaces included;
-- an unquoted expansion producing no fields produces no words at all
-  (`IFS=,; set -- $(true)` → `$#` = 0), while a word containing quotes keeps
-  one empty word (see the quoted-empty rule under "For-list words").
-
-```
-IFS=,;  builtin printf "[%s] " a,b          → [a,b]        (literal: no split)
-IFS=,;  builtin printf "[%s] " x"a,b"       → [xa,b]       (quoted bytes never delimit)
-IFS=,;  builtin printf "[%s] " $(printf "a,,b")  → [a] [] [b]   (middle empty kept)
-IFS=,;  builtin printf "[%s] " $(printf "a,")    → [a]     (trailing delimiter elided)
-IFS=" ,"; builtin printf "[%s] " $(printf "a, b, ")  → [a] [b]  (runs collapse, ends trim)
-IFS=;   x="a b"; builtin printf "[%s] " $x  → [a b]        (`IFS=` disables)
-```
-
-The same splitter serves command arguments, the unquoted `$@`/`$*` re-split and
-the `for … in` list (see "For-list words").
-
 An unset parameter expands to the empty string (POSIX 2.6.2), in every form:
 `echo "[$undefined]"` → `[]`, `echo ${unset}x` → `x`, and `${#undefined}` → `0`
 (the length of an unset parameter is 0). `set -u` (`nounset`) makes an unbound
@@ -789,6 +757,38 @@ Accepted divergences from bash:
   prints the indirect target's value; fdshell prints the word `z`) — task #176.
 - A positional parameter is not a braced name: `${1}` and `${1#a}` expand to
   empty; bash gives the positional `1` (task #177).
+
+### Word splitting (`IFS`)
+
+Field splitting applies to the *result of an expansion* (POSIX 2.6.5), never to
+the bytes of a word that performed none: `IFS=,; echo a,b` prints `a,b`, and
+`IFS=:; set -- a:b` has one positional.
+
+- runs of `IFS` whitespace collapse to one delimiter and are trimmed at both
+  ends of the expansion;
+- every non-whitespace `IFS` byte delimits a field, empty fields included:
+  leading and middle empties are kept, and a delimiter at the very end of the
+  expansion produces no trailing empty field;
+- a delimiter merged with an `IFS` whitespace run is trimmed with it
+  (`IFS=" ,"; set -- $v` with `v="a, "` → one field `a`);
+- bytes produced by an expansion inherit the mask bit of its trigger byte, so a
+  quoted byte never delimits, and a fully quoted word is one word;
+- `IFS=` disables splitting: the expansion is one field, spaces included;
+- an unquoted expansion producing no fields produces no words at all
+  (`IFS=,; set -- $(true)` → `$#` = 0), while a word containing quotes keeps
+  one empty word (see the quoted-empty rule under "For-list words").
+
+```
+IFS=,;  builtin printf "[%s] " a,b          → [a,b]        (literal: no split)
+IFS=,;  builtin printf "[%s] " x"a,b"       → [xa,b]       (quoted bytes never delimit)
+IFS=,;  builtin printf "[%s] " $(printf "a,,b")  → [a] [] [b]   (middle empty kept)
+IFS=,;  builtin printf "[%s] " $(printf "a,")    → [a]     (trailing delimiter elided)
+IFS=" ,"; builtin printf "[%s] " $(printf "a, b, ")  → [a] [b]  (runs collapse, ends trim)
+IFS=;   x="a b"; builtin printf "[%s] " $x  → [a b]        (`IFS=` disables)
+```
+
+The same splitter serves command arguments, the unquoted `$@`/`$*` re-split and
+the `for … in` list (see "For-list words").
 
 ## Parameter expansion
 
