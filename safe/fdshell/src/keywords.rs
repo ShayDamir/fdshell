@@ -22,7 +22,14 @@ use crate::segment::group::{closes, opens};
 /// `{`/`}` are the group command's delimiters and use the predicates the
 /// segment scanner uses for its group opener, so the depth rule and the
 /// segment opener cannot drift.
+/// A `time [-p]` word is a *prefix*, not a keyword of its own: it opens no
+/// block, so it never enters the depth table. A block keyword behind it
+/// (`time while … done`) is scored on the rest of the word, which keeps the
+/// whole statement one segment for the `time` parse hook.
 pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
+    if let Some(p) = time_prefix_len(word) {
+        return keyword_delta(word.get(p..).unwrap_or(b""), line, word_end);
+    }
     if word.starts_with(b"case") && boundary(word, 4, b"") {
         return Some(1);
     }
@@ -54,6 +61,49 @@ pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option
         return Some(-1);
     }
     None
+}
+
+/// Length of the whole `time [-p]` prefix run at the start of `word` (`time
+/// time -p` counts both prefixes), `None` if the word does not start with one.
+/// The prefix is transparent for the block-depth rule: the keyword behind it
+/// (`time while … done`, `time -p { …; }`) is scored on the rest of the word,
+/// which keeps such a statement one segment. The whitespace between prefixes and
+/// between the last prefix and the keyword is part of the prefix, so the
+/// recursive score sees the keyword itself.
+///
+/// A bare `time` / `time -p` (no trailing whitespace) counts as a prefix of its
+/// own length: the group scanner trims the run before the `{`, so the
+/// whitespace lies outside the word it scores there.
+pub(crate) fn time_prefix_len(word: &[u8]) -> Option<usize> {
+    let (mut total, mut rest) = (0usize, word);
+    while let Some(n) = one_prefix_len(rest) {
+        total += n;
+        rest = rest.get(n..).unwrap_or(b"");
+        let ws = rest.iter().take_while(|b| b.is_ascii_whitespace()).count();
+        total += ws;
+        rest = rest.get(ws..).unwrap_or(b"");
+    }
+    (total > 0).then_some(total)
+}
+
+/// Length of a single `time [-p]` prefix at the start of `word`, `None` if the
+/// word does not start with one. Whitespace inside the prefix and between the
+/// prefix and the keyword behind it is part of the prefix; a glued `-px` is not
+/// the flag.
+fn one_prefix_len(word: &[u8]) -> Option<usize> {
+    let tail = word.strip_prefix(b"time")?;
+    let ws = tail.iter().take_while(|b| b.is_ascii_whitespace()).count();
+    let after = tail.get(ws..).unwrap_or(b"");
+    if after.is_empty() {
+        return Some(4 + ws);
+    }
+    match after.strip_prefix(b"-p") {
+        None => (ws > 0).then_some(4 + ws),
+        Some(rest) => {
+            let ws2 = rest.iter().take_while(|b| b.is_ascii_whitespace()).count();
+            (rest.get(ws2..).unwrap_or(b"").is_empty() || ws2 > 0).then_some(6 + ws + ws2)
+        }
+    }
 }
 
 #[cfg(test)]

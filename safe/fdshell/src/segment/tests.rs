@@ -2,6 +2,55 @@
 use super::*;
 use alloc::vec;
 
+/// A `time [-p]` prefix keeps a keyword block one segment, spanning the prefix
+/// too, so the `time` parse hook sees the whole block (`time while … done`).
+#[test]
+fn scan_time_prefixed_keyword_block() {
+    for line in [
+        b"time while false; do echo x; done".as_slice(),
+        b"time -p if true; then echo y; fi".as_slice(),
+        b"time  -p for i in 1 2; do echo $i; done".as_slice(),
+    ] {
+        let segments = scan_segments(line, false);
+        assert_eq!(segments.len(), 1, "{:?}", line);
+        match &segments[0] {
+            Segment::Block {
+                block_start,
+                end_pos,
+                closed,
+            } => {
+                assert_eq!(*block_start, 0, "{:?}", line);
+                assert_eq!(*end_pos, line.len(), "{:?}", line);
+                assert!(*closed, "{:?}", line);
+            }
+            Segment::Statement { cmd, .. } => panic!("expected Block, got {:?}", cmd),
+        }
+    }
+}
+
+/// A `time` prefix written alone before a `{` joins the group's span; a `time`
+/// word with arguments after it stays command data.
+#[test]
+fn scan_time_prefixed_group_span_starts_at_the_prefix() {
+    let segments = scan_segments(b"time { echo a; } > out", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+        } => {
+            assert_eq!(*block_start, 0);
+            assert_eq!(*end_pos, 22);
+            assert!(*closed);
+        }
+        Segment::Statement { cmd, .. } => panic!("expected Block, got {:?}", cmd),
+    }
+    // `time echo { …` is a command whose argument is a brace: not a group.
+    let segments = scan_segments(b"time echo { a; }", false);
+    assert!(segments.len() > 1);
+}
+
 #[test]
 fn scan_if_block_end_pos() {
     let segments = scan_segments(b"if x; then y; fi", false);

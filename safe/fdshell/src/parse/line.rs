@@ -3,6 +3,7 @@ use crate::parse::for_block::ForBlock;
 use crate::parse::function_block::FunctionDef;
 use crate::parse::group_block::GroupBlock;
 use crate::parse::if_block::IfBlock;
+use crate::parse::time_block::TimeBlock;
 use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{CommandLine, Pipeline};
@@ -55,6 +56,9 @@ pub enum ParsedLine {
     While(WhileBlock),
     Until(UntilBlock),
     Function(FunctionDef),
+    /// `[-p] <statement>`: report the statement's real/user/sys times on
+    /// stderr, with the statement's exit status.
+    Time(TimeBlock),
     /// `break n`: exit `n` enclosing loops, `n >= 1`.
     Break(u32),
     /// `continue n`: advance `n` enclosing loops, `n >= 1`.

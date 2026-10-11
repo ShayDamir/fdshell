@@ -15,6 +15,7 @@ const RESERVED: &[&[u8]] = &[
     b"until",
     b"done",
     b"function",
+    b"time",
 ];
 
 /// Expand one command position, skipping fully quoted, double-quoted and

@@ -33,6 +33,7 @@ mod quotes;
 mod redirect;
 mod redirect_op;
 mod semi;
+pub(crate) mod time_block;
 pub(crate) mod token;
 mod token_pipe;
 mod token_subst;
@@ -46,6 +47,7 @@ pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;
 pub(crate) use redirect::{clobber_pipe, clobber_word};
+pub(crate) use time_block::TimeBlock;
 
 use crate::error::parse::ParseError;
 use error_stack::{Report, ResultExt};
@@ -75,6 +77,10 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     }
 
     if let Some(pl) = dispatch::dispatch_keyword(&raw, text)? {
+        return Ok(pl);
+    }
+
+    if let Some(pl) = time_block::detect(&raw, text)? {
         return Ok(pl);
     }
 

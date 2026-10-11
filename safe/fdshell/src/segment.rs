@@ -54,7 +54,7 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                     // `&&` / `||` before it, so each part's group short-circuits.
                     Some(true) => {
                         let (resume, floor) =
-                            group::open(line, i, line_start, &state, &mut segments, &mut runs);
+                            group::open(line, start, line_start, &state, &mut segments, &mut runs);
                         i = resume;
                         start = i;
                         line_start = i;

@@ -93,6 +93,46 @@ fn keyword_delta_group_delimiters() {
     assert_eq!(keyword_delta(b"}a", b"}a", 2), None);
 }
 
+/// The `time [-p]` prefix: transparent for the depth rule, so the keyword
+/// behind it is scored and the statement stays one segment.
+#[test]
+fn time_prefix_is_transparent_for_the_depth_rule() {
+    assert_eq!(time_prefix_len(b"time while false"), Some(5));
+    assert_eq!(time_prefix_len(b"time -p while false"), Some(8));
+    assert_eq!(time_prefix_len(b"time  -p { echo a; }"), Some(9));
+    assert_eq!(time_prefix_len(b"while false"), None);
+    assert_eq!(time_prefix_len(b"timeless"), None);
+    assert_eq!(time_prefix_len(b"time -px"), None);
+    assert_eq!(time_prefix_len(b"timefoo"), None);
+
+    assert_eq!(
+        keyword_delta(b"time while false", b"time while false", 4),
+        Some(1)
+    );
+    assert_eq!(
+        keyword_delta(
+            b"time -p case x in x) echo;; esac",
+            b"time -p case x in x) echo;; esac",
+            4
+        ),
+        Some(1)
+    );
+    assert_eq!(keyword_delta(b"timeless x", b"timeless x", 4), None);
+}
+
+/// Repeated prefixes all count, and a bare `time` / `time -p` is a prefix of
+/// its own length (the group scanner trims the run before the brace).
+#[test]
+fn time_prefix_run_counts_all_prefixes() {
+    assert_eq!(time_prefix_len(b"time"), Some(4));
+    assert_eq!(time_prefix_len(b"time -p"), Some(7));
+    assert_eq!(time_prefix_len(b"time time -p ls"), Some(13));
+    assert_eq!(
+        keyword_delta(b"time time -p while x", b"time time -p while x", 4),
+        Some(1)
+    );
+}
+
 /// Nested groups net out of the depth, so an inner group never closes an
 /// enclosing keyword block.
 #[test]

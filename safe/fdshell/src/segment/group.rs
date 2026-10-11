@@ -5,49 +5,41 @@ use alloc::vec::Vec;
 
 use super::Segment;
 
+mod prefix;
 mod word;
+pub(crate) use prefix::group_at_run;
 pub(crate) use word::{closes, opens, opens_at};
 
-/// What the `{` at `brace` is, seen from the run that starts at `start` (the
-/// byte after the last separator): `Some(true)` starts a new statement (the run
-/// before it is empty), so the group is a block; `Some(false)` starts a cond
-/// part mid-run (the run ends with `&&` / `||`), so the group's text is opaque
-/// data inside the statement; `None` is command word data — a brace in an
-/// argument position (`echo {`, `echo x{`), after `|` (a pipeline stage), or
-/// glued to a word, as in bash.
-pub(crate) fn group_at_run(line: &[u8], start: usize, brace: usize) -> Option<bool> {
-    let raw = line.get(start..brace).unwrap_or(b"").trim_ascii();
-    if raw.is_empty() {
-        Some(true)
-    } else if raw.ends_with(b"&&") || raw.ends_with(b"||") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Take the group branch of the segment scan at the `{` byte `i` (a run start):
-/// the group's span is pushed. Returns the scan resume index and the resume
-/// floor for the rest of the physical line.
+/// Take the group branch of the segment scan at the group opener of the run
+/// that starts at `run_start`: the group's span is pushed. The opener is the
+/// run's first `{` — the scan only gets here when the run before it is empty
+/// or a cond operator, so nothing before that brace can be one.
+/// Returns the scan resume index and the resume floor for the rest of the
+/// physical line.
 pub(super) fn open<'a>(
     line: &'a [u8],
-    i: usize,
+    run_start: usize,
     line_start: usize,
     state: &ScanState,
     segments: &mut Vec<Segment<'a>>,
     runs: &mut Vec<(&'a [u8], usize)>,
 ) -> (usize, usize) {
+    let tail = line.get(run_start..).unwrap_or(b"");
+    let brace = run_start + tail.iter().position(|&b| b == b'{').unwrap_or(0);
     // The opener is at a run start, so nothing precedes it on this run; the
     // flush claims only the line's heredoc bodies scanned so far.
-    let pre_resume = line::flush_line(segments, line, line_start, i, runs);
-    let (segment, resume, floor) = group_block(line, i, state.in_quote, pre_resume);
+    let pre_resume = line::flush_line(segments, line, line_start, brace, runs);
+    let span_start = prefix::span_start(line, run_start, brace);
+    let (segment, resume, floor) = group_block(line, brace, span_start, state.in_quote, pre_resume);
     segments.push(segment);
     (resume, floor)
 }
 
 /// Build the `Segment::Block` for a `{ …; }` group whose `{` is at `start` (the
 /// scanner has already landed on the brace byte, so the run's leading whitespace
-/// is not part of the span). The span runs from the `{` to the end of the
+/// is not part of the span). `block_start` is the span's start: the brace, or a
+/// `time [-p]` prefix written before it (see [`prefix::span_start`]).
+/// The span runs from the `{` to the end of the
 /// statement it opens, so the group owns everything written after its closing
 /// brace (`} > out`, `} && echo b`, `} | cat`): the parse layer decides what the
 /// trailing operators mean.
@@ -58,6 +50,7 @@ pub(super) fn open<'a>(
 fn group_block<'a>(
     line: &'a [u8],
     start: usize,
+    block_start: usize,
     in_quote: bool,
     pre_resume: usize,
 ) -> (Segment<'a>, usize, usize) {
@@ -74,7 +67,7 @@ fn group_block<'a>(
     };
     (
         Segment::Block {
-            block_start: start,
+            block_start,
             end_pos: end,
             closed,
         },

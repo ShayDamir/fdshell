@@ -3,6 +3,7 @@
 
 use super::Segment;
 use crate::comment::scan_block;
+use crate::keywords::time_prefix_len;
 use crate::scan::ScanState;
 use crate::scan::heredoc;
 
@@ -40,7 +41,7 @@ pub(super) fn keyword_block<'a>(
     } else {
         5
     };
-    let after_kw = start + leading_ws + kw_len;
+    let after_kw = start + leading_ws + time_prefix_len(part).unwrap_or(0) + kw_len;
     let mut quote_state = state.in_quote;
     let mut block_start_pos = after_kw;
     let (_end_pos, closed) = scan_block(line, after_kw, &mut quote_state, &mut block_start_pos, 1);
