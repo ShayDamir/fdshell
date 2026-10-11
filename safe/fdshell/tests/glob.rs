@@ -173,6 +173,31 @@ fn for_list_words_glob() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A for-list word is pathname-expanded **after** substitution (task #131):
+/// an unquoted `$x` holding `a*` globs to `a1 a2` (the word's quotes are gone
+/// by then, exactly as in bash), a quoted `"$x"` keeps the value literal, and
+/// a `$(…)` output is globbed too.
+#[test]
+fn for_list_globbed_after_expansion() {
+    let dir = scratch("forglob");
+    let (out, _err, code) = run(&dir, r#"x=a*; for f in $x; do printf "[%s]\n" "$f"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a1]\n[a2]\n");
+    let (out, _err, code) = run(
+        &dir,
+        r#"x="a*"; for f in "$x"; do printf "[%s]\n" "$f"; done"#,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a*]\n");
+    let (out, _err, code) = run(
+        &dir,
+        r#"for f in $(echo a*); do printf "[%s]\n" "$f"; done"#,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a1]\n[a2]\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn set_words_glob_and_dollar_at_reglobs() {
     let dir = scratch("setwords");

@@ -238,3 +238,14 @@ fn xtrace_covers_short_flag_set() {
     assert_eq!(code, 0);
     assert!(err.contains("+ set -e"), "stderr={err:?}");
 }
+
+/// `set -u` bails an unbound variable in a `for … in` list too (task #131
+/// runs the argument pipeline there): rc 1, `unbound variable`, no iteration.
+/// bash's `-c` mode exits 127 (LESSONS.md accepts the rc asymmetry).
+#[test]
+fn for_list_nounset_bails() {
+    let (out, err, code) = run("set -u; for w in $undef; do echo hit; done; echo after");
+    assert_eq!(code, 1, "stderr={err}");
+    assert!(err.contains("undef: unbound variable"), "stderr={err:?}");
+    assert_eq!(out, "");
+}

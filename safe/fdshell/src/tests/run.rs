@@ -1848,6 +1848,31 @@ fn for_over_unset_percent_name_is_literal_word() {
     );
 }
 
+/// Task #131: a for list runs the argument substitution pipeline, so a `%fd`
+/// word whose name is a **scalar fd var** expands to the exported fd number
+/// and binds as a string; an fd-array reference in the list keeps binding fd
+/// vars per entry (the array path in `for_run::array_word`).
+#[test]
+fn for_list_percent_fd_word_expands_to_fd_number() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    // `LocalFd::export()` is a fresh `dup` per call, so the exact number the
+    // expansion renders is not predictable here; the bound word must be a
+    // decimal fd number (the `%fd` substitution), not the literal `%src`.
+    run_script(b"for w in %src; do :; done", &cell).unwrap();
+    let bound = borrow_state(&cell)
+        .strings
+        .get::<sys::ShortCStr>(&c"w".into())
+        .map(|v| v.value.as_bytes().unwrap().to_vec())
+        .unwrap();
+    let fd: i32 = core::str::from_utf8(&bound).unwrap().parse().unwrap();
+    assert!(fd > 2, "bound fd number {fd}");
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    run_script(b"%arr=[]; %arr+=%src; for %x in %arr; do :; done", &cell).unwrap();
+    assert!(borrow_state(&cell).fds.contains_key(&ShortCStr::from(c"x")));
+}
+
 #[test]
 fn explain_unset_var_reports_unset() {
     let out = capture_stdout(|| {

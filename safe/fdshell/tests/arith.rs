@@ -179,6 +179,34 @@ fn arith_cmd_subst_in_for_list() {
     assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "2");
 }
 
+/// A `$((…))` glued to other text inside a `for … in` word expands like it
+/// does in a command argument (task #131, closes #215): `1$((1+2))` is `13`,
+/// `$((1+2))x` is `3x`, and two glued forms are one word `24`.
+#[test]
+fn for_list_mid_word_arith_expands() {
+    let output = run("for i in 1$((1+2)); do printf \"[%s]\\n\" \"$i\"; done");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "[13]");
+    let output = run("for i in $((1+2))x; do printf \"[%s]\\n\" \"$i\"; done");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "[3x]");
+    let output = run("for i in $((1+1))$((2+2)); do printf \"[%s]\\n\" \"$i\"; done");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        str::from_utf8(&output.stderr).unwrap()
+    );
+    assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "[24]");
+}
+
 /// Command output as an operand: the ternary picks the taken branch.
 #[test]
 fn arith_cmd_subst_as_operand() {

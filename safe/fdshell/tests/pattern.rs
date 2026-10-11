@@ -480,3 +480,18 @@ fn length_operator_with_a_pattern_reads_the_whole_body_as_a_name() {
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[0]");
 }
+
+/// A `for … in` word now runs the argument substitution pipeline (task #131),
+/// so a `${zz:?}` in the list is an error: rc 1 with bash's message, and the
+/// body never runs. bash's `-c` mode exits 127 (LESSONS.md accepts the rc
+/// asymmetry); fdshell's top-level bail is rc 1, as everywhere else.
+#[test]
+fn for_list_param_operator_error() {
+    let (out, err, code) = run("for w in ${zz:?}; do echo hit; done; echo after");
+    assert_eq!(code, 1, "stderr={err}");
+    assert!(
+        err.contains("zz: parameter null or not set"),
+        "stderr={err:?}"
+    );
+    assert_eq!(out, "");
+}

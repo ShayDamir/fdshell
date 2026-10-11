@@ -229,13 +229,116 @@ fn quoted_region_in_a_loop_condition_runs_once() {
     assert_eq!(out, "x; y\n");
 }
 
-/// Accepted divergence (owner tasks #131/#132): for-list words are bound
-/// verbatim — no substitution runs there — so the quoted region is scanned as
-/// one word (task #130: one iteration, no parse error) and printed literally.
+/// A quoted region in a for list is one word (task #130) and is *substituted*
+/// (task #131): `"a$(printf " b")c"` expands to `a bc` and iterates once.
+/// Measured against `bash -c` (5.3.9): `[a bc]`.
 #[test]
-fn quoted_region_in_a_for_list_is_one_verbatim_iteration() {
+fn quoted_region_in_a_for_list_is_one_word() {
     let (out, err, code) = run(r#"for w in "a$(printf " b")c"; do echo "[$w]"; done"#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(err, "");
-    assert_eq!(out, "[a$(printf \" b\")c]\n");
+    assert_eq!(out, "[a bc]\n");
+}
+
+/// A for-list word goes through the argument substitution pipeline (task
+/// #131): `$x`, `"$x"` and `${x}b` all expand. Measured: `[a]`, `[a]`, `[ab]`.
+#[test]
+fn for_list_word_expands_variable() {
+    let (out, err, code) = run(r#"x=a; for w in $x; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a]\n");
+    let (out, _err, code) = run(r#"x=a; for w in "$x"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n");
+    let (out, _err, code) = run(r#"x=a; for w in ${x}b; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[ab]\n");
+}
+
+/// An unquoted for-list expansion is split on `IFS` and each field is one
+/// iteration; `IFS=` disables the split. Measured: `[a] [b]`, `[a] [b]`,
+/// `[a b]`.
+#[test]
+fn for_list_unquoted_expansion_splits_on_ifs() {
+    let (out, err, code) = run(r#"x="a b"; for w in $x; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a]\n[b]\n");
+    let (out, _err, code) = run(r#"IFS=:; x=a:b; for w in $x; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[b]\n");
+    let (out, _err, code) = run(r#"IFS=; x="a b"; for w in $x; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a b]\n");
+}
+
+/// A leading `~` in a for-list word expands to `$HOME`; `~` anywhere else in
+/// the word stays literal. Compared against `printf "%s" "$HOME"`, never a
+/// hardcoded home path.
+#[test]
+fn for_list_word_expands_leading_tilde() {
+    let (home, _err, code) = run(r#"printf "[%s]" "$HOME""#);
+    assert_eq!(code, 0);
+    let (out, err, code) = run(r#"for w in ~; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, format!("{home}\n"));
+    let (out, _err, code) = run(r#"for w in a~b; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a~b]\n");
+}
+
+/// A quoted command substitution is exactly one field (closes #132): the
+/// output's whitespace is not a split point. Unquoted, the same output splits
+/// on `IFS` into one iteration per field. Measured: `[x y]` (one iteration);
+/// `[a] [b] [c]`.
+#[test]
+fn for_list_quoted_cmd_subst_is_one_word() {
+    let (out, err, code) = run(r#"for w in "$(echo a b)"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a b]\n");
+    let (out, _err, code) = run(r#"for w in "$(echo "x" "y")"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[x y]\n");
+    let (out, _err, code) = run(r#"for w in $(echo "a b" c); do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a]\n[b]\n[c]\n");
+}
+
+/// `$@` in a for list iterates over the positionals; quoted `"$@"` keeps a
+/// positional containing a space whole. `set --` runs at top level — inside a
+/// function the name leaks into `$@` (task #134). Measured: `[a] [b]` and
+/// `[a b] [c]`.
+#[test]
+fn for_list_dollar_at_iterates_positionals() {
+    let (out, err, code) = run(r#"set -- a b; for w in $@; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a]\n[b]\n");
+    let (out, _err, code) = run(r#"set -- "a b" c; for w in "$@"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[a b]\n[c]\n");
+}
+
+/// Accepted divergence (task #219): `"$@"` with no positionals is one empty
+/// iteration here, where bash gives none. The for list inherits the rule from
+/// `substitute_args`' quoted-empty rule; pinned as a drift alarm.
+#[test]
+fn for_list_empty_dollar_at_is_one_iteration() {
+    let (out, _err, code) = run(r#"set --; for w in "$@"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n");
+}
+
+/// The whole-word backtick arm keeps working (task #216 owns moving backticks
+/// into the argument pipeline; this is its drift alarm), including the
+/// quoted-empty rule. Measured: `[hi]`, `[]` (one iteration), no iteration.
+#[test]
+fn for_list_whole_word_backtick_still_expands() {
+    let (out, err, code) = run(r#"for w in `echo hi`; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[hi]\n");
+    let (out, _err, code) = run(r#"for w in "`true`"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[]\n");
+    let (out, _err, code) = run(r#"for w in `true`; do echo hit; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
 }
