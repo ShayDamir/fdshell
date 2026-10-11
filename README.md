@@ -472,6 +472,48 @@ forms share one expression language:
   expression and sets the exit status from the last one. `let x=3+4; echo $x`
   → `7`; `let i=1 j=2` sets both.
 
+`$((expr))` is a word expansion, on the surfaces `$(…)` expands on: command
+arguments (external, builtins, `builtin`, `become`, `exec`, `timeout`), the
+bare and scoped assignment value (`x=$((1+2))`, `FOO=$((1+2)) env`), `local`'s
+value, `set --` words (`set -- $((1+1)) c; echo "$*"` → `2 c`), a function
+call's arguments, `case` words, here-string words, and `test`/`[` operands. It
+expands mid-word and inside double quotes (`echo x$((1+2))` → `x3`,
+`echo "a $((1+1)) b"` → `a 2 b`) and the body is whitespace-tolerant
+(`echo $(( 1 + 2 ))` → `3`). No child is forked for the arithmetic itself; the
+`++` side effects of a word expanded in a forked child follow the third bullet
+of the deviations list.
+
+The body is walked once **before** it is lexed, and each `$(…)` and nested
+`$((…))` in it is spliced in place, so the parser is handed one expression
+(bash's expand-then-evaluate model): `echo $(( $(echo 1) + 1 ))` → `2`,
+`echo $(( $(echo 1+1) ))` → `2` (the capture is re-parsed as arithmetic, not
+split into words), `echo $(( $((1+2)) * 3 ))` → `9`. The scan is quote- and
+paren-aware — a `(`/`)` inside double quotes in the inner command does not move
+it (`echo $(( $(true "a)" && echo 5) + 1 ))` → `6`) — and `%` keeps its
+arithmetic meaning (`echo $(( 5 % $(echo 3) ))` → `2`), which is why this is a
+pass of its own and not the generic word substitution. The `((…))` keyword form
+goes through the same pass (`(( $(echo 1) + 1 )); echo $?` → `0`). A capture
+obeys `set --stdout-capture-limit` and over the limit fails the command with
+`command substitution inside an arithmetic expression failed`; nesting shares
+the shell-wide nesting cap; a body the scan cannot close is
+`unclosed subexpression parenthesis`. `let` is not part of this pass: its
+arguments are substituted at word level like any command's
+(`let x=$(echo 1)+1` sets `x` to `2`).
+
+Nothing else is expanded in the body. The arithmetic language has no quoting,
+no comments and no command form of its own, so a `$(…)` inside double quotes,
+a backtick body, a `$1` and a `${…}` are all syntax errors. A variable's value
+is re-evaluated as an expression and never word-expanded: `x=1+1; echo $((x))`
+→ `2`, a value that is not an integer expression is
+`variable x is not an integer` (rc 1), and `$(…)` written in a value is
+never run as a command.
+
+In a `for … in` list only a **whole-word** `$((…))` is expanded: it is
+evaluated in-process and is exactly one word, with no field splitting and no
+pathname expansion (`for i in $((1+2)) $((3*3)); do echo $i; done` prints `3`
+then `9`; `i=1; for x in $((i++)); do :; done; echo $i` → `2`). A form glued to
+other text in the word is not expanded.
+
 The expression language:
 
 - C operator precedence and associativity: `**`, unary `!`/`~`/`-`,
@@ -511,8 +553,9 @@ Limitations / deviations from bash:
   prints `3` then `3` (bash prints `4`). The same command sees it
   (`echo $((x++)) $x` → `3 4`), and the `((…))` keyword and `let` forms run
   in-process, so they persist.
-- An empty expression (`(( ))`, `let ""`) is a syntax error, not bash's
-  status-1 no-op.
+- An empty expression (`(( ))`, `let ""`, `echo $(( ))`) is a syntax error, not
+  bash's status-1 no-op (`echo $(( ))` prints `0` there); the same holds for a
+  body that expands to nothing, `echo $(( $(true) ))` (bash `0`).
 - `((…))` takes no redirections, captures, background form, or pipeline
   position: `((x)) >f`, `((x)) | cat`, and `((x)) &` are clean parse errors.
 - A statement that *starts* with `((` is always the arithmetic keyword, so
@@ -525,8 +568,28 @@ Limitations / deviations from bash:
   syntax error. The `((…))` keyword form stays strict (`((1,2)+3)` →
   "arithmetic command must be `((expr))` with no trailing words") and
   `let "1,2,3)+1"` is a syntax error, like bash.
-- No positional parameters, command substitution, or `${…}` inside an
-  arithmetic expression.
+- The body has no quoting: a `$(…)` inside double quotes
+  (`echo $(( "$(echo 1)" + 1 ))`) and a backtick command body are arithmetic
+  syntax errors, where bash expands both to `2`. Single quotes are literal
+  bytes here as everywhere else in fdshell, so they quote nothing either.
+- No positional parameters and no `${…}` inside an arithmetic expression: with
+  `set -- 5`, `echo $(( $1 ))` and `echo $(( ${1} ))` are syntax errors, where
+  bash expands both to `5`.
+- A `for … in` word that only *contains* a `$((…))` is not expanded:
+  `for i in 1$((1+2))` and `for i in $((1+2))x` print the word verbatim (bash
+  `13` and `3x`), and two glued forms in one word fail with
+  `unclosed subexpression parenthesis` (`for i in $((1+1))$((2+2))`; bash `24`)
+  — task #215.
+- A redirect target word and the command name (word 0) are not
+  arithmetic-expanded: `echo hi >f$((1))` writes the file `f$((1))` (bash
+  writes `f1`), and `$((1+1))` as the command name is a `"$((1+1))" not found`
+  at rc 1, where bash runs the command `2` and reports 127 — task #213.
+- `export` does not expand its assignment value: `export E=$((1+2))` exports
+  the text `$((1+2))` (bash exports `3`) — task #214.
+- Nested `$((…))` shares the shell-wide nesting cap: in a command argument
+  101 nested forms evaluate and the 102nd reports
+  `arithmetic expression nested too deeply; reduce the nesting of $((...))
+  expansions` at rc 1, where bash has no such cap.
 - `let` evaluates each argument as a separate expression (bash-compatible).
 
 ## Shell variables
