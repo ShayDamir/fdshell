@@ -876,10 +876,10 @@ quote (the enclosing quote is what stays open); `echo "$"`, `echo "${"` and
 Accepted divergences (scanning is fixed, expansion is not):
 
 - a backtick body is expanded **only** as a whole-word `for … in` list word
-    (task #131) and its fields are never pathname-expanded (task #220); its
-    split rule is the pipeline's (task #132: a quoted substitution is one word,
-    an unquoted one splits on `IFS`); everywhere else a backtick stays literal
-    (task #216, which also owns moving the arm into the pipeline);
+  (task #131) and its fields are never pathname-expanded (task #220); its
+  split rule is the pipeline's (task #132: a quoted substitution is one word,
+  an unquoted one splits on `IFS`); everywhere else a backtick stays literal
+  (task #216, which also owns moving the arm into the pipeline);
 - a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
   literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
   is taken verbatim (task #174);
