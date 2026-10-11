@@ -32,16 +32,20 @@ pub(super) fn keyword_block<'a>(
     pre_resume: usize,
 ) -> (Segment<'a>, usize, usize) {
     let leading_ws = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-    let kw_len = if part.starts_with(b"case") || part.starts_with(b"wait") {
+    // The keyword is scored on the word behind the `time [-p]` prefix run, so
+    // `kw_len` measures the keyword itself (`time if …` must not measure `time`).
+    let prefix = time_prefix_len(part).unwrap_or(0);
+    let keyword = part.get(prefix..).unwrap_or(b"");
+    let kw_len = if keyword.starts_with(b"case") || keyword.starts_with(b"wait") {
         4
-    } else if part.starts_with(b"if") {
+    } else if keyword.starts_with(b"if") {
         2
-    } else if part.starts_with(b"for") {
+    } else if keyword.starts_with(b"for") {
         3
     } else {
         5
     };
-    let after_kw = start + leading_ws + time_prefix_len(part).unwrap_or(0) + kw_len;
+    let after_kw = start + leading_ws + prefix + kw_len;
     let mut quote_state = state.in_quote;
     let mut block_start_pos = after_kw;
     let (_end_pos, closed) = scan_block(line, after_kw, &mut quote_state, &mut block_start_pos, 1);
@@ -91,3 +95,6 @@ pub(super) fn keyword_block<'a>(
         floor,
     )
 }
+
+#[cfg(test)]
+mod tests;

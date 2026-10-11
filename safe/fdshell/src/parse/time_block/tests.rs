@@ -78,6 +78,46 @@ fn prefix_run_collapses_to_one_report() {
     assert_eq!(inner(&block), b"ls");
 }
 
+/// Each `time` takes the `-p` written right behind it, so a run of prefixed
+/// prefixes leaves no `-p` behind as a command word: `time -p time -p :` times the
+/// `:` (bash: one POSIX-layout report, status 0), not a command named `-p`.
+#[test]
+fn every_prefix_takes_its_own_flag() {
+    for (line, want) in [
+        (b"time -p time -p :".as_slice(), b":".as_slice()),
+        (b"time time -p time -p ls".as_slice(), b"ls".as_slice()),
+        (b"time -p time -p time -p ls".as_slice(), b"ls".as_slice()),
+    ] {
+        let block = detect_line(line).unwrap();
+        assert!(block.posix, "{line:?}");
+        assert_eq!(inner(&block), want, "{line:?}");
+    }
+}
+
+/// The two scorers of the prefix run must strip the same bytes: the segment
+/// scanner's [`time_prefix_len`] and this hook's token loop. Any drift leaves a
+/// prefix word at the head of the inner statement (a command named `-p`).
+#[test]
+fn parse_prefix_run_matches_time_prefix_len() {
+    for line in [
+        b"time ls".as_slice(),
+        b"time -p ls".as_slice(),
+        b"time time -p ls".as_slice(),
+        b"time -p time -p ls".as_slice(),
+        b"time time time :".as_slice(),
+        b"time -p -p ls".as_slice(),
+        b"time -p ls -p".as_slice(),
+    ] {
+        let block = detect_line(line).unwrap();
+        let prefix = crate::keywords::time_prefix_len(line).unwrap_or(0);
+        assert_eq!(
+            inner(&block),
+            line.get(prefix..).unwrap_or(b"").trim_ascii(),
+            "{line:?}"
+        );
+    }
+}
+
 #[test]
 fn bare_time_has_no_inner_statement() {
     let block = detect_line(b"time").unwrap();
@@ -169,4 +209,32 @@ fn prefix_after_the_inner_is_not_stripped() {
     // `time` is only a prefix statement at the statement's start.
     assert!(detect_line(b"echo time").is_none());
     assert!(detect_line(b"echo time ls").is_none());
+}
+
+/// The inner text's span ends at the last token, not at the end of the text:
+/// the bytes a statement's tokens do not cover (trailing whitespace) belong to
+/// the block span, which only a block opener takes. `wait` is the word that
+/// scores `Some(0)` in the depth rule (the POSIX builtin, not the event-case
+/// block opener) and a closer scores a negative delta — both are statements.
+#[test]
+fn inner_span_ends_at_the_last_token() {
+    assert_eq!(inner(&detect_line(b"time ls -l  ").unwrap()), b"ls -l");
+    assert_eq!(inner(&detect_line(b"time wait  ").unwrap()), b"wait");
+    assert_eq!(inner(&detect_line(b"time -p wait x  ").unwrap()), b"wait x");
+    assert_eq!(inner(&detect_line(b"time fi  ").unwrap()), b"fi");
+}
+
+/// A quoted block keyword scores a block delta on its quote-folded word, so only
+/// the XCU 2.4 "none of the characters is quoted" test keeps its statement on
+/// the token span: the block span would reach the trailing whitespace its tokens
+/// do not cover.
+#[test]
+fn quoted_block_keyword_inner_takes_the_token_span() {
+    let block = detect_line(b"time \"while\" false; do :; done  ").unwrap();
+    assert_eq!(inner(&block), b"\"while\" false; do :; done");
+    let block = detect_line(b"time -p \"if\" true; then :; fi  ").unwrap();
+    assert!(block.posix);
+    assert_eq!(inner(&block), b"\"if\" true; then :; fi");
+    // A quoted word that is no keyword at all is a plain command.
+    assert_eq!(inner(&detect_line(b"time \"ls\"  ").unwrap()), b"\"ls\"");
 }

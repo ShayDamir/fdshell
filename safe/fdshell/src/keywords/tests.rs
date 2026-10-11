@@ -133,6 +133,37 @@ fn time_prefix_run_counts_all_prefixes() {
     );
 }
 
+/// The length ends exactly at the word behind the run: the prefix's own
+/// whitespace (between `time` and `-p`, and closing the run) is counted once, by
+/// the loop — no term is redundant, so each one is pinned here.
+#[test]
+fn time_prefix_length_ends_at_the_word_behind_it() {
+    assert_eq!(time_prefix_len(b"time ls"), Some(5));
+    assert_eq!(time_prefix_len(b"time  ls"), Some(6));
+    assert_eq!(time_prefix_len(b"time -p ls"), Some(8));
+    assert_eq!(time_prefix_len(b"time \t-p  ls"), Some(10));
+    assert_eq!(time_prefix_len(b"time time"), Some(9));
+    assert_eq!(time_prefix_len(b"time time -p"), Some(12));
+    // A glued `-p` is the flag of a glued prefix: still transparent.
+    assert_eq!(time_prefix_len(b"time-p ls"), Some(7));
+    // Not prefixes: a longer word, a glued flag word, a flag without a `time`.
+    assert_eq!(time_prefix_len(b"timely"), None);
+    assert_eq!(time_prefix_len(b"time-px ls"), None);
+    assert_eq!(time_prefix_len(b"-p ls"), None);
+}
+
+/// Closers are transparent too: `time` in front of a closer scores the closer,
+/// so the group scanner and the block scan see the same keyword.
+#[test]
+fn time_prefix_in_front_of_a_closer_scores_the_closer() {
+    assert_eq!(keyword_delta(b"time }", b"time }", 5), Some(-1));
+    assert_eq!(keyword_delta(b"time -p }", b"time -p }", 8), Some(-1));
+    assert_eq!(keyword_delta(b"time fi", b"time fi", 4), Some(-1));
+    assert_eq!(keyword_delta(b"time done&", b"time done&", 4), Some(-1));
+    assert_eq!(keyword_delta(b"time fi|", b"time fi|", 4), Some(-1));
+    assert_eq!(keyword_delta(b"time esac|", b"time esac|", 4), Some(-1));
+}
+
 /// Nested groups net out of the depth, so an inner group never closes an
 /// enclosing keyword block.
 #[test]

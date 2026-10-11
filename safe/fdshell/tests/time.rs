@@ -40,6 +40,15 @@ fn clock_secs(value: &str) -> f64 {
     seconds(&mins.replace('s', "")) * 60.0 + seconds(rest.trim_end_matches('s'))
 }
 
+/// The report's `N.NN` seconds field in either layout.
+fn secs(value: &str) -> f64 {
+    if value.contains('m') {
+        clock_secs(value)
+    } else {
+        seconds(value)
+    }
+}
+
 /// The report is written on stderr; the inner's stdout stays clean.
 #[test]
 fn report_goes_to_stderr_and_not_stdout() {
@@ -139,13 +148,17 @@ fn bare_time_reports_zeros() {
     }
 }
 
-/// Every leading `time [-p]` collapses: one statement, one report.
+/// Every leading `time [-p]` collapses: one statement, one report. A `-p` behind
+/// each `time` belongs to that prefix, so the run leaves no `-p` to run as a
+/// command (bash: status 0, one POSIX-layout report).
 #[test]
 fn repeated_prefixes_print_one_report() {
     for script in [
         "time time ls /dev/null",
         "time -p time ls /dev/null",
         "time time -p time ls /dev/null",
+        "time -p time -p :",
+        "time -p time -p time -p ls /dev/null",
     ] {
         let out = run(script);
         assert_eq!(out.status.code(), Some(0), "{script}");
@@ -316,4 +329,81 @@ fn inner_redirect_leaves_report_on_stderr() {
     assert_eq!(stdout(&out), "");
     assert_eq!(fields(&stderr(&out)).len(), 3, "stderr={}", stderr(&out));
     assert_eq!(out.status.code(), Some(0));
+}
+
+/// `.`/`source` runs the script in *this* shell and returns, so the report
+/// covers the sourced script and prints after it: the sourced script writes to
+/// the same stderr, and `sourced` comes before the report.
+#[test]
+fn sourced_script_is_timed_and_reports_after_it() {
+    let path = std::env::temp_dir().join(format!("fdshell_time_source_{}", std::process::id()));
+    std::fs::write(&path, "sleep 0.3; echo sourced 1>&2\n").unwrap();
+    for verb in [".", "source"] {
+        let script = format!("time -p {verb} {}", path.display());
+        let out = run(&script);
+        assert_eq!(out.status.code(), Some(0), "{script}: {}", stderr(&out));
+        let report = stderr(&out);
+        let fields = fields(&report);
+        assert_eq!(fields.len(), 3, "{script}: {report}");
+        assert!(
+            secs(&fields[0].1) >= 0.15,
+            "the sourced script's sleep must be in the report: {report}"
+        );
+        let (sourced, real) = (report.find("sourced"), report.find("real "));
+        assert!(
+            sourced.is_some() && real.is_some() && sourced < real,
+            "the sourced output comes before the report: {report}"
+        );
+    }
+    std::fs::remove_file(&path).ok();
+}
+
+/// A whole `time [-p]` prefix run in front of a cond-part group is transparent,
+/// exactly like a single prefix: the group is a group and the statement prints
+/// one report.
+#[test]
+fn repeated_prefix_in_a_cond_part_group_is_timed() {
+    for script in [
+        "true && time time -p { sleep 0.2; }",
+        "true && time time { sleep 0.2; }",
+        "true && time -p time { sleep 0.2; }",
+        "false || time -p { sleep 0.2; }",
+    ] {
+        let out = run(script);
+        assert_eq!(out.status.code(), Some(0), "{script}: {}", stderr(&out));
+        let report = fields(&stderr(&out));
+        assert_eq!(report.len(), 3, "{script}: {}", stderr(&out));
+        assert!(secs(&report[0].1) >= 0.15, "{script}: real {}", report[0].1);
+    }
+}
+
+/// `exec` and `become` replace the shell process, so their report prints before
+/// they go (`exit`/`quit` are covered by
+/// `terminating_commands_report_before_leaving`).
+#[test]
+fn exec_and_become_report_before_replacing_the_shell() {
+    for script in ["time -p exec true", "time exec true", "time -p become true"] {
+        let out = run(script);
+        assert_eq!(out.status.code(), Some(0), "{script}: {}", stderr(&out));
+        assert_eq!(fields(&stderr(&out)).len(), 3, "{script}: {}", stderr(&out));
+    }
+}
+
+/// The report is a CPU *delta*: after children have been reaped, a statement
+/// that consumes nothing reports zeros, not the accumulated child times.
+#[test]
+fn quiet_statement_after_child_cpu_reports_zero_cpu() {
+    let out = run("sleep 0.2; time -p :");
+    assert_eq!(out.status.code(), Some(0));
+    let report = fields(&stderr(&out));
+    assert_eq!(report.len(), 3, "stderr={}", stderr(&out));
+    assert!(secs(&report[0].1) < 0.10, "real: {}", report[0].1);
+    for (name, value) in &report[1..] {
+        assert_eq!(
+            value,
+            "0.00",
+            "{name} must be the delta of the timed statement, not the shell's total: {}",
+            stderr(&out)
+        );
+    }
 }

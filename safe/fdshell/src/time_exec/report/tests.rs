@@ -48,3 +48,55 @@ fn zero_snapshot_reports_zeros() {
         "\nreal\t0m0.000s\nuser\t0m0.000s\nsys\t0m0.000s\n"
     );
 }
+
+/// The report's numbers are `end - start` for each field: the child-time
+/// totals carried in both snapshots cancel out of the delta, and a value that
+/// went backwards saturates to 0 instead of wrapping.
+#[test]
+fn elapsed_is_the_snapshot_difference() {
+    let start = Start {
+        real: 1_000,
+        user: 1_000_000,
+        sys: 2_000_000,
+    };
+    let end = Start {
+        real: 5_000,
+        user: 1_000_000,
+        sys: 3_000_000,
+    };
+    let elapsed = start.elapsed(&end);
+    assert_eq!(
+        (elapsed.real, elapsed.user, elapsed.sys),
+        (4_000, 0, 1_000_000)
+    );
+    let back = start.elapsed(&Start {
+        real: 900,
+        user: 999,
+        sys: 999,
+    });
+    assert_eq!((back.real, back.user, back.sys), (0, 0, 0));
+}
+
+/// The two layouts of a real delta, so the report text is pinned end to end.
+#[test]
+fn elapsed_report_layouts() {
+    let start = Start {
+        real: 0,
+        user: 0,
+        sys: 0,
+    };
+    let end = Start {
+        real: 104_000,
+        user: 20_000,
+        sys: 10_000,
+    };
+    let elapsed = start.elapsed(&end);
+    assert_eq!(
+        report(true, elapsed.real, elapsed.user, elapsed.sys),
+        "real 0.10\nuser 0.02\nsys 0.01\n"
+    );
+    assert_eq!(
+        report(false, elapsed.real, elapsed.user, elapsed.sys),
+        "\nreal\t0m0.104s\nuser\t0m0.020s\nsys\t0m0.010s\n"
+    );
+}

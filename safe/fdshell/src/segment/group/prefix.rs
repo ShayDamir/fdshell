@@ -50,16 +50,26 @@ fn ends_cond_op(body: &[u8]) -> bool {
     body.ends_with(b"&&") || body.ends_with(b"||")
 }
 
-/// `x && time`, `x || time -p`: the `time` prefix trails a cond operator, so
-/// the group behind it starts a cond part.
+/// `x && time`, `x || time -p`, `x && time time -p`: the prefix run trails a
+/// cond operator, so the group behind it starts a cond part. The run is stripped
+/// with the same rule [`strip_prefix`] uses on the statement side — a prefix is
+/// transparent in every scorer of the run's first word, so a repeated prefix
+/// cannot split the group (`x && time time -p { …; }`).
 fn trails_cond_op(body: &[u8]) -> bool {
-    let stem = body
-        .strip_suffix(b" -p")
-        .unwrap_or(body)
-        .strip_suffix(b"time")
-        .unwrap_or(body)
-        .trim_ascii_end();
-    ends_cond_op(stem)
+    ends_cond_op(strip_trailing_prefix(body))
+}
+
+/// `body` without its trailing `time` / `-p` prefix words (the whitespace
+/// between them goes with the words).
+fn strip_trailing_prefix(body: &[u8]) -> &[u8] {
+    let mut rest = body.trim_ascii_end();
+    while let Some(shorter) = rest
+        .strip_suffix(b"-p")
+        .or_else(|| rest.strip_suffix(b"time"))
+    {
+        rest = shorter.trim_ascii_end();
+    }
+    rest
 }
 
 #[cfg(test)]

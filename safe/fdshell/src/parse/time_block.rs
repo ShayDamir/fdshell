@@ -38,20 +38,27 @@ pub(super) fn detect(
         return Ok(None);
     }
     let mut posix = false;
-    // Tokens consumed as prefixes: the leading `time`, every further `time`,
-    // and one `-p`. Collapsing them in this loop keeps one parse pass and one
-    // report for `time time -p …` (no recursion over the prefix count); a
-    // second `-p` is the statement's own first word (`time -p -p ls` runs the
-    // command `-p`, as bash does), so the flag is only taken while unset.
-    let mut taken = 1usize;
-    loop {
-        match tokens.get(taken) {
-            Some((w, s, e, _, _)) if w.eq_bytes(b"-p") && !posix && !word_quoted(w, *s, *e) => {
-                posix = true;
-                taken += 1;
-            }
-            Some((w, s, e, _, _)) if w.eq_bytes(b"time") && !word_quoted(w, *s, *e) => taken += 1,
-            _ => break,
+    // Tokens consumed as prefixes: every leading `time` and the `-p` written
+    // directly behind it — the same run `keywords::time_prefix_len` measures, so
+    // the parse hook and the segment scanner strip the same bytes. Collapsing the
+    // run in this loop keeps one parse pass and one report for `time time -p …`
+    // (no recursion over the prefix count). A prefix run ends at the first word
+    // that is not a `time` with its optional flag: a `-p` that follows a statement
+    // is one of its words (`time -p -p ls` runs the command `-p`, as bash does),
+    // and so is a quoted `-p` (`time "-p" ls`), so the flag is taken only from an
+    // unquoted `-p` right behind a `time`.
+    let mut taken = 0usize;
+    while let Some((w, s, e, _, _)) = tokens.get(taken) {
+        if !w.eq_bytes(b"time") || word_quoted(w, *s, *e) {
+            break;
+        }
+        taken += 1;
+        if let Some((w, s, e, _, _)) = tokens.get(taken)
+            && w.eq_bytes(b"-p")
+            && !word_quoted(w, *s, *e)
+        {
+            posix = true;
+            taken += 1;
         }
     }
     let rest = tokens.get(taken..).unwrap_or(&[]);

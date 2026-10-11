@@ -98,9 +98,13 @@ fn block_inner_runs_whole() {
 fn terminating_inners_are_detected() {
     assert!(terminates_shell(&time_block(b"time exit 3")));
     assert!(terminates_shell(&time_block(b"time quit 2")));
-    assert!(terminates_shell(&time_block(b"time . /dev/null")));
     assert!(terminates_shell(&time_block(b"time exec /bin/true")));
+    assert!(terminates_shell(&time_block(b"time become /bin/true")));
     assert!(terminates_shell(&time_block(b"time -p exit 0")));
+    // `.` is `source`: the script runs in this shell and returns, so its report
+    // prints after the script, exactly like the `source` spelling.
+    assert!(!terminates_shell(&time_block(b"time . /dev/null")));
+    assert!(!terminates_shell(&time_block(b"time source /dev/null")));
     assert!(!terminates_shell(&time_block(b"time echo exit")));
     assert!(!terminates_shell(&time_block(b"time :")));
     assert!(!terminates_shell(&time_block(b"time")));
@@ -119,4 +123,53 @@ fn start_snapshot_is_monotonic_and_nonzero() {
     assert!(second.real >= first.real);
     assert!(second.user >= first.user);
     assert!(second.sys >= first.sys);
+}
+
+/// Both snapshots are the shell's own rusage *plus* the accumulated reaped
+/// children: the report's `user`/`sys` approximate POSIX's `tms_utime +
+/// tms_cutime`, so the child totals must be in the numbers, not added twice and
+/// not dropped. The bounds leave the shell's own CPU (a few ms) unmeasured.
+#[test]
+fn snapshots_add_the_reaped_childrens_cpu() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().child_utime = 1_000_000;
+    cell.borrow_mut().unwrap().child_stime = 2_000_000;
+    let start = report::start(&cell).unwrap();
+    let end = report::end(&cell);
+    for snapshot in [start, end] {
+        assert!(
+            (1_000_000..10_000_000).contains(&snapshot.user),
+            "user must be the child's 1 s plus the shell's own: {}",
+            snapshot.user
+        );
+        assert!(
+            (2_000_000..11_000_000).contains(&snapshot.sys),
+            "sys must be the child's 2 s plus the shell's own: {}",
+            snapshot.sys
+        );
+    }
+}
+
+/// `emit` prints the report and hands the inner's `LoopControl` straight back: a
+/// timed `return` still returns out of the function. The child CPU seeded into the
+/// cell must not leak into the elapsed window (the report subtracts the start
+/// snapshot), and the window stays small because the timed statement ran nothing —
+/// only the report's own formatting and write are inside it.
+#[test]
+fn emit_reports_the_quiet_statement_and_passes_the_result_through() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().child_utime = 1_000_000;
+    cell.borrow_mut().unwrap().child_stime = 2_000_000;
+    let start = report::start(&cell).unwrap();
+    let result = report::emit(true, &start, &cell, Ok(Some(LoopControl::Return))).unwrap();
+    assert_eq!(result, Some(LoopControl::Return));
+    let elapsed = start.elapsed(&report::end(&cell));
+    for (name, cpu) in [("user", elapsed.user), ("sys", elapsed.sys)] {
+        assert!(
+            cpu < 5_000,
+            "a statement that ran nothing consumed {cpu} us of {name}; the reaped \
+             child's 1 s/2 s must not be in the window"
+        );
+    }
+    assert!(elapsed.real < 100_000, "real: {}", elapsed.real);
 }

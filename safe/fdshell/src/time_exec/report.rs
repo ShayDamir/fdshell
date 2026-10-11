@@ -9,18 +9,32 @@ use alloc::string::String;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 
-/// A statement's start snapshot, in microseconds.
+/// A snapshot of the clock and the CPU times a `time` report measures, in
+/// microseconds: monotonic real time, plus user/sys as the shell's own rusage
+/// and the CPU of the children it has reaped (Linux's `getrusage(RUSAGE_SELF)`
+/// excludes reaped children, so their `waitid` rusage totals are added — the
+/// closest Linux analogue of POSIX's `tms_utime + tms_cutime`).
 pub struct Start {
     pub real: u64,
     pub user: u64,
     pub sys: u64,
 }
 
-/// Snapshot the clock and the CPU times a `time` report measures against:
-/// the shell's own rusage plus the CPU of the children it reaped (Linux's
-/// `getrusage(RUSAGE_SELF)` excludes reaped children, so their `waitid`
-/// rusage totals are added — the closest Linux analogue of POSIX's
-/// `tms_utime + tms_cutime`). The `ShellState` borrow ends with this function.
+impl Start {
+    /// The elapsed part between this snapshot and a later one: the report's
+    /// three numbers. Saturating, so a clock that went backwards reports 0.
+    pub(super) fn elapsed(&self, end: &Self) -> Self {
+        Self {
+            real: end.real.saturating_sub(self.real),
+            user: end.user.saturating_sub(self.user),
+            sys: end.sys.saturating_sub(self.sys),
+        }
+    }
+}
+
+/// Snapshot the clock and the CPU times a `time` report measures against. The
+/// `ShellState` borrow ends with this function (never hold a `ForkCell` borrow
+/// across a call that re-borrows it).
 pub fn start(cell: &ForkCell<ShellState>) -> Result<Start, Report<CmdError>> {
     let real = sys::clock::monotonic_us().change_context(CmdError::TimeClock)?;
     let own = sys::getrusage::self_usage().change_context(CmdError::TimeUsage)?;
@@ -32,6 +46,21 @@ pub fn start(cell: &ForkCell<ShellState>) -> Result<Start, Report<CmdError>> {
     })
 }
 
+/// The same snapshot taken infallibly — the report's end point, where a failed
+/// read can only zero the report (§4.12: a user cannot fix a failed report).
+pub(super) fn end(cell: &ForkCell<ShellState>) -> Start {
+    let own = sys::getrusage::self_usage().unwrap_or_default();
+    let (child_user, child_sys) = match cell.borrow() {
+        Ok(state) => (state.child_utime, state.child_stime),
+        Err(_) => (0, 0),
+    };
+    Start {
+        real: sys::clock::monotonic_us().unwrap_or(0),
+        user: own.utime + child_user,
+        sys: own.stime + child_sys,
+    }
+}
+
 /// Print the report to stderr and hand back the inner statement's result:
 /// the status and control flow belong to the inner, the report is attached.
 /// Infallible by design (§4.12): a failed stderr write is not user-fixable.
@@ -41,38 +70,28 @@ pub fn emit(
     cell: &ForkCell<ShellState>,
     result: Result<Option<LoopControl>, Report<CmdError>>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    let now = real_now();
-    let own = sys::getrusage::self_usage().unwrap_or_default();
-    let (child_user, child_sys) = match cell.borrow() {
-        Ok(state) => (state.child_utime, state.child_stime),
-        Err(_) => (0, 0),
-    };
-    let out = report(
-        posix,
-        now.saturating_sub(start.real),
-        (own.utime + child_user).saturating_sub(start.user),
-        (own.stime + child_sys).saturating_sub(start.sys),
-    );
+    let elapsed = start.elapsed(&end(cell));
+    let out = report(posix, elapsed.real, elapsed.user, elapsed.sys);
     sys::ERR.write_all(out.as_bytes()).ok();
     result
 }
 
 /// The report text: the POSIX `-p` layout, or bash's default (a leading empty
 /// line, tab-separated `N m N.NNN s` values).
-fn report(posix: bool, real: u64, user: u64, sys: u64) -> String {
+fn report(posix: bool, real: u64, user: u64, sys_us: u64) -> String {
     if posix {
         return format!(
             "real {}\nuser {}\nsys {}\n",
             seconds(real),
             seconds(user),
-            seconds(sys)
+            seconds(sys_us)
         );
     }
     format!(
         "\nreal\t{}\nuser\t{}\nsys\t{}\n",
         clock(real),
         clock(user),
-        clock(sys)
+        clock(sys_us)
     )
 }
 
@@ -96,12 +115,6 @@ pub(crate) fn clock(us: u64) -> String {
         (us / 1_000_000) % 60,
         (us / 1_000) % 1_000
     )
-}
-
-/// The monotonic clock, with a zero fallback: a clock read that fails leaves
-/// `real` at 0, which is all a failed report write can offer anyway.
-fn real_now() -> u64 {
-    sys::clock::monotonic_us().unwrap_or(0)
 }
 
 #[cfg(test)]

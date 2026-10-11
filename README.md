@@ -911,16 +911,35 @@ assignments, loops, or control flow, and the statement's status and control flow
 **none of its characters quoted** (`"time" ls`, `t"i"me ls`, `\time ls` are the
 `/usr/bin/time` utility, as in bash; fdshell does not strip single quotes yet, so
 `'time' ls` fails to resolve a command named `'time'`). Every leading `time [-p]`
-prefix collapses into one statement (`time time -p ls` prints one report), and a `-p`
-written after the statement is one of its arguments. A quoted `-p` is an argument too,
-so `time "-p" ls` runs `ls` in the default layout.
+prefix collapses into one statement — `time time -p ls` and `time -p time -p ls` each
+print a single report, the second in the POSIX layout — and the prefix run ends at the
+first word that is not a `time` with its own unquoted `-p`. A `-p` written after the
+statement is one of its arguments, and so is a quoted one: `time -p -p ls` and
+`time "-p" ls` both try to run the command `-p` (command-not-found), exactly as bash does.
 A `time` alias is not expanded: `time` is in the reserved-word list the alias expander
 skips, exactly like `if` or `done`.
 
-A statement that ends the shell (`exit`, `quit`, `.`, `exec`, `become`) prints its report
+A statement that ends the shell (`exit`, `quit`, `exec`, `become`) prints its report
 *before* it runs, because nothing runs after it (`time exit 3` reports, then exits 3).
-`exit` inside a pipeline (`exit | cat`) runs in a child, and a `source`d script that
-exits is not anticipated: in both cases the report covers the timed statement itself.
+`exit` inside a pipeline (`exit | cat`) runs in a child, so the report is the pipeline's
+own. `.`/`source` is **not** a terminating statement: the script runs in the current
+shell and returns, so `time -p . file` reports *after* the sourced script, covering
+everything the script did.
+
+Limitations / deviations from bash:
+
+* `time && false` runs the bare `time` (a zero report) and then `false`. fdshell splits
+  cond-lists before parsing, so `time` is left with no statement; bash raises a syntax
+  error there.
+* An expansion-produced `time` (`$(echo time) ls`) is an ordinary command name: the
+  reserved word is recognized at parse time only, where bash re-scans expansion results.
+* `TIMEFORMAT` is ignored: the report is always one of the two layouts above.
+* A background job started inside the timed statement (`cmd &>&job`) is not reaped at
+  report time, so its CPU is missing from `user`/`sys` (their contribution is ≈0). The
+  `times` builtin accumulates it as usual once `wait`/`waitpid` reaps the job.
+* `user`/`sys` are the shell's own CPU around the statement plus the CPU of the children
+  it reaped, because the statement runs in the current shell; bash times a forked
+  subshell. The numbers are comparable in magnitude, not identical.
 
 ### `times`
 

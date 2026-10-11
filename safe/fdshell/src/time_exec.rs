@@ -12,9 +12,10 @@ use sys::fork_cell::ForkCell;
 
 /// The commands that end the shell process. Their report is printed *before*
 /// they run, because nothing runs after them: `time exit 3` reports, as bash
-/// does. `source`ing a script that exits is not anticipated (the statement
-/// itself returns, so its own report prints normally).
-const TERMINATING: &[&[u8]] = &[b"exit", b"quit", b".", b"exec", b"become"];
+/// does. `.`/`source` is not one of them — it runs the script in the *current*
+/// shell and returns, so its report prints after the sourced script, like every
+/// statement that returns.
+const TERMINATING: &[&[u8]] = &[b"exit", b"quit", b"exec", b"become"];
 
 /// Run the `time` statement: snapshot, run the inner statement, report the
 /// deltas, and return the inner's result (its status and its control flow are
