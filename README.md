@@ -757,6 +757,33 @@ Accepted divergences from bash:
   prints the indirect target's value; fdshell prints the word `z`) — task #176.
 - A positional parameter is not a braced name: `${1}` and `${1#a}` expand to
   empty; bash gives the positional `1` (task #177).
+- Bare `set` lists `$1..` then the variables; bash lists `$0` before `$1..`.
+- `$0` names the invocation (`fdshell`, or `sh` for `-c` with no extra args);
+  bash's `-c` mode puts `bash` there, and with extra args bash's `$0` is the
+  **first extra argument** (argv semantics). fdshell keeps every extra argument
+  as a positional, so `-c` mode never numbers an extra arg as `$0`.
+
+### Positional parameters
+
+`$1..$N` are the positional parameters, stored 0-based and read 1-based
+(`$1` is the first stored word). `$0` is **not** a slot of that store: it is the
+program name, seeded by the CLI — the script path in file mode (argv[1]),
+`sh` for `-c` with no extra args, `fdshell` for `-c` with extras and for the
+REPL. Nothing rebinds it: `set -- words`, a function call, `source f words` and
+`shift` all rebind `$1..` and leave `$0` alone, and `$0` is always bound, so
+`set -u` never reports it.
+
+`$#` counts the positionals and `$@`/`$*` iterate exactly them, so a function
+sees its arguments and never its own name
+(`f() { echo "$@"; echo $#; }; f a b` → `a b` then `2`). Out-of-range `$N`
+expands to the empty string; under `set -u` it is an error naming the index
+(rc 1, `4: unbound variable`).
+
+```
+set -- a b c; echo "[$1][$2][$3][$#]"     → [a][b][c][3]
+set -- a b c; shift; echo "[$0][$1][$#]"  → [sh][b][2]   (`shift` never moves `$0`)
+f() { echo "$1|$#|$0"; }; f a b           → a|2|sh       (the name is not a positional)
+```
 
 ### Word splitting (`IFS`)
 
@@ -923,8 +950,6 @@ Accepted divergences (scanning is fixed, expansion is not):
   on `IFS`, bash splits only the expansion part, so a literal `IFS` byte placed
   after an unquoted embedded expansion cuts between the expansion's last field
   and the literal text (task #222);
-- `$1` after `set --` is off-by-one (task #134), so positional values are read
-  with `"$@"` or `printf "[%s]"`.
 
 Other accepted divergences of the `for … in` word pipeline (task #131):
 
