@@ -135,6 +135,19 @@ fn condition_bodies_window_is_bounded_to_the_conditions_line() {
     );
 }
 
+/// `line_start_of` is panic-free on a text starting with a newline: the anchor
+/// is byte 1 and the condition keeps its region. (This is what kills the
+/// `cond_bodies.rs:63:75` `+` → `-` mutant: at `n = 0` it computes `0 - 1`,
+/// a `usize` underflow — LESSONS.)
+#[test]
+fn condition_bodies_of_a_text_starting_with_a_newline() {
+    let line = b"\nif cat <<A; then echo y; fi\nbodyA\nA";
+    assert_eq!(
+        cond_bodies_of(line, b"if"),
+        vec![ShortCStr::from_vec(b"bodyA\nA".to_vec()).unwrap()]
+    );
+}
+
 /// The exact region a multi-line block's condition claims when the operator it
 /// reads is written **mid-line**: the stream starts after the condition line's
 /// newline, so the region is the next line's text up to the operator's
