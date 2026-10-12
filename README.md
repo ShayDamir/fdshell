@@ -910,6 +910,13 @@ Accepted divergences:
   is still parsed as the keyword (task #247); bash runs it as a command word.
 - An unpaired quote (of either kind) is a parse error reported at the quote
   byte, rc 1.
+- Quotes written inside a `${ … }` or backtick **body** are markers, not
+  content: the region scan drops both quote bytes and the body text is then
+  read as expansion text, so a span's protection does not survive there (see
+  "Nested regions inside double quotes"). `v=; echo "${v:-'a b'}"` prints `a b`
+  where bash keeps the single quotes literal (`'a b'`), and a literal `}`
+  written in an alternate word diverges (`echo ${v:-'a\}b'}` → `a\\b}`, bash
+  `a\}b`). The common unquoted case `echo ${v:-'a b'}` matches bash exactly.
 
 ### Word splitting (`IFS`)
 
