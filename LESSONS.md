@@ -1101,10 +1101,17 @@ condition line's newline, in operator order) and the **skip** `operator_count`
 computes for the operators that claimed the head of that stream. Prepending `k`
 operators to the window prepends `k` regions and raises the skip by exactly `k`,
 so the slice `regions[skip .. skip + ops.len()]` is identical for every anchor.
-That makes the window/skip **pair-shift equivalent on the success path**, and so
-is `n + 1` → `n - 1`/`n * 1` on `cond_bodies.rs:63:75`: the newline byte is
-never part of an operator, so a window starting before, at, or after it counts
-the same operators. Accepted equivalent mutants — no test for them.
+The pair-shift is therefore invariant **on the success path**. Of the two
+`cond_bodies.rs:63:75` mutants, `n + 1` → `n * 1` is **strictly equivalent**
+(`* 1` is the identity; the full suite is green under it, leading-newline pin
+included) — the file's only accepted missed mutant; the newline byte is never
+part of an operator, so on a line whose head is not `<<` the anchor shift
+counts the same operators. `n + 1` → `n - 1` is that same equivalence only for
+`n ≥ 1`: at `n = 0` it computes `0 - 1` in `usize` — a debug panic (release
+wraps to `usize::MAX`), emptying the window — and is **killed**, not accepted,
+by `condition_bodies_of_a_text_starting_with_a_newline`. A blanket "a window
+starting before, at, or after the newline counts the same operators" is an
+over-claim: it is exactly the species this entry's own rule below forbids.
 
 **The missing-delimiter path is not anchor-invariant.** `body_regions_full`
 (`scan/heredoc/full.rs`) returns `Err(n)` when a *windowed* operator's delimiter
