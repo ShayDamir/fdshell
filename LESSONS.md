@@ -1013,3 +1013,41 @@ pins are `builtin echo hi > out` / `exec 3<>f; builtin echo z >&3`, run with the
 harness `PATH` set to relative entries, and use helper *binaries*
 (`EXEC_OK_PATH`, `ARG_PRINT_PATH`) copied into the scratch dir: no `/bin/sh`, no
 coreutils dependency, deterministic exit codes.
+
+## A keyword block is opaque to the cond-list split — and `scan_block`'s end is a *run* end, not the closer's end
+`&&` / `||` inside a `while`/`until`/`if` condition, a loop body, an `if` body, a
+`case` arm or a `wait` arm is the block's *own* cond list: the block executors
+run a condition through `run_cond_list` (with `exempt`) and parse bodies inside
+the block. So `cond/boundary::next_boundary` must not split a block text in
+half — it counts the block's keywords (`cond/boundary/block.rs::word_delta`, the
+shared `keywords::keyword_delta` scorer) and only splits at `group_depth == 0 &&
+block_depth == 0`, exactly the rule it already had for a `{ …; }` group. The
+counter's brace rule is layered the same way: inside a block (`block_depth > 0`)
+`{`/`}` score `keyword_delta`'s ±1 (the rule `comment::depth_delta` uses to find
+the span, so a literal `}` argument eats the closer there — the accepted
+divergence in `tests/group.rs::literal_brace_argument_in_a_block_body`), and at
+top level a group opener scores 0 because the group arm applies the segment
+scanner's clause-position rule (`group_at_run`), keeping `echo { && echo b` a
+split. A `time [-p]` prefix needs no special case: `keyword_delta` already
+strips it, so the depth fires at the keyword behind it.
+
+Two traps found while doing it:
+
+1. **`comment::scan_block` returns the closing keyword's *separator*, not its
+   word end.** Its runs break only at `;`/`\n`/end-of-input — spaces are not run
+   boundaries — so a "jump over the block" built on it swallows everything
+   written after the closer on that run: `while true; do a; done && echo b` jumps
+   to the end of the line, the trailing `&&` disappears, and `echo b` runs
+   unconditionally (and `run_one` gets `… done && echo b` as one part, a parse
+   error). A depth counter over the words `next_boundary` already walks has no
+   such boundary, so the scan resumes exactly where the block ends.
+2. **The opacity rule must be gated on a heredoc-free text.** A block's
+   condition bodies travel *inside* its span (`segment/block/keyword.rs` extends
+   `end_pos` past them), so making that text opaque also hides the `&&` written
+   in a *body* line, which must stay a split point:
+   `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` pins
+   the split (rc 1 `missing 'fi'`, bash rc 2) and is the alarm. The gate is
+   `heredoc::operator_count(line, i, line.len()) == 0`, and the gap it leaves
+   (`while cat <<X; do a && b; X` + `done`) is task #234, recorded in README.
+   Task #235 owns the twin case (a `&&` in a function-definition group body,
+   where the definer word keeps the `{` off the run start).

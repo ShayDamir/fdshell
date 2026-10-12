@@ -240,6 +240,14 @@ Limitations:
   does work: the body is the child's own text.
 - A body line that is exactly `elif` / `else` (in an if body) or `;;` (in a
   case / wait body) is misread as block structure.
+- A keyword block whose text carries a `<<` operator keeps the pre-#137 split, so
+  a cond-list operator in such a block is still broken:
+  `while cat <<X; do a && b; X` + `done` is a parse error rc 1 (bash rc 2), where
+  the heredoc-free `while true; do a && b; done` runs (task #137). The reason is
+  that a block's condition bodies travel *inside* its text, and the `&&` written
+  in a body line must stay a split point
+  (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
+  Task #234 owns the fix.
 
 ## Group command
 
@@ -262,6 +270,21 @@ A group is a cond-list part, so `{ echo a; } && { echo b; }` prints `a b` and
 brace in an argument position (`echo {` prints `{`) or after a pipeline `|` is a
 command word, as in bash. `exec >file` inside a group is permanent: the group is
 the current shell, so the redirection is not undone at the group end, as in bash.
+
+A keyword block (`if`/`for`/`while`/`until`/`case`/`wait`) is one cond-list part
+too (task #137): an `&&` / `||` written inside the block's text belongs to the
+block's *own* cond list, never to the list around it. So
+`while [ 1 ] && [ 1 ]; do echo hi; break; done` runs its condition as a cond
+list (`hi`, rc 0) exactly like a top-level `a && b` line,
+`if [ 1 ] && [ 0 ]; then echo t; else echo f; fi` takes the branch the whole
+condition decides, and `while true; do false && echo a; break; done` keeps the
+operator in its body. The outer split lands on the operator written *outside*
+the block (`while false; do :; done; echo x`), a `{ …; }` group inside a block
+condition keeps its per-part rule (`while { true; } && { true; }; do …; done`),
+and a `time [-p]` prefix is transparent (`time while [ 1 ] && [ 1 ]; do …; done`).
+Pinned by `tests/cond_blocks.rs` and `tests/loops.rs`. Two shapes stay broken:
+an operator *adjacent* to a block (`true && while …; do …; done`, task #232) and
+a block whose text also carries a here-doc (task #234, see "Heredocs").
 
 Accepted divergences from bash:
 
@@ -357,7 +380,10 @@ Accepted divergences from bash:
   and `while :; do if break; then :; fi; echo body; done` hang the same way,
   identically on master), and `i=0; for x in 1 2 3; do if break; then :; fi;
   i=$((i+1)); done` prints `i=3` where bash prints `i=0`. The `&&` spelling
-  (`while [ $i -lt 3 ] && break; do …`) is a parse error rc 1 (task #137). Task
+  (`i=0; while [ $i -lt 3 ] && break; do i=$((i+1)); done; echo i=$i`) parses and
+  runs since task #137 and diverges the same way: `i=3` here, where bash's
+  `break` ends the loop and prints `i=0`. Pinned by
+  `tests/cond_blocks.rs::break_in_an_and_condition_is_ignored`. Task
   #205 owns the fix; the hang is deliberately unpinned (an infinite loop is not
   a test) and #205 owns the pins for this shape.
 
@@ -926,6 +952,13 @@ keeps the array reference and the loop binds an fd variable per entry. A
 word's provenance is kept for `explain NAME`: a leading `~` reports `HOME`, a
 word carrying a substitution reports command output, a literal word reports the
 script.
+
+Accepted divergence: a `&&` / `||` written in the `in` list is a list **word**,
+not a cond-list operator — `for i in a && b; do echo hi; break; done` iterates
+over `a`, `&&`, `b` (rc 0, printing `hi`), where bash rejects the line as a
+syntax error (rc 2). It became reachable when task #137 made a whole
+`for … do … done` block one cond-list part (see "Group command"); pinned by
+`tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`.
 
 ### Nested regions inside double quotes
 
