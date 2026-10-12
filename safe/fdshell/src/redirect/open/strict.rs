@@ -6,10 +6,10 @@
 //! redirect opening (redirect/open.rs) is byte-for-byte unchanged.
 
 use super::open_target;
-use crate::bytes::fold::fold_word;
+use super::target;
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::ExportedCStr;
 use sys::LocalFd;
 use sys::ShortCStr;
@@ -35,7 +35,7 @@ pub(super) fn target(
         RedirectSource::Path { path, mask } => (path, mask.as_slice()),
         _ => return Err(Report::new(OpenRedirectError::Never)),
     };
-    let target_name = redirect_target(path, mask, base, cell)?;
+    let target_name = target::resolve(path, mask, Some(base), cell)?;
     let name = target_name.export();
     let noclobber_flag = noclobber && def.write_flag();
     let opened = match noclobber_flag {
@@ -73,40 +73,5 @@ fn noclobber_open(
             }
             Some(_) | None => Err(report),
         },
-    }
-}
-
-/// Glob a redirect target under strict: `> 1` match is ambiguous, `0` matches
-/// open the literal word (bash passes unmatched redirect patterns through;
-/// `failglob` does not apply to redirects), `1` match opens that match.
-///
-/// The target word is folded first (POSIX #4.1): bash folds every unquoted
-/// escape pair at tokenization, and a redirect target is never substituted,
-/// so `> a\*b` opens the file named `a*b`. The walk is rooted at `base`;
-/// strict bans an absolute target *before* the walk, so a leading-`/` pattern
-/// never reaches the filesystem root.
-fn redirect_target(
-    path: &ShortCStr,
-    mask: &[bool],
-    base: &LocalFd,
-    cell: &ForkCell<ShellState>,
-) -> Result<ShortCStr, Report<OpenRedirectError>> {
-    let (target, target_mask) = fold_word(path, mask).change_context(OpenRedirectError::Never)?;
-    if target.starts_with(b"/") {
-        bail!(OpenRedirectError::StrictAbsoluteTarget {
-            name: target.clone(),
-        });
-    }
-    let matches = crate::glob::matches(&target, &target_mask, cell, Some(base))
-        .change_context(OpenRedirectError::Glob)?;
-    match matches.len() {
-        0 => Ok(target),
-        1 => matches
-            .first()
-            .cloned()
-            .ok_or(OpenRedirectError::Never.into()),
-        _ => Err(Report::new(OpenRedirectError::AmbiguousRedirect {
-            name: path.clone(),
-        })),
     }
 }

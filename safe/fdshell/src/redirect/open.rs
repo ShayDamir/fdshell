@@ -1,6 +1,8 @@
+mod cwd;
 mod strict;
+mod target;
 
-use super::{RedirectDef, RedirectDirection, RedirectSource};
+use super::{RedirectDef, RedirectSource};
 use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
@@ -33,7 +35,7 @@ pub fn open_redirect_files(
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<LocalFd>, Report<OpenRedirectError>> {
     // The options and the pinned `%CWD` fd are read in block-scoped borrows:
-    // `glob::matches` re-borrows the cell per redirect target (RefCell,
+    // the target glob re-borrows the cell per redirect target (RefCell,
     // LESSONS.md). Strict opens every target through `%CWD`.
     let strict = {
         let state = cell.borrow().change_context(OpenRedirectError::Never)?;
@@ -69,8 +71,7 @@ fn open_redirect(
     if let Some(base) = base {
         return strict::target(r, base, min_fd, noclobber, cell);
     }
-    let noclobber_flag = noclobber && r.write_flag();
-    let opened = process_cwd_open(r, path, mask, noclobber_flag, cell)?;
+    let opened = cwd::open(r, path, mask, noclobber && r.write_flag(), cell)?;
     // Re-home the freshly opened fd above every redirect target of this
     // command: a `dup2` of another redirect must never clobber the open
     // fd and then have this descriptor's drop close the target.
@@ -81,9 +82,10 @@ fn open_redirect(
     Ok(rehomed)
 }
 
-/// Open a redirect target through `dir`: strict (a base dirfd is present)
-/// opens via `openat2` on the pinned `%CWD` fd; non-strict (no `dir`) keeps
-/// the plain process-CWD `open()` call. `O_CLOEXEC` is forced by `sys`.
+/// The `open_target` form of a redirect open: with a dirfd (`Some`) it is
+/// `openat2` on the pinned `%CWD` fd — strict mode's capability route;
+/// without one (`None`) it is the plain process-CWD `open()`. `O_CLOEXEC` is
+/// forced by `sys`.
 pub(super) fn open_target(
     name: &ExportedCStr,
     how: &sys::openat2::OpenHow,
@@ -94,64 +96,6 @@ pub(super) fn open_target(
         None => sys::openat2::open(name, sys::openat2::flags_of(how)),
     }
     .change_context(OpenRedirectError::Open)
-}
-
-/// The non-strict path, byte-for-byte as before: process-CWD `open()`.
-fn process_cwd_open(
-    r: &RedirectDef,
-    path: &ShortCStr,
-    mask: &[bool],
-    noclobber_flag: bool,
-    cell: &ForkCell<ShellState>,
-) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let target = redirect_target(path, mask, cell)?;
-    let name = target.export();
-    if noclobber_flag {
-        return open_noclobber(&name, &target);
-    }
-    sys::openat2::open(&name, r.direction.open_flags()).change_context(OpenRedirectError::Open)
-}
-
-/// Glob a redirect target: `> 1` match is ambiguous, `0` matches open the
-/// literal word (bash passes unmatched redirect patterns through; `failglob`
-/// does not apply to redirects), `1` match opens that match.
-///
-/// The target word is folded first (POSIX #4.1): bash folds every unquoted
-/// escape pair at tokenization, and a redirect target is never substituted,
-/// so `> a\*b` opens the file named `a*b`.
-fn redirect_target(
-    path: &ShortCStr,
-    mask: &[bool],
-    cell: &ForkCell<ShellState>,
-) -> Result<ShortCStr, Report<OpenRedirectError>> {
-    let (target, target_mask) =
-        crate::bytes::fold::fold_word(path, mask).change_context(OpenRedirectError::Never)?;
-    let matches = crate::glob::matches(&target, &target_mask, cell, None)
-        .change_context(OpenRedirectError::Glob)?;
-    match matches.len() {
-        0 => Ok(target),
-        1 => matches
-            .first()
-            .cloned()
-            .ok_or(OpenRedirectError::Never.into()),
-        _ => Err(Report::new(OpenRedirectError::AmbiguousRedirect {
-            name: path.clone(),
-        })),
-    }
-}
-
-/// Open a fresh file exclusively: `EEXIST` means the target exists (noclobber).
-fn open_noclobber(
-    name: &ExportedCStr,
-    path: &ShortCStr,
-) -> Result<LocalFd, Report<OpenRedirectError>> {
-    match sys::openat2::open(name, RedirectDirection::noclobber_flags()) {
-        Ok(fd) => Ok(fd),
-        Err(e) if e.errno() == sys::errno::EEXIST => {
-            Err(OpenRedirectError::Noclobber { name: path.clone() }.into())
-        }
-        Err(e) => Err(Report::new(OpenRedirectError::Open).attach(e)),
-    }
 }
 
 #[cfg(test)]
