@@ -7,8 +7,6 @@ use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::AtFd;
-use sys::ExportedCStr;
 use sys::LocalFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -80,22 +78,6 @@ fn open_redirect(
         .change_context(OpenRedirectError::Open)?;
     drop(opened);
     Ok(rehomed)
-}
-
-/// The `open_target` form of a redirect open: with a dirfd (`Some`) it is
-/// `openat2` on the pinned `%CWD` fd — strict mode's capability route;
-/// without one (`None`) it is the plain process-CWD `open()`. `O_CLOEXEC` is
-/// forced by `sys`.
-pub(super) fn open_target(
-    name: &ExportedCStr,
-    how: &sys::openat2::OpenHow,
-    dir: Option<&LocalFd>,
-) -> Result<LocalFd, Report<OpenRedirectError>> {
-    match dir {
-        Some(fd) => sys::openat2::openat2(AtFd::from(fd), name, how),
-        None => sys::openat2::open(name, sys::openat2::flags_of(how)),
-    }
-    .change_context(OpenRedirectError::Open)
 }
 
 #[cfg(test)]

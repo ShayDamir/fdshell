@@ -148,3 +148,36 @@ fn strict_noclobber_rejects_existing_target() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Non-strict `noclobber` keeps its process-CWD exclusive create: an existing
+/// target is refused with the same error strict mode raises.
+#[test]
+fn noclobber_rejects_existing_target() {
+    let dir = scratch();
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.options |= NOCLOBBER;
+    }
+    let abs = format!("{dir}/a1");
+    let report = open_redirect_files(&[write_def(&abs)], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::Noclobber { .. }
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `noclobber` under strict creates a *fresh* target through the base fd: the
+/// refusal above is about the existing file, not about strict mode.
+#[test]
+fn strict_noclobber_creates_fresh_target() {
+    let dir = scratch();
+    let fds =
+        open_redirect_files(&[write_def("fresh")], &cell_with(&dir, STRICT | NOCLOBBER)).unwrap();
+    assert_eq!(fds.len(), 1);
+    assert!(std::path::Path::new(&format!("{dir}/fresh")).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

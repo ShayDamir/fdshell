@@ -5,11 +5,11 @@
 //! an absolute target (filesystem-root resolution) is banned. Non-strict
 //! redirect opening (redirect/open.rs) is byte-for-byte unchanged.
 
-use super::open_target;
 use super::target;
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use error_stack::{Report, ResultExt};
+use sys::AtFd;
 use sys::ExportedCStr;
 use sys::LocalFd;
 use sys::ShortCStr;
@@ -40,7 +40,7 @@ pub(super) fn target(
     let noclobber_flag = noclobber && def.write_flag();
     let opened = match noclobber_flag {
         true => noclobber_open(&name, path, base),
-        false => open_target(&name, &open_how(def), Some(base)),
+        false => open(&name, &open_how(def), base),
     }?;
     let rehomed = opened
         .try_clone_above(min_fd)
@@ -57,6 +57,17 @@ fn open_how(def: &RedirectDef) -> OpenHow {
     OpenHow::new(flags as u64, mode as u64)
 }
 
+/// The strict redirect open: `openat2` on the pinned `%CWD` fd, with the
+/// direction's flags and the `O_CREAT` mode `open()` passes (`O_CLOEXEC` is
+/// forced by `sys`). Non-strict opens from the process CWD (redirect/open/cwd.rs).
+fn open(
+    name: &ExportedCStr,
+    how: &OpenHow,
+    base: &LocalFd,
+) -> Result<LocalFd, Report<OpenRedirectError>> {
+    sys::openat2::openat2(AtFd::from(base), name, how).change_context(OpenRedirectError::Open)
+}
+
 /// `noclobber` under strict: an exclusive create through the pinned dirfd;
 /// `EEXIST` means the target exists.
 fn noclobber_open(
@@ -65,7 +76,7 @@ fn noclobber_open(
     base: &LocalFd,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
     let how = OpenHow::new(RedirectDirection::noclobber_flags() as u64, 0o666);
-    match open_target(name, &how, Some(base)) {
+    match open(name, &how, base) {
         Ok(fd) => Ok(fd),
         Err(report) => match report.downcast_ref::<SyscallError>() {
             Some(e) if e.errno() == sys::errno::EEXIST => {
