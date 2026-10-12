@@ -120,3 +120,29 @@ fn operator_inside_a_quoted_region_is_not_a_boundary() {
         (32, false)
     );
 }
+
+// Task #137: keyword-block texts. Inside a block the operator is the block's
+// own cond list, so the outer scan finds no boundary; the group rule, the quoted
+// regions and the heredoc window keep working around it (the block arm's own
+// shapes are pinned in `cond/boundary/block/tests.rs`).
+#[test]
+fn block_texts_leave_the_outer_scan_no_boundary() {
+    // A block inside a group: the split is the group's own trailing `&&` (35).
+    assert_eq!(
+        boundary_of(b"{ while c && c; do b && c; done; } && echo d"),
+        (35, false)
+    );
+    // A group inside a block condition: the block rule covers the whole text.
+    let block = b"while { true; } && { true; }; do echo hi; done";
+    assert_eq!(boundary_of(&block[..]), (block.len(), false));
+    // A quoted region inside a block body, with an operator written after the
+    // block: the split is the trailing `&&` (44) — never the one inside the
+    // quotes, and never one inside the block text.
+    assert_eq!(
+        boundary_of(b"if true; then echo \"$(printf \"a && b\")\"; fi && echo c"),
+        (44, false)
+    );
+    // A multi-line block body: the `&&` on the body's line is inside the block.
+    let multi = b"while true; do\n  false && echo a\n  break\ndone";
+    assert_eq!(boundary_of(&multi[..]), (multi.len(), false));
+}

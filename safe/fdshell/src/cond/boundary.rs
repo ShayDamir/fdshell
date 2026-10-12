@@ -5,22 +5,41 @@
 use crate::scan::{ScanState, heredoc};
 use crate::segment::group::{group_at_run, opens_at};
 
+mod block;
+
 /// Scan from `i` to the next unquoted `&&` / `||` (or end of line). Heredoc
 /// command lines are skipped whole along with their bodies. A `{ …; }` group
 /// is opaque at this level too: the braces are counted, and an operator inside
 /// the group's body is part of the body (the group's own text), so the split
-/// happens after the closing brace. Returns the operator's first byte (or
-/// `line.len()`) and whether it is `||`.
+/// happens after the closing brace. A keyword block is opaque the same way:
+/// `block_depth` counts its keywords, so an operator written in a loop
+/// condition, an `if` condition, a body or a `case` arm belongs to the block's
+/// own cond list. Returns the operator's first byte (or `line.len()`) and
+/// whether it is `||`.
 pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut run_start = i;
     let mut group_depth: i32 = 0;
+    // The block rule is off for a text that carries `<<` operators: a block's
+    // condition bodies travel *inside* its span, and the `&&` written in such a
+    // body line must keep splitting the part
+    // (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
+    let block_rule = heredoc::operator_count(line, i, line.len()) == 0;
+    let mut block_depth: i32 = 0;
     while let Some(&b) = line.get(i) {
         if !state.in_quote && state.paren_depth == 0 {
             if group_depth == 0
+                && block_depth == 0
                 && ((b == b'&' && line.get(i + 1) == Some(&b'&'))
                     || (b == b'|' && line.get(i + 1) == Some(&b'|')))
             {
                 return (i, b == b'|');
+            }
+            // Only a word start can open a block; the closers that end one are
+            // scored by the same shared helper. A stray closer clamps at 0, so
+            // a stray `done` never hides the operators of a plain command line.
+            if block_rule && state.at_word_start() {
+                let delta = block::word_delta(line, i, block_depth);
+                block_depth = block_depth.saturating_add(delta).max(0);
             }
             // Only a brace that opens a group counts: at a cond-list part start
             // (the run is empty, or the run ends with `&&` / `||`). A brace in an
