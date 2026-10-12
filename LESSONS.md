@@ -1092,27 +1092,43 @@ legal let chain, verified by hand), and this one missed. `master`'s own run of
 the file reports the same `==`→`!=` plus two further survivors (the stray-`}`
 arm's `==` and the `\n`/`;` arm's `||`) that #137's pins now kill.)
 
+## A region window and the skip derived from it are one pair — only on the success path
 
-## A region window and the skip derived from it are one pair: shifting the anchor is an equivalent mutant
 `parse/cond_bodies.rs` anchors both halves of a condition's body extraction at
 `line_start_of(line, cond_start)`: the **window** `operator_delims` scans for
 the line's operators (their regions are laid out contiguously after the
-condition line's newline, in operator order) and the **skip**
-`operator_count` computes for the operators that claimed the head of that
-stream. Prepending `k` operators to the window prepends `k` regions and raises
-the skip by exactly `k`, so the slice `regions[skip .. skip + ops.len()]` is
-identical for every anchor. All three `line_start_of` mutants are therefore
-unkillable: `→ 0` (the same shift, observable only when the condition sits
-past line 1 — the extra operators it sees are the ones its skip then skips),
-and `→ 1` (window `[1..]` ≡ window `[0..]`: a `<<` at index 0 never starts an
-operator because `operator_delims` requires a preceding word and its scan
-starts with `seen_word = false`). The pin
-`parse/cond_bodies/tests.rs::condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition`
-exercises the non-trivial anchor (operator mid-line in a multi-line condition,
-the shape bash rejects with a syntax error) and asserts the exact region it
-claims (`cat <<A; echo x` + `Z`, bytes 18..25); the suite passes under all
-three shifts, which is the equivalence record. Accepted equivalent mutants —
-do not add a test for them. (`n + 1` → `n - 1`/`n * 1` on the same line is the
-same species from the other side: the newline byte is never part of an
-operator, so a window starting before, at, or after it counts the same
-operators.)
+condition line's newline, in operator order) and the **skip** `operator_count`
+computes for the operators that claimed the head of that stream. Prepending `k`
+operators to the window prepends `k` regions and raises the skip by exactly `k`,
+so the slice `regions[skip .. skip + ops.len()]` is identical for every anchor.
+That makes the window/skip **pair-shift equivalent on the success path**, and so
+is `n + 1` → `n - 1`/`n * 1` on `cond_bodies.rs:63:75`: the newline byte is
+never part of an operator, so a window starting before, at, or after it counts
+the same operators. Accepted equivalent mutants — no test for them.
+
+**The missing-delimiter path is not anchor-invariant.** `body_regions_full`
+(`scan/heredoc/full.rs`) returns `Err(n)` when a *windowed* operator's delimiter
+line is missing and `condition_bodies` maps that to an empty list, so widening
+the window to an earlier line drags that line's unterminated heredoc into the
+stream and empties the condition's bodies. The `line_start_of` **literal**
+mutants `→ 0` and `→ 1` are therefore *not* equivalent:
+`parse/cond_bodies/tests.rs::condition_bodies_window_is_bounded_to_the_conditions_line`
+(complete condition line, unterminated `<<` on an earlier line) kills both. `→ 1`
+is inert only when the computed anchor is 0, i.e. only for a condition that
+starts its line. The `b == b'\n'` → `b != b'\n'` mutant in the same function
+(`cond_bodies.rs:63:55`) is likewise **not** equivalent: it is killed by
+`condition_bodies_of_an_incomplete_line_stream_are_empty` and
+`condition_bodies_skip_the_regions_claimed_before_them`.
+
+`condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition` pins the
+non-trivial anchor (operator mid-line in a multi-line condition, the shape bash
+rejects with a syntax error) and the exact region it claims (`cat <<A; echo x` +
+`Z`, bytes 18..36); the suite is green under every pair-shift, which is the
+success path's equivalence record.
+
+**Rule:** scope an equivalence claim to the path it argues about — a shift that
+is invisible once the regions are consumed is visible on the path that refuses
+to consume them. And never record a mutant as unkillable from a loaded run:
+measure it quietly (no parallel load, suite twice) first, and write down which
+tests kill the ones that are killed.
+

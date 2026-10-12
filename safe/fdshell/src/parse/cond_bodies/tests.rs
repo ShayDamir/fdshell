@@ -119,14 +119,32 @@ fn condition_bodies_of_an_incomplete_line_stream_are_empty() {
     assert!(cond_bodies_of(line, b"elif").is_empty());
 }
 
+/// The region window is **bounded to the condition's own physical line**: an
+/// unterminated heredoc on an *earlier* line never enters it, so the condition
+/// keeps its bodies. (This is the observable half of the window's anchor: the
+/// success path is invariant to it, the missing-delimiter path is not —
+/// LESSONS.)
+#[test]
+fn condition_bodies_window_is_bounded_to_the_conditions_line() {
+    // `<<Z` sits on a line before the condition's and has no delimiter line in
+    // the text; the condition's own line is complete, so it claims its region.
+    let line = b"cat <<Z\nif cat <<A; then echo y; fi\nbodyA\nA";
+    assert_eq!(
+        cond_bodies_of(line, b"if"),
+        vec![ShortCStr::from_vec(b"bodyA\nA".to_vec()).unwrap()]
+    );
+}
+
 /// The exact region a multi-line block's condition claims when the operator it
 /// reads is written **mid-line**: the stream starts after the condition line's
 /// newline, so the region is the next line's text up to the operator's
 /// delimiter line (the shape bash rejects with a syntax error — the accepted
 /// divergence README records, and `script.rs` bails on it too). This is the
-/// text that exercises `line_start_of`'s non-trivial window: the operators
-/// its window spans and the `skip` it computes shift together, so the
-/// extraction is invariant to the window's start (LESSONS).
+/// text that exercises `line_start_of`'s non-trivial window: on this **success
+/// path** the operators its window spans and the `skip` it computes shift
+/// together, so the extraction is invariant to the window's start (LESSONS;
+/// `condition_bodies_window_is_bounded_to_the_conditions_line` pins the
+/// path that is *not* invariant).
 #[test]
 fn condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition() {
     // `while cat <<Z; do` closes on line 1; `cat <<A` sits on line 2, and Z's
