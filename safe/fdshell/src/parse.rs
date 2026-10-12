@@ -57,8 +57,8 @@ use sys::ShortCStr;
 /// A token: its unquoted word (empty for a quoted empty word such as `""`),
 /// the byte range `(start, end)` of its raw text, whether it was fully
 /// quoted, and the per-byte quote mask (parallel to the word; `true` marks
-/// bytes that were inside double quotes and are protected from IFS word
-/// splitting).
+/// bytes that were inside quotes (double **or** single) and are protected from
+/// IFS word splitting).
 pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>);
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {

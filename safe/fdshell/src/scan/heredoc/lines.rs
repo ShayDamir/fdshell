@@ -1,12 +1,12 @@
 //! Word and line helpers for heredoc (`<<`) detection.
 
 use super::super::ScanState;
-use crate::bytes::SQUOTE;
+use crate::bytes::{QUOTE, SQUOTE};
 
 /// Strip one pair of surrounding quotes from the raw delimiter word and report
 /// whether the word was quoted (`<<"Q"` → `Q`, quoted; `<<'Q'` → `Q`, quoted).
 pub(crate) fn delimiter_word(raw: &[u8]) -> (&[u8], bool) {
-    for q in [b'"', SQUOTE] {
+    for q in [QUOTE, SQUOTE] {
         if raw.len() >= 2 && raw.first() == Some(&q) && raw.last() == Some(&q) {
             return (raw.get(1..raw.len() - 1).unwrap_or(b""), true);
         }

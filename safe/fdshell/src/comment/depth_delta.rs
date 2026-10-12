@@ -9,8 +9,17 @@ use alloc::vec::Vec;
 /// A keyword only counts when its word is unquoted: a `for` / `if` / … inside
 /// double quotes, a single-quoted span, backticks, or a `$( )` substitution is
 /// data, not a nested block opener. The quote / backtick / `$( )` handling
-/// mirrors `ScanState::advance` so the per-word state matches the surrounding
-/// scan. A run always starts at substitution depth 0 (separators only exist at
+/// follows `ScanState::advance`'s byte classification (a `'…'` span has no
+/// escape pair, a `"` inside a span is data) — with one deliberate difference:
+/// `advance` closes a span at its closing `'`, this scan never does. `bare` is
+/// false while the span is open, so the closing `'` never matches its own arm
+/// and the span stays open for the rest of the run.
+///
+/// That is safe: the run's tail is data (bash requires a closer keyword to sit
+/// in command-word position, after a separator), the state is run-local (the
+/// `Quotes` value is not returned to the caller) and it only ever suppresses
+/// keyword scoring for the words after the span.
+/// A run always starts at substitution depth 0 (separators only exist at
 /// depth 0), so only the caller's quote state is taken as a parameter.
 ///
 /// `line` and `base` (the run's offset in `line`) let a `wait` at the run's

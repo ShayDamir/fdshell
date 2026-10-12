@@ -11,7 +11,8 @@ use crate::error::resolve::ResolveError;
 /// A non-whitespace delimiter merges with an IFS-whitespace run that
 /// follows it, and a delimiter at the very end of the word produces no
 /// trailing empty field. An empty IFS disables splitting. An IFS char
-/// whose mask bit is `true` was inside double quotes and never delimits.
+/// whose mask bit is `true` was inside quotes (double **or** single) and never
+/// delimits.
 /// Each field comes back with the per-byte quote mask of the same span,
 /// so later pattern detection can skip quoted bytes.
 pub(crate) fn split_word(
