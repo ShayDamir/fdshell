@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use alloc::ffi::CString;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -9,6 +10,7 @@ use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
 use crate::glob::expand;
+use crate::glob::matches;
 use crate::options::{FAILGLOB, NOGLOB, NULLGLOB};
 use crate::state::ShellState;
 
@@ -238,4 +240,27 @@ fn escaped_star_word_is_not_a_pattern() {
         expand_to_bytes_masked(&cell, &w, &mask),
         vec![format!("{dir}/a*").into_bytes()]
     );
+}
+
+/// Strict's glob base: a relative pattern walks from the pinned dirfd, not
+/// from the process CWD (the unit-test cwd is the repo root, which has no
+/// `a1`), so the `%CWD` fd is what a strict redirect target is globbed in.
+#[test]
+fn relative_pattern_walks_from_the_base_fd() {
+    let cell = ForkCell::new(ShellState::new());
+    let dir = scratch();
+    let base = sys::openat2::open(
+        CString::new(dir.as_str()).unwrap().as_c_str(),
+        sys::fcntl::O_DIRECTORY,
+    )
+    .unwrap();
+    let names = matches(&word("a*"), &[], &cell, Some(&base))
+        .unwrap()
+        .iter()
+        .map(|s| s.as_bytes().unwrap().to_vec())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec![b"a1".to_vec(), b"a2".to_vec()]);
+    // No base: the same pattern is CWD-rooted and finds nothing here.
+    assert!(matches(&word("a*"), &[], &cell, None).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }
