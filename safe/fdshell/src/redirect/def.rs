@@ -19,6 +19,12 @@ impl RedirectDef {
         redirects.iter().map(|r| r.export_to).max().unwrap_or(0)
     }
 
+    /// `noclobber` applies to a plain write (`>`); `>|` is the bypass (POSIX
+    /// #2.2), so only the `Write` direction is gated (redirect/open.rs).
+    pub fn write_flag(&self) -> bool {
+        matches!(self.direction, RedirectDirection::Write)
+    }
+
     pub fn var(export_to: i32, name: impl Into<ShortCStr>) -> Self {
         RedirectDef {
             export_to,

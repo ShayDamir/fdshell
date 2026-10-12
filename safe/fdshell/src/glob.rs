@@ -13,6 +13,7 @@ pub(crate) use r#match::match_component;
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
+use sys::LocalFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -25,11 +26,13 @@ use crate::state::ShellState;
 /// A word with no unquoted pattern bytes — and the empty word — yields
 /// `[word]` without touching the filesystem; a pattern with no matches yields
 /// `[]`. `dotglob` is read from `cell` (block-scoped borrow) and threaded
-/// into the walk.
+/// into the walk, which roots a relative pattern at `base` (the strict-mode
+/// pinned `%CWD` fd) or at the process CWD when `base` is `None`.
 pub(crate) fn matches(
     word: &ShortCStr,
     mask: &[bool],
     cell: &ForkCell<ShellState>,
+    base: Option<&LocalFd>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     let bytes = word.as_bytes().change_context(ResolveError::Never)?;
     if !r#match::has_unquoted_pattern(bytes, mask) {
@@ -46,7 +49,7 @@ pub(crate) fn matches(
         // `set -f`: the pattern word passes through verbatim (no filesystem).
         return Ok(vec![word.clone()]);
     }
-    Ok(walk::walk(word, mask, dotglob)
+    Ok(walk::walk(word, mask, dotglob, base)
         .into_iter()
         .filter_map(|n| ShortCStr::from_vec(n).ok())
         .collect())
@@ -62,7 +65,9 @@ pub(crate) fn expand(
     mask: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
-    let names = matches(word, mask, cell)?;
+    // Word/command-name expansion stays CWD-rooted (bash semantics): the
+    // strict bans guard the root escapes (redirect targets, program paths).
+    let names = matches(word, mask, cell, None)?;
     if !names.is_empty() {
         return Ok(names);
     }

@@ -27,6 +27,12 @@ pub const RESOLVE_BENEATH: u64 = 8;
 pub const RESOLVE_IN_ROOT: u64 = 16;
 pub const RESOLVE_CACHED: u64 = 32;
 
+/// The `flags` field of an [`OpenHow`], for callers that must hand them to
+/// a non-openat2 entry point (`open` takes an `i32`, `OpenHow` a `u64`).
+pub fn flags_of(how: &OpenHow) -> i32 {
+    how.flags as i32
+}
+
 pub fn open<P: AsRef<CStr>>(pathname: P, flags: i32) -> Result<LocalFd, crate::SyscallError> {
     let pathname = pathname.as_ref();
     let mode = if flags & O_CREAT != 0 { 0o666 } else { 0 };

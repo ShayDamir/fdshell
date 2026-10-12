@@ -30,11 +30,15 @@ pub(super) fn lookup_or_pin(
             Ok(0)
         }
         None => {
-            let path = state
-                .hash_table
-                .get(name)
-                .cloned()
-                .or_else(|| crate::exec::resolve_path_str(name, &state.hash_table).ok());
+            let path = state.hash_table.get(name).cloned().or_else(|| {
+                crate::exec::resolve_path_str(
+                    name,
+                    &state.hash_table,
+                    state.strict(),
+                    state.cwd_fd(),
+                )
+                .ok()
+            });
             match path {
                 Some(p) => {
                     state.hash_table.insert(name.clone(), p.clone());

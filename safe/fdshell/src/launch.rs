@@ -69,7 +69,8 @@ fn prehash(cmd: &Command, cell: &ForkCell<ShellState>) {
         if child::dispatch::builtin_first(&cmd.name, &state) {
             return;
         }
-        crate::exec::resolve_path_str(&cmd.name, &state.hash_table).ok()
+        crate::exec::resolve_path_str(&cmd.name, &state.hash_table, state.strict(), state.cwd_fd())
+            .ok()
     };
     let Some(path) = path else {
         return;

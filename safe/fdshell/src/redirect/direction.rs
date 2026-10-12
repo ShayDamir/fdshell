@@ -1,4 +1,4 @@
-use sys::fcntl::{O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
+use sys::fcntl::{O_APPEND, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(Debug, PartialEq))]
@@ -23,6 +23,12 @@ impl RedirectDirection {
             Self::Append => O_WRONLY + O_CREAT + O_APPEND,
             Self::Rw => O_RDWR + O_CREAT,
         }
+    }
+
+    /// The `noclobber` exclusive-create flags (`O_EXCL` on a plain `>`).
+    pub fn noclobber_flags() -> i32 {
+        // Disjoint flags summed, as in `open_flags` (LESSONS.md).
+        O_WRONLY + O_CREAT + O_EXCL
     }
 }
 

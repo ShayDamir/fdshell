@@ -15,8 +15,13 @@ pub(super) fn handle_resolve(ctx: &Ctx) -> Result<i32, Report<builtins::error::B
         .ok_or(builtins::error::BuiltinError::InvalidArgument("arg"))?;
     let mut name_short = ShortCStr::new();
     name_short.push(*name_cstr);
-    let fd = crate::exec::resolve_path(&name_short, &ctx.state.hash_table)
-        .change_context(builtins::error::BuiltinError::InvalidArgument("path"))?;
+    let fd = crate::exec::resolve_path(
+        &name_short,
+        &ctx.state.hash_table,
+        ctx.state.strict(),
+        ctx.state.cwd_fd(),
+    )
+    .change_context(builtins::error::BuiltinError::InvalidArgument("path"))?;
     sock.send_fd(&fd, c"resolve")
         .change_context(builtins::error::BuiltinError::SendFdFailed)?;
     Ok(0)

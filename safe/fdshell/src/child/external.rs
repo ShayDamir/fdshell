@@ -24,7 +24,7 @@ pub(super) fn run_external(
         .borrow()
         .change_context(ChildProcessError::BorrowFailed)?;
     let name_exported = name.export();
-    let fd = exec::resolve_path(&name, &state.hash_table)
+    let fd = exec::resolve_path(&name, &state.hash_table, state.strict(), state.cwd_fd())
         .change_context(ChildProcessError::ResolveFailed(cmd.name.clone()))?;
     let name_cstr = name_exported.as_ref();
     let mut full_argv: Vec<&CStr> = alloc::vec![name_cstr];

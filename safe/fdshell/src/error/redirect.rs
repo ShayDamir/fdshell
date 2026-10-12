@@ -23,6 +23,9 @@ pub(crate) enum OpenRedirectError {
     Noclobber { name: sys::ShortCStr },
     /// ambiguous redirect: {name}
     AmbiguousRedirect { name: sys::ShortCStr },
+    /// strict mode forbids absolute redirect targets (use a path relative to
+    /// the shell's working directory)
+    StrictAbsoluteTarget { name: sys::ShortCStr },
     /// failed to glob the redirect target
     Glob,
     /// failed to duplicate fd {n}; the descriptor table may be full

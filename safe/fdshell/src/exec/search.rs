@@ -1,57 +1,90 @@
+mod path;
+
 use error_stack::{Report, ResultExt, bail};
 use hashbrown::HashMap;
 use sys::fcntl::O_PATH;
-use sys::{LocalFd, ShortCStr};
+use sys::openat2::OpenHow;
+use sys::{AtFd, LocalFd, ShortCStr};
 
 use crate::error::child_process::ChildProcessError;
 
-fn search_path_str(bin: &ShortCStr) -> Result<ShortCStr, Report<ChildProcessError>> {
-    // An empty name resolves to no file: `dir/` is openable, so without this
-    // the PATH search would "find" a directory and fail later in execveat.
-    if bin.is_empty() {
-        bail!(ChildProcessError::NotFound(bin.clone()));
+use path::search_path_str;
+
+/// Resolve `path` (O_PATH), banning an absolute pathname while strict is on.
+pub(super) fn open_checked(
+    pathname: &ShortCStr,
+    strict: bool,
+    cwd: Option<&LocalFd>,
+) -> Result<LocalFd, Report<ChildProcessError>> {
+    if strict && pathname.starts_with(b"/") {
+        bail!(ChildProcessError::StrictPath(pathname.clone()));
     }
-    let path_str = sys::env::getenv(c"PATH").unwrap_or(c"/usr/local/bin:/usr/bin:/bin".into());
-    let slash: ShortCStr = c"/".into();
-    for dir in path_str.split(b':') {
-        if dir.is_empty() {
-            continue;
-        }
-        let pathname = ShortCStr::concat(&[&dir, &slash, bin]);
-        if sys::openat2::open(pathname.export(), O_PATH).is_ok() {
-            return Ok(pathname);
-        }
-    }
-    bail!(ChildProcessError::NotFound(bin.clone()))
+    sys::openat2::openat2(
+        base(strict, cwd),
+        pathname.export(),
+        &OpenHow::new(O_PATH as u64, 0),
+    )
+    .change_context_lazy(|| ChildProcessError::NotFound(pathname.clone()))
 }
 
-fn open_path_str(pathname: &ShortCStr) -> Result<LocalFd, Report<ChildProcessError>> {
-    sys::openat2::open(pathname.export(), O_PATH)
-        .change_context_lazy(|| ChildProcessError::NotFound(pathname.clone()))
+/// The PATH-search base: the shell's pinned `%CWD` fd under strict (capability
+/// base, follows `cd`), the process CWD otherwise (non-strict is unchanged).
+fn base(strict: bool, cwd: Option<&LocalFd>) -> AtFd<'_> {
+    if strict && let Some(fd) = cwd {
+        return AtFd::from(fd);
+    }
+    AtFd::cwd()
+}
+
+/// The pinned table entry, if strict allows it and it opens. A pin that no
+/// longer exists returns `None` and the caller falls back to the PATH search
+/// (self-heal).
+fn pinned_path(
+    bin: &ShortCStr,
+    table: &HashMap<ShortCStr, ShortCStr>,
+    strict: bool,
+    cwd: Option<&LocalFd>,
+) -> Result<Option<ShortCStr>, Report<ChildProcessError>> {
+    let Some(pinned) = table.get(bin).cloned() else {
+        return Ok(None);
+    };
+    if strict && pinned.starts_with(b"/") {
+        bail!(ChildProcessError::StrictPath(pinned));
+    }
+    Ok(open_checked(&pinned, strict, cwd)
+        .is_ok()
+        .then(|| pinned.clone()))
 }
 
 /// The path `bin` would exec, honoring the hash table: a bare name with a
 /// table entry opens the pinned path; a pin that no longer exists falls back
 /// to the PATH search (self-heal). Names containing `/` bypass the table.
+/// Strict bans an absolute program word, an absolute pinned path and an
+/// absolute PATH entry; relative lookups resolve against the `cwd` base fd.
 pub fn resolve_path_str(
     bin: &ShortCStr,
     table: &HashMap<ShortCStr, ShortCStr>,
+    strict: bool,
+    cwd: Option<&LocalFd>,
 ) -> Result<ShortCStr, Report<ChildProcessError>> {
     if bin.contains(b'/') {
-        open_path_str(bin)?;
+        open_checked(bin, strict, cwd)?;
         return Ok(bin.clone());
     }
-    if let Some(pinned) = table.get(bin)
-        && sys::openat2::open(pinned.export(), O_PATH).is_ok()
-    {
-        return Ok(pinned.clone());
+    if let Some(pinned) = pinned_path(bin, table, strict, cwd)? {
+        return Ok(pinned);
     }
-    search_path_str(bin)
+    search_path_str(bin, strict, cwd)
 }
 
 pub fn resolve_path(
     bin: &ShortCStr,
     table: &HashMap<ShortCStr, ShortCStr>,
+    strict: bool,
+    cwd: Option<&LocalFd>,
 ) -> Result<LocalFd, Report<ChildProcessError>> {
-    open_path_str(&resolve_path_str(bin, table)?)
+    open_checked(&resolve_path_str(bin, table, strict, cwd)?, strict, cwd)
 }
+
+#[cfg(test)]
+mod tests;

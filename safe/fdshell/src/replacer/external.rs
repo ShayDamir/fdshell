@@ -53,7 +53,7 @@ pub(super) fn run(
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        exec::resolve_path(&binary, &state.hash_table)
+        exec::resolve_path(&binary, &state.hash_table, state.strict(), state.cwd_fd())
             .change_context(ChildProcessError::ExecFailed)?
     };
     let binary_exported = binary.export();

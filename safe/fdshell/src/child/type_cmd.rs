@@ -59,7 +59,9 @@ fn describe(name: &CStr, state: &ShellState) -> Result<bool, Report<BuiltinError
     if state.fds.contains_key(&key) || state.arrays.contains_key(&key) {
         return emit(&[name.to_bytes(), b" is an fd variable"]).map(|_| true);
     }
-    if let Ok(path) = crate::exec::resolve_path_str(&key, &state.hash_table) {
+    if let Ok(path) =
+        crate::exec::resolve_path_str(&key, &state.hash_table, state.strict(), state.cwd_fd())
+    {
         let pb = path.as_bytes().change_context(BuiltinError::Never)?;
         return emit(&[name.to_bytes(), b" is ", pb]).map(|_| true);
     }

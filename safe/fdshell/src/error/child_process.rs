@@ -19,6 +19,9 @@ pub(crate) enum ChildProcessError {
     ResolveFailed(ShortCStr),
     /// "{0}" not found
     NotFound(ShortCStr),
+    /// strict mode forbids absolute program paths: run a bare name found by a
+    /// relative `PATH`, or a path relative to the shell's working directory
+    StrictPath(ShortCStr),
     /// execveat failed
     ExecFailed,
     /// builtin execution failed
@@ -44,6 +47,7 @@ impl ChildProcessError {
             | Self::SubstituteFailed
             | Self::BorrowFailed
             | Self::ResolveFailed(_)
+            | Self::StrictPath(_)
             | Self::ExecFailed
             | Self::BuiltinExecutionFailed
             | Self::MissingArg

@@ -100,7 +100,9 @@ impl Default for ShellState {
 }
 
 mod arrays;
+mod cwd;
 pub(crate) mod frames;
+mod options;
 mod setters;
 
 #[cfg(test)]

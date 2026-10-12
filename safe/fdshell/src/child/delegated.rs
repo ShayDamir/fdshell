@@ -23,19 +23,15 @@ pub(super) fn handle_pipe(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     builtins::pipe::pipe_exec(cfg.flags, sock).map(|()| 0)
 }
 
-fn strict(ctx: &Ctx) -> bool {
-    ctx.state.options & crate::options::STRICT != 0
-}
-
 pub(super) fn handle_mkdirat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let sock = sock(ctx.state)?;
-    let cfg = builtins::mkdirat::parse::mkdirat_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::mkdirat::parse::mkdirat_parse(ctx.refs, ctx.state.strict())?;
     builtins::mkdirat::mkdirat_exec(&cfg, sock).map(|()| 0)
 }
 
 pub(super) fn handle_mkfifoat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let sock = sock(ctx.state)?;
-    let cfg = builtins::mkfifoat::parse::mkfifoat_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::mkfifoat::parse::mkfifoat_parse(ctx.refs, ctx.state.strict())?;
     builtins::mkfifoat::mkfifoat_exec(&cfg, sock).map(|()| 0)
 }
 
@@ -47,7 +43,7 @@ pub(super) fn handle_memfd(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
 
 pub(super) fn handle_openat2(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let sock = sock(ctx.state)?;
-    let cfg = builtins::openat2::parse::openat2_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::openat2::parse::openat2_parse(ctx.refs, ctx.state.strict())?;
     builtins::openat2::openat2_exec(&cfg, sock).map(|()| 0)
 }
 
@@ -64,22 +60,22 @@ pub(super) fn handle_eventfd(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
 }
 
 pub(super) fn handle_renameat2(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cfg = builtins::renameat2::parse::renameat2_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::renameat2::parse::renameat2_parse(ctx.refs, ctx.state.strict())?;
     builtins::renameat2::renameat2_exec(&cfg).map(|()| 0)
 }
 
 pub(super) fn handle_unlinkat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cfg = builtins::unlinkat::parse::unlinkat_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::unlinkat::parse::unlinkat_parse(ctx.refs, ctx.state.strict())?;
     builtins::unlinkat::unlinkat_exec(&cfg).map(|()| 0)
 }
 
 pub(super) fn handle_symlinkat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cfg = builtins::symlinkat::parse::symlinkat_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::symlinkat::parse::symlinkat_parse(ctx.refs, ctx.state.strict())?;
     builtins::symlinkat::symlinkat_exec(&cfg).map(|()| 0)
 }
 
 pub(super) fn handle_utimensat(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
-    let cfg = builtins::utimensat::parse::utimensat_parse(ctx.refs, strict(ctx))?;
+    let cfg = builtins::utimensat::parse::utimensat_parse(ctx.refs, ctx.state.strict())?;
     builtins::utimensat::utimensat_exec(&cfg).map(|()| 0)
 }
 

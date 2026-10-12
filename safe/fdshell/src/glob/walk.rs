@@ -8,7 +8,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use sys::fcntl::O_DIRECTORY;
 use sys::openat2::{OpenHow, openat2};
-use sys::{AtFd, ShortCStr};
+use sys::{AtFd, LocalFd, ShortCStr};
 
 use super::r#match as m;
 
@@ -17,7 +17,14 @@ use super::r#match as m;
 /// silently (bash behavior: no error, no stderr). `dotglob` lets unquoted
 /// pattern bytes match a name's leading `.`; `.`/`..` are never listed, for
 /// any pattern (bash: even `dotglob; echo .*` lists only real dotfiles).
-pub(super) fn walk(word: &ShortCStr, mask: &[bool], dotglob: bool) -> Vec<Vec<u8>> {
+/// A relative pattern is rooted at `base` — the strict mode's pinned `%CWD`
+/// fd — or at the process CWD when `base` is `None`.
+pub(super) fn walk(
+    word: &ShortCStr,
+    mask: &[bool],
+    dotglob: bool,
+    base: Option<&LocalFd>,
+) -> Vec<Vec<u8>> {
     let Ok(bytes) = word.as_bytes() else {
         return Vec::new();
     };
@@ -25,6 +32,8 @@ pub(super) fn walk(word: &ShortCStr, mask: &[bool], dotglob: bool) -> Vec<Vec<u8
     let dir = OpenHow::new(O_DIRECTORY as u64, 0);
     let root = if parts.absolute {
         openat2(AtFd::cwd(), c"/", &dir)
+    } else if let Some(fd) = base {
+        openat2(AtFd::from(fd), c".", &dir)
     } else {
         openat2(AtFd::cwd(), c".", &dir)
     };
