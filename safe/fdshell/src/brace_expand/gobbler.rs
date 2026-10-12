@@ -4,7 +4,7 @@
 
 mod rules;
 
-use crate::bytes::QUOTE;
+use crate::bytes::{QUOTE, SQUOTE};
 
 /// The separator class of a found `}` group.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,14 +24,27 @@ pub(super) fn gobble(text: &[u8], from: usize, satisfy: u8) -> (usize, bool, Opt
     let mut btype: Option<GroupType> = None;
     let mut commas = usize::from(satisfy != b'}');
     let mut in_quote = false;
+    let mut in_single = false;
     let mut in_backtick = false;
     while let Some(&c) = text.get(i) {
-        if in_quote || in_backtick {
-            let closer = if in_quote { QUOTE } else { b'`' };
-            if c == b'\\' {
+        if in_quote || in_single || in_backtick {
+            // A span's bytes are data. Inside a `'…'` span there is no escape
+            // pair (POSIX §2.2.3 — a backslash is literal there), so only the
+            // closing quote ends it (task #141).
+            let closer = if in_single {
+                SQUOTE
+            } else if in_quote {
+                QUOTE
+            } else {
+                b'`'
+            };
+            let escape = c == b'\\' && !in_single;
+            if escape {
                 i += 2;
             } else if c == closer {
-                if in_quote {
+                if in_single {
+                    in_single = false;
+                } else if in_quote {
                     in_quote = false;
                 } else {
                     in_backtick = false;
@@ -44,6 +57,7 @@ pub(super) fn gobble(text: &[u8], from: usize, satisfy: u8) -> (usize, bool, Opt
         }
         match c {
             QUOTE => in_quote = true,
+            SQUOTE => in_single = true,
             b'`' => in_backtick = true,
             // An unquoted escape pair is skipped whole: an escaped `{`, `}` or
             // `,` never opens a group or separates one.

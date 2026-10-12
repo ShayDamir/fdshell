@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
+use crate::scan::Quotes;
 use alloc::vec;
 
 /// A `time [-p]` prefix keeps a keyword block one segment, spanning the prefix
@@ -388,18 +389,18 @@ fn scan_kw_len_arithmetic_with_whitespace() {
 #[test]
 fn scan_block_detects_fi_after_comment_outside_quotes() {
     // Mutant MISSED 4: delete ! in scan_block line 31 affects quote toggling
-    let mut in_quote = false;
+    let mut quotes = Quotes::new();
     let mut start = 2usize; // start after "if"
     let depth = 1u32;
     let (_end, closed) = super::super::comment::scan_block(
         b"if \"hello\" # comment\nfi",
         2,
-        &mut in_quote,
+        &mut quotes,
         &mut start,
         depth,
     );
     assert!(closed); // fi IS detected after comment, block should be closed
-    assert!(!in_quote); // should end with quote state = false
+    assert!(!quotes.double); // should end with quote state = false
 }
 
 #[test]
@@ -444,13 +445,13 @@ fn scan_statement_semicolon_inside_dollar_paren_with_newline() {
 
 #[test]
 fn scan_block_semicolon_inside_dollar_paren() {
-    let mut in_quote = false;
+    let mut quotes = Quotes::new();
     let mut start = 3usize;
     let depth = 1u32;
     let (end, closed) = super::super::comment::scan_block(
         b"if $(a; b); then x; fi",
         3,
-        &mut in_quote,
+        &mut quotes,
         &mut start,
         depth,
     );
@@ -470,13 +471,13 @@ fn scan_statement_plain_paren_inside_dollar_paren() {
 
 #[test]
 fn scan_block_plain_paren_inside_dollar_paren() {
-    let mut in_quote = false;
+    let mut quotes = Quotes::new();
     let mut start = 3usize;
     let depth = 1u32;
     let (end, closed) = super::super::comment::scan_block(
         b"if $(a (b; c) d); then x; fi",
         3,
-        &mut in_quote,
+        &mut quotes,
         &mut start,
         depth,
     );

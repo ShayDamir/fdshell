@@ -1,13 +1,13 @@
 use crate::keywords::function_def_name;
-use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
+use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
 /// If `part` opens a `name() { … }` block, return the exclusive end position
-/// and whether the block was closed. `in_quote` is the quote state at `start`.
+/// and whether the block was closed. `quotes` is the quote state at `start`.
 pub(crate) fn scan_function_block(
     line: &[u8],
     part: &[u8],
     start: usize,
-    in_quote: bool,
+    quotes: Quotes,
 ) -> Option<(usize, bool)> {
     function_def_name(part)?;
     let brace = line
@@ -15,29 +15,25 @@ pub(crate) fn scan_function_block(
         .and_then(|s| s.iter().position(|&b| b == b'{'))
         .map(|p| start + p)
         .unwrap_or(line.len());
-    let mut quote_state = in_quote;
-    let (close_pos, closed) = scan_brace_block(line, brace + 1, &mut quote_state);
+    let mut quotes = quotes;
+    let (close_pos, closed) = scan_brace_block(line, brace + 1, &mut quotes);
     let end = line.len().min(close_pos + 1);
     Some((end, closed))
 }
 
 /// Scan forward from `i` (just after an opening `{`) to the matching `}`,
-/// tracking quotes, backticks, `$( )` and nested braces. Updates `in_quote`.
+/// tracking quotes, backticks, `$( )` and nested braces. Updates `quotes`.
 /// Returns `(closing_brace_position, block_was_closed)`.
 ///
 /// Two callers share it: the `name() { … }` function body above, and the
 /// `{ …; }` group command in `segment/group.rs`.
-pub(crate) fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -> (usize, bool) {
-    let mut state = ScanState {
-        in_quote: *in_quote,
-        in_backtick: false,
-        paren_depth: 0,
-        word_active: false,
-    };
+pub(crate) fn scan_brace_block(line: &[u8], mut i: usize, quotes: &mut Quotes) -> (usize, bool) {
+    let mut state = quotes.scan_state();
     let mut depth = 1;
     let mut run_start = i;
     while let Some(&b) = line.get(i) {
-        let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
+        let bare =
+            !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0;
         if bare && b == b'{' {
             depth += 1;
             i += 1;
@@ -67,7 +63,7 @@ pub(crate) fn scan_brace_block(line: &[u8], mut i: usize, in_quote: &mut bool) -
         }
         run_start = i;
     }
-    *in_quote = state.in_quote;
+    *quotes = state.quotes();
     (i, depth == 0)
 }
 

@@ -28,7 +28,7 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
     let block_rule = heredoc::operator_count(line, i, line.len()) == 0;
     let mut block_depth: i32 = 0;
     while let Some(&b) = line.get(i) {
-        if !state.in_quote && state.paren_depth == 0 {
+        if !state.in_quote && !state.in_single && state.paren_depth == 0 {
             if group_depth == 0
                 && block_depth == 0
                 && ((b == b'&' && line.get(i + 1) == Some(&b'&'))

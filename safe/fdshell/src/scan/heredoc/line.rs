@@ -15,7 +15,8 @@ pub(crate) fn line_end_after(line: &[u8], from: usize) -> usize {
     let mut state = ScanState::new();
     let mut i = from;
     while i < line.len() {
-        let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
+        let bare =
+            !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0;
         if bare && line.get(i) == Some(&b'\n') {
             return i + 1;
         }

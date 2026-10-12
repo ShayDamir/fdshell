@@ -57,9 +57,9 @@ pub(super) fn keyword_block<'a>(
         5
     };
     let after_kw = start + leading_ws + prefix + kw_len;
-    let mut quote_state = state.in_quote;
+    let mut quotes = state.quotes();
     let mut block_start_pos = after_kw;
-    let (_end_pos, closed) = scan_block(line, after_kw, &mut quote_state, &mut block_start_pos, 1);
+    let (_end_pos, closed) = scan_block(line, after_kw, &mut quotes, &mut block_start_pos, 1);
     // The span's exclusive end: the closing keyword's separator (`;`/`\n`)
     // at `block_start_pos - 1` is excluded, or the line end when the closing
     // keyword is the last thing on the input (no separator to step past).

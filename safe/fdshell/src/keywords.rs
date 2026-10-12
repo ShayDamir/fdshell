@@ -5,7 +5,10 @@ fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
 }
 
 mod function;
+mod quoted;
 mod wait;
+
+use quoted::quoted_word;
 
 pub(crate) use function::{function_def_name, name_len};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
@@ -22,11 +25,17 @@ use crate::segment::group::{closes, opens};
 /// `{`/`}` are the group command's delimiters and use the predicates the
 /// segment scanner uses for its group opener, so the depth rule and the
 /// segment opener cannot drift.
+/// A word that contains quote bytes scores `None`: a quoted keyword word is
+/// data ([`quoted_word`]), as bash requires — the same rule the segment
+/// scanner's `frag_quoted` test applies to a word run.
 /// A `time [-p]` word is a *prefix*, not a keyword of its own: it opens no
 /// block, so it never enters the depth table. A block keyword behind it
 /// (`time while … done`) is scored on the rest of the word, which keeps the
 /// whole statement one segment for the `time` parse hook.
 pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
+    if quoted_word(line, word_end) {
+        return None;
+    }
     if let Some(p) = time_prefix_len(word) {
         return keyword_delta(word.get(p..).unwrap_or(b""), line, word_end);
     }

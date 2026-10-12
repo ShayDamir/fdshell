@@ -1,37 +1,35 @@
 use alloc::vec::Vec;
 
+use nest::Nest;
+
+mod nest;
+
 /// Scan the body of a parenthesized expression from a byte stream positioned
 /// just after an opening `(`, tracking quote state: an escape pair `\X` shields
 /// the next byte (inside double quotes too), so an escaped `)`, `(`, `"` never
 /// counts, and the pair is kept in the body for the recursive parse. Quotes and
-/// parens inside double quotes are data. `depth` counts the parens the caller
-/// already consumed, so the body ends at the first `)` bringing the count back
-/// to `depth`. Returns the body without that final `)`, or `None` if the input
-/// ends first.
+/// parens inside double quotes are data. A `'…'` span is opaque (task #141):
+/// its bytes never count and its backslash shields nothing. `depth` counts the
+/// parens the caller already consumed, so the body ends at the first `)`
+/// bringing the count back to `depth`. Returns the body without that final `)`,
+/// or `None` if the input ends first.
 pub(crate) fn scan_paren_body(
     bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     depth: u32,
 ) -> Option<Vec<u8>> {
     let mut body = Vec::new();
-    let mut d = depth;
-    let mut in_quotes = false;
+    let mut nest = Nest::new(depth);
     while let Some(c) = bytes.next() {
-        if c == b'\\' {
+        if c == b'\\' && !nest.opaque() {
             let escaped = bytes.next()?;
             body.push(b'\\');
             body.push(escaped);
             continue;
         }
-        if c == b')' && !in_quotes && d == depth {
+        if nest.closes(c) {
             return Some(body);
         }
-        body.push(c);
-        match c {
-            b'"' => in_quotes = !in_quotes,
-            b'(' if !in_quotes => d += 1,
-            b')' if !in_quotes => d -= 1,
-            _ => {}
-        }
+        nest.consume(&mut body, c);
     }
     None
 }
@@ -51,12 +49,11 @@ pub(crate) fn scan_dollar_paren_body(
 /// the input ends first.
 pub(crate) fn scan_at(body: &[u8], start: usize, depth: u32) -> Option<(Vec<u8>, usize)> {
     let mut out = Vec::new();
-    let mut d = depth;
-    let mut in_quotes = false;
+    let mut nest = Nest::new(depth);
     let mut i = start;
     while let Some(&c) = body.get(i) {
         i += 1;
-        if c == b'\\' {
+        if c == b'\\' && !nest.opaque() {
             // The escape pair is kept in the body (the recursive parse sees
             // it), so an escaped `)`/`(`/`"` never counts.
             let escaped = *body.get(i)?;
@@ -65,16 +62,10 @@ pub(crate) fn scan_at(body: &[u8], start: usize, depth: u32) -> Option<(Vec<u8>,
             out.push(escaped);
             continue;
         }
-        if c == b')' && !in_quotes && d == depth {
+        if nest.closes(c) {
             return Some((out, i));
         }
-        out.push(c);
-        match c {
-            b'"' => in_quotes = !in_quotes,
-            b'(' if !in_quotes => d += 1,
-            b')' if !in_quotes => d -= 1,
-            _ => {}
-        }
+        nest.consume(&mut out, c);
     }
     None
 }

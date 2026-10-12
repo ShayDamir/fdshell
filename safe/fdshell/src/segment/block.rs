@@ -51,7 +51,7 @@ pub(super) fn open_block<'a>(
     pre_resume: usize,
     line_start: usize,
 ) -> (Segment<'a>, usize, usize, usize) {
-    if let Some((end, closed)) = scan_function_block(line, part, start, state.in_quote) {
+    if let Some((end, closed)) = scan_function_block(line, part, start, state.quotes()) {
         (
             Segment::Block {
                 block_start: start,

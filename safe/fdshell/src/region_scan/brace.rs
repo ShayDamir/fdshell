@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use crate::bytes::QUOTE;
+use crate::bytes::{QUOTE, SQUOTE};
 
 /// Scan a `${ … }` region in `line`; `start` is the index of the `$`. Returns
 /// the body text (the `${` prefix excluded, quotes dropped), the number of raw
@@ -13,25 +13,28 @@ use crate::bytes::QUOTE;
 /// data and only the `}` that closes both depths ends the region. A `"`
 /// toggles the quote state and is dropped from the body: a quote is a marker,
 /// not content, because the substitution pass takes the braced content
-/// verbatim. A `"` left unpaired at the end of the line belongs to the
+/// verbatim. A `'…'` span is one opaque literal (task #141): its `}`/`)`/`"`
+/// are data, its backslash shields nothing, and its quote bytes are dropped
+/// like a `"`'s. A quote left unpaired at the end of the line belongs to the
 /// *enclosing* region: the scan stops before it, so the enclosing quote can
 /// close and the unterminated `${ … }` stays literal text.
 pub(crate) fn scan_brace(line: &[u8], start: usize) -> (Vec<u8>, usize, bool) {
     let mut body = Vec::new();
     let mut depth: u32 = 0;
     let mut in_quotes = false;
+    let mut in_single = false;
     let mut open_quote: Option<(usize, usize)> = None;
     let mut i = start.saturating_add(2); // just past `${`
     while let Some(&c) = line.get(i) {
         i += 1;
-        if c == b'\\' {
+        if c == b'\\' && !in_single {
             let Some(&escaped) = line.get(i) else { break };
             i += 1;
             body.push(b'\\');
             body.push(escaped);
             continue;
         }
-        if c == QUOTE {
+        if c == QUOTE && !in_single {
             in_quotes = !in_quotes;
             open_quote = if in_quotes {
                 Some((i - 1 - start, body.len()))
@@ -40,7 +43,16 @@ pub(crate) fn scan_brace(line: &[u8], start: usize) -> (Vec<u8>, usize, bool) {
             };
             continue;
         }
-        if in_quotes {
+        if c == SQUOTE && !in_quotes {
+            in_single = !in_single;
+            open_quote = if in_single {
+                Some((i - 1 - start, body.len()))
+            } else {
+                None
+            };
+            continue;
+        }
+        if in_quotes || in_single {
             body.push(c);
             continue;
         }

@@ -1,3 +1,4 @@
+use crate::bytes::{QUOTE, SQUOTE};
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -18,7 +19,7 @@ const RESERVED: &[&[u8]] = &[
     b"time",
 ];
 
-/// Expand one command position, skipping fully quoted, double-quoted and
+/// Expand one command position, skipping fully quoted, quoted-word and
 /// reserved words.
 pub(super) fn expand_position(
     line: &[u8],
@@ -28,7 +29,11 @@ pub(super) fn expand_position(
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
     let (word0, s0, e0, fq) = position;
-    let quoted = line.get(*s0..*e0).is_some_and(|r| r.contains(&b'"'));
+    // A word that contains quote bytes is not an alias target: the quotes make
+    // it data (bash), and `fq` only covers a word that *starts* quoted.
+    let quoted = line
+        .get(*s0..*e0)
+        .is_some_and(|r| r.contains(&QUOTE) || r.contains(&SQUOTE));
     if *fq || quoted || RESERVED.iter().any(|r| word0.eq_bytes(r)) {
         return Ok(());
     }

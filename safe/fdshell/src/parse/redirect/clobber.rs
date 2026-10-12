@@ -5,6 +5,7 @@
 //! same predicate over the word's raw bytes + quote mask, so their `<<` counts
 //! cannot diverge (LESSONS: byte-level and token-level rules must agree).
 
+use crate::bytes::SQUOTE;
 use alloc::vec::Vec;
 
 /// The shared rule: the word's last byte is `>`, unquoted and not the second
@@ -12,8 +13,8 @@ use alloc::vec::Vec;
 /// `a>`, `2>|`, `&>` and the bare `>` are `>`-terminated, while `>>`, `>&`,
 /// `<>`, `a>b` and `x\>` are not. A `%`-leading word (the capture operator)
 /// keeps its own absorption, where earlier operator bytes do not disqualify it.
-/// `quoted[i]` is true when byte `i` is inside double quotes, so a quoted `>`
-/// never terminates an operator word.
+/// `quoted[i]` is true when byte `i` is inside quotes (double or single), so a
+/// quoted `>` never terminates an operator word.
 pub(crate) fn clobber_word(bytes: &[u8], quoted: &[bool]) -> bool {
     let last = bytes.len().saturating_sub(1);
     if bytes.get(last) != Some(&b'>') || quoted.get(last) == Some(&true) {
@@ -37,24 +38,30 @@ pub(crate) fn clobber_word(bytes: &[u8], quoted: &[bool]) -> bool {
     i == last
 }
 
-/// Per-byte double-quote mask of `line[0..e]`: `true` for a byte inside `"…"`.
-/// The quote delimiters and the bytes of an unquoted escape pair are `false`,
-/// and the mask is parallel to the bytes. It is scanned from the line start, so
-/// a word's mask slice knows the quote state at its first byte (a word that
-/// begins with the closing `"` of a quoted span is the case that a word-local
-/// scan gets wrong).
+/// Per-byte quote mask of `line[0..e]`: `true` for a byte inside `"…"` or a
+/// `'…'` span. The quote delimiters and the bytes of an unquoted escape pair
+/// are `false`, and the mask is parallel to the bytes. It is scanned from the
+/// line start, so a word's mask slice knows the quote state at its first byte
+/// (a word that begins with the closing `"` of a quoted span is the case that
+/// a word-local scan gets wrong).
 pub(crate) fn quote_mask(line: &[u8], e: usize) -> Vec<bool> {
     let mut mask = Vec::new();
     let mut in_quote = false;
+    let mut in_single = false;
     let mut i = 0;
     while i < e {
-        mask.push(in_quote);
+        mask.push(in_quote || in_single);
         match line.get(i) {
-            Some(b'"') => {
+            Some(b'"') if !in_single => {
                 in_quote = !in_quote;
                 i += 1;
             }
-            Some(b'\\') if !in_quote => {
+            Some(&SQUOTE) if !in_quote => {
+                in_single = !in_single;
+                i += 1;
+            }
+            Some(b'\\') if !in_quote && !in_single => {
+                // The escape pair is two unquoted bytes.
                 mask.push(false);
                 i += 2;
             }

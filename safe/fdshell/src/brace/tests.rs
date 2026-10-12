@@ -1,8 +1,10 @@
 #![allow(clippy::unwrap_used)]
 
+use crate::scan::Quotes;
+
 /// Brace-scan a `name() { … }` line and return its exclusive end + closed flag.
 fn scan(line: &[u8]) -> Option<(usize, bool)> {
-    crate::brace::scan_function_block(line, line, 0, false)
+    crate::brace::scan_function_block(line, line, 0, Quotes::new())
 }
 
 #[test]

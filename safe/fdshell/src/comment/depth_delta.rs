@@ -1,14 +1,16 @@
 //! Block-depth deltas of the keywords in a word run.
 
+use crate::bytes::SQUOTE;
+use crate::scan::Quotes;
 use alloc::vec::Vec;
 
 /// Sum the block-depth deltas of the keywords in a space-separated word run.
 ///
 /// A keyword only counts when its word is unquoted: a `for` / `if` / … inside
-/// double quotes, backticks, or a `$( )` substitution is data, not a nested
-/// block opener. The quote / backtick / `$( )` handling mirrors
-/// `ScanState::advance` so the per-word state matches the surrounding scan.
-/// A run always starts at substitution depth 0 (separators only exist at
+/// double quotes, a single-quoted span, backticks, or a `$( )` substitution is
+/// data, not a nested block opener. The quote / backtick / `$( )` handling
+/// mirrors `ScanState::advance` so the per-word state matches the surrounding
+/// scan. A run always starts at substitution depth 0 (separators only exist at
 /// depth 0), so only the caller's quote state is taken as a parameter.
 ///
 /// `line` and `base` (the run's offset in `line`) let a `wait` at the run's
@@ -18,24 +20,29 @@ pub(crate) fn depth_delta(
     line: &[u8],
     raw: &[u8],
     base: usize,
-    in_quote: bool,
+    quotes: Quotes,
     in_backtick: bool,
 ) -> i32 {
     let mut sum = 0;
     let mut frag = Vec::new();
-    let mut in_quote = in_quote;
+    let mut quotes = quotes;
     let mut in_backtick = in_backtick;
     let mut depth: u32 = 0;
     // A run starts quoted only when the caller is mid-quote/mid-backtick;
     // the flag is sticky until a split (splits only happen unquoted, so a
     // quoted word is one fragment and can never be a bare keyword).
-    let mut frag_quoted = in_quote || in_backtick;
+    let mut frag_quoted = quotes.double || quotes.single || in_backtick;
     let mut i = 0usize;
     while let Some(&b) = raw.get(i) {
-        let bare = !in_quote && !in_backtick;
+        let bare = !quotes.double && !quotes.single && !in_backtick;
         let mut step = 1usize;
-        if b == b'"' {
-            in_quote = !in_quote;
+        if b == SQUOTE && bare {
+            // A `'…'` span is one literal word: its bytes are data and its
+            // spaces are no split, so a keyword written in it never scores.
+            quotes.single = !quotes.single;
+            frag_quoted = true;
+        } else if b == crate::bytes::QUOTE {
+            quotes.double = !quotes.double;
         } else if bare && b == b'$' && raw.get(i + 1) == Some(&b'(') {
             depth = depth.saturating_add(1);
             step = 2;

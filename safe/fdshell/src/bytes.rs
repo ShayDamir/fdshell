@@ -5,3 +5,7 @@ pub(crate) mod fold;
 /// The `"` byte, shared by the quote-state scanners (see LESSONS.md on why
 /// this is a constant rather than a `b'"'` literal at each use site).
 pub(crate) const QUOTE: u8 = b'"';
+
+/// The `'` byte, shared by the single-quote-state scanners. A named constant
+/// for the same tokei reason as [`QUOTE`].
+pub(crate) const SQUOTE: u8 = b'\'';

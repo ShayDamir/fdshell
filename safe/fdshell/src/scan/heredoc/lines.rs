@@ -1,15 +1,17 @@
 //! Word and line helpers for heredoc (`<<`) detection.
 
 use super::super::ScanState;
+use crate::bytes::SQUOTE;
 
-/// Strip one pair of surrounding double quotes from the raw delimiter word
-/// and report whether the word was quoted (`<<"Q"` → `Q`, quoted).
+/// Strip one pair of surrounding quotes from the raw delimiter word and report
+/// whether the word was quoted (`<<"Q"` → `Q`, quoted; `<<'Q'` → `Q`, quoted).
 pub(crate) fn delimiter_word(raw: &[u8]) -> (&[u8], bool) {
-    if raw.len() >= 2 && raw.first() == Some(&b'"') && raw.last() == Some(&b'"') {
-        (raw.get(1..raw.len() - 1).unwrap_or(b""), true)
-    } else {
-        (raw, false)
+    for q in [b'"', SQUOTE] {
+        if raw.len() >= 2 && raw.first() == Some(&q) && raw.last() == Some(&q) {
+            return (raw.get(1..raw.len() - 1).unwrap_or(b""), true);
+        }
     }
+    (raw, false)
 }
 
 /// A byte that ends a token word for the tokenizer (the split set of
@@ -25,7 +27,7 @@ pub(crate) fn token_word_end(b: u8) -> bool {
 pub(crate) fn delimiter_span(line: &[u8], mut j: usize, to: usize) -> Option<(usize, &[u8])> {
     let attached = j;
     while j < to && !token_word_end(line.get(j).copied().unwrap_or(0)) {
-        j += 1;
+        j = word_span(line, j, to);
     }
     if j > attached {
         return Some((j, line.get(attached..j)?));
@@ -35,7 +37,7 @@ pub(crate) fn delimiter_span(line: &[u8], mut j: usize, to: usize) -> Option<(us
     }
     let word = j;
     while j < to && !token_word_end(line.get(j).copied().unwrap_or(0)) {
-        j += 1;
+        j = word_span(line, j, to);
     }
     // `word..j` is within `from..to` by construction.
     let raw = line.get(word..j)?;
@@ -50,13 +52,30 @@ pub(crate) fn delimiter_span(line: &[u8], mut j: usize, to: usize) -> Option<(us
     Some((j, raw))
 }
 
-/// The index just after the first newline that is not inside quotes,
-/// backticks, or a `$( )` substitution; `None` when the line has none.
+/// The index just past the delimiter word byte at `j`: a `'…'` span is
+/// consumed whole, because the tokenizer reads it as one word and its spaces
+/// are word content (`<<'a b'` delimits `a b`) — byte-level and token-level
+/// rules must agree (LESSONS).
+fn word_span(line: &[u8], j: usize, to: usize) -> usize {
+    if line.get(j) != Some(&SQUOTE) {
+        return j + 1;
+    }
+    let mut k = j + 1;
+    while k < to && line.get(k) != Some(&SQUOTE) {
+        k += 1;
+    }
+    k.saturating_add(1).min(to)
+}
+
+/// The index just after the first newline that is not inside quotes, a
+/// single-quoted span, backticks, or a `$( )` substitution; `None` when the
+/// line has none.
 pub(crate) fn first_unquoted_newline(line: &[u8]) -> Option<usize> {
     let mut state = ScanState::new();
     let mut i = 0;
     while i < line.len() {
-        let bare = !state.in_quote && !state.in_backtick && state.paren_depth == 0;
+        let bare =
+            !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0;
         if bare && line.get(i) == Some(&b'\n') {
             return Some(i + 1);
         }

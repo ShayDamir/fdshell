@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use super::super::comment::skip_comment;
 use super::State;
-use crate::bytes::QUOTE;
+use crate::bytes::{QUOTE, SQUOTE};
 use crate::error::parse::ParseError;
 use error_stack::{Report, ResultExt};
 
@@ -41,6 +41,12 @@ impl State {
                 self.word_started = true;
                 self.quote_start = Some(self.pos - 1);
             }
+            // A `'…'` span is literal word content: both quote bytes are
+            // stripped and its bytes are masked, like a double-quoted span.
+            SQUOTE => self.open_single(),
+            // `$'…'` is the POSIX-sh reading (`$'x'` → literal `$x`), not
+            // bash's ANSI-C quoting: the `$` is escaped and the quote opens.
+            b'$' if bytes.peek() == Some(&SQUOTE) => self.dollar_quote()?,
             b'$' if bytes.peek() == Some(&b'(') => {
                 self.word_start();
                 self.read_dollar_paren(bytes, line, false)?;
@@ -85,7 +91,7 @@ impl State {
     }
 
     /// The current word starts unquoted.
-    fn word_start(&mut self) {
+    pub(super) fn word_start(&mut self) {
         self.fq = false;
         self.word_started = true;
     }

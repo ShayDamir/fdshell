@@ -1,4 +1,5 @@
 use super::ScanState;
+use crate::bytes::SQUOTE;
 
 mod subst;
 
@@ -15,9 +16,25 @@ impl ScanState {
     /// Inside double quotes a nested `$( … )`, `${ … }` or `` ` … ` `` region
     /// is consumed whole (task #130): the region is one unit, so its inner
     /// quote, `;`, `|`, `&&`, `<`/`>` and `<<` are data, never separators.
+    ///
+    /// A `'…'` span is opaque the same way (task #141), byte by byte: a
+    /// backslash inside it is literal, so it shields nothing.
     pub(crate) fn advance(&mut self, line: &[u8], i: usize) -> usize {
         let b = line.get(i).copied().unwrap_or(0);
+        if self.in_single {
+            // Inside a `'…'` span every byte is data: the span has no escape
+            // pair (POSIX §2.2.3 — a backslash is literal there), no quote
+            // toggle and no separator; only its closing `'` ends it.
+            self.word_active = true;
+            self.in_single = b != SQUOTE;
+            return i + 1;
+        }
         let bare = !self.in_quote && !self.in_backtick;
+        if b == SQUOTE && !self.in_quote {
+            self.in_single = true;
+            self.word_active = true;
+            return i + 1;
+        }
         if b == b'\\' {
             // The pair is consumed together; a trailing `\` at end of line
             // clamps to `line.len()` so the caller's end-of-line boundary

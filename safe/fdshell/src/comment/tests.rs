@@ -9,13 +9,13 @@ struct R {
 }
 
 fn scan(line: &[u8], start: usize) -> R {
-    let mut in_quote = false;
+    let mut quotes = Quotes::new();
     let mut s = start;
-    let (end, closed) = scan_block(line, start, &mut in_quote, &mut s, 1);
+    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, 1);
     R {
         end,
         closed,
-        quote: in_quote,
+        quote: quotes.double,
         start: s,
     }
 }
@@ -339,11 +339,14 @@ fn unquoted_keyword_still_opens_nested_block() {
 // closes on this line.
 #[test]
 fn run_starting_mid_quote_ignores_closer() {
-    let mut in_quote = true;
+    let mut quotes = Quotes {
+        double: true,
+        single: false,
+    };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"\"fi", 1, &mut in_quote, &mut s, 1);
+    let (_end, closed) = scan_block(b"\"fi", 1, &mut quotes, &mut s, 1);
     assert!(!closed, "fi inside an open quote must not close the block");
-    assert!(in_quote, "the quote must stay open");
+    assert!(quotes.double, "the quote must stay open");
 }
 
 // A block-opening keyword inside a `$( )` substitution in the body must not

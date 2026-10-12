@@ -1,5 +1,5 @@
 use crate::brace::scan_brace_block;
-use crate::scan::{Boundary, ScanState, boundary, skip_comment};
+use crate::scan::{Boundary, Quotes, ScanState, boundary, skip_comment};
 use crate::segment::book::Book;
 use crate::segment::line;
 use alloc::vec::Vec;
@@ -26,7 +26,7 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let pre_resume = line::flush_line(&mut book.segments, line, line_start, brace, &mut book.runs);
     let span_start = prefix::span_start(line, run_start, brace);
     let (segment, resume, floor) =
-        group_block(line, brace, span_start, book.state.in_quote, pre_resume);
+        group_block(line, brace, span_start, book.state.quotes(), pre_resume);
     book.segments.push(segment);
     book.rewind(resume, resume, floor);
 }
@@ -47,16 +47,16 @@ fn group_block<'a>(
     line: &'a [u8],
     start: usize,
     block_start: usize,
-    in_quote: bool,
+    quotes: Quotes,
     pre_resume: usize,
 ) -> (Segment<'a>, usize, usize) {
-    let mut quote = in_quote;
-    let (close, closed) = scan_brace_block(line, start + 1, &mut quote);
+    let mut quotes = quotes;
+    let (close, closed) = scan_brace_block(line, start + 1, &mut quotes);
     // The group never closes: the span is the rest of the input, and the REPL
     // keeps reading continuation lines.
     let open_end = line.len().min(close + 1);
     let (end, resume, floor) = if closed {
-        let (sep, r) = statement_end(line, close + 1, quote);
+        let (sep, r) = statement_end(line, close + 1, quotes);
         (sep, r.max(pre_resume), r)
     } else {
         (open_end, open_end + 1, 0)
@@ -82,13 +82,8 @@ fn group_block<'a>(
 /// A second `{ …; }` group in the same statement (after `&&` / `||`) is opaque:
 /// its text is skipped whole, so the span ends past its closing brace and the
 /// `cond` scan splits the statement into one part per group.
-fn statement_end(line: &[u8], mut i: usize, in_quote: bool) -> (usize, usize) {
-    let mut state = ScanState {
-        in_quote,
-        in_backtick: false,
-        paren_depth: 0,
-        word_active: false,
-    };
+fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize) {
+    let mut state = quotes.scan_state();
     while line.get(i).is_some() {
         match boundary(line, i, &state) {
             Boundary::Separator => return (i, i + 1),
@@ -110,9 +105,9 @@ fn statement_end(line: &[u8], mut i: usize, in_quote: bool) -> (usize, usize) {
 /// quote inside are counted, and the scan resumes just past its closing brace
 /// (or at the end of input if unclosed). No `;` inside the body is a separator.
 pub(super) fn skip_group(line: &[u8], i: usize, state: &mut ScanState) -> usize {
-    let mut quote = state.in_quote;
-    let (close, closed) = scan_brace_block(line, i + 1, &mut quote);
-    state.in_quote = quote;
+    let mut quotes = state.quotes();
+    let (close, closed) = scan_brace_block(line, i + 1, &mut quotes);
+    state.set_quotes(quotes);
     state.word_active = false;
     if closed { close + 1 } else { line.len() }
 }

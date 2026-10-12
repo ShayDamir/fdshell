@@ -3,8 +3,8 @@
 
 use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
 
-/// `true` when `line` ends in an open quote/backtick/`$( )`, or in a
-/// top-level `&&`/`||` operator followed only by whitespace.
+/// `true` when `line` ends in an open quote (double or single)/backtick/`$( )`,
+/// or in a top-level `&&`/`||` operator followed only by whitespace.
 pub(super) fn trailing_open(line: &[u8]) -> bool {
     let mut state = ScanState::new();
     let mut i = 0usize;
@@ -42,16 +42,16 @@ pub(super) fn trailing_open(line: &[u8]) -> bool {
             }
         }
     }
-    if state.in_quote || state.in_backtick || state.paren_depth > 0 {
+    if state.in_quote || state.in_single || state.in_backtick || state.paren_depth > 0 {
         return true;
     }
     matches!(last_op, Some((pos, len)) if tail_is_whitespace(line, pos + len))
 }
 
-/// `true` when the state is at the top level (no open quote, backtick, or
-/// `$( )`/`(( ))` substitution).
+/// `true` when the state is at the top level (no open quote, single-quoted span,
+/// backtick, or `$( )`/`(( ))` substitution).
 fn is_bare(state: &ScanState) -> bool {
-    !state.in_quote && !state.in_backtick && state.paren_depth == 0
+    !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0
 }
 
 /// The length of the top-level cond-list operator at `i`: `&&` (2) or `||`

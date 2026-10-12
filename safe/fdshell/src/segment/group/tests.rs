@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
+use crate::scan::Quotes;
 use crate::segment::scan_segments;
 
 /// The group span claims the whole statement it opens: the `{` to the next
@@ -7,7 +8,7 @@ use crate::segment::scan_segments;
 /// `&&`/`||`/`|` operators belong to the group. `start` is 0 (a group at the
 /// start of the line), `pre_resume` is 0.
 fn span(line: &[u8], end: usize, resume: usize) {
-    let (segment, got_resume, floor) = group_block(line, 0, 0, false, 0);
+    let (segment, got_resume, floor) = group_block(line, 0, 0, Quotes::new(), 0);
     match segment {
         Segment::Block {
             block_start,
@@ -42,7 +43,7 @@ fn group_span_covers_the_statement_after_the_closing_brace() {
 /// span runs to the end of the input and reports `closed = false`.
 #[test]
 fn unclosed_group_is_open() {
-    let (segment, resume, _) = group_block(b"{ echo a", 0, 0, false, 0);
+    let (segment, resume, _) = group_block(b"{ echo a", 0, 0, Quotes::new(), 0);
     match segment {
         Segment::Block {
             block_start,
@@ -65,7 +66,7 @@ fn unclosed_group_is_open() {
 #[test]
 fn group_resume_never_reopens_the_group_body() {
     let line = b"cat <<EOF\nhi\nEOF\n; { echo a; } > out";
-    let (segment, resume, floor) = group_block(line, 19, 19, false, 17);
+    let (segment, resume, floor) = group_block(line, 19, 19, Quotes::new(), 17);
     match segment {
         Segment::Block {
             block_start,
