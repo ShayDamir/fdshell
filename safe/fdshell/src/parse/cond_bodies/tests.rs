@@ -107,6 +107,18 @@ fn condition_bodies_skip_is_zero_on_a_bare_condition_line() {
     );
 }
 
+/// A line whose body stream is incomplete yields no bodies: the regions are
+/// allocated for **all** the line's operators in order, so a missing delimiter
+/// line anywhere on the line leaves the condition with nothing to claim (the
+/// parse layer reports the missing delimiter).
+#[test]
+fn condition_bodies_of_an_incomplete_line_stream_are_empty() {
+    // The `then` arm's `<<X` has no body: its delimiter line is searched first
+    // and is missing, so the stream has no regions at all.
+    let line = b"if false; then cat <<X; elif cat <<A; then echo b; fi\nbodyA\nA";
+    assert!(cond_bodies_of(line, b"elif").is_empty());
+}
+
 /// The block text of a segment in append mode carries **only** the block's own
 /// regions: the condition's extraction reads exactly that region, with nothing
 /// of the neighbouring statements' bodies in its stream.
