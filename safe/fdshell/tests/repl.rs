@@ -6,6 +6,10 @@ use std::str;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
+/// The prompt printed before every read. Pinned byte-for-byte: it is the
+/// counter the blank-line tests below use, so it pins one prompt per read.
+const PROMPT: &str = "fdshell> ";
+
 /// Spawn the REPL (no `-c`), pipe `input` to stdin, close it, and capture
 /// stdout/stderr/exit code.
 fn run_repl(input: &str) -> (String, String, i32) {
@@ -170,6 +174,29 @@ fn single_line_unchanged() {
     let (out, _err, code) = run_repl("echo hi\nexit\n");
     assert_eq!(code, 0);
     assert!(out.contains("hi"), "output: {out:?}");
+}
+
+/// A blank line is not an input: the shell re-prompts and keeps reading, so
+/// only end of input (`exit`, EOF) ends it. Prompt counts are read counts —
+/// line, blank line, `exit` — and a shell that quit on the blank line prints
+/// two.
+#[test]
+fn blank_line_does_not_end_the_shell() {
+    let (out, err, code) = run_repl("echo hi\n\nexit\n");
+    assert_eq!(code, 0, "stderr: {err:?}");
+    assert!(out.contains("hi"), "output: {out:?}");
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+}
+
+/// Whitespace-only input is blank too: it is skipped with a prompt and never
+/// dispatched (dispatching `   ` reports a parse error on stderr).
+#[test]
+fn whitespace_line_is_skipped_not_executed() {
+    let (out, err, code) = run_repl("   \necho hi\nexit\n");
+    assert_eq!(code, 0, "stderr: {err:?}");
+    assert!(out.contains("hi"), "output: {out:?}");
+    assert!(!err.contains("parse error"), "stderr: {err:?}");
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
 }
 
 #[test]
