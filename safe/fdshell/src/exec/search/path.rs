@@ -17,29 +17,33 @@ fn join(dir: &ShortCStr, bin: &ShortCStr) -> ShortCStr {
     ShortCStr::concat(&[dir, &slash, bin])
 }
 
-/// The openable pathname built from one PATH entry: strict bans an absolute
-/// entry (root-escape ban) and opens a relative one against the pinned
-/// `%CWD` base fd; non-strict joins it verbatim (behavior unchanged).
+/// One `PATH` entry as a search base: an empty entry is `.` (bash semantics)
+/// under strict; non-strict keeps skipping it (the pre-strict behavior).
+pub(super) fn entry(dir: ShortCStr, strict: bool) -> Option<ShortCStr> {
+    match (dir.is_empty(), strict) {
+        (true, true) => Some(c".".into()),
+        (true, false) => None,
+        (false, _) => Some(dir),
+    }
+}
+
+/// The openable pathname built from one PATH entry, opened against the
+/// strict `%CWD` base when `strict` (non-strict: the process CWD).
 fn search_entry(
     dir: &ShortCStr,
     bin: &ShortCStr,
     strict: bool,
     cwd: Option<&LocalFd>,
 ) -> Result<ShortCStr, Report<ChildProcessError>> {
-    if strict && dir.starts_with(b"/") {
-        bail!(ChildProcessError::StrictPath(dir.clone()));
-    }
     let pathname = join(dir, bin);
-    Ok(open_checked(&pathname, strict, cwd)
-        .is_ok()
-        .then(|| pathname.clone())
-        .ok_or(ChildProcessError::NotFound(pathname.clone()))?)
+    open_checked(&pathname, strict, cwd)?;
+    Ok(pathname)
 }
 
-/// Search `PATH` for `bin`: the first entry that yields an openable pathname
-/// (a `:`-separated empty entry means `.`, bash). Strict bans an absolute
-/// `bin` outright and absolute entries inside the loop — before the entry is
-/// probed, so a root-escaping `PATH` fails loudly instead of half-working.
+/// Search `PATH` for `bin`: the first entry that yields an openable pathname.
+/// Strict bans an absolute `bin` outright and bans an absolute entry the
+/// moment the loop reaches it — a root-escaping `PATH` fails loudly instead of
+/// half-working.
 pub(super) fn search_path_str(
     bin: &ShortCStr,
     strict: bool,
@@ -54,9 +58,9 @@ pub(super) fn search_path_str(
         bail!(ChildProcessError::StrictPath(bin.clone()));
     }
     let path_str = sys::env::getenv(c"PATH").unwrap_or(c"/usr/local/bin:/usr/bin:/bin".into());
-    for dir in path_str.split(b':') {
-        if dir.is_empty() {
-            continue;
+    for dir in path_str.split(b':').filter_map(|dir| entry(dir, strict)) {
+        if strict && dir.starts_with(b"/") {
+            bail!(ChildProcessError::StrictPath(dir));
         }
         if let Ok(pathname) = search_entry(&dir, bin, strict, cwd) {
             return Ok(pathname);

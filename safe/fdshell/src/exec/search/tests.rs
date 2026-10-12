@@ -13,6 +13,7 @@ use sys::fcntl::O_DIRECTORY;
 use sys::fcntl::O_PATH;
 
 use crate::error::child_process::ChildProcessError;
+use crate::exec::search::path::entry;
 use crate::exec::search::{open_checked, search_path_str};
 use crate::exec::{resolve_path, resolve_path_str};
 
@@ -262,4 +263,18 @@ fn base_fd_opens_the_target_through_openat2() {
     );
     assert!(fd.is_ok());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `:`-separated empty `PATH` entry is `.` under strict (bash) and skipped
+/// under non-strict (the pre-strict behavior); any other entry passes through
+/// unchanged — the strict arm adds no prefix, it only names the base.
+#[test]
+fn empty_path_entry_is_the_base_only_under_strict() {
+    let dot = entry(word(""), true).map(|d| d.as_bytes().unwrap().to_vec());
+    assert_eq!(dot, Some(b".".to_vec()));
+    assert!(entry(word(""), false).is_none());
+    let bin = entry(word("bin"), true).map(|d| d.as_bytes().unwrap().to_vec());
+    assert_eq!(bin, Some(b"bin".to_vec()));
+    let bin = entry(word("bin"), false).map(|d| d.as_bytes().unwrap().to_vec());
+    assert_eq!(bin, Some(b"bin".to_vec()));
 }
