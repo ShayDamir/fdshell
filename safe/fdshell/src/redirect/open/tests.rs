@@ -181,3 +181,20 @@ fn strict_noclobber_creates_fresh_target() {
     assert!(std::path::Path::new(&format!("{dir}/fresh")).exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A strict noclobber open that fails with an errno other than `EEXIST` (here
+/// `ENOENT`: the parent dir `sub/` is absent under the pinned base) propagates
+/// the open failure with its own errno — `Noclobber` is only the `EEXIST`
+/// refusal, so the guard on that errno must stay exact.
+#[test]
+fn strict_noclobber_propagates_non_eexist_open_failure() {
+    let dir = scratch();
+    let report = open_redirect_files(
+        &[write_def("sub/ghost")],
+        &cell_with(&dir, STRICT | NOCLOBBER),
+    )
+    .err()
+    .unwrap();
+    assert!(matches!(report.current_context(), OpenRedirectError::Open));
+    let _ = std::fs::remove_dir_all(&dir);
+}
