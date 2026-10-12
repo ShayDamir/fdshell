@@ -981,3 +981,35 @@ concatenating it with the literal parts, so a literal `IFS` byte after an
 embedded expansion stops cutting the word (`IFS=,; v=$(echo "b c"); printf
 "[%s]" x$v,y` → `[xb c][y]` here, `[xb c,y]` in bash) — is task #222; the
 `expanded` bit added here is exactly the information that refactor needs.
+
+## A capability base that tracks the process CWD must be pinned by a test that diverges them
+
+Strict mode's resolution base is the shell's pinned `%CWD` fd, not `AT_FDCWD`.
+`cd` calls `fchdir`, so inside one process the two are the same directory and a
+`base → AtFd::cwd()` mutant is *in-process unkillable*: `openat2(%CWD, rel)` and
+`openat2(AT_FDCWD, rel)` open the same inode. The pin has to diverge the state:
+spawn with the process CWD at a scratch root, run `cd in` (moves `%CWD` only),
+then assert the effect lands in `in/` — `strict_redirect_base_follows_cd`
+(`cd in; builtin echo hi > f` must create `in/f`, never the root `f`) — and for
+the PATH search park a same-named decoy in the launch dir that *cannot* be
+exec'd (`strict_exec_search_base_follows_cd`: root `probe` is mode 0644, so the
+`O_PATH` probe succeeds and `execveat` fails) and pin the pinned program by its
+exit 42. Same species as the "pin with a test that diverges the state" entries.
+
+Rule: a ban inside a search loop must *escape* the loop. `search_path_str`
+probes entries with `if let Ok(..)`; the strict absolute-`PATH`-entry ban
+returns an `Err` from inside that arm, so the loop swallowed it and the search
+ended in a plain `NotFound` — the ban compiled, ran, and was unobservable
+(harness `PATH=".:nonexistent:/bin"` proved it). Hoist the ban to the loop head
+as its own `bail!`, and pin it with a `PATH` whose relative entries miss and
+whose absolute entry is reached.
+
+Rule: a shell-behavior test must make the *shell* own the redirect. A script
+body's `echo x > f` is the child shell's redirect — it tests bash, not fdshell.
+fdshell is PATH-first for bare words (a builtin needs the `builtin` keyword or
+`shopt -s builtin_first`), and `<>` on a bare command lands at a free fd with
+no dup to 1 (bash: `exec 3<>f` is the way to write through it), so the strict
+pins are `builtin echo hi > out` / `exec 3<>f; builtin echo z >&3`, run with the
+harness `PATH` set to relative entries, and use helper *binaries*
+(`EXEC_OK_PATH`, `ARG_PRINT_PATH`) copied into the scratch dir: no `/bin/sh`, no
+coreutils dependency, deterministic exit codes.

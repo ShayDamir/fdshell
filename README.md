@@ -106,9 +106,27 @@ only the link *location* `linkpath` is constrained; the link *content*
 `target` is stored verbatim and never resolved, so an absolute `target` is
 still allowed.
 
-Strict mode covers the dirfd-based builtins only. Redirect targets
-(`> file`), external command paths, and `~`/`$HOME` expansion are not
-dirfd-relative in this version and are tracked as follow-up work.
+Redirect targets and external commands have no per-command `--dirfd` (bash
+syntax), so strict resolves both routes through the shell's **pinned `%CWD`
+directory fd** — a real `O_DIRECTORY` fd seeded at startup and re-opened by
+`cd` — and bans every filesystem-root path:
+
+- a redirect target (`<`, `>`, `>>`, `<>`, `>|`) that is absolute: the ban
+  fires before the glob walk, so an absolute *pattern* is caught too, and a
+  relative target is globbed and opened `openat2(%CWD, …)`, so it follows `cd`;
+- a program word containing `/` that is absolute; `exec`/`become` inherit the
+  ban, and so does command substitution (`$(prog)`);
+- a `hash` pin or a `PATH` entry that is absolute: under strict `PATH` must be
+  relative (a `:`-separated empty entry means `.`, as in bash), a relative
+  entry is joined and opened against `%CWD`, and the program runs from the fd
+  of the inode that walk pinned (`execveat`), so a root-escaping `PATH` fails
+  loudly instead of half-working.
+
+`cd ..` is the user's own escape hatch: the base follows the shell, exactly as
+a relative path does today. Accepted gaps (documented, not banned): `..`
+traversal across the base, symlink escapes (a `RESOLVE_*` policy is follow-up
+work), `~`/`$HOME` expansion, and word-expansion globbing, which stays
+CWD-rooted (bash semantics — the bans above guard its root escapes).
 
 ## Redirection
 
