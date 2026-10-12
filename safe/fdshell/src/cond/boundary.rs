@@ -14,8 +14,10 @@ mod block;
 /// happens after the closing brace. A keyword block is opaque the same way:
 /// `block_depth` counts its keywords, so an operator written in a loop
 /// condition, an `if` condition, a body or a `case` arm belongs to the block's
-/// own cond list. Returns the operator's first byte (or `line.len()`) and
-/// whether it is `||`.
+/// own cond list. Both counters only recognize a *command-position* word — a
+/// keyword-shaped argument (`echo if && echo b`) is word data, as bash and the
+/// segment scanner require. Returns the operator's first byte (or `line.len()`)
+/// and whether it is `||`.
 pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut run_start = i;
     let mut group_depth: i32 = 0;
@@ -36,9 +38,11 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             }
             // Only a word start can open a block; the closers that end one are
             // scored by the same shared helper. A stray closer clamps at 0, so
-            // a stray `done` never hides the operators of a plain command line.
+            // a stray `done` never hides the operators of a plain command line,
+            // and the helper's command-position rule keeps a keyword-shaped
+            // *argument* (`echo if && echo b`) word data too.
             if block_rule && state.at_word_start() {
-                let delta = block::word_delta(line, i, block_depth);
+                let delta = block::word_delta(line, i, block_depth, run_start);
                 block_depth = block_depth.saturating_add(delta).max(0);
             }
             // Only a brace that opens a group counts: at a cond-list part start
