@@ -39,11 +39,11 @@ impl<'a> Book<'a> {
     /// Rewind the cursor to `resume` — just past a block's span (a trailing
     /// statement on the same line is still scanned) — with the line start the
     /// trailing runs' bookkeeping continues from and the resume floor for the
-    /// physical line (`None` keeps the current floor).
-    pub(super) fn rewind(&mut self, resume: usize, line_start: usize, floor: Option<usize>) {
+    /// physical line.
+    pub(super) fn rewind(&mut self, resume: usize, line_start: usize, floor: usize) {
         self.i = resume;
         self.start = resume;
         self.line_start = line_start;
-        self.body_floor = floor.unwrap_or(self.body_floor);
+        self.body_floor = floor;
     }
 }

@@ -25,7 +25,7 @@ pub(super) fn open<'a>(line: &'a [u8], raw: &[u8], book: &mut Book<'a>) {
     let (segment, resume, floor, new_start) =
         open_block(line, raw, part, start, &book.state, pre_resume, line_start);
     book.segments.push(segment);
-    book.rewind(resume, new_start, Some(floor));
+    book.rewind(resume, new_start, floor);
 }
 
 /// Build the `Segment::Block` for a block-opening word at `start`, and the

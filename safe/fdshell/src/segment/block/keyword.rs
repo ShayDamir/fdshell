@@ -74,22 +74,21 @@ pub(super) fn keyword_block<'a>(
         // last body region (the line end when the bodies are missing).
         let (_, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
         let k = heredoc::operator_count(line, start, block_start_pos);
-        let claimed = claimed_regions(line, line_start, start, line_end, k);
+        // `k == 0` claims no region: skip the whole-line region scan for it.
         let bodies = if k == 0 {
             Vec::new()
-        } else if claimed.first().is_some_and(|&(s, _)| s >= end) {
-            // Append mode: the claimed regions are fully outside the block's
-            // command text, so the span stops at the closing keyword.
-            claimed
         } else {
-            // Extension mode: extend forward only — a body region may end
-            // before the closing keyword (a multi-line block with a heredoc in
-            // its body), and the span must keep covering the whole block text.
-            end = match claimed.last() {
-                Some(&(_, e)) => end.max(e),
-                None => end.max(line_resume),
-            };
-            Vec::new()
+            let claimed = claimed_regions(line, line_start, start, line_end, k);
+            if claimed.first().is_some_and(|&(s, _)| s >= end) {
+                claimed
+            } else {
+                // Extension mode: forward-only — the span keeps the block text.
+                end = match claimed.last() {
+                    Some(&(_, e)) => end.max(e),
+                    None => end.max(line_resume),
+                };
+                Vec::new()
+            }
         };
         if block_start_pos < line_end {
             // Trailing content on the same line: scan it; the line's final

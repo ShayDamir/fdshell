@@ -28,7 +28,7 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let (segment, resume, floor) =
         group_block(line, brace, span_start, book.state.in_quote, pre_resume);
     book.segments.push(segment);
-    book.rewind(resume, resume, Some(floor));
+    book.rewind(resume, resume, floor);
 }
 
 /// Build the `Segment::Block` for a `{ …; }` group whose `{` is at `start` (the

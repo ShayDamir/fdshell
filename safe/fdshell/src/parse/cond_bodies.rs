@@ -7,7 +7,9 @@
 use super::Token;
 use super::heredoc::operators;
 use super::semi::token_range;
-use crate::scan::heredoc::{body_regions_full, line_end_after, operator_count, operator_delims};
+use crate::scan::heredoc::{
+    Operator, body_regions_full, line_end_after, operator_count, operator_delims,
+};
 use alloc::vec::Vec;
 use sys::ScriptText;
 use sys::ShortCStr;
@@ -23,8 +25,10 @@ pub(crate) fn condition_bodies(text: &ScriptText, cond_tokens: &[Token]) -> Vec<
     // The token offsets are relative to the full block text, so the
     // token-level operator scan runs over `line`, not a condition subslice.
     let (cond_start, _) = token_range(cond_tokens);
+    // An empty operator list yields an empty body list through `take(ops.len())`
+    // below — no separate guard.
     let ops = match operators(line, cond_tokens) {
-        Ok(ops) if !ops.is_empty() => ops,
+        Ok(ops) => ops,
         _ => return Vec::new(),
     };
     let line_end = line_end_after(line, cond_start);
@@ -49,11 +53,7 @@ pub(crate) fn condition_bodies(text: &ScriptText, cond_tokens: &[Token]) -> Vec<
 
 /// Every `<<` operator on the condition's physical line, in operator order
 /// (empty when the line has none).
-fn all_operators(
-    line: &[u8],
-    line_end: usize,
-    cond_start: usize,
-) -> Vec<crate::scan::heredoc::Operator> {
+fn all_operators(line: &[u8], line_end: usize, cond_start: usize) -> Vec<Operator> {
     operator_delims(line, line_start_of(line, cond_start), line_end).unwrap_or_default()
 }
 

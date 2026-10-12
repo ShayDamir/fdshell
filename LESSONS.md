@@ -1092,3 +1092,27 @@ legal let chain, verified by hand), and this one missed. `master`'s own run of
 the file reports the same `==`→`!=` plus two further survivors (the stray-`}`
 arm's `==` and the `\n`/`;` arm's `||`) that #137's pins now kill.)
 
+
+## A region window and the skip derived from it are one pair: shifting the anchor is an equivalent mutant
+`parse/cond_bodies.rs` anchors both halves of a condition's body extraction at
+`line_start_of(line, cond_start)`: the **window** `operator_delims` scans for
+the line's operators (their regions are laid out contiguously after the
+condition line's newline, in operator order) and the **skip**
+`operator_count` computes for the operators that claimed the head of that
+stream. Prepending `k` operators to the window prepends `k` regions and raises
+the skip by exactly `k`, so the slice `regions[skip .. skip + ops.len()]` is
+identical for every anchor. All three `line_start_of` mutants are therefore
+unkillable: `→ 0` (the same shift, observable only when the condition sits
+past line 1 — the extra operators it sees are the ones its skip then skips),
+and `→ 1` (window `[1..]` ≡ window `[0..]`: a `<<` at index 0 never starts an
+operator because `operator_delims` requires a preceding word and its scan
+starts with `seen_word = false`). The pin
+`parse/cond_bodies/tests.rs::condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition`
+exercises the non-trivial anchor (operator mid-line in a multi-line condition,
+the shape bash rejects with a syntax error) and asserts the exact region it
+claims (`cat <<A; echo x` + `Z`, bytes 18..25); the suite passes under all
+three shifts, which is the equivalence record. Accepted equivalent mutants —
+do not add a test for them. (`n + 1` → `n - 1`/`n * 1` on the same line is the
+same species from the other side: the newline byte is never part of an
+operator, so a window starting before, at, or after it counts the same
+operators.)

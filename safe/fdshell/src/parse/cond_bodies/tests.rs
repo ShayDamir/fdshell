@@ -119,6 +119,33 @@ fn condition_bodies_of_an_incomplete_line_stream_are_empty() {
     assert!(cond_bodies_of(line, b"elif").is_empty());
 }
 
+/// The exact region a multi-line block's condition claims when the operator it
+/// reads is written **mid-line**: the stream starts after the condition line's
+/// newline, so the region is the next line's text up to the operator's
+/// delimiter line (the shape bash rejects with a syntax error — the accepted
+/// divergence README records, and `script.rs` bails on it too). This is the
+/// text that exercises `line_start_of`'s non-trivial window: the operators
+/// its window spans and the `skip` it computes shift together, so the
+/// extraction is invariant to the window's start (LESSONS).
+#[test]
+fn condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition() {
+    // `while cat <<Z; do` closes on line 1; `cat <<A` sits on line 2, and Z's
+    // body stream starts after that line's newline.
+    let line = b"while cat <<Z; do\ncat <<A; echo x\nZ\nbodyZ\nA\nbodyA\nA";
+    let text = ScriptText::new(
+        ShortCStr::from_vec(line.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    let tokens = tokenize_statement(line).unwrap();
+    let do_idx = find_preceded_by_semi(&tokens, 1, b"do").unwrap();
+    let cond_tokens = trim_semi(tokens.get(1..do_idx).unwrap());
+    assert_eq!(
+        condition_bodies(&text, cond_tokens),
+        vec![ShortCStr::from_vec(b"cat <<A; echo x\nZ\n".to_vec()).unwrap()]
+    );
+}
+
 /// The block text of a segment in append mode carries **only** the block's own
 /// regions: the condition's extraction reads exactly that region, with nothing
 /// of the neighbouring statements' bodies in its stream.
