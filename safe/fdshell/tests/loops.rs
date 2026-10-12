@@ -220,7 +220,7 @@ fn continue_in_if_condition_at_depth_zero_aborts_rc1() {
 
 // Task #130: a quoted region in a loop condition is one word — its `;` does not
 // end the statement, so the condition runs once. (`&&` in a `while` condition is
-// task #137 and stays out of these shapes.)
+// task #137, now accepted — see `while_and_in_condition_runs_the_cond_list`.)
 #[test]
 fn quoted_region_in_a_loop_condition_runs_once() {
     let (out, err, code) = run(r#"while echo "$(echo "x; y")"; do break; done"#);
@@ -420,4 +420,57 @@ fn for_list_backtick_output_elides_trailing_empty_field() {
     let (out, _err, code) = run(r#"IFS=,; for w in `echo ",,"`; do printf "[%s]\n" "$w"; done"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[]\n[]\n");
+}
+
+/// Task #137: `&&` / `||` in a `while`/`until` condition is the loop's own cond
+/// list, exactly as bash runs it — the block text is never split at it (master:
+/// `expected 'do'` / `expected 'done'` rc 1). Measured against `bash -c` 5.3.9:
+/// `hi` `rc=0`, `rc=0`, and the short-circuit `i=0`.
+#[test]
+fn while_and_in_condition_runs_the_cond_list() {
+    let (out, err, code) = run("while [ 1 ] && [ 1 ]; do echo hi; break; done; echo rc=$?");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "hi\nrc=0\n");
+    let (out, err, code) =
+        run("i=0; while [ $i -lt 5 ] && i=$((i+1)) && [ $i -lt 3 ]; do :; done; echo i=$i");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "i=3\n");
+    let (out, err, code) = run("i=0; while [ $i -lt 3 ] && false; do i=$((i+1)); done; echo i=$i");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "i=0\n");
+}
+
+/// The `until` twin: a cond-list condition is evaluated with the same
+/// short-circuit rules, so the loop runs once (`break`) and reports 0.
+/// Measured: `rc=0`.
+#[test]
+fn until_and_in_condition_runs_the_cond_list() {
+    let (out, err, code) = run("until [ 1 ] && [ 1 ]; do echo hi; break; done; echo rc=$?");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "rc=0\n");
+    let (out, err, code) = run("until [ 1 ] || [ 1 ]; do echo hi; break; done; echo rc=$?");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "rc=0\n");
+}
+
+/// `&&` / `||` in a loop *body* belong to the body: the loop is parsed whole
+/// (master: `expected 'done'` rc 1). Measured against bash: `after` and the
+/// per-iteration `a x b x`, on single- and multi-line bodies.
+#[test]
+fn and_in_loop_body_stays_inside_the_block() {
+    let (out, err, code) = run("while true; do false && echo a; break; done; echo after");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "after\n");
+    let (out, err, code) = run("while true; do\n  false && echo a\n  break\ndone\necho after");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "after\n");
+    let (out, err, code) = run("for w in a b; do echo $w && echo x; done; echo after");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "a\nx\nb\nx\nafter\n");
+    let (out, err, code) = run("for w in a b; do\n  echo $w && echo x\ndone\necho after");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "a\nx\nb\nx\nafter\n");
+    let (out, err, code) = run("while [ 1 ] && [ 1 ]; do\n  echo hi\n  break\ndone\necho after");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "hi\nafter\n");
 }
