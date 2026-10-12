@@ -2,7 +2,8 @@
 //! `&&` / `||` written inside a keyword block's text is never a boundary of
 //! the outer cond list, and the shapes that must *not* take the jump
 //! (closers, quoted keywords, substitution bodies, keyword-shaped words,
-//! group openers, heredoc-carrying spans) keep splitting exactly as before.
+//! keyword-shaped *arguments*, group openers, heredoc-carrying spans) keep
+//! splitting exactly as before.
 
 use crate::cond::boundary::next_boundary;
 use crate::scan::ScanState;
@@ -11,6 +12,12 @@ use crate::scan::ScanState;
 /// the text is one cond-list part".
 fn boundary_of(line: &[u8]) -> (usize, bool) {
     next_boundary(line, 0, &mut ScanState::new())
+}
+
+/// `next_boundary` from `i` — the resume point `run_cond_list` uses after it
+/// takes the part that ends at the previous boundary.
+fn boundary_from(line: &[u8], i: usize) -> (usize, bool) {
+    next_boundary(line, i, &mut ScanState::new())
 }
 
 /// The shapes of the reported bug: the whole block is one part, so the
@@ -115,4 +122,63 @@ fn gate_fires_only_for_an_opening_keyword_word() {
     // A group opener is a cond-list part: its own rule splits after the brace.
     assert_eq!(boundary_of(b"echo { && echo b"), (7, false));
     assert_eq!(boundary_of(b"{ echo a; } && { echo b; }"), (12, false));
+}
+
+/// Task #137 regression: a keyword-shaped word in an **argument** position is
+/// word data, exactly as bash, the segment scanner and the group arm above all
+/// require. Without the command-position gate the word scored `+1`, the depth
+/// left 0 and every later `&&` / `||` of the part disappeared — including the
+/// data-corrupting `echo x > if && echo b`.
+#[test]
+fn keyword_shaped_argument_words_keep_the_split() {
+    for (line, index, is_or) in [
+        (b"echo if && echo b".as_slice(), 8, false),
+        (b"echo while && echo b".as_slice(), 11, false),
+        (b"echo for && echo b".as_slice(), 9, false),
+        (b"echo case && echo b".as_slice(), 10, false),
+        (b"echo until && echo b".as_slice(), 11, false),
+        (b"echo wait && echo b".as_slice(), 10, false),
+        (b"echo if || echo b".as_slice(), 8, true),
+        // A pipeline stage's arguments, and a redirect target, are arguments.
+        (b"echo x | echo if && echo b".as_slice(), 17, false),
+        (b"echo x > if && echo b".as_slice(), 12, false),
+        (b"> if && echo b".as_slice(), 5, false),
+        // A keyword-shaped *closer* in an argument position stays data too.
+        (b"echo done && echo b".as_slice(), 10, false),
+        (b"echo fi && echo b".as_slice(), 8, false),
+    ] {
+        assert_eq!(
+            boundary_of(line),
+            (index, is_or),
+            "expected the split at {index} in {line:?}"
+        );
+    }
+    // A cond part of the run is command position, and the argument rule applies
+    // to the word behind its command word: `run_cond_list` resumes just past
+    // the outer `&&` (5), and there the second `&&` (16) is the split.
+    assert_eq!(boundary_from(b"true && echo if && echo b", 7), (16, false));
+}
+
+/// The gate must not swallow a real block opener: a keyword in command
+/// position keeps opening the block at the start of a run, behind `&&` / `||`
+/// (with a `time` prefix), and inside a block body — where a nested block's own
+/// closer is what brings the depth back down, so the operators written between
+/// the pair stay inside the block.
+#[test]
+fn command_position_keywords_still_open_the_block() {
+    // A block statement after `;`: its body's `&&` is the body's own.
+    let line = b"echo a; if true; then false && echo x; fi";
+    assert_eq!(boundary_of(&line[..]), (line.len(), false));
+    // `true && if …` — the split is the outer `&&` (5): the segment scanner
+    // splits the run at the block's own `;` (task #232's gap).
+    assert_eq!(boundary_of(b"true && if true; then echo t; fi"), (5, false));
+    // `time` is transparent in the run's rule too.
+    assert_eq!(
+        boundary_of(b"true && time while [ 1 ] && [ 1 ]; do a; done"),
+        (5, false)
+    );
+    // A nested block in a body: its `fi` is scored, so the `&&` written after it
+    // belongs to the outer body — the whole text stays one part.
+    let line = b"while true; do if true; then false; fi && echo x; break; done; echo tail";
+    assert_eq!(boundary_of(&line[..]), (line.len(), false));
 }

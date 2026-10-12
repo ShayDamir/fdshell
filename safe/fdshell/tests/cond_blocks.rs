@@ -19,6 +19,31 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// Run with the child's cwd set to a fresh scratch dir, for the shapes that
+/// write a file (the harness itself runs from the repo root).
+fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .current_dir(dir)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+fn scratch(tag: &str) -> std::path::PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-cond_blocks-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 /// Task #137: a cond-list operator in an `if` condition is the block's own cond
 /// list. Measured against `bash -c` (5.3.9): `[ 0 ]` is a true test (a non-empty
 /// word), so the first shape takes `then`; the second short-circuits to `else`.
@@ -174,4 +199,44 @@ fn break_in_an_and_condition_is_ignored() {
 fn operator_adjacent_to_a_block_is_unchanged() {
     let (_out, _err, code) = run("true && while [ 1 ]; do echo hi; break; done");
     assert_eq!(code, 1);
+}
+
+/// Task #137 regression: a keyword-shaped word in an **argument** position is
+/// word data, never a block opener — the same command-position rule the group
+/// arm and the segment scanner apply. Without that gate the word scored `+1`,
+/// the block depth left 0, and every later `&&` / `||` of the part was swallowed
+/// into the command's arguments: `echo if && echo b` printed one argument
+/// `if && echo b`, `echo if || echo b` failed with `unexpected pipe` rc 1,
+/// `test if && echo b` ran a 4-argument `test` (rc 2), and
+/// `echo x > if && echo b` wrote `x && echo b` into the file `if` and never ran
+/// `echo b` — data corruption. Every row is measured against `bash -c` 5.3.9.
+#[test]
+fn keyword_shaped_argument_words_do_not_swallow_the_cond_operators() {
+    for (script, want) in [
+        ("echo if && echo b", "if\nb\n"),
+        ("echo while && echo b", "while\nb\n"),
+        ("echo for && echo b", "for\nb\n"),
+        ("echo case && echo b", "case\nb\n"),
+        ("echo until && echo b", "until\nb\n"),
+        // A keyword-shaped *closer* is an argument too.
+        ("echo fi && echo b", "fi\nb\n"),
+        ("echo done && echo b", "done\nb\n"),
+        // `||` short-circuits on the successful first part.
+        ("echo if || echo b", "if\n"),
+        ("echo if && echo b && echo c", "if\nb\nc\n"),
+        ("true && echo if && echo b", "if\nb\n"),
+        ("echo x | echo if && echo b", "if\nb\n"),
+        // A one-argument `test` on a non-empty word is true, as in bash.
+        ("test if && echo b", "b\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // A redirect target is an argument: the file holds the command's output
+    // alone, and the second part runs.
+    let dir = scratch("keyword-redirect");
+    let (out, err, code) = run_in(&dir, "echo x > if && echo b");
+    assert_eq!((out.as_str(), code), ("b\n", 0), "stderr={err}");
+    assert_eq!(std::fs::read_to_string(dir.join("if")).unwrap(), "x\n");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
