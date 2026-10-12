@@ -1,48 +1,34 @@
 use alloc::vec::Vec;
 use core::fmt::Write;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 
 use crate::app::AppError;
 use crate::error::cmd::CmdError;
-use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
 
 mod complete;
+mod control;
 mod line;
 mod trailing;
 
 pub(crate) use crate::cond::run_cond_list;
 pub(crate) use crate::script::run_script;
 
-pub fn handle(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
+pub(super) fn handle(
+    text: &ScriptText,
+    cell: &ForkCell<ShellState>,
+) -> Result<(), Report<CmdError>> {
     if let Some(control) = run_script(text, cell)? {
-        // The count is clamped to `loop_depth` at the call site, so a `Break(_)`
-        // / `Continue(_)` reaching here means depth 0, which `run_simple` already
-        // bails on; these arms are unreachable defensive arms.
-        match control {
-            LoopControl::Break(_) => bail!(CmdError::BreakOutsideLoop),
-            LoopControl::Continue(_) => bail!(CmdError::ContinueOutsideLoop),
-            LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
-            // Interactive shells do not exit on errexit: stop this input.
-            LoopControl::Exit => {}
-        }
+        control::out_of_scope(control)?;
     }
     Ok(())
 }
 
 pub fn exec_cmd(text: &ScriptText, cell: &ForkCell<ShellState>) -> Result<i32, Report<CmdError>> {
     if let Some(control) = run_script(text, cell)? {
-        // Unreachable defensive arms, as in `handle`: the clamped count cannot
-        // outlive the loops it was counted against.
-        match control {
-            LoopControl::Break(_) => bail!(CmdError::BreakOutsideLoop),
-            LoopControl::Continue(_) => bail!(CmdError::ContinueOutsideLoop),
-            LoopControl::Return => bail!(CmdError::ReturnOutsideFunction),
-            // Errexit: fall through to the failing status in `last_status`.
-            LoopControl::Exit => {}
-        }
+        control::out_of_scope(control)?;
     }
     let state = cell.borrow().change_context(CmdError::Never)?;
     Ok(state.last_status.exit_code())
