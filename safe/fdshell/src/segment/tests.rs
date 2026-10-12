@@ -18,6 +18,7 @@ fn scan_time_prefixed_keyword_block() {
                 block_start,
                 end_pos,
                 closed,
+                bodies: _,
             } => {
                 assert_eq!(*block_start, 0, "{:?}", line);
                 assert_eq!(*end_pos, line.len(), "{:?}", line);
@@ -39,6 +40,7 @@ fn scan_time_prefixed_group_span_starts_at_the_prefix() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 22);
@@ -60,6 +62,7 @@ fn scan_if_block_end_pos() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 16);
@@ -78,6 +81,7 @@ fn scan_for_block_end_pos() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 30);
@@ -96,6 +100,7 @@ fn scan_case_block_end_pos() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 26);
@@ -168,6 +173,7 @@ fn scan_if_with_leading_whitespace() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 18);
@@ -186,6 +192,7 @@ fn scan_for_with_leading_whitespace() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 32);
@@ -293,6 +300,7 @@ fn scan_comment_on_block_line() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 26);
@@ -336,6 +344,7 @@ fn scan_block_not_closed() {
             block_start,
             end_pos: _,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert!(!*closed);
@@ -641,12 +650,58 @@ fn scan_block_heredoc_body_fi_does_not_close() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 33);
             assert!(*closed);
         }
         _ => panic!("expected Block segment"),
+    }
+}
+
+/// The three adjacencies on one physical line allocate the line's body stream
+/// in operator order: the pre-block statement takes region 0, the block its own
+/// region (append mode: its span stops at `fi`, so the trailing statement's
+/// text is not swallowed), and the trailing statement the region left over.
+#[test]
+fn scan_pre_block_block_and_trailing_share_one_body_stream() {
+    let segments = scan_segments(
+        b"cat <<X; if cat <<A; then echo y; fi; cat <<B\nbodyX\nX\nbodyA\nA\nbodyB\nB",
+        false,
+    );
+    assert_eq!(segments.len(), 3);
+    match (&segments[0], &segments[1], &segments[2]) {
+        (
+            Segment::Statement {
+                cmd: pre,
+                off: pre_off,
+                bodies: pre_bodies,
+            },
+            Segment::Block {
+                block_start,
+                end_pos,
+                closed,
+                bodies,
+            },
+            Segment::Statement {
+                cmd: tail,
+                off: tail_off,
+                bodies: tail_bodies,
+            },
+        ) => {
+            assert_eq!(pre, b"cat <<X");
+            assert_eq!(*pre_off, 0);
+            assert_eq!(pre_bodies, &vec![(46, 54)]);
+            assert_eq!(*block_start, 8, "the run start, leading space included");
+            assert_eq!(*end_pos, 36, "the span stops at the closing keyword");
+            assert!(*closed);
+            assert_eq!(bodies, &vec![(54, 62)], "the block's own region");
+            assert_eq!(tail, b"cat <<B");
+            assert_eq!(*tail_off, 38);
+            assert_eq!(tail_bodies, &vec![(62, 69)]);
+        }
+        _ => panic!("expected Statement, Block, Statement"),
     }
 }
 
@@ -683,6 +738,7 @@ fn scan_wait_block_opens_on_subsequent_line() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 29);
@@ -702,6 +758,7 @@ fn scan_wait_block_opens_on_same_line_keyword() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 28);
@@ -724,6 +781,7 @@ fn scan_function_block_keyword_form_span() {
                 block_start,
                 end_pos,
                 closed,
+                bodies: _,
             },
             Segment::Statement { cmd, off, .. },
         ) => {
@@ -809,6 +867,7 @@ fn check_block(line: &[u8], want: (usize, usize, bool)) {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => assert_eq!((*block_start, *end_pos, *closed), want, "{line:?}"),
         Segment::Statement { .. } => panic!("{line:?} must be a group block"),
     }
@@ -823,6 +882,7 @@ fn check_segments(line: &[u8], want: &[(usize, usize, bool)]) {
                 block_start,
                 end_pos,
                 closed,
+                bodies: _,
             } => Some((*block_start, *end_pos, *closed)),
             Segment::Statement { .. } => None,
         })

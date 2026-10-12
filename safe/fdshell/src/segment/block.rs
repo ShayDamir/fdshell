@@ -3,6 +3,30 @@ pub(super) mod keyword;
 use crate::brace::scan_function_block;
 use crate::scan::ScanState;
 use crate::scan::heredoc;
+use crate::segment::book::Book;
+use crate::segment::line;
+use alloc::vec::Vec;
+
+/// Take the keyword-block branch of the segment scan for the block-opening run
+/// `raw` that starts at `book.start`: the run's statements are flushed, then
+/// the block segment is pushed, and the cursor is rewound past the block's span
+/// with the line start the trailing runs continue from and the resume floor for
+/// the rest of the physical line.
+pub(super) fn open<'a>(line: &'a [u8], raw: &[u8], book: &mut Book<'a>) {
+    let (start, line_start) = (book.start, book.line_start);
+    let part = raw.trim_ascii();
+    let pre_resume = line::flush_line(
+        &mut book.segments,
+        line,
+        line_start,
+        start + raw.len(),
+        &mut book.runs,
+    );
+    let (segment, resume, floor, new_start) =
+        open_block(line, raw, part, start, &book.state, pre_resume, line_start);
+    book.segments.push(segment);
+    book.rewind(resume, new_start, Some(floor));
+}
 
 /// Build the `Segment::Block` for a block-opening word at `start`, and the
 /// scan bookkeeping for the rest of the physical line: the resume index, the
@@ -33,6 +57,9 @@ pub(super) fn open_block<'a>(
                 block_start: start,
                 end_pos: end,
                 closed,
+                // A function body's heredocs belong to the statements inside it
+                // (the body is re-scanned), never to the definition's span.
+                bodies: Vec::new(),
             },
             end + 1,
             pre_resume,
@@ -40,7 +67,7 @@ pub(super) fn open_block<'a>(
         )
     } else {
         let (segment, resume, floor) =
-            keyword::keyword_block(line, raw, part, start, state, pre_resume);
+            keyword::keyword_block(line, raw, part, start, line_start, state, pre_resume);
         // Trailing content shares the block's physical line: the line's
         // bookkeeping (and its global body stream) continues from the line's
         // start, so the trailing runs' flush skips the regions the block's

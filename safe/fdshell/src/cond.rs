@@ -1,6 +1,6 @@
 mod boundary;
 mod errexit;
-mod part;
+pub(crate) mod part;
 
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;

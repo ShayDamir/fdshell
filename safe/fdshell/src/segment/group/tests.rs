@@ -13,6 +13,7 @@ fn span(line: &[u8], end: usize, resume: usize) {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(block_start, 0, "span of {line:?}");
             assert_eq!(end_pos, end, "span end of {line:?}");
@@ -47,6 +48,7 @@ fn unclosed_group_is_open() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!((block_start, end_pos), (0, 8));
             assert!(!closed);
@@ -69,6 +71,7 @@ fn group_resume_never_reopens_the_group_body() {
             block_start,
             end_pos,
             closed,
+            bodies: _,
         } => {
             assert_eq!(block_start, 19);
             assert_eq!(end_pos, line.len());

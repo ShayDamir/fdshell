@@ -28,12 +28,22 @@ pub(crate) fn run_script(
                 block_start,
                 end_pos,
                 closed,
+                bodies,
             } => {
                 ensure!(closed, CmdError::Parse);
                 let raw = line.get(block_start..end_pos).unwrap_or(b"");
                 crate::verbose::trace(raw.trim_ascii(), cell);
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-                let full = sub(text, block_start + lead, raw.trim_ascii().len())?;
+                let cmd_start = block_start + lead;
+                // A block that carries its own body regions gets a text
+                // rebuilt from them (command line + newline + regions); the
+                // other blocks are subsliced verbatim.
+                let full = if bodies.is_empty() {
+                    sub(text, cmd_start, raw.trim_ascii().len())?
+                } else {
+                    let body_bytes = extract_bodies(line, &bodies);
+                    crate::cond::part::reconstruct(text, line, cmd_start, end_pos, &body_bytes)?
+                };
                 if let Some(control) = crate::cond::run_cond_list(&full, &[], cell, false)? {
                     return Ok(Some(control));
                 }

@@ -6,6 +6,7 @@ use super::condition_bodies;
 use crate::parse::semi::{find_preceded_by_semi, trim_semi};
 use crate::parse::token::tokenize_statement;
 use alloc::vec;
+use alloc::vec::Vec;
 use sys::{Origin, Position, ScriptText, ShortCStr};
 
 /// The condition's bodies (body lines plus the delimiter line) are extracted
@@ -63,4 +64,85 @@ fn condition_bodies_multiple_operators_are_in_order() {
             ShortCStr::from_vec(b"bodyB\nB".to_vec()).unwrap(),
         ]
     );
+}
+
+/// The condition claims only its own regions of the line's body stream: the
+/// `<<` operators written on the condition's physical line **before** the
+/// condition already claimed the head of the stream, so an `elif` condition
+/// skips them and takes its own region.
+#[test]
+fn condition_bodies_skip_the_regions_claimed_before_them() {
+    // `cat <<X` sits in the `then` body on the same physical line as the elif
+    // condition: region 0 is its, the elif condition takes region 1.
+    let line = b"if false; then cat <<X; elif cat <<A; then echo b; fi\nbodyX\nX\nbodyA\nA";
+    let bodies = cond_bodies_of(line, b"elif");
+    assert_eq!(
+        bodies,
+        vec![ShortCStr::from_vec(b"bodyA\nA".to_vec()).unwrap()]
+    );
+
+    // Two operators in the condition, one claimed before it: the claimed
+    // region is skipped and the condition takes the next two, in order.
+    let line = b"if false; then cat <<X; elif cat <<A && cat <<B; then echo b; fi\nbodyX\nX\nbodyA\nA\nbodyB\nB";
+    let bodies = cond_bodies_of(line, b"elif");
+    assert_eq!(
+        bodies,
+        vec![
+            ShortCStr::from_vec(b"bodyA\nA\n".to_vec()).unwrap(),
+            ShortCStr::from_vec(b"bodyB\nB".to_vec()).unwrap(),
+        ]
+    );
+}
+
+/// Nothing precedes an ordinary condition on its physical line: `skip` is 0
+/// and the condition takes region 0 — the shape every `if`/`while`/`until`
+/// condition and every multi-line block has.
+#[test]
+fn condition_bodies_skip_is_zero_on_a_bare_condition_line() {
+    let line = b"if false; then echo a; elif cat <<E; then echo b; fi\nbodyE\nE";
+    let bodies = cond_bodies_of(line, b"elif");
+    assert_eq!(
+        bodies,
+        vec![ShortCStr::from_vec(b"bodyE\nE".to_vec()).unwrap()]
+    );
+}
+
+/// The block text of a segment in append mode carries **only** the block's own
+/// regions: the condition's extraction reads exactly that region, with nothing
+/// of the neighbouring statements' bodies in its stream.
+#[test]
+fn condition_bodies_of_a_pre_sliced_block_text() {
+    // `segment/block/keyword.rs` produces this text for
+    // `cat <<X; if cat <<A; …; fi; cat <<B`: the pre-block and trailing
+    // regions are not in it.
+    let line = b"if cat <<A; then echo y; fi\nbodyA\nA";
+    let text = ScriptText::new(
+        ShortCStr::from_vec(line.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    let tokens = tokenize_statement(line).unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
+    assert_eq!(
+        condition_bodies(&text, cond_tokens),
+        vec![ShortCStr::from_vec(b"bodyA\nA".to_vec()).unwrap()]
+    );
+}
+
+/// The condition of the arm opened by `keyword` (`elif`), as the parse layer
+/// extracts it from a full block text.
+fn cond_bodies_of(line: &[u8], keyword: &[u8]) -> Vec<ShortCStr> {
+    let text = ScriptText::new(
+        ShortCStr::from_vec(line.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    let tokens = tokenize_statement(line).unwrap();
+    let kw = tokens
+        .iter()
+        .position(|(t, _, _, _, _)| t.eq_bytes(keyword))
+        .unwrap();
+    let then = find_preceded_by_semi(&tokens, kw + 1, b"then").unwrap();
+    condition_bodies(&text, trim_semi(tokens.get(kw + 1..then).unwrap()))
 }

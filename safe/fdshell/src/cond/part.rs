@@ -38,8 +38,10 @@ pub(crate) fn run_part(
 }
 
 /// Reconstruct a part's text: the command bytes plus a newline plus the
-/// bodies, as a fresh `ScriptText` at the part's start position.
-fn reconstruct(
+/// bodies, as a fresh `ScriptText` at the part's start position. Shared by the
+/// cond-list parts and by a block segment that carries its own body regions
+/// (`script.rs`).
+pub(crate) fn reconstruct(
     text: &ScriptText,
     line: &[u8],
     part_start: usize,

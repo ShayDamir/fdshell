@@ -1,38 +1,34 @@
 use crate::brace::scan_brace_block;
 use crate::scan::{Boundary, ScanState, boundary, skip_comment};
+use crate::segment::book::Book;
 use crate::segment::line;
 use alloc::vec::Vec;
 
 use super::Segment;
 
+pub(super) mod opener;
 mod prefix;
 mod word;
 pub(crate) use prefix::group_at_run;
 pub(crate) use word::{closes, opens, opens_at};
 
 /// Take the group branch of the segment scan at the group opener of the run
-/// that starts at `run_start`: the group's span is pushed. The opener is the
+/// that starts at `book.start`: the group's span is pushed. The opener is the
 /// run's first `{` — the scan only gets here when the run before it is empty
-/// or a cond operator, so nothing before that brace can be one.
-/// Returns the scan resume index and the resume floor for the rest of the
-/// physical line.
-pub(super) fn open<'a>(
-    line: &'a [u8],
-    run_start: usize,
-    line_start: usize,
-    state: &ScanState,
-    segments: &mut Vec<Segment<'a>>,
-    runs: &mut Vec<(&'a [u8], usize)>,
-) -> (usize, usize) {
+/// or a cond operator, so nothing before that brace can be one. The cursor is
+/// rewound past the group's span with the line's resume floor.
+pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
+    let (run_start, line_start) = (book.start, book.line_start);
     let tail = line.get(run_start..).unwrap_or(b"");
     let brace = run_start + tail.iter().position(|&b| b == b'{').unwrap_or(0);
     // The opener is at a run start, so nothing precedes it on this run; the
     // flush claims only the line's heredoc bodies scanned so far.
-    let pre_resume = line::flush_line(segments, line, line_start, brace, runs);
+    let pre_resume = line::flush_line(&mut book.segments, line, line_start, brace, &mut book.runs);
     let span_start = prefix::span_start(line, run_start, brace);
-    let (segment, resume, floor) = group_block(line, brace, span_start, state.in_quote, pre_resume);
-    segments.push(segment);
-    (resume, floor)
+    let (segment, resume, floor) =
+        group_block(line, brace, span_start, book.state.in_quote, pre_resume);
+    book.segments.push(segment);
+    book.rewind(resume, resume, Some(floor));
 }
 
 /// Build the `Segment::Block` for a `{ …; }` group whose `{` is at `start` (the
@@ -70,6 +66,9 @@ fn group_block<'a>(
             block_start,
             end_pos: end,
             closed,
+            // A group's own heredocs are a separate limitation (task #226):
+            // the group's span is carried verbatim, with no body regions.
+            bodies: Vec::new(),
         },
         resume,
         floor,

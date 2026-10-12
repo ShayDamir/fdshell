@@ -221,11 +221,18 @@ line's own newline (`ab\n` is 3 bytes). A here-doc works in pipelines
 block conditions and cond-list positions (`if cat <<EOF; then …`,
 `cat <<EOF && x`), like any other command. When a line carries several
 here-docs (`cat <<A && cat <<B`), the bodies are read after the whole logical
-line, in operator order, so a body may contain another here-doc's delimiter. A
-here-doc on a **user-function call** delivers the body to the call, because a
-function call is a simple command: `f() { cat; }; f <<EOF` prints the body, and
-the shell's stdin is back when the call finishes, so `echo after` after it
-prints on the terminal (as bash).
+line, in operator order, so a body may contain another here-doc's delimiter.
+The regions are allocated **per physical line, in operator order**: every
+consumer of a line's body stream first subtracts the operators that already
+claimed that line. A block's text carries only the regions its own operators
+claim — the regions written before the block on the same line belong to those
+statements, and a heredoc statement after the block on the block's line is
+outside the block's span: `cat <<X; if cat <<A; then echo y; fi; cat <<B` +
+bodies prints `bodyX bodyA y bodyB` (as bash), for `if`/`elif`/`while`/`until`
+and any number of pre-block operators. A here-doc on a **user-function call**
+delivers the body to the call, because a function call is a simple command:
+`f() { cat; }; f <<EOF` prints the body, and the shell's stdin is back when the
+call finishes, so `echo after` after it prints on the terminal (as bash).
 
 Limitations:
 
@@ -246,8 +253,12 @@ Limitations:
   the heredoc-free `while true; do a && b; done` runs (task #137). The reason is
   that a block's condition bodies travel *inside* its text, and the `&&` written
   in a body line must stay a split point
-  (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
-  Task #234 owns the fix.
+   (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
+   Task #234 owns the fix.
+- A **multi-line** block whose condition carries a here-doc keeps its text verbatim:
+  `if cat <<A; then` / `echo y` / `fi` + body + `A` runs `echo y`, `fi` and the body lines as
+  commands and the condition prints its region, where bash reports a syntax error (rc 2). Only
+  the single-line form (`if cat <<A; then echo y; fi` + body + `A`) is bash-compatible.
 
 ## Group command
 

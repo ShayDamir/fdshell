@@ -480,6 +480,74 @@ fn heredoc_stmt_before_function_block_same_line() {
     assert_eq!(out, "body\nhi\n");
 }
 
+// --- All three adjacencies on one line: a `;`-terminated heredoc statement
+// before a block, a condition-position heredoc in the block, and a heredoc
+// statement after it. The condition must be fed its OWN body region (the
+// regions are allocated per physical line, in operator order). ---
+
+#[test]
+fn heredoc_stmt_before_if_condition_and_after_same_line() {
+    // bash: `bodyX bodyA y bodyB`.
+    let (out, _err, code) =
+        run("cat <<X; if cat <<A; then echo y; fi; cat <<B\nbodyX\nX\nbodyA\nA\nbodyB\nB");
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\nbodyA\ny\nbodyB\n");
+}
+
+#[test]
+fn heredoc_two_stmts_before_if_condition_same_line() {
+    // Two pre-block operators: the condition takes region 2 of the line.
+    let (out, _err, code) = run(
+        "cat <<X; cat <<Y; if cat <<A; then echo y; fi; cat <<B\nbodyX\nX\nbodyY\nY\nbodyA\nA\nbodyB\nB",
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\nbodyY\nbodyA\ny\nbodyB\n");
+}
+
+#[test]
+fn heredoc_stmt_before_while_condition_and_after_same_line() {
+    let (out, _err, code) = run(
+        "cat <<X; while cat <<A; do echo w; break; done; cat <<B\nbodyX\nX\nbodyA\nA\nbodyB\nB",
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\nbodyA\nw\nbodyB\n");
+}
+
+#[test]
+fn heredoc_stmt_before_until_condition_and_after_same_line() {
+    // `cat` exits 0, so `until` stops before its body (bash parity).
+    let (out, _err, code) = run(
+        "cat <<X; until cat <<A; do echo u; break; done; cat <<B\nbodyX\nX\nbodyA\nA\nbodyB\nB",
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\nbodyA\nbodyB\n");
+}
+
+#[test]
+fn heredoc_stmt_before_elif_condition_and_after_same_line() {
+    let (out, _err, code) = run(
+        "cat <<X; if false; then echo a; elif cat <<E; then echo b; fi; cat <<B\nbodyX\nX\nbodyE\nE\nbodyB\nB",
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\nbodyE\nb\nbodyB\n");
+}
+
+#[test]
+fn heredoc_stmt_before_if_condition_no_trailing_stmt_same_line() {
+    let (out, _err, code) = run("cat <<X; if cat <<A; then echo y; fi\nbodyX\nX\nbodyA\nA");
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\nbodyA\ny\n");
+}
+
+#[test]
+fn heredoc_stmt_before_if_no_condition_heredoc_same_line() {
+    // The block claims no region (k = 0); the pre-block statement runs first
+    // and the trailing statement takes the region left over.
+    let (out, _err, code) = run("cat <<X; if true; then echo y; fi; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(code, 0);
+    assert_eq!(out, "bodyX\ny\nbodyB\n");
+}
+
 #[test]
 fn heredoc_twice_last_wins() {
     // POSIX #2.5: both bodies are kept in operator order and the last redirect

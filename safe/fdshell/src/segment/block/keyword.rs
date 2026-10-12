@@ -6,28 +6,39 @@ use crate::comment::scan_block;
 use crate::keywords::time_prefix_len;
 use crate::scan::ScanState;
 use crate::scan::heredoc;
+use alloc::vec::Vec;
 
 /// Build the `Segment::Block` for a block-opening keyword at `start`.
 /// Returns the segment, the scan resume index, and the resume floor for the
 /// rest of the physical line (past which no flush may resume).
 /// `pre_resume` is the end of the body regions of a statement that precedes
-/// the block on the same line (the line end when there is none).
+/// the block on the same line (the line end when there is none); `line_start`
+/// is the start of the physical line whose body stream the block reads.
 ///
-/// The span's exclusive end (`end_pos`) is the closing keyword's separator
-/// (`;`/`\n`) position, extended to cover the block's own heredoc bodies when
-/// the block text carries `<<` operators (a condition-position heredoc): the
-/// bodies sit after the block's command line, in the first body regions of
-/// the line, in operator order. A trailing statement's bodies stay outside
-/// the span, so a heredoc statement after the block on the same line is not
-/// swallowed. The scan resumes just past the closing keyword (a trailing
-/// statement on the same line is still scanned) and the floor keeps the
-/// line's final flush from re-entering any body region; when the block ends
-/// the line the resume is already past all of them.
+/// The block claims **its own** regions of that line's body stream (see
+/// [`claimed_regions`]), and the segment carries them in `bodies` when they
+/// sit entirely past the block's command text (**append mode**): the span then
+/// stops at the closing keyword's separator, so a trailing statement's text is
+/// outside the block and the block's text is rebuilt from its own regions
+/// (script.rs). The regions are appended after the command line, in operator
+/// order.
+///
+/// When the regions are interleaved with the block's own lines (a multi-line
+/// block with a heredoc in its body), the segment carries no bodies and the
+/// span's exclusive end (`end_pos`) is the closing keyword's separator
+/// (`;`/`\n`) **extended forward** to the block's last claimed region: the span
+/// must keep covering the whole block text. A trailing statement's bodies stay
+/// outside the span, so a heredoc statement after the block on the same line is
+/// not swallowed. The scan resumes just past the closing keyword (a trailing
+/// statement on the same line is still scanned) and the floor keeps the line's
+/// final flush from re-entering any body region; when the block ends the line
+/// the resume is already past all of them.
 pub(super) fn keyword_block<'a>(
     line: &'a [u8],
     raw: &[u8],
     part: &[u8],
     start: usize,
+    line_start: usize,
     state: &ScanState,
     pre_resume: usize,
 ) -> (Segment<'a>, usize, usize) {
@@ -57,43 +68,70 @@ pub(super) fn keyword_block<'a>(
     } else {
         block_start_pos - 1
     };
-    let (resume, floor) = if closed {
+    let (resume, floor, bodies) = if closed {
         let line_end = heredoc::line_end_after(line, start);
-        let (bodies, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
-        // The block text's operators (condition and body) claim the line's
-        // body regions in operator order; a trailing statement's operators
-        // come after them and keep their regions outside the span.
+        // `line_resume` is the resume floor's anchor: the end of the line's
+        // last body region (the line end when the bodies are missing).
+        let (_, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
         let k = heredoc::operator_count(line, start, block_start_pos);
-        if k > 0 {
-            // Extend forward only: a body region may end before the closing
-            // keyword (a multi-line block with a heredoc in its body), and
-            // the span must keep covering the whole block text.
-            end = match bodies.get(k - 1) {
+        let claimed = claimed_regions(line, line_start, start, line_end, k);
+        let bodies = if k == 0 {
+            Vec::new()
+        } else if claimed.first().is_some_and(|&(s, _)| s >= end) {
+            // Append mode: the claimed regions are fully outside the block's
+            // command text, so the span stops at the closing keyword.
+            claimed
+        } else {
+            // Extension mode: extend forward only — a body region may end
+            // before the closing keyword (a multi-line block with a heredoc in
+            // its body), and the span must keep covering the whole block text.
+            end = match claimed.last() {
                 Some(&(_, e)) => end.max(e),
                 None => end.max(line_resume),
             };
-        }
+            Vec::new()
+        };
         if block_start_pos < line_end {
             // Trailing content on the same line: scan it; the line's final
             // flush must not re-enter the body regions.
-            (block_start_pos, line_resume.max(pre_resume))
+            (block_start_pos, line_resume.max(pre_resume), bodies)
         } else {
             // The block ends the line (or continues on later lines): resume
             // just past the closing keyword, never inside a body region.
-            (block_start_pos.max(line_resume).max(pre_resume), 0)
+            (block_start_pos.max(line_resume).max(pre_resume), 0, bodies)
         }
     } else {
-        (end + 1, 0)
+        (end + 1, 0, Vec::new())
     };
     (
         Segment::Block {
             block_start: start,
             end_pos: end,
             closed,
+            bodies,
         },
         resume,
         floor,
     )
+}
+
+/// The body regions the block's own `k` operators claim from its physical
+/// line's body stream: the regions of the whole line's operators, in operator
+/// order, starting after the `p` operators written on that line **before** the
+/// block (`p` = the pre-block statements' operators, which already claimed the
+/// head of the stream — the same rule `segment/line.rs::flush_line` applies to
+/// trailing statements). An empty list when the block has no operator or the
+/// line's bodies are missing.
+fn claimed_regions(
+    line: &[u8],
+    line_start: usize,
+    start: usize,
+    line_end: usize,
+    k: usize,
+) -> Vec<(usize, usize)> {
+    let claimed_before = heredoc::operator_count(line, line_start, start);
+    let (all, _) = heredoc::line_bodies_for_line(line, line_start, line_end);
+    all.into_iter().skip(claimed_before).take(k).collect()
 }
 
 #[cfg(test)]

@@ -1,11 +1,13 @@
 mod block;
+pub(super) mod book;
 pub(crate) mod group;
 mod line;
 
 use crate::brace::scan_function_block;
 use crate::keywords::{first_word_end, keyword_delta};
-use crate::scan::{Boundary, ScanState, boundary, skip_comment};
+use crate::scan::{Boundary, boundary, skip_comment};
 use alloc::vec::Vec;
+use book::Book;
 
 /// A segment of a script line extracted by the scanner.
 pub(crate) enum Segment<'a> {
@@ -24,6 +26,11 @@ pub(crate) enum Segment<'a> {
         end_pos: usize,
         /// Whether the closing keyword was found.
         closed: bool,
+        /// The block's own heredoc body regions, appended to its text; empty
+        /// when the block carries no `<<` operator, or when its bodies are
+        /// interleaved with its lines (extension mode, see
+        /// [`block::keyword::keyword_block`]).
+        bodies: Vec<(usize, usize)>,
     },
 }
 
@@ -34,90 +41,59 @@ pub(crate) enum Segment<'a> {
 /// content rather than new blocks. This prevents re-detecting nested blocks
 /// inside already-scanned block bodies.
 pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
-    let mut segments = Vec::new();
-    let mut start = 0;
-    let mut state = ScanState::new();
-    let mut i = 0;
-    let mut line_start = 0;
-    let mut runs: Vec<(&[u8], usize)> = Vec::new();
-    // The resume floor: after a block, no flush may resume inside a heredoc
-    // body region of the block's line (or of a statement that precedes the
-    // block on that line).
-    let mut body_floor = 0;
+    let mut book = Book::new();
 
-    while i <= line.len() {
-        let kind = boundary(line, i, &state);
+    while book.i <= line.len() {
+        let kind = boundary(line, book.i, &book.state);
         if kind == Boundary::Char {
-            if !in_block && state.at_word_start() && group::opens_at(line, i) {
-                match group::group_at_run(line, start, i) {
-                    // A group at a run start is a block; the cond layer owns any
-                    // `&&` / `||` before it, so each part's group short-circuits.
-                    Some(true) => {
-                        let (resume, floor) =
-                            group::open(line, start, line_start, &state, &mut segments, &mut runs);
-                        i = resume;
-                        start = i;
-                        line_start = i;
-                        body_floor = floor;
-                    }
-                    // A group at a cond-part start mid-run: skip its span whole so
-                    // the body's `;` is not a top-level separator. The run keeps the
-                    // group's text, and the cond layer splits the operator.
-                    Some(false) => i = group::skip_group(line, i, &mut state),
-                    // A brace in an argument position is word data.
-                    None => i = state.advance(line, i),
-                }
+            if !in_block && book.state.at_word_start() && group::opens_at(line, book.i) {
+                group::opener::scan(line, &mut book);
             } else {
-                i = state.advance(line, i);
+                book.i = book.state.advance(line, book.i);
             }
             continue;
         }
-        state.word_active = false;
+        book.state.word_active = false;
 
-        let raw = line.get(start..i).unwrap_or(b"");
+        let raw = line.get(book.start..book.i).unwrap_or(b"");
         let part = raw.trim_ascii();
         let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-        let word_end = first_word_end(part, start + lead);
+        let word_end = first_word_end(part, book.start + lead);
 
         if !in_block
             && !part.is_empty()
             && (keyword_delta(part, line, word_end) == Some(1)
-                || scan_function_block(line, part, start, state.in_quote).is_some())
+                || scan_function_block(line, part, book.start, book.state.in_quote).is_some())
         {
-            let pre_resume = line::flush_line(&mut segments, line, line_start, i, &mut runs);
-            let (segment, resume, floor, new_start) =
-                block::open_block(line, raw, part, start, &state, pre_resume, line_start);
-            segments.push(segment);
-            // `resume` is just past the block's span (a trailing statement on
-            // the same line is still scanned) or already past the line's body
-            // regions; the floor pulls the line's final flush past any body
-            // region (the block's own or the pre-block statement's).
-            i = resume;
-            start = i;
-            line_start = new_start;
-            body_floor = floor;
+            block::open(line, raw, &mut book);
         } else {
             if !part.is_empty() {
-                runs.push((part, start + lead));
+                book.runs.push((part, book.start + lead));
             }
-            if line.get(i) == Some(&b'\n') || i == line.len() {
-                let resume = line::flush_line(&mut segments, line, line_start, i, &mut runs);
-                i = resume.max(body_floor);
-                line_start = i;
+            if line.get(book.i) == Some(&b'\n') || book.i == line.len() {
+                book.i = line::flush_line(
+                    &mut book.segments,
+                    line,
+                    book.line_start,
+                    book.i,
+                    &mut book.runs,
+                )
+                .max(book.body_floor);
+                book.line_start = book.i;
             }
             if kind == Boundary::Comment {
-                i = skip_comment(line, i);
-                start = i;
+                book.i = skip_comment(line, book.i);
+                book.start = book.i;
                 // The comment ends the physical line: the next line starts at
                 // `i`, so the buffered runs' line bookkeeping restarts there.
-                line_start = i;
+                book.line_start = book.i;
             } else {
-                start = i + 1;
-                i += 1;
+                book.start = book.i + 1;
+                book.i += 1;
             }
         }
     }
-    segments
+    book.segments
 }
 
 #[cfg(test)]
