@@ -8,7 +8,8 @@ use error_stack::{Report, ResultExt};
 use crate::app::AppError;
 use crate::cmd_subst::MAX_CAPTURED;
 use crate::options::IGNOREEOF;
-use crate::repl::{complete, handle, line::{self, LineReader}};
+use crate::repl::line::{self, LineReader};
+use crate::repl::{complete, handle};
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
@@ -19,7 +20,7 @@ const PRIMARY_PROMPT: &[u8] = b"fdshell> ";
 const CONTINUATION_PROMPT: &[u8] = b"> ";
 
 /// Prompt, read and execute inputs until the end of input.
-pub(super) fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
+pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     seed_state(cell)?;
     let mut input = LineReader::new();
     loop {
@@ -44,9 +45,7 @@ fn seed_state(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     // still exits on EOF. The seed borrow above is already dropped: `is_tty`
     // is a syscall, and a held `RefMut` poisons every nested borrow.
     if sys::IN.is_tty().change_context(AppError::Read)? {
-        cell.borrow_mut()
-            .change_context(AppError::Borrow)?
-            .options |= IGNOREEOF;
+        cell.borrow_mut().change_context(AppError::Borrow)?.options |= IGNOREEOF;
     }
     Ok(())
 }
