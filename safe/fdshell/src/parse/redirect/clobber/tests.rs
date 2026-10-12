@@ -58,4 +58,52 @@ fn span_terminated_by_operator_byte_is_a_pipe() {
         !crate::parse::clobber_pipe(b"a\">|b", 4),
         "the double-quoted case, unchanged"
     );
+    // The `'` written inside `"` is data: the `>` is masked, so the `|` is a
+    // pipe (`echo "a'b>"c` prints `a'b>c`).
+    assert!(
+        !crate::parse::clobber_pipe(b"a\"'b>\"|c", 6),
+        "the `'` in `\"` opens no span, the `>` stays quoted"
+    );
+}
+
+/// The three quote arms are mutually gated, and each gate is visible in the
+/// mask byte by byte: a `"` written in a span never toggles (the bytes after
+/// the span are bare again), a `'` written in `"` never opens a span, and no
+/// escape pair is formed inside a span (so the span's bytes are one mask entry
+/// each and the `>` written in it is a masked byte, not a pair's tail).
+#[test]
+fn each_quote_arm_is_gated_by_the_other_state() {
+    // `'a"b'c`: the `"` is span data, `c` is bare again.
+    assert_eq!(
+        quoted(b"'a\"b'c"),
+        vec![false, true, true, true, true, false]
+    );
+    // `"a'b"c>`: the `'` opens nothing, so `c`/`>` are bare after the `"`.
+    assert_eq!(
+        quoted(b"\"a'b\"c>"),
+        vec![false, true, true, true, true, false, false]
+    );
+    // `'a\>'`: 5 source bytes, 5 mask entries — no pair consumed the `>`.
+    assert_eq!(quoted(b"'a\\>'"), vec![false, true, true, true, true]);
+    // The unquoted baseline keeps its pair: `\>` is two bare bytes.
+    assert_eq!(quoted(b"a\\>"), vec![false, false, false]);
+}
+
+/// The escape arm is the only place that consumes a pair, and its gate is what
+/// makes a quoted escape pair invisible to the quote toggles: in `a\"b` the pair
+/// is consumed whole, so the `"` never opens a double quote and every byte
+/// stays bare, while the same bytes without the backslash quote the `b`.
+#[test]
+fn escape_pair_never_leaves_a_toggle_behind() {
+    // `a\"b`: the pair is two bare bytes and the `"` is its tail, not a toggle.
+    assert_eq!(quoted(b"a\\\"b"), vec![false, false, false, false]);
+    // Without the backslash the `"` opens a span: the mask is parallel to the
+    // bytes, one entry each.
+    assert_eq!(quoted(b"a\"b"), vec![false, false, true]);
+    // A `\'` written in `"` is span data (`"` gates the pair), so the closing
+    // `"` still closes the span and the `b` after it is bare.
+    assert_eq!(
+        quoted(b"\"a\\'\"b"),
+        vec![false, true, true, true, true, false]
+    );
 }

@@ -237,3 +237,30 @@ fn backtick_span_content_is_data() {
         "the scan stops before the unpaired span quote"
     );
 }
+
+/// An unterminated region gives its opening quote back to the enclosing scan,
+/// and the offset of that quote is measured **from the region start** — for a
+/// `'…'` span exactly as for a `"` (the region model drops the quote bytes; see
+/// the README's Quoting divergences). The pins use a nonzero start so the
+/// offset is measured, not the absolute index.
+#[test]
+fn unterminated_span_offset_counts_from_the_region_start() {
+    // `echo ${v:-'a b`: `$` at 5, the span's `'` at 10 → 5 raw bytes are the
+    // region (`${` + `v:-`), and the body is truncated at the span quote.
+    assert_eq!(
+        scan_brace(b"echo ${v:-'a b", 5),
+        (b"v:-".to_vec(), 5, false),
+        "the span quote is at offset 5 from the `$`"
+    );
+    // ``x`echo 'a``: the backtick is at 1, the span's `'` at 7 → 6 bytes.
+    assert_eq!(
+        scan_backtick(b"x`echo 'a", 1),
+        (b"echo ".to_vec(), 6, false),
+        "the span quote is at offset 6 from the backtick"
+    );
+    // The `"` arm keeps the same rule at a nonzero start (regression pair).
+    assert_eq!(
+        scan_brace(b"echo ${v:-\"a b", 5),
+        (b"v:-".to_vec(), 5, false)
+    );
+}

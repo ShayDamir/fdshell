@@ -430,3 +430,33 @@ fn advance_quote_inside_span_does_not_toggle() {
     assert!(s.in_single, "the span is still open");
     assert!(!s.in_quote, "the inner quote byte is data");
 }
+
+// The `Quotes` carrier hands *both* quote bits across a nested scan, and
+// `set_quotes` must restore both: a group/function-block scan that resumed with
+// only the `"` half would read the rest of a `'…'` span as bare bytes (task #141).
+#[test]
+fn set_quotes_restores_both_bits() {
+    let mut s = ScanState::new();
+    s.set_quotes(Quotes {
+        double: true,
+        single: true,
+    });
+    assert!(s.in_quote, "the double bit is restored");
+    assert!(s.in_single, "the single bit is restored");
+    assert_eq!(
+        (s.quotes().double, s.quotes().single),
+        (true, true),
+        "quotes() round-trips both fields"
+    );
+    // The carrier seeds a fresh state the same way (the asymmetric pair proves
+    // neither field is ignored).
+    let seeded = Quotes {
+        double: false,
+        single: true,
+    }
+    .scan_state();
+    assert!(
+        !seeded.in_quote && seeded.in_single,
+        "only the span bit is set, not the double bit"
+    );
+}

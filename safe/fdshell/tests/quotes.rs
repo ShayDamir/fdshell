@@ -292,21 +292,30 @@ fn alias_body_round_trips_a_span() {
 
 /// bash: `echo 'a` (unterminated) is a syntax error. fdshell reports its own
 /// "unmatched quote" at the quote byte and exits 1 — the same convention as
-/// the pre-existing double-quote case.
+/// the pre-existing double-quote case. The caret line must sit on the byte of
+/// the `'` that opened the span.
 #[test]
 fn unbalanced_span_is_a_parse_error_at_the_quote() {
-    for script in ["echo 'a", "echo x 'y", "echo 'a' 'b", "echo '"] {
+    // (script, byte index of the `'` that opens the unbalanced span)
+    for (script, quote) in [
+        ("echo 'a", 5usize),
+        ("echo x 'y", 7),
+        ("echo 'a' 'b", 9),
+        ("echo '", 5),
+    ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(err.contains("unmatched quote"), "{script}: stderr={err:?}");
-        // The report shows the script text and a caret line under the quote.
-        assert!(
-            err.lines().any(|l| l.contains(script)),
-            "{script}: no script-text line in stderr={err:?}"
-        );
-        assert!(
-            err.lines().any(|l| l.trim_end().ends_with('^')),
-            "{script}: no caret line in stderr={err:?}"
+        // The report shows the script text, and a caret line whose caret is
+        // the column of the opening quote on that line.
+        let shown = err.lines().find(|l| l.contains(script)).unwrap();
+        let text_col = shown[..shown.find(script).unwrap()].chars().count();
+        let caret_line = err.lines().find(|l| l.trim_end().ends_with('^')).unwrap();
+        let caret_col = caret_line[..caret_line.find('^').unwrap()].chars().count();
+        assert_eq!(
+            caret_col,
+            text_col + quote,
+            "{script}: caret must point at byte {quote}, stderr={err:?}"
         );
     }
     // Inside a block body the block scanner reports its own parse error.
@@ -361,4 +370,54 @@ fn span_text_reaches_builtins_as_one_argument() {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
     }
+}
+
+/// The span's literal backslash is what makes the byte-level scanners agree with
+/// the tokenizer, and each case below is byte-identical to bash:
+/// * `echo 'a\>'|b` pipes to the command `b` (the `>` is span data and the
+///   span's `\` forms no escape pair, so it is not a `>|` clobber operator);
+/// * `echo "a'b>"c` prints `a'b>c` (a `'` written in `"` opens no span, so the
+///   `>` stays inside the double quotes);
+/// * `echo {x,'a\}'}` prints `x a\}` (the span's `\` does not swallow its
+///   closing quote, so the group is found and the member keeps a literal `\}`);
+/// * `echo $(echo 'a\)b')` prints `a\)b` (the `)` written in the span is body
+///   data: the substitution ends at the span's own quote and the real `)`).
+#[test]
+fn span_backslash_keeps_the_byte_level_scanners_in_step() {
+    let bin = scratch_bin(&["b"]);
+    let (out, err, code) = run_with_path(&bin, "echo 'a\\>'|b");
+    assert_eq!((out.as_str(), code), ("ran-b\n", 0), "stderr={err:?}");
+    for (script, want) in [
+        ("echo \"a'b>\"c", "a'b>c\n"),
+        ("echo {x,'a\\}'}", "x a\\}\n"),
+        ("echo $(echo 'a\\)b')", "a\\)b\n"),
+        ("echo a'x\\'b", "ax\\b\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// Documented divergence (README "Quoting" and "Nested regions inside double
+/// quotes"): a quote written inside a `${ … }` body is a marker, not content —
+/// the region scan drops **both** quote bytes and the body is then read as
+/// expansion text, so a span's protection is lost there. bash strips `"` bytes
+/// in an alternate word and keeps `'` bytes literal. The model is pre-existing
+/// for `"` (task #174) and #141 made `'…'` follow it; the common unquoted case
+/// matches bash exactly, and master printed the region literally.
+#[test]
+fn region_body_drops_the_span_quote_bytes() {
+    // bash: `a b` — unquoted, the span is one word before the expansion runs.
+    let (out, err, code) = run("v=; echo ${v:-'a b'}");
+    assert_eq!((out.as_str(), code), ("a b\n", 0), "stderr={err:?}");
+    // bash: `a b` — the `"` form is identical on every side.
+    let (out, err, code) = run("v=; echo \"${v:-\"a b\"}\"");
+    assert_eq!((out.as_str(), code), ("a b\n", 0), "stderr={err:?}");
+    // bash: `'a b'` — fdshell drops the span's quotes from the body text.
+    let (out, err, code) = run("v=; echo \"${v:-'a b'}\"");
+    assert_eq!((out.as_str(), code), ("a b\n", 0), "stderr={err:?}");
+    // bash: `a\}b` — a literal `}` written in an alternate word diverges too
+    // (the region ends at the span's `}`, the body keeps a literal `\}`).
+    let (out, err, code) = run("v=; echo ${v:-'a\\}b'}");
+    assert_eq!((out.as_str(), code), ("a\\\\b}\n", 0), "stderr={err:?}");
 }

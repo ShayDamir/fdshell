@@ -365,14 +365,26 @@ fn double_quote_inside_span_does_not_toggle() {
     assert_eq!(w[1].4, vec![true; 3]);
 }
 
-// An unbalanced `'` is an `UnbalancedQuote` reported at the opening byte.
+// An unbalanced `'` is an `UnbalancedQuote` reported at the opening byte: the
+// `ParsePosition` carried on the report is the index of the `'` that opened the
+// span (the same byte the caret line points at), not a neighbouring byte.
 #[test]
 fn unbalanced_single_quote_reports_the_opening_byte() {
-    let line = b"echo 'abc";
-    let err = tokenize(line).expect_err("unbalanced quote");
-    assert!(alloc::format!("{err:?}").contains("unmatched quote"));
-    let caret = 5;
-    assert_eq!(line[caret], b'\'');
+    for line in [
+        b"echo 'abc".as_slice(),
+        b"echo 'a' 'b".as_slice(),
+        b"echo x 'y".as_slice(),
+    ] {
+        let err = tokenize(line).expect_err("unbalanced quote");
+        assert!(alloc::format!("{err:?}").contains("unmatched quote"));
+        let pos = err
+            .downcast_ref::<crate::error::parse::ParsePosition>()
+            .expect("the report carries a position")
+            .pos;
+        let open = line.iter().rposition(|&b| b == b'\'').unwrap();
+        assert_eq!(pos, open, "{line:?}: the report must point at the open `'`");
+        assert_eq!(line[pos], b'\'');
+    }
 }
 
 // A trailing `''` empty span still ends the word (`echo x ''` is two words).

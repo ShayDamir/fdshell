@@ -78,6 +78,33 @@ fn span_backslash_shields_nothing() {
     assert_eq!(scan_at(b"echo '\\a)b'", 0, 1), None);
 }
 
+/// The span's opacity is what disables the escape-pair rule inside it. With a
+/// `\` in a span the pair is never formed, so (a) the `)` written behind it is
+/// span data and the body ends at the span's own closing quote plus the real
+/// `)` — `$(echo 'a\)b')` has the body `echo 'a\)b'` (bash prints `a\)b`) — and
+/// (b) the closing quote is never swallowed as a pair's second byte:
+/// `$(echo 'x\')` has the body `echo 'x\'` and ends at the `)` after the span
+/// (bash prints `x\`).
+#[test]
+fn span_backslash_leaves_the_escape_arm_out() {
+    assert_eq!(
+        scan_at(b"echo 'a\\)b')", 0, 1),
+        Some((b"echo 'a\\)b'".to_vec(), 12)),
+        "the `\\)` pair is not formed inside a span: the `)` is span data"
+    );
+    assert_eq!(
+        scan_at(b"echo 'x\\')", 0, 1),
+        Some((b"echo 'x\\'".to_vec(), 10)),
+        "the span's closing quote is not a pair tail, so the span closes and the `)` ends the body"
+    );
+    let mut bytes = b"echo 'x\\')".iter().copied().peekable();
+    assert_eq!(
+        scan_paren_body(&mut bytes, 1),
+        Some(b"echo 'x\\'".to_vec()),
+        "the iterator form takes the same body"
+    );
+}
+
 /// The iterator form tracks the same span rule (the two variants share `Nest`).
 #[test]
 fn iterator_form_tracks_the_single_quote_span() {

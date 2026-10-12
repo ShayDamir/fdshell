@@ -742,3 +742,22 @@ fn gobbler_skips_single_quote_spans() {
         "a span's backslash is literal: its brace is span data"
     );
 }
+
+/// Inside a `'…'` span the gobbler forms no escape pair, so a `\` written just
+/// before the closing quote does **not** swallow it: the span closes at its own
+/// quote and the group after it is found. A group whose member ends in
+/// `'…\'…'` therefore still expands (`{x,'a\}'}` → `x` and `'a\}'`; bash prints
+/// `x a\}`).
+#[test]
+fn gobbler_escape_pair_never_swallows_a_span_close() {
+    assert_eq!(
+        gobble(b"a'x\\'{b,c}", 0, b'{'),
+        (5, true, None),
+        "the span closes at its own quote, so the group opener after it is found"
+    );
+    assert_eq!(
+        words("{x,'a\\}'}"),
+        Some(vec![b"x".to_vec(), b"'a\\}'".to_vec()]),
+        "the member's span survives the backslash"
+    );
+}

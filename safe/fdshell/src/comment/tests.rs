@@ -486,3 +486,58 @@ fn run_starting_mid_span_ignores_closer() {
     assert!(!closed, "fi inside an open span must not close the block");
     assert!(quotes.single, "the span must stay open");
 }
+
+/// A run that starts quoted never scores a keyword: `depth_delta`'s first
+/// fragment is marked quoted from the caller's state, and a split (the only
+/// thing that clears the flag) can only happen unquoted. Each of the three
+/// states is pinned on its own — an `&&` in the initial `frag_quoted`
+/// expression would silently let one of them score.
+#[test]
+fn run_starting_quoted_never_scores_a_keyword() {
+    let mid_span = Quotes {
+        double: false,
+        single: true,
+    };
+    let mid_double = Quotes {
+        double: true,
+        single: false,
+    };
+    let mid_backtick = Quotes {
+        double: false,
+        single: false,
+    };
+    for (quotes, in_backtick, what) in [
+        (mid_span, false, "mid-span"),
+        (mid_double, false, "mid-\""),
+        (mid_backtick, true, "mid-backtick"),
+    ] {
+        assert_eq!(
+            depth_delta::depth_delta(b"fi", b"fi", 0, quotes, in_backtick),
+            0,
+            "{what}: a closer written in a run that starts quoted is data"
+        );
+    }
+}
+
+/// The `'…'` span opened inside a run stays open for the rest of the run (see
+/// the `depth_delta` doc): the `done` after the span's closing `'` is **not** a
+/// closer, which is exactly bash's behaviour for a closer written in the same
+/// run as a preceding quoted word (`if true; then echo 'q' done` is a syntax
+/// error in bash; fdshell reports the block as unclosed). The pin kills a
+/// dropped toggle, which would close the span at the `'` and score the `done`.
+#[test]
+fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
+    let line = b"echo 'q' done";
+    assert_eq!(
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        0,
+        "the span swallows the rest of the run, so `done` never scores"
+    );
+    // Without the span the same run is a closer (`while :; do ... done`).
+    let line = b"echo q done";
+    assert_eq!(
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        -1,
+        "the unquoted `done` after a split scores"
+    );
+}
