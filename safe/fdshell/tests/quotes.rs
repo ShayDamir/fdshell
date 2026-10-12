@@ -221,16 +221,18 @@ fn span_in_a_redirect_target_and_a_heredoc_delimiter() {
     assert_eq!(out, "0x\n");
 }
 
-/// bash: `'time' ls` runs `ls` — a quoted `time` is a command word, not the
-/// keyword; `ls` is looked up as a real file (a scratch `PATH` stub).
+/// bash: `'time' ls` runs the `time` **utility** (`/usr/bin/time ls`) — a
+/// quoted `time` is a command word, not the reserved word. The scratch `PATH`
+/// holds stubs so the assertion is hermetic: each stub prints its own name,
+/// which proves the quoted word is looked up in `PATH` as a command name.
 #[test]
 fn quoted_keyword_words_are_command_words() {
-    let bin = scratch_bin(&["ls", "if", "done"]);
+    let bin = scratch_bin(&["time", "ls", "then"]);
     for (script, want) in [
-        ("'time' ls", "ran-ls\n"),
-        // A quoted keyword is a command name, so it is looked up in PATH.
+        // The stub `time` runs, so the keyword never claims the statement.
+        ("'time' ls", "ran-time\n"),
+        ("\"time\" ls", "ran-time\n"),
         ("'ls' -d .", "ran-ls\n"),
-        ("\"time\" ls", "ran-ls\n"),
     ] {
         let (out, err, code) = run_with_path(&bin, script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
