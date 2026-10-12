@@ -282,6 +282,9 @@ operator in its body. The outer split lands on the operator written *outside*
 the block (`while false; do :; done; echo x`), a `{ …; }` group inside a block
 condition keeps its per-part rule (`while { true; } && { true; }; do …; done`),
 and a `time [-p]` prefix is transparent (`time while [ 1 ] && [ 1 ]; do …; done`).
+Only a *command-position* keyword opens a block: written as an argument it is
+word data, exactly as a brace is above — `echo if && echo b` prints `if` and `b`,
+and `echo x > if && echo b` writes `x` into the file `if` and then runs `echo b`.
 Pinned by `tests/cond_blocks.rs` and `tests/loops.rs`. Two shapes stay broken:
 an operator *adjacent* to a block (`true && while …; do …; done`, task #232) and
 a block whose text also carries a here-doc (task #234, see "Heredocs").

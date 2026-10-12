@@ -1051,3 +1051,42 @@ Two traps found while doing it:
    (`while cat <<X; do a && b; X` + `done`) is task #234, recorded in README.
    Task #235 owns the twin case (a `&&` in a function-definition group body,
    where the definer word keeps the `{` off the run start).
+3. **A keyword scorer must ask *command position*, not word start.**
+   `keywords::keyword_delta` scores `if`/`while`/`for`/`case`/`until` as `+1`
+   wherever the word sits, and a word start is not a command position: the
+   first `#137` round scored `echo if && echo b` as a block, so the part lost
+   its `&&` and printed one argument `if && echo b`;
+   `echo x > if && echo b` wrote `x && echo b` into the file named `if` and
+   never ran `echo b` (data corruption). Every other layer already knows the
+   rule — bash, the segment scanner, and the group arm of this very scan
+   (`group_at_run`: the run is empty, or it ends with `&&` / `||`, a `time [-p]`
+   prefix transparent) — so the keyword arm must call it too, with `run_start`
+   passed in. Gate it on the *top level* only: inside a block (`block_depth > 0`)
+   the scan cannot see `then` / `do` / `else` / `elif` / body / arm positions, so
+   a nested `if` there keeps scoring, and its closers clamp the depth back to 0
+   (`while true; do if true; then false; fi && echo x; break; done` is one part).
+   Pins: `cond/boundary/block/tests.rs::keyword_shaped_argument_words_keep_the_split`
+   and `tests/cond_blocks.rs::keyword_shaped_argument_words_do_not_swallow_the_cond_operators`.
+   The gate leaves two gaps, tasks #236 (argument-position keywords *inside* a
+   block body — a body needs its own clause-position rule) and #237 (comment
+   lines inside a body: `# done` drops the counter and re-opens the split).
+
+## A cond-list heredoc arm's `b == b'\n'` guard is a mutation survivor with no mid-run pin
+
+`cond/boundary.rs` skips a heredoc's body with
+`if b == b'\n' && let Some(resume) = heredoc::skip(line, run_start, i)`. The
+`==`→`!=` mutant survives, and `master`'s own run of this file reports the same
+mutant (`boundary.rs:37:18` there, `:60:18` after #137's comments shifted the
+lines), so it is pre-existing, not #137's. Reason: every cond-list heredoc pin
+the suite has puts the `<<` at a run start, so the scan reaches the newline that
+closes the *same* run and the two forms agree. The `!=` form only differs for a
+`<<` written **mid-run** whose body follows (`cat <<X && echo b` + body +
+delimiter inside a cond list), i.e. the mid-run keyword gap task #232 owns.
+Record it: when #232's mid-run work lands, add a cond-list pin for that shape
+measured against bash and the survivor dies with it. (Measured with
+`cargo mutants -j4 --test-tool nextest --file safe/fdshell/src/cond/{boundary,boundary/block}.rs`:
+42 mutants — 40 caught, 1 unviable (the chained-`let` `&&`: `|| let` is not a
+legal let chain, verified by hand), and this one missed. `master`'s own run of
+the file reports the same `==`→`!=` plus two further survivors (the stray-`}`
+arm's `==` and the `\n`/`;` arm's `||`) that #137's pins now kill.)
+
