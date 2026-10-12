@@ -357,3 +357,76 @@ fn full_walk_of_quoted_regions_ends_balanced() {
         assert_eq!(s.paren_depth, 0, "{line:?}: no substitution is left open");
     }
 }
+
+// --- Single quotes (task #141): a `'…'` span is one opaque byte run.
+
+// A `'` opens the span and its closing `'` ends it; the bytes between are data.
+#[test]
+fn advance_single_quote_span_open_close() {
+    let line = b"a'b'c";
+    let mut s = ScanState::new();
+    s.advance(line, 0); // 'a'
+    assert!(!s.in_single);
+    s.advance(line, 1); // '\''
+    assert!(s.in_single);
+    s.advance(line, 2); // 'b'
+    assert!(s.in_single, "the span byte advances one position");
+    s.advance(line, 3); // '\''
+    assert!(!s.in_single);
+}
+
+// Inside a span a backslash is literal (POSIX §2.2.3): it consumes one byte
+// and shields nothing, so the `'` behind it closes the span.
+#[test]
+fn advance_span_has_no_escape_pair() {
+    let mut s = ScanState::new();
+    s.advance(b"'\\", 0); // opens the span
+    assert!(s.in_single);
+    let next = s.advance(b"'\\", 1); // the `\` is one data byte
+    assert_eq!(next, 2, "no escape pair inside a span: one byte");
+    assert!(s.in_single);
+}
+
+// A `#` inside a `'…'` span is data, never a comment.
+#[test]
+fn boundary_hash_in_single_quote_is_char() {
+    let s = ScanState {
+        in_single: true,
+        ..ScanState::new()
+    };
+    assert_eq!(
+        boundary(b"a'#b'", 2, &s),
+        Boundary::Char,
+        "the span's `#` is not a comment"
+    );
+}
+
+// A `;` inside a `'…'` span is not a separator (`echo 'a; b'` is one command).
+#[test]
+fn boundary_semicolon_in_single_quote_is_char() {
+    let s = ScanState {
+        in_single: true,
+        ..ScanState::new()
+    };
+    assert_eq!(boundary(b"a;b", 1, &s), Boundary::Char);
+}
+
+// A `'` is a word byte, and mid-span no new word can start.
+#[test]
+fn at_word_start_is_false_inside_a_span() {
+    let mut s = ScanState::new();
+    s.advance(b"'x", 0);
+    assert!(s.in_single);
+    assert!(!s.at_word_start(), "mid-span is never a word start");
+}
+
+// A `"` written inside a span does not toggle the double-quote state.
+#[test]
+fn advance_quote_inside_span_does_not_toggle() {
+    let mut s = ScanState::new();
+    s.advance(b"'\"", 0);
+    assert!(s.in_single);
+    s.advance(b"'\"", 1);
+    assert!(s.in_single, "the span is still open");
+    assert!(!s.in_quote, "the inner quote byte is data");
+}

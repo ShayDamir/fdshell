@@ -142,3 +142,30 @@ fn glued_comment_after_the_closing_brace_ends_the_statement() {
     span(b"{ echo a; }# note", 11, 17);
     span(b"{ echo a; } && { echo b; }#x", 26, 28);
 }
+
+/// A `'…'` span masks its bytes (task #141): a `{`/`}` written inside a span is
+/// a word, never a group delimiter, and a span inside a group body is one word
+/// whose separator bytes are data.
+#[test]
+fn quoted_braces_are_not_group_delimiters() {
+    for line in [b"'{' x }".as_slice(), b"\"{\" x }".as_slice()] {
+        assert!(
+            !opens(line, line, 3),
+            "a brace written in a span is a word byte, not an opener"
+        );
+        assert!(
+            !opens_at(line, 0),
+            "the brace byte in a span opens no group mid-line"
+        );
+        assert!(
+            matches!(
+                scan_segments(line, false).first(),
+                Some(Segment::Statement { .. })
+            ),
+            "{line:?} is a plain statement"
+        );
+    }
+    // A group whose body words are spans: the span's `;` is data.
+    span(b"{ 'a; b'; }", 11, 11);
+    span(b"{ echo 'a' 'b'; }", 17, 17);
+}

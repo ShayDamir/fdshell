@@ -460,3 +460,29 @@ fn posix_wait_in_body_does_not_open_nested_block() {
     );
     assert_eq!(r.end, 38);
 }
+
+/// A closer written inside a `'…'` span is data (task #141); the real closer
+/// after the span still closes the block.
+#[test]
+fn single_quoted_closer_is_data() {
+    let r = scan(b"if true; then echo 'fi'; fi", 2);
+    assert!(r.closed, "the quoted `fi` is data, the real one closes");
+    assert_eq!(r.end, 28, "the closer is the last word of the run");
+    // A span that hides the only closer leaves the block open.
+    let r = scan(b"if true; then echo 'fi'", 2);
+    assert!(!r.closed, "the span's `fi` must not close the block");
+}
+
+/// A run handed to the scanner while already inside a `'…'` span (the REPL
+/// continuation case) keeps the span open and ignores a closer written in it.
+#[test]
+fn run_starting_mid_span_ignores_closer() {
+    let mut quotes = Quotes {
+        double: false,
+        single: true,
+    };
+    let mut s = 1;
+    let (_end, closed) = scan_block(b"'fi", 1, &mut quotes, &mut s, 1);
+    assert!(!closed, "fi inside an open span must not close the block");
+    assert!(quotes.single, "the span must stay open");
+}

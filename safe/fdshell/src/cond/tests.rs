@@ -146,3 +146,24 @@ fn block_texts_leave_the_outer_scan_no_boundary() {
     let multi = b"while true; do\n  false && echo a\n  break\ndone";
     assert_eq!(boundary_of(&multi[..]), (multi.len(), false));
 }
+
+/// A `'…'` span is opaque (task #141): `echo 'a && b'` is one cond-list part,
+/// and the split is the operator written outside the quotes. Bash's split of
+/// `echo 'a && b' && echo ok` is the `&&` at 14.
+#[test]
+fn operator_inside_a_single_quote_is_not_a_boundary() {
+    assert_eq!(boundary_of(b"echo 'a && b'"), (13, false), "one part");
+    assert_eq!(boundary_of(b"echo 'a && b' && echo ok"), (14, false));
+    assert_eq!(boundary_of(b"echo 'a || b' || echo ok"), (14, true));
+    // The run resets at a `;`/newline, and a `;` inside a span is not one:
+    // `echo 'a; b' && echo c` splits at the `&&` (12), not at the `;`.
+    assert_eq!(boundary_of(b"echo 'a; b' && echo c"), (12, false));
+}
+
+/// A keyword written inside a `'…'` span opens no block, so the cond-list
+/// operators written after it stay top-level (`echo 'a if b' && echo c`).
+#[test]
+fn keyword_inside_a_single_quote_opens_no_block() {
+    assert_eq!(boundary_of(b"echo 'a if b' && echo c"), (14, false));
+    assert_eq!(boundary_of(b"echo 'if' fi && echo c"), (13, false));
+}

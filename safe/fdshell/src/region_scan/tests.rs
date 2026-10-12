@@ -199,3 +199,41 @@ fn backtick_at_returns_the_index_past_the_close() {
     assert_eq!(scan_backtick_at(b"`a", 0), None, "unterminated");
     assert_eq!(scan_backtick_at(b"abc", 5), None, "start past the line");
 }
+
+/// A `'…'` span is one opaque literal (task #141): the `}` written in it is
+/// data, its quote bytes are dropped from the body like a `"`'s, and the
+/// region closes at the real `}`.
+#[test]
+fn brace_span_is_opaque_and_its_quote_bytes_are_dropped() {
+    assert_eq!(
+        brace_scan(b"${a:-'b}c'}"),
+        (b"a:-b}c".to_vec(), 11, true),
+        "the closing brace written inside the span is data"
+    );
+    // A backslash written in the span is literal: it shields no byte, so the
+    // `}` written behind it is span data and the real `}` still closes.
+    assert_eq!(
+        brace_scan(b"${a:-'b\\}'}"),
+        (b"a:-b\\}".to_vec(), 11, true),
+        "the span's backslash shields nothing; the span's brace is data"
+    );
+}
+
+/// A backtick body containing a `'…'` span ends at the real closing backtick,
+/// not at the one written inside the span.
+#[test]
+fn backtick_span_content_is_data() {
+    assert_eq!(
+        backtick_scan(b"`echo 'a`b'`"),
+        (b"echo a`b".to_vec(), 12, true),
+        "the span's backtick is data; its quote bytes are dropped like a `\"`'s"
+    );
+    // A `'` left open at the end of the line belongs to the enclosing region.
+    let (body, consumed, closed) = backtick_scan(b"`echo 'a");
+    assert!(!closed);
+    assert_eq!(
+        (body, consumed),
+        (b"echo ".to_vec(), 6),
+        "the scan stops before the unpaired span quote"
+    );
+}

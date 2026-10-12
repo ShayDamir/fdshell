@@ -101,3 +101,49 @@ fn fold_word_returns_a_shortcstr_with_the_aligned_mask() {
     assert_eq!(word.as_bytes().expect("bytes"), b"echo");
     assert_eq!(mask, vec![false, false, false, false]);
 }
+
+/// A `'…'` span has no escape pair at all (POSIX §2.2.3): every byte written in
+/// it is literal, including a backslash. Its state is independent from the `"`
+/// state — `fold` reads the raw bytes, so a delimiter text still carries quotes.
+#[test]
+fn fold_keeps_every_byte_of_a_single_quote_span() {
+    // The span's backslash is one byte of data: no folding happens in the span.
+    assert_eq!(fold(b"'a\\*b'"), b"'a\\*b'");
+    assert_eq!(fold(b"'a\\'"), b"'a\\'");
+    // An unquoted pair behind the span folds as usual.
+    assert_eq!(fold(b"'a\\b'\\*c"), b"'a\\b'*c");
+    // A `"` written in a span is data: it opens no double-quote state, so the
+    // pair behind the span is unquoted and folds.
+    assert_eq!(fold(b"'a\"b'\\*c"), b"'a\"b'*c");
+    // A `'` written inside double quotes is data: the pair stays quoted.
+    assert_eq!(fold(b"\"a'b\\*c\""), b"\"a'b\\*c\"");
+}
+
+/// A span's literal bytes arrive from the tokenizer in the double-quote escape
+/// form (`\\`, `\$`) with mask `true`, and a word that never reaches
+/// substitution is folded by this function alone: POSIX #4.2 drops the
+/// backslash of a quoted `\$`/`\\` pair, so the span round-trips to the bytes
+/// that were written in it. Any other quoted pair keeps its backslash.
+#[test]
+fn fold_mask_round_trips_the_single_quote_encoding() {
+    // `'a\b'` → word `a\\b`, mask all quoted → `a\b`.
+    assert_eq!(
+        fold_mask(b"a\\\\b", &[true, true, true, true]),
+        (b"a\\b".to_vec(), vec![true, true, true])
+    );
+    // `'$'` → word `\$`, mask quoted → `$` (no substitution pass involved).
+    assert_eq!(
+        fold_mask(b"\\$", &[true, true]),
+        (b"$".to_vec(), vec![true])
+    );
+    // An unquoted pair folds the same way, protecting the escaped byte.
+    assert_eq!(
+        fold_mask(b"\\$", &[false, false]),
+        (b"$".to_vec(), vec![true])
+    );
+    // Any other quoted pair keeps its backslash (POSIX #4.2 lists only these).
+    assert_eq!(
+        fold_mask(b"a\\*b", &[true, true, true, true]),
+        (b"a\\*b".to_vec(), vec![true, true, true, true])
+    );
+}

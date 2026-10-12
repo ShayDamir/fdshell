@@ -217,3 +217,42 @@ fn unterminated_quoted_regions_need_a_continuation() {
         assert!(!is_complete(line), "{line:?} needs a continuation line");
     }
 }
+
+/// A `'…'` span behaves like a `"…"` region for the REPL (task #141): its
+/// separators, operators and newlines are data, and a closed span on a
+/// statement that ends properly is complete.
+#[test]
+fn single_quoted_regions_with_inner_separators_are_complete() {
+    for line in [
+        b"echo 'a; b'".as_slice(),
+        b"echo 'a && b' && echo ok".as_slice(),
+        b"echo 'a | b' | cat".as_slice(),
+        b"echo '<<EOF'".as_slice(),
+        b"if true; then echo 'x; y'; fi".as_slice(),
+        b"while true; do echo 'a; b'; done".as_slice(),
+        b"echo 'a' 'b'".as_slice(),
+        // A span's quote bytes are dropped, so the empty span is a word too.
+        b"echo ''".as_slice(),
+    ] {
+        assert!(
+            is_complete(line),
+            "{line:?} must execute without continuation"
+        );
+    }
+}
+
+/// An unpaired `'` keeps the REPL reading; a statement that ends in a dangling
+/// operator behind a closed span still needs its continuation line.
+#[test]
+fn unpaired_span_and_dangling_operator_need_continuation() {
+    for line in [
+        b"echo '".as_slice(),
+        b"echo 'a".as_slice(),
+        b"echo 'a' '".as_slice(),
+        b"echo 'a' &&".as_slice(),
+        b"echo 'a' && ".as_slice(),
+        b"if true; then echo 'a".as_slice(),
+    ] {
+        assert!(!is_complete(line), "{line:?} needs a continuation line");
+    }
+}

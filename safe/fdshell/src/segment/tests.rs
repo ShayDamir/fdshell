@@ -976,3 +976,46 @@ fn statements(line: &[u8]) -> Vec<Vec<u8>> {
         })
         .collect()
 }
+
+/// A `'…'` span is one opaque literal word (task #141): the separator, pipe,
+/// `&&` or newline written in it never splits a statement, and the span's
+/// metacharacters are data.
+#[test]
+fn separators_inside_a_single_quote_span_are_data() {
+    let cases: &[(&[u8], &[&[u8]])] = &[
+        (b"echo 'a; b'", &[b"echo 'a; b'"]),
+        (b"echo 'a\nb'", &[b"echo 'a\nb'"]),
+        (b"echo 'a && b'", &[b"echo 'a && b'"]),
+        (b"echo 'a | b'", &[b"echo 'a | b'"]),
+        (b"echo 'a; b'; echo after", &[b"echo 'a; b'", b"echo after"]),
+        (b"echo 'a' && echo ok", &[b"echo 'a' && echo ok"]),
+        // An empty span is a word of its own, and it separates nothing.
+        (b"echo '' ; echo after", &[b"echo ''", b"echo after"]),
+        // The span and a `"` region nest independently: the `'` in `"` is data
+        // and the `"` in `'` is data.
+        (b"echo \"a'b;c\"; echo x", &[b"echo \"a'b;c\"", b"echo x"]),
+        (b"echo 'a\"b;c'; echo x", &[b"echo 'a\"b;c'", b"echo x"]),
+    ];
+    for (line, want) in cases {
+        let got = statements(line);
+        let want: Vec<Vec<u8>> = want.iter().map(|w| w.to_vec()).collect();
+        assert_eq!(got, want, "{line:?}");
+    }
+}
+
+/// A block keyword written in a `'…'` span opens and closes nothing (task
+/// #141): the block below is closed by the real `fi`, and the quoted `then`,
+/// `done`, `fi` are command words.
+#[test]
+fn quoted_keywords_do_not_open_or_close_blocks() {
+    // `'fi'` as an argument: the statement is one command, the block is intact.
+    check_block(b"if true; then echo 'fi'; fi", (0, 27, true));
+    // `'then'` is not the opener: the run is a plain command statement.
+    assert_eq!(
+        statements(b"if true; 'then' echo x; fi"),
+        vec![b"if true; 'then' echo x; fi".to_vec()],
+        "the quoted `then` opens nothing, so the whole line is one statement"
+    );
+    // A quoted `done` in a loop body does not close it.
+    check_block(b"while true; do echo 'done'; done", (0, 32, true));
+}

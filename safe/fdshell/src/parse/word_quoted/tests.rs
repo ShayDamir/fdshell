@@ -64,3 +64,17 @@ fn attached_plain_operator_forms_are_not_quoted() {
     assert!(!case(b"<<X", 0, 3));
     assert!(!case(b"<<<w", 0, 4));
 }
+
+/// Single quotes are the same shape as double quotes for this test — the word
+/// is quoted because the span is longer than the word's bytes (task #141).
+#[test]
+fn single_quoted_words_are_quoted() {
+    // `''` (empty span) and `'a'`.
+    assert!(case(b"", 0, 2));
+    assert!(case(b"a", 0, 3));
+    // `'a'b'c'`: three word bytes, a seven-byte span.
+    assert!(case(b"abc", 0, 7));
+    // `<<'EOF'` attached heredoc form: operator bytes plus a quoted span.
+    assert!(case(b"<<EOF", 0, 7));
+    assert!(!case(b"<<EOF", 0, 5));
+}

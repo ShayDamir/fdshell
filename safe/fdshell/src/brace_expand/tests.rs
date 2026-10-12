@@ -702,3 +702,43 @@ fn escaped_braces_never_open_a_group() {
     assert_eq!(expand_line("echo \\{a,b\\}"), b"echo \\{a,b\\}".to_vec());
     assert_eq!(expand_line("echo a\\{b,c\\}"), b"echo a\\{b,c\\}".to_vec());
 }
+
+/// A `'…'` span is as opaque as a `"…"` one (task #141): the braces, commas and
+/// ranges written in it are data. Its quote bytes stay in the word here — the
+/// brace stage works on raw text, and word expansion strips them later.
+#[test]
+fn single_quoted_braces_are_opaque() {
+    assert_eq!(words("'{a,b}'"), None);
+    assert_eq!(words("a'{b,c}'d"), None);
+    // A group right after a span still expands: the span is a word prefix.
+    assert_eq!(
+        words("'x'{b,c}"),
+        Some(vec![b"'x'b".to_vec(), b"'x'c".to_vec()])
+    );
+    // A quoted member: `{a,'b c'}` is two words, `a` and `b c`.
+    assert_eq!(
+        words("{a,'b c'}"),
+        Some(vec![b"a".to_vec(), b"'b c'".to_vec()])
+    );
+}
+
+#[test]
+fn single_quoted_brace_word_unchanged() {
+    assert_eq!(expand_line("echo '{a,b}'"), b"echo '{a,b}'".to_vec());
+}
+
+/// The gobbler's own quote state tracks `'…'`: a `{` written in the span opens
+/// nothing, and a backslash in it is literal, so it shields nothing either.
+#[test]
+fn gobbler_skips_single_quote_spans() {
+    assert_eq!(
+        gobble(b"a'x{y}'{b,c}", 0, b'{'),
+        (7, true, None),
+        "the brace written in the span opens nothing: the scan lands on it"
+    );
+    assert_eq!(
+        gobble(b"a'x\\{y}'{b,c}", 0, b'{'),
+        (8, true, None),
+        "a span's backslash is literal: its brace is span data"
+    );
+}

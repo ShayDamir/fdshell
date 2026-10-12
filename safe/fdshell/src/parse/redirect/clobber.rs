@@ -91,3 +91,6 @@ pub(crate) fn clobber_pipe(line: &[u8], k: usize) -> bool {
     let word = line.get(s..k).unwrap_or(b"");
     clobber_word(word, mask.get(s..k).unwrap_or(&[]))
 }
+
+#[cfg(test)]
+mod tests;

@@ -18,6 +18,40 @@ fn delimiter_word_strips_one_quote_pair() {
     assert_eq!(delimiter_word(raw), (b"Q\"" as &[u8], false));
     let raw = b"\"Q\"x";
     assert_eq!(delimiter_word(raw), (b"\"Q\"x" as &[u8], false));
+    // A single-quote pair is stripped too (task #141): `<<'Q'` delimits `Q`.
+    let raw = b"'Q'";
+    assert_eq!(delimiter_word(raw), (b"Q" as &[u8], true));
+    let raw = b"''";
+    assert_eq!(delimiter_word(raw), (b"" as &[u8], true));
+    // Mixed one-sided forms are kept verbatim.
+    let raw = b"'Q";
+    assert_eq!(delimiter_word(raw), (b"'Q" as &[u8], false));
+    let raw = b"\"Q'";
+    assert_eq!(delimiter_word(raw), (b"\"Q'" as &[u8], false));
+}
+
+/// A quoted delimiter (`<<'EOF'`, `<<'a b'`) makes the body literal, and a
+/// `'…'` span is one word for the byte-level delimiter scan: `<<'a b'`
+/// delimits `a b` (byte-level and token-level must agree, LESSONS).
+#[test]
+fn single_quoted_delimiter_is_literal_and_spans_words() {
+    // `cat <<'EOF'` — body literal, terminator `EOF`.
+    let out = skip(b"cat <<'EOF'\nbody\nEOF", 0, 11);
+    assert_eq!(out, Some(20), "the terminator line ends the body");
+    // The `<<'EOF'` operator counts as one at the byte level.
+    assert_eq!(
+        crate::scan::heredoc::operator_count(b"cat <<'EOF'\nbody\nEOF", 0, 11),
+        1
+    );
+    // A delimiter with a space: the span is the whole quoted word.
+    let out = skip(b"cat <<'a b'\nbody\na b", 0, 11);
+    assert_eq!(out, Some(20));
+    // `<< 'a b'` (bare form): the next word is the quoted span.
+    let out = skip(b"cat << 'a b'\nbody\na b", 0, 12);
+    assert_eq!(out, Some(21));
+    // An unbalanced span is not a quoted word: the terminator is the raw text.
+    let out = skip(b"cat <<'EOF\nbody\n'EOF", 0, 10);
+    assert_eq!(out, Some(20));
 }
 
 // The resume index is the newline terminating the last delimiter line, or

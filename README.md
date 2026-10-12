@@ -432,8 +432,8 @@ is expanded against the filesystem (bash pathname-expansion semantics):
   pattern word is passed through verbatim (`set -f; echo *` prints `*`);
   `set +f` re-enables it.
 
-Quoting: double-quoted bytes always match literally; a fully quoted word is
-never expanded. Expansion happens for command arguments (external, builtins,
+Quoting: quoted bytes (in `"…"` or `'…'`) always match literally; a fully
+quoted word is never expanded. Expansion happens for command arguments (external, builtins,
 `builtin`, `become`, `exec`), `set --` words, user-function arguments,
 unquoted `$@` / `$*` fields (which re-glob, like bash), `for … in` list words
 (after their substitution — see "For-list words"), redirect target words (a
@@ -635,8 +635,11 @@ Limitations / deviations from bash:
   `let "1,2,3)+1"` is a syntax error, like bash.
 - The body has no quoting: a `$(…)` inside double quotes
   (`echo $(( "$(echo 1)" + 1 ))`) and a backtick command body are arithmetic
-  syntax errors, where bash expands both to `2`. Single quotes are literal
-  bytes here as everywhere else in fdshell, so they quote nothing either.
+  syntax errors, where bash expands both to `2`. A quote is a tokenizer
+  concept and the body is never tokenized, so quotes quote nothing here:
+  `echo $(( '1' + 1 ))` is an arithmetic syntax error, and the span's bytes
+  (including both `'`) are passed to the arithmetic parser like everywhere
+  else the body text is passed verbatim.
 - No positional parameters and no `${…}` inside an arithmetic expression: with
   `set -- 5`, `echo $(( $1 ))` and `echo $(( ${1} ))` are syntax errors, where
   bash expands both to `5`.
@@ -845,6 +848,68 @@ set -- a b c; echo "[$1][$2][$3][$#]"     → [a][b][c][3]
 set -- a b c; shift; echo "[$0][$1][$#]"  → [sh][b][2]   (`shift` never moves `$0`)
 f() { echo "$1|$#|$0"; }; f a b           → a|2|sh       (the name is not a positional)
 ```
+
+### Quoting
+
+A quoted byte never splits, never globs, and never expands. Three forms:
+
+- `'…'` (a **single-quote span**): both quote bytes are removed and every byte
+  between them is literal. There is **no escape pair inside a span** (POSIX
+  2.2.3), so a backslash is an ordinary byte and shields nothing; `$`,
+  backtick, `*`, `?`, `[`, `;`, `|`, `&`, `>`, `<`, `(`, `)`, `{`, `}`, `#`
+  are all data. Spans glue to neighbouring words into one word, and `''` is
+  one empty word.
+- `"…"` (a **double-quote span**): both quote bytes are removed; `$`,
+  backtick and `\` keep their meaning there, everything else is literal, and
+  `\$`/`\\` collapse to `$`/`\` while any other `\X` keeps its backslash
+  (POSIX 2.2.2).
+- `\X` outside quotes: an **escape pair** — the backslash is removed and `X`
+  loses its special meaning (POSIX 2.2.1).
+
+Quote state is a byte-level property of the source text, so the two kinds nest
+as data, never as toggles: a `'` written in `"…"` is a literal `'`, a `"`
+written in `'…'` is a literal `"`, and a `\` written in `'…'` is a literal `\`.
+
+```
+echo 'a b'            → a b        (quotes stripped, one word: no IFS split)
+echo 'a"b'            → a"b        (a `"` is data in a span)
+echo "a'b"            → a'b        (a `'` is data in `")
+echo 'a\b'            → a\b        (no escape pair inside a span)
+echo '\'              → \          (a span's backslash is that byte)
+echo '\\$v'           → \\$v       (no expansion: `$v` is bytes)
+echo 'a$b'            → a$b
+echo ''               →            (one empty word: `set -- ''` → `$#` = 1)
+echo 'a'b'c'          → abc        (spans glue into one word)
+echo 'a b'c           → a bc
+echo 'a|b'            → a|b        (no pipeline)
+echo 'a;b'            → a;b        (no statement split)
+echo '$(echo hi)'     → $(echo hi) (no command substitution)
+echo '{a,b}'          → {a,b}      (no brace expansion)
+echo 'ca?t'           → ca?t       (no globbing, with files `ca1`, `ca2`)
+echo x'y' # comment   → xy         (a `#` in a span is data, the comment is not)
+printf '%q\n' 'a b'   → a\ b       (fdshell's own quoting round-trips)
+alias q="echo a'b'"; q  → ab
+cat <<'EOF'           → the body verbatim: `$v`, `\`, `*`, `` ` `` unexpanded
+cat <<'a b'           → the body, terminated by the line `a b` (a span is a word)
+'time' ls            → /usr/bin/time ls   (a quoted keyword is a command word)
+```
+
+A quoted word is never an alias name (`'ls'` is not the `ls` alias) and never a
+block closer (`if true; then echo 'fi'; fi` prints `fi`). A quoted word that
+*contains* a keyword is a command word (`echo 'done'` runs `echo` with the
+argument `done`).
+
+Accepted divergences:
+
+- `$'…'` is **not** ANSI-C quoting (task #156): fdshell reads it the POSIX-sh
+  way, so `echo $'x'` prints `$x` where bash prints `x`. The `$` is kept
+  deliberately — dropping it would expand the variable `x` instead.
+- A quoted `case` pattern has its quotes stripped but its bytes still glob
+  (task #246, pre-existing for `"` as well).
+- A quoted *block opener* at the start of a statement (`'if' x`, `"while" x`)
+  is still parsed as the keyword (task #247); bash runs it as a command word.
+- An unpaired quote (of either kind) is a parse error reported at the quote
+  byte, rc 1.
 
 ### Word splitting (`IFS`)
 
@@ -1207,9 +1272,8 @@ assignments, loops, or control flow, and the statement's status and control flow
 (`break`/`continue`/`return`) pass through the report untouched.
 
 `time` is a reserved word, so it is recognized as the first word of a statement with
-**none of its characters quoted** (`"time" ls`, `t"i"me ls`, `\time ls` are the
-`/usr/bin/time` utility, as in bash; fdshell does not strip single quotes yet, so
-`'time' ls` fails to resolve a command named `'time'`). Every leading `time [-p]`
+**none of its characters quoted** (`"time" ls`, `t"i"me ls`, `\time ls`, `'time' ls` are
+the `/usr/bin/time` utility, as in bash). Every leading `time [-p]`
 prefix collapses into one statement — `time time -p ls` and `time -p time -p ls` each
 print a single report, the second in the POSIX layout — and the prefix run ends at the
 first word that is not a `time` with its own unquoted `-p`. A `-p` written after the

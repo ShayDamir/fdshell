@@ -113,3 +113,21 @@ fn out_of_range_end_maps_to_never() {
             .is_err()
     );
 }
+
+/// A word written with a `'…'` span is quoted, so no alias is recognized in it
+/// (task #141, as bash: `'ab'` after `alias ab=z` runs command `ab`).
+#[test]
+fn single_quoted_word_is_not_aliased() {
+    assert_eq!(run("'ab' now", &[("ab", "z")]), b"'ab' now");
+    // A span at the end of the word makes it partially quoted: not aliased.
+    assert_eq!(run("ab'x' now", &[("abx", "z")]), b"ab'x' now");
+    // The span's bytes are masked, not the letters outside it.
+    assert_eq!(run("'q'ab now", &[("qab", "z")]), b"'q'ab now");
+}
+
+/// An alias body is spliced verbatim: a `'…'` span written in it keeps its
+/// quote bytes here and is stripped later by word expansion.
+#[test]
+fn alias_body_keeps_its_span_verbatim() {
+    assert_eq!(run("q now", &[("q", "echo a'b")]), b"echo a'b now");
+}

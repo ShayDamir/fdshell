@@ -175,3 +175,23 @@ fn keyword_delta_group_nests_to_zero() {
     }
     assert_eq!(depth, 0);
 }
+
+/// A word that contains quote bytes is data (task #141): `"fi"`, `'done'`, `'{'`
+/// are command words, so they open and close no block — as bash does.
+#[test]
+fn quoted_keyword_words_are_data() {
+    assert!(!quoted_word(b"fi|", 2), "the bare keyword is unquoted");
+    assert!(quoted_word(b"\"fi\"", 4));
+    assert!(quoted_word(b"'fi'", 4));
+    assert!(quoted_word(b"'done'", 6));
+    // A quote byte anywhere in the word counts: `x'fi`.
+    assert!(quoted_word(b"x'fi", 4));
+    assert_eq!(keyword_delta(b"'fi'", b"'fi'|", 4), None);
+    assert_eq!(keyword_delta(b"\"fi\"", b"\"fi\"|", 5), None);
+    assert_eq!(keyword_delta(b"'done'", b"'done'&", 6), None);
+    assert_eq!(keyword_delta(b"'{'", b"'{' x }", 3), None);
+    // The unquoted keywords behind them still score, so the rule is a gate and
+    // not a blanket `None`.
+    assert_eq!(keyword_delta(b"fi", b"fi|", 2), Some(-1));
+    assert_eq!(keyword_delta(b"{", b"{ x }", 1), Some(1));
+}
