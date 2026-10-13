@@ -56,28 +56,31 @@ fn in_loop_nests() {
 }
 
 #[test]
-fn consume_one_level_of_break() {
-    assert_eq!(consume(LoopControl::Break(2)), Some(LoopControl::Break(1)));
-    assert_eq!(consume(LoopControl::Break(1)), None);
-}
-
-#[test]
-fn consume_one_level_of_continue() {
-    assert_eq!(
-        consume(LoopControl::Continue(3)),
-        Some(LoopControl::Continue(2))
-    );
-    assert_eq!(consume(LoopControl::Continue(1)), None);
-}
-
-#[test]
-fn consume_leaves_return_and_exit_untouched() {
+fn at_level_consumes_one_level_of_break() {
+    assert!(matches!(at_level(LoopControl::Break(1)), AtLevel::Stop));
     assert!(matches!(
-        consume(LoopControl::Return),
-        Some(LoopControl::Return)
+        at_level(LoopControl::Break(2)),
+        AtLevel::Outer(LoopControl::Break(1))
+    ));
+}
+
+#[test]
+fn at_level_consumes_one_level_of_continue() {
+    assert!(matches!(at_level(LoopControl::Continue(1)), AtLevel::Next));
+    assert!(matches!(
+        at_level(LoopControl::Continue(3)),
+        AtLevel::Outer(LoopControl::Continue(2))
+    ));
+}
+
+#[test]
+fn at_level_leaves_return_and_exit_untouched() {
+    assert!(matches!(
+        at_level(LoopControl::Return),
+        AtLevel::Outer(LoopControl::Return)
     ));
     assert!(matches!(
-        consume(LoopControl::Exit),
-        Some(LoopControl::Exit)
+        at_level(LoopControl::Exit),
+        AtLevel::Outer(LoopControl::Exit)
     ));
 }

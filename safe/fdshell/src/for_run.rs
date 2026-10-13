@@ -1,7 +1,7 @@
 mod array_word;
 
 use crate::error::cmd::CmdError;
-use crate::loop_control::{LoopControl, consume, in_loop};
+use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
 use crate::parse::for_block::ForBlock;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -35,13 +35,11 @@ fn run_for_body(
     .change_context(CmdError::Resolve)?;
     for word in &words {
         if let Some(control) = run_for_word(forblock, word, cell)? {
-            match control {
-                LoopControl::Break(1) => break,
-                LoopControl::Break(n) => return Ok(consume(LoopControl::Break(n))),
-                LoopControl::Continue(1) => {}
-                LoopControl::Continue(n) => return Ok(consume(LoopControl::Continue(n))),
-                LoopControl::Return => return Ok(Some(LoopControl::Return)),
-                LoopControl::Exit => return Ok(Some(LoopControl::Exit)),
+            match at_level(control) {
+                AtLevel::Stop => break,
+                // The for list's next iteration is the next word.
+                AtLevel::Next => {}
+                AtLevel::Outer(rest) => return Ok(Some(rest)),
             }
         }
     }

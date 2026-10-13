@@ -17,15 +17,27 @@ pub(crate) enum LoopControl {
     Exit,
 }
 
-/// Consume one enclosing loop level from `control`: a `Break(n)`/`Continue(n)`
-/// count drops by one, and count 1 is fully consumed (`None`). `Return`/`Exit`
-/// are not loop counts and propagate unchanged.
-pub(crate) fn consume(control: LoopControl) -> Option<LoopControl> {
+/// What one loop level does with a control raised inside it — its body **or**
+/// its condition. `Break(1)`/`Continue(1)` are consumed by this level, a larger
+/// count hands the remainder to the enclosing level, and `Return`/`Exit` are not
+/// loop counts, so they pass through unchanged.
+pub(crate) enum AtLevel {
+    /// Stop this loop (`break 1`).
+    Stop,
+    /// Advance this loop to its next iteration (`continue 1`).
+    Next,
+    /// The signal belongs to an enclosing level.
+    Outer(LoopControl),
+}
+
+/// Map a control raised inside one of this loop's own levels to [`AtLevel`].
+pub(crate) fn at_level(control: LoopControl) -> AtLevel {
     match control {
-        LoopControl::Break(1) | LoopControl::Continue(1) => None,
-        LoopControl::Break(n) => Some(LoopControl::Break(n - 1)),
-        LoopControl::Continue(n) => Some(LoopControl::Continue(n - 1)),
-        LoopControl::Return | LoopControl::Exit => Some(control),
+        LoopControl::Break(1) => AtLevel::Stop,
+        LoopControl::Continue(1) => AtLevel::Next,
+        LoopControl::Break(n) => AtLevel::Outer(LoopControl::Break(n - 1)),
+        LoopControl::Continue(n) => AtLevel::Outer(LoopControl::Continue(n - 1)),
+        LoopControl::Return | LoopControl::Exit => AtLevel::Outer(control),
     }
 }
 

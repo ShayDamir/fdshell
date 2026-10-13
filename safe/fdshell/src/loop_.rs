@@ -1,4 +1,4 @@
-use crate::loop_control::{LoopControl, consume, in_loop};
+use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
@@ -32,7 +32,22 @@ fn run_loop_body(
     let cond_bodies = body_bytes(&block.cond_bodies);
     let mut ran_body = false;
     loop {
-        crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true)?;
+        // A `break`/`continue` raised inside the condition (an `if` then-body, a
+        // `{ …; }` group, a `case` arm, a function called from it) is the loop's
+        // own signal: the condition runs inside this loop's level (`in_loop`), so
+        // it is consumed here exactly like the body's.
+        if let Some(control) =
+            crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true)?
+        {
+            match at_level(control) {
+                AtLevel::Stop => break,
+                // The loop's next iteration is the next condition test, body skipped:
+                // a `continue` in a condition re-tests it, an infinite loop exactly as
+                // in bash (README "Loop control").
+                AtLevel::Next => continue,
+                AtLevel::Outer(rest) => return Ok(Some(rest)),
+            }
+        }
         let exit_code = {
             let state = cell.borrow().change_context(CmdError::Never)?;
             state.last_status.exit_code()
@@ -44,13 +59,10 @@ fn run_loop_body(
         if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
             crate::repl::run_script(&block.body, cell)
         })? {
-            match control {
-                LoopControl::Break(1) => break,
-                LoopControl::Break(n) => return Ok(consume(LoopControl::Break(n))),
-                LoopControl::Continue(1) => continue,
-                LoopControl::Continue(n) => return Ok(consume(LoopControl::Continue(n))),
-                LoopControl::Return => return Ok(Some(LoopControl::Return)),
-                LoopControl::Exit => return Ok(Some(LoopControl::Exit)),
+            match at_level(control) {
+                AtLevel::Stop => break,
+                AtLevel::Next => continue,
+                AtLevel::Outer(rest) => return Ok(Some(rest)),
             }
         }
     }
@@ -60,3 +72,6 @@ fn run_loop_body(
     }
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests;

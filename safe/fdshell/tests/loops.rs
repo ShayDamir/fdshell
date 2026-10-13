@@ -1,21 +1,92 @@
 #![allow(clippy::unwrap_used)]
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::str;
+use std::time::{Duration, Instant};
+use sys::Pid;
+use sys::signal::{SIGKILL, kill};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
 fn run(script: &str) -> (String, String, i32) {
     let output = Command::new(BIN)
         .args(["-c", script])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .output()
         .unwrap();
     (
         str::from_utf8(&output.stdout).unwrap().to_string(),
         str::from_utf8(&output.stderr).unwrap().to_string(),
         output.status.code().unwrap_or(-1),
+    )
+}
+
+/// A loop-control regression runs forever, so the child is bounded: 5 s is
+/// strictly under nextest's 10 s `slow-timeout` (`.config/nextest.toml`), which
+/// makes the diagnostic panic below — not a bare timeout — report the regression.
+const BOUND: Duration = Duration::from_secs(5);
+
+/// All pids whose parent is `parent` (the same helper as `tests/pipeline.rs`:
+/// every integration-test file is its own binary, so the helper is local).
+fn children_of(parent: u32) -> Vec<u32> {
+    let mut pids = Vec::new();
+    for entry in std::fs::read_dir("/proc").unwrap() {
+        let name = entry.unwrap().file_name();
+        let Ok(pid) = name.to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        // "pid (comm) state ppid …" — comm may contain spaces and parens.
+        let fields = stat.rsplit(')').next().unwrap_or("");
+        let ppid = fields
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok());
+        if ppid == Some(parent) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+/// Run `script`, killing it and every child it forked at [`BOUND`]. Every
+/// condition-control shape below hangs when the fix regresses (a dropped signal
+/// makes the loop re-test its condition forever), so none of them may use the
+/// unbounded [`run`].
+fn run_bounded(script: &str) -> (String, String, i32) {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + BOUND;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(e) => panic!("try_wait failed: {e}"),
+        }
+        if Instant::now() >= deadline {
+            for pid in children_of(child.id()) {
+                let _ = kill(Pid::from_raw(pid as i32), SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "`{script}` did not finish in {BOUND:?} — a loop-control signal raised in a condition was dropped, so the loop re-tests its condition forever"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&out.stdout).unwrap().to_string(),
+        str::from_utf8(&out.stderr).unwrap().to_string(),
+        out.status.code().unwrap_or(-1),
     )
 }
 
@@ -473,4 +544,240 @@ fn and_in_loop_body_stays_inside_the_block() {
     let (out, err, code) = run("while [ 1 ] && [ 1 ]; do\n  echo hi\n  break\ndone\necho after");
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "hi\nafter\n");
+}
+
+// ——— Task #205: a loop control raised inside a condition is the loop's own ———
+//
+// The condition runs inside the loop's own level, so a `break`/`continue` in it
+// (written directly, or in an `if` then-body, a `{ …; }` group, a `case` arm, a
+// function called from the condition) is consumed by that loop: one level
+// consumed, the remainder handed outward. An `if` is transparent, so its
+// condition's control reaches the caller's loop whole. master dropped the signal
+// (`?` on the cond-list run kept only the error), so every shape that must end a
+// loop ran forever (rc 124 at the timeout) — they all run under [`run_bounded`].
+// All expectations measured against `bash -c` (bash 5.3.9, 2026-10-13).
+
+/// Row 1: a `break` in an `if` then-body inside a `while` condition ends the loop
+/// before its body ever runs. master printed `body` forever, rc 124 at the timeout.
+#[test]
+fn break_in_an_if_condition_ends_the_while_loop() {
+    let (out, err, code) =
+        run_bounded("while if true; then break; fi; do echo body; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 2: the same `break` written in the loop body's `if` condition; the loop
+/// ends before `echo body` runs (bash prints `end` only — not `body` `end`).
+#[test]
+fn break_in_an_if_condition_inside_a_while_body_ends_the_loop() {
+    let (out, err, code) =
+        run_bounded("while :; do if break; then :; fi; echo body; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 3: a `for` list is a loop level too, so a `break` in a body-`if` condition
+/// ends it in the first iteration. master ran all three (`i=3`).
+#[test]
+fn break_in_an_if_condition_ends_the_for_list() {
+    let (out, err, code) =
+        run_bounded("i=0; for x in 1 2 3; do if break; then :; fi; i=$((i+1)); done; echo i=$i");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "i=0\n");
+    assert_eq!(err, "");
+}
+
+/// Row 4: the bare spelling — `break` written straight in the `while` condition.
+#[test]
+fn bare_break_in_a_while_condition_ends_the_loop() {
+    let (out, err, code) = run_bounded("while break; do echo body; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 6: `break 2` in a nested loop's condition consumes the inner loop and
+/// hands `Break(1)` to the outer `for`, so both exit in the first iteration.
+#[test]
+fn break_2_in_a_while_condition_exits_both_loops() {
+    let (out, err, code) =
+        run_bounded("for a in 1 2 3; do while break 2; do :; done; echo inner; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 7: `continue 2` in a nested loop's condition advances the outer `for`
+/// past the rest of its body, so `inner` never prints.
+#[test]
+fn continue_2_in_a_while_condition_advances_the_outer_for() {
+    let (out, err, code) =
+        run_bounded("for a in 1 2 3; do while continue 2; do :; done; echo inner; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 8: an `if` is transparent, so a `continue` raised in its condition reaches
+/// the caller's `for` list and advances it. master printed `inner` three times.
+#[test]
+fn continue_in_an_if_condition_advances_the_for_list() {
+    let (out, err, code) =
+        run_bounded("for a in 1 2 3; do if continue; then :; fi; echo inner; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 9: an `elif` condition is a cond-list run like the `if` condition, so its
+/// `break` ends the `for` list too.
+#[test]
+fn break_in_an_elif_condition_ends_the_for_list() {
+    let (out, err, code) = run_bounded(
+        "for a in 1 2 3; do if false; then :; elif break; then :; fi; echo inner; done; echo end",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 10: the `continue` twin in an `elif` condition.
+#[test]
+fn continue_in_an_elif_condition_advances_the_for_list() {
+    let (out, err, code) = run_bounded(
+        "for a in 1 2 3; do if false; then :; elif continue; then :; fi; echo inner; done; echo end",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 11: a `{ …; }` group in the condition is transparent, so its `break` is
+/// the loop's; the `echo cond` after it never runs, and neither does the body.
+#[test]
+fn break_in_a_group_condition_ends_the_loop() {
+    let (out, err, code) = run_bounded("while { break; echo cond; }; do echo body; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 12: a `case` arm in the condition, same rule.
+#[test]
+fn break_in_a_case_arm_condition_ends_the_loop() {
+    let (out, err, code) =
+        run_bounded("while case x in x) break; echo cond;; esac; do echo body; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// The `until` twin of row 1. master exited by accident (the condition's status
+/// is 0, which is what ends an `until`), so this row agrees on master and pins
+/// the rule, not the accident.
+#[test]
+fn break_in_an_if_condition_ends_the_until_loop() {
+    let (out, err, code) =
+        run_bounded("until if true; then break; fi; do echo body; done; echo end");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 14: the control crosses a nested `if` (both are transparent) and ends the
+/// `for` list in its first iteration.
+#[test]
+fn break_in_a_nested_if_condition_ends_the_for_list() {
+    let (out, err, code) = run_bounded(
+        "for a in 1 2 3; do if true; then if break; then :; fi; fi; echo inner; done; echo end",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Depth 2: `break 2` in an inner `for` list's condition consumes the inner list
+/// and exits the outer one.
+#[test]
+fn break_2_in_an_if_condition_exits_both_for_lists() {
+    let (out, err, code) = run_bounded(
+        "for a in 1 2 3; do for b in 1 2 3; do if break 2; then :; fi; echo inner; done; done; echo end",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// The `until` twin at depth 2: the condition's `break 2` exits the `until` and
+/// the outer `for`.
+#[test]
+fn break_2_in_an_until_condition_exits_both_loops() {
+    let (out, err, code) = run_bounded(
+        "for a in 1 2 3; do until false; do if break 2; then :; fi; echo inner; done; echo inner; done; echo end",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Depth 2 with `continue 2`: the outer `for` advances, so neither `inner` runs.
+#[test]
+fn continue_2_in_an_if_condition_advances_the_outer_for() {
+    let (out, err, code) = run_bounded(
+        "for a in 1 2 3; do for b in 1 2 3; do if continue 2; then :; fi; echo inner; done; done; echo end",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    assert_eq!(err, "");
+}
+
+/// Row 15: a `return` raised in a loop condition propagates out of the loop, so
+/// the function returns with the status the `return` set and `afterloop` never
+/// prints. master looped forever.
+#[test]
+fn return_in_a_while_condition_leaves_the_function() {
+    let (out, err, code) = run_bounded(
+        "f() { while if true; then return 3; fi; do :; done; echo afterloop; }; f; echo rc=$?",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "rc=3\n");
+    assert_eq!(err, "");
+}
+
+/// Row 16: the same `return` in an `if` condition leaves the function.
+#[test]
+fn return_in_an_if_condition_leaves_the_function() {
+    let (out, err, code) =
+        run_bounded("f() { if return 3; then :; fi; echo after; }; f; echo rc=$?");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "rc=3\n");
+    assert_eq!(err, "");
+}
+
+/// Row 17: the `elif` twin.
+#[test]
+fn return_in_an_elif_condition_leaves_the_function() {
+    let (out, err, code) = run_bounded(
+        "f() { if false; then :; elif return 3; then :; fi; echo after; }; f; echo rc=$?",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "rc=3\n");
+    assert_eq!(err, "");
+}
+
+/// Row 18: the body ran, and a later condition `break` ends the loop. Only the
+/// stdout is pinned: the loop's own status diverges (bash `echo rc=$?` → 0,
+/// fdshell → 1, measured 2026-10-13) because `break` does not zero `$?` — task
+/// #262 owns that; task #164 owns the loop's condition-status rule.
+#[test]
+fn break_in_the_condition_after_the_body_ran_ends_the_loop() {
+    let (out, err, code) = run_bounded(
+        "i=0; while if [ $i -lt 2 ]; then :; else break; fi; do i=$((i+1)); echo body; done; echo i=$i",
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "body\nbody\ni=2\n");
+    assert_eq!(err, "");
 }

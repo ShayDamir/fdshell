@@ -181,15 +181,15 @@ fn and_in_a_block_that_carries_a_heredoc_still_splits() {
     assert_eq!(code, 1);
 }
 
-/// Accepted divergence, task #205: the shape is now *parsed*, and a `break`
-/// written in a loop condition is dropped (the condition runs as a cond list and
-/// its loop control does not abort the loop). bash exits the loop (`i=0`);
-/// fdshell runs every iteration (`i=3`).
+/// Task #205: the shape is parsed **and** the `break` works — a loop control raised
+/// in a loop condition is the loop's own signal, so it ends the loop in the first
+/// condition test. Measured against `bash -c` (5.3.9): `i=0`, rc 0 (master dropped
+/// the control and ran every iteration, `i=3`).
 #[test]
-fn break_in_an_and_condition_is_ignored() {
+fn break_in_an_and_condition_ends_the_loop() {
     let (out, _err, code) = run("i=0; while [ $i -lt 3 ] && break; do i=$((i+1)); done; echo i=$i");
     assert_eq!(code, 0);
-    assert_eq!(out, "i=3\n");
+    assert_eq!(out, "i=0\n");
 }
 
 /// Known gap, task #232: an operator *adjacent* to a block (outside its text)
