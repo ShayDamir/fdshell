@@ -801,18 +801,24 @@ through `black_box` on every iteration (self burn and forked-child burn), which
 costs ~18 ms of real user time in the sandbox's release build — `utime ≈ 18_000 µs`,
 four orders of magnitude above the `> 0` assertion.
 
-The same assertion then flaked a *second* way (task #194): the burn ran and the
-kernel accounted **all** of it to system time — `nix log` of the fdshell `.drv`
-shows `CpuTimes { utime: 0, stime: 3124 }`. Rule: how a process's CPU time
-splits between `ru_utime` and `ru_stime` is the kernel's accounting choice, and
-a test does not control it, so a positive-`utime` assertion is a scheduler coin
-flip. Self (`self_usage`) and reaped-child (`wait_pidfd_rusage`) CPU-time
-assertions are on `utime + stime`. Keep the burn loop — it is what makes the
-reported numbers real — but read a `> 0` sum as "the report is non-degenerate",
-never as "the burn ran": that claim belongs to the un-foldability rule above,
-never to the sum. (3124 µs is ~6× below the measured ~18 ms of the un-foldable
-burn, so one failing sandbox run cannot tell fold from attribution; both are
-de-flaked by the same sum assertion.)
+The same assertion then failed a second way (task #194): a `nix log` of the
+fdshell `.drv` shows `CpuTimes { utime: 0, stime: 3124 }`, so
+`assert!(t.utime > 0)` was a coin flip. Rule: how a process's CPU time splits
+between `ru_utime` and `ru_stime` is the **kernel's accounting choice**, which a
+test does not control, so a positive-`utime` assertion is unassertable — self
+(`self_usage`) and reaped-child (`wait_pidfd_rusage`) CPU-time assertions are on
+`utime + stime`. Keep the burn loop: it is what makes the reported numbers real.
+Read a `> 0` sum as "the report is non-degenerate", never as "the burn ran"; that
+claim belongs to the un-foldability rule above, never to the sum.
+
+Diagnostic (task #194, same sandbox, un-foldable burn in place):
+`CpuTimes { utime: 346_962, stime: 990 }` — the burn is effective in the nix
+release profile, and ~347 ms lands in `utime`. So the `utime: 0` of the failing
+report was not a measured attribution flip: that run predates the task #171 burn
+fix (task #97 ran 2026-10-10, #171 landed 2026-10-13) and its 3124 µs is the
+folded signature recorded above (`{ utime: 0, stime: 2888 }`, ~3 ms of
+process-startup system time). Attribution stays unassertable all the same: the
+sum is the attribution-independent claim, and it is what both assertions make.
 
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
