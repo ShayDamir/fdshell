@@ -132,20 +132,20 @@ CWD-rooted (bash semantics — the bans above guard its root escapes).
 
 Operators: `>` (write), `>>` (append), `<` (read), `<>` (read and write),
 `>|` (clobber: a write that bypasses `noclobber`), `&>` (write fd 1 **and**
-fd 2 to one target) and `&>>` (append both), each with an optional
-numeric fd prefix (`2> file`, `1< file`, `3<> file`, `2>|file`;
-no prefix means fd 1 for `>`/`>>`/`>|` and fd 0 for `<`/`<>`). The operator is
-either attached to its target (`>file.txt`, `>|file.txt`, `&>file.txt`) or
+fd 2 to one target) and `&>>` (append both). The first five take an optional
+numeric fd prefix (`2> file`, `1< file`, `3<> file`, `2>|file`; no prefix
+means fd 1 for `>`/`>>`/`>|` and fd 0 for `<`/`<>`). The operator is either
+attached to its target (`>file.txt`, `>|file.txt`, `&>file.txt`) or
 space-separated (a bare operator takes the next word as its target:
-`> file.txt`, `>| file.txt`, `&> file.txt`). A
-bare operator's target must be a plain word: not a separator (`;`, `|`) and not
-another operator (`>`, `<<`, `&1`, `%var`) — `cmd >`, `cmd > ;` and `cmd &>` are
-`invalid redirect` parse errors. Targets: a path (globbed like other
-words, with the quote mask applied), `%var` (the variable's fd, attached
-form: `>%var`, `&>%var`), and `/dev/fd/N` / `/proc/self/fd/N` (dup of the open fd
-N). `>&1`, `>&%var` (dup the fd the variable refers to, e.g.
-`2>&%f`), `2>&-`, here-docs, and here-strings are the other redirect
-sources; see below. A command may carry several redirections to the same fd;
+`> file.txt`, `>| file.txt`, `&> file.txt`). A bare operator's target must be
+a plain word: not a separator (`;`, `|`) and not another operator (`>`, `<<`,
+`&1`, `%var`) — `cmd >`, `cmd > ;` and `cmd &>` are `invalid redirect` parse
+errors. Targets: a path (globbed like other words, with the quote mask
+applied), `%var` (the variable's fd, attached form: `>%var`, `&>%var`), and
+`/dev/fd/N` / `/proc/self/fd/N` (dup of the open fd N). `>&1`, `>&%var` (dup
+the fd the variable refers to, e.g. `2>&%f`), `2>&-`, here-docs, and
+here-strings are the other redirect sources; see below. A command may carry
+several redirections to the same fd;
 all of them are applied in the order written, so the **last one to that fd
 wins** and it is not an error: `echo hi >a >b` writes `hi` to `b` and creates
 `a` empty (the first redirect opened and truncated its target), and
@@ -184,8 +184,8 @@ Clobber deviations from bash:
   clobbers `b` with `x a`). Same class as the existing `a>b` / `echo 2>&1`
   word-break deviations.
 - `>|%x` and `&>%x` are fd-variable redirects (fdshell's `%` convention); bash
-  writes to a file named `%x`. `>| %x` and `&> %x` (spaced) are an
-  `invalid redirect` operand error, as `> %x` is today.
+  writes to a file named `%x`. `>| %x` and `&> %x` (spaced) are
+  `invalid redirect` operand errors, as `> %x` is today.
 - Parse errors exit 1 with `parse error:` on stderr, where bash exits 2 with a
   syntax error (repo-wide convention).
 - `cmd &> | f` is an `invalid redirect` parse error: the bare `&>` refuses the
