@@ -17,18 +17,24 @@ fn burn_cpu(iterations: u64) -> u64 {
     n
 }
 
-/// `self_usage()` succeeds and reports a positive own-user time.
+/// `self_usage()` succeeds and reports positive own CPU time (user + system).
 #[test]
 fn self_usage_succeeds() {
-    // Burn a little CPU so the reported user time is deterministically
-    // non-zero (a freshly started process can read `utime: 0`, and an
-    // optimizable burn reads 0 too: 50M un-foldable iterations cost tens of
-    // ms of user time in release builds).
+    // Burn a little CPU so the reported times are deterministically non-zero
+    // (a freshly started process can read `utime: 0`, and an optimizable burn
+    // reads 0 too: 50M un-foldable iterations cost tens of ms of CPU time in
+    // release builds). Which field the burned time lands in is the kernel's
+    // choice: a `nix flake check --build-all` run accounted the whole burn to
+    // system time (`CpuTimes { utime: 0, stime: 3124 }`), so the assertion is
+    // on the sum, not on `utime` alone.
     burn_cpu(50_000_000);
     let t = getrusage::self_usage().unwrap();
-    // u64 fields are finite by construction; the process has burned user time
-    // by now, so `utime` must be positive.
-    assert!(t.utime > 0, "utime must be positive: {t:?}");
+    // u64 fields are finite by construction; the process has burned CPU time
+    // by now, so the total must be positive.
+    assert!(
+        t.utime + t.stime > 0,
+        "own CPU time (user + system) must be positive: {t:?}"
+    );
 }
 
 /// `CpuTimes::from_rusage` converts the `timeval` fields to total
@@ -58,8 +64,10 @@ fn wait_pidfd_rusage_reports_child_times() {
     let (_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     match pidfd_opt {
         None => {
-            // Child: burn a little un-foldable CPU so its reported user time
-            // is non-zero in debug and release builds alike.
+            // Child: burn a little un-foldable CPU so its reported times are
+            // non-zero in debug and release builds alike. The scheduler
+            // attributes the child's burn to user or system time too, so the
+            // parent's assertion below is on the sum.
             burn_cpu(50_000_000);
             sys::exit(0);
         }
@@ -67,7 +75,10 @@ fn wait_pidfd_rusage_reports_child_times() {
             // Parent: reap via the production path and read the child's times.
             let (status, times) = pidfd.wait_pidfd_rusage().unwrap();
             assert_eq!(status.exit_code(), 0);
-            assert!(times.utime > 0, "child must report user time: {times:?}");
+            assert!(
+                times.utime + times.stime > 0,
+                "child must report CPU time: {times:?}"
+            );
         }
     }
 }
