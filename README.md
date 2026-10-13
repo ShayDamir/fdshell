@@ -786,11 +786,13 @@ Accepted divergences from bash:
   (`[${!p}]` with `p=""`), but the wording differs: bash says
   `: invalid variable name`, fdshell `: invalid indirect expansion`. Same rc 1.
 - An indirect target that is **not a valid variable name** expands to the empty
-  string, silently, at rc 0: with `p="a b"` and with `p=a-b`, `[${!p}]` prints
-  `[]` where bash rejects the name (`a b: invalid variable name`, rc 1) and
-  prints nothing. `p="-"` follows the same rule: fdshell looks for a variable
-  literally named `-` and expands to empty, where bash resolves its special
-  `$-` parameter (`[hBc]`, rc 0; fdshell has no `$-` at all — task #177). Under
+   string, silently, at rc 0: with `p="a b"` and with `p=a-b`, `[${!p}]` prints
+   `[]` where bash rejects the name (`a b: invalid variable name`, rc 1) and
+   prints nothing. `p="-"` follows the same rule: fdshell looks for a variable
+   literally named `-` and expands to empty, where bash resolves its special
+   `$-` parameter (`[hBc]`, rc 0; fdshell's `$-` is its own flag bytes, empty by
+   default — task #177). Under
+
   `set -u` fdshell bails `!p: unbound variable` at rc 1 for every one of the
   three (bash keeps `NAME: invalid variable name` rc 1 for the first two, and
   prints `[huBc]` at rc 0 for `-`). Pinned by `tests/unset_expand.rs`:
@@ -861,8 +863,34 @@ Accepted divergences from bash:
   `${!?m}: bad substitution`) and `r=${!:=z}` assigns at rc 0 (bash rc 1,
   `$!: cannot assign in this way`). Pinned by
   `degenerate_empty_indirect_name_with_colon_operators`.
-- A positional parameter is not a braced name: `${1}` and `${1#a}` expand to
-  empty; bash gives the positional `1` (task #177).
+- A **braced positional** expands like the bare one (task #177): `${1}` is `$1`,
+  `${0}` is the program name, leading zeros are allowed (`${01}` is `$1`), and
+  every operator family acts on the parameter (`${1#c}` strips the value). An
+  out-of-range index is unset, and `set -u` bails it naming the index, so the
+  plain and pattern families agree with bash.
+- The braced `${@}` expands like `${@}`/`${*}`: the positionals joined by the
+  first `IFS` byte (a space when `IFS` is empty), because a braced arm returns
+  one string. bash's per-positional word form is the whole-word `"$@"` arm
+  (task #219): `IFS=; set -- "a b" c; printf "[%s]\n" "${@}"` prints `[a b c]`
+  here, where bash prints `[a b]` and `[c]`.
+- fdshell's `$-`/`${-}` prints fdshell's own flag bytes (`u`, `e`, `f`, `v`, `x`;
+  **empty by default**), so it can be empty where bash's is `hBc`/`huBc`. That
+  shows in `:=`: `set --; printf "[%s]" "${-:=q}"` is rc 1
+  `-: cannot assign in this way` here, where bash prints its flags at rc 0.
+- `:=` rejects a positional or special target (bash's rule) with the same rc,
+  naming the parameter without bash's `$` prefix: fdshell `5: cannot assign in
+  this way`, bash `$5: cannot assign in this way`. A parameter that holds a
+  non-empty value keeps it, so `${1:=q}` prints `$1` and writes nothing.
+- A digit run too large for `usize` keeps fdshell's `TooLarge` bail (rc 1) in
+  **both** forms; bash expands the braced form to the empty string at rc 0
+  (and under `set -u` bails `99999…: unbound variable`). The bare form is
+  pinned by `tests/herestring.rs::here_string_expansion_failure_is_reported`.
+- An **indirect target** keeps the plain variable lookup, so a target name that
+  names a parameter resolves to nothing here: with `set -- a b c; v=1`,
+  `${!v}` prints `[]` where bash prints `[a]`, and `${!#}` keeps fdshell's rc 1
+  `: invalid indirect expansion` where bash prints `[c]`. This is #172's
+  `-`-target rule extended to digits (task #260); the colon family's word still
+  supplies the value (`p=1` with `${!p:-z}` prints `[z]` on both).
 - Bare `set` lists `$1..` (raw values) before the variables; bash (measured
   5.3.9, in `-c`, script and `-i` modes) lists only variables and functions,
   no positional parameters at all.
@@ -889,15 +917,30 @@ Accepted divergences from bash:
 program name, seeded by the CLI — the script path in file mode (argv[1]),
 `sh` for `-c` with no extra args, `fdshell` for `-c` with extras and for the
 REPL. Nothing rebinds it: `set -- words`, a function call, `source f words` and
-`shift` all rebind `$1..` and leave `$0` alone. The bare `$0` is always bound,
-so `set -u` never reports it; the braced `${0}` is task #177's divergence (it
-expands to the empty string and nounset reports it).
+`shift` all rebind `$1..` and leave `$0` alone. `$0` is always bound, so `set -u`
+never reports it, in **both** forms: the bare `$0` and the braced `${0}` are the
+program name (task #177).
 
 `$#` counts the positionals and `$@`/`$*` iterate exactly them, so a function
 sees its arguments and never its own name
 (`f() { echo "$@"; echo $#; }; f a b` → `a b` then `2`). Out-of-range `$N`
 expands to the empty string; under `set -u` it is an error naming the index
 (rc 1, `4: unbound variable`).
+
+The braced forms read the same parameters through the same lookup, so nothing is
+numbered differently inside `${…}`: a digit run is the positional (`${1}` = `$1`,
+`${01}` = `$1`, `${0}` = `$0`) and the single-byte specials `#`, `?`, `$`, `@`,
+`*`, `-` expand exactly as the bare form does (see "Parameter expansion"). The
+pattern and colon operators act on the positional value
+(`set -- a b c`: `${1#c}` → `a`, `${3%b}` → `c`, `${2:-z}` → `b`), the nounset
+rule is the shared one (an out-of-range index is unbound: `${5}` → rc 1,
+`5: unbound variable`), and `:=` refuses to assign to a parameter.
+
+```
+set -- a b c; echo "[$1$2${3}]"           → [abc]      (the braced `${3}` is `$3`)
+set -- a b c; echo "[${1}][${1#c}][${0}]" → [a][a][sh]
+set -- a b c; echo "[${?}][${$}][${*}]"   → [0][<pid>][a b c]
+```
 
 ```
 set -- a b c; echo "[$1][$2][$3][$#]"     → [a][b][c][3]
@@ -1048,6 +1091,27 @@ on. The colon family stays exempt: its word supplies the value, so
 indirect name takes the pattern form too: `${!ind#a}` strips the value that
 `ind` names, and under `set -u` an unbound indirect name bails with bash's
 `!p: unbound variable` / `nope: invalid indirect expansion` (rc 1).
+
+The **name** may be a parameter rather than a variable (task #177): an ASCII
+digit run is a positional parameter (`${1}` is `$1`, leading zeros allowed,
+`${0}` is the program name) and a single-byte name among `#`, `?`, `$`, `@`,
+`*`, `-` is a special parameter. The shared lookup resolves both for every
+family, so the plain, colon and pattern arms all act on the parameter's value
+and the nounset rule stays the single rule it is for variables: `set -u` bails
+an out-of-range positional in the plain and pattern families
+(`5: unbound variable`) and the colon family stays exempt.
+
+```
+set -- a b c  ${1}→a  ${01}→a  ${0}→sh  ${1#c}→a  ${3%b}→c  ${2:-z}→b  ${4:+p}→(empty)
+              ${?}→last status  ${$}→shell pid  ${@},${*}→positionals joined by the first IFS byte
+              ${-}→fdshell's option flag bytes (`u` under `set -u`, empty by default)
+              ${#}→`0`: in a word the length arm owns `${#…}` (task #173)
+```
+
+`:=` is the write arm, and a parameter has no slot to write into: `${5:=q}`
+reports `5: cannot assign in this way` at rc 1 and creates no variable named
+`5`, while `${1:=q}` prints the positional and writes nothing (bash's rule,
+with its `$5: …` wording being #177's divergence).
 
 `!name` is resolved with the colon operators as well (task #176), through the
 same rule as the pattern family, and the value it points at is what the operator
