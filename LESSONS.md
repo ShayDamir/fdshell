@@ -834,6 +834,22 @@ folded signature recorded above (`{ utime: 0, stime: 2888 }`, ~3 ms of
 process-startup system time). Attribution stays unassertable all the same: the
 sum is the attribution-independent claim, and it is what both assertions make.
 
+Repeatability measured (task #208, 2026-10-13, `master` @ `286abdb`): the
+fold-proof burns are repeatably green, and the barrier's effect is measurable. Five
+**fresh** sandbox executions of the check derivation — `nix build
+.#checks.x86_64-linux.default --rebuild` re-runs the whole check phase, where a
+plain `nix flake check` repeat is a store hit that runs nothing — each passed
+4529/4529 tests with zero `FAIL` lines, both named tests among them
+(`self_usage_succeeds` 17–21 ms, `wait_pidfd_rusage_reports_child_times` 18–21 ms,
+against 3–4 ms for the non-burning `from_rusage` test in the same binary); plus one
+fresh `nix build .#coverage --rebuild` (4532/4532 tests — its exit 1 is the
+coverage report's embedded timestamps tripping nix's output-determinism check, not a
+test failure), 130 targeted `cargo nextest run --release -p sys --test getrusage`
+runs, 10 debug runs and 5 full release sweeps (4529/4529 each). Timed directly in
+the release profile, one un-folded burn costs ~10 ms of user CPU and the same loop
+with `black_box` moved back *after* the loop ~0 ms — the burn is real in release,
+which is the only thing a `utime + stime > 0` assertion needs from it.
+
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
 report prints *before* them") carried `.`. `.` is the `source` alias: it runs the script
