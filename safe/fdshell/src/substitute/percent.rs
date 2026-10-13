@@ -22,6 +22,12 @@ pub(crate) fn collect_name(
     Ok(name)
 }
 
+/// Substitute the `%` arm's text at `out`: a bound fd name (`%name`, `%?`)
+/// writes its fd number, anything else writes a literal `%` and consumes
+/// exactly the trigger byte. There is deliberately **no** shell-level `%%`
+/// escape — `%%` belongs to the `printf` builtin, which interprets it, so the
+/// shell must pass both bytes through (bash parity, task #155, LESSONS). The
+/// literal-`%` escape is the POSIX #4.1 pair outside quotes (`\%name`).
 pub(crate) fn percent_subst(
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
@@ -29,10 +35,6 @@ pub(crate) fn percent_subst(
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
-        Some(b'%') => {
-            out.push(c"%");
-            peek.next();
-        }
         // `%?` is the `wait` arm's matched fd; a name in the fd namespace.
         Some(b'?') => wait_fd_subst(peek, cache, state, out)?,
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {

@@ -793,6 +793,19 @@ Accepted divergences from bash:
   task #170).
 - A `%name` fd variable that is unbound stays literal (`%nosuchfd` prints
   `%nosuchfd`). The fd namespace is a fdshell extension, not a POSIX parameter.
+- `%name` expands to a fd number only when `name` starts with an ASCII letter,
+  digit or `_` **and** is a bound fd variable; a `%` followed by anything else
+  (`%`, `-`, punctuation, end of word) is a literal `%` that consumes just the
+  trigger byte.
+- `%%` is **not** a shell escape (task #155): both bytes reach the command, so
+  the `printf` builtin interprets its own `%%` — `printf '%%'` prints `%` and
+  `echo '%%'` prints `%%`, as in bash.
+- The literal-`%` escape is the POSIX #4.1 pair **outside** quotes: `\%name`
+  prints `%name` even with `name` bound (`echo [\%s]` → `[%s]`). Inside a quote
+  span there is no escape pair, so a quoted `%name` is substituted too — an
+  accepted divergence (task #252): with fd `s` bound, `printf "%s\n" hi` prints
+  the fd number where bash prints `hi`, and `printf '%%s' x` becomes the
+  format `%<fdnum>` (`invalid format string`, rc 1) where bash prints `%s`.
 - The pattern word of `${name#pat}` and friends is **not** expanded:
   `${v#$(printf abc)}` and `${v#$v}` stay literal (the pattern bytes are matched
   as written), and the brace reader stops at the first `}`, so a pattern
@@ -907,6 +920,7 @@ echo 'a;b'            → a;b        (no statement split)
 echo '$(echo hi)'     → $(echo hi) (no command substitution)
 echo '{a,b}'          → {a,b}      (no brace expansion)
 echo 'ca?t'           → ca?t       (no globbing, with files `ca1`, `ca2`)
+echo '%%'             → %%         (no percent escape: `%%` is data)
 echo x'y' # comment   → xy         (a `#` in a span is data, the comment is not)
 printf '%q\n' 'a b'   → a\ b       (fdshell's own quoting round-trips)
 alias q="echo a'b'"; q  → ab
@@ -1187,6 +1201,11 @@ between `fork()` and `exec()`, and fdshell will substitute `%var` with the resul
 
 For example, if `dup()` returned `63`, the command line argument `--fd=%var` will be substitued
 as `--fd=63`. The launched subprocess then can use this number as a valid file descriptor.
+
+The substitution has no percent escaping of its own (task #155): `%%` is passed
+through untouched, so a builtin that reads `%%` as its own escape — `printf
+'%%'` printing `%` — keeps working, and a literal `%` in front of a bound fd
+name is written `\%var` outside quotes.
 
 ### Addressing background tasks
 

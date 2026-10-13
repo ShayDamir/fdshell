@@ -1303,12 +1303,90 @@ fn dollar_multi_digit_index_in_text() {
 }
 
 #[test]
-fn percent_double_percent_is_literal() {
+fn percent_double_percent_stays_literal() {
+    // Task #155: the shell has no `%%` escape — both bytes reach argv so the
+    // `printf` builtin can interpret its own `%%` (bash prints `a%b` here).
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"a%%b");
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
-    assert_eq!(res.as_bytes().unwrap(), b"a%b");
+    assert_eq!(res.as_bytes().unwrap(), b"a%%b");
+}
+
+#[test]
+fn percent_double_percent_keeps_the_quote_mask() {
+    // The mask invariant of the literal `%`: one byte consumed, one byte
+    // written, so `realign` pads 1:1 and the quoted bits stay parallel.
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"a%%b");
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let (res, mask) = substitute_arg(&arg, &[true, true, true, true], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"a%%b");
+    assert_eq!(mask, vec![true; 4]);
+}
+
+#[test]
+fn percent_triple_percent_is_three_lits() {
+    let cell = dummy_cell();
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let expand = |arg: &'static core::ffi::CStr, cache: &mut HashMap<ShortCStr, ExportedFd>| {
+        substitute_arg(&ShortCStr::from(arg), &[], cache, &cell)
+            .unwrap()
+            .0
+            .as_bytes()
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(expand(c"%%%", &mut cache), b"%%%");
+    // The `?` arm keeps its literal fallback when `?` is unbound.
+    assert_eq!(expand(c"%%?", &mut cache), b"%%?");
+}
+
+#[test]
+fn percent_double_percent_before_a_name_is_literal() {
+    // Unbound `o`: nothing substitutes, all three bytes are literal.
+    let cell = dummy_cell();
+    let arg = ShortCStr::from(c"%%o");
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%%o");
+}
+
+#[test]
+fn percent_double_percent_with_bound_fd_substitutes_the_second_name() {
+    // Accepted divergence pinned for task #155: with fd `o` bound the second
+    // `%` starts a name lookup, so `%%o` becomes `%<fdnum>` (bash prints
+    // `%o`). Task #252 owns the quoting gate that would fix it.
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"o"), fdvar(dev_null));
+    let arg = ShortCStr::from(c"%%o");
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let (res, _) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    let bytes = res.as_bytes().unwrap().to_vec();
+    let fd = cache.get(&ShortCStr::from(c"o")).unwrap().as_raw();
+    assert_eq!(bytes, format!("%{fd}").as_bytes());
+}
+
+#[test]
+fn percent_escaped_percent_with_bound_fd_is_literal() {
+    // POSIX #4.1 outside quotes: `\%` protects the `%`, so the arm never runs
+    // and the bound fd `s` is not substituted. The escaped byte is masked
+    // quoted, the following name bytes keep their own (unquoted) bits.
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"s"), fdvar(dev_null));
+    let arg = ShortCStr::from(c"\\%s");
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let (res, mask) = substitute_arg(&arg, &[], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%s");
+    assert_eq!(mask, vec![true, false]);
 }
 
 #[test]

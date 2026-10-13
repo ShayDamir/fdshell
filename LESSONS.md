@@ -1199,3 +1199,32 @@ construction; `set -ee` is pinned at both levels
 a test and a `|` fold has no mutant to record. Rule: for a list of disjoint
 flags, accumulate a *list* and apply per item; never build a mask by arithmetic.
 
+## The shell must not consume bytes a builtin owns: `%%` is printf's, not the shell's
+
+`arms::percent` had a dedicated arm for a following `%`: it pushed one `%` and
+**consumed the second**, a shell-level escape bash does not have. The argv that
+reached `printf` was therefore `%` where bash passes `%%`, and a trailing `%` is
+POSIX's *missing format character*: `printf '%%'` ended at rc 1,
+`printf 'a%%b'` printed `a`, `echo '%%'` printed `%`. The arm is gone
+(`substitute/percent.rs`): `%%` is two ordinary literal bytes and the
+`printf` builtin (`child/printf.rs:74-77`) interprets its own escape, which is
+the only semantics that can match bash — a shell collapse and bash-parity
+output are mutually exclusive.
+
+* The `%` arm consumes **exactly the trigger byte** for a non-name `%`, so
+  `arg.rs`'s `realign` keeps the quote mask 1:1 for it. Pin the mask, not just
+  the text: `substitute/tests.rs::percent_double_percent_keeps_the_quote_mask`.
+* The literal-`%` escape is the POSIX #4.1 pair **outside** quotes
+  (`\%s` → `%s`, pinned by `percent_escaped_percent_with_bound_fd_is_literal`
+  and `tests/quotes.rs::percent_bytes_are_data_in_a_span`). Inside a span there
+  is no escape pair, so a quoted `%name` is substituted too: with fd `s` bound
+  `printf '%%s' x` becomes the format `%<fdnum>` and printf reports
+  `invalid format string` at rc 1 where bash prints `%s` at rc 0 — pinned as an
+  accepted divergence by `tests/printf.rs::printf_double_percent_with_bound_fd_name`
+  and tracked by task #252 (the `b'%' if !quoted` gate).
+* An undocumented "feature" pinned only by a unit test is a divergence to fix,
+  not a contract to preserve: `percent_double_percent_is_literal` asserted the
+  collapse (`a%%b` → `a%b`) and nothing in the README ever documented it.
+  Measure against bash first, then re-pin the test
+  (`percent_double_percent_stays_literal`), exactly as tasks #107/#109/#141 did.
+

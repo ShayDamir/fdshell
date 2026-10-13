@@ -421,3 +421,18 @@ fn region_body_drops_the_span_quote_bytes() {
     let (out, err, code) = run("v=; echo ${v:-'a\\}b'}");
     assert_eq!((out.as_str(), code), ("a\\\\b}\n", 0), "stderr={err:?}");
 }
+
+/// Task #155: the shell performs no percent escaping — `%%` is data in every
+/// spelling. bash prints `%%` for `echo '%%'` and for `echo "%%"`; the only
+/// literal-`%` escape is the POSIX #4.1 pair outside quotes, and with fd `s`
+/// bound bash's `echo [\%s]` prints `[%s]` (fdshell has no `%name` feature to
+/// escape from, so it prints the same).
+#[test]
+fn percent_bytes_are_data_in_a_span() {
+    for (script, want) in [("echo '%%'", "%%\n"), ("echo \"%%\"", "%%\n")] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    let (out, err, code) = run("builtin openat2 --flags O_RDONLY /dev/null %>%s; echo [\\%s]");
+    assert_eq!((out.as_str(), code), ("[%s]\n", 0), "stderr={err:?}");
+}

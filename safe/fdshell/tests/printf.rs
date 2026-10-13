@@ -177,3 +177,81 @@ fn printf_star_width_from_argument() {
     assert_eq!(code, 0);
     assert_eq!(out, "    7");
 }
+
+// --- `%%` is the builtin's escape, not the shell's (task #155) ---
+//
+// Every expectation here is measured against bash 5.3.9: the shell must pass
+// both `%` bytes through to argv so the printf rules below apply.
+
+#[test]
+fn printf_percent_percent_is_a_literal_percent() {
+    let (out, _err, code) = run("printf '%%'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "%");
+}
+
+#[test]
+fn printf_double_percent_mid_format() {
+    let (out, _err, code) = run("printf 'a%%b'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a%b");
+}
+
+#[test]
+fn printf_double_percent_before_a_conversion_letter() {
+    // `%%o` is a literal `%` followed by the letter `o`, not the `%o`
+    // conversion: bash prints the two characters and consumes no argument.
+    let (out, _err, code) = run("printf '%%o'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "%o");
+    let (out, _err, code) = run("printf '%%d' 7");
+    assert_eq!(code, 0);
+    assert_eq!(out, "%d");
+}
+
+#[test]
+fn printf_double_percent_at_the_end() {
+    let (out, _err, code) = run("printf '%s%%' 7");
+    assert_eq!(code, 0);
+    assert_eq!(out, "7%");
+}
+
+#[test]
+fn printf_double_percent_with_escape_pair() {
+    // Quoted `%%\n`: printf sees both `%` and the `\n` pair it must interpret.
+    let (out, _err, code) = run(r"printf '100%%\n'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "100%\n");
+    let (out, _err, code) = run(r"printf '100%%done'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "100%done");
+}
+
+#[test]
+fn printf_double_percent_survives_as_argument() {
+    // `%%` as a plain argument is data: bash prints it verbatim.
+    let (out, _err, code) = run("printf '%s' '%%'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "%%");
+}
+
+#[test]
+fn printf_double_percent_with_bound_fd_name() {
+    // Accepted divergence, pinned (README + task #252): with fd `s` bound the
+    // second `%` starts a name lookup, so the format becomes `%<fdnum>` —
+    // printf reports it as a missing format character at rc 1 with empty
+    // stdout, where bash's `printf '%%s' x` prints `%s` at rc 0. The master
+    // collapsing reading (`printf '%%s' x` → `x`) is gone, and an unquoted fd
+    // reference in a non-format word still substitutes.
+    let open = "builtin openat2 --flags O_RDONLY /dev/null %>%s; ";
+    let (out, err, code) = run(&format!("{open}printf '%%s' x"));
+    assert_eq!(code, 1);
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("invalid format string"), "stderr={err:?}");
+    let (out, _err, code) = run(&format!("{open}printf '%s' %s"));
+    assert_eq!(code, 0);
+    assert!(
+        !out.is_empty() && out.bytes().all(|b| b.is_ascii_digit()),
+        "stdout={out:?}"
+    );
+}

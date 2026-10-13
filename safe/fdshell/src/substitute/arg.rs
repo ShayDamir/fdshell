@@ -71,6 +71,10 @@ pub(super) fn substitute_arg_marked(
                 }
                 _ => push_byte(&mut out, &mut out_mask, b'\\', quoted)?,
             },
+            // `%name` fd substitution. The arm consumes the trigger byte and
+            // at most the name; a following `%` or non-name byte is literal,
+            // so `%%` reaches argv intact — the `printf` builtin owns `%%`
+            // (task #155). `realign` keeps the mask 1:1 for the literal `%`.
             b'%' => {
                 let before = out.len();
                 arms::percent(&mut peek, cache, cell, &mut out)?;
