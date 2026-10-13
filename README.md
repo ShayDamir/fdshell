@@ -786,15 +786,14 @@ Accepted divergences from bash:
   (`[${!p}]` with `p=""`), but the wording differs: bash says
   `: invalid variable name`, fdshell `: invalid indirect expansion`. Same rc 1.
 - An indirect target that is **not a valid variable name** expands to the empty
-   string, silently, at rc 0: with `p="a b"` and with `p=a-b`, `[${!p}]` prints
-   `[]` where bash rejects the name (`a b: invalid variable name`, rc 1) and
-   prints nothing. `p="-"` follows the same rule: fdshell looks for a variable
-   literally named `-` and expands to empty, where bash resolves its special
-   `$-` parameter (`[hBc]`, rc 0; fdshell's `$-` is its own flag bytes, empty by
-   default — task #177). Under
-
-  `set -u` fdshell bails `!p: unbound variable` at rc 1 for every one of the
-  three (bash keeps `NAME: invalid variable name` rc 1 for the first two, and
+  string, silently, at rc 0: with `p="a b"` and with `p=a-b`, `[${!p}]` prints
+  `[]` where bash rejects the name (`a b: invalid variable name`, rc 1) and
+  prints nothing. `p="-"` follows the same rule: fdshell looks for a variable
+  literally named `-` and expands to empty, where bash resolves its special
+  `$-` parameter (`[hBc]`, rc 0; fdshell's `$-` is its own flag bytes, empty by
+  default — task #177). Under `set -u` fdshell bails `!p: unbound variable` at
+  rc 1 for every one of the three (bash keeps `NAME: invalid variable name` rc 1
+  for the first two, and
   prints `[huBc]` at rc 0 for `-`). Pinned by `tests/unset_expand.rs`:
   `indirect_target_that_is_not_a_name_is_empty`,
   `indirect_target_that_is_the_dash_name_is_empty` (task #172).
@@ -937,15 +936,12 @@ rule is the shared one (an out-of-range index is unbound: `${5}` → rc 1,
 `5: unbound variable`), and `:=` refuses to assign to a parameter.
 
 ```
-set -- a b c; echo "[$1$2${3}]"           → [abc]      (the braced `${3}` is `$3`)
-set -- a b c; echo "[${1}][${1#c}][${0}]" → [a][a][sh]
-set -- a b c; echo "[${?}][${$}][${*}]"   → [0][<pid>][a b c]
-```
-
-```
 set -- a b c; echo "[$1][$2][$3][$#]"     → [a][b][c][3]
 set -- a b c; shift; echo "[$0][$1][$#]"  → [sh][b][2]   (`shift` never moves `$0`)
 f() { echo "$1|$#|$0"; }; f a b           → a|2|sh       (the name is not a positional)
+set -- a b c; echo "[$1$2${3}]"           → [abc]        (the braced `${3}` is `$3`)
+set -- a b c; echo "[${1}][${1#c}][${0}]" → [a][a][sh]
+set -- a b c; echo "[${?}][${$}][${*}]"   → [0][<pid>][a b c]
 ```
 
 ### Quoting
