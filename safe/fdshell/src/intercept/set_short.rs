@@ -1,36 +1,80 @@
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
-use error_stack::{Report, ResultExt};
+use alloc::vec::Vec;
+use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-/// Map a 2-byte `-c`/`+c` short flag to `(option bit, enable)`: the four
-/// POSIX flags `set` intercepts (`e`, `u`, `f`, `v`). Anything else —
-/// including `-x` (its own arm) and combined flags like `-eu` — is `None`.
-pub(super) fn short_flag(first: &ShortCStr) -> Option<(u32, bool)> {
-    let bytes = first.as_bytes().ok()?;
-    // Exactly 2 bytes: a lone `-`/`+` or a combined flag (`-eu`) is not ours.
-    let (sign, flag) = (*bytes.first()?, *bytes.get(1)?);
-    if bytes.len() != 2 {
-        return None;
-    }
+/// Split a `set` short-flag **cluster**: a `-`/`+` sign followed by one or more
+/// known flag bytes, each applied with the word's sign (`set -eu` = errexit +
+/// nounset, `set +ef` = clear noglob + verbosity). The bits come back in word
+/// order, duplicates included (applying a flag twice is harmless).
+///
+/// `Ok(None)` is a word that is not ours: empty, signless (`set a b`), or a lone
+/// sign (task #249's `set -`/`set +`) — the caller keeps falling through. A
+/// signed cluster with an unknown byte is an error naming the whole word
+/// (`set: unknown option '-z'`), and **no** flag has been applied yet: bash
+/// validates the whole word first, so `set -ez` leaves `-e` off.
+fn short_flags(first: &ShortCStr) -> Result<Option<(Vec<u32>, bool)>, Report<CmdError>> {
+    let bytes = first.as_bytes().change_context(CmdError::Never)?;
+    let Some(&sign) = bytes.first() else {
+        return Ok(None);
+    };
     let enable = sign == b'-';
     if !enable && sign != b'+' {
-        return None;
+        return Ok(None);
     }
+    // A lone sign has no flag byte, so it is not a cluster.
+    let Some(flags) = bytes.get(1..).filter(|flags| !flags.is_empty()) else {
+        return Ok(None);
+    };
+
+    let mut bits = Vec::new();
+    for &flag in flags {
+        bits.push(flag_bit(flag, first)?);
+    }
+    Ok(Some((bits, enable)))
+}
+
+/// The option bit of one cluster byte. `x` is accepted (bash's `set -xf` works)
+/// even though the single `-x`/`+x` word is claimed by its own `set` arm.
+fn flag_bit(flag: u8, word: &ShortCStr) -> Result<u32, Report<CmdError>> {
     let bit = match flag {
         b'e' => crate::options::ERREXIT,
         b'u' => crate::options::NOUNSET,
         b'f' => crate::options::NOGLOB,
         b'v' => crate::options::VERBOSITY,
-        _ => return None,
+        b'x' => crate::options::XTRACE,
+        _ => bail!(CmdError::ShellOptionUnknown("set", word.clone())),
     };
-    Some((bit, enable))
+    Ok(bit)
 }
 
-/// `set -c` / `set +c`: set/clear one short-flag option, status 0 (the
-/// ordinary xtrace is printed by the caller, as for `set -o`).
-pub(super) fn run_set_short(
+/// `set -eu` / `set +ef`: validate the word, trace it, apply each flag byte with
+/// the word's sign, status 0. Returns `false` for a word that is not a cluster
+/// (the caller keeps falling through). The cluster is traced only if xtrace was
+/// already on, as bash does (`set -xf` traces `echo`, not itself); the
+/// unconditional self-trace belongs to the single `-x`/`+x` arm.
+pub(super) fn run_short_flags(
+    first: &ShortCStr,
+    line: &[u8],
+    cmdline: &crate::parse::CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<bool, Report<CmdError>> {
+    let Some((bits, enable)) = short_flags(first)? else {
+        return Ok(false);
+    };
+    super::validation::validate_intercept(line, "set", cmdline)?;
+    crate::xtrace::trace_cmd(b"set", cmdline, cell);
+    for bit in bits {
+        run_set_short(bit, enable, cell)?;
+    }
+    Ok(true)
+}
+
+/// Apply one short-flag bit and report status 0 (the xtrace line is printed by
+/// the caller, as for `set -o`).
+fn run_set_short(
     bit: u32,
     enable: bool,
     cell: &ForkCell<ShellState>,
@@ -40,3 +84,6 @@ pub(super) fn run_set_short(
     state.set_last_exit(0);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

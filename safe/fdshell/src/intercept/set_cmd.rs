@@ -7,9 +7,9 @@ use sys::{ImportedStr, ShortCStr, Trace};
 
 /// Replace `$1..` with the words after `--` (`$0` survives, as in bash),
 /// set/clear a shell option with `-o`/`+o` or the POSIX short flags
-/// `-e`/`-u`/`-f`/`-v` (and `+e`/`+u`/`+f`/`+v`), or list variables (bare
-/// `set`) / fd variables (`set -F`). Other `set` forms fall through to
-/// external lookup.
+/// `-e`/`-u`/`-f`/`-v` (and `+e`/`+u`/`+f`/`+v`), clustered in one word
+/// (`set -eu`, `set +ef`), or list variables (bare `set`) / fd variables
+/// (`set -F`). Other `set` forms fall through to external lookup.
 pub(crate) fn run_set(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
@@ -34,11 +34,6 @@ pub(crate) fn run_set(
         super::validation::validate_intercept(line, "set", cmdline)?;
         return run_set_xtrace(first, cmdline, cell).map(|_| true);
     }
-    if let Some((bit, enable)) = super::set_short::short_flag(first) {
-        super::validation::validate_intercept(line, "set", cmdline)?;
-        crate::xtrace::trace_cmd(b"set", cmdline, cell);
-        return super::set_short::run_set_short(bit, enable, cell).map(|_| true);
-    }
     if first.eq_bytes(b"-F") {
         super::validation::validate_intercept(line, "set", cmdline)?;
         crate::xtrace::trace_cmd(b"set", cmdline, cell);
@@ -48,6 +43,12 @@ pub(crate) fn run_set(
         super::validation::validate_intercept(line, "set", cmdline)?;
         crate::xtrace::trace_cmd(b"set", cmdline, cell);
         return super::set_limit::run_set_capture_limit(cmdline, cell).map(|_| true);
+    }
+    // The cluster parser is the catch-all for sign-shaped words, so it runs
+    // last: `-F` and `--stdout-capture-limit` are flag-shaped words that it
+    // would reject as unknown flags.
+    if super::set_short::run_short_flags(first, line, cmdline, cell)? {
+        return Ok(true);
     }
     Ok(false)
 }

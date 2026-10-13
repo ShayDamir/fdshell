@@ -234,9 +234,10 @@ fn run_eval_empty_script_sets_zero_status() {
 
 #[test]
 fn try_intercept_set_unhandled_forms_return_false() {
-    // Combined short flags (`-eu`) are not intercepted (tracked separately);
-    // bare words after `set` fall through to external lookup.
-    for args in [&["-eu"] as &[&str], &["a", "b"] as &[&str]] {
+    // Bare words after `set` fall through to external lookup, and so does a
+    // lone sign (`set -`/`set +`, task #249). Combined flags (`-eu`) are
+    // intercepted by this task (#142).
+    for args in [&["a", "b"] as &[&str], &["-"] as &[&str], &["+"] as &[&str]] {
         let cmdline = make_cmdline(b"set", args);
         let line = make_line("set", args);
         let cell = make_cell();
@@ -263,6 +264,61 @@ fn try_intercept_set_posix_short_flags_are_handled() {
             "set {flag:?} should be intercepted"
         );
     }
+}
+
+#[test]
+fn try_intercept_set_short_flag_cluster_applies_every_flag() {
+    let args = ["-eu"];
+    let cmdline = make_cmdline(b"set", &args);
+    let line = make_line("set", &args);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some(),
+        "set -eu must be intercepted"
+    );
+    let want = crate::options::ERREXIT | crate::options::NOUNSET;
+    assert_eq!(cell.borrow().unwrap().options & want, want);
+}
+
+#[test]
+fn try_intercept_set_cluster_keeps_the_flag_shaped_arms_first() {
+    // `-F` (fd list) and `--stdout-capture-limit` are flag-shaped words that the
+    // catch-all cluster parser rejects, so they must be claimed above it.
+    let args = ["--stdout-capture-limit", "1"];
+    let cmdline = make_cmdline(b"set", &args);
+    let line = make_line("set", &args);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some(),
+        "set --stdout-capture-limit must be intercepted"
+    );
+    assert_eq!(cell.borrow().unwrap().capture_limit, 1);
+
+    let args = ["-F"];
+    let cmdline = make_cmdline(b"set", &args);
+    let line = make_line("set", &args);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some(),
+        "set -F must be intercepted (fd list), not rejected as a flag"
+    );
+
+    // The same byte inside a cluster *is* an unknown flag: a builtin error, not
+    // a fall-through.
+    let args = ["-eF"];
+    let cmdline = make_cmdline(b"set", &args);
+    let line = make_line("set", &args);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell).is_err(),
+        "set -eF must report the unknown flag"
+    );
 }
 
 #[test]
