@@ -73,9 +73,12 @@ pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
     !operator_delim(line, start, end).1.is_empty()
 }
 
-/// A bare `<<` delimiter word may not be a separator or another operator.
-/// A `)` never forms a token (the tokenizer emits a `;` separator instead),
-/// so the `;` arm covers the `<<`-before-`)` case.
+/// The shared bare-operand rule: a bare `<<` delimiter, a bare
+/// `>`/`>>`/`<`/`<>`/`>|` path and a bare `&>`/`&>>` path may not be a
+/// separator or another operator. A `)` never forms a token (the tokenizer
+/// emits a `;` separator instead), so the `;` arm covers the `<<`-before-`)`
+/// case. Every bare-operand site calls this one function, so the families
+/// cannot drift apart.
 pub(crate) fn invalid_delimiter(word: &ShortCStr) -> bool {
     word.is_empty()
         || word.starts_with(b"<")

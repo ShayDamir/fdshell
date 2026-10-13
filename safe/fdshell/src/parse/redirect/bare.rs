@@ -5,6 +5,7 @@
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use crate::scan::heredoc::invalid_delimiter;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
@@ -54,7 +55,10 @@ pub(super) fn parse_bare(
     let Some((operand, _os, _oe, _ofq, omask)) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    if invalid_operand(operand) {
+    // The operand must be a plain word: the shared bare-operand guard
+    // (`scan::heredoc::op::invalid_delimiter`), also used by the bare `<<`
+    // delimiter and the bare `&>` / `&>>` form.
+    if invalid_delimiter(operand) {
         bail!(ParseError::InvalidRedirect);
     }
     if let Some(n) = super::super::fd_path::fd_path_target(operand) {
@@ -81,17 +85,4 @@ fn direction(op: &ShortCStr) -> RedirectDirection {
     } else {
         RedirectDirection::Rw
     }
-}
-
-/// A bare operator's operand must be a plain word: the same rule as the bare
-/// `<<` delimiter (`scan::heredoc::op::invalid_delimiter`) — not empty, not a
-/// separator, and not another operator.
-fn invalid_operand(word: &ShortCStr) -> bool {
-    word.is_empty()
-        || word.starts_with(b"<")
-        || word.starts_with(b">")
-        || word.starts_with(b"&")
-        || word.starts_with(b"%")
-        || word.eq_bytes(b";")
-        || word.eq_bytes(b"|")
 }
