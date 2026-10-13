@@ -212,9 +212,14 @@ TABs are dropped from every body line and from the terminator line — spaces ar
 kept, and a tab-indented terminator matches; the body is otherwise opaque as
 below). An unquoted delimiter runs `$` / `$(…)` / backtick expansion in the
 body; a quoted delimiter makes the body literal. `<<""` (empty quoted
-delimiter) reads a body up to the next empty line. The delimiter word folds its
-unquoted escape pairs (`<<E\OF` delimits `EOF`), and a quoted delimiter keeps
-the pair (`<<"E\OF"` delimits the literal `E\OF`).
+delimiter) reads a body up to the next empty line. The delimiter word is a
+word, so it gets quote removal: every `"`/`'` byte is dropped in the same pass
+that folds its unquoted escape pairs (`<<E\OF` delimits `EOF`, `<<a'b'c`
+delimits `abc`, `<<""Q"x"` delimits `Qx`), a quote written as an escape pair is
+data (`<<a\"b` delimits the literal `a"b`), a quoted delimiter keeps the pair
+(`<<"E\OF"` delimits the literal `E\OF`), and a quote byte **anywhere** in the
+word quotes the delimiter, so the body is literal. A quoted span is one
+delimiter word, spaces and all (`<<"a b"` and `<<'a b'` delimit `a b`).
 The body is otherwise opaque: `;`, `&&`, `|`, `#`, `$(…)`, quotes, and
 keyword-shaped lines (`fi`, `done`, `}`) are all body content. An empty body
 is zero bytes, and no trailing newline is appended — the body keeps the last
@@ -1016,6 +1021,8 @@ printf '%q\n' 'a b'   → a\ b       (fdshell's own quoting round-trips)
 alias q="echo a'b'"; q  → ab
 cat <<'EOF'           → the body verbatim: `$v`, `\`, `*`, `` ` `` unexpanded
 cat <<'a b'           → the body, terminated by the line `a b` (a span is a word)
+cat <<a'b'c           → the body, terminated by `abc` (every quote byte is removed)
+cat <<'x'y'z'         → the body, terminated by `xyz` (the word is quoted: no expansion)
 'time' ls            → /usr/bin/time ls   (a quoted keyword is a command word)
 ```
 
