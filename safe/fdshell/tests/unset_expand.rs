@@ -277,3 +277,27 @@ fn nested_paren_inside_a_brace_region_is_scanned_but_not_expanded() {
     assert_eq!(err, "");
     assert_eq!(out, "x$(echo p q)y\n");
 }
+
+// Accepted divergence (task #172): an indirect target that is not a valid
+// variable name expands to empty here. bash rejects the name and prints
+// nothing: `a b: invalid variable name` / `a-b: invalid variable name`, rc 1.
+#[test]
+fn indirect_target_that_is_not_a_name_is_empty() {
+    for script in [r#"p="a b"; echo "[${!p}]""#, r#"p=a-b; echo "[${!p}]""#] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must expand quietly, stderr={err}");
+        assert_eq!(out, "[]\n", "{script:?}");
+        assert_eq!(err, "", "{script:?} must report nothing");
+    }
+}
+
+// Accepted divergence (task #172): bash resolves `-` to its special `$-`
+// parameter (`[hBc]`, rc 0). fdshell has no `$-` (task #177) and looks for a
+// variable literally named `-`: unbound, so the expansion is empty.
+#[test]
+fn indirect_target_that_is_the_dash_name_is_empty() {
+    let (out, err, code) = run(r#"p="-"; echo "[${!p}]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[]\n");
+    assert_eq!(err, "");
+}

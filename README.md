@@ -785,6 +785,17 @@ Accepted divergences from bash:
 - `${!name}` of a name bound to the empty string is an error on both
   (`[${!p}]` with `p=""`), but the wording differs: bash says
   `: invalid variable name`, fdshell `: invalid indirect expansion`. Same rc 1.
+- An indirect target that is **not a valid variable name** expands to the empty
+  string, silently, at rc 0: with `p="a b"` and with `p=a-b`, `[${!p}]` prints
+  `[]` where bash rejects the name (`a b: invalid variable name`, rc 1) and
+  prints nothing. `p="-"` follows the same rule: fdshell looks for a variable
+  literally named `-` and expands to empty, where bash resolves its special
+  `$-` parameter (`[hBc]`, rc 0; fdshell has no `$-` at all — task #177). Under
+  `set -u` fdshell bails `!p: unbound variable` at rc 1 for every one of the
+  three (bash keeps `NAME: invalid variable name` rc 1 for the first two, and
+  prints `[huBc]` at rc 0 for `-`). Pinned by `tests/unset_expand.rs`:
+  `indirect_target_that_is_not_a_name_is_empty`,
+  `indirect_target_that_is_the_dash_name_is_empty` (task #172).
 - The `$_` arm is not nounset-checked (unobservable in `-c` mode: `set -u`
   binds `_` exactly as bash does, so `set -u; builtin echo "[$_]"` prints
   `[-u]` on both).
