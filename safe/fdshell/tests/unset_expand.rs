@@ -292,8 +292,9 @@ fn indirect_target_that_is_not_a_name_is_empty() {
 }
 
 // Accepted divergence (task #172): bash resolves `-` to its special `$-`
-// parameter (`[hBc]`, rc 0). fdshell has no `$-` (task #177) and looks for a
-// variable literally named `-`: unbound, so the expansion is empty.
+// parameter (`[hBc]`, rc 0). fdshell's indirect target keeps the plain-name
+// lookup (task #177's D4 rule, owned by task #260) and looks for a variable
+// literally named `-`: unbound, so the expansion is empty.
 #[test]
 fn indirect_target_that_is_the_dash_name_is_empty() {
     let (out, err, code) = run(r#"p="-"; echo "[${!p}]""#);
@@ -453,6 +454,53 @@ fn degenerate_empty_indirect_name_with_colon_operators() {
     assert_eq!(out, "[z]");
 }
 
+// Accepted divergence (task #177, the write face of the #172/#260 indirect
+// target rule): `:=` resolves `!name` to the parameter its value names and then
+// refuses to assign it, so it bails at rc 1 and writes nothing where bash has
+// the parameter's value at rc 0 — `p=1` prints `[a]`, `p="-"` prints `[hBc]`,
+// `p="#"` prints `[0]`; `p="@"` is rc 1 in bash too (`@: invalid variable
+// name`), so only the wording differs there. Task #260 owns resolving the
+// target as a parameter.
+#[test]
+fn indirect_target_naming_a_parameter_refuses_assign() {
+    for (script, want) in [
+        (
+            r#"set -- a b c; p=1; printf "[%s]" "${!p:=q}""#,
+            "1: cannot assign in this way",
+        ),
+        (
+            r#"set -- a b c; p=1; set -u; printf "[%s]" "${!p:=q}""#,
+            "1: cannot assign in this way",
+        ),
+        (
+            r#"p="-"; printf "[%s]" "${!p:=q}""#,
+            "-: cannot assign in this way",
+        ),
+        (
+            r##"p="#"; printf "[%s]" "${!p:=q}""##,
+            "#: cannot assign in this way",
+        ),
+        (
+            r#"p="@"; printf "[%s]" "${!p:=q}""#,
+            "@: cannot assign in this way",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(
+            out, "",
+            "{script:?} must print nothing, so nothing was assigned"
+        );
+        assert!(err.contains(want), "{script:?} stderr={err}");
+    }
+    // The read face of the same target: the target is an unset *variable*, so
+    // the colon family's word supplies the value where bash has the positional
+    // (`${!p:-z}` → `[z]` here, `[a]` in bash; `:+` prints nothing here).
+    let (out, err, code) = run(r#"set -- a b c; p=1; printf "[%s][%s]" "${!p:-z}" "${!p:+z}""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[z][]", "the colon word supplies the unset target");
+}
+
 // --- task #177: positional and special parameters in the shared lookup ---
 
 /// `set -u` bails an out-of-range positional in the plain and pattern families
@@ -501,6 +549,13 @@ fn braced_specials_are_never_unbound() {
         run(r#"set --; set -u; printf "[%s]" "${0}" "${?}" "${@}" "${*}" "${-}""#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[sh][0][][][u]");
+    // Divergence D2's `:?` face: fdshell's flag bytes are empty by default, so
+    // `${-}` is an empty parameter and `:?` bails at rc 1 where bash (whose
+    // `$-` is `hBc`) prints its flags at rc 0.
+    let (out, err, code) = run(r#"printf "[%s]" "${-:?m}""#);
+    assert_eq!(code, 1, "stderr={err}");
+    assert_eq!(out, "", "the bail prints nothing");
+    assert!(err.contains("-: m"), "stderr={err}");
 }
 
 /// Accepted divergences (task #177), each pinned with its rc:

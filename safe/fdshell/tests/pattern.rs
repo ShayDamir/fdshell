@@ -507,3 +507,24 @@ fn for_list_param_operator_error() {
     );
     assert_eq!(out, "");
 }
+
+/// Accepted divergence (task #177, the pattern-op face of the `${@}`/`${*}`
+/// one-string rule): the braced join is a single string, so the operator strips
+/// **it**, where bash strips every positional word. `IFS=,` joins `a b c` into
+/// `a,b,c`, and the shortest prefix `a,` strips from the join; bash strips `a,`
+/// from each of `a`, `b`, `c` (no match) and prints `[a,b,c]` / `[a][b][c]`.
+#[test]
+fn pattern_operator_on_a_braced_join_strips_the_joined_string() {
+    for script in [
+        r#"IFS=,; set -- a b c; printf "[%s]" "${*#a,}""#,
+        r#"IFS=,; set -- a b c; printf "[%s]" "${@#a,}""#,
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must expand, stderr={err}");
+        assert_eq!(&out, "[b,c]", "{script:?}");
+    }
+    // No match leaves the join whole, exactly as bash leaves the words whole.
+    let (out, err, code) = run(r#"IFS=,; set -- a b c; printf "[%s]" "${*%c,}""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a,b,c]", "bash: [a,b,c]");
+}
