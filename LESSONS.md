@@ -1228,3 +1228,44 @@ output are mutually exclusive.
   Measure against bash first, then re-pin the test
   (`percent_double_percent_stays_literal`), exactly as tasks #107/#109/#141 did.
 
+## e2e tests that assert `rc == errno` must *retry* the load-dependent errnos, never skip them
+
+Task #159: the **unmutated baseline** of `cargo mutants -j4` aborted on
+`verity::double_enable_is_eexist`, and the immediate re-run was green. The mechanism is
+the exit-code channel itself: `handle_builtin_error` returns `Ok(e.errno())` for a syscall
+failure, so a kernel/fd transient reaches the test *as the exit code*, and the suite pins
+exit codes (`17` EEXIST, `61` ENODATA, `1`, `42`). Under `cargo mutants -j4` (hundreds of
+concurrent test processes doing kernel work) the work `FS_IOC_ENABLE_VERITY` does is
+exactly the work that fails transiently: Merkle-tree build + fs transaction (kernel
+allocations, btrfs metadata reservations → `ENOMEM`/`ENOSPC`/`EIO`/`EBUSY`), `openat2`
+racing the system-wide fd table (`ENFILE`), fork/exec of the tiny child under memory
+pressure (`EAGAIN`), a concurrently rebuilt target binary (`ETXTBSY`).
+
+Rules:
+
+- Classify the transient set **in the shared helper** and retry it with a bounded budget
+  (`tests/verity.rs`: `TRANSIENT` + `run`'s 8 tries at 10 ms), never *skip* it. A skip
+  that swallows transient errnos hides the pressure, and per "A mutant 'caught' by a
+  flaky test is a false kill" it corrupts the gate's accounting.
+- Keep the graceful-skip set exact: only `ENOTTY`/`EOPNOTSUPP` (fs lacks fs-verity)
+  skip. A transient is retried, a non-transient rc is a hard failure. No pinned rc
+  (17, 61, 1, 42, …) is in the transient set, so no pin can be masked by a retry.
+- Absorb spawn failures as well: `Command::output()` reports fork `EAGAIN`/`ETXTBSY` as
+  an `io::Error`, never as an rc, so a `.output().unwrap()` in a helper is itself a flake.
+- Retrying a *failed* enable is safe for exactly this set: the kernel sets the verity
+  flag only in its final success step, so a transient failure leaves the file non-verity
+  and the repeat re-runs the identical first-enable path — which is why `EEXIST` must
+  stay out of the set (a half-enabled file must stay visible).
+- Name the errno in the helper's output (`transient rc …, retrying`,
+  `enable failed: rc=… stderr=…`) and hand the last output back to the assertion when the
+  budget is exhausted: a real gate failure then identifies the errno, and the set grows
+  by one constant.
+- **Verify with fault injection, not with load.** A wrapper at the suite's
+  `CARGO_BIN_EXE_fdshell` path that fails 1-of-N invocations with a chosen rc (and an
+  interpreter symlink deleted/recreated for the spawn-failure class) reproduces the whole
+  class deterministically: injected `EAGAIN`/`ENFILE`/`ENOSPC` → suite green with visible
+  retries, injected `EINVAL` (22) → suite fails hard, injected `ENOTTY` on every call →
+  graceful skip. A load loop alone is worth less: it is rare enough to hide behind other
+  flaky tests (measured: 48 loaded suite runs, the verity suite never failed, two *other*
+  tests did).
+

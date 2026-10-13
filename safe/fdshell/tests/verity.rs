@@ -41,12 +41,64 @@ impl Drop for Scratch {
     }
 }
 
-fn run(dir: &std::path::Path, script: &str) -> Output {
+/// Load-dependent errnos. `FS_IOC_ENABLE_VERITY` is kernel Merkle-tree plus
+/// fs-transaction work (btrfs metadata reservations, kernel allocations) and
+/// `openat2` races the system-wide fd table, so under a parallel suite run
+/// (measured: `cargo mutants -j4`) these fail *transiently*. The shell
+/// surfaces a syscall errno as the exit code (`child/error.rs`), so they
+/// arrive as exactly these rc values. None of them is an rc any test in this
+/// file expects, so retrying them can never mask a pin.
+const TRANSIENT: [i32; 7] = [
+    sys::errno::EAGAIN,  //  11 fork/exec and child memory pressure
+    sys::errno::EIO,     //   5 fs-level transient
+    sys::errno::ENOMEM,  //  12 kernel tree-build allocation pressure
+    sys::errno::EBUSY,   //  16 fs busy
+    sys::errno::ENFILE,  //  23 system-wide open fd pressure (openat2)
+    sys::errno::ETXTBSY, //  26 shared target binary (concurrent rebuild)
+    sys::errno::ENOSPC,  //  28 btrfs metadata reservation under load
+];
+
+/// Bounded retry budget for [`run`]: 8 tries at 10 ms, ~70 ms worst case per
+/// call. A host that keeps failing past the budget fails the test hard.
+const RETRIES: usize = 8;
+const BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);
+
+fn spawn(dir: &std::path::Path, script: &str) -> Result<Output, std::io::Error> {
     Command::new(BIN)
         .current_dir(dir)
         .args(["-c", script])
         .output()
-        .unwrap()
+}
+
+fn is_transient(out: &Output) -> bool {
+    out.status.code().is_some_and(|rc| TRANSIENT.contains(&rc))
+}
+
+/// Run `script` in `dir`, absorbing only the *load-dependent* failures of a
+/// parallel suite: a spawn that fails outright (fork `EAGAIN` under memory
+/// pressure, `ETXTBSY` on a concurrently rebuilt binary — std reports both as
+/// an `io::Error`, never as an rc) and the [`TRANSIENT`] rc set, each retried
+/// after [`BACKOFF`]. Any other rc (including 0) returns immediately, so the
+/// pinned rc assertions are untouched; when the budget is exhausted the last
+/// output is returned, so the asserting test names the errno and its stderr
+/// instead of hiding it. Retrying a failed enable is safe: the kernel marks a
+/// file verity only in its final success step, so a [`TRANSIENT`] failure
+/// leaves the file non-verity and the repeat re-runs the first-enable path.
+fn run(dir: &std::path::Path, script: &str) -> Output {
+    for _ in 0..RETRIES {
+        match spawn(dir, script) {
+            Ok(out) if is_transient(&out) => {
+                eprintln!("transient rc {:?}, retrying: {script}", out.status.code());
+                std::thread::sleep(BACKOFF);
+            }
+            Ok(out) => return out,
+            Err(e) => {
+                eprintln!("spawn failed ({e}), retrying: {script}");
+                std::thread::sleep(BACKOFF);
+            }
+        }
+    }
+    spawn(dir, script).unwrap()
 }
 
 fn stdout(out: &Output) -> String {
@@ -57,26 +109,38 @@ fn stderr(out: &Output) -> String {
     str::from_utf8(&out.stderr).unwrap().to_string()
 }
 
-/// Run the enable step on `name`; returns `false` (skip) when the host
-/// fs/kernel lacks fs-verity (rc 25 ENOTTY or 95 EOPNOTSUPP). Any other
-/// non-zero rc is a hard failure.
-fn enable(dir: &std::path::Path, name: &str) -> bool {
-    let script = format!(
-        "builtin openat2 --flags O_RDONLY {name} %>%b; \
-                          builtin verity %b --enable"
-    );
-    let out = run(dir, &script);
+/// Run a script that enables verity on the scratch file: `None` (skip) when
+/// the host fs/kernel lacks fs-verity (rc 25 ENOTTY or 95 EOPNOTSUPP), the
+/// output when rc 0. Any other rc, after [`run`]'s transient retries, is a
+/// hard failure and names it. The one skip rule for every enable-bearing
+/// script in this file.
+fn enable_run(dir: &std::path::Path, script: &str) -> Option<Output> {
+    let out = run(dir, script);
     match out.status.code() {
-        Some(0) => true,
+        Some(0) => Some(out),
         Some(25) | Some(95) => {
             eprintln!(
                 "skipping verity test: fs-verity unsupported (rc={:?})",
                 out.status.code()
             );
-            false
+            None
         }
         other => panic!("enable failed: rc={other:?} stderr={}", stderr(&out)),
     }
+}
+
+/// Enable verity on `name` with extra `flags`; `false` means skip (see
+/// [`enable_run`]).
+fn enable_with(dir: &std::path::Path, name: &str, flags: &str) -> bool {
+    let script = format!(
+        "builtin openat2 --flags O_RDONLY {name} %>%b; \
+                          builtin verity %b --enable{flags}"
+    );
+    enable_run(dir, &script).is_some()
+}
+
+fn enable(dir: &std::path::Path, name: &str) -> bool {
+    enable_with(dir, name, "")
 }
 
 /// Query a non-verity file: prints `enabled=no`, rc 0.
@@ -116,16 +180,8 @@ fn enable_and_query_sha256() {
 fn enable_and_query_sha512() {
     let dir = Scratch::new();
     std::fs::write(dir.join("f"), CONTENT).unwrap();
-    let script = "builtin openat2 --flags O_RDONLY f %>%b; \
-                  builtin verity %b --enable --algo sha512";
-    let out = run(&dir, script);
-    match out.status.code() {
-        Some(0) => {}
-        Some(25) | Some(95) => {
-            eprintln!("skipping verity test: fs-verity unsupported");
-            return;
-        }
-        other => panic!("enable failed: rc={other:?} stderr={}", stderr(&out)),
+    if !enable_with(&dir, "f", " --algo sha512") {
+        return;
     }
     let out = run(
         &dir,
@@ -193,15 +249,9 @@ fn verify_then_exec() {
     // Stage 1: enable and query, capturing the digest.
     let s1 = "builtin openat2 --flags O_RDONLY bin %>%b; \
               builtin verity %b --enable; builtin verity %b";
-    let out1 = run(&dir, s1);
-    match out1.status.code() {
-        Some(0) => {}
-        Some(25) | Some(95) => {
-            eprintln!("skipping verity test: fs-verity unsupported");
-            return;
-        }
-        other => panic!("stage 1 failed: rc={other:?} stderr={}", stderr(&out1)),
-    }
+    let Some(out1) = enable_run(&dir, s1) else {
+        return;
+    };
     let s = stdout(&out1);
     assert!(
         s.starts_with("enabled=yes algo=sha256 digest="),
