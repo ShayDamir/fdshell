@@ -360,11 +360,22 @@ bash (`for a in 1 2 3; do j=$((j+1)); break 5; done` → one iteration). The loo
 levels are `for`, `while` and `until`; `if`, `case`, a `{ …; }` group, a
 cond-list/pipeline part and a `wait` block in the **loop body** are transparent,
 as in bash (`case_clause_is_not_a_loop_level`,
-`group_and_if_do_not_count_as_loop_levels`). A `break`/`continue` inside a loop
-**condition** is ignored today; see the divergence below. `eval`, `source` and a
-group share the caller's depth, so `eval "break 2"` in a nested loop exits both
-loops, and a `break` in a forked child (`$( … )`, a pipeline stage) is consumed
-by that child's own loops. A leading `+` and leading zeros are accepted
+`group_and_if_do_not_count_as_loop_levels`). A `break`/`continue` raised inside
+a loop **condition** is that loop's own signal — the condition runs inside the
+loop's level, so it is consumed exactly like the body's:
+`while if true; then break; fi; do echo body; done; echo end` prints `end`,
+`while break; do echo body; done; echo end` prints `end`,
+`i=0; while [ $i -lt 3 ] && break; do i=$((i+1)); done; echo i=$i` prints `i=0`,
+and `break 2` in a nested loop's condition exits both loops. `while`/`until`/`for`
+are the levels; an `if`/`case`/group in a condition stays transparent, so a
+control raised there reaches the loop whole (the `elif` arm and a `return` in a
+condition propagate the same way). A `continue` in a condition advances the loop
+to its next condition test, which is an infinite loop in bash too
+(`while continue; do …; done`): deliberately unpinned, and every shape that can
+regress to one runs under a bounded child in `tests/loops.rs`. `eval`, `source`
+and a group share the caller's depth, so `eval "break 2"` in a nested loop exits
+both loops, and a `break` in a forked child (`$( … )`, a pipeline stage) is
+consumed by that child's own loops. A leading `+` and leading zeros are accepted
 (`break +2`, `break 0100`), as bash's `atoi` is.
 
 Accepted divergences from bash:
@@ -394,20 +405,16 @@ Accepted divergences from bash:
   meaningful in a … loop` for each call and keeps running. Task #203 owns this
   change; `tests/loops.rs::break_2_in_function_body_crosses_the_boundary_current_fdshell_behavior`
   pins the current behavior as its drift alarm.
-- A `break`/`continue` inside a loop **condition** is ignored: the condition is
-  run as a cond-list and its loop control is dropped when the condition
-  finishes, so `while if true; then break; fi; do echo body; done` prints `body`
-  forever (measured 2026-10-11: fdshell runs to the timeout, rc 124, where bash
-  exits the loop with rc 0 and prints `end`; `while break; do echo body; done`
-  and `while :; do if break; then :; fi; echo body; done` hang the same way,
-  identically on master), and `i=0; for x in 1 2 3; do if break; then :; fi;
-  i=$((i+1)); done` prints `i=3` where bash prints `i=0`. The `&&` spelling
-  (`i=0; while [ $i -lt 3 ] && break; do i=$((i+1)); done; echo i=$i`) parses and
-  runs since task #137 and diverges the same way: `i=3` here, where bash's
-  `break` ends the loop and prints `i=0`. Pinned by
-  `tests/cond_blocks.rs::break_in_an_and_condition_is_ignored`. Task
-  #205 owns the fix; the hang is deliberately unpinned (an infinite loop is not
-  a test) and #205 owns the pins for this shape.
+- A loop that exits through a `break` in its condition **after its body ran**
+  reports the status the `break` inherited, where bash reports 0:
+  `i=0; while if [ $i -lt 2 ]; then :; else break; fi; do i=$((i+1)); echo body;
+  done; echo rc=$?` prints the same `body` `body` `i=2` in both shells and
+  `rc=1` here, `rc=0` in bash (measured 2026-10-13). The loop control itself is
+  bash-identical (task #205); only `$?` differs, because `break`/`continue` do
+  not zero `$?` here — task #262 owns that, on top of task #164's rule for a
+  loop's exit status. `tests/loops.rs::break_in_the_condition_after_the_body_ran_ends_the_loop`
+  pins the stdout only, for exactly that reason. A loop whose first condition
+  test breaks reports 0 in both shells.
 
 ## Glob expansion
 
