@@ -452,3 +452,78 @@ fn degenerate_empty_indirect_name_with_colon_operators() {
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[z]");
 }
+
+// --- task #177: positional and special parameters in the shared lookup ---
+
+/// `set -u` bails an out-of-range positional in the plain and pattern families
+/// and names the index, exactly as bash does; the colon family keeps its
+/// exemption because its own word supplies the value.
+#[test]
+fn braced_positional_family_nounset() {
+    for (script, want) in [
+        (
+            r#"set -- a; set -u; printf "[%s]" "${2}""#,
+            "2: unbound variable",
+        ),
+        (
+            r#"set -- a; set -u; printf "[%s]" "${2#x}""#,
+            "2: unbound variable",
+        ),
+        (
+            r#"set -- a; set -u; printf "[%s]" "${2:?}""#,
+            "2: parameter null or not set",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(out, "", "{script:?} must print nothing");
+        assert!(err.contains(want), "{script:?} stderr={err}");
+    }
+    for (script, want) in [
+        (r#"set -- a; set -u; printf "[%s]" "${2:-z}""#, "[z]"),
+        (r#"set -- a; set -u; printf "[%s]" "${2:+p}""#, "[]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must expand, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+/// `$0` and every single-byte special are always bound: `set -u` never reports
+/// them, and the expansion is their value (bash: `huBc` for `${-}`; fdshell
+/// renders its own option flags, empty by default — divergence D2).
+#[test]
+fn braced_specials_are_never_unbound() {
+    let (out, err, code) = run(r#"set --; printf "[%s]" "${0}" "${?}" "${@}" "${*}" "${-}""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[sh][0][][][]");
+    let (out, err, code) =
+        run(r#"set --; set -u; printf "[%s]" "${0}" "${?}" "${@}" "${*}" "${-}""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[sh][0][][][u]");
+}
+
+/// Accepted divergences (task #177), each pinned with its rc:
+/// * D3 — bash prefixes the assignment message with `$` (`$5: cannot assign in
+///   this way`), fdshell names the parameter (`5: cannot assign in this way`).
+/// * D5 — a digit run too large for `usize` keeps fdshell's `TooLarge` bail
+///   (rc 1) in the braced form, where bash expands it to empty at rc 0.
+/// * D4 — an indirect target keeps the plain-name lookup: bash resolves `1` to
+///   the positional, fdshell expands to empty (task #260).
+#[test]
+fn braced_parameter_assignment_divergences() {
+    let (out, err, code) = run(r#"set -- a b c; r=${5:=q}; printf "never""#);
+    assert_eq!(out, "", "stderr={err}");
+    assert_eq!(code, 1, "stderr={err}");
+    assert!(err.contains("5: cannot assign in this way"), "stderr={err}");
+    let (out, err, code) = run(r#"set -- a b c; set -u; printf "[%s]" "${99999999999999999999}""#);
+    assert_eq!(out, "", "stderr={err}");
+    assert_eq!(code, 1, "stderr={err}");
+    assert!(
+        err.contains("index or value too large for type"),
+        "stderr={err}"
+    );
+    let (out, err, code) = run(r#"set -- a b c; v=1; r=${!v}; printf "[%s]" "$r""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[]");
+}

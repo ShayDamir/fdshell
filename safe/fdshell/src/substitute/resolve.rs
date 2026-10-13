@@ -1,9 +1,10 @@
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::ShortCStr;
 
+mod param_name;
 mod param_value;
 
 impl ShellState {
@@ -25,7 +26,7 @@ impl ShellState {
         out: &mut ShortCStr,
     ) -> Result<(), Report<ResolveError>> {
         if let Some(val) = self.param_value(content)? {
-            out.push(val);
+            out.push(&val);
         }
         Ok(())
     }
@@ -36,15 +37,15 @@ impl ShellState {
         out: &mut ShortCStr,
     ) -> Result<(), Report<ResolveError>> {
         if let Some(val) = self.param_value(name)? {
-            out.push(val);
+            out.push(&val);
         }
         Ok(())
     }
 }
 
-/// Expand `$N` from the digit run starting at `first_digit`: `$0` is the
-/// program name, `$1..$N` are `positional.get(N - 1)` (1-based parameters,
-/// 0-based storage).
+/// Expand `$N` from the digit run starting at `first_digit`: the index map,
+/// `$0` and the nounset rule live in `positional_value`, shared with the braced
+/// path so the two forms agree.
 pub(super) fn resolve_positional_index(
     first_digit: u8,
     peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
@@ -62,19 +63,9 @@ pub(super) fn resolve_positional_index(
             break;
         }
     }
-    let idx: usize = num.parse().change_context(ResolveError::TooLarge)?;
-    // `$0` is the program name: always bound, so nounset never fires on it.
-    if idx == 0 {
-        out.push(&state.program_name);
-        return Ok(());
-    }
-    match state.positional.get(idx - 1) {
-        Some(pos) => out.push(pos),
-        // nounset: an out-of-range `$N` is an unbound variable (bash: `N: unbound variable`).
-        None if state.options & crate::options::NOUNSET != 0 => {
-            bail!(ResolveError::UnboundVariable { var: num });
-        }
-        None => {}
+    let nounset = state.options & crate::options::NOUNSET != 0;
+    if let Some(value) = state.positional_value(&num, nounset)? {
+        out.push(&value);
     }
     Ok(())
 }

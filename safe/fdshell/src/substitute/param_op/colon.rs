@@ -28,7 +28,7 @@ pub(super) fn apply(
     let state = borrow_state(cell)?;
     let val = state.colon_value(name)?;
     match op {
-        ParamOp::Default => out.push(match val {
+        ParamOp::Default => out.push(match val.as_ref() {
             Some(v) if !v.is_empty() => v,
             _ => word,
         }),
@@ -39,7 +39,7 @@ pub(super) fn apply(
         }
         _ => {
             if let Some(v) = val.filter(|v| !v.is_empty()) {
-                out.push(v);
+                out.push(&v);
             } else {
                 let msg = if word.is_empty() {
                     c"parameter null or not set".into()
@@ -59,31 +59,35 @@ pub(super) fn apply(
 /// `:=`: a parameter that holds a non-empty value keeps it; otherwise the word
 /// is stored as a shell variable (traced as a shell boundary) and pushed. The
 /// write goes to the parameter the name *points at* — `${!v:=q}` writes the
-/// target `v` names — resolved through the shared lookup. The mutable borrow is
-/// this arm's own, so it never overlaps a shared borrow: the shared borrow ends
-/// at the block and the target crosses it as an owned `ShortCStr`.
+/// target `v` names — resolved through the shared lookup. A positional or
+/// special target has no slot to write into, so it bails with bash's
+/// `cannot assign in this way` and leaves no write. The mutable borrow is this
+/// arm's own, so it never overlaps a shared borrow: the shared borrow ends at
+/// the block and the value and target cross it as owned `ShortCStr`s.
 pub(super) fn assign(
     name: &ShortCStr,
     word: &ShortCStr,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
 ) -> Result<(), Report<ResolveError>> {
-    let target = {
+    let (target, value) = {
         let state = borrow_state(cell)?;
-        state.colon_target(name)?
+        (state.colon_target(name)?, state.colon_value(name)?)
     };
+    if let Some(val) = value.filter(|v| !v.is_empty()) {
+        out.push(&val);
+        return Ok(());
+    }
     let mut state = cell
         .borrow_mut()
         .change_context(ResolveError::RefNotFound)?;
-    match state.var_value(&target) {
-        Some(val) if !val.is_empty() => out.push(val),
-        _ => {
-            state.set_var(
-                target,
-                sys::ImportedStr::new(word.clone(), sys::Trace::boundary(sys::Origin::Shell)),
-            );
-            out.push(word);
-        }
+    if state.is_param_name(&target) {
+        bail!(ResolveError::CannotAssign { var: target });
     }
+    state.set_var(
+        target,
+        sys::ImportedStr::new(word.clone(), sys::Trace::boundary(sys::Origin::Shell)),
+    );
+    out.push(word);
     Ok(())
 }

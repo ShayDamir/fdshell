@@ -13,6 +13,8 @@ pub(crate) enum ResolveError {
     UnboundVariable { var: ShortCStr },
     /// {var}: invalid indirect expansion
     InvalidIndirect { var: ShortCStr },
+    /// {var}: cannot assign in this way
+    CannotAssign { var: ShortCStr },
     /// NUL byte in variable name
     NulByte,
     /// unclosed subexpression parenthesis

@@ -466,10 +466,22 @@ fn literal_braced_guards_stay_green_under_nounset() {
 }
 
 #[test]
-fn positional_parameter_in_braces_is_not_a_pattern_target() {
-    // `${1#a}` is the positional parameter `1` in bash; fdshell reads `1` as a
-    // variable name, which is unset, so it expands to empty (task #177).
-    assert_eq!(strips("set -- a b", &["${1#a}", "${1}"]), "[][]");
+fn positional_parameter_in_braces_is_the_parameter() {
+    // `${1#a}` is the positional parameter `1`, not a variable named `1`
+    // (task #177): the plain, colon and pattern arms all read the parameter, and
+    // an out-of-range index stays unset. Every value is the bash 5.3.9 output
+    // measured on this machine; `${0}` is fdshell's program name `sh` in `-c`
+    // mode (the README's `$0` divergence).
+    assert_eq!(
+        strips(
+            "set -- a b c",
+            &[
+                "${1}", "${1#a}", "${1#c}", "${3%b}", "${2:-z}", "${4:-z}", "${4:+p}", "${3:?m}",
+                "${10}", "${01}", "${0}",
+            ],
+        ),
+        "[a][][a][c][b][z][][c][][a][sh]"
+    );
 }
 
 #[test]

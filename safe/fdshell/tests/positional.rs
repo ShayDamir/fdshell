@@ -159,3 +159,78 @@ fn fd_mode_keeps_the_default_program_name() {
     assert_eq!(output.status.code().unwrap_or(-1), 0, "stderr={err:?}");
     assert_eq!(out, "[fdshell][a][2]\n");
 }
+
+// --- task #177: positional and special parameters inside `${…}` ---
+
+/// The braced forms resolve exactly the parameters the bare `$` path does
+/// (bash 5.3.9: `[a][b][c][][][a][bash][0][a b c][a b c]`), so a digit run is
+/// never a variable named `1`. `fdshell`'s `${0}` is `sh` in `-c` mode, the
+/// README's `$0` divergence.
+#[test]
+fn braced_positionals_and_specials_are_parameters() {
+    let (out, err, code) = run(
+        r#"set -- a b c; r0=${1}; r1=${2}; r2=${3}; r3=${4}; r4=${10}; r5=${01}; r6=${0}; r7=${?}; r8=${@}; r9=${*}; printf "[%s]" "$r0" "$r1" "$r2" "$r3" "$r4" "$r5" "$r6" "$r7" "$r8" "$r9""#,
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a][b][c][][][a][sh][0][a b c][a b c]");
+}
+
+/// `set -u` bails an out-of-range positional in every family that needs its
+/// value, naming the index; `$0` and the specials are always bound (bash prints
+/// them all at rc 0). fdshell's `${-}` is its own flag bytes and `${#}` is the
+/// length arm (task #173), so the last two fields differ from bash's `huBc`/`3`.
+#[test]
+fn braced_positional_nounset_bails_and_specials_stay_bound() {
+    let (out, err, code) = run(r#"set -- a; set -u; printf "[%s]" "${2}""#);
+    assert_eq!(out, "", "stderr={err:?}");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("2: unbound variable"),
+        "the report must name the index, got {err:?}"
+    );
+    let (out, err, code) = run(
+        r#"set -- a b c; set -u; r0=${0}; r1=${?}; r2=${@}; r3=${*}; r4=${-}; r5=${1}; r6=${#}; printf "[%s]" "$r0" "$r1" "$r2" "$r3" "$r4" "$r5" "$r6""#,
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[sh][0][a b c][a b c][u][a][0]");
+}
+
+/// A positional parameter has no slot to assign to: `:=` reports bash's
+/// `cannot assign in this way` at rc 1 and leaves no variable named `5` behind.
+/// A parameter that holds a value keeps it (bash `${1:=q}` prints `$1`).
+#[test]
+fn assign_to_positional_is_rejected() {
+    for script in [
+        r#"set -- a b c; r=${5:=q}; printf "never""#,
+        r#"set --; r=${@:=q}; printf "never""#,
+        r#"set -- ""; r=${1:=q}; printf "never""#,
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err:?}");
+        assert_eq!(
+            out, "",
+            "{script:?} must print nothing, so nothing was assigned"
+        );
+        assert!(
+            err.contains("cannot assign in this way"),
+            "{script:?} stderr={err:?}"
+        );
+    }
+    let (out, err, code) = run(r#"set -- a b c; r=${1:=q}; printf "[%s][%s]" "$r" "$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a][a]");
+}
+
+/// Accepted divergence D1 (task #177): the braced `${@}` returns one joined
+/// string, so it expands like `${*}`; bash's per-positional word form is the
+/// whole-word `"$@"` arm (task #219). With an empty `IFS` fdshell joins with a
+/// space, where bash yields one word per positional.
+#[test]
+fn braced_dollar_at_expands_like_dollar_star() {
+    let (out, err, code) = run(r#"IFS=; set -- "a b" c; printf "[%s]\n" "${@}""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a b c]\n");
+    let (out, err, code) = run(r#"IFS=,; set -- a b c; printf "[%s]" "${@}" "${*}""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a,b,c][a,b,c]");
+}

@@ -2682,3 +2682,192 @@ fn scan_empty_name_resolves_the_content() {
     assert_eq!(expand(&cell, c"${!}", &[false; 4]), b"${!}");
     assert_eq!(expand(&cell, c"${#}", &[false; 3]), b"0");
 }
+
+// --- positional and special parameters inside `${…}` (task #177) ---
+
+#[test]
+fn braced_digit_name_is_the_positional() {
+    // A digit run in braces is the positional, not a variable named `1`.
+    let cell = positional_cell_with_n(4);
+    let m = &[false; 20];
+    assert_eq!(expand(&cell, c"${1}", m), b"arg1");
+    assert_eq!(expand(&cell, c"${2}", m), b"arg2");
+    assert_eq!(expand(&cell, c"${3}", m), b"arg3");
+    // Out of range is unset (POSIX 2.6.2), as bash measures `${4}` and `${10}`.
+    assert_eq!(expand(&cell, c"${4}", m), b"");
+    assert_eq!(expand(&cell, c"${10}", m), b"");
+    // Leading zeros parse as the same index; `0` is the program name.
+    assert_eq!(expand(&cell, c"${01}", m), b"arg1");
+    assert_eq!(expand(&cell, c"${001}", m), b"arg1");
+    assert_eq!(expand(&cell, c"${0}", m), b"arg0");
+    assert_eq!(expand(&cell, c"${00}", m), b"arg0");
+    // The bare path shares `positional_value`, so the two forms cannot drift.
+    assert_eq!(
+        expand(&cell, c"${1}${2}$1$2${3}$3", m),
+        b"arg1arg2arg1arg2arg3arg3"
+    );
+}
+
+#[test]
+fn braced_special_parameters_render() {
+    let cell = positional_cell_with_n(4);
+    cell.borrow_mut().unwrap().last_status = sys::siginfo::WaitStatus::Exited(7);
+    let pid = alloc::format!("{}", cell.borrow().unwrap().shell_pid);
+    let m = &[false; 8];
+    assert_eq!(expand(&cell, c"${?}", m), b"7");
+    assert_eq!(expand(&cell, c"${$}", m), pid.as_bytes());
+    // `${@}` and `${*}` join the positionals with the first IFS byte (D1).
+    assert_eq!(expand(&cell, c"${@}", m), b"arg1 arg2 arg3");
+    assert_eq!(expand(&cell, c"${*}", m), b"arg1 arg2 arg3");
+    cell.borrow_mut().unwrap().ifs = ShortCStr::from(c",");
+    assert_eq!(expand(&cell, c"${*}", m), b"arg1,arg2,arg3");
+    // `${-}` renders fdshell's own option flags (D2): `DEFAULTS` carries no
+    // short flag, `-u` is `u`.
+    assert_eq!(expand(&cell, c"${-}", m), b"");
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    assert_eq!(expand(&cell, c"${-}", m), b"u");
+    // `${#}` in a word is the length arm (`brace.rs`), so the special reaches
+    // the shared lookup directly: it is the positional count.
+    let count = cell
+        .borrow()
+        .unwrap()
+        .param_value(&ShortCStr::from(c"#"))
+        .unwrap();
+    assert_eq!(count.unwrap().as_bytes().unwrap(), b"3");
+}
+
+#[test]
+fn braced_positional_nounset_bails_and_specials_never_do() {
+    let cell = positional_cell_with_n(3);
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let e = substitute_arg(&ShortCStr::from(c"${5}"), &[], &mut HashMap::new(), &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"5"
+    ));
+    // The pattern family is nounset-checked too, and names the index (bash).
+    let e = substitute_arg(
+        &ShortCStr::from(c"${5#x}"),
+        &[false; 6],
+        &mut HashMap::new(),
+        &cell,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"5"
+    ));
+    // `$0` and every special are always bound: nounset never fires on them.
+    for arg in [
+        c"${0}", c"${#}", c"${?}", c"${$}", c"${@}", c"${*}", c"${-}",
+    ] {
+        assert!(
+            substitute_arg(&ShortCStr::from(arg), &[], &mut HashMap::new(), &cell).is_ok(),
+            "{arg:?} is always bound under `set -u`"
+        );
+    }
+    // The colon family stays exempt: its word supplies the value.
+    let m = &[false; 8];
+    assert_eq!(expand(&cell, c"${5:-z}", m), b"z");
+    assert_eq!(expand(&cell, c"${5:+p}", m), b"");
+}
+
+#[test]
+fn param_name_predicate() {
+    let cell = positional_cell();
+    for name in [c"1", c"0", c"01", c"12", c"#", c"?", c"$", c"@", c"*", c"-"] {
+        assert!(
+            cell.borrow().unwrap().is_param_name(&ShortCStr::from(name)),
+            "{name:?} is a parameter name"
+        );
+    }
+    for name in [c"", c"1x", c"-1", c"a1", c"1 ", c"#a", c"_", c"u"] {
+        assert!(
+            !cell.borrow().unwrap().is_param_name(&ShortCStr::from(name)),
+            "{name:?} is a variable name"
+        );
+    }
+}
+
+#[test]
+fn colon_assign_refuses_positional_and_special_targets() {
+    let cell = positional_cell_with_n(3);
+    let m = &[false; 9];
+    // An out-of-range positional has no slot to write: bash's message, rc 1,
+    // and no variable named `5` is created.
+    let e =
+        substitute_arg(&ShortCStr::from(c"${5:=q}"), m, &mut HashMap::new(), &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::CannotAssign { var } if var.as_bytes().unwrap() == b"5"
+    ));
+    assert!(
+        cell.borrow()
+            .unwrap()
+            .strings
+            .get(&ShortCStr::from(c"5"))
+            .is_none(),
+        "the bail must leave no write behind"
+    );
+    // A parameter that holds a non-empty value keeps it: `:=` prints the value
+    // and writes nothing (bash `${1:=q}` prints `$1`, `${@:=q}` prints `$@`).
+    assert_eq!(expand(&cell, c"${1:=q}", m), b"arg1");
+    assert_eq!(expand(&cell, c"${0:=q}", m), b"arg0");
+    assert_eq!(expand(&cell, c"${@:=q}", m), b"arg1 arg2");
+    // With no positional the value is empty, so the bail fires on `@` too.
+    cell.borrow_mut()
+        .unwrap()
+        .set_positional(alloc::collections::VecDeque::new());
+    let e =
+        substitute_arg(&ShortCStr::from(c"${@:=q}"), m, &mut HashMap::new(), &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::CannotAssign { var } if var.as_bytes().unwrap() == b"@"
+    ));
+    // Non-parameter targets keep writing: task #258's indirect target `a b`.
+    bind(&cell, c"p", c"a b");
+    assert_eq!(expand(&cell, c"${!p:=q}", m), b"q");
+    let written = cell
+        .borrow()
+        .unwrap()
+        .strings
+        .get(&ShortCStr::from(c"a b"))
+        .unwrap()
+        .value
+        .clone();
+    assert_eq!(written.as_bytes().unwrap(), b"q");
+}
+
+#[test]
+fn pattern_arms_strip_a_positional_value() {
+    let cell = positional_cell_with_n(4);
+    let m = &[false; 7];
+    assert_eq!(expand(&cell, c"${1#a}", m), b"rg1");
+    assert_eq!(expand(&cell, c"${1#arg}", m), b"1");
+    assert_eq!(expand(&cell, c"${3%3}", m), b"arg");
+    assert_eq!(expand(&cell, c"${1##*}", m), b"");
+    // Mask alignment with a bound positional: the pattern mask slice of
+    // `${1#a*}` starts at word index 4 (the `{` index plus the name and the
+    // operator byte), so bits 4..5 are the pattern bytes. Quoted, the pattern
+    // is literal and nothing strips; unquoted, the shortest prefix `a` strips.
+    let quoted_pat = [false, false, false, false, true, true, false];
+    assert_eq!(expand(&cell, c"${1#a*}", &quoted_pat), b"arg1");
+    assert_eq!(expand(&cell, c"${1#a*}", m), b"rg1");
+    assert_eq!(expand(&cell, c"${1##a*}", &[false; 7]), b"");
+}
+
+#[test]
+fn braced_digit_run_too_large_keeps_the_too_large_bail() {
+    // The bare `$99999…` path is pinned by `tests/herestring.rs`; the braced
+    // path shares `positional_value`, so it keeps the same bail (divergence
+    // D5: bash expands the braced form to the empty string at rc 0).
+    let cell = positional_cell();
+    let e = substitute_arg(
+        &ShortCStr::from(c"${99999999999999999999}"),
+        &[],
+        &mut HashMap::new(),
+        &cell,
+    )
+    .unwrap_err();
+    assert!(matches!(e.current_context(), ResolveError::TooLarge));
+}
