@@ -801,15 +801,16 @@ through `black_box` on every iteration (self burn and forked-child burn), which
 costs ~18 ms of real user time in the sandbox's release build — `utime ≈ 18_000 µs`,
 four orders of magnitude above the `> 0` assertion.
 
-The same assertion then failed a second way (task #194): a `nix log` of the
+The same assertion failed again in the sandbox (task #194): a `nix log` of the
 fdshell `.drv` shows `CpuTimes { utime: 0, stime: 3124 }`, so
-`assert!(t.utime > 0)` was a coin flip. Rule: how a process's CPU time splits
-between `ru_utime` and `ru_stime` is the **kernel's accounting choice**, which a
-test does not control, so a positive-`utime` assertion is unassertable — self
-(`self_usage`) and reaped-child (`wait_pidfd_rusage`) CPU-time assertions are on
-`utime + stime`. Keep the burn loop: it is what makes the reported numbers real.
-Read a `> 0` sum as "the report is non-degenerate", never as "the burn ran"; that
-claim belongs to the un-foldability rule above, never to the sum.
+`assert!(t.utime > 0)` failed and the next run passed. Rule: how a process's CPU
+time splits between `ru_utime` and `ru_stime` is the **kernel's accounting
+choice**, which no test controls, so a positive-`utime` assertion is a scheduler
+coin flip — self (`self_usage`) and reaped-child (`wait_pidfd_rusage`) CPU-time
+assertions are on `utime + stime`. Keep the burn loop: it is what makes the
+reported numbers real. Read a `> 0` sum as "the report is non-degenerate", never
+as "the burn ran"; that claim belongs to the un-foldability rule above, never to
+the sum.
 
 Diagnostic (task #194, same sandbox, un-foldable burn in place):
 `CpuTimes { utime: 346_962, stime: 990 }` — the burn is effective in the nix
