@@ -436,3 +436,35 @@ fn percent_bytes_are_data_in_a_span() {
     let (out, err, code) = run("builtin openat2 --flags O_RDONLY /dev/null %>%s; echo [\\%s]");
     assert_eq!((out.as_str(), code), ("[%s]\n", 0), "stderr={err:?}");
 }
+
+/// Task #207: a here-doc delimiter word is a word, so it gets POSIX quote
+/// removal — **every** `'` byte is removed, not one surrounding pair, and any
+/// quoting in the word makes the body literal. Each expectation is bash's own
+/// output for the same script (the terminator line is the stripped word).
+#[test]
+fn heredoc_delimiter_strips_every_single_quote() {
+    // bash: empty body, rc 0 (`<<a'b'c` delimits `abc`, terminated by `abc`).
+    let (out, err, code) = run("cat <<a'b'c\nabc");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // bash: empty body (`<<'x'y'z'` delimits `xyz`).
+    let (out, err, code) = run("cat <<'x'y'z'\nxyz");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // bash: empty body (`<<ab'c'` and `<<'a'bc` both delimit `abc`).
+    let (out, err, code) = run("cat <<ab'c'\nabc");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("cat <<'a'bc\nabc");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // bash: empty body, tab-indented terminator (`<<-` form, separate word).
+    let (out, err, code) = run("cat <<- a'b'c\n\tabc");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // bash: `$HOME` — a quoted delimiter word makes the body literal.
+    let (out, err, code) = run("cat <<a'b'c\n$HOME\nabc");
+    assert_eq!((out.as_str(), code), ("$HOME\n", 0), "stderr={err:?}");
+    // bash: `body $i` twice — a loop body's heredoc keeps the same rule.
+    let (out, err, code) = run("for i in 1 2; do cat <<a'b'c\nbody $i\nabc\ndone");
+    assert_eq!(
+        (out.as_str(), code),
+        ("body $i\nbody $i\n", 0),
+        "stderr={err:?}"
+    );
+}

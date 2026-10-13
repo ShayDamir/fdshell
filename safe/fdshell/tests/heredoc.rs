@@ -661,3 +661,47 @@ fn heredoc_bodies_of_one_command_are_read_in_operator_order() {
     assert_eq!(code, 0);
     assert_eq!(out, "3\n");
 }
+
+/// Task #207: the here-doc delimiter word is a word, so every `"` byte is
+/// removed (not one surrounding pair) and any quoting in it makes the body
+/// literal. Each expectation is bash's own output for the same script.
+#[test]
+fn heredoc_delimiter_strips_every_double_quote() {
+    for (script, want) in [
+        // `<<"a b"` delimits `a b` (the quoted space is delimiter content).
+        ("cat <<\"a b\"\na b", ""),
+        // `<<a"b"c` delimits `abc`.
+        ("cat <<a\"b\"c\nabc", ""),
+        // `<<""Q"x"` delimits `Qx` (the pair rule sees only `"` bytes).
+        ("cat <<\"\"Q\"x\"\nQx", ""),
+        // A quoted delimiter word makes the body literal.
+        ("X=v; cat <<a\"b\"c\n$X\nabc", "$X\n"),
+        // A pipeline position keeps the same rule.
+        ("cat <<\"a b\" | cat\na b", ""),
+        // `{a,b}` in the delimiter is protected from brace expansion
+        // (LESSONS: protect the terminating delimiter line).
+        ("cat <<\"{a,b}\"\n{a,b}", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// Task #207: the single-quote form in the shapes the heredoc layer is
+/// sensitive to — a mid-statement operator and the brace-protected terminator.
+#[test]
+fn heredoc_delimiter_single_quote_forms_in_heredoc_shapes() {
+    // bash: `one two three` — the operator is mid-statement.
+    let (out, err, code) = run("echo one; cat <<a'b'c\ntwo\nabc\necho three");
+    assert_eq!(
+        (out.as_str(), code),
+        ("one\ntwo\nthree\n", 0),
+        "stderr={err:?}"
+    );
+    // bash: empty body — a quoted brace word is a delimiter, never expanded.
+    let (out, err, code) = run("cat <<'{a,b}'\n{a,b}");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // bash: `$X` — the quoted word makes the body literal, terminator `{a,b}`.
+    let (out, err, code) = run("X=zzz; cat <<'{a,b}'\n$X\n{a,b}");
+    assert_eq!((out.as_str(), code), ("$X\n", 0), "stderr={err:?}");
+}
