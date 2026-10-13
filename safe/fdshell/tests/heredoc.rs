@@ -351,6 +351,101 @@ fn heredoc_pipe_position_fails_explicitly() {
     assert!(err.contains("\"EOF\" not found"), "stderr={err:?}");
 }
 
+// --- A line that opens with a redirect/separator token: the `<<` is an
+// operator at both the byte and the token level (the byte scan needs a preceding
+// *token*, not a preceding word — task #185), so the scanner claims the body
+// region and the statement fails on its operator word. The body lines are
+// consumed, never executed. bash is a rc-2 syntax error on every line here;
+// fdshell maps it to its rc-1 "not found" family. ---
+
+/// A leading bare `>`: the statement's command word is `>`, its body is consumed.
+#[test]
+fn heredoc_leading_redirect_operator_consumes_its_body() {
+    let (out, err, code) = run("> <<EOF\nhi\nEOF");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("\">\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"hi\" not found"),
+        "body must not leak: {err:?}"
+    );
+    assert!(
+        !err.contains("\"EOF\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
+/// The same with the POSIX #2.2 clobber operator.
+#[test]
+fn heredoc_leading_clobber_operator_consumes_its_body() {
+    let (out, err, code) = run(">| <<EOF\nhi\nEOF");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("\">|\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"hi\" not found"),
+        "body must not leak: {err:?}"
+    );
+    assert!(
+        !err.contains("\"EOF\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
+/// Both operators of a `&&` cond-list are allocated in order and the failing
+/// first part stops the chain: no body line runs.
+#[test]
+fn heredoc_leading_operator_in_cond_list_allocates_both_bodies() {
+    let (out, err, code) = run("> <<EOF && cat <<A\nhi\nEOF\nx\nA");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("\">\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"hi\" not found"),
+        "body must not leak: {err:?}"
+    );
+    assert!(
+        !err.contains("\"x\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
+/// Regression guard for the shape the divergence was found on: a word between
+/// the clobber operator and the `<<` behaves exactly as before.
+#[test]
+fn heredoc_clobber_operator_with_word_consumes_its_body() {
+    let (out, err, code) = run(">| x <<EOF\nhi\nEOF");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("\">|\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"hi\" not found"),
+        "body must not leak: {err:?}"
+    );
+    assert!(
+        !err.contains("\"EOF\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
+/// `;` is a token for the tokenizer, so the `<<` after it counts and the body
+/// is consumed: master ran `hi` and `EOF` as commands, the fixed scan does not.
+#[test]
+fn heredoc_after_semicolon_with_no_command_word_consumes_its_body() {
+    let (out, err, code) = run("; <<EOF\nhi\nEOF");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"hi\" not found"),
+        "body must not leak: {err:?}"
+    );
+    assert!(
+        !err.contains("\"EOF\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
 // --- New positions: heredoc operators in cond-list and block-condition
 // positions (bash-compatible: body read after the whole logical line, in
 // operator order). ---
