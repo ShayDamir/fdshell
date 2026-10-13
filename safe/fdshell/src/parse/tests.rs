@@ -3398,3 +3398,37 @@ fn test_env_assign_value_keeps_the_escape_pair() {
     assert_eq!(cmd.env_assigns, vec![(c"X".into(), c"a\\ b".into())]);
     assert_eq!(cmd.command, c"cmd".into());
 }
+
+/// The `command`/`builtin` keyword path must keep the command *name* word out of
+/// the scoped-assignment range: `args_from = prefix + kw + 1` with `kw = 1`, so
+/// widening the range by one word (`args_from - 1` → `args_from`, and the `+`
+/// neighbour) collects the assignment-shaped name `X=1` as a scoped assignment.
+/// In-process pin of the `args_from - 1` bound — the integration kill
+/// `command_keyword_keeps_the_name_word_out_of_the_env_prefix` needs a scratch
+/// `PATH` file literally named `X=1`; this one needs no fork.
+#[test]
+fn test_env_assign_prefix_stops_before_the_keyword_name_word() {
+    let ParsedLine::Cmd(cmd) = parse(b"command X=1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.prefix, BuiltinPrefix::Command);
+    assert_eq!(cmd.command, c"X=1".into());
+    assert!(cmd.env_assigns.is_empty());
+    assert_eq!(cmd.args, Vec::new());
+
+    let ParsedLine::Cmd(cmd) = parse(b"builtin X=1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
+    assert_eq!(cmd.command, c"X=1".into());
+    assert!(cmd.env_assigns.is_empty());
+
+    // The same bound with a non-empty scoped prefix: the prefix keeps only its
+    // own words, never the keyword and never the assignment-shaped name.
+    let ParsedLine::Cmd(cmd) = parse(b"A=2 command X=1").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns, vec![(c"A".into(), c"2".into())]);
+    assert_eq!(cmd.command, c"X=1".into());
+    assert_eq!(cmd.args, Vec::new());
+}
