@@ -17,10 +17,11 @@ use crate::substitute::positional::positional_join;
 const SPECIALS: [u8; 6] = *b"#?$@*-";
 
 impl ShellState {
-    /// Value of a parameter name: a digit run is a positional, a special byte
-    /// renders its own value, and `Ok(None)` means "an ordinary variable name,
-    /// keep looking". `nounset` is passed in by the lookup: the pattern family
-    /// consults `set -u`, the colon family is exempt.
+    /// Value of a parameter name — the gate is `is_param_name`: a digit run is
+    /// the positional, a special byte renders its own value. `Ok(None)` is the
+    /// out-of-range positional (POSIX 2.6.2 expands it to the empty string).
+    /// `nounset` is passed in by the lookup: the pattern family consults
+    /// `set -u`, the colon family is exempt.
     pub(crate) fn param_name_value(
         &self,
         name: &ShortCStr,
@@ -55,7 +56,9 @@ impl ShellState {
     }
 
     /// The value of a special parameter: a rendered number, the positional
-    /// join, or the active option flags — never a borrow of the state.
+    /// join, or the active option flags — never a borrow of the state. Only
+    /// the `SPECIALS` bytes reach it, so `@`/`*` are the catch-all arm
+    /// (STYLE §4.10: an impossible case is not a silent no-op).
     fn special_value(&self, byte: u8) -> Result<ShortCStr, Report<ResolveError>> {
         let mut out = ShortCStr::new();
         match byte {
@@ -67,8 +70,7 @@ impl ShellState {
             b'-' => out
                 .push_checked(&crate::options::flags(self.options))
                 .change_context(ResolveError::NulByte)?,
-            b'@' | b'*' => return positional_join(&self.positional, &self.ifs),
-            _ => {}
+            _ => return positional_join(&self.positional, &self.ifs),
         }
         Ok(out)
     }
@@ -82,6 +84,9 @@ impl ShellState {
 }
 
 /// A non-empty run of ASCII digits: every digit run is a positional index.
+/// `is_param_name` is the gate the shared lookup consults, so a digit run is
+/// answered by the positional and never falls through to a variable literally
+/// named `4`.
 fn is_digit_run(name: &ShortCStr) -> bool {
     name.as_bytes()
         .is_ok_and(|b| !b.is_empty() && b.iter().all(u8::is_ascii_digit))

@@ -4,8 +4,10 @@
 //! family is exempt because its own word supplies the value (bash
 //! `set -u; ${undef:-x}` prints `x`). Positional and special parameters are
 //! resolved here too, so `${1}` is the positional and `${5}` is unbound in
-//! every arm (task #177). Values are owned `ShortCStr`s: the specials render
-//! theirs, and `clone` is documented as very cheap (STYLE §6.3).
+//! every arm (task #177). A parameter name is answered by the parameter lookup
+//! alone: it never falls through to a variable literally named `4`. Values
+//! are owned `ShortCStr`s: the specials render theirs, and `clone` is
+//! documented as very cheap (STYLE §6.3).
 
 use error_stack::{Report, bail};
 use sys::ShortCStr;
@@ -66,15 +68,17 @@ impl ShellState {
         }
     }
 
-    /// A plain name: a positional or special parameter first, then the shell
-    /// strings and the inherited environment; unbound is the nounset bail.
+    /// A plain name: a parameter name is answered by the parameter lookup and
+    /// nothing else (a variable literally named `4` is not positional 4, so the
+    /// bare and the braced form cannot drift), then the shell strings and the
+    /// inherited environment; unbound is the nounset bail.
     fn direct_value(
         &self,
         name: &ShortCStr,
         nounset: bool,
     ) -> Result<Option<ShortCStr>, Report<ResolveError>> {
-        if let Some(val) = self.param_name_value(name, nounset)? {
-            return Ok(Some(val));
+        if self.is_param_name(name) {
+            return self.param_name_value(name, nounset);
         }
         if let Some(val) = self.var_value(name) {
             return Ok(Some(val.clone()));

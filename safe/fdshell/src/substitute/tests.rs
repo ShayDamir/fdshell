@@ -2871,3 +2871,65 @@ fn braced_digit_run_too_large_keeps_the_too_large_bail() {
     .unwrap_err();
     assert!(matches!(e.current_context(), ResolveError::TooLarge));
 }
+
+#[test]
+fn braced_digit_run_never_reads_a_variable_of_the_same_name() {
+    // A digit run is answered by the positional and nothing else. bash
+    // `env 4=x bash -c 'set -- a b c; echo "[$4][${4}]"'` prints `[][]`: an
+    // inherited variable literally named `4` is not positional 4, so the bare
+    // and the braced form agree, and `:=` never writes a name `${4}` reads.
+    let cell = positional_cell_with_n(4);
+    bind(&cell, c"4", c"shell4");
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"4"), ShortCStr::from(c"env4")));
+    let m = &[false; 20];
+    // Out of range is unset (POSIX 2.6.2): empty, the entry shadowed away.
+    assert_eq!(expand(&cell, c"${4}", m), b"");
+    assert_eq!(expand(&cell, c"$4", m), b"");
+    assert_eq!(expand(&cell, c"${4:+p}", m), b"");
+    assert_eq!(expand(&cell, c"${4:-z}", m), b"z");
+    assert_eq!(expand(&cell, c"${4#4}", m), b"");
+    // `:=` refuses the target, so the variable named `4` keeps its value.
+    let e =
+        substitute_arg(&ShortCStr::from(c"${4:=q}"), m, &mut HashMap::new(), &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::CannotAssign { var } if var.as_bytes().unwrap() == b"4"
+    ));
+    let kept = cell
+        .borrow()
+        .unwrap()
+        .strings
+        .get(&ShortCStr::from(c"4"))
+        .unwrap()
+        .value
+        .clone();
+    assert_eq!(
+        kept.as_bytes().unwrap(),
+        b"shell4",
+        "the bail leaves no write"
+    );
+    // `:?` bails on the unset positional (bash `4: m`, rc 1).
+    let e =
+        substitute_arg(&ShortCStr::from(c"${4:?m}"), m, &mut HashMap::new(), &cell).unwrap_err();
+    assert!(matches!(
+        e.current_context(),
+        ResolveError::ParamNullOrNotSet { var, word }
+            if var.as_bytes().unwrap() == b"4" && word.as_bytes().unwrap() == b"m"
+    ));
+    // `set -u` reports the out-of-range index in every checked family, never
+    // the inherited variable's name.
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    for arg in [c"${4}", c"$4", c"${4#x}"] {
+        let e = substitute_arg(&ShortCStr::from(arg), m, &mut HashMap::new(), &cell).unwrap_err();
+        assert!(
+            matches!(
+                e.current_context(),
+                ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"4"
+            ),
+            "{arg:?} is unbound even with the inherited `4` present"
+        );
+    }
+}
