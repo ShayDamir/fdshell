@@ -692,6 +692,14 @@ parameter an error instead (rc 1, `x: unbound variable`), for `$name`, `${name}`
 `${!name}` whose name is itself unset is an error (rc 1,
 `undefined: invalid indirect expansion`), as bash.
 
+`set` short flags **cluster** in one word: every byte after the sign is applied
+with the word's sign, so `set -eu` sets errexit *and* nounset and `set +ef`
+clears noglob *and* verbosity; a repeated byte (`set -ee`) is harmless. The
+accepted flag bytes are `e u f v x`; a signed word containing any other byte is
+an error naming the whole word (`set -ez` → rc 1,
+`set: unknown option '-ez'`) and **no** flag is applied — the word is validated
+before the first one is set.
+
 Accepted divergences from bash:
 
 - `FOO=bar | cat` is a parse error (`expected command`); bash runs a no-op
@@ -825,6 +833,17 @@ Accepted divergences from bash:
   bash's `-c` mode puts `bash` there, and with extra args bash's `$0` is the
   **first extra argument** (argv semantics). fdshell keeps every extra argument
   as a positional, so `-c` mode never numbers an extra arg as `$0`.
+- `set` clusters accept five flag bytes (`e u f v x`); bash accepts many more
+  (`-a -b -C -h …`), so `set -C` is an fdshell error where bash enables noclobber.
+  Only the first word is a cluster (`set -eu -f` applies `-eu`, ignores `-f`)
+  and `-o NAME` cannot ride inside one (`set -eo pipefail` is an fdshell error);
+  task #249.
+- An unknown flag byte stops the script at the failing `set` (rc 1); bash
+  reports status 2 for it and runs the rest of the script.
+- fdshell names the whole word (`set -abc` → `set: unknown option '-abc'`);
+  bash names the first unknown byte (`set: -c: invalid option`).
+- `set -F` lists fd variables (fdshell's fd-list extension); bash rejects `-F`
+  as an invalid option.
 
 ### Positional parameters
 

@@ -1144,3 +1144,56 @@ to consume them. And never record a mutant as unkillable from a loaded run:
 measure it quietly (no parallel load, suite twice) first, and write down which
 tests kill the ones that are killed.
 
+## A catch-all short-flag parser must be the last arm of the builtin that owns it
+
+`set` claims several flag-shaped words before its short-flag word is treated as
+a cluster: `--`, `-o`/`+o`, `-x`/`+x`, `-F` (the fd list) and
+`--stdout-capture-limit`. Task #142 turned the single 2-byte `-c`/`+c` mapping
+into a cluster parser (`set_short.rs::short_flags`) that accepts **any**
+sign-shaped word, so it has to run after every one of those arms: `F` is not one
+of the cluster's `e u f v x` bytes and `--stdout-capture-limit` is a long
+sign-shaped word, so moving the cluster above them silently converts two working
+fdshell forms into `set: unknown option '-F'` / `set: unknown option
+'--stdout-capture-limit'`. Nothing in the cluster parser changes — the defect is
+pure arm order. Plain flag tests (`set -e`, `set -eu`) stay green under it, so
+the only pins are the flag-shaped ones:
+`intercept/tests.rs::try_intercept_set_cluster_keeps_the_flag_shaped_arms_first`
+(new, pins `-F`, `--stdout-capture-limit` and the `-eF` cluster error) plus the
+pre-existing `tests/set_cmd.rs::set_dash_f_lists_fd_variables` and the
+`--stdout-capture-limit` tests. Rule: when a parser grows into a catch-all over
+a shape, re-audit every arm that already claimed a member of that shape.
+
+## A slice-range `get` is `Some(empty)` at the length, so write the length guard as a filter
+
+Scanning the bytes after the sign looks like the `ulimit_cmd/parse.rs:38`
+precedent: `bytes.get(1..).unwrap_or(&[])` behind a `len() >= 2` guard. That
+guard makes the `None` arm **unreachable** (`get(1..)` on a slice of length ≥ 1
+is `Some(&[])` when `1 == len`, never `None`), and an unreachable arm is an
+unkillable equivalent mutant to be recorded, not tested around. Expressing the
+same guard as a filter on the slice —
+`let Some(flags) = bytes.get(1..).filter(|flags| !flags.is_empty()) else { return Ok(None) }`
+— has no dead arm: the lone `-`/`+` word (length 1) takes the `else`, so the arm
+is reachable and killable, pinned by
+`set_short/tests.rs::signless_empty_and_lone_sign_words_are_not_clusters` and
+`intercept/tests.rs::try_intercept_set_unhandled_forms_return_false` (the
+`filter` → `is_empty()` mutant flips exactly those words into empty clusters).
+Rule: a `get(range)` whose `None` case is excluded by a length guard above it is
+dead code in disguise — fold the guard into the `Option` (filter) so the
+fall-through arm is real.
+
+## Apply cluster flags one by one: a mask sum is the disjoint-`|` trap, and `+` is a bug
+
+The cluster's bits go into a `Vec<u32>` in word order and each is applied by its
+own `options::set()` call (`set_short.rs::run_set_short`). Folding them into one
+mask with `|` recreates the disjoint-flag equivalence source of the `|`→`^`
+entries above, and folding with `+` is not merely unkillable but **wrong**: the
+bits are powers of two, so a repeated byte carries into its neighbour —
+`ERREXIT + ERREXIT` = `512 + 512` = `1024` = `NOUNSET`, i.e. `set -ee` would
+enable nounset (bash: errexit twice, nothing else). Keeping the bytes as
+repeated entries in a vector makes the duplicate free and idempotent by
+construction; `set -ee` is pinned at both levels
+(`set_short/tests.rs::duplicate_flag_bytes_stay_repeated`,
+`tests/set_opts.rs::cluster_duplicate_flag_is_idempotent`), so a `+` fold fails
+a test and a `|` fold has no mutant to record. Rule: for a list of disjoint
+flags, accumulate a *list* and apply per item; never build a mask by arithmetic.
+
