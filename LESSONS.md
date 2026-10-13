@@ -789,7 +789,11 @@ sides (at least 10 ms slept, far less than the clock reads). The same fold hits
 builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox and
 `nix flake check --build-all` fails the suite intermittently (task #208). A burn
 must be un-foldable to be assertable: keep the accumulator inside the loop under
-`black_box`, and never assert a positive CPU count for folded-away work.
+`black_box`, and never assert a positive CPU count for folded-away work. Fixed by
+task #171: `burn_cpu()` in `unsafe/sys/tests/getrusage.rs` feeds the accumulator
+through `black_box` on every iteration (self burn and forked-child burn), which
+costs ~18 ms of real user time in the sandbox's release build — `utime ≈ 18_000 µs`,
+four orders of magnitude above the `> 0` assertion.
 
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
