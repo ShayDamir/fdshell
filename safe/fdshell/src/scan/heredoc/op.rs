@@ -1,8 +1,7 @@
 //! One `<<` operator: its delimiter word and the two flags that select how
 //! it is read — `<<-` tab stripping and a quoted (literal) delimiter.
 
-use super::lines::delimiter_word;
-use crate::bytes::fold::fold;
+use crate::bytes::fold::fold_quotes;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -12,7 +11,8 @@ use sys::ShortCStr;
 /// decision is made once and cannot diverge between them.
 #[derive(Clone)]
 pub(crate) struct Operator {
-    /// The delimiter word: quotes stripped, unquoted escape pairs folded.
+    /// The delimiter word: every quote byte stripped, unquoted escape pairs
+    /// folded.
     pub(crate) delim: Vec<u8>,
     /// A quoted delimiter: the body is literal.
     pub(crate) quoted: bool,
@@ -21,15 +21,17 @@ pub(crate) struct Operator {
 }
 
 impl Operator {
-    /// The operator of a raw delimiter word: the raw bytes fold first (POSIX
-    /// #4.1: an unquoted `\X` pair folds to `X`, so `<<E\OF` delimits `EOF`),
-    /// then one pair of surrounding double quotes is stripped (`<<"Q"` →
-    /// literal `Q`), and `strip` is the `<<-` marker.
+    /// The operator of a raw delimiter word, in one pass over the raw bytes:
+    /// POSIX #4.1 folds every unquoted `\X` pair to `X` (so `<<E\OF` delimits
+    /// `EOF`) and POSIX quote removal drops every `"`/`'` marker byte (so
+    /// `<<"Q"` delimits `Q` and `<<a'b'c` delimits `abc`). Folding and
+    /// stripping share one pass because an escaped quote (`a\'b`) is data and
+    /// must not read as a marker (LESSONS). `quoted` reports a quote marker
+    /// byte anywhere in the word, and `strip` is the `<<-` marker.
     pub(crate) fn new(raw: &[u8], strip: bool) -> Self {
-        let raw = fold(raw);
-        let (delim, quoted) = delimiter_word(&raw);
+        let (delim, quoted) = fold_quotes(raw);
         Self {
-            delim: delim.to_vec(),
+            delim,
             quoted,
             strip,
         }

@@ -89,3 +89,65 @@ fn operator_new_strips_quotes_and_carries_flags() {
     assert!(!p.quoted);
     assert!(!p.strip);
 }
+
+/// The delimiter word is a word: quote removal strips **every** quote byte,
+/// not one surrounding pair, and any quoting marks the delimiter as quoted
+/// (task #207 — the one-pair rule left `<<a'b'c`'s and `<<""Q"x"`'s bytes in).
+#[test]
+fn operator_new_strips_every_quote_byte() {
+    for (raw, want) in [
+        (b"a'b'c" as &[u8], b"abc" as &[u8]),
+        (b"'x'y'z'", b"xyz"),
+        (b"ab'c'", b"abc"),
+        (b"'a'bc", b"abc"),
+        (b"a\"b\"c", b"abc"),
+        (b"\"\"Q\"x\"", b"Qx"),
+        (b"a\"b c\"d", b"ab cd"),
+        (b"\"a b\"", b"a b"),
+        (b"'a <<b'", b"a <<b"),
+        (b"\"a <<b\"", b"a <<b"),
+        (b"'a\"b'", b"a\"b"),
+        (b"\"a'b\"", b"a'b"),
+    ] {
+        let op = Operator::new(raw, false);
+        assert_eq!(
+            op.delim,
+            want,
+            "raw={:?}",
+            core::str::from_utf8(raw).unwrap()
+        );
+        assert!(op.quoted, "a quote byte means a quoted delimiter");
+        assert!(!op.strip);
+    }
+}
+
+/// An escaped quote is data (the pair folds in the same pass that strips), and
+/// an unquoted escape pair folds: neither sets `quoted`, so the body expands
+/// (task #263 owns the `\`-quotes-the-delimiter rule).
+#[test]
+fn operator_new_folds_escapes_and_keeps_an_escaped_quote_as_data() {
+    let op = Operator::new(b"a\\'b", false);
+    assert_eq!(op.delim, b"a'b" as &[u8]);
+    assert!(!op.quoted);
+    let op = Operator::new(b"E\\OF", false);
+    assert_eq!(op.delim, b"EOF" as &[u8]);
+    assert!(!op.quoted);
+    // A quoted pair survives: the delimiter is the literal `E\OF`.
+    let op = Operator::new(b"\"E\\OF\"", false);
+    assert_eq!(op.delim, b"E\\OF" as &[u8]);
+    assert!(op.quoted);
+}
+
+/// A quoted delimiter's terminator is the stripped word, byte-exactly.
+#[test]
+fn operator_matches_the_stripped_quoted_delimiter() {
+    let op = Operator::new(b"a'b'c", false);
+    assert!(op.matches(b"abc"));
+    assert!(
+        !op.matches(b"a'b'c"),
+        "the terminator line keeps its raw bytes"
+    );
+    let dash = Operator::new(b"'a'bc", true);
+    assert!(dash.matches(b"\tabc"));
+    assert!(!dash.matches(b"\ta'bc"));
+}

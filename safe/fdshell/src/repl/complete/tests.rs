@@ -92,6 +92,19 @@ fn heredoc_body_with_unbalanced_quote_is_complete() {
     assert!(is_complete(b"cat <<EOF\n\"q\nEOF"));
 }
 
+/// Task #207: a quoted delimiter word with a space (`<<'a b'`, `<<"a b"`) is
+/// one word whose terminator line is the stripped word, so the REPL keeps
+/// reading until that line arrives.
+#[test]
+fn heredoc_quoted_delimiter_with_a_space_continues_to_its_line() {
+    for open in [b"cat <<'a b'" as &[u8], b"cat <<\"a b\"", b"cat <<a'b'c"] {
+        assert!(!is_complete(open), "the delimiter line has not arrived");
+    }
+    assert!(is_complete(b"cat <<'a b'\nbody\na b"));
+    assert!(is_complete(b"cat <<\"a b\"\nbody\na b"));
+    assert!(is_complete(b"cat <<a'b'c\nbody\nabc"));
+}
+
 #[test]
 fn trailing_cond_list_operator_opens() {
     assert!(!is_complete(b"echo a &&"));

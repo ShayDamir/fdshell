@@ -1,38 +1,45 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::lines::delimiter_word;
 use super::{body_regions, skip, skip_region, unterminated};
 use alloc::vec;
 
+/// The delimiter word is a word, so it gets POSIX quote removal in
+/// `op::Operator::new`: every `"`/`'` byte is removed (not one surrounding
+/// pair — task #207), so the terminator line is the stripped word.
 #[test]
-fn delimiter_word_strips_one_quote_pair() {
-    let raw = b"EOF";
-    assert_eq!(delimiter_word(raw), (b"EOF" as &[u8], false));
-    let raw = b"\"Q\"";
-    assert_eq!(delimiter_word(raw), (b"Q" as &[u8], true));
-    let raw = b"\"\"";
-    assert_eq!(delimiter_word(raw), (b"" as &[u8], true));
-    // One-sided or trailing bytes: not a quote pair, kept verbatim.
-    let raw = b"\"Q";
-    assert_eq!(delimiter_word(raw), (b"\"Q" as &[u8], false));
-    let raw = b"Q\"";
-    assert_eq!(delimiter_word(raw), (b"Q\"" as &[u8], false));
-    let raw = b"\"Q\"x";
-    assert_eq!(delimiter_word(raw), (b"\"Q\"x" as &[u8], false));
-    // A single-quote pair is stripped too (task #141): `<<'Q'` delimits `Q`.
-    let raw = b"'Q'";
-    assert_eq!(delimiter_word(raw), (b"Q" as &[u8], true));
-    let raw = b"''";
-    assert_eq!(delimiter_word(raw), (b"" as &[u8], true));
-    // Mixed one-sided forms are kept verbatim.
-    let raw = b"'Q";
-    assert_eq!(delimiter_word(raw), (b"'Q" as &[u8], false));
-    let raw = b"\"Q'";
-    assert_eq!(delimiter_word(raw), (b"\"Q'" as &[u8], false));
+fn delimiter_quote_removal_ends_the_body_at_the_stripped_word() {
+    // `<<a'b'c` delimits `abc`; the one-pair rule left `'a'b'c'`'s bytes in.
+    assert_eq!(skip(b"cat <<a'b'c\nbody\nabc", 0, 11), Some(20));
+    assert_eq!(skip(b"cat <<'x'y'z'\nbody\nxyz", 0, 13), Some(22));
+    assert_eq!(skip(b"cat <<ab'c'\nbody\nabc", 0, 11), Some(20));
+    assert_eq!(skip(b"cat <<'a'bc\nbody\nabc", 0, 11), Some(20));
+    // `<<- a'b'c`: the marker form, tab-indented terminator.
+    assert_eq!(skip(b"cat <<- a'b'c\n\tbody\n\tabc", 0, 13), Some(24));
+    // The `"` form obeys the same rule.
+    assert_eq!(skip(b"cat <<a\"b\"c\nbody\nabc", 0, 11), Some(20));
+    assert_eq!(skip(b"cat <<\"a b\"\nbody\na b", 0, 11), Some(20));
+    assert_eq!(skip(b"cat <<\"\"Q\"x\"\nbody\nQx", 0, 12), Some(20));
+    assert_eq!(skip(b"cat <<a\"b c\"d\nbody\nab cd", 0, 13), Some(24));
+    // An escaped quote is data, so `<<a\"b` delimits the literal `a"b`.
+    assert_eq!(skip(b"cat <<a\\\"b\nbody\na\"b", 0, 10), Some(19));
+    // A `<<` written inside a quoted delimiter word is word content, not a
+    // second operator: the span is consumed whole at both levels.
+    assert_eq!(skip(b"cat <<'a <<b'\nbody\na <<b", 0, 13), Some(24));
+    assert_eq!(skip(b"cat <<\"a <<b\"\nbody\na <<b", 0, 13), Some(24));
 }
 
-/// A quoted delimiter (`<<'EOF'`, `<<'a b'`) makes the body literal, and a
-/// `'…'` span is one word for the byte-level delimiter scan: `<<'a b'`
-/// delimits `a b` (byte-level and token-level must agree, LESSONS).
+/// The body region of a quoted-delimiter heredoc: the region is the body lines
+/// only, and the delimiter word's quotes are gone from the terminator.
+#[test]
+fn skip_region_of_a_quoted_delimiter_heredoc() {
+    let line = b"cat <<a'b'c\nbody\nabc\necho x";
+    assert_eq!(skip_region(line, 0, 11), Some(((12, 17), 20, 20)));
+    let line = b"cat <<\"a b\"\nbody\na b\necho x";
+    assert_eq!(skip_region(line, 0, 11), Some(((12, 17), 20, 20)));
+}
+
+/// A quoted delimiter makes the body literal, and a `'…'` span is one word for
+/// the byte-level delimiter scan: `<<'a b'` delimits `a b` (byte-level and
+/// token-level must agree, LESSONS).
 #[test]
 fn single_quoted_delimiter_is_literal_and_spans_words() {
     // `cat <<'EOF'` — body literal, terminator `EOF`.
@@ -49,9 +56,13 @@ fn single_quoted_delimiter_is_literal_and_spans_words() {
     // `<< 'a b'` (bare form): the next word is the quoted span.
     let out = skip(b"cat << 'a b'\nbody\na b", 0, 12);
     assert_eq!(out, Some(21));
-    // An unbalanced span is not a quoted word: the terminator is the raw text.
-    let out = skip(b"cat <<'EOF\nbody\n'EOF", 0, 10);
-    assert_eq!(out, Some(20));
+    // An unbalanced span is not a quoted word: quote removal strips the lone
+    // `'`, so the delimiter is `EOF` and the `'EOF` line no longer matches.
+    // At CLI level such a line is a parse error (`unmatched quote`, rc 1), so
+    // this is the scan-internal shape only (task #207 re-pin).
+    assert_eq!(skip(b"cat <<'EOF\nbody\n'EOF", 0, 10), None);
+    // The balanced form terminates at the stripped word.
+    assert_eq!(skip(b"cat <<'EOF\nbody\nEOF", 0, 10), Some(19));
 }
 
 // The resume index is the newline terminating the last delimiter line, or

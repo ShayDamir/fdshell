@@ -97,6 +97,58 @@ fn quoted_delimiter_keeps_the_pair() {
     assert!(!ops[0].quoted);
 }
 
+/// The delimiter word is a word at the byte level too: quote removal drops
+/// every `"`/`'` byte (not one surrounding pair) and any quoting marks the
+/// delimiter quoted, so the body is literal (task #207).
+#[test]
+fn delimiter_strips_every_quote_byte() {
+    for (line, want, strip, quoted) in [
+        (b"cat <<a'b'c" as &[u8], b"abc" as &[u8], false, true),
+        (b"cat <<'x'y'z'", b"xyz", false, true),
+        (b"cat <<ab'c'", b"abc", false, true),
+        (b"cat <<'a'bc", b"abc", false, true),
+        (b"cat <<- a'b'c", b"abc", true, true),
+        (b"cat <<a\"b\"c", b"abc", false, true),
+        (b"cat <<\"\"Q\"x\"", b"Qx", false, true),
+        (b"cat <<\"a b\"", b"a b", false, true),
+        (b"cat <<a\"b c\"d", b"ab cd", false, true),
+        (b"cat << 'a b'", b"a b", false, true),
+        // An escaped quote is data: the delimiter quotes nothing, so the body
+        // expands (`<<a\"b` — task #263 owns the `\`-quotes-the-delimiter rule).
+        (b"cat <<a\\\"b", b"a\"b", false, false),
+    ] {
+        let ops = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(ops.len(), 1, "line={:?}", line);
+        assert_eq!(ops[0].delim, want, "line={:?}", line);
+        assert_eq!(ops[0].strip, strip, "line={:?}", line);
+        assert_eq!(ops[0].quoted, quoted, "line={:?}", line);
+    }
+}
+
+/// A quoted delimiter word that contains `<<` is ONE word: the byte scan
+/// consumes a `"…"` span whole, exactly like the `'…'` span, so it finds one
+/// operator and not two (the byte/token agreement rule, LESSONS).
+#[test]
+fn quoted_delimiter_containing_a_chevron_is_one_operator() {
+    for line in [
+        b"cat <<'a <<b'" as &[u8],
+        b"cat <<\"a <<b\"",
+        b"cat << 'a <<b'",
+        b"cat <<-\"a <<b\"",
+    ] {
+        let ops = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(ops.len(), 1, "line={:?}", line);
+        assert_eq!(ops[0].delim, b"a <<b" as &[u8], "line={:?}", line);
+        assert!(ops[0].quoted, "line={:?}", line);
+        assert_eq!(
+            ops[0].strip,
+            line.starts_with(b"cat <<-"),
+            "line={:?}",
+            line
+        );
+    }
+}
+
 /// POSIX #2.2 `>|`: the `|` absorbed into the clobber operator is an operator
 /// byte, so it neither breaks a word nor forms a pipeline position. The
 /// token-level agreement of these lines is asserted in

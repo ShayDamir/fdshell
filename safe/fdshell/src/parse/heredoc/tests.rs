@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use super::operator::operator_at;
 use super::{delimiter_token_indices, is_operator, layout, operator_count};
 use crate::error::parse::ParseError;
 use crate::parse::token::tokenize_statement;
@@ -34,6 +35,55 @@ fn layout_quoted_delimiter_is_literal() {
     assert_eq!(s.len(), 1);
     assert_eq!(s[0].body, ShortCStr::from_vec(b"x\n".to_vec()).unwrap());
     assert!(!s[0].expand);
+}
+
+/// The delimiter word is a word at the token level too: every quote byte is
+/// removed, so the terminator line is the stripped word, and any quoting in
+/// the word makes the body literal (task #207).
+#[test]
+fn layout_delimiter_quote_removal_is_literal() {
+    for (line, want) in [
+        (b"cat <<a'b'c\n$X\nabc" as &[u8], b"$X\n" as &[u8]),
+        (b"cat <<'x'y'z'\n$X\nxyz", b"$X\n"),
+        (b"cat <<ab'c'\n$X\nabc", b"$X\n"),
+        (b"cat <<'a'bc\n$X\nabc", b"$X\n"),
+        (b"cat <<- a'b'c\n\t$X\n\tabc", b"$X\n"),
+        (b"cat <<a\"b\"c\n$X\nabc", b"$X\n"),
+        (b"cat <<\"\"Q\"x\"\n$X\nQx", b"$X\n"),
+        (b"cat <<a\"b c\"d\n$X\nab cd", b"$X\n"),
+        (b"cat <<\"a b\"\n$X\na b", b"$X\n"),
+    ] {
+        let s = specs(line);
+        assert_eq!(s.len(), 1, "line={:?}", line);
+        assert_eq!(
+            s[0].body,
+            ShortCStr::from_vec(want.to_vec()).unwrap(),
+            "line={:?}",
+            line
+        );
+        assert!(!s[0].expand, "a quoted delimiter never expands");
+    }
+}
+
+/// An escaped quote is data, so `<<a\"b` delimits the literal `a"b` and — with
+/// no quote byte in the word — the body keeps expanding.
+/// A delimiter word that contains a `<<` is one operator at both levels on its
+/// command line (pinned in `scan/heredoc/ops/tests.rs` and by the agreement
+/// rows above). Its multi-line form (`cat <<'a <<b'` + body + `a <<b`) is not
+/// layout-pinnable yet: the terminator line is part of the statement text, so
+/// its own `<<b` counts as an operator and the body allocation shifts — the
+/// terminator-line defect, filed as task #266.
+#[test]
+fn layout_escaped_quote_delimiter_word_is_a_literal_delimiter() {
+    let (op, extra) = operator_at(
+        b"cat <<a\\\"b",
+        &tokenize_statement(b"cat <<a\\\"b").unwrap(),
+        1,
+    )
+    .unwrap();
+    assert_eq!(op.delim, b"a\"b" as &[u8]);
+    assert!(!op.quoted);
+    assert_eq!(extra, 0);
 }
 
 #[test]
@@ -383,6 +433,37 @@ fn operator_count_leading_operator_forms_agree() {
         (b"cat <<A && <<B", 2),
         (b"cat <<A && cat <<B", 2),
         (b"cat <<A | tr <<B", 2),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+        assert_eq!(byte, want, "line={:?}", line);
+    }
+}
+
+/// The byte-level and token-level counts agree on the quote-removed delimiter
+/// words, including the words that contain a `<<` (row 9 of the task's table:
+/// the byte scan must consume a `"…"` span whole like the `'…'` span, or it
+/// counts a phantom second operator) (task #207, LESSONS).
+#[test]
+fn operator_count_quoted_delimiter_forms_agree() {
+    for (line, want) in [
+        (b"cat <<a'b'c" as &[u8], 1usize),
+        (b"cat <<'x'y'z'", 1),
+        (b"cat <<ab'c'", 1),
+        (b"cat <<'a'bc", 1),
+        (b"cat <<- a'b'c", 1),
+        (b"cat <<a\"b\"c", 1),
+        (b"cat <<\"\"Q\"x\"", 1),
+        (b"cat <<\"a b\"", 1),
+        (b"cat <<a\"b c\"d", 1),
+        (b"cat <<a\\\"b", 1),
+        (b"cat <<'a <<b'", 1),
+        (b"cat <<\"a <<b\"", 1),
+        (b"cat << 'a <<b'", 1),
+        (b"cat <<-\"a <<b\"", 1),
+        (b"cat <<a'b'c && cat <<d'e'f", 2),
+        (b"cat <<\"a <<b\" | tr <<\"c <<d\"", 2),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
