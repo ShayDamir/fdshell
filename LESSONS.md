@@ -1244,8 +1244,8 @@ pressure (`EAGAIN`), a concurrently rebuilt target binary (`ETXTBSY`).
 Rules:
 
 - Classify the transient set **in the shared helper** and retry it with a bounded budget
-  (`tests/verity.rs`: `TRANSIENT` + `run`'s 8 tries at 10 ms), never *skip* it. A skip
-  that swallows transient errnos hides the pressure, and per "A mutant 'caught' by a
+  (`tests/verity.rs`: `TRANSIENT` + `run`'s 9 attempts, 8 × 10 ms sleeps), never *skip* it.
+  A skip that swallows transient errnos hides the pressure, and per "A mutant 'caught' by a
   flaky test is a false kill" it corrupts the gate's accounting.
 - Keep the graceful-skip set exact: only `ENOTTY`/`EOPNOTSUPP` (fs lacks fs-verity)
   skip. A transient is retried, a non-transient rc is a hard failure. No pinned rc
@@ -1256,6 +1256,15 @@ Rules:
   flag only in its final success step, so a transient failure leaves the file non-verity
   and the repeat re-runs the identical first-enable path — which is why `EEXIST` must
   stay out of the set (a half-enabled file must stay visible).
+- Give `--enable` a script **of its own**, never a composite `--enable; <query>`: `;` is a
+  sequence, not a stop (the script's rc is the *last* command's rc), so a composite hides a
+  step-level transient. Measured with a step-level injector: a transient at the enable step
+  leaves the file non-verity, the query step then prints `enabled=no` and the composite
+  reports rc 0, so `run`'s retry re-runs the whole script against an inode the first attempt
+  already enabled (`--enable` → `EEXIST`, and `;` swallows that too). The hard failure
+  names no errno at all — `stage 1 stdout="enabled=no"`. One idempotent step per `run()`:
+  enable-only, then query-only (`verify_then_exec` stage 1; the `enable_and_query_*` and
+  `dump_*` tests were already shaped that way, which is why only stage 1 was exposed).
 - Name the errno in the helper's output (`transient rc …, retrying`,
   `enable failed: rc=… stderr=…`) and hand the last output back to the assertion when the
   budget is exhausted: a real gate failure then identifies the errno, and the set grows
@@ -1264,8 +1273,14 @@ Rules:
   `CARGO_BIN_EXE_fdshell` path that fails 1-of-N invocations with a chosen rc (and an
   interpreter symlink deleted/recreated for the spawn-failure class) reproduces the whole
   class deterministically: injected `EAGAIN`/`ENFILE`/`ENOSPC` → suite green with visible
-  retries, injected `EINVAL` (22) → suite fails hard, injected `ENOTTY` on every call →
-  graceful skip. A load loop alone is worth less: it is rare enough to hide behind other
+  retries, injected `EINVAL` (22) → suite fails hard, injected `ENOTTY` on the
+  **enable-bearing** invocations → graceful skip. An *invocation-level* injector cannot
+  show the skip as "suite green": forced on every invocation it also breaks the tests that
+  never enable (`query_non_verity`, `error_paths`, `dump_non_verity`, `dump_error_paths`),
+  which legitimately fail — a verity-less host is a *step*-level fault (the ioctl), not an
+  invocation-level one. A step-level injector is the only way to prove the composite-script
+  rule above: run the real enable, then exit with a transient rc.
+  A load loop alone is worth less: it is rare enough to hide behind other
   flaky tests (measured: 48 loaded suite runs, the verity suite never failed, two *other*
   tests did).
 

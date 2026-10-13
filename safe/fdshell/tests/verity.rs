@@ -58,8 +58,9 @@ const TRANSIENT: [i32; 7] = [
     sys::errno::ENOSPC,  //  28 btrfs metadata reservation under load
 ];
 
-/// Bounded retry budget for [`run`]: 8 tries at 10 ms, ~70 ms worst case per
-/// call. A host that keeps failing past the budget fails the test hard.
+/// Bounded retry budget for [`run`]: [`RETRIES`] retries at [`BACKOFF`] plus
+/// the final un-retried attempt — 9 attempts, 8 × 10 ms sleeps, ~80 ms
+/// worst case per call. A host that keeps failing past the budget fails hard.
 const RETRIES: usize = 8;
 const BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);
 
@@ -246,12 +247,19 @@ fn double_enable_is_eexist() {
 fn verify_then_exec() {
     let dir = Scratch::new();
     std::fs::copy(EXEC_OK, dir.join("bin")).unwrap();
-    // Stage 1: enable and query, capturing the digest.
-    let s1 = "builtin openat2 --flags O_RDONLY bin %>%b; \
-              builtin verity %b --enable; builtin verity %b";
-    let Some(out1) = enable_run(&dir, s1) else {
+    // Stage 1a: enable *alone*. A script that has already enabled the file must
+    // never be retried as a unit: a transient at a later step would make the
+    // retry fail at `--enable` with EEXIST (17) and name the wrong errno.
+    if !enable(&dir, "bin") {
         return;
-    };
+    }
+    // Stage 1b: query *alone* (a query never changes the file, so `run`'s
+    // transient retry is safe here), capturing the digest.
+    let out1 = run(
+        &dir,
+        "builtin openat2 --flags O_RDONLY bin %>%b; builtin verity %b",
+    );
+    assert_eq!(out1.status.code(), Some(0), "stderr={}", stderr(&out1));
     let s = stdout(&out1);
     assert!(
         s.starts_with("enabled=yes algo=sha256 digest="),
