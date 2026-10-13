@@ -2,8 +2,8 @@ use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
+use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
-use sys::{ImportedStr, ShortCStr, Trace};
 
 /// Replace `$1..` with the words after `--` (`$0` survives, as in bash),
 /// set/clear a shell option with `-o`/`+o` or the POSIX short flags
@@ -23,7 +23,7 @@ pub(crate) fn run_set(
     };
     if first.eq_bytes(b"--") {
         crate::xtrace::trace_cmd(b"set", cmdline, cell);
-        return run_set_positional(line, cmdline, text, cell);
+        return super::set_positional::run_set_positional(line, cmdline, text, cell);
     }
     if first.eq_bytes(b"-o") || first.eq_bytes(b"+o") {
         super::validation::validate_intercept(line, "set", cmdline)?;
@@ -51,31 +51,6 @@ pub(crate) fn run_set(
         return Ok(true);
     }
     Ok(false)
-}
-
-fn run_set_positional(
-    line: &[u8],
-    cmdline: &crate::parse::CommandLine,
-    text: &ScriptText,
-    cell: &ForkCell<ShellState>,
-) -> Result<bool, Report<CmdError>> {
-    super::validation::validate_intercept(line, "set", cmdline)?;
-    let expanded = crate::substitute::substitute_args(
-        cmdline.args.get(1..).unwrap_or(&[]),
-        cmdline.args_mask.get(1..).unwrap_or(&[]),
-        cmdline.args_quoted.get(1..).unwrap_or(&[]),
-        cell,
-    )
-    .change_context(CmdError::Resolve)?;
-    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    state.set_last_arg(expanded.last().cloned().unwrap_or_else(|| c"set".into()));
-    let positional = expanded
-        .iter()
-        .map(|s| ImportedStr::new(s.clone(), Trace::at(text.start, text.origin.clone())))
-        .collect();
-    state.set_positional(positional);
-    state.set_last_exit(0);
-    Ok(true)
 }
 
 /// `set -x` enables, `set +x` disables xtrace. The command itself is printed
