@@ -1158,6 +1158,150 @@ fn test_combined_redirect_append_var() {
     );
 }
 
+// The bare `&>` / `&>>` forms take the next word as their operand, with the
+// plain-word rule the bare `>` family uses (task #145). Measured against bash
+// 5.3: `cmd &> f` is `cmd > f 2> f`, and the operand is never an argument.
+
+#[test]
+fn test_bare_combined_redirect_takes_next_token() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &> out.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "out.log"),
+            path_def(2, RedirectDirection::Write, "out.log"),
+        ]
+    );
+    assert!(cmd.args.is_empty(), "the operand must not leak into args");
+}
+
+#[test]
+fn test_bare_combined_append_takes_next_token() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &>> out.log").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Append, "out.log"),
+            path_def(2, RedirectDirection::Append, "out.log"),
+        ]
+    );
+    assert!(cmd.args.is_empty(), "the operand must not leak into args");
+}
+
+#[test]
+fn test_bare_combined_operand_keeps_its_quote_mask() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &> \"a b.log\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef {
+                export_to: 1,
+                direction: RedirectDirection::Write,
+                source: RedirectSource::path(c"a b.log", vec![true; 7]),
+            },
+            RedirectDef {
+                export_to: 2,
+                direction: RedirectDirection::Write,
+                source: RedirectSource::path(c"a b.log", vec![true; 7]),
+            },
+        ]
+    );
+    assert!(cmd.args.is_empty());
+}
+
+#[test]
+fn test_bare_combined_following_words_stay_args() {
+    let ParsedLine::Cmd(cmd) = parse(b"cmd a &> f b").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "f"),
+            path_def(2, RedirectDirection::Write, "f"),
+        ]
+    );
+}
+
+#[test]
+fn test_bare_combined_in_pipeline_stage() {
+    let ParsedLine::Pipeline(pl) = parse(b"echo hi &> f | cat").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(
+        pl.commands[0].redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "f"),
+            path_def(2, RedirectDirection::Write, "f"),
+        ]
+    );
+    assert_eq!(pl.commands[0].command, c"echo".into());
+    assert_eq!(
+        pl.commands[0].args,
+        vec![c"hi".into()],
+        "the operand must not leak into args"
+    );
+    assert_eq!(pl.commands[1].command, c"cat".into());
+    assert!(pl.commands[1].redirects.is_empty());
+    assert!(pl.commands[1].args.is_empty());
+}
+
+#[test]
+fn test_bare_combined_missing_operand_is_error() {
+    assert!(parse(b"cmd &>").is_err());
+    assert!(parse(b"cmd &>>").is_err());
+    assert!(parse(b"cmd &> ; echo x").is_err());
+    assert!(parse(b"cmd &> && echo x").is_err());
+    // `|` is a separator: a pipeline stage whose `&>` has no operand.
+    assert!(parse(b"cmd &> | f").is_err());
+    assert!(parse(b"cmd &> &job").is_err());
+    assert!(parse(b"cmd &> %log").is_err());
+    assert!(parse(b"cmd &> <f").is_err());
+    // A heredoc operator is an operator, not a path operand — bash rejects it
+    // with a syntax error too.
+    assert!(parse(b"cmd &> <<EOF").is_err());
+    assert!(parse(b"cmd &>> | f").is_err());
+}
+
+#[test]
+fn test_bare_combined_fd_path_operand_is_a_path() {
+    // The `&>` family never uses a `dup` def: the attached form opens the magic
+    // path, and the bare form keeps doing the same (LESSONS).
+    let ParsedLine::Cmd(cmd) = parse(b"cmd &> /dev/fd/3").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            path_def(1, RedirectDirection::Write, "/dev/fd/3"),
+            path_def(2, RedirectDirection::Write, "/dev/fd/3"),
+        ]
+    );
+}
+
+#[test]
+fn test_bare_combined_operand_does_not_shift_the_heredoc_body() {
+    let ParsedLine::Cmd(cmd) = parse(b"echo a &> f <<EOF\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![
+            RedirectDef::here_doc(c"body\n", true),
+            path_def(1, RedirectDirection::Write, "f"),
+            path_def(2, RedirectDirection::Write, "f"),
+        ]
+    );
+    assert_eq!(cmd.args, vec![c"a".into()]);
+}
+
 #[test]
 fn test_renameat2() {
     let ParsedLine::Cmd(cmd) =

@@ -60,7 +60,7 @@ pub(super) fn finish_command(
             bg_redirect::insert_redirect(&mut cmd.redirects, r);
             spec_at += 1;
             skip = extra;
-        } else if let Some(bg) = parse_bg_redirect(t, mask)? {
+        } else if let Some((bg, extra)) = parse_bg_redirect(tokens, i)? {
             // A pidvar bg redirect carries no redirects, so the loop is a
             // no-op there; the two cases share one straight-line form.
             for r in bg.redirects {
@@ -70,6 +70,7 @@ pub(super) fn finish_command(
                 cmd.pidvar = Some(p);
                 cmd.bg_force = bg.bg_force;
             }
+            skip = extra;
         } else if t.starts_with(b"%") {
             match crate::parse::classify::parse_capture(t, set_at)? {
                 Some(c) => cmd.captures.push(c),

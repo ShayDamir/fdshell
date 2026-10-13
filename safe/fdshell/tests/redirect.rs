@@ -619,3 +619,102 @@ fn clobber_quoted_path_is_one_target() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hi\n", "stdout={out:?}");
 }
+
+// POSIX/bash: the bare `&>` / `&>>` forms take the next word as their operand
+// and write fd 1 *and* fd 2 to it (`&> f` is `> f 2> f`). Measured against
+// bash 5.3.9; task #145.
+#[test]
+fn space_separated_combined_redirect() {
+    let path = temp_path("combined_write");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!("echo hi &> {path}; cat {path}"));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n", "stdout={out:?}");
+    assert_eq!(body, "hi\n");
+}
+
+#[test]
+fn space_separated_combined_redirect_captures_stderr() {
+    let path = temp_path("combined_stderr");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!("echo o; echo e 2>&1 &> {path}; cat {path}"));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    // Only `echo o` and the final `cat` reach the terminal.
+    assert_eq!(out, "o\ne\n", "stdout={out:?}");
+    assert_eq!(body, "e\n");
+}
+
+#[test]
+fn space_separated_combined_append() {
+    let path = temp_path("combined_append");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!("echo a &>> {path}; echo b &>> {path}; cat {path}"));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\nb\n", "stdout={out:?}");
+}
+
+#[test]
+fn space_separated_combined_redirect_quoted_operand() {
+    let path = std::env::temp_dir().join(format!(
+        "redirect_combined_quoted_{}.txt",
+        std::process::id()
+    ));
+    let quoted = path.to_str().unwrap();
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!("echo hi &> \"{quoted}\"; cat \"{quoted}\""));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n", "stdout={out:?}");
+}
+
+#[test]
+fn space_separated_combined_redirect_without_operand_is_error() {
+    let (_out, err, code) = run("true &>");
+    assert_eq!(code, 1);
+    assert!(err.contains("invalid redirect"), "stderr={err:?}");
+    let (_out, err, code) = run("true &>>");
+    assert_eq!(code, 1);
+    assert!(err.contains("invalid redirect"), "stderr={err:?}");
+}
+
+#[test]
+fn space_separated_combined_redirect_before_pipe_is_error() {
+    let path = temp_path("combined_before_pipe");
+    let _ = std::fs::remove_file(&path);
+    let (_out, err, code) = run(&format!("echo hi &> | {path}"));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("invalid redirect"), "stderr={err:?}");
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "the rejected `|` operand must not create a file"
+    );
+}
+
+#[test]
+fn space_separated_combined_redirect_var_operand_is_error() {
+    // `&>%x` (attached) is fdshell's fd-variable redirect; the spaced operand
+    // is the plain-word rule's rejection, exactly as `> %x`.
+    let (_out, err, code) = run("echo hi &> %x");
+    assert_eq!(code, 1);
+    assert!(err.contains("invalid redirect"), "stderr={err:?}");
+}
+
+#[test]
+fn space_separated_combined_redirect_fd_path() {
+    let path = temp_path("combined_fd_path");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "exec 4> {path}; echo hi &> /dev/fd/4; exec 4>&-; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n", "stdout={out:?}");
+    assert_eq!(body, "hi\n");
+}
