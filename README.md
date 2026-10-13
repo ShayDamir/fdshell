@@ -261,6 +261,12 @@ Limitations:
   `if cat <<A; then` / `echo y` / `fi` + body + `A` runs `echo y`, `fi` and the body lines as
   commands and the condition prints its region, where bash reports a syntax error (rc 2). Only
   the single-line form (`if cat <<A; then echo y; fi` + body + `A`) is bash-compatible.
+- A `<<` is an operator when **any** token precedes it, so a line that opens with a
+  redirect has no command word: `> <<EOF`, `>| <<EOF` and `; <<EOF` + body consume
+  the body in the scanner and report the operator word — rc 1 `">" not found`,
+  `">|" not found`, `"<<EOF" not found` (bash: a syntax error, rc 2). The body
+  lines are never executed; only a pipeline `|` right before the `<<` keeps it a
+  command word (`true | <<EOF` runs its body lines as commands).
 
 ## Group command
 
