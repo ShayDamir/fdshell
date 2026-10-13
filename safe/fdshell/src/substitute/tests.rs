@@ -718,6 +718,165 @@ fn param_assign_colon_set_keeps_value() {
     );
 }
 
+/// The bytes of a shell string variable: an assertion about where an
+/// assignment landed (an empty expansion asserts nothing about the state).
+fn var_of(state: &ShellState, name: &'static core::ffi::CStr) -> Vec<u8> {
+    state
+        .strings
+        .get(&ShortCStr::from(name))
+        .map(|v| v.value.as_bytes().unwrap().to_vec())
+        .unwrap_or_default()
+}
+
+#[test]
+fn colon_operators_resolve_indirect_names() {
+    // `${!ind…}` reads the target `ind` names, the same rule the pattern family
+    // uses (task #176): `:-` and `:?` take the target's value, `:+` the word,
+    // and `:=` finds the target non-empty so it writes nothing.
+    let cell = env_cell();
+    bind(&cell, c"ind", c"v");
+    bind(&cell, c"v", c"abcabc");
+    let m = &[false; 12];
+    assert_eq!(expand(&cell, c"${!ind:-z}", m), b"abcabc");
+    assert_eq!(expand(&cell, c"${!ind:+z}", m), b"z");
+    assert_eq!(expand(&cell, c"${!ind:?m}", m), b"abcabc");
+    assert_eq!(expand(&cell, c"${!ind:=q}", m), b"abcabc");
+    assert_eq!(expand(&cell, c"$v", m), b"abcabc");
+}
+
+#[test]
+fn colon_assign_writes_the_indirect_target() {
+    // The write goes to the parameter the reference points at: `x` gets the
+    // word, no variable named `!ind` is ever made, and `ind` keeps its own
+    // value. `set -u` keeps the assignment at rc 0 (the family's word supplies).
+    let cell = env_cell();
+    bind(&cell, c"ind", c"x");
+    assert_eq!(expand(&cell, c"${!ind:=q}", &[false; 11]), b"q");
+    {
+        let state = cell.borrow().unwrap();
+        assert_eq!(var_of(&state, c"x"), b"q");
+        assert_eq!(var_of(&state, c"ind"), b"x");
+        assert!(state.strings.get(&ShortCStr::from(c"!ind")).is_none());
+    }
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    bind(&cell, c"ind", c"y");
+    assert_eq!(expand(&cell, c"${!ind:=w}", &[false; 11]), b"w");
+    assert_eq!(var_of(&cell.borrow().unwrap(), c"y"), b"w");
+}
+
+#[test]
+fn colon_arms_stay_nounset_exempt_with_indirect_names() {
+    // The target is unset: the family's word supplies the value, so `set -u`
+    // never bails (`nounset_bails_a_pattern_parameter` is the pattern family).
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    bind(&cell, c"v", c"undef_target");
+    let m = &[false; 12];
+    assert_eq!(expand(&cell, c"${!v:-z}", m), b"z");
+    assert_eq!(expand(&cell, c"${!v:+z}", m), b"");
+    assert_eq!(expand(&cell, c"${!v:=q}", m), b"q");
+    assert_eq!(var_of(&cell.borrow().unwrap(), c"undef_target"), b"q");
+    // No colon arm reports `UnboundVariable` under `set -u` (bash: every colon
+    // operator carries its own word); `:?` keeps its own bail.
+    for arg in [
+        c"${undef:-z}",
+        c"${undef:+z}",
+        c"${undef:=q}",
+        c"${undef:?m}",
+    ] {
+        if let Err(e) = substitute_arg(&ShortCStr::from(arg), m, &mut HashMap::new(), &cell) {
+            assert!(
+                !matches!(e.current_context(), ResolveError::UnboundVariable { .. }),
+                "{arg:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn colon_arms_bail_on_an_unresolvable_indirect_reference() {
+    // A name that is unbound, or bound to the empty string, names no target:
+    // the word does not rescue it, so every colon arm takes the same
+    // `InvalidIndirect` bail as the pattern family.
+    let cell = env_cell();
+    let m = &[false; 12];
+    let cases: [(&'static core::ffi::CStr, &[u8]); 8] = [
+        (c"${!nope:-z}", b"nope"),
+        (c"${!nope:+z}", b"nope"),
+        (c"${!nope:?m}", b"nope"),
+        (c"${!nope:=q}", b"nope"),
+        (c"${!empty:-z}", b""),
+        (c"${!empty:+z}", b""),
+        (c"${!empty:?m}", b""),
+        (c"${!empty:=q}", b""),
+    ];
+    for (arg, want) in cases {
+        let e = substitute_arg(&ShortCStr::from(arg), m, &mut HashMap::new(), &cell).unwrap_err();
+        assert!(
+            matches!(
+                e.current_context(),
+                ResolveError::InvalidIndirect { var } if var.as_bytes().unwrap() == want
+            ),
+            "{arg:?}"
+        );
+    }
+    // The two `:=` bails left no write behind.
+    assert!(
+        cell.borrow()
+            .unwrap()
+            .strings
+            .get(&ShortCStr::from(c"nope"))
+            .is_none()
+    );
+    assert!(
+        cell.borrow()
+            .unwrap()
+            .strings
+            .get(&ShortCStr::from(c"empty"))
+            .is_some_and(|v| v.value.is_empty())
+    );
+    // The write-target lookup itself: a plain name writes itself, `!name`
+    // writes the target its value names, the degenerate `!` writes the body it
+    // was scanned as, and an unresolvable reference bails with no write.
+    bind(&cell, c"ind", c"var");
+    let state = cell.borrow().unwrap();
+    let targets: [(&'static core::ffi::CStr, &[u8]); 3] =
+        [(c"var", b"var"), (c"!ind", b"var"), (c"!", b"!")];
+    for (name, want) in targets {
+        assert_eq!(
+            state
+                .colon_target(&name.into())
+                .unwrap()
+                .as_bytes()
+                .unwrap(),
+            want,
+            "{name:?}"
+        );
+    }
+    assert!(matches!(
+        state
+            .colon_target(&c"!nope".into())
+            .unwrap_err()
+            .current_context(),
+        ResolveError::InvalidIndirect { .. }
+    ));
+}
+
+#[test]
+fn colon_arms_treat_the_empty_indirect_name_as_unset() {
+    // The scan name is exactly `!` (`${!:-z}`): the degenerate guard runs ahead
+    // of the `!` dispatch, so the reference never reaches the `InvalidIndirect`
+    // bail — bash gives `z` for `:-` and nothing for `:+`, rc 0 with `set -u`
+    // too (the `?` and `=` forms are integration pins).
+    let cell = env_cell();
+    let m = &[false; 8];
+    assert_eq!(expand(&cell, c"${!:-z}", m), b"z");
+    assert_eq!(expand(&cell, c"${!:+z}", m), b"");
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    assert_eq!(expand(&cell, c"${!:-z}", m), b"z");
+    assert_eq!(expand(&cell, c"${!:+z}", m), b"");
+}
+
 #[test]
 fn param_question_colon_set_gives_value() {
     let cell = dummy_cell();

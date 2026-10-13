@@ -848,8 +848,19 @@ Accepted divergences from bash:
   (`%x: unbound variable`) where bash says `bad substitution` — same rc,
   different wording. `${#v#a}` reads the name `v#a` and prints `0` at rc 0,
   where bash is a `bad substitution` (task #173 owns the `${#name}` arm).
-- `${!name}` inside the **colon** operators is not resolved (bash `${!v:-z}`
-  prints the indirect target's value; fdshell prints the word `z`) — task #176.
+- An indirect target whose **value** is not a valid variable name is just an
+  unset parameter for the **colon** family, so the family's word supplies the
+  value: `p="a b"` with `printf "[%s]" "${!p:-z}"` prints `[z]` at rc 0, where
+  bash rejects the name (`a b: invalid variable name`, rc 1) and prints nothing.
+  The plain form is #172's rule. Pinned by
+  `indirect_target_that_is_not_a_name_with_a_word`.
+- The **empty indirect name** (`${!…}`, the scan name is exactly `!`) is unset
+  for the colon family, as in bash (`${!:-z}` → `z`, `${!:+z}` → empty, rc 0
+  with and without `set -u`), and keeps fdshell's own wording/rc on the two
+  forms bash rejects: `${!?m}` is rc 1 `?m: invalid indirect expansion` (bash
+  `${!?m}: bad substitution`) and `r=${!:=z}` assigns at rc 0 (bash rc 1,
+  `$!: cannot assign in this way`). Pinned by
+  `degenerate_empty_indirect_name_with_colon_operators`.
 - A positional parameter is not a braced name: `${1}` and `${1#a}` expand to
   empty; bash gives the positional `1` (task #177).
 - Bare `set` lists `$1..` (raw values) before the variables; bash (measured
@@ -1008,7 +1019,7 @@ The colon family supplies its own word:
 | form | result |
 | --- | --- |
 | `${name:-word}` | the word when `name` is unset or empty |
-| `${name:=word}` | the word, assigned to `name` (and printed) |
+| `${name:=word}` | the word, assigned to the parameter `name` **points at** (with `!name`, its indirect target) and printed |
 | `${name:+word}` | the word when `name` is set and non-empty |
 | `${name:?word}` | `word` as the error message (`parameter null or not set` when the word is empty), rc 1 |
 
@@ -1037,6 +1048,27 @@ on. The colon family stays exempt: its word supplies the value, so
 indirect name takes the pattern form too: `${!ind#a}` strips the value that
 `ind` names, and under `set -u` an unbound indirect name bails with bash's
 `!p: unbound variable` / `nope: invalid indirect expansion` (rc 1).
+
+`!name` is resolved with the colon operators as well (task #176), through the
+same rule as the pattern family, and the value it points at is what the operator
+acts on. Measured with `x=abcabc; v=x`:
+
+```
+${!v:-z}→abcabc  ${!v:+z}→z  ${!v:?m}→abcabc  ${!v:=q}→abcabc, x keeps abcabc
+x=; v=x:  ${!v:-z}→z  ${!v:=q}→q, and x becomes q
+v=y;:     ${!v:=q}→q, and the unset y is created with q
+```
+
+Two rules split the behaviour. The **nounset exemption is about a value**:
+`set -u; ${!v:-z}` prints the target's value, and prints the word when the
+target is unset — never a bail. An **unresolvable reference** is rc 1 in every
+family, word or no word: a name that is itself unbound (`${!undef:-z}` →
+`undef: invalid indirect expansion`) or bound to the empty string (`p=""` →
+`: invalid indirect expansion`) names no target, and `:=` bails with it before
+writing anything. `:=` writes the parameter the reference **points at** —
+`${!v:=q}` assigns `x`, never a variable named `!v`. The bare `${!v+word}` form
+is not an operator here; it belongs to the single-character family of the
+divergence list above.
 
 The stripped result is a normal word: it goes through field splitting and
 pathname expansion afterwards, so `v=a*x` with `echo ${v#a}` prints the file `*x`

@@ -301,3 +301,154 @@ fn indirect_target_that_is_the_dash_name_is_empty() {
     assert_eq!(out, "[]\n");
     assert_eq!(err, "");
 }
+
+// --- task #176: `${!name}` inside the colon operators ---
+
+#[test]
+fn indirect_with_colon_operators() {
+    // The reference resolves to the target's value; only `:+` takes the word
+    // (its target is set and non-empty) and `:=` has nothing to write, so `x`
+    // keeps `abcabc`. Measured against bash 5.3.9.
+    let (out, err, code) = run(
+        r#"x=abcabc; v=x; r0=${!v:-z}; r1=${!v:+z}; r2=${!v:?m}; r3=${!v:=q}; r4=${!v}; printf "[%s]" "$r0" "$r1" "$r2" "$r3" "$r4"; printf "|x=%s" "$x""#,
+    );
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[abcabc][z][abcabc][abcabc][abcabc]|x=abcabc");
+}
+
+#[test]
+fn indirect_assign_writes_the_indirect_target() {
+    // `:=` writes the parameter the reference points at, never the `!` body:
+    // an empty target is filled, an unset one is created, a set one is left
+    // alone, and the reference variable keeps its own value in all three.
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"x=; v=x; r=${!v:=q}; printf "[%s][%s][%s]" "$r" "$x" "$v""#,
+            "[q][q][x]",
+        ),
+        (
+            r#"v=y; r=${!v:=q}; printf "[%s][%s][%s]" "$r" "$y" "$v""#,
+            "[q][q][y]",
+        ),
+        (
+            r#"x=abc; v=x; r=${!v:=q}; printf "[%s][%s][%s]" "$r" "$x" "$v""#,
+            "[abc][abc][x]",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must assign, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+#[test]
+fn indirect_colon_family_stays_nounset_exempt() {
+    // The colon family carries its own word, so `set -u` never bails: an unset
+    // target yields the word, and `:=` assigns at rc 0. The pattern family
+    // bails on the same input (`nounset_bails_a_pattern_parameter`).
+    let cases: &[(&str, &str)] = &[
+        (r#"set -u; v=undef_target; printf "[%s]" "${!v:-z}""#, "[z]"),
+        (
+            r#"set -u; x=; v=x; printf "[%s][%s]" "${!v:-z}" "${!v:+z}""#,
+            "[z][]",
+        ),
+        (
+            r#"set -u; x=; v=x; r=${!v:=q}; printf "[%s][%s]" "$r" "$x""#,
+            "[q][q]",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must expand, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+#[test]
+fn indirect_colon_unresolvable_reference_errors() {
+    // An unbound name, or a name bound to the empty string, names no target:
+    // the word does not rescue it. bash: `undef: invalid indirect expansion` /
+    // `: invalid variable name`, rc 1 (bash `-c` prints 127, the script rc is 1).
+    let bails: &[(&str, &str)] = &[
+        (
+            r#"printf "[%s]" "${!undef:-z}""#,
+            "undef: invalid indirect expansion",
+        ),
+        (
+            r#"set -u; printf "[%s]" "${!undef:-z}""#,
+            "undef: invalid indirect expansion",
+        ),
+        (
+            r#"p=""; printf "[%s]" "${!p:-z}""#,
+            ": invalid indirect expansion",
+        ),
+        (
+            r#"set -u; p=""; printf "[%s]" "${!p:-z}""#,
+            ": invalid indirect expansion",
+        ),
+    ];
+    for (script, want) in bails {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(out, "", "{script:?} must print nothing");
+        assert!(err.contains(want), "{script:?} stderr={err}");
+    }
+    // `:=` resolves its write target first, so it bails and assigns nothing.
+    for script in [
+        r#"p=""; r=${!p:=q}; printf "never""#,
+        r#"set -u; p=""; r=${!p:=q}; printf "never""#,
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(
+            out, "",
+            "{script:?} must print nothing, so nothing was assigned"
+        );
+    }
+}
+
+// Accepted divergence (#172 family): an indirect target value that is not a
+// valid name is just an unset parameter for the colon family, so its word
+// supplies the value at rc 0. bash rejects the name (`a b: invalid variable
+// name`, `a-b: invalid variable name`), rc 1.
+#[test]
+fn indirect_target_that_is_not_a_name_with_a_word() {
+    for script in [
+        r#"p="a b"; printf "[%s]" "${!p:-z}""#,
+        r#"p=a-b; printf "[%s]" "${!p:-z}""#,
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must expand quietly, stderr={err}");
+        assert_eq!(out, "[z]", "{script:?}");
+        assert_eq!(err, "", "{script:?} must report nothing");
+    }
+}
+
+#[test]
+fn degenerate_empty_indirect_name_with_colon_operators() {
+    // The scan name is exactly `!`: bash treats it as unset (`:-` takes the
+    // word, `:+` prints nothing), with and without `set -u`.
+    for script in [
+        r#"printf "[%s][%s]" "${!:-z}" "${!:+z}""#,
+        r#"set -u; printf "[%s][%s]" "${!:-z}" "${!:+z}""#,
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must expand, stderr={err}");
+        assert_eq!(&out, "[z][]", "{script:?}");
+        assert_eq!(err, "", "{script:?} must report nothing");
+    }
+    // Accepted divergence: bash rejects the whole form (`${!?m}: bad
+    // substitution`, rc 1; `$!: cannot assign in this way`, rc 1). fdshell
+    // keeps the rc for `:?` and assigns at rc 0 for `:=`.
+    let (out, err, code) = run(r#"printf "[%s]" "${!?m}""#);
+    assert_eq!(code, 1, "stderr={err}");
+    assert_eq!(out, "");
+    assert!(
+        err.contains("?m: invalid indirect expansion"),
+        "stderr={err}"
+    );
+    let (out, err, code) = run(r#"r=${!:=z}; printf "[%s]" "$r""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[z]");
+}
