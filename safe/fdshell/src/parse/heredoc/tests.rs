@@ -337,7 +337,9 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
 /// is not a pipeline `|`, and the byte scan mirrors exactly that (task #185 —
 /// it used to require a preceding *word*, so `> <<EOF` counted 0 byte-level
 /// and 1 token-level). A divergence shifts the body regions and the per-command
-/// spec allocation silently.
+/// spec allocation silently. The whitespace-leading rows pin the other half of
+/// the mirror: with no token at all the `<<` is the command word (0) at both
+/// levels, and the first token of the run makes the next `<<` an operator.
 #[test]
 fn operator_count_leading_operator_forms_agree() {
     for (line, want) in [
@@ -360,14 +362,21 @@ fn operator_count_leading_operator_forms_agree() {
         (b"> <<EOF && cat <<A", 2),
         // Agreement zeros: the run-start `<<` is a command word, a pipeline `|`
         // right before it is a stage boundary, `>x<<EOF`/`><<EOF` keep the `<<`
-        // inside one word, a quoted `<<` is data, and a comment hides it.
+        // inside one word, a quoted `<<` is data, and a comment hides it. A run
+        // that opens with only whitespace has no preceding token either: the
+        // `i == 0` arm makes its `<<` the command word.
         (b"<<EOF", 0),
         (b"| <<EOF", 0),
+        (b"  <<EOF", 0),
+        (b"  <<-EOF", 0),
         (b"> | <<EOF", 0),
         (b">x<<EOF", 0),
         (b"><<EOF", 0),
         (b"> \"<<EOF\"", 0),
         (b"# x\n<<EOF", 0),
+        // Whitespace leading, then a real token: the token counts, so the
+        // second `<<` is an operator at both levels (1).
+        (b"  <<EOF <<B", 1),
         // Multi-statement agreements: `;`/`&&`/`|` split the line into runs, and
         // each run keeps its own operator at both levels.
         (b"cat <<A ; <<B", 2),

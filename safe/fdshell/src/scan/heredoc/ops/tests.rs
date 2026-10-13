@@ -206,6 +206,9 @@ fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
 /// `is_word_break` ends the word at `>`, so a word-seen flag can never
 /// express it. Mirrors `parse::heredoc::is_operator` (`i != 0 && prev != b"|"`);
 /// the token-level agreement is pinned in `parse/heredoc/tests.rs` (task #185).
+/// The zeros are the run-start `<<`, the pipeline pipe, the bytes inside one
+/// word, and the runs whose leading bytes are only whitespace — whitespace
+/// never sets the flag, so those are the runs that pin `is_token_byte` down.
 /// `to` is the full run: a truncated `to` makes `delimiter_span` return `None`
 /// and the scan reports no operators at all.
 #[test]
@@ -231,6 +234,19 @@ fn redirect_operator_leading_run_counts_the_operator() {
         (b"| <<EOF", 0),
         (b"><<EOF", 0),
         (b">x<<EOF", 0),
+        // Whitespace never sets the flag: a run whose leading bytes are only
+        // whitespace has no preceding token, so its `<<` is the command word
+        // (`is_operator`'s `i == 0` arm). These are the runs that kill the
+        // `is_token_byte -> true` / `delete !` / `&& -> ||` mutants — every
+        // pin with a token before the `<<` has the flag set by that token
+        // alone, so it cannot see a mutation that makes *every* byte a token
+        // byte (task #185's review).
+        (b" <<EOF", 0),
+        (b"  <<EOF", 0),
+        (b"\t<<EOF", 0),
+        (b"  <<EOF x", 0),
+        (b"  <<-EOF", 0),
+        (b"   | <<EOF", 0),
     ] {
         let found = operator_delims(line, 0, line.len()).unwrap();
         assert_eq!(found.len(), want, "line={:?}", line);
@@ -239,6 +255,14 @@ fn redirect_operator_leading_run_counts_the_operator() {
     // The `<<-` form keeps its tab-stripping marker.
     let line = b"> <<-EOF";
     let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops[0].delim, b"EOF");
+    assert!(ops[0].strip);
+
+    // A `<<-` behind leading whitespace and a real token keeps the marker too:
+    // the whitespace sets no flag, the `>` is the preceding token.
+    let line = b"  > <<-EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
     assert_eq!(ops[0].delim, b"EOF");
     assert!(ops[0].strip);
 }
