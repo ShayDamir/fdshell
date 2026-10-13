@@ -3,7 +3,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{fold, fold_mask, fold_word};
+use super::{fold, fold_mask, fold_quotes, fold_word};
 use sys::ShortCStr;
 
 #[test]
@@ -33,6 +33,67 @@ fn keeps_trailing_backslash() {
 fn plain_bytes_are_unchanged() {
     assert_eq!(fold(b"EOF"), b"EOF");
     assert_eq!(fold(b""), b"");
+}
+
+/// A delimiter word is a word: POSIX quote removal drops **every** quote
+/// marker byte, not one surrounding pair, and reports a quote byte in any
+/// position (task #207).
+#[test]
+fn fold_quotes_strips_every_quote_byte() {
+    assert_eq!(fold_quotes(b"EOF"), (b"EOF".to_vec(), false));
+    assert_eq!(fold_quotes(b""), (Vec::new(), false));
+    assert_eq!(fold_quotes(b"\"Q\""), (b"Q".to_vec(), true));
+    assert_eq!(fold_quotes(b"''"), (Vec::new(), true));
+    assert_eq!(fold_quotes(b"\"\""), (Vec::new(), true));
+    assert_eq!(fold_quotes(b"a'b'c"), (b"abc".to_vec(), true));
+    assert_eq!(fold_quotes(b"'x'y'z'"), (b"xyz".to_vec(), true));
+    assert_eq!(fold_quotes(b"ab'c'"), (b"abc".to_vec(), true));
+    assert_eq!(fold_quotes(b"'a'bc"), (b"abc".to_vec(), true));
+    assert_eq!(fold_quotes(b"E\"O\"F"), (b"EOF".to_vec(), true));
+}
+
+/// The spaces of a quoted span are word content, so they survive into the
+/// delimiter text (`<<"a b"` and `<<'a <<b'` delimit a word with a space).
+#[test]
+fn fold_quotes_keeps_the_spaces_of_a_quoted_span() {
+    assert_eq!(fold_quotes(b"a\"b c\"d"), (b"ab cd".to_vec(), true));
+    assert_eq!(fold_quotes(b"'a <<b'"), (b"a <<b".to_vec(), true));
+}
+
+/// The folding runs in the same pass: an unquoted pair folds and the trailing
+/// `\` keeps its backslash. No quote byte means no quoting, so `<<E\OF` keeps
+/// the body expanding.
+#[test]
+fn fold_quotes_folds_unquoted_escape_pairs_in_the_same_pass() {
+    assert_eq!(fold_quotes(b"a\\*b"), (b"a*b".to_vec(), false));
+    assert_eq!(fold_quotes(b"E\\OF"), (b"EOF".to_vec(), false));
+    // A trailing `\` keeps it, exactly like `fold`.
+    assert_eq!(fold_quotes(b"E\\"), (b"E\\".to_vec(), false));
+}
+
+/// An escaped quote is data, not a marker: it stays in the text (folded to the
+/// quote byte) and does not make the delimiter quoted. Folding first and
+/// stripping in the same pass is what makes this decidable (LESSONS).
+#[test]
+fn fold_quotes_keeps_an_escaped_quote_as_data() {
+    assert_eq!(fold_quotes(b"a\\'b"), (b"a'b".to_vec(), false));
+    assert_eq!(fold_quotes(b"a\\\"b"), (b"a\"b".to_vec(), false));
+}
+
+/// A quoted span keeps its pair: POSIX #4.2 drops the backslash only at
+/// substitution, so `<<"E\OF"` delimits the literal `E\OF`.
+#[test]
+fn fold_quotes_keeps_a_quoted_escape_pair() {
+    assert_eq!(fold_quotes(b"\"E\\OF\""), (b"E\\OF".to_vec(), true));
+}
+
+/// Nesting: a `"` written in a `'…'` span is data, a `'` written in `"…"` is
+/// data (README "Quoting"). The quote byte seen is a marker byte, so both
+/// words are quoted.
+#[test]
+fn fold_quotes_treats_a_quote_in_the_other_span_as_data() {
+    assert_eq!(fold_quotes(b"'a\"b'"), (b"a\"b".to_vec(), true));
+    assert_eq!(fold_quotes(b"\"a'b\""), (b"a'b".to_vec(), true));
 }
 
 #[test]

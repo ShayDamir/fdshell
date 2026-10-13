@@ -1,31 +1,59 @@
 //! Escape-pair folding: every unquoted `\X` pair of a byte slice folds to `X`
 //! (POSIX #4.1 — the backslash is removed and the escaped byte loses its
 //! special meaning), so a word/delimiter text is compared in its folded form.
-//! Two entry points: [`fold`] reads the quote state off the raw bytes (a
-//! delimiter text still carries its `"`), [`fold_mask`] reads it from a word's
-//! quote mask (the tokenizer strips the quotes from word text).
+//! Three entry points, one state machine (`fold_impl`): [`fold`] reads the
+//! quote state off the raw bytes and keeps the quote bytes, [`fold_quotes`]
+//! reads the same raw bytes and applies POSIX quote removal on top of the
+//! folding (every `"`/`'` byte is dropped, in the same pass, and the caller is
+//! told whether a quote byte was seen), [`fold_mask`] reads the quote state
+//! from a word's quote mask (the tokenizer strips the quotes from word text).
 
 use crate::bytes::{QUOTE, SQUOTE};
 use alloc::vec::Vec;
 use sys::{ShortCStr, ShortCStrError};
 
-/// `raw` with every unquoted escape pair `\X` folded to `X`. A `\` inside a
-/// quoted span keeps its backslash (POSIX #4.2), a `\` inside a `'…'` span is
-/// literal (POSIX §2.2.3 — a single-quoted span has no escape pair at all),
-/// and a trailing `\` at the end of `raw` keeps it.
+/// `raw` with every unquoted escape pair `\X` folded to `X`, quote bytes kept.
+/// A `\` inside a quoted span keeps its backslash (POSIX #4.2), a `\` inside a
+/// `'…'` span is literal (POSIX §2.2.3 — a single-quoted span has no escape
+/// pair at all), and a trailing `\` at the end of `raw` keeps it.
 pub(crate) fn fold(raw: &[u8]) -> Vec<u8> {
+    fold_impl(raw, true).0
+}
+
+/// POSIX quote removal plus escape folding on raw bytes: every `"`/`'`
+/// **marker** byte is dropped and every unquoted `\X` pair folds to `X` in the
+/// same pass, so a heredoc delimiter word `a'b'c` delimits `abc` and an
+/// escaped quote (`a\'b`) survives as data. The flag reports a quote marker
+/// byte in any position (a quoted delimiter makes a here-doc body literal);
+/// an escaped quote is data, so it does not set it.
+pub(crate) fn fold_quotes(raw: &[u8]) -> (Vec<u8>, bool) {
+    fold_impl(raw, false)
+}
+
+/// The shared state machine. `keep_quotes` writes the quote marker bytes into
+/// the output ([`fold`]) or applies quote removal ([`fold_quotes`]); the quote
+/// state itself is identical for both, which is why one machine serves both
+/// rules. The returned flag is `true` when a quote marker byte was seen.
+fn fold_impl(raw: &[u8], keep_quotes: bool) -> (Vec<u8>, bool) {
     let mut out = Vec::new();
     let mut i = 0usize;
     let mut quoted = false;
     let mut single = false;
+    let mut has_quote = false;
     while let Some(&b) = raw.get(i) {
         if b == QUOTE && !single {
             quoted = !quoted;
-            out.push(b);
+            has_quote = true;
+            if keep_quotes {
+                out.push(b);
+            }
             i += 1;
         } else if b == SQUOTE && !quoted {
             single = !single;
-            out.push(b);
+            has_quote = true;
+            if keep_quotes {
+                out.push(b);
+            }
             i += 1;
         } else if b == b'\\' && !quoted && !single {
             i += 1;
@@ -39,7 +67,7 @@ pub(crate) fn fold(raw: &[u8]) -> Vec<u8> {
             i += 1;
         }
     }
-    out
+    (out, has_quote)
 }
 
 /// `bytes` with every unquoted escape pair `\X` folded to `X`, and the quote
