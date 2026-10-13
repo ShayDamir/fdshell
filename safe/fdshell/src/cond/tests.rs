@@ -1,7 +1,7 @@
 //! Tests for the cond-list body assignment and the group-depth boundary scan.
 
 use super::boundary::next_boundary;
-use super::take_bodies;
+use super::parts::take_bodies;
 use crate::scan::ScanState;
 use alloc::vec;
 
