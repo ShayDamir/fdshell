@@ -191,6 +191,137 @@ fn verbose_off_again_stops_echoing() {
     assert!(!err.contains("builtin echo bye"), "stderr={err:?}");
 }
 
+// --- concatenated short flags (`set -eu`, `set +ef`) ---
+
+#[test]
+fn cluster_sets_every_flag_in_the_word() {
+    let (out, _err, code) = run("set -eu; echo $-");
+    assert_eq!(code, 0, "stderr={_err:?}");
+    assert_eq!(out, "eu\n");
+}
+
+#[test]
+fn cluster_duplicate_flag_is_idempotent() {
+    let (out, _err, code) = run("set -ee; echo $-");
+    assert_eq!(code, 0, "stderr={_err:?}");
+    assert_eq!(out, "e\n");
+}
+
+#[test]
+fn cluster_nounset_flag_bails_unbound() {
+    let (_out, err, code) = run("set -eu; echo $x");
+    assert_eq!(code, 1);
+    assert!(err.contains("x: unbound variable"), "stderr={err:?}");
+}
+
+#[test]
+fn cluster_errexit_flag_stops_the_shell() {
+    let (out, _err, code) = run("set -eu; false; echo after");
+    assert_eq!(code, 1);
+    assert!(!out.contains("after"), "stdout={out:?}");
+}
+
+#[test]
+fn cluster_clears_every_named_flag() {
+    let dir = scratch();
+    // `-f` alone keeps the pattern literal; `+ef` clears noglob (and errexit).
+    let (out, _err, code) = run_in(&dir, "set -f; set +ef; echo a*");
+    assert_eq!(code, 0, "stderr={_err:?}");
+    assert_eq!(out, "a1 a2\n");
+}
+
+#[test]
+fn cluster_leaves_the_flags_it_does_not_name() {
+    let dir = scratch();
+    let (out, _err, code) = run_in(&dir, "set -f; set +e; echo a*");
+    assert_eq!(code, 0, "stderr={_err:?}");
+    assert_eq!(out, "a*\n", "`f` is untouched by `set +e`");
+}
+
+#[test]
+fn cluster_verbose_flag_echoes_statements() {
+    let (out, err, code) = run("set -uv; builtin echo hi; set +v; builtin echo bye");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\nbye\n");
+    assert!(err.contains("builtin echo hi"), "stderr={err:?}");
+    assert!(!err.contains("builtin echo bye"), "stderr={err:?}");
+}
+
+#[test]
+fn cluster_that_turns_on_xtrace_is_not_itself_traced() {
+    // bash parity: `set -xf` traces `echo hi`, not the `set` that enabled xtrace.
+    let (out, err, code) = run("set -xf; echo hi");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n");
+    assert!(err.contains("+ echo hi"), "stderr={err:?}");
+    assert!(!err.contains("+ set -xf"), "stderr={err:?}");
+}
+
+#[test]
+fn cluster_is_traced_when_xtrace_is_already_on() {
+    let (out, err, code) = run("set -x; set -eu; echo hi");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\n");
+    assert!(err.contains("+ set -eu"), "stderr={err:?}");
+}
+
+#[test]
+fn cluster_unknown_flag_is_a_builtin_error() {
+    let (_out, err, code) = run("set -ez");
+    assert_eq!(code, 1);
+    assert!(err.contains("set") && err.contains("-ez"), "stderr={err:?}");
+
+    // fdshell stops the script at the failing `set`; bash reports status 2 and
+    // runs the rest (accepted divergence, README).
+    let (out, _err, code) = run("set -ez; echo after");
+    assert_eq!(code, 1);
+    assert!(!out.contains("after"), "stdout={out:?}");
+}
+
+#[test]
+fn cluster_mid_cluster_sign_is_an_unknown_flag() {
+    let (_out, err, code) = run("set -e+u; echo after");
+    assert_eq!(code, 1);
+    assert!(err.contains("-e+u"), "stderr={err:?}");
+}
+
+#[test]
+fn cluster_names_the_whole_word_not_the_offending_byte() {
+    // bash names the first unknown byte (`set: -c: invalid option`); fdshell
+    // names the word (accepted divergence, README).
+    let (_out, err, code) = run("set -abc");
+    assert_eq!(code, 1);
+    assert!(err.contains("-abc"), "stderr={err:?}");
+}
+
+#[test]
+fn cluster_error_reports_before_the_builtin_keyword_check() {
+    let (_out, err, code) = run("builtin set -e");
+    assert_eq!(code, 1);
+    assert!(err.contains("prefix is not supported"), "stderr={err:?}");
+    let (_out, err, code) = run("builtin set -z");
+    assert_eq!(code, 1);
+    assert!(err.contains("-z"), "stderr={err:?}");
+}
+
+/// Only the first word is a cluster (`set -eu -f` applies `-eu`); multi-word
+/// flag lists are task #249.
+#[test]
+fn cluster_only_the_first_word_is_a_flag_list() {
+    let (out, _err, code) = run("set -eu -f; echo $-");
+    assert_eq!(code, 0, "stderr={_err:?}");
+    assert_eq!(out, "eu\n");
+}
+
+/// `set -`/`set +` are not clusters (task #249): they keep falling through.
+#[test]
+fn lone_sign_still_falls_through_to_external_lookup() {
+    let (out, err, code) = run("set -; echo after");
+    assert!(out.contains("after"), "stdout={out:?}");
+    assert!(err.contains("resolve command path"), "stderr={err:?}");
+    assert_eq!(code, 0, "stdout={out:?}");
+}
+
 // --- `$-` and free integration ---
 
 #[test]
