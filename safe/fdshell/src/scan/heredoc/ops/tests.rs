@@ -135,13 +135,14 @@ fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
 
     // A `>|` at the run start: the absorbed `|` is not a pipeline position (the
     // `k == 0` guard is not reached, and `clobber_pipe` sees the `>` at k-1),
-    // but the count is 0 for the pre-existing `seen_word` reason — `is_word_break`
-    // ends the word at `>`/`|`, so no command word has been seen. The token
-    // layer counts 1 here; that divergence predates `>|` and is the same class
-    // as the bare `> <<EOF` line.
+    // and the `>` is a preceding *token*, so the `<<` counts 1 — the same count
+    // the token layer gives (task #185: the byte scan mirrors
+    // `parse::heredoc::is_operator`'s "a preceding token that is not a pipeline
+    // `|`", not "a command word has been seen").
     let line = b">| <<EOF";
     let ops = operator_delims(line, 0, line.len()).unwrap();
-    assert_eq!(ops.len(), 0);
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"EOF");
 
     // The shared rule reads the word's raw bytes, so a quoted `>` does not
     // terminate an operator word: `cat "a>"| <<EOF` counts 0 at both levels
@@ -198,4 +199,46 @@ fn clobber_pipe_is_an_operator_byte_not_a_pipeline() {
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops.len(), 1);
     assert_eq!(ops[0].delim, b"EOF");
+}
+
+/// A run that opens with a redirect, `;`, `&` or an escape pair counts its
+/// `<<`: the guard is a preceding *token*, not a preceding *word* —
+/// `is_word_break` ends the word at `>`, so a word-seen flag can never
+/// express it. Mirrors `parse::heredoc::is_operator` (`i != 0 && prev != b"|"`);
+/// the token-level agreement is pinned in `parse/heredoc/tests.rs` (task #185).
+/// `to` is the full run: a truncated `to` makes `delimiter_span` return `None`
+/// and the scan reports no operators at all.
+#[test]
+fn redirect_operator_leading_run_counts_the_operator() {
+    for (line, want) in [
+        (b"> <<EOF" as &[u8], 1usize),
+        (b">> <<EOF", 1),
+        (b">& <<EOF", 1),
+        (b"<> <<EOF", 1),
+        (b"< <<EOF", 1),
+        (b"; <<EOF", 1),
+        (b"& <<EOF", 1),
+        (b"\\< <<EOF", 1),
+        (b">> >& <<EOF", 1),
+        (b"> << EOF", 1),
+        (b"> <<-EOF", 1),
+        // A `<<` at the run start is the command word, a pipeline `|` before it
+        // is a stage boundary, and `><<EOF`/`>x<<EOF` keep the `<<` inside one
+        // word: no operator at either level.
+        (b"<<EOF", 0),
+        (b"<<EOF x", 0),
+        (b"> | <<EOF", 0),
+        (b"| <<EOF", 0),
+        (b"><<EOF", 0),
+        (b">x<<EOF", 0),
+    ] {
+        let found = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(found.len(), want, "line={:?}", line);
+    }
+
+    // The `<<-` form keeps its tab-stripping marker.
+    let line = b"> <<-EOF";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops[0].delim, b"EOF");
+    assert!(ops[0].strip);
 }

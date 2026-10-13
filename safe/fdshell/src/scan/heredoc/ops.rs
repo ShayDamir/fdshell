@@ -11,10 +11,15 @@ use alloc::vec::Vec;
 /// `<<` (or `<<-`) has no delimiter word. A `#` comment (outside quotes, at
 /// a word start) is skipped whole, so a `<<` in a comment is not an operator
 /// (the tokenizer never yields it, and the two counts must agree).
+///
+/// A `<<` counts as an operator when a token precedes it and that token is
+/// not a pipeline `|` — the byte mirror of `parse::heredoc::is_operator`
+/// (`i != 0 && prev != b"|"`). A `<<` at the run start is the command word
+/// and never counts.
 pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator>> {
     let mut state = ScanState::new();
     let mut found: Vec<Operator> = Vec::new();
-    let mut seen_word = false;
+    let mut seen_token = false;
     let mut i = from;
     while i < to {
         let bare =
@@ -30,7 +35,7 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
             continue;
         }
         if bare
-            && seen_word
+            && seen_token
             && word_start(line, i, &state)
             && line.get(i) == Some(&b'<')
             && line.get(i + 1) == Some(&b'<')
@@ -43,15 +48,28 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
             while i < next {
                 i = state.advance(line, i);
             }
-            seen_word = true;
             continue;
         }
+        // Read the byte before `advance`: the `\<`, `$(`, `((` and quoted-region
+        // arms jump 2+ bytes, so the post-jump byte is not the token's first byte.
+        let byte = line.get(i).copied();
         i = state.advance(line, i);
-        if state.word_active {
-            seen_word = true;
+        if byte.is_some_and(is_token_byte) {
+            seen_token = true;
         }
     }
     Some(found)
+}
+
+/// The byte at a consumed position starts (or continues) a token: any
+/// non-whitespace byte, except a pipeline `|`, which is a stage boundary with
+/// no token of its own — `parse::heredoc::is_operator` rejects a `<<` whose
+/// previous token is `|`, and a `|`-leading run has no preceding token at all
+/// (`| <<EOF`). A `|` absorbed into a `>|` clobber is operator content of its
+/// word, decided by `precedes_pipe`, never here. `;`/`&&` ARE tokens for the
+/// tokenizer, so they count here: `cat <<A ; <<B` is two operators at both levels.
+fn is_token_byte(b: u8) -> bool {
+    !b.is_ascii_whitespace() && b != b'|'
 }
 
 /// `i` starts a token word: the run start or a tokenizer word-break byte.

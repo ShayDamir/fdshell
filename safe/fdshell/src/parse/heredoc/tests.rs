@@ -332,6 +332,56 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
     }
 }
 
+/// A run that opens with a redirect/separator token and has no command word
+/// counts its `<<` at both levels: `is_operator` needs a preceding token that
+/// is not a pipeline `|`, and the byte scan mirrors exactly that (task #185 —
+/// it used to require a preceding *word*, so `> <<EOF` counted 0 byte-level
+/// and 1 token-level). A divergence shifts the body regions and the per-command
+/// spec allocation silently.
+#[test]
+fn operator_count_leading_operator_forms_agree() {
+    for (line, want) in [
+        (b"> <<EOF" as &[u8], 1usize),
+        (b">| <<EOF", 1),
+        (b">> <<EOF", 1),
+        (b">& <<EOF", 1),
+        (b"<> <<EOF", 1),
+        (b"< <<EOF", 1),
+        (b">>x <<EOF", 1),
+        (b">> >& <<EOF", 1),
+        (b"> << EOF", 1),
+        (b"; <<EOF", 1),
+        (b"& <<EOF", 1),
+        (b"&& <<EOF", 1),
+        (b"( <<EOF", 1),
+        (b"cat ; > <<EOF", 1),
+        (b">| x <<EOF", 1),
+        (b"> <<EOF <<B", 2),
+        (b"> <<EOF && cat <<A", 2),
+        // Agreement zeros: the run-start `<<` is a command word, a pipeline `|`
+        // right before it is a stage boundary, `>x<<EOF`/`><<EOF` keep the `<<`
+        // inside one word, a quoted `<<` is data, and a comment hides it.
+        (b"<<EOF", 0),
+        (b"| <<EOF", 0),
+        (b"> | <<EOF", 0),
+        (b">x<<EOF", 0),
+        (b"><<EOF", 0),
+        (b"> \"<<EOF\"", 0),
+        (b"# x\n<<EOF", 0),
+        // Multi-statement agreements: `;`/`&&`/`|` split the line into runs, and
+        // each run keeps its own operator at both levels.
+        (b"cat <<A ; <<B", 2),
+        (b"cat <<A && <<B", 2),
+        (b"cat <<A && cat <<B", 2),
+        (b"cat <<A | tr <<B", 2),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+        assert_eq!(byte, want, "line={:?}", line);
+    }
+}
+
 #[test]
 fn is_operator_bounds_guard() {
     let line = b"cat <<EOF";
