@@ -7,7 +7,7 @@ mod apply;
 pub use apply::{apply, apply_child, restore};
 
 use crate::error::cmd::CmdError;
-use crate::parse::{CommandLine, Pipeline};
+use crate::parse::{Assign, CommandLine, Pipeline};
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -32,8 +32,8 @@ pub fn expand(
     cell: &ForkCell<ShellState>,
 ) -> Result<EnvAssigns, Report<CmdError>> {
     let mut out = Vec::new();
-    for (name, value) in &cmdline.env_assigns {
-        out.push(expand_one(name, value, text, cell)?);
+    for assign in &cmdline.env_assigns {
+        out.push(expand_one(assign, text, cell)?);
     }
     Ok(out)
 }
@@ -52,17 +52,20 @@ pub fn expand_pipeline(
 }
 
 /// Expand one raw value word and trace its origin like a shell assignment.
+/// The value is expanded with **its own quote mask** (task #217); the mask
+/// `substitute_arg` returns is discarded — the value is applied whole, never
+/// field-split and never globbed.
 fn expand_one(
-    name: &ShortCStr,
-    value: &ShortCStr,
+    assign: &Assign,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<EnvAssign, Report<CmdError>> {
-    let (expanded, _) = crate::substitute::substitute_arg(value, &[], &mut HashMap::new(), cell)
-        .change_context(CmdError::Resolve)?;
-    let origin = crate::run_origin::assign_origin(value, text.origin.clone(), cell)?;
+    let (expanded, _) =
+        crate::substitute::substitute_arg(&assign.value, &assign.mask, &mut HashMap::new(), cell)
+            .change_context(CmdError::Resolve)?;
+    let origin = crate::run_origin::assign_origin(&assign.value, text.origin.clone(), cell)?;
     Ok(EnvAssign {
-        name: name.clone(),
+        name: assign.name.clone(),
         value: ImportedStr::new(expanded, Trace::at(text.start, origin)),
     })
 }

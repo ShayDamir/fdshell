@@ -4,6 +4,27 @@ use super::Token;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
+/// One raw `NAME=value` word: the name, the raw (unexpanded) value word, and
+/// the value's per-byte quote mask — the token's word mask sliced at the `=`.
+/// The mask travels with the value so every substitution site expands the value
+/// as its own quoting says (task #217), never with an empty mask.
+#[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
+pub struct Assign {
+    pub name: ShortCStr,
+    pub value: ShortCStr,
+    pub mask: Vec<bool>,
+}
+
+/// The value's mask: the word mask sliced at the `=` (offset `name.len() + 1`).
+/// This is the **only** place that offset exists, so the three assignment
+/// surfaces cannot drift apart (LESSONS: slice the word, its mask and its
+/// quoted flags with the same offset). A mask shorter than the value degrades
+/// to unquoted, the same padding `substitute/arg.rs` applies.
+pub fn value_mask(word_mask: &[bool], name_len: usize) -> Vec<bool> {
+    word_mask.get(name_len + 1..).unwrap_or_default().to_vec()
+}
+
 /// A `NAME=value` word: non-empty lhs, no `%` prefix (the same leniency as
 /// the bare-assignment detection — no new name validation), and no `\` in the
 /// name (an escape pair is not a name byte: `\X=1` is a command word, not an
@@ -33,8 +54,8 @@ pub(crate) fn prefix_len(tokens: &[Token]) -> usize {
 
 /// The `NAME=value` word at `i`, if it is a leading assignment with a
 /// command word that can still follow.
-fn assign_at(tokens: &[Token], i: usize) -> Option<(ShortCStr, ShortCStr)> {
-    let (t, _, _, _, _) = tokens.get(i)?;
+fn assign_at(tokens: &[Token], i: usize) -> Option<Assign> {
+    let (t, _, _, _, mask) = tokens.get(i)?;
     if t.eq_bytes(b";") {
         return None;
     }
@@ -42,42 +63,41 @@ fn assign_at(tokens: &[Token], i: usize) -> Option<(ShortCStr, ShortCStr)> {
     if next.0.eq_bytes(b";") {
         return None;
     }
-    let (name, value) = t.split_once_byte(b'=')?;
+    assign_of(t, mask)
+}
+
+/// The `Assign` for one word plus its word mask: `None` when the word is not
+/// an assignment word. The value's mask is sliced here, once, by `value_mask`.
+fn assign_of(word: &ShortCStr, word_mask: &[bool]) -> Option<Assign> {
+    let (name, value) = word.split_once_byte(b'=')?;
     if name.is_empty() || name.starts_with(b"%") || name.contains(b'\\') {
         return None;
     }
-    Some((name, value))
+    let mask = value_mask(word_mask, name.len());
+    Some(Assign { name, value, mask })
 }
 
-/// The `NAME=value` words of `tokens[..end]` as `(name, value)` pairs; by
-/// the parse invariant, every word there is an assignment word.
-pub(crate) fn collect_range(tokens: &[Token], end: usize) -> Vec<(ShortCStr, ShortCStr)> {
+/// The `NAME=value` words of `tokens[..end]` as `Assign`es; by the parse
+/// invariant, every word there is an assignment word.
+pub(crate) fn collect_range(tokens: &[Token], end: usize) -> Vec<Assign> {
     let mut out = Vec::new();
-    for (t, _, _, _, _) in tokens.get(..end).unwrap_or(tokens) {
-        if let Some((name, value)) = t.split_once_byte(b'=')
-            && !name.is_empty()
-            && !name.starts_with(b"%")
-            && !name.contains(b'\\')
-        {
-            out.push((name, value));
+    for (t, _, _, _, mask) in tokens.get(..end).unwrap_or(tokens) {
+        if let Some(a) = assign_of(t, mask) {
+            out.push(a);
         }
     }
     out
 }
 
-/// Every word of an all-assignment statement as `(name, value)` pairs
-/// (up to the first `;`), or `None` when a non-assignment word is present.
-pub(crate) fn collect_all(tokens: &[Token]) -> Option<Vec<(ShortCStr, ShortCStr)>> {
+/// Every word of an all-assignment statement as `Assign`es (up to the first
+/// `;`), or `None` when a non-assignment word is present.
+pub(crate) fn collect_all(tokens: &[Token]) -> Option<Vec<Assign>> {
     let mut out = Vec::new();
-    for (t, _, _, _, _) in tokens {
+    for (t, _, _, _, mask) in tokens {
         if t.eq_bytes(b";") {
             break;
         }
-        let (name, value) = t.split_once_byte(b'=')?;
-        if name.is_empty() || name.starts_with(b"%") || name.contains(b'\\') {
-            return None;
-        }
-        out.push((name, value));
+        out.push(assign_of(t, mask)?);
     }
     Some(out)
 }

@@ -43,6 +43,7 @@ pub(crate) mod word_quoted;
 
 pub(crate) use case_block::literal_indices;
 pub use cmdline::{BuiltinPrefix, CommandLine, Pipeline};
+pub use envassign::{Assign, value_mask};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;

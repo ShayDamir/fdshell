@@ -1,4 +1,5 @@
 use crate::capture::Capture;
+use crate::parse::Assign;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use sys::ShortCStr;
@@ -28,7 +29,9 @@ pub struct CommandLine {
     pub command_mask: Vec<bool>,
     /// Leading `NAME=value` words scoped to this command (POSIX 2.9.1): raw
     /// value words, unexpanded; applied to the command's environment only.
-    pub env_assigns: Vec<(ShortCStr, ShortCStr)>,
+    /// Each value carries its own per-byte quote mask — the word mask sliced
+    /// at the `=` — so it is expanded with its own quoting (task #217).
+    pub env_assigns: Vec<Assign>,
     pub args: Vec<ShortCStr>,
     /// Per-byte quote mask for each arg (parallel to `args`, each mask
     /// parallel to its arg). `true` marks bytes that were inside double

@@ -28,13 +28,13 @@ pub(crate) fn run_simple(
             state.clear_last_arg();
             state.set_last_exit(0);
         }
-        crate::parse::ParsedLine::AssignStr { var, value } => {
-            assign_str::set(var, value, text, cell)?;
+        crate::parse::ParsedLine::AssignStr(assign) => {
+            assign_str::set(assign, text, cell)?;
             finish_assignment(cell)?;
         }
-        crate::parse::ParsedLine::AssignStrs { assigns } => {
-            for (var, value) in assigns {
-                assign_str::set(var, value, text, cell)?;
+        crate::parse::ParsedLine::AssignStrs(assigns) => {
+            for assign in assigns {
+                assign_str::set(assign, text, cell)?;
             }
             finish_assignment(cell)?;
         }

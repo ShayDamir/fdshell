@@ -1,8 +1,9 @@
 //! `local NAME[=value] …` — string variables scoped to the current function
-//! call. A value is expanded with `substitute_arg` (no IFS splitting, no
-//! globbing — the bare-assignment rule, as `run_dispatch/assign_str.rs`), and
-//! the name comes from the raw word. A bare `NAME` declares the variable unset
-//! for the call; `local` with no arguments lists the call's locals.
+//! call. A value is expanded with `substitute_arg` and the value word's own
+//! quote mask (no IFS splitting, no globbing — the bare-assignment rule, as
+//! `run_dispatch/assign_str.rs`), and the name comes from the raw word. A bare
+//! `NAME` declares the variable unset for the call; `local` with no arguments
+//! lists the call's locals.
 //!
 //! The shadowed values are restored when the function call returns
 //! (`state/frames.rs`), which is why `local` is legal only inside a function.
@@ -17,6 +18,7 @@ use sys::{ExportedFd, ImportedStr, ScriptText, ShortCStr, Trace};
 
 use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
+use crate::parse::value_mask;
 use crate::state::ShellState;
 
 pub(crate) fn run_local(
@@ -61,7 +63,10 @@ fn store(state: &mut ShellState, name: &ShortCStr, value: Option<ImportedStr>) {
     }
 }
 
-/// One word per `local` argument: the name, and the expanded value.
+/// One word per `local` argument: the name, and the expanded value. The word's
+/// mask comes from `args_mask` by index (never `zip`, so a length mismatch
+/// cannot silently drop a word); the value's mask is that word mask sliced at
+/// the `=`.
 fn expand_words(
     cmdline: &CommandLine,
     text: &ScriptText,
@@ -69,17 +74,21 @@ fn expand_words(
 ) -> Result<Vec<(ShortCStr, Option<ImportedStr>)>, Report<CmdError>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let mut words = Vec::new();
-    for word in &cmdline.args {
+    for (i, word) in cmdline.args.iter().enumerate() {
         let (name, raw) = split_name(word)?;
-        words.push((name, expand_value(raw, text, &mut cache, cell)?));
+        let mask = value_mask(cmdline.args_mask.get(i).unwrap_or(&Vec::new()), name.len());
+        words.push((name, expand_value(raw, &mask, text, &mut cache, cell)?));
     }
     Ok(words)
 }
 
 /// The `=value` part, with no splitting and no globbing, traced like any shell
 /// assignment (`run_env::expand_one` and `assign_str::set` are the precedents).
+/// The value is expanded with its own quote mask, so a quoted escape pair
+/// keeps its backslash (task #217).
 fn expand_value(
     raw: Option<ShortCStr>,
+    mask: &[bool],
     text: &ScriptText,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
@@ -87,7 +96,7 @@ fn expand_value(
     let Some(value) = raw else {
         return Ok(None);
     };
-    let (expanded, _) = crate::substitute::substitute_arg(&value, &[], cache, cell)
+    let (expanded, _) = crate::substitute::substitute_arg(&value, mask, cache, cell)
         .change_context(CmdError::Resolve)?;
     let origin = crate::run_origin::assign_origin(&value, text.origin.clone(), cell)?;
     Ok(Some(ImportedStr::new(

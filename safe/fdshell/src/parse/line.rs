@@ -6,7 +6,7 @@ use crate::parse::if_block::IfBlock;
 use crate::parse::time_block::TimeBlock;
 use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
-use crate::parse::{CommandLine, Pipeline};
+use crate::parse::{Assign, CommandLine, Pipeline};
 use alloc::vec::Vec;
 use sys::ScriptText;
 use sys::ShortCStr;
@@ -32,14 +32,10 @@ pub enum ParsedLine {
         var: ShortCStr,
         value: ShortCStr,
     },
-    AssignStr {
-        var: ShortCStr,
-        value: ShortCStr,
-    },
+    /// A bare `NAME=value` statement: the raw word with its value's quote mask.
+    AssignStr(Assign),
     /// A bare statement of several `NAME=value` words; all persist.
-    AssignStrs {
-        assigns: Vec<(ShortCStr, ShortCStr)>,
-    },
+    AssignStrs(Vec<Assign>),
     Unset(ShortCStr),
     UnsetArrayEntry {
         var: ShortCStr,

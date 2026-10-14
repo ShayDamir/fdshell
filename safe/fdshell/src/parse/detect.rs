@@ -45,10 +45,10 @@ fn detect_assigns(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseEr
     };
     match assigns.len() {
         1 => {
-            let (var, value) = assigns.into_iter().next().ok_or(ParseError::Never)?;
-            Ok(Some(ParsedLine::AssignStr { var, value }))
+            let assign = assigns.into_iter().next().ok_or(ParseError::Never)?;
+            Ok(Some(ParsedLine::AssignStr(assign)))
         }
-        _ => Ok(Some(ParsedLine::AssignStrs { assigns })),
+        _ => Ok(Some(ParsedLine::AssignStrs(assigns))),
     }
 }
 
