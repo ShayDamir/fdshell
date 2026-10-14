@@ -18,6 +18,17 @@ fn stext(bytes: &[u8]) -> ScriptText {
     )
 }
 
+/// A scoped-assignment `Assign` for a value word written fully quoted
+/// (`quoted = true`) or fully unquoted (`false`) — the mask the parser must
+/// hand on: the value word's own mask, one bit per value byte.
+fn assign(name: &str, value: &str, quoted: bool) -> Assign {
+    Assign {
+        name: sys::ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap(),
+        value: sys::ShortCStr::from_vec(value.as_bytes().to_vec()).unwrap(),
+        mask: vec![quoted; value.len()],
+    }
+}
+
 fn pos() -> Position {
     Position::new(1, 1)
 }
@@ -1398,35 +1409,38 @@ fn test_unset_array_entry_malformed_is_plain_unset() {
 
 #[test]
 fn test_assign_str_simple() {
-    let ParsedLine::AssignStr { var, value } = parse(b"var=hello").unwrap() else {
+    let ParsedLine::AssignStr(a) = parse(b"var=hello").unwrap() else {
         panic!("expected AssignStr")
     };
-    assert_eq!(var, c"var".into());
-    assert_eq!(value, c"hello".into());
+    assert_eq!(a.name, c"var".into());
+    assert_eq!(a.value, c"hello".into());
+    assert_eq!(a.mask, vec![false; 5]);
 }
 
 #[test]
 fn test_assign_str_empty_value() {
-    let ParsedLine::AssignStr { var, value } = parse(b"var=").unwrap() else {
+    let ParsedLine::AssignStr(a) = parse(b"var=").unwrap() else {
         panic!("expected AssignStr")
     };
-    assert_eq!(var, c"var".into());
-    assert_eq!(value, c"".into());
+    assert_eq!(a.name, c"var".into());
+    assert_eq!(a.value, c"".into());
+    assert!(a.mask.is_empty());
 }
 
 #[test]
 fn test_assign_str_quoted_spaces() {
-    let ParsedLine::AssignStr { var, value } = parse(b"var=\"foo bar\"").unwrap() else {
+    let ParsedLine::AssignStr(a) = parse(b"var=\"foo bar\"").unwrap() else {
         panic!("expected AssignStr")
     };
-    assert_eq!(var, c"var".into());
-    assert_eq!(value, c"foo bar".into());
+    assert_eq!(a.name, c"var".into());
+    assert_eq!(a.value, c"foo bar".into());
+    assert_eq!(a.mask, vec![true; 7]);
 }
 
 #[test]
 fn test_assign_str_no_lhs_is_not_assign() {
     let result = parse(b"=value").unwrap();
-    assert!(!matches!(result, ParsedLine::AssignStr { .. }));
+    assert!(!matches!(result, ParsedLine::AssignStr(_)));
 }
 
 #[test]
@@ -1437,11 +1451,12 @@ fn test_assign_str_fd_assign_takes_priority() {
 
 #[test]
 fn test_assign_str_percent_value_is_literal() {
-    let ParsedLine::AssignStr { var, value } = parse(b"var=%othervar").unwrap() else {
+    let ParsedLine::AssignStr(a) = parse(b"var=%othervar").unwrap() else {
         panic!("expected AssignStr")
     };
-    assert_eq!(var, c"var".into());
-    assert_eq!(value, c"%othervar".into());
+    assert_eq!(a.name, c"var".into());
+    assert_eq!(a.value, c"%othervar".into());
+    assert_eq!(a.mask, vec![false; 9]);
 }
 
 #[test]
@@ -3235,7 +3250,7 @@ fn test_env_assign_prefix_on_command() {
     };
     assert_eq!(cmd.prefix, BuiltinPrefix::None);
     assert_eq!(cmd.command, c"cmd".into());
-    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("FOO", "bar", false)]);
     assert_eq!(cmd.args, vec![c"arg".into()]);
 }
 
@@ -3248,7 +3263,7 @@ fn test_env_assign_prefix_builtin_detection_runs_on_command_word() {
     };
     assert_eq!(cmd.prefix, BuiltinPrefix::Builtin);
     assert_eq!(cmd.command, c"printf".into());
-    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("FOO", "bar", false)]);
     assert_eq!(cmd.args, vec![c"hi".into()]);
 }
 
@@ -3259,35 +3274,30 @@ fn test_env_assign_compound_prefix() {
     };
     assert_eq!(
         cmd.env_assigns,
-        vec![
-            (c"FOO".into(), c"bar".into()),
-            (c"BAZ".into(), c"qux".into()),
-        ]
+        vec![assign("FOO", "bar", false), assign("BAZ", "qux", false)]
     );
     assert_eq!(cmd.command, c"cmd".into());
 }
 
 #[test]
 fn test_env_assign_bare_statement_is_assign_strs() {
-    let ParsedLine::AssignStrs { assigns } = parse(b"FOO=bar BAZ=qux").unwrap() else {
+    let ParsedLine::AssignStrs(assigns) = parse(b"FOO=bar BAZ=qux").unwrap() else {
         panic!("expected AssignStrs")
     };
     assert_eq!(
         assigns,
-        vec![
-            (c"FOO".into(), c"bar".into()),
-            (c"BAZ".into(), c"qux".into()),
-        ]
+        vec![assign("FOO", "bar", false), assign("BAZ", "qux", false)]
     );
 }
 
 #[test]
 fn test_env_assign_single_bare_statement_is_assign_str() {
-    let ParsedLine::AssignStr { var, value } = parse(b"FOO=bar").unwrap() else {
+    let ParsedLine::AssignStr(a) = parse(b"FOO=bar").unwrap() else {
         panic!("expected AssignStr")
     };
-    assert_eq!(var, c"FOO".into());
-    assert_eq!(value, c"bar".into());
+    assert_eq!(a.name, c"FOO".into());
+    assert_eq!(a.value, c"bar".into());
+    assert_eq!(a.mask, vec![false; 3]);
 }
 
 #[test]
@@ -3295,11 +3305,12 @@ fn test_env_assign_bare_before_semicolon_token_is_assign_str() {
     // A raw `;` token (unit-parse level; the statement splitter removes it
     // in the production flow): the assignment word before it stays a bare
     // assignment.
-    let ParsedLine::AssignStr { var, value } = parse(b"FOO=bar ;").unwrap() else {
+    let ParsedLine::AssignStr(a) = parse(b"FOO=bar ;").unwrap() else {
         panic!("expected AssignStr")
     };
-    assert_eq!(var, c"FOO".into());
-    assert_eq!(value, c"bar".into());
+    assert_eq!(a.name, c"FOO".into());
+    assert_eq!(a.value, c"bar".into());
+    assert_eq!(a.mask, vec![false; 3]);
 }
 
 #[test]
@@ -3307,7 +3318,7 @@ fn test_env_assign_prefix_bare_value() {
     let ParsedLine::Cmd(cmd) = parse(b"FOO= cmd").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("FOO", "", false)]);
     assert_eq!(cmd.command, c"cmd".into());
 }
 
@@ -3316,7 +3327,9 @@ fn test_env_assign_quoted_prefix_is_scoped() {
     let ParsedLine::Cmd(cmd) = parse(b"\"FOO=bar\" cmd").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    // The whole word is quoted, so the value's mask is all-`true`: the value
+    // is expanded as quoted text (task #217).
+    assert_eq!(cmd.env_assigns, vec![assign("FOO", "bar", true)]);
     assert_eq!(cmd.command, c"cmd".into());
 }
 
@@ -3334,7 +3347,7 @@ fn test_env_assign_prefix_before_keyword_runs_keyword_as_command() {
     let ParsedLine::Cmd(cmd) = parse(b"FOO=bar if").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("FOO", "bar", false)]);
     assert_eq!(cmd.command, c"if".into());
 }
 
@@ -3354,7 +3367,7 @@ fn test_fdstyle_word_after_prefix_ends_the_prefix() {
     let ParsedLine::Cmd(cmd) = parse(b"FOO=bar %foo=baz").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.env_assigns, vec![(c"FOO".into(), c"bar".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("FOO", "bar", false)]);
     assert_eq!(cmd.command, c"%foo=baz".into());
 }
 
@@ -3390,13 +3403,68 @@ fn test_env_assign_escaped_name_is_not_an_assignment() {
 
 /// The assignment value keeps the escape pair: substitution drops the backslash
 /// later and the escaped space stays inside the value (never an IFS split).
+/// The value's mask is the **value's** own 4 bytes, all unquoted — not the 6
+/// of the word (`X=a\ b`), so a slice shifted by one is caught here.
 #[test]
 fn test_env_assign_value_keeps_the_escape_pair() {
     let ParsedLine::Cmd(cmd) = parse(b"X=a\\ b cmd").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.env_assigns, vec![(c"X".into(), c"a\\ b".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("X", "a\\ b", false)]);
+    assert_eq!(cmd.env_assigns[0].mask, vec![false; 4]);
     assert_eq!(cmd.command, c"cmd".into());
+}
+
+/// The mask slice offset, pinned with two prefix words whose quoting
+/// **differs** (LESSONS: an off-by-one and an off-by-two slice are
+/// indistinguishable in a same-quoting pair). `x="a\ b"` carries a quoted
+/// escape pair that must keep its mask bits; `y=b\ c` is fully unquoted.
+#[test]
+fn test_env_assign_value_mask_is_sliced_at_the_equals() {
+    let ParsedLine::Cmd(cmd) = parse(b"x=\"a\\ b\" y=b\\ c cmd").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.env_assigns.len(), 2);
+    assert_eq!(cmd.env_assigns[0].value, c"a\\ b".into());
+    assert_eq!(cmd.env_assigns[0].mask, vec![true; 4]);
+    assert_eq!(cmd.env_assigns[1].value, c"b\\ c".into());
+    assert_eq!(cmd.env_assigns[1].mask, vec![false; 4]);
+    assert_eq!(cmd.command, c"cmd".into());
+}
+
+/// The offset is `name.len() + 1`, measured on the **name's** bytes, not on the
+/// raw span: a quoted name (`"x"`) is one word byte and one mask bit, so the
+/// value mask starts at the value's first byte.
+#[test]
+fn test_env_assign_value_mask_of_a_quoted_name() {
+    let ParsedLine::AssignStr(a) = parse(b"\"x\"=\"a\\ b\"").unwrap() else {
+        panic!("expected AssignStr")
+    };
+    assert_eq!(a.name, c"x".into());
+    assert_eq!(a.value, c"a\\ b".into());
+    assert_eq!(a.mask, vec![true; 4]);
+}
+
+/// The 1:1 invariant `value_mask` rests on: the tokenizer pushes one mask bit
+/// per word byte, so a word and its mask always have the same length. Pinned
+/// as a test, not as a `debug_assert!` (nextest runs debug binaries, and a
+/// debug assert would abort the test binary).
+#[test]
+fn test_token_mask_is_parallel_to_the_word() {
+    for line in [
+        "x=\"a b\" 'c d' e\\ f $(printf a) `printf b` g",
+        "\"\" \"\"$(true)",
+        "%fd <%q \"a\\$b\" $x*y",
+    ] {
+        let tokens = token::tokenize_statement(line.as_bytes()).unwrap();
+        for (word, _, _, _, mask) in &tokens {
+            assert_eq!(
+                mask.len(),
+                word.len(),
+                "mask/word length mismatch for {line:?}"
+            );
+        }
+    }
 }
 
 /// The `command`/`builtin` keyword path must keep the command *name* word out of
@@ -3428,7 +3496,7 @@ fn test_env_assign_prefix_stops_before_the_keyword_name_word() {
     let ParsedLine::Cmd(cmd) = parse(b"A=2 command X=1").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.env_assigns, vec![(c"A".into(), c"2".into())]);
+    assert_eq!(cmd.env_assigns, vec![assign("A", "2", false)]);
     assert_eq!(cmd.command, c"X=1".into());
     assert_eq!(cmd.args, Vec::new());
 }

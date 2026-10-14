@@ -392,11 +392,13 @@ fn enclosing_quotes_make_pattern_bytes_literal() {
 }
 
 #[test]
-fn assignment_value_drops_the_quote_mask() {
-    // The bare-assignment path expands its value with no mask (the codebase
-    // rule), so a quoted `[` in the pattern is treated as unquoted here:
-    // fdshell strips `a`, bash (whose `"` is literal in the pattern) does not.
-    assert_eq!(strips("v=abcabc", &["${v#\"[\"a]}"]), "[bcabc]");
+fn assignment_value_keeps_its_quote_mask() {
+    // Task #217: the bare-assignment path expands its value with the value
+    // word's own mask, so a quoted `[` in the pattern stays literal here and
+    // nothing strips — as in bash (which treats the quoted `[` literally too).
+    // The empty mask that made fdshell strip `a` was the bug; the sibling of
+    // `quoted_pattern_byte_in_an_assignment_value_stays_literal` above.
+    assert_eq!(strips("v=abcabc", &["${v#\"[\"a]}"]), "[abcabc]");
 }
 
 #[test]
@@ -527,4 +529,15 @@ fn pattern_operator_on_a_braced_join_strips_the_joined_string() {
     let (out, err, code) = run(r#"IFS=,; set -- a b c; printf "[%s]" "${*%c,}""#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[a,b,c]", "bash: [a,b,c]");
+}
+
+/// Task #217 kills the README divergence "the bare-assignment path expands its
+/// value with no quote mask": the assignment value is expanded with its **own**
+/// mask, so the quoted `[` of the pattern stored in `x` stays literal and
+/// nothing strips. bash prints `[a[b]`; fdshell printed `[[b]`.
+#[test]
+fn quoted_pattern_byte_in_an_assignment_value_stays_literal() {
+    let (out, err, code) = run(r#"x="a[b"; r=${x#"["a]}; printf "[%s]" "$r""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a[b]", "bash: [a[b]");
 }

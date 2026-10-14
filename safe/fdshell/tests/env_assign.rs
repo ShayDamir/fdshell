@@ -157,3 +157,99 @@ fn scoped_prefix_on_intercepted_command_is_visible() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "bar\nunset\n");
 }
+
+/// Task #217, the headline case: a `\<char>` pair written **inside double
+/// quotes** keeps its backslash (POSIX #4.2). With the empty quote mask the
+/// value folded as an unquoted escape pair and printed `[a b]`.
+#[test]
+fn quoted_escape_pair_in_a_value_keeps_its_backslash() {
+    let (out, err, code) = run(r#"x="a\ b"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a\\ b]\n");
+}
+
+/// The escape pairs POSIX #4.1 and #4.2 agree on are unchanged by the mask:
+/// `\\` collapses to one backslash, `\$` is a literal `$` (never expanded).
+#[test]
+fn backslash_and_dollar_pairs_are_unchanged_by_the_mask() {
+    let (out, err, code) = run(r#"x="a\\b"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a\\b]\n");
+    let (out, err, code) = run(r#"b=1; x="a\$b"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a$b]\n");
+}
+
+/// A single-quoted value is stored in the double-quote escape form, whose
+/// `\$`/`\\` pairs fold identically under both mask arms — the same output
+/// with and without the mask (LESSONS: "a single-quoted literal is stored in
+/// the double-quote escape form").
+#[test]
+fn single_quoted_value_is_mask_independent() {
+    let (out, err, code) = run(r#"x='a\ b'; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a\\ b]\n");
+}
+
+/// The first byte of the value is an escape pair: the mask slice must start at
+/// the value's first byte, not at the `=` (the `name.len() + 1` offset).
+#[test]
+fn escape_pair_at_the_start_of_the_value_keeps_its_dollar() {
+    let (out, err, code) = run(r#"b=1; x="\$b"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[$b]\n");
+}
+
+/// A value is stored **whole**: `$( … )` with a space and a pattern character
+/// reach the variable verbatim — no IFS splitting, no pathname expansion
+/// (the mask changes folding only).
+#[test]
+fn value_is_stored_whole_without_splitting_or_globbing() {
+    let (out, err, code) = run(r#"x="$(printf "a b")"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a b]\n");
+    let (out, err, code) = run(r#"x="a *"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a *]\n");
+}
+
+/// The store keeps the whole value; the *use* of it still splits on IFS, and
+/// the split fields carry the folded bytes — bash splits `a\ b` into `a\` and
+/// `b`, fdshell (with the empty mask) produced `a` and `b`.
+#[test]
+fn use_of_the_value_splits_and_keeps_the_quoted_backslash() {
+    let (out, err, code) = run(r#"x="a\ b"; printf "[%s]\n" $x"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a\\]\n[b]\n");
+}
+
+/// The scoped-prefix form reaches the child verbatim.
+#[test]
+fn scoped_prefix_value_reaches_the_child_verbatim() {
+    let (out, err, code) = run(r#"x="a\ b" env | grep '^x='"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "x=a\\ b\n");
+}
+
+/// The offset pin in integration form (LESSONS: pin the offset with words of
+/// **different** quoting): the quoted pair keeps its backslash, the unquoted
+/// pair folds, in the same statement.
+#[test]
+fn two_prefixed_values_with_different_quoting_keep_their_own_masks() {
+    let (out, err, code) = run(r#"x="a\ b" y=b\ c env | grep -E '^x=|^y=' | sort"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "x=a\\ b\ny=b c\n");
+}
+
+/// The same folding visible in `IFS` itself: quoted `\t` is a backslash and a
+/// `t` (bash's three-byte `IFS`), not the tab an unquoted escape pair folds to
+/// — so the split points are the space and the backslash, and `t` is not one.
+#[test]
+fn quoted_ifs_keeps_the_backslash_as_a_split_byte() {
+    let (out, err, code) = run(r#"IFS=" \t"; printf "[%s]" "$IFS""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[ \\t]", "bash: [ \\t]");
+    let (out, err, code) = run(r#"IFS=" \t"; v=a\ b; printf "[%s]" $v"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a][b]", "bash: [a][b]");
+}

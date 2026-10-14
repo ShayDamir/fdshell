@@ -19,20 +19,27 @@ fn make_line(args: &[&str]) -> Vec<u8> {
     alloc::format!("local {}", args.join(" ")).into_bytes()
 }
 
-fn make_cmdline(args: &[&str]) -> CommandLine {
+/// `CommandLine` for `local` words, with a per-word quote mask of the given
+/// kind: the mask is parallel to its word (`args_mask[i]` describes
+/// `args[i]`), so quoting every byte means `quoted = true`, unquoted `false`.
+fn make_cmdline_with_masks(args: &[&str], quoted: bool) -> CommandLine {
     CommandLine {
         prefix: BuiltinPrefix::None,
         command: c"local".into(),
         command_mask: vec![],
         env_assigns: vec![],
         args: args.iter().map(|a| s(a.as_bytes())).collect(),
-        args_mask: vec![vec![]; args.len()],
-        args_quoted: vec![false; args.len()],
+        args_mask: args.iter().map(|a| vec![quoted; a.len()]).collect(),
+        args_quoted: vec![quoted; args.len()],
         captures: vec![],
         redirects: vec![],
         pidvar: None,
         bg_force: false,
     }
+}
+
+fn make_cmdline(args: &[&str]) -> CommandLine {
+    make_cmdline_with_masks(args, false)
 }
 
 /// A cell inside a function call (the `local` frame `function_call` pushes).
@@ -199,4 +206,25 @@ fn local_ifs_syncs_the_splitting_and_is_recorded() {
     }
     pop_frame(&cell).unwrap();
     assert_eq!(cell.borrow().unwrap().ifs, caller_ifs);
+}
+
+/// Task #217: the value is expanded with the **value word's own** quote mask —
+/// the word mask sliced at the `=` (the name's length is the offset). The two
+/// runs are the same bytes with the two masks, so each kills the other's
+/// mutant: an empty mask (the old `&[]`) fails the quoted run, a
+/// neighbour-mispliced mask fails the unquoted one.
+#[test]
+fn local_value_keeps_a_quoted_escape_pair() {
+    let word = "q=a\\ b";
+    let line = make_line(&[word]);
+
+    let cell = make_cell();
+    let quoted = make_cmdline_with_masks(&[word], true);
+    run_local(&line, &quoted, &text(b"local"), &cell).unwrap();
+    assert_eq!(stored(&cell, &s(b"q")), Some(s(b"a\\ b")));
+
+    let cell = make_cell();
+    let plain = make_cmdline_with_masks(&[word], false);
+    run_local(&line, &plain, &text(b"local"), &cell).unwrap();
+    assert_eq!(stored(&cell, &s(b"q")), Some(s(b"a b")));
 }

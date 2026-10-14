@@ -255,6 +255,16 @@ fn a_scoped_prefix_restores_under_the_local_frame() {
 }
 
 #[test]
+fn a_local_value_keeps_a_quoted_escape_pair() {
+    // Task #217: `local`'s value goes through the same mask-carrying path as
+    // the other assignment surfaces, so a `\<char>` pair written inside double
+    // quotes keeps its backslash (bash prints `[a\ b]`).
+    let (out, err, code) = run(r#"f(){ local q="a\ b"; printf "[%s]\n" "$q"; }; f"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a\\ b]\n");
+}
+
+#[test]
 fn help_lists_local() {
     let (out, err, code) = run("help");
     assert_eq!(code, 0, "stderr={err:?}");

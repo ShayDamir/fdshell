@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr, Trace};
 
-use crate::parse::{BuiltinPrefix, CommandLine};
+use crate::parse::{Assign, BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 
 use super::{EnvAssign, apply, apply_child, expand, restore};
@@ -127,6 +127,43 @@ fn apply_child_sets_strings_and_exports() {
     assert_eq!(get(&cell, "FOO", "exports"), Some(c"bar".into()));
 }
 
+/// A `CommandLine` carrying exactly one scoped prefix word `name=value` with
+/// the given per-byte value mask; everything else is inert.
+fn cmd_with_assign(name: &str, value: &str, mask: Vec<bool>) -> CommandLine {
+    CommandLine {
+        prefix: BuiltinPrefix::None,
+        command: ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
+        command_mask: vec![],
+        env_assigns: vec![Assign {
+            name: ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap(),
+            value: ShortCStr::from_vec(value.as_bytes().to_vec()).unwrap(),
+            mask,
+        }],
+        args: vec![],
+        args_mask: vec![],
+        args_quoted: vec![],
+        captures: vec![],
+        redirects: vec![],
+        pidvar: None,
+        bg_force: false,
+    }
+}
+
+/// The value a scoped prefix stores in the shell's environment: expand, apply,
+/// read back.
+fn expanded_value(name: &str, value: &str, mask: Vec<bool>) -> ShortCStr {
+    let cell = cell_with(&[]);
+    let cl = cmd_with_assign(name, value, mask);
+    let text = ScriptText::new(
+        ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    let env = expand(&cl, &text, &cell).unwrap();
+    apply(&env, &cell).unwrap();
+    get(&cell, name, "strings").unwrap()
+}
+
 #[test]
 fn expand_expands_value_words_against_state() {
     let cell = cell_with(&[("A", "1")]);
@@ -134,10 +171,11 @@ fn expand_expands_value_words_against_state() {
         prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
         command_mask: vec![],
-        env_assigns: vec![(
-            ShortCStr::from_vec(b"FOO".to_vec()).unwrap(),
-            ShortCStr::from_vec(b"$A".to_vec()).unwrap(),
-        )],
+        env_assigns: vec![Assign {
+            name: ShortCStr::from_vec(b"FOO".to_vec()).unwrap(),
+            value: ShortCStr::from_vec(b"$A".to_vec()).unwrap(),
+            mask: vec![false; 2],
+        }],
         args: vec![],
         args_mask: vec![],
         args_quoted: vec![],
@@ -156,4 +194,23 @@ fn expand_expands_value_words_against_state() {
     let applied = apply(&env, &cell).unwrap();
     assert_eq!(get(&cell, "FOO", "strings"), Some(c"1".into()));
     restore(applied, &cell).unwrap();
+}
+
+/// Task #217: the value word is expanded with **its own** quote mask. The two
+/// assertions are each other's mutant kill — a `&[]` literal (the old bug)
+/// folds the quoted pair and fails the first, and an all-`true` mask folds
+/// nothing and fails the second.
+#[test]
+fn expand_uses_the_value_words_own_quote_mask() {
+    assert_eq!(expanded_value("x", "a\\ b", vec![true; 4]), c"a\\ b".into());
+    assert_eq!(expanded_value("x", "a\\ b", vec![false; 4]), c"a b".into());
+}
+
+/// The mask changes folding only: a quoted value word is stored whole, with no
+/// field splitting and no pathname expansion (`x="a b"` keeps its space,
+/// `x="*"` stays the literal star).
+#[test]
+fn expand_stores_the_quoted_value_whole() {
+    assert_eq!(expanded_value("x", "a b", vec![true; 3]), c"a b".into());
+    assert_eq!(expanded_value("x", "*", vec![true]), c"*".into());
 }
