@@ -80,13 +80,12 @@ fn assign_of(word: &ShortCStr, word_mask: &[bool]) -> Option<Assign> {
 /// The `NAME=value` words of `tokens[..end]` as `Assign`es; by the parse
 /// invariant, every word there is an assignment word.
 pub(crate) fn collect_range(tokens: &[Token], end: usize) -> Vec<Assign> {
-    let mut out = Vec::new();
-    for (t, _, _, _, mask) in tokens.get(..end).unwrap_or(tokens) {
-        if let Some(a) = assign_of(t, mask) {
-            out.push(a);
-        }
-    }
-    out
+    tokens
+        .get(..end)
+        .unwrap_or(tokens)
+        .iter()
+        .filter_map(|(t, _, _, _, mask)| assign_of(t, mask))
+        .collect()
 }
 
 /// Every word of an all-assignment statement as `Assign`es (up to the first

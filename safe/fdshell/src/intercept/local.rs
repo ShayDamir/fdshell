@@ -17,8 +17,7 @@ use sys::fork_cell::ForkCell;
 use sys::{ExportedFd, ImportedStr, ScriptText, ShortCStr, Trace};
 
 use crate::error::cmd::CmdError;
-use crate::parse::CommandLine;
-use crate::parse::value_mask;
+use crate::parse::{CommandLine, value_mask};
 use crate::state::ShellState;
 
 pub(crate) fn run_local(
@@ -74,9 +73,10 @@ fn expand_words(
 ) -> Result<Vec<(ShortCStr, Option<ImportedStr>)>, Report<CmdError>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let mut words = Vec::new();
+    let masks = cmdline.args_mask.as_slice();
     for (i, word) in cmdline.args.iter().enumerate() {
         let (name, raw) = split_name(word)?;
-        let mask = value_mask(cmdline.args_mask.get(i).unwrap_or(&Vec::new()), name.len());
+        let mask = value_mask(masks.get(i).map_or(&[], Vec::as_slice), name.len());
         words.push((name, expand_value(raw, &mask, text, &mut cache, cell)?));
     }
     Ok(words)
