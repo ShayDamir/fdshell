@@ -679,6 +679,12 @@ Limitations / deviations from bash:
 
 Plain `NAME=value` statements persist in the shell (`FOO=bar; echo $FOO` →
 `bar`); several on one line set them all (`FOO=bar BAZ=qux` persists both).
+A value word is expanded **with its own quote mask** — the word's per-byte mask
+sliced at the `=` — so a `\<char>` pair written inside quotes keeps its
+backslash (`x="a\ b"` stores `a\ b`, as bash) and a quoted pattern byte stays
+literal (`x="a[b"` with `${x#"["a]}` strips nothing); the expansion is a single
+word, with no field splitting and no pathname expansion (`x="$(printf "a b")`
+stores `a b`, `x="a *"` stores `a *`).
 
 Leading `NAME=value` words on a *command* are scoped to that one command
 (POSIX 2.9.1): the values are expanded against the shell, set for the
@@ -853,9 +859,6 @@ Accepted divergences from bash:
   the space, so the trailing `}` is run as a command
   (`failed to resolve command path: "}"`). A pattern containing a space is
   unreachable.
-- The bare-assignment path expands its value with no quote mask, so a quoted
-  `[` in `${x#"["a]}` is treated as unquoted there and strips; bash keeps it
-  literal.
 - Single-character operators are not implemented: bash `${v+x#y}` prints `x#y`
   (the `+` operator with the word `x#y`), while fdshell reads the whole name
   `v+x`, which is unset and expands to empty. Only the colon-prefixed forms
