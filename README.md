@@ -594,10 +594,11 @@ forms share one expression language:
   expression and sets the exit status from the last one. `let x=3+4; echo $x`
   → `7`; `let i=1 j=2` sets both.
 
-`$((expr))` is a word expansion, on the surfaces `$(…)` expands on: command
-arguments (external, builtins, `builtin`, `become`, `exec`, `timeout`), the
-bare and scoped assignment value (`x=$((1+2))`, `FOO=$((1+2)) env`), `local`'s
-value, `set --` words (`set -- $((1+1)) c; echo "$*"` → `2 c`), a function
+`$((expr))` is a word expansion, on the surfaces `$(…)` expands on: the command
+word (word 0, so `$((1+1))` looks up the command `2` — see "The command word"),
+command arguments (external, builtins, `builtin`, `become`, `exec`, `timeout`),
+the bare and scoped assignment value (`x=$((1+2))`, `FOO=$((1+2)) env`),
+`local`'s value, `set --` words (`set -- $((1+1)) c; echo "$*"` → `2 c`), a function
 call's arguments, `case` words, here-string words, and `test`/`[` operands. It
 expands mid-word and inside double quotes (`echo x$((1+2))` → `x3`,
 `echo "a $((1+1)) b"` → `a 2 b`) and the body is whitespace-tolerant
@@ -703,10 +704,11 @@ Limitations / deviations from bash:
 - No positional parameters and no `${…}` inside an arithmetic expression: with
   `set -- 5`, `echo $(( $1 ))` and `echo $(( ${1} ))` are syntax errors, where
   bash expands both to `5`.
-- A redirect target word and the command name (word 0) are not
-  arithmetic-expanded: `echo hi >f$((1))` writes the file `f$((1))` (bash
-  writes `f1`), and `$((1+1))` as the command name is a `"$((1+1))" not found`
-  at rc 1, where bash runs the command `2` and reports 127 — task #213.
+- A redirect target word is not arithmetic-expanded: `echo hi >f$((1))` writes
+  the file `f$((1))` (bash writes `f1`) — task #213, tracked by task #278. The
+  command name (word 0) is expanded, so `$((1+1))` looks up the command `2` and
+  reports `"2" not found` at rc 1, where bash runs the command `2` and reports
+  127 (see "The command word").
 - `export` does not expand its assignment value: `export E=$((1+2))` exports
   the text `$((1+2))` (bash exports `3`) — task #214.
 - Nested `$((…))` shares the shell-wide nesting cap: in a command argument
@@ -1219,6 +1221,48 @@ The stripped result is a normal word: it goes through field splitting and
 pathname expansion afterwards, so `v=a*x` with `echo ${v#a}` prints the file `*x`
 matches (`zx`), while a fully quoted word keeps the stripped text literal.
 
+### The command word (word 0)
+
+The command-name position is an expansion surface like any other word (task
+#268): word 0 is expanded in the parent, before the function, intercept and
+`PATH` lookups, so every dispatch path sees the same name — a plain command, a
+pipeline stage, an `if`/`for`/`case` body, a function call, `command`/`builtin`,
+`exec`, `become`, and `timeout`'s target word.
+
+- `$( … )`, backticks, `$(( … ))`, `$name`/`${name}`, `%fd`/`%CWD` and a leading
+  `~` all apply, whole-word and mid-word: `$(echo echo) hi` → `hi`,
+  `$(echo "ec")ho hi` → `hi`, `cmd=echo; $cmd hi` → `hi`,
+  `` `echo echo` hi `` → `hi`, `$((1+1))` looks up the command `2`,
+  `~/bin/x` is `$HOME/bin/x`.
+- Double quotes never suppress it (`"$(echo echo)" hi` → `hi`); single quotes
+  keep the word literal, so `'$(echo echo)'` looks up the name `$(echo echo)`.
+- The expansion is split on `IFS` and then pathname-expanded, and the fields are
+  the words of the command: field 0 is the command name and fields 1.. are the
+  leading arguments, arriving *before* the word's own arguments —
+  `$(echo echo hi) x` runs `echo hi x`, and with `ea` (an executable), `eb` and
+  `ed` in the directory, `./e* zz` runs `./ea` with `./eb ./ed zz`.
+- An unquoted word 0 whose expansion produces no field is not a word, so the
+  next field becomes the command: `$(true) echo hi` → `hi`. A *quoted* empty
+  expansion is a word, so the command name is empty: `"$(true)" echo hi` reports
+  the name `""` (the same rule as "For-list words"), and `$(echo )` with nothing
+  after it leaves no command at all.
+- Escape pairs fold in word 0 (POSIX #4.1): `e\cho hi` runs `echo`. Inside
+  double quotes the pair stays in the name (POSIX #4.2): `"e\cho"` is looked up
+  literally.
+- An expansion output field is protected from the parent's re-expansion — it
+  reaches the command lookup encoded, so `$(echo '$HOME') x` looks up the
+  literal name `$HOME` and `$(echo '`cmd`') x` the literal `` `cmd` ``.
+- The substitution child's status is never the command's status, so
+  `set -e; $(false) echo hi` prints `hi` and succeeds; over the capture limit
+  `$(yes)` in word 0 is the usual capture-limit error.
+
+Divergences from bash, all in the report, not the lookup: an empty command name
+is fdshell's missing-command error at rc 1 where bash prints
+`: command not found` at rc 127; a scoped `IFS` assignment is already in the
+environment when word 0 is split (`IFS=: $(printf "echo:hi") zz` splits on `:`
+and runs `echo hi zz`, where bash splits with the shell's `IFS` and reports the
+name `echo:hi`); and `hash`'s name words stay literal (task #279).
+
 ### For-list words
 
 Every word of a `for … in` list goes through the same pipeline a command
@@ -1544,8 +1588,10 @@ Limitations / deviations from bash:
 * `time && false` runs the bare `time` (a zero report) and then `false`. fdshell splits
   cond-lists before parsing, so `time` is left with no statement; bash raises a syntax
   error there.
-* An expansion-produced `time` (`$(echo time) ls`) is an ordinary command name: the
-  reserved word is recognized at parse time only, where bash re-scans expansion results.
+* An expansion-produced `time` (`$(echo time) ls`) *is* timed: word 0 is expanded
+  before the dispatch, so the `time` handler sees the name bash's re-scan produces
+  (task #268). Only the *reserved word* is parse-time: `time` written in a
+  `$( … )` body is not a keyword for the parse.
 * `TIMEFORMAT` is ignored: the report is always one of the two layouts above.
 * A background job started inside the timed statement (`cmd &>&job`) is not reaped at
   report time, so its CPU is missing from `user`/`sys` (their contribution is ≈0). The
