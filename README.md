@@ -1241,6 +1241,12 @@ pipeline stage, an `if`/`for`/`case` body, a function call, `command`/`builtin`,
   leading arguments, arriving *before* the word's own arguments —
   `$(echo echo hi) x` runs `echo hi x`, and with `ea` (an executable), `eb` and
   `ed` in the directory, `./e* zz` runs `./ea` with `./eb ./ed zz`.
+- Those leading fields are ordinary command-line arguments afterwards, so they
+  take the global argv `%var` fd-substitution rule ("Passing file descriptors to
+  subprocess"): with `%s` bound, `signalfd %s 10` followed by
+  `$(echo ./ea; echo "$w")` with `w="%s"` runs `./ea` with the fd *number*
+  (bash, which has no fd vars, passes the text `%s`), and the literal form is
+  `\%var`.
 - An unquoted word 0 whose expansion produces no field is not a word, so the
   next field becomes the command: `$(true) echo hi` → `hi`. A *quoted* empty
   expansion is a word, so the command name is empty: `"$(true)" echo hi` reports
