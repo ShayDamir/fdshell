@@ -994,20 +994,72 @@ fn tilde_mid_word_untouched() {
 
 // Tilde expansion must keep the quote mask aligned: the expansion inherits
 // the tilde's bit, and later original bytes keep their own bits even though
-// the expansion consumed input from the shared peekable.
+// the expansion consumed input from the shared peekable. The tilde's own bit
+// is `false`, because a **quoted** leading `~` never reaches the arm at all
+// (the test below).
 #[test]
 fn tilde_expansion_keeps_mask_alignment() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"~/a");
     let mut cache = HashMap::new();
-    let (res, mask_out) = substitute_arg(&arg, &[true, false, false], &mut cache, &cell).unwrap();
+    let (res, mask_out) = substitute_arg(&arg, &[false, true, false], &mut cache, &cell).unwrap();
     let home = std::env::var("HOME").unwrap();
     assert_eq!(res.as_bytes().unwrap(), format!("{}/a", home).as_bytes());
-    assert!(mask_out.iter().take(home.len()).all(|&q| q));
+    assert!(mask_out.iter().take(home.len()).all(|&q| !q));
     assert!(
-        !mask_out.get(home.len()).copied().unwrap_or(true),
-        "the byte after the expansion must keep its own (unquoted) bit"
+        mask_out.get(home.len()).copied().unwrap_or(false),
+        "the byte after the expansion must keep its own (quoted) bit"
     );
+}
+
+// A quoted `~` is a literal byte: POSIX removes the quotes after tilde
+// expansion, and bash keeps `printf "[%s]" "~"` → `[~]` and
+// `printf "[%s]" "~/x"` → `[~/x]`. The mask's first bit is the gate, so the
+// arm must not run at all (task #269) — `expanded` stays clear.
+#[test]
+fn tilde_quoted_first_bit_is_literal() {
+    let cell = dummy_cell();
+    let mut expanded = true;
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"~"),
+        &[true],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"~");
+    assert_eq!(mask, vec![true]);
+    assert!(!expanded, "a quoted `~` runs no expansion arm");
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"~/x"),
+        &[true, true, true],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"~/x");
+    assert_eq!(mask, vec![true, true, true]);
+    assert!(!expanded);
+}
+
+// The gate is the *first* bit only: an unquoted `~` with a quoted tail
+// expands, as bash's `printf "[%s]" ~/x` prints `[<HOME>]`.
+#[test]
+fn tilde_quoted_tail_still_expands() {
+    let cell = dummy_cell();
+    let mut cache = HashMap::new();
+    let (res, _) = substitute_arg(
+        &ShortCStr::from(c"~/x"),
+        &[false, true, true],
+        &mut cache,
+        &cell,
+    )
+    .unwrap();
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(res.as_bytes().unwrap(), format!("{}/x", home).as_bytes());
 }
 
 // The `expanded` signal (task #133): field splitting applies to the result of

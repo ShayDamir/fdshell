@@ -62,7 +62,9 @@ fn shape(redirects: &[RedirectDef]) -> Vec<(i32, RedirectDirection, Vec<u8>)> {
             let target = match &r.source {
                 RedirectSource::Path { path, .. }
                 | RedirectSource::Var(path)
-                | RedirectSource::HereString(path) => path.as_bytes().unwrap_or(&[]).to_vec(),
+                | RedirectSource::HereString { word: path, .. } => {
+                    path.as_bytes().unwrap_or(&[]).to_vec()
+                }
                 RedirectSource::Dup(from) => format!("dup{from}").into_bytes(),
                 RedirectSource::Close => Vec::from(b"close".as_slice()),
                 RedirectSource::HereDoc { .. } => Vec::from(b"heredoc".as_slice()),

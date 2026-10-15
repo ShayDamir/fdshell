@@ -331,7 +331,10 @@ fn test_here_string_prefix_form() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<<hello").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"hello")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"hello", vec![false; 5])]
+    );
     assert!(cmd.args.is_empty());
 }
 
@@ -340,7 +343,57 @@ fn test_here_string_keeps_unquoted_spaces() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<<\"a b\"").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"a b")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"a b", vec![true; 3])]
+    );
+}
+
+#[test]
+fn parse_here_string_word_carries_its_quote_mask() {
+    // The attached form slices the operator token's mask at `<<<` (offset 3).
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<\"a\\ b\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])]
+    );
+    // An unquoted escape pair stays in the *token text* with both bytes
+    // unmasked (`\ ` never breaks the token), so the attached word is the
+    // unmasked `a\ b` (4 bytes: `a`, `\`, ` `, `b`) and keeps folding to `a b`,
+    // as bash does.
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<a\\ b").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"a\\ b", vec![false; 4])]
+    );
+    // A bare `<<<` takes the next token's mask verbatim.
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<< \"a\\ b\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])]
+    );
+}
+
+#[test]
+fn parse_here_string_mask_of_a_quoted_word_with_a_second_word() {
+    // The anti-off-by-one pair (task #217's rule, here on the here-string
+    // surface): the two words have **different** masks, so a slice shifted by
+    // one byte misreads one of them and the pair cannot agree.
+    let ParsedLine::Cmd(cmd) = parse(b"cat <<<\"a\\ b\" b\\ c").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])]
+    );
+    assert_eq!(cmd.args, vec![c"b\\ c".into()]);
+    assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
 }
 
 #[test]
@@ -463,7 +516,10 @@ fn test_here_string_bare_takes_next_token() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<< word").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"word")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"word", vec![false; 4])]
+    );
     assert!(cmd.args.is_empty());
 }
 
@@ -472,7 +528,10 @@ fn test_here_string_bare_at_eof_is_empty_word() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<<").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"", Vec::new())]
+    );
 }
 
 #[test]
@@ -2563,6 +2622,17 @@ fn case_simple() {
 }
 
 #[test]
+fn case_word_carries_its_quote_mask() {
+    // The word's mask travels to `case_exec` with the word (task #269), so the
+    // quoted escape pair is folded by the quoted arm and keeps its backslash.
+    let ParsedLine::Case(cb) = parse(b"case \"a\\ b\" in \"a b\") echo m;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.word, c"a\\ b".into());
+    assert_eq!(cb.word_mask, vec![true; 4]);
+}
+
+#[test]
 fn case_multiple_clauses() {
     let ParsedLine::Case(cb) = parse(b"case \"x\" in a) echo one;; b) echo two;; esac").unwrap()
     else {
@@ -3068,7 +3138,10 @@ fn parse_here_string_empty_quoted_word() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<<\"\"").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"", Vec::new())]
+    );
     assert!(cmd.args.is_empty());
 }
 
@@ -3078,7 +3151,10 @@ fn parse_here_string_empty_quoted_word_keeps_later_args() {
     let ParsedLine::Cmd(cmd) = parse(b"echo a <<<\"\" b").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_string(c"")]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(c"", Vec::new())]
+    );
     assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
 }
 

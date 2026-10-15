@@ -552,3 +552,32 @@ fn layout_escaped_operator_byte_is_not_an_operator() {
     let tokens = tokenize_statement(b"echo a\\< <<X").unwrap();
     assert_eq!(operator_count(&tokens), 1);
 }
+
+/// POSIX #4.2: in an expandable body a `\<newline>` pair is a line
+/// continuation, removed in the parse layer so the body's substitution (a
+/// quoted context, which keeps `\<char>`) never sees it.
+#[test]
+fn layout_strips_body_line_continuations() {
+    let s = specs(b"cat <<EOF\na\\\nb\nEOF\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"ab\n".to_vec()).unwrap());
+    assert!(s[0].expand);
+    // `\\` before the newline is a pair, so the newline is body data.
+    let s = specs(b"cat <<EOF\na\\\\\nb\nEOF\n");
+    assert_eq!(
+        s[0].body,
+        ShortCStr::from_vec(b"a\\\\\nb\n".to_vec()).unwrap()
+    );
+}
+
+/// A quoted body is verbatim bytes: no continuation is stripped from it.
+#[test]
+fn layout_quoted_body_keeps_its_continuation_pair() {
+    let s = specs(b"cat <<'EOF'\na\\\nb\nEOF\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(
+        s[0].body,
+        ShortCStr::from_vec(b"a\\\nb\n".to_vec()).unwrap()
+    );
+    assert!(!s[0].expand);
+}

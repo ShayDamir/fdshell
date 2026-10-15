@@ -112,7 +112,7 @@ fn here_string_expands_word_and_appends_newline() {
             sys::ImportedStr::new(c"hello".into(), sys::Trace::boundary(sys::Origin::Shell)),
         );
     }
-    let redirects = vec![RedirectDef::here_string(c"$x")];
+    let redirects = vec![RedirectDef::here_string(c"$x", vec![false; 2])];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
@@ -124,7 +124,7 @@ fn here_string_expands_word_and_appends_newline() {
 #[test]
 fn here_string_empty_word_is_bare_newline() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(c"")];
+    let redirects = vec![RedirectDef::here_string(c"", Vec::new())];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -135,7 +135,7 @@ fn here_string_empty_word_is_bare_newline() {
 #[test]
 fn here_string_reads_back_to_eof() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(c"abc")];
+    let redirects = vec![RedirectDef::here_string(c"abc", vec![false; 3])];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -143,6 +143,54 @@ fn here_string_reads_back_to_eof() {
     assert_eq!(n, 4);
     let n = dup_of(r).read(&mut buf).unwrap();
     assert_eq!(n, 0);
+}
+
+#[test]
+fn here_string_quoted_escape_pair_keeps_the_backslash() {
+    // `cat <<<"a\ b"`: the word's mask is all-quoted, so the POSIX 2.2.2 arm
+    // keeps the backslash of a `\<char>` pair that is not `\$`, `\\` or `` \` ``
+    // (bash prints `a\ b`; the empty mask printed `a b` — task #269).
+    let c = cell();
+    let redirects = vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let mut buf = [0u8; 16];
+    let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"a\\ b\n");
+}
+
+#[test]
+fn here_string_unquoted_escape_pair_folds_the_backslash() {
+    // The same word unmasked folds its escape pair (POSIX 2.2.1), the shape of
+    // `cat <<<a\ b`, where bash prints `a b` too.
+    let c = cell();
+    let redirects = vec![RedirectDef::here_string(c"a\\ b", Vec::new())];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let mut buf = [0u8; 16];
+    let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"a b\n");
+}
+
+#[test]
+fn here_doc_body_is_a_quoted_context() {
+    // An expandable body is expanded as a quoted context (POSIX 2.2 "the
+    // here-document is equivalent to double-quoting"): `a\ b` keeps its
+    // backslash, and `$( … )` still runs (bash: `a\ b`).
+    let c = cell();
+    let redirects = vec![RedirectDef::here_doc(c"a\\ b\n", true)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let mut buf = [0u8; 16];
+    let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"a\\ b\n");
+}
+
+#[test]
+fn here_doc_quoted_delimiter_body_stays_verbatim() {
+    let c = cell();
+    let redirects = vec![RedirectDef::here_doc(c"a\\ b $(echo hi)\n", false)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let mut buf = [0u8; 32];
+    let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"a\\ b $(echo hi)\n");
 }
 
 #[test]
