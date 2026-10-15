@@ -396,8 +396,8 @@ fn for_list_empty_dollar_at_is_one_iteration() {
     assert_eq!(out, "[]\n");
 }
 
-/// The whole-word backtick arm keeps working (task #216 owns moving backticks
-/// into the argument pipeline; this is its drift alarm), including the
+/// Whole-word backticks in a for list work through the argument pipeline
+/// (task #216 deleted the whole-word arm that used to own this), including the
 /// quoted-empty rule. Measured: `[hi]`, `[]` (one iteration), no iteration.
 #[test]
 fn for_list_whole_word_backtick_still_expands() {
@@ -425,8 +425,9 @@ fn for_list_quoted_backtick_is_never_split() {
     let (out, err, code) = run(r#"for w in "`echo a b`"; do printf "[%s]\n" "$w"; done"#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[a b]\n");
-    // The newline comes from a third command in the body: no escape is needed
-    // (a `\n` inside a quoted backtick body loses its backslash here — #216).
+    // The newline comes from a third command in the body: a `\n` escape cannot
+    // survive it — the child re-parses the body with its own tokenizer, whose
+    // unquoted `\n` pair folds to a literal `n` (both shells print `[xny]`).
     let (out, _err, code) =
         run(r#"for w in "`printf x; echo; printf y`"; do printf "[%s]\n" "$w"; done"#);
     assert_eq!(code, 0);
@@ -491,6 +492,38 @@ fn for_list_backtick_output_elides_trailing_empty_field() {
     let (out, _err, code) = run(r#"IFS=,; for w in `echo ",,"`; do printf "[%s]\n" "$w"; done"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[]\n[]\n");
+}
+
+/// Task #220 (fixed free by task #216): a whole-word backtick's fields are
+/// pathname-expanded, because the word now runs through the argument pipeline,
+/// whose `push_word` globs every field. The `$( … )` form is the reference
+/// shape — both give the same fields. Measured against `bash -c` 5.3.9 in a
+/// directory with `ab ac zz`: `[ab]`, `[ac]`, `[zz]`.
+#[test]
+fn for_list_backtick_fields_are_globbed() {
+    let dir = std::env::temp_dir().join(format!("fdshell-loops-glob-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["ab", "ac", "zz"] {
+        std::fs::write(dir.join(name), name.as_bytes()).unwrap();
+    }
+    let dir = dir.to_str().unwrap().to_string();
+    for script in [
+        r#"for w in `echo "*"`; do printf "[%s]\n" "$w"; done"#,
+        r#"for w in $(echo "*"); do printf "[%s]\n" "$w"; done"#,
+    ] {
+        let output = Command::new(BIN)
+            .current_dir(&dir)
+            .args(["-c", script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        let out = str::from_utf8(&output.stdout).unwrap().to_string();
+        let err = str::from_utf8(&output.stderr).unwrap().to_string();
+        assert_eq!(output.status.code().unwrap_or(-1), 0, "{script:?}: {err}");
+        assert_eq!(out, "[ab]\n[ac]\n[zz]\n", "{script:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Task #137: `&&` / `||` in a `while`/`until` condition is the loop's own cond

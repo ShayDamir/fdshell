@@ -310,8 +310,8 @@ fn escape_pair_in_arith_is_a_syntax_error() {
     );
 }
 
-/// POSIX #4.2: inside double quotes every `\<char>` other than `\$`/`\\` keeps
-/// the backslash, and `\"` yields a literal quote.
+/// POSIX #4.2: inside double quotes every `\<char>` other than
+/// `\$`/`\\`/`` \` `` keeps the backslash, and `\"` yields a literal quote.
 #[test]
 fn in_quote_escape_rules_are_unchanged() {
     let (out, _err, code) = run("builtin echo \"a\\ b\"");
@@ -326,6 +326,11 @@ fn in_quote_escape_rules_are_unchanged() {
     let (out, _err, code) = run("builtin echo \"a\\\\b\"");
     assert_eq!(code, 0);
     assert_eq!(out, "a\\b\n");
+    // `` \` `` collapses to a literal backtick, never a command substitution
+    // (task #216; killable only now that the pipeline expands backticks).
+    let (out, _err, code) = run("builtin echo \"a\\`b\"");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a`b\n");
 }
 
 /// An alias body runs the normal tokenizer, so an escape pair after the alias

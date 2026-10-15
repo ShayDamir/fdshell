@@ -411,11 +411,12 @@ fn group_opener_needs_a_word_start() {
     let (out, err, rc) = run("echo a{ b; }");
     assert_eq!((out.as_str(), rc), ("a{ b\n", 1));
     assert!(err.contains("\"}\" not found"), "{err}");
-    // A brace inside a backtick body is data. fdshell has no backtick command
-    // substitution, so the body text is printed (a pre-existing gap, pinned here
-    // for the scan-level guard).
+    // A brace inside a backtick body is data for this shell's scan: the region
+    // is one word, the brace never opens a *parent* group and `&& echo c` stays
+    // outside it. The body is the child's own text, so the child runs the group
+    // (task #216; measured against `bash -c` 5.3.9: `a`, `b`, `c`).
     let (out, _, rc) = run("echo `{ echo a; echo b; }` && echo c");
-    assert_eq!((out.as_str(), rc), ("`{ echo a; echo b; }`\nc\n", 0));
+    assert_eq!((out.as_str(), rc), ("a b\nc\n", 0));
 }
 
 /// A function name that is also a block keyword wins the scan: `if()` / `case()`

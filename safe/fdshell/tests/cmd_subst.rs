@@ -274,19 +274,27 @@ fn quoted_region_keeps_a_heredoc_inside_its_body() {
     assert_eq!(out, "x; y\n");
 }
 
-/// A quoted backtick region is scanned as one unit too: one word, exit 0, and
-/// the text stays literal (fdshell does not expand backticks at all — task #216
-/// owns the expansion; #130 only makes the scanning unit-sized).
+/// A quoted backtick region is scanned as one unit *and* expanded (task #216):
+/// the arm runs under the region's all-quoted mask, so its output is one word
+/// and `IFS` never applies. Measured against `bash -c` 5.3.9: `hi`, `[a b]`.
+///
+/// Accepted divergence (README "Nested regions inside double quotes"): the
+/// region scanner drops the quote bytes written *inside* a quoted body, exactly
+/// as it does in a `${ … }` body, so the child re-parses the body without them.
+/// `printf` shows it — bash runs `` `printf "q r"` `` with one argument,
+/// fdshell's child sees `printf q r` and prints `q`. `echo` hides the same
+/// difference because it rejoins its arguments with a space.
 #[test]
-fn quoted_backtick_region_is_one_literal_word() {
+fn quoted_backtick_region_expands_as_one_word() {
     let cases: &[(&str, &str)] = &[
-        ("echo \"`echo hi`\"", "`echo hi`\n"),
-        ("echo \"`printf \"q r\"`\"", "`printf q r`\n"),
-        (
-            "builtin printf \"[%s]\" \"`printf \"q r\"`\"",
-            "[`printf q r`]",
-        ),
-        ("echo \"`printf \"a; b\"`\"", "`printf a; b`\n"),
+        ("echo \"`echo hi`\"", "hi\n"),
+        ("builtin printf \"[%s]\" \"`echo a b`\"", "[a b]"),
+        ("echo \"`echo a b`\"", "a b\n"),
+        ("echo \"`printf x; echo; printf y`\"", "x\ny\n"),
+        ("echo \"`echo hi`x\"", "hix\n"),
+        ("echo x\"`echo hi`\"", "xhi\n"),
+        ("echo \"`printf \"q r\"`\"", "q\n"),
+        ("builtin printf \"[%s]\" \"`printf \"q r\"`\"", "[q]"),
     ];
     for (script, want) in cases {
         let (out, err, code) = run(script);
