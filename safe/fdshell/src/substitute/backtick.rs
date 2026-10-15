@@ -16,7 +16,7 @@ use crate::state::ShellState;
 /// child, and its output is pushed under `quoted` — the trigger byte's mask
 /// bit, which is what protects the output from splitting (LESSONS).
 pub(super) fn handle(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     out_mask: &mut Vec<bool>,
@@ -34,9 +34,7 @@ pub(super) fn handle(
 /// scan — exactly how a `$( … )` body is kept. End of input with no closer is
 /// reported as an unclosed backtick; the tokenizer pairs real input before
 /// this arm ever runs, so it is a defensive bound for a hand-fed iterator.
-fn scan_body(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
-) -> Result<ShortCStr, Report<ResolveError>> {
+fn scan_body(peek: &mut super::mask::Counting<'_>) -> Result<ShortCStr, Report<ResolveError>> {
     let mut body = ShortCStr::new();
     while let Some(b) = peek.next() {
         let escaped = match b {

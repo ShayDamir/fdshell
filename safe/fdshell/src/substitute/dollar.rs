@@ -7,11 +7,12 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 pub(crate) fn dollar_subst(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     mask: &[bool],
     start: usize,
+    limit: usize,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         Some(b'$') => {
@@ -42,10 +43,18 @@ pub(crate) fn dollar_subst(
             // `$0` is the program name; `$1, $2, ... $N` are the positionals.
             peek.next();
             let state = super::borrow_state(cell)?;
-            super::resolve::resolve_positional_index(c, peek, &state, out)?;
+            super::resolve::resolve_positional_index(c, peek, &state, out, limit)?;
         }
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
-            let name_scs = super::percent::collect_name(peek)?;
+            // A name never crosses out of its trigger byte's quote region
+            // (`"$v"bc` is the parameter `v` plus the literal `bc`), so a
+            // region that ends at the `$` leaves no name and the `$` is
+            // literal — the same rule `$'…'` and `$"…"` already follow.
+            if limit == 0 {
+                out.push(c"$");
+                return Ok(());
+            }
+            let name_scs = super::percent::collect_name(peek, limit)?;
             let state = super::borrow_state(cell)?;
             if name_scs.eq_bytes(b"_") {
                 // `$_`: the `_` variable set by the shell after each command.

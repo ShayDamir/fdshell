@@ -22,7 +22,7 @@ pub(super) fn leads(bytes: &[u8], mask: &[bool]) -> bool {
 /// `expanded` reports that `$HOME` was pushed: an unset `HOME` or a
 /// literal `~user` performed no expansion.
 pub(super) fn expand(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     idx: &mut usize,
     mask: &[bool],
     expanded: &mut bool,

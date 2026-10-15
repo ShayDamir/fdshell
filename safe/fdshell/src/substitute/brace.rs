@@ -7,7 +7,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 pub(crate) fn handle_brace(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     mask: &[bool],
     start: usize,
     cell: &ForkCell<ShellState>,
@@ -77,7 +77,7 @@ pub(crate) fn handle_brace(
 }
 
 fn read_until_close(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
 ) -> Result<(ShortCStr, bool), Report<ResolveError>> {
     let mut name = ShortCStr::new();
     let mut closed = false;

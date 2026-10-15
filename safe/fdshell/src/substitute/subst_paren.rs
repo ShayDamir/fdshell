@@ -6,14 +6,14 @@ use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-use super::mask::{Counting, push_expanded};
+use super::mask::push_expanded;
 use crate::error::resolve::ResolveError;
 use crate::paren_scan::scan_paren_body;
 use crate::state::ShellState;
 
 /// The caller consumed `$` and the first `(`; this handles the rest.
-pub(super) fn handle_dollar_paren<I: Iterator<Item = u8>>(
-    peek: &mut core::iter::Peekable<Counting<I>>,
+pub(super) fn handle_dollar_paren(
+    peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     out_mask: &mut Vec<bool>,
@@ -30,8 +30,8 @@ pub(super) fn handle_dollar_paren<I: Iterator<Item = u8>>(
 
 /// `$((…))`: the body scan starts at depth 2 — the inner `(` and the `)` that
 /// re-enters depth 2 stay inside the body (grouping the parser understands).
-fn arith_body<I: Iterator<Item = u8>>(
-    peek: &mut core::iter::Peekable<Counting<I>>,
+fn arith_body(
+    peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     out_mask: &mut Vec<bool>,

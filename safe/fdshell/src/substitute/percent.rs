@@ -7,17 +7,21 @@ use sys::ShortCStr;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
+/// The name of a `$name` / `%name` arm: a run of at most `limit` name bytes,
+/// greedy as bash's (`$vbc` is the parameter `vbc`). `limit` is the trigger
+/// byte's quote region, so a name never crosses out of its own region.
 pub(crate) fn collect_name(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
+    limit: usize,
 ) -> Result<ShortCStr, Report<ResolveError>> {
     let mut name = ShortCStr::new();
-    name.push_byte(peek.next().ok_or(ResolveError::RefNotFound)?)
-        .change_context(ResolveError::NulByte)?;
-    while let Some(&nc) = peek.peek()
-        && (nc.is_ascii_alphanumeric() || nc == b'_')
-    {
-        name.push_byte(nc).change_context(ResolveError::NulByte)?;
+    for _ in 0..limit {
+        let Some(&c) = peek.peek() else { break };
+        if !(c.is_ascii_alphanumeric() || c == b'_') {
+            break;
+        }
         peek.next();
+        name.push_byte(c).change_context(ResolveError::NulByte)?;
     }
     Ok(name)
 }
@@ -28,17 +32,20 @@ pub(crate) fn collect_name(
 /// escape — `%%` belongs to the `printf` builtin, which interprets it, so the
 /// shell must pass both bytes through (bash parity, task #155, LESSONS). The
 /// literal-`%` escape is the POSIX #4.1 pair outside quotes (`\%name`).
+/// `limit` caps the name at the trigger byte's quote region, the same cap the
+/// `$` arm applies (`"%a"b` is the fd `a` plus the literal `b`).
 pub(crate) fn percent_subst(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
     out: &mut ShortCStr,
+    limit: usize,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
         // `%?` is the `wait` arm's matched fd; a name in the fd namespace.
         Some(b'?') => wait_fd_subst(peek, cache, state, out)?,
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
-            let name_scs = collect_name(peek)?;
+            let name_scs = collect_name(peek, limit)?;
             if !write_fd(&name_scs, cache, state, out)? {
                 out.push(c"%");
                 out.push(&name_scs);
@@ -72,7 +79,7 @@ fn write_fd(
 
 /// Substitute the `wait` arm's matched fd bound under the reserved name `?`.
 fn wait_fd_subst(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     state: &ShellState,
     out: &mut ShortCStr,

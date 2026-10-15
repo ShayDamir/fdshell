@@ -45,23 +45,26 @@ impl ShellState {
 
 /// Expand `$N` from the digit run starting at `first_digit`: the index map,
 /// `$0` and the nounset rule live in `positional_value`, shared with the braced
-/// path so the two forms agree.
+/// path so the two forms agree. `limit` caps the run at the trigger byte's
+/// quote region, exactly as a variable name is capped (`"$1"2` is `$1` plus
+/// the literal `2`).
 pub(super) fn resolve_positional_index(
     first_digit: u8,
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut super::mask::Counting<'_>,
     state: &ShellState,
     out: &mut ShortCStr,
+    limit: usize,
 ) -> Result<(), Report<ResolveError>> {
     let mut num = ShortCStr::new();
     num.push_byte(first_digit)
         .change_context(ResolveError::Never)?;
-    while let Some(&nc) = peek.peek() {
-        if nc.is_ascii_digit() {
-            num.push_byte(nc).change_context(ResolveError::Never)?;
-            peek.next();
-        } else {
+    while num.len() < limit {
+        let Some(&nc) = peek.peek() else { break };
+        if !nc.is_ascii_digit() {
             break;
         }
+        peek.next();
+        num.push_byte(nc).change_context(ResolveError::Never)?;
     }
     let nounset = state.options & crate::options::NOUNSET != 0;
     if let Some(value) = state.positional_value(&num, nounset)? {

@@ -12,25 +12,28 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 /// The `%` arm: the state borrow ends before the caller realigns the mask.
+/// `limit` is the name cap of the trigger byte's quote region.
 pub(super) fn percent(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut crate::substitute::mask::Counting<'_>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
+    limit: usize,
 ) -> Result<(), Report<ResolveError>> {
     let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-    crate::substitute::percent::percent_subst(peek, cache, &state, out)
+    crate::substitute::percent::percent_subst(peek, cache, &state, out, limit)
 }
 
 /// The `$` arm (the `$(` arm is handled separately in the loop). `start` is the
 /// word index of the byte after `$`, so the `${…}` arm sees the mask under its
-/// own content bytes.
+/// own content bytes. `limit` caps a bare name at the trigger's quote region.
 pub(super) fn dollar(
-    peek: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
+    peek: &mut crate::substitute::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     mask: &[bool],
     start: usize,
+    limit: usize,
 ) -> Result<(), Report<ResolveError>> {
-    crate::substitute::dollar::dollar_subst(peek, cell, out, mask, start)
+    crate::substitute::dollar::dollar_subst(peek, cell, out, mask, start, limit)
 }

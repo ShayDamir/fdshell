@@ -3,14 +3,13 @@
 mod arms;
 
 use alloc::vec::Vec;
-use core::cell::Cell;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-use super::mask::{Counting, push_byte, realign};
+use super::mask::{Counting, push_byte, realign, region_len};
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
@@ -32,12 +31,7 @@ pub(super) fn substitute_arg_marked(
     let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
     let mut out = ShortCStr::new();
     let mut out_mask = Vec::new();
-    let consumed = Cell::new(0usize);
-    let mut peek = Counting {
-        inner: bytes.iter().copied(),
-        consumed: &consumed,
-    }
-    .peekable();
+    let mut peek = Counting::new(bytes.iter().copied());
     let mut idx = 0usize;
     *expanded = false;
     if super::tilde::leads(bytes, mask) {
@@ -45,6 +39,10 @@ pub(super) fn substitute_arg_marked(
     }
     while let Some(b) = peek.next() {
         let quoted = mask.get(idx).copied().unwrap_or(false);
+        // A name arm (`$name`, `%name`, `$N`) reads at most the quote region of
+        // its own trigger byte: `idx` is that byte's word index here, before
+        // the arm's peek-ahead moves it.
+        let limit = region_len(mask, idx).saturating_sub(1);
         idx += 1;
         match b {
             // Unquoted POSIX #4.1: `\X` removes the backslash and the escaped
@@ -79,8 +77,8 @@ pub(super) fn substitute_arg_marked(
             // (task #155). `realign` keeps the mask 1:1 for the literal `%`.
             b'%' => {
                 let before = out.len();
-                arms::percent(&mut peek, cache, cell, &mut out)?;
-                realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
+                arms::percent(&mut peek, cache, cell, &mut out, limit)?;
+                realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);
                 *expanded = true;
             }
             b'$' if peek.peek() == Some(&b'(') => {
@@ -92,22 +90,22 @@ pub(super) fn substitute_arg_marked(
                     &mut out_mask,
                     quoted,
                 )?;
-                idx = consumed.get();
+                idx = peek.consumed();
                 *expanded = true;
             }
             // `` ` … ` `` runs the same capture machinery as `$( … )`; the
             // trigger byte's mask bit protects the output from splitting.
             b'`' => {
                 super::backtick::handle(&mut peek, cell, &mut out, &mut out_mask, quoted)?;
-                idx = consumed.get();
+                idx = peek.consumed();
                 *expanded = true;
             }
             b'$' => {
                 let before = out.len();
                 // `idx` is the word index of the byte after `$` — the `{` of a
                 // `${…}` arm; `realign` re-syncs it to the consumed count.
-                arms::dollar(&mut peek, cell, &mut out, mask, idx)?;
-                realign(&mut idx, &consumed, &mut out_mask, before, &out, quoted);
+                arms::dollar(&mut peek, cell, &mut out, mask, idx, limit)?;
+                realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);
                 *expanded = true;
             }
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,

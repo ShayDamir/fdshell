@@ -13,10 +13,7 @@ mod nest;
 /// parens the caller already consumed, so the body ends at the first `)`
 /// bringing the count back to `depth`. Returns the body without that final `)`,
 /// or `None` if the input ends first.
-pub(crate) fn scan_paren_body(
-    bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
-    depth: u32,
-) -> Option<Vec<u8>> {
+pub(crate) fn scan_paren_body(bytes: &mut impl Iterator<Item = u8>, depth: u32) -> Option<Vec<u8>> {
     let mut body = Vec::new();
     let mut nest = Nest::new(depth);
     while let Some(c) = bytes.next() {
@@ -35,9 +32,7 @@ pub(crate) fn scan_paren_body(
 }
 
 /// Scan the body of a `$(…)` expression: one `(` consumed by the caller.
-pub(crate) fn scan_dollar_paren_body(
-    bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
-) -> Option<Vec<u8>> {
+pub(crate) fn scan_dollar_paren_body(bytes: &mut impl Iterator<Item = u8>) -> Option<Vec<u8>> {
     scan_paren_body(bytes, 1)
 }
 
