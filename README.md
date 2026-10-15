@@ -206,12 +206,26 @@ line two
 EOF
 ```
 
+An unquoted delimiter runs `$` / `$(…)` / backtick expansion in the body; a
+quoted delimiter makes the body literal:
+
+```shell
+cat <<EOF
+`echo hi` $(echo yo)
+EOF
+# → hi yo                       (unquoted: `…` and $( … ) expand)
+
+cat <<'EOF'
+`echo hi` $(echo yo)
+EOF
+# → `echo hi` $(echo yo)        (quoted: the body is literal)
+```
+
 Forms: `cmd <<DELIM` (attached), `cmd << DELIM` (separate word),
 `cmd <<"DELIM"` (quoted), and `cmd <<-DELIM` (the tab-stripping form: leading
 TABs are dropped from every body line and from the terminator line — spaces are
 kept, and a tab-indented terminator matches; the body is otherwise opaque as
-below). An unquoted delimiter runs `$` / `$(…)` / backtick expansion in the
-body; a quoted delimiter makes the body literal. `<<""` (empty quoted
+below). `<<""` (empty quoted
 delimiter) reads a body up to the next empty line. The delimiter word is a
 word, so it gets quote removal: every `"`/`'` byte is dropped in the same pass
 that folds its unquoted escape pairs (`<<E\OF` delimits `EOF`, `<<a'b'c`
@@ -993,8 +1007,8 @@ A quoted byte never splits, never globs, and never expands. Three forms:
   one empty word.
 - `"…"` (a **double-quote span**): both quote bytes are removed; `$`,
   backtick and `\` keep their meaning there, everything else is literal, and
-  `\$`/`\\` collapse to `$`/`\` while any other `\X` keeps its backslash
-  (POSIX 2.2.2).
+  `\$`/`\\`/`` \` `` collapse to `$`/`\`/`` ` `` while any other `\X` keeps
+  its backslash (POSIX 2.2.2).
 - `\X` outside quotes: an **escape pair** — the backslash is removed and `X`
   loses its special meaning (POSIX 2.2.1).
 
@@ -1016,6 +1030,9 @@ echo 'a b'c           → a bc
 echo 'a|b'            → a|b        (no pipeline)
 echo 'a;b'            → a;b        (no statement split)
 echo '$(echo hi)'     → $(echo hi) (no command substitution)
+echo '`echo hi`'      → `echo hi`  (no backtick command substitution)
+echo "`echo hi`"      → hi         (backtick command substitution runs)
+echo "\`"             → `          (an escaped backtick is literal)
 echo '{a,b}'          → {a,b}      (no brace expansion)
 echo 'ca?t'           → ca?t       (no globbing, with files `ca1`, `ca2`)
 echo '%%'             → %%         (no percent escape: `%%` is data)
@@ -1196,17 +1213,19 @@ x=a*b;    for w in "$x"    → the value, quoted bytes never glob
 for w in ~                 → $HOME
 for w in 1$((1+2))         → 13
 for w in $(echo a*)        → the files matching `a*`
+for w in `echo "*"`        → the files matching `*` (backtick fields glob too)
 for w in "a$(printf " b")c" → [a bc]     (one word, substituted)
 for w in "`echo a b`"      → [a b]       (a quoted substitution is one word)
 for w in `echo a b`        → [a] [b]     (unquoted: the output is IFS-split)
 ```
 
-The whole-word backtick arm (`` ` … ` `` as the entire word) is the one form
-the pipeline does not expand itself, and it follows the same split rule as
-every other expansion (task #132): a **fully quoted** substitution is exactly
-one iteration — its spaces, tabs and newlines are data and `IFS` never applies
-— and an unquoted one is split by the same `IFS` splitter, non-whitespace `IFS`
-bytes included, with `IFS=` disabling the split.
+A backtick word goes through the argument pipeline like any other (task #216),
+so it follows the same split rule as every other expansion (task #132): a
+**fully quoted** substitution is exactly one iteration — its spaces, tabs and
+newlines are data and `IFS` never applies — and an unquoted one is split by the
+same `IFS` splitter, non-whitespace `IFS` bytes included, with `IFS=` disabling
+the split. Its fields are pathname-expanded like any other expansion's
+(task #220).
 
 The quoted-empty rule is the argument rule: `for w in "$(true)"` is one empty
 iteration, `for w in $(true)` is none, `for w in "" x` iterates over `""` then
@@ -1248,20 +1267,33 @@ builtin printf "[%s]" "$(printf "a b")"      → [a b]       (one word)
 "$(printf "a b")" in `"a$(printf " b")c"`    → a bc        (text around it stays in the word)
 echo "${u:-"z w"}"                           → z w         (quotes dropped, spaces kept)
 echo "$(echo "$(printf "x && y")")"          → x && y      (region inside a region)
-echo "`printf "q r"`"                        → `printf q r` (scanned as a unit, literal)
+echo "`echo hi`"                             → hi          (a quoted backtick region expands)
+echo "`printf "q r"`"                        → q           (expanded; the body's quotes drop — see below)
+echo "$(echo `echo a`)"                      → a           (a backtick inside a $( … ) body)
 ```
 
 An unterminated region is a clean parse error whose caret is on the *outer*
 quote (the enclosing quote is what stays open); `echo "$"`, `echo "${"` and
 `echo "${x"` keep printing `$`, `${` and `${x` literally.
 
+A backtick region is expanded wherever the argument pipeline runs (command
+arguments, assignments, `local`/`let`, `set --`, here-strings, `case` words,
+heredoc bodies with an unquoted delimiter, and `for … in` lists) — task #216:
+the region runs through the same `cmd_subst` machinery as `$( … )`, and the
+output takes its split protection from the region's quote mask, so a quoted
+region is one word and an unquoted one splits on `IFS`.
+
 Accepted divergences (scanning is fixed, expansion is not):
 
-- a backtick body is expanded **only** as a whole-word `for … in` list word
-  (task #131) and its fields are never pathname-expanded (task #220); its
-  split rule is the pipeline's (task #132: a quoted substitution is one word,
-  an unquoted one splits on `IFS`); everywhere else a backtick stays literal
-  (task #216, which also owns moving the arm into the pipeline);
+- quotes written **inside** a quoted backtick body are markers, not content:
+  the region scanner drops them, so the body's quoted bytes reach the child
+  without their protection (the same rule as a `${ … }` body) —
+  `echo "`printf "q r"`"` prints `q` where bash prints `q r`, because the child
+  sees `printf q r`. Pairing is a naive left-to-right match on the text after
+  quote removal, where bash pairs raw bytes; and a backtick body nests no
+  `$( … )` at scan level (see the Limitations under "Heredocs");
+- the word-0 (command-name) and redirect-target positions are never
+  substituted, so a backtick there is a literal (task #268);
 - a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
   literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
   is taken verbatim (task #174);

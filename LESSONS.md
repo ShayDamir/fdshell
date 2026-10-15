@@ -290,7 +290,7 @@ The REPL's completeness check treats a trailing top-level `&&`/`||` as "keep rea
 In the REPL's trailing check (`repl/trailing.rs`, used by `repl/complete.rs`), `trailing_open` records a `&&`/`||` as the last top-level operator only when `is_bare(&state)` is true (no open quote, single-quote span, backtick, or `$( )` substitution). `is_bare` carries mutants no input can kill: the function's `-> true`, and each `&&`→`||` on its single expression (`!state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0`). They are equivalent because an in-quote / in-span / in-backtick / in-`$( )` `&&`/`||` can never be the *last* top-level operator with a whitespace tail: a balanced quote leaves a non-whitespace closing `"` (or `'`, backtick / `)`) after it, and an unbalanced one makes the buffer incomplete via the `in_quote` / `in_single` / `in_backtick` / `paren_depth` checks independently. The gate is dead weight for every input that reaches it — accepted equivalent mutants, recorded here so future `cargo mutants` runs and reviews do not re-flag them (the plan's "Mutant hygiene" note anticipated exactly this). Task #141 added the `!state.in_single` conjunct: it is the same class (an unterminated `'` is reported by the quote check in `trailing_open`, and a terminated span leaves a non-whitespace `'` tail), so the `in_single` mutants of `is_bare` are accepted as equivalent too.
 
 ## A single-quoted literal is stored in the double-quote escape form
-Task #141 gives the tokenizer a single-quote state, but the quote **mask** stays `Vec<bool>` — it is read by ~15 consumers (word splitting, globbing, param-op patterns, clobber/redirect detection, `word_quoted`, `args_quoted`, for-list words), and a per-byte quote *kind* would touch every one of them. So a `'…'` span is encoded as the text the **double-quote arms** of the word readers produce: `\` → `\\`, `$` → `\$`, every other byte verbatim, all with mask bits `true`. Word text is read by exactly two layers, and both decode that encoding to the literal bytes: `substitute/arg.rs` (quoted arm, POSIX 2.2.2: `\$`→`$`, `\\`→`\`, any other `\X` keeps the backslash) and `bytes/fold.rs::fold_mask` (the path for a word that never reaches substitution — a command name, a redirect target, a `builtin`/`hash` name), whose quoted arm #141 aligned with `arg.rs` so one rule decides both. The encoding is **mask-independent**: `\$`/`\\` fold to the same literals under the POSIX 2.2.1 (unquoted) *and* 2.2.2 (quoted) arms, so an assignment value is right with and without the mask — the paths are `run_dispatch/assign_str.rs` and `run_env::expand_one` (mask-carrying since task #217, and pinned mask-independent by `tests/env_assign.rs::single_quoted_value_is_mask_independent`) and the empty-mask `case_exec` (task #269); that is why #141 needs nothing from #217. Consequences to remember when touching a scanner: (1) inside `'…'` there is **no escape pair** (POSIX 2.2.3) — every `in_single` test must precede the `\` arm, or a span's `\` swallows the next byte (`echo 'a\'` → `a\`, `echo 'a\b'` → `a\b`); (2) `$'x'` is read as the POSIX-sh expansion — the `b'$' if peek == SQUOTE` arm pushes `\$` with mask `false`, so the word is `$x`, never a silent expansion of the variable `x` (bash's ANSI-C gives `x`; accepted divergence, task #156); (3) `fold` and `fold_quotes` read quote bytes off raw text and `fold_mask` reads the mask — keep all three in lockstep: they are one state machine (`fold_impl`) with three contracts (task #207 added `fold_quotes`, the raw-text **quote removal** a heredoc delimiter word gets; `fold` keeps the quote bytes and is now used by its pins alone).
+Task #141 gives the tokenizer a single-quote state, but the quote **mask** stays `Vec<bool>` — it is read by ~15 consumers (word splitting, globbing, param-op patterns, clobber/redirect detection, `word_quoted`, `args_quoted`, for-list words), and a per-byte quote *kind* would touch every one of them. So a `'…'` span is encoded as the text the **double-quote arms** of the word readers produce: `\` → `\\`, `$` → `\$`, `` ` `` → `` \` ``, every other byte verbatim, all with mask bits `true` (the `` ` `` pair was added by task #216: the substitution pass reads an unescaped backtick as a command substitution, so the literal backtick of a `'…'` span must reach it in the same escape encoding `$` uses). Word text is read by exactly two layers, and both decode that encoding to the literal bytes: `substitute/arg.rs` (quoted arm, POSIX 2.2.2: `\$`→`$`, `\\`→`\`, `` \` ``→`` ` ``, any other `\X` keeps the backslash) and `bytes/fold.rs::fold_mask` (the path for a word that never reaches substitution — a command name, a redirect target, a `builtin`/`hash` name), whose quoted arm #141 aligned with `arg.rs` so one rule decides both. The encoding is **mask-independent**: `\$`/`\\` fold to the same literals under the POSIX 2.2.1 (unquoted) *and* 2.2.2 (quoted) arms, so an assignment value is right with and without the mask — the paths are `run_dispatch/assign_str.rs` and `run_env::expand_one` (mask-carrying since task #217, and pinned mask-independent by `tests/env_assign.rs::single_quoted_value_is_mask_independent`) and the empty-mask `case_exec` (task #269); that is why #141 needs nothing from #217. Consequences to remember when touching a scanner: (1) inside `'…'` there is **no escape pair** (POSIX 2.2.3) — every `in_single` test must precede the `\` arm, or a span's `\` swallows the next byte (`echo 'a\'` → `a\`, `echo 'a\b'` → `a\b`); (2) `$'x'` is read as the POSIX-sh expansion — the `b'$' if peek == SQUOTE` arm pushes `\$` with mask `false`, so the word is `$x`, never a silent expansion of the variable `x` (bash's ANSI-C gives `x`; accepted divergence, task #156); (3) `fold` and `fold_quotes` read quote bytes off raw text and `fold_mask` reads the mask — keep all three in lockstep: they are one state machine (`fold_impl`) with three contracts (task #207 added `fold_quotes`, the raw-text **quote removal** a heredoc delimiter word gets; `fold` keeps the quote bytes and is now used by its pins alone).
 
 ## tokei 14 miscounts every line after a `b'"'` byte literal — quote bytes are `bytes::QUOTE`
 The LoC gate (`tools/complexity.py`, tokei 14.0.0) parses Rust, and its parser reads a `b'"'` byte literal as the *start of a string*: from that line on, comment and blank lines are swallowed into the "string" and miscounted as code. `parse/token/step.rs` measured 81 (true ~73) and `brace_expand/gobbler.rs` 89 (true ~77) purely from this artifact, which had parked them in the 80–90 band that task #85 clears. The fix is structural, not cosmetic: shared quote bytes live in `crate::bytes` (`pub(crate) const QUOTE: u8 = b'"'`), so the literal exists exactly once, in a file too small for the inflation to matter, and the scanners match on the named constant (`QUOTE => …`, `c == QUOTE`). Do not write `b'"'` (or reach for `0x22`) at scanner use sites: it re-introduces the miscount and silently re-inflates the file's LoC by every comment/blank line after it.
@@ -389,7 +389,7 @@ Task #109 implements "outside quotes `\X` removes the backslash and `X` loses it
 2. A pair jump must clamp to the slice end: `advance` returns `(i + 2).min(line.len())`. The unclamped jump lands past EOF, so the caller's end-of-line boundary never fires and the final word is dropped (`printf "[%s]" a\` printed nothing).
 3. Fold the escape pairs **in the same pass as** the quote removal, and never after it. The heredoc delimiter rule lives in `scan/heredoc/op.rs::Operator::new` → `bytes/fold.rs::fold_quotes` (one pass over the raw word: quote tracking folds every unquoted `\X` pair and drops every `"`/`'` **marker** byte), so the byte scanner and the token parser share one decision. The first attempt folded inside `matches`, which broke the quoted form: `<<"E\OF"` must delimit the literal `E\OF`, and folding after the quotes are gone cannot tell that the pair was quoted. Task #207 generalised the same reason to the quotes: stripping first cannot tell an escaped quote from a marker (`<<a\"b` delimits the literal `a"b`, quoted = false), so the fold and the strip share one state machine. `Operator` lost its lifetime (`delim: Vec<u8>`, `Clone`) for the same reason.
 4. `printf %s\n` is not a newline emitter: POSIX #4.1 folds `\n` to `n`, so bash prints `n` and fdshell now agrees. Integration tests that used `printf %s\n` to print one line per argument were pinning the old fdshell deviation; they now use the quoted `printf "%s\n"` form, which is what bash needs for the same result.
-5. **The escape pair must be folded at every word surface, not only at substitution.** bash folds the pair in *every* word at tokenization, so any surface that consumes raw word text and never substitutes it sees the folded text: `e\cho hi` runs `echo`, `echo hi > a\*b` writes `a*b`, `for x in a\ b` binds one word, `exec e\cho hi` replaces the shell with `echo`, `timeout 1 e\cho hi` runs `echo`, `hash a\*` finds the `PATH` file `a*`. The tool is `bytes::fold::fold_mask(bytes, mask)` / `fold_word(word, mask)` — the raw `fold` cannot be used on word text, because the tokenizer strips the `"` bytes from it, so the quote state must come from the word's mask. Surfaces folded (each folds the word *and* its aligned mask): `parse/command_args.rs::finish_command` (word 0, folded once at parse — that single point feeds the command-name glob, `exec::resolve_path`, builtin/`command`/`builtin`-keyword dispatch, `intercept` dispatch, the function lookup, `set --`, `prehash`, xtrace and `argv[0]`), `redirect/open.rs::redirect_target`, `replacer/external.rs` + `replacer.rs` (the `exec`/`become` command word and the `builtin` keyword's name), `intercept/timeout_cmd/parse.rs` (`timeout`'s target word, which the sub-`CommandLine` looks up), and `intercept/hash_cmd.rs` + `hash_cmd/pin.rs` (`hash`'s name word, its pin path, and the `hash -r` name list — the table is keyed by the *folded* name because `prehash` stores word 0 folded, so a raw `a\*` query misses the key). Surfaces deliberately NOT folded: the arith lexers (`$((1\+2))` stays a syntax error, as in bash) and the whole-word backtick arm of the `for … in` list (its body is command text, never a word surface) — fold only the surfaces that consume word text, and never before a check that keys on the raw bytes. The for-list itself stopped being a fold surface in task #131: it delegates its words to `substitute/arg.rs`, which folds the pair in its own `\\` arms, so `for x in a\ b` binds one word through the substitution pipeline (`tests/backslash.rs::for_list_words_fold_escape_pairs`). A folded word must carry mask `true` on the escaped byte, otherwise the folded `*` becomes a pattern again. The fold's `ShortCStrError` is a NUL-free invariant, so it chains onto the domain's `Never` variant (never `ExecFailed`). Pin every surface with a bash-parity test (see `tests/backslash.rs`); the accepted divergences of the same design are the alias name lookup, the `builtin`/`command`/`if` keyword recognition, and the identifier grammar — all three run on the raw token text, so an escaped keyword word is a command name (`b\uiltin echo hi` looks up `builtin`, rc 1, where bash prints `hi`), pinned by `alias_name_keeps_the_escape_pair` and `keyword_recognition_runs_on_the_raw_token`.
+5. **The escape pair must be folded at every word surface, not only at substitution.** bash folds the pair in *every* word at tokenization, so any surface that consumes raw word text and never substitutes it sees the folded text: `e\cho hi` runs `echo`, `echo hi > a\*b` writes `a*b`, `for x in a\ b` binds one word, `exec e\cho hi` replaces the shell with `echo`, `timeout 1 e\cho hi` runs `echo`, `hash a\*` finds the `PATH` file `a*`. The tool is `bytes::fold::fold_mask(bytes, mask)` / `fold_word(word, mask)` — the raw `fold` cannot be used on word text, because the tokenizer strips the `"` bytes from it, so the quote state must come from the word's mask. Surfaces folded (each folds the word *and* its aligned mask): `parse/command_args.rs::finish_command` (word 0, folded once at parse — that single point feeds the command-name glob, `exec::resolve_path`, builtin/`command`/`builtin`-keyword dispatch, `intercept` dispatch, the function lookup, `set --`, `prehash`, xtrace and `argv[0]`), `redirect/open.rs::redirect_target`, `replacer/external.rs` + `replacer.rs` (the `exec`/`become` command word and the `builtin` keyword's name), `intercept/timeout_cmd/parse.rs` (`timeout`'s target word, which the sub-`CommandLine` looks up), and `intercept/hash_cmd.rs` + `hash_cmd/pin.rs` (`hash`'s name word, its pin path, and the `hash -r` name list — the table is keyed by the *folded* name because `prehash` stores word 0 folded, so a raw `a\*` query misses the key). Surfaces deliberately NOT folded: the arith lexers (`$((1\+2))` stays a syntax error, as in bash) and a backtick command-substitution body (its bytes are command text, never a word surface — task #216 now expands the body through the argument pipeline, but the body itself reaches the child verbatim) — fold only the surfaces that consume word text, and never before a check that keys on the raw bytes. The for-list itself stopped being a fold surface in task #131: it delegates its words to `substitute/arg.rs`, which folds the pair in its own `\\` arms, so `for x in a\ b` binds one word through the substitution pipeline (`tests/backslash.rs::for_list_words_fold_escape_pairs`). A folded word must carry mask `true` on the escaped byte, otherwise the folded `*` becomes a pattern again. The fold's `ShortCStrError` is a NUL-free invariant, so it chains onto the domain's `Never` variant (never `ExecFailed`). Pin every surface with a bash-parity test (see `tests/backslash.rs`); the accepted divergences of the same design are the alias name lookup, the `builtin`/`command`/`if` keyword recognition, and the identifier grammar — all three run on the raw token text, so an escaped keyword word is a command name (`b\uiltin echo hi` looks up `builtin`, rc 1, where bash prints `hi`), pinned by `alias_name_keeps_the_escape_pair` and `keyword_recognition_runs_on_the_raw_token`.
 
 ## Four mutants of `scan/heredoc/ops.rs` are equivalent, and one neighbour of `lines.rs` is (accepted, do not chase)
 The `<<` operator scan walks the run with `advance`-driven bounds, and four of its mutants are unobservable, verified by analysis and by `cargo mutants` runs (the loop-bound three are on lines untouched by task #109). Recorded so future mutant runs do not re-flag them. Verify them with a **focused** `cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs --iterate` run: this file's build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores them as *caught* (the per-mutant timeout expires before the mutant is tested) — the sweep's count is not the truth for this file.
@@ -942,8 +942,10 @@ decision**, set by what consumes the body downstream:
   content verbatim and `param_op::colon::apply` pushes it verbatim, so kept
   quotes would print literally. `"${u:-"z w"}"` must expand to `z w` (bash
   parity); kept quotes give `z w` with literal `"` around it.
-* backtick — dropped, for the same reason (the body is taken verbatim; the
-  expansion itself is task #216).
+* backtick — dropped, for the same reason: task #216 expands the body through
+  the same `cmd_subst` path as `$( … )`, so the body text is handed to the
+  child verbatim (the drop is the accepted divergence: `echo "`printf "q r"`"`
+  prints `q`, bash `q r`).
 
 Rule: write the reason next to the choice. The same byte is a marker in one
 region type and content in another; a "consistent" rule applied to all three
@@ -972,10 +974,9 @@ list needs all three, so `expand.rs::expand_for_words` delegates to
 `substitute_args` on `slice::from_ref(word)` — one call per word — and classifies
 the provenance from the **source** bytes in that loop: `Origin::CommandOutput` is
 decided by `run_origin::has_cmd_subst` on the word as written, and a whole-list
-call would classify the *expanded* text, which no longer contains `$(`
-(`explain` then reports a literal for a `$(…)` word). A special form the
-argument pipeline cannot express (the whole-word backtick arm, until task #216)
-can only be pre-armed per word too. Cost: a fresh `%fd` export cache per word —
+call would classify the *expanded* text, which no longer contains `$(` or `` ` ``
+(`explain` then reports a literal for a `$(…)` / backtick word). Cost: a fresh
+`%fd` export cache per word —
 nothing cross-word depends on it. The per-word loop must not hold a `RefCell`
 borrow across the call (LESSONS.md #56/#119): `substitute_args` forks inside a
 `$(…)` and reborrows for `nullglob`.
@@ -987,7 +988,11 @@ CR and LF, which was wrong twice over: it split **quoted** output (bash keeps a
 quoted substitution whole, spaces *and* newlines), and it ignored `IFS`
 entirely — `IFS=:; for w in \`printf %s "a:b"\`` gave one word where bash gives
 two, `IFS=; for w in \`echo a b\`` gave two where bash gives one, and CR split
-where bash keeps it.
+where bash keeps it. Task #216 deleted that arm and moved the form into
+`substitute/arg.rs`, so the whole argument pipeline now shares the one rule —
+the arm is gone precisely because a per-surface splitter is a second copy of
+the mask rule (see "A command-substitution form belongs in the argument
+pipeline").
 
 Rule: the **word's** quote mask decides, never the output's bytes — command
 output carries no quote protection of its own, so an unquoted substitution goes
@@ -1002,8 +1007,36 @@ Test design for `IFS` pins: quote the value inside the substitution body
 (`IFS=:` + `` `printf %s "a:b"` ``, never `` `printf a:b` `` — a literal word is
 never split, task #133); single quotes are unavailable; a real TAB
 needs `printf %b` (`%s` keeps `\t` as text in both shells); and a **quoted**
-backtick body must not nest quotes (the scanner drops them — #216), so get a
-newline from several commands: `` `printf x; echo; printf y` ``.
+backtick body must not nest quotes (the region scanner drops them — the
+accepted divergence of task #216), so get a newline from several commands:
+`` `printf x; echo; printf y` ``.
+
+## A command-substitution form belongs in the argument pipeline, not in a per-surface arm
+Task #216 added backtick expansion. The tempting shortcut was a per-surface arm
+in the `for … in` list (`expand/backtick.rs`, which recognized a whole-word
+`` ` … ` `` and ran it) — it existed only because `substitute/arg.rs` had no
+backtick arm. That arm diverged: its fields skipped pathname expansion
+(task #220), so `for w in` a `` `echo "*"` `` word never globbed while the
+`$(echo "*")` shape did, and any second surface that substitutes (assignments,
+`local`/`let`, `set --`, here-strings, `case` words, heredoc bodies) would have
+needed its own copy. The fix is one arm in the substitution loop, mirroring the
+`$( … )` arm: scan the body, run it through `cmd_subst::run_and_capture`, push
+the output with `mask::push_expanded(out, out_mask, &output, quoted)`. Every
+surface gets the form with that one arm, and the mask / split / glob /
+quoted-empty / `expanded`-gate rules apply uniformly, for free.
+
+The deleted arm's doc comment had already commanded this ("Delete this arm when
+task #216 expands backticks inside `substitute_arg`") — a per-surface arm for a
+form the pipeline should own is a staging device, so write that intent in the
+comment and delete the arm (and its unit tests, now covered by the pipeline's)
+when the pipeline arm lands. Watch the file budget: the arm pushed
+`substitute/arg.rs` into the 80–90 LoC band; keep the arm lean (one call + the
+`idx = consumed.get()` re-sync) and prefer a helper module
+(`substitute/backtick.rs`) over growing `arg.rs` past the limit.
+
+Rule: implement a shell expansion **once**, in the pipeline every surface
+already shares; a per-surface arm is a bug generator (divergence on the rules
+the pipeline applies) and a coverage liability.
 
 ## Field splitting is an expansion-only rule; a text-comparison proxy for "did it expand" is unsound
 `IFS=,; printf "[%s]\n" a,b` printed `[a] [b]` and `IFS=:; set -- a:b; echo $#`
@@ -1014,8 +1047,8 @@ splits the **result of an expansion**, and a word with no `$`, no `%` and no
 leading `~` has no result to split: it is one field.
 
 Rule: track the signal, never infer it from the text. `substitute_arg_marked`
-takes `expanded: &mut bool` as an **output** and sets it in exactly the four
-expansion arms (`~` only when `$HOME` was pushed, `%`, `$(`, `$`). Every text
+takes `expanded: &mut bool` as an **output** and sets it in exactly the five
+expansion arms (`~` only when `$HOME` was pushed, `%`, `$(`, `` ` ``, `$`). Every text
 proxy flips a real case: with `IFS=,` and `a=,`, the word `$a` (2 bytes) expands
 to 1 byte, so `out.len() != arg.len()` calls it unexpanded and yields `$,`
 where bash yields one empty field; with `a=b,` the word `$a` (2 bytes) expands
