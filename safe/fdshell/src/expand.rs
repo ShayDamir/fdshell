@@ -1,4 +1,3 @@
-mod backtick;
 mod fields;
 
 use alloc::vec::Vec;
@@ -12,9 +11,10 @@ use crate::state::ShellState;
 use crate::substitute::substitute_args;
 
 /// The `for … in` word list, expanded word by word: each word goes through
-/// the argument substitution pipeline (tilde, parameter, command,
-/// arithmetic, `%fd`, `$@`), is IFS-split by its own quote mask, and every
-/// field is pathname-expanded — each resulting field is one iteration.
+/// the argument substitution pipeline (tilde, parameter, command — `$(…)` and
+/// `` ` … ` `` — arithmetic, `%fd`, `$@`), is IFS-split by its own quote mask,
+/// and every field is pathname-expanded — each resulting field is one
+/// iteration.
 ///
 /// The list is expanded per word, never whole: `substitute_args` returns a
 /// flat field vector, so a whole-list call would lose the word→fields
@@ -42,18 +42,15 @@ pub(crate) fn expand_for_words(
     Ok(out)
 }
 
-/// One for-list word: a whole-word backtick is the only form the argument
-/// pipeline does not expand (task #216); every other word is substituted.
+/// One for-list word: every word goes through the argument substitution
+/// pipeline, so a backtick word is expanded there like every other surface
+/// (task #216), and its fields are pathname-expanded by `substitute_args`.
 fn expand_word(
     word: &ShortCStr,
     mask: &Vec<bool>,
     quoted: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
-    let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
-    if fields::is_backtick(bs) {
-        return backtick::expand(word, mask, quoted, cell);
-    }
     substitute_args(
         core::slice::from_ref(word),
         core::slice::from_ref(mask),

@@ -26,25 +26,11 @@ impl State {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
+                    // The escape pair is kept verbatim, like `scan_backtick`'s
+                    // body: the backslash shields the byte in this scan and
+                    // reaches the child, which re-parses the body quote-aware
+                    // (so `` \` `` is a literal backtick, never a closer).
                     match bytes.next() {
-                        Some(b'`') => {
-                            self.pos += 1;
-                            self.cur
-                                .push_byte(b'`')
-                                .change_context(ParseError::InvalidChar { ch: 0 })?;
-                            self.mask.push(false);
-                        }
-                        Some(b'\\') => {
-                            self.pos += 1;
-                            self.cur
-                                .push_byte(b'\\')
-                                .change_context(ParseError::InvalidChar { ch: 0 })?;
-                            self.mask.push(false);
-                            self.cur
-                                .push_byte(b'\\')
-                                .change_context(ParseError::InvalidChar { ch: 0 })?;
-                            self.mask.push(false);
-                        }
                         Some(c) => {
                             self.pos += 1;
                             self.cur

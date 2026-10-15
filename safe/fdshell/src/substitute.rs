@@ -1,4 +1,5 @@
 mod arg;
+mod backtick;
 mod brace;
 mod dollar;
 mod mask;
@@ -12,7 +13,6 @@ mod subst_paren;
 mod tilde;
 mod words;
 
-pub(crate) use split::split_word;
 pub use words::substitute_args;
 
 use alloc::vec::Vec;

@@ -19,6 +19,8 @@ pub(crate) enum ResolveError {
     NulByte,
     /// unclosed subexpression parenthesis
     UnclosedParen,
+    /// unclosed backtick command substitution
+    UnclosedBacktick,
     /// index or value too large for type
     TooLarge,
     /// arithmetic expression has a syntax error

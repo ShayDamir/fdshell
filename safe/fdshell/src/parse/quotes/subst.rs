@@ -74,7 +74,8 @@ pub(super) fn brace(
 
 /// Read a `` ` … ` `` region inside double quotes, terminated by the first
 /// unescaped, unquoted backtick; its quotes are dropped like the `${ … }`
-/// body. fdshell never expands backticks (task #216): the text is literal.
+/// body. The region is one quoted unit, so the substitution pass expands it as
+/// a backtick arm under an all-quoted mask — its output can never split.
 pub(super) fn backtick(
     st: &mut State,
     bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,

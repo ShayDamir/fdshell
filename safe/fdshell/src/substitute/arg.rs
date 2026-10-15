@@ -1,4 +1,4 @@
-//! Single-argument substitution — handles ~, %, $(), $((…)), and $.
+//! Single-argument substitution — handles ~, %, $(), `` ` … ` ``, $((…)), and $.
 
 mod arms;
 
@@ -61,10 +61,12 @@ pub(super) fn substitute_arg_marked(
                 }
                 None => push_byte(&mut out, &mut out_mask, b'\\', false)?,
             },
-            // Quoted POSIX #4.2: `\$` and `\\` drop the backslash; any other
-            // `\<char>` keeps it.
+            // Quoted POSIX #4.2: `\$`, `\\` and `` \` `` drop the backslash;
+            // any other `\<char>` keeps it. The backtick pair is the encoding
+            // of a literal backtick (single-quote spans and `"\`"`), so the
+            // backtick arm never sees a byte that is not a region delimiter.
             b'\\' => match peek.peek() {
-                Some(&c @ (b'$' | b'\\')) => {
+                Some(&c @ (b'$' | b'\\' | b'`')) => {
                     peek.next();
                     idx += 1;
                     push_byte(&mut out, &mut out_mask, c, quoted)?;
@@ -90,6 +92,13 @@ pub(super) fn substitute_arg_marked(
                     &mut out_mask,
                     quoted,
                 )?;
+                idx = consumed.get();
+                *expanded = true;
+            }
+            // `` ` … ` `` runs the same capture machinery as `$( … )`; the
+            // trigger byte's mask bit protects the output from splitting.
+            b'`' => {
+                super::backtick::handle(&mut peek, cell, &mut out, &mut out_mask, quoted)?;
                 idx = consumed.get();
                 *expanded = true;
             }

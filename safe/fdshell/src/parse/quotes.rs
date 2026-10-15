@@ -37,13 +37,15 @@ impl State {
                     return Err(report_unexpected_eof(line, self.pos));
                 };
                 self.pos += 1;
-                // `\<newline>` is line continuation (both bytes removed); `\` before
-                // `"` or a backtick escapes that char; `\\` and `\$` keep both bytes
-                // so substitution resolves them (`\\`→`\`, `\$`→a literal,
-                // unexpanded `$`); any other `\<char>` keeps the backslash literally.
+                // `\<newline>` is line continuation (both bytes removed); `\`
+                // before `"` escapes that char; `\\`, `\$` and `` \` `` keep both
+                // bytes so substitution resolves them (`\\`→`\`, `\$`→a literal,
+                // unexpanded `$`, `` \` ``→a literal backtick that is never a
+                // command-substitution delimiter — task #216); any other `\<char>`
+                // keeps the backslash literally.
                 match c {
                     b'\n' => Ok(true),
-                    b'"' | b'`' => {
+                    b'"' => {
                         self.cur
                             .push_byte(c)
                             .change_context(ParseError::InvalidChar { ch: 0 })?;

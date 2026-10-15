@@ -89,8 +89,10 @@ fn quoted_brace_region_drops_its_inner_quotes() {
     );
 }
 
-// The backtick region behaves the same; fdshell never expands backticks
-// (task #216), so only the scanning shape is pinned.
+// The backtick region is scanned as the same unit: delimiters kept, inner
+// quotes dropped, one mask-`true` word. Its expansion is task #216, pinned in
+// `tests/backtick.rs` / `tests/cmd_subst.rs`; here only the scanning shape is
+// pinned.
 #[test]
 fn quoted_backtick_region_is_one_word() {
     assert_eq!(text_of(b"\"`printf \"q r\"`\""), b"`printf q r`".to_vec());

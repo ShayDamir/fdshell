@@ -1779,9 +1779,12 @@ fn tokenize_dollar_paren_nested() {
 
 #[test]
 fn tokenize_backtick_escape_positions() {
+    // The body keeps every escape pair verbatim (`scan_backtick`'s rule): the
+    // backslash shields the byte in this scan, and the child that runs the
+    // body re-parses the pair as its own literal.
     let result = token::tokenize(b"`a\\`\\\\\\z` b").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"`a`\\\\\\z`".into());
+    assert_eq!(result[0].0, c"`a\\`\\\\\\z`".into());
     assert_eq!(result[0].1, 0);
     assert_eq!(result[1].0, c"b".into());
     assert_eq!(result[1].1, 10);
@@ -1874,11 +1877,13 @@ fn tokenize_dquote_backslash_non_special_preserved() {
 
 #[test]
 fn tokenize_dquote_backslash_before_special_dropped() {
-    // `\"` and `` \` `` drop the backslash; `\\` and `\$` keep both bytes so
-    // substitution resolves them.
+    // `\"` drops the backslash; `\\`, `\$` and `` \` `` keep both bytes so
+    // substitution resolves them (`\$`→an unexpanded `$`, `\\`→`\`, and
+    // `` \` ``→a literal backtick that is never a command-substitution
+    // delimiter — task #216).
     let cases = [
         (b"\"a\\\"b\"", c"a\"b"),
-        (b"\"a\\`b\"", c"a`b"),
+        (b"\"a\\`b\"", c"a\\`b"),
         (b"\"a\\\\b\"", c"a\\\\b"),
         (b"\"a\\$b\"", c"a\\$b"),
     ];

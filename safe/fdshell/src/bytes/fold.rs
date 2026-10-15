@@ -90,12 +90,12 @@ pub(crate) fn fold_mask(bytes: &[u8], mask: &[bool]) -> (Vec<u8>, Vec<bool>) {
                 out_mask.push(true);
                 i += 2;
             }
-            // Quoted `\$`/`\\`: POSIX #4.2 drops the backslash. This is the
-            // arm `substitute/arg.rs` runs on a word that *does* go through
-            // substitution, so a command name, a redirect target or a builtin
-            // name sees the same text either way (task #141's single-quote
-            // encoding relies on that).
-            Some(&c @ (b'$' | b'\\')) if b == b'\\' => {
+            // Quoted `\$`, `\\` and `` \` ``: POSIX #4.2 drops the backslash.
+            // This is the arm `substitute/arg.rs` runs on a word that *does*
+            // go through substitution, so a command name, a redirect target or
+            // a builtin name sees the same text either way (task #141's
+            // single-quote encoding relies on that).
+            Some(&c @ (b'$' | b'\\' | b'`')) if b == b'\\' => {
                 out.push(c);
                 out_mask.push(quoted);
                 i += 2;

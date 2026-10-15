@@ -3,12 +3,14 @@
 //! A `'…'` span contributes literal bytes to the word and mask bits `true` —
 //! exactly the double-quote meaning: the bytes are protected from IFS splitting
 //! and globbing. The mask carries no quote *kind*, so the literal is written in
-//! the double-quote escape form (`\` → `\\`, `$` → `\$`, any other byte
-//! verbatim): both readers of word text (`substitute/arg.rs`'s quoted arm,
-//! `bytes/fold.rs::fold_mask`) fold those pairs back to the literal byte, and
-//! the unquoted arms fold them the same way, so the encoding is correct with
-//! and without the mask (LESSONS: a single-quoted literal is stored in the
-//! double-quote escape form).
+//! the double-quote escape form (`\` → `\\`, `$` → `\$`, `` ` `` → `` \` ``,
+//! any other byte verbatim): both readers of word text (`substitute/arg.rs`'s
+//! quoted arm, `bytes/fold.rs::fold_mask`) fold those pairs back to the literal
+//! byte, and the unquoted arms fold them the same way, so the encoding is
+//! correct with and without the mask (LESSONS: a single-quoted literal is
+//! stored in the double-quote escape form). A backtick needs the pair for the
+//! same reason as `$`: without it the substitution pass would read the byte as
+//! a command-substitution delimiter (task #216).
 
 use super::State;
 use crate::bytes::SQUOTE;
@@ -32,12 +34,12 @@ impl State {
     /// Handle one byte of an open `'…'` span: returns `false` for the closing
     /// quote. Inside the span a backslash is literal (POSIX §2.2.3 — no escape
     /// pair, no line continuation), and `$` and backticks start no expansion;
-    /// `\` and `$` go in as the escape pair their reader folds back.
+    /// `\`, `$` and `` ` `` go in as the escape pair their reader folds back.
     pub(super) fn single_char(&mut self, b: u8) -> Result<bool, Report<ParseError>> {
         if b == SQUOTE {
             return Ok(false);
         }
-        if matches!(b, b'\\' | b'$') {
+        if matches!(b, b'\\' | b'$' | b'`') {
             self.push_quoted(b'\\')?;
         }
         self.push_quoted(b)?;
