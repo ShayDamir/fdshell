@@ -454,7 +454,7 @@ fn fully_quoted_dollar_at_no_positionals_is_no_positionals() {
     let (out, err, code) = run(r#"set --; set -- "$@" "$@"; echo $#"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "0\n");
-    // `"a$@"`-style embedding keeps the join path: one word `x`.
+    // The glued spelling `"$@"x` is one word `x` (bash), so the pair has one.
     let (out, err, code) = run(r#"set --; set -- "$@"x "$@"; echo $#"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "1\n");
