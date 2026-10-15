@@ -24,9 +24,15 @@ pub struct CommandLine {
     /// Dispatch prefix for the command word (`builtin`/`command` keyword).
     pub prefix: BuiltinPrefix,
     pub command: ShortCStr,
-    /// Per-byte quote mask for the command word (word 0), parallel to it;
-    /// its unquoted pattern bytes glob the command name (bash field model).
+    /// Per-byte quote mask for the command word (word 0), parallel to it.
+    /// Word 0 is expanded by `command_word` with this mask (substitution, IFS
+    /// splitting, pathname expansion); after the expansion the child sees a
+    /// fully-quoted mask, so its word-0 rules are no-ops on the name.
     pub command_mask: Vec<bool>,
+    /// Whether word 0's raw span contained quotes (word 0's counterpart of
+    /// `args_quoted`, see `parse::word_quoted`): the quoted-empty rule —
+    /// `"$(true)"` has no mask bit that says it, only the span does.
+    pub command_quoted: bool,
     /// Leading `NAME=value` words scoped to this command (POSIX 2.9.1): raw
     /// value words, unexpanded; applied to the command's environment only.
     /// Each value carries its own per-byte quote mask — the word mask sliced

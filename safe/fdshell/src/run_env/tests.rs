@@ -134,6 +134,7 @@ fn cmd_with_assign(name: &str, value: &str, mask: Vec<bool>) -> CommandLine {
         prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![Assign {
             name: ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap(),
             value: ShortCStr::from_vec(value.as_bytes().to_vec()).unwrap(),
@@ -171,6 +172,7 @@ fn expand_expands_value_words_against_state() {
         prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![Assign {
             name: ShortCStr::from_vec(b"FOO".to_vec()).unwrap(),
             value: ShortCStr::from_vec(b"$A".to_vec()).unwrap(),

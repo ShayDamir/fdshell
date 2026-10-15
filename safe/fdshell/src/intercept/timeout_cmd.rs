@@ -27,6 +27,7 @@ pub(crate) fn run_timeout(
         prefix: BuiltinPrefix::None,
         command: cfg.command,
         command_mask: cfg.command_mask,
+        command_quoted: cfg.command_quoted,
         // A scoped prefix on `timeout` itself rides in the forked child's
         // inherited state, not in this sub-command line.
         env_assigns: vec![],
@@ -38,6 +39,10 @@ pub(crate) fn run_timeout(
         pidvar: None,
         bg_force: false,
     };
+    // The target word is word 0, so it is expanded exactly like a command word
+    // — substitution, IFS splitting, globbing — before the launch (task #268).
+    let subcmdline = crate::command_word::expand(&subcmdline, cell)?;
+    let subcmdline = subcmdline.into_owned();
     let outcome = crate::launch::launch(cell, &subcmdline, &Vec::new())
         .change_context(CmdError::TimeoutLaunch)?;
     let (exit, times) = bounded_wait(&outcome.pidfd, cfg.seconds)?;

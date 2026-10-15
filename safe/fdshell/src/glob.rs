@@ -8,6 +8,7 @@
 mod r#match;
 mod walk;
 
+pub(crate) use r#match::has_unquoted_pattern;
 pub(crate) use r#match::match_component;
 
 use alloc::vec;

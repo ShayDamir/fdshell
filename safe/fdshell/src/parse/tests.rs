@@ -77,6 +77,7 @@ fn test_mkdirat_capture() {
             prefix: BuiltinPrefix::Builtin,
             command: c"mkdirat".into(),
             command_mask: vec![false; 7],
+            command_quoted: false,
             env_assigns: vec![],
             args: vec![
                 c"--mode".into(),
@@ -3469,22 +3470,25 @@ fn test_fdstyle_word_leading_is_arg_not_prefix() {
 }
 
 /// POSIX #4.1: an escape pair in the name makes the word a plain command word,
-/// never an assignment — `\X=1` and `X\=1` are words. Word 0 is folded at parse,
-/// so the command that runs is the folded `X=1` (bash runs a PATH file `X=1`).
+/// never an assignment — `\X=1` and `X\=1` are words. Word 0 keeps its raw text
+/// at parse (task #268): the escape pair is folded by the word-0 expansion pass
+/// (`command_word::expand`), so the command that runs is the folded `X=1`.
 #[test]
 fn test_env_assign_escaped_name_is_not_an_assignment() {
     let ParsedLine::Cmd(cmd) = parse(b"\\X=1 cmd").unwrap() else {
         panic!("expected Cmd")
     };
     assert!(cmd.env_assigns.is_empty());
-    assert_eq!(cmd.command, c"X=1".into());
+    assert_eq!(cmd.command, c"\\X=1".into());
+    assert_eq!(cmd.command_mask, vec![false; 4]);
     assert_eq!(cmd.args, vec![c"cmd".into()]);
 
     let ParsedLine::Cmd(cmd) = parse(b"X\\=1 cmd").unwrap() else {
         panic!("expected Cmd")
     };
     assert!(cmd.env_assigns.is_empty());
-    assert_eq!(cmd.command, c"X=1".into());
+    assert_eq!(cmd.command, c"X\\=1".into());
+    assert_eq!(cmd.command_mask, vec![false; 4]);
     assert_eq!(cmd.args, vec![c"cmd".into()]);
 }
 

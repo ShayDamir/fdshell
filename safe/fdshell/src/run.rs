@@ -7,7 +7,9 @@ use crate::loop_control::LoopControl;
 use crate::parse::ParsedLine;
 use crate::state::ShellState;
 
+mod cmd;
 mod parent;
+mod pipeline;
 
 pub(crate) fn run_one(
     text: &ScriptText,
@@ -27,46 +29,8 @@ pub(crate) fn run_parsed(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     match parsed {
-        ParsedLine::Cmd(cmdline) => {
-            // A scoped `NAME=value` prefix: expanded once, applied around the
-            // parent-side handlers, and handed to the forked child (which
-            // applies it itself after arg substitution).
-            let env = crate::run_env::expand(cmdline, text, cell)?;
-            let save = crate::run_env::apply(&env, cell)?;
-            let control = match parent::run_parent(text, cmdline, cell) {
-                Ok(control) => {
-                    crate::run_env::restore(save, cell)?;
-                    control
-                }
-                Err(e) => {
-                    let _ = crate::run_env::restore(save, cell);
-                    return Err(e);
-                }
-            };
-            if let Some(control) = control {
-                return Ok(control);
-            }
-            // Forked commands must expand their args against the previous `$_`,
-            // so the child (not the parent) reports the new value via the
-            // capture socket, consumed by `finish_cmd`.
-            let outcome =
-                crate::launch::launch(cell, cmdline, &env).change_context(CmdError::Launch)?;
-            {
-                let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-                state.last_status =
-                    crate::postlaunch::finish_cmd(cmdline.clone(), outcome, &mut state)
-                        .change_context(CmdError::Launch)?;
-            }
-            Ok(None)
-        }
-        ParsedLine::Pipeline(pipeline) => {
-            let envs = crate::run_env::expand_pipeline(pipeline, text, cell)?;
-            let status = crate::postlaunch::run_pipeline(pipeline.clone(), cell, &envs)
-                .change_context(CmdError::Pipeline)?;
-            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.last_status = status;
-            Ok(None)
-        }
+        ParsedLine::Cmd(cmdline) => cmd::run_cmd(cmdline, text, cell),
+        ParsedLine::Pipeline(pipeline) => pipeline::run_pipeline(pipeline, text, cell),
         ParsedLine::For(forblock) => {
             if let Some(control) = crate::for_run::run_for(forblock, text, cell)? {
                 return Ok(Some(control));

@@ -154,9 +154,10 @@ fn empty_body_expands_to_nothing() {
 #[test]
 fn dollar_paren_inside_a_backtick_is_the_childs_whole_script() {
     // The body runs as the child's own text, so a body that *is* a `$( … )`
-    // lands in the child's word 0, which fdshell never expands (task #268):
-    // the child reports the missing command and prints nothing. The arm
-    // reports the expansion, the word ends up empty (bash prints `a`).
+    // lands in the child's word 0 — a substitution surface (task #268): the
+    // child expands it to `a`, reports the missing command `a` and prints
+    // nothing, so the capture is empty and the word ends up empty. bash takes
+    // the same path (`a: command not found`, empty stdout).
     let word = ShortCStr::from(c"`$(echo a)`");
     let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
     assert!(text.as_bytes().unwrap().is_empty());

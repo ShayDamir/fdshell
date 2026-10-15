@@ -17,6 +17,7 @@ mod cd;
 mod child;
 mod cli;
 mod cmd_subst;
+mod command_word;
 mod comment;
 mod cond;
 mod debug;

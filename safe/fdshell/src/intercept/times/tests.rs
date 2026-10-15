@@ -10,6 +10,7 @@ fn make_cmdline() -> crate::parse::CommandLine {
         prefix: crate::parse::BuiltinPrefix::None,
         command: ShortCStr::from(c"times"),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![],
         args: vec![],
         args_mask: vec![],

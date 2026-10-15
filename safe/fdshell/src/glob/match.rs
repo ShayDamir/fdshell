@@ -5,7 +5,7 @@ pub(in crate::glob) mod bracket;
 /// True when `bytes` (parallel quote `mask`) holds an unquoted, unescaped
 /// `*` or `?`, or an unquoted `[` opening a valid bracket expression.
 /// Quoted bytes never count; unquoted `\X` pairs are literal.
-pub(super) fn has_unquoted_pattern(bytes: &[u8], mask: &[bool]) -> bool {
+pub(crate) fn has_unquoted_pattern(bytes: &[u8], mask: &[bool]) -> bool {
     let mut i = 0usize;
     while let Some(&b) = bytes.get(i) {
         if bracket::quoted(mask, i) {

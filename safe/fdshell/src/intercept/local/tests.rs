@@ -27,6 +27,7 @@ fn make_cmdline_with_masks(args: &[&str], quoted: bool) -> CommandLine {
         prefix: BuiltinPrefix::None,
         command: c"local".into(),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![],
         args: args.iter().map(|a| s(a.as_bytes())).collect(),
         args_mask: args.iter().map(|a| vec![quoted; a.len()]).collect(),

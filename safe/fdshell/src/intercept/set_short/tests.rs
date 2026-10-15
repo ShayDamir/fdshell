@@ -15,6 +15,7 @@ fn make_cmdline(args: &[&str], prefix: BuiltinPrefix) -> CommandLine {
         prefix,
         command: word("set"),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![],
         args: args.iter().map(|s| word(s)).collect(),
         args_mask: vec![vec![]; args.len()],

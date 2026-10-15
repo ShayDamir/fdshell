@@ -1,9 +1,8 @@
-use crate::bytes::fold::fold_word;
 use crate::error::parse::ParseError;
 use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::{BuiltinPrefix, CommandLine, Token, bg_redirect};
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, bail};
 use sys::{Position, ShortCStr};
 
 /// Collect the tokens after the command word into args, captures and
@@ -20,21 +19,20 @@ pub(super) fn finish_command(
 ) -> Result<CommandLine, Report<ParseError>> {
     // The command token precedes the first arg; its mask describes word 0,
     // and the words before it are the command's scoped `NAME=value` prefix.
-    let command_mask = tokens
+    let (command_mask, command_quoted) = tokens
         .get(args_from - 1)
-        .map(|t| t.4.clone())
-        .unwrap_or_default();
-    // Word 0 is folded here, once: it is never substituted, so every surface
-    // that consumes `CommandLine.command` (glob, PATH lookup, builtin/function
-    // and intercept dispatch, `set --`, argv[0]) sees the folded name, as bash
-    // folds it at tokenization.
-    let (command, command_mask) =
-        fold_word(&command, &command_mask).change_context(ParseError::Never)?;
+        .map(|t| (t.4.clone(), super::word_quoted::word_quoted(&t.0, t.1, t.2)))
+        .unwrap_or((Vec::new(), false));
+    // Word 0 is a substitution surface (task #268): its escape pairs are folded
+    // by the substitution pass, and its fields are split and globbed, so the
+    // raw text, mask and quoted flag travel to `command_word::expand` — the
+    // one point that runs before function, intercept and `PATH` dispatch.
     let env_assigns = super::envassign::collect_range(tokens, args_from - 1);
     let mut cmd = CommandLine {
         prefix,
         command,
         command_mask,
+        command_quoted,
         env_assigns,
         args: Vec::new(),
         args_mask: Vec::new(),

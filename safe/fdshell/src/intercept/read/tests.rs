@@ -33,6 +33,7 @@ fn make_read_cmdline(args: &[ShortCStr]) -> CommandLine {
         prefix: BuiltinPrefix::None,
         command: c"read".into(),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![],
         args_mask: vec![vec![]; args.len()],
         args_quoted: vec![false; args.len()],

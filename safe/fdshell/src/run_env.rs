@@ -4,7 +4,7 @@
 
 mod apply;
 
-pub use apply::{apply, apply_child, restore};
+pub use apply::{EnvSave, apply, apply_child, restore};
 
 use crate::error::cmd::CmdError;
 use crate::parse::{Assign, CommandLine, Pipeline};

@@ -29,6 +29,19 @@ fn run_masked(
     parse(&args, mask, &quoted)
 }
 
+/// `parse` with an explicit quote mask *and* quoted-span flag per word.
+fn run_masked_quoted(
+    words: &[&str],
+    mask: &[Vec<bool>],
+    quoted: &[bool],
+) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
+    let args: Vec<ShortCStr> = words
+        .iter()
+        .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
+        .collect();
+    parse(&args, mask, quoted)
+}
+
 #[test]
 fn missing_seconds() {
     let err = run(&[]).unwrap_err();
@@ -94,23 +107,42 @@ fn negative_seconds() {
     ));
 }
 
-/// POSIX #4.1: the target word is folded, because it never goes through
-/// substitution — `timeout 1 e\cho hi` launches the command `echo`, with the folded
-/// mask aligned to the folded text (the escaped byte is protected).
+/// The target word is word 0 of the sub-command, so `parse` keeps it raw:
+/// `command_word::expand` substitutes, folds, splits and globs it before the
+/// launch (task #268) — folding it here would decode the single-quote encoding
+/// before the substitution pass ever sees the word. The mask stays aligned to
+/// the raw text.
 #[test]
-fn target_word_folds_escape_pairs() {
+fn target_word_is_raw_for_the_word_zero_expansion() {
     let p = run(&["1", "e\\cho", "hi"]).unwrap();
-    assert_eq!(p.command.as_bytes().unwrap(), b"echo");
-    assert_eq!(p.command_mask, vec![false, true, false, false]);
+    assert_eq!(p.command.as_bytes().unwrap(), b"e\\cho");
+    assert_eq!(p.command_mask, vec![false; 5]);
+    assert!(!p.command_quoted);
     assert_eq!(p.args.len(), 1);
     assert_eq!(p.args.first().unwrap().as_bytes().unwrap(), b"hi");
 }
 
-/// A quoted target word has `true` on the backslash, so the pair is kept (POSIX
-/// #4.2) and the literal name `e\cho` is what the lookup sees.
+/// A quoted target word carries `true` on the backslash, so the pair is kept
+/// (POSIX #4.2) and the literal name `e\cho` is what the lookup sees; the
+/// quoted span flag is the quoted-empty rule for word 0.
 #[test]
 fn quoted_target_word_keeps_the_pair() {
     let p = run_masked(&["1", "e\\cho"], &[vec![false], vec![true; 5]]).unwrap();
     assert_eq!(p.command.as_bytes().unwrap(), b"e\\cho");
     assert_eq!(p.command_mask, vec![true; 5]);
+    assert!(!p.command_quoted);
+}
+
+/// The quoted-span flag rides on the target word: `timeout 1 ""$(true)` has no
+/// mask bit that says the word was quoted, only the span flag does.
+#[test]
+fn quoted_span_flag_rides_on_the_target_word() {
+    let p = run_masked_quoted(
+        &["1", "$(true)", "hi"],
+        &[vec![false], vec![false; 7], vec![false]],
+        &[false, true, false],
+    )
+    .unwrap();
+    assert_eq!(p.command.as_bytes().unwrap(), b"$(true)");
+    assert!(p.command_quoted);
 }

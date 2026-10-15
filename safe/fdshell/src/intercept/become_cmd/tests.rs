@@ -9,6 +9,7 @@ fn make_exec_cmdline(redirects: Vec<RedirectDef>) -> CommandLine {
         prefix: crate::parse::BuiltinPrefix::None,
         command: c"exec".into(),
         command_mask: vec![],
+        command_quoted: false,
         env_assigns: vec![],
         args: vec![],
         args_mask: vec![],
