@@ -438,6 +438,99 @@ fn quoted_dollar_at_reassignment_keeps_words() {
     assert_eq!(out, "2\n");
 }
 
+// Task #219: a **fully quoted whole-word** `$@` is bash's positional word
+// list, not a word that expanded to nothing, so with no positionals it is no
+// word at all. The discriminator is the quote mask (`"$@"` is all-quoted,
+// `""$@` is all-unquoted), so the triple `"$@"` → 0, `"$*"` → 1, `""$@` → 1
+// is pinned below. Probe rule: `echo $#`, a `for` loop, or `arg_print`'s argv
+// count — **never** `printf "[%s]\n" "$@"`, which prints `[]` in bash too
+// because printf reuses its format with empty substitutions.
+
+#[test]
+fn fully_quoted_dollar_at_no_positionals_is_no_positionals() {
+    let (out, err, code) = run(r#"set --; set -- "$@"; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n");
+    let (out, err, code) = run(r#"set --; set -- "$@" "$@"; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n");
+    // `"a$@"`-style embedding keeps the join path: one word `x`.
+    let (out, err, code) = run(r#"set --; set -- "$@"x "$@"; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn fully_quoted_dollar_at_mixed_with_dollar_star_keeps_the_join_word() {
+    // `"$*"` contributes its single (empty) joined word; `"$@"` contributes none.
+    let (out, err, code) = run(r#"set --; set -- "$@" "$*"; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn fully_quoted_dollar_at_under_nounset_is_no_positionals() {
+    // bash does not bail on `"$@"` with an empty deque, nounset included.
+    let (out, err, code) = run(r#"set --; set -u; set -- "$@"; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n");
+    assert_eq!(err, "");
+}
+
+#[test]
+fn fully_quoted_dollar_at_empty_positional_is_one_positional() {
+    // An empty positional *is* a word for `"$@"`: the fix must not drop it.
+    let (out, err, code) = run(r#"set -- ""; set -- "$@"; echo $#"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n");
+}
+
+#[test]
+fn fully_quoted_dollar_at_pipeline_stage_is_no_argument() {
+    // The argv count is the observable: `arg_print` prints `[arg] ` per argv
+    // entry, so bash prints a bare newline and fdshell must too.
+    let (out, err, code) = run(&format!("set --; {ARG_PRINT} \"$@\" | cat"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "\n");
+    // Guard: the partially quoted spelling is one empty argument.
+    let (out, err, code) = run(&format!("set --; {ARG_PRINT} \"\"$@ | cat"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[] \n");
+    let (out, err, code) = run(r#"set --; set -- "$@"; echo $# | cat"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n");
+}
+
+#[test]
+fn fully_quoted_dollar_at_builtin_gets_exactly_the_positionals() {
+    // The `set --` builtin is its own word-count probe: over one positional
+    // `a`, both `"$@"` and the partially quoted `""$@` hand exactly one word
+    // to the builtin (bash: `1/a` in both).
+    let (out, err, code) = run(r#"set -- a; set -- "$@"; echo "$#/$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1/a\n");
+    let (out, err, code) = run(r#"set -- a; set -- ""$@; echo "$#/$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1/a\n");
+}
+
+#[test]
+fn fully_quoted_dollar_at_external_and_timeout_get_no_argument() {
+    // The `become`/`exec` slice and the `timeout` rebuilt command line see the
+    // same word count: no argv entries, so `arg_print` prints a bare newline
+    // (bash `timeout 1 arg_print "$@"` → newline, `""$@` → `[] `).
+    let (out, err, code) = run(&format!("set --; become {ARG_PRINT} \"$@\""));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "\n");
+    let (out, err, code) = run(&format!("set --; timeout 1 {ARG_PRINT} \"$@\""));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "\n");
+    // Guard pair: the partially quoted spelling is one empty argument.
+    let (out, err, code) = run(&format!("set --; timeout 1 {ARG_PRINT} \"\"$@"));
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[] \n");
+}
+
 // Regression guards: the unquoted spellings must not gain a word.
 
 #[test]

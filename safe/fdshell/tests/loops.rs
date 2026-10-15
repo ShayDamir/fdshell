@@ -400,14 +400,19 @@ fn for_list_dollar_at_iterates_positionals() {
     assert_eq!(out, "[a b]\n[c]\n");
 }
 
-/// Accepted divergence (task #219): `"$@"` with no positionals is one empty
-/// iteration here, where bash gives none. The for list inherits the rule from
-/// `substitute_args`' quoted-empty rule; pinned as a drift alarm.
+/// Bash parity (task #219): `"$@"` with no positionals is **no iteration** —
+/// the fully quoted whole-word `$@` *is* the positional word list, so an
+/// empty deque produces no word at all. The for list inherits the rule from
+/// `substitute_args`; the pair with `"$*"` shows the join word still iterates
+/// once. Measured: `end`, `hitend`.
 #[test]
-fn for_list_empty_dollar_at_is_one_iteration() {
-    let (out, _err, code) = run(r#"set --; for w in "$@"; do printf "[%s]\n" "$w"; done"#);
-    assert_eq!(code, 0);
-    assert_eq!(out, "[]\n");
+fn for_list_empty_dollar_at_is_no_iteration() {
+    let (out, err, code) = run(r#"set --; for w in "$@"; do printf hit; done; echo end"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "end\n");
+    let (out, err, code) = run(r#"set --; for w in "$@" "$*"; do printf hit; done; echo end"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "hitend\n");
 }
 
 /// Whole-word backticks in a for list work through the argument pipeline

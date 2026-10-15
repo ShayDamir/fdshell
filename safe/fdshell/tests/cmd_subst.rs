@@ -417,6 +417,30 @@ fn word0_empty_expansion_consumes_the_next_field() {
     }
 }
 
+/// A fully quoted whole-word `$@` with no positionals is **no word at all**
+/// (task #219, bash parity: `"$@"` *is* the positional word list), so word 0
+/// is empty and the next word becomes the command — the same shape as the
+/// unquoted empty expansion above. Measured against bash: `hi`.
+#[test]
+fn empty_dollar_at_in_word_zero_leaves_the_next_word_as_command() {
+    let (out, err, rc) = run(r#"set --; "$@" echo hi"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "");
+    assert_eq!(out, "hi\n");
+}
+
+/// The residual divergence of that shape: with nothing left to consume, the
+/// command name is empty and fdshell reports it (rc 1 in the report, the
+/// script continues at rc 0), where bash runs no command at all and prints
+/// nothing. Pinned like the `$(echo )` pins above: the message, not the path.
+#[test]
+fn empty_dollar_at_alone_in_word_zero_reports_the_empty_name() {
+    let (out, err, rc) = run(r#"set --; "$@"; echo after"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "after\n");
+    assert!(err.contains("\"\""), "must name the empty word, {err}");
+}
+
 /// Word 0's expansion is split on the shell's `IFS` like any other word:
 /// `IFS=x` splits `echoxhi` into the command `echo` and the argument `hi`,
 /// which keeps the following word. Measured against bash.
