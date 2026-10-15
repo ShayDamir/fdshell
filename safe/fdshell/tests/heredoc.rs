@@ -705,3 +705,198 @@ fn heredoc_delimiter_single_quote_forms_in_heredoc_shapes() {
     let (out, err, code) = run("X=zzz; cat <<'{a,b}'\n$X\n{a,b}");
     assert_eq!((out.as_str(), code), ("$X\n", 0), "stderr={err:?}");
 }
+
+// --- `;`-terminated heredocs in a single-line block body (task #238) -------
+//
+// A single-line block's text carries its body regions **after** the closing
+// keyword (append mode), so each arm's text is rebuilt from the regions its own
+// `<<` operators claim and parses as a self-contained heredoc. Every
+// expectation below is bash 5.3.9's own output for the same script.
+
+#[test]
+fn single_line_block_body_heredoc_runs() {
+    let (out, err, code) = run("if true; then cat <<T; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_loop_body_heredoc_runs() {
+    let (out, err, code) = run("while true; do cat <<T; break; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_until_body_heredoc_runs() {
+    let (out, err, code) = run("until false; do cat <<T; break; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// A `while` body that never runs never parses its heredoc: with no delimiter
+/// line below, the loop simply produces nothing (bash parity).
+#[test]
+fn single_line_loop_body_heredoc_of_an_unrun_body_is_silent() {
+    let (out, err, code) = run("while false; do cat <<T; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+}
+
+#[test]
+fn elif_arm_body_heredoc_runs() {
+    let (out, err, code) = run("if false; then :; elif true; then cat <<E; fi\nbodyE\nE");
+    assert_eq!((out.as_str(), code), ("bodyE\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn else_body_heredoc_runs() {
+    let (out, err, code) = run("if false; then :; else cat <<T; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// The sharpest ordering shape: the `elif` **condition** and the arm **body**
+/// under it sit on one physical line, so the condition claims the region its
+/// own operator writes and the arm takes the next one.
+#[test]
+fn elif_condition_and_arm_body_heredocs_run_in_order() {
+    let (out, err, code) =
+        run("if false; then :; elif cat <<C; then cat <<T; fi\nbodyC\nC\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyC\nbodyT\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn single_line_block_body_two_heredocs_run_in_order() {
+    let (out, err, code) = run("if true; then cat <<A; cat <<B; fi\nbodyA\nA\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyA\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn single_line_block_body_heredoc_keeps_trailing_statement() {
+    let (out, err, code) = run("if true; then cat <<T; fi; echo after\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\nafter\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn single_line_block_body_heredoc_keeps_statement_after_the_bodies() {
+    let (out, err, code) = run("if true; then cat <<T; fi\nbodyT\nT\necho after");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\nafter\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+/// The arm's whole text (statements + heredoc) is rebuilt, so the arm's
+/// statements and exit status behave as bash's: `false` leaves rc 1.
+#[test]
+fn single_line_block_body_heredoc_keeps_the_arm_statements() {
+    let (out, err, code) = run("if true; then true; cat <<T; false; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 1), "stderr={err:?}");
+    let (out, err, code) = run("if true; then cat <<T; fi\nbodyT\nT\necho $?");
+    assert_eq!((out.as_str(), code), ("bodyT\n0\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_block_body_heredocs_of_two_blocks_run_in_order() {
+    let (out, err, code) =
+        run("if true; then cat <<T; fi; if true; then cat <<U; fi\nbodyT\nT\nbodyU\nU");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\nbodyU\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+/// The block's own trailing pipeline/background form: the block text ends at
+/// the closing keyword's separator, so the bodies are appended to the block.
+#[test]
+fn single_line_block_body_heredoc_survives_pipeline_and_background_forms() {
+    let (out, err, code) = run("if true; then cat <<T; fi | cat\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("if true; then cat <<T; fi &\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// A body line that is exactly a keyword stays body text at arm granularity
+/// (the multi-line `heredoc_body_keyword_lines_do_not_close_block` rule).
+#[test]
+fn single_line_block_body_heredoc_body_keywords_are_data() {
+    let (out, err, code) = run("if true; then cat <<T; fi\nfi\nT");
+    assert_eq!((out.as_str(), code), ("fi\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("while true; do cat <<T; break; done\ndone\nT");
+    assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("if false; then :; else cat <<T; fi\nelse\nT");
+    assert_eq!((out.as_str(), code), ("else\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("if false; then :; elif true; then cat <<T; fi\nelif\nT");
+    assert_eq!((out.as_str(), code), ("elif\n", 0), "stderr={err:?}");
+}
+
+/// Body lines stay opaque: `#` is not a comment, and an unquoted delimiter
+/// keeps the `$(…)` expansion rule.
+#[test]
+fn single_line_block_body_heredoc_body_lines_are_opaque() {
+    let (out, err, code) = run("if true; then cat <<T; fi\nbody $(echo sub)\nT");
+    assert_eq!((out.as_str(), code), ("body sub\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("if true; then cat <<T; fi\n# comment\nT");
+    assert_eq!((out.as_str(), code), ("# comment\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_block_body_heredoc_survives_quoted_and_dash_delimiters() {
+    let (out, err, code) = run("if true; then cat <<\"T\"; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("if true; then cat <<-T; fi\n\tbodyT\n\tT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// Task #234 (measured divergence, pinned as fdshell's own behaviour): an `&&`
+/// written in the **appended body text** still splits the block's text, so the
+/// delimiter line is never attached. bash prints `body && x`, rc 0.
+#[test]
+fn single_line_block_body_heredoc_with_and_in_body_still_splits() {
+    let (out, _err, code) = run("if true; then cat <<T; fi\nbody && x\nT");
+    assert_eq!((out.as_str(), code), ("", 1));
+}
+
+/// Task #274 / LESSONS "a region window and the skip derived from it are one
+/// pair" (measured divergence, pinned as fdshell's own behaviour): the line's
+/// regions are allocated for **all** of its operators, so an unterminated
+/// `<<E` in the `elif` condition leaves the line with no regions at all and the
+/// `then` arm reports its own missing delimiter. bash takes the `then` body and
+/// warns about `E`: `bodyT`, rc 0.
+#[test]
+fn single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty() {
+    let (out, _err, code) = run("if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 1));
+}
+
+/// Task #238's out-of-scope interaction, pinned as measured: a block trailing
+/// redirect writes the **arm's** stdout, as for a heredoc-free block
+/// (`if true; then echo hi; fi > out` behaves identically on master); bash
+/// writes the here-doc body into `out` and prints nothing.
+#[test]
+fn single_line_block_body_heredoc_with_block_trailing_redirect() {
+    let dir = std::env::temp_dir().join("fdshell-task238");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _ = std::fs::remove_file(dir.join("out"));
+    let script = format!(
+        "cd {}; if true; then cat <<T; fi > out\nbodyT\nT",
+        dir.display()
+    );
+    let (out, _err, code) = run(&script);
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0));
+    // The body went to stdout and the redirect target is never even opened —
+    // the same as the heredoc-free `if true; then echo hi; fi > out`, which
+    // prints `hi` and leaves no `out` on master. bash writes the body into
+    // `out` and prints nothing.
+    assert!(!dir.join("out").exists());
+}
