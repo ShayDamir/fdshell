@@ -19,6 +19,13 @@ use super::split::split_word;
 /// separators behind. Each result word comes back with the per-byte quote
 /// mask (all quoted for a quoted expansion, all unquoted otherwise) so
 /// later pattern detection can skip quoted bytes.
+///
+/// Empty-deque contract, load-bearing for `substitute_args`' word count
+/// (task #219): `fq` + `$@` returns **no words at all** — bash's `"$@"` *is*
+/// the positional word list, so an empty deque is no word, and the caller
+/// must not synthesize one; `fq` + `$*` returns its single joined word, empty
+/// (so one word) when there are none; unquoted, an empty positional
+/// contributes nothing.
 pub(super) fn expand_positional_word(
     is_star: bool,
     fq: bool,

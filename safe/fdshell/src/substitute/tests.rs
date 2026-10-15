@@ -2163,6 +2163,51 @@ fn quoted_dollar_at_nonempty_positionals_not_padded() {
     assert_eq!(result[1].as_bytes().unwrap(), b"b");
 }
 
+// The fully quoted whole-word `$@` is the exception to the quoted-empty rule
+// (task #219): bash's `"$@"` *is* the positional word list, so an empty
+// deque is no word at all. The discriminator is the quote mask, never the
+// per-word `quoted` flag — the empty-deque triple `"$@"`, `"$*"` and `""$@`
+// must all be pinned for the fix to mean anything.
+#[test]
+fn fully_quoted_dollar_at_with_no_positionals_is_no_words() {
+    // `set --; set -- "$@"` — bash: `$#` = 0.
+    let cell = ForkCell::new(ShellState::new());
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert!(result.is_empty(), "an empty deque yields no words");
+}
+
+#[test]
+fn fully_quoted_dollar_star_with_no_positionals_is_one_empty_word() {
+    // `set --; set -- "$*"` — bash: `$#` = 1: the join path's single word is
+    // empty but present, so the suppression above must not zero it.
+    let cell = ForkCell::new(ShellState::new());
+    let args = alloc::vec![ShortCStr::from(c"$*")];
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_empty());
+}
+
+#[test]
+fn fully_quoted_dollar_at_keeps_empty_positional_words() {
+    // `set -- a "" b; set -- "$@"` — bash: `$#` = 3. Guard: the suppression
+    // runs after the push loop, so positional words — empty ones included —
+    // are never dropped by it.
+    let cell = empty_masked_positional_cell();
+    let args = alloc::vec![ShortCStr::from(c"$@")];
+    let args_mask = alloc::vec![alloc::vec![true, true]];
+    let args_quoted = alloc::vec![true];
+    let result = super::substitute_args(&args, &args_mask, &args_quoted, &cell).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].as_bytes().unwrap(), b"a");
+    assert!(result[1].is_empty());
+    assert_eq!(result[2].as_bytes().unwrap(), b"b");
+}
+
 #[test]
 fn quoted_whitespace_only_expansion_is_one_empty_word() {
     // `""$(echo "  ")` with the default IFS: two spaces split to zero fields,

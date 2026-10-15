@@ -29,10 +29,19 @@ pub fn substitute_args(
         let quoted = args_quoted.get(i).copied().unwrap_or(false);
         let before = result.len();
         if arg.eq_bytes(b"$@") || arg.eq_bytes(b"$*") {
-            for (word, mask) in
-                expand_positional_word(arg.eq_bytes(b"$*"), super::fully_quoted(&mask), cell)?
-            {
+            let is_star = arg.eq_bytes(b"$*");
+            let fq = super::fully_quoted(&mask);
+            for (word, mask) in expand_positional_word(is_star, fq, cell)? {
                 push_word(&mut result, &word, &mask, cell)?;
+            }
+            // bash: a fully quoted whole-word `$@` *is* the positional words,
+            // not a word that expanded to nothing — with no positionals it
+            // yields no word at all, so the quoted-empty rule below must not
+            // fire on it (task #219). `$*` keeps its single joined word (one
+            // empty word when there are none), and a partially quoted `""$@`
+            // (mask all-`false`, so `fq` false) keeps the rule.
+            if fq && !is_star {
+                continue;
             }
         } else {
             // A fully quoted word is exactly one word — kept even when the
