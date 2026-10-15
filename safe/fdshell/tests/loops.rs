@@ -526,6 +526,46 @@ fn for_list_backtick_fields_are_globbed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Task #220: the backtick fields reach the same `glob::expand` as the
+/// `$( … )` fields, so the for-list surface honours the shell's glob options on
+/// both forms. A non-matching pattern is dropped by `nullglob`, and `set -f`
+/// (noglob) passes the pattern through verbatim without touching the
+/// filesystem. Measured against `bash -c` 5.3.9 in a directory with `ab ac zz`:
+/// both forms print nothing with `nullglob`, and `[*]` with `set -f`.
+#[test]
+fn for_list_backtick_fields_respect_glob_options() {
+    let dir = std::env::temp_dir().join(format!("fdshell-loops-globopt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["ab", "ac", "zz"] {
+        std::fs::write(dir.join(name), name.as_bytes()).unwrap();
+    }
+    let dir = dir.to_str().unwrap().to_string();
+    for script in [
+        r#"shopt -s nullglob; for w in `echo "nomatch*"`; do printf "[%s]\n" "$w"; done"#,
+        r#"shopt -s nullglob; for w in $(echo "nomatch*"); do printf "[%s]\n" "$w"; done"#,
+        r#"set -f; for w in `echo "*"`; do printf "[%s]\n" "$w"; done"#,
+        r#"set -f; for w in $(echo "*"); do printf "[%s]\n" "$w"; done"#,
+    ] {
+        let output = Command::new(BIN)
+            .current_dir(&dir)
+            .args(["-c", script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        let out = str::from_utf8(&output.stdout).unwrap().to_string();
+        let err = str::from_utf8(&output.stderr).unwrap().to_string();
+        let want = if script.contains("nullglob") {
+            ""
+        } else {
+            "[*]\n"
+        };
+        assert_eq!(output.status.code().unwrap_or(-1), 0, "{script:?}: {err}");
+        assert_eq!(out, want, "{script:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Task #137: `&&` / `||` in a `while`/`until` condition is the loop's own cond
 /// list, exactly as bash runs it — the block text is never split at it (master:
 /// `expected 'do'` / `expected 'done'` rc 1). Measured against `bash -c` 5.3.9:
