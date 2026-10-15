@@ -254,6 +254,32 @@ fn arithmetic_expansion_names_the_command() {
     assert_eq!(bytes(&out.command), b"2");
 }
 
+/// `%fd` is an expansion trigger in word 0: a bound name is substituted with a
+/// descriptor number (the fd pipeline's own `dup`, so the number is not
+/// predictable here) and that number is the command name; an unbound name stays
+/// the literal text. Measured with `fdshell -c`: `signalfd %s 10; $(echo %s)`
+/// reports the name `"10"`, `%d` reports the name `"%d"`.
+#[test]
+fn percent_fd_names_the_command() {
+    let cell = cell();
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut().unwrap().fds.insert(
+        ShortCStr::from(c"s"),
+        crate::state::FdVar {
+            fd: dev_null,
+            trace: sys::Trace::boundary(sys::Origin::Shell),
+        },
+    );
+    let out = expand(&cmdline("%s", &[]), &cell).unwrap().into_owned();
+    let name = bytes(&out.command);
+    assert!(
+        !name.is_empty() && name.iter().all(|b| b.is_ascii_digit()),
+        "the bound fd becomes the numeric command name, got {name:?}"
+    );
+    let out = expand(&cmdline("%d", &[]), &cell).unwrap().into_owned();
+    assert_eq!(bytes(&out.command), b"%d");
+}
+
 /// Every pipeline stage's word 0 is expanded, in stage order.
 #[test]
 fn pipeline_stages_expand_their_word_zero() {

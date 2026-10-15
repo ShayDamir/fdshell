@@ -533,3 +533,227 @@ fn word0_unbounded_output_is_capped() {
     assert_ne!(rc, 0, "an unbounded word-0 substitution must fail");
     assert!(err.contains("capture limit"), "{err}");
 }
+
+/// A chain of nested substitutions in word 0 is **bounded**: 100 levels run the
+/// innermost command and report its name (`deep`, bash's `deep: command not
+/// found` at rc 127 → fdshell rc 1), and one level more stops at the shell-wide
+/// nesting cap with a *fixed* report count and the empty command name — the
+/// chain never grows with the script, never hangs, never panics.
+#[test]
+fn word0_deep_nesting_is_bounded() {
+    for (depth, name) in [(100, "deep"), (101, "")] {
+        let script = format!("{}echo deep{}", "$(".repeat(depth), ")".repeat(depth));
+        let (out, err, rc) = run(&script);
+        assert_ne!(rc, 0, "depth {depth} must fail the command, stdout={out}");
+        assert_eq!(out, "", "depth {depth} must print nothing");
+        assert!(
+            !err.contains("panicked"),
+            "depth {depth} must not panic, stderr={err}"
+        );
+        assert!(
+            err.contains(&format!("\"{name}\"")),
+            "depth {depth} must name {name:?}, stderr={err}"
+        );
+        // 100 report blocks of 5 lines; the cap keeps the count fixed.
+        assert!(
+            err.lines().count() <= 520,
+            "depth {depth} must stay bounded, got {} lines",
+            err.lines().count()
+        );
+    }
+}
+
+/// The nesting cap around a word-0 expansion (README "Nesting is capped at 100
+/// groups"): 99 nested `if` blocks run the expanded command exactly as bash
+/// does, the 100th makes the expansion report `nesting too deep` at rc 1 (bash
+/// has no cap and runs `hi`).
+#[test]
+fn word0_nesting_cap_reports_the_message() {
+    for (depth, want_hi) in [(99usize, true), (100, false)] {
+        let script = format!(
+            "{} $(echo echo) hi{}",
+            "if true; then ".repeat(depth),
+            "; fi".repeat(depth)
+        );
+        let (out, err, rc) = run(&script);
+        if want_hi {
+            assert_eq!(rc, 0, "depth {depth} must run, stderr={err}");
+            assert_eq!(out, "hi\n", "depth {depth}");
+        } else {
+            assert_ne!(rc, 0, "depth {depth} must hit the nesting cap");
+            assert_eq!(out, "", "depth {depth} must print nothing");
+            assert!(
+                err.contains("nesting too deep"),
+                "depth {depth} must report the cap, stderr={err}"
+            );
+        }
+    }
+}
+
+/// `exec` and `become` command words are word-0 positions
+/// (`replacer/external.rs` runs `command_word::fields` on them): the expansion
+/// names the program, its extra fields are the leading argv, and the command
+/// word is globbed exactly as a plain command word is. Measured against
+/// `bash -c` for `exec`; bash has no `become`, and fdshell's `become` was
+/// measured equal to fdshell's `exec` on every spelling here.
+#[test]
+fn word0_exec_and_become_expand_their_command_word() {
+    let dir = word0_scratch();
+    for (script, want) in [
+        ("exec $(echo echo) hi", "hi\n"),
+        ("exec ./e* zz", "ran ./eb ./ed zz\n"),
+        ("become $(echo echo) hi", "hi\n"),
+        ("become ./e* zz", "ran ./eb ./ed zz\n"),
+    ] {
+        let (out, err, rc) = run_in(&dir, script);
+        assert_eq!(rc, 0, "{script:?} must run, stderr={err}");
+        assert_eq!(out, want, "{script:?}");
+    }
+    for prefix in ["exec", "become"] {
+        let script = format!("{prefix} $(echo pwd)");
+        let (out, err, rc) = run_in(&dir, &script);
+        assert_eq!(rc, 0, "{script:?} must run pwd, stderr={err}");
+        assert_eq!(out, format!("{dir}\n"), "{script:?} prints the cwd");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `timeout`'s target word is a word-0 position: the sub-command line is built
+/// from the raw target word and expanded by `command_word::expand` before it is
+/// launched, so `timeout 1 $(echo echo) hi` prints `hi` (bash: coreutils
+/// `timeout` runs `echo hi`).
+#[test]
+fn word0_timeout_target_word_expands() {
+    let (out, err, rc) = run("timeout 1 $(echo echo) hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "", "stderr={err}");
+    assert_eq!(out, "hi\n");
+}
+
+/// The `builtin` and `command` prefixes see the expanded word 0 of the command
+/// they prefix: both print `hi` (bash parity).
+#[test]
+fn word0_builtin_and_command_prefixes_see_the_expansion() {
+    for script in ["builtin $(echo echo) hi", "command $(echo echo) hi"] {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must run the expanded echo, stderr={err}");
+        assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(out, "hi\n", "{script:?}");
+    }
+}
+
+/// Function lookup runs on the expanded word 0: the expanded name finds the
+/// function and its body runs (bash parity).
+#[test]
+fn word0_function_lookup_uses_the_expanded_name() {
+    let (out, err, rc) = run("foo(){ builtin echo IN-FOO; }; $(echo foo) x");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "", "stderr={err}");
+    assert_eq!(out, "IN-FOO\n");
+}
+
+/// The in-process builtins are dispatched on the expanded name: `cd` moves the
+/// shell's cwd, and `exit` ends the shell with its argument's status (bash
+/// parity: `cd` prints the new pwd, `exit 7` exits 7).
+#[test]
+fn word0_in_process_builtins_see_the_expanded_name() {
+    let dir = word0_scratch();
+    let (out, err, rc) = run(&format!("$(echo cd) {dir}; pwd"));
+    assert_eq!(rc, 0, "the expanded cd must move the shell, stderr={err}");
+    assert_eq!(out, format!("{dir}\n"), "the shell's cwd must be {dir}");
+    let (_out, _err, rc) = run("$(echo exit) 7");
+    assert_eq!(rc, 7, "the expanded exit must end the shell with 7");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The glob rules of the expansion, pinned as words in the scratch layout
+/// (`ea` executable, `eb`, `ed`, `zz`): a `nullglob` pattern that matches
+/// nothing makes the word vanish, so the *next* field is the command (bash
+/// names `zz`); a matched one takes its first match as the command name (bash
+/// names `ea`); `set -f` disables the glob and leaves the literal name; and a
+/// newline in the expansion is an `IFS` delimiter.
+#[test]
+fn word0_glob_rules_apply_as_words() {
+    let dir = word0_scratch();
+    for (script, name) in [
+        (r#"shopt -s nullglob; $(echo "nope*") zz"#, "zz"),
+        (r#"shopt -s nullglob; $(echo "e*") zz"#, "ea"),
+        (r"set -f; echo* zz", "echo*"),
+    ] {
+        let (_out, err, rc) = run_in(&dir, script);
+        assert_ne!(
+            rc, 0,
+            "{script:?} must reach the command lookup, stderr={err}"
+        );
+        assert!(err.contains(name), "{script:?} must name {name:?}, {err}");
+    }
+    let (out, err, rc) = run_in(&dir, "set -f; $(echo echo) hi");
+    assert_eq!(rc, 0, "set -f must not stop the expansion, stderr={err}");
+    assert_eq!(out, "hi\n");
+    let (out, err, rc) = run_in(&dir, r#"$(printf "echo\nhi") zz"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi zz\n", "newline splits the expansion");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every statement path expands its own word 0: an `if` condition, a loop body,
+/// a group, a function body, `eval`, `time`, a pipeline stage, and a nested
+/// substitution — whose child expands *its own* word 0 too. Measured against
+/// `bash -c`, including the two nested forms.
+#[test]
+fn word0_expands_in_every_context() {
+    let cases: &[(&str, &str)] = &[
+        ("if $(echo true); then echo yes; fi", "yes\n"),
+        ("for i in 1; do $(echo echo) in; done", "in\n"),
+        ("while $(echo false); do echo no; done", ""),
+        ("{ $(echo echo) grp; }", "grp\n"),
+        ("f(){ $(echo echo) inbody; }; f", "inbody\n"),
+        ("eval '$(echo echo) ev'", "ev\n"),
+        ("$(echo echo) hi | cat", "hi\n"),
+        ("echo $( $(echo echo) hi )", "hi\n"),
+        ("echo `$(echo echo) hi`", "hi\n"),
+    ];
+    for (script, want) in cases {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+    // `time` prints its own report on stderr: pin the command's stdout only.
+    let (out, _err, rc) = run("time $(echo echo) tm");
+    assert_eq!(rc, 0);
+    assert_eq!(out, "tm\n");
+}
+
+/// Accepted divergence, pinned by name (LESSONS "word 0 is a substitution
+/// surface" item 8, README "The command word (word 0)"): a scoped `NAME=value`
+/// prefix is applied *around* the word-0 expansion, so a scoped `IFS` splits
+/// word 0 — `IFS=: $(printf "echo:hi") zz` runs `echo hi zz` — where bash
+/// splits the expansion with the shell's `IFS`, keeps `echo:hi` as one field,
+/// and reports the name `echo:hi` (rc 127, fdshell rc 1).
+#[test]
+fn word0_scoped_ifs_divergence() {
+    let (out, err, rc) = run(r#"IFS=: $(printf "echo:hi") zz"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi zz\n", "the scoped IFS splits word 0");
+    let (out, err, rc) = run(r#"IFS=:; $(printf "echo:hi") zz"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi zz\n", "the shell's own IFS=: splits it too, {out}");
+}
+
+/// Word-0 leading fields are ordinary argv words, so they take the global argv
+/// `%fd` substitution rule (README "Passing file descriptors to subprocess";
+/// the literal form is `\%var`): with `%s` bound by `signalfd`,
+/// `signalfd %s 10; w="%s"; $(echo ./ea; echo "$w")` runs `./ea` with the fd
+/// *number*, where bash (no fd vars) passes the text `%s`.
+#[test]
+fn word0_leading_fields_take_the_argv_fd_substitution() {
+    let dir = word0_scratch();
+    let (out, err, rc) = run_in(&dir, r#"signalfd %s 10; w="%s"; $(echo ./ea; echo "$w")"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    let fields = out.trim_end().strip_prefix("ran ").unwrap_or_default();
+    assert!(
+        !fields.is_empty() && fields.chars().all(|c| c.is_ascii_digit()),
+        "the leading field must be substituted with the fd number, stdout={out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
