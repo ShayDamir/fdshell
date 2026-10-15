@@ -1039,5 +1039,6 @@ fn heredoc_body_continuation_into_the_delimiter_line_ends_the_body() {
 fn heredoc_unterminated_body_with_continuation_is_a_parse_error() {
     let (_out, err, code) = run("cat <<EOF\nab\\\n");
     assert_eq!(code, 1);
-    assert!(err.contains("heredoc"), "stderr={err:?}");
+    assert!(err.contains("here-doc"), "stderr={err:?}");
+    assert!(err.contains("missing terminating"), "stderr={err:?}");
 }
