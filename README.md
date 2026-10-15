@@ -981,7 +981,10 @@ Accepted divergences from bash:
   one-string limit is what the pattern operators act on, so they strip the
   **joined** string where bash strips each positional word: `IFS=,; set -- a b c;
   printf "[%s]" "${*#a,}"` prints `[b,c]` here and `[a,b,c]` in bash
-  (`${@#a,}` likewise).
+  (`${@#a,}` likewise). The empty deque shows the same split: the whole-word
+  `"$@"` arm is then **no word at all** (task #219), while the braced arm is
+  one joined (empty) string, so `set --; set -- "${@}"; echo $#` prints `1`
+  here where bash prints `0`.
 - fdshell's `$-`/`${-}` prints fdshell's own flag bytes (`u`, `e`, `f`, `v`, `x`;
   **empty by default**), so it can be empty where bash's is `hBc`/`huBc`. That
   shows in `:=`: `set --; printf "[%s]" "${-:=q}"` is rc 1
@@ -1045,6 +1048,13 @@ sees its arguments and never its own name
 expands to the empty string; under `set -u` it is an error naming the index
 (rc 1, `4: unbound variable`).
 
+**Word rule** of the two (task #219): a fully quoted whole-word `"$@"` **is**
+the positional word list — one word per positional, and **no word at all**
+when there are none, as bash does. `"$*"` is its one joined word, so an empty
+deque is one *empty* word. The partially quoted `""$@` is a different word (an
+empty quoted span glued to an unquoted `$@`) and keeps the quoted-empty rule
+("For-list words"): one empty word.
+
 The braced forms read the same parameters through the same lookup, so nothing is
 numbered differently inside `${…}`: a digit run is the positional (`${1}` = `$1`,
 `${01}` = `$1`, `${0}` = `$0`) and the single-byte specials `?`, `$`, `@`, `*`,
@@ -1063,6 +1073,9 @@ f() { echo "$1|$#|$0"; }; f a b           → a|2|sh       (the name is not a po
 set -- a b c; echo "[$1$2${3}]"           → [abc]        (the braced `${3}` is `$3`)
 set -- a b c; echo "[${1}][${1#c}][${0}]" → [a][a][sh]
 set -- a b c; echo "[${?}][${$}][${*}]"   → [0][<pid>][a b c]
+set --; set -- "$@"; echo $#              → 0        (`"$@"` *is* the words: none here)
+set --; set -- "$*"; echo $#              → 1        (the joined word, empty)
+set --; set -- ""$@; echo $#              → 1        (a quoted-empty span is a word)
 ```
 
 ### Quoting
@@ -1169,7 +1182,9 @@ the bytes of a word that performed none: `IFS=,; echo a,b` prints `a,b`, and
 - `IFS=` disables splitting: the expansion is one field, spaces included;
 - an unquoted expansion producing no fields produces no words at all
   (`IFS=,; set -- $(true)` → `$#` = 0), while a word containing quotes keeps
-  one empty word (see the quoted-empty rule under "For-list words").
+  one empty word (see the quoted-empty rule under "For-list words"). The
+  exception is a fully quoted whole-word `$@`: it *is* the positional words
+  themselves, so with no positionals it is no word at all (task #219);
 
 ```
 IFS=,;  builtin printf "[%s] " a,b          → [a,b]        (literal: no split)
@@ -1304,7 +1319,9 @@ pipeline stage, an `if`/`for`/`case` body, a function call, `command`/`builtin`,
   next field becomes the command: `$(true) echo hi` → `hi`. A *quoted* empty
   expansion is a word, so the command name is empty: `"$(true)" echo hi` reports
   the name `""` (the same rule as "For-list words"), and `$(echo )` with nothing
-  after it leaves no command at all.
+  after it leaves no command at all. A fully quoted whole-word `"$@"` with no
+  positionals is no word either (task #219), so `set --; "$@" echo hi` runs
+  `echo hi`, and `set --; "$@"` alone reports the empty name (the divergence below).
 - Escape pairs fold in word 0 (POSIX #4.1): `e\cho hi` runs `echo`. Inside
   double quotes the pair stays in the name (POSIX #4.2): `"e\cho"` is looked up
   literally.
@@ -1360,7 +1377,11 @@ the split. Its fields are pathname-expanded like any other expansion's
 
 The quoted-empty rule is the argument rule: `for w in "$(true)"` is one empty
 iteration, `for w in $(true)` is none, `for w in "" x` iterates over `""` then
-`x`. A list word that performed no expansion is one iteration:
+`x`. Its exception is a fully quoted whole-word `$@` (task #219):
+`set --; for w in "$@"` iterates **zero** times, as in bash — that word *is*
+the positional list rather than an expansion that produced nothing, and
+`for w in "$@" "$*"` iterates once, over the `"$*"` join word.
+A list word that performed no expansion is one iteration:
 `IFS=,; for w in a,b` iterates once over `a,b` (the splitting rule of
 "Word splitting (`IFS`)"). A `%name` word expands to the fd number when `name`
 is a scalar fd variable; when it is an fd array (`for %x in %arr`) the list
@@ -1436,8 +1457,6 @@ Accepted divergences (scanning is fixed, expansion is not):
 
 Other accepted divergences of the `for … in` word pipeline (task #131):
 
-- `"$@"` with no positionals is **one empty iteration** here, where bash gives
-  none (the quoted-empty rule of `substitute_args`; task #219);
 - `~` and `~/…` expand to `$HOME`, `~user` stays literal (bash resolves it via
   the password database);
 - `set -u` with an unbound word (`for w in $undef`) and a `${zz:?}` word bail
