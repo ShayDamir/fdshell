@@ -120,10 +120,11 @@ fn timeout_bad_seconds_errors() {
     assert!(err.contains("seconds"), "stderr={err}");
 }
 
-/// POSIX #4.1: `timeout`'s target word is folded before the lookup, as bash folds
-/// word 0 at tokenization — `timeout 1 e\cho hi` runs `echo` and `timeout 1 a\*`
-/// runs the file literally named `a*`. The seconds argument and the trailing args
-/// (which go through substitution) are unaffected.
+/// POSIX #4.1: `timeout`'s target word is word 0 of the command it launches, so
+/// the word-0 expansion pass folds its escape pairs before the lookup (task
+/// #268) — bash folds word 0 at tokenization, and `timeout 1 e\cho hi` runs
+/// `echo` while `timeout 1 a\*` runs the file literally named `a*`. The seconds
+/// argument and the trailing args (which go through substitution) are unaffected.
 #[test]
 fn timeout_folds_the_target_command_word() {
     let bin = scratch_bin(&["a*"]);

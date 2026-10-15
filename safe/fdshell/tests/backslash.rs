@@ -342,10 +342,11 @@ fn alias_body_takes_the_same_escape_rule() {
     assert_eq!(out, "a*\n");
 }
 
-/// Word 0 is folded at parse, so the command name matches the folded text on
-/// every lookup surface: builtin dispatch, `command`/`builtin` keywords, `if`
-/// body, and `exec` (whose command word is also folded). Bash folds word 0 at
-/// tokenization, so `e\cho hi` runs `echo` — fdshell runs the same name.
+/// Word 0 goes through the substitution pass (task #268), so its escape pairs
+/// fold before every lookup surface: builtin dispatch, `command`/`builtin`
+/// keywords, `if` body, and `exec` (whose command word is the same surface).
+/// Bash folds word 0 at tokenization, so `e\cho hi` runs `echo` — fdshell runs
+/// the same name.
 #[test]
 fn command_name_folds_escape_pairs() {
     for script in ["e\\cho hi", "command e\\cho hi", "builtin e\\cho hi"] {

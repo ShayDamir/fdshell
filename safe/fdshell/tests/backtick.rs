@@ -99,13 +99,22 @@ fn backtick_unterminated_is_clean_error() {
     assert!(out.is_empty() || !out.contains("hi"), "{out}");
 }
 
-/// In word-0 position a backtick is a literal command name (documented
-/// divergence, task #268). Measured against bash: fdshell reports rc 1.
+/// Word 0 is a substitution surface (task #268), so the backtick form expands
+/// there too: `` `echo echo` hi `` runs `echo echo`, its output field `echo` is
+/// the command name and `hi` stays the argument. The old literal-word-0
+/// divergence is gone. Measured against bash 5.3.9, which prints `hi` for the
+/// first case and reports the *output* name `hi` for the second (rc 127 there,
+/// fdshell reports rc 1).
 #[test]
-fn backtick_word0_is_literal() {
-    let (out, err, rc) = run(r#"`echo hi`"#);
-    assert_ne!(rc, 0, "expected a failure, got stdout={out:?}");
-    assert!(!err.is_empty(), "expected an error message");
+fn backtick_word0_expands() {
+    let (out, err, rc) = run("`echo echo` hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "");
+    assert_eq!(out, "hi\n");
+
+    let (_out, err, rc) = run("`echo hi`");
+    assert_ne!(rc, 0, "the output field `hi` is the command name");
+    assert!(err.contains("\"hi\""), "{err}");
 }
 
 /// A backtick substitution with an unbounded producer hits the capture limit.

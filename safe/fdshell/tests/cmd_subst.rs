@@ -324,3 +324,212 @@ fn unterminated_quoted_region_is_a_clean_error() {
         );
     }
 }
+
+// ---- word 0: the command-name position (task #268) --------------------
+
+use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static WORD0_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Scratch dir for the word-0 glob pins: an executable `ea` that echoes its
+/// own argv, plus `eb`, `ed` (glob fillers) and `zz` (a plain argument).
+fn word0_scratch() -> String {
+    let c = WORD0_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-word0-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ea = dir.join("ea");
+    std::fs::write(&ea, "#!/bin/sh\necho ran \"$@\"\n").unwrap();
+    std::fs::set_permissions(&ea, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for name in ["eb", "ed", "zz"] {
+        std::fs::write(dir.join(name), name.as_bytes()).unwrap();
+    }
+    dir.to_str().unwrap().to_string()
+}
+
+/// Run with the child's cwd inside `dir`, so relative word-0 patterns resolve
+/// against the scratch layout.
+fn run_in(dir: &str, script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .current_dir(dir)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// Word 0 expands exactly like an argument: the whole-word form names the
+/// command, a mid-word expansion concatenates with the literal bytes, and the
+/// double-quoted form expands too (bash's `"` never suppresses command
+/// substitution). Single quotes are the only suppression, so `'$( … )'` stays
+/// the literal command name — bash reports the same name (rc 127, fdshell rc 1).
+#[test]
+fn word0_expansion_names_the_command() {
+    for script in [
+        "$(echo echo) hi",
+        "$(echo \"ec\")ho hi",
+        "\"$(echo echo)\" hi",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must run echo, stderr={err}");
+        assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(out, "hi\n", "{script:?}");
+    }
+    let (_out, err, rc) = run("'$(echo echo)' hi");
+    assert_ne!(rc, 0, "single quotes must keep word 0 literal");
+    assert!(err.contains("$(echo echo)"), "{err}");
+}
+
+/// A multi-field expansion in word 0 makes field 0 the command and fields 1..
+/// the leading arguments, before the word's own args. Measured against bash:
+/// `hi x`.
+#[test]
+fn word0_multi_field_expansion_leads_the_arguments() {
+    let (out, err, rc) = run("$(echo echo hi) x");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "");
+    assert_eq!(out, "hi x\n");
+}
+
+/// An unquoted word 0 whose expansion is empty is not a word: the next field
+/// becomes the command. A *quoted* empty expansion is a word, so it is the
+/// (empty) command name and the arguments stay put; with nothing left to
+/// consume, the command name is empty. fdshell reports the empty name as a
+/// missing command (bash prints `: command not found`).
+#[test]
+fn word0_empty_expansion_consumes_the_next_field() {
+    let (out, err, rc) = run("$(true) echo hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+    for script in ["\"$(true)\" echo hi", "$(echo )"] {
+        let (_out, err, rc) = run(script);
+        assert_ne!(rc, 0, "{script:?} must have an empty command name");
+        assert!(
+            err.contains("\"\""),
+            "{script:?} must name the empty word, {err}"
+        );
+    }
+}
+
+/// Word 0's expansion is split on the shell's `IFS` like any other word:
+/// `IFS=x` splits `echoxhi` into the command `echo` and the argument `hi`,
+/// which keeps the following word. Measured against bash.
+#[test]
+fn word0_ifs_splitting_applies() {
+    let (out, err, rc) = run("IFS=x; $(echo \"echoxhi\") zz");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi zz\n");
+}
+
+/// `$name` and `$(( … ))` are expansion triggers in word 0 as well: an unset
+/// variable yields the empty name (so the next field is consumed), `$((1+1))`
+/// looks up the command `2`. bash reports the same names, rc 127 there.
+#[test]
+fn word0_parameter_and_arithmetic_expansion() {
+    let (out, err, rc) = run("cmd=echo; $cmd hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+    let (_out, err, rc) = run("$((1+1))");
+    assert_ne!(rc, 0, "the command name is the arithmetic value");
+    assert!(err.contains("\"2\""), "{err}");
+    let (_out, err, rc) = run("$missingvar $((0+1))");
+    assert_ne!(
+        rc, 0,
+        "an unset variable is the empty name, so `1` is consumed"
+    );
+    assert!(err.contains("\"1\""), "{err}");
+}
+
+/// Escape pairs fold in word 0 (POSIX #4.1): `e\cho` is the command `echo`.
+/// Inside double quotes the pair survives as the literal name (POSIX #4.2),
+/// and `$`/`` ` `` survive as literal bytes. bash runs `echo`; the quoted
+/// variant is a command that does not exist there too.
+#[test]
+fn word0_escape_pairs_fold_and_quotes_protect() {
+    let (out, err, rc) = run(r"e\cho hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+    let (_out, err, rc) = run(r#""e\cho""#);
+    assert_ne!(rc, 0, "a quoted pair stays in the command name");
+    assert!(err.contains(r"e\cho"), "{err}");
+    let (_out, err, rc) = run(r"$(echo '$HOME') x");
+    assert_ne!(
+        rc, 0,
+        "the child's $HOME must not be re-expanded in the parent"
+    );
+    assert!(err.contains("$HOME"), "{err}");
+}
+
+/// A leading `~` in word 0 is expanded to `$HOME` (the arg pipeline's tilde
+/// rule applies to the command word). The name reported must be the expanded
+/// path, never the literal `~/…`.
+#[test]
+fn word0_tilde_expands() {
+    let (_out, err, rc) = run("~/fdshell-word0-missing");
+    assert_ne!(rc, 0, "the command does not exist");
+    assert!(err.contains("/fdshell-word0-missing"), "{err}");
+    assert!(!err.contains("~/"), "the tilde must be expanded, {err}");
+}
+
+/// Globbing applies to the expanded word: the first field of the match list is
+/// the command and the rest are its leading arguments. Measured against bash
+/// (`ran ./eb ./ed zz`) in the same scratch layout.
+#[test]
+fn word0_glob_of_the_expansion_first_field_is_the_command() {
+    let dir = word0_scratch();
+    let (out, err, rc) = run_in(&dir, "$(echo ./e)* zz");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "ran ./eb ./ed zz\n");
+    let (out, err, rc) = run_in(&dir, "./e* zz");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "ran ./eb ./ed zz\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With `failglob` a word-0 pattern that matches nothing is a clean,
+/// actionable error (no `no match`, no hang): the shell reports the pattern.
+#[test]
+fn word0_failglob_reports_a_clean_error() {
+    let dir = word0_scratch();
+    let (_out, err, rc) = run_in(&dir, "shopt -s failglob; nope* echo");
+    assert_ne!(rc, 0, "failglob must fail the command");
+    assert!(err.contains("no match"), "{err}");
+    assert!(!err.contains("panicked"), "{err}");
+    // Without failglob the pattern stays literal and the lookup fails.
+    let (_out, err, rc) = run_in(&dir, "nope* echo");
+    assert_ne!(rc, 0, "an unmatched literal pattern is a missing command");
+    assert!(err.contains("nope*"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every pipeline stage expands its own word 0, and a `set -e` prefix is not
+/// triggered by the substitution child's failure (the child's status is never
+/// the command's status).
+#[test]
+fn word0_pipeline_stages_and_set_e() {
+    let (out, err, rc) = run("$(echo echo) hi | cat");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+    let (out, err, rc) = run("set -e; $(false) echo hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+    // A scoped assignment prefix reaches the command found through word 0.
+    let (out, err, rc) = run("X=1 $(echo echo) hi");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+}
+
+/// An unbounded producer in word 0 (`$(yes)`) is capped by the capture limit:
+/// the shell reports the actionable error and exits non-zero, in time.
+#[test]
+fn word0_unbounded_output_is_capped() {
+    let (_out, err, rc) = run("$(yes)");
+    assert_ne!(rc, 0, "an unbounded word-0 substitution must fail");
+    assert!(err.contains("capture limit"), "{err}");
+}
