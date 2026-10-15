@@ -144,7 +144,10 @@ errors. Targets: a path (globbed like other words, with the quote mask
 applied), `%var` (the variable's fd, attached form: `>%var`, `&>%var`), and
 `/dev/fd/N` / `/proc/self/fd/N` (dup of the open fd N). `>&1`, `>&%var` (dup
 the fd the variable refers to, e.g. `2>&%f`), `2>&-`, here-docs, and
-here-strings are the other redirect sources; see below. A command may carry
+here-strings are the other redirect sources; see below. A **here-string word**
+is expanded with its own quoting (`<<<"a\ b"` is `a\ b`, `<<<a\ b` is `a b`,
+`<<<"~"` is the literal `~`): the word's quote mask travels with it to the
+substitution, exactly as an assignment value's does (task #269). A command may carry
 several redirections to the same fd;
 all of them are applied in the order written, so the **last one to that fd
 wins** and it is not an error: `echo hi >a >b` writes `hi` to `b` and creates
@@ -219,6 +222,33 @@ cat <<'EOF'
 `echo hi` $(echo yo)
 EOF
 # → `echo hi` $(echo yo)        (quoted: the body is literal)
+```
+
+An expandable body is a **quoted context** (POSIX 2.2: "the here-document is
+equivalent to double-quoting"), so its escape pairs follow the double-quote
+rule, not the unquoted one: `\$`, `\\` and `` \` `` drop the backslash, every
+other `\<char>` keeps it, `\<newline>` is a line continuation (both bytes go),
+quotes are body data, and a leading `~` stays literal (task #269):
+
+```shell
+cat <<EOF          # → a\ b        (`\ ` keeps its backslash, as bash)
+a\ b
+EOF
+cat <<EOF          # → a$b         (`\$` drops it; so do `\\` and `` \` ``)
+a\$b
+EOF
+cat <<EOF          # → ab          (the continuation joins the two lines)
+a\
+b
+EOF
+cat <<EOF          # → a\ then b on two lines (`\\` is the pair, the newline is data)
+a\\
+b
+EOF
+cat <<EOF          # → ~ then ~/x  (a body `~` never expands)
+~
+~/x
+EOF
 ```
 
 Forms: `cmd <<DELIM` (attached), `cmd << DELIM` (separate word),
@@ -312,6 +342,18 @@ Limitations:
   `">|" not found`, `"<<EOF" not found` (bash: a syntax error, rc 2). The body
   lines are never executed; only a pipeline `|` right before the `<<` keeps it a
   command word (`true | <<EOF` runs its body lines as commands).
+- A body line ending with `\<newline>` joins the **delimiter line** into the
+  body: fdshell ends the body at the delimiter line and prints the joined text
+  (`cat <<EOF` + `a\` + `EOF` → `a`, rc 0), where bash eats the delimiter, warns
+  `heredoc delimited by end-of-file` and prints `aEOF`. A body whose last line
+  ends with `\<newline>` and that has **no** delimiter line is fdshell's
+  unterminated-heredoc error (rc 1), as any other missing delimiter; bash only
+  warns (rc 0). Pinned in `tests/heredoc.rs` (task #269).
+- A `<<-` body joins its line continuations **after** the leading tabs of every
+  physical line were stripped, so the joined line loses its tab
+  (`cat <<-EOF` + `<TAB>a\` + `<TAB>b` + `EOF` → `ab`). bash strips tabs from the
+  joined line and prints `a<TAB>b` (rc 0 on both sides, pinned in
+  `tests/heredoc.rs::heredoc_dash_continuation_drops_the_joined_line_tab`).
 
 ## Group command
 
@@ -1064,6 +1106,8 @@ echo "\`"             → `          (an escaped backtick is literal)
 echo '{a,b}'          → {a,b}      (no brace expansion)
 echo 'ca?t'           → ca?t       (no globbing, with files `ca1`, `ca2`)
 echo '%%'             → %%         (no percent escape: `%%` is data)
+echo "~"              → ~          (a quoted `~` is literal: quotes go after tilde expansion)
+echo ~                → $HOME      (an unquoted leading `~` expands; `~/x` is `$HOME/x`)
 echo x'y' # comment   → xy         (a `#` in a span is data, the comment is not)
 printf '%q\n' 'a b'   → a\ b       (fdshell's own quoting round-trips)
 alias q="echo a'b'"; q  → ab
@@ -1085,7 +1129,16 @@ Accepted divergences:
   way, so `echo $'x'` prints `$x` where bash prints `x`. The `$` is kept
   deliberately — dropping it would expand the variable `x` instead.
 - A quoted `case` pattern has its quotes stripped but its bytes still glob
-  (task #246, pre-existing for `"` as well).
+  (task #246, pre-existing for `"` as well). The word side is now expanded with
+  its **own** mask (task #269), so the two sides read the same text differently:
+  `case "a\ b" in "a\ b")` matches in bash (word and pattern are the same text)
+  and not in fdshell — the word keeps its `a\ b` while the unmasked pattern
+  folds the pair to a space. Task #280 owns the pattern-side mask; the rows are
+  pinned in `tests/case.rs`.
+- A quoted leading `~` is a literal byte (POSIX expands tildes **before** quote
+  removal): `echo "~"`, `"~/x"`, `<<<"~"` and a body `~` all print `~`, while
+  the unquoted `~` and `~/x` expand to `$HOME` (task #269; the expansion order
+  of "For-list words" is unchanged).
 - A quoted *block opener* at the start of a statement (`'if' x`, `"while" x`)
   is still parsed as the keyword (task #247); bash runs it as a command word.
 - An unpaired quote (of either kind) is a parse error reported at the quote
@@ -1277,7 +1330,8 @@ argument goes through (task #131), in bash's order:
 1. braces are rewritten at text level, before tokenization (see "Brace
    expansion"), so they never re-expand the result of a substitution;
 2. tilde, parameter, command, and arithmetic substitution and `%fd` / `$@`
-   expansion run in-process;
+   expansion run in-process (a tilde only when its own mask bit is unquoted —
+   `"~"` is the literal tilde, task #269);
 3. the expansion is split on `IFS` bytes, driven by the word's own quote mask —
    a quoted byte never splits;
 4. every field is pathname-expanded (`$(…)` output included), and each
@@ -1287,6 +1341,7 @@ argument goes through (task #131), in bash's order:
 x="a b";  for w in $x      → [a] [b]      IFS-split, each field globbed
 x=a*b;    for w in "$x"    → the value, quoted bytes never glob
 for w in ~                 → $HOME
+for w in "~"               → the literal `~` (a quoted tilde never expands)
 for w in 1$((1+2))         → 13
 for w in $(echo a*)        → the files matching `a*`
 for w in `echo "*"`        → the files matching `*` (backtick fields glob too)
