@@ -250,8 +250,16 @@ claim — the regions written before the block on the same line belong to those
 statements, and a heredoc statement after the block on the block's line is
 outside the block's span: `cat <<X; if cat <<A; then echo y; fi; cat <<B` +
 bodies prints `bodyX bodyA y bodyB` (as bash), for `if`/`elif`/`while`/`until`
-and any number of pre-block operators. A here-doc on a **user-function call**
-delivers the body to the call, because a function call is a simple command:
+and any number of pre-block operators. The allocation applies **per arm**
+inside the block too (task #238): in a single-line block the bodies sit past
+the closing keyword, so each arm's text is rebuilt from the regions its own
+operators claim — `if true; then cat <<T; fi` + body + `T` prints `bodyT`
+(rc 0, as bash), and so do the `while`/`until` body (`while true; do cat <<T;
+break; done`), the `elif` arm and the `else` arm, an arm with several
+here-docs (`then cat <<A; cat <<B; fi`, bodies in operator order) and an arm
+below an earlier arm's here-doc (`elif cat <<C; then cat <<T; fi`); in a
+multi-line block the arm's own lines already carry the body inline. A here-doc on a
+**user-function call** delivers the body to the call, because a function call is a simple command:
 `f() { cat; }; f <<EOF` prints the body, and the shell's stdin is back when the
 call finishes, so `echo after` after it prints on the terminal (as bash).
 
@@ -276,6 +284,24 @@ Limitations:
   in a body line must stay a split point
    (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
    Task #234 owns the fix.
+- The same split hits the **body** of a single-line block (task #238's twin of
+  the bullet above): `if true; then cat <<T; fi` + `body && x` + `T` is a parse
+  error rc 1, where bash prints `body && x` (rc 0) — the body regions appended
+  to the arm's text are re-split on their `&&` before the arm parses
+  (`tests/heredoc.rs::single_line_block_body_heredoc_with_and_in_body_still_splits`).
+  Task #234 owns the fix.
+- A line whose body stream is **incomplete** yields no regions at all, because
+  the regions are allocated for all of the line's operators in order: in
+  `if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT` + `T` the
+  `elif` condition's `<<E` has no delimiter line, so the `then` arm is left with
+  no body and reports its own missing delimiter (rc 1), where bash prints
+  `bodyT` (rc 0) with only a warning about `E`
+  (`tests/heredoc.rs::single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty`).
+- A **block trailing redirect** is unchanged by the arm-body delivery:
+  `if true; then cat <<T; fi > out` + body + `T` prints `bodyT` and never opens
+  `out`, exactly as the heredoc-free `if true; then echo hi; fi > out` does
+  (`tests/heredoc.rs::single_line_block_body_heredoc_with_block_trailing_redirect`);
+  bash writes the body into `out` and prints nothing.
 - A **multi-line** block whose condition carries a here-doc keeps its text verbatim:
   `if cat <<A; then` / `echo y` / `fi` + body + `A` runs `echo y`, `fi` and the body lines as
   commands and the condition prints its region, where bash reports a syntax error (rc 2). Only
