@@ -23,8 +23,11 @@ pub(crate) fn part_text(
 ) -> Result<ScriptText, Report<ParseError>> {
     let (start, end) = token_range(tokens);
     let regions = claimed_regions(text, tokens);
-    // Extension mode, and the no-operator case: the bodies are already inline.
-    if regions.first().is_none_or(|&(s, _)| s < end) {
+    // The block scanner's discriminator at arm granularity: regions that start
+    // at or past the slice's end are outside its text and must be appended.
+    // Below that (extension mode, and the no-operator case) they are inline.
+    let past = regions.first().is_some_and(|&(s, _)| s >= end);
+    if !past {
         return verbatim(text, tokens);
     }
     let line = text.as_bytes().change_context(ParseError::Never)?;

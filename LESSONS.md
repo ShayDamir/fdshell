@@ -1203,9 +1203,12 @@ computes for the operators that claimed the head of that stream. Prepending `k`
 operators to the window prepends `k` regions and raises the skip by exactly `k`,
 so the slice `regions[skip .. skip + ops.len()]` is identical for every anchor.
 The pair-shift is therefore invariant **on the success path**. Of the two
-`cond_bodies.rs:63:75` mutants, `n + 1` → `n * 1` is **strictly equivalent**
-(`* 1` is the identity; the full suite is green under it, leading-newline pin
-included) — the file's only accepted missed mutant; the newline byte is never
+`cond_bodies.rs:77:75` mutants (the `line_start_of` anchor, at line 63 before
+task #238 extracted `claimed_regions`), `n + 1` → `n * 1` is **strictly
+equivalent** (`* 1` is the identity; measured twice on the quiet suite under it,
+all 4606 tests green, leading-newline pin included; a `-j4` mutation run reports
+it *caught*, which is load flakiness — re-measure quietly) — the file's only
+accepted missed mutant; the newline byte is never
 part of an operator, so on a line whose head is not `<<` the anchor shift
 counts the same operators. `n + 1` → `n - 1` is that same equivalence only for
 `n ≥ 1`: at `n = 0` it computes `0 - 1` in `usize` — a debug panic (release
@@ -1224,7 +1227,7 @@ mutants `→ 0` and `→ 1` are therefore *not* equivalent:
 (complete condition line, unterminated `<<` on an earlier line) kills both. `→ 1`
 is inert only when the computed anchor is 0, i.e. only for a condition that
 starts its line. The `b == b'\n'` → `b != b'\n'` mutant in the same function
-(`cond_bodies.rs:63:55`) is likewise **not** equivalent: it is killed by
+(`cond_bodies.rs:77:55`) is likewise **not** equivalent: it is killed by
 `condition_bodies_of_an_incomplete_line_stream_are_empty` and
 `condition_bodies_skip_the_regions_claimed_before_them`.
 
