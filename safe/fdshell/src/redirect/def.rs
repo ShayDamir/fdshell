@@ -57,12 +57,13 @@ impl RedirectDef {
         }
     }
 
-    /// Here-string: the expanded `word` becomes the stdin of the command.
-    pub fn here_string(word: impl Into<ShortCStr>) -> Self {
+    /// Here-string: the expanded `word` (with its own quote mask) becomes the
+    /// stdin of the command.
+    pub fn here_string(word: impl Into<ShortCStr>, mask: Vec<bool>) -> Self {
         RedirectDef {
             export_to: 0,
             direction: RedirectDirection::Read,
-            source: RedirectSource::here_string(word),
+            source: RedirectSource::here_string(word, mask),
         }
     }
 

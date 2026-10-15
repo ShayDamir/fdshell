@@ -10,13 +10,16 @@ use sys::fork_cell::ForkCell;
 
 use crate::state::ShellState;
 
-/// Expand the word and back it with a seeked-to-zero memfd as the new stdin.
+/// Expand the word **with its own quote mask** and back it with a
+/// seeked-to-zero memfd as the new stdin. The appended newline is payload,
+/// not a word byte, so it takes no mask bit.
 pub fn here_string(
     word: &ShortCStr,
+    mask: &[bool],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let (data, _) = crate::substitute::substitute_arg(word, &[], cache, cell)
+    let (data, _) = crate::substitute::substitute_arg(word, mask, cache, cell)
         .change_context(OpenRedirectError::HereStringExpand)?;
     let fd = sys::memfd::memfd_create().change_context(OpenRedirectError::HereStringCreate)?;
     let mut payload = Vec::with_capacity(data.len() + 1);

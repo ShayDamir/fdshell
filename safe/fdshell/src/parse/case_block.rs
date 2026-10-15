@@ -1,6 +1,6 @@
 use super::Token;
 use super::case_clause;
-use super::semi::{trim_semi, try_join};
+use super::semi::{trim_semi, try_join_masked};
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
@@ -9,6 +9,10 @@ use sys::ShortCStr;
 
 pub struct CaseBlock {
     pub word: ShortCStr,
+    /// The per-byte quote mask of `word`, parallel to it: the joined word
+    /// tokens' masks with a `false` bit per inserted space (task #269), so the
+    /// `case` word is expanded with its own quoting.
+    pub word_mask: Vec<bool>,
     pub clauses: Vec<case_clause::CaseClause>,
 }
 
@@ -39,13 +43,17 @@ pub(crate) fn tokens_to_case(
         ParseError::CaseMissingEsac
     );
 
-    let word = try_join(trim_semi(
+    let (word, word_mask) = try_join_masked(trim_semi(
         tokens.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
     ));
 
     let clauses = case_clause::parse_clauses(tokens, in_idx + 1, esac_idx, text)?;
 
-    Ok(CaseBlock { word, clauses })
+    Ok(CaseBlock {
+        word,
+        word_mask,
+        clauses,
+    })
 }
 
 /// The token indices of the case word and every clause's pattern region in

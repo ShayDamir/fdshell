@@ -2,6 +2,7 @@
 //! turning the operator tokens into stdin redirects.
 
 mod operator;
+mod strip;
 
 use super::Token;
 use crate::error::parse::ParseError;
@@ -43,6 +44,15 @@ pub(crate) fn layout(
             let bytes = op.body_bytes(line.get(body_start..body_end).ok_or(ParseError::Never)?);
             let body =
                 ShortCStr::from_vec(bytes).change_context(ParseError::InvalidChar { ch: 0 })?;
+            // An expandable body is a quoted context whose `\<newline>` pairs
+            // are line continuations: they are gone before the substitution
+            // (POSIX #4.2, `strip::strip_continuations`). A quoted body is
+            // verbatim bytes and keeps its backslashes.
+            let body = if op.quoted {
+                body
+            } else {
+                strip::strip_continuations(&body)?
+            };
             Ok(HeredocBody {
                 body,
                 expand: !op.quoted,

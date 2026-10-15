@@ -41,9 +41,9 @@ fn resolve_one(
     match &r.source {
         super::RedirectSource::Var(var) => arms::resolve_var(var, r.export_to, min_fd, cell),
         super::RedirectSource::Path { .. } => arms::resolve_path(r.export_to, min_fd, opened_iter),
-        super::RedirectSource::HereString(word) => Ok(Redirect::Dup {
+        super::RedirectSource::HereString { word, mask } => Ok(Redirect::Dup {
             export_to: r.export_to,
-            local: super::herestring::here_string(word, cache, cell)?,
+            local: super::herestring::here_string(word, mask, cache, cell)?,
         }),
         super::RedirectSource::HereDoc { body, expand } => Ok(Redirect::Dup {
             export_to: r.export_to,

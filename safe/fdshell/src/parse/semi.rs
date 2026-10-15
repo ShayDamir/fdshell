@@ -1,5 +1,6 @@
 use super::Token;
 use crate::error::parse::ParseError;
+use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ScriptText;
 use sys::ShortCStr;
@@ -56,14 +57,27 @@ pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
 }
 
 pub(crate) fn try_join(tokens: &[Token]) -> ShortCStr {
+    try_join_masked(tokens).0
+}
+
+/// The joined word of `tokens` **with its mask**: the space inserted between
+/// two tokens takes a `false` bit and every token byte keeps its own, so the
+/// mask stays parallel to the text (task #269: a joined word that is
+/// substituted later needs the mask of the whole join). `try_join` is its
+/// text, so the space-insertion rule lives in exactly one place — the word and
+/// its mask can never drift apart.
+pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<bool>) {
     let mut out = ShortCStr::new();
-    for (t, _, _, _, _) in tokens {
+    let mut mask = Vec::new();
+    for (t, _, _, _, t_mask) in tokens {
         if !out.is_empty() {
             out.push(c" ");
+            mask.push(false);
         }
         out.push(t);
+        mask.extend(t_mask.iter().copied());
     }
-    out
+    (out, mask)
 }
 
 /// A verbatim subslice of `text` covering the given tokens' byte ranges.

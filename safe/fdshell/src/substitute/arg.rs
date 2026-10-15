@@ -40,7 +40,7 @@ pub(super) fn substitute_arg_marked(
     .peekable();
     let mut idx = 0usize;
     *expanded = false;
-    if bytes.first() == Some(&b'~') {
+    if super::tilde::leads(bytes, mask) {
         super::tilde::expand(&mut peek, &mut idx, mask, expanded, &mut out, &mut out_mask)?;
     }
     while let Some(b) = peek.next() {
