@@ -468,3 +468,28 @@ fn heredoc_delimiter_strips_every_single_quote() {
         "stderr={err:?}"
     );
 }
+
+/// A quoted `~` is a literal byte: POSIX removes the quotes *after* tilde
+/// expansion, and bash keeps `echo "~"` and `echo "~/x"` literal (task #269's
+/// mask gate in `substitute/tilde.rs`). The unquoted pair expands, as before.
+#[test]
+fn quoted_leading_tilde_is_literal() {
+    let (out, err, code) = run(r#"printf "[%s]" "~""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[~]", "bash prints [~]");
+    let (out, _err, code) = run(r#"printf "[%s]" "~/x""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~/x]", "bash prints [~/x]");
+    let (home, _err, code) = run(r#"printf "%s" "$HOME""#);
+    assert_eq!(code, 0);
+    let (out, _err, code) = run(r#"printf "[%s]" ~"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, format!("[{home}]"));
+    let (out, _err, code) = run(r#"printf "[%s]" ~/x"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, format!("[{home}/x]"));
+    // A single-quoted span is literal too, as everywhere (`'~'` is `~`).
+    let (out, _err, code) = run(r#"printf "[%s]" '~'"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~]");
+}

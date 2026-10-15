@@ -296,6 +296,15 @@ fn case_pattern_escape_is_literal() {
     let (out, _err, code) = run("case foobar in f\\*o) builtin echo y;; esac");
     assert_eq!(code, 0);
     assert_eq!(out, "");
+    // The word side, task #269: a quoted word keeps its escape pair, so the
+    // pattern's literal `f*o` no longer matches it (bash agrees), and a word
+    // without the pair does.
+    let (out, _err, code) = run("case \"f\\*o\" in f\\*o) builtin echo y;; esac");
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
+    let (out, _err, code) = run("case \"f*o\" in f\\*o) builtin echo y;; esac");
+    assert_eq!(code, 0);
+    assert_eq!(out, "y\n", "bash prints y");
 }
 
 /// The arith lexers do not fold escape pairs, so `$((1\+2))` is an arithmetic

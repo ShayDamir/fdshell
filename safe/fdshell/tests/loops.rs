@@ -357,6 +357,20 @@ fn for_list_word_expands_leading_tilde() {
     assert_eq!(out, "[a~b]\n");
 }
 
+/// A **quoted** leading `~` is a literal byte (POSIX expands tildes before
+/// quote removal, and bash's `for w in "~"` iterates over `~`) — task #269's
+/// mask gate in `substitute/tilde.rs`. With the empty mask fdshell expanded
+/// `$HOME`.
+#[test]
+fn for_list_quoted_leading_tilde_is_literal() {
+    let (out, err, code) = run(r#"for w in "~"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[~]\n", "bash iterates over the literal ~");
+    let (out, _err, code) = run(r#"for w in "~" x; do printf "[%s]" "$w"; done"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~][x]");
+}
+
 /// A quoted command substitution is exactly one field (closes #132): the
 /// output's whitespace is not a split point. Unquoted, the same output splits
 /// on `IFS` into one iteration per field. Measured: `[x y]` (one iteration);

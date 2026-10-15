@@ -900,3 +900,144 @@ fn single_line_block_body_heredoc_with_block_trailing_redirect() {
     // `out` and prints nothing.
     assert!(!dir.join("out").exists());
 }
+
+// --- the body's escape pairs and line continuations (task #269) -------------
+//
+// POSIX #4.2: an expandable body is a **quoted context** ("the here-document
+// is equivalent to double-quoting"): `\<char>` keeps its backslash except
+// `\$`, `\\`, `` \` `` and `\<newline>`, and `$( … )` / backtick / `$name`
+// still expand. fdshell substituted the body with an empty quote mask, so
+// every pair folded as an unquoted escape. Every expectation below is
+// measured against bash 5.3.9.
+
+#[test]
+fn heredoc_body_keeps_a_non_special_escape_pair() {
+    for (body, want) in [
+        ("a\\ b", "a\\ b\n"),
+        ("a\\*b", "a\\*b\n"),
+        ("a\\nb", "a\\nb\n"),
+        ("a\\\"b", "a\\\"b\n"),
+        ("a\\~b", "a\\~b\n"),
+    ] {
+        let (out, _err, code) = run(&format!("cat <<EOF\n{body}\nEOF"));
+        assert_eq!((out.as_str(), code), (want, 0), "body {body:?} vs bash");
+    }
+}
+
+#[test]
+fn heredoc_body_drops_the_backslash_of_its_three_special_pairs() {
+    for (body, want) in [
+        ("a\\$b", "a$b\n"),   // `\$`
+        ("a\\\\b", "a\\b\n"), // `\\`
+        ("a\\`b", "a`b\n"),   // `` \` ``
+    ] {
+        let (out, _err, code) = run(&format!("cat <<EOF\n{body}\nEOF"));
+        assert_eq!((out.as_str(), code), (want, 0), "body {body:?} vs bash");
+    }
+}
+
+#[test]
+fn heredoc_body_runs_substitutions_in_a_quoted_context() {
+    // `$name`, `$( … )` and backticks expand in the body exactly as bash's
+    // body does, and an escaped `\$(` is protected text.
+    let (out, _err, code) = run("cat <<EOF\n`echo hi` $(echo yo)\nEOF");
+    assert_eq!((out.as_str(), code), ("hi yo\n", 0));
+    let (out, _err, code) = run("cat <<EOF\n\\\\\\$(echo hi)\nEOF");
+    // Body `\\\$(echo hi)`: the pair, then the escaped `$` — bash prints the
+    // text `\$(echo hi)`.
+    assert_eq!((out.as_str(), code), ("\\$(echo hi)\n", 0));
+}
+
+#[test]
+fn heredoc_body_tilde_is_literal() {
+    // A body is a quoted context, so a leading `~` never expands (bash prints
+    // `~` and `~/x`; fdshell expanded `$HOME` with the empty mask).
+    let (out, _err, code) = run("cat <<EOF\n~\n~/x\nEOF");
+    assert_eq!((out.as_str(), code), ("~\n~/x\n", 0));
+}
+
+#[test]
+fn heredoc_body_line_continuation_joins_the_lines() {
+    let (out, _err, code) = run("cat <<EOF\na\\\nb\nEOF");
+    assert_eq!((out.as_str(), code), ("ab\n", 0));
+    // Consecutive continuations collapse the same way.
+    let (out, _err, code) = run("cat <<EOF\na\\\n\\\nb\nEOF");
+    assert_eq!((out.as_str(), code), ("ab\n", 0));
+}
+
+#[test]
+fn heredoc_body_pairs_backslashes_left_to_right() {
+    // `a\\` + newline: the pair is the escaped backslash, so the newline is
+    // body data and the next line stays a line (bash prints `a\` and `b`).
+    let (out, _err, code) = run("cat <<EOF\na\\\\\nb\nEOF");
+    assert_eq!((out.as_str(), code), ("a\\\nb\n", 0));
+    // `a\\\` + newline: the first two pair, the third pairs with the newline,
+    // so the join leaves `a\` + `b` (bash agrees).
+    let (out, _err, code) = run("cat <<EOF\na\\\\\\\nb\nEOF");
+    assert_eq!((out.as_str(), code), ("a\\b\n", 0));
+    // Four backslashes: pairs only, the newline stays.
+    let (out, _err, code) = run("cat <<EOF\na\\\\\\\\\nb\nEOF");
+    assert_eq!((out.as_str(), code), ("a\\\\\nb\n", 0));
+}
+
+#[test]
+fn heredoc_quoted_delimiter_body_keeps_pairs_and_continuations() {
+    // A quoted body is verbatim bytes: no pair folds and no continuation joins.
+    let (out, _err, code) = run("cat <<'EOF'\na\\ b\nEOF");
+    assert_eq!((out.as_str(), code), ("a\\ b\n", 0));
+    let (out, _err, code) = run("cat <<'EOF'\na\\\nb\nEOF");
+    assert_eq!((out.as_str(), code), ("a\\\nb\n", 0));
+}
+
+/// Accepted divergence (task #269, measured): a `<<-` body joins its
+/// continuation **after** stripping the leading tabs of each physical line, so
+/// the joined line's leading tab is gone. bash strips tabs from the joined
+/// line, keeping it (`a<TAB>b`). rc is 0 on both sides.
+#[test]
+fn heredoc_dash_continuation_drops_the_joined_line_tab() {
+    let (out, _err, code) = run("cat <<-EOF\n\ta\\\n\tb\nEOF");
+    assert_eq!(
+        (out.as_str(), code),
+        ("ab\n", 0),
+        "bash prints \"a\\tb\\n\""
+    );
+    let (out, _err, code) = run("cat <<-EOF\na\\\n\tb\nEOF");
+    assert_eq!(
+        (out.as_str(), code),
+        ("ab\n", 0),
+        "bash prints \"a\\tb\\n\""
+    );
+}
+
+/// Accepted divergence (task #269, measured): a body whose last line ends with
+/// `\<newline>` and whose delimiter line follows joins into the delimiter, so
+/// fdshell ends the body at the delimiter line and prints the joined text
+/// (`a`). bash eats the delimiter line, warns `heredoc delimited by
+/// end-of-file` and prints `aEOF` — rc 0 on both sides.
+#[test]
+fn heredoc_body_continuation_into_the_delimiter_line_ends_the_body() {
+    // The body is `a\` + newline: the continuation pair (both bytes) is the
+    // body's last thing, so what is left is `a` with no newline at all.
+    let (out, _err, code) = run("cat <<EOF\na\\\nEOF\n");
+    assert_eq!(
+        (out.as_str(), code),
+        ("a", 0),
+        "bash prints \"aEOF\\n\" + warning"
+    );
+    let (out, _err, code) = run("cat <<EOF\nab\\\nEOF\n");
+    assert_eq!(
+        (out.as_str(), code),
+        ("ab", 0),
+        "bash prints \"abEOF\\n\" + warning"
+    );
+}
+
+/// A body that ends with a trailing `\<newline>` and has **no** delimiter line
+/// is fdshell's usual unterminated-heredoc error, the same rc 1 as the plain
+/// `cat <<EOF` + body. bash only warns (rc 0).
+#[test]
+fn heredoc_unterminated_body_with_continuation_is_a_parse_error() {
+    let (_out, err, code) = run("cat <<EOF\nab\\\n");
+    assert_eq!(code, 1);
+    assert!(err.contains("heredoc"), "stderr={err:?}");
+}
