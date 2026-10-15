@@ -274,3 +274,13 @@ fn help_lists_local() {
         "stdout={out:?}"
     );
 }
+
+#[test]
+fn a_local_value_glues_a_quoted_expansion_to_literal_text() {
+    // Task #223: `local` shares the substitution path, so the quoted
+    // expansion keeps its bytes and the glued literal is not read as part of
+    // the name (`vb` is bound; bash prints `[qbc]`).
+    let (out, err, code) = run(r#"v=q; vb=VB; f(){ local w="$v"bc; printf "[%s]" "$w"; }; f"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[qbc]");
+}

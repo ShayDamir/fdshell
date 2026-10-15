@@ -253,3 +253,22 @@ fn quoted_ifs_keeps_the_backslash_as_a_split_byte() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[a][b]", "bash: [a][b]");
 }
+
+/// Task #223: the value of an assignment whose word is a quoted expansion
+/// glued to literal text keeps every byte, and the glued literal never
+/// extends the parameter name (`vb` is bound and must not win). bash:
+/// `v=q; w="$v"b,c; printf "[%s]" "$w"` → `[qb,c]`.
+#[test]
+fn quoted_expansion_glued_to_literal_text_keeps_every_byte() {
+    let cases: &[(&str, &str)] = &[
+        (r#"IFS=,; v=q; w="$v"b,c; printf "[%s]" "$w""#, "[qb,c]"),
+        (r#"IFS=,; v=q; w=x"$v"b,c; printf "[%s]" "$w""#, "[xqb,c]"),
+        (r#"IFS=,; v=""; w="$v"a,b; printf "[%s]" "$w""#, "[a,b]"),
+        (r#"v=q; vb=VB; w="$v"bc; printf "[%s]" "$w""#, "[qbc]"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(out, *want, "{script:?}");
+    }
+}

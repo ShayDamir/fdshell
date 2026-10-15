@@ -334,6 +334,11 @@ fn dollar_quote_keeps_the_dollar() {
     // `$` followed by a span is a literal `$` glued to the span's text.
     let (out, err, code) = run("echo a$'b c'd");
     assert_eq!((out.as_str(), code), ("a$b cd\n", 0), "stderr={err:?}");
+    // The same family (task #223): bash's `$"…"` is a locale translation and
+    // in the C locale it is the span's text; fdshell reads the `$` as the
+    // POSIX-sh expansion, so `v=q; printf "[%s]" $"v"` prints `[$v]`.
+    let (out, err, code) = run(r#"v=q; printf "[%s]" $"v""#);
+    assert_eq!((out.as_str(), code), ("[$v]", 0), "stderr={err:?}");
 }
 
 /// The child shell parses the same source: a `'…'` span survives the quote
@@ -492,4 +497,47 @@ fn quoted_leading_tilde_is_literal() {
     let (out, _err, code) = run(r#"printf "[%s]" '~'"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[~]");
+}
+
+/// Task #223: when the byte right after `$` starts a new quote region the
+/// `$` is a literal byte and nothing is consumed — the region cap on the name
+/// scan has no name to read. bash's `printf "[%s]" "$"v` prints `[$v]`, so
+/// this is parity, not a divergence; it is the same rule `$'…'` and `$"…"`
+/// already follow (see `dollar_quote_keeps_the_dollar`).
+#[test]
+fn dollar_at_a_region_end_is_a_literal_byte() {
+    let (out, err, code) = run(r#"v=q; printf "[%s]" "$"v"#);
+    assert_eq!((out.as_str(), code), ("[$v]", 0), "stderr={err:?}");
+    let (out, err, code) = run(r#"v=q; echo a"$"v"#);
+    assert_eq!((out.as_str(), code), ("a$v\n", 0), "stderr={err:?}");
+    // The word is still an expansion (an arm ran), so the splitter runs on
+    // it: fdshell cuts `[$v][a]` where bash keeps `[$v,a]` whole — the
+    // "an arm ran" reading of `expanded`, task #133's rule (task #222 owns
+    // the literal-delimiter join).
+    let (out, err, code) = run(r#"IFS=,; v=q; printf "[%s]" "$"v,a"#);
+    assert_eq!((out.as_str(), code), ("[$v][a]", 0), "stderr={err:?}");
+}
+
+/// Accepted divergence (task #285): the quote mask is one bit per byte, so two
+/// *adjacent* quoted regions read as one region and a bare name keeps
+/// collecting across the boundary. bash ends the name at the closing quote of
+/// the region that holds the `$`: it prints `[qb]` and `[A2]`, fdshell `[VB]`
+/// and `[]`. Pinning today's bytes gives #285 the expectations to delete.
+#[test]
+fn adjacent_quoted_regions_keep_collecting_the_name() {
+    let (out, err, code) = run(r#"v=q; vb=VB; printf "[%s]" "$v""b""#);
+    assert_eq!((out.as_str(), code), ("[VB]", 0), "stderr={err:?}");
+    let (out, err, code) = run(r#"set -- A B; printf "[%s]" "$1""2""#);
+    assert_eq!((out.as_str(), code), ("[]", 0), "stderr={err:?}");
+    // The single-quote spelling of the same adjacency: two quoted regions,
+    // and the name crosses the boundary into `vx`.
+    let (out, err, code) = run(r#"v=q; vx=VX; printf "[%s]" "$v"'x'y"#);
+    assert_eq!((out.as_str(), code), ("[VXy]", 0), "stderr={err:?}");
+    // The quoted↔unquoted boundary *is* expressible in the mask, so it is
+    // parity: `"$v"x` is the parameter `v` plus the literal `x` in both.
+    let (out, err, code) = run(r#"v=q; vx=VX; printf "[%s]" "$v"x"#);
+    assert_eq!((out.as_str(), code), ("[qx]", 0), "stderr={err:?}");
+    // The same shape with a space between the regions is two words in both.
+    let (out, err, code) = run(r#"set -- A B; printf "[%s]" "$1" "2""#);
+    assert_eq!((out.as_str(), code), ("[A][2]", 0), "stderr={err:?}");
 }

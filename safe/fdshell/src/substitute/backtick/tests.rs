@@ -10,6 +10,7 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use crate::substitute::arg::substitute_arg_marked;
+use crate::substitute::mask::Counting;
 use crate::substitute::split::split_word;
 
 use super::{handle, scan_body};
@@ -18,8 +19,8 @@ fn cell() -> ForkCell<ShellState> {
     ForkCell::new(ShellState::new())
 }
 
-fn peekable(bytes: &[u8]) -> core::iter::Peekable<core::iter::Copied<core::slice::Iter<'_, u8>>> {
-    bytes.iter().copied().peekable()
+fn peekable(bytes: &[u8]) -> Counting<'_> {
+    Counting::new(bytes.iter().copied())
 }
 
 /// The body scan alone: `None` when the region does not close.

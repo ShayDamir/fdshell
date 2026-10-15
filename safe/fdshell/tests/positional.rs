@@ -234,3 +234,26 @@ fn braced_dollar_at_expands_like_dollar_star() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[a,b,c][a,b,c]");
 }
+
+/// Task #223: the digit run of a positional parameter ends at the closing
+/// quote of its trigger byte's region, exactly as a variable name does —
+/// `"$1"2` is `$1` plus the literal `2` (bash `[A2]`), never positional 12,
+/// which is unbound and printed `[]` before the fix.
+#[test]
+fn quoted_positional_glued_to_literal_text_keeps_the_literal() {
+    let (out, err, code) = run(r#"set -- A B; set -- "$1"2; printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[A2]\n");
+    let (out, err, code) = run(r#"set -- A B; set -- "$1"abc; printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[Aabc]\n");
+    // One word, and its bytes are the parameter plus the literal text.
+    let (out, err, code) = run(r#"set -- A B; set -- "$1"abc; echo "$#/$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1/Aabc\n");
+    // The same cap on an unquoted parameter glued to a quoted literal: the
+    // region of the digit is the digit itself (`$1"2"` is `$1` plus `2`).
+    let (out, err, code) = run(r#"set -- A B; set -- $1"2"; echo "$#/$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1/A2\n");
+}

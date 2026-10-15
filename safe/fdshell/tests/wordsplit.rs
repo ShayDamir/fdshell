@@ -714,3 +714,77 @@ fn literal_ifs_byte_after_expansion_cuts_the_word() {
         assert_eq!(&out, want, "{script:?}");
     }
 }
+
+// Task #223: a quoted expansion glued to literal text must keep every byte.
+// The assignment form is split-independent, so these pins state the bytes
+// only: what the splitter decides about a literal delimiter is task #222's
+// rule. Before the fix these words lost the expansion's output and the byte
+// right after it (`"$v"b,c` → `[] [c]`, `"$v"bc` → the value of `vb`).
+
+#[test]
+fn quoted_expansion_glued_to_literal_text_keeps_every_byte() {
+    // bash: `IFS=,; v=q; w="$v"b,c; printf "[%s]" "$w"` → `[qb,c]`.
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; v=q; w="$v"b,c; builtin printf "[%s]" "$w""#,
+            "[qb,c]",
+        ),
+        (
+            r#"IFS=,; v=""; w="$v"a,b; builtin printf "[%s]" "$w""#,
+            "[a,b]",
+        ),
+        (
+            r#"IFS=,; v=q; w=x"$v"b,c; builtin printf "[%s]" "$w""#,
+            "[xqb,c]",
+        ),
+        // A glued literal that is a name prefix must not extend the name:
+        // `vb` is bound and the word must still print `[qb]`, never `[VB]`.
+        (r#"v=q; vb=VB; builtin printf "[%s]" "$v"b"#, "[qb]"),
+        (r#"v=q; vb=VB; builtin printf "[%s]" ab"$v"cd"#, "[abqcd]"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+#[test]
+fn quoted_expansion_glued_to_literal_text_is_one_word() {
+    // bash `IFS=,; v=q; vbc=VBC; set -- "$v"bc` → the single field `[qbc]`:
+    // no byte loss, no word split, and the name stays `v`.
+    let (out, err, code) = run(r#"IFS=,; v=q; vbc=VBC; set -- "$v"bc; printf "[%s]\n" "$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[qbc]\n");
+    let (out, err, code) = run(r#"IFS=,; v=q; vbc=VBC; set -- "$v"bc; echo "$#/$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1/qbc\n");
+}
+
+#[test]
+fn quoted_expansion_glued_to_a_literal_delimiter_keeps_all_the_bytes() {
+    // The `IFS=,` `set --` shapes of task #223, pinned to today's *bytes*:
+    // every byte survives, and the word still cuts at the literal `,`. The
+    // join bash performs here (`[qb,c]` as one field) is task #222's
+    // accepted divergence, so #222's own commit is the one that moves these
+    // expectations — this task must not pre-empt it.
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; v=q; vb=VB; set -- "$v"b,c; printf "[%s]\n" "$@""#,
+            "[qb]\n[c]\n",
+        ),
+        (
+            r#"IFS=,; v=""; va=VA; set -- "$v"a,b; printf "[%s]\n" "$@""#,
+            "[a]\n[b]\n",
+        ),
+        (
+            r#"IFS=,; v=q; vb=VB; set -- x"$v"b,c; printf "[%s]\n" "$@""#,
+            "[xqb]\n[c]\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}

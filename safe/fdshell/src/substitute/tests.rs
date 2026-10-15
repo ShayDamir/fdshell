@@ -12,6 +12,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::{FdVar, ShellState};
 
 use super::arg::substitute_arg_marked;
+use super::mask::Counting;
 use super::substitute_arg;
 
 fn fdvar(fd: sys::LocalFd) -> FdVar {
@@ -2250,7 +2251,7 @@ fn quoted_multiword_expansion_still_splits() {
 // Mutant-catching tests for substitute/paren.rs
 #[test]
 fn paren_single_level_expr() {
-    let mut peek = b"echo hi)".iter().copied().peekable();
+    let mut peek = Counting::new(b"echo hi)".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek).unwrap();
     assert_eq!(res, b"echo hi".as_slice());
 }
@@ -2261,21 +2262,21 @@ fn paren_nested_expr_keeps_all_levels() {
     // Input mirrors what arg.rs passes: outer `$(` already consumed, so the
     // byte sequence ends with the `)` closing that outer level.
     let input = b"(a(b(c))d))";
-    let mut peek = input.iter().copied().peekable();
+    let mut peek = Counting::new(input.iter().copied());
     let res = super::paren::read_paren_expr(&mut peek).unwrap();
     assert_eq!(res, b"(a(b(c))d)");
 }
 
 #[test]
 fn paren_empty_inner() {
-    let mut peek = b")".iter().copied().peekable();
+    let mut peek = Counting::new(b")".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek).unwrap();
     assert!(res.is_empty());
 }
 
 #[test]
 fn paren_unclosed_is_error() {
-    let mut peek = b"abc".iter().copied().peekable();
+    let mut peek = Counting::new(b"abc".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek);
     assert!(matches!(
         res.unwrap_err().current_context(),
@@ -2285,28 +2286,28 @@ fn paren_unclosed_is_error() {
 
 #[test]
 fn paren_paren_in_quotes_is_data() {
-    let mut peek = b"echo \"a)b\")".iter().copied().peekable();
+    let mut peek = Counting::new(b"echo \"a)b\")".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek).unwrap();
     assert_eq!(res, b"echo \"a)b\"".as_slice());
 }
 
 #[test]
 fn paren_open_paren_in_quotes_is_data() {
-    let mut peek = b"a\"(b)c\")".iter().copied().peekable();
+    let mut peek = Counting::new(b"a\"(b)c\")".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek).unwrap();
     assert_eq!(res, b"a\"(b)c\"".as_slice());
 }
 
 #[test]
 fn paren_escaped_quote_in_quotes_is_data() {
-    let mut peek = b"echo \"a\\\"b)\")".iter().copied().peekable();
+    let mut peek = Counting::new(b"echo \"a\\\"b)\")".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek).unwrap();
     assert_eq!(res, b"echo \"a\\\"b)\"".as_slice());
 }
 
 #[test]
 fn paren_unclosed_quote_is_error() {
-    let mut peek = b"echo \"a".iter().copied().peekable();
+    let mut peek = Counting::new(b"echo \"a".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek);
     assert!(matches!(
         res.unwrap_err().current_context(),
@@ -2316,7 +2317,7 @@ fn paren_unclosed_quote_is_error() {
 
 #[test]
 fn paren_trailing_escape_in_quotes_is_error() {
-    let mut peek = b"echo \"a\\".iter().copied().peekable();
+    let mut peek = Counting::new(b"echo \"a\\".iter().copied());
     let res = super::paren::read_paren_expr(&mut peek);
     assert!(matches!(
         res.unwrap_err().current_context(),
@@ -3029,4 +3030,177 @@ fn braced_digit_run_never_reads_a_variable_of_the_same_name() {
             "{arg:?} is unbound even with the inherited `4` present"
         );
     }
+}
+
+// ── task #223: a quoted expansion followed by literal text ────────────────
+//
+// Two bookkeeping facts compose the byte loss of `"$v"b,c`:
+// * a byte a helper only peeks at must not count as consumed, or every
+//   `realign` leaves `idx` one byte ahead of the mask (mask.rs's `Counting`);
+// * a bare name is confined to the quote region of its trigger byte, exactly
+//   as bash ends `"$v"bc` at the closing quote (`mask::region_len`).
+// Every test below binds the name it probes: an unbound name expands to the
+// empty string and the byte loss is invisible (LESSONS).
+#[test]
+fn region_len_measures_the_trigger_byte_region() {
+    use super::mask::region_len;
+    assert_eq!(region_len(&[true, true, false, false], 0), 2);
+    assert_eq!(region_len(&[false, true, true], 1), 2);
+    assert_eq!(region_len(&[true], 0), 1);
+    // No bit at `from` is no information: the scan stays unbounded, which is
+    // what the mask-independent callers (heredoc bodies, `case_exec`) need.
+    assert_eq!(region_len(&[], 3), usize::MAX);
+    // A run of equal bits is one region, so an all-quoted mask is unbounded.
+    assert_eq!(region_len(&[true, true, true], 0), 3);
+}
+
+#[test]
+fn counting_ignores_peeked_bytes() {
+    // `consumed` is the index of the next *unread* byte: `realign` assigns it
+    // to `idx`, so a peeked byte counted at peek time desynchronizes the mask.
+    let mut peek = Counting::new(b"abc".iter().copied());
+    assert_eq!(peek.peek().copied(), Some(b'a'));
+    assert_eq!(peek.peek().copied(), Some(b'a'));
+    assert_eq!(peek.consumed(), 0);
+    assert_eq!(peek.next(), Some(b'a'));
+    assert_eq!(peek.consumed(), 1);
+    assert_eq!(peek.next(), Some(b'b'));
+    assert_eq!(peek.consumed(), 2);
+    assert_eq!(peek.peek().copied(), Some(b'c'));
+    assert_eq!(peek.consumed(), 2);
+    assert_eq!(peek.next(), Some(b'c'));
+    assert_eq!(peek.consumed(), 3);
+    assert_eq!(peek.peek(), None);
+    assert_eq!(peek.next(), None);
+    assert_eq!(peek.consumed(), 3);
+}
+
+#[test]
+fn quoted_name_stops_at_the_closing_quote() {
+    // The word of `"$vb",c` is `$vb,c` with the first two bytes quoted: the
+    // parameter is `v`, and the literal `b` keeps its byte and its own bit.
+    // bash `IFS=,; v=q; set -- "$v"b,c` → one field `qb,c` (no byte loss).
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"W");
+    bind(&cell, c"vb", c"VB");
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"$vb,c"),
+        &[true, true, false, false, false],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"Wb,c");
+    assert_eq!(mask, vec![true, false, false, false]);
+    assert!(expanded);
+}
+
+#[test]
+fn name_is_greedy_inside_its_quote_region() {
+    // `"x$vbc"`: every name byte is inside the `$`'s region, so the greedy
+    // scan keeps the whole name (bash `$vbc` is the parameter `vbc`).
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"V");
+    bind(&cell, c"vbc", c"VBC");
+    assert_eq!(
+        expand(&cell, c"x$vbc", &[true, true, true, true, true]),
+        b"xVBC"
+    );
+    // Crossing out of the region is what the cap forbids: `"x$v"bc` is `xVbc`.
+    bind(&cell, c"vb", c"VB");
+    assert_eq!(
+        expand(&cell, c"x$vbc", &[true, true, true, false, false, false]),
+        b"xVbc"
+    );
+}
+
+#[test]
+fn positional_digit_run_stops_at_the_closing_quote() {
+    // `"$1"2` is `$1` plus the literal `2` (bash `[A2]`), not positional 12.
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"A"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    assert_eq!(expand(&cell, c"$12", &[true, true, false]), b"A2");
+    // A word with no mask at all stays mask-independent: greedy digits.
+    assert_eq!(expand(&positional_cell_with_n(15), c"$12", &[]), b"arg12");
+}
+
+#[test]
+fn percent_name_stops_at_the_closing_quote() {
+    // `"%v"b`: the fd name is capped at the region, the literal `b` follows.
+    // A seeded cache entry fixes the fd number, so the bytes are exact.
+    let cell = dummy_cell();
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    cache.insert(ShortCStr::from(c"v"), exported_fd(1000));
+    let mut expanded = false;
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"%vb"),
+        &[true, true, false],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"1000b");
+    assert_eq!(mask, vec![true, true, true, true, false]);
+    assert!(expanded);
+}
+
+#[test]
+fn percent_at_region_end_is_literal_and_consumes_nothing() {
+    // `"%v"` region ends at the `%`: the name is empty, so the arm is the
+    // literal `%` escape and the `v` is handed to the loop as a literal byte.
+    let cell = dummy_cell();
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"%v"),
+        &[true, false],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"%v");
+    assert_eq!(mask, vec![true, false]);
+    assert!(expanded, "the `%` arm ran, so the word is expanded");
+}
+
+#[test]
+fn dollar_at_region_end_is_literal() {
+    // `"$"v`: the byte after `$` starts a new region, so `$` is literal and
+    // nothing is consumed — the same rule `$'…'` and `$"…"` already follow
+    // (bash `v`, README accepted divergence). `expanded` stays set: the arm
+    // ran (`bare_dollar_marks_expansion` pins the same reading).
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"V");
+    let mut expanded = false;
+    let mut cache = HashMap::new();
+    let (res, mask) = substitute_arg_marked(
+        &ShortCStr::from(c"$v"),
+        &[true, false],
+        &mut cache,
+        &cell,
+        &mut expanded,
+    )
+    .unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"$v");
+    assert_eq!(mask, vec![true, false]);
+    assert!(expanded);
+}
+
+/// An `ExportedFd` with a fixed raw number, so a `%name` pin asserts exact
+/// bytes. `export_to` is `dup2`, whose kernel contract is to return `raw`; the
+/// source's `LocalFd` closing afterwards leaves the duplicate open.
+fn exported_fd(raw: i32) -> ExportedFd {
+    let (src, _dst) = sys::pipe::pipe2(0).unwrap();
+    src.export_to(raw).unwrap()
 }
