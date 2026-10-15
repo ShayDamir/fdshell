@@ -2301,6 +2301,75 @@ fn if_multi_word_then_body() {
     assert_eq!(ib.then_body.data, c"b c".into());
 }
 
+/// A `;`-terminated heredoc in a single-line block **body**: the block text
+/// carries the body regions after the closing keyword (append mode), so the
+/// arm's text is rebuilt from the regions its own operators claim into a
+/// self-contained heredoc (command bytes + newline + bodies).
+#[test]
+fn if_then_body_heredoc_of_a_single_line_block_is_self_contained() {
+    let ParsedLine::If(ib) = parse(b"if true; then cat <<T; fi\nbodyT\nT").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.then_body.data, c"cat <<T\nbodyT\nT".into());
+    assert!(ib.cond_bodies.is_empty());
+}
+
+/// The same for an `elif` arm's body and for the `else` body.
+#[test]
+fn if_elif_and_else_body_heredocs_are_self_contained() {
+    let ParsedLine::If(ib) =
+        parse(b"if false; then :; elif true; then cat <<E; fi\nbodyE\nE").unwrap()
+    else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.elifs[0].body.data, c"cat <<E\nbodyE\nE".into());
+
+    let ParsedLine::If(ib) = parse(b"if false; then :; else cat <<T; fi\nbodyT\nT").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.else_body.unwrap().data, c"cat <<T\nbodyT\nT".into());
+}
+
+/// Two heredoc operators in one arm body: both bodies are appended, in
+/// operator order.
+#[test]
+fn if_then_body_with_two_heredocs_appends_both_bodies() {
+    let ParsedLine::If(ib) =
+        parse(b"if true; then cat <<A; cat <<B; fi\nbodyA\nA\nbodyB\nB").unwrap()
+    else {
+        panic!("expected If")
+    };
+    assert_eq!(
+        ib.then_body.data,
+        c"cat <<A; cat <<B\nbodyA\nA\nbodyB\nB".into()
+    );
+}
+
+/// A single-line loop body's heredoc — `while` and `until` share the builder.
+#[test]
+fn loop_body_heredoc_of_a_single_line_block_is_self_contained() {
+    let ParsedLine::While(wb) = parse(b"while true; do cat <<T; done\nbodyT\nT").unwrap() else {
+        panic!("expected While")
+    };
+    assert_eq!(wb.body.data, c"cat <<T\nbodyT\nT".into());
+
+    let ParsedLine::Until(ub) = parse(b"until false; do cat <<T; done\nbodyT\nT").unwrap() else {
+        panic!("expected Until")
+    };
+    assert_eq!(ub.body.data, c"cat <<T\nbodyT\nT".into());
+}
+
+/// A multi-line body-position heredoc keeps the verbatim arm text (the
+/// delimiter line is an unblanked token inside the arm's token range): the
+/// extension mode `part_text` must not rewrite.
+#[test]
+fn if_then_body_heredoc_of_a_multi_line_block_stays_verbatim() {
+    let ParsedLine::If(ib) = parse(b"if true; then cat <<T\nbodyT\nT\nfi").unwrap() else {
+        panic!("expected If")
+    };
+    assert_eq!(ib.then_body.data, c"cat <<T\nbodyT\nT".into());
+}
+
 #[test]
 fn if_no_semi_before_fi_body_is_empty() {
     let ParsedLine::If(ib) = parse(b"if a; then b fi").unwrap() else {

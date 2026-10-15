@@ -72,13 +72,12 @@ pub(crate) fn tokens_to_if(
         Some(&(ei, _)) => ei,
         None => else_idx.unwrap_or(fi_idx),
     };
-    let then_body = span_verbatim(
-        text,
-        tokens,
-        first_then + 1,
-        first_end - 1,
-        ParseError::MissingThen,
-    )?;
+    let then_tokens = trim_semi(
+        tokens
+            .get(first_then + 1..first_end - 1)
+            .ok_or(ParseError::MissingThen)?,
+    );
+    let then_body = super::part_text::part_text(text, then_tokens)?;
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
     let else_body: Result<Option<ScriptText>, Report<ParseError>> = else_idx

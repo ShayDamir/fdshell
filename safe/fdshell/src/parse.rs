@@ -28,6 +28,7 @@ mod here_string;
 mod heredoc;
 pub(crate) mod if_block;
 mod line;
+mod part_text;
 mod pipeline;
 mod quotes;
 mod redirect;

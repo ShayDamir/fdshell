@@ -2,8 +2,10 @@
 
 #![allow(clippy::unwrap_used)]
 
+use super::claimed_regions;
 use super::condition_bodies;
-use crate::parse::semi::{find_preceded_by_semi, trim_semi};
+use crate::parse::Token;
+use crate::parse::semi::{closing_keyword_index, find_preceded_by_semi, token_range, trim_semi};
 use crate::parse::token::tokenize_statement;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -200,6 +202,55 @@ fn condition_bodies_of_a_pre_sliced_block_text() {
     );
 }
 
+/// The regions an **arm body** claims follow the same rule as a condition's:
+/// the `<<` operators written on the same physical line **before** the arm
+/// already claimed the head of the stream, so the `elif` arm skips the `then`
+/// arm's region and claims only its own.
+#[test]
+fn claimed_regions_of_an_arm_skip_the_operators_written_before_them() {
+    let line = b"if false; then cat <<A; elif true; then cat <<B; fi\nbodyA\nA\nbodyB\nB";
+    let regions = arm_regions_of(line, b"elif");
+    assert_eq!(regions.len(), 1);
+    let &(s, e) = regions.first().unwrap();
+    assert_eq!(line.get(s..e).unwrap(), b"bodyB\nB");
+}
+
+/// An arm with two operators claims both regions, in operator order.
+#[test]
+fn claimed_regions_of_an_arm_with_two_operators_are_in_order() {
+    let line = b"if true; then cat <<A; cat <<B; fi\nbodyA\nA\nbodyB\nB";
+    let regions = arm_regions_of(line, b"if");
+    assert_eq!(regions.len(), 2);
+    let contents: Vec<&[u8]> = regions
+        .iter()
+        .map(|&(s, e)| line.get(s..e).unwrap())
+        .collect();
+    assert_eq!(
+        contents,
+        vec![b"bodyA\nA\n".as_slice(), b"bodyB\nB".as_slice()]
+    );
+}
+
+/// In extension mode (a multi-line block) the regions a slice claims sit
+/// **inside** its token range — the discriminator `part_text` uses to leave
+/// the slice's text verbatim.
+#[test]
+fn claimed_regions_of_an_extension_mode_slice_sit_inside_the_token_range() {
+    let line = b"if true; then cat <<T\nbodyT\nT\nfi";
+    let regions = arm_regions_of(line, b"if");
+    assert_eq!(regions.len(), 1);
+    let &(s, e) = regions.first().unwrap();
+    assert_eq!(line.get(s..e).unwrap(), b"bodyT\nT\n");
+    assert!(s < arm_token_range_end(line, b"if"));
+}
+
+/// A slice with no `<<` operator claims no region.
+#[test]
+fn claimed_regions_of_a_slice_without_operators_are_empty() {
+    let line = b"if true; then echo x; fi";
+    assert!(arm_regions_of(line, b"if").is_empty());
+}
+
 /// The condition of the arm opened by `keyword` (`elif`), as the parse layer
 /// extracts it from a full block text.
 fn cond_bodies_of(line: &[u8], keyword: &[u8]) -> Vec<ShortCStr> {
@@ -215,4 +266,32 @@ fn cond_bodies_of(line: &[u8], keyword: &[u8]) -> Vec<ShortCStr> {
         .unwrap();
     let then = find_preceded_by_semi(&tokens, kw + 1, b"then").unwrap();
     condition_bodies(&text, trim_semi(tokens.get(kw + 1..then).unwrap()))
+}
+
+/// The regions claimed by the arm slice opened by the `then` following
+/// `keyword`, cut the way the block parsers cut it.
+fn arm_regions_of(line: &[u8], keyword: &[u8]) -> Vec<(usize, usize)> {
+    let text = ScriptText::new(
+        ShortCStr::from_vec(line.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    claimed_regions(&text, &arm_slice(line, keyword))
+}
+
+/// The exclusive end of the arm slice's token range.
+fn arm_token_range_end(line: &[u8], keyword: &[u8]) -> usize {
+    let slice = arm_slice(line, keyword);
+    token_range(&slice).1
+}
+
+fn arm_slice(line: &[u8], keyword: &[u8]) -> Vec<Token> {
+    let tokens = tokenize_statement(line).unwrap();
+    let closing = closing_keyword_index(&tokens, line).unwrap();
+    let kw = tokens
+        .iter()
+        .position(|(t, _, _, _, _)| t.eq_bytes(keyword))
+        .unwrap();
+    let then = find_preceded_by_semi(&tokens, kw + 1, b"then").unwrap();
+    trim_semi(tokens.get(then + 1..closing - 1).unwrap()).to_vec()
 }

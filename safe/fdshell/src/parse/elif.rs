@@ -39,7 +39,7 @@ pub fn parse_elifs(
             if body.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
                 bail!(ParseError::MalformedIfBlock);
             }
-            let eb = verbatim(text, trim_semi(body))?;
+            let eb = super::part_text::part_text(text, trim_semi(body))?;
             Ok(ElifArm {
                 cond: ec,
                 body: eb,
@@ -60,5 +60,5 @@ pub fn parse_else_body(
         bail!(ParseError::MalformedIfBlock);
     }
     let trimmed = trim_semi(raw);
-    verbatim(text, trimmed)
+    super::part_text::part_text(text, trimmed)
 }

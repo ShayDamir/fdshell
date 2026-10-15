@@ -43,7 +43,7 @@ pub(crate) fn tokens_to_loop(
     let condition = verbatim(text, cond_tokens)?;
     let cond_bodies = condition_bodies(text, cond_tokens);
 
-    let body = verbatim(
+    let body = crate::parse::part_text::part_text(
         text,
         trim_semi(
             tokens
