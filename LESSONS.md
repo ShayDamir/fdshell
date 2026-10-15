@@ -1437,3 +1437,86 @@ The discriminator is the **mask**, never the per-word `quoted` flag — that fla
 **Probe rule:** measure the word count with `echo $#`, a `for` loop, or `arg_print`'s argv count (`tests/bins/arg_print.rs` prints `[arg] ` per argv entry, so zero args print a bare newline). Never `printf "[%s]\n" "$@"` — printf reuses its format with empty substitutions, so it prints `[]` **in bash too** and reads as agreement (it did exactly that in the planning measurement). The word-0 surface inherits the rule through `command_word::args::consume` (an empty field list takes the next word), so `set --; "$@" echo hi` runs `echo hi` (bash-equal); with nothing after it, `set --; "$@"` is the pre-existing empty-command-name divergence, not new behaviour.
 
 **Measure the surface's own pipeline before probing through it.** The plan's builtin probe was `set --; cd "$@"; echo rc=$?; pwd` → HOME, assuming `cd` receives expanded words. It does not: `intercept/cd.rs` hands `cmdline.args` — the raw parsed words — to `cd::cd`, so `cd "$@"`, `cd $1` and `cd "$HOME"` all look up the literal text on master (measured: ENOENT reports for every form, with and without positionals). `cd` therefore cannot probe this fix at all; the pipeline/`become`/`timeout` shapes with `arg_print` are the bash-comparable builtin/external probes. `cd`'s missing word expansion is its own divergence (tracked as a task, not fixed here — it is a `cd`-local substitution gap, orthogonal to the word count).
+
+## A peeked byte must not count as consumed
+`mask::Counting` counted bytes for the substitution loop, and it was wrapped in
+`Peekable`: `Peekable::peek()` pulls through `Counting::next()`, so every byte a
+helper only *looked at* was already in `consumed` — and `realign` assigns
+`consumed` to the loop's `idx`. `idx` therefore ran **one byte ahead of the mask**
+after every arm that peeks, and `mask.get(idx)` handed the byte that directly
+follows an expansion its *neighbour's* mask bit. The visible shape (task #223):
+`a%%b` read the second `%` at mask index 3 instead of 2, and any quantity
+computed from `idx` at the loop top (task #223's name cap) is off by one.
+
+Fix shape: the counting iterator owns its peek buffer (`Counting { inner,
+consumed, peeked }`, `peek()` fills the buffer without counting, `next()` takes
+from it first), so `consumed` is exactly the index of the next unread byte and
+the loop's documented `idx == consumed` invariant is true rather than
+approximate. Consequences worth knowing before touching this again:
+
+- The stream type is now fixed to the word's bytes
+  (`Copied<slice::Iter<'_, u8>>`), so substitution helpers take `&mut
+  mask::Counting<'_>` instead of `&mut Peekable<impl Iterator<Item = u8>>`.
+  Helpers that only ever call `next()` (`paren_scan.rs`) take
+  `&mut impl Iterator<Item = u8>` and stay callable from both worlds; the
+  generic `I: Iterator<Item = u8>` parameters that only existed to build a
+  `Peekable<Counting<I>>` (`subst_paren.rs`) disappear with the wrapper.
+- `Counting` carries its own `Cell` and exposes `consumed()`, so the caller no
+  longer borrows a cell through the iterator; `realign`'s second parameter is
+  the stream (`*idx = peek.consumed()`), which makes the coupling explicit.
+- The accounting change is **global**: every arm's mask bits for the bytes
+  following an expansion change from neighbour-bit to exact-bit at once. Expect
+  state-asserting unit tests to be the ones that move; run the whole suite with
+  `--no-fail-fast` (LESSONS: "grep is not enough") and re-derive any moved pin
+  from bash/POSIX — never encode the old index.
+- The two faces of task #223 compose: with the accounting fixed alone the bytes
+  after an expansion keep their own bits, and with the name cap alone every
+  quantity derived from `idx` is one byte off. Pin both faces (unit:
+  `substitute/tests.rs::counting_ignores_peeked_bytes` plus the region-cap
+  tests; integration: `tests/wordsplit.rs::quoted_expansion_glued_to_*`).
+
+## A bare name is capped at the quote region of its trigger byte
+bash ends a `$name`, a `%name` and a positional `$N` at the closing quote of the
+region that contains the `$`: `"$v"bc` is the parameter `v` plus the literal
+`bc`, and `"$1"2` is `$1` plus `2`. fdshell's name scans were greedy over the
+word text, so they read `vbc`/`12` and swallowed the literal bytes with the
+name. The cap is a **region** cap, not a length cap: `mask::region_len(mask,
+from)` is the length of the run of mask bits equal to the bit at `from`, and the
+arms get `limit = region_len(mask, idx).saturating_sub(1)` computed at the loop
+top, where `idx` is the trigger byte's own index (before the arm peeks — see the
+sibling rule above, which is what makes that index trustworthy).
+
+- **Greedy stays greedy inside the region.** `"x$vbc"` is `VBC`; the unquoted
+  `$vbc` is `VBC` too. The cap only forbids crossing the region boundary.
+- **A missing mask bit is no information.** `region_len` returns `usize::MAX`
+  when `mask.get(from)` is `None`, so the mask-independent callers (heredoc
+  bodies, `case_exec`, `set -u`-style unit calls) keep the greedy scan
+  unchanged; an all-quoted mask (a heredoc body) is one run and stays greedy.
+  Pinned: `region_len_measures_the_trigger_byte_region`, and the heredoc row
+  `$v"bc"` → `q"bc"`.
+- **`limit == 0` means the next byte starts a new region**, so the trigger is
+  literal and consumes nothing: `$"v"` → `$v`, `"$"v` → `$v` (bash prints `v`
+  for the ANSI-C/locale `$"…"` family — the divergence the `$'x'` → `$x` bullet
+  already documents — and `$v` for `"$"v`, so that spelling is parity).
+  `expanded` stays **set**: the arm ran, which is what
+  `bare_dollar_marks_expansion` pins; do not "clean up" the flag here.
+  The `%` arm needs no special case: an empty name takes the existing
+  literal-`%` fallback and consumes nothing.
+- **A boolean mask cannot express adjacent quoted regions.** `"$v""b"` is the
+  text `vb` with an all-true mask, so the run is one region and the name keeps
+  collecting: fdshell prints `[VB]`, bash `[qb]`; `"$1""2"` gives `[]` where
+  bash gives `[A2]`. Accepted divergence (task #285 owns the region-id model),
+  pinned in `tests/quotes.rs::adjacent_quoted_regions_keep_collecting_the_name`
+  with a README bullet, so #285 has the expectations to delete.
+- **Bind every name a mask-alignment test probes** (LESSONS): with `vb`
+  unbound, `"$v"b` prints `[]` for the greedy scan, for the cap *and* for the
+  byte loss, so a test that binds nothing measures nothing. The pins glue a
+  literal to a **name prefix** (`vb=VB` next to `"$v"b`) — that pair is what
+  distinguishes a capped scan from a greedy one.
+- **Re-measure the plan's table against bash; two of its rows were wrong.**
+  The plan predicted bash `v` for `"$"v` (bash prints `$v` — parity, so the
+  pin is a parity pin, not a divergence) and `"${v}"x` → `VX` for the
+  adjacent-region divergence (the braced form is unaffected: the name ends at
+  `}`, both shells print `[qx]`; the bare-name spelling `"$v""b"` is the shape
+  that diverges). A pin typed from a plan table, not measured, pins a
+  prediction.

@@ -802,6 +802,15 @@ parameter an error instead (rc 1, `x: unbound variable`), for `$name`, `${name}`
 `${!name}` whose name is itself unset is an error (rc 1,
 `undefined: invalid indirect expansion`), as bash.
 
+A bare name never crosses out of the **quote region of its trigger byte** (task
+#223): the tokenizer's quote regions are what end a name, so `"$v"bc` is the
+parameter `v` plus the literal `bc` (`[qbc]`), `"$1"2` is `$1` plus `2`, and
+`"%v"b` is the fd `v` plus `b`. The scan stays greedy *within* the region, so
+the unquoted `$vbc` is the parameter `vbc` and `"x$vbc"` is `xVBC`. A byte that
+starts a new region right after `$` leaves no name, and the `$` is then a
+literal byte that consumes nothing: `printf "[%s]" "$"v` prints `[$v]`, as
+bash.
+
 `set` short flags **cluster** in one word: every byte after the sign is applied
 with the word's sign, so `set -eu` sets errexit *and* nounset and `set +ef`
 clears noglob *and* verbosity; a repeated byte (`set -ee`) is harmless. The
@@ -1141,6 +1150,18 @@ Accepted divergences:
 - `$'…'` is **not** ANSI-C quoting (task #156): fdshell reads it the POSIX-sh
   way, so `echo $'x'` prints `$x` where bash prints `x`. The `$` is kept
   deliberately — dropping it would expand the variable `x` instead.
+- `$"…"` is **not** a locale translation (the same family as the bullet above,
+  task #223): bash's `$"v"` in the C locale is the span's text, so
+  `v=q; printf "[%s]" $"v"` prints `[v]`, while fdshell prints `[$v]`. The
+  glued spelling `"$"v` — a quoted `$` in one region, `v` in the next — prints
+  `[$v]` in both shells, because a byte that starts a new region right after
+  `$` leaves no name and the `$` is literal.
+- Quote state is one bit per byte, so two **adjacent quoted regions** read as
+  one region and a bare name keeps collecting across their boundary (task
+  #285): `v=q; vb=VB; printf "[%s]" "$v""b"` prints `[VB]` where bash prints
+  `[qb]`, and `set -- A B; printf "[%s]" "$1""2"` prints `[]` where bash
+  prints `[A2]`. Pinned in `tests/quotes.rs`, next to the parity rows of the
+  quote-region name cap ("Shell variables").
 - A quoted `case` pattern has its quotes stripped but its bytes still glob
   (task #246, pre-existing for `"` as well). The word side is now expanded with
   its **own** mask (task #269), so the two sides read the same text differently:
