@@ -5,7 +5,11 @@
 //! (`boundary/body.rs`). The group counter recognizes a function
 //! definition's body opener as well as the plain group opener, so a body's
 //! operators stay body data of the definition ([`opens_group`], task #235).
+//! In-block keyword scoring follows bash's clause rule: the scan carries a
+//! command-position flag ([`Place`]) so a block keyword written as an argument
+//! in a body (`echo if && echo x`) stays word data (task #236).
 
+use crate::keywords::Place;
 use crate::scan::ScanState;
 use crate::segment::group::{definer_at_run, group_at_run, opens_at};
 
@@ -31,8 +35,21 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
     let mut run_start = i;
     let mut group_depth: i32 = 0;
     let mut block_depth: i32 = 0;
+    // Bash recognizes a reserved word in command position only. Inside a block
+    // the scan carries that rule as a flag ([`Place`], task #236): every
+    // separator and every cond operator restarts it, and every word moves it
+    // per [`block::word_delta`]'s transition.
+    let mut place = Place::Command;
     while let Some(&b) = line.get(i) {
         if !state.in_quote && !state.in_single && state.paren_depth == 0 {
+            if block_depth > 0
+                && (b == b'&' && line.get(i + 1) == Some(&b'&')
+                    || b == b'|' && line.get(i + 1) == Some(&b'|'))
+            {
+                // A cond operator starts a command, also inside a block: the
+                // word behind it may be a nested block's opener.
+                place = Place::Command;
+            }
             if group_depth == 0
                 && block_depth == 0
                 && ((b == b'&' && line.get(i + 1) == Some(&b'&'))
@@ -44,10 +61,12 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             // scored by the same shared helper. A stray closer clamps at 0, so
             // a stray `done` never hides the operators of a plain command line,
             // and the helper's command-position rule keeps a keyword-shaped
-            // *argument* (`echo if && echo b`) word data too.
+            // *argument* (`echo if && echo b`) word data at top level *and*
+            // inside a block (the carried `place`).
             if state.at_word_start() {
-                let delta = block::word_delta(line, i, block_depth, run_start);
+                let (delta, next) = block::word_delta(line, i, block_depth, run_start, place);
                 block_depth = block_depth.saturating_add(delta).max(0);
+                place = next;
             }
             // Only a brace that opens a group counts: at a cond-list part start
             // (the run is empty, or the run ends with `&&` / `||`) or as a
@@ -75,6 +94,7 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                     body::Step::Skip(resume) => {
                         i = resume;
                         run_start = i;
+                        place = Place::Command;
                         // The run reset starts a new word: the line after a
                         // heredoc body begins with a command word.
                         state.word_active = false;
@@ -85,6 +105,7 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             if b == b'\n' || b == b';' {
                 i += 1;
                 run_start = i;
+                place = Place::Command;
                 // A run reset is a word reset: a closer written at the start
                 // of a physical line must be scored, or the block's trailing
                 // operator is swallowed into its text.

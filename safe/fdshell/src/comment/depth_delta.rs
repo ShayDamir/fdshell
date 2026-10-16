@@ -1,8 +1,25 @@
 //! Block-depth deltas of the keywords in a word run.
 
 use crate::bytes::SQUOTE;
+use crate::keywords::{Place, after, keyword_delta, scores};
 use crate::scan::Quotes;
 use alloc::vec::Vec;
+
+/// Score one word of the run and move the command-position flag with it
+/// (task #236): bash recognizes a block keyword in command position *only*,
+/// so a keyword-shaped *argument* (`echo if`, `echo done`) is word data, and
+/// only the words behind a run start, a cond operator, `then`/`do`/`else`/
+/// `elif`, a condition-taking opener, a group opener or a `case` clause's `)`
+/// can open or close a nested block. A brace word stays ungated, the accepted
+/// divergence `tests/group.rs::literal_brace_argument_in_a_block_body` pins.
+fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i32 {
+    let delta = scores(frag, line, word_end, *place)
+        .then(|| keyword_delta(frag, line, word_end))
+        .flatten()
+        .unwrap_or(0);
+    *place = after(frag, line, word_end, *place);
+    delta
+}
 
 /// Sum the block-depth deltas of the keywords in a space-separated word run.
 ///
@@ -42,6 +59,9 @@ pub(crate) fn depth_delta(
     // quoted word is one fragment and can never be a bare keyword).
     let mut frag_quoted = quotes.double || quotes.single || in_backtick;
     let mut i = 0usize;
+    // A run always starts at a command position: `scan_block` breaks runs at
+    // `;`/newline/comment/heredoc, and each break starts a new command word.
+    let mut place = Place::Command;
     while let Some(&b) = raw.get(i) {
         let bare = !quotes.double && !quotes.single && !in_backtick;
         let mut step = 1usize;
@@ -65,7 +85,7 @@ pub(crate) fn depth_delta(
             // A split only exists outside quotes and substitutions, so the
             // next word always starts unquoted.
             if !frag_quoted {
-                sum += crate::keywords::keyword_delta(&frag, line, base + i).unwrap_or(0);
+                sum += word_step(&frag, line, base + i, &mut place);
             }
             frag.clear();
             frag_quoted = false;
@@ -76,7 +96,7 @@ pub(crate) fn depth_delta(
         i += step;
     }
     if !frag_quoted {
-        sum += crate::keywords::keyword_delta(&frag, line, base + raw.len()).unwrap_or(0);
+        sum += word_step(&frag, line, base + raw.len(), &mut place);
     }
     sum
 }

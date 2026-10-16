@@ -5,12 +5,14 @@ fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
 }
 
 mod function;
+mod position;
 mod quoted;
 mod wait;
 
 use quoted::quoted_word;
 
 pub(crate) use function::{definer_len, function_def_name, name_len};
+pub(crate) use position::{Place, after, scores};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
 use crate::segment::group::{closes, opens};
