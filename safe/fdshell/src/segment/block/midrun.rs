@@ -9,7 +9,7 @@
 use super::length::opener_len;
 use crate::brace::scan_brace_block;
 use crate::comment::scan_block;
-use crate::keywords::{function_def_name, time_prefix_len};
+use crate::keywords::{function_def_name, keyword_delta, time_prefix_len};
 use crate::scan::Quotes;
 use crate::segment::book::Book;
 use crate::segment::group;
@@ -56,10 +56,21 @@ pub(in crate::segment) fn skip(line: &[u8], book: &mut Book<'_>) -> Option<usize
 /// for the cond layer to re-split. A function definition is scanned to its
 /// closing brace, carrying the quote state out of the body exactly like
 /// `skip_group`. An unclosed span ends at the end of input.
+///
+/// The keyword branch is gated on the **shared run-start scorer**
+/// [`keyword_delta`] `== Some(1)` — `opener_len` only measures the word. The
+/// scorer is what tells a block-opening `wait` from the POSIX builtin
+/// (`keyword_delta` scores the builtin `0`: no pattern keyword behind it), and
+/// the cond layer re-splits only `&&`/`||`, never a `;`: a span over the
+/// builtin would swallow every statement after the first `;` of the run
+/// (`true && wait; echo tail`). A word the scorer rejects stays word data, so
+/// the caller advances over it and the run splits at its `;` as before.
 fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) -> Option<usize> {
     let prefix = time_prefix_len(tail).unwrap_or(0);
     let keyword = tail.get(prefix..).unwrap_or(b"");
-    if let Some(kw_len) = opener_len(keyword) {
+    if let Some(kw_len) = opener_len(keyword)
+        && keyword_delta(keyword, line, i + prefix + kw_len) == Some(1)
+    {
         let after_kw = i + prefix + kw_len;
         let mut start = after_kw;
         let (_end, closed) = scan_block(line, after_kw, quotes, &mut start, 1);
@@ -70,11 +81,8 @@ fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) -> Option<u
         });
     }
     function_def_name(tail)?;
-    let brace = tail
-        .iter()
-        .position(|&b| b == b'{')
-        .map_or(line.len(), |p| i + p);
-    let (close, closed) = scan_brace_block(line, brace + 1, quotes);
+    let brace = tail.iter().position(|&b| b == b'{')?;
+    let (close, closed) = scan_brace_block(line, i + brace + 1, quotes);
     Some(if closed { close + 1 } else { line.len() })
 }
 
