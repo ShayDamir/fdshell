@@ -210,4 +210,13 @@ fn region_window_is_the_runs_own_physical_line() {
         (line.len(), false),
         "the `<<` of a line-initial run is an operator"
     );
+    // The run starts one byte past a leading newline: the anchor is that
+    // newline's own index + 1, so the window is the run's line and its region
+    // (`b && c` + `Q`) is skipped whole — one part.
+    let line = b"\ncat <<Q\nb && c\nQ";
+    assert_eq!(
+        boundary_from(&line[..], 1),
+        (line.len(), false),
+        "the anchor is the byte past the leading newline"
+    );
 }
