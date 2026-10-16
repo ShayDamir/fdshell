@@ -70,8 +70,16 @@ pub(crate) fn split_word(
                 fields.push((core::mem::take(&mut cur), core::mem::take(&mut cur_mask)));
             }
             trailing = false;
+            // The run consumes unquoted `IFS` whitespace only. No `$@`
+            // boundary can cut it: boundaries exist only for a **quoted**
+            // `$@`, whose positional bytes inherit the trigger byte's quoted
+            // mask bit, so `quoted(i + 1)` already stops the run at the
+            // positional's first byte — and a byte the run consumed could
+            // never flush anyway (inside a run `cur` is empty, `trailing` is
+            // false and `i != 0`), so a boundary there has no observable
+            // effect.
             while let Some(&n) = bytes.get(i + 1) {
-                if !is_ws(n) || quoted(i + 1) || !origin.boundaries_at(i + 1).is_empty() {
+                if !is_ws(n) || quoted(i + 1) {
                     break;
                 }
                 i += 1;

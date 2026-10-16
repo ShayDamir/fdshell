@@ -10,6 +10,7 @@ use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use super::dollar::Region;
 use super::mask::{Counting, push_byte, realign, region_len};
 use super::origin::Origin;
 use crate::error::resolve::ResolveError;
@@ -88,7 +89,7 @@ pub(super) fn substitute_arg_marked(
                     &mut peek,
                     cell,
                     &mut out,
-                    crate::substitute::dollar::Region {
+                    Region {
                         mask,
                         start: idx,
                         limit,
@@ -102,6 +103,5 @@ pub(super) fn substitute_arg_marked(
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,
         }
     }
-    origin.close(out.len());
     Ok((out, out_mask, origin))
 }

@@ -49,7 +49,6 @@ fn split_origin_q(
     for &i in boundaries {
         origin.boundary(i, false);
     }
-    origin.close(word.len());
     split_word(&scs(word), &[], &scs(ifs), &origin)
         .unwrap()
         .iter()
@@ -64,7 +63,6 @@ fn split_origin_quoted(word: &str, boundaries: &[usize], ifs: &str) -> Vec<Vec<u
     for &i in boundaries {
         origin.boundary(i, true);
     }
-    origin.close(word.len());
     let mask = vec![true; word.len()];
     split_word(&scs(word), &mask, &scs(ifs), &origin)
         .unwrap()
@@ -309,13 +307,76 @@ fn boundary_at_index_zero_yields_a_leading_empty_field() {
 }
 
 #[test]
-fn whitespace_run_stops_at_a_boundary_byte() {
+fn whitespace_run_swallows_a_boundary_byte_and_the_fields_stay() {
     // Two adjacent expansions each producing one space, glued between
-    // literals (`x$(printf " ")$(printf " ")y` → `[x][y]`): the run may not
-    // swallow the positional's leading byte, so the boundary at index 2
-    // stays visible for the positional that starts with whitespace.
+    // literals (`x$(printf " ")$(printf " ")y` → `[x][y]`). The run *does*
+    // consume the second expansion's leading byte and the fields are
+    // unchanged: a run-consumed byte is never flushed (`cur` is empty,
+    // `trailing` is false, `i != 0`), and in the real arms a boundary belongs
+    // to a quoted positional, whose mask bit already stops the run.
     assert_eq!(
         split_origin_q("x  y", &[1, 2], &[2], " "),
         vec![b"x".to_vec(), b"y".to_vec()]
+    );
+}
+
+#[test]
+fn whitespace_ifs_run_of_a_joined_dollar_at_splits_multibyte_positionals() {
+    // The unquoted join spelling `IFS=" "; set -- "a " " b"; printf %s x$@y`
+    // → `[xa][by]`: the join byte is the whitespace run, and the multi-byte
+    // positional keeps its own field (bash). No boundary is involved.
+    assert_eq!(
+        split_origin("xa  by", &[1, 2, 3, 4], " "),
+        vec![b"xa".to_vec(), b"by".to_vec()]
+    );
+}
+
+#[test]
+fn boundary_at_the_word_end_flushes_the_last_field() {
+    // `IFS=,; set -- a b; printf %s x"$@"` → `[xa][b]`: the positional that
+    // starts at the last byte closes the field opened by the literal `x`.
+    assert_eq!(
+        split_origin_quoted("xab", &[2], ","),
+        vec![b"xa".to_vec(), b"b".to_vec()]
+    );
+}
+
+#[test]
+fn quoted_boundary_at_the_word_end_keeps_the_empty_field() {
+    // `IFS=,; set -- a ""; printf %s x"$@"` → `[xa][]`: the word ends exactly
+    // at a **quoted** positional's start, and its (empty) field survives the
+    // end-of-text flush.
+    assert_eq!(
+        split_origin_quoted("xa", &[2], ","),
+        vec![b"xa".to_vec(), b"".to_vec()]
+    );
+    // Two empty positionals end the word: `set -- a "" ""` → `[xa][][]`.
+    assert_eq!(
+        split_origin_quoted("xa", &[2, 2], ","),
+        vec![b"xa".to_vec(), b"".to_vec(), b"".to_vec()]
+    );
+}
+
+#[test]
+fn unquoted_empty_positional_at_the_word_end_vanishes() {
+    // The join spelling `IFS=,; set -- a ""; printf %s x$@` → `[xa]`: the
+    // join byte is a delimiter at the very end of the expansion, so its
+    // empty field is elided and no boundary is there to keep it.
+    assert_eq!(split_origin("xa,", &[1, 2], ","), vec![b"xa".to_vec()]);
+}
+
+#[test]
+fn quoted_boundary_between_literals_splits_the_word() {
+    // `IFS=,; set -- "" ""; printf %s x"$@"y` → `[x][y]`: the boundary at the
+    // empty positional's start closes the field the literal `x` opened.
+    assert_eq!(
+        split_origin_quoted("xy", &[1], ","),
+        vec![b"x".to_vec(), b"y".to_vec()]
+    );
+    // `IFS=,; set -- "" b; printf %s "$@"y` → `[][by]`: a boundary at index 0
+    // yields the leading empty field.
+    assert_eq!(
+        split_origin_quoted("by", &[0], ","),
+        vec![b"".to_vec(), b"by".to_vec()]
     );
 }

@@ -10,18 +10,22 @@ use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
+use crate::substitute::dollar::{self, Region};
+use crate::substitute::mask::Counting;
+use crate::substitute::origin::Origin;
+use crate::substitute::percent::percent_subst;
 
 /// The `%` arm: the state borrow ends before the caller realigns the mask.
 /// `limit` is the name cap of the trigger byte's quote region.
 pub(super) fn percent(
-    peek: &mut crate::substitute::mask::Counting<'_>,
+    peek: &mut Counting<'_>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     limit: usize,
 ) -> Result<(), Report<ResolveError>> {
     let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
-    crate::substitute::percent::percent_subst(peek, cache, &state, out, limit)
+    percent_subst(peek, cache, &state, out, limit)
 }
 
 /// The `$` arm (the `$(` arm is handled separately in the loop). `region`
@@ -30,12 +34,12 @@ pub(super) fn percent(
 /// the quote bit the `$@` arm gives its positionals; `origin` records the
 /// arm's positional boundaries.
 pub(super) fn dollar(
-    peek: &mut crate::substitute::mask::Counting<'_>,
+    peek: &mut Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
-    region: crate::substitute::dollar::Region<'_>,
+    region: Region<'_>,
     quoted: bool,
-    origin: &mut crate::substitute::origin::Origin,
+    origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
-    crate::substitute::dollar::dollar_subst(peek, cell, out, region, quoted, origin)
+    dollar::dollar_subst(peek, cell, out, region, quoted, origin)
 }

@@ -56,20 +56,16 @@ impl Origin {
         self.boundaries.push((at, quoted));
     }
 
-    /// Pad the provenance to the final word length; the tail is literal.
-    pub(crate) fn close(&mut self, len: usize) {
-        for _ in self.splittable.len()..len {
-            self.splittable.push(false);
-        }
-    }
-
     /// No byte of the word came from an expansion (a tilde arm deliberately
     /// records none).
     pub(crate) fn is_empty(&self) -> bool {
         !self.splittable.iter().any(|&s| s)
     }
 
-    /// Whether byte `i` came from an expansion.
+    /// Whether byte `i` came from an expansion. A byte past the recorded
+    /// spans — the literal tail of the word — is not splittable, so the
+    /// out-of-range read *is* the literal padding: the provenance never needs
+    /// to be closed to the word's length.
     pub(crate) fn splittable(&self, i: usize) -> bool {
         self.splittable.get(i).copied().unwrap_or(false)
     }
