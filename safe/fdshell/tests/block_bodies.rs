@@ -166,7 +166,7 @@ fn empty_group_body_stays_its_own_error() {
 #[test]
 fn heredoc_arm_bodies_are_not_empty() {
     // A body carrying a `<<` operator has tokens: non-empty, and its claimed
-    // body region is appended as before (the single-line block rule).
+    // body region travels with the block (the cond layer's bodies, task #234).
     let (out, err, code) = run("if true; then cat <<T; fi\nbodyT\nT");
     assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr: {err}");
     // The condition-position heredoc pin keeps its `missing 'fi'` message:

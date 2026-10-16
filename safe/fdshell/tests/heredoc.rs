@@ -858,13 +858,56 @@ fn single_line_block_body_heredoc_survives_quoted_and_dash_delimiters() {
     assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
 }
 
-/// Task #234 (measured divergence, pinned as fdshell's own behaviour): an `&&`
-/// written in the **appended body text** still splits the block's text, so the
-/// delimiter line is never attached. bash prints `body && x`, rc 0.
+/// Task #234: the **appended** body of a single-line block is no longer
+/// re-split on its `&&`. An append-mode block hands its body regions to
+/// `run_cond_list` as its bodies (like a statement) instead of inlining them
+/// in the block text, so the split is the block's own `&&` and the body travels
+/// with the part that owns the operator. Measured against bash 5.3.9:
+/// `body && x`, rc 0 — fdshell agrees (master was a parse error rc 1).
 #[test]
-fn single_line_block_body_heredoc_with_and_in_body_still_splits() {
-    let (out, _err, code) = run("if true; then cat <<T; fi\nbody && x\nT");
-    assert_eq!((out.as_str(), code), ("", 1));
+fn single_line_block_body_heredoc_with_and_in_body_runs_the_body() {
+    let (out, err, code) = run("if true; then cat <<T; fi\nbody && x\nT");
+    assert_eq!((out.as_str(), code), ("body && x\n", 0), "stderr={err:?}");
+}
+
+/// Task #234: a cond-list operator written in a heredoc-carrying block's **own
+/// command text** (its condition, its body) belongs to the block's cond list,
+/// exactly as in the heredoc-free shape — the block text is opaque and only its
+/// heredoc **body regions** are scanned for an operator. Measured against bash
+/// 5.3.9 on both shapes: `body` `a` `b`, rc 0 (master split the block text and
+/// reported `expected 'done'` / `missing 'fi'` rc 1).
+#[test]
+fn block_with_heredoc_keeps_its_operators_in_its_own_cond_list() {
+    let (out, err, code) = run("while cat <<X; do echo a && echo b; break; done\nbody\nX");
+    assert_eq!((out.as_str(), code), ("body\na\nb\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("if cat <<X; then echo a && echo b; fi\nbody\nX");
+    assert_eq!((out.as_str(), code), ("body\na\nb\n", 0), "stderr={err:?}");
+}
+
+/// Task #234, the failing-body twin of the pin above: `a && b` is the block's
+/// own cond list, `a` is the shell's missing-command report (rc 1, README
+/// "Errors"; bash prints `a: command not found` and its `break` leaves rc 0 —
+/// the `break`-status divergence of task #262). stdout is what the pin asserts.
+#[test]
+fn block_with_heredoc_runs_a_failing_body_cond_list() {
+    let (out, _err, code) = run("while cat <<X; do a && b; break; done\nbody\nX");
+    assert_eq!((out.as_str(), code), ("body\n", 1));
+}
+
+/// Task #234: the operator written on a heredoc's **delimiter line** is region
+/// data, never a cond-list split. In a multi-line block the body region starts
+/// on the block's own lines, so the region swallows `break`/`done` and the
+/// block reports its own unterminated heredoc (rc 1) — bash's region rule is
+/// the same and ends in a syntax error (rc 2, with its
+/// `here-document ... delimited by end-of-file` warning).
+#[test]
+fn block_body_heredoc_delimiter_line_operator_is_region_data() {
+    let (_out, err, code) = run("while :; do\ncat <<Q\nbody\nQ && echo x\nbreak\ndone");
+    assert_eq!(code, 1, "bash rc 2");
+    assert!(
+        err.contains("missing terminating delimiter line 'Q'"),
+        "stderr={err:?}"
+    );
 }
 
 /// Task #274 / LESSONS "a region window and the skip derived from it are one

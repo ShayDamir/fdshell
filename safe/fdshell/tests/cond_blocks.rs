@@ -168,17 +168,58 @@ fn for_list_with_and_is_an_accepted_divergence() {
     assert_eq!(out, "hi\nafter\n");
 }
 
-/// Known gap, task #234: a block whose text carries a `<<` operator keeps the
-/// old split (its condition bodies travel inside the span, and the pinned
-/// `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`
-/// depends on it), so `&&`/`||` in such a block stay broken — bash rejects this
-/// shape with rc 2, fdshell reports a parse error rc 1.
+/// Task #234: a heredoc-carrying block text is opaque to the cond split too —
+/// the `&&` in the block's **command** text is the block's own cond list. What
+/// stays a divergence is the shape whose heredoc has **no delimiter line**
+/// inside the block text: the block runs as one part and reports its own
+/// unterminated heredoc (rc 1), where bash reports a syntax error rc 2 (the
+/// same rc-1-vs-2 family as `midrun_adjacent_shapes_stay_measured_divergences`).
 #[test]
-fn and_in_a_block_that_carries_a_heredoc_still_splits() {
-    let (_out, _err, code) = run("while cat <<X; do a && b; X\ndone\necho after");
-    assert_eq!(code, 1);
-    let (_out, _err, code) = run("if cat <<X; then a && b; X\nfi\necho after");
-    assert_eq!(code, 1);
+fn and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error() {
+    for script in [
+        "while cat <<X; do a && b; X\ndone\necho after",
+        "if cat <<X; then a && b; X\nfi\necho after",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: bash rc 2");
+        assert!(
+            err.contains("missing terminating delimiter line 'X'"),
+            "{script}: stderr={err}"
+        );
+    }
+}
+
+/// Task #234: the shapes the gate used to break. A heredoc in a block
+/// condition (single-line, so its bodies sit past the closing keyword) with an
+/// `&&` in the block's command text now runs the block's own cond list. Rows
+/// measured against bash 5.3.9. The `for`/`case` twins of this shape are
+/// rejected by the closing-keyword/region defect task **#273** owns, and the
+/// `case` twin (`case q in q) cat <<Q; echo a && echo b;; esac` + body + `Q`)
+/// is rc 1 `case: missing 'esac'` on `master` and here alike, where bash prints
+/// `body` `a` `b` rc 0 — #234 widens nothing there, it is #273's shape.
+#[test]
+fn and_in_a_block_that_carries_a_heredoc_runs_the_block() {
+    for (script, want) in [
+        (
+            "while cat <<X; do echo a && echo b; break; done\nbody\nX",
+            "body\na\nb\n",
+        ),
+        (
+            "if cat <<X; then echo a && echo b; fi\nbody\nX",
+            "body\na\nb\n",
+        ),
+        // The operator *outside* the block, on a block whose bodies sit past
+        // `fi`: the part that owns the `<<` gets its own body (task #234).
+        ("if true; then cat <<T; fi && echo x\nbody\nT", "body\nx\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // #273's shape, pinned as measured on `master` and here alike: a `case` arm
+    // whose heredoc bodies sit past `esac` never reaches the closer.
+    let (_out, err, code) = run("case q in q) cat <<Q; echo a && echo b;; esac\nbody\nQ");
+    assert_eq!(code, 1, "bash prints body a b rc 0");
+    assert!(err.contains("missing 'esac'"), "stderr={err}");
 }
 
 /// Task #205: the shape is parsed **and** the `break` works — a loop control raised
@@ -399,8 +440,7 @@ fn event_case_wait_mid_run_keeps_its_block_span() {
 /// as a pipeline stage (argument position — Fix A must not cover it, task
 /// **#292**); an unclosed mid-run construct (rc 1 parse error, bash rc 2); a
 /// line that opens with `&&` (bash rejects it, rc 2; fdshell runs the part,
-/// documented in README, no task); the heredoc-carrying block text (task
-/// **#234**).
+/// documented in README, no task).
 #[test]
 fn midrun_adjacent_shapes_stay_measured_divergences() {
     // #292: the `|` position is argument position — `while`/`do` stay words.
@@ -424,9 +464,6 @@ fn midrun_adjacent_shapes_stay_measured_divergences() {
     // gate, LESSONS): it stays word data, rc 1 — byte-identical to master and
     // to the run-start twin `f()`. bash reports a syntax error rc 2.
     let (_out, _err, code) = run("true && f()");
-    assert_eq!(code, 1);
-    // #234: a block text carrying a `<<` operator keeps the old split.
-    let (_out, _err, code) = run("if true; then cat <<T; fi && echo x\nbody\nT");
     assert_eq!(code, 1);
 }
 
