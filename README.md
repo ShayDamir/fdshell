@@ -318,8 +318,14 @@ Limitations:
   (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). A
   block whose heredoc has **no delimiter line inside its text** reports its own
   unterminated heredoc (rc 1) where bash reports a syntax error rc 2:
-  `while cat <<X; do a && b; X` + `done`. The block's *command* bytes are opaque
-  to the split, and a statement's bodies stay fully opaque (task #234).
+  `while cat <<X; do a && b; X` + `done`. The rc 2 framing is the **clause**
+  position (`if cat <<X; then …`); a heredoc written in the block's **body**
+  diverges the other way — bash prints the body line, rc 0, and fdshell is
+  rc 1: `if :; then cat <<Q` + `z && y` + `Q` + `fi` prints `z && y` in bash
+  (and on master, rc 0) and reports `missing 'fi'` here
+  (`tests/heredoc.rs::and_in_a_body_position_heredoc_region_splits_the_block_until_304`;
+  task #304 owns the clause/body position gate). The block's *command* bytes
+  are opaque to the split, and a statement's bodies stay fully opaque (task #234).
 - A `#`-comment block closer inside a block body's **own** line drops the block
   counter, so the block never closes: `while :; do` / `cat <<Q` / `body` / `Q` /
   `# done` / `echo a && echo b` / `break` / `done` is rc 1 `expected 'done'`,

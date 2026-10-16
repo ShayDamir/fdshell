@@ -1187,11 +1187,20 @@ Two traps found while doing it:
    past its command bytes and drop out, so its bodies stay fully opaque. The
    alarm's body-`&&` split survives unchanged and the block's *command* bytes
    stop splitting
-   (`tests/cond_blocks.rs::and_in_a_block_that_carries_a_heredoc_runs_the_block`);
-   a block whose heredoc has no delimiter line inside its text stays a
-   parse-error divergence (rc 1, bash rc 2 —
-   `tests/cond_blocks.rs::and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error`).
-   Task #235 owns the twin case (a `&&` in a function-definition group body,
+    (`tests/cond_blocks.rs::and_in_a_block_that_carries_a_heredoc_runs_the_block`);
+    a block whose heredoc has no delimiter line inside its text stays a
+    parse-error divergence (rc 1, bash rc 2 —
+    `tests/cond_blocks.rs::and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error`).
+    The scan does **not yet discriminate the position of the `<<`**: a region
+    claimed by a word in the block's *clause* (`if cat <<X; then`) is scanned
+    exactly like one claimed by its *body* (`if :; then cat <<Q`), and for the
+    body position bash prints the body line (rc 0, as master — the gate made
+    the counter off by accident) while the region rule splits the block text
+    (rc 1 `missing 'fi'`) — a measured parity loss, pinned as the accepted
+    divergence in
+    `tests/heredoc.rs::and_in_a_body_position_heredoc_region_splits_the_block_until_304`;
+    task **#304** owns the position gate.
+    Task #235 owns the twin case (a `&&` in a function-definition group body,
    where the definer word keeps the `{` off the run start), #236 the
    argument-position keywords inside a body, #237 the comment lines inside a body.
 3. **A keyword scorer must ask *command position*, not word start.**
@@ -1273,9 +1282,15 @@ two, both in `cond/boundary/body.rs`, and both are the **identity** mutation of 
 `+ 1` term:
 
 1. `regions`'s `line_bodies_for_line(line, anchor, nl + 1)`: `+`→`*` is
-   `nl * 1`, the identity — no input distinguishes it (the same accepted species
+   `nl * 1`, the identity — no input **the program can produce** distinguishes
+   it (the difference needs an unterminated quote in the delimiter word, e.g.
+   `cat <<'a b` + `a b`, where the raw window end decides the match — `nl`
+   finds the raw delimiter `a b`, `nl + 1` matches `a b\n` and never a
+   delimiter line — and the parse layer rejects the unmatched quote before the
+   cond layer ever sees such a text; so this is not a helper-level invariant,
+   only a program-level one). It is the same accepted species
    as `parse/cond_bodies.rs`'s `n + 1` → `n * 1` in "A region window and the skip
-   derived from it are one pair"). Its `+`→`-` twin, a real shift of the window's
+   derived from it are one pair". Its `+`→`-` twin, a real shift of the window's
    end, is **killed** (measured: caught).
 2. `line_start_of`'s `.map(|p| p + 1)`: `+`→`*` is again the identity. A run
    taken while the review's pins were still landing listed it *caught*; that is

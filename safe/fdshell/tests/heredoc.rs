@@ -946,6 +946,26 @@ fn comment_block_closer_in_a_block_body_line_stays_broken() {
     assert!(err.contains("expected 'done'"), "stderr={err:?}");
 }
 
+/// Task #234 (review N1): the region scan does not yet discriminate a `<<`
+/// written in a block's **clause** (`if cat <<X; then`, the shape whose split
+/// ends where bash also errors, rc 2) from one written in the block's **body**:
+/// `if :; then cat <<Q` + `z && y` + `Q` + `fi` prints `z && y` in bash (rc 0),
+/// as it does on master — the gate switched the block counter off for
+/// heredoc-carrying text, so the body line was an ordinary part. The region
+/// rule scans every region the block's text carries, so the `&&` in this
+/// body-position region splits the block text: rc 1 `missing 'fi'`. Accepted
+/// divergence, measured 2026-10-16 (bash 5.3.9 rc 0, master rc 0, this tree
+/// rc 1; `case` twin rc 1 `case: missing 'esac'`, `while` twin rc 1 `expected
+/// 'done'` where bash loops forever) — task **#304** owns the position gate.
+/// When #304 lands, this pin flips to bash parity (`z && y`, rc 0) and drops
+/// the `304` suffix from its name.
+#[test]
+fn and_in_a_body_position_heredoc_region_splits_the_block_until_304() {
+    let (_out, err, code) = run("if :; then cat <<Q\nz && y\nQ\nfi");
+    assert_eq!(code, 1, "bash rc 0 prints 'z && y'");
+    assert!(err.contains("missing 'fi'"), "stderr={err:?}");
+}
+
 /// Task #274 / LESSONS "a region window and the skip derived from it are one
 /// pair" (measured divergence, pinned as fdshell's own behaviour): the line's
 /// regions are allocated for **all** of its operators, so an unterminated
