@@ -47,18 +47,21 @@ pub fn substitute_args(
             // A fully quoted word is exactly one word — kept even when the
             // expansion is empty (`"${Y:+a}"` → one empty argument).
             let fq = super::fully_quoted(&mask);
-            let mut expanded = false;
-            let (text, mask) = substitute_arg_marked(arg, &mask, &mut cache, cell, &mut expanded)?;
-            // Field splitting applies to the result of expansion only (POSIX
-            // 2.6.5): a word that performed no expansion is one field, so a
-            // literal `IFS` byte inside it never delimits.
-            let fields = if fq || !expanded {
+            let (text, mask, origin) = substitute_arg_marked(arg, &mask, &mut cache, cell)?;
+            // Field splitting cuts only the bytes the provenance marks as
+            // expansion-produced (POSIX 2.6.5, task #222): a word with no
+            // expansion has no delimiter bytes and a fully quoted word has
+            // every byte protected, so both come back from the splitter as
+            // one field. A quoted word whose expansion is empty is the
+            // quoted-empty word: the splitter has no bytes to work on, so
+            // it is the one empty field.
+            let fields = if fq && text.is_empty() {
                 vec![(text, mask)]
             } else {
                 // The IFS borrow must end before the glob reborrows the cell
                 // for `nullglob` (RefCell, LESSONS.md).
                 let state = borrow_state(cell)?;
-                split_word(&text, &mask, &state.ifs)?
+                split_word(&text, &mask, &state.ifs, &origin)?
             };
             for (word, mask) in fields {
                 push_word(&mut result, &word, &mask, cell)?;

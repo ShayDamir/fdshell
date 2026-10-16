@@ -1578,3 +1578,17 @@ guard mutated over 12 shapes (`%`, `%%`, `a%%b`, `%-b`, `%)`, `"%a"b`, `%$v`, `v
 equivalent mutant, the same species as the disjoint-flag `|` entries: record it, do not test
 around it. The comment in `percent_subst` states the empty-name invariant the fallback leans on —
 if a future surface ever binds an empty name, that fallback stops being equivalent.
+## `$@` has two join rules, selected by the trigger byte's quote bit
+Task #222's provenance splitting replaced the `expanded` flag, and the natural model — push each
+positional adjacent, let a word-boundary mark split every one of them — is **wrong for the
+unquoted arm**. bash joins an unquoted embedded `$@` (and any `$*`) with the first `IFS` byte,
+and that separator byte is what splits: `IFS=:; set -- a b; printf %s x$@` → `[xa][b]`,
+`IFS=" "; set -- "a b" "c d"; printf %s x$@y` → `[xa][b][c][dy]` — an adjacent push loses the
+ws-IFS split (`[xa][bcd][y]`) and a boundary after a consumed ws-run drops the empty field bash
+keeps with multi-byte positionals. Only the *quoted* `$@` emits no separator at all (`IFS=,;
+set -- "a b" c; printf %s x"$@"y` → `[xa b][cy]`, no comma in bash's output); it needs the
+boundary marks, and carries the quote bit there because a quoted positional ending the word
+keeps its empty field (`IFS=,; set -- a ""; printf %s x"$@"` → `[xa][]` unquoted `[xa]`).
+Record spans for the splitter, never guess from `expanded`; measure every shape in bash before
+pinning — the earlier "bash cuts here" pins for literal `IFS` bytes after an expansion
+(`x$(true):y` → `[x:y]`, not `[x][y]`) were master-behavior pins, not bash facts.

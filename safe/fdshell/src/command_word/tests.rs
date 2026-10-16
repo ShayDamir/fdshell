@@ -148,11 +148,14 @@ fn leading_fields_arrive_quote_encoded() {
 }
 
 /// bash: an unquoted word 0 whose expansion is empty is not a word — the next
-/// field becomes the command.
+/// field becomes the command. The double form carries no space: a space in
+/// the word text is literal content under task #222's provenance rule (and
+/// the tokenizer never produces one), so the pure empty-expansion shape is
+/// the one bash reaches this path with.
 #[test]
 fn empty_expansion_consumes_the_next_field() {
     let cell = cell();
-    for spelling in ["$(true)", "$(true) $(true)"] {
+    for spelling in ["$(true)", "$(true)$(true)"] {
         let out = expand(&cmdline(spelling, &["echo", "hi"]), &cell)
             .unwrap()
             .into_owned();

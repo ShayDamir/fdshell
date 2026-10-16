@@ -1,6 +1,7 @@
 //! Single-argument substitution — handles ~, %, $(), `` ` … ` ``, $((…)), and $.
 
 mod arms;
+mod escape;
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -10,15 +11,17 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use super::mask::{Counting, push_byte, realign, region_len};
+use super::origin::Origin;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
-/// Substitute one word, returning the expanded text plus a parallel quote
-/// mask. Bytes copied from the word keep their mask bit; bytes produced by
-/// an expansion inherit the mask bit of the expansion's trigger byte.
-/// `expanded` is an output: it reports that an expansion arm ran (even an
-/// empty one) — field splitting applies only to a word that expanded
-/// (POSIX 2.6.5). It is cleared here, so the caller's value is irrelevant.
+/// Substitute one word, returning the expanded text, a parallel quote mask
+/// and the byte provenance. Bytes copied from the word keep their mask bit;
+/// bytes produced by an expansion inherit the mask bit of the expansion's
+/// trigger byte. `Origin` records which output bytes came from an expansion
+/// (field splitting cuts only those, POSIX 2.6.5) and where an embedded `$@`
+/// positional starts a new word; the tilde arm records nothing — bash never
+/// splits the expanded `$HOME` (task #222).
 ///
 /// Invariant: at the top of each loop iteration `idx == peek.consumed()`.
 pub(super) fn substitute_arg_marked(
@@ -26,16 +29,15 @@ pub(super) fn substitute_arg_marked(
     mask: &[bool],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
-    expanded: &mut bool,
-) -> Result<(ShortCStr, Vec<bool>), Report<ResolveError>> {
+) -> Result<(ShortCStr, Vec<bool>, Origin), Report<ResolveError>> {
     let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
     let mut out = ShortCStr::new();
     let mut out_mask = Vec::new();
+    let mut origin = Origin::new();
     let mut peek = Counting::new(bytes.iter().copied());
     let mut idx = 0usize;
-    *expanded = false;
     if super::tilde::leads(bytes, mask) {
-        super::tilde::expand(&mut peek, &mut idx, mask, expanded, &mut out, &mut out_mask)?;
+        super::tilde::expand(&mut peek, &mut idx, mask, &mut out, &mut out_mask)?;
     }
     while let Some(b) = peek.next() {
         let quoted = mask.get(idx).copied().unwrap_or(false);
@@ -45,32 +47,8 @@ pub(super) fn substitute_arg_marked(
         let limit = region_len(mask, idx).saturating_sub(1);
         idx += 1;
         match b {
-            // Unquoted POSIX #4.1: `\X` removes the backslash and the escaped
-            // byte becomes protected (mask `true` — it never splits or globs).
-            // `\<newline>` is a line continuation: both bytes are dropped. A
-            // trailing `\` at end of word keeps the backslash.
-            b'\\' if !quoted => match peek.next() {
-                Some(b'\n') => {
-                    idx += 1;
-                }
-                Some(c) => {
-                    idx += 1;
-                    push_byte(&mut out, &mut out_mask, c, true)?;
-                }
-                None => push_byte(&mut out, &mut out_mask, b'\\', false)?,
-            },
-            // Quoted POSIX #4.2: `\$`, `\\` and `` \` `` drop the backslash;
-            // any other `\<char>` keeps it. The backtick pair is the encoding
-            // of a literal backtick (single-quote spans and `"\`"`), so the
-            // backtick arm never sees a byte that is not a region delimiter.
-            b'\\' => match peek.peek() {
-                Some(&c @ (b'$' | b'\\' | b'`')) => {
-                    peek.next();
-                    idx += 1;
-                    push_byte(&mut out, &mut out_mask, c, quoted)?;
-                }
-                _ => push_byte(&mut out, &mut out_mask, b'\\', quoted)?,
-            },
+            b'\\' if !quoted => escape::unquoted(&mut peek, &mut idx, &mut out, &mut out_mask)?,
+            b'\\' => escape::quoted(&mut peek, &mut idx, &mut out, &mut out_mask, quoted)?,
             // `%name` fd substitution. The arm consumes the trigger byte and
             // at most the name; a following `%` or non-name byte is literal,
             // so `%%` reaches argv intact — the `printf` builtin owns `%%`
@@ -79,9 +57,10 @@ pub(super) fn substitute_arg_marked(
                 let before = out.len();
                 arms::percent(&mut peek, cache, cell, &mut out, limit)?;
                 realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);
-                *expanded = true;
+                origin.record(before, out.len());
             }
             b'$' if peek.peek() == Some(&b'(') => {
+                let before = out.len();
                 peek.next();
                 super::subst_paren::handle_dollar_paren(
                     &mut peek,
@@ -91,25 +70,38 @@ pub(super) fn substitute_arg_marked(
                     quoted,
                 )?;
                 idx = peek.consumed();
-                *expanded = true;
+                origin.record(before, out.len());
             }
             // `` ` … ` `` runs the same capture machinery as `$( … )`; the
             // trigger byte's mask bit protects the output from splitting.
             b'`' => {
+                let before = out.len();
                 super::backtick::handle(&mut peek, cell, &mut out, &mut out_mask, quoted)?;
                 idx = peek.consumed();
-                *expanded = true;
+                origin.record(before, out.len());
             }
             b'$' => {
                 let before = out.len();
                 // `idx` is the word index of the byte after `$` — the `{` of a
                 // `${…}` arm; `realign` re-syncs it to the consumed count.
-                arms::dollar(&mut peek, cell, &mut out, mask, idx, limit)?;
+                arms::dollar(
+                    &mut peek,
+                    cell,
+                    &mut out,
+                    crate::substitute::dollar::Region {
+                        mask,
+                        start: idx,
+                        limit,
+                    },
+                    quoted,
+                    &mut origin,
+                )?;
                 realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);
-                *expanded = true;
+                origin.record(before, out.len());
             }
             _ => push_byte(&mut out, &mut out_mask, b, quoted)?,
         }
     }
-    Ok((out, out_mask))
+    origin.close(out.len());
+    Ok((out, out_mask, origin))
 }

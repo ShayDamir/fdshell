@@ -510,12 +510,12 @@ fn dollar_at_a_region_end_is_a_literal_byte() {
     assert_eq!((out.as_str(), code), ("[$v]", 0), "stderr={err:?}");
     let (out, err, code) = run(r#"v=q; echo a"$"v"#);
     assert_eq!((out.as_str(), code), ("a$v\n", 0), "stderr={err:?}");
-    // The word is still an expansion (an arm ran), so the splitter runs on
-    // it: fdshell cuts `[$v][a]` where bash keeps `[$v,a]` whole — the
-    // "an arm ran" reading of `expanded`, task #133's rule (task #222 owns
-    // the literal-delimiter join).
+    // The word is all literal (the `$` arm ran into the region cap and
+    // expanded nothing), so task #222's provenance rule keeps it whole:
+    // fdshell `[$v,a]` = bash (POSIX 2.6.5 splits only expansion bytes; a
+    // literal `,` glues).
     let (out, err, code) = run(r#"IFS=,; v=q; printf "[%s]" "$"v,a"#);
-    assert_eq!((out.as_str(), code), ("[$v][a]", 0), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("[$v,a]", 0), "stderr={err:?}");
 }
 
 /// Accepted divergence (task #285): the quote mask is one bit per byte, so two

@@ -9,6 +9,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
 use super::borrow_state;
+use super::origin::Origin;
 use super::split::split_word;
 
 /// Expands a word that is exactly `$@` or `$*` (unlike `$var`, the two differ).
@@ -19,6 +20,13 @@ use super::split::split_word;
 /// separators behind. Each result word comes back with the per-byte quote
 /// mask (all quoted for a quoted expansion, all unquoted otherwise) so
 /// later pattern detection can skip quoted bytes.
+///
+/// This whole-word path and the embedded `$@`/`$*` arm
+/// (`dollar/at_star.rs`, task #222) must agree on the per-positional
+/// semantics — a positional's own split, empty ones vanishing unquoted —
+/// and both spellings are pinned side by side in `tests/positional.rs`.
+/// Here each positional's text *is* the expansion, so the splitter gets
+/// `Origin::all` (every byte splittable) and no boundaries.
 ///
 /// Empty-deque contract, load-bearing for `substitute_args`' word count
 /// (task #219): `fq` + `$@` returns **no words at all** — bash's `"$@"` *is*
@@ -43,7 +51,8 @@ pub(super) fn expand_positional_word(
         if fq {
             out.push((p.value.clone(), vec![true; p.value.len()]));
         } else {
-            for (field, mask) in split_word(&p.value, &[], &state.ifs)? {
+            for (field, mask) in split_word(&p.value, &[], &state.ifs, &Origin::all(p.value.len()))?
+            {
                 out.push((field, vec![false; mask.len()]));
             }
         }

@@ -13,6 +13,7 @@ use crate::state::{FdVar, ShellState};
 
 use super::arg::substitute_arg_marked;
 use super::mask::Counting;
+use super::origin::Origin;
 use super::substitute_arg;
 
 fn fdvar(fd: sys::LocalFd) -> FdVar {
@@ -219,6 +220,32 @@ fn env_cell() -> ForkCell<ShellState> {
     let cell = dummy_cell();
     cell.borrow_mut().unwrap().environ = Vec::new();
     cell
+}
+
+/// The arm as the pipeline runs it: the expanded text, its mask, and the
+/// splitting signal. The signal is the provenance list of task #222 — the
+/// `expanded` bit of task #133 is superseded by it: the helper reports
+/// `true` exactly when some byte of the text came from an expansion (the
+/// tilde arm deliberately records none).
+fn expand_marked(
+    cell: &ForkCell<ShellState>,
+    word: &ShortCStr,
+    mask: &[bool],
+) -> (ShortCStr, Vec<bool>, bool) {
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    expand_marked_cached(cell, &mut cache, word, mask)
+}
+
+/// The same helper with a seeded fd-substitution cache (a `%name` pin needs
+/// exact fd numbers).
+fn expand_marked_cached(
+    cell: &ForkCell<ShellState>,
+    cache: &mut HashMap<ShortCStr, ExportedFd>,
+    word: &ShortCStr,
+    mask: &[bool],
+) -> (ShortCStr, Vec<bool>, bool) {
+    let (text, out_mask, origin) = substitute_arg_marked(word, mask, cache, cell).unwrap();
+    (text, out_mask, !origin.is_empty())
 }
 
 #[test]
@@ -1016,31 +1043,15 @@ fn tilde_expansion_keeps_mask_alignment() {
 // A quoted `~` is a literal byte: POSIX removes the quotes after tilde
 // expansion, and bash keeps `printf "[%s]" "~"` → `[~]` and
 // `printf "[%s]" "~/x"` → `[~/x]`. The mask's first bit is the gate, so the
-// arm must not run at all (task #269) — `expanded` stays clear.
+// arm must not run at all (task #269) — the word records no splittable byte.
 #[test]
 fn tilde_quoted_first_bit_is_literal() {
     let cell = dummy_cell();
-    let mut expanded = true;
-    let mut cache = HashMap::new();
-    let (res, mask) = substitute_arg_marked(
-        &ShortCStr::from(c"~"),
-        &[true],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, mask, expanded) = expand_marked(&cell, &ShortCStr::from(c"~"), &[true]);
     assert_eq!(res.as_bytes().unwrap(), b"~");
     assert_eq!(mask, vec![true]);
     assert!(!expanded, "a quoted `~` runs no expansion arm");
-    let (res, mask) = substitute_arg_marked(
-        &ShortCStr::from(c"~/x"),
-        &[true, true, true],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, mask, expanded) = expand_marked(&cell, &ShortCStr::from(c"~/x"), &[true, true, true]);
     assert_eq!(res.as_bytes().unwrap(), b"~/x");
     assert_eq!(mask, vec![true, true, true]);
     assert!(!expanded);
@@ -1063,25 +1074,16 @@ fn tilde_quoted_tail_still_expands() {
     assert_eq!(res.as_bytes().unwrap(), format!("{}/x", home).as_bytes());
 }
 
-// The `expanded` signal (task #133): field splitting applies to the result of
-// an expansion only (POSIX 2.6.5), so `substitute_args` gates the split on it.
-// A word is expanded when an expansion arm ran, not when the output differs
-// from the raw text: `IFS=,; a=,; set -- $a` is one word whose expansion has
-// exactly the raw word's length. The pins below start the flag at the wrong
-// value, so they fail if any arm (or the literal path) flips it.
+// Field splitting applies to the bytes an expansion produced (POSIX 2.6.5),
+// so `substitute_args` feeds the provenance list to the splitter (task #222,
+// superseding the `expanded` bit of task #133). A word whose arms produced
+// no bytes has no splittable byte: `IFS=,; a=,; set -- $a` is one word whose
+// expansion has exactly the raw word's length. The pins below fail if any
+// arm (or the literal path) records the wrong span.
 #[test]
 fn literal_word_marks_no_expansion() {
     let cell = dummy_cell();
-    let mut expanded = true;
-    let mut cache = HashMap::new();
-    let (res, _) = substitute_arg_marked(
-        &ShortCStr::from(c"a,b"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"a,b"), &[]);
     assert_eq!(res.as_bytes().unwrap(), b"a,b");
     assert!(!expanded, "a literal word performed no expansion");
 }
@@ -1092,16 +1094,7 @@ fn backslash_protected_delimiter_marks_no_expansion() {
     // mask (POSIX #4.1) — no expansion ran, and the protected delimiter never
     // delimits, so the splitter keeps the word whole on its own.
     let cell = dummy_cell();
-    let mut expanded = true;
-    let mut cache = HashMap::new();
-    let (res, mask) = substitute_arg_marked(
-        &ShortCStr::from(c"a\\,b"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, mask, expanded) = expand_marked(&cell, &ShortCStr::from(c"a\\,b"), &[]);
     assert_eq!(res.as_bytes().unwrap(), b"a,b");
     assert_eq!(mask, vec![false, true, false]);
     assert!(!expanded);
@@ -1110,68 +1103,41 @@ fn backslash_protected_delimiter_marks_no_expansion() {
 #[test]
 fn dollar_var_marks_expansion() {
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"$hello"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (_, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"$hello"), &[]);
     assert!(expanded);
 }
 
 #[test]
 fn bare_dollar_marks_expansion() {
+    // The literal `$` the fallback arm pushes is arm output: the span covers
+    // it, so the word reaches the splitter exactly as before task #133.
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"$"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (_, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"$"), &[]);
     assert!(expanded);
 }
 
 #[test]
-fn positional_dollar_at_marks_expansion() {
+fn dollar_at_without_positionals_records_no_splittable_bytes() {
+    // `$@` with an empty deque produces no bytes, so nothing may split; the
+    // word-level rule (the empty word yields no word) is pinned by the
+    // task #219 integration pins in `tests/wordsplit.rs`.
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"$@"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
-    assert!(expanded);
+    let (res, mask, expanded) = expand_marked(&cell, &ShortCStr::from(c"$@"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"");
+    assert!(mask.is_empty());
+    assert!(!expanded);
 }
 
 #[test]
-fn empty_command_subst_marks_expansion() {
-    // The flag means "an arm ran", not "the arm produced bytes": `$(true)`
-    // expands to nothing and is still an expansion — bash splits its empty
-    // result (`unquoted_empty_cmd_subst_is_no_words`).
+fn empty_command_subst_records_no_splittable_bytes() {
+    // `$(true)` expands to nothing: no expansion byte exists to delimit.
+    // The word-level rule — the empty unquoted word is no word, bash splits
+    // its empty result — is pinned by `unquoted_empty_cmd_subst_is_no_words`
+    // in `tests/cmd_subst.rs`.
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"$(true)"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
-    assert!(expanded);
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"$(true)"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"");
+    assert!(!expanded);
 }
 
 #[test]
@@ -1181,71 +1147,39 @@ fn bound_percent_fd_marks_expansion() {
     cell.borrow_mut()
         .unwrap()
         .set_fd_var(ShortCStr::from(c"?"), fdvar(rd));
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"%?"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (_, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"%?"), &[]);
     assert!(expanded);
 }
 
 #[test]
 fn unbound_percent_fd_marks_expansion() {
-    // Guard for the reading above: the literal `%?` output also counts as a
-    // run arm, so such a word keeps going through the splitter exactly as
-    // before task #133.
+    // The literal `%?` output is arm output: the span covers it, so such a
+    // word keeps going through the splitter exactly as before task #133.
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"%nosuchfd"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (_, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"%nosuchfd"), &[]);
     assert!(expanded);
 }
 
 #[test]
-fn leading_tilde_with_home_marks_expansion() {
+fn leading_tilde_output_is_never_splittable() {
+    // `~` pushed $HOME, and the home bytes are **literal** in the provenance
+    // (task #222): bash never splits tilde output, so a literal `IFS` byte in
+    // `$HOME` stays content (`IFS=,; HOME="a,b"; printf %s ~` → `[a,b]`,
+    // pinned in `tests/wordsplit.rs`).
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    substitute_arg_marked(
-        &ShortCStr::from(c"~"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
-    assert!(expanded, "`~` pushed $HOME");
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"~"), &[]);
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(res.as_bytes().unwrap(), home.as_bytes());
+    assert!(!expanded, "the tilde records no splittable bytes");
 }
 
 #[test]
 fn tilde_user_marks_no_expansion() {
     // `~user` is literal here (README), so the word performed no expansion
     // and a literal `IFS` byte inside it must not split it. An unset `HOME`
-    // is the other literal arm: `tilde::expand` sets the flag only when the
-    // home bytes are pushed.
+    // records nothing either: the tilde arm never produces a span (§ above).
     let cell = dummy_cell();
-    let mut expanded = true;
-    let mut cache = HashMap::new();
-    let (res, _) = substitute_arg_marked(
-        &ShortCStr::from(c"~nobody:x"),
-        &[],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"~nobody:x"), &[]);
     assert_eq!(res.as_bytes().unwrap(), b"~nobody:x");
     assert!(!expanded);
 }
@@ -3083,16 +3017,11 @@ fn quoted_name_stops_at_the_closing_quote() {
     let cell = dummy_cell();
     bind(&cell, c"v", c"W");
     bind(&cell, c"vb", c"VB");
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    let (res, mask) = substitute_arg_marked(
+    let (res, mask, expanded) = expand_marked(
+        &cell,
         &ShortCStr::from(c"$vb,c"),
         &[true, true, false, false, false],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    );
     assert_eq!(res.as_bytes().unwrap(), b"Wb,c");
     assert_eq!(mask, vec![true, false, false, false]);
     assert!(expanded);
@@ -3140,15 +3069,12 @@ fn percent_name_stops_at_the_closing_quote() {
     let cell = dummy_cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     cache.insert(ShortCStr::from(c"v"), exported_fd(1000));
-    let mut expanded = false;
-    let (res, mask) = substitute_arg_marked(
+    let (res, mask, expanded) = expand_marked_cached(
+        &cell,
+        &mut cache,
         &ShortCStr::from(c"%vb"),
         &[true, true, false],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    );
     assert_eq!(res.as_bytes().unwrap(), b"1000b");
     assert_eq!(mask, vec![true, true, true, true, false]);
     assert!(expanded);
@@ -3159,42 +3085,187 @@ fn percent_at_region_end_is_literal_and_consumes_nothing() {
     // `"%v"` region ends at the `%`: the name is empty, so the arm is the
     // literal `%` escape and the `v` is handed to the loop as a literal byte.
     let cell = dummy_cell();
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    let (res, mask) = substitute_arg_marked(
-        &ShortCStr::from(c"%v"),
-        &[true, false],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, mask, expanded) = expand_marked(&cell, &ShortCStr::from(c"%v"), &[true, false]);
     assert_eq!(res.as_bytes().unwrap(), b"%v");
     assert_eq!(mask, vec![true, false]);
-    assert!(expanded, "the `%` arm ran, so the word is expanded");
+    assert!(
+        expanded,
+        "the `%` arm ran, so its byte reaches the splitter"
+    );
 }
 
 #[test]
 fn dollar_at_region_end_is_literal() {
     // `"$"v`: the byte after `$` starts a new region, so `$` is literal and
     // nothing is consumed — the same rule `$'…'` and `$"…"` already follow
-    // (bash `v`, README accepted divergence). `expanded` stays set: the arm
-    // ran (`bare_dollar_marks_expansion` pins the same reading).
+    // (bash `v`, README accepted divergence). The literal `$` is arm output,
+    // so the word reaches the splitter (`bare_dollar_marks_expansion` pins
+    // the same reading; the literal-delimiter join is task #222).
     let cell = dummy_cell();
     bind(&cell, c"v", c"V");
-    let mut expanded = false;
-    let mut cache = HashMap::new();
-    let (res, mask) = substitute_arg_marked(
-        &ShortCStr::from(c"$v"),
-        &[true, false],
-        &mut cache,
-        &cell,
-        &mut expanded,
-    )
-    .unwrap();
+    let (res, mask, expanded) = expand_marked(&cell, &ShortCStr::from(c"$v"), &[true, false]);
     assert_eq!(res.as_bytes().unwrap(), b"$v");
     assert_eq!(mask, vec![true, false]);
     assert!(expanded);
+}
+
+/// The arm as the pipeline runs it, handing back the full provenance.
+fn expand_origin(
+    cell: &ForkCell<ShellState>,
+    word: &ShortCStr,
+    mask: &[bool],
+) -> (ShortCStr, Vec<bool>, Origin) {
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    substitute_arg_marked(word, mask, &mut cache, cell).unwrap()
+}
+
+fn splittable_all(origin: &Origin, len: usize) -> Vec<bool> {
+    (0..len).map(|i| origin.splittable(i)).collect()
+}
+
+// Per-arm provenance (task #222): only the arm's own output bytes are
+// splittable; the tilde arm records none, and the gaps around every span
+// are literal.
+#[test]
+fn tilde_arm_records_no_splittable_bytes() {
+    let cell = dummy_cell();
+    let (res, _mask, origin) = expand_origin(&cell, &ShortCStr::from(c"~"), &[]);
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(res.as_bytes().unwrap(), home.as_bytes());
+    assert!(splittable_all(&origin, res.len()).iter().all(|&s| !s));
+}
+
+#[test]
+fn expansion_arms_record_only_their_output() {
+    let cell = dummy_cell();
+    bind(&cell, c"w", c"B C");
+    let cases: &[(&core::ffi::CStr, &[bool])] = &[
+        // `$name`: the literal `x` and `,y` are gaps, the value is the span.
+        (c"x$w,y", &[false, true, true, true, false, false]),
+        // `${name}` produces the same span shape.
+        (c"x${w},y", &[false, true, true, true, false, false]),
+        // `$(( … ))` output splits like any expansion.
+        (c"x$((1+1)),y", &[false, true, false, false]),
+        // `$( … )` output is splittable; the literals around it are not.
+        (
+            c"x$(printf \"B C\"),y",
+            &[false, true, true, true, false, false],
+        ),
+        // A fully quoted expansion keeps every byte protected by the mask;
+        // the provenance still marks the span (the mask is what blocks). The
+        // harness text keeps the literal quote bytes (gaps here, unmarked).
+        (
+            c"x\"$w\",y",
+            &[false, false, true, true, true, false, false, false],
+        ),
+    ];
+    for (word, want) in cases {
+        let (res, mask, origin) = expand_origin(&cell, &ShortCStr::from(*word), &[]);
+        let bytes = res.as_bytes().unwrap();
+        assert_eq!(bytes.len(), mask.len(), "{word:?}: mask parallel to text");
+        assert!(!origin.splittable(bytes.len()), "{word:?}: origin closed");
+        assert_eq!(&splittable_all(&origin, bytes.len()), want, "{word:?}");
+    }
+}
+
+#[test]
+fn percent_arm_records_its_fd_number() {
+    let cell = dummy_cell();
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    cache.insert(ShortCStr::from(c"v"), exported_fd(1000));
+    let (res, _mask, origin) =
+        substitute_arg_marked(&ShortCStr::from(c"x%v,y"), &[false; 5], &mut cache, &cell).unwrap();
+    assert_eq!(res.as_bytes().unwrap(), b"x1000,y");
+    assert_eq!(
+        splittable_all(&origin, res.len()),
+        vec![false, true, true, true, true, false, false]
+    );
+}
+
+#[test]
+fn dollar_at_arm_unquoted_joins_with_the_ifs_byte() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"a b", c"c"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    // `x$@y` unquoted: bash joins the positionals with the first IFS byte
+    // and the splitter cuts that byte (`IFS=:; set -- a b; printf %s x$@`
+    // → `[xa][b]`), so the arm records one span and no boundaries.
+    let (res, mask, origin) = expand_origin(&cell, &ShortCStr::from(c"x$@y"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"xa b cy");
+    assert_eq!(mask.len(), res.len());
+    assert_eq!(
+        splittable_all(&origin, res.len()),
+        vec![false, true, true, true, true, true, false]
+    );
+    assert!(
+        origin.boundaries_at(4).is_empty(),
+        "the separator is the boundary"
+    );
+    assert!(!origin.ends_quoted(res.len()));
+}
+
+#[test]
+fn dollar_at_arm_quoted_records_a_span_and_a_boundary_per_positional() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"a b", c"c"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    // `x"$@"y`: no separator (bash emits none in a quote region), spans on
+    // both positionals, a quoted boundary at the second's start. The harness
+    // keeps the quote bytes in the expanded text; the mask marks the quoted
+    // region, so the trigger byte's bit selects the quoted arm.
+    let (res, mask, origin) = expand_origin(
+        &cell,
+        &ShortCStr::from(c"x\"$@\"y"),
+        &[false, true, true, true, true, false],
+    );
+    assert_eq!(res.as_bytes().unwrap(), b"x\"a bc\"y");
+    assert_eq!(mask.len(), res.len());
+    assert_eq!(
+        splittable_all(&origin, res.len()),
+        vec![false, false, true, true, true, true, false, false]
+    );
+    assert!(
+        origin.boundaries_at(1).is_empty(),
+        "the first positional has no boundary"
+    );
+    assert_eq!(
+        origin.boundaries_at(5),
+        [(5, true)],
+        "boundary at the second's start"
+    );
+    assert!(!origin.ends_quoted(res.len()));
+}
+
+#[test]
+fn dollar_star_arm_records_one_span_and_no_boundary() {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().set_positional(
+        [c"a", c"b"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    let (res, _mask, origin) = expand_origin(&cell, &ShortCStr::from(c"x$*y"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"xa by");
+    assert_eq!(
+        splittable_all(&origin, res.len()),
+        vec![false, true, true, true, false]
+    );
+    assert!(
+        origin.boundaries_at(2).is_empty(),
+        "$* is one joined string"
+    );
 }
 
 /// An `ExportedFd` with a fixed raw number, so a `%name` pin asserts exact

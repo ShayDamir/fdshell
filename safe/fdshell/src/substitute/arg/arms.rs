@@ -24,16 +24,18 @@ pub(super) fn percent(
     crate::substitute::percent::percent_subst(peek, cache, &state, out, limit)
 }
 
-/// The `$` arm (the `$(` arm is handled separately in the loop). `start` is the
-/// word index of the byte after `$`, so the `${…}` arm sees the mask under its
-/// own content bytes. `limit` caps a bare name at the trigger's quote region.
+/// The `$` arm (the `$(` arm is handled separately in the loop). `region`
+/// carries the mask, the word index of the byte after `$`, and the name cap
+/// of the trigger's quote region; `quoted` is the trigger byte's mask bit,
+/// the quote bit the `$@` arm gives its positionals; `origin` records the
+/// arm's positional boundaries.
 pub(super) fn dollar(
     peek: &mut crate::substitute::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
-    mask: &[bool],
-    start: usize,
-    limit: usize,
+    region: crate::substitute::dollar::Region<'_>,
+    quoted: bool,
+    origin: &mut crate::substitute::origin::Origin,
 ) -> Result<(), Report<ResolveError>> {
-    crate::substitute::dollar::dollar_subst(peek, cell, out, mask, start, limit)
+    crate::substitute::dollar::dollar_subst(peek, cell, out, region, quoted, origin)
 }

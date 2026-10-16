@@ -19,13 +19,13 @@ pub(super) fn leads(bytes: &[u8], mask: &[bool]) -> bool {
 /// Expand the leading `~` already at the front of `peek`. `~` alone or
 /// `~/…` becomes `$HOME` (nothing when unset); any other `~x` keeps the
 /// tilde. Consumed input and appended output keep the quote mask aligned.
-/// `expanded` reports that `$HOME` was pushed: an unset `HOME` or a
-/// literal `~user` performed no expansion.
+/// The pushed `$HOME` bytes are deliberately **not** recorded as a
+/// provenance span: bash never IFS-splits tilde output
+/// (`IFS=,; HOME="a,b"; printf %s ~` → `[a,b]`), so they stay literal.
 pub(super) fn expand(
     peek: &mut super::mask::Counting<'_>,
     idx: &mut usize,
     mask: &[bool],
-    expanded: &mut bool,
     out: &mut ShortCStr,
     out_mask: &mut Vec<bool>,
 ) -> Result<(), Report<ResolveError>> {
@@ -37,7 +37,6 @@ pub(super) fn expand(
             if let Some(home) = sys::env::getenv(c"HOME") {
                 let bytes = home.as_bytes().change_context(ResolveError::RefNotFound)?;
                 push_expanded(out, out_mask, bytes, home_q)?;
-                *expanded = true;
             }
         }
         _ => push_byte(out, out_mask, b'~', home_q)?,

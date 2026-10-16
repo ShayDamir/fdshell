@@ -11,6 +11,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::mask::Counting;
+use crate::substitute::origin::Origin;
 use crate::substitute::split::split_word;
 
 use super::{handle, scan_body};
@@ -31,21 +32,26 @@ fn body(input: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// The arm as the pipeline runs it: the word with one mask bit per byte, and
-/// the expanded text, its mask and the `expanded` flag that come back.
+/// the expanded text, its mask and the splitting signal (`true` exactly when
+/// the arm produced splittable bytes — the provenance of task #222,
+/// superseding the `expanded` flag of task #133).
 fn expand(word: &ShortCStr, mask: &[bool]) -> (ShortCStr, Vec<bool>, bool) {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let mut expanded = false;
-    let (text, out_mask) =
-        substitute_arg_marked(word, mask, &mut cache, &cell, &mut expanded).unwrap();
-    (text, out_mask, expanded)
+    let (text, out_mask, origin) = substitute_arg_marked(word, mask, &mut cache, &cell).unwrap();
+    (text, out_mask, !origin.is_empty())
 }
 
 /// The arm's output after the pipeline's `IFS` split (default `IFS`).
 fn fields(word: &ShortCStr, mask: &[bool]) -> Vec<ShortCStr> {
-    let (text, out_mask, expanded) = expand(word, mask);
-    assert!(expanded, "the backtick arm must report an expansion");
-    split_word(&text, &out_mask, &cell().borrow().unwrap().ifs)
+    let cell = cell();
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let (text, out_mask, origin) = substitute_arg_marked(word, mask, &mut cache, &cell).unwrap();
+    assert!(
+        !origin.is_empty(),
+        "the backtick arm must produce splittable bytes"
+    );
+    split_word(&text, &out_mask, &cell.borrow().unwrap().ifs, &origin)
         .unwrap()
         .into_iter()
         .map(|(field, _)| field)
@@ -127,7 +133,7 @@ fn quoted_output_takes_the_trigger_bit_and_never_splits() {
     let cell = cell();
     cell.borrow_mut().unwrap().ifs = ShortCStr::from(c",");
     let ifs = cell.borrow().unwrap().ifs.clone();
-    let out: Vec<ShortCStr> = split_word(&text, &mask, &ifs)
+    let out: Vec<ShortCStr> = split_word(&text, &mask, &ifs, &Origin::all(text.len()))
         .unwrap()
         .into_iter()
         .map(|(f, _)| f)
@@ -144,12 +150,15 @@ fn trailing_newlines_are_stripped() {
 }
 
 #[test]
-fn empty_body_expands_to_nothing() {
+fn empty_body_records_no_splittable_bytes() {
     let word = ShortCStr::from(c"``");
     let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
     assert!(text.as_bytes().unwrap().is_empty());
     assert!(mask.is_empty());
-    assert!(expanded, "an empty arm ran: POSIX 2.6.5 splitting applies");
+    // Task #222: an arm that produced no bytes has nothing to split; the
+    // word-level rule (the empty unquoted word is no word, the quoted-empty
+    // word survives) is pinned in `tests/wordsplit.rs`.
+    assert!(!expanded);
 }
 
 #[test]
@@ -163,7 +172,7 @@ fn dollar_paren_inside_a_backtick_is_the_childs_whole_script() {
     let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
     assert!(text.as_bytes().unwrap().is_empty());
     assert!(mask.is_empty());
-    assert!(expanded);
+    assert!(!expanded, "no bytes, nothing splittable (task #222)");
 }
 
 #[test]

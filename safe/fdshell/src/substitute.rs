@@ -3,6 +3,7 @@ mod backtick;
 mod brace;
 mod dollar;
 mod mask;
+mod origin;
 mod param_op;
 mod paren;
 mod percent;
@@ -24,16 +25,17 @@ use sys::{ExportedFd, ShortCStr};
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
-/// Substitute one word without caring whether it expanded: the wrapper for
-/// every caller that does not gate on the `expanded` signal.
+/// Substitute one word, discarding the byte provenance: the wrapper for
+/// every caller that does not split the result (assignments, heredocs,
+/// `local`/`let`, `case` — the value is stored whole, LESSONS).
 pub(crate) fn substitute_arg(
     arg: &ShortCStr,
     mask: &[bool],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<bool>), Report<ResolveError>> {
-    let mut expanded = false;
-    arg::substitute_arg_marked(arg, mask, cache, cell, &mut expanded)
+    let (out, out_mask, _origin) = arg::substitute_arg_marked(arg, mask, cache, cell)?;
+    Ok((out, out_mask))
 }
 
 pub(crate) fn borrow_state(

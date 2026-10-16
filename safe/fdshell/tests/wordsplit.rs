@@ -206,9 +206,16 @@ fn quoted_ifs_after_cmd_subst_stays_one_word() {
 
 #[test]
 fn unquoted_ifs_after_cmd_subst_still_splits() {
+    // Task #222: the literal `:` is not part of the expansion, so it never
+    // delimits — bash keeps `[x:y]` (`$(true)` expands to nothing). A `:`
+    // *inside* the `$( … )` output still cuts; see the `v=$(echo x)` shapes
+    // beside this test.
     let (out, err, code) = run(r#"IFS=:; builtin printf "[%s]" x$(true):y"#);
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "[x][y]");
+    assert_eq!(out, "[x:y]");
+    let (out, err, code) = run(r#"IFS=:; builtin printf "[%s]" x$(printf "p:q"):y"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[xp][q:y]");
 }
 
 #[test]
@@ -688,24 +695,28 @@ fn leading_and_middle_empty_fields_stay() {
 
 // Task #222 (accepted divergence, next to task #133's fix): the mask model
 // splits the whole concatenation of a literal part and an expansion, while
-// bash splits only the expansion part — a literal `IFS` byte placed after an
-// unquoted embedded expansion cuts between the expansion's last field and the
-// literal text.
+// bash splits only the expansion part — a **literal** `IFS` byte placed after
+// an unquoted embedded expansion never cuts: the word stays one field
+// (`IFS=,; v=$(echo "b c"); printf "[%s]" x$v,y` → bash `[xb c,y]`), and an
+// `IFS` byte that comes *from the expansion itself* cuts (last case).
+// Task #222 (POSIX 2.6.5: field splitting applies to the expansion).
 
 #[test]
 fn literal_ifs_byte_after_expansion_cuts_the_word() {
     let cases: &[(&str, &str)] = &[
         (
             r#"IFS=,; v=$(echo "b c"); builtin printf "[%s]" x$v,y"#,
-            "[xb c][y]",
+            "[xb c,y]",
         ),
         (
             r#"IFS=,; set -- $(echo "b c"); builtin printf "[%s]" x$@,y"#,
-            "[xb c][y]",
+            "[xb c,y]",
         ),
+        // One quoted positional: no separator, no literal cut — the whole
+        // word is one field.
         (
             r#"IFS=,; set -- "$(echo "b c")"; builtin printf "[%s]" x"$@"z,y"#,
-            "[xb cz][y]",
+            "[xb cz,y]",
         ),
     ];
     for (script, want) in cases {
@@ -767,23 +778,21 @@ fn quoted_expansion_glued_to_literal_text_is_one_word() {
 
 #[test]
 fn quoted_expansion_glued_to_a_literal_delimiter_keeps_all_the_bytes() {
-    // The `IFS=,` `set --` shapes of task #223, pinned to today's *bytes*:
-    // every byte survives, and the word still cuts at the literal `,`. The
-    // join bash performs here (`[qb,c]` as one field) is task #222's
-    // accepted divergence, so #222's own commit is the one that moves these
-    // expectations — this task must not pre-empt it.
+    // The `IFS=,` `set --` shapes of task #223: every byte survives, and
+    // task #222 landed the join — a literal `IFS` byte glued to a quoted
+    // expansion never cuts, each word is one field, exactly bash.
     let cases: &[(&str, &str)] = &[
         (
             r#"IFS=,; v=q; vb=VB; set -- "$v"b,c; printf "[%s]\n" "$@""#,
-            "[qb]\n[c]\n",
+            "[qb,c]\n",
         ),
         (
             r#"IFS=,; v=""; va=VA; set -- "$v"a,b; printf "[%s]\n" "$@""#,
-            "[a]\n[b]\n",
+            "[a,b]\n",
         ),
         (
             r#"IFS=,; v=q; vb=VB; set -- x"$v"b,c; printf "[%s]\n" "$@""#,
-            "[xqb]\n[c]\n",
+            "[xqb,c]\n",
         ),
     ];
     for (script, want) in cases {
