@@ -322,6 +322,91 @@ fn lone_sign_still_falls_through_to_external_lookup() {
     assert_eq!(code, 0, "stdout={out:?}");
 }
 
+// --- -C / +C (noclobber) and -i / +i (ignoreeof): the table's short flags ---
+
+/// `set -C` is `set -o noclobber`: the short flag was advertised by the option
+/// table but the cluster parser did not accept it (task #231).
+#[test]
+fn short_noclobber_flag_blocks_overwrite() {
+    let dir = scratch();
+    // `scratch()` writes `a1`/`a2`, so `a1` is an existing target.
+    let (out, err, code) = run_in(&dir, "set -C; builtin echo q > a1");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("noclobber"), "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(&dir).join("a1")).unwrap(),
+        "a1",
+        "the blocked write leaves the target untouched"
+    );
+}
+
+#[test]
+fn short_noclobber_flag_restores_overwrite_when_cleared() {
+    let dir = scratch();
+    let (out, err, code) = run_in(&dir, "set -C; set +C; builtin echo q > a1; cat a1");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "q\n", "stdout={out:?}");
+}
+
+#[test]
+fn short_noclobber_flag_shows_in_dollar_dash_and_clusters() {
+    // `$-` prints the table's flags in table order (noclobber is its first entry).
+    let (out, err, code) = run("set -C; builtin echo [$-]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[C]\n", "stdout={out:?}");
+    // bash: `set -Ce` → `[ehBCc]`; fdshell prints its own bytes, same flags set.
+    let (out, err, code) = run("set -Ce; builtin echo [$-]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[Ce]\n", "stdout={out:?}");
+    let (out, err, code) = run("set -Ce; set +Ce; builtin echo [$-]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n", "stdout={out:?}");
+    // `>|` is still the bypass under the short flag (bash: rc 0, target truncated).
+    let dir = scratch();
+    let (out, err, code) = run_in(&dir, "set -C; builtin echo q >| a1; cat a1");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "q\n", "stdout={out:?}");
+}
+
+#[test]
+fn short_noclobber_flag_is_the_same_option_as_dash_o_noclobber() {
+    let (out, err, code) = run("set -C; shopt -q noclobber; builtin echo $?");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n", "stdout={out:?}");
+    let (out, err, code) = run("set -C; set +C; shopt -q noclobber; builtin echo $?");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "1\n", "stdout={out:?}");
+    let (out, err, code) = run("set -C; set -o");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.contains("noclobber on"), "stdout={out:?}");
+}
+
+/// The byte match is exact: `-C` is noclobber, `-c` is not in the table (bash
+/// rejects it too), and an unknown byte next to a known one is still the error.
+#[test]
+fn short_flag_bytes_are_case_sensitive() {
+    for word in ["-c", "-Cvz", "-aC"] {
+        let (out, _err, code) = run(&format!("set {word}; builtin echo after"));
+        assert_eq!(code, 1, "`set {word}` must fail: stdout={out:?}");
+    }
+}
+
+#[test]
+fn short_ignoreeof_flag_shows_in_dollar_dash_and_shopt() {
+    // fdshell gives `-i` its own meaning (`ignoreeof`); non-interactive bash
+    // rejects it as an invalid option (accepted divergence, README).
+    let (out, err, code) = run("set -i; builtin echo [$-]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[i]\n", "stdout={out:?}");
+    let (out, err, code) = run("set -i; set +i; builtin echo [$-]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n", "stdout={out:?}");
+    let (out, err, code) = run("set -i; shopt -q ignoreeof; builtin echo $?");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "0\n", "stdout={out:?}");
+}
+
 // --- `$-` and free integration ---
 
 #[test]

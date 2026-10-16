@@ -1653,3 +1653,34 @@ not shared code, so pin both spellings side by side (`"$@"`, `""$@`, `"$@"y`, `x
 `x"$@"`) in `tests/positional.rs::whole_word_and_embedded_dollar_at_paths_agree` and never move a
 pin to match fdshell's output — every expectation in task #222's tables was re-measured in bash
 5.3.9 first.
+
+## A second table for one fact is how a documented flag goes missing
+
+`options.rs::OPTIONS` carries each option's `set` short flag in its third field
+(`(b"noclobber", NOCLOBBER, b'C')`, `(b"ignoreeof", IGNOREEOF, b'i')`), and
+`options::flags` prints exactly those bytes for `$-`. `set_short.rs::flag_bit`
+kept a **second** table for the same fact — a match over `e u f v x` — and it
+was the one `set` consulted. So `set -o noclobber` worked, `set -o noclobber`
+put `C` into `$-`, and the flag `$-` advertised was rejected by the very word
+that sets it: `set -C` → `set: unknown option '-C'`, rc 1, where bash enables
+noclobber; `set -i` likewise. Task #231 deleted the duplicate: `flag_bit` now
+asks the table (`options::flag_lookup`), so the cluster's accepted bytes **are**
+the table's third field, and auditing every non-zero one of them is mechanical —
+it yields `e u f v x C i`, i.e. `-C` (noclobber) and `-i` (ignoreeof) come for
+free, as does any flag a later option adds. `-i` is accepted with fdshell's own
+meaning where a non-interactive bash rejects it (`set: -i: invalid option`);
+that divergence is documented in the README rather than carved out, because a
+carve-out would reintroduce a parser-side list. The diagnostic trap is worth
+remembering too: before the cluster parser existed (task #142) a rejected
+short-flag word fell through `run_set` and went to the external lookup, so
+`set -C` under a relative `PATH` reported `failed to resolve command path:
+"set"` — a missing builtin flag surfaces as a *path* error, and the symptom
+names the command, not the flag.
+**Rule:** when two modules encode one fact, make one of them read the other, and
+pin the **correspondence** between the two, not each side's own view —
+`options/tests.rs::every_table_short_flag_is_accepted_and_unique` asserts every
+table entry with a short flag resolves to its own bit, that no byte is shared by
+two options, and that the accepted set is exactly those bytes, so a table entry
+the parser would reject fails there rather than in a user's shell; the
+observable side is pinned by `set_short/tests.rs::table_short_flags_are_cluster_flags`
+and `tests/set_opts.rs::short_noclobber_flag_blocks_overwrite`.

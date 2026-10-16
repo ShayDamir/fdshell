@@ -155,7 +155,7 @@ wins** and it is not an error: `echo hi >a >b` writes `hi` to `b` and creates
 `cat <f1 <f2` reads `f2`. A failing redirection aborts the command, so the
 order matters: `cat <missing <f2` exits 1 without reading `f2`.
 
-`set -o noclobber` (`shopt -s noclobber`) blocks a `>` write over an existing
+`set -o noclobber` (`set -C`, `shopt -s noclobber`) blocks a `>` write over an existing
 file (`echo hi >f` fails with `cannot overwrite existing file`, and the command
 aborts). `>|` is the bypass: `echo hi >|f` truncates an existing `f`, in the
 attached, bare, fd-prefix (`2>|f`), `%var` (`>|%f`) and `/dev/fd/N` forms, and
@@ -814,7 +814,10 @@ bash.
 `set` short flags **cluster** in one word: every byte after the sign is applied
 with the word's sign, so `set -eu` sets errexit *and* nounset and `set +ef`
 clears noglob *and* verbosity; a repeated byte (`set -ee`) is harmless. The
-accepted flag bytes are `e u f v x`; a signed word containing any other byte is
+accepted flag bytes are the option table's short flags — `e u f v x C i`, where
+`-C` is noclobber (`set -o noclobber`) and `-i` is ignoreeof
+(`set -o ignoreeof`) — read from the same table `$-` prints, so a byte `set`
+accepts is a byte `$-` shows. A signed word containing any other byte is
 an error naming the whole word (`set -ez` → rc 1,
 `set: unknown option '-ez'`) and **no** flag is applied — the word is validated
 before the first one is set.
@@ -994,8 +997,8 @@ Accepted divergences from bash:
   `"$@"` arm is then **no word at all** (task #219), while the braced arm is
   one joined (empty) string, so `set --; set -- "${@}"; echo $#` prints `1`
   here where bash prints `0`.
-- fdshell's `$-`/`${-}` prints fdshell's own flag bytes (`u`, `e`, `f`, `v`, `x`;
-  **empty by default**), so it can be empty where bash's is `hBc`/`huBc`. That
+- fdshell's `$-`/`${-}` prints fdshell's own flag bytes (`u`, `e`, `f`, `v`, `x`,
+  `C`, `i`; **empty by default**), so it can be empty where bash's is `hBc`/`huBc`. That
   shows in `:=`: `set --; printf "[%s]" "${-:=q}"` is rc 1
   `-: cannot assign in this way` here, where bash prints its flags at rc 0; and
   in `:?`: `${-:?m}` is rc 1 `-: m` where bash prints `[hBc]` at rc 0.
@@ -1028,8 +1031,11 @@ Accepted divergences from bash:
   bash's `-c` mode puts `bash` there, and with extra args bash's `$0` is the
   **first extra argument** (argv semantics). fdshell keeps every extra argument
   as a positional, so `-c` mode never numbers an extra arg as `$0`.
-- `set` clusters accept five flag bytes (`e u f v x`); bash accepts many more
-  (`-a -b -C -h …`), so `set -C` is an fdshell error where bash enables noclobber.
+- `set` clusters accept the option table's short flag bytes (`e u f v x C i`,
+  `C` = noclobber, `i` = ignoreeof); bash accepts many more
+  (`-a -b -h …`), so `set -a` is an fdshell error where bash enables
+  allexport. fdshell accepts `set -i` as `ignoreeof` where a non-interactive
+  bash rejects `-i` (`set: -i: invalid option`).
   Only the first word is a cluster (`set -eu -f` applies `-eu`, ignores `-f`)
   and `-o NAME` cannot ride inside one (`set -eo pipefail` is an fdshell error);
   task #249.

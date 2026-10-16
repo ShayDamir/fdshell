@@ -77,6 +77,43 @@ fn eof_is_ignored_when_ignoreeof_is_on() {
 }
 
 #[test]
+fn short_i_flag_turns_ignoreeof_on() {
+    // `set -i` is the short form of `set -o ignoreeof`: the same observable
+    // hint as `eof_is_ignored_when_ignoreeof_is_on`, reached through the
+    // cluster's `i` byte (task #231).
+    let mut child = Command::new(BIN)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"set -i\n")
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    let mut data = Vec::new();
+    let mut buf = [0u8; 1024];
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while data.windows(19).all(|w| w != b"use `exit' to leave")
+        && std::time::Instant::now() < deadline
+    {
+        let n = child.stdout.as_mut().unwrap().read(&mut buf).unwrap();
+        assert!(n > 0, "shell exited on EOF: {data:?}");
+        data.extend_from_slice(buf.get(..n).unwrap());
+    }
+    assert!(
+        data.windows(19).any(|w| w == b"use `exit' to leave"),
+        "no ignoreeof hint: {data:?}"
+    );
+    assert!(child.try_wait().unwrap().is_none(), "shell died on EOF");
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
 fn ignoreeof_defaults_on_when_stdin_is_a_tty() {
     // `script` (util-linux) attaches a pty, so fdshell's stdin is a terminal
     // and the default-on `ignoreeof` must show up in `$-`.
