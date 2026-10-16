@@ -218,14 +218,26 @@ fn line_start_words_keep_the_closer_and_argument_gates() {
     // line starts a fresh run and its `&&` (13) splits.
     assert_eq!(boundary_of(b"echo if\ntrue && echo b"), (13, false));
     // A mid-run `<<` with a body: the split is the operator written before
-    // the body (8). From the resume (10) the body-skip arm finds no operator
-    // in its run, the scan continues over the text, and the body's own `&&`
-    // (20) splits — the region stream the caller hands to `run_one` strips
-    // the body from the part text (pinned by `tests/cond_blocks.rs`).
+    // the body (8). From the resume (10) the run window is anchored at the
+    // physical line start (task #234), so the region is recognized and
+    // skipped whole — on this text, which carries its body bytes inline, the
+    // body's `&&` no longer splits (one part). Real statement runs hand
+    // `run_cond_list` the command bytes only (the regions travel as
+    // `bodies`), so their split at 8 is unchanged — pinned by
+    // `tests/cond_blocks.rs::mid_run_heredoc_keeps_the_body_inside_the_part`.
     assert_eq!(boundary_of(b"cat <<X && echo b\nq && r\nX"), (8, false));
     assert_eq!(
         boundary_from(b"cat <<X && echo b\nq && r\nX", 10),
-        (20, false)
+        (26, false)
+    );
+    // The same shape in **block context** (task #234): a block carries its
+    // condition bodies inside its own text, the run window is anchored at the
+    // physical line start (the `;` reset does not hide the `<<`), and the
+    // region walk scans the body region: its `&&` (22) stays the split
+    // (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
+    assert_eq!(
+        boundary_of(b"if cat <<X; then\nbody && x\nX\nfi"),
+        (22, false)
     );
     // The body-skip arm resumes a fresh run: the operator written on the
     // delimiter line after a body (23) is the split.

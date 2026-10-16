@@ -1,11 +1,14 @@
 //! `&&` / `||` boundary scanning for cond lists, skipping heredoc bodies so
 //! a multi-line heredoc part stays one part and `&&` / `||` in its body do
-//! not split it.
+//! not split it. Inside a keyword block the block's command text is opaque,
+//! while the heredoc **body** regions it carries inline stay scanned
+//! (`boundary/heredoc.rs`).
 
-use crate::scan::{ScanState, heredoc};
+use crate::scan::ScanState;
 use crate::segment::group::{group_at_run, opens_at};
 
 mod block;
+mod heredoc;
 
 /// Scan from `i` to the next unquoted `&&` / `||` (or end of line). Heredoc
 /// command lines are skipped whole along with their bodies. A `{ …; }` group
@@ -16,16 +19,15 @@ mod block;
 /// condition, an `if` condition, a body or a `case` arm belongs to the block's
 /// own cond list. Both counters only recognize a *command-position* word — a
 /// keyword-shaped argument (`echo if && echo b`) is word data, as bash and the
-/// segment scanner require. Returns the operator's first byte (or `line.len()`)
-/// and whether it is `||`.
+/// segment scanner require. A block that carries heredoc bodies in its own
+/// text (a block condition's bodies travel inside the span) keeps the block
+/// rule, and its **body** regions are walked region by region: skipped whole
+/// in a statement's text, scanned for an operator inside a block's text
+/// ([`heredoc::walk`]). Returns the operator's first byte (or
+/// `line.len()`) and whether it is `||`.
 pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut run_start = i;
     let mut group_depth: i32 = 0;
-    // The block rule is off for a text that carries `<<` operators: a block's
-    // condition bodies travel *inside* its span, and the `&&` written in such a
-    // body line must keep splitting the part
-    // (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
-    let block_rule = heredoc::operator_count(line, i, line.len()) == 0;
     let mut block_depth: i32 = 0;
     while let Some(&b) = line.get(i) {
         if !state.in_quote && !state.in_single && state.paren_depth == 0 {
@@ -41,7 +43,7 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             // a stray `done` never hides the operators of a plain command line,
             // and the helper's command-position rule keeps a keyword-shaped
             // *argument* (`echo if && echo b`) word data too.
-            if block_rule && state.at_word_start() {
+            if state.at_word_start() {
                 let delta = block::word_delta(line, i, block_depth, run_start);
                 block_depth = block_depth.saturating_add(delta).max(0);
             }
@@ -57,15 +59,22 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                 // later `&&`/`||` and swallow the operator into the arguments.
                 group_depth = group_depth.saturating_sub(1).max(0);
             }
-            if b == b'\n'
-                && let Some(resume) = heredoc::skip(line, run_start, i)
-            {
-                i = resume;
-                run_start = i;
-                // The run reset starts a new word: the line after a heredoc
-                // body begins with a command word.
-                state.word_active = false;
-                continue;
+            if b == b'\n' {
+                let (regions, resume) = heredoc::regions(line, run_start, i);
+                if !regions.is_empty() {
+                    if let Some(op) = heredoc::walk(&regions, block_depth, line, &mut i) {
+                        return op;
+                    }
+                    // Every region is skipped: resume at the newline terminating
+                    // the last delimiter line; its run reset happens in the plain
+                    // arm below, where the scan meets that newline again.
+                    i = resume;
+                    run_start = i;
+                    // The run reset starts a new word: the line after a heredoc
+                    // body begins with a command word.
+                    state.word_active = false;
+                    continue;
+                }
             }
             if b == b'\n' || b == b';' {
                 i += 1;

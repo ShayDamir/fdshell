@@ -20,9 +20,10 @@ use alloc::vec::Vec;
 /// [`claimed_regions`]), and the segment carries them in `bodies` when they
 /// sit entirely past the block's command text (**append mode**): the span then
 /// stops at the closing keyword's separator, so a trailing statement's text is
-/// outside the block and the block's text is rebuilt from its own regions
-/// (script.rs). The regions are appended after the command line, in operator
-/// order.
+/// outside the block, and `script.rs` hands the regions to `run_cond_list` as
+/// the block's bodies — exactly like a statement's (task #234), so the part
+/// that owns the `<<` operator is the one that gets its body. The regions are
+/// appended after the command line, in operator order.
 ///
 /// When the regions are interleaved with the block's own lines (a multi-line
 /// block with a heredoc in its body), the segment carries no bodies and the

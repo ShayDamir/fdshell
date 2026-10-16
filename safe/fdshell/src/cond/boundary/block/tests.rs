@@ -79,21 +79,33 @@ fn unclosed_opener_is_one_part() {
     assert_eq!(boundary_of(line.as_slice()), (line.len(), false));
 }
 
-/// A span that carries a `<<` operator does not take the jump: the block's
-/// condition bodies travel inside its text, and the `&&` written in a body
-/// line must keep splitting the part (see `tests/heredoc.rs`).
+/// A span that carries a `<<` operator keeps the block rule (task #234): its
+/// command text is opaque, and only the `&&` written inside a **body** region
+/// splits the part (see `tests/heredoc.rs`).
 #[test]
-fn heredoc_carrying_span_keeps_the_split() {
-    // `while cat <<X; do a && b; X` + newline + `done` — split at the `&&` (20).
-    assert_eq!(
-        boundary_of(b"while cat <<X; do a && b; X\ndone"),
-        (20, false)
-    );
-    // `if cat <<X; then` + body with `&&` + delimiter + `fi` — the body `&&` (22).
+fn heredoc_carrying_span_scans_only_its_body_regions() {
+    // `while cat <<X; do a && b; X` + newline + `done`: the `&&` is in the
+    // block's command text, the body region carries none, so the whole text
+    // is one part — the block's own cond list runs it (bash's rule).
+    let line = b"while cat <<X; do a && b; X\ndone";
+    assert_eq!(boundary_of(line), (line.len(), false), "{:?}", line);
+    // `if cat <<X; then` + body with `&&` + delimiter + `fi` — the body `&&`
+    // (22) stays a split point: the pinned rc 1 `missing 'fi'` shape.
     assert_eq!(
         boundary_of(b"if cat <<X; then\nbody && x\nX\nfi"),
         (22, false)
     );
+    // An operator in a multi-line block's *body* line that carries a heredoc:
+    // the text is the block's own (extension mode, bodies inline), and the
+    // region rule applies — the `&&` written on the **delimiter line** (26)
+    // is inside the body region, so the region is skipped and the whole text
+    // stays one part.
+    let line = b"while :; do\ncat <<Q\nbody\nQ && echo x\nbreak\ndone";
+    assert_eq!(boundary_of(line), (line.len(), false), "{:?}", line);
+    // A `case` arm's operator in a heredoc-carrying block (append mode: the
+    // bodies travel outside the text): the command text is opaque, one part.
+    let line = b"case q in q) cat <<Q; echo a && echo b;; esac\nbody\nQ";
+    assert_eq!(boundary_of(line), (line.len(), false), "{:?}", line);
 }
 
 /// Kill-shapes for the gate: only an *opening* keyword word at a word start

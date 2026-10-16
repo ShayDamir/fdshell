@@ -35,16 +35,17 @@ pub(crate) fn run_script(
                 crate::verbose::trace(raw.trim_ascii(), cell);
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
                 let cmd_start = block_start + lead;
-                // A block that carries its own body regions gets a text
-                // rebuilt from them (command line + newline + regions); the
-                // other blocks are subsliced verbatim.
-                let full = if bodies.is_empty() {
-                    sub(text, cmd_start, raw.trim_ascii().len())?
-                } else {
-                    let body_bytes = extract_bodies(line, &bodies);
-                    crate::cond::part::reconstruct(text, line, cmd_start, end_pos, &body_bytes)?
-                };
-                if let Some(control) = crate::cond::run_cond_list(&full, &[], cell, false)? {
+                // The block's text is its **command** bytes only, and its body
+                // regions travel as `run_cond_list`'s bodies exactly like a
+                // statement's (task #234): `cond::parts::take_bodies` gives the
+                // part that owns the `<<` operator its own body, so a split
+                // past the closing keyword never leaves a heredoc part bodyless.
+                // An extension-mode block (a condition's bodies are inside the
+                // span) claims no regions here and keeps its verbatim text.
+                let full = sub(text, cmd_start, raw.trim_ascii().len())?;
+                let body_bytes = extract_bodies(line, &bodies);
+                if let Some(control) = crate::cond::run_cond_list(&full, &body_bytes, cell, false)?
+                {
                     return Ok(Some(control));
                 }
             }
@@ -53,7 +54,8 @@ pub(crate) fn run_script(
     Ok(None)
 }
 
-/// Extract the body bytes of a statement's heredoc regions.
+/// Extract the body bytes of a segment's heredoc regions (statements and
+/// append-mode blocks both hand them to `run_cond_list`).
 fn extract_bodies(line: &[u8], bodies: &[(usize, usize)]) -> Vec<Vec<u8>> {
     bodies
         .iter()
