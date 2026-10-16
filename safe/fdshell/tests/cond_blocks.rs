@@ -351,6 +351,50 @@ fn midrun_block_body_heredoc_travels_with_the_run() {
     assert_eq!((out.as_str(), code), ("body\nmid\n", 0), "stderr={err}");
 }
 
+/// Review F1 (task #232): a POSIX builtin `wait` written mid-run opens no
+/// block, so it must stay **word data** — the mid-run span is gated on the
+/// shared scorer (`keyword_delta` scores the builtin `0`, only the event-case
+/// `wait` `+1`). Without that gate the builtin took a span, found no closer,
+/// and swallowed the rest of the run; the cond layer re-splits only `&&`/`||`
+/// and never a `;`, so every statement after the first `;` of the run was
+/// dropped with rc 0 and no diagnostic, and a loop whose `break` sat in the
+/// swallowed text ran forever (that row is pinned bounded in
+/// `tests/loops.rs::mid_run_builtin_wait_keeps_the_loop_body`). Rows measured
+/// against bash 5.3.9; `master` agreed with bash on all of them.
+#[test]
+fn builtin_wait_mid_run_stays_word_data() {
+    for (script, want) in [
+        ("true && wait; echo tail", "tail\n"),
+        ("echo a && wait; echo b", "a\nb\n"),
+        ("true && echo x && wait; echo tail", "x\ntail\n"),
+        ("true && time wait; echo tail", "tail\n"),
+        ("true && time -p wait; echo tail", "tail\n"),
+        ("false && wait; echo tail", "tail\n"),
+        ("true || wait; echo tail", "tail\n"),
+        ("set -e; true && wait; echo tail", "tail\n"),
+        ("if true; then true && wait; echo tail; fi", "tail\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The gated opener keeps its span mid-run: the **event-case** `wait` (a
+/// pattern keyword behind it, fdshell-only syntax so bash is a syntax error
+/// here) scores `+1`, so `true &&` runs the block and `false &&` skips it —
+/// the span and the short circuit, pinned beside the builtin row above that
+/// must *not* take one. Measured on `master` the same script ran `wait` as the
+/// builtin and `finished` as a command (`failed to resolve command path`).
+#[test]
+fn event_case_wait_mid_run_keeps_its_block_span() {
+    let (out, err, code) =
+        run("builtin true &>&j; true && wait\n finished %&j)\n echo f ;;\ndone; echo tail");
+    assert_eq!((out.as_str(), code), ("f\ntail\n", 0), "stderr={err}");
+    let (out, err, code) =
+        run("builtin true &>&j; false && wait\n finished %&j)\n echo f ;;\ndone; echo tail");
+    assert_eq!((out.as_str(), code), ("tail\n", 0), "stderr={err}");
+}
+
 /// Accepted divergences pinned with the task that owns them: a keyword block
 /// as a pipeline stage (argument position — Fix A must not cover it, task
 /// **#292**); an unclosed mid-run construct (rc 1 parse error, bash rc 2); a
@@ -376,6 +420,11 @@ fn midrun_adjacent_shapes_stay_measured_divergences() {
         ("a\nx\n", 0),
         "bash rc 2: measured divergence"
     );
+    // A `name()` word with no `{` body opens no definition span (the scorer
+    // gate, LESSONS): it stays word data, rc 1 — byte-identical to master and
+    // to the run-start twin `f()`. bash reports a syntax error rc 2.
+    let (_out, _err, code) = run("true && f()");
+    assert_eq!(code, 1);
     // #234: a block text carrying a `<<` operator keeps the old split.
     let (_out, _err, code) = run("if true; then cat <<T; fi && echo x\nbody\nT");
     assert_eq!(code, 1);

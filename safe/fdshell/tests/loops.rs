@@ -940,3 +940,33 @@ fn loops_as_cond_parts_run_like_bash() {
     let (out, err, code) = run("true && for i in 1 2; do echo $i; done; echo tail");
     assert_eq!((out.as_str(), code), ("1\n2\ntail\n", 0), "stderr={err}");
 }
+
+/// Review F1 (task #232): the mid-run span must not swallow a loop body. Body
+/// runs are re-scanned with the mid-run rule, so a builtin `wait` written
+/// after `&&` inside a body took a span as soon as it was not gated on the
+/// shared scorer: the swallowed text held the `break`, the loop re-tested its
+/// condition forever and the statements after the swallowed `;` were dropped
+/// (rc 0, no diagnostic). Every row is bounded ([`run_bounded`]) so a
+/// regression panics here with the script in its message instead of hanging
+/// the suite. Measured against bash 5.3.9: `tail` (rc 0).
+#[test]
+fn mid_run_builtin_wait_keeps_the_loop_body() {
+    for (script, want) in [
+        ("while :; do true && wait; echo tail; break; done", "tail\n"),
+        (
+            "while :; do true && time wait; echo tail; break; done",
+            "tail\n",
+        ),
+        (
+            "while :; do echo a && wait; echo tail; break; done",
+            "a\ntail\n",
+        ),
+        (
+            "for i in 1; do false || wait; echo tail; break; done",
+            "tail\n",
+        ),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}

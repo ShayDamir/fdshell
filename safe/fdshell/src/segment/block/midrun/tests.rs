@@ -72,10 +72,13 @@ fn every_opener_keyword_skips_its_span() {
 /// exactly the keyword whose keyword word `keyword_delta` scores `+1` — the
 /// seed of the mid-run span cannot drift from the scored keyword (LESSONS:
 /// sharing the scorer is not enough, the strip must be the same rule).
-/// `wait` is the gated opener: the length is measured on the word, the block
-/// score needs the pattern keyword behind it, and the mid-run scan closes at
-/// the `done` it finds — a `wait` that opens no block swallows nothing the
-/// cond layer does not re-split.
+/// `span_end` takes the keyword branch only where that scorer says `+1`, so
+/// the gate is the scorer itself and not a parallel rule.
+/// `wait` is the gated opener: `opener_len` measures the word for both forms,
+/// the score separates them — the event-case `wait` (a pattern keyword behind
+/// it) takes the span, the POSIX builtin stays **word data**, because the cond
+/// layer re-splits only `&&`/`||` and a swallowed `;` would drop the
+/// statements after it (`true && wait; echo tail`).
 #[test]
 fn opener_len_agrees_with_the_scored_keyword() {
     for word in [
@@ -93,14 +96,18 @@ fn opener_len_agrees_with_the_scored_keyword() {
             "{word:?}: the seed and the score must agree"
         );
     }
-    // `wait`: length 4; `+1` only for the event-case form (the POSIX builtin
-    // scores `0`, and the builtin mid-run keeps its operators through the
-    // cond re-split).
+    // `wait`: length 4 for both forms; `+1` only for the event-case form.
     assert_eq!(opener_len(b"wait"), Some(4));
+    assert_eq!(opener_len(b"wait $!"), Some(4));
     let block = b"wait\n readable %rd) x ;;\ndone";
     assert_eq!(keyword_delta(b"wait", block, 4), Some(1));
     assert_eq!(keyword_delta(b"wait", b"wait", 4), Some(0));
-    assert_eq!(midrun(b"x && wait $! && echo x"), Some(22));
+    assert_eq!(keyword_delta(b"wait", b"wait $!", 4), Some(0));
+    // The mid-run span follows the score: the event-case form skips, the
+    // builtin form is word data (`None`).
+    let event = [b"x && "[..].to_vec(), block[..].to_vec()].concat();
+    assert_eq!(midrun(&event).unwrap(), event.len());
+    assert_eq!(midrun(b"x && wait $! && echo x"), None);
     // The boundary rule: glued forms are not keywords, closers and braces are
     // not openers, and the `time` prefix is measured off by `time_prefix_len`.
     for word in [
@@ -117,6 +124,52 @@ fn opener_len_agrees_with_the_scored_keyword() {
         b"ls".as_slice(),
     ] {
         assert_eq!(opener_len(word), None, "{word:?}");
+    }
+}
+
+/// The `keyword_delta` gate in `span_end`: a word the shared scorer scores `0`
+/// opens no span, so a mid-run POSIX `wait` stays word data and the run keeps
+/// its `;` split (the cond layer re-splits only `&&`/`||`: a span over the
+/// builtin swallowed every statement after the first `;` and hung a loop whose
+/// `break` sat in the swallowed text). The same word behind `time [-p]` is
+/// gated on the stripped word, and a `wait` with a pattern keyword behind it
+/// keeps its span.
+#[test]
+fn the_scored_gate_keeps_the_builtin_wait_word_data() {
+    for tail in [
+        b"wait".as_slice(),
+        b"wait $!".as_slice(),
+        b"wait 123".as_slice(),
+        b"wait; echo tail".as_slice(),
+        b"time wait".as_slice(),
+        b"time -p wait".as_slice(),
+        b"time time -p wait".as_slice(),
+        b"wait \"readable\"".as_slice(),
+        b"wait 123abc".as_slice(),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert_eq!(midrun(&line), None, "{line:?}: a builtin opens no span");
+    }
+    // The event-case form keeps its span, bare and behind a `time` prefix.
+    for prefix in [b"".as_slice(), b"time ".as_slice(), b"time -p ".as_slice()] {
+        let line = [
+            b"x && "[..].to_vec(),
+            prefix[..].to_vec(),
+            b"wait\n readable %rd) echo r ;;\ndone"[..].to_vec(),
+        ]
+        .concat();
+        assert_eq!(midrun(&line).unwrap(), line.len(), "{line:?}");
+    }
+    // A `name()` word with no `{` body is not a span either: like the
+    // run-start path (which requires `scan_function_block` to match), the
+    // definition is only a block once its brace body is there.
+    for tail in [
+        b"f()".as_slice(),
+        b"f()x".as_slice(),
+        b"function g".as_slice(),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert_eq!(midrun(&line), None, "{line:?}: no body, no span");
     }
 }
 

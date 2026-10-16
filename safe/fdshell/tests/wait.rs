@@ -82,3 +82,30 @@ fn wait_pattern_keyword_is_block_not_builtin() {
     let out = run("wait readable");
     assert_ne!(out.status.code(), Some(0));
 }
+
+/// Review F1 (task #232): a `wait` written after `&&` / `||` is still the
+/// POSIX builtin — the segment scanner's mid-run block span is gated on the
+/// shared scorer, which scores this `wait` `0` (no pattern keyword behind it).
+/// So the run keeps its `;` split, the builtin reaps the task, its status is
+/// the chain's status, and the statements written after the `;` run. Ungated,
+/// the builtin took a block span and swallowed them (no output, rc 0).
+/// Measured against bash (`builtin` is fdshell's own validation form, so only
+/// the shapes are bash-comparable: `true && wait; echo tail` → `tail` rc 0).
+#[test]
+fn builtin_wait_after_a_cond_operator_stays_the_builtin() {
+    let out = run("builtin true &>&j; true && wait; builtin echo tail");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "tail\n");
+    assert_eq!(str::from_utf8(&out.stderr).unwrap(), "");
+    // The builtin ran: the reaped child's status is the chain's status.
+    let out = run("builtin false &>&j; true && wait; builtin echo tail=$?");
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "tail=1\n");
+    // A skipped chain never runs it, and the tail of the run still runs.
+    let out = run("builtin true &>&j; false && wait; builtin echo tail");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("tail\n", Some(0))
+    );
+    let out = run("builtin true &>&j; true && echo x && wait; builtin echo tail");
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "x\ntail\n");
+}
