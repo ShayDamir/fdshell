@@ -254,12 +254,15 @@ fn quoted_ifs_keeps_the_backslash_as_a_split_byte() {
     assert_eq!(out, "[a][b]", "bash: [a][b]");
 }
 
-/// Task #223: the value of an assignment whose word is a quoted expansion
-/// glued to literal text keeps every byte, and the glued literal never
-/// extends the parameter name (`vb` is bound and must not win). bash:
-/// `v=q; w="$v"b,c; printf "[%s]" "$w"` → `[qb,c]`.
+/// Task #223: the **assignment path** of a quoted expansion glued to literal
+/// text — the value of an assignment keeps every byte, and the glued literal
+/// never extends the parameter name (`vb` is bound and must not win). bash:
+/// `v=q; w="$v"b,c; printf "[%s]" "$w"` → `[qb,c]`. The same shapes run
+/// through the **split path** in
+/// `tests/wordsplit.rs::quoted_expansion_glued_to_literal_text_keeps_every_byte`;
+/// this pin measures the folding of the value into the environment.
 #[test]
-fn quoted_expansion_glued_to_literal_text_keeps_every_byte() {
+fn quoted_expansion_glued_to_literal_text_in_an_assignment_value() {
     let cases: &[(&str, &str)] = &[
         (r#"IFS=,; v=q; w="$v"b,c; printf "[%s]" "$w""#, "[qb,c]"),
         (r#"IFS=,; v=q; w=x"$v"b,c; printf "[%s]" "$w""#, "[xqb,c]"),

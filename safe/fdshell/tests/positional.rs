@@ -257,3 +257,35 @@ fn quoted_positional_glued_to_literal_text_keeps_the_literal() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "1/A2\n");
 }
+
+/// Task #223 (review F1): a positional digit run ends at the first **name**
+/// byte, so `"$1a"` is `$1` plus the literal `a` (bash 5.3.9 `[Aa]`) and the
+/// parameter `1a` is never the reading — it does not exist, and under `set -u`
+/// reading it is a bail fdshell must not produce.
+///
+/// Every pin above glues its literal **outside** the trigger byte's region, so
+/// the region cap truncates the run to one digit and the shell's digit arm of
+/// `dollar_subst` cannot be told apart from a scan that reads the whole name —
+/// that is why `cargo mutants` survived deleting the arm. These shapes put the
+/// name byte inside the region, where only the digit arm agrees with bash, so
+/// they are the pin that keeps the arm from being deleted as a "redundant"
+/// mutant (LESSONS: "`dollar_subst`'s digit arm is load-bearing").
+#[test]
+fn positional_digit_run_ends_at_a_name_byte() {
+    let cases: &[(&str, &str)] = &[
+        (r#"set -- A B; printf "[%s]" "$1a""#, "[Aa]"),
+        (r#"set -- A B; printf "[%s]" "$1abc""#, "[Aabc]"),
+        (r#"set -- A B; printf "[%s]" $1a"#, "[Aa]"),
+        (r#"set -- A B; printf "[%s]" "$1_2""#, "[A_2]"),
+        (r#"set -- A B; set -u; printf "[%s]" "$1a""#, "[Aa]"),
+        (
+            r#"set -- A B; set -- "$1a"; printf "[%s]\n" "$@""#,
+            "[Aa]\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(out, *want, "{script:?}");
+    }
+}

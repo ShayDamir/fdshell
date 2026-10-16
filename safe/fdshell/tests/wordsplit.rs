@@ -716,6 +716,10 @@ fn literal_ifs_byte_after_expansion_cuts_the_word() {
 }
 
 // Task #223: a quoted expansion glued to literal text must keep every byte.
+// These cases run the word through the **split path** (word text out of the
+// substitution pass, into the splitter); the assignment path, where the same
+// word becomes a variable value, is pinned beside them in
+// `tests/env_assign.rs::quoted_expansion_glued_to_literal_text_in_an_assignment_value`.
 // The assignment form is split-independent, so these pins state the bytes
 // only: what the splitter decides about a literal delimiter is task #222's
 // rule. Before the fix these words lost the expansion's output and the byte
