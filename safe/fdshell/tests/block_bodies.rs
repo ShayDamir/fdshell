@@ -107,8 +107,19 @@ fn empty_then_body_is_a_parse_error() {
     run_err("if true\nthen\nfi", "'then' body is empty");
     // A comment is not a command: a comment-only body is empty (bash rc 2).
     run_err("if true; then\n# c\nfi", "'then' body is empty");
-    // The glued-`fi` form used to print an accepted empty body (rc 0).
-    run_err("if a; then b fi", "'then' body is empty");
+    // Task #236: the glued-`fi` form is now the *unclosed block* class — the
+    // `fi` behind `b` is an argument and never closes the `if`, so the span
+    // swallows the line and the run reports the bare unmatched-keyword parse
+    // error (rc 1, bash rc 2 — README "unclosed mid-run construct"). The
+    // parse layer's own message for this shape is `missing 'fi'`, pinned in
+    // `parse::tests::if_body_before_a_glued_fi_is_a_missing_fi_err`.
+    let (out, err, code) = run("if a; then b fi");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "`if a; then b fi` stderr: {err}"
+    );
+    assert!(err.contains("parse error"), "stderr: {err}");
 }
 
 #[test]

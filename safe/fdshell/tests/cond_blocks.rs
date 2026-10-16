@@ -2,6 +2,8 @@
 
 use std::process::Command;
 use std::str;
+use sys::Pid;
+use sys::signal::{SIGKILL, kill};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
@@ -42,6 +44,74 @@ fn scratch(tag: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+// Task #236 section: keyword words in argument position inside a block body.
+// Every shape is measured against `bash -c` (5.3.9). The `echo done` row of
+// [`keyword_words_in_argument_position_split_the_body_operators`] runs under
+// a bounded child: on master the `break` landed in a dropped cond part and
+// the loop ran forever (rc 124), so a regression must panic, not hang — the
+// same harness as `tests/loops.rs::run_bounded`.
+
+/// 5 s, strictly under nextest's 10 s `slow-timeout` (`.config/nextest.toml`).
+const BOUND: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// All pids whose parent is `parent` (the same helper as `tests/loops.rs`).
+fn children_of(parent: u32) -> Vec<u32> {
+    let mut pids = Vec::new();
+    for entry in std::fs::read_dir("/proc").unwrap() {
+        let name = entry.unwrap().file_name();
+        let Ok(pid) = name.to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let fields = stat.rsplit(')').next().unwrap_or("");
+        let ppid = fields
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok());
+        if ppid == Some(parent) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+/// Run `script`, killing it and every child it forked at [`BOUND`].
+fn run_bounded(script: &str) -> (String, String, i32) {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + BOUND;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(e) => panic!("try_wait failed: {e}"),
+        }
+        if std::time::Instant::now() >= deadline {
+            for pid in children_of(child.id()) {
+                let _ = kill(Pid::from_raw(pid as i32), SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "`{script}` did not finish in {BOUND:?} — the loop-control `break` was dropped again (task #205's shape regressed through #236's gate)"
+            )
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&out.stdout).unwrap().to_string(),
+        str::from_utf8(&out.stderr).unwrap().to_string(),
+        out.status.code().unwrap_or(-1),
+    )
 }
 
 /// Task #137: a cond-list operator in an `if` condition is the block's own cond
@@ -564,4 +634,165 @@ fn definer_with_cond_operators_around_it_splits_the_list() {
     assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err}");
     let (out, err, code) = run("f() { echo a && echo b; }; f; f");
     assert_eq!((out.as_str(), code), ("a\nb\na\nb\n", 0), "stderr={err}");
+}
+
+/// Task #236: a keyword-shaped word in **argument position inside a block
+/// body** is word data (bash recognizes a reserved word in command position
+/// only), so the body's `&&` / `||` keeps splitting. On `master` the argument
+/// opened (or dropped) the block depth and the whole shape was a parse error
+/// rc 1 — the `while … echo done …` row even **hung** (the `break` landed in a
+/// dropped cond part, the #205 lesson), so it runs under the bounded child.
+/// Rows measured against `bash -c` 5.3.9: every row prints its keyword word,
+/// the gated part, and `after`, rc 0.
+#[test]
+fn keyword_words_in_argument_position_split_the_body_operators() {
+    for (script, want) in [
+        (
+            "while true; do echo if && echo x; break; done; echo after",
+            "if\nx\nafter\n",
+        ),
+        (
+            "if true; then echo while && echo x; fi; echo after",
+            "while\nx\nafter\n",
+        ),
+        (
+            "case x in x) echo if && echo y;; esac; echo after",
+            "if\ny\nafter\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // The closer twin: `echo done` is data, the real `done` closes, and the
+    // body's `&&` runs. Master hung (rc 124) — bounded child, so a regression
+    // panics with the script, never stalls the suite.
+    let (out, err, code) =
+        run_bounded("while true; do echo done && echo x; break; done; echo after");
+    assert_eq!(
+        (out.as_str(), code),
+        ("done\nx\nafter\n", 0),
+        "stderr={err}"
+    );
+    let (out, err, code) = run("if true; then echo done && echo x; fi; echo after");
+    assert_eq!(
+        (out.as_str(), code),
+        ("done\nx\nafter\n", 0),
+        "stderr={err}"
+    );
+    // No operator at all: the argument-keyword is a plain argument (master
+    // reported the unmatched-keyword parse error rc 1).
+    let (out, err, code) = run("while true; do echo if; break; done; echo after");
+    assert_eq!((out.as_str(), code), ("if\nafter\n", 0), "stderr={err}");
+}
+
+/// The clause positions of task #236: `then`/`else`/`elif` bodies, a `case`
+/// arm body, and an `until` body all put their words in the same clause rule —
+/// a keyword-shaped argument is data there too, and a nested block in a body
+/// keeps its operators inside the block. Rows measured against bash.
+#[test]
+fn clause_positions_apply_the_same_rule() {
+    for (script, want) in [
+        (
+            "if :; then echo a; elif :; then echo if; fi; echo after",
+            "a\nafter\n",
+        ),
+        ("if :; then :; else echo while; fi; echo after", "after\n"),
+        ("case x in a) echo do;; esac", ""),
+        ("until :; do echo if; break; done; echo after", "after\n"),
+        (
+            "while true; do if true; then false && echo b; fi; break; done; echo after",
+            "after\n",
+        ),
+        (
+            "while :; do case x in a) if :; then :; fi;; esac; break; done; echo after",
+            "after\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// A multi-line body keeps the rule across the run resets, and an operator
+/// written **after** the block's closer is still the outer cond list's
+/// (#232's mid-run rule survives the new flag). Rows measured against bash.
+#[test]
+fn multi_line_bodies_and_trailing_operators_keep_the_rule() {
+    let (out, err, code) = run("while :; do\necho if && echo x\nbreak\ndone\necho after");
+    assert_eq!((out.as_str(), code), ("if\nx\nafter\n", 0), "stderr={err}");
+    let (out, err, code) = run("while :; do echo if; break; done && echo tail");
+    assert_eq!((out.as_str(), code), ("if\ntail\n", 0), "stderr={err}");
+    let (out, err, code) = run("true && while :; do echo if; break; done && echo tail");
+    assert_eq!((out.as_str(), code), ("if\ntail\n", 0), "stderr={err}");
+}
+
+/// A closer written in argument position is word data: `echo fi` prints `fi`
+/// and the block closes at its real `fi` (master: rc 1 — the argument-`fi`
+/// closed the block early and cut the body). Rows measured against bash.
+#[test]
+fn closers_in_argument_position_stay_data() {
+    for (script, want) in [
+        ("if :; then echo fi; fi; echo after", "fi\nafter\n"),
+        ("if :; then echo esac; fi; echo after", "esac\nafter\n"),
+        (
+            "f() { if :; then echo if; fi; }; f; echo after",
+            "if\nafter\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The `case` list position (task #236's `Place::Pattern`): `esac` is the
+/// list's terminator and scores (`case x in esac` stays a complete `case`),
+/// while an opener-shaped **pattern word** (`if)`) is a pattern, not a block —
+/// the pin that kills "closers and openers share one gate". Measured: bash
+/// prints only `after` for the pattern row, rc 0 on both.
+#[test]
+fn case_list_position_scores_closers_not_openers() {
+    let (out, err, code) = run("case x in esac; echo after");
+    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err}");
+    let (out, err, code) = run("case x in if) echo p;; esac; echo after");
+    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err}");
+}
+
+/// Accepted divergences pinned as measured (task #236):
+/// * the glued-closer forms (`while … echo x done`, `if a; then b fi`,
+///   `if test fi`, `case … *) echo no esac`) become **unclosed constructs**:
+///   the closer behind a command word never scores, so the block swallows the
+///   line and the run reports the parse error rc 1 where bash reports a syntax
+///   error rc 2 — README "unclosed mid-run construct" (#294's family). The
+///   parse layer's detailed messages for these shapes are pinned in
+///   `parse::tests` and `tests/block_bodies.rs`.
+/// * `echo { if && echo b` is unchanged top level: the group arm's own
+///   clause rule keeps `echo {` word data (the brace carve-out is the in-block
+///   half; `tests/group.rs::literal_brace_argument_in_a_block_body` pins the
+///   body-position asymmetry `echo }` eats the closer — #189/#193's rule).
+#[test]
+fn glued_closer_forms_stay_measured_divergences() {
+    for script in [
+        "while true; do echo x done",
+        "if a; then b fi",
+        "if test fi",
+        "case \"x\" in a) echo yes;; *) echo no esac",
+        "for i in a; do echo done",
+    ] {
+        let (out, _err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+    }
+    let (out, err, code) = run("echo { if && echo b");
+    assert_eq!((out.as_str(), code), ("{ if\nb\n", 0), "stderr={err}");
+}
+
+/// Task #236 closing #237's gap: a `#`-comment line in a block body is inert
+/// for the block counter — the words behind `#` sit in argument position, so
+/// `# done` never drops the depth and the body's `&&` stays the body's own
+/// (measured against bash: `a`, `b`, rc 0; master reported `expected 'done'`,
+/// rc 1). The heredoc-carrying twin is pinned in
+/// `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`.
+#[test]
+fn comment_lines_in_a_block_body_are_inert() {
+    let (out, err, code) = run("while :; do # done\necho a && echo b\nbreak\ndone; echo after");
+    assert_eq!((out.as_str(), code), ("a\nb\nafter\n", 0), "stderr={err}");
 }

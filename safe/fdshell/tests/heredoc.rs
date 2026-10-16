@@ -934,16 +934,20 @@ fn comment_block_closer_in_a_heredoc_body_region_is_inert() {
     );
 }
 
-/// The same comment written in the block's **own** body line stays broken: it
-/// drops the block counter, so the tail `&&` splits the block text and the loop
-/// never closes. Measured rc 1 `expected 'done'` on master and here, bash rc 0 —
-/// task #237 owns the comment rule; #234 changed nothing here.
+/// Task #236 (with #237's gap closing on this shape): the same comment written
+/// in the block's **own** body line is inert too. The command-position rule
+/// (`keywords/position.rs`) puts the words behind a `#` in argument position —
+/// the `done` in `# done` is data, the counter stays, the tail `&&` stays
+/// inside the body and the loop closes on its real closer. Measured against
+/// bash 5.3.9: `body`, `a`, `b`, rc 0 — parity gained (master dropped the
+/// counter at the comment's `done`, split the block text at the `&&` and
+/// reported `expected 'done'`, rc 1; task #237's comment rule lands with
+/// #236's shared one).
 #[test]
-fn comment_block_closer_in_a_block_body_line_stays_broken() {
-    let (_out, err, code) =
+fn comment_block_closer_in_a_block_body_line_is_inert() {
+    let (out, err, code) =
         run("while :; do\ncat <<Q\nbody\nQ\n# done\necho a && echo b\nbreak\ndone");
-    assert_eq!(code, 1, "bash rc 0");
-    assert!(err.contains("expected 'done'"), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("body\na\nb\n", 0), "stderr={err:?}");
 }
 
 /// Task #234 (review N1): the region scan does not yet discriminate a `<<`
