@@ -1267,19 +1267,20 @@ equivalent" label on it is retired (the `word_active` symmetry of the plain
 ## Only the identity `+ 1` mutants survive in the cond-boundary region rule
 
 `cargo mutants -j4 --test-tool nextest` over `cond/boundary.rs`,
-`cond/boundary/body.rs` and `script.rs` (task #234's review round: 90 mutants —
-70 caught, 18 unviable, 2 missed) left two, both in `cond/boundary/body.rs`, and
-both are the **identity** mutation of a `+ 1` term. After the review's pins
-landed the iterate run reports one of them caught, so the residue is:
+`cond/boundary/body.rs` and `script.rs` (task #234's review round, all review
+pins in the tree: 90 mutants — 70 caught, 18 unviable, 2 missed) leaves exactly
+two, both in `cond/boundary/body.rs`, and both are the **identity** mutation of a
+`+ 1` term:
 
 1. `regions`'s `line_bodies_for_line(line, anchor, nl + 1)`: `+`→`*` is
    `nl * 1`, the identity — no input distinguishes it (the same accepted species
    as `parse/cond_bodies.rs`'s `n + 1` → `n * 1` in "A region window and the skip
    derived from it are one pair"). Its `+`→`-` twin, a real shift of the window's
    end, is **killed** (measured: caught).
-2. `line_start_of`'s `.map(|p| p + 1)`: `+`→`*` is again the identity. The `-j4`
-   run listed it *caught*, which is the load flakiness that same entry warns
-   about; measured quietly twice on the mutated tree the whole suite passes, so
+2. `line_start_of`'s `.map(|p| p + 1)`: `+`→`*` is again the identity. A run
+   taken while the review's pins were still landing listed it *caught*; that is
+   the load flakiness "A mutant 'caught' by a flaky test is a false kill" warns
+   about — measured quietly twice on the mutated tree the whole suite passes, so
    it is accepted-equivalent, not killed. Its `+`→`-` twin **is** killed, by
    `cond/boundary/body/tests.rs::region_window_is_the_runs_own_physical_line`:
    at `p == 0` the mutation computes `0 - 1` in `usize` — a debug panic, and in
