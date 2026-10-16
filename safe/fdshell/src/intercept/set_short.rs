@@ -1,7 +1,7 @@
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -36,17 +36,14 @@ fn short_flags(first: &ShortCStr) -> Result<Option<(Vec<u32>, bool)>, Report<Cmd
     Ok(Some((bits, enable)))
 }
 
-/// The option bit of one cluster byte. `x` is accepted (bash's `set -xf` works)
-/// even though the single `-x`/`+x` word is claimed by its own `set` arm.
+/// The option bit of one cluster byte. The accepted bytes **are** the option
+/// table's short flags — `e u f v x C i` ([`crate::options::flag_lookup`]) — so
+/// a flag `set` accepts is a flag `$-` prints. `x` is accepted (bash's
+/// `set -xf` works) even though the single `-x`/`+x` word is claimed by its own
+/// `set` arm.
 fn flag_bit(flag: u8, word: &ShortCStr) -> Result<u32, Report<CmdError>> {
-    let bit = match flag {
-        b'e' => crate::options::ERREXIT,
-        b'u' => crate::options::NOUNSET,
-        b'f' => crate::options::NOGLOB,
-        b'v' => crate::options::VERBOSITY,
-        b'x' => crate::options::XTRACE,
-        _ => bail!(CmdError::ShellOptionUnknown("set", word.clone())),
-    };
+    let bit = crate::options::flag_lookup(flag)
+        .ok_or(CmdError::ShellOptionUnknown("set", word.clone()))?;
     Ok(bit)
 }
 

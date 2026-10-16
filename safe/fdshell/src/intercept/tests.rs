@@ -253,7 +253,23 @@ fn try_intercept_set_unhandled_forms_return_false() {
 
 #[test]
 fn try_intercept_set_posix_short_flags_are_handled() {
-    for flag in ["-e", "+e", "-u", "+u", "-f", "+f", "-v", "+v"] {
+    // Every short flag the option table carries is intercepted and lands its
+    // own bit: `-C` is noclobber and `-i` ignoreeof, the two bytes the cluster
+    // parser used to reject.
+    for (flag, bit) in [
+        ("-e", crate::options::ERREXIT),
+        ("+e", crate::options::ERREXIT),
+        ("-u", crate::options::NOUNSET),
+        ("+u", crate::options::NOUNSET),
+        ("-f", crate::options::NOGLOB),
+        ("+f", crate::options::NOGLOB),
+        ("-v", crate::options::VERBOSITY),
+        ("+v", crate::options::VERBOSITY),
+        ("-C", crate::options::NOCLOBBER),
+        ("+C", crate::options::NOCLOBBER),
+        ("-i", crate::options::IGNOREEOF),
+        ("+i", crate::options::IGNOREEOF),
+    ] {
         let args = [flag];
         let cmdline = make_cmdline(b"set", &args);
         let line = make_line("set", &args);
@@ -263,6 +279,13 @@ fn try_intercept_set_posix_short_flags_are_handled() {
                 .unwrap()
                 .is_some(),
             "set {flag:?} should be intercepted"
+        );
+        let on = flag.starts_with('-');
+        assert_eq!(
+            cell.borrow().unwrap().options & bit != 0,
+            on,
+            "set {flag:?} must {} its bit {bit}",
+            if on { "set" } else { "clear" }
         );
     }
 }

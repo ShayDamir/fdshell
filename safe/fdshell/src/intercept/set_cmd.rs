@@ -7,9 +7,10 @@ use sys::fork_cell::ForkCell;
 
 /// Replace `$1..` with the words after `--` (`$0` survives, as in bash),
 /// set/clear a shell option with `-o`/`+o` or the POSIX short flags
-/// `-e`/`-u`/`-f`/`-v` (and `+e`/`+u`/`+f`/`+v`), clustered in one word
-/// (`set -eu`, `set +ef`), or list variables (bare `set`) / fd variables
-/// (`set -F`). Other `set` forms fall through to external lookup.
+/// `-e`/`-u`/`-f`/`-v`/`-C`/`-i` (and `+e`/`+u`/`+f`/`+v`/`+C`/`+i`; the bytes
+/// are the option table's short flags), clustered in one word (`set -eu`,
+/// `set +ef`), or list variables (bare `set`) / fd variables (`set -F`).
+/// Other `set` forms fall through to external lookup.
 pub(crate) fn run_set(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,

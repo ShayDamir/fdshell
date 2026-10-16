@@ -79,6 +79,27 @@ fn single_flag_words_still_parse() {
 }
 
 #[test]
+fn table_short_flags_are_cluster_flags() {
+    // The cluster's accepted bytes are the option table's short flags, so
+    // `-C` (noclobber) and `-i` (ignoreeof) ride it like `e u f v x` do.
+    assert_eq!(
+        short_flags(&word("-C")).unwrap().unwrap(),
+        (vec![crate::options::NOCLOBBER], true),
+        "`set -C` is `set -o noclobber`"
+    );
+    assert_eq!(
+        short_flags(&word("+C")).unwrap().unwrap(),
+        (vec![crate::options::NOCLOBBER], false),
+        "`+` clears the same bit"
+    );
+    assert_eq!(
+        short_flags(&word("-Ci")).unwrap().unwrap().0,
+        vec![crate::options::NOCLOBBER, crate::options::IGNOREEOF],
+        "bits follow the word order"
+    );
+}
+
+#[test]
 fn duplicate_flag_bytes_stay_repeated() {
     assert_eq!(
         short_flags(&word("-ee")).unwrap().unwrap().0,
@@ -88,7 +109,16 @@ fn duplicate_flag_bytes_stay_repeated() {
 
 #[test]
 fn unknown_cluster_byte_is_an_error_naming_the_word() {
-    for text in ["-z", "-ez", "-e+u", "-abc", "-F", "--stdout-capture-limit"] {
+    for text in [
+        "-z",
+        "-ez",
+        "-e+u",
+        "-abc",
+        "-F",
+        "-c",
+        "-aC",
+        "--stdout-capture-limit",
+    ] {
         let err = short_flags(&word(text)).unwrap_err();
         assert!(
             matches!(
@@ -124,6 +154,12 @@ fn cluster_error_applies_no_flag() {
         0,
         "bash validates the whole cluster before applying any flag"
     );
+    assert!(run("-Cz", &cell).is_err());
+    assert_eq!(
+        options_of(&cell) & crate::options::NOCLOBBER,
+        0,
+        "the new bytes obey the same validate-first rule"
+    );
 }
 
 #[test]
@@ -145,6 +181,47 @@ fn cluster_sets_every_named_bit_with_zero_status() {
     let want = crate::options::ERREXIT | crate::options::NOUNSET;
     assert_eq!(state.options & want, want);
     assert_eq!(state.last_status.exit_code(), 0);
+}
+
+#[test]
+fn noclobber_and_ignoreeof_clusters_set_their_bits_with_zero_status() {
+    for (text, want) in [
+        ("-C", crate::options::NOCLOBBER),
+        ("-i", crate::options::IGNOREEOF),
+        ("-Ci", crate::options::NOCLOBBER | crate::options::IGNOREEOF),
+    ] {
+        let cell = make_cell();
+        assert!(run(text, &cell).unwrap(), "{text} is a cluster");
+        let state = cell.borrow().unwrap();
+        assert_eq!(state.options & want, want, "{text} sets every named bit");
+        assert_eq!(
+            state.last_status.exit_code(),
+            0,
+            "{text} ends with status 0"
+        );
+    }
+}
+
+#[test]
+fn noclobber_and_ignoreeof_flags_clear_only_their_bits() {
+    let all = crate::options::NOCLOBBER | crate::options::IGNOREEOF | crate::options::ERREXIT;
+    for (text, cleared) in [
+        ("+C", crate::options::NOCLOBBER),
+        ("+i", crate::options::IGNOREEOF),
+        ("+Ci", crate::options::NOCLOBBER | crate::options::IGNOREEOF),
+    ] {
+        let cell = make_cell();
+        {
+            let mut state = cell.borrow_mut().unwrap();
+            state.options = all;
+        }
+        assert!(run(text, &cell).unwrap(), "{text} is a cluster");
+        assert_eq!(
+            options_of(&cell),
+            all & !cleared,
+            "{text} clears only its own bits"
+        );
+    }
 }
 
 #[test]

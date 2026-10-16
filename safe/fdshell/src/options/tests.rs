@@ -1,10 +1,11 @@
 #![allow(clippy::unwrap_used)]
 
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 use super::{
-    DOTGLOB, ERREXIT, EXPAND_ALIASES, FAILGLOB, NOCLOBBER, NOGLOB, NOUNSET, NULLGLOB, STRICT,
-    VERBOSITY, flags, lookup, name_of, set,
+    DOTGLOB, ERREXIT, EXPAND_ALIASES, FAILGLOB, IGNOREEOF, NOCLOBBER, NOGLOB, NOUNSET, NULLGLOB,
+    OPTIONS, STRICT, VERBOSITY, XTRACE, flag_lookup, flags, lookup, name_of, set,
 };
 
 #[test]
@@ -71,4 +72,52 @@ fn set_toggles_bits() {
     assert_eq!(both, NOCLOBBER | EXPAND_ALIASES);
     assert_eq!(set(both, NOCLOBBER, false), EXPAND_ALIASES);
     assert_eq!(set(both, NOCLOBBER, true), both);
+}
+
+#[test]
+fn flag_lookup_resolves_every_table_short_flag() {
+    assert_eq!(flag_lookup(b'C'), Some(NOCLOBBER));
+    assert_eq!(flag_lookup(b'i'), Some(IGNOREEOF));
+    assert_eq!(flag_lookup(b'x'), Some(XTRACE));
+    assert_eq!(flag_lookup(b'e'), Some(ERREXIT));
+    assert_eq!(flag_lookup(b'u'), Some(NOUNSET));
+    assert_eq!(flag_lookup(b'f'), Some(NOGLOB));
+    assert_eq!(flag_lookup(b'v'), Some(VERBOSITY));
+}
+
+#[test]
+fn flag_lookup_rejects_bytes_that_are_not_flags() {
+    // `F` is fdshell's fd-list word, not an option; the POSIX short flags
+    // fdshell has no option for (`a`, `T`) and the case neighbours (`c` is not
+    // `C`, `V` is not `v`) stay unknown.
+    for flag in [b'F', b'c', b'V', b'a', b'T', b'-', b'0', b' '] {
+        assert_eq!(
+            flag_lookup(flag),
+            None,
+            "{flag:?} is not a table short flag"
+        );
+    }
+}
+
+#[test]
+fn every_table_short_flag_is_accepted_and_unique() {
+    // The audit pin (the cluster parser reads its accepted bytes from here, so
+    // `set -C` and `$-` cannot drift): every entry with a short flag resolves
+    // to its own bit, no byte is shared by two options, and the accepted set is
+    // exactly these bytes.
+    let mut accepted: Vec<u8> = Vec::new();
+    for (_, bit, flag) in OPTIONS {
+        if *flag == 0 {
+            continue;
+        }
+        assert_eq!(
+            flag_lookup(*flag),
+            Some(*bit),
+            "byte {flag:?} must map to bit {bit}"
+        );
+        assert!(!accepted.contains(flag), "short flag collision on {flag:?}");
+        accepted.push(*flag);
+    }
+    accepted.sort();
+    assert_eq!(accepted, Vec::from(&b"Cefiuvx"[..]));
 }

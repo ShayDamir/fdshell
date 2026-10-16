@@ -17,7 +17,9 @@ pub const VERBOSITY: u32 = 4096;
 /// All shell options, bash-compatible names.
 ///
 /// The third field is the option's `set` short flag as shown by `$-`
-/// (0 when the option has no short flag).
+/// (0 when the option has no short flag). It is **also** the set of bytes the
+/// `set` short-flag cluster accepts ([`flag_lookup`]): one table, so `set -C`
+/// and `$-` cannot disagree.
 pub const OPTIONS: &[(&[u8], u32, u8)] = &[
     (b"noclobber", NOCLOBBER, b'C'),
     (b"expand_aliases", EXPAND_ALIASES, 0),
@@ -49,6 +51,16 @@ pub fn name_of(bit: u32) -> Option<&'static [u8]> {
         .iter()
         .find(|(_, b, _)| *b == bit)
         .map(|(n, _, _)| *n)
+}
+
+/// The option bit of a `set` short flag byte: the table's third field, so the
+/// cluster parser and `$-` read the same flags. `F` (the fd list) is not an
+/// option, so it has no bit here.
+pub fn flag_lookup(flag: u8) -> Option<u32> {
+    OPTIONS
+        .iter()
+        .find(|(_, _, f)| *f == flag)
+        .map(|(_, bit, _)| *bit)
 }
 
 pub fn set(options: u32, bit: u32, on: bool) -> u32 {
