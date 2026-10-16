@@ -1,10 +1,10 @@
 //! Parser errors (parse/*.rs).
 //!
 //! `ParseError` covers parse-time errors without position info.
-//! Position is attached separately via `ParsePosition` on the `Report`.
+//! Position is attached separately via `ParsePosition` on the `Report`
+//! (`error/parse/position.rs`).
 
-use alloc::vec::Vec;
-use error_stack::Report;
+pub(crate) mod position;
 
 /// [ParseError] Parser errors
 // Debug needed for impl Error (trait bound), not for display.
@@ -60,6 +60,14 @@ pub(crate) enum ParseError {
     GroupHereDocNotSupported,
     /// expected ';' before 'done'
     ExpectedSemicolonBeforeDone,
+    /// 'then' body is empty
+    EmptyThenBody,
+    /// 'elif' body is empty
+    EmptyElifBody,
+    /// 'else' body is empty
+    EmptyElseBody,
+    /// 'do' body is empty
+    EmptyDoBody,
     /// expected command
     ExpectedCommand,
     /// expected command after pipe
@@ -132,32 +140,5 @@ pub(crate) enum ParseError {
 
 impl core::error::Error for ParseError {}
 
-/// Create a `Report<ParseError>` for an unbalanced quote at `pos`.
-pub(crate) fn report_unbalanced_quote(line: &[u8], pos: usize) -> Report<ParseError> {
-    Report::new(ParseError::UnbalancedQuote).attach_opaque(ParsePosition {
-        pos,
-        input: Some(line.to_vec()),
-    })
-}
-
-/// Create a `Report<ParseError>` for unexpected EOF starting at `pos`.
-pub(crate) fn report_unexpected_eof(line: &[u8], pos: usize) -> Report<ParseError> {
-    Report::new(ParseError::UnexpectedEof).attach_opaque(ParsePosition {
-        pos,
-        input: Some(line.to_vec()),
-    })
-}
-
-/// Create a `Report<ParseError>` for an invalid character at `pos`.
-pub(crate) fn report_invalid_char(ch: u8, pos: usize) -> Report<ParseError> {
-    Report::new(ParseError::InvalidChar { ch }).attach_opaque(ParsePosition { pos, input: None })
-}
-
-/// Attached with the parse error to show position in error output.
-#[derive(Debug)]
-pub(crate) struct ParsePosition {
-    /// Byte offset of the error in the input.
-    pub(crate) pos: usize,
-    /// The input line for formatting.
-    pub(crate) input: Option<Vec<u8>>,
-}
+pub(crate) use position::report_unexpected_eof;
+pub(crate) use position::{ParsePosition, report_unbalanced_quote};

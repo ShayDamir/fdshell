@@ -1,7 +1,7 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
-use error_stack::Report;
+use error_stack::{Report, ensure};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -54,6 +54,19 @@ pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
         .count();
     let end = tokens.len().saturating_sub(end);
     tokens.get(start..end).unwrap_or(&[])
+}
+
+/// A block arm's body tokens: `tokens` with the `;`s bracketing it trimmed,
+/// `err` when nothing is left — bash rejects an empty body (`if x; then; fi`,
+/// `while x; do; done`, `for i in a; do; done`: all rc 2, and an empty `do`
+/// body makes the loop unbounded at run time).
+pub(crate) fn block_body(
+    tokens: &[Token],
+    err: ParseError,
+) -> Result<&[Token], Report<ParseError>> {
+    let body = trim_semi(tokens);
+    ensure!(!body.is_empty(), err);
+    Ok(body)
 }
 
 pub(crate) fn try_join(tokens: &[Token]) -> ShortCStr {

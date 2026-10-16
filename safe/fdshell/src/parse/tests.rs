@@ -2330,9 +2330,21 @@ fi",
     assert_eq!(ib.else_body.unwrap().data, c"e".into());
 }
 
+/// bash 5.3.9 rejects the empty `else` body (rc 2, task #233); the arm bodies
+/// must be non-empty at parse time.
 #[test]
-fn if_elif_empty_else_body() {
-    let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; else; fi").unwrap() else {
+fn if_elif_empty_else_body_is_err() {
+    let err = parse(b"if a; then b; elif c; then d; else; fi")
+        .err()
+        .unwrap();
+    assert_eq!(err.current_context().to_string(), "'else' body is empty");
+}
+
+/// The structural asserts of the old empty-`else` pin, on the green sibling:
+/// the same shape with a non-empty `else` body parses as before.
+#[test]
+fn if_elif_with_else_body() {
+    let ParsedLine::If(ib) = parse(b"if a; then b; elif c; then d; else e; fi").unwrap() else {
         panic!("expected If")
     };
     assert_eq!(ib.condition.data, c"a".into());
@@ -2340,7 +2352,84 @@ fn if_elif_empty_else_body() {
     assert_eq!(ib.elifs.len(), 1);
     assert_eq!(ib.elifs[0].cond.data, c"c".into());
     assert_eq!(ib.elifs[0].body.data, c"d".into());
-    assert!(ib.else_body.is_none(), "empty else body should be None");
+    assert_eq!(ib.else_body.unwrap().data, c"e".into());
+}
+
+// --- empty arm bodies (task #233) ------------------------------------------
+//
+// POSIX #2.9 requires a non-empty `list` after `then`, after `elif … then`,
+// after `else` and after `do`; bash 5.3.9 rejects every empty form (rc 2,
+// measured). fdshell reports its own message with rc 1 (README "Errors").
+
+/// Asserts the exact top-level message of a parse error.
+fn body_err(line: &[u8], msg: &str) {
+    let err = parse(line).err().unwrap();
+    assert_eq!(err.current_context().to_string(), msg, "{line:?}");
+}
+
+#[test]
+fn empty_then_body_is_err() {
+    body_err(b"if true; then fi", "'then' body is empty");
+    body_err(b"if true; then; fi", "'then' body is empty");
+    body_err(b"if true; then ; fi", "'then' body is empty");
+    body_err(b"if true; then ;; fi", "'then' body is empty");
+    body_err(b"if true\nthen\nfi", "'then' body is empty");
+    // The tokenizer drops comments, so a comment-only body is an empty
+    // range — bash rejects it too: a comment is not a command.
+    body_err(b"if true; then\n# c\nfi", "'then' body is empty");
+}
+
+#[test]
+fn empty_elif_body_is_err() {
+    body_err(b"if a; then b; elif c; then; fi", "'elif' body is empty");
+    // The glued-`fi` form reported `missing 'then'` before task #233.
+    body_err(b"if a; then b; elif c; then fi", "'elif' body is empty");
+}
+
+#[test]
+fn empty_else_body_is_err() {
+    body_err(b"if a; then b; else fi", "'else' body is empty");
+    body_err(b"if a; then b; else; fi", "'else' body is empty");
+}
+
+#[test]
+fn empty_do_body_is_err() {
+    body_err(b"while true; do done", "'do' body is empty");
+    body_err(b"while true; do; done", "'do' body is empty");
+    body_err(b"while true; do\n# c\ndone", "'do' body is empty");
+    body_err(b"until false; do; done", "'do' body is empty");
+    body_err(b"for i in a; do; done", "'do' body is empty");
+}
+
+#[test]
+fn for_semi_before_done_reports_before_the_empty_body() {
+    // Message contract: the `;`-before-`done` ensure fires first in `for`.
+    body_err(b"for i in a; do done", "expected ';' before 'done'");
+}
+
+#[test]
+fn empty_condition_pins_the_body_message() {
+    // The empty *condition* of this form is task #299's gap; the body
+    // message is pinned here so #299 cannot silently change it.
+    body_err(b"if ; then; fi", "'then' body is empty");
+    // No closer at all keeps `missing 'fi'` (the heredoc pin's contract).
+    body_err(b"if true; then", "missing 'fi'");
+}
+
+#[test]
+fn non_empty_and_case_bodies_stay_green() {
+    assert!(parse(b"if true; then echo a; fi").is_ok());
+    assert!(parse(b"if true; then echo a; else echo b; fi").is_ok());
+    assert!(parse(b"while false; do echo a; done").is_ok());
+    assert!(parse(b"for i in a; do echo a; done").is_ok());
+    // bash rc 0: an empty word list iterates zero times — not a divergence.
+    assert!(parse(b"for i in; do echo a; done").is_ok());
+    // bash accepts an empty `case` clause body (rc 0): the rule is not
+    // applied to `case_block.rs`.
+    assert!(parse(b"case \"x\" in a) ;; esac").is_ok());
+    // A `;;` body line is a token range of separators only: after trimming
+    // nothing is left, so task #233 rejects it (bash rc 2 too).
+    body_err(b"if true; then\n;;\nfi", "'then' body is empty");
 }
 
 #[test]
@@ -2430,13 +2519,13 @@ fn if_then_body_heredoc_of_a_multi_line_block_stays_verbatim() {
     assert_eq!(ib.then_body.data, c"cat <<T\nbodyT\nT".into());
 }
 
+/// `if a; then b fi` has no `;` before `fi` (task #301 owns the missing
+/// separator), so the `fi`-bound drops the glued word and the `then` body
+/// range is empty: bash rejects it too (rc 2, task #233).
 #[test]
-fn if_no_semi_before_fi_body_is_empty() {
-    let ParsedLine::If(ib) = parse(b"if a; then b fi").unwrap() else {
-        panic!("expected If")
-    };
-    assert_eq!(ib.condition.data, c"a".into());
-    assert!(ib.then_body.data.is_empty());
+fn if_body_before_a_glued_fi_is_an_empty_body_err() {
+    let err = parse(b"if a; then b fi").err().unwrap();
+    assert_eq!(err.current_context().to_string(), "'then' body is empty");
 }
 
 #[test]
@@ -2545,6 +2634,7 @@ fn parse_elifs_missing_body_err() {
     assert!(result.is_err());
 }
 
+/// bash 5.3.9 rejects `else fi` with no body (rc 2, task #233).
 #[test]
 fn parse_else_body_empty() {
     use super::elif::parse_else_body;
@@ -2552,8 +2642,8 @@ fn parse_else_body_empty() {
     // Indices: 0,      1
     let line = b"else fi";
     let tokens = token::tokenize(line).unwrap();
-    let result = parse_else_body(&tokens, 0, 1, &stext(line)).unwrap();
-    assert!(result.data.is_empty());
+    let err = parse_else_body(&tokens, 0, 1, &stext(line)).err().unwrap();
+    assert_eq!(err.current_context().to_string(), "'else' body is empty");
 }
 
 #[test]

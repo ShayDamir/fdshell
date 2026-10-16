@@ -1,6 +1,8 @@
 use super::Token;
 use super::cond_bodies::condition_bodies;
 use super::if_block::ElifArm;
+use super::part_text::part_text;
+use super::semi::block_body;
 use super::semi::trim_semi;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
@@ -33,13 +35,11 @@ pub fn parse_elifs(
                 .map(|&(ne, _)| ne)
                 .or(else_idx)
                 .unwrap_or(fi_idx);
-            let body = tokens
-                .get(ti + 1..next - 1)
-                .ok_or(ParseError::MissingThen)?;
-            if body.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
+            let raw = tokens.get(ti + 1..next - 1).unwrap_or(&[]);
+            if raw.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
                 bail!(ParseError::MalformedIfBlock);
             }
-            let eb = super::part_text::part_text(text, trim_semi(body))?;
+            let eb = part_text(text, block_body(raw, ParseError::EmptyElifBody)?)?;
             Ok(ElifArm {
                 cond: ec,
                 body: eb,
@@ -59,6 +59,5 @@ pub fn parse_else_body(
     if raw.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
         bail!(ParseError::MalformedIfBlock);
     }
-    let trimmed = trim_semi(raw);
-    super::part_text::part_text(text, trimmed)
+    part_text(text, block_body(raw, ParseError::EmptyElseBody)?)
 }

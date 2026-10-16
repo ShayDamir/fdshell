@@ -2,7 +2,7 @@ mod words;
 
 use super::Token;
 use crate::error::parse::ParseError;
-use crate::parse::semi::{find_preceded_by_semi, trim_semi, verbatim};
+use crate::parse::semi::{block_body, find_preceded_by_semi, verbatim};
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
 use sys::ScriptText;
@@ -60,11 +60,10 @@ pub(crate) fn tokens_to_for(
 
     let body = verbatim(
         text,
-        trim_semi(
-            tokens
-                .get(do_idx + 1..done_idx)
-                .ok_or(ParseError::ExpectedDone)?,
-        ),
+        block_body(
+            tokens.get(do_idx + 1..done_idx).unwrap_or(&[]),
+            ParseError::EmptyDoBody,
+        )?,
     )?;
 
     let ws = words::collect_words(tokens, in_pos, do_idx)?;

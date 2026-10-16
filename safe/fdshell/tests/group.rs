@@ -322,15 +322,17 @@ fn brace_shaped_words_at_top_level_are_data() {
 
 /// A literal `{` argument inside a block body prints the brace, as bash does. A
 /// literal `}` argument consumes the block's closing keyword: `if true; then
-/// echo }; fi` reports `"fi" not found` (rc 1) where bash prints `}` — the
-/// accepted cost of counting every brace word as the block depth.
+/// echo }; fi` reports the `'then' body is empty` parse error (rc 1) where bash
+/// prints `}` — the accepted cost of counting every brace word as the block
+/// depth (the message was `"fi" not found` before the empty-body rule of task
+/// #233: the closer consumed by the brace leaves an empty body range).
 #[test]
 fn literal_brace_argument_in_a_block_body() {
     let (out, err, rc) = run("if true; then echo {; fi");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
     let (out, err, rc) = run("if true; then echo }; fi");
     assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains("\"fi\" not found"), "{err}");
+    assert!(err.contains("'then' body is empty"), "{err}");
     let (out, err, rc) = run("case x in x) echo {;; esac");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
 }

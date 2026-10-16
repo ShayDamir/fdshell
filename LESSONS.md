@@ -1805,3 +1805,36 @@ too). The heredoc arm's clear is bookkeeping symmetry: the block rule is off
 on any `<<`-carrying text, so that arm's clear is not observable through
 `word_delta` (its observable behavior — resuming past the delimiter line —
 is pinned there as well; the arm's mutation follow-up is task #248's).
+
+## An empty block arm body is a parser rule, not a syntax nit
+bash requires a non-empty `list` after `then`, after `elif … then`, after `else`
+and after `do` (`if x; then; fi`, `while x; do; done`, `for i in a; do; done`:
+bash 5.3.9 rc 2, measured). fdshell accepted all of them, and an empty `do`
+body is not a cosmetic defect: `while true; do; done` is an **unbounded loop**
+the moment the body is empty — the condition stays true and the no-op body
+returns, and nothing at run time bounds it (it hung to the 3 s measurement
+timeout). Grammar rules of the form "the grammar requires a non-empty list"
+therefore live in the parser, never in the executors: one helper
+(`parse/semi.rs::block_body` beside `trim_semi`) is called at the five arm-body
+sites (`if_block.rs`, `elif.rs`, `while_block.rs`, `for_block.rs`) with one
+plain `ParseError` variant per keyword so the message names the arm to fill in.
+The tokenizer drops comments, so a comment-only body is an empty range and is
+rejected — exactly bash's rule (a comment is not a command). Two boundaries are
+load-bearing, cf. "Redundant boundary ±1 produces equivalent mutants": the
+`first_end - 1` in `tokens_to_if` is what makes the glued form `if a; then b fi`
+an empty `then` body, and `while_block.rs`/`for_block.rs` must **not** gain such
+a `-1` (`done_idx` is the closer's own index and `trim_semi` eats the `;`). The
+rule is scoped: `case` clause bodies stay allowed empty (`case x in a) ;; esac`
+is bash rc 0), and the `is_empty` filter on `IfBlock::else_body` became
+unreachable once the empty `else` body is an error — a guard that can never fire
+is an equivalent-mutant source, so it was deleted, not kept "defensive".
+Sibling forms deliberately left open (measured, filed): empty block
+**conditions** (#299), `case x in a) esac` (#300), missing `;` before
+`done`/`fi` (#301), empty function body (#302), redirect-only command (#303).
+Pins: `parse/tests.rs` (`empty_then_body_is_err`, `empty_elif_body_is_err`,
+`empty_else_body_is_err`, `empty_do_body_is_err`,
+`for_semi_before_done_reports_before_the_empty_body`,
+`empty_condition_pins_the_body_message`, `non_empty_and_case_bodies_stay_green`)
+and `tests/block_bodies.rs` (every form rc 1 with its message; the two
+empty-`do` hang forms under the bounded child so a regression panics, never
+hangs; the heredoc arm-body pins; the bash-parity green pins).

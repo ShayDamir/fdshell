@@ -1,5 +1,11 @@
+mod types;
+
+pub(crate) use types::{ElifArm, IfBlock};
+
 use super::Token;
 use super::cond_bodies::condition_bodies;
+use super::part_text::part_text;
+use super::semi::block_body;
 use super::semi::closing_keyword_index;
 use super::semi::find_preceded_by_semi;
 use super::semi::trim_semi;
@@ -8,23 +14,6 @@ use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
-use sys::ShortCStr;
-
-pub struct ElifArm {
-    pub cond: ScriptText,
-    pub body: ScriptText,
-    /// The condition's heredoc bodies (in operator order; empty when none).
-    pub cond_bodies: Vec<ShortCStr>,
-}
-
-pub struct IfBlock {
-    pub condition: ScriptText,
-    pub then_body: ScriptText,
-    pub elifs: Vec<ElifArm>,
-    pub else_body: Option<ScriptText>,
-    /// The condition's heredoc bodies (in operator order; empty when none).
-    pub cond_bodies: Vec<ShortCStr>,
-}
 
 pub(crate) fn tokens_to_if(
     tokens: &[Token],
@@ -43,11 +32,7 @@ pub(crate) fn tokens_to_if(
     let fi_idx = closing_keyword_index(tokens, line).ok_or(ParseError::MissingFi)?;
     let tokens = tokens.get(..=fi_idx).ok_or(ParseError::MissingFi)?;
 
-    let first_then = find_preceded_by_semi(tokens, 1, b"then");
-    let first_then = match first_then {
-        Some(idx) => idx,
-        None => return Err(ParseError::MissingThen.into()),
-    };
+    let first_then = find_preceded_by_semi(tokens, 1, b"then").ok_or(ParseError::MissingThen)?;
 
     let cond_tokens = trim_semi(
         tokens
@@ -72,18 +57,15 @@ pub(crate) fn tokens_to_if(
         Some(&(ei, _)) => ei,
         None => else_idx.unwrap_or(fi_idx),
     };
-    let then_tokens = trim_semi(
-        tokens
-            .get(first_then + 1..first_end - 1)
-            .ok_or(ParseError::MissingThen)?,
-    );
-    let then_body = super::part_text::part_text(text, then_tokens)?;
+    // `first_end - 1` drops the `;` before the next keyword (POSIX requires it);
+    // a body glued to the closer has no token left here, so it is an empty body.
+    let raw = tokens.get(first_then + 1..first_end - 1).unwrap_or(&[]);
+    let then_body = part_text(text, block_body(raw, ParseError::EmptyThenBody)?)?;
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
-    let else_body: Result<Option<ScriptText>, Report<ParseError>> = else_idx
+    let else_body = else_idx
         .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx, text))
-        .transpose();
-    let else_body = else_body?.filter(|t| !t.data.is_empty());
+        .transpose()?;
     Ok(IfBlock {
         condition,
         then_body,

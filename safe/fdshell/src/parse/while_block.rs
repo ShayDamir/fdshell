@@ -1,7 +1,8 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::cond_bodies::condition_bodies;
-use crate::parse::semi::{closing_keyword_index, find_preceded_by_semi, trim_semi, verbatim};
+use crate::parse::semi::{block_body, closing_keyword_index, find_preceded_by_semi};
+use crate::parse::semi::{trim_semi, verbatim};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -45,11 +46,10 @@ pub(crate) fn tokens_to_loop(
 
     let body = crate::parse::part_text::part_text(
         text,
-        trim_semi(
-            tokens
-                .get(do_idx + 1..done_idx)
-                .ok_or(ParseError::ExpectedDone)?,
-        ),
+        block_body(
+            tokens.get(do_idx + 1..done_idx).unwrap_or(&[]),
+            ParseError::EmptyDoBody,
+        )?,
     )?;
 
     Ok(LoopBlock {

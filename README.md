@@ -406,6 +406,14 @@ data: `true && wait; echo tail` runs the POSIX builtin `wait` and then
 the block span mid-run. What stays broken:
 a block whose text also carries a here-doc (task #234, see "Heredocs").
 
+Every `then`, `elif`, `else` and `do` arm requires a non-empty body (POSIX #2.9,
+task #233): `if true; then; fi`, `if true; then echo a; else; fi` and
+`while true; do; done` are parse errors (`'then' body is empty`, `'else' body
+is empty`, `'do' body is empty`, rc 1, where bash exits 2); a comment-only body
+counts as empty, because a comment is not a command. `case` clause bodies stay
+allowed empty (`case x in a) ;; esac` runs, rc 0) because bash allows them, and
+an empty group body stays the `group is empty` error it already was.
+
 Accepted divergences from bash:
 
 - A keyword block as a pipeline stage (`echo a | while :; do …; done`) runs
@@ -453,8 +461,8 @@ Accepted divergences from bash:
 - Nesting is capped at 100 groups in one construct (`nesting too deep`, rc 1),
   as for the other nested constructs.
 - A literal `}` argument inside a block body consumes the block's closing keyword
-  (`if true; then echo }; fi` → rc 1, `"fi" not found`), where bash prints `}`; a
-  literal `{` argument prints `{` as bash does. The cost of counting every
+  (`if true; then echo }; fi` → rc 1 `'then' body is empty`), where bash prints
+  `}`; a literal `{` argument prints `{` as bash does. The cost of counting every
   `{`/`}` word as the block depth, which is what makes a nested group inside a
   block body close at the block's own keyword.
 - `wait` at the end of a line absorbs the group on the next line as its
