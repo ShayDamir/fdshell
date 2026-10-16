@@ -506,3 +506,62 @@ fn keyword_shaped_argument_words_do_not_swallow_the_cond_operators() {
     assert_eq!(std::fs::read_to_string(dir.join("if")).unwrap(), "x\n");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Task #235: `&&` / `||` written in a function definition's **body** are body
+/// data — the definition is one cond-list part (the group counter counts the
+/// definer's body brace, `cond/boundary::opens_group`), the call runs the
+/// body's own cond list. Every definer spelling, the glued-brace-with-space
+/// form, the multi-line form, a nested group / keyword block in the body, a
+/// group around the definition, a definition in an `if` body, and a variable
+/// word in the body are measured against `bash -c` 5.3.9.
+///
+/// Not pinned here: `f() { … }; f | cat` — the `&&` split is fixed, but a
+/// function *in a pipeline stage* is task #182's pre-existing gap (`f | cat`
+/// fails identically with a `&&`-free body on master).
+#[test]
+fn definer_body_operators_keep_the_definition_one_part() {
+    for (script, want) in [
+        ("f() { echo a && echo b; }; f", "a\nb\n"),
+        ("f(){ echo a && echo b; }; f", "a\nb\n"),
+        ("function f { echo a && echo b; }; f", "a\nb\n"),
+        ("function f(){ echo a && echo b; }; f", "a\nb\n"),
+        ("function f() { echo a && echo b; }; f", "a\nb\n"),
+        ("function f () { echo a && echo b; }; f", "a\nb\n"),
+        ("function f ( ) { echo a && echo b; }; f", "a\nb\n"),
+        ("f() {\necho a && echo b\n}; f", "a\nb\n"),
+        ("g=1; f() { echo $g && echo b; }; f", "1\nb\n"),
+        ("f() { { echo a && echo b; }; }; f", "a\nb\n"),
+        ("f() { if true; then echo t && echo u; fi; }; f", "t\nu\n"),
+        ("{ f() { echo a && echo b; }; }; f", "a\nb\n"),
+        ("if true; then f() { echo a && echo b; }; fi; f", "a\nb\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The cond-list operators written *around* a definition stay top-level: the
+/// definition is one part and its status gates the operator, exactly as the
+/// keyword blocks' `trailing_operator_after_a_midrun_block_splits_the_list`
+/// case. The short-circuited definer never lands (bash 127 vs fdshell's
+/// `f: not found` rc 1 — the accepted command-not-found divergence).
+#[test]
+fn definer_with_cond_operators_around_it_splits_the_list() {
+    let (out, err, code) = run("f() { echo a && echo b; } && echo c; f");
+    assert_eq!((out.as_str(), code), ("c\na\nb\n", 0), "stderr={err}");
+    let (out, err, code) = run("f() { echo a && echo b; } ; f && echo z");
+    assert_eq!((out.as_str(), code), ("a\nb\nz\n", 0), "stderr={err}");
+    let (out, err, code) = run("true && f() { echo a && echo b; } && f");
+    assert_eq!((out.as_str(), code), ("a\nb\n", 0), "stderr={err}");
+    let (out, err, code) = run("false || f() { echo a && echo b; }; f");
+    assert_eq!((out.as_str(), code), ("a\nb\n", 0), "stderr={err}");
+    let (_out, err, code) = run("false && f() { echo a && echo b; }; f");
+    assert_eq!(code, 1, "stderr={err}");
+    assert!(err.contains("\"f\" not found"), "stderr={err}");
+    let (out, err, code) = run("f() { echo a; { echo b && echo c; } && echo d; }; f");
+    assert_eq!((out.as_str(), code), ("a\nb\nc\nd\n", 0), "stderr={err}");
+    let (out, err, code) = run("f() { false && echo b; }; f; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err}");
+    let (out, err, code) = run("f() { echo a && echo b; }; f; f");
+    assert_eq!((out.as_str(), code), ("a\nb\na\nb\n", 0), "stderr={err}");
+}

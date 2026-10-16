@@ -538,3 +538,16 @@ fn quoted_region_inside_groups_and_conditions() {
         assert_eq!(&out, want, "{script:?}");
     }
 }
+
+/// Task #235, the definer twin of
+/// [`nested_group_at_a_cond_part_start_keeps_the_body_depth`]: the definer's
+/// body brace is the outer counted open (`opens_group`'s definer arm), the
+/// body's inner group is the second one, and the split that must not happen is
+/// the `&&` between the inner `}` and `echo d`. The mutated `group_depth`
+/// (opener `-=`) reaches 0 at that `&&` and reports a missing closing brace.
+/// Measured against bash 5.3.9.
+#[test]
+fn definer_body_keeps_the_nested_group_depth() {
+    let (out, err, rc) = run("f() { echo a; { echo b && echo c; } && echo d; }; f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\nc\nd\n", "", 0));
+}

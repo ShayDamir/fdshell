@@ -246,3 +246,56 @@ fn line_start_words_keep_the_closer_and_argument_gates() {
         (23, false)
     );
 }
+
+// Task #235: a function definition's body is one cond-list part. The definer
+// word keeps the body's `{` off the run start, so the group arm needs the
+// definer rule (`opens_group`) to count it; the body's `&&` is body data.
+#[test]
+fn definer_body_operators_stay_inside_the_definition() {
+    // One part for every definer spelling, glued brace and multi-line form.
+    let one_part: &[&[u8]] = &[
+        b"f() { echo a && echo b; }; f",
+        b"f() { echo a && echo b; }",
+        b"f(){ echo a && echo b; }; f",
+        b"function f { echo a && echo b; }; f",
+        b"function f ( ) { echo a && echo b; }; f",
+        b"f() {\necho a && echo b\n}; f",
+        // The counted-open / counted-open / closer / operator sequence: the
+        // true depth at the body `&&` is 1 (the definer's brace), at the body
+        // `&&` of the mutated `+=`→`-=` it is 0 and the line splits (LESSONS
+        // "A `max(0)` clamp on the closer does NOT make `+=`→`-=` equivalent").
+        b"f() { echo a; { echo b && echo c; } && echo d; }; f",
+    ];
+    for line in one_part {
+        assert_eq!(boundary_of(line), (line.len(), false), "{line:?}");
+    }
+}
+
+/// The operators written *around* a definition split the list at them, never
+/// inside its body; a glued brace and a word filler keep the braces word data.
+#[test]
+fn operators_around_a_definition_split_the_list() {
+    // The `&&` after the closing brace (26) is the boundary, not the body's (13).
+    assert_eq!(
+        boundary_of(b"f() { echo a && echo b; } && echo c"),
+        (26, false)
+    );
+    // Mid-run definer: the list first splits at the `&&` before the definer (5)
+    // — the definer joins the next part exactly like a keyword block does
+    // (`every_opener_joins_the_run_mid_cond`); from that part's resume the
+    // definer rule counts the body brace, so the body's `&&` (21) is data and
+    // the split is the `&&` after the closing brace (34).
+    assert_eq!(
+        boundary_of(b"true && f() { echo a && echo b; } && f"),
+        (5, false)
+    );
+    assert_eq!(
+        boundary_from(b"true && f() { echo a && echo b; } && f", 7),
+        (34, false)
+    );
+    // A word filler never joins a definer run: the body's `&&` (13) splits.
+    assert_eq!(boundary_of(b"f() echo { a && b; } && echo c"), (13, false));
+    // A glued brace is no opener (`opens_at` stays load-bearing): the `&&` (11)
+    // splits and the definition never lands, as today.
+    assert_eq!(boundary_of(b"f(){echo a && echo b;}; f"), (11, false));
+}

@@ -87,3 +87,31 @@ fn glued_close_paren_after_the_keyword_is_its_own_word() {
     // A `)` after the name word ends the definer pair, as in the POSIX form.
     assert_eq!(def(b"function f)g {"), Some(b"f".to_vec()));
 }
+
+// Task #235: the definer's byte length — the definer words the parse layer
+// consumes; the text after them is `definer_at_run`'s filler test.
+#[test]
+fn definer_len_spans_the_definer_words() {
+    // POSIX: the name word and the `)` closing its `(`.
+    assert_eq!(definer_len(b"f("), Some(2));
+    assert_eq!(definer_len(b"f()"), Some(3));
+    assert_eq!(definer_len(b"f(){"), Some(3));
+    // Keyword form: `function` + the name word, parens included when glued.
+    assert_eq!(definer_len(b"function f"), Some(10));
+    assert_eq!(definer_len(b"function f()"), Some(11));
+    // A split `()` after the name is not definer words — it is filler for the
+    // run rule (`function f ( ) {` is accepted, LESSONS "Byte-level definer
+    // words must be the tokenizer's tokens").
+    assert_eq!(definer_len(b"function f ( )"), Some(10));
+    // A word after the definer words is no definer text either: `f` is the
+    // name and the trailing `x` run is dropped by the parse layer.
+    assert_eq!(definer_len(b"function f x"), Some(10));
+}
+
+#[test]
+fn definer_len_rejects_non_definers() {
+    // POSIX needs its glued `(`; `function` glued to the opener has no name.
+    assert_eq!(definer_len(b"f () "), None);
+    assert_eq!(definer_len(b"function)f"), None);
+    assert_eq!(definer_len(b""), None);
+}

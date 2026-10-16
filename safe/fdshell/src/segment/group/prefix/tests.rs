@@ -71,7 +71,6 @@ fn span_start_is_the_brace_without_a_prefix() {
     assert_eq!(span_start(b"echo a && { b; }", 0, 10), 10);
     assert_eq!(span_start(b"{ b; }", 0, 0), 0);
 }
-
 #[test]
 fn span_start_includes_a_bare_time_prefix() {
     assert_eq!(span_start(b"time { echo a; }", 0, 5), 0);
@@ -84,4 +83,65 @@ fn span_start_includes_a_bare_time_prefix() {
     // A prefix with arguments after it is not the group's prefix.
     assert_eq!(span_start(b"time echo { b; }", 0, 10), 10);
     assert_eq!(span_start(b"time time -p echo { b; }", 0, 18), 18);
+}
+
+// Task #235: the definer run rule (cond layer only — `group_at_run` stays
+// `None` there so the segment scanner keeps claiming the definition).
+#[test]
+fn definer_runs_opens_the_body_group() {
+    for (line, start, brace) in [
+        (b"f() { echo a; }".as_slice(), 0, 4),
+        (b"f(){ echo a; }".as_slice(), 0, 3),
+        (b"function f { echo a; }".as_slice(), 0, 11),
+        (b"function f() { echo a; }".as_slice(), 0, 13),
+        (b"function f () { echo a; }".as_slice(), 0, 14),
+        (b"function f ( ) { echo a; }".as_slice(), 0, 15),
+        (b"f() ( ) { echo a; }".as_slice(), 0, 8),
+        (b"f() (){ echo a; }".as_slice(), 0, 6),
+        // An indented run, and a run that starts after `;`.
+        (b"  f() { echo a; }".as_slice(), 2, 6),
+        (b"x=1; f() { echo a; }".as_slice(), 5, 9),
+    ] {
+        assert!(definer_at_run(line, start, brace), "{line:?}");
+    }
+}
+
+#[test]
+fn definer_mid_run_after_a_cond_operator_opens_the_body_group() {
+    for (line, brace) in [
+        (b"true && f() { echo a; }".as_slice(), 12),
+        (b"true && function f { echo a; }".as_slice(), 19),
+        (b"false || f() { echo a; }".as_slice(), 13),
+        // The scan is quote-blind: the last raw `&&` ends the tail.
+        (b"echo 'a && b' && f() { echo a; }".as_slice(), 21),
+    ] {
+        assert!(definer_at_run(line, 0, brace), "{line:?}");
+    }
+}
+
+#[test]
+fn non_definer_runs_are_no_body_openers() {
+    for (line, start, brace) in [
+        // The plain group keeps `group_at_run`'s answer: an empty run.
+        (b"{ echo a; }".as_slice(), 0, 0),
+        (b"echo { a; }".as_slice(), 0, 5),
+        (b"echo x { a; }".as_slice(), 0, 7),
+        // A cond part before the brace is `group_at_run`'s business, not a definer.
+        (b"echo a && { b; }".as_slice(), 0, 10),
+        // POSIX split parens: the definer rule rejects the shape (LESSONS
+        // "Byte-level definer words must be the tokenizer's tokens").
+        (b"f ( ) { echo a; }".as_slice(), 0, 6),
+        // A *word* filler never joins a definer run: bash rejects these with
+        // rc 2 and fdshell keeps the parse error visible.
+        (b"f() echo { a && b; }".as_slice(), 0, 9),
+        (b"f() x( ) { echo a; }".as_slice(), 0, 9),
+        (b"function ) f { echo a; }".as_slice(), 0, 13),
+        (b"function)f { echo a; }".as_slice(), 0, 11),
+        (b"f} { echo a; }".as_slice(), 0, 3),
+        // `time` is not a definer, and an operator ends the run, not a definer.
+        (b"time f() { echo a; }".as_slice(), 0, 9),
+        (b"f() && { b; }".as_slice(), 0, 7),
+    ] {
+        assert!(!definer_at_run(line, start, brace), "{line:?}");
+    }
 }
