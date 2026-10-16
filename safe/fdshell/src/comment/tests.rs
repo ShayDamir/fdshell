@@ -324,14 +324,20 @@ fn quoted_keyword_in_wait_arm_does_not_block_closer() {
     );
 }
 
-// An unquoted opener in the same run must still be counted.
+// Task #236: an unquoted opener in an **argument** position is word data —
+// bash recognizes a reserved word in command position only, and `echo "a"
+// for b` puts `for` in `echo`'s argument list. The span scan no longer opens
+// a nested block there, so the block closes at the `done` (measured against
+// `bash -c`: bash rejects the whole shape with rc 2, `syntax error near
+// unexpected token 'done'` — the unclosed-construct rc-1-vs-2 class).
 #[test]
-fn unquoted_keyword_still_opens_nested_block() {
+fn unquoted_keyword_in_an_argument_is_data_the_block_closes() {
     let r = scan(b"echo \"a\" for b; done", 0);
     assert!(
-        !r.closed,
-        "the unquoted `for` must still open a nested block"
+        r.closed,
+        "the argument-position `for` must not open a nested block"
     );
+    assert_eq!(r.end, 21, "the block closes at its own `done`");
 }
 
 // A run that starts already inside an open quote (caller mid-quote) must not
@@ -369,13 +375,18 @@ fn nested_dollar_paren_keyword_does_not_open_nested_block() {
     assert!(r.closed, "while inside nested $( ) must not count");
 }
 
-// A top-level `(` does not suppress word splits, so an unquoted keyword in
-// the same run still counts as a nested opener (conservative: the scanner
-// cannot tell a keyword word from a data word inside a subshell).
+// A top-level `(` does not suppress word splits, so the split around `for`
+// still happens — and with the command-position rule of task #236 the split
+// position settles the place: `x(a` is an argument word, so the `for` behind
+// it is argument data and never opens a nested block. The block closes at
+// the real `fi` (measured: bash rejects `if x(a for b); then y; fi` with
+// rc 2, `syntax error near unexpected token 'a'`; fdshell runs the
+// argument-`for` and closes the block — the unclosed-construct rc-1-vs-2
+// class, README "Errors").
 #[test]
-fn plain_paren_does_not_suppress_keyword_split() {
+fn plain_paren_does_not_suppress_the_command_position_rule() {
     let r = scan(b"if x(a for b); then y; fi", 2);
-    assert!(!r.closed, "for inside a top-level ( ) must still count");
+    assert!(r.closed, "the argument-position `for` must not count");
     assert_eq!(r.end, 26);
 }
 
@@ -521,10 +532,19 @@ fn run_starting_quoted_never_scores_a_keyword() {
 
 /// The `'…'` span opened inside a run stays open for the rest of the run (see
 /// the `depth_delta` doc): the `done` after the span's closing `'` is **not** a
-/// closer, which is exactly bash's behaviour for a closer written in the same
-/// run as a preceding quoted word (`if true; then echo 'q' done` is a syntax
-/// error in bash; fdshell reports the block as unclosed). The pin kills a
-/// dropped toggle, which would close the span at the `'` and score the `done`.
+/// closer — the span swallows the run, which is exactly bash's behaviour for a
+/// closer written in the same run as a preceding quoted word (`if true; then
+/// echo 'q' done` is a syntax error in bash; fdshell reports the block as
+/// unclosed). The pin kills a dropped toggle, which would close the span at
+/// the `'` and score the `done`.
+///
+/// The unquoted twin returns `0` for a **different** cause (task #236): the
+/// `done` after a split sits in argument position (behind the command word
+/// `echo`), and bash recognizes a closer in command position only —
+/// `if true; then echo q done` is a bash syntax error (rc 2) and fdshell
+/// reports the block as unclosed too. Keep the two causes separable: the
+/// span shape scores 0 *despite* the closer's position, the plain shape
+/// scores 0 because the position is an argument.
 #[test]
 fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
     let line = b"echo 'q' done";
@@ -533,11 +553,18 @@ fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
         0,
         "the span swallows the rest of the run, so `done` never scores"
     );
-    // Without the span the same run is a closer (`while :; do ... done`).
+    // Without the span the same run scores 0 too, for the *position* reason.
     let line = b"echo q done";
     assert_eq!(
         depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        0,
+        "the `done` behind a command word is an argument"
+    );
+    // A run that *starts* at the closer (command position) still scores it.
+    let line = b"done";
+    assert_eq!(
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
         -1,
-        "the unquoted `done` after a split scores"
+        "a closer at the run start is in command position"
     );
 }

@@ -1646,11 +1646,19 @@ fn case_no_match_no_else_sets_zero() {
     });
 }
 
+/// Task #236: the last `case` clause needs its `;;` before `esac` — the
+/// `esac` behind `no` sits in the arm body's **argument** position, so it no
+/// longer closes the block (fdshell used to accept the form with rc 0; bash
+/// rejects it with rc 2, `syntax error near unexpected token 'esac'`;
+/// fdshell reports the parse error with rc 1, README "Errors").
 #[test]
 fn case_last_clause_no_double_semi() {
     child_test(|| {
         let cell = make_cell();
-        run_script(b"case \"x\" in a) echo yes;; *) echo no esac", &cell).unwrap();
+        assert!(
+            run_script(b"case \"x\" in a) echo yes;; *) echo no esac", &cell).is_err(),
+            "the argument-position `esac` must not close the case"
+        );
     });
 }
 

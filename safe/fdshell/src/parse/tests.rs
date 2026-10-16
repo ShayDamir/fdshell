@@ -1700,6 +1700,11 @@ fn parse_if_newline_separators() {
     assert!(ib.else_body.is_none());
 }
 
+/// Task #236: `if test fi` has no command-position `then` and its `fi` sits in
+/// the condition's **argument** position, so the closer never scores and the
+/// `if` finds no `fi`: `missing 'fi'` (was `missing 'then'`, produced by the
+/// ungated scorer closing the block at the argument-`fi`). Measured against
+/// `bash -c`: rc 2 syntax error; fdshell reports the parse error with rc 1.
 #[test]
 fn if_without_then_returns_err() {
     let result = parse(b"if test fi");
@@ -1709,8 +1714,8 @@ fn if_without_then_returns_err() {
     };
     assert_eq!(
         e.current_context().to_string(),
-        "missing 'then'",
-        "expected Reason('missing \\'then\\') error"
+        "missing 'fi'",
+        "expected Reason('missing \\'fi\\'') error"
     );
 }
 
@@ -2000,13 +2005,16 @@ fn while_parse_dispatch() {
     assert_eq!(wb.body.data, c"echo x".into());
 }
 
+/// Task #236: `while true; do echo x done` has its `done` in the body's
+/// **argument** position (behind the command word `echo`), so it never closes
+/// the block: the parse reports `expected 'done'` (was: the argument-`done`
+/// closed the block and the body `echo x` was accepted without the required
+/// separator). Measured against `bash -c`: rc 2 syntax error; fdshell reports
+/// the parse error with rc 1.
 #[test]
 fn while_parse_body_without_semi_before_done() {
-    let ParsedLine::While(wb) = parse(b"while true; do echo x done").unwrap() else {
-        panic!("expected While")
-    };
-    assert_eq!(wb.condition.data, c"true".into());
-    assert_eq!(wb.body.data, c"echo x".into());
+    let err = parse(b"while true; do echo x done").err().unwrap();
+    assert_eq!(err.current_context().to_string(), "expected 'done'");
 }
 
 #[test]
@@ -2114,13 +2122,13 @@ fn until_parse_dispatch() {
     assert_eq!(wb.body.data, c"echo x".into());
 }
 
+/// Task #236: the `until` twin of the `while` pin — the body's argument-position
+/// `done` never closes the block, so `expected 'done'` (bash: rc 2 syntax
+/// error; fdshell: the parse error with rc 1).
 #[test]
 fn until_parse_body_without_semi_before_done() {
-    let ParsedLine::Until(wb) = parse(b"until true; do echo x done").unwrap() else {
-        panic!("expected Until")
-    };
-    assert_eq!(wb.condition.data, c"true".into());
-    assert_eq!(wb.body.data, c"echo x".into());
+    let err = parse(b"until true; do echo x done").err().unwrap();
+    assert_eq!(err.current_context().to_string(), "expected 'done'");
 }
 
 #[test]
@@ -2519,13 +2527,16 @@ fn if_then_body_heredoc_of_a_multi_line_block_stays_verbatim() {
     assert_eq!(ib.then_body.data, c"cat <<T\nbodyT\nT".into());
 }
 
-/// `if a; then b fi` has no `;` before `fi` (task #301 owns the missing
-/// separator), so the `fi`-bound drops the glued word and the `then` body
-/// range is empty: bash rejects it too (rc 2, task #233).
+/// Task #236: `if a; then b fi` has no `;` before `fi` (task #301 owns the
+/// missing separator), and the `fi` sits in the body's **argument** position
+/// (behind the command word `b`), so it never scores as the closer: the `if`
+/// reports `missing 'fi'` (was: the argument-`fi` closed the block and the
+/// body range came out empty, `'then' body is empty`). bash rejects it too
+/// (rc 2, task #233).
 #[test]
-fn if_body_before_a_glued_fi_is_an_empty_body_err() {
+fn if_body_before_a_glued_fi_is_a_missing_fi_err() {
     let err = parse(b"if a; then b fi").err().unwrap();
-    assert_eq!(err.current_context().to_string(), "'then' body is empty");
+    assert_eq!(err.current_context().to_string(), "missing 'fi'");
 }
 
 #[test]
