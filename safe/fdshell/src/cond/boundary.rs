@@ -2,13 +2,13 @@
 //! a multi-line heredoc part stays one part and `&&` / `||` in its body do
 //! not split it. Inside a keyword block the block's command text is opaque,
 //! while the heredoc **body** regions it carries inline stay scanned
-//! (`boundary/heredoc.rs`).
+//! (`boundary/body.rs`).
 
 use crate::scan::ScanState;
 use crate::segment::group::{group_at_run, opens_at};
 
 mod block;
-mod heredoc;
+mod body;
 
 /// Scan from `i` to the next unquoted `&&` / `||` (or end of line). Heredoc
 /// command lines are skipped whole along with their bodies. A `{ …; }` group
@@ -23,7 +23,7 @@ mod heredoc;
 /// text (a block condition's bodies travel inside the span) keeps the block
 /// rule, and its **body** regions are walked region by region: skipped whole
 /// in a statement's text, scanned for an operator inside a block's text
-/// ([`heredoc::walk`]). Returns the operator's first byte (or
+/// ([`body::step`]). Returns the operator's first byte (or
 /// `line.len()`) and whether it is `||`.
 pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut run_start = i;
@@ -59,21 +59,24 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                 // later `&&`/`||` and swallow the operator into the arguments.
                 group_depth = group_depth.saturating_sub(1).max(0);
             }
-            if b == b'\n' {
-                let (regions, resume) = heredoc::regions(line, run_start, i);
-                if !regions.is_empty() {
-                    if let Some(op) = heredoc::walk(&regions, block_depth, line, &mut i) {
-                        return op;
-                    }
-                    // Every region is skipped: resume at the newline terminating
-                    // the last delimiter line; its run reset happens in the plain
+            if b == b'\n'
+                && let Some(step) = body::step(line, run_start, i, block_depth)
+            {
+                match step {
+                    // The block's own body region carries the operator: it is
+                    // the cond-list boundary.
+                    body::Step::Split(at, is_or) => return (at, is_or),
+                    // Every region is opaque: resume at the newline terminating
+                    // the last delimiter line. Its run reset happens in the plain
                     // arm below, where the scan meets that newline again.
-                    i = resume;
-                    run_start = i;
-                    // The run reset starts a new word: the line after a heredoc
-                    // body begins with a command word.
-                    state.word_active = false;
-                    continue;
+                    body::Step::Skip(resume) => {
+                        i = resume;
+                        run_start = i;
+                        // The run reset starts a new word: the line after a
+                        // heredoc body begins with a command word.
+                        state.word_active = false;
+                        continue;
+                    }
                 }
             }
             if b == b'\n' || b == b';' {

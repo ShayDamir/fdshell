@@ -1,12 +1,13 @@
-//! Unit pins for the heredoc region walk: a statement's body regions stay
+//! Unit pins for the heredoc region step: a statement's body regions stay
 //! opaque (skipped whole), a keyword block's own body regions are scanned for
 //! their earliest top-level operator, regions of a `;`-terminated operator
 //! line are found on the following lines, a multi-region run skips every
-//! region, and a body's unbalanced quotes never fold into the caller's state.
+//! region, a body's unbalanced quotes never fold into the caller's state, and
+//! the region scan and its window are bounded by the region's own bytes.
 
 use alloc::vec::Vec;
 
-use crate::cond::boundary::heredoc::{regions, walk};
+use crate::cond::boundary::body::{Step, regions, step};
 use crate::cond::boundary::next_boundary;
 use crate::scan::ScanState;
 
@@ -27,14 +28,11 @@ fn regions_of(line: &[u8], run_start: usize, nl: usize) -> (Vec<(usize, usize)>,
     regions(line, run_start, nl)
 }
 
-/// The regions of the run ending at `line`'s first newline, walked with
-/// `block_depth` from index 0; returns the walk's boundary and the index it
-/// ended at.
-fn walk_of(line: &[u8], block_depth: i32) -> (Option<(usize, bool)>, usize) {
+/// The region step of the run ending at `line`'s first newline, taken from
+/// index 0 with `block_depth`.
+fn step_of(line: &[u8], block_depth: i32) -> Option<Step> {
     let nl = line.iter().position(|&b| b == b'\n').unwrap_or(0);
-    let (regions, _resume) = regions_of(line, 0, nl);
-    let mut i = 0;
-    (walk(&regions, block_depth, line, &mut i), i)
+    step(line, 0, nl, block_depth)
 }
 
 /// A `;`-terminated operator line finds its body on the following lines: the
@@ -56,11 +54,9 @@ fn semicolon_terminated_operator_line_finds_its_regions() {
         "body + delimiter lines of the one operator"
     );
     assert_eq!(resume, 32, "the newline terminating the delimiter line");
-    let mut i = 13;
-    let op = walk(&regions, 1, &line[..], &mut i);
     assert_eq!(
-        op,
-        Some((26, false)),
+        step(&line[..], 13, 20, 1),
+        Some(Step::Split(26, false)),
         "the body's `&&` splits in block context"
     );
 }
@@ -86,11 +82,13 @@ fn statement_regions_are_skipped_whole() {
         (28, false),
         "the run's second region is opaque"
     );
-    // The walk in statement context skips every region, ending at the last
-    // region's newline (24).
-    let (op, i) = walk_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", 0);
-    assert_eq!(op, None);
-    assert_eq!(i, 24, "both regions skipped: last delimiter newline");
+    // The step in statement context skips every region, landing on the last
+    // delimiter line's newline (24).
+    assert_eq!(
+        step_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", 0),
+        Some(Step::Skip(24)),
+        "both regions skipped"
+    );
 }
 
 /// Block context (`block_depth > 0`): the region's earliest top-level `&&` /
@@ -104,21 +102,23 @@ fn block_regions_split_on_their_earliest_operator() {
     // A body with no operator: skipped whole up to its newline (22); the `fi`
     // closes the block and the tail after it splits (26).
     let line = b"if :; then cat <<Q\nz\nQ\nfi && echo tail";
-    let (op, i) = walk_of(&line[..], 1);
-    assert_eq!(op, None, "the region carries no operator");
-    assert_eq!(i, 22, "the region skipped up to its delimiter newline");
+    assert_eq!(
+        step_of(&line[..], 1),
+        Some(Step::Skip(22)),
+        "the region carries no operator"
+    );
     assert_eq!(boundary_of(&line[..]), (26, false), "the tail `&&` (26)");
     // Earliest-first: the second region's operator is reported only when the
     // first region carries none.
-    let (op, i) = walk_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", 1);
-    assert_eq!(op, Some((18, false)), "the second body's `&&` (18)");
-    assert_eq!(i, 15, "the first region was skipped up to its newline");
-    // A region that ends at the text end is claimed in block context.
-    let line = b"if :; then cat <<X ;\nbody && x\nX\nfi";
-    let (op, _i) = walk_of(&line[..], 1);
     assert_eq!(
-        op,
-        Some((26, false)),
+        step_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", 1),
+        Some(Step::Split(18, false)),
+        "the second body's `&&` (18)"
+    );
+    // A region that ends at the text end is claimed in block context.
+    assert_eq!(
+        step_of(b"if :; then cat <<X ;\nbody && x\nX\nfi", 1),
+        Some(Step::Split(26, false)),
         "the body's `&&` of the block's own run"
     );
 }
@@ -155,5 +155,59 @@ fn region_bytes_never_fold_into_the_callers_state() {
     assert!(
         !state.in_quote && !state.in_single,
         "the body folded into the state"
+    );
+}
+
+/// The region scan covers the region's own bytes and nothing past them: the
+/// byte just after a region belongs to the line that follows it, and a **pair**
+/// of `&` / `|` is what makes an operator — a lone `&` in a body line is data.
+#[test]
+fn region_operator_scan_is_bounded_by_the_region() {
+    // The region is `(19, 23)`: body `z` + the delimiter line `Q`. The `&&` at
+    // 23 is the region's *successor* line, the block's own text, and the block
+    // keeps it: one part to the end of the text.
+    let line = b"if :; then cat <<Q\nz\nQ\n&& echo tail";
+    assert_eq!(
+        boundary_of(&line[..]),
+        (line.len(), false),
+        "the operator past the region stays block text"
+    );
+    // A single `&` (21) in a body line: the scan must read the *next* byte to
+    // call it an operator, so the region is opaque and the `fi` closes the
+    // block — one part.
+    let line = b"if :; then cat <<Q\nz & y\nQ\nfi";
+    assert_eq!(
+        boundary_of(&line[..]),
+        (line.len(), false),
+        "a lone `&` is body data"
+    );
+}
+
+/// The region window is anchored at the run's **own physical line**, and that
+/// anchor is a real rule, not a convenience: widening it to the text start
+/// drags an earlier line's unterminated heredoc into the run's region list
+/// (the helper's missing-delimiter path empties the list, so the body stops
+/// being opaque), and shifting it one byte right stops recognizing a `<<` that
+/// starts its line after a word break.
+#[test]
+fn region_window_is_the_runs_own_physical_line() {
+    // The run `cat <<Q` (line 3) has one complete region (`b && c` + `Q`):
+    // skipped whole, one part. Anchored at the text start, its window also
+    // sees line 1's unterminated `<<P` and the regions collapse to none, so
+    // the body's `&&` (21) splits.
+    let line = b"cat <<P\np\ncat <<Q\nb && c\nQ";
+    assert_eq!(
+        boundary_of(&line[..]),
+        (line.len(), false),
+        "line 3's region is opaque"
+    );
+    // The run's physical line starts with `;` immediately followed by `<<`:
+    // the word break *at index 0* is what makes `<<` an operator, so the
+    // region exists and its `&&` (7) is region data.
+    let line = b";<<Q\nz && y\nQ";
+    assert_eq!(
+        boundary_of(&line[..]),
+        (line.len(), false),
+        "the `<<` of a line-initial run is an operator"
     );
 }
