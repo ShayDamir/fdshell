@@ -1201,7 +1201,9 @@ Two traps found while doing it:
     `tests/heredoc.rs::and_in_a_body_position_heredoc_region_splits_the_block_until_304`;
     task **#304** owns the position gate.
     Task #235 owns the twin case (a `&&` in a function-definition group body,
-   where the definer word keeps the `{` off the run start), #236 the
+   where the definer word keeps the `{` off the run start) — **owned and
+   closed**: the group arm counts a definer's body opener, see "A definer word
+   makes its body brace a group opener for the cond layer" below; #236 the
    argument-position keywords inside a body, #237 the comment lines inside a body.
 3. **A keyword scorer must ask *command position*, not word start.**
    `keywords::keyword_delta` scores `if`/`while`/`for`/`case`/`until` as `+1`
@@ -1923,3 +1925,53 @@ Pins: `parse/tests.rs` (`empty_then_body_is_err`, `empty_elif_body_is_err`,
 and `tests/block_bodies.rs` (every form rc 1 with its message; the two
 empty-`do` hang forms under the bounded child so a regression panics, never
 hangs; the heredoc arm-body pins; the bash-parity green pins).
+
+## A definer word makes its body brace a group opener for the cond layer
+`f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list
+group counter (`cond/boundary.rs`) judged the brace by the *run* rule alone:
+`group_at_run` accepts an empty run, a run ending with `&&` / `||`, and a
+`time [-p]` prefix made transparent in both — and a definer word (`f() `,
+`function f `) in front of the `{` is none of those, so the brace was word
+data, the depth stayed 0, and the body's operator cut the definition in half
+(`function definition is missing a closing brace` rc 1). The fix is the `time`
+transparency's twin (`segment/group/prefix.rs::definer_at_run`, consumed only
+by `cond/boundary.rs::opens_group`): a `{` is a group opener when the run
+before it is exactly the definer words (`definer_len` in `keywords/function.rs`
+— one implementation with `function_def_name`) plus `(`/`)`/whitespace filler.
+
+Three decisions the rule carries:
+
+1. **The layers need *different* answers, so `group_at_run` stays untouched.**
+   The segment layer asks "may I flush what precedes the brace as a
+   statement?" — with a definer: **no** (flushing `f()` as a command means the
+   definition is never claimed). The cond layer asks "is this brace's text
+   opaque?" — **yes**. Folding the definer into `group_at_run`'s `Some(true)`
+   answers the first question wrongly; the asymmetry is the rule, and the doc
+   comments must say so.
+2. **The run rule is strict: word filler never joins a definer run.**
+   `f() echo { a && b; }` and `f() x( ) { … }` are bash syntax errors (rc 2);
+   a loose "definer prefix" rule would turn fdshell's visible rc 1 parse
+   error into *silent* acceptance (the no-`&&` twins already run rc 0). The
+   `(`/`)` filler allowance is byte-permissive exactly as far as the parse
+   layer goes (`function f ( ) {`, `f() ( ) {` are accepted there, LESSONS
+   "Byte-level definer words must be the tokenizer's tokens"); `f ( ) {`
+   (POSIX split parens) stays rejected and its operators stay visible.
+3. **The definer's brace scores 0 in `block::word_delta` — count it in the
+   group arm only.** Routing the definer through `block_depth` would score
+   `+1` for the definer *and* `+1` for the body's `{` against a single `}`,
+   the counter never returns to 0, and `f() { echo a; } && echo b` (a green
+   pin) stops splitting. The `{`/`}` pair is naturally balanced in
+   `group_depth`; keep its `+= 1` unclamped and the closer's
+   `saturating_sub().max(0)` (LESSONS "A `max(0)` clamp on the closer does
+   NOT make `+=`→`-=` on the opener equivalent").
+
+Mutation kills (unit, `cond/tests.rs`): the counted-open / counted-open /
+closer / operator row kills the opener's `+=`→`-=` (the inner `{` is counted
+only after the `;` run reset, so the true depth at the body `&&` is 1, the
+mutated depth 0); the word-filler row kills the filler test's `all`→`any`.
+Pins: `keywords/function/tests.rs::definer_len_*`,
+`segment/group/prefix/tests.rs::definer_*`, `cond/tests.rs::definer_*` and
+`operators_around_a_definition_split_the_list`,
+`tests/cond_blocks.rs::definer_body_operators_keep_the_definition_one_part`
+and `definer_with_cond_operators_around_it_splits_the_list`,
+`tests/group.rs::definer_body_keeps_the_nested_group_depth`.

@@ -424,10 +424,26 @@ carries heredoc bodies inside its own text keeps the rule, and only its body
 **regions** are scanned for an operator — `while cat <<X; do echo a && echo b;
 break; done` + `body` + `X` prints `body` `a` `b` (rc 0, as bash), while the
 `&&` written in a body line stays the pinned split (see "Heredocs"). What stays
-broken: a `&&` inside a function-definition group body (task #235), a keyword in
-argument position inside a body (#236), and a comment line in a body's **own**
-lines (#237) — a comment written inside a heredoc **body region** is inert, as in
-bash.
+broken: a keyword in argument position inside a body (#236), and a comment line
+in a body's **own** lines (#237) — a comment written inside a heredoc **body
+region** is inert, as in bash.
+
+A function definition's **body text** is opaque to the surrounding cond list the
+same way (task #235): the definer words in front of the `{` sit inside the
+statement's span, so the body opener counts as a group opener and an `&&` / `||`
+written in the body is the body's own cond list, run at call time —
+`f() { echo a && echo b; }; f` defines `f` and prints `a` `b`. The rule covers
+every accepted opener spelling (`f() {`, `f(){`, `function f {`,
+`function f() {`, `function f () {`, `function f ( ) {`), multi-line defs, a
+nested group or keyword block in the body, a def inside a group, an `if` body,
+or mid-run (`true && f() { echo a && echo b; } && f` defines in the `&&` part
+and gates the call on the `&&` after `}`), and a definition's status is 0, so
+`f() { … } && echo c` always runs `echo c`, as bash does. The definer run is
+strict: `(`/`)`/whitespace filler follows the parse layer's own leniency, a
+*word* filler behind the definer (`f() echo { a && b; }`) never joins the run
+and keeps its visible parse error. What stays broken is listed under the
+function divergences (`f ( ) { … }`, a heredoc body under `&&` — task #305,
+`time f() { … }`, a function call as a pipeline stage — task #182).
 
 Every `then`, `elif`, `else` and `do` arm requires a non-empty body (POSIX #2.9,
 task #233): `if true; then; fi`, `if true; then echo a; else; fi` and
@@ -937,6 +953,23 @@ Accepted divergences from bash:
    and the text runs as commands (`function)f g { echo hi; } && echo done` → rc 1,
    `"function" not found` + `"}" not found`, nothing dropped; bash rc 2), exactly as
    the spaced twin `function ) f g { echo hi; } && echo done` does.
+- the POSIX definer with **split parens** `f ( ) { echo a; }; f` stays `"f" not
+  found` rc 1 (bash defines `f`, rc 0): fdshell's definer rule requires the glued
+  `(` and the cond layer keeps its operators visible (LESSONS "Byte-level definer
+  words must be the tokenizer's tokens").
+- a *word* filler behind the definer (`f() echo { a && b; } && echo c`,
+  `f() x( ) { echo a && b; }; f`) is a parse error rc 1 where bash reports a
+  syntax error rc 2; the no-`&&` twins run (fdshell rc 0, bash rc 2) — the
+  strict definer-run rule (task #235) keeps the parse error visible.
+- `time f() { echo a && echo b; }; f` (and `time -p …`) is a parse error rc 1;
+  bash times the definition (report on stderr) and runs the call (`a` `b`,
+  rc 0). The definer is not a `time` prefix and `time` + definition is not a
+  timed command (task #235 records this as a residual divergence).
+- a `;`-terminated heredoc in a definition body (`f() { cat <<E; }; f` + body +
+  `E`) is rc 1 `here-doc: missing terminating delimiter line` (bash prints the
+  body, rc 0); with an `&&` in the body the message is the same after the
+  task #235 fix. The multi-line form (`f() { cat <<E` + body + `E` + `}`) is
+  fine. Tracked by task #305.
 - `function` is a reserved word, so `alias function=echo` never replaces the keyword
   position (as bash); a `function` word with no definer name is the missing command
   (`"function" not found`, rc 1) and `function f; echo after` is rc 1 `parse error`
