@@ -1215,15 +1215,27 @@ Two traps found while doing it:
    rule — bash, the segment scanner, and the group arm of this very scan
    (`group_at_run`: the run is empty, or it ends with `&&` / `||`, a `time [-p]`
    prefix transparent) — so the keyword arm must call it too, with `run_start`
-   passed in. Gate it on the *top level* only: inside a block (`block_depth > 0`)
-   the scan cannot see `then` / `do` / `else` / `elif` / body / arm positions, so
-   a nested `if` there keeps scoring, and its closers clamp the depth back to 0
-   (`while true; do if true; then false; fi && echo x; break; done` is one part).
-   Pins: `cond/boundary/block/tests.rs::keyword_shaped_argument_words_keep_the_split`
-   and `tests/cond_blocks.rs::keyword_shaped_argument_words_do_not_swallow_the_cond_operators`.
-   The gate leaves two gaps, tasks #236 (argument-position keywords *inside* a
-   block body — a body needs its own clause-position rule) and #237 (comment
-   lines inside a body: `# done` drops the counter and re-opens the split).
+   passed in. #137 gated the *top level* only, leaving the in-block half as the
+   gap tasks #236 (argument-position keywords *inside* a block body) and #237
+   (comment lines inside a body: `# done` drops the counter and re-opens the
+   split) — **#236 closed both**: the rule is now a shared state machine
+   (`keywords/position.rs`: `Place` + `scores` + `after`) that every scorer of
+   block text consumes verbatim — the cond-boundary counter (with a `Place`
+   flag it carries over words, restarts at separators and cond operators, and
+   seeds Command at a run start), the block-span scan (`comment/depth_delta`,
+   whose runs start at command position by construction), and the parse layer's
+   closing-keyword search (`parse/semi/closing`). The in-block gate is
+   `scores`: openers score in `Place::Command` only, closers in
+   `Command | Pattern` (a `case` list's `esac` is its terminator —
+   `case x in esac` — and a glued `x)` puts the arm's first word in command
+   position; `in` opens the list, `time [-p]` is transparent, `#` behind a run
+   start makes its words data, so `# done` is inert). Pins:
+   `cond/boundary/block/tests.rs::keyword_shaped_argument_words_keep_the_split`
+   and `in_block_words_follow_the_clause_rule`, `keywords/position/tests.rs`,
+   `tests/cond_blocks.rs::keyword_words_in_argument_position_split_the_body_operators`
+   and the rest of the task's section there, plus
+   `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`
+   (#237's parity, gained through #236's shared rule).
 
 ## A cond-list heredoc arm's `b == b'\n'` guard is a mutation survivor with no mid-run pin
 
@@ -1975,3 +1987,54 @@ Pins: `keywords/function/tests.rs::definer_len_*`,
 `tests/cond_blocks.rs::definer_body_operators_keep_the_definition_one_part`
 and `definer_with_cond_operators_around_it_splits_the_list`,
 `tests/group.rs::definer_body_keeps_the_nested_group_depth`.
+
+## One clause rule, three scorers: closers and openers do not share one gate
+Task #236: `while true; do echo if && echo x; break; done` was a parse error
+because the in-block half of the command-position rule was missing — every
+keyword-shaped word inside a block scored `keyword_delta`'s value, so an
+*argument* (`echo if`, `echo done`) opened/dropped the depth and the body's
+`&&` never split (or the block's span closed at the argument). The rule is
+now one shared state machine (`keywords/position.rs`) consumed verbatim by
+the three scorers that walk block text: the cond-boundary block counter
+(`cond/boundary.rs` + `cond/boundary/block.rs` carry a `Place` flag), the
+block-span scan (`comment/depth_delta`), and the parse closing-keyword search
+(`parse/semi/closing.rs`). The sharp edges, all measured against bash:
+
+1. **The gate is *place*-based, and the closer's gate is wider than the
+   opener's.** Openers score in `Command` only; closers score in
+   `Command | Pattern` — the `Pattern` place (after `in`) is a `case` word
+   list, whose `esac` is the list's terminator (`case x in esac` is complete;
+   `case x in if) …` is a pattern, not a block). "Closers and openers share
+   one gate" is the mutation: it kills `case x in esac` (the closer stops
+   scoring in the list) — `tests/cond_blocks.rs::case_list_position_scores_closers_not_openers`
+   and `keywords/position/tests.rs::closers_score_in_command_and_pattern_positions`
+   are the pair that pins the asymmetry. A `max(0)`-clamped depth hides the
+   imbalance until the split lands *inside* the block: the gate symmetry, not
+   the clamp, is the invariant.
+2. **The flag transitions are applied to *every* word, scored or not.**
+   An unscored `if`-shaped argument still moves the place to Command (the
+   condition-taking-word shape); a glued `x)` (a `case` clause) moves it to
+   Command via the word's *last* byte; `in` moves it to `Pattern`; a whole
+   `time [-p]` word is transparent (keeps the place — `keyword_delta` already
+   strips the prefix for the score, so the double transparency is deliberate);
+   `#` moves it to Data, which is what makes a `# done` comment line inert
+   (#237's parity lands here, no comment rule of its own).
+3. **Braces stay ungated.** `scores` returns true for `{`/`}` in every place:
+   gating them would silently fix the accepted divergence
+   `tests/group.rs::literal_brace_argument_in_a_block_body` (`echo }` in a
+   body eats the closer, rc 1, bash rc 0) and rewrite its pin — the brace
+   half belongs to #189/#193. The asymmetry (`echo done` is data, `echo }`
+   is not) is stated in the README divergence list.
+
+The gate moves *accepted* forms into the unclosed-construct class, and there
+the run-level message is the bare unmatched-keyword EINVAL: `while true; do
+echo x done`, `if a; then b fi`, `if test fi` and `case … *) echo no esac`
+report `parse error` rc 1 (bash rc 2), where master accepted two of them
+(`if test fi` reported `missing 'then'`, the glued-`fi`/glued-`done` forms
+ran). The detailed frames (`expected 'done'`, `missing 'fi'`) survive at the
+parse layer and are pinned in `parse::tests`; the README's "unclosed mid-run
+construct" bullet (#294) carries the framing. Do not add new error variants
+for the degraded run-level text. Pins: `cond/boundary/block/tests.rs::in_block_words_follow_the_clause_rule`,
+`keywords/position/tests.rs`, `tests/cond_blocks.rs` (the task #236 section,
+the `echo done` row bounded like `tests/loops.rs`),
+`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`.

@@ -423,10 +423,15 @@ the block span mid-run. The opacity is **region-aware** (task #234): a block tha
 carries heredoc bodies inside its own text keeps the rule, and only its body
 **regions** are scanned for an operator — `while cat <<X; do echo a && echo b;
 break; done` + `body` + `X` prints `body` `a` `b` (rc 0, as bash), while the
-`&&` written in a body line stays the pinned split (see "Heredocs"). What stays
-broken: a keyword in argument position inside a body (#236), and a comment line
-in a body's **own** lines (#237) — a comment written inside a heredoc **body
-region** is inert, as in bash.
+`&&` written in a body line stays the pinned split (see "Heredocs"). A comment
+line inside a block body is inert for the block counter (task #236): the words
+behind `#` are argument position, so `# done` never closes the block, and the
+same rule covers keyword-shaped words in a body's **argument** position —
+`while true; do echo if && echo x; break; done` prints `if` `x` (the body's
+`&&` is its own cond list), `echo fi` / `echo done` in a body are data and the
+block closes at its real closer. What stays broken is the missing-`;`-before-
+closer *message* (#301) and a keyword-shaped **word list** word
+(`for i in done; do …`, #306).
 
 A function definition's **body text** is opaque to the surrounding cond list the
 same way (task #235): the definer words in front of the `{` sit inside the
@@ -462,7 +467,13 @@ Accepted divergences from bash:
 - An unclosed mid-run construct (`true && while :; do echo hi`) is a parse
   error rc 1, where bash reports a syntax error rc 2. The REPL reports it at
   once; it does not buffer the input under the `> ` continuation prompt
-  (task #294).
+  (task #294). The same rc-1-vs-2 family covers a closer written in a body's
+  argument position, which leaves the construct unclosed (task #236):
+  `while true; do echo x done`, `if a; then b fi`, `if test fi` and
+  `case "x" in a) echo yes;; *) echo no esac` are parse errors rc 1 where
+  bash reports a syntax error rc 2. The parse layer's own detailed messages
+  for these shapes (`expected 'done'`, `missing 'fi'`) are pinned in
+  `parse::tests`; the run reports the unmatched-keyword framing above.
 - A physical line may open with `&&` / `||` in fdshell: `done` + newline +
   `&& echo x` runs the tail (rc 0); bash rejects the line (`syntax error near
   unexpected token '&'`, rc 2).
