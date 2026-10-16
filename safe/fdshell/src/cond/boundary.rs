@@ -62,11 +62,18 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             {
                 i = resume;
                 run_start = i;
+                // The run reset starts a new word: the line after a heredoc
+                // body begins with a command word.
+                state.word_active = false;
                 continue;
             }
             if b == b'\n' || b == b';' {
                 i += 1;
                 run_start = i;
+                // A run reset is a word reset: a closer written at the start
+                // of a physical line must be scored, or the block's trailing
+                // operator is swallowed into its text.
+                state.word_active = false;
                 continue;
             }
         }

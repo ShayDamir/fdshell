@@ -924,3 +924,19 @@ fn for_list_words_split_only_on_expansion_bytes() {
         assert_eq!(&out, want, "{script:?}");
     }
 }
+
+/// Task #232: a loop written as a cond part (`true && while …`) and a loop
+/// whose multi-line text ends with a gated operator run exactly like bash:
+/// the segment scanner keeps the whole run, the cond layer splits the
+/// operators around the block, and the loop's own `;` never splits the run.
+#[test]
+fn loops_as_cond_parts_run_like_bash() {
+    let (out, err, code) = run("true && while :; do echo hi; break; done");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+    let (out, err, code) = run("true && until false; do echo u; break; done && echo tail");
+    assert_eq!((out.as_str(), code), ("u\ntail\n", 0), "stderr={err}");
+    let (out, err, code) = run("while :; do\necho a\nbreak\ndone && echo x");
+    assert_eq!((out.as_str(), code), ("a\nx\n", 0), "stderr={err}");
+    let (out, err, code) = run("true && for i in 1 2; do echo $i; done; echo tail");
+    assert_eq!((out.as_str(), code), ("1\n2\ntail\n", 0), "stderr={err}");
+}

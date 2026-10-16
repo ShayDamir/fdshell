@@ -1019,3 +1019,67 @@ fn quoted_keywords_do_not_open_or_close_blocks() {
     // A quoted `done` in a loop body does not close it.
     check_block(b"while true; do echo 'done'; done", (0, 32, true));
 }
+
+/// Task #232: a keyword block that opens after `&&` / `||` is a cond part
+/// inside the run: the run stays **one statement** covering the whole block
+/// text (the block's own `;` are not top-level separators), every opener
+/// spelling joins the run, the `time` prefix rides inside it, and the trailing
+/// `;` after the closing keyword ends the statement as usual.
+#[test]
+fn midrun_keyword_block_stays_one_statement_in_the_run() {
+    for line in [
+        b"true && while :; do echo hi; break; done".as_slice(),
+        b"echo a && if true; then echo b; fi".as_slice(),
+        b"true && for i in 1 2; do echo $i; done".as_slice(),
+        b"true && until :; do echo u; break; done".as_slice(),
+        b"true && case x in x) echo cx;; esac".as_slice(),
+        b"true && f() { echo F; } && f".as_slice(),
+        b"true && time while :; do :; break; done".as_slice(),
+        b"x && time -p while :; do :; break; done".as_slice(),
+        b"true && time { echo g; }".as_slice(),
+        b"true && while :; do\necho hi\nbreak\ndone".as_slice(),
+        b"true && while :; do echo hi; break; done && echo y".as_slice(),
+    ] {
+        assert_eq!(statements(line), vec![line.to_vec()], "{line:?}");
+    }
+    // The closer's `;` ends the statement: the tail is its own statement.
+    assert_eq!(
+        statements(b"true && while :; do echo hi; break; done; echo tail"),
+        vec![
+            b"true && while :; do echo hi; break; done".to_vec(),
+            b"echo tail".to_vec(),
+        ]
+    );
+    // A keyword-shaped *argument* mid-run stays word data: the run splits at
+    // its `;` as before (the `|` stage is task #292's gap, unchanged).
+    assert_eq!(
+        statements(b"echo a | while :; do echo b; break; done"),
+        vec![
+            b"echo a | while :".to_vec(),
+            b"do echo b".to_vec(),
+            b"break".to_vec(),
+            b"done".to_vec(),
+        ]
+    );
+    // A keyword at a line start in an argument position is word data too.
+    assert_eq!(
+        statements(b"echo if\ntrue"),
+        vec![b"echo if".to_vec(), b"true".to_vec()]
+    );
+}
+
+/// Task #232 regression: the run-start block path is untouched by the mid-run
+/// span — a run-start keyword is still a `Segment::Block` with its span, and a
+/// block that stays unclosed mid-run is a plain statement (the parse layer
+/// reports the missing closer).
+#[test]
+fn run_start_blocks_and_unclosed_midruns_keep_their_shapes() {
+    check_block(b"while :; do echo hi; break; done", (0, 32, true));
+    check_block(b"if true; then echo t; fi", (0, 24, true));
+    // Unclosed mid-run: one statement, the parse reports the missing closer.
+    assert_eq!(
+        statements(b"true && while :; do echo hi"),
+        vec![b"true && while :; do echo hi".to_vec()]
+    );
+    assert_eq!(statements(b"true && if"), vec![b"true && if".to_vec()]);
+}

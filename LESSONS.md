@@ -1162,6 +1162,13 @@ Two traps found while doing it:
    unconditionally (and `run_one` gets `… done && echo b` as one part, a parse
    error). A depth counter over the words `next_boundary` already walks has no
    such boundary, so the scan resumes exactly where the block ends.
+   Task #232 turned the boundary into the rule: the *segment* scanner's
+   mid-run span (`segment/block/midrun.rs`) **relies** on the run-end
+   semantics — the run keeps everything the closer's run carries (so
+   `done && echo y` rides inside the statement and `cond` re-splits it),
+   and it resumes at the separator closing that run, not past it, so a `;`
+   after the closer still ends the statement (see the new LESSONS entry
+   "A keyword block after `&&` is a cond part").
 2. **The opacity rule must be gated on a heredoc-free text.** A block's
    condition bodies travel *inside* its span (`segment/block/keyword.rs` extends
    `end_pos` past them), so making that text opaque also hides the `&&` written
@@ -1210,6 +1217,26 @@ measured against bash and the survivor dies with it. (Measured with
 legal let chain, verified by hand), and this one missed. `master`'s own run of
 the file reports the same `==`→`!=` plus two further survivors (the stray-`}`
 arm's `==` and the `\n`/`;` arm's `||`) that #137's pins now kill.)
+
+**The pin landed with task #232** (`tests/cond_blocks.rs::mid_run_heredoc_keeps_the_body_inside_the_part`,
+`cat <<X && echo b` + body `q && r` + `X`, measured against bash;
+`tests/heredoc.rs::midrun_block_body_heredoc_is_region_scanned` pins the
+segment side of the same shape). The mid-run `<<` now has a cond-list pin,
+**but the `==`→`!=` mutant is provably equivalent and stays a survivor**:
+`heredoc::skip_region`'s guard requires `line[run_end] == b'\n'`
+(`run_end` is the arm's `i`), so the mutant's guard `b != b'\n'` contradicts
+the `Some` condition and the arm body is unreachable for every input — the
+mutant is dead code, the same species as "Re-deriving an already-set flag is
+dead code with equivalent mutants". Verified by hand: the mutated binary
+passes the new pins byte-identically. Accepted equivalent; the follow-up
+bookkeeping of that arm (the `word_active` symmetry added by #232) belongs to
+task #248. Task #232's `cargo mutants` run of `segment.rs`,
+`segment/block/midrun.rs`, `segment/block/keyword.rs`, `cond/boundary.rs`
+(108 mutants: 93 caught, 12 unviable, 3 missed) also surfaced two
+pre-existing keyword.rs survivors at `end + 1` (`+`→`-`, `+`→`*`): the resume
+lands on the separator closing an unclosed block's run, where the scanner's
+separator arm and the run parser's EOF flush produce the same segment text —
+unkillable, accepted equivalent (±1-offset species above).
 
 ## A region window and the skip derived from it are one pair — only on the success path
 
@@ -1684,3 +1711,80 @@ two options, and that the accepted set is exactly those bytes, so a table entry
 the parser would reject fails there rather than in a user's shell; the
 observable side is pinned by `set_short/tests.rs::table_short_flags_are_cluster_flags`
 and `tests/set_opts.rs::short_noclobber_flag_blocks_overwrite`.
+
+## A keyword block after `&&` is a cond part: the group rule applies verbatim
+The segment scanner's run-start scorer (`first_word_end` + `keyword_delta` on
+the run's first word) is **not a command-position scorer**. `true && while :;
+do echo hi; break; done` scored the run `true && while [ … ]` only at its
+first word `true`, so the block was not recognised, the block's own `;`
+split the run, and `while [ 1 ]` reached `tokens_to_loop` without its
+`do`/`done` (`expected 'done'` rc 1). The rule already existed — LESSONS "A
+group after `&&` is a cond part: skip its span, never flush the run before
+it" — and applies verbatim to keyword blocks and `name() { … }` definitions:
+the three-way classification `segment/group.rs::group_at_run` (run start →
+the block path owns it; cond part mid-run → **skip the span whole inside the
+run**; argument position → word data) must be applied by the segment scanner
+(`segment/block/midrun.rs`, the twin of `skip_group`), by the cond layer
+(`cond/boundary/block.rs::word_delta`), and by the block executors — three
+layers, one rule; pin the tri-state classification per layer.
+
+Three edges the twin rule carries:
+
+1. **The span end is the closer's run *separator*, not the run end.**
+   `comment::scan_block`'s run end swallows the `;` written after the closer
+   (`true && while … done; echo tail` loses `echo tail`: the whole rest of
+   the line joins the block statement and the tokenizer stops at the first
+   `;`). Resume at the byte `scan_block`'s `start` minus one — the
+   `;`/`\n`/EOF closing the closer's run — so the statement ends at the
+   closer's separator and everything between the closer and that separator
+   (`done && echo y`) stays in the run for `cond` to re-split (measured:
+   `hi` `tail`; `hi` `y`).
+2. **The `time [-p]` prefix must be stripped by the mid-run scorer too**
+   (see "A statement-prefix keyword must be transparent in *every*
+   first-word scorer"): `group_at_run` strips it on both sides of the run,
+   `opener_len` measures the keyword behind it, and the scan seed adds
+   `time_prefix_len`. Pin the three spellings mid-run (`&& time while`,
+   `&& time -p while`, `&& time time -p while`) and pin the `{` twin
+   (`&& time { …; }`) to the group arm, not to `midrun`.
+3. **Sharing the length rule needs the boundary check.** The extracted
+   `opener_len` (seed of the keyword scan, shared by `keyword_block` and
+   `midrun::skip`) must reject glued keyword prefixes (`whileish`, `iffy`)
+   with the same boundary rule `keyword_delta` scores with, and answer
+   `None` for the group brace (`segment/group.rs` owns `{ …; }`). A measured
+   length on a `starts_with` prefix seeds the scan inside the word, and the
+   scan then swallows the rest of the run.
+
+`wait` is the gated opener: `keyword_delta` scores the event-case `wait`
+only with a pattern keyword behind it, while `opener_len` measures the word.
+The mid-run span swallows the run for the builtin form too — harmlessly: the
+cond layer re-splits every operator the span swallowed, so
+`true && wait $! && echo x` keeps the builtin's operators (pinned).
+
+Pins: `segment/block/midrun/tests.rs` (tri-state, openers, agreement,
+`time`, function definitions, unclosed → resume = end of input, quotes,
+comment, brace words), `segment/tests.rs::midrun_keyword_block_stays_one_statement_in_the_run`,
+`tests/cond_blocks.rs::operator_adjacent_to_a_block_makes_the_block_a_cond_part`
+and its siblings.
+
+## A run reset must clear `word_active`
+In `cond/boundary.rs` the `;`/`\n` arms reset `run_start` (the group/keyword
+counters' command-position anchor) — and *only* that. `word_active` stayed
+`true` from the last word of the closed run, so a closing keyword written at
+the start of the next physical line was not at a word start, never reached
+`block::word_delta`, the block depth never returned to 0, and the operator
+written after the multi-line block was swallowed into the block's text:
+`while :; do / echo a / break / done && echo x` printed `a` only (bash gates
+the tail on the block's status and prints `x`). The tell is the indentation:
+the indented block (` done && echo x`, closer preceded by a space) worked,
+the unindented one did not — the space made the scanner `advance` over it,
+which cleared `word_active`, and the closer scored. Rule: every arm that
+starts a new run (`;`/`\n` and the heredoc body-skip) must start a new word:
+`state.word_active = false`. Pins:
+`cond/tests.rs::line_start_closer_scores_the_blocks_trailing_operator`
+(both indentations, the `if` twin, the nested multi-line row) and
+`line_start_words_keep_the_closer_and_argument_gates` (stray closers clamp
+at 0, the argument-position gate keeps `echo if` word data at a line start
+too). The heredoc arm's clear is bookkeeping symmetry: the block rule is off
+on any `<<`-carrying text, so that arm's clear is not observable through
+`word_delta` (its observable behavior — resuming past the delimiter line —
+is pinned there as well; the arm's mutation follow-up is task #248's).

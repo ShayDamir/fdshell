@@ -273,3 +273,27 @@ fn if_block_spans_lines_under_tty() {
     assert!(out.contains("in-if"), "output: {out:?}");
     assert!(out.contains("> "), "continuation prompt missing: {out:?}");
 }
+
+/// Task #232 pinned today's REPL behavior for an **unclosed mid-run
+/// construct** (the documented gap, task #294, with the group twin that
+/// predates it): the span lives in a plain statement, so `repl/complete.rs`
+/// sees no open block and the shell reports the parse error at once — no
+/// `>` continuation buffering. Pinned for both twins.
+#[test]
+fn unclosed_midrun_constructs_report_at_once() {
+    for (input, want) in [
+        ("true && { echo g\n", "group is missing a closing brace"),
+        ("true && while :; do echo hi\n", "expected 'done'"),
+    ] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "stderr={err}");
+        assert!(err.contains(want), "{input}: stderr={err}");
+        // Two prompts (one per read) and no `> ` continuation prompt outside
+        // them: the input never enters the continuation buffer.
+        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+        assert!(
+            !out.replace(PROMPT, "").contains("> "),
+            "{input}: continuation prompt: {out:?}"
+        );
+    }
+}

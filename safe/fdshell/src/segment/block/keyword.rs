@@ -2,6 +2,7 @@
 //! closing-keyword scan and the heredoc-body region bookkeeping.
 
 use super::Segment;
+use super::length::opener_len;
 use crate::comment::scan_block;
 use crate::keywords::time_prefix_len;
 use crate::scan::ScanState;
@@ -47,15 +48,7 @@ pub(super) fn keyword_block<'a>(
     // `kw_len` measures the keyword itself (`time if …` must not measure `time`).
     let prefix = time_prefix_len(part).unwrap_or(0);
     let keyword = part.get(prefix..).unwrap_or(b"");
-    let kw_len = if keyword.starts_with(b"case") || keyword.starts_with(b"wait") {
-        4
-    } else if keyword.starts_with(b"if") {
-        2
-    } else if keyword.starts_with(b"for") {
-        3
-    } else {
-        5
-    };
+    let kw_len = opener_len(keyword).unwrap_or(0);
     let after_kw = start + leading_ws + prefix + kw_len;
     let mut quotes = state.quotes();
     let mut block_start_pos = after_kw;

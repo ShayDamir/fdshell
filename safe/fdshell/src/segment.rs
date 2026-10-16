@@ -46,8 +46,13 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     while book.i <= line.len() {
         let kind = boundary(line, book.i, &book.state);
         if kind == Boundary::Char {
-            if !in_block && book.state.at_word_start() && group::opens_at(line, book.i) {
+            let opener = !in_block && book.state.at_word_start();
+            if opener && group::opens_at(line, book.i) {
                 group::opener::scan(line, &mut book);
+            } else if opener && block::midrun::skip(line, &mut book).is_some() {
+                // A keyword block that opens a cond part mid-run: `skip` moved
+                // the cursor past its whole span, so its `;` never splits the
+                // run and the cond layer splits the operators.
             } else {
                 book.i = book.state.advance(line, book.i);
             }

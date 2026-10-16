@@ -1059,3 +1059,15 @@ fn quoted_dollar_at_in_a_heredoc_body_is_glued() {
     assert_eq!(code, 0);
     assert_eq!(out, "$@\n");
 }
+
+/// Task #232: a here-doc in the body of a **mid-run** block (a block that
+/// opens after `&&` / `||`) claims its body region through the multi-line
+/// run: `cat` prints the body, the loop continues, and a `&&` written in
+/// the body line never splits the part (measured against bash).
+#[test]
+fn midrun_block_body_heredoc_is_region_scanned() {
+    let (out, err, code) = run("true && while :; do cat <<T; echo mid; break; done\nbody\nT");
+    assert_eq!((out.as_str(), code), ("body\nmid\n", 0), "stderr={err}");
+    let (out, err, code) = run("cat <<X && echo b\nq && r\nX");
+    assert_eq!((out.as_str(), code), ("q && r\nb\n", 0), "stderr={err}");
+}

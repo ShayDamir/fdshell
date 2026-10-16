@@ -10,6 +10,12 @@ fn boundary_of(line: &[u8]) -> (usize, bool) {
     next_boundary(line, 0, &mut ScanState::new())
 }
 
+/// `next_boundary` from `i` — the resume point `run_cond_list` uses after it
+/// takes the part that ends at the previous boundary.
+fn boundary_from(line: &[u8], i: usize) -> (usize, bool) {
+    next_boundary(line, i, &mut ScanState::new())
+}
+
 /// A `{ …; }` group is opaque: an `&&` inside the body belongs to the body, and
 /// the split is the `&&` **after** the closing brace.
 #[test]
@@ -166,4 +172,65 @@ fn operator_inside_a_single_quote_is_not_a_boundary() {
 fn keyword_inside_a_single_quote_opens_no_block() {
     assert_eq!(boundary_of(b"echo 'a if b' && echo c"), (14, false));
     assert_eq!(boundary_of(b"echo 'if' fi && echo c"), (13, false));
+}
+
+/// Task #232: a run reset (`;` / newline) is also a word reset, so a closing
+/// keyword written at the start of a physical line is scored: the block depth
+/// returns to 0 and the operator written after the block splits the list,
+/// gated by the block's status (bash's rule). The indented variant (the
+/// closer's word start was already visible) keeps working.
+#[test]
+fn line_start_closer_scores_the_blocks_trailing_operator() {
+    // `… done && echo x` at a line start: the split is the `&&` (30).
+    assert_eq!(
+        boundary_of(b"while :; do\necho a\nbreak\ndone && echo x"),
+        (30, false)
+    );
+    // The same block indented: the split is the `&&` (33).
+    assert_eq!(
+        boundary_of(b"while :; do\n echo a\n break\n done && echo x"),
+        (33, false)
+    );
+    // The `if` twin: `… fi && echo y` at a line start — the split is (24).
+    assert_eq!(
+        boundary_of(b"if true; then\necho b\nfi && echo y"),
+        (24, false)
+    );
+    // A nested multi-line block in a body (a heredoc-free text): the nested
+    // `fi` scores inside the block, its trailing `&&` is the body's own
+    // operator, and the whole text stays one part (LESSONS #137 gate 3).
+    let multi = b"while :; do\nif true; then echo t; fi && echo x\nbreak\ndone";
+    assert_eq!(boundary_of(&multi[..]), (multi.len(), false));
+}
+
+/// The word-start bookkeeping after a run reset keeps the gates: a stray
+/// closer at a line start clamps the depth at 0 (never hides the operator),
+/// and a keyword-shaped word in an argument position is still word data —
+/// the command-position rule of `block::word_delta` applies at line starts
+/// exactly as it does mid-line.
+#[test]
+fn line_start_words_keep_the_closer_and_argument_gates() {
+    // A stray `done` at a line start clamps at 0: the `&&` (10) splits.
+    assert_eq!(boundary_of(b"echo done\n&& echo b"), (10, false));
+    // A stray closer at a line start is scored and clamped (11 splits).
+    assert_eq!(boundary_of(b"echo if\nfi && echo b"), (11, false));
+    // A keyword-shaped argument on the first line stays word data; the second
+    // line starts a fresh run and its `&&` (13) splits.
+    assert_eq!(boundary_of(b"echo if\ntrue && echo b"), (13, false));
+    // A mid-run `<<` with a body: the split is the operator written before
+    // the body (8). From the resume (10) the body-skip arm finds no operator
+    // in its run, the scan continues over the text, and the body's own `&&`
+    // (20) splits — the region stream the caller hands to `run_one` strips
+    // the body from the part text (pinned by `tests/cond_blocks.rs`).
+    assert_eq!(boundary_of(b"cat <<X && echo b\nq && r\nX"), (8, false));
+    assert_eq!(
+        boundary_from(b"cat <<X && echo b\nq && r\nX", 10),
+        (20, false)
+    );
+    // The body-skip arm resumes a fresh run: the operator written on the
+    // delimiter line after a body (23) is the split.
+    assert_eq!(
+        boundary_of(b"echo p; cat <<X\nbody\nX && echo y"),
+        (23, false)
+    );
 }

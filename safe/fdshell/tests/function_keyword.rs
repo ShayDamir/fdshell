@@ -228,16 +228,16 @@ fn glued_close_paren_after_the_keyword_runs_as_commands() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
 }
 
-/// A mid-run definition is the inherited cond-list gap (task #168): the cond part
-/// has no closing brace, so it is a parse error rc 1 where bash runs it.
+/// The mid-run definition gap (task #168) closed with task #232: a
+/// `function name { … }` written after `&&` is a cond part — the segment
+/// scanner skips its span inside the run, so the definition parses, the
+/// gated call runs it, and bash's behavior is matched exactly.
 #[test]
-fn mid_run_definition_is_a_parse_error() {
+fn mid_run_definition_is_a_cond_part() {
     let (out, err, rc) = run("true && function f { echo hi; }; f");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(
-        err.contains("function definition is missing a closing brace"),
-        "stderr={err}"
-    );
+    assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
+    let (out, err, rc) = run("false && function g { echo hi; }; g");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
 }
 
 /// `set -x` traces the call's body, not the definition (stable, same as the POSIX form).

@@ -391,9 +391,32 @@ and a `time [-p]` prefix is transparent (`time while [ 1 ] && [ 1 ]; do …; don
 Only a *command-position* keyword opens a block: written as an argument it is
 word data, exactly as a brace is above — `echo if && echo b` prints `if` and `b`,
 and `echo x > if && echo b` writes `x` into the file `if` and then runs `echo b`.
-Pinned by `tests/cond_blocks.rs` and `tests/loops.rs`. Two shapes stay broken:
-an operator *adjacent* to a block (`true && while …; do …; done`, task #232) and
+Pinned by `tests/cond_blocks.rs` and `tests/loops.rs`. A keyword block (or a
+`name() { … }` definition) written *next to* a cond operator is a cond-list
+part too (task #232): the segment scanner skips the block's span whole inside
+the run (the rule the `{ …; }` group already used), so `true && while :; do
+echo hi; break; done` runs the loop as the `&&` part (and `false &&` skips
+it, rc 1), a trailing operator after the closing keyword — on one line
+(`… done && echo x`) or with the closer at a line start (`… done` newline-less
+offset, `done && echo x`) — is a part gated by the block's status, and all of
+it holds inside a block body and with `time [-p]` prefixes. What stays broken:
 a block whose text also carries a here-doc (task #234, see "Heredocs").
+
+Accepted divergences from bash:
+
+- A keyword block as a pipeline stage (`echo a | while :; do …; done`) runs
+  `while`/`do` as commands (rc 1); bash runs the loop (task #292). The `|`
+  position is argument position, where only *command-position* keywords open
+  blocks.
+- An unclosed mid-run construct (`true && while :; do echo hi`) is a parse
+  error rc 1, where bash reports a syntax error rc 2. The REPL reports it at
+  once; it does not buffer the input under the `> ` continuation prompt
+  (task #294).
+- A physical line may open with `&&` / `||` in fdshell: `done` + newline +
+  `&& echo x` runs the tail (rc 0); bash rejects the line (`syntax error near
+  unexpected token '&'`, rc 2).
+- C-style `for ((i=0;i<3;i++)); do …; done` is rejected (`expected 'in'`,
+  task #293); bash runs it.
 
 Accepted divergences from bash:
 

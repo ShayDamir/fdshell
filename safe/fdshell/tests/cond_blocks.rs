@@ -192,12 +192,192 @@ fn break_in_an_and_condition_ends_the_loop() {
     assert_eq!(out, "i=0\n");
 }
 
-/// Known gap, task #232: an operator *adjacent* to a block (outside its text)
-/// is unchanged by task #137 — `true && while …` is still a parse error rc 1
-/// (bash `hi` rc 0).
+/// Task #232 (was the pinned gap of task #137): an operator *adjacent* to a
+/// block makes the block a cond part — the segment scanner keeps the whole
+/// run (the block's own `;` are not separators), the cond layer splits the
+/// operator, and the block runs (or is skipped) as a part. Measured against
+/// bash 5.3.9: `hi` rc 0.
 #[test]
-fn operator_adjacent_to_a_block_is_unchanged() {
-    let (_out, _err, code) = run("true && while [ 1 ]; do echo hi; break; done");
+fn operator_adjacent_to_a_block_makes_the_block_a_cond_part() {
+    let (out, err, code) = run("true && while :; do echo hi; break; done");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+}
+
+/// The short-circuit applies to the block part: `false &&` skips it (rc 1,
+/// the last-run part's status, exactly like the group twin), `false ||` runs
+/// it. Measured: bash (nothing) rc 1 / `hi` rc 0.
+#[test]
+fn midrun_block_respects_the_cond_short_circuit() {
+    let (out, err, code) = run("false && while :; do echo hi; break; done");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    let (out, err, code) = run("false || while :; do echo hi; break; done");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+}
+
+/// Every block opener joins the run mid-cond — `if`, `for`, `case`, `until`,
+/// `while`, and a `name() { … }` definition (the definition's trailing
+/// `&& f` runs the defined function). All rows measured against bash.
+#[test]
+fn every_opener_joins_the_run_mid_cond() {
+    for (script, want) in [
+        ("echo a && if true; then echo b; fi", "a\nb\n"),
+        ("true && for i in 1 2; do echo $i; done", "1\n2\n"),
+        ("true && case x in x) echo cx;; esac", "cx\n"),
+        ("true && until :; do echo u; break; done", ""),
+        ("true && f() { echo F; } && f", "F\n"),
+        ("x=1 && while :; do echo b; break; done", "b\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// `time [-p]` is transparent before a mid-run block, all three spellings
+/// (LESSONS: a statement-prefix keyword must be transparent in *every*
+/// first-word scorer): the block runs, the report goes to stderr, rc 0.
+#[test]
+fn time_prefix_is_transparent_before_a_midrun_block() {
+    for prefix in ["time ", "time -p ", "time time -p "] {
+        let script = format!("{prefix}while :; do echo hi; break; done");
+        let (out, _err, code) = run(&script);
+        assert_eq!((out.as_str(), code), ("hi\n", 0), "{script}");
+        let script = format!("true && {prefix}while :; do echo hi; break; done");
+        let (out, _err, code) = run(&script);
+        assert_eq!((out.as_str(), code), ("hi\n", 0), "{script}");
+    }
+}
+
+/// An operator written after a mid-run block (on the same run) is the cond
+/// list's own: the mid-run block runs and the tail is gated by its status.
+#[test]
+fn trailing_operator_after_a_midrun_block_splits_the_list() {
+    let (out, err, code) = run("true && while :; do echo hi; break; done && echo y");
+    assert_eq!((out.as_str(), code), ("hi\ny\n", 0), "stderr={err}");
+    let (out, err, code) = run("false && while :; do echo hi; break; done && echo y");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+}
+
+/// A mid-run block that spans physical lines (the `do` on the opener's line,
+/// the body on the lines below) stays one run: the block runs as a cond part
+/// and the statement ends where the block's closing keyword's line does.
+#[test]
+fn midrun_block_spans_physical_lines() {
+    let (out, err, code) = run("true && while :; do\necho hi\nbreak\ndone");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+    let (out, err, code) = run("true && if true; then\necho b\nfi && echo y");
+    assert_eq!((out.as_str(), code), ("b\ny\n", 0), "stderr={err}");
+}
+
+/// A mid-run block inside a block body: the body is re-scanned, the mid-run
+/// rule applies there too, and the outer block stays intact.
+#[test]
+fn midrun_block_inside_a_block_body() {
+    let (out, err, code) = run("if true; then true && while :; do echo hi; break; done; fi");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+    let (out, err, code) =
+        run("case q in q) true && for i in 1; do echo c$i; done ;; esac; echo tail");
+    assert_eq!((out.as_str(), code), ("c1\ntail\n", 0), "stderr={err}");
+}
+
+/// Task #232 gap 2: a trailing operator on a multi-line block (the closing
+/// keyword at the start of its physical line) is a cond part gated by the
+/// block's status — the run reset starts a new word, the closer scores, and
+/// the depth returns to 0. The indented variant worked before; both stay.
+/// Rows measured against bash; `if false; then … fi` exits 0 without an
+/// `else`, so its tail runs (bash agrees).
+#[test]
+fn trailing_operator_after_a_multi_line_block_is_gated() {
+    let (out, err, code) = run("while :; do\necho a\nbreak\ndone && echo x");
+    assert_eq!((out.as_str(), code), ("a\nx\n", 0), "stderr={err}");
+    let (out, err, code) = run("while :; do\n echo a\n break\n done && echo x");
+    assert_eq!((out.as_str(), code), ("a\nx\n", 0), "stderr={err}");
+    let (out, err, code) = run("if true; then\necho b\nfi && echo y");
+    assert_eq!((out.as_str(), code), ("b\ny\n", 0), "stderr={err}");
+    let (out, err, code) = run("if false; then\necho b\nfi && echo y");
+    assert_eq!((out.as_str(), code), ("y\n", 0), "stderr={err}");
+}
+
+/// The nested multi-line rows of the task: a multi-line block whose body
+/// carries a nested block with a trailing operator. The heredoc-free text
+/// keeps the block opaque (the nested `fi` scores inside, LESSONS #137 gate
+/// 3), so the `&&` is the body's own cond list; the failing-gate row prints
+/// nothing — its rc 1 (bash rc 0) is task #262's pinned `break`-status
+/// divergence, not this shape's.
+#[test]
+fn nested_multi_line_blocks_keep_their_operators_inside() {
+    let (out, err, code) = run("while :; do\nif true; then echo t; fi && echo x\nbreak\ndone");
+    assert_eq!((out.as_str(), code), ("t\nx\n", 0), "stderr={err}");
+    let (out, err, code) = run("while :; do\nif true; then false; fi && echo x\nbreak\ndone");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+}
+
+/// `set -e` rows of the task: the errexit rules around mid-run blocks are
+/// the list's own — a skipped chain never fires it, the run's block status
+/// does not either. Measured: bash prints `after` rc 0 on every row.
+#[test]
+fn errexit_does_not_fire_around_midrun_blocks() {
+    for script in [
+        "set -e; true && while :; do echo hi; break; done; echo after",
+        "set -e; false && while :; do echo hi; break; done; echo after",
+        "set -e; false && if true; then echo t; fi; echo after",
+        "set -e; true && case x in x) echo cx;; esac; echo after",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert!(out.ends_with("after\n"), "{script}: {out}");
+    }
+}
+
+/// The mid-run heredoc pin of LESSONS ("A cond-list heredoc arm's
+/// `b == b'\\n'` guard is a mutation survivor with no mid-run pin"): a `<<`
+/// written mid-run whose body follows. The body's `&&` must not split the
+/// part; the split is the operator written before the body. Measured: bash
+/// `q && r` `b` rc 0, fdshell identical. This row kills the pre-existing
+/// `==`→`!=` survivor in `cond/boundary.rs` (its follow-up bookkeeping is
+/// task #248's).
+#[test]
+fn mid_run_heredoc_keeps_the_body_inside_the_part() {
+    let (out, err, code) = run("cat <<X && echo b\nq && r\nX");
+    assert_eq!((out.as_str(), code), ("q && r\nb\n", 0), "stderr={err}");
+}
+
+/// A mid-run block that carries a here-doc in its body claims the body
+/// through the run: `cat` prints it and the loop continues (measured against
+/// bash; the region bookkeeping of #138/#238 applies to the mid-run run
+/// body unchanged).
+#[test]
+fn midrun_block_body_heredoc_travels_with_the_run() {
+    let (out, err, code) = run("true && while :; do cat <<T; echo mid; break; done\nbody\nT");
+    assert_eq!((out.as_str(), code), ("body\nmid\n", 0), "stderr={err}");
+}
+
+/// Accepted divergences pinned with the task that owns them: a keyword block
+/// as a pipeline stage (argument position — Fix A must not cover it, task
+/// **#292**); an unclosed mid-run construct (rc 1 parse error, bash rc 2); a
+/// line that opens with `&&` (bash rejects it, rc 2; fdshell runs the part,
+/// documented in README, no task); the heredoc-carrying block text (task
+/// **#234**).
+#[test]
+fn midrun_adjacent_shapes_stay_measured_divergences() {
+    // #292: the `|` position is argument position — `while`/`do` stay words.
+    let (_out, _err, code) = run("echo a | while :; do echo b; break; done");
+    assert_eq!(code, 1);
+    // Unclosed mid-run: parse error rc 1 (bash rc 2).
+    let (_out, _err, code) = run("true && while :; do echo hi");
+    assert_eq!(code, 1);
+    let (_out, _err, code) = run("true && while");
+    assert_eq!(code, 1);
+    let (_out, _err, code) = run("true && if");
+    assert_eq!(code, 1);
+    // A line opening with `&&`: bash rc 2 (syntax), fdshell runs the part.
+    let (out, _err, code) = run("while :; do\necho a\nbreak\ndone\n&& echo x");
+    assert_eq!(
+        (out.as_str(), code),
+        ("a\nx\n", 0),
+        "bash rc 2: measured divergence"
+    );
+    // #234: a block text carrying a `<<` operator keeps the old split.
+    let (_out, _err, code) = run("if true; then cat <<T; fi && echo x\nbody\nT");
     assert_eq!(code, 1);
 }
 

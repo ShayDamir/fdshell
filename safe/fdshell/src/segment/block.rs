@@ -1,5 +1,7 @@
 use super::Segment;
 pub(super) mod keyword;
+mod length;
+pub(super) mod midrun;
 use crate::brace::scan_function_block;
 use crate::scan::ScanState;
 use crate::scan::heredoc;
