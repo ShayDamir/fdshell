@@ -1200,12 +1200,31 @@ the bytes of a word that performed none: `IFS=,; echo a,b` prints `a,b`, and
   (`IFS=" ,"; set -- $v` with `v="a, "` → one field `a`);
 - bytes produced by an expansion inherit the mask bit of its trigger byte, so a
   quoted byte never delimits, and a fully quoted word is one word;
+- **only expansion bytes delimit** (task #222): a literal `IFS` byte in the
+  word is content and glues to the field it sits next to
+  (`IFS=,; v=$(echo "b c"); printf %s x$v,y` → one field `xb c,y`), while an
+  `IFS` byte that came *from* the expansion cuts
+  (`IFS=,; v=$(printf "p,q"); printf %s x$v` → `[xp][q]`). The tilde arm
+  records no expansion bytes: the expanded `$HOME` is never split. An
+  unquoted embedded `$@` (and any `$*`) joins the positionals with the first
+  `IFS` byte, and that join byte delimits
+  (`IFS=:; set -- a b; printf %s x$@` → `[xa][b]`); a quoted `$@` emits no
+  join byte and cuts at each positional's start
+  (`IFS=,; set -- "a b" c; printf %s x"$@"y` → `[xa b][cy]`), with a quoted
+  positional ending the word keeping its empty field (`x"$@"` over `a ""` →
+  `[xa][]`, unquoted `[xa]`);
 - `IFS=` disables splitting: the expansion is one field, spaces included;
 - an unquoted expansion producing no fields produces no words at all
   (`IFS=,; set -- $(true)` → `$#` = 0), while a word containing quotes keeps
   one empty word (see the quoted-empty rule under "For-list words"). The
   exception is a fully quoted whole-word `$@`: it *is* the positional words
   themselves, so with no positionals it is no word at all (task #219);
+- accepted divergence (task #222, pinned by
+  `wordsplit.rs::quoted_dollar_at_reassignment_keeps_words` in its
+  default-`IFS` form): the whole-word `""$@` has an all-unquoted mask (the
+  `""` contributes no bytes), so fdshell re-splits each positional with `IFS`
+  and drops the empty ones (`IFS=,; set -- a "" b; set -- ""$@; echo $#` →
+  `2`), where bash makes each positional its own word (`3`).
 
 ```
 IFS=,;  builtin printf "[%s] " a,b          → [a,b]        (literal: no split)

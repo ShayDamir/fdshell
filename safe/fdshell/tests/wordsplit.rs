@@ -440,7 +440,18 @@ fn quoted_dollar_star_reassignment_no_positionals() {
 #[test]
 fn quoted_dollar_at_reassignment_keeps_words() {
     // Guard: words from the positionals are kept, no empty word is added.
-    let (out, err, code) = run(r#"set -- a "" b; set -- ""$@; echo $#"#);
+    let (out, _err, code) = run(r#"set -- a "" b; set -- ""$@; echo $#"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "2\n");
+}
+
+/// Accepted divergence (task #222): `""` contributes no bytes, so the
+/// whole-word `""$@` carries an all-unquoted mask and fdshell re-splits each
+/// positional with `IFS`, dropping the empty one (2); bash makes every
+/// positional its own word (3).
+#[test]
+fn empty_quote_dollar_at_reassignment_drops_empty_positional_ifs() {
+    let (out, err, code) = run(r#"IFS=,; set -- a "" b; set -- ""$@; echo $#"#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "2\n");
 }
