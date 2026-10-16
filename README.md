@@ -469,11 +469,15 @@ Accepted divergences from bash:
   once; it does not buffer the input under the `> ` continuation prompt
   (task #294). The same rc-1-vs-2 family covers a closer written in a body's
   argument position, which leaves the construct unclosed (task #236):
-  `while true; do echo x done`, `if a; then b fi`, `if test fi` and
-  `case "x" in a) echo yes;; *) echo no esac` are parse errors rc 1 where
-  bash reports a syntax error rc 2. The parse layer's own detailed messages
-  for these shapes (`expected 'done'`, `missing 'fi'`) are pinned in
-  `parse::tests`; the run reports the unmatched-keyword framing above.
+  `while true; do echo x done`, `if a; then b fi`, `if test fi`,
+  `for i in a; do echo done` and `case "x" in a) echo yes;; *) echo no esac`
+  are parse errors rc 1 where bash reports a syntax error rc 2. The parse
+  layer's own detailed messages for these shapes (`expected 'done'`,
+  `missing 'fi'`) are pinned in `parse::tests`; the run reports the
+  unmatched-keyword framing above. `for i in a; do echo done` shows the
+  framing's cost: it used to report `expected ';' before 'done'` and now
+  reports the bare parse error (rc 1 unchanged); giving it back its detailed
+  message is task #301.
 - A physical line may open with `&&` / `||` in fdshell: `done` + newline +
   `&& echo x` runs the tail (rc 0); bash rejects the line (`syntax error near
   unexpected token '&'`, rc 2).

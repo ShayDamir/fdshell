@@ -381,8 +381,9 @@ fn nested_dollar_paren_keyword_does_not_open_nested_block() {
 // it is argument data and never opens a nested block. The block closes at
 // the real `fi` (measured: bash rejects `if x(a for b); then y; fi` with
 // rc 2, `syntax error near unexpected token 'a'`; fdshell runs the
-// argument-`for` and closes the block — the unclosed-construct rc-1-vs-2
-// class, README "Errors").
+// argument-`for` and closes the block, so it accepts at rc 0 — the
+// accepts-what-bash-rejects family, not the rc-1-vs-2 one (README
+// "Errors").
 #[test]
 fn plain_paren_does_not_suppress_the_command_position_rule() {
     let r = scan(b"if x(a for b); then y; fi", 2);

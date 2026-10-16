@@ -765,6 +765,10 @@ fn case_list_position_scores_closers_not_openers() {
 ///   error rc 2 — README "unclosed mid-run construct" (#294's family). The
 ///   parse layer's detailed messages for these shapes are pinned in
 ///   `parse::tests` and `tests/block_bodies.rs`.
+/// * `while :; do : done` is the same family's **hang** row: on master the
+///   loop never closes and runs forever (rc 124); the closer-in-argument rule
+///   leaves it unclosed, so it is a parse error rc 1 (bash rc 2). Bounded
+///   child: a regression back into the loop panics with the script.
 /// * `echo { if && echo b` is unchanged top level: the group arm's own
 ///   clause rule keeps `echo {` word data (the brace carve-out is the in-block
 ///   half; `tests/group.rs::literal_brace_argument_in_a_block_body` pins the
@@ -781,6 +785,8 @@ fn glued_closer_forms_stay_measured_divergences() {
         let (out, _err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
     }
+    let (out, err, code) = run_bounded("while :; do : done");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}: bash rc 2");
     let (out, err, code) = run("echo { if && echo b");
     assert_eq!((out.as_str(), code), ("{ if\nb\n", 0), "stderr={err}");
 }
