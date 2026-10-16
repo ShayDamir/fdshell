@@ -1489,9 +1489,15 @@ sibling rule above, which is what makes that index trustworthy).
 - **Greedy stays greedy inside the region.** `"x$vbc"` is `VBC`; the unquoted
   `$vbc` is `VBC` too. The cap only forbids crossing the region boundary.
 - **A missing mask bit is no information.** `region_len` returns `usize::MAX`
-  when `mask.get(from)` is `None`, so the mask-independent callers (heredoc
-  bodies, `case_exec`, `set -u`-style unit calls) keep the greedy scan
-  unchanged; an all-quoted mask (a heredoc body) is one run and stays greedy.
+  when `mask.get(from)` is `None`, and in production that only happens where the
+  mask is **shorter than the word text**: the padding rule (`arg.rs` reads a bit
+  past the mask as unquoted) makes the rest of the word unquoted, and an
+  unbounded scan is exactly bash's unquoted behaviour. Unit calls that pass
+  `&[]` are the other caller. Callers with a real mask never take the missing-bit
+  branch: a heredoc body passes `vec![true; body.len()]` and `case_exec` passes
+  its joined word mask, so each is one full run and stays greedy by the *run*
+  rule. Do not go looking for a substitution caller that passes an empty mask —
+  there is none (LESSONS: "No substitution surface takes an empty mask").
   Pinned: `region_len_measures_the_trigger_byte_region`, and the heredoc row
   `$v"bc"` → `q"bc"`.
 - **`limit == 0` means the next byte starts a new region**, so the trigger is
@@ -1520,3 +1526,55 @@ sibling rule above, which is what makes that index trustworthy).
   `}`, both shells print `[qx]`; the bare-name spelling `"$v""b"` is the shape
   that diverges). A pin typed from a plan table, not measured, pins a
   prediction.
+## `dollar_subst`'s digit arm is load-bearing: a name arm that also accepts digits is not its equivalent
+`cargo mutants` deletes `substitute/dollar.rs`'s `Some(c @ b'0'..=b'9')` arm and the whole
+suite passes, and the arm looks redundant: the generic name arm below accepts digits
+(`is_ascii_alphanumeric`) and the shared lookup routes a **pure digit run** to the positional
+(`param_value` → `direct_value` → `is_param_name` → `positional_value`, `resolve/param_name.rs`),
+with `collect_name(peek, limit)` capping the run at the same `limit` as
+`resolve_positional_index`'s `while num.len() < limit`. The argument only covers runs that are
+all digits. Measured on task #223's branch (arm deleted, `target/debug/fdshell` against bash
+5.3.9, `/home/damir/tmp/opencode/mut223_table.py`): 8 of 10 probe shapes change, and the shell
+goes from bash-agreeing on 8 of them to bash-agreeing on 2.
+
+| shape (`set -- A B;` prefix) | arm present | arm deleted | bash |
+| --- | --- | --- | --- |
+| `printf "[%s]" "$1a"` | `[Aa]` | `[]` | `[Aa]` |
+| `printf "[%s]" "$1abc"` | `[Aabc]` | `[]` | `[Aabc]` |
+| `printf "[%s]" $1a` | `[Aa]` | `[]` | `[Aa]` |
+| `printf "[%s]" "$1_2"` | `[A_2]` | `[]` | `[A_2]` |
+| `set -u; printf "[%s]" "$1a"` | `[Aa]`, rc 0 | `1a: unbound variable`, rc 1 | `[Aa]` |
+| `set -- "$1a"; printf "[%s]\n" "$@"` | `[Aa]` | `[]` | `[Aa]` |
+| `printf "[%s]" $"1"` | `[A]` | `[$1]` | `[1]` |
+
+bash ends a positional reference at the first non-digit, so the digits are the index and the
+name bytes after them are literal text; a scan that reads the whole name looks up the parameter
+`1a`, which is unset (empty, and a `set -u` bail). The mutant is therefore **observable** — a
+missed mutant is a *test gap*, not an equivalence, and the fix is a pin, not a record. The old
+pins could not see it because they glue their literal **outside** the trigger byte's region
+(`"$1"2`, `"$1"abc`, `$1"2"`): the region cap truncates the run to one digit there, which is
+exactly the reading the name arm produces too. Pinned inside the region by
+`tests/positional.rs::positional_digit_run_ends_at_a_name_byte`; the `delete match arm` mutant is
+killed by it.
+
+Two rules. (1) An arm is not redundant just because a catch-all arm accepts its bytes: check what
+the catch-all does with **more** than the arm's byte class, not with the same bytes. (2) An
+equivalence claim for a mutant is a measurement over shapes, never an argument over the shared
+lookup — record it as accepted-equivalent only after a probe corpus shows no difference (the
+sibling entry below is one that genuinely has none). The `$"1"` row stays unpinned on purpose: it
+is the accepted `$"…"` ANSI-C/locale family (`$"v"` → `$v`, bash `v`), and in that family the digit
+arm ignores the region cap the name arm honours (`[A]` where the name arm's `limit == 0` rule gives
+`[$1]`), so touching the arm needs that family resolved first.
+## `%name`'s guard is an accepted equivalent mutant: `collect_name` self-guards the name bytes
+`substitute/percent.rs`'s arm guard `Some(c) if c.is_ascii_alphanumeric() || c == b'_'` mutates to
+`true` and survives, because the guard is enforced a second time inside `collect_name`'s own loop:
+a non-name byte after `%` yields the empty name, `write_fd(&"")` is false because **no path binds
+an fd to the empty name** (the binding callers are `cd`, `state/setters`, `wait/arm/reap`,
+`run_dispatch{,/array_ops}`, `capture/commit`, `intercept/recvmsg` — whose slot names start with
+`%` — `intercept/signalfd_cmd`, `for_run`), and the arm then pushes `%` plus the empty name having
+consumed nothing — byte-for-byte the `_ => out.push(c"%")` fallback. Probed on task #223 with the
+guard mutated over 12 shapes (`%`, `%%`, `a%%b`, `%-b`, `%)`, `"%a"b`, `%$v`, `v=q; %$v`, `%?`,
+`"%%"b`, `%a%%b`, `"%v"%w`): **zero** differences, so no test can distinguish the arms. Accepted
+equivalent mutant, the same species as the disjoint-flag `|` entries: record it, do not test
+around it. The comment in `percent_subst` states the empty-name invariant the fallback leans on —
+if a future surface ever binds an empty name, that fallback stops being equivalent.
