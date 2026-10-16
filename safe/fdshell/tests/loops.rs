@@ -873,3 +873,54 @@ fn break_in_the_condition_after_the_body_ran_ends_the_loop() {
     assert_eq!(out, "body\nbody\ni=2\n");
     assert_eq!(err, "");
 }
+
+/// Task #222: the `for … in` list runs the same splitter as a command
+/// argument, so a list word splits **only on the bytes its expansions
+/// produced** — a literal `IFS` byte in the list is content and glues
+/// (`IFS=,; for w in x$(echo "b c"),y` is one iteration, exactly bash), and a
+/// positional of an embedded `$@` starts a new iteration. bash 5.3.9 values;
+/// the literal-word guard (`for w in a,b`) is task #133's rule.
+#[test]
+fn for_list_words_split_only_on_expansion_bytes() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; for w in x$(echo "b c"),y; do printf "[%s]\n" "$w"; done"#,
+            "[xb c,y]\n",
+        ),
+        (
+            r#"IFS=,; v="a b"; for w in x$v,y; do printf "[%s]\n" "$w"; done"#,
+            "[xa b,y]\n",
+        ),
+        (
+            r#"IFS=,; for w in $(printf "a,")$(printf ",b"); do printf "[%s]\n" "$w"; done"#,
+            "[a]\n[]\n[b]\n",
+        ),
+        (
+            r#"IFS=,; v="a,"; u="b"; for w in $v$u; do printf "[%s]\n" "$w"; done"#,
+            "[a]\n[b]\n",
+        ),
+        (
+            r#"IFS=" "; set -- "a b" c; for w in x$@y; do printf "[%s]\n" "$w"; done"#,
+            "[xa]\n[b]\n[cy]\n",
+        ),
+        (
+            r#"IFS=,; set -- "a b" c; for w in x"$@"y; do printf "[%s]\n" "$w"; done"#,
+            "[xa b]\n[cy]\n",
+        ),
+        // Guards: a literal list word never splits (task #133), and the
+        // whole-word `"$@"` is the positional words themselves.
+        (
+            r#"IFS=,; for w in a,b; do printf "[%s]\n" "$w"; done"#,
+            "[a,b]\n",
+        ),
+        (
+            r#"IFS=" "; set -- "a b" c; for w in "$@"; do printf "[%s]\n" "$w"; done"#,
+            "[a b]\n[c]\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}

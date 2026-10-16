@@ -20,6 +20,26 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// `substitute/tilde.rs` reads `$HOME` from the **process** environment (task
+/// #287 owns the shell-variable rule), so the tilde pins pass `HOME` to the
+/// child. `IFS` is assigned **inside** the script: bash resets an `IFS`
+/// inherited from the environment to its own default, so `IFS=, bash -c …` is
+/// not the comparison.
+fn run_with_home(script: &str, home: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .args(["-c", script])
+        .env("HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 fn run_stdin(script: &str, stdin: &str) -> (String, String, i32) {
     use std::io::Write;
     let mut child = Command::new(BIN)
@@ -205,7 +225,7 @@ fn quoted_ifs_after_cmd_subst_stays_one_word() {
 }
 
 #[test]
-fn unquoted_ifs_after_cmd_subst_still_splits() {
+fn cmd_subst_expansion_bytes_still_split_literal_bytes_do_not() {
     // Task #222: the literal `:` is not part of the expansion, so it never
     // delimits — bash keeps `[x:y]` (`$(true)` expands to nothing). A `:`
     // *inside* the `$( … )` output still cuts; see the `v=$(echo x)` shapes
@@ -713,7 +733,7 @@ fn leading_and_middle_empty_fields_stay() {
 // Task #222 (POSIX 2.6.5: field splitting applies to the expansion).
 
 #[test]
-fn literal_ifs_byte_after_expansion_cuts_the_word() {
+fn literal_ifs_byte_after_expansion_joins_the_word() {
     let cases: &[(&str, &str)] = &[
         (
             r#"IFS=,; v=$(echo "b c"); builtin printf "[%s]" x$v,y"#,
@@ -811,4 +831,287 @@ fn quoted_expansion_glued_to_a_literal_delimiter_keeps_all_the_bytes() {
         assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
         assert_eq!(&out, want, "{script:?}");
     }
+}
+
+// Task #222, the boundary side of the rule: inside a larger word every
+// positional of a `$@` starts a new field, and the field boundaries survive
+// the literal bytes glued to it. Values measured against bash 5.3.9 (the
+// join side of the rule — the unquoted `$@` and `$*` use the first `IFS` byte
+// as their separator — is pinned by
+// `embedded_dollar_at_uses_first_ifs_byte_join` above).
+
+#[test]
+fn embedded_quoted_dollar_at_starts_a_field_at_every_positional() {
+    let cases: &[(&str, &str)] = &[
+        // The positional glued to a literal keeps the literal on its side.
+        (
+            r#"IFS=,; set -- "a b" c; builtin printf "[%s]" x"$@"y"#,
+            "[xa b][cy]",
+        ),
+        (
+            r#"IFS=,; set -- "a b" c; builtin printf "[%s]" "$@"y"#,
+            "[a b][cy]",
+        ),
+        (
+            r#"IFS=,; set -- "a b" c; builtin printf "[%s]" x"$@""#,
+            "[xa b][c]",
+        ),
+        // A fully quoted word still cuts at the positional boundaries (bash).
+        (
+            r#"set -- "a b" c; builtin printf "[%s]" "x$@y""#,
+            "[xa b][cy]",
+        ),
+        // A positional that starts with whitespace keeps its own field.
+        (
+            r#"IFS=,; set -- "a " b; builtin printf "[%s]" x"$@"y"#,
+            "[xa ][by]",
+        ),
+        // No positionals: the word is the concatenation of its literals.
+        (r#"IFS=,; set -- ; builtin printf "[%s]" x"$@"y"#, "[xy]"),
+        (r#"IFS=,; set -- ; set -- x"$@"z; echo $#"#, "1\n"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+#[test]
+fn embedded_dollar_at_empty_positionals_keep_their_boundaries() {
+    // The empty positionals produce no bytes, so they cut only through their
+    // boundary: a **quoted** one keeps its (empty) field, and at the very end
+    // of the word a quoted one keeps it while the unquoted join drops it.
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; set -- a ""; builtin printf "[%s]" x"$@""#,
+            "[xa][]",
+        ),
+        (
+            r#"IFS=,; set -- a "" ""; builtin printf "[%s]" x"$@""#,
+            "[xa][][]",
+        ),
+        (
+            r#"IFS=,; set -- "" ""; builtin printf "[%s]" x"$@"y"#,
+            "[x][y]",
+        ),
+        (
+            r#"IFS=,; set -- "" b; builtin printf "[%s]" "$@"y"#,
+            "[][by]",
+        ),
+        (
+            r#"IFS=,; set -- "" c; builtin printf "[%s]" x$@y"#,
+            "[x][cy]",
+        ),
+        (
+            r#"IFS=,; set -- a ""; builtin printf "[%s]" x$@y"#,
+            "[xa][y]",
+        ),
+        (
+            r#"IFS=,; set -- "" ""; builtin printf "[%s]" x$@y"#,
+            "[x][y]",
+        ),
+        (
+            r#"IFS=,; set -- "a," b; builtin printf "[%s]" x$@y"#,
+            "[xa][][by]",
+        ),
+        // The unquoted join spelling: the join byte at the word end is a
+        // delimiter at the end of the expansion, so its field is elided.
+        (r#"IFS=,; set -- a ""; builtin printf "[%s]" x$@"#, "[xa]"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+#[test]
+fn embedded_dollar_at_join_and_boundaries_split_multibyte_positionals() {
+    // The unquoted `$@` joins with the first `IFS` byte, and that byte is
+    // what delimits (bash): the multi-byte positionals come out split.
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; set -- "a b" c; builtin printf "[%s]" x$@y"#,
+            "[xa b][cy]",
+        ),
+        (
+            r#"IFS=,; set -- "a,b" "c,d"; builtin printf "[%s]" x$@y"#,
+            "[xa][b][c][dy]",
+        ),
+        (
+            r#"IFS=" "; set -- " " b; builtin printf "[%s]" x$@y"#,
+            "[x][by]",
+        ),
+        (
+            r#"IFS=" "; set -- "a " " b"; builtin printf "[%s]" x$@y"#,
+            "[xa][by]",
+        ),
+        (
+            r#"IFS=" ,"; set -- "a, " b; builtin printf "[%s]" x$@y"#,
+            "[xa][by]",
+        ),
+        // `$*` is one joined string; the splitter cuts it back into fields.
+        (
+            r#"IFS=,; set -- "a,b" c; builtin printf "[%s]" x$*y"#,
+            "[xa][b][cy]",
+        ),
+        (
+            r#"IFS=,; set -- "a,b" c; builtin printf "[%s]" "$*""#,
+            "[a,b,c]",
+        ),
+        // Word counts: the same rule through `set --`.
+        (r#"IFS=,; set -- "a,b" "c,d"; set -- x$@y; echo $#"#, "4\n"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+/// Accepted divergence (task #222, pinned with the join rule): with an
+/// **empty** `IFS` the join byte does not exist, so fdshell's unquoted `$@`
+/// and `$*` contribute one joined field where bash makes each positional its
+/// own word. Pre-existing on master (the join is the first `IFS` byte, and an
+/// empty `IFS` disables splitting); the quoted `$@` is unaffected.
+#[test]
+fn empty_ifs_joins_an_unquoted_dollar_at_into_one_field() {
+    let (out, err, code) = run(r#"IFS=; set -- a b; builtin printf "[%s]" x$@y"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[xa by]", "bash prints [xa][by]");
+    let (out, err, code) = run(r#"IFS=; set -- a b; builtin printf "[%s]" x$*y"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[xa by]", "bash prints [xa][by]");
+    // Guard: the quoted `$@` has no join byte, so it splits per positional.
+    let (out, err, code) = run(r#"IFS=; set -- a b; builtin printf "[%s]" x"$@"y"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[xa][by]");
+}
+
+/// Task #222: two adjacent unquoted expansions. The trailing `IFS` byte of
+/// the **first** expansion delimits (it is not at the end of the whole
+/// expansion), a leading one delimits too, and an `IFS` byte of the *word*
+/// between them is content that glues. bash 5.3.9 values.
+#[test]
+fn adjacent_expansions_delimit_only_with_their_own_bytes() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; v="a,"; w="b"; builtin printf "[%s]" $v$w"#,
+            "[a][b]",
+        ),
+        (
+            r#"IFS=,; v=",a"; w="b"; builtin printf "[%s]" $v$w"#,
+            "[][ab]",
+        ),
+        (
+            r#"IFS=,; v="a,"; w=",b"; builtin printf "[%s]" $v$w"#,
+            "[a][][b]",
+        ),
+        (
+            r#"IFS=,; v="a, "; w="b"; builtin printf "[%s]" $v$w"#,
+            "[a][ b]",
+        ),
+        (
+            r#"IFS=" ,"; v="a, "; w="b"; builtin printf "[%s]" $v$w"#,
+            "[a][b]",
+        ),
+        (
+            r#"IFS=,; v="a,"; w=","; builtin printf "[%s]" $v$w"#,
+            "[a][]",
+        ),
+        (
+            r#"IFS=,; v="a "; w="b"; builtin printf "[%s]" $v$w"#,
+            "[a b]",
+        ),
+        // The tail of one expansion is not the tail of the whole expansion.
+        (r#"IFS=,; v="a,"; builtin printf "[%s]" ${v}x"#, "[a][x]"),
+        (r#"IFS=,; v="a,"; builtin printf "[%s]" $v":z""#, "[a][:z]"),
+        (r#"IFS=,; v="a,"; builtin printf "[%s]" x$v"#, "[xa]"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+/// Task #222, the trimming and glue rules over longer words: `IFS` whitespace
+/// trims at the ends of the **whole** expansion (so a run in the middle of a
+/// word delimits), every expansion byte delimits, and the word's literal
+/// bytes glue to the field they touch. bash 5.3.9 values.
+#[test]
+fn expansion_bytes_split_and_literal_bytes_glue_across_a_word() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=" "; builtin printf "[%s]" x$(printf " a")"#,
+            "[x][a]",
+        ),
+        (
+            r#"IFS=" "; builtin printf "[%s]" x$(printf "a ")y"#,
+            "[xa][y]",
+        ),
+        (
+            r#"IFS=" "; builtin printf "[%s]" x$(printf "  a  b  ")y"#,
+            "[x][a][b][y]",
+        ),
+        (
+            r#"IFS=" "; builtin printf "[%s]" x$(echo "a")$(echo "b")y"#,
+            "[xaby]",
+        ),
+        (
+            r#"IFS=" "; builtin printf "[%s]" x$(echo " ")$(echo " ")y"#,
+            "[x][y]",
+        ),
+        (
+            r#"IFS=,; builtin printf "[%s]" $(printf "a,")$(printf ",b")"#,
+            "[a][][b]",
+        ),
+        (
+            r#"IFS=,; v="a,b"; w="c"; builtin printf "[%s]" pre$v${w}post,y"#,
+            "[prea][bcpost,y]",
+        ),
+        (
+            r#"IFS=,; v="b,c"; w="d"; builtin printf "[%s]" x$v"$w"y,z"#,
+            "[xb][cdy,z]",
+        ),
+        (
+            r#"IFS=,; v="b c"; builtin printf "[%s]" x"${v}"y,z"#,
+            "[xb cy,z]",
+        ),
+        // A word that performed no expansion is one field, whatever `IFS` is.
+        (r#"IFS=,; v="a b"; set -- x$v,y; echo $#"#, "1\n"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
+/// Task #222: the tilde arm records **no** expansion bytes, so the expanded
+/// `$HOME` is never `IFS`-split — bash's rule (`IFS=,; HOME="a,b"; printf %s
+/// ~` is one field `[a,b]`). The `$HOME` of a `~` is read from the process
+/// environment (task #287), hence `run_with_home`. bash 5.3.9 values.
+#[test]
+fn tilde_output_is_never_split_by_ifs() {
+    let cases: &[(&str, &str)] = &[
+        (r#"IFS=,; builtin printf "[%s]" ~"#, "[a,b]"),
+        (r#"IFS=,; builtin printf "[%s]" ~/x"#, "[a,b/x]"),
+        // A quoted tilde is a literal byte, so `$HOME`'s own comma cuts.
+        (r#"IFS=,; builtin printf "[%s]" "~"$HOME"#, "[~a][b]"),
+        (r#"IFS=,; builtin printf "[%s]" "~""$HOME""#, "[~a,b]"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run_with_home(script, "a,b");
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+    // The same words, with the `IFS` byte coming from the expansion itself.
+    let (out, err, code) = run_with_home(r#"IFS=,; builtin printf "[%s]" "$HOME""#, "a,b");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a,b]", "quoted: the value is one field");
+    let (out, err, code) = run_with_home(r#"IFS=,; builtin printf "[%s]" $HOME"#, "a,b");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a][b]", "unquoted: the expansion's own byte cuts");
 }

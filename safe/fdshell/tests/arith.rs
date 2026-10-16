@@ -634,3 +634,23 @@ fn paren_depth_keeps_substitution_intact() {
         "stdout={stdout}"
     );
 }
+
+/// Accepted divergence (task #222, to be closed by task #288): `let` evaluates
+/// the substituted text, and a **quoted** `$@` contributes task #222's
+/// separator-free join, so the digits glue (`x = 34` → 34) where bash's
+/// non-word join is a space (`let "x = 3 4"` evaluates the first argument, so
+/// bash's `x` is 3). The braced/numbered spellings are unaffected.
+#[test]
+fn quoted_dollar_at_in_let_glues_the_positionals() {
+    let out = run(r#"set -- 3 4; let "x = $@"; echo $x"#);
+    assert!(out.status.success());
+    assert_eq!(
+        str::from_utf8(&out.stdout).unwrap().trim(),
+        "34",
+        "bash: `let \"x = 3 4\"` → 3"
+    );
+    // Guard: `$1`/`$2` are ordinary expansions — bash's value and fdshell's.
+    let guard = run(r#"set -- 3 4; let "x = $1 + $2"; echo $x"#);
+    assert!(guard.status.success());
+    assert_eq!(str::from_utf8(&guard.stdout).unwrap().trim(), "7");
+}

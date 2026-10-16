@@ -1042,3 +1042,20 @@ fn heredoc_unterminated_body_with_continuation_is_a_parse_error() {
     assert!(err.contains("here-doc"), "stderr={err:?}");
     assert!(err.contains("missing terminating"), "stderr={err:?}");
 }
+
+/// Accepted divergence (task #222, to be closed by task #288): a here-doc body
+/// is the substituted text and is never split, so a **quoted** `$@` keeps task
+/// #222's separator-free join and the positionals glue, where bash joins them
+/// with a space. A quoted delimiter is literal, so `$@` there expands to
+/// nothing in both shells.
+#[test]
+fn quoted_dollar_at_in_a_heredoc_body_is_glued() {
+    // bash prints `a b c`.
+    let (out, err, code) = run("set -- \"a b\" c; cat <<EOF\n$@\nEOF");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a bc\n", "bash prints a b c");
+    // Guard: a quoted delimiter expands nothing — both print the text `$@`.
+    let (out, _err, code) = run("set -- \"a b\" c; cat <<'EOF'\n$@\nEOF");
+    assert_eq!(code, 0);
+    assert_eq!(out, "$@\n");
+}

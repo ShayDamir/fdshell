@@ -1164,8 +1164,10 @@ fn unbound_percent_fd_marks_expansion() {
 fn leading_tilde_output_is_never_splittable() {
     // `~` pushed $HOME, and the home bytes are **literal** in the provenance
     // (task #222): bash never splits tilde output, so a literal `IFS` byte in
-    // `$HOME` stays content (`IFS=,; HOME="a,b"; printf %s ~` → `[a,b]`,
-    // pinned in `tests/wordsplit.rs`).
+    // `$HOME` stays content — pinned end to end by
+    // `tests/wordsplit.rs::tilde_output_is_never_split_by_ifs` (`~` →
+    // `[a,b]`, `~/x` → `[a,b/x]`, and the quoted-tilde contrast `"~"$HOME` →
+    // `[~a][b]`, where the `$HOME` bytes *are* splittable).
     let cell = dummy_cell();
     let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"~"), &[]);
     let home = std::env::var("HOME").unwrap();

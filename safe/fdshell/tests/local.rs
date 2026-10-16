@@ -284,3 +284,20 @@ fn a_local_value_glues_a_quoted_expansion_to_literal_text() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[qbc]");
 }
+
+/// Accepted divergence (task #222, to be closed by task #288): `local` shares
+/// the assignment rule — it stores the substituted text whole and never
+/// splits it — so a **quoted** `$@` keeps task #222's separator-free join and
+/// the positionals glue, where bash joins them with a space. Measured values;
+/// the unquoted spelling joins with the first `IFS` byte and matches bash.
+#[test]
+fn quoted_dollar_at_in_a_local_value_is_glued() {
+    // bash: `[a b c]` then `[xa b c]`.
+    let (out, err, code) = run(r#"f(){ local v="$@"; printf "[%s]\n" "$v" "x$v"; }; f "a b" c"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a bc]\n[xa bc]\n", "bash prints [a b c] / [xa b c]");
+    // Guard: the unquoted spelling matches bash (`[a b c]`).
+    let (out, err, code) = run(r#"f(){ local v=$@; printf "[%s]" "$v"; }; f "a b" c"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[a b c]");
+}

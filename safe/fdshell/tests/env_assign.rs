@@ -275,3 +275,41 @@ fn quoted_expansion_glued_to_literal_text_in_an_assignment_value() {
         assert_eq!(out, *want, "{script:?}");
     }
 }
+
+// Accepted divergence (task #222, to be closed by task #288): a **quoted**
+// `$@` in a value has no join byte. Task #222's splitter needs the
+// separator-free positional text (`IFS=,; set -- "a b" c; printf %s x"$@"y`
+// → `[xa b][cy]`, pinned in `tests/wordsplit.rs`), and an assignment never
+// splits — it stores the substituted text whole — so the positionals come out
+// glued where bash joins them with a space. bash's non-word `$@` join is
+// always a single space, whatever `IFS` is; the values below are the measured
+// fdshell text, and the bash value is quoted beside each case.
+#[test]
+fn quoted_dollar_at_in_an_assignment_value_is_glued() {
+    let cases: &[(&str, &str)] = &[
+        // bash: `[a b c]` then `[xa b c]`.
+        (
+            r#"set -- "a b" c; v="$@"; printf "[%s]\n" "$v" "x$v""#,
+            "[a bc]\n[xa bc]\n",
+        ),
+        // `IFS=,`: bash still joins with a space (`[a b c]`).
+        (
+            r#"IFS=,; set -- "a b" c; v="$@"; printf "[%s]" "$v""#,
+            "[a bc]",
+        ),
+        // The scoped form reaches the child the same way (bash: `v=a b c`).
+        (r#"set -- "a b" c; v="$@" env | grep "^v=""#, "v=a bc\n"),
+        // Guard: the unquoted spelling joins with the first `IFS` byte
+        // (master's rule) and with the default `IFS` that byte is a space,
+        // so it matches bash (`[a b c]`, `[xa b c]`).
+        (
+            r#"set -- "a b" c; v=$@; printf "[%s]\n" "$v" "x$v""#,
+            "[a b c]\n[xa b c]\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}

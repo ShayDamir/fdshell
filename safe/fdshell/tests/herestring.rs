@@ -171,3 +171,18 @@ fn here_string_tilde_follows_its_mask() {
         "bash prints {home}/x"
     );
 }
+
+/// Accepted divergence (task #222, to be closed by task #288): the here-string
+/// word becomes the redirect's text and is never split, so a **quoted** `$@`
+/// keeps task #222's separator-free join and the positionals glue, where bash
+/// joins them with a space.
+#[test]
+fn quoted_dollar_at_in_a_here_string_is_glued() {
+    // bash prints `a b c`, then `pa b c`.
+    let (out, err, code) = run(r#"set -- "a b" c; cat <<<"$@""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a bc\n", "bash prints a b c");
+    let (out, _err, code) = run(r#"set -- "a b" c; cat <<<"p$@""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "pa bc\n", "bash prints pa b c");
+}

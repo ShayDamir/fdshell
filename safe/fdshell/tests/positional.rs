@@ -289,3 +289,60 @@ fn positional_digit_run_ends_at_a_name_byte() {
         assert_eq!(out, *want, "{script:?}");
     }
 }
+
+/// Task #222: `$@` inside a larger word goes through the arm's spans and word
+/// boundaries (`substitute/dollar/at_star.rs`), a whole-word `$@` through
+/// `substitute::positional::expand_positional_word`. Two code paths, one rule:
+/// every positional is its own field, glued to the literal bytes that touch
+/// it. Pinned side by side (`"$@"`, `""$@`, `"$@"y`, `x"$@"y`, `x$@y`,
+/// `x"$@"`) with the word count and the values, `IFS=,`. bash 5.3.9 values;
+/// the accepted divergence of the whole-word `""$@` over an empty positional
+/// is pinned in `tests/wordsplit.rs`.
+#[test]
+fn whole_word_and_embedded_dollar_at_paths_agree() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"IFS=,; set -- a b; set -- "$@"; echo $#; printf "[%s]" "$@""#,
+            "2\n[a][b]",
+        ),
+        (
+            r#"IFS=,; set -- a b; set -- ""$@; echo $#; printf "[%s]" "$@""#,
+            "2\n[a][b]",
+        ),
+        (
+            r#"IFS=,; set -- a b; set -- "$@"y; echo $#; printf "[%s]" "$@""#,
+            "2\n[a][by]",
+        ),
+        (
+            r#"IFS=,; set -- a b; set -- x"$@"y; echo $#; printf "[%s]" "$@""#,
+            "2\n[xa][by]",
+        ),
+        (
+            r#"IFS=,; set -- a b; set -- x$@y; echo $#; printf "[%s]" "$@""#,
+            "2\n[xa][by]",
+        ),
+        (
+            r#"IFS=,; set -- a b; set -- x"$@"; echo $#; printf "[%s]" "$@""#,
+            "2\n[xa][b]",
+        ),
+        // The empty positional: kept by the quoted spellings (its own field),
+        // dropped by the unquoted join (delimiter at the expansion's end).
+        (
+            r#"IFS=,; set -- a ""; set -- "$@"; echo $#; printf "[%s]" "$@""#,
+            "2\n[a][]",
+        ),
+        (
+            r#"IFS=,; set -- a ""; set -- x"$@"; echo $#; printf "[%s]" "$@""#,
+            "2\n[xa][]",
+        ),
+        (
+            r#"IFS=,; set -- a ""; set -- x$@; echo $#; printf "[%s]" "$@""#,
+            "1\n[xa]",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(out, *want, "{script:?}");
+    }
+}

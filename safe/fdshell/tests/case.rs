@@ -110,3 +110,24 @@ fn case_pattern_side_divergences_are_pinned() {
     let (out, _err, code) = run("case \"a\\$b\" in \"a$b\") echo m;; esac");
     assert_eq!((out.as_str(), code), ("m\n", 0), "bash prints nothing");
 }
+
+/// Accepted divergence (task #222, to be closed by task #288): the `case` word
+/// is substituted whole and compared as-is, so a **quoted** `$@` keeps task
+/// #222's separator-free join and the pattern must be written glued where
+/// bash's space join asks for a space.
+#[test]
+fn quoted_dollar_at_in_a_case_word_is_glued() {
+    // bash matches the `a b c` pattern (its word is `a b c`); fdshell's word
+    // is `a bc`, so only the glued pattern matches.
+    let (out, err, code) = run(
+        r#"set -- "a b" c; case "$@" in "a b c") echo spaced;; "a bc") echo glued;; *) echo other;; esac"#,
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "glued\n", "bash prints spaced");
+    // The glued literal in front of the expansion follows the same rule.
+    let (out, err, code) = run(
+        r#"set -- "a b" c; case "p$@"q in "pa b cq") echo spaced;; "pa bcq") echo glued;; *) echo other;; esac"#,
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "glued\n", "bash prints spaced");
+}
