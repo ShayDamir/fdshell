@@ -1172,7 +1172,11 @@ Accepted divergences:
 - A quoted leading `~` is a literal byte (POSIX expands tildes **before** quote
   removal): `echo "~"`, `"~/x"`, `<<<"~"` and a body `~` all print `~`, while
   the unquoted `~` and `~/x` expand to `$HOME` (task #269; the expansion order
-  of "For-list words" is unchanged).
+  of "For-list words" is unchanged). The bytes the tilde produces are **not**
+  `IFS`-split — the tilde arm records no expansion bytes, so
+  `IFS=,; HOME=a,b; printf %s ~` is one field `a,b` (task #222, see "Word
+  splitting (`IFS`)`); a `~` quoted away from `$HOME` (`"~"$HOME`) leaves the
+  `$HOME` bytes splittable and splits (`[~a][b]`).
 - A quoted *block opener* at the start of a statement (`'if' x`, `"while" x`)
   is still parsed as the keyword (task #247); bash runs it as a command word.
 - An unpaired quote (of either kind) is a parse error reported at the quote
@@ -1224,7 +1228,23 @@ the bytes of a word that performed none: `IFS=,; echo a,b` prints `a,b`, and
   default-`IFS` form): the whole-word `""$@` has an all-unquoted mask (the
   `""` contributes no bytes), so fdshell re-splits each positional with `IFS`
   and drops the empty ones (`IFS=,; set -- a "" b; set -- ""$@; echo $#` →
-  `2`), where bash makes each positional its own word (`3`).
+  `2`), where bash makes each positional its own word (`3`);
+- accepted divergence (task #222): with an **empty** `IFS` the unquoted `$@`
+  and `$*` have no join byte, so their positionals come out as one joined
+  field (`IFS=; set -- a b; printf %s x$@y` → `[xa by]`), where bash makes
+  each positional its own word (`[xa][by]`). The quoted `$@` is unaffected
+  (`x"$@"y` → `[xa][by]`), because it never used a join byte;
+- accepted divergence (task #222, to be closed by task #288): bash's
+  **non-word** `$@` join is always a single space, and the surfaces that
+  never split — an assignment value, a here-doc body, a here-string word, a
+  `case` word, a `local`/`let` value — store the substituted text whole, so a
+  **quoted** `$@` there keeps the positionals glued:
+  `set -- "a b" c; v="$@"; printf %s "$v"` prints `a bc` where bash prints
+  `a b c`. In word positions (where splitting runs) fdshell matches bash
+  (`IFS=,; printf %s x"$@"y` → `[xa b][cy]`); the unquoted spellings keep the
+  first-`IFS`-byte join, so with the default `IFS` they match (`v=$@` →
+  `a b c`). Pinned per surface in `tests/env_assign.rs`, `tests/local.rs`,
+  `tests/arith.rs`, `tests/heredoc.rs`, `tests/herestring.rs`, `tests/case.rs`.
 
 ```
 IFS=,;  builtin printf "[%s] " a,b          → [a,b]        (literal: no split)
@@ -1389,15 +1409,17 @@ argument goes through (task #131), in bash's order:
 2. tilde, parameter, command, and arithmetic substitution and `%fd` / `$@`
    expansion run in-process (a tilde only when its own mask bit is unquoted —
    `"~"` is the literal tilde, task #269);
-3. the expansion is split on `IFS` bytes, driven by the word's own quote mask —
-   a quoted byte never splits;
+3. the expansion is split on `IFS` bytes, driven by the word's own quote mask
+   **and on provenance**: a quoted byte never splits, and only the bytes an
+   expansion produced delimit, so a literal `IFS` byte in the list is content
+   that glues (see "Word splitting (`IFS`)");
 4. every field is pathname-expanded (`$(…)` output included), and each
    resulting field is one iteration of the loop.
 
 ```
 x="a b";  for w in $x      → [a] [b]      IFS-split, each field globbed
 x=a*b;    for w in "$x"    → the value, quoted bytes never glob
-for w in ~                 → $HOME
+for w in ~                 → $HOME        (the expanded `$HOME` is never split)
 for w in "~"               → the literal `~` (a quoted tilde never expands)
 for w in 1$((1+2))         → 13
 for w in $(echo a*)        → the files matching `a*`
@@ -1489,11 +1511,6 @@ Accepted divergences (scanning is fixed, expansion is not):
 - a `$( … )` nested inside a `${ … }` body is scanned as a unit and stays
   literal (`echo "x${u:-"$(echo "p q")"}y"` → `x$(echo p q)y`); the `${ … }` body
   is taken verbatim (task #174);
-- `IFS=,; printf "[%s]" x$v,y` (with `v=$(echo "b c")`) yields two words here
-  and one in bash: fdshell splits the whole word — the literal part included —
-  on `IFS`, bash splits only the expansion part, so a literal `IFS` byte placed
-  after an unquoted embedded expansion cuts between the expansion's last field
-  and the literal text (task #222).
 
 Other accepted divergences of the `for … in` word pipeline (task #131):
 

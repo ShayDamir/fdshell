@@ -1091,12 +1091,17 @@ the "delete the flag" shortcut. `split(":")` is one empty field, not none: the
 leading delimiter delimits it, and the word end adds no second one (bash:
 `IFS=:; set -- $(printf ":")` → `$#` = 1).
 
-Flag `safe/fdshell/src/substitute/arg.rs` (83 LoC, STYLE.md §2.3 80–90 band) for
-refactoring. The structural fix — splitting each expansion part separately and
-concatenating it with the literal parts, so a literal `IFS` byte after an
-embedded expansion stops cutting the word (`IFS=,; v=$(echo "b c"); printf
-"[%s]" x$v,y` → `[xb c][y]` here, `[xb c,y]` in bash) — is task #222; the
-`expanded` bit added here is exactly the information that refactor needs.
+Flag `safe/fdshell/src/substitute/arg.rs` (82 LoC after task #222 extracted the escape arms,
+STYLE.md §2.3 80–90 band, reported by `tools/complexity.py`) for refactoring; it stays in the
+Refactoring epic. The structural fix it was flagged for — a literal `IFS` byte after an embedded
+expansion cutting the word (`IFS=,; v=$(echo "b c"); printf "[%s]" x$v,y` → `[xb c][y]` here,
+`[xb c,y]` in bash) — landed in task #222 as **byte provenance** (`substitute/origin.rs`: the
+splitter cuts only the bytes an expansion produced), not as per-part splitting: splitting per part
+needs the whole-expansion trimming rules across part boundaries (see the task #222 lesson). The
+`expanded` bit added here was exactly the information that fix needed, and task #222 superseded it
+with the span list — the flag is gone, so `is_empty()` (no splittable byte recorded) is the one
+signal, and the tilde arm is the arm where the two ever differed (it produces bytes that must not
+split).
 
 ## A capability base that tracks the process CWD must be pinned by a test that diverges them
 
@@ -1581,14 +1586,70 @@ if a future surface ever binds an empty name, that fallback stops being equivale
 ## `$@` has two join rules, selected by the trigger byte's quote bit
 Task #222's provenance splitting replaced the `expanded` flag, and the natural model — push each
 positional adjacent, let a word-boundary mark split every one of them — is **wrong for the
-unquoted arm**. bash joins an unquoted embedded `$@` (and any `$*`) with the first `IFS` byte,
-and that separator byte is what splits: `IFS=:; set -- a b; printf %s x$@` → `[xa][b]`,
-`IFS=" "; set -- "a b" "c d"; printf %s x$@y` → `[xa][b][c][dy]` — an adjacent push loses the
-ws-IFS split (`[xa][bcd][y]`) and a boundary after a consumed ws-run drops the empty field bash
-keeps with multi-byte positionals. Only the *quoted* `$@` emits no separator at all (`IFS=,;
-set -- "a b" c; printf %s x"$@"y` → `[xa b][cy]`, no comma in bash's output); it needs the
-boundary marks, and carries the quote bit there because a quoted positional ending the word
-keeps its empty field (`IFS=,; set -- a ""; printf %s x"$@"` → `[xa][]` unquoted `[xa]`).
+unquoted arm** with a **non-empty** `IFS`, which is what bash's own rule measures. bash joins an
+unquoted embedded `$@` (and any `$*`) with the first `IFS` byte, and that separator byte is what
+splits: `IFS=:; set -- a b; printf %s x$@` → `[xa][b]`, `IFS=" "; set -- "a b" "c d"; printf %s
+x$@y` → `[xa][b][c][dy]`. The boundary model reproduces that row too (the positional bytes are
+splittable, so `IFS=" "` splits `a b` inside the first positional), so the join is not forced by
+whitespace `IFS`; it is what bash measures for every non-empty `IFS` measured on task #222 (≈30
+shapes: multi-byte positionals with whitespace `IFS`, empty positionals at the start/middle/end,
+`"a,"` positionals, `$*`). The **residual divergence is the empty `IFS`**: with no join byte the
+unquoted `$@`/`$*` give one field (`IFS=; set -- a b; printf %s x$@y` → `[xa by]`, bash
+`[xa][by]`, pinned in `wordsplit.rs::empty_ifs_joins_an_unquoted_dollar_at_into_one_field`) —
+pre-existing on master, and the quoted `$@` is unaffected because it never used a join byte.
+Only the *quoted* `$@` emits no separator at all (`IFS=,; set -- "a b" c; printf %s x"$@"y` →
+`[xa b][cy]`, no comma in bash's output); it needs the boundary marks, and carries the quote bit
+there because a quoted positional ending the word keeps its empty field (`IFS=,; set -- a "";
+printf %s x"$@"` → `[xa][]` unquoted `[xa]`).
+**Record spans for the splitter, and join only where a splitter consumes the text**: the joining
+arm belongs on the path that runs `split_word`, never on a surface that stores the substituted
+text (an assignment value, a here-doc body, a here-string word, a `case` word, `local`/`let`),
+and the separator-free text is what makes the *splitting* path bash-accurate — re-adding a
+separator there breaks `x"$@"y` → `[xa b][cy]`. Today the non-splitting surfaces inherit the
+separator-free text (bash's non-word join is a space, so `v="$@"` stores `a bc` where bash stores
+`a b c`); task #288 owns that join.
 Record spans for the splitter, never guess from `expanded`; measure every shape in bash before
 pinning — the earlier "bash cuts here" pins for literal `IFS` bytes after an expansion
 (`x$(true):y` → `[x:y]`, not `[x][y]`) were master-behavior pins, not bash facts.
+## Field splitting cuts expansion bytes only; `$@` positionals are word boundaries
+POSIX 2.6.5 "Fields are produced by splitting the expansion of the word" is a **provenance** rule,
+not a quote rule. The splitter (`substitute/split.rs::split_word`) cuts a byte only when it is in
+`IFS`, its mask bit is `false`, **and** `substitute/origin.rs` marks it as produced by an
+expansion; the word's own literal bytes are always content, so a literal `IFS` byte glues to the
+field it touches (`IFS=,; v=$(echo "b c"); printf %s x$v,y` → `[xb c,y]`, `IFS=,; v=q; printf %s
+"$v"b,c` → `[qb,c]`). The mask model alone cannot say this — it knows quoting, not origin — and a
+per-part split ("split each expansion part, then glue") is wrong, because `IFS` whitespace
+trimming and empty-field elision are properties of the **whole** expansion:
+`IFS=" " v="a "; w="b"; printf %s $v$w` → `[a][b]` (the first expansion's trailing space is not at
+the end of the expansion, so it delimits) and `IFS=" " printf %s x$(printf " a")` → `[x][a]` (the
+leading space of an expansion that is not at the start of the word delimits). Both rows are the
+reason the algorithm stays **one linear scan** over the concatenated text with a provenance vector
+(the parts are spans, the gaps are literal); `IFS=,; v="a,"; w="b"` → `[a][b]` is the same fact
+with a non-whitespace byte. Trimming corollaries, all pinned: the elision is at the end of the
+expansion only (`IFS=,; set -- a ""; printf %s x$@` → `[xa]` — the join byte is the expansion's
+last byte; `IFS=,; v="a,"; printf %s x$v` → `[xa]`), leading and middle empties survive
+(`IFS=,; v=",a"; w="b"` → `[][ab]`, `v="a,"; w=",b"` → `[a][][b]`), and a word with no spans has
+no delimiter bytes at all, so it comes back as one field — which is why task #133's `expanded`
+gate is now redundant and the tilde arm records **nothing**: bash never splits the expanded
+`$HOME` (`IFS=,; HOME=a,b; printf %s ~` → `[a,b]`, `~/x` → `[a,b/x]`), and `"~"$HOME` → `[~a][b]`
+shows the two provenances side by side in one word.
+A `$@` positional glued into a larger word is a **word boundary**: the boundary flush reuses the
+non-whitespace-delimiter condition `!cur.is_empty() || trailing || i == 0`, and each arm of it is
+pinned separately — flush the pending empty field a delimiter just produced (`IFS=,; set -- "a,"
+b; printf %s x$@y` → `[xa][][by]`), flush a leading empty field at index 0 (`IFS=,; set -- "" b;
+printf %s "$@"y` → `[][by]`), and **skip** the flush when the preceding text was a whitespace run
+just consumed (`IFS=" "; set -- " " b; printf %s x$@y` → `[x][by]`). The end-of-word case needs the
+positional's quote bit on the boundary: a quoted positional ending the word keeps its (empty)
+field (`IFS=,; set -- a ""; printf %s x"$@"` → `[xa][]`, two empties → `[xa][][]`) while the
+unquoted join drops it (`[xa]`). A boundary is *not* needed in the whitespace-run look-ahead: a
+byte the run consumes can never flush (`cur` empty, `trailing` false, `i != 0`), and boundaries
+only exist for a quoted `$@`, whose positional bytes inherit the trigger's quoted mask bit — so
+the mask test already stops the run there. That guard was dead code and an equivalent mutant;
+task #222's review deleted it.
+The two `$@` **code paths** — the whole-word form (`substitute/words.rs` →
+`substitute::positional::expand_positional_word`, per-positional splitting) and the embedded form
+(`substitute/dollar/at_star.rs`, spans + boundaries) — are the drift risk of this design: they are
+not shared code, so pin both spellings side by side (`"$@"`, `""$@`, `"$@"y`, `x"$@"y`, `x$@y`,
+`x"$@"`) in `tests/positional.rs::whole_word_and_embedded_dollar_at_paths_agree` and never move a
+pin to match fdshell's output — every expectation in task #222's tables was re-measured in bash
+5.3.9 first.
