@@ -320,6 +320,16 @@ Limitations:
   unterminated heredoc (rc 1) where bash reports a syntax error rc 2:
   `while cat <<X; do a && b; X` + `done`. The block's *command* bytes are opaque
   to the split, and a statement's bodies stay fully opaque (task #234).
+- A `#`-comment block closer inside a block body's **own** line drops the block
+  counter, so the block never closes: `while :; do` / `cat <<Q` / `body` / `Q` /
+  `# done` / `echo a && echo b` / `break` / `done` is rc 1 `expected 'done'`,
+  where bash prints `body` `a` `b` (rc 0) — task #237 owns the comment rule
+  (`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_stays_broken`).
+  The same comment **inside a heredoc body region** is inert, because the region
+  is opaque in both directions: `while :; do` / `cat <<Q` / `# done` / `body` /
+  `Q` / `echo a && echo b` / `break` / `done` prints `# done` `body` `a` `b`
+  (rc 0, as bash; `case` twin included)
+  (`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`).
 - A line whose body stream is **incomplete** yields no regions at all, because
   the regions are allocated for all of the line's operators in order: in
   `if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT` + `T` the
@@ -409,7 +419,9 @@ carries heredoc bodies inside its own text keeps the rule, and only its body
 break; done` + `body` + `X` prints `body` `a` `b` (rc 0, as bash), while the
 `&&` written in a body line stays the pinned split (see "Heredocs"). What stays
 broken: a `&&` inside a function-definition group body (task #235), a keyword in
-argument position inside a body (#236), and a comment line inside a body (#237).
+argument position inside a body (#236), and a comment line in a body's **own**
+lines (#237) — a comment written inside a heredoc **body region** is inert, as in
+bash.
 
 Every `then`, `elif`, `else` and `do` arm requires a non-empty body (POSIX #2.9,
 task #233): `if true; then; fi`, `if true; then echo a; else; fi` and

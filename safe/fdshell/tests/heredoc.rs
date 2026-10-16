@@ -910,6 +910,42 @@ fn block_body_heredoc_delimiter_line_operator_is_region_data() {
     );
 }
 
+/// Task #234 (review F2): a `#`-comment **block closer written inside a heredoc
+/// body region** is inert. The region is skipped whole by the cond-boundary
+/// region rule, so its bytes never reach the block-keyword counter and the block
+/// closes on its real closer. Measured against bash 5.3.9 on both shapes:
+/// `# done` / `# esac`, the body, `a`, `b`, rc 0 — parity gained (master
+/// reported `expected 'done'` and `case: missing 'esac'`, rc 1).
+#[test]
+fn comment_block_closer_in_a_heredoc_body_region_is_inert() {
+    let (out, err, code) =
+        run("while :; do\ncat <<Q\n# done\nbody\nQ\necho a && echo b\nbreak\ndone");
+    assert_eq!(
+        (out.as_str(), code),
+        ("# done\nbody\na\nb\n", 0),
+        "stderr={err:?}"
+    );
+    let (out, err, code) =
+        run("case q in\nq)\ncat <<Q\n# esac\nbody\nQ\necho a && echo b\n;;\nesac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("# esac\nbody\na\nb\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+/// The same comment written in the block's **own** body line stays broken: it
+/// drops the block counter, so the tail `&&` splits the block text and the loop
+/// never closes. Measured rc 1 `expected 'done'` on master and here, bash rc 0 —
+/// task #237 owns the comment rule; #234 changed nothing here.
+#[test]
+fn comment_block_closer_in_a_block_body_line_stays_broken() {
+    let (_out, err, code) =
+        run("while :; do\ncat <<Q\nbody\nQ\n# done\necho a && echo b\nbreak\ndone");
+    assert_eq!(code, 1, "bash rc 0");
+    assert!(err.contains("expected 'done'"), "stderr={err:?}");
+}
+
 /// Task #274 / LESSONS "a region window and the skip derived from it are one
 /// pair" (measured divergence, pinned as fdshell's own behaviour): the line's
 /// regions are allocated for **all** of its operators, so an unterminated
