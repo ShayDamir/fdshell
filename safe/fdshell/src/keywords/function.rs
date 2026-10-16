@@ -35,6 +35,23 @@ pub(crate) fn function_def_name(word: &[u8]) -> Option<&[u8]> {
     head.filter(|w| w.ends_with(b"(")).and_then(name)
 }
 
+/// The byte length of the definer words at the start of `word`: the definer
+/// text the parse layer consumes (`f(` + its `)` in the POSIX form,
+/// `function` + the name word in the keyword form). Leading whitespace is
+/// skipped, the text after the definer words is not counted. `None` = not a
+/// definer. `segment/group/prefix.rs::definer_at_run` measures the filler
+/// behind the returned length, so the run rule and this definer rule are one
+/// implementation (task #235).
+pub(crate) fn definer_len(word: &[u8]) -> Option<usize> {
+    function_def_name(word)?;
+    let (head, rest) = skip_word(word);
+    if head.is_some_and(|w| w == b"function") {
+        return Some(word.len() - skip_word(rest).1.len());
+    }
+    // POSIX: the `)` closing the name word's `(` is part of the definer text.
+    Some(word.len() - rest.len() + usize::from(rest.first() == Some(&b')')))
+}
+
 /// The definer word with its trailing POSIX `(` stripped.
 fn name(word: &[u8]) -> Option<&[u8]> {
     word.get(..name_len(word)?)

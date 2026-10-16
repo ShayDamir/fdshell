@@ -10,7 +10,7 @@ mod wait;
 
 use quoted::quoted_word;
 
-pub(crate) use function::{function_def_name, name_len};
+pub(crate) use function::{definer_len, function_def_name, name_len};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
 use crate::segment::group::{closes, opens};

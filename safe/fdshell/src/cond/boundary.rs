@@ -2,10 +2,12 @@
 //! a multi-line heredoc part stays one part and `&&` / `||` in its body do
 //! not split it. Inside a keyword block the block's command text is opaque,
 //! while the heredoc **body** regions it carries inline stay scanned
-//! (`boundary/body.rs`).
+//! (`boundary/body.rs`). The group counter recognizes a function
+//! definition's body opener as well as the plain group opener, so a body's
+//! operators stay body data of the definition ([`opens_group`], task #235).
 
 use crate::scan::ScanState;
-use crate::segment::group::{group_at_run, opens_at};
+use crate::segment::group::{definer_at_run, group_at_run, opens_at};
 
 mod block;
 mod body;
@@ -48,10 +50,11 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                 block_depth = block_depth.saturating_add(delta).max(0);
             }
             // Only a brace that opens a group counts: at a cond-list part start
-            // (the run is empty, or the run ends with `&&` / `||`). A brace in an
-            // argument position (`echo x{`, `echo {`) is word data, exactly as the
-            // segment scanner's `group_at_run` rule requires.
-            if opens_at(line, i) && group_at_run(line, run_start, i).is_some() {
+            // (the run is empty, or the run ends with `&&` / `||`) or as a
+            // function definition's body opener. A brace in an argument position
+            // (`echo x{`, `echo {`) is word data, exactly as the segment
+            // scanner's `group_at_run` rule requires.
+            if opens_at(line, i) && opens_group(line, run_start, i) {
                 group_depth += 1;
             } else if b == b'}' {
                 // A stray closer must clamp at 0, not go negative: a negative
@@ -92,4 +95,15 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
         i = state.advance(line, i);
     }
     (line.len(), false)
+}
+
+/// A `{` at `brace` opens an opaque group on the run that starts at
+/// `run_start`: the cond-list clause rule [`group_at_run`] (empty run, a run
+/// ending with `&&` / `||`, `time [-p]` transparent), plus a function
+/// definition's body opener — the definer word in front of the `{` keeps the
+/// opener off the run start, and the segment scanner claims the body from the
+/// definer, so the body's `&&` / `||` is body data (task #235,
+/// [`definer_at_run`]).
+fn opens_group(line: &[u8], run_start: usize, brace: usize) -> bool {
+    group_at_run(line, run_start, brace).is_some() || definer_at_run(line, run_start, brace)
 }

@@ -9,7 +9,7 @@ use super::Segment;
 pub(super) mod opener;
 mod prefix;
 mod word;
-pub(crate) use prefix::group_at_run;
+pub(crate) use prefix::{definer_at_run, group_at_run};
 pub(crate) use word::{closes, opens, opens_at};
 
 /// Take the group branch of the segment scan at the group opener of the run
