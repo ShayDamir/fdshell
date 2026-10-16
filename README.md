@@ -288,7 +288,12 @@ operators claim — `if true; then cat <<T; fi` + body + `T` prints `bodyT`
 break; done`), the `elif` arm and the `else` arm, an arm with several
 here-docs (`then cat <<A; cat <<B; fi`, bodies in operator order) and an arm
 below an earlier arm's here-doc (`elif cat <<C; then cat <<T; fi`); in a
-multi-line block the arm's own lines already carry the body inline. A here-doc on a
+multi-line block the arm's own lines already carry the body inline. A block
+segment delivers its claimed regions to the cond layer the same way a statement
+does (task #234): the block's text is its command bytes and its regions are
+`run_cond_list`'s bodies, so the part that owns the `<<` operator is the one that
+runs with the body — `if true; then cat <<T; fi && echo x` + `body` + `T` prints
+`body` `x` (rc 0, as bash). A here-doc on a
 **user-function call** delivers the body to the call, because a function call is a simple command:
 `f() { cat; }; f <<EOF` prints the body, and the shell's stdin is back when the
 call finishes, so `echo after` after it prints on the terminal (as bash).
@@ -306,20 +311,15 @@ Limitations:
   does work: the body is the child's own text.
 - A body line that is exactly `elif` / `else` (in an if body) or `;;` (in a
   case / wait body) is misread as block structure.
-- A keyword block whose text carries a `<<` operator keeps the pre-#137 split, so
-  a cond-list operator in such a block is still broken:
-  `while cat <<X; do a && b; X` + `done` is a parse error rc 1 (bash rc 2), where
-  the heredoc-free `while true; do a && b; done` runs (task #137). The reason is
-  that a block's condition bodies travel *inside* its text, and the `&&` written
-  in a body line must stay a split point
-   (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`).
-   Task #234 owns the fix.
-- The same split hits the **body** of a single-line block (task #238's twin of
-  the bullet above): `if true; then cat <<T; fi` + `body && x` + `T` is a parse
-  error rc 1, where bash prints `body && x` (rc 0) — the body regions appended
-  to the arm's text are re-split on their `&&` before the arm parses
-  (`tests/heredoc.rs::single_line_block_body_heredoc_with_and_in_body_still_splits`).
-  Task #234 owns the fix.
+- A cond-list operator written in a **heredoc body region that travels inside a
+  block's own text** stays a split point, so the block's parse fails:
+  `if cat <<X; then` + `body && x` + `X` + `fi` is rc 1 `missing 'fi'`, where
+  bash reports a syntax error rc 2
+  (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). A
+  block whose heredoc has **no delimiter line inside its text** reports its own
+  unterminated heredoc (rc 1) where bash reports a syntax error rc 2:
+  `while cat <<X; do a && b; X` + `done`. The block's *command* bytes are opaque
+  to the split, and a statement's bodies stay fully opaque (task #234).
 - A line whose body stream is **incomplete** yields no regions at all, because
   the regions are allocated for all of the line's operators in order: in
   `if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT` + `T` the
@@ -403,8 +403,13 @@ it holds inside a block body and with `time [-p]` prefixes. The span is gated on
 the same scorer the run start uses, so a word that opens no block stays word
 data: `true && wait; echo tail` runs the POSIX builtin `wait` and then
 `echo tail`, and only the event-case `wait` (a pattern keyword behind it) takes
-the block span mid-run. What stays broken:
-a block whose text also carries a here-doc (task #234, see "Heredocs").
+the block span mid-run. The opacity is **region-aware** (task #234): a block that
+carries heredoc bodies inside its own text keeps the rule, and only its body
+**regions** are scanned for an operator — `while cat <<X; do echo a && echo b;
+break; done` + `body` + `X` prints `body` `a` `b` (rc 0, as bash), while the
+`&&` written in a body line stays the pinned split (see "Heredocs"). What stays
+broken: a `&&` inside a function-definition group body (task #235), a keyword in
+argument position inside a body (#236), and a comment line inside a body (#237).
 
 Every `then`, `elif`, `else` and `do` arm requires a non-empty body (POSIX #2.9,
 task #233): `if true; then; fi`, `if true; then echo a; else; fi` and
