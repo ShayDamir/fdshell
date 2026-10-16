@@ -397,9 +397,13 @@ part too (task #232): the segment scanner skips the block's span whole inside
 the run (the rule the `{ …; }` group already used), so `true && while :; do
 echo hi; break; done` runs the loop as the `&&` part (and `false &&` skips
 it, rc 1), a trailing operator after the closing keyword — on one line
-(`… done && echo x`) or with the closer at a line start (`… done` newline-less
-offset, `done && echo x`) — is a part gated by the block's status, and all of
-it holds inside a block body and with `time [-p]` prefixes. What stays broken:
+(`… done && echo x`) or with the closer at the start of a physical line
+(`… done` ↵ `done && echo x`) — is a part gated by the block's status, and all of
+it holds inside a block body and with `time [-p]` prefixes. The span is gated on
+the same scorer the run start uses, so a word that opens no block stays word
+data: `true && wait; echo tail` runs the POSIX builtin `wait` and then
+`echo tail`, and only the event-case `wait` (a pattern keyword behind it) takes
+the block span mid-run. What stays broken:
 a block whose text also carries a here-doc (task #234, see "Heredocs").
 
 Accepted divergences from bash:
@@ -417,9 +421,6 @@ Accepted divergences from bash:
   unexpected token '&'`, rc 2).
 - C-style `for ((i=0;i<3;i++)); do …; done` is rejected (`expected 'in'`,
   task #293); bash runs it.
-
-Accepted divergences from bash:
-
 - A group as a pipeline stage (`{ echo a; } | cat`, `echo a| { echo b; }`) and a
   background group (`{ echo a; } &`) are parse errors (`unexpected pipe` /
   `unexpected character`, rc 1, where bash forks the stage and exits 0); in

@@ -1728,7 +1728,7 @@ run**; argument position → word data) must be applied by the segment scanner
 (`cond/boundary/block.rs::word_delta`), and by the block executors — three
 layers, one rule; pin the tri-state classification per layer.
 
-Three edges the twin rule carries:
+Four edges the twin rule carries:
 
 1. **The span end is the closer's run *separator*, not the run end.**
    `comment::scan_block`'s run end swallows the `;` written after the closer
@@ -1754,15 +1754,32 @@ Three edges the twin rule carries:
    length on a `starts_with` prefix seeds the scan inside the word, and the
    scan then swallows the rest of the run.
 
-`wait` is the gated opener: `keyword_delta` scores the event-case `wait`
-only with a pattern keyword behind it, while `opener_len` measures the word.
-The mid-run span swallows the run for the builtin form too — harmlessly: the
-cond layer re-splits every operator the span swallowed, so
-`true && wait $! && echo x` keeps the builtin's operators (pinned).
+4. **The mid-run scorer must *call* `keyword_delta`, not parallel it.** The
+   span's gate is the shared run-start scorer, not the length: `opener_len`
+   measures a word, only the scorer says whether that word opens a block.
+   `wait` is the proof — `opener_len` answers `Some(4)` for the POSIX builtin
+   too, and a span over it swallows the whole rest of the run **harmfully**:
+   the cond layer re-splits `&&`/`||` only, never a `;`, so
+   `true && wait; echo tail` printed nothing with rc 0 and no diagnostic, and
+   `while :; do true && wait; echo tail; break; done` hung, because the
+   swallowed text held the `break` (bodies are re-scanned, so mid-run applies
+   inside them). Take the keyword branch only on `keyword_delta == Some(1)`
+   (`span_end`): the event-case `wait` (pattern keyword behind it) keeps its
+   span, a `wait` that opens no block stays **word data** and the run splits
+   at its `;` exactly as before the mid-run rule existed. The same gate is
+   what keeps a `name()` word with no `{` body word data — the run-start path
+   requires `scan_function_block` to match, so the mid-run path requires the
+   brace body to exist. Pins: `segment/block/midrun/tests.rs::the_scored_gate_keeps_the_builtin_wait_word_data`,
+   `tests/cond_blocks.rs::builtin_wait_mid_run_stays_word_data` and
+   `event_case_wait_mid_run_keeps_its_block_span`,
+   `tests/loops.rs::mid_run_builtin_wait_keeps_the_loop_body` (bounded: a
+   regression must panic with the script, never hang the suite),
+   `tests/wait.rs::builtin_wait_after_a_cond_operator_stays_the_builtin`.
 
 Pins: `segment/block/midrun/tests.rs` (tri-state, openers, agreement,
-`time`, function definitions, unclosed → resume = end of input, quotes,
-comment, brace words), `segment/tests.rs::midrun_keyword_block_stays_one_statement_in_the_run`,
+the scored gate, `time`, function definitions, unclosed → resume = end of
+input, quotes, comment, brace words),
+`segment/tests.rs::midrun_keyword_block_stays_one_statement_in_the_run`,
 `tests/cond_blocks.rs::operator_adjacent_to_a_block_makes_the_block_a_cond_part`
 and its siblings.
 
