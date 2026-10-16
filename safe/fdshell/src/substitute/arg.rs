@@ -20,7 +20,7 @@ use crate::state::ShellState;
 /// empty one) — field splitting applies only to a word that expanded
 /// (POSIX 2.6.5). It is cleared here, so the caller's value is irrelevant.
 ///
-/// Invariant: at the top of each loop iteration `idx == consumed.get()`.
+/// Invariant: at the top of each loop iteration `idx == peek.consumed()`.
 pub(super) fn substitute_arg_marked(
     arg: &ShortCStr,
     mask: &[bool],

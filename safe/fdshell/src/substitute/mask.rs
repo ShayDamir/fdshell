@@ -100,9 +100,8 @@ pub(super) fn region_len(mask: &[bool], from: usize) -> usize {
     let Some(&quoted) = mask.get(from) else {
         return usize::MAX;
     };
-    mask.get(from..)
-        .unwrap_or(&[])
-        .iter()
+    mask.iter()
+        .skip(from)
         .take_while(|&bit| *bit == quoted)
         .count()
 }

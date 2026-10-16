@@ -44,6 +44,11 @@ pub(crate) fn percent_subst(
     match peek.peek().copied() {
         // `%?` is the `wait` arm's matched fd; a name in the fd namespace.
         Some(b'?') => wait_fd_subst(peek, cache, state, out)?,
+        // A name in the fd namespace. The fallback below is also the
+        // `limit == 0` path (the region ends at the `%`): `collect_name`
+        // returns the empty name, `write_fd` cannot find it because no path
+        // ever binds an fd to the empty name, and the arm pushes a literal
+        // `%` having consumed nothing — byte-for-byte the `_` arm.
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             let name_scs = collect_name(peek, limit)?;
             if !write_fd(&name_scs, cache, state, out)? {
