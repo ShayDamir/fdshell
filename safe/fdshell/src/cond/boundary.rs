@@ -7,7 +7,10 @@
 //! operators stay body data of the definition ([`opens_group`], task #235).
 //! In-block keyword scoring follows bash's clause rule: the scan carries a
 //! command-position flag ([`Place`]) so a block keyword written as an argument
-//! in a body (`echo if && echo x`) stays word data (task #236).
+//! in a body (`echo if && echo x`) stays word data (task #236). Separators
+//! reset the flag at their run reset; a cond operator needs no byte-level arm:
+//! its own bytes *are* a word, and the transition
+//! (`keywords::position::after("&&") == Place::Command`) restarts it.
 
 use crate::keywords::Place;
 use crate::scan::ScanState;
@@ -36,20 +39,12 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
     let mut group_depth: i32 = 0;
     let mut block_depth: i32 = 0;
     // Bash recognizes a reserved word in command position only. Inside a block
-    // the scan carries that rule as a flag ([`Place`], task #236): every
-    // separator and every cond operator restarts it, and every word moves it
-    // per [`block::word_delta`]'s transition.
+    // the scan carries that rule as a flag ([`Place`], task #236): a separator
+    // resets it at its run reset, a cond operator restarts it as the word it
+    // is, and every word moves it per [`block::word_delta`]'s transition.
     let mut place = Place::Command;
     while let Some(&b) = line.get(i) {
         if !state.in_quote && !state.in_single && state.paren_depth == 0 {
-            if block_depth > 0
-                && (b == b'&' && line.get(i + 1) == Some(&b'&')
-                    || b == b'|' && line.get(i + 1) == Some(&b'|'))
-            {
-                // A cond operator starts a command, also inside a block: the
-                // word behind it may be a nested block's opener.
-                place = Place::Command;
-            }
             if group_depth == 0
                 && block_depth == 0
                 && ((b == b'&' && line.get(i + 1) == Some(&b'&'))

@@ -13,7 +13,8 @@ use crate::segment::group::{closes, opens};
 
 /// Where the word written next sits, as far as the keyword scorers can tell.
 /// The state transitions are [`after`]; the gate is [`scores`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(crate) enum Place {
     /// A command may start here: the run's start, behind a cond operator,
     /// after `then`/`do`/`else`/`elif`, after a condition-taking opener, a
@@ -42,7 +43,7 @@ pub(crate) fn scores(word: &[u8], line: &[u8], word_end: usize, place: Place) ->
         return true;
     }
     match keyword_delta(word, line, word_end) {
-        Some(delta) if delta > 0 => place == Place::Command,
+        Some(delta) if delta > 0 => matches!(place, Place::Command),
         Some(delta) if delta < 0 => matches!(place, Place::Command | Place::Pattern),
         _ => false,
     }
