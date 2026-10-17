@@ -281,11 +281,13 @@ statements, and a heredoc statement after the block on the block's line is
 outside the block's span: `cat <<X; if cat <<A; then echo y; fi; cat <<B` +
 bodies prints `bodyX bodyA y bodyB` (as bash), for `if`/`elif`/`while`/`until`
 and any number of pre-block operators. The allocation applies **per arm**
-inside the block too (task #238): in a single-line block the bodies sit past
-the closing keyword, so each arm's text is rebuilt from the regions its own
-operators claim — `if true; then cat <<T; fi` + body + `T` prints `bodyT`
-(rc 0, as bash), and so do the `while`/`until` body (`while true; do cat <<T;
-break; done`), the `elif` arm and the `else` arm, an arm with several
+inside the block too (task #238, completed for `for`/`case` by task #273): in a
+single-line block the bodies sit past the closing keyword, so each arm's text is
+rebuilt from the regions its own operators claim — `if true; then cat <<T; fi` +
+body + `T` prints `bodyT` (rc 0, as bash), and so do the `while`/`until` body
+(`while true; do cat <<T; break; done`), the `for` body (`for x in a; do cat <<T;
+done`), each `case` clause (`case x in x) cat <<T;; esac`, arms in arm order), the
+`elif` arm and the `else` arm, an arm with several
 here-docs (`then cat <<A; cat <<B; fi`, bodies in operator order) and an arm
 below an earlier arm's here-doc (`elif cat <<C; then cat <<T; fi`); in a
 multi-line block the arm's own lines already carry the body inline. A block
@@ -338,9 +340,33 @@ Limitations:
   no body and reports its own missing delimiter (rc 1), where bash prints
   `bodyT` (rc 0) with only a warning about `E`
   (`tests/heredoc.rs::single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty`).
+- A **word list is word data** for the closer search of the parse layer (task
+  #273): `case x in done) cat <<T;; esac` + body + `T` closes on its `esac` and
+  takes no body (`done)` matches nothing, rc 0, as bash), and a `case` pattern of
+  a clause that carries a body heredoc is protected from brace expansion, so
+  `case '{a,b}' in {a,b}) cat <<T;; esac` + `hit` + `T` prints `hit` (as bash).
+  The **span** scans do not carry the rule yet, so a closer-shaped word that must
+  *match* still ends the block early: `for x in done; do echo "$x"; done` and
+  `case done in done) echo p;; esac` are rc 1, where bash prints `done` and `p`
+  (`tests/heredoc.rs::closer_shaped_word_list_words_end_the_block_span_until_310`;
+  task #310 owns the span-level rule).
+- A quoted delimiter whose **body** line carries an unbalanced quote is a parse
+  error of the statement layer (`unmatched quote`, rc 1) rather than the body
+  bash prints: `for x in a; do cat <<'Q'; done` + `body Q unbalanced '` + `Q`,
+  and the `if`/`while`/`case` twins (`tests/heredoc.rs::
+  single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_stays_measured_until_266`;
+  task #266 owns body/terminator opacity to the statement layers).
+- A `case` clause terminated by a closer-shaped word reports its own missing
+  `esac` (rc 1): `case x in x) cat <<T; done;; esac` + body + `T`, where bash
+  reports a syntax error (rc 2), the same rc-1-vs-2 family as
+  `midrun_adjacent_shapes_stay_measured_divergences`.
 - A **block trailing redirect** is unchanged by the arm-body delivery:
   `if true; then cat <<T; fi > out` + body + `T` prints `bodyT` and never opens
-  `out`, exactly as the heredoc-free `if true; then echo hi; fi > out` does
+  `out`, exactly as the heredoc-free `if true; then echo hi; fi > out` does; the
+  `for`/`case` twins (`for x in a; do cat <<T; done > out` and
+  `case x in x) cat <<T;; esac > out` + body + `T`, with their `>>` twins) join
+  that family on task #273 — on `master` they were only the parse errors of the
+  untruncated closer search
   (`tests/heredoc.rs::single_line_block_body_heredoc_with_block_trailing_redirect`);
   bash writes the body into `out` and prints nothing.
 - A **multi-line** block whose condition carries a here-doc keeps its text verbatim:
