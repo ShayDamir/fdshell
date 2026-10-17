@@ -4,6 +4,7 @@ use super::semi::closing_keyword_index;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use crate::redirect::RedirectDef;
+use crate::scan::heredoc::span_operator;
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail, ensure};
@@ -49,7 +50,7 @@ pub(crate) fn tokens_to_group(
     // sit between it and the operator, so trimming the trailing side would cut
     // them out of the body text (the block-text-carries-its-bodies rule).
     let body = verbatim(text, body_tokens)?;
-    let redirects = tail_redirects(&split_close(tokens, close))?;
+    let redirects = tail_redirects(&split_close(tokens, close), line)?;
     Ok(GroupBlock { body, redirects })
 }
 
@@ -57,13 +58,15 @@ pub(crate) fn tokens_to_group(
 /// operator is checked first (it starts with `<`, which the read redirect would
 /// otherwise swallow); a pipeline, background, here-doc, or here-string form on
 /// the group is a parse error (each is a separate task), and so is a trailing
-/// plain word.
-fn tail_redirects(tail: &[Token]) -> Result<Vec<RedirectDef>, Report<ParseError>> {
+/// plain word. The here-doc test is the shared raw-span shape rule, so the
+/// io-number form `{ …; } 3<<T` keeps the here-doc message instead of
+/// degrading to a trailing word.
+fn tail_redirects(tail: &[Token], line: &[u8]) -> Result<Vec<RedirectDef>, Report<ParseError>> {
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
-        let (t, _, _, _, _) = tail.get(i).ok_or(ParseError::Never)?;
-        if t.starts_with(b"<<") {
+        let (t, start, end, _fq, _mask) = tail.get(i).ok_or(ParseError::Never)?;
+        if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
             bail!(ParseError::GroupHereDocNotSupported);
         }
         if let Some((def, extra)) = parse_redirect(tail, i)? {

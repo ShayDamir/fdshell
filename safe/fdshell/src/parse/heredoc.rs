@@ -61,15 +61,20 @@ pub(crate) fn layout(
         .collect()
 }
 
-/// Turn the operator at `i` into a redirect from its pre-extracted body.
+/// Turn the operator at `i` into a redirect from its pre-extracted body: the
+/// body goes to the operator's own descriptor (`0` for `<<T`, the io-number
+/// of `3<<T`).
 pub(crate) fn parse_operator(
     line: &[u8],
     tokens: &[Token],
     i: usize,
     spec: &HeredocBody,
 ) -> Result<(RedirectDef, usize), Report<ParseError>> {
-    let (_op, extra) = operator::operator_at(line, tokens, i)?;
-    Ok((RedirectDef::here_doc(spec.body.clone(), spec.expand), extra))
+    let (op, extra) = operator::operator_at(line, tokens, i)?;
+    Ok((
+        RedirectDef::here_doc(op.fd, spec.body.clone(), spec.expand),
+        extra,
+    ))
 }
 
 fn unterminated(delim: &[u8]) -> Report<ParseError> {

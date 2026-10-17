@@ -52,7 +52,7 @@ pub(super) fn finish_command(
             bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
         let mut skip = 0usize;
-        if super::heredoc::is_operator(tokens, i) {
+        if super::heredoc::is_operator(line, tokens, i) {
             let spec = specs.get(spec_at).ok_or(ParseError::InvalidRedirect)?;
             let (r, extra) = super::heredoc::parse_operator(line, tokens, i, spec)?;
             bg_redirect::insert_redirect(&mut cmd.redirects, r);

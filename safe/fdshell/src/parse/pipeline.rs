@@ -45,7 +45,7 @@ fn parse_stage(
         .get(start..end)
         .ok_or(ParseError::ExpectedCommandAfterPipe)?;
     let trimmed = trim_at_semi(stage);
-    let count = operator_count(trimmed);
+    let count = operator_count(line, trimmed);
     let stage_specs = specs
         .get(*spec_at..*spec_at + count)
         .ok_or(ParseError::Never)?;

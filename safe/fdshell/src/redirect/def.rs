@@ -67,11 +67,12 @@ impl RedirectDef {
         }
     }
 
-    /// Here-doc: the body (expanded when `expand`) becomes the stdin of the
-    /// command.
-    pub fn here_doc(body: impl Into<ShortCStr>, expand: bool) -> Self {
+    /// Here-doc: the body (expanded when `expand`) becomes the
+    /// `export_to` descriptor of the command — `export_to` is 0 for `<<T`
+    /// (stdin) and the io-number of the `N<<T` form.
+    pub fn here_doc(export_to: i32, body: impl Into<ShortCStr>, expand: bool) -> Self {
         RedirectDef {
-            export_to: 0,
+            export_to,
             direction: RedirectDirection::Read,
             source: RedirectSource::here_doc(body, expand),
         }

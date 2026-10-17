@@ -4,7 +4,7 @@ use super::{Redirect, RedirectDef};
 use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::LocalFd;
@@ -43,11 +43,20 @@ fn resolve_one(
         super::RedirectSource::Path { .. } => arms::resolve_path(r.export_to, min_fd, opened_iter),
         super::RedirectSource::HereString { word, mask } => Ok(Redirect::Dup {
             export_to: r.export_to,
-            local: super::herestring::here_string(word, mask, cache, cell)?,
+            // The body memfd is cloned above every target like every other
+            // source: created on its own target it would make `dup2` a no-op
+            // and its `Drop` would close that target (LESSONS). The clone
+            // shares the memfd's open file description, so the rewound body
+            // survives the original's drop.
+            local: super::herestring::here_string(word, mask, cache, cell)?
+                .try_clone_above(min_fd)
+                .change_context(OpenRedirectError::HereStringCreate)?,
         }),
         super::RedirectSource::HereDoc { body, expand } => Ok(Redirect::Dup {
             export_to: r.export_to,
-            local: super::heredoc::here_doc(body, *expand, cache, cell)?,
+            local: super::heredoc::here_doc(body, *expand, cache, cell)?
+                .try_clone_above(min_fd)
+                .change_context(OpenRedirectError::HereDocCreate)?,
         }),
         super::RedirectSource::Dup(from) => arms::resolve_dup(r.export_to, min_fd, *from),
         super::RedirectSource::Close => Ok(Redirect::Close {

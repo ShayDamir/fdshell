@@ -3,6 +3,7 @@
 
 use crate::scan::ScanState;
 
+use super::io::{heredoc_fd, io_prefix, word_start};
 use super::lines::delimiter_span;
 use super::op::Operator;
 use alloc::vec::Vec;
@@ -12,10 +13,13 @@ use alloc::vec::Vec;
 /// a word start) is skipped whole, so a `<<` in a comment is not an operator
 /// (the tokenizer never yields it, and the two counts must agree).
 ///
-/// A `<<` counts as an operator when a token precedes it and that token is
-/// not a pipeline `|` — the byte mirror of `parse::heredoc::is_operator`
+/// A `<<` counts as an operator when a token precedes its word and that token
+/// is not a pipeline `|` — the byte mirror of `parse::heredoc::is_operator`
 /// (`i != 0 && prev != b"|"`). A `<<` at the run start is the command word
-/// and never counts.
+/// and never counts. The io-number form (`3<<T`, `0<<-T`) is read through the
+/// shared `io::io_prefix`, so its digits begin the operator's word and the
+/// operator carries their fd; `io::span_operator` is the token-level half of
+/// that same rule (LESSONS: the byte-level and token-level counts must agree).
 pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator>> {
     let mut state = ScanState::new();
     let mut found: Vec<Operator> = Vec::new();
@@ -34,17 +38,29 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
             }
             continue;
         }
+        // The io-number form's word starts at its digits, so both the word
+        // gate and the pipeline gate are evaluated at the operator's own word
+        // start `run`: the operator's prefix is never its own preceding token
+        // (`is_operator`'s `i != 0`), and a `|` written right before the
+        // digits is a stage boundary (`prev != |`).
+        let io = io_prefix(line, i, &state);
+        let run = io.map_or(i, |(run, _)| run);
+        let preceded = if run == i {
+            seen_token && word_start(line, i, &state)
+        } else {
+            token_before(line, from, run)
+        };
         if bare
-            && seen_token
-            && word_start(line, i, &state)
+            && preceded
             && line.get(i) == Some(&b'<')
             && line.get(i + 1) == Some(&b'<')
             && line.get(i + 2) != Some(&b'<')
-            && !precedes_pipe(line, i)
+            && !precedes_pipe(line, run)
         {
             let dash = line.get(i + 2) == Some(&b'-');
             let (next, raw) = delimiter_span(line, i + 2 + usize::from(dash), to)?;
-            found.push(Operator::new(raw, dash));
+            let fd = io.and_then(|(_, digits)| heredoc_fd(digits)).unwrap_or(0);
+            found.push(Operator::new(raw, dash, fd));
             while i < next {
                 i = state.advance(line, i);
             }
@@ -72,23 +88,16 @@ fn is_token_byte(b: u8) -> bool {
     !b.is_ascii_whitespace() && b != b'|'
 }
 
-/// `i` starts a token word: the run start or a tokenizer word-break byte.
-/// A `)` breaks the word only at top level — a `$( )`-closing `)` keeps the
-/// token whole, exactly as the tokenizer does.
-fn word_start(line: &[u8], i: usize, state: &ScanState) -> bool {
-    if i == 0 {
-        return true;
-    }
-    match line.get(i - 1).copied() {
-        Some(b')') => !state.word_active,
-        // The `_` arm excludes `|`: a `|` byte never starts a word here, so a
-        // `<<` right after `|` (absorbed into a `>|` operator or a pipeline
-        // pipe) is never an operator; `precedes_pipe` decides the pipe.
-        _ => matches!(
-            line.get(i - 1).copied(),
-            Some(b' ') | Some(b'\t') | Some(b';') | Some(b'\n')
-        ),
-    }
+/// A token byte sits in `line[from..run]`: the byte mirror of `is_operator`'s
+/// `i != 0` for an operator whose word begins at `run` (its io-number digits
+/// belong to that word, so they never count as the preceding token — a run
+/// that opens with only whitespace has none, exactly as the whitespace-leading
+/// `<<` rows of `is_token_byte` decide).
+fn token_before(line: &[u8], from: usize, run: usize) -> bool {
+    line.get(from..run)
+        .unwrap_or_default()
+        .iter()
+        .any(|&b| is_token_byte(b))
 }
 
 /// A `|` with only whitespace between it and `i`: a pipeline position, where

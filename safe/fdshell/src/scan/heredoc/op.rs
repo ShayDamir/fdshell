@@ -1,14 +1,16 @@
-//! One `<<` operator: its delimiter word and the two flags that select how
-//! it is read — `<<-` tab stripping and a quoted (literal) delimiter.
+//! One `<<` operator: its delimiter word, the two flags that select how it is
+//! read (`<<-` tab stripping, a quoted (literal) delimiter) and the descriptor
+//! its body goes to (`N<<word`).
 
 use crate::bytes::fold::fold_quotes;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
-/// One `<<` operator: the delimiter word plus the two flags that select how
-/// the body is read. `Operator` is carried through both levels (the byte
-/// scanner and the token parser) so the `<<-` / quoted / escape-folding
-/// decision is made once and cannot diverge between them.
+/// One `<<` operator: the delimiter word plus the flags and the target
+/// descriptor that select how the body is read and where it goes. `Operator`
+/// is carried through both levels (the byte scanner and the token parser) so
+/// the `<<-` / quoted / escape-folding / io-number decision is made once and
+/// cannot diverge between them.
 #[derive(Clone)]
 pub(crate) struct Operator {
     /// The delimiter word: every quote byte stripped, unquoted escape pairs
@@ -18,6 +20,9 @@ pub(crate) struct Operator {
     pub(crate) quoted: bool,
     /// The `<<-` form: strip leading tabs from the body and the terminator.
     pub(crate) strip: bool,
+    /// The descriptor the body goes to: the io-number of `N<<word`, `0`
+    /// (stdin) for the unprefixed form (`scan::heredoc::io::io_prefix`).
+    pub(crate) fd: i32,
 }
 
 impl Operator {
@@ -27,13 +32,15 @@ impl Operator {
     /// `<<"Q"` delimits `Q` and `<<a'b'c` delimits `abc`). Folding and
     /// stripping share one pass because an escaped quote (`a\'b`) is data and
     /// must not read as a marker (LESSONS). `quoted` reports a quote marker
-    /// byte anywhere in the word, and `strip` is the `<<-` marker.
-    pub(crate) fn new(raw: &[u8], strip: bool) -> Self {
+    /// byte anywhere in the word, `strip` is the `<<-` marker, and `fd` is the
+    /// io-number of the `[N]<<` form (`0` for the unprefixed form).
+    pub(crate) fn new(raw: &[u8], strip: bool, fd: i32) -> Self {
         let (delim, quoted) = fold_quotes(raw);
         Self {
             delim,
             quoted,
             strip,
+            fd,
         }
     }
 

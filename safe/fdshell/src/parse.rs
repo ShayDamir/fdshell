@@ -48,6 +48,7 @@ pub use envassign::{Assign, value_mask};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;
+pub(crate) use redirect::parse_fd;
 pub(crate) use redirect::{clobber_pipe, clobber_word};
 pub(crate) use time_block::TimeBlock;
 
