@@ -340,6 +340,14 @@ fn gate_end_skips_the_gated_and_list_to_its_separator() {
     // A `{ …; }` group is opaque to the gate: its body `;` is group data, and
     // with no separator behind the `}` the gate runs to the text end.
     assert_eq!(gate_of(b"echo a || { echo b; } && echo c", 10, false), 31);
+    // Nested groups: the gate's group depth is a *count* (its `+=` counts the
+    // unmatched `{` openers of the run rule), so with an inner group left open
+    // the `;` behind the outer `}` is still group data and the gate runs to the
+    // text end.
+    assert_eq!(
+        gate_of(b"echo a || { :; { echo b; } ; echo c", 10, false),
+        35
+    );
     // A stray `}` clamps the group depth at 0, never below it.
     assert_eq!(gate_of(b"echo a || echo x} && echo c", 10, false), 27);
     // A brace in *argument* position opens no group (`opens_group` is

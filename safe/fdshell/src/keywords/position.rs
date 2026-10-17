@@ -102,29 +102,25 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
         Glue::Tail => place,
     };
     let n = glue::strip(glue);
-    let pipeline = match glue {
-        Glue::None => {
-            if matches!(w, b"" | b";" | b"&&" | b"||" | b"&" | b"(" | b")") || w.ends_with(b")") {
-                return Place::Command;
-            }
-            if opens(word, line, word_end) {
-                return Place::Command;
-            }
-            glue::tail(w).is_some()
+    if matches!(glue, Glue::None) {
+        if matches!(w, b"" | b";" | b"&&" | b"||" | b"&" | b"(" | b")") || w.ends_with(b")") {
+            return Place::Command;
         }
-        Glue::Head | Glue::Tail => true,
-    };
+        if opens(word, line, word_end) {
+            return Place::Command;
+        }
+    }
     let rest = w.get(n..).unwrap_or(b"").trim_ascii();
     if rest.is_empty() {
         return open;
     }
-    if rest.iter().all(|&b| b == b'&' || b == b'|') {
-        return Place::Data;
-    }
-    // The pipeline tail rows: behind data an argument (#292's carve-out),
-    // and the `|`-starting separator word in any place. A glue payload has
-    // its operator bytes stripped, so it reads the pair's command position.
-    if pipeline && (matches!(place, Place::Data) || rest.starts_with(b"|")) {
+    // The glue pair's payload rows: behind data the pair's own word is an
+    // argument (#292's carve-out: a block written as a pipeline stage), and an
+    // operator run never starts a command. The payload has its operator bytes
+    // stripped, so it reads the place the pair set.
+    if matches!(glue, Glue::Head | Glue::Tail)
+        && (matches!(place, Place::Data) || rest.starts_with(b"|"))
+    {
         return Place::Data;
     }
     let rest = time_prefix_len(rest)

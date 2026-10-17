@@ -161,6 +161,18 @@ fn pair_payloads_take_the_place_the_pair_sets() {
         after_word_glue(b"||||", Place::Command, Glue::Head),
         Place::Data
     );
+    // A payload that only *looks* like an opener is an argument: each arm's
+    // guard is the whole payload, not its first letter.
+    assert_eq!(
+        after_word_glue(b"|usr", Place::Command, Glue::Tail),
+        Place::Data
+    );
+    // A payload glued to a pattern's closing `)` starts the arm's body: the
+    // word is judged by its last byte (`case x in a)|echo b`).
+    assert_eq!(
+        after_word_glue(b"||x)", Place::Command, Glue::Head),
+        Place::Command
+    );
     // A `time [-p]` payload is transparent: it keeps the pair's place.
     assert_eq!(
         after_word_glue(b"||time", Place::Command, Glue::Head),
