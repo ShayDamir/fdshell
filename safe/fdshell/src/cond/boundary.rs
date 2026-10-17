@@ -5,19 +5,19 @@
 //! (`boundary/body.rs`). The group counter recognizes a function
 //! definition's body opener as well as the plain group opener, so a body's
 //! operators stay body data of the definition ([`opens_group`], task #235).
-//! In-block keyword scoring follows bash's clause rule: the scan carries a
-//! command-position flag ([`Place`]) so a block keyword written as an argument
-//! in a body (`echo if && echo x`) stays word data (task #236). Separators
-//! reset the flag at their run reset; a cond operator needs no byte-level arm:
-//! its own bytes *are* a word, and the transition
-//! (`keywords::position::after("&&") == Place::Command`) restarts it.
+//! In-block keyword scoring follows bash's clause rule through the segment
+//! scanner's run rule: command position is read from the word's run, which
+//! restarts at every `;`/newline, so a block keyword written as an argument
+//! in a body (`echo if && echo x`) stays word data and a block opened by a
+//! glued cond pair's payload closes at its own closer (task #236).
 
 use crate::keywords::Place;
 use crate::scan::ScanState;
 use crate::segment::group::{definer_at_run, group_at_run, opens_at};
 
-mod block;
+pub(crate) mod block;
 mod body;
+pub(super) mod gate;
 
 /// Scan from `i` to the next unquoted `&&` / `||` (or end of line). Heredoc
 /// command lines are skipped whole along with their bodies. A `{ …; }` group
@@ -38,10 +38,6 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
     let mut run_start = i;
     let mut group_depth: i32 = 0;
     let mut block_depth: i32 = 0;
-    // Bash recognizes a reserved word in command position only. Inside a block
-    // the scan carries that rule as a flag ([`Place`], task #236): a separator
-    // resets it at its run reset, a cond operator restarts it as the word it
-    // is, and every word moves it per [`block::word_delta`]'s transition.
     let mut place = Place::Command;
     while let Some(&b) = line.get(i) {
         if !state.in_quote && !state.in_single && state.paren_depth == 0 {
@@ -89,9 +85,10 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                     body::Step::Skip(resume) => {
                         i = resume;
                         run_start = i;
-                        place = Place::Command;
                         // The run reset starts a new word: the line after a
-                        // heredoc body begins with a command word.
+                        // heredoc body begins with a command word. The flag's
+                        // restart needs no line here — the plain arm below
+                        // meets that newline again and resets it (task #236).
                         state.word_active = false;
                         continue;
                     }

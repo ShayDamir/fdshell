@@ -46,7 +46,15 @@ pub(crate) fn run_cond_list(
             let st = cell.borrow().change_context(CmdError::Never)?;
             let ok = st.last_status.exit_code() == 0;
             if is_or && ok {
-                return Ok(None);
+                // A short-circuited `||` chain gates bash's *AND-list*, and a
+                // `;` ends it (task #236): skip the gated list, consume its
+                // bodies, and resume the scan ungated on the statements
+                // behind the separator — `echo a || if :; then :; fi; break`
+                // skips the `if` and runs `break`.
+                let gate = boundary::gate::gate_end(line, i + 2, &mut state);
+                parts::take_bodies(line, i + 2, gate, bodies, &mut body_idx);
+                start = gate;
+                continue;
             }
             if !is_or && !ok {
                 // `&&` after a failure: skip the rest of the list up to `||`.

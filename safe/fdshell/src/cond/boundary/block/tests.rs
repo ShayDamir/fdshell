@@ -198,21 +198,24 @@ fn command_position_keywords_still_open_the_block() {
 }
 
 /// Task #236: the in-block clause rule, word by word. `word_delta` scores a
-/// block keyword in command position only (the [`Place`] flag), so an opener
-/// written as an argument (`echo if &&`) never opens a nested depth, a clause
-/// keyword (`then`/`do`/`else`/`elif`) puts the word behind it back in command
-/// position, a closer behind a command word (`echo done`) is data, a glued
-/// `case` clause `)` starts the arm body in command position, and a `case`
-/// list scores a closer (`esac`) but no opener (`if)` is a pattern word,
-/// killing "closers and openers share one gate"). Braces stay ungated, the
-/// accepted divergence `tests/group.rs::literal_brace_argument_in_a_block_body`
-/// pins.
+/// block keyword in command position only (at top level the run's own
+/// [`group_at_run`] answer, inside a block the scan's [`Place`] flag), so an
+/// opener written as an argument (`echo if &&`) never opens a nested depth,
+/// a clause keyword (`then`/`do`/`else`/`elif`) puts the word behind it back
+/// in command position, a closer behind a command word (`echo done`) is
+/// data, a glued `case` clause `)` starts the arm body in command position,
+/// and a `case` list scores a closer (`esac`) but no opener (`if)` is a
+/// pattern word, killing "closers and openers share one gate"). Braces are
+/// scored by neither gate — the group arm counts them with the same clause
+/// rule — so an argument brace (`echo {`, `echo }`) stays word data and
+/// `echo { && echo b` keeps splitting (task #236).
 #[test]
 fn in_block_words_follow_the_clause_rule() {
-    // `do echo if &&`: the `if` behind `echo` is an argument → the body's `&&`
-    // stays a boundary. The transition is applied even to the unscored word:
-    // an `if`-shaped argument puts the *next* word in command position (the
-    // machine's shape; a condition-taking word reads its condition there).
+    // `do echo if &&`: the `if` behind `echo` is an argument → the body's
+    // `&&` stays a boundary. The transition is applied even to the unscored
+    // word: an `if`-shaped argument puts the *next* word in command position
+    // (the machine's shape; a condition-taking word reads its condition
+    // there).
     let l = b"do echo if &&";
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
     assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (0, Place::Data));
@@ -245,11 +248,16 @@ fn in_block_words_follow_the_clause_rule() {
     let l = b"in time if";
     assert_eq!(word_delta(l, 3, 1, 0, Place::Pattern), (0, Place::Pattern));
     assert_eq!(word_delta(l, 8, 1, 0, Place::Pattern), (0, Place::Command));
-    // Braces are ungated: `echo }` eats the block's closer, `echo { if` opens
-    // twice (`if` sits in command position behind the group opener).
+    // Braces score 0 at every place (the group arm counts them); the
+    // transition keeps the master behavior: an argument brace keeps data, a
+    // command-position opener opens a command, and the keyword behind it
+    // scores in-block nesting as before.
     let l = b"echo }";
-    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (-1, Place::Data));
+    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (0, Place::Data));
     let l = b"echo { if";
-    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (1, Place::Command));
+    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (0, Place::Command));
     assert_eq!(word_delta(l, 7, 1, 0, Place::Command), (1, Place::Command));
+    let l = b"{ if";
+    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (1, Place::Command));
 }

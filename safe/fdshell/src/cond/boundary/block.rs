@@ -11,32 +11,31 @@
 //! scored only where a command word may sit — bash recognizes a block keyword
 //! in command position only, and so does this counter (see [`word_delta`]).
 
-use crate::keywords::{Place, after, first_word_end, keyword_delta, scores};
-use crate::segment::group::{group_at_run, opens};
+use crate::keywords::{Glue, Place, after, first_word_end, keyword_delta, scores};
+use crate::segment::group::group_at_run;
+
+mod glue;
 
 /// The block-depth delta of the word that starts at `i`, and what that word
 /// does to the scan's command-position flag.
 ///
-/// At top level (`block_depth == 0`) only a word in **command position** is a
-/// keyword, judged by the segment scanner's own rule [`group_at_run`]: the run
-/// is empty, or it ends with `&&` / `||` (a `time [-p]` prefix is transparent
-/// there too). A keyword-shaped *argument* (`echo if && echo b`,
-/// `echo x > if && echo b`, `echo x | echo if && echo b`) is word data, exactly
-/// as bash and the segment scanner require, so its `&&` keeps splitting. A
-/// group opener scores 0 too: its depth is counted by `next_boundary`'s group
-/// arm, which applies the same clause-position rule, so `echo {` stays word
-/// data and splits on `&&`.
-///
-/// Inside a block (`block_depth > 0`) the *same* clause rule applies, carried
-/// by the scan's [`Place`] flag ([`after`]/[`scores`], task #236): bash
-/// recognizes a reserved word in command position *only*, so a block keyword
-/// written as an argument (`echo if && echo x`, `echo done`) is word data and
-/// never opens a nested depth — the body's own `&&` keeps splitting. A keyword
-/// written in a clause position keeps scoring: after a separator, a cond
-/// operator, `then`/`do`/`else`/`elif`, a condition-taking opener or a `case`
-/// clause's `)`, so a nested block in a body keeps its operators inside the
-/// block. A brace word stays scored unconditionally, the accepted divergence
-/// `tests/group.rs::literal_brace_argument_in_a_block_body` pins.
+/// One clause rule — bash recognizes a reserved word in command position
+/// *only* — carried by two halves: at top level the place is read from the
+/// word's run by the segment scanner's own rule [`group_at_run`] (its
+/// redirect, assignment and pipeline halves included); inside a block it is
+/// the scan's [`Place`] flag ([`after`]/[`scores`], task #236), because a
+/// run cannot see the clause keywords (`then`/`do`/`else`/`elif`) that
+/// restart command position mid-run. Both halves answer the same rule: a
+/// keyword-shaped *argument* (`echo if && echo b`, `echo done`) is word
+/// data at every depth and its `&&` keeps splitting (task #137), a keyword
+/// in a clause position scores, and a *closer* in command position closes
+/// the block — including the block a glued cond pair's payload opened
+/// (`a||if :; then :; fi`): the pair word's *payload* is scored at its own
+/// bytes, and its closer must close, or the `fi` swallows the rest of the
+/// line (task #236's S2). Braces are scored by neither: the group arm of
+/// `next_boundary` counts them with the same clause rule, so an argument
+/// brace (`echo {`, `echo }`) stays word data and `echo { && echo b` keeps
+/// splitting.
 pub(super) fn word_delta(
     line: &[u8],
     i: usize,
@@ -47,13 +46,36 @@ pub(super) fn word_delta(
     let tail = line.get(i..).unwrap_or(b"");
     let word_end = first_word_end(tail, i);
     let word = line.get(i..word_end).unwrap_or(b"");
-    let next = after(word, line, word_end, place);
-    let scored = if block_depth == 0 {
-        !opens(word, line, word_end) && group_at_run(line, run_start, i).is_some()
-    } else {
-        scores(word, line, word_end, place)
+    // The byte-level scan meets a glued cond pair twice: its first byte
+    // opens the pair word (`||if`), its tail byte starts the tail word
+    // (`&if`, `|if`) — the pair's glue position for the transition in
+    // [`after`] and for scoring the *payload* at its own bytes (task #236's
+    // S2: the glued pair consumes its keyword in the scan's advance, so the
+    // keyword behind it must be scored from inside the pair word).
+    let strip = glue::strip_at(line, i);
+    let glue = match strip {
+        0 => Glue::None,
+        1 => Glue::Tail,
+        _ => Glue::Head,
     };
-    let delta = if scored {
+    // Scoring uses the *word*: [`keyword_delta`]'s pair-tail rule reads the
+    // payload behind a glued pair itself, so the scan scores it exactly once
+    // (task #236's S2).
+    // At top level the place is the run's own answer — the segment scanner's
+    // rule [`group_at_run`], with its redirect and pipeline halves; inside a
+    // block it is the scan's [`Place`] flag, because a run cannot see the
+    // clause keywords (`then`/`do`/`else`/`elif`) that restart command
+    // position mid-run. Braces are scored by neither: the group arm of
+    // `next_boundary` counts them with the same clause rule, so an argument
+    // brace (`echo {`, `echo }`) stays word data (task #236).
+    let at = if block_depth == 0 {
+        group_at_run(line, run_start, i + strip).map_or(Place::Data, |_| Place::Command)
+    } else {
+        place
+    };
+    let next = after(word, line, word_end, at, glue);
+    let brace = matches!(word.trim_ascii(), b"{" | b"}");
+    let delta = if !brace && scores(word, line, word_end, at) {
         keyword_delta(word, line, word_end).unwrap_or(0)
     } else {
         0
