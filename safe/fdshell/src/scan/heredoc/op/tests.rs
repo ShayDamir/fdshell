@@ -56,10 +56,10 @@ fn untab_body_strips_leading_tabs_of_every_line() {
 
 #[test]
 fn operator_matches_respects_strip() {
-    let plain = Operator::new(b"EOF", false);
+    let plain = Operator::new(b"EOF", false, 0);
     assert!(plain.matches(b"EOF"));
     assert!(!plain.matches(b"\tEOF"), "the plain form never strips tabs");
-    let dash = Operator::new(b"EOF", true);
+    let dash = Operator::new(b"EOF", true, 0);
     assert!(dash.matches(b"EOF"));
     assert!(dash.matches(b"\tEOF"));
     assert!(dash.matches(b"\t\tEOF"));
@@ -69,9 +69,9 @@ fn operator_matches_respects_strip() {
 
 #[test]
 fn operator_body_bytes_respects_strip() {
-    let plain = Operator::new(b"EOF", false);
+    let plain = Operator::new(b"EOF", false, 0);
     assert_eq!(plain.body_bytes(b"\tone\n").as_slice(), b"\tone\n" as &[u8]);
-    let dash = Operator::new(b"EOF", true);
+    let dash = Operator::new(b"EOF", true, 0);
     assert_eq!(
         dash.body_bytes(b"\tone\n\t\ttwo\n").as_slice(),
         b"one\ntwo\n" as &[u8]
@@ -80,11 +80,11 @@ fn operator_body_bytes_respects_strip() {
 
 #[test]
 fn operator_new_strips_quotes_and_carries_flags() {
-    let q = Operator::new(b"\"Q\"", true);
+    let q = Operator::new(b"\"Q\"", true, 0);
     assert_eq!(q.delim, b"Q" as &[u8]);
     assert!(q.quoted);
     assert!(q.strip);
-    let p = Operator::new(b"EOF", false);
+    let p = Operator::new(b"EOF", false, 0);
     assert_eq!(p.delim, b"EOF" as &[u8]);
     assert!(!p.quoted);
     assert!(!p.strip);
@@ -109,7 +109,7 @@ fn operator_new_strips_every_quote_byte() {
         (b"'a\"b'", b"a\"b"),
         (b"\"a'b\"", b"a'b"),
     ] {
-        let op = Operator::new(raw, false);
+        let op = Operator::new(raw, false, 0);
         assert_eq!(
             op.delim,
             want,
@@ -126,14 +126,14 @@ fn operator_new_strips_every_quote_byte() {
 /// (task #263 owns the `\`-quotes-the-delimiter rule).
 #[test]
 fn operator_new_folds_escapes_and_keeps_an_escaped_quote_as_data() {
-    let op = Operator::new(b"a\\'b", false);
+    let op = Operator::new(b"a\\'b", false, 0);
     assert_eq!(op.delim, b"a'b" as &[u8]);
     assert!(!op.quoted);
-    let op = Operator::new(b"E\\OF", false);
+    let op = Operator::new(b"E\\OF", false, 0);
     assert_eq!(op.delim, b"EOF" as &[u8]);
     assert!(!op.quoted);
     // A quoted pair survives: the delimiter is the literal `E\OF`.
-    let op = Operator::new(b"\"E\\OF\"", false);
+    let op = Operator::new(b"\"E\\OF\"", false, 0);
     assert_eq!(op.delim, b"E\\OF" as &[u8]);
     assert!(op.quoted);
 }
@@ -141,13 +141,13 @@ fn operator_new_folds_escapes_and_keeps_an_escaped_quote_as_data() {
 /// A quoted delimiter's terminator is the stripped word, byte-exactly.
 #[test]
 fn operator_matches_the_stripped_quoted_delimiter() {
-    let op = Operator::new(b"a'b'c", false);
+    let op = Operator::new(b"a'b'c", false, 0);
     assert!(op.matches(b"abc"));
     assert!(
         !op.matches(b"a'b'c"),
         "the terminator line keeps its raw bytes"
     );
-    let dash = Operator::new(b"'a'bc", true);
+    let dash = Operator::new(b"'a'bc", true, 0);
     assert!(dash.matches(b"\tabc"));
     assert!(!dash.matches(b"\ta'bc"));
 }

@@ -1506,3 +1506,202 @@ fn midrun_block_body_heredoc_is_region_scanned() {
     let (out, err, code) = run("cat <<X && echo b\nq && r\nX");
     assert_eq!((out.as_str(), code), ("q && r\nb\n", 0), "stderr={err}");
 }
+
+// ── The io-number form: `[N]<<word` (task #276) ──────────────────────────────
+// Every expectation below was measured against bash 5.3.9 (`bash -c`) and
+// `target/debug/fdshell`; the rows named "divergence" are documented in
+// POSIX_COMPATIBILITY.md and reference the task that owns the gap.
+
+#[test]
+fn numbered_heredoc_delivers_body_to_the_descriptor() {
+    // bash: `hello`, rc 0 — the body is fd 3's input, stdin stays untouched.
+    let (out, _err, code) = run("exec 3<<T\nhello\nT\ncat <&3");
+    assert_eq!(code, 0);
+    assert_eq!(out, "hello\n");
+}
+
+#[test]
+fn numbered_heredoc_zero_target_feeds_stdin() {
+    let (out, _err, code) = run("cat 0<<T\nbody\nT");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n");
+}
+
+#[test]
+fn numbered_heredoc_leaves_stdin_untouched() {
+    let (out, _err, code) = run("cat 3<<T\nbody\nT");
+    assert_eq!(code, 0);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn numbered_heredoc_quoted_delimiter_is_literal() {
+    let (out, _err, code) = run("X=zzz; exec 3<<'Q'\n$X\nQ\ncat <&3");
+    assert_eq!(code, 0);
+    assert_eq!(out, "$X\n");
+}
+
+#[test]
+fn numbered_heredoc_dash_form_strips_leading_tabs() {
+    let (out, _err, code) = run("exec 3<<-T\n\thello\n\tT\ncat <&3");
+    assert_eq!(code, 0);
+    assert_eq!(out, "hello\n");
+}
+
+#[test]
+fn numbered_heredoc_bare_form_takes_the_next_word() {
+    // `3<< T`: the delimiter is the next word, so the body starts on the
+    // following line and the operator line's tail is not its body.
+    let (out, _err, code) = run("exec 3<< T\nbare\nT\ncat <&3");
+    assert_eq!(code, 0);
+    assert_eq!(out, "bare\n");
+}
+
+#[test]
+fn numbered_heredoc_targets_are_independent() {
+    let (out, _err, code) = run("exec 3<<T\nfirst\nT\nexec 4<<U\nsecond\nU\ncat <&3\ncat <&4");
+    assert_eq!(code, 0);
+    assert_eq!(out, "first\nsecond\n");
+}
+
+#[test]
+fn numbered_heredoc_dup_of_the_target_keeps_the_body() {
+    // The body's source descriptor is allocated above every export target, so
+    // `3<&3` (a dup onto the target itself) cannot truncate what fd 3 holds.
+    let (out, _err, code) = run("exec 3<<T\nhello\nT\nexec 3<&3\ncat <&3");
+    assert_eq!(code, 0);
+    assert_eq!(out, "hello\n");
+}
+
+#[test]
+fn numbered_heredoc_in_a_block_targets_the_descriptor() {
+    let (out, _err, code) = run("if true; then exec 3<<T; fi\nbody\nT\ncat <&3");
+    assert_eq!(code, 0);
+    assert_eq!(out, "body\n");
+}
+
+#[test]
+fn numbered_heredoc_is_not_a_path_open() {
+    // The old defect opened the path `<T` (`failed to open redirection path`);
+    // the `<<` operator never reaches the path rule.
+    let (out, err, code) = run("echo a 3<<T\nbody\nT");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\n");
+    assert!(!err.contains("redirection path"), "{err}");
+}
+
+#[test]
+fn numbered_heredoc_word_is_not_an_argument() {
+    // `3<<T` is an operator, not a word: only `x` reaches the child.
+    let (out, _err, code) = run("echo x 3<<T\nbody\nT");
+    assert_eq!(code, 0);
+    assert_eq!(out, "x\n");
+}
+
+#[test]
+fn numbered_heredoc_body_lines_are_not_executed() {
+    let (out, _err, code) = run("cat 3<<T\nbody\nT\necho after");
+    assert_eq!(code, 0);
+    assert_eq!(out, "after\n");
+}
+
+#[test]
+fn numbered_heredoc_in_a_pipeline_and_cond_list() {
+    let (out, _err, code) = run("cat 3<<T | wc -c\nbody\nT");
+    assert_eq!(code, 0);
+    assert_eq!(out, "0\n");
+    let (out, _err, code) = run("cat 3<<T && echo yes\nbody\nT");
+    assert_eq!(code, 0);
+    assert_eq!(out, "yes\n");
+}
+
+/// The `N<<word` rule reads raw bytes, so a prefix that is quoted, escaped or
+/// glued to a longer word is word data: the token reaches the child as one
+/// argument and there is no here-doc. bash agrees (its io-number must be an
+/// unquoted word of digits); only the exit status of the follow-on commands
+/// differs (fdshell reports 1, bash 127 — pinned in tests/external.rs).
+#[test]
+fn numbered_heredoc_prefixes_that_are_not_digits_are_word_data() {
+    for (script, needle) in [
+        ("cat x<<T\nbody\nT", "cat: 'x<<T'"),
+        ("cat x3<<T\nbody\nT", "cat: 'x3<<T'"),
+        ("cat -3<<T\nbody\nT", "cat: invalid option"),
+        ("cat \"3\"<<T\nbody\nT", "cat: '3<<T'"),
+        ("cat 3\"<<\"T\nbody\nT", "cat: '3<<T'"),
+        ("cat 3'<<'T\nbody\nT", "cat: '3<<T'"),
+        ("cat \\3<<T\nbody\nT", "cat: '3<<T'"),
+        ("FD=3; cat $FD<<T\nbody\nT", "cat: '3<<T'"),
+        ("cat 3<<<str", "cat: '3<<<str'"), // task #312 owns the here-string
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "script={script:?} err={err}");
+        assert_eq!(out, "", "script={script:?}");
+        // The word reaches the child as an argument: no here-doc, no path
+        // open of `<T`, no descriptor-number report.
+        assert!(err.contains(needle), "script={script:?} err={err}");
+        assert!(!err.contains("redirection path"), "script={script:?}");
+        assert!(
+            !err.contains("valid descriptor number"),
+            "script={script:?}"
+        );
+    }
+}
+
+/// A digit run that is not a descriptor number is a parse error naming the
+/// prefix — fdshell's io-number rule is the `N>file` fd rule, where bash
+/// treats the whole word as a command argument (`cat: 999…: No such file`).
+#[test]
+fn numbered_heredoc_rejects_an_io_number_that_is_not_a_descriptor() {
+    let (out, err, code) = run("cat 99999999999999999999999<<T\nb\nT");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("is not a valid descriptor number"), "{err}");
+}
+
+/// The largest `i32` fd number is accepted by the rule and rejected when the
+/// descriptor is opened (`cat: 2147483647: Bad file descriptor` in bash).
+#[test]
+fn numbered_heredoc_largest_io_number_is_reported_at_open() {
+    let (out, err, code) = run("cat 2147483647<<T\nb\nT");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(
+        err.contains("file descriptor number is out of range"),
+        "{err}"
+    );
+}
+
+/// Divergences pinned as measured, each owned by the task named in its comment.
+#[test]
+fn numbered_heredoc_known_divergences() {
+    // A `<<` at the run start is fdshell's command word (the operator rule needs
+    // a preceding token), so `3<<T` alone runs as a command: rc 1. bash reads it
+    // as a here-doc on fd 3 with no command: rc 0.
+    let (out, _err, code) = run("3<<T\nbody\nT");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+
+    // A sibling `>&N` dup takes its source from the parent's fd table, so the
+    // descriptor that `3<<T` opens in the same command is invisible to it
+    // (task #178, order of redirections).
+    let (out, err, code) = run("cat 3<<T 1>&3\nbody\nT");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("fd 3 is not open"), "{err}");
+
+    // A here-doc in a single-line group body claims no body region (task #315);
+    // the plain form fails identically.
+    let (out, err, code) = run("{ cat 3<<T; }\nbody\nT");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(
+        err.contains("missing terminating delimiter line 'T'"),
+        "{err}"
+    );
+
+    // `( … )` is not a subshell: `(` reaches the command lookup (task #316).
+    let (out, err, code) = run("( cat 3<<T )\nbody\nT");
+    assert_eq!(code, 1);
+    assert_eq!(out, "");
+    assert!(err.contains("\"(\" not found"), "{err}");
+}

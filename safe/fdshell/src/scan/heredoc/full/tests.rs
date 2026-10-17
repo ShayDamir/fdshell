@@ -12,7 +12,7 @@ use alloc::vec;
 #[test]
 fn body_regions_full_spans_body_and_delimiter() {
     let line = b"body\nEOF\nnext\n";
-    let ops = vec![Operator::new(b"EOF", false)];
+    let ops = vec![Operator::new(b"EOF", false, 0)];
     let (regions, resume) = body_regions_full(line, 0, &ops).unwrap();
     assert_eq!(regions, vec![(0, 9)]);
     assert_eq!(resume, 8);
@@ -22,7 +22,7 @@ fn body_regions_full_spans_body_and_delimiter() {
 #[test]
 fn body_regions_full_multiple_operators_are_sequential() {
     let line = b"a\nA\nb\nB\n";
-    let ops = vec![Operator::new(b"A", false), Operator::new(b"B", false)];
+    let ops = vec![Operator::new(b"A", false, 0), Operator::new(b"B", false, 0)];
     let (regions, resume) = body_regions_full(line, 0, &ops).unwrap();
     assert_eq!(regions, vec![(0, 4), (4, 8)]);
     assert_eq!(resume, 7);
@@ -32,6 +32,6 @@ fn body_regions_full_multiple_operators_are_sequential() {
 #[test]
 fn body_regions_full_missing_delimiter_is_err() {
     let line = b"body\nnothing\n";
-    let ops = vec![Operator::new(b"EOF", false)];
+    let ops = vec![Operator::new(b"EOF", false, 0)];
     assert_eq!(body_regions_full(line, 0, &ops), Err(0));
 }

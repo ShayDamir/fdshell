@@ -318,3 +318,85 @@ fn redirect_operator_leading_run_counts_the_operator() {
     assert_eq!(ops[0].delim, b"EOF");
     assert!(ops[0].strip);
 }
+
+/// The io-number form of the operator: the digit run that begins the operator's
+/// word is its target descriptor, and the delimiter rules (`<<-`, the bare
+/// form, quoting) are unchanged by it. Every shape whose bytes only *look*
+/// numbered — a digit run glued to a longer word (`x3<<T`, `>3<<T`), a quoted
+/// prefix (`"3"<<T`), a quoted operator (`3"<<"T`), an escaped digit
+/// (`\3<<T`), the pipeline position (`a|3<<T`) — is word data: 0 operators,
+/// exactly as the token layer counts (the byte/token agreement rule).
+/// `cat 99999999999999999999999<<T` counts 1 with fd 0: the count rule is
+/// syntactic, and `parse::heredoc::operator_at` is what reports the fd.
+#[test]
+fn io_number_prefixed_operators_carry_their_fd() {
+    for (line, want) in [
+        (b"cat 3<<T".as_slice(), 1usize),
+        (b"cat 0<<T", 1),
+        (b"cat 003<<T", 1),
+        (b"cat 3<<-T", 1),
+        (b"cat 3<< T", 1),
+        (b"cat 3<<'Q'", 1),
+        (b"cat 3<<T 4<<U", 2),
+        (b"cat ;3<<T", 1),
+        (b"cat 3<<T && cat 4<<U", 2),
+        (b"cat 2147483647<<T", 1),
+        (b"cat 99999999999999999999999<<T", 1),
+        (b"3<<T", 0),
+        (b" 3<<T", 0),
+        (b"\t3<<T", 0),
+        (b"cat x<<T", 0),
+        (b"cat x3<<T", 0),
+        (b"cat -3<<T", 0),
+        (b"cat $FD<<T", 0),
+        (b"cat \"3\"<<T", 0),
+        (b"cat 3\"<<\"T", 0),
+        (b"cat 3'<<'T", 0),
+        (b"cat \\3<<T", 0),
+        (b"cat 3\\\\<<T", 0),
+        (b">3<<T", 0),
+        (b"cat a|3<<T", 0),
+        (b"cat 3<<<x", 0),
+        (b"cat <<<x", 0),
+    ] {
+        let ops = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(ops.len(), want, "line={:?}", line);
+    }
+
+    for (line, fd, delim, strip, quoted) in [
+        (b"cat 3<<T".as_slice(), 3i32, b"T".as_slice(), false, false),
+        (b"cat 0<<T", 0, b"T", false, false),
+        (b"cat 003<<T", 3, b"T", false, false),
+        (b"cat 12 34<<T", 34, b"T", false, false),
+        (b"cat 3<<-T", 3, b"T", true, false),
+        (b"cat 3<< T", 3, b"T", false, false),
+        (b"cat 3<<'Q'", 3, b"Q", false, true),
+        (b"cat ;3<<T", 3, b"T", false, false),
+        (b"cat 2147483647<<T", i32::MAX, b"T", false, false),
+        // Syntactically an operator with an unrepresentable fd: the byte scan
+        // reports fd 0 and the parse layer names the prefix.
+        (b"cat 99999999999999999999999<<T", 0, b"T", false, false),
+    ] {
+        let ops = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(ops.len(), 1, "line={:?}", line);
+        assert_eq!(
+            (
+                ops[0].fd,
+                ops[0].delim.as_slice(),
+                ops[0].strip,
+                ops[0].quoted
+            ),
+            (fd, delim, strip, quoted),
+            "line={:?}",
+            line
+        );
+    }
+
+    // Two numbered operators on one line keep their own descriptors.
+    let line = b"cat 3<<T 4<<U";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(
+        ops.iter().map(|op| op.fd).collect::<alloc::vec::Vec<i32>>(),
+        alloc::vec![3, 4]
+    );
+}

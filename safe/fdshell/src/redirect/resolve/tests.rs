@@ -176,7 +176,7 @@ fn here_doc_body_is_a_quoted_context() {
     // here-document is equivalent to double-quoting"): `a\ b` keeps its
     // backslash, and `$( … )` still runs (bash: `a\ b`).
     let c = cell();
-    let redirects = vec![RedirectDef::here_doc(c"a\\ b\n", true)];
+    let redirects = vec![RedirectDef::here_doc(0, c"a\\ b\n", true)];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
@@ -186,7 +186,7 @@ fn here_doc_body_is_a_quoted_context() {
 #[test]
 fn here_doc_quoted_delimiter_body_stays_verbatim() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_doc(c"a\\ b $(echo hi)\n", false)];
+    let redirects = vec![RedirectDef::here_doc(0, c"a\\ b $(echo hi)\n", false)];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let mut buf = [0u8; 32];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
@@ -196,7 +196,7 @@ fn here_doc_quoted_delimiter_body_stays_verbatim() {
 #[test]
 fn here_doc_writes_body_verbatim_without_newline() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_doc(c"ab\n", true)];
+    let redirects = vec![RedirectDef::here_doc(0, c"ab\n", true)];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
@@ -213,7 +213,7 @@ fn here_doc_writes_body_verbatim_without_newline() {
 #[test]
 fn here_doc_empty_body_is_zero_bytes() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_doc(c"", false)];
+    let redirects = vec![RedirectDef::here_doc(0, c"", false)];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -230,7 +230,7 @@ fn here_doc_unquoted_delimiter_expands() {
             sys::ImportedStr::new(c"world".into(), sys::Trace::boundary(sys::Origin::Shell)),
         );
     }
-    let redirects = vec![RedirectDef::here_doc(c"hi $x\n", true)];
+    let redirects = vec![RedirectDef::here_doc(0, c"hi $x\n", true)];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -248,10 +248,47 @@ fn here_doc_quoted_delimiter_is_literal() {
             sys::ImportedStr::new(c"world".into(), sys::Trace::boundary(sys::Origin::Shell)),
         );
     }
-    let redirects = vec![RedirectDef::here_doc(c"hi $x\n", false)];
+    let redirects = vec![RedirectDef::here_doc(0, c"hi $x\n", false)];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(r).read(&mut buf).unwrap();
     assert_eq!(buf.get(..n).unwrap(), b"hi $x\n");
+}
+
+/// The here-doc body is written to a memfd allocated **above** every export
+/// target of the command, so `N<<word` never truncates the very descriptor it
+/// feeds: the source of the fd-3 body sits above the highest target of the same
+/// command list (LESSONS "redirect source fds must be allocated above the
+/// command's highest target"; task #276 makes the target user-visible as `N`).
+#[test]
+fn numbered_here_doc_source_sits_above_the_export_targets() {
+    let c = cell();
+    let redirects = vec![
+        RedirectDef::dup(5, 1),
+        RedirectDef::here_doc(3, c"body\n", true),
+    ];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let doc = resolved
+        .iter()
+        .find(|r| matches!(r, Redirect::Dup { export_to: 3, .. }))
+        .unwrap();
+    assert!(
+        dup_of(doc).as_raw() > 5,
+        "the source fd {} must be above the highest export target",
+        dup_of(doc).as_raw()
+    );
+    let mut buf = [0u8; 16];
+    let n = dup_of(doc).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"body\n");
+}
+
+/// The unprefixed form keeps its fd-0 target, and its source is a descriptor
+/// above it (the same rule the `N<<word` form relies on).
+#[test]
+fn here_doc_source_is_above_its_zero_target() {
+    let c = cell();
+    let resolved = resolve_redirects(&[RedirectDef::here_doc(0, c"x\n", true)], &[], &c).unwrap();
+    let doc = resolved.first().unwrap();
+    assert!(dup_of(doc).as_raw() > 0);
 }

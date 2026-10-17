@@ -291,7 +291,7 @@ fn operator_count_skips_command_word() {
     // index 0 is the command word even when it looks like an operator.
     let line = b"<<EOF x";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(operator_count(&tokens), 0);
+    assert_eq!(operator_count(line, &tokens), 0);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn operator_count_builtin_prefix() {
     // The builtin prefix shifts the command word; `<<EOF` is still an operator.
     let line = b"builtin cat <<EOF";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(operator_count(&tokens), 1);
+    assert_eq!(operator_count(line, &tokens), 1);
 }
 
 #[test]
@@ -307,15 +307,15 @@ fn operator_count_pipe_position_is_not_operator() {
     // The word right after `|` is a command word, not an operator.
     let line = b"a | <<B";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(operator_count(&tokens), 0);
+    assert_eq!(operator_count(line, &tokens), 0);
 }
 
 #[test]
 fn operator_count_per_stage() {
     let line = b"cat <<A | tr <<B";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(operator_count(&tokens[0..2]), 1);
-    assert_eq!(operator_count(&tokens[3..5]), 1);
+    assert_eq!(operator_count(line, &tokens[0..2]), 1);
+    assert_eq!(operator_count(line, &tokens[3..5]), 1);
 }
 
 /// The byte-level and token-level operator counts agree on every supported
@@ -336,7 +336,7 @@ fn operator_count_byte_and_token_levels_agree() {
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
-        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
     }
 }
 
@@ -377,8 +377,8 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
-        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
-        assert_eq!(operator_count(&tokens), want, "line={:?}", line);
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
+        assert_eq!(operator_count(line, &tokens), want, "line={:?}", line);
     }
 }
 
@@ -436,7 +436,7 @@ fn operator_count_leading_operator_forms_agree() {
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
-        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
         assert_eq!(byte, want, "line={:?}", line);
     }
 }
@@ -467,7 +467,7 @@ fn operator_count_quoted_delimiter_forms_agree() {
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
-        assert_eq!(byte, operator_count(&tokens), "line={:?}", line);
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
         assert_eq!(byte, want, "line={:?}", line);
     }
 }
@@ -476,8 +476,8 @@ fn operator_count_quoted_delimiter_forms_agree() {
 fn is_operator_bounds_guard() {
     let line = b"cat <<EOF";
     let tokens = tokenize_statement(line).unwrap();
-    assert!(!is_operator(&tokens, 0));
-    assert!(!is_operator(&tokens, tokens.len() + 1));
+    assert!(!is_operator(line, &tokens, 0));
+    assert!(!is_operator(line, &tokens, tokens.len() + 1));
 }
 
 #[test]
@@ -545,12 +545,14 @@ fn layout_quoted_escaped_delimiter_is_literal() {
 /// is one word with no operator (the byte-level scan agrees, `ops.rs`).
 #[test]
 fn layout_escaped_operator_byte_is_not_an_operator() {
-    let tokens = tokenize_statement(b"echo a\\<<X").unwrap();
-    assert_eq!(operator_count(&tokens), 0);
-    assert!(specs(b"echo a\\<<X").is_empty());
+    let line = b"echo a\\<<X";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(operator_count(line, &tokens), 0);
+    assert!(specs(line).is_empty());
     // A real operator after an escaped `<` is still found.
-    let tokens = tokenize_statement(b"echo a\\< <<X").unwrap();
-    assert_eq!(operator_count(&tokens), 1);
+    let line = b"echo a\\< <<X";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(operator_count(line, &tokens), 1);
 }
 
 /// POSIX #4.2: in an expandable body a `\<newline>` pair is a line
@@ -580,4 +582,112 @@ fn layout_quoted_body_keeps_its_continuation_pair() {
         ShortCStr::from_vec(b"a\\\nb\n".to_vec()).unwrap()
     );
     assert!(!s[0].expand);
+}
+
+/// The io-number form is one operator at both levels with the prefix as its
+/// descriptor (`3<<T` → fd 3, `003<<T` → fd 3); every word-data shape whose
+/// *text* reads like an operator (`3"<<"T`, `"3"<<T`, `\3<<T`, `x3<<T`,
+/// `>3<<T`, `x<<T`) counts 0 at both levels, because `is_operator` tests the
+/// token's raw span through the shared `span_operator` (the byte/token
+/// agreement rule, LESSONS; task #276).
+#[test]
+fn operator_count_io_number_forms_agree() {
+    for (line, want) in [
+        (b"cat 3<<T".as_slice(), 1usize),
+        (b"cat 0<<T", 1),
+        (b"cat 003<<T", 1),
+        (b"cat 3<<-T", 1),
+        (b"cat 3<< T", 1),
+        (b"cat 3<<'Q'", 1),
+        (b"cat 3<<T 4<<U", 2),
+        (b"cat ;3<<T", 1),
+        (b"cat 3<<T && cat 4<<U", 2),
+        (b"cat 3<<T | tr", 1),
+        (b"builtin cat 3<<T", 1),
+        (b"3<<T", 0),
+        (b" 3<<T", 0),
+        (b"cat x<<T", 0),
+        (b"cat x3<<T", 0),
+        (b"cat -3<<T", 0),
+        (b"cat $FD<<T", 0),
+        (b"cat \"3\"<<T", 0),
+        (b"cat 3\"<<\"T", 0),
+        (b"cat 3'<<'T", 0),
+        (b"cat \\3<<T", 0),
+        (b"cat 3\\\\<<T", 0),
+        (b">3<<T", 0),
+        (b"cat a|3<<T", 0),
+        (b"cat 3<<<x", 0),
+        (b"cat <<<x", 0),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
+        assert_eq!(operator_count(line, &tokens), want, "line={:?}", line);
+    }
+}
+
+/// The operator carries the prefix as its target descriptor, and the attached
+/// and bare delimiter rules are unchanged by the prefix: `3<<T` attaches on `T`
+/// (extra 0), `3<< T` takes the next word (extra 1), `3<<-T` keeps the marker.
+#[test]
+fn operator_at_reports_the_prefixed_fd() {
+    for (line, index, fd, delim, quoted, extra) in [
+        (
+            b"cat 3<<T".as_slice(),
+            1usize,
+            3i32,
+            b"T".as_slice(),
+            false,
+            0usize,
+        ),
+        (b"cat 0<<T", 1, 0, b"T", false, 0),
+        (b"cat 003<<T", 1, 3, b"T", false, 0),
+        (b"cat 12 34<<T", 2, 34, b"T", false, 0),
+        (b"cat 3<<-T", 1, 3, b"T", false, 0),
+        (b"cat 3<< T", 1, 3, b"T", false, 1),
+        (b"cat 3<<'Q'", 1, 3, b"Q", true, 0),
+        (b"cat 3<<\"Q\"", 1, 3, b"Q", true, 0),
+        (b"cat 3<<T 4<<U", 1, 3, b"T", false, 0),
+        (b"cat 3<<T 4<<U", 2, 4, b"U", false, 0),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let (op, got) = operator_at(line, &tokens, index).unwrap();
+        assert_eq!(
+            (op.fd, op.delim.as_slice(), op.quoted, got),
+            (fd, delim, quoted, extra),
+            "line={:?}",
+            line
+        );
+    }
+    let line = b"cat 3<<T 4<<U";
+    let tokens = tokenize_statement(line).unwrap();
+    let ops = super::operators(line, &tokens).unwrap();
+    assert_eq!(ops.iter().map(|op| op.fd).collect::<Vec<i32>>(), vec![3, 4]);
+}
+
+/// The fd rule is the `N>file` rule, so the run that overflows `i32` is a
+/// parse error naming the prefix — the byte scan counts it (it is syntactically
+/// an operator), and the parse reports it instead of silently writing to fd 0.
+#[test]
+fn operator_at_rejects_an_io_number_that_is_not_a_descriptor() {
+    let line = b"cat 99999999999999999999999<<T";
+    let tokens = tokenize_statement(line).unwrap();
+    let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+    assert_eq!(byte, operator_count(line, &tokens), "count agreement");
+    assert_eq!(
+        operator_count(line, &tokens),
+        1,
+        "syntactically an operator"
+    );
+    let err = operator_at(line, &tokens, 1).err().unwrap();
+    assert!(matches!(
+        err.current_context(),
+        ParseError::InvalidHeredocFd { .. }
+    ));
+    // A prefix that fits is an fd, and `2147483647` is the largest one.
+    let line = b"cat 2147483647<<T";
+    let tokens = tokenize_statement(line).unwrap();
+    let (op, _extra) = operator_at(line, &tokens, 1).unwrap();
+    assert_eq!(op.fd, i32::MAX);
 }

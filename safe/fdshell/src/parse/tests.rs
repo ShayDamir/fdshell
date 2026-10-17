@@ -403,7 +403,10 @@ fn test_heredoc_basic() {
     };
     assert_eq!(cmd.command, c"cat".into());
     assert!(cmd.args.is_empty());
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(c"body\n", true)]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_doc(0, c"body\n", true)]
+    );
 }
 
 #[test]
@@ -411,7 +414,10 @@ fn test_heredoc_quoted_delimiter_is_literal() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<\"Q\"\n$x\nQ").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(c"$x\n", false)]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_doc(0, c"$x\n", false)]
+    );
 }
 
 #[test]
@@ -423,7 +429,7 @@ fn test_heredoc_dash_form_strips_leading_tabs() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_doc(c"one\n two\n", true)]
+        vec![RedirectDef::here_doc(0, c"one\n two\n", true)]
     );
 }
 
@@ -432,7 +438,7 @@ fn test_heredoc_empty_body() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<EOF\nEOF").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(c"", true)]);
+    assert_eq!(cmd.redirects, vec![RedirectDef::here_doc(0, c"", true)]);
 }
 
 #[test]
@@ -444,7 +450,7 @@ fn test_heredoc_args_and_redirect_after_operator() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::here_doc(c"body\n", true),
+            RedirectDef::here_doc(0, c"body\n", true),
             path_def(1, RedirectDirection::Write, "out"),
         ]
     );
@@ -475,8 +481,8 @@ fn test_heredoc_twice_keeps_both_bodies_in_order() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::here_doc(c"x\n", true),
-            RedirectDef::here_doc(c"y\n", true),
+            RedirectDef::here_doc(0, c"x\n", true),
+            RedirectDef::here_doc(0, c"y\n", true),
         ]
     );
 }
@@ -489,7 +495,7 @@ fn test_heredoc_then_read_redirect_keeps_both() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::here_doc(c"body\n", true),
+            RedirectDef::here_doc(0, c"body\n", true),
             path_def(0, RedirectDirection::Read, "f1"),
         ]
     );
@@ -506,7 +512,7 @@ fn test_heredoc_pipeline_stage_trimmed() {
     assert_eq!(pl.commands[1].args, vec![c"-l".into()]);
     assert_eq!(
         pl.commands[0].redirects,
-        vec![RedirectDef::here_doc(c"body\n", true)]
+        vec![RedirectDef::here_doc(0, c"body\n", true)]
     );
     assert!(pl.commands[1].redirects.is_empty());
 }
@@ -909,7 +915,7 @@ fn test_space_separated_redirect_with_heredoc() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::here_doc(c"body\n", true),
+            RedirectDef::here_doc(0, c"body\n", true),
             path_def(1, RedirectDirection::Write, "out"),
         ]
     );
@@ -1378,7 +1384,7 @@ fn test_bare_combined_operand_does_not_shift_the_heredoc_body() {
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::here_doc(c"body\n", true),
+            RedirectDef::here_doc(0, c"body\n", true),
             path_def(1, RedirectDirection::Write, "f"),
             path_def(2, RedirectDirection::Write, "f"),
         ]
