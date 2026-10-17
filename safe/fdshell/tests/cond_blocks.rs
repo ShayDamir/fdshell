@@ -313,7 +313,7 @@ fn and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error() {
 /// closing-keyword/region defect task **#273** owns: its `for`
 /// and `case` twins (`for q in 1; do cat <<Q; echo a && echo b; done` and
 /// `case q in q) cat <<Q; echo a && echo b;; esac` + body + `Q`) were rc 1
-/// `expected 'do'` / `case: missing 'esac'` on `master`, where bash prints
+/// `expected 'done'` / `case: missing 'esac'` on `master`, where bash prints
 /// `body` `a` `b` rc 0. #234 widens nothing there; #273 lands the parity, and
 /// the rows below are the shape measured on both operators (bash 5.3.9).
 #[test]
