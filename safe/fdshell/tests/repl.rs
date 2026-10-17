@@ -275,21 +275,28 @@ fn if_block_spans_lines_under_tty() {
 }
 
 /// Task #236 §9.5 (plan §9.5): a closer written in a block body's **argument
-/// position** (`while :; do echo x done`, `if a; then b fi`, `if test fi`,
+/// position** (`while :; do echo x done`, `if a; then b fi`,
 /// `for i in a; do echo done`, the glued-`esac` form) is word data, so the
 /// block stays open and the shape reaches the REPL's `> ` continuation buffer
 /// — where `master` answered the very first line (a parse error, or for
 /// `while :; do echo x done` an accepted infinite loop).
 ///
-/// Measured against `bash -i` on a pty (`script -qec "bash -i" /dev/null`):
-/// bash buffers the same shapes (its `PS2` is user-set on this box, so the
+/// Measured against **`bash --norc --noprofile -i`** on a pty
+/// (`script -qec "bash --norc --noprofile -i" /dev/null`). Plain `bash -i` on
+/// this box `exec`s fish (the user `~/.bashrc` replaces the shell at
+/// interactive startup), so a `bash -i` probe reports fish's prompt and fish's
+/// error texts, not bash's; `--norc --noprofile` is what reaches bash, and the
 /// comparison is the **buffering and the joined-line result**, not the prompt
-/// bytes), and running the buffer with the closer on the next line prints
-/// bash's stdout verbatim: `for i in a; do echo done` + `done` prints `done`,
-/// the `case` twin prints `yes`, and `if a; then b fi` + `fi` runs the `then`
-/// body (`a` is command-not-found in bash too), so `echo tail` prints. EOF
-/// mid-buffer executes the buffer and reports the parse error, the same rule
-/// [`eof_mid_if_executes_buffer`] pins.
+/// bytes. Under it bash buffers the same shapes, and running the buffer with
+/// the closer on the next line prints bash's stdout verbatim:
+/// `for i in a; do echo done` + `done` prints `done`, the `case` twin prints
+/// `yes`, and `if a; then b fi` + `fi` runs the `then` body (`a` is
+/// command-not-found in bash too), so `echo tail` prints. EOF mid-buffer
+/// executes the buffer and reports the parse error, the same rule
+/// [`eof_mid_if_executes_buffer`] pins; bash prints its
+/// `unexpected end of file` report and exits 2 there, fdshell reports the
+/// parse error and exits 0 — the documented REPL rc-1-vs-2 family (README,
+/// task #294), not a divergence of these shapes.
 #[test]
 fn glued_closer_shapes_buffer_in_the_repl() {
     // The buffer joins the two lines into ONE dispatch: three prompts (the
