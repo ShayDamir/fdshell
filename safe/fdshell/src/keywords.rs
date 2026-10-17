@@ -5,6 +5,7 @@ fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
 }
 
 mod function;
+mod pair;
 mod position;
 mod quoted;
 mod wait;
@@ -12,7 +13,8 @@ mod wait;
 use quoted::quoted_word;
 
 pub(crate) use function::{definer_len, function_def_name, name_len};
-pub(crate) use position::{Place, after, scores};
+pub(crate) use pair::pair_payload;
+pub(crate) use position::{Glue, Place, after, scores};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
 use crate::segment::group::{closes, opens};
@@ -33,7 +35,7 @@ use crate::segment::group::{closes, opens};
 /// A `time [-p]` word is a *prefix*, not a keyword of its own: it opens no
 /// block, so it never enters the depth table. A block keyword behind it
 /// (`time while … done`) is scored on the rest of the word, which keeps the
-/// whole statement one segment for the `time` parse hook.
+/// whole statement one segment for the `time` parse hook. A word carrying a
 pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
     if quoted_word(line, word_end) {
         return None;

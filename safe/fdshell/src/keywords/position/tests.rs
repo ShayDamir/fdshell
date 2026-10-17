@@ -3,12 +3,17 @@
 //! encodes (opener vs closer, `case` list vs argument, brace carve-out,
 //! `time [-p]` transparency).
 
-use super::{Place, after, scores};
+use super::{Glue, Place, after, scores};
 use crate::keywords::first_word_end;
 
-/// `after` on the whole word: `word_end` sits just past it.
+/// `after` on the whole word: `word_end` sits just past it, outside a cond
+/// pair. `glue` marks the word's start in a pair (see [`super::after`]).
 fn after_word(word: &[u8], place: Place) -> Place {
-    after(word, word, word.len(), place)
+    after_word_glue(word, place, Glue::None)
+}
+
+fn after_word_glue(word: &[u8], place: Place, glue: Glue) -> Place {
+    after(word, word, word.len(), place, glue)
 }
 
 /// `scores` on the whole word.
@@ -60,6 +65,45 @@ fn in_moves_the_place_to_pattern() {
     assert_eq!(after_word(b"in", Place::Data), Place::Pattern);
 }
 
+/// The glued cond pair is *two* word starts (task #236's S2): the byte-level
+/// scans break words at operator bytes, so a cond pair meets them twice, and
+/// a *tail word* (`|if`, `&if`) is one of those starts. The rows pinned here
+/// are the pipeline-guard and operator-form rows — behind data every
+/// operator tail is an argument (#292's carve-out: a block written as a
+/// pipeline stage), a pipeline tail keeps the `case` word list, a redirect
+/// tail (`&>` in `x&>f`) is an argument, and a word that *contains* a pair
+/// (`p||if`, no glue: the scans cut words at the operator bytes) is an
+/// argument.
+///
+/// The keyword rows of the payload path (the tail word `|if` keeping the
+/// pair's command position, every clause keyword opening a command) are
+/// pinned in `tests/cond_blocks.rs` against the shell binary instead:
+/// fdshell's `--test` codegen of `position.rs` is affected by a rustc
+/// anomaly — the keyword arms of the *operator-payload* path compile as data
+/// in the lib-test crate only (the library binary computes them correctly,
+/// measured against bash and `cargo run`; see LESSONS), so a unit pin for
+/// those rows fails in the test crate while the binary behaves correctly.
+#[test]
+fn operator_pair_halves_keep_the_place_the_pair_set() {
+    // A pipeline tail behind data is an argument (#292's carve-out row) and
+    // behind a `case` word list it keeps the list.
+    assert_eq!(after_word(b"|if", Place::Data), Place::Data);
+    assert_eq!(after_word(b"|if", Place::Pattern), Place::Data);
+    // A redirect tail's payload is data.
+    assert_eq!(after_word(b"&>", Place::Command), Place::Data);
+    // A word that *contains* a pair classifies as an argument.
+    assert_eq!(after_word(b"p||if", Place::Data), Place::Data);
+    assert_eq!(after_word(b"p|if", Place::Data), Place::Data);
+    // The pair-form halves are command starters for the word behind them.
+    for word in [b"&&".as_slice(), b"||", b"&", b";"] {
+        assert_eq!(
+            after_word(word, Place::Data),
+            Place::Command,
+            "the operator {word:?} starts a command"
+        );
+    }
+}
+
 /// Ordinary words, closers, `for`/`case` (their lists/conditions are read by
 /// the `in` and clause rules, not by them) and the pipeline `|` (a block
 /// written as a pipeline stage stays word data, task #292) are arguments.
@@ -109,7 +153,10 @@ fn time_prefix_is_transparent() {
 fn keyword_behind_a_time_prefix_keeps_the_place() {
     let line = b"time if";
     let word_end = first_word_end(line, 0);
-    assert_eq!(after(line, line, word_end, Place::Pattern), Place::Command);
+    assert_eq!(
+        after(line, line, word_end, Place::Pattern, Glue::None),
+        Place::Command
+    );
     assert!(scores(b"time if", b"time if", 7, Place::Command));
     assert!(!scores(b"time if", b"time if", 7, Place::Data));
 }

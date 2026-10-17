@@ -1,7 +1,7 @@
 //! Block-depth deltas of the keywords in a word run.
 
 use crate::bytes::SQUOTE;
-use crate::keywords::{Place, after, keyword_delta, scores};
+use crate::keywords::{Glue, Place, after, keyword_delta, pair_payload, scores};
 use crate::scan::Quotes;
 use alloc::vec::Vec;
 
@@ -17,8 +17,22 @@ fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i3
         .then(|| keyword_delta(frag, line, word_end))
         .flatten()
         .unwrap_or(0);
-    *place = after(frag, line, word_end, *place);
-    delta
+    // The glued-pair payload (task #236's S2): a fragment carrying a cond
+    // pair (`echo a&&if` is one whitespace unit) scores the keyword behind
+    // the pair at the fragment's place — `echo a&&if` stays data (argument),
+    // `a&&if` at a clause start nests the `if` so its `fi` closes *the if*.
+    let payload_delta = pair_payload(frag).map_or(0, |(payload, at)| {
+        if scores(payload, line, at, *place) {
+            keyword_delta(payload, line, at).unwrap_or(0)
+        } else {
+            0
+        }
+    });
+    // The fragment is the run's *whitespace* unit: a glued pair is one
+    // fragment, never a bare tail byte, so the fragment is never in a pair
+    // ([`Glue::None`]).
+    *place = after(frag, line, word_end, *place, Glue::None);
+    delta + payload_delta
 }
 
 /// Sum the block-depth deltas of the keywords in a space-separated word run.
