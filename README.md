@@ -326,15 +326,10 @@ Limitations:
   (`tests/heredoc.rs::and_in_a_body_position_heredoc_region_splits_the_block_until_304`;
   task #304 owns the clause/body position gate). The block's *command* bytes
   are opaque to the split, and a statement's bodies stay fully opaque (task #234).
-- A `#`-comment block closer inside a block body's **own** line drops the block
-  counter, so the block never closes: `while :; do` / `cat <<Q` / `body` / `Q` /
-  `# done` / `echo a && echo b` / `break` / `done` is rc 1 `expected 'done'`,
-  where bash prints `body` `a` `b` (rc 0) — task #237 owns the comment rule
-  (`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_stays_broken`).
-  The same comment **inside a heredoc body region** is inert, because the region
-  is opaque in both directions: `while :; do` / `cat <<Q` / `# done` / `body` /
-  `Q` / `echo a && echo b` / `break` / `done` prints `# done` `body` `a` `b`
-  (rc 0, as bash; `case` twin included)
+- A `#`-comment block closer **inside a heredoc body region** is inert, because
+  the region is opaque in both directions: `while :; do` / `cat <<Q` / `# done` /
+  `body` / `Q` / `echo a && echo b` / `break` / `done` prints `# done` `body`
+  `a` `b` (rc 0, as bash; `case` twin included)
   (`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`).
 - A line whose body stream is **incomplete** yields no regions at all, because
   the regions are allocated for all of the line's operators in order: in
