@@ -238,6 +238,13 @@ delimiter (`<<'EOF'`) makes the body literal. `<<-EOF` strips leading tabs
 from the body and the delimiter. A here-document is usually attached to
 `cat`, `read` or another command that reads stdin.
 
+A number in front of the operator puts the body on that descriptor instead of
+stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
+`exec 3<<EOF` keeps it there for the rest of the script. The number must be
+its own unquoted digit word, as in `3>file` — `cat "3"<<EOF` and `cat \3<<EOF`
+are the argument `"3"<<EOF`, not a here-document
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#here-document-descriptor-numbers)).
+
 A here-string feeds one expanded word plus a newline:
 
 ```shell

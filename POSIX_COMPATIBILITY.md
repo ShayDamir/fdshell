@@ -57,6 +57,29 @@ echo hi >file       # both: write `hi` to `file`
 
 Write a space (or a quote) between a word and an operator that follows it.
 
+## Here-document descriptor numbers
+
+`[N]<<word` delivers the body to descriptor `N` (`cat 3<<EOF` writes the body
+to fd 3 and leaves stdin untouched). fdshell reads `N` with the same rule as
+`N>file`, on raw bytes, and that gives three differences from bash:
+
+- The digits must begin the operator's word unescaped: a quoted prefix, a
+  quoted operator, an escaped digit, or digits glued to a longer word are word
+  data (`cat "3"<<EOF`, `cat 3"<<"EOF`, `cat \3<<EOF`, `cat x3<<EOF` all pass
+  the token to the command). bash agrees on every one of these.
+- The number is validated as a descriptor, so a run that does not fit is a
+  parse error naming it: `cat 99999999999999999999999<<EOF` reports `is not a
+  valid descriptor number` where bash passes `999…` as an argument.
+- A number-prefixed `<<` at the start of a run is fdshell's command word
+  (`3<<EOF` alone runs `3<<EOF` as a command, rc 1); bash opens fd 3 and
+  prints nothing.
+
+The prefix is not recognised on `&>`/`&>>` (`cat 3&>file`, task #314) or on the
+here-string (`cat 3<<<word`, task #312); both keep their current shapes.
+Combining a numbered here-doc with a sibling `>&N`/`<&N` dup
+(`cat 3<<T 1>&3`), with a group body (`{ cat 3<<T; }`) or inside `( … )` hits
+the pre-existing gaps of tasks #178, #315 and #316.
+
 ## `wait` is also a block keyword
 
 POSIX `wait` waits for background jobs. fdshell opens an event block when

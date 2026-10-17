@@ -2173,3 +2173,54 @@ Both sources are now **deleted**, not tested around: `glue.rs` keeps only `strip
 `tests/getdents64.rs` had two tests that asserted the **first** record of a fresh scratch directory is `.` (`assert_eq!(first.name, b".")`), and both failed on this box: the first record returned was `sub`. `getdents64` returns entries in the directory's own internal order, and the kernel guarantees only that each entry appears exactly once per `readdir` pass and that records are walked by `d_reclen` — nothing orders `.` and `..` first. Measured on this box (`/tmp` is ext4, scratch dir created as `a`, `b`, `c`, then `sub`): the batch came back `sub`, `b`, `a`, `c`, `..`, `.`, i.e. `.` last.
 
 Fix: assert **membership**, not position. `reports_type_and_reclen_for_a_record` now walks records by `d_reclen` from each record's own offset (a record's header read at a fixed `buf[16..18]` is only valid when that record is first), finds `.`, and checks its `d_type == DT_DIR` and `d_reclen >= 24`. `dir_batch_iter_yields_dot_with_dir_type` scans the batch for `.` instead of taking `next()`. General rule: any test over a directory listing is a set assertion; only the *set* and the per-record header layout are portable, never the order.
+
+## An io-number prefix is a raw-byte rule, so both count levels must read the same helper (task #276)
+
+`[N]<<word` is a here-doc operator; `[N]<word` is the read redirect (bash 5.3.9
+measured). Making it work meant one predicate for two layers:
+`scan::heredoc::io::io_prefix` (raw bytes, walking back from the `<<` to the
+digit run, gated by `word_start`) is the byte scan's gate, and
+`scan::heredoc::io::span_operator` (the operator's *raw span*: `span[line[..at]]
+== [digits] <<`, never `<`) is the token layer's, so `is_operator`,
+`delimiter_token_indices` and `operator_at` all read the span and not the token
+text. The failure mode this avoids is the count mismatch that tasks #261/#274
+record: the token text of `cat 3"<<"T`, `cat "3"<<T` and `cat \3<<T` is exactly
+`3<<T`/`3<<T`/`3<<T`, so a token-text rule counts 1 where the byte scan counts
+0, and the region allocation shifts. Pinned: `operator_count_io_number_forms_agree`
+(byte == token on 26 lines) and `io_number_prefixed_operators_carry_their_fd`.
+
+Related rules that must stay separate: the *word-start* test (`word_start`,
+space/tab/`;`/`\n`, deliberately **not** `|`) decides whether a digit run begins
+the operator's word; the *preceding-token* test (`token_before`, the `is_operator`
+mirror `i != 0 && prev != b"|"`) decides whether the operator is a command word.
+Merging them breaks the pinned `a | <<B` / `cat a|3<<T` rows (the pipeline's
+command word) and the `> <<EOF` rows. `parse::redirect::parse_fd` is the single
+fd rule (`N>file` and `N<<word` share it), so the fd-number semantics cannot
+drift between the two operators.
+
+## A heredoc source must be allocated above every export target, the target included (task #276)
+
+`redirect/resolve.rs`'s `HereDoc`/`HereString` arms now use
+`clone_above(1).try_clone_above(min_fd)`, where `min_fd` is the maximum over
+**all** the command's targets — the here-doc's own `export_to` included. With
+the unprefixed form the source was always a free slot ≥ 1 and `export_to` was
+0, so the ordering was invisible. With `N<<word` the source can be handed to
+the very descriptor it was allocated on: `exec 3<<T` whose source lands on 3
+dup2s a memfd onto itself, which truncates it to 0 bytes (measured: `cat <&3`
+prints nothing). `cat 3<<T 1>&3` and the unit test
+`numbered_here_doc_source_sits_above_the_export_targets` pin the same rule.
+Any new source-allocating redirect arm must take the same minimum.
+
+## Measure the plan's bash table on the shapes it claims are "fdshell-identical" (task #276)
+
+Three rows of task #276's table were labelled fdshell-identical and are not,
+all for pre-existing reasons the table did not test: `{ cat 3<<T; }` and
+`f(){ cat 3<<T; }; f` fail with `missing terminating delimiter line` because a
+here-doc in a group/function body claims no body region (the plain `<<` form
+fails identically on master — tasks #315/#305/#295); `( cat 3<<T )` is not a
+subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
+because a `>&N`/`<&N` source is resolved against the *parent's* fd table, never
+against a descriptor a sibling redirect of the same command opens (task #178).
+Recording the measured behaviour as pins and naming the owning task is the
+deliverable; inventing a bash-parity assertion for a gap this task does not own
+is not.
