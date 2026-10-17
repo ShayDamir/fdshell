@@ -18,8 +18,8 @@ mod glue;
 
 /// Where the word written next sits, as far as the keyword scorers can tell.
 /// The state transitions are [`after`]; the gate is [`scores`].
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(crate) enum Place {
     /// A command may start here: the run's start, behind a cond operator,
     /// after `then`/`do`/`else`/`elif`, after a condition-taking opener, a
@@ -124,7 +124,7 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
     // The pipeline tail rows: behind data an argument (#292's carve-out),
     // and the `|`-starting separator word in any place. A glue payload has
     // its operator bytes stripped, so it reads the pair's command position.
-    if pipeline && (place == Place::Data || rest.starts_with(b"|")) {
+    if pipeline && (matches!(place, Place::Data) || rest.starts_with(b"|")) {
         return Place::Data;
     }
     let rest = time_prefix_len(rest)
@@ -140,7 +140,7 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
     // command, `in` opens a word list, every other payload is an argument.
     match rest.first() {
         Some(b'i') if rest == b"if" => Place::Command,
-        Some(b'i') => Place::Pattern,
+        Some(b'i') if rest == b"in" => Place::Pattern,
         Some(b'w') if rest == b"while" => Place::Command,
         Some(b'u') if rest == b"until" => Place::Command,
         Some(b't') if rest == b"then" => Place::Command,

@@ -114,6 +114,53 @@ fn run_bounded(script: &str) -> (String, String, i32) {
     )
 }
 
+/// Run every `script` at once, capped at [`BOUND`] each, and return their exit
+/// codes in order — the pinned-hang harness: rows whose measured fdshell
+/// result *is* a body that never returns (README "Accepted divergences", task
+/// #236/#309). Unlike [`run_bounded`] a timeout is the *expected* outcome, so
+/// it returns rc 124 instead of panicking; a row that stops hanging is
+/// reported as its real rc. Running the family in parallel keeps a six-row
+/// pin well inside nextest's 10 s `slow-timeout`.
+fn run_capped(scripts: &[&str]) -> Vec<i32> {
+    let mut children: Vec<(std::process::Child, String)> = scripts
+        .iter()
+        .map(|script| {
+            let child = Command::new(BIN)
+                .args(["-c", script])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            (child, (*script).to_string())
+        })
+        .collect();
+    let deadline = std::time::Instant::now() + BOUND;
+    let mut codes = Vec::new();
+    for (child, script) in children.iter_mut() {
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    codes.push(status.code().unwrap_or(-1));
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => panic!("try_wait failed on `{script}`: {e}"),
+            }
+            if std::time::Instant::now() >= deadline {
+                for pid in children_of(child.id()) {
+                    let _ = kill(Pid::from_raw(pid as i32), SIGKILL);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                codes.push(124);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+    codes
+}
+
 /// Task #137: a cond-list operator in an `if` condition is the block's own cond
 /// list. Measured against `bash -c` (5.3.9): `[ 0 ]` is a true test (a non-empty
 /// word), so the first shape takes `then`; the second short-circuits to `else`.
@@ -801,4 +848,85 @@ fn glued_closer_forms_stay_measured_divergences() {
 fn comment_lines_in_a_block_body_are_inert() {
     let (out, err, code) = run("while :; do # done\necho a && echo b\nbreak\ndone; echo after");
     assert_eq!((out.as_str(), code), ("a\nb\nafter\n", 0), "stderr={err}");
+}
+
+/// Task #236 (round-3 F1): a word that only *looks* like an in-block opener
+/// must not move the command-position flag. `Place::Pattern` is the `case`/`for`
+/// word list, and bash opens it on the single word `in` — a generalization to
+/// every `i`-shaped payload (`is`, `it`, `ix`) turns an argument into a pattern
+/// place, and the closer written after it (`done`/`fi`/`esac`) scores there, so
+/// the enclosing block closes early: the body loses its `break` (the loop runs
+/// forever) or its tail. Measured against `bash -c` (5.3.9): every row prints
+/// its words and exits 0. Bounded children: the regression measured at
+/// `cb9febb` on the first four rows was a hang, so a regression must fail with
+/// the script, not stall the suite. `while :; do echo in done; …` is *not* in
+/// this test: with `in` → `Place::Pattern` it hangs on master and here alike,
+/// and the hang is pinned with the family in
+/// [`in_block_bodies_that_never_return_run_forever`] (task #309's class).
+#[test]
+fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
+    for (script, want) in [
+        (
+            "while :; do echo is done; break; done; echo after",
+            "is done\nafter\n",
+        ),
+        (
+            "while :; do echo is fi; break; done; echo after",
+            "is fi\nafter\n",
+        ),
+        (
+            "while :; do echo ix done; break; done; echo after",
+            "ix done\nafter\n",
+        ),
+        (
+            "while :; do echo it esac; break; done; echo after",
+            "it esac\nafter\n",
+        ),
+        (
+            "while :; do echo i done; break; done; echo after",
+            "i done\nafter\n",
+        ),
+        (
+            "if :; then echo is done; fi; echo after",
+            "is done\nafter\n",
+        ),
+        ("case x in a) echo is done;; esac; echo after", "after\n"),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// Task #236 (accepted divergence, README "body that never returns", class
+/// owned by task #309): the in-block keyword pairing counts a *depth*, not the
+/// block's kind, so a closer of one type closes a block of another and the
+/// loop's own `break` never lands — the body runs forever. Every row is
+/// measured with a capped child (rc 124 at [`BOUND`]) against `bash -c`
+/// (5.3.9) and `master` 75398c8; the last two rows hang on master too, so the
+/// bullet states the whole family honestly, not only the rows this branch
+/// moves.
+#[test]
+fn in_block_bodies_that_never_return_run_forever() {
+    let rows = [
+        // bash prints `y`, `after` rc 0; master reports a parse error rc 1.
+        "while :; do echo a|if :; then echo y; fi; break; done; echo after",
+        // bash rejects the line (rc 2); master runs it (`x`, `after` rc 0).
+        "while :; do echo a | if; fi; echo x; break; done; echo after",
+        // bash prints `y`, `after` rc 0; master prints `after` rc 0.
+        "while :; do echo a | if :; then echo y; fi; break; done; echo after",
+        // bash prints `after` rc 0; master reports a parse error rc 1.
+        "while :; do echo a|while :; do break; done; break; done; echo after",
+        // The `case`/`for` list: `done` there is a pattern word, so the block
+        // never closes. bash prints `in done`, `after`; hangs on master too.
+        "while :; do echo in done; break; done; echo after",
+        // master's own hang: a `fi` closes a `while`, the body never ends.
+        "while :; do echo a; fi; echo after",
+    ];
+    let codes = run_capped(&rows);
+    for (script, code) in rows.iter().zip(codes) {
+        assert_eq!(
+            code, 124,
+            "{script}: bash terminates (rc 0/2), fdshell runs forever"
+        );
+    }
 }
