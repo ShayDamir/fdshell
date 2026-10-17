@@ -2105,21 +2105,46 @@ runs forever —
 `… echo a|if :; then echo y; fi; echo z; break; done …`,
 `… echo a|if :; then echo y; fi; break; done …`,
 `… echo a|while :; do break; done; break; done …`, and master's own
-`while :; do echo a; fi; echo after`. **The rows are a sample of a sweep,
-never the family's extent, and a report must say so.** Two rounds of this task
-each claimed a complete count and both were numerically false ("0 new hangs",
-then "six shapes hang"); the round-5 sweep measures ≥15 shapes beyond the
-disclosed rows. So: disclose the family by *rule*, pin a *sample* under a
-bounded child, and never present an enumerated list as the extent. #236 fixes
-the *argument-position* half of the rule (keyword-shaped words are data); the
-type-aware pairing is #309's job, so a #309 fix must be read together with the
-rows pinned in
+`while :; do echo a; fi; echo after`. **These rows are a sample of a sweep,
+never the family's extent** — the next section is the reporting rule. #236
+fixes the *argument-position* half of the rule (keyword-shaped words are
+data); the type-aware pairing is #309's job, so a #309 fix must be read
+together with the rows pinned in
 `tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever` and the
 README's "body that never returns" bullet — do not "fix" one row and leave the
 family. The same type-blindness is what `Place::Pattern` pays for `case x in
 esac` (the list's terminator is a closer, so a `done` in a `case`/`for` *list*
 is a pattern word, not a closer: the `echo in done` row, which hangs on
 `master` too).
+
+## Disclose a divergence family by rule, pin a sample — never a list as the extent (task #236)
+
+Task #236's "body that never returns" class is a *rule* (an argument-position
+keyword opener plus a mismatched closer in a loop body ⇒ the body never
+returns, rc 124), and two rounds of that task each claimed a complete count of
+its rows, both numerically false: "0 new hangs", then "six shapes hang". The
+round-5 sweep measures ≥15 shapes beyond the disclosed rows, and its own count
+is a lower bound, so no report from this repo may present a row list as the
+family's extent. The rule: **disclose the family by *rule*, pin a *sample*
+under a bounded child, and say in the disclosure that the sample is not the
+extent.** The README bullet, the LESSONS entry above and the pin's doc comment
+in `tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever` each
+state it, and a green run on the pinned rows therefore never means "the family
+is N rows".
+
+## An interactive-shell probe measures the shell that actually starts (task #236)
+
+Every bash claim of this task's REPL pin was first measured with
+`script -qec "bash -i"`, and the prompts and error texts it printed were
+**fish's**: this box's `~/.bashrc` ends its interactive-startup branch with
+`exec …-fish-4.7.1/bin/fish`, so a plain `bash -i` never runs bash. The
+measurement was real, the attribution was not, and a doc comment inherited the
+wrong shell's prompt as "bash's user-set `PS2`". Before citing an
+interactive shell, check what starts: `--norc`/`--noprofile` bypasses the user
+rc (that is what reaches bash here — `bash --norc --noprofile -i`), and a
+prompt, a completion, an `exec` line or a version string in the probe's output
+names the shell that answered. Quote the exact command that reproduces the
+claim, never a shorter spelling of it.
 
 ## A gate start measured from the operator pair has an unkillable `-2` twin (task #236)
 
