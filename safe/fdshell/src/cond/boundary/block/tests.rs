@@ -263,10 +263,12 @@ fn in_block_words_follow_the_clause_rule() {
 }
 
 /// Task #236's S2: a glued cond pair is *two* word starts for the byte scan
-/// (`is_word_break` cuts words at operator bytes), so `word_delta` meets it
-/// three times and the pair's payload must be scored exactly once: the pair's
-/// head word (`||if`) and tail word (`|if`) carry no keyword of their own and
-/// only set the command position the payload word scores in. A background `&`
+/// (`is_word_break` cuts words at operator bytes): its head word (`||if`)
+/// starts at the pair's first byte and its tail word (`|if`) at the last.
+/// `word_delta` is therefore called on the head, the tail and the payload
+/// word behind them, and the payload must be scored exactly once: the two
+/// pair words carry no keyword of their own and only set the command position
+/// the payload word scores in. A background `&`
 /// and a pipeline `|` are single-byte runs (no pair): their tails are
 /// arguments, #292's carve-out, and the keyword behind them is unscored.
 #[test]

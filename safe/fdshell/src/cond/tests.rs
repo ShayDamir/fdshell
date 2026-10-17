@@ -303,7 +303,7 @@ fn operators_around_a_definition_split_the_list() {
 /// Task #236's S2: the short-circuit gate scan in process. A short-circuited
 /// `||` gates bash's *AND-list*, and the gate ends at the first `;`/newline at
 /// group *and* block depth 0, so `run_cond_list` resumes ungated behind it.
-/// Every arm of `gate/boundary/gate.rs::gate_end` is pinned here: the depth-0
+/// Every arm of `cond/boundary/gate.rs::gate_end` is pinned here: the depth-0
 /// separator (the success path), the block arms (a block the gated text opens
 /// ends at its own closer, its inner `;`s only reset the run), the group arms
 /// (a `{ …; }` body is opaque, a stray `}` clamps), the quote states (a `;`
