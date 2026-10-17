@@ -985,10 +985,12 @@ fn single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty() {
 /// Task #238's out-of-scope interaction, pinned as measured: a block trailing
 /// redirect writes the **arm's** stdout, as for a heredoc-free block
 /// (`if true; then echo hi; fi > out` behaves identically on master); bash
-/// writes the here-doc body into `out` and prints nothing. Task #273 extends
-/// the shape to the `for` and `case` blocks, whose trailing redirects are
-/// reachable only once their closer search truncates the body (`> out` and its
-/// `>>` twin, plus the heredoc-free twins).
+/// writes the here-doc body into `out` and prints nothing. The silent drop of a
+/// block's trailing redirect is the family task **#298** owns. Task #273 makes
+/// the `for` and `case` twins *join* that family: on `master` each of them was
+/// only a parse error of the untruncated closer search (`expected 'done'` /
+/// `case: missing 'esac'`), heredoc-carrying and heredoc-free alike. Pinned:
+/// `> out` and its `>>` twin for every block, plus the heredoc-free twins.
 #[test]
 fn single_line_block_body_heredoc_with_block_trailing_redirect() {
     let dir = std::env::temp_dir().join("fdshell-task238");
@@ -1001,10 +1003,13 @@ fn single_line_block_body_heredoc_with_block_trailing_redirect() {
         ("for x in a; do cat <<T; done >> out\nbodyT\nT", "bodyT\n"),
         ("case x in x) cat <<T;; esac > out\nbodyT\nT", "bodyT\n"),
         ("case x in x) cat <<T;; esac >> out\nbodyT\nT", "bodyT\n"),
-        // The heredoc-free twins, unchanged by all of this: `hi` on stdout and
-        // no `out` on `master` either.
+        // The heredoc-free twins: the `if` row is unchanged by all of this
+        // (`hi` on stdout, and no `out` on `master` either); the heredoc-free
+        // `for` and `case` rows *join* #298's family on task #273 — on `master`
+        // they were the parse errors `expected 'done'` / `case: missing 'esac'`.
         ("if true; then echo hi; fi > out", "hi\n"),
         ("for x in a; do echo A; done > out", "A\n"),
+        ("case x in x) echo C;; esac > out", "C\n"),
     ] {
         let _ = std::fs::remove_file(dir.join("out"));
         let script = format!("cd {}; {}", dir.display(), script);
@@ -1195,6 +1200,45 @@ fn single_line_for_and_case_body_heredoc_body_lines_are_opaque() {
     assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
     let (out, err, code) = run("case x in x) cat <<T\nbodyT\nT\n;; esac");
     assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// Task #273's fourth measured divergence, pinned as fdshell's own behaviour: in
+/// append mode an arm's text is rebuilt from the regions its own operators claim,
+/// so the body bytes travel **inside** the arm text and the pre-parse
+/// `brace_expand::expand` pass rewrites a brace word written in the body — every
+/// arm site below prints ` a b` (rc 0) where bash prints `{a,b}`. This is #238's
+/// machinery, already on `master` for `if`/`elif`/`else`/`while`; the `for` and
+/// `case` twins were rc 1 parse errors there, so #273 makes them reachable. Only
+/// the arm sites are affected: the top-level statement path keeps the body
+/// regions out of the line it brace-rewrites
+/// (`tests/brace_expand.rs::heredoc_body_is_verbatim` prints `{a,b}`), and the
+/// body's other expansion neighbours stay in bash parity at the very same arm
+/// sites (`$X` → `zzz`, `$(echo sub)` → `sub`, a literal `a,b` body → `a,b`) —
+/// bash's body expansion is `$`-expansion only, never brace expansion. Task
+/// **#311** owns the root cause (body bytes must stay out of the pre-parse text
+/// passes); when it lands these rows flip to bash parity and the name drops its
+/// `311` suffix.
+#[test]
+fn single_line_block_body_heredoc_of_a_brace_word_body_stays_measured_until_311() {
+    for (script, want) in [
+        ("for x in a; do cat <<T; done\n{a,b}\nT", " a b\n"),
+        ("case x in x) cat <<T;; esac\n{a,b}\nT", " a b\n"),
+        ("case x in x) cat <<T; ;; esac\n{a,b}\nT", " a b\n"),
+        ("if true; then cat <<T; fi\n{a,b}\nT", " a b\n"),
+        ("if false; then :; else cat <<T; fi\n{a,b}\nT", " a b\n"),
+        (
+            "if false; then :; elif true; then cat <<T; fi\n{a,b}\nT",
+            " a b\n",
+        ),
+        ("while :; do cat <<T; break; done\n{a,b}\nT", " a b\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, 0),
+            "{script}: bash prints '{{a,b}}', rc 0; stderr={err:?}"
+        );
+    }
 }
 
 #[test]

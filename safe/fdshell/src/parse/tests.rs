@@ -2913,6 +2913,19 @@ fn case_last_clause_no_semi_semi() {
     assert_eq!(cb.clauses[1].body.data, c"echo two".into());
 }
 
+/// `up_to_esac`'s leniency (task #273) covers the `;;`-less last clause of a
+/// heredoc-free block only: a clause that carries a body heredoc has its body
+/// tokens *after* the `esac`, so the fallback's "last token is `esac`" check
+/// fails and the shape stays the block's own missing-`esac` rejection (bash
+/// reports a syntax error, rc 2; fdshell rc 1 on `master` and here — the
+/// integration path reports the generic parse error of the unclosed block span,
+/// `tests/heredoc.rs::case_body_heredoc_of_a_clause_terminated_by_done_reports_missing_esac`
+/// pins the family's message shape).
+#[test]
+fn case_last_clause_body_heredoc_of_a_late_esac_is_not_lenient() {
+    assert!(parse(b"case x in x) cat <<T esac\nbodyT\nT").is_err());
+}
+
 #[test]
 fn case_empty_body_clause() {
     let ParsedLine::Case(cb) = parse(b"case \"x\" in a) ;; esac").unwrap() else {
