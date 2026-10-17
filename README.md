@@ -475,7 +475,7 @@ Accepted divergences from bash:
   `a`-`tail` parity, task #236's S2). Pinned by
   `tests/glued_pair.rs::glued_pair_keeps_the_command_position_the_pair_sets`
   and `…::short_circuit_gate_skips_the_gated_list_and_resumes_behind_it`.
- - A block **body that never returns** runs forever (rc 124), where bash ends
+- A block **body that never returns** runs forever (rc 124), where bash ends
   the loop. The family is a **rule**, not a list: *an argument-position
   keyword opener plus a mismatched closer in a loop body*. The in-block
   keyword pairing counts a *depth*, not the block's *kind*, so the keyword a
