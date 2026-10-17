@@ -66,13 +66,23 @@ fn reports_type_and_reclen_for_a_record() {
     let mut buf = [0u8; 4096];
     let n = getdents(&dir_fd, &mut buf).unwrap();
     assert!(n > 0);
-    let first = Iter::new(&buf, n).next().unwrap();
-    // First record is always `.`: a directory named one byte.
-    assert_eq!(u32::from(first.d_type), DT_DIR);
-    assert_eq!(first.name, b".");
-    // `d_reclen` covers the fixed header plus the name and its NUL terminator.
-    let reclen = u16::from_le_bytes(buf[16..18].try_into().unwrap());
-    assert!(reclen as usize >= 24);
+    let mut off = 0usize;
+    let mut found_dot = false;
+    while off + 18 <= n {
+        let reclen = u16::from_le_bytes(buf[off + 16..off + 18].try_into().unwrap()) as usize;
+        let entry = Iter::new(buf.get(off..off + reclen).unwrap(), reclen)
+            .next()
+            .unwrap();
+        if entry.name == b"." {
+            // `.` is a directory: header (24 bytes) plus a one-byte name and its NUL.
+            assert_eq!(u32::from(entry.d_type), DT_DIR);
+            assert!(reclen >= 24);
+            found_dot = true;
+            break;
+        }
+        off += reclen;
+    }
+    assert!(found_dot, "no `.` record in the first batch");
 }
 
 #[test]
@@ -174,8 +184,13 @@ fn dir_batch_iter_yields_dot_with_dir_type() {
     let dir = scratch();
     let dir_fd = open(cstr(&dir).as_c_str(), libc::O_RDONLY | libc::O_CLOEXEC).unwrap();
     let batch = dir_fd.dir_batch().unwrap().unwrap();
-    let first = batch.iter().next().unwrap();
-    // First record is always `.`: a directory named one byte.
-    assert_eq!(first.name, b".");
-    assert_eq!(u32::from(first.d_type), DT_DIR);
+    let mut found_dot = false;
+    for entry in batch.iter() {
+        if entry.name == b"." {
+            assert_eq!(u32::from(entry.d_type), DT_DIR);
+            found_dot = true;
+            break;
+        }
+    }
+    assert!(found_dot);
 }
