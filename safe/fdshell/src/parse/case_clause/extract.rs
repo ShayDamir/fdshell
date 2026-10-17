@@ -11,8 +11,9 @@ use sys::ScriptText;
 ///
 /// The text is the slice's verbatim span with the heredoc body regions its own
 /// `<<` operators claim attached (`part_text`): in a single-line `case` those
-/// regions sit past `esac`, in a multi-line clause they are inside the span and
-/// `verbatim` already covers them.
+/// regions sit past `esac`, in a multi-line clause they are inside the span,
+/// where `part_text`'s extension mode returns the slice's verbatim span
+/// unchanged.
 pub(crate) fn body(
     tokens: &[Token],
     text: &ScriptText,

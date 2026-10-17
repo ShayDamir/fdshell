@@ -356,6 +356,20 @@ Limitations:
   and the `if`/`while`/`case` twins (`tests/heredoc.rs::
   single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_stays_measured_until_266`;
   task #266 owns body/terminator opacity to the statement layers).
+- A brace word written in a single-line block's **body** is brace-expanded,
+  because in append mode the arm's text is rebuilt from the regions its own
+  operators claim and the body bytes travel inside that text, through the
+  pre-parse brace pass: `for x in a; do cat <<T; done`, `case x in x) cat <<T;;
+  esac`, `if true; then cat <<T; fi` (and the `else`/`elif` arms and the `while`
+  twin) + `{a,b}` + `T` print ` a b` (rc 0), where bash prints `{a,b}`
+  (`tests/heredoc.rs::
+  single_line_block_body_heredoc_of_a_brace_word_body_stays_measured_until_311`;
+  task #311 owns the body bytes leaving the pre-parse passes). `for`/`case` are
+  newly reachable here — on `master` they were rc 1 parse errors, and the four
+  `if`/`while` sites already printed ` a b`. The top-level statement path keeps
+  the regions out of the line it brace-rewrites (`cat <<T` + `{a,b}` + `T`
+  prints `{a,b}`), and the body's `$`-expansion neighbours (`$X` → `zzz`,
+  `$(echo sub)` → `sub`, a literal `a,b`) stay in bash parity at the same sites.
 - A `case` clause terminated by a closer-shaped word reports its own missing
   `esac` (rc 1): `case x in x) cat <<T; done;; esac` + body + `T`, where bash
   reports a syntax error (rc 2), the same rc-1-vs-2 family as
