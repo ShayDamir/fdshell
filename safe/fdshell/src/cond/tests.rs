@@ -299,3 +299,98 @@ fn operators_around_a_definition_split_the_list() {
     // splits and the definition never lands, as today.
     assert_eq!(boundary_of(b"f(){echo a && echo b;}; f"), (11, false));
 }
+
+/// Task #236's S2: the short-circuit gate scan in process. A short-circuited
+/// `||` gates bash's *AND-list*, and the gate ends at the first `;`/newline at
+/// group *and* block depth 0, so `run_cond_list` resumes ungated behind it.
+/// Every arm of `gate/boundary/gate.rs::gate_end` is pinned here: the depth-0
+/// separator (the success path), the block arms (a block the gated text opens
+/// ends at its own closer, its inner `;`s only reset the run), the group arms
+/// (a `{ …; }` body is opaque, a stray `}` clamps), the quote states (a `;`
+/// inside a quote never ends the gate), the heredoc region arm (a body region
+/// is skipped whole, its `&&` is region data; a block-context region `&&`
+/// falls through to the plain run reset), and the word-state reset at the gate
+/// start (the state comes back from the boundary scan with `word_active` set
+/// by the operator bytes, and the gated list's first word must still be
+/// scored). End-to-end parity of these shapes is pinned in
+/// `tests/glued_pair.rs`; the gate's *scope* rule is LESSONS' task #236 entry.
+#[test]
+fn gate_end_skips_the_gated_and_list_to_its_separator() {
+    // The gated list's own `;` ends the gate: `echo a || :; echo b` — the
+    // `;` at 11, and the scan resumes at 12 (`echo b` runs ungated).
+    assert_eq!(gate_of(b"echo a || :; echo b", 10, false), 12);
+    // A newline ends it too.
+    assert_eq!(gate_of(b"echo a || echo b\necho c", 10, false), 17);
+    // A block the gated text opens keeps its `;`s: only the `;` behind its
+    // closer ends the gate (the S2 hang: scoring only at top level ended the
+    // gate inside the block and the loop never saw its `break`).
+    assert_eq!(
+        gate_of(b"echo a || if :; then :; fi; echo tail", 10, false),
+        27
+    );
+    assert_eq!(gate_of(b"echo a||if :; then :; fi; break", 8, true), 25);
+    assert_eq!(
+        gate_of(
+            b"echo a || if :; then if :; then :; fi; fi; echo tail",
+            10,
+            false
+        ),
+        42
+    );
+    // A `{ …; }` group is opaque to the gate: its body `;` is group data, and
+    // with no separator behind the `}` the gate runs to the text end.
+    assert_eq!(gate_of(b"echo a || { echo b; } && echo c", 10, false), 31);
+    // A stray `}` clamps the group depth at 0, never below it.
+    assert_eq!(gate_of(b"echo a || echo x} && echo c", 10, false), 27);
+    // A brace in *argument* position opens no group (`opens_group` is
+    // load-bearing, so the gate's `&&` arm is too): the `;` right after it ends
+    // the gate, exactly as a `;` with no brace at all.
+    assert_eq!(gate_of(b"echo a || echo {; echo b", 9, false), 17);
+    // Quote states: a `;` inside a quoted word never ends the gate.
+    assert_eq!(gate_of(b"echo a || echo \"x; y\"; echo b", 10, false), 22);
+    assert_eq!(gate_of(b"echo a || echo 'x; y'; echo b", 10, false), 22);
+    // Heredoc regions in the gated text are skipped whole (the region arm):
+    // the gate ends at the newline terminating the last delimiter line, so the
+    // statements behind the body run ungated, and a `&&` written *inside* the
+    // body is region data, not a gate end.
+    assert_eq!(
+        gate_of(b"echo a || cat <<E\nbody\nE\necho b", 10, false),
+        25
+    );
+    assert_eq!(
+        gate_of(b"echo a || cat <<E\nbody\nE\n:; echo b", 10, false),
+        25
+    );
+    assert_eq!(
+        gate_of(b"echo a || cat <<E\nbody && z\nE\n:; echo b", 10, false),
+        30
+    );
+    // Block context: the region's own `&&` is a *split* for the boundary scan
+    // and is no gate end — it falls through to the plain run reset, and the
+    // block's closer ends the gate.
+    assert_eq!(
+        gate_of(
+            b"echo a || if :; then cat <<Q\nq && y\nQ; fi; echo tail",
+            10,
+            false
+        ),
+        42
+    );
+    assert_eq!(
+        gate_of(
+            b"echo a || if :; then cat <<Q\nq\nQ; fi; echo tail",
+            10,
+            false
+        ),
+        37
+    );
+}
+
+/// `gate_end` from `from`, with the word state the boundary scan hands over
+/// (`active` is `word_active`: the glued pair's bytes leave it set).
+fn gate_of(line: &[u8], from: usize, active: bool) -> usize {
+    use super::boundary::gate::gate_end;
+    let mut state = ScanState::new();
+    state.word_active = active;
+    gate_end(line, from, &mut state)
+}

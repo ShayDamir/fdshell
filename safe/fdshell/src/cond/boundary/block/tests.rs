@@ -261,3 +261,53 @@ fn in_block_words_follow_the_clause_rule() {
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
     assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (1, Place::Command));
 }
+
+/// Task #236's S2: a glued cond pair is *two* word starts for the byte scan
+/// (`is_word_break` cuts words at operator bytes), so `word_delta` meets it
+/// three times and the pair's payload must be scored exactly once: the pair's
+/// head word (`||if`) and tail word (`|if`) carry no keyword of their own and
+/// only set the command position the payload word scores in. A background `&`
+/// and a pipeline `|` are single-byte runs (no pair): their tails are
+/// arguments, #292's carve-out, and the keyword behind them is unscored.
+#[test]
+fn glued_pair_words_score_their_payload_once() {
+    // `a||if :` in a body: head at 1, tail byte at 2, payload word at 3.
+    let l = b"a||if :".as_slice();
+    assert_eq!(word_delta(l, 1, 1, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
+    // The `&&` spelling, and the tail byte `&if`.
+    let l = b"a&&if :".as_slice();
+    assert_eq!(word_delta(l, 1, 1, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
+    // Behind data the same three words carry no keyword: the in-block glued
+    // divergence (`echo a&&if`), measured in `tests/glued_pair.rs`. The
+    // machine's transition is unchanged — an `if`-shaped argument puts the
+    // *next* word in command position (see [`in_block_words_follow_the_clause_rule`]).
+    let l = b"a||if :".as_slice();
+    for i in [1, 2] {
+        assert_eq!(
+            word_delta(l, i, 1, 0, Place::Data),
+            (0, Place::Data),
+            "the pair word at {i} is data behind data"
+        );
+    }
+    assert_eq!(word_delta(l, 3, 1, 0, Place::Data), (0, Place::Command));
+    // A background `&` is a single-byte run: its tail word `&if` is an
+    // argument, and the `if` behind it is scored in the place that leaves.
+    let l = b"&if :".as_slice();
+    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Data));
+    assert_eq!(word_delta(l, 1, 1, 0, Place::Data), (0, Place::Command));
+    // A pipeline `|` is a single-byte run too (#292): the byte is an
+    // argument and so is the keyword behind it.
+    let l = b"a | if :".as_slice();
+    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Data));
+    assert_eq!(word_delta(l, 4, 1, 0, Place::Data), (0, Place::Command));
+    // The same pair at top level is judged by the run's own rule, not the
+    // flag: an empty run at `run_start` is command position, so the payload
+    // `if` opens its block exactly as in-block.
+    let l = b"a||if :; then :; fi".as_slice();
+    assert_eq!(word_delta(l, 1, 0, 1, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 3, 0, 1, Place::Command), (1, Place::Command));
+}

@@ -51,8 +51,9 @@ pub(crate) fn run_cond_list(
                 // bodies, and resume the scan ungated on the statements
                 // behind the separator — `echo a || if :; then :; fi; break`
                 // skips the `if` and runs `break`.
-                let gate = boundary::gate::gate_end(line, i + 2, &mut state);
-                parts::take_bodies(line, i + 2, gate, bodies, &mut body_idx);
+                let after = i + 2;
+                let gate = boundary::gate::gate_end(line, after, &mut state);
+                parts::take_bodies(line, after, gate, bodies, &mut body_idx);
                 start = gate;
                 continue;
             }

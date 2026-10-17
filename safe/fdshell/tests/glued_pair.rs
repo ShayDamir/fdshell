@@ -1,62 +1,29 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Glued cond-pair and short-circuit-gate pins (task #236). The lib-test
-//! codegen anomaly (LESSONS: the fdshell *test-profile* library miscompiles
-//! the keyword payload arms of `keywords/position.rs`, glued forms only)
-//! makes these shapes unpinable against `CARGO_BIN_EXE_fdshell` in a plain
-//! `cargo nextest` run, so this harness runs the *non-test* profile binary
-//! when one is available — `cargo build --release` (or the nix build, whose
-//! test profile is built with `opt-level = 1` via `package.nix`) — and skips
-//! with a loud note otherwise. The shapes are measured against bash 5.3.9.
-//!
-//! Run locally: `cargo build --release && cargo nextest run --test glued_pair`.
+//! Glued cond-pair and short-circuit-gate pins (task #236): the end-to-end
+//! half of the pair rule (the in-process half is pinned in
+//! `keywords/position/tests.rs`, `keywords/pair/tests.rs`,
+//! `cond/boundary/block/tests.rs`, `parse/semi/closing/tests.rs` and
+//! `cond/tests.rs`). The shapes are measured against bash 5.3.9 and run
+//! against `CARGO_BIN_EXE_fdshell` unconditionally: the dev and release
+//! binaries compute these shapes identically (LESSONS, task #236 — the only
+//! profile difference is the source-location frames of a debug error report),
+//! so there is no profile to dodge and no skip path.
 
-use std::path::PathBuf;
 use std::process::Command;
 use std::str;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
-/// The pin binary: the test-profile binary when it is a non-test-profile
-/// build (the nix test run: `opt-level = 1`), else the `target/release`
-/// binary of a preceding `cargo build --release`, else `None` (skip).
-fn pin_bin() -> Option<PathBuf> {
-    let test = PathBuf::from(BIN);
-    if test.file_name().and_then(|n| n.to_str()) == Some("fdshell") {
-        // Nix: the test profile is opt-level 1 — keyword-correct (LESSONS).
-        if std::env::var("NIX_BUILD_TOP").is_ok() {
-            return Some(test);
-        }
-    }
-    let release = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/release/fdshell");
-    release.exists().then_some(release)
-}
-
-fn run(script: &str) -> (String, String, i32) {
-    let bin = pin_bin().expect("run `cargo build --release` first (see module doc)");
-    let output = Command::new(&bin)
-        .args(["-c", script])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .expect("spawn pin binary");
-    (
-        str::from_utf8(&output.stdout).unwrap().to_string(),
-        str::from_utf8(&output.stderr).unwrap().to_string(),
-        output.status.code().unwrap_or(-1),
-    )
-}
-
 /// Run with a bounded child (the loop rows must end on their own; a hung
 /// child is killed and the shape fails with rc 124 — same harness as
 /// `tests/cond_blocks.rs::run_bounded`).
 fn run_bounded(script: &str) -> (String, String, i32) {
-    let bin = pin_bin().expect("run `cargo build --release` first (see module doc)");
-    let mut child = Command::new(&bin)
+    let mut child = Command::new(BIN)
         .args(["-c", script])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("spawn pin binary");
+        .expect("spawn fdshell");
     let started = std::time::Instant::now();
     while child.try_wait().expect("try_wait").is_none() {
         if started.elapsed() > std::time::Duration::from_secs(5) {
@@ -76,19 +43,6 @@ fn run_bounded(script: &str) -> (String, String, i32) {
     )
 }
 
-/// The skip guard: no suitable binary → the test passes vacuously (the
-/// shapes stay pinned wherever a non-test binary is built, and a plain
-/// `cargo nextest` run prints the reminder).
-#[test]
-fn glued_pair_pins_have_a_binary() {
-    if pin_bin().is_none() {
-        eprintln!(
-            "SKIP glued_pair pins: no non-test fdshell binary found \
-             (`cargo build --release` enables them)"
-        );
-    }
-}
-
 /// Task #236 (S2): a glued `&&`/`||` pair *keeps* the command position the
 /// pair sets, so the keyword glued behind it is scored: `x||if :; …; fi`
 /// nests the `if` block (its `;`s are clause bytes) and the statement runs
@@ -96,9 +50,6 @@ fn glued_pair_pins_have_a_binary() {
 /// splits at the `;`) — pinned here as the measured accepted divergence.
 #[test]
 fn glued_pair_keeps_the_command_position_the_pair_sets() {
-    if pin_bin().is_none() {
-        return;
-    }
     // The spaced pairs: bash parity — the `&&` twin runs the `if` (prints
     // `y`), the `||` twin short-circuits it.
     let (out, err, code) = run_bounded("echo x&&if :; then echo y; fi; echo after");
@@ -119,9 +70,6 @@ fn glued_pair_keeps_the_command_position_the_pair_sets() {
 /// ends it, so `break`/`echo` behind the block run.
 #[test]
 fn short_circuit_gate_skips_the_gated_list_and_resumes_behind_it() {
-    if pin_bin().is_none() {
-        return;
-    }
     // The gate skips the `if` block and `echo tail` runs (bash parity).
     let (out, err, code) = run_bounded("echo a || if :; then :; fi; echo tail");
     assert_eq!((out.as_str(), code), ("a\ntail\n", 0), "stderr={err}");

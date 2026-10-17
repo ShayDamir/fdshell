@@ -39,6 +39,14 @@ fn run_cond_list(
     crate::cond::run_cond_list(&st(b), &[], cell, false)
 }
 
+fn run_cond_list_bodies(
+    b: &[u8],
+    bodies: &[Vec<u8>],
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    crate::cond::run_cond_list(&st(b), bodies, cell, false)
+}
+
 fn handle(b: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
     crate::repl::handle(&st(b), cell)
 }
@@ -873,6 +881,21 @@ fn or_success_skips_rest() {
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });
+}
+
+/// Task #236's S2, in process: the bodies written in a short-circuited gated
+/// list are consumed by the gate skip, so the statement behind the gated text
+/// gets **its own** body and never re-serves the skipped one. `true && true ||
+/// cat <<Q; cat <<R` short-circuits on the `||` (13), skips the gated
+/// `cat <<Q` with its body, and `cat <<R` runs on the *second* body.
+#[test]
+fn short_circuit_gate_consumes_the_gated_list_bodies() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        let bodies = [b"q-body\nQ".to_vec(), b"r-body\nR".to_vec()];
+        run_cond_list_bodies(b"true && true || cat <<Q; cat <<R", &bodies, &cell).unwrap();
+    });
+    assert_eq!(out, b"r-body\n");
 }
 
 #[test]

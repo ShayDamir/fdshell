@@ -74,15 +74,6 @@ fn in_moves_the_place_to_pattern() {
 /// tail (`&>` in `x&>f`) is an argument, and a word that *contains* a pair
 /// (`p||if`, no glue: the scans cut words at the operator bytes) is an
 /// argument.
-///
-/// The keyword rows of the payload path (the tail word `|if` keeping the
-/// pair's command position, every clause keyword opening a command) are
-/// pinned in `tests/cond_blocks.rs` against the shell binary instead:
-/// fdshell's `--test` codegen of `position.rs` is affected by a rustc
-/// anomaly — the keyword arms of the *operator-payload* path compile as data
-/// in the lib-test crate only (the library binary computes them correctly,
-/// measured against bash and `cargo run`; see LESSONS), so a unit pin for
-/// those rows fails in the test crate while the binary behaves correctly.
 #[test]
 fn operator_pair_halves_keep_the_place_the_pair_set() {
     // A pipeline tail behind data is an argument (#292's carve-out row) and
@@ -102,6 +93,83 @@ fn operator_pair_halves_keep_the_place_the_pair_set() {
             "the operator {word:?} starts a command"
         );
     }
+}
+
+/// The cond pair's *payload* arms (task #236's S2): a pair's head word
+/// (`||if`) and tail word (`|if`) carry the keyword behind their operator
+/// bytes, and that keyword takes the place the pair sets — every
+/// condition-taking opener and every clause keyword opens a command, `in`
+/// opens a `case`/`for` word list. Behind **data** the payload stays data:
+/// that is the in-block glued divergence the README bullet pins and
+/// `tests/glued_pair.rs` measures (`echo a&&if` is an argument). A bare glue
+/// (an empty payload) leaves the place the pair sets; an operator-shaped
+/// payload is a redirect form, an argument; a `time [-p]` payload is
+/// transparent, keeping the place.
+#[test]
+fn pair_payloads_take_the_place_the_pair_sets() {
+    for (head, tail) in [
+        (b"||if".as_slice(), b"|if".as_slice()),
+        (b"&&while", b"&while"),
+        (b"||until", b"|until"),
+        (b"&&then", b"&then"),
+        (b"||do", b"|do"),
+        (b"&&else", b"&else"),
+        (b"||elif", b"|elif"),
+    ] {
+        for (word, glue) in [(head, Glue::Head), (tail, Glue::Tail)] {
+            assert_eq!(
+                after_word_glue(word, Place::Command, glue),
+                Place::Command,
+                "the pair {word:?} opens a command"
+            );
+            assert_eq!(
+                after_word_glue(word, Place::Data, glue),
+                Place::Data,
+                "the pair {word:?} behind data is an argument"
+            );
+            assert_eq!(
+                after_word_glue(word, Place::Pattern, glue),
+                Place::Command,
+                "the pair {word:?} ends the word list it sits in"
+            );
+        }
+    }
+    // `in` opens the word list from both halves.
+    for (word, glue) in [
+        (b"&&in".as_slice(), Glue::Head),
+        (b"|in".as_slice(), Glue::Tail),
+    ] {
+        assert_eq!(
+            after_word_glue(word, Place::Command, glue),
+            Place::Pattern,
+            "{word:?} opens the list"
+        );
+    }
+    // A bare glue (no payload) leaves the place the pair set: the head opens
+    // a command, the tail is transparent.
+    assert_eq!(
+        after_word_glue(b"||", Place::Data, Glue::Head),
+        Place::Command
+    );
+    assert_eq!(
+        after_word_glue(b"|", Place::Command, Glue::Tail),
+        Place::Command
+    );
+    assert_eq!(after_word_glue(b"|", Place::Data, Glue::Tail), Place::Data);
+    // An operator-shaped payload is a redirect form, an argument.
+    assert_eq!(
+        after_word_glue(b"||||", Place::Command, Glue::Head),
+        Place::Data
+    );
+    // A `time [-p]` payload is transparent: it keeps the pair's place.
+    assert_eq!(
+        after_word_glue(b"||time", Place::Command, Glue::Head),
+        Place::Command
+    );
+    assert_eq!(
+        after_word_glue(b"||time -p", Place::Data, Glue::Head),
+        Place::Data
+    );
 }
 
 /// Ordinary words, closers, `for`/`case` (their lists/conditions are read by
