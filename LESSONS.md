@@ -2052,6 +2052,10 @@ Task #236 (S2 round): the short-circuit gate and the glued cond pair.
   gate. Scoring closers at top level is exactly what `group_at_run` cannot
   see (its answer is "no group"), and a block opened by a glued pair's
   payload that never closes swallows the rest of the line: the S2 hang.
+  The two short-circuit scopes are **deliberately asymmetric** (measured at
+  parity today, so do not "fix" one side blind): a short-circuited `||` ends
+  its gate at the `;` (`gate_end`), the `&&`-failure path keeps skipping to
+  the next `||` (`parts::skip_to_or`).
 - **A cond pair opens two word starts; the payload is a word.** The
   byte-level scans carry this as `Glue` (head/tail strip in
   `keywords/position.rs::after`); the token- and run-layer scorers see the
@@ -2063,20 +2067,47 @@ Task #236 (S2 round): the short-circuit gate and the glued cond pair.
   `echo a && if …` open a block from the whole run — the midrun cond-part
   semantics collapse (spaced rows failed en masse). The run-open test is
   leading-word-only by design.
-- **Rustc codegen anomaly (unresolved, treat as a platform quirk).** At
-  `opt-level = 0` the fdshell library's keyword payload/glue classification
-  of `keywords/position.rs` miscompiles *only in this crate*: the dev binary
-  and every `cargo test`/nextest binary disagree with the release build on
-  glued cond-pair forms (glued `if` behind `||`/`&&` classified as data).
-  The library binary of a plain `cargo build --release`, and the nix build
-  (cargoHook builds `--release`), are correct; `nix flake check` runs tests
-  against the release binary. Consequences: unit pins of glued forms are
-  unpinable in the test profile; `tests/glued_pair.rs` runs them against a
-  non-test binary (release build, or the nix test's `CARGO_BIN_EXE`) and
-  skips with a note otherwise. Bisection ruled out deps, lints, crate layout
-  and mtime; a minimal no_std replica compiles fine. Do NOT "fix" it via
-  `[profile.dev/test] opt-level = 1`: opt-1 has its *own* bug class (spaced
-  forms broke en masse, parity 34→18 on the sweep); opt-0 plus the release
-  pins is the stable state, and the local `cargo build` dev binary stays
-  anomaly-prone for glued forms — verify glued shapes against
-  `target/release/fdshell`, not the dev binary.
+- **There is no profile split on these shapes — do not invent one.** A
+  round-3 probe claimed a "rustc codegen anomaly": that at `opt-level = 0`
+  the payload/glue arms of `keywords/position.rs` miscompile, so the dev and
+  test binaries disagree with the release build on glued cond pairs and unit
+  pins of glued forms are "unpinable". Measured on 19 glued shapes
+  (`echo x&&if …`, `echo x||if …`, `echo x|if …`, `while … echo a&&if …`,
+  the glued closers, the in-block clause rows): `target/debug/fdshell` and
+  `target/release/fdshell` print **identical stdout with identical rc**; the
+  payload/glue arms pass as plain unit pins in the `cfg(test)` build. The
+  only profile difference is error-stack's source-location frames, present in
+  a debug report and absent from a release one (stdout/rc are the same, so
+  pins that compare stdout+rc are profile-independent). `package.nix` sets
+  **no** `opt-level` at all (`buildRustPackage` + `useNextest`; cargoHook
+  builds `--release`). The probe's "miscompile" is the *rule*: a pair payload
+  behind data is deliberately `Place::Data` (`after`'s pipeline arm — #292's
+  carve-out, a block written as a pipeline stage is word data), so a probe
+  expecting `Command` behind `Place::Data` asserts the divergence away and
+  fails: a test bug. Pin the place the rule sets, and never exempt a shape
+  from unit pins on a toolchain excuse.
+
+Task #236 (accepted divergence, class owned by task #309): the in-block
+opener/closer pairing is **type-blind** and knowingly left incomplete. Every
+in-block scorer pairs an opener with *any* closer — `word_delta`/`depth_delta`
+/`closing_keyword_index` count a single `block_depth` (the `Place` flag says
+*where* a word sits, never *which* block it belongs to), so a `while` body's
+`if`-closer (`fi`) closes the `while`, a `done` closes an `if`, and the loop's
+own `break` lands in a level that no longer exists. bash pairs them per
+construct type. Consequence: a body whose control never lands **runs forever**
+(rc 124) — `while :; do echo a|if :; then echo y; fi; break; done; echo after`
+(bash `y` `after`, master rc 1, fdshell hangs), its spaced twins,
+`while :; do echo a|while :; do break; done; break; done; echo after`,
+`while :; do echo in done; break; done; echo after` and master's own
+`while :; do echo a; fi; echo after`. #236 fixes the *argument-position* half
+of the rule (keyword-shaped words are data); the type-aware pairing is #309's
+job, so a #309 fix must be read together with the rows pinned in
+`tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever` and the
+README's "body that never returns" bullet — do not "fix" one row and leave the
+family. The same type-blindness is what `Place::Pattern` pays for `case x in
+esac` (the list's terminator is a closer, so a `done` in a `case`/`for` *list*
+is a pattern word, not a closer: the `echo in done` row above).
+
+## A gate start measured from the operator pair has an unkillable `-2` twin (task #236)
+
+`cond.rs::run_cond_list` names the gate start once (`let after = i + 2;` — the byte just past the `&&`/`||` pair the boundary scan stopped on) and hands it to `gate_end` and `take_bodies`. The `+`→`-` mutant (`i - 2`) is an accepted equivalent: the bytes it starts on are the pair's own bytes and the whitespace before them, and the gate's two run rules normalize that start to exactly the state the `+2` start has on the gated list's first word — `strip_at` classifies a `|`/`&` word as a pair head/tail and leaves `Place::Command`, and `group_at_run` treats a run ending in `&&`/`||` as command position. The gate then ends at the same byte and `take_bodies` counts the same `<<` operators, so no input distinguishes the two starts. The `+`→`*` twin (`2i`, past the gated text) is *not* equivalent and is killed: `cond/tests.rs::gate_end_skips_the_gated_and_list_to_its_separator` pins the gate's end index, and `tests/run.rs::short_circuit_gate_consumes_the_gated_list_bodies` pins the body a skipped gated heredoc must consume. Do not chase the `-2` twin with a test: measuring the start from the pair is the honest expression (the pair *is* the boundary), and recording the equivalence here is what keeps a future `cargo mutants` run from re-flagging it.

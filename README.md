@@ -475,6 +475,19 @@ Accepted divergences from bash:
   `a`-`tail` parity, task #236's S2). Pinned by
   `tests/glued_pair.rs::glued_pair_keeps_the_command_position_the_pair_sets`
   and `…::short_circuit_gate_skips_the_gated_list_and_resumes_behind_it`.
+- A block **body that never returns** runs forever (rc 124), where bash ends
+  the loop. The in-block keyword pairing counts a *depth*, not the block's
+  *kind*, so an opener and a closer of different types pair up and the loop's
+  own `break` lands in the wrong level:
+  `while :; do echo a|if :; then echo y; fi; break; done; echo after` (bash
+  prints `y` `after`; master reports a parse error, fdshell runs forever),
+  `… echo a | if; fi; echo x; break; done …`, `… echo a | if :; then echo y;
+  fi; break; done …`, `… echo a|while :; do break; done; break; done …`;
+  `while :; do echo in done; break; done; echo after` (the `case`/`for` word
+  list is a pattern place, so `done` there is a pattern word) and
+  `while :; do echo a; fi; echo after` hang on `master` too. Fixing the
+  pairing (a type-aware in-block rule) is task #309; the bounded pins are
+  `tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever`.
 - An unclosed mid-run construct (`true && while :; do echo hi`) is a parse
   error rc 1, where bash reports a syntax error rc 2. The REPL reports it at
   once; it does not buffer the input under the `> ` continuation prompt
