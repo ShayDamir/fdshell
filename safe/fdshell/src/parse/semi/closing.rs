@@ -38,10 +38,10 @@ pub(crate) fn closing_keyword_index(tokens: &[Token], line: &[u8]) -> Option<usi
         // (task #236's S2: `do echo a||if :; …; fi` nests the `if`, so its
         // `fi` closes *the if* and the span scan keeps the enclosing block's
         // closer).
-        if let Some((payload, at)) = pair_payload(word)
+        if let Some(payload) = pair_payload(word)
             && scores(payload, line, *end, place)
         {
-            let delta = keyword_delta(payload, line, at).unwrap_or(0);
+            let delta = keyword_delta(payload, line, *end).unwrap_or(0);
             depth += delta;
             if depth == 0 {
                 return Some(i);
@@ -83,3 +83,6 @@ fn glue_at(tokens: &[Token], i: usize, word: &[u8]) -> Glue {
 fn is_op(word: &[u8]) -> bool {
     matches!(word, b"|" | b"&")
 }
+
+#[cfg(test)]
+mod tests;

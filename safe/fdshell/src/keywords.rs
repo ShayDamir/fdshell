@@ -35,7 +35,7 @@ use crate::segment::group::{closes, opens};
 /// A `time [-p]` word is a *prefix*, not a keyword of its own: it opens no
 /// block, so it never enters the depth table. A block keyword behind it
 /// (`time while … done`) is scored on the rest of the word, which keeps the
-/// whole statement one segment for the `time` parse hook. A word carrying a
+/// whole statement one segment for the `time` parse hook.
 pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
     if quoted_word(line, word_end) {
         return None;

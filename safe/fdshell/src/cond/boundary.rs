@@ -15,7 +15,7 @@ use crate::keywords::Place;
 use crate::scan::ScanState;
 use crate::segment::group::{definer_at_run, group_at_run, opens_at};
 
-pub(crate) mod block;
+mod block;
 mod body;
 pub(super) mod gate;
 

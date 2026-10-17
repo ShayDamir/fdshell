@@ -569,3 +569,36 @@ fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
         "a closer at the run start is in command position"
     );
 }
+
+/// The pair payload rides in the run's **sum** (`delta + payload_delta`), with
+/// the payload's own sign and at the place the run has reached when the
+/// fragment is read (task #236). The sum is what a block span's depth is built
+/// from, so a flipped sign moves a whole block's depth, and a payload scored at
+/// the *transition's* place would score in argument position too.
+#[test]
+fn pair_payload_rides_the_run_sum() {
+    // Command position: the glued pair's payload `if` opens, the glued word
+    // `a&&if` itself is no keyword, and the block's own words net back to 1.
+    let line = b"a&&if :; then :; fi";
+    assert_eq!(
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        1,
+        "the payload behind the pair scores once, at the run's current place"
+    );
+    // A payload that closes carries the closing sign.
+    let line = b"a&&done";
+    assert_eq!(
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        -1,
+        "a glued closer behind the pair closes the block"
+    );
+    // Argument position: behind a command word the same payload is data, so the
+    // run's sum is 0 — the place is the one the run has reached, not the one
+    // `after` hands to the next fragment.
+    let line = b"echo a&&if :; then :; fi";
+    assert_eq!(
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        0,
+        "a payload behind a command word is an argument"
+    );
+}

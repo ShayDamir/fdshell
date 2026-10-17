@@ -21,9 +21,12 @@ fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i3
     // pair (`echo a&&if` is one whitespace unit) scores the keyword behind
     // the pair at the fragment's place — `echo a&&if` stays data (argument),
     // `a&&if` at a clause start nests the `if` so its `fi` closes *the if*.
-    let payload_delta = pair_payload(frag).map_or(0, |(payload, at)| {
-        if scores(payload, line, at, *place) {
-            keyword_delta(payload, line, at).unwrap_or(0)
+    // The payload is scored at the *fragment's* end in `line` (`word_end`):
+    // the payload is a slice of the fragment, so the fragment's own end is
+    // the only offset into `line` that is true for it.
+    let payload_delta = pair_payload(frag).map_or(0, |payload| {
+        if scores(payload, line, word_end, *place) {
+            keyword_delta(payload, line, word_end).unwrap_or(0)
         } else {
             0
         }
