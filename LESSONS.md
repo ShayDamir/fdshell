@@ -2094,19 +2094,32 @@ in-block scorer pairs an opener with *any* closer — `word_delta`/`depth_delta`
 *where* a word sits, never *which* block it belongs to), so a `while` body's
 `if`-closer (`fi`) closes the `while`, a `done` closes an `if`, and the loop's
 own `break` lands in a level that no longer exists. bash pairs them per
-construct type. Consequence: a body whose control never lands **runs forever**
-(rc 124) — `while :; do echo a|if :; then echo y; fi; break; done; echo after`
-(bash `y` `after`, master rc 1, fdshell hangs), its spaced twins,
-`while :; do echo a|while :; do break; done; break; done; echo after`,
-`while :; do echo in done; break; done; echo after` and master's own
-`while :; do echo a; fi; echo after`. #236 fixes the *argument-position* half
-of the rule (keyword-shaped words are data); the type-aware pairing is #309's
-job, so a #309 fix must be read together with the rows pinned in
+construct type. Consequence, stated as the rule it is (not as a row list):
+**an argument-position opener plus a mismatched closer in a loop body ⇒ the
+body never returns** (rc 124). Measured samples of it:
+`while :; do echo a | case x in a) echo y;; esac; break; done; echo after` —
+the worst row, bash *and* `master` exit 0 printing `after` and this branch
+runs forever —
+`while :; do echo if; fi; echo x; break; done; echo after`,
+`… echo case; esac; break; done …`, `… echo if; fi; echo after`,
+`… echo a|if :; then echo y; fi; echo z; break; done …`,
+`… echo a|if :; then echo y; fi; break; done …`,
+`… echo a|while :; do break; done; break; done …`, and master's own
+`while :; do echo a; fi; echo after`. **The rows are a sample of a sweep,
+never the family's extent, and a report must say so.** Two rounds of this task
+each claimed a complete count and both were numerically false ("0 new hangs",
+then "six shapes hang"); the round-5 sweep measures ≥15 shapes beyond the
+disclosed rows. So: disclose the family by *rule*, pin a *sample* under a
+bounded child, and never present an enumerated list as the extent. #236 fixes
+the *argument-position* half of the rule (keyword-shaped words are data); the
+type-aware pairing is #309's job, so a #309 fix must be read together with the
+rows pinned in
 `tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever` and the
 README's "body that never returns" bullet — do not "fix" one row and leave the
 family. The same type-blindness is what `Place::Pattern` pays for `case x in
 esac` (the list's terminator is a closer, so a `done` in a `case`/`for` *list*
-is a pattern word, not a closer: the `echo in done` row above).
+is a pattern word, not a closer: the `echo in done` row, which hangs on
+`master` too).
 
 ## A gate start measured from the operator pair has an unkillable `-2` twin (task #236)
 

@@ -475,14 +475,25 @@ Accepted divergences from bash:
   `a`-`tail` parity, task #236's S2). Pinned by
   `tests/glued_pair.rs::glued_pair_keeps_the_command_position_the_pair_sets`
   and `…::short_circuit_gate_skips_the_gated_list_and_resumes_behind_it`.
-- A block **body that never returns** runs forever (rc 124), where bash ends
-  the loop. The in-block keyword pairing counts a *depth*, not the block's
-  *kind*, so an opener and a closer of different types pair up and the loop's
-  own `break` lands in the wrong level:
-  `while :; do echo a|if :; then echo y; fi; break; done; echo after` (bash
-  prints `y` `after`; master reports a parse error, fdshell runs forever),
+ - A block **body that never returns** runs forever (rc 124), where bash ends
+  the loop. The family is a **rule**, not a list: *an argument-position
+  keyword opener plus a mismatched closer in a loop body*. The in-block
+  keyword pairing counts a *depth*, not the block's *kind*, so the keyword a
+  body prints (`echo if`, `echo case`, `echo a | if`) is word data, the
+  closer behind it (`fi`, `esac`, `done`) decrements the **enclosing** block,
+  and the loop's own `break` lands in a level that no longer exists. Every
+  row below is a **sample of a sweep, not the family's extent** — the same
+  rule shows up in many more shapes, and some of them are acceptance losses:
+  `while :; do echo a | case x in a) echo y;; esac; break; done; echo after`
+  and `while :; do echo a|if :; then echo y; fi; echo z; break; done; echo
+  after` exit **0** in bash *and* on `master` (fdshell runs forever), while
+  bash rejects the line with rc 2 and `master` prints its words for
+  `while :; do echo if; fi; echo x; break; done; echo after`,
+  `… echo case; esac; break; done …`, `… echo if; fi; echo after`.
+  `while :; do echo a|if :; then echo y; fi; break; done; echo after`,
   `… echo a | if; fi; echo x; break; done …`, `… echo a | if :; then echo y;
-  fi; break; done …`, `… echo a|while :; do break; done; break; done …`;
+  fi; break; done …`, `… echo a|while :; do break; done; break; done …` are
+  the rows this branch moves from a parse error to a hang;
   `while :; do echo in done; break; done; echo after` (the `case`/`for` word
   list is a pattern place, so `done` there is a pattern word) and
   `while :; do echo a; fi; echo after` hang on `master` too. Fixing the

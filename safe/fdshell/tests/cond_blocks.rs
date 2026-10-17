@@ -119,8 +119,8 @@ fn run_bounded(script: &str) -> (String, String, i32) {
 /// result *is* a body that never returns (README "Accepted divergences", task
 /// #236/#309). Unlike [`run_bounded`] a timeout is the *expected* outcome, so
 /// it returns rc 124 instead of panicking; a row that stops hanging is
-/// reported as its real rc. Running the family in parallel keeps a six-row
-/// pin well inside nextest's 10 s `slow-timeout`.
+/// reported as its real rc. Running the family in parallel keeps the
+/// twelve-row pin well inside nextest's 10 s `slow-timeout`.
 fn run_capped(scripts: &[&str]) -> Vec<i32> {
     let mut children: Vec<(std::process::Child, String)> = scripts
         .iter()
@@ -900,11 +900,15 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
 /// Task #236 (accepted divergence, README "body that never returns", class
 /// owned by task #309): the in-block keyword pairing counts a *depth*, not the
 /// block's kind, so a closer of one type closes a block of another and the
-/// loop's own `break` never lands — the body runs forever. Every row is
-/// measured with a capped child (rc 124 at [`BOUND`]) against `bash -c`
-/// (5.3.9) and `master` 75398c8; the last two rows hang on master too, so the
-/// bullet states the whole family honestly, not only the rows this branch
-/// moves.
+/// loop's own `break` never lands — the body runs forever. The family is the
+/// **rule**, not this list: an argument-position opener plus a mismatched
+/// closer in a loop body ⇒ the body never returns. Every row is measured with
+/// a capped child (rc 124 at [`BOUND`]) against `bash -c` (5.3.9) and
+/// `master` 75398c8; these twelve are the sample a sweep produced (the sweep
+/// finds ≥15 more shapes of the same rule), so the pin is a *sample*, not the
+/// family's extent — do not read a green run here as "the family is twelve
+/// rows". Three rows hang on `master` too, so the bullet states the class
+/// honestly, not only the rows this branch moves.
 #[test]
 fn in_block_bodies_that_never_return_run_forever() {
     let rows = [
@@ -921,6 +925,20 @@ fn in_block_bodies_that_never_return_run_forever() {
         "while :; do echo in done; break; done; echo after",
         // master's own hang: a `fi` closes a `while`, the body never ends.
         "while :; do echo a; fi; echo after",
+        // The acceptance loss: bash *and* master exit 0 printing `after`;
+        // the `case` arm's opener eats the `esac`, so the loop never returns.
+        "while :; do echo a | case x in a) echo y;; esac; break; done; echo after",
+        // The `case` opener in argument position, closed by `esac`.
+        "while :; do echo case; esac; break; done; echo after",
+        // #309's headline row: the `if`-closer closes the `while`.
+        "while :; do echo if; fi; echo x; break; done; echo after",
+        // The cheapest reading of the same rule: no `break`, no tail.
+        "while :; do echo if; fi; echo after",
+        // The pipeline twin of #309's row 3: `done` closes the `while` early.
+        "while :; do echo a | if; echo x; done; echo after",
+        // The pinned `echo y` row with a tail command: bash prints `y`, `z`,
+        // `after` rc 0, master a parse error rc 1, this branch runs forever.
+        "while :; do echo a|if :; then echo y; fi; echo z; break; done; echo after",
     ];
     let codes = run_capped(&rows);
     for (script, code) in rows.iter().zip(codes) {
