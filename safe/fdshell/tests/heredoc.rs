@@ -985,23 +985,311 @@ fn single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty() {
 /// Task #238's out-of-scope interaction, pinned as measured: a block trailing
 /// redirect writes the **arm's** stdout, as for a heredoc-free block
 /// (`if true; then echo hi; fi > out` behaves identically on master); bash
-/// writes the here-doc body into `out` and prints nothing.
+/// writes the here-doc body into `out` and prints nothing. Task #273 extends
+/// the shape to the `for` and `case` blocks, whose trailing redirects are
+/// reachable only once their closer search truncates the body (`> out` and its
+/// `>>` twin, plus the heredoc-free twins).
 #[test]
 fn single_line_block_body_heredoc_with_block_trailing_redirect() {
     let dir = std::env::temp_dir().join("fdshell-task238");
     std::fs::create_dir_all(&dir).unwrap();
-    let _ = std::fs::remove_file(dir.join("out"));
-    let script = format!(
-        "cd {}; if true; then cat <<T; fi > out\nbodyT\nT",
-        dir.display()
+    // Task #273 makes the `for` and `case` twins of this shape reachable (on
+    // `master` they were the parse errors of the untruncated closer search).
+    for (script, want) in [
+        ("if true; then cat <<T; fi > out\nbodyT\nT", "bodyT\n"),
+        ("for x in a; do cat <<T; done > out\nbodyT\nT", "bodyT\n"),
+        ("for x in a; do cat <<T; done >> out\nbodyT\nT", "bodyT\n"),
+        ("case x in x) cat <<T;; esac > out\nbodyT\nT", "bodyT\n"),
+        ("case x in x) cat <<T;; esac >> out\nbodyT\nT", "bodyT\n"),
+        // The heredoc-free twins, unchanged by all of this: `hi` on stdout and
+        // no `out` on `master` either.
+        ("if true; then echo hi; fi > out", "hi\n"),
+        ("for x in a; do echo A; done > out", "A\n"),
+    ] {
+        let _ = std::fs::remove_file(dir.join("out"));
+        let script = format!("cd {}; {}", dir.display(), script);
+        let (out, err, code) = run(&script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+        // The body went to stdout and the redirect target is never even opened.
+        // bash writes the body into `out` and prints nothing.
+        assert!(!dir.join("out").exists(), "{script}");
+    }
+}
+
+// --- `;`-terminated heredocs in a single-line `for`/`case` body (task #273) --
+//
+// The same append-mode shape as the section above, for the two block builders
+// that were left out of it: their bodies sit past `done`/`esac`, so each body is
+// rebuilt from the regions its own `<<` claims and the closer search walks the
+// block's word list as bash reads it (patterns and `for` words are word data).
+// Every expectation below is bash 5.3.9's own output for the same script.
+
+#[test]
+fn single_line_for_body_heredoc_runs() {
+    let (out, err, code) = run("for x in a; do cat <<T; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_case_clause_body_heredoc_runs() {
+    let (out, err, code) = run("case x in x) cat <<T;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// The matched arm of a multi-arm `case` takes its own body, in order, exactly
+/// as bash's per-arm here-docs do.
+#[test]
+fn single_line_case_clause_body_heredocs_run_in_arm_order() {
+    let script = "case a in a) cat <<A;; b) cat <<B;; esac\nbodyA\nA\nbodyB\nB";
+    let (out, err, code) = run(script);
+    assert_eq!((out.as_str(), code), ("bodyA\n", 0), "stderr={err:?}");
+    let (out, err, code) = run(&script.replace("case a in", "case b in"));
+    assert_eq!((out.as_str(), code), ("bodyB\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("case z in a) cat <<A;; b) cat <<B;; esac\nbodyA\nA\nbodyB\nB");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+}
+
+/// A `for` body's two heredoc operators are claimed in order and the body runs
+/// once per word, so both bodies go out on every iteration (bash's own output).
+#[test]
+fn single_line_for_body_two_heredocs_run_per_iteration() {
+    let (out, err, code) = run("for x in a b; do cat <<A <<B; done\nbodyA\nA\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyB\nbodyB\n", 0),
+        "stderr={err:?}"
     );
-    let (out, _err, code) = run(&script);
-    assert_eq!((out.as_str(), code), ("bodyT\n", 0));
-    // The body went to stdout and the redirect target is never even opened —
-    // the same as the heredoc-free `if true; then echo hi; fi > out`, which
-    // prints `hi` and leaves no `out` on master. bash writes the body into
-    // `out` and prints nothing.
-    assert!(!dir.join("out").exists());
+}
+
+/// The remaining single-line `for` body positions, all bash 5.3.9 parity: a
+/// body that continues after the heredoc, a delimiter line that *is* the whole
+/// body (an empty region), an **empty word list** (the body never runs, so the
+/// region is never read — the #238 unrun-body rule), a `break` raised after the
+/// body command, and a statement that follows the block on the same line.
+#[test]
+fn single_line_for_body_heredoc_of_a_longer_or_never_run_body_runs() {
+    for (script, want) in [
+        (
+            "for x in a; do cat <<T; echo mid; done\nbodyT\nT",
+            "bodyT\nmid\n",
+        ),
+        ("for x in a; do cat <<T; done\nT", ""),
+        ("for x in ; do cat <<T; done\nbodyT\nT", ""),
+        ("for x in a; do cat <<T; break; done\nbodyT\nT", "bodyT\n"),
+        (
+            "for x in a; do cat <<T; done\nbodyT\nT\necho tail",
+            "bodyT\ntail\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// The body's cond list runs inside the body, both for a `for` and for a `case`
+/// arm: the `&&`/`||` is the block's own cond list, and the body region travels
+/// with the part that owns the operator (the #234 rule, now for #273's blocks).
+#[test]
+fn single_line_for_and_case_body_heredoc_runs_the_bodys_cond_list() {
+    for (script, want) in [
+        (
+            "for q in 1; do cat <<Q; echo a && echo b; done\nbodyQ\nQ",
+            "bodyQ\na\nb\n",
+        ),
+        (
+            "case q in q) cat <<Q; echo a && echo b;; esac\nbodyQ\nQ",
+            "bodyQ\na\nb\n",
+        ),
+        (
+            "true && for q in 1; do cat <<Q; echo a || echo b; done\nbodyQ\nQ",
+            "bodyQ\na\n",
+        ),
+        (
+            "true && case q in q) cat <<Q; echo a || echo b;; esac\nbodyQ\nQ",
+            "bodyQ\na\n",
+        ),
+        (
+            "for q in 1; do echo start && cat <<Q; done\nbodyQ\nQ",
+            "start\nbodyQ\n",
+        ),
+        (
+            "case q in q) echo start && cat <<Q;; esac\nbodyQ\nQ",
+            "start\nbodyQ\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// The operator *outside* the block, on a block whose bodies sit past the closer.
+#[test]
+fn single_line_for_and_case_body_heredoc_keeps_the_outer_cond_list() {
+    for (script, want) in [
+        ("true && for x in a; do cat <<T; done\nbodyT\nT", "bodyT\n"),
+        ("true && case x in x) cat <<T;; esac\nbodyT\nT", "bodyT\n"),
+        (
+            "for x in a; do cat <<T; done && echo after\nbodyT\nT",
+            "bodyT\nafter\n",
+        ),
+        (
+            "case x in x) cat <<T;; esac && echo after\nbodyT\nT",
+            "bodyT\nafter\n",
+        ),
+        (
+            "for x in a; do cat <<T; done || echo after\nbodyT\nT",
+            "bodyT\n",
+        ),
+        ("for x in a; do cat <<T; done | cat\nbodyT\nT", "bodyT\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// Blocks nested in a block body, each with its own body-position heredoc: the
+/// closers nest, so the two bodies go out in order (bash parity).
+#[test]
+fn nested_single_line_block_body_heredocs_of_for_and_case_run_in_order() {
+    let (out, err, code) =
+        run("for x in a; do while :; do cat <<W; break; done; cat <<T; done\nbodyW\nW\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyW\nbodyT\n", 0),
+        "stderr={err:?}"
+    );
+    let (out, err, code) = run("while :; do case x in x) cat <<T;; esac; break; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_for_and_case_body_heredocs_of_two_blocks_run_in_order() {
+    let (out, err, code) =
+        run("for x in a; do cat <<T; done; for x in a; do cat <<U; done\nbodyT\nT\nbodyU\nU");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\nbodyU\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+/// A body line that is exactly a keyword stays body text in the `for` and
+/// `case` bodies too (the #238 rule, same arm granularity).
+#[test]
+fn single_line_for_and_case_body_heredoc_body_keywords_are_data() {
+    let (out, err, code) = run("for x in a; do cat <<T; done\ndone\nT");
+    assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("case x in x) cat <<T;; esac\nesac\nT");
+    assert_eq!((out.as_str(), code), ("esac\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("case x in x) cat <<T;; esac\n;;\nT");
+    assert_eq!((out.as_str(), code), (";;\n", 0), "stderr={err:?}");
+}
+
+/// Body lines stay opaque in a multi-line `for`/`case` too: the region is
+/// scanned as data, so an operator and a keyword inside it change nothing.
+#[test]
+fn single_line_for_and_case_body_heredoc_body_lines_are_opaque() {
+    let (out, err, code) = run("for x in a; do cat <<T; done\nbody && x\nT");
+    assert_eq!((out.as_str(), code), ("body && x\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("for x in a; do\ncat <<T\nbodyT\nT\ndone");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("case x in x) cat <<T\nbodyT\nT\n;; esac");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn single_line_for_body_heredoc_survives_quoted_and_dash_delimiters() {
+    let (out, err, code) = run("for x in a; do cat <<\"T\"; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("for x in a; do cat <<-T; done\n\tbodyT\n\tT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
+}
+
+/// The closer search reads a `case` pattern list and a `for` word list as word
+/// data (bash's rule), so a closer-shaped **pattern** never closes the block: the
+/// clause keeps its body region and the block closes on its real `esac` — these
+/// rows run (rc 0, the arm takes no body because `done)`/`fi)` match nothing)
+/// where `master` reported `case: missing 'esac'`, rc 1. The shapes whose
+/// *pattern matches* the closer-shaped word are task **#310**'s span-scan gap,
+/// pinned below.
+#[test]
+fn closer_shaped_pattern_words_of_for_and_case_do_not_close_the_block() {
+    let (out, err, code) = run("case x in done) echo hit;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("case x in done) cat <<T;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("case x in fi) cat <<T;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // A `case` list that *is* a lone `esac` stays a complete block.
+    let (out, err, code) = run("case x in esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("for x in a; do cat <<T; done\ndone\nT");
+    assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err:?}");
+}
+
+/// Task #273's third measured divergence, pinned as fdshell's own behaviour
+/// (identical on `master`): the **span** scan ends a block's text at a
+/// closer-shaped word of its word list, so `done` never becomes a `for` word and
+/// `done)` never becomes a clause pattern — rc 1, where bash runs both
+/// (word lists are word lists). Task **#310** owns the span-level rule; when it
+/// lands these rows flip to bash parity and the name drops its `310` suffix.
+#[test]
+fn closer_shaped_word_list_words_end_the_block_span_until_310() {
+    let (_out, err, code) = run("for x in done; do echo \"$x\"; done");
+    assert_eq!(code, 1, "bash prints done, rc 0");
+    assert!(err.contains("expected 'do'"), "stderr={err:?}");
+    let (_out, _err, code) = run("case done in done) echo p;; esac");
+    assert_eq!(code, 1, "bash prints p, rc 0");
+    let (_out, _err, code) = run("case done in done) cat <<T;; esac\nbodyT\nT");
+    assert_eq!(code, 1, "bash prints bodyT, rc 0");
+}
+
+/// Bash applies no brace expansion to a `case` clause pattern, and fdshell
+/// protects the pattern region of a clause that carries a body heredoc: the
+/// arm matches the brace word and its body runs (the multi-arm twin too).
+#[test]
+fn case_clause_pattern_of_a_body_heredoc_is_protected_from_brace_expansion() {
+    let (out, err, code) = run("case '{a,b}' in {a,b}) cat <<T;; esac\nhit\nT");
+    assert_eq!((out.as_str(), code), ("hit\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("case '{a,b}' in {a,b}) cat <<T;; z) cat <<U;; esac\nhit\nT\nuu\nU");
+    assert_eq!((out.as_str(), code), ("hit\n", 0), "stderr={err:?}");
+    // A pattern that does not match takes no body, in fdshell and in bash.
+    let (out, err, code) = run("case a in {a,b}) cat <<T;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+}
+
+/// Task #273's measured divergence, pinned as fdshell's own behaviour: a
+/// quoted `<<'Q'` delimiter in a single-line block body leaves the appended
+/// body's lone `'` unterminated, and the *statement* tokenizer that re-splits
+/// the run reports `unmatched quote` (rc 1) before the block ever runs. bash
+/// prints the body, rc 0. The same on master for `if`/`while`/`case` (the
+/// `case` arm text is the statement text there), so #273 introduces nothing:
+/// task **#266** owns the unquoted-delimiter-body line class.
+#[test]
+fn single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_stays_measured_until_266()
+ {
+    for script in [
+        "for x in a; do cat <<'Q'; done\nbody Q unbalanced '\nQ",
+        "case q in q) cat <<'Q';; esac\nbody Q unbalanced '\nQ",
+        "if true; then cat <<'Q'; fi\nbody Q unbalanced '\nQ",
+        "while :; do cat <<'Q'; break; done\nbody Q unbalanced '\nQ",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: bash prints the body, rc 0");
+        assert!(err.contains("unmatched quote"), "{script}: stderr={err:?}");
+    }
+}
+
+/// Task #273's second measured divergence, pinned as fdshell's own behaviour:
+/// a clause body terminated by `; done` closes on that word-shaped closer shape
+/// and the block reports its own missing `esac` (rc 1) where bash reports a
+/// syntax error (rc 2) — the rc-1-vs-2 family of
+/// `midrun_adjacent_shapes_stay_measured_divergences`, same on master.
+#[test]
+fn case_body_heredoc_of_a_clause_terminated_by_done_reports_missing_esac() {
+    let (_out, err, code) = run("case x in x) cat <<T; done;; esac\nbodyT\nT");
+    assert_eq!(code, 1, "bash rc 2");
+    assert!(err.contains("missing 'esac'"), "stderr={err:?}");
 }
 
 // --- the body's escape pairs and line continuations (task #269) -------------

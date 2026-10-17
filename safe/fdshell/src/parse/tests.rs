@@ -2516,15 +2516,90 @@ fn loop_body_heredoc_of_a_single_line_block_is_self_contained() {
     assert_eq!(ub.body.data, c"cat <<T\nbodyT\nT".into());
 }
 
+/// Task #273: the `for` body is the same arm-body shape — its text is rebuilt
+/// from the regions its own operators claim, so it is self-contained too.
+#[test]
+fn for_body_heredoc_of_a_single_line_block_is_self_contained() {
+    let ParsedLine::For(fb) = parse(b"for x in a; do cat <<T; done\nbodyT\nT").unwrap() else {
+        panic!("expected For")
+    };
+    assert_eq!(fb.body.data, c"cat <<T\nbodyT\nT".into());
+}
+
+/// Task #273: a `case` clause body of a single-line `case`, whose bodies sit
+/// past `esac`. Both arm shapes: `;;`-terminated and the last (bare) one, so
+/// each `part_text` slice of `case_clause::extract::body` is pinned.
+#[test]
+fn case_clause_body_heredoc_of_a_single_line_block_is_self_contained() {
+    let ParsedLine::Case(cb) = parse(b"case x in x) cat <<T; ;; esac\nbodyT\nT").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 1);
+    assert_eq!(cb.clauses[0].body.data, c"cat <<T\nbodyT\nT".into());
+
+    let ParsedLine::Case(cb) =
+        parse(b"case x in x) cat <<T;; y) cat <<U;; esac\nbodyT\nT\nbodyU\nU").unwrap()
+    else {
+        panic!("expected Case")
+    };
+    // The first arm's region is not the text's last one, so it keeps its
+    // terminating newline (`reconstruct` appends regions verbatim); the arm
+    // body runs with that newline as a separator, and the second arm claims the
+    // next region in the line's operator order.
+    assert_eq!(cb.clauses[0].body.data, c"cat <<T\nbodyT\nT\n".into());
+    assert_eq!(cb.clauses[1].body.data, c"cat <<U\nbodyU\nU".into());
+}
+
 /// A multi-line body-position heredoc keeps the verbatim arm text (the
 /// delimiter line is an unblanked token inside the arm's token range): the
-/// extension mode `part_text` must not rewrite.
+/// extension mode `part_text` must not rewrite. `if`/`while` were pinned by
+/// task #238, `for`/`case` by task #273 — the same byte-identity requirement.
 #[test]
 fn if_then_body_heredoc_of_a_multi_line_block_stays_verbatim() {
     let ParsedLine::If(ib) = parse(b"if true; then cat <<T\nbodyT\nT\nfi").unwrap() else {
         panic!("expected If")
     };
     assert_eq!(ib.then_body.data, c"cat <<T\nbodyT\nT".into());
+}
+
+#[test]
+fn for_body_heredoc_of_a_multi_line_block_stays_verbatim() {
+    let ParsedLine::For(fb) = parse(b"for x in a; do\ncat <<T\nbodyT\nT\ndone").unwrap() else {
+        panic!("expected For")
+    };
+    assert_eq!(fb.body.data, c"cat <<T\nbodyT\nT".into());
+}
+
+#[test]
+fn case_clause_body_heredoc_of_a_multi_line_block_stays_verbatim() {
+    let ParsedLine::Case(cb) = parse(b"case x in x) cat <<T\nbodyT\nT\n;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses[0].body.data, c"cat <<T\nbodyT\nT".into());
+}
+
+/// Task #273: the closing-keyword truncation must not swallow a missing
+/// closer. With the `done` gone the depth walk never reaches 0, so the `for`
+/// keeps reporting `expected 'done'` and never reaches the body build.
+#[test]
+fn for_heredoc_body_without_done_reports_expected_done() {
+    let err = parse(b"for x in a; do cat <<T\nbodyT").err().unwrap();
+    assert_eq!(err.current_context().to_string(), "expected 'done'");
+}
+
+/// The `case` twins: no closer at all, and a `done` (an argument-position
+/// word in bash's grammar is not a closer; here the depth walk stops at the
+/// first depth-0 keyword and the closer check then rejects it). bash reports
+/// a syntax error rc 2 for the `done` shape; the message fdshell gives is
+/// pinned as measured, not copied from bash.
+#[test]
+fn case_heredoc_body_without_esac_reports_missing_esac() {
+    let err = parse(b"case x in x) cat <<T; ;;").err().unwrap();
+    assert_eq!(err.current_context().to_string(), "case: missing 'esac'");
+    let err = parse(b"case x in x) cat <<T; done;; esac\nbodyT\nT")
+        .err()
+        .unwrap();
+    assert_eq!(err.current_context().to_string(), "case: missing 'esac'");
 }
 
 /// Task #236: `if a; then b fi` has no `;` before `fi` (task #301 owns the
