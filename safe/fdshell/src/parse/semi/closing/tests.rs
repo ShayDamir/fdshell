@@ -95,6 +95,11 @@ fn closing_index_walks_the_block_depth() {
     // the payload never nests, and the block closes at the first `fi`.
     let line = b"while :; do echo a&&if :; then :; fi; done";
     assert_eq!(closing_keyword_index(&toks(line), line), Some(11));
+    // The pair payload can be the *closer* itself: the group-opener word
+    // `{&&fi` scores +1 as the opener and its payload `fi` closes the block,
+    // so the scan stops at the pair word's own token, not at a later word.
+    let line = b"if :; then {&&fi";
+    assert_eq!(closing_keyword_index(&toks(line), line), Some(4));
     // No closer at all: the block never returns to depth 0.
     let line = b"echo a || if :; then :; fi";
     assert_eq!(closing_keyword_index(&toks(line), line), None);

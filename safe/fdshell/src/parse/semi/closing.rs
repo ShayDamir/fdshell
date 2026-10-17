@@ -19,6 +19,9 @@ pub(crate) fn closing_keyword_index(tokens: &[Token], line: &[u8]) -> Option<usi
     let mut depth: i32 = 1;
     let mut place = Place::Command;
     for (i, (t, _, end, _, _)) in tokens.iter().enumerate().skip(1) {
+        // Defensive: the tokens were built from `line`, so their bytes are
+        // always valid; an error token means a future tokenizer that hands
+        // this scan a token it cannot read, and the scan skips it.
         let Some(word) = t.as_bytes().ok() else {
             continue;
         };
