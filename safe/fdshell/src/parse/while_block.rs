@@ -1,7 +1,7 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::cond_bodies::condition_bodies;
-use crate::parse::semi::{block_body, closing_keyword_index, find_preceded_by_semi};
+use crate::parse::semi::{List, block_body, find_preceded_by_semi, up_to_closing};
 use crate::parse::semi::{trim_semi, verbatim};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
@@ -34,8 +34,9 @@ pub(crate) fn tokens_to_loop(
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `done`: the tokens after it are body data, not block structure.
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let done_idx = closing_keyword_index(tokens, line).ok_or(ParseError::ExpectedDone)?;
-    let tokens = tokens.get(..=done_idx).ok_or(ParseError::ExpectedDone)?;
+    let tokens = up_to_closing(tokens, line, List::Plain, ParseError::ExpectedDone)?;
+    // The closing `done` is the truncated slice's last token.
+    let done_idx = tokens.len() - 1;
 
     let do_idx = find_preceded_by_semi(tokens, 1, b"do").ok_or(ParseError::ExpectedDo)?;
     ensure!(do_idx >= 2, ParseError::ExpectedCondition);

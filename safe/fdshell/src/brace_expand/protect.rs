@@ -15,7 +15,7 @@ pub(super) fn protected(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     if is_assignment(tokens) {
         out.push(0);
     }
-    for i in literal_indices(tokens) {
+    for i in literal_indices(tokens, line) {
         out.push(i);
     }
     for i in word_indices(tokens) {

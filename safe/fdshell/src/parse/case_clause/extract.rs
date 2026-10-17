@@ -1,12 +1,18 @@
 use super::Token;
 use crate::error::parse::ParseError;
-use crate::parse::semi::{trim_semi, verbatim};
+use crate::parse::part_text::part_text;
+use crate::parse::semi::trim_semi;
 use error_stack::Report;
 use sys::ScriptText;
 
 /// Extract one clause body starting at `body_start`, up to the `;;`
 /// clause separator or `esac_idx`. Returns the body text and the
 /// position to resume clause scanning from.
+///
+/// The text is the slice's verbatim span with the heredoc body regions its own
+/// `<<` operators claim attached (`part_text`): in a single-line `case` those
+/// regions sit past `esac`, in a multi-line clause they are inside the span and
+/// `verbatim` already covers them.
 pub(crate) fn body(
     tokens: &[Token],
     text: &ScriptText,
@@ -20,11 +26,11 @@ pub(crate) fn body(
         .map(|i| body_start + i);
     match end {
         Some(end) => {
-            let b = verbatim(text, trim_semi(tokens.get(body_start..end).unwrap_or(&[])))?;
+            let b = part_text(text, trim_semi(tokens.get(body_start..end).unwrap_or(&[])))?;
             Ok((b, end + 2))
         }
         None => {
-            let b = verbatim(
+            let b = part_text(
                 text,
                 trim_semi(tokens.get(body_start..esac_idx).unwrap_or(&[])),
             )?;

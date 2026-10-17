@@ -7,7 +7,7 @@ use sys::ShortCStr;
 
 mod closing;
 
-pub(crate) use closing::closing_keyword_index;
+pub(crate) use closing::{List, closing_keyword_index, list_closing_keyword_index, up_to_closing};
 
 pub(crate) fn find_preceded_by_semi(
     tokens: &[Token],

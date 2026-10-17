@@ -6,7 +6,8 @@
 
 #![allow(clippy::unwrap_used)]
 
-use super::{closing_keyword_index, glue_at, is_op};
+use super::closing_keyword_index;
+use super::word::{glue_at, is_op};
 use crate::keywords::Glue;
 use crate::parse::Token;
 use crate::parse::token::tokenize_statement;
@@ -103,4 +104,49 @@ fn closing_index_walks_the_block_depth() {
     // No closer at all: the block never returns to depth 0.
     let line = b"echo a || if :; then :; fi";
     assert_eq!(closing_keyword_index(&toks(line), line), None);
+}
+
+/// Task #273: a `case` clause list and a `for` word list are **word** lists, so
+/// their closer-shaped words never close the block. In a `case` list only `esac`
+/// scores, and only when no pattern `)` follows it (`case x in esac` is a
+/// complete block, `case x in esac) …` is a clause). A `for` list scores
+/// nothing: it is closed by `do`.
+#[test]
+fn word_lists_are_walked_as_words() {
+    let cases = [
+        (
+            b"case x in done) echo p;; esac".as_slice(),
+            Some(3),
+            Some(9),
+        ),
+        (b"case x in fi) echo p;; esac".as_slice(), Some(3), Some(9)),
+        (b"case x in esac".as_slice(), Some(3), Some(3)),
+        (
+            b"case x in esac) echo p;; esac".as_slice(),
+            Some(3),
+            Some(9),
+        ),
+        (
+            b"for x in done; do echo x; done".as_slice(),
+            Some(3),
+            Some(9),
+        ),
+        (b"for x in a; do echo x; done".as_slice(), Some(9), Some(9)),
+    ];
+    for (line, plain, case) in cases {
+        let t = toks(line);
+        assert_eq!(closing_keyword_index(&t, line), plain, "{line:?}");
+        assert_eq!(
+            super::list_closing_keyword_index(&t, line, super::List::Case),
+            case,
+            "{line:?}"
+        );
+        if line.starts_with(b"for") {
+            assert_eq!(
+                super::list_closing_keyword_index(&t, line, super::List::Words),
+                Some(9),
+                "{line:?}"
+            );
+        }
+    }
 }

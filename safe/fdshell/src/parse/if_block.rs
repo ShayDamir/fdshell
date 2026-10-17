@@ -5,10 +5,11 @@ pub(crate) use types::{ElifArm, IfBlock};
 use super::Token;
 use super::cond_bodies::condition_bodies;
 use super::part_text::part_text;
+use super::semi::List;
 use super::semi::block_body;
-use super::semi::closing_keyword_index;
 use super::semi::find_preceded_by_semi;
 use super::semi::trim_semi;
+use super::semi::up_to_closing;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
@@ -29,8 +30,9 @@ pub(crate) fn tokens_to_if(
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `fi`: the tokens after it are body data, not block structure.
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let fi_idx = closing_keyword_index(tokens, line).ok_or(ParseError::MissingFi)?;
-    let tokens = tokens.get(..=fi_idx).ok_or(ParseError::MissingFi)?;
+    let tokens = up_to_closing(tokens, line, List::Plain, ParseError::MissingFi)?;
+    // The closing `fi` is the truncated slice's last token.
+    let fi_idx = tokens.len() - 1;
 
     let first_then = find_preceded_by_semi(tokens, 1, b"then").ok_or(ParseError::MissingThen)?;
 

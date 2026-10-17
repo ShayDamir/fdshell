@@ -1,9 +1,13 @@
+mod literal;
+
+pub(crate) use literal::literal_indices;
+
 use super::Token;
 use super::case_clause;
-use super::semi::{trim_semi, try_join_masked};
+use super::semi::{List, list_closing_keyword_index, trim_semi, try_join_masked};
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
-use error_stack::{Report, ensure};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -35,13 +39,16 @@ pub(crate) fn tokens_to_case(
         })
         .ok_or(ParseError::CaseMissingIn)?;
 
+    // A clause-position heredoc's bodies sit in the block text after the
+    // closing `esac`: the tokens after it are body data, not block structure
+    // (task #273, [`up_to_esac`]) — the clause list is walked as a `case` word
+    // list, so a closer-shaped **pattern** (`case x in done) …`) stays word
+    // data. The `in` index is a prefix index, so the truncation (which cuts a
+    // suffix) leaves it valid.
+    let line = text.as_bytes().change_context(ParseError::Never)?;
+    let tokens = up_to_esac(tokens, line)?;
+    // The closing `esac` is the truncated slice's last token.
     let esac_idx = tokens.len() - 1;
-    ensure!(
-        tokens
-            .last()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"esac")),
-        ParseError::CaseMissingEsac
-    );
 
     let (word, word_mask) = try_join_masked(trim_semi(
         tokens.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
@@ -56,41 +63,24 @@ pub(crate) fn tokens_to_case(
     })
 }
 
-/// The token indices of the case word and every clause's pattern region in
-/// a `case` line (bash applies no brace expansion to them); empty for other
-/// lines. Mirrors the traversal of [tokens_to_case] without the checks.
-pub(crate) fn literal_indices(tokens: &[Token]) -> Vec<usize> {
-    let (Some(first), Some(last)) = (tokens.first(), tokens.last()) else {
-        return Vec::new();
+/// The `case` block's tokens up to and including its closing `esac`: the word
+/// walk of [`list_closing_keyword_index`] with [`List::Case`], whose closer must
+/// be an `esac`, plus the block's own leniency. A last clause whose body is not
+/// `;;`-terminated has its `esac` in argument position, where no closer scores —
+/// bash rejects the shape, fdshell accepts it
+/// (`parse::tests::case_last_clause_no_semi_semi`), so an unclosed walk keeps
+/// the whole list, and its last token must still be `esac`.
+fn up_to_esac<'a>(tokens: &'a [Token], line: &[u8]) -> Result<&'a [Token], Report<ParseError>> {
+    let rest = match list_closing_keyword_index(tokens, line, List::Case) {
+        Some(idx) => tokens.get(..=idx).ok_or(ParseError::CaseMissingEsac)?,
+        None => tokens,
     };
-    if !first.0.eq_bytes(b"case") || !last.0.eq_bytes(b"esac") {
-        return Vec::new();
-    }
-    let Some(in_idx) = (1..tokens.len()).find(|&i| word_at(tokens, i, b"in")) else {
-        return Vec::new();
-    };
-    let esac_idx = tokens.len() - 1;
-    let mut out: Vec<usize> = (1..in_idx).collect();
-    let mut pos = in_idx + 1;
-    while pos < esac_idx {
-        if word_at(tokens, pos, b";") {
-            pos += 1;
-            continue;
-        }
-        let Some(close) = (pos..esac_idx).find(|&i| word_at(tokens, i, b")")) else {
-            break;
-        };
-        out.extend(pos..close);
-        pos = close + 1;
-        let pair = (pos..esac_idx.saturating_sub(1))
-            .find(|&i| word_at(tokens, i, b";") && word_at(tokens, i + 1, b";"));
-        pos = pair.map_or(esac_idx, |i| i + 2);
-    }
-    out
-}
-
-fn word_at(tokens: &[Token], i: usize, w: &[u8]) -> bool {
-    tokens.get(i).is_some_and(|(t, _, _, _, _)| t.eq_bytes(w))
+    ensure!(
+        rest.last()
+            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"esac")),
+        ParseError::CaseMissingEsac
+    );
+    Ok(rest)
 }
 
 #[cfg(test)]

@@ -309,11 +309,13 @@ fn and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error() {
 /// Task #234: the shapes the gate used to break. A heredoc in a block
 /// condition (single-line, so its bodies sit past the closing keyword) with an
 /// `&&` in the block's command text now runs the block's own cond list. Rows
-/// measured against bash 5.3.9. The `for`/`case` twins of this shape are
-/// rejected by the closing-keyword/region defect task **#273** owns, and the
-/// `case` twin (`case q in q) cat <<Q; echo a && echo b;; esac` + body + `Q`)
-/// is rc 1 `case: missing 'esac'` on `master` and here alike, where bash prints
-/// `body` `a` `b` rc 0 — #234 widens nothing there, it is #273's shape.
+/// measured against bash 5.3.9. The `for`/`case` twins of this shape were the
+/// closing-keyword/region defect task **#273** owns: its `for`
+/// and `case` twins (`for q in 1; do cat <<Q; echo a && echo b; done` and
+/// `case q in q) cat <<Q; echo a && echo b;; esac` + body + `Q`) were rc 1
+/// `expected 'do'` / `case: missing 'esac'` on `master`, where bash prints
+/// `body` `a` `b` rc 0. #234 widens nothing there; #273 lands the parity, and
+/// the rows below are the shape measured on both operators (bash 5.3.9).
 #[test]
 fn and_in_a_block_that_carries_a_heredoc_runs_the_block() {
     for (script, want) in [
@@ -328,15 +330,39 @@ fn and_in_a_block_that_carries_a_heredoc_runs_the_block() {
         // The operator *outside* the block, on a block whose bodies sit past
         // `fi`: the part that owns the `<<` gets its own body (task #234).
         ("if true; then cat <<T; fi && echo x\nbody\nT", "body\nx\n"),
+        // #273's parity: the `for` and `case` twins of the same shape.
+        (
+            "for q in 1; do cat <<Q; echo a && echo b; done\nbodyQ\nQ",
+            "bodyQ\na\nb\n",
+        ),
+        (
+            "case q in q) cat <<Q; echo a && echo b;; esac\nbodyQ\nQ",
+            "bodyQ\na\nb\n",
+        ),
+        (
+            "for q in 1; do cat <<Q; echo a || echo b; done\nbodyQ\nQ",
+            "bodyQ\na\n",
+        ),
+        (
+            "case q in q) cat <<Q; echo a || echo b;; esac\nbodyQ\nQ",
+            "bodyQ\na\n",
+        ),
+        (
+            "true && for q in 1; do cat <<Q; echo a || echo b; done\nbodyQ\nQ",
+            "bodyQ\na\n",
+        ),
+        (
+            "true && case q in q) cat <<Q; echo a || echo b;; esac\nbodyQ\nQ",
+            "bodyQ\na\n",
+        ),
+        (
+            "for x in a; do cat <<T; done || echo after\nbodyT\nT",
+            "bodyT\n",
+        ),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
     }
-    // #273's shape, pinned as measured on `master` and here alike: a `case` arm
-    // whose heredoc bodies sit past `esac` never reaches the closer.
-    let (_out, err, code) = run("case q in q) cat <<Q; echo a && echo b;; esac\nbody\nQ");
-    assert_eq!(code, 1, "bash prints body a b rc 0");
-    assert!(err.contains("missing 'esac'"), "stderr={err}");
 }
 
 /// Task #205: the shape is parsed **and** the `break` works — a loop control raised

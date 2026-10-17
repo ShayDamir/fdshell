@@ -2,9 +2,10 @@ mod words;
 
 use super::Token;
 use crate::error::parse::ParseError;
-use crate::parse::semi::{block_body, find_preceded_by_semi, verbatim};
+use crate::parse::part_text::part_text;
+use crate::parse::semi::{List, block_body, find_preceded_by_semi, up_to_closing};
 use alloc::vec::Vec;
-use error_stack::{Report, ensure};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -44,6 +45,14 @@ pub(crate) fn tokens_to_for(
 
     let do_idx = find_preceded_by_semi(tokens, in_pos, b"do").ok_or(ParseError::ExpectedDo)?;
 
+    // A body-position heredoc's bodies sit in the block text after the closing
+    // `done`: the tokens past it are body data, not block structure (task #273,
+    // `semi::up_to_closing`). The `in` list is walked as `List::Words`, so a
+    // closer-shaped word of the word list (`for x in done; do …; done`) is a
+    // word, not the closer.
+    let line = text.as_bytes().change_context(ParseError::Never)?;
+    let tokens = up_to_closing(tokens, line, List::Words, ParseError::ExpectedDone)?;
+    // The closing `done` is the truncated slice's last token.
     let done_idx = tokens.len() - 1;
     ensure!(
         tokens
@@ -58,7 +67,7 @@ pub(crate) fn tokens_to_for(
         ParseError::ExpectedSemicolonBeforeDone
     );
 
-    let body = verbatim(
+    let body = part_text(
         text,
         block_body(
             tokens.get(do_idx + 1..done_idx).unwrap_or(&[]),
