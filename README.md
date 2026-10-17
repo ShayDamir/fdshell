@@ -464,6 +464,17 @@ Accepted divergences from bash:
   `while`/`do` as commands (rc 1); bash runs the loop (task #292). The `|`
   position is argument position, where only *command-position* keywords open
   blocks.
+- A cond pair glued to its operand **inside a block body**
+  (`while :; do echo a||if :; then :; fi; break; done; echo after`, and the
+  `&&` twin, `if`/`case` bodies alike) is a parse error rc 1 (`expected
+  'done'` / `missing 'fi'`), as on `master`, where bash runs it (rc 0): the
+  parse layer's token walk keeps the keyword glued behind the pair in the
+  operand word's shadow, so the block span breaks. The **spaced** pair nests
+  and runs like bash, and the glued pair at the top level of a cond list is
+  scored by the boundary scan (`echo x||if :; then :; fi; echo tail` prints
+  `a`-`tail` parity, task #236's S2). Pinned by
+  `tests/glued_pair.rs::glued_pair_keeps_the_command_position_the_pair_sets`
+  and `…::short_circuit_gate_skips_the_gated_list_and_resumes_behind_it`.
 - An unclosed mid-run construct (`true && while :; do echo hi`) is a parse
   error rc 1, where bash reports a syntax error rc 2. The REPL reports it at
   once; it does not buffer the input under the `> ` continuation prompt

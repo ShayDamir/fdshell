@@ -2038,3 +2038,45 @@ for the degraded run-level text. Pins: `cond/boundary/block/tests.rs::in_block_w
 `keywords/position/tests.rs`, `tests/cond_blocks.rs` (the task #236 section,
 the `echo done` row bounded like `tests/loops.rs`),
 `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`.
+
+Task #236 (S2 round): the short-circuit gate and the glued cond pair.
+- **The gate's scope is the statement.** A short-circuited `||` chain gates
+  bash's *AND-list*, and the first `;` at group/block depth 0 ends it; the
+  scan must resume *ungated* behind that `;` (`cond/boundary/gate.rs::gate_end`).
+  Two traps cost a hang each: (1) the gate scan inherits the boundary scan's
+  word state, so `state.word_active` must be reset at the gate start or the
+  gated list's first word is swallowed; (2) the gate's block depth must
+  *close* — score with the full `word_delta` (the run resets `;`/newline
+  restart the run at *every* `;`, inside blocks included), so a block the
+  gated text opens ends at its own closer and the `;` behind it ends the
+  gate. Scoring closers at top level is exactly what `group_at_run` cannot
+  see (its answer is "no group"), and a block opened by a glued pair's
+  payload that never closes swallows the rest of the line: the S2 hang.
+- **A cond pair opens two word starts; the payload is a word.** The
+  byte-level scans carry this as `Glue` (head/tail strip in
+  `keywords/position.rs::after`); the token- and run-layer scorers see the
+  glued word whole (`a||if` is ONE token) and must score the payload behind
+  the pair themselves — `keywords::pair_payload` + payload arms in
+  `parse/semi/closing.rs` and `comment/depth_delta.rs`. Do not put the pair
+  rule inside `keyword_delta` itself: `keyword_delta` is also the *run-open*
+  test (`segment.rs`, `midrun::skip`), and scoring a payload there makes
+  `echo a && if …` open a block from the whole run — the midrun cond-part
+  semantics collapse (spaced rows failed en masse). The run-open test is
+  leading-word-only by design.
+- **Rustc codegen anomaly (unresolved, treat as a platform quirk).** At
+  `opt-level = 0` the fdshell library's keyword payload/glue classification
+  of `keywords/position.rs` miscompiles *only in this crate*: the dev binary
+  and every `cargo test`/nextest binary disagree with the release build on
+  glued cond-pair forms (glued `if` behind `||`/`&&` classified as data).
+  The library binary of a plain `cargo build --release`, and the nix build
+  (cargoHook builds `--release`), are correct; `nix flake check` runs tests
+  against the release binary. Consequences: unit pins of glued forms are
+  unpinable in the test profile; `tests/glued_pair.rs` runs them against a
+  non-test binary (release build, or the nix test's `CARGO_BIN_EXE`) and
+  skips with a note otherwise. Bisection ruled out deps, lints, crate layout
+  and mtime; a minimal no_std replica compiles fine. Do NOT "fix" it via
+  `[profile.dev/test] opt-level = 1`: opt-1 has its *own* bug class (spaced
+  forms broke en masse, parity 34→18 on the sweep); opt-0 plus the release
+  pins is the stable state, and the local `cargo build` dev binary stays
+  anomaly-prone for glued forms — verify glued shapes against
+  `target/release/fdshell`, not the dev binary.
