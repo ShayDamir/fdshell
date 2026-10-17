@@ -483,17 +483,21 @@ Accepted divergences from bash:
   closer behind it (`fi`, `esac`, `done`) decrements the **enclosing** block,
   and the loop's own `break` lands in a level that no longer exists. Every
   row below is a **sample of a sweep, not the family's extent** — the same
-  rule shows up in many more shapes, and some of them are acceptance losses:
+  rule shows up in many more shapes. Per row, measured (bash / `master` /
+  fdshell): bash **0** and `master` **0**, fdshell forever —
   `while :; do echo a | case x in a) echo y;; esac; break; done; echo after`
-  and `while :; do echo a|if :; then echo y; fi; echo z; break; done; echo
-  after` exit **0** in bash *and* on `master` (fdshell runs forever), while
-  bash rejects the line with rc 2 and `master` prints its words for
-  `while :; do echo if; fi; echo x; break; done; echo after`,
-  `… echo case; esac; break; done …`, `… echo if; fi; echo after`.
-  `while :; do echo a|if :; then echo y; fi; break; done; echo after`,
-  `… echo a | if; fi; echo x; break; done …`, `… echo a | if :; then echo y;
-  fi; break; done …`, `… echo a|while :; do break; done; break; done …` are
-  the rows this branch moves from a parse error to a hang;
+  and `… echo a | if :; then echo y; fi; break; done …` (the acceptance
+  losses: bash *and* `master` terminate 0 there today, fdshell does not).
+  bash **0** where `master` reports a parse error rc 1, fdshell
+  forever — the three glued rows `while :; do echo a|if :; then echo y; fi;
+  break; done; echo after`, `… echo a|if :; then echo y; fi; echo z; break;
+  done …`, `… echo a|while :; do break; done; break; done …` (here a
+  `master` parse error becomes a hang). bash rc 2, `master` rc 0,
+  fdshell forever — `while :; do echo if; fi; echo x; break; done; echo
+  after`, `… echo case; esac; break; done …`, `… echo a | if; fi; echo x;
+  break; done …`. bash rc 2 where `master` reports a parse error rc 1,
+  fdshell forever — `… echo if; fi; echo after`, `… echo a | if; echo x;
+  done …`.
   `while :; do echo in done; break; done; echo after` (the `case`/`for` word
   list is a pattern place, so `done` there is a pattern word) and
   `while :; do echo a; fi; echo after` hang on `master` too. Fixing the
