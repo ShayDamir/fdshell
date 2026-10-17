@@ -274,6 +274,81 @@ fn if_block_spans_lines_under_tty() {
     assert!(out.contains("> "), "continuation prompt missing: {out:?}");
 }
 
+/// Task #236 §9.5 (plan §9.5): a closer written in a block body's **argument
+/// position** (`while :; do echo x done`, `if a; then b fi`, `if test fi`,
+/// `for i in a; do echo done`, the glued-`esac` form) is word data, so the
+/// block stays open and the shape reaches the REPL's `> ` continuation buffer
+/// — where `master` answered the very first line (a parse error, or for
+/// `while :; do echo x done` an accepted infinite loop).
+///
+/// Measured against `bash -i` on a pty (`script -qec "bash -i" /dev/null`):
+/// bash buffers the same shapes (its `PS2` is user-set on this box, so the
+/// comparison is the **buffering and the joined-line result**, not the prompt
+/// bytes), and running the buffer with the closer on the next line prints
+/// bash's stdout verbatim: `for i in a; do echo done` + `done` prints `done`,
+/// the `case` twin prints `yes`, and `if a; then b fi` + `fi` runs the `then`
+/// body (`a` is command-not-found in bash too), so `echo tail` prints. EOF
+/// mid-buffer executes the buffer and reports the parse error, the same rule
+/// [`eof_mid_if_executes_buffer`] pins.
+#[test]
+fn glued_closer_shapes_buffer_in_the_repl() {
+    // The buffer joins the two lines into ONE dispatch: three prompts (the
+    // shape, the joined buffer, `exit`) — a shell that ran each line by
+    // itself would print four, and `master` did (its answer to line 1 is a
+    // parse error, which is why these rows must not carry one).
+    for (input, want, want_err) in [
+        (
+            "for i in a; do echo done\ndone\necho tail\nexit\n",
+            "done\ntail\n",
+            "",
+        ),
+        (
+            "case x in x) echo yes;; *) echo no esac\nesac\necho tail\nexit\n",
+            "yes\ntail\n",
+            "",
+        ),
+        (
+            "if a; then b fi\nfi\necho tail\nexit\n",
+            "tail\n",
+            "\"a\" not found",
+        ),
+    ] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "stderr={err}");
+        assert!(
+            out.contains("> "),
+            "{input}: no continuation prompt: {out:?}"
+        );
+        assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+        let body = out.replace(PROMPT, "").replace("> ", "");
+        assert_eq!(body, want, "{input}: stdout: {out:?}");
+        assert!(
+            !err.contains("parse error"),
+            "{input}: parse error: {err:?}"
+        );
+        assert!(
+            want_err.is_empty() || err.contains(want_err),
+            "{input}: stderr={err:?}"
+        );
+    }
+    // EOF mid-buffer: the buffer is executed and reports the parse error —
+    // master's infinite loop (`while :; do echo x done` was accepted) is a
+    // regression here, so the row is pinned with a closed stdin.
+    for input in ["while :; do echo x done\n", "if a; then b fi\n"] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "stderr={err}");
+        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+        assert!(
+            out.replace(PROMPT, "").contains("> "),
+            "{input}: no continuation prompt: {out:?}"
+        );
+        assert!(
+            err.contains("parse error"),
+            "{input}: the buffer was not executed: {err:?}"
+        );
+    }
+}
+
 /// Task #232 pinned today's REPL behavior for an **unclosed mid-run
 /// construct** (the documented gap, task #294, with the group twin that
 /// predates it): the span lives in a plain statement, so `repl/complete.rs`
