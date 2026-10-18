@@ -4017,6 +4017,30 @@ fn test_env_assign_value_mask_of_a_quoted_name() {
     assert_eq!(a.mask, vec![true; 4]);
 }
 
+/// The value's zero-byte span slice (`value_spans`, task #321) shares
+/// `value_mask`'s offset, pinned on raw lists: `abc=~/x""` (name 3, pair index
+/// 7 → 3, the value's own end) and `abc=~""` (index 4 → 0, the value's start).
+/// A 1-char name cannot tell `i - off` from `i / off` (`3-2 == 3/2`); with
+/// `off = 4`, `7-4 = 3` (the tilde expands) and `7/4 = 1` (it is suppressed).
+/// The drop case is the pair inside the name (`a""=1` is the text `a=`, index
+/// 1 < 2): an inclusive-only drop keeps it and shifts to 0.
+#[test]
+fn test_env_assign_value_spans_slice_at_the_equals() {
+    for (spans, name_len, want) in [
+        (&[7][..], 3, vec![3]),
+        (&[4][..], 3, vec![0]),
+        (&[1][..], 1, Vec::new()),
+        (&[0, 4, 7][..], 3, vec![0, 3]),
+        (&[][..], 3, Vec::new()),
+    ] {
+        assert_eq!(
+            value_spans(spans, name_len),
+            want,
+            "{spans:?} name_len {name_len}"
+        );
+    }
+}
+
 /// The 1:1 invariant `value_mask` rests on: the tokenizer pushes one mask bit
 /// per word byte, so a word and its mask always have the same length. Pinned
 /// as a test, not as a `debug_assert!` (nextest runs debug binaries, and a

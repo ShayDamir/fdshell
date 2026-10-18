@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::{parse_here_string, word_indices};
+use super::{parse_here_string, word_indices, word_spans};
 use crate::error::parse::ParseError;
 use crate::parse::token::tokenize_statement;
 use alloc::vec;
@@ -84,4 +84,25 @@ fn parse_here_string_rejects_an_io_number_that_is_not_a_descriptor() {
     let tokens = tokenize_statement(line).unwrap();
     let (def, _extra) = parse_here_string(line, &tokens, 1).unwrap().unwrap();
     assert_eq!(def.export_to, i32::MAX);
+}
+
+/// The here-string word's zero-byte span slice (task #321): `prefix + 3` is the
+/// only owner of the operator's length, so the offset, the drop and the shift
+/// are pinned on raw lists. `<<<""` is the pair at the word's start (`prefix 0`,
+/// index 3 → 0), `3<<<""` the same with an io-number (`prefix 1`, index 4 → 0),
+/// and `3<<<~/x""` the pair after the word's own bytes (index 7 → 3): a shift
+/// to `+` gives 6, a shift to `/` gives 1, a `prefix * 3` offset gives 3, and a
+/// reversed drop keeps the index 2 pair of `3<<<""` (index 2 < 4).
+#[test]
+fn word_spans_slice_at_the_operator_offset() {
+    for (spans, prefix, want) in [
+        (&[3][..], 0, vec![0]),
+        (&[4][..], 1, vec![0]),
+        (&[7][..], 1, vec![3]),
+        (&[2][..], 1, Vec::new()),
+        (&[0, 4, 7][..], 1, vec![0, 3]),
+        (&[][..], 1, Vec::new()),
+    ] {
+        assert_eq!(word_spans(spans, prefix), want, "{spans:?} prefix {prefix}");
+    }
 }

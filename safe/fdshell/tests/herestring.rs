@@ -192,6 +192,22 @@ fn here_string_tilde_follows_its_mask() {
         (format!("{home}/x\n").as_str(), 0),
         "bash prints {home}/x"
     );
+    // Task #321: a quote pair that contributes **no bytes** has no mask bit, and
+    // the word's span list carries it. `<<<""~/x` keeps the tilde literal (the
+    // pair is at index 0 of the tilde-prefix) and `<<<~/x""` expands (the pair
+    // sits past the `/`) — both measured in bash 5.3.9.
+    let (out, _err, code) = run("cat <<<\"\"~/x");
+    assert_eq!(
+        (out.as_str(), code),
+        ("~/x\n", 0),
+        "bash prints ~/x, not HOME"
+    );
+    let (out, _err, code) = run("cat <<<~/x\"\"");
+    assert_eq!(
+        (out.as_str(), code),
+        (format!("{home}/x\n").as_str(), 0),
+        "bash prints {home}/x"
+    );
 }
 
 /// Task #282: the here-string word's tilde follows the `HOME` **shell

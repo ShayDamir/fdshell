@@ -349,6 +349,21 @@ fn assignment_value_with_quoted_tilde_prefix_stays_literal() {
             r#"x=~/""; printf "[%s]\n" "$x""#,
             format!("[{home}/]\n").as_str(),
         ),
+        // A **long** name pins the value slice's offset arithmetic: with
+        // `name.len() + 1 = 4` the pair index 7 (`abc=~/x""`) shifts to the
+        // value's index 3 — past the `/`, so the tilde expands — where a 1-char
+        // name cannot tell the shift from a division (`3-2 == 3/2`). Measured in
+        // bash 5.3.9: `abc=~/x""` stores `[{home}/x]`, `abc=~""` stores `[~]`.
+        (
+            r#"abc=~/x""; printf "[%s]\n" "$abc""#,
+            format!("[{home}/x]\n").as_str(),
+        ),
+        (r#"abc=~""; printf "[%s]\n" "$abc""#, "[~]\n"),
+        (
+            r#"abcd=~/x""; printf "[%s]\n" "$abcd""#,
+            format!("[{home}/x]\n").as_str(),
+        ),
+        (r#"abcd=~""; printf "[%s]\n" "$abcd""#, "[~]\n"),
     ] {
         let (out, err, code) = run(script);
         assert_eq!(code, 0, "{script}: stderr={err:?}");
