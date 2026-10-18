@@ -301,3 +301,20 @@ fn quoted_dollar_at_in_a_local_value_is_glued() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[a b c]");
 }
+
+/// Task #281: a `local` value carries its own quote mask, so a quoted character
+/// in its tilde-prefix suppresses tilde expansion (POSIX #2.6.1) — bash's
+/// `local w=~"/*"` stores `~/*`, never `$HOME/*`.
+#[test]
+fn local_value_with_quoted_tilde_prefix_stays_literal() {
+    let (out, err, code) = run(r#"f(){ local w=~"/*"; printf "[%s]\n" "$w"; }; f"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~/*]\n", "bash stores [~/*]");
+    // Contrast: the quote after the `/` leaves the prefix unquoted, and bash
+    // stores `[<HOME>/x]` — read in-shell, never a hardcoded home path.
+    let (home, _err, code) = run(r#"printf "%s" "$HOME""#);
+    assert_eq!(code, 0);
+    let (out, err, code) = run(r#"f(){ local w=~/"x"; printf "[%s]\n" "$w"; }; f"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("[{home}/x]\n"), "bash stores [{home}/x]");
+}

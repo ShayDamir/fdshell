@@ -480,6 +480,11 @@ fn heredoc_delimiter_strips_every_single_quote() {
 /// A quoted `~` is a literal byte: POSIX removes the quotes *after* tilde
 /// expansion, and bash keeps `echo "~"` and `echo "~/x"` literal (task #269's
 /// mask gate in `substitute/tilde.rs`). The unquoted pair expands, as before.
+///
+/// Task #281 widens the gate to the whole tilde-prefix (POSIX #2.6.1: a tilde
+/// expands only when **no** quoted character appears in the bytes from `~`
+/// through the first `/`, the `/` included). Every row below is bash's own
+/// output, measured with `HOME=/h/o/m/e`, rc 0 in both shells.
 #[test]
 fn quoted_leading_tilde_is_literal() {
     let (out, err, code) = run(r#"printf "[%s]" "~""#);
@@ -500,6 +505,44 @@ fn quoted_leading_tilde_is_literal() {
     let (out, _err, code) = run(r#"printf "[%s]" '~'"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[~]");
+    // A quoted character in the tilde-prefix suppresses the expansion, and the
+    // quote's own removal is all that is left: bash prints `[~/*]` for `~"/*"`,
+    // `[~/*/sub]` for `~"/*"/sub`, `[~/x]` for `~"/x"`, `~'/'x` and `~"/*"`
+    // spelled with single quotes (task #281).
+    let (out, _err, code) = run(r#"printf "[%s]" ~"/*""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[~/*]", "bash prints [~/*]");
+    let (out, _err, code) = run(r#"printf "[%s]" ~"/*"/sub"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~/*/sub]", "bash prints [~/*/sub]");
+    let (out, _err, code) = run(r#"printf "[%s]" ~'/*'"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~/*]", "bash prints [~/*]");
+    for word in [r#"~"/x""#, r#"~'/'x"#] {
+        let (out, _err, code) = run(&format!("printf \"[%s]\" {word}"));
+        assert_eq!(code, 0, "{word}: stderr={err}");
+        assert_eq!(out, "[~/x]", "{word}: bash prints [~/x]");
+    }
+    // The contrast: with the `/` unquoted the quote sits after the prefix, so
+    // the tilde does expand (`~/"x"` is `[<HOME>/x]` in bash).
+    let (out, _err, code) = run(r#"printf "[%s]" ~/"x""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, format!("[{home}/x]"), "bash prints [{home}/x]");
+    // Word-start rule and no-`~user`-lookup rows that stay agreement:
+    // `~"a"b` and `~a/"x"` print `[~ab]` and `[~a/x]`; `x~"/*"` prints
+    // `[x~/*]`; `~\/x` prints `[~/x]`.
+    let (out, _err, code) = run(r#"printf "[%s]" ~"a"b"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~ab]", "bash prints [~ab]");
+    let (out, _err, code) = run(r#"printf "[%s]" ~a/"x""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~a/x]", "bash prints [~a/x]");
+    let (out, _err, code) = run(r#"printf "[%s]" x~"/*""#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[x~/*]", "bash prints [x~/*]");
+    let (out, _err, code) = run(r#"printf "[%s]" ~\/x"#);
+    assert_eq!(code, 0);
+    assert_eq!(out, "[~/x]", "bash prints [~/x]");
 }
 
 /// Task #223: when the byte right after `$` starts a new quote region the

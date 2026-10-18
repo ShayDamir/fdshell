@@ -361,6 +361,10 @@ fn for_list_word_expands_leading_tilde() {
 /// quote removal, and bash's `for w in "~"` iterates over `~`) — task #269's
 /// mask gate in `substitute/tilde.rs`. With the empty mask fdshell expanded
 /// `$HOME`.
+///
+/// Task #281 widens the gate: a quoted character anywhere in the tilde-prefix
+/// (the bytes from `~` through the first `/`, the `/` included) suppresses the
+/// expansion, so bash's `for w in ~"/*"` iterates over `~/*` — not `$HOME/*`.
 #[test]
 fn for_list_quoted_leading_tilde_is_literal() {
     let (out, err, code) = run(r#"for w in "~"; do printf "[%s]\n" "$w"; done"#);
@@ -369,6 +373,12 @@ fn for_list_quoted_leading_tilde_is_literal() {
     let (out, _err, code) = run(r#"for w in "~" x; do printf "[%s]" "$w"; done"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[~][x]");
+    let (out, _err, code) = run(r#"for w in ~"/*"; do printf "[%s]\n" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[~/*]\n", "bash iterates over [~/*]");
+    let (out, _err, code) = run(r#"for w in ~"/x" y; do printf "[%s]" "$w"; done"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[~/x][y]", "bash iterates over [~/x] then [y]");
 }
 
 /// A quoted command substitution is exactly one field (closes #132): the

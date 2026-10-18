@@ -156,7 +156,10 @@ fn here_string_quoted_word_never_splits() {
 #[test]
 fn here_string_tilde_follows_its_mask() {
     // Unquoted `~` expands to `$HOME`; a quoted `~` is a literal byte (bash
-    // keeps it, task #269's mask gate in `substitute/tilde.rs`).
+    // keeps it, task #269's mask gate in `substitute/tilde.rs`), and so is a
+    // `~` whose **tilde-prefix** carries any quoted character — the bytes
+    // through the first `/` included, so bash's `cat <<<~"/*"` prints `~/*`
+    // and `cat <<<~"/x"` prints `~/x` (task #281).
     let home = std::env::var("HOME").unwrap();
     let (out, _err, code) = run("cat <<<~");
     assert_eq!((out.as_str(), code), (format!("{home}\n").as_str(), 0));
@@ -165,6 +168,25 @@ fn here_string_tilde_follows_its_mask() {
     let (out, _err, code) = run("cat <<<\"~/x\"");
     assert_eq!((out.as_str(), code), ("~/x\n", 0));
     let (out, _err, code) = run("cat <<<~/x");
+    assert_eq!(
+        (out.as_str(), code),
+        (format!("{home}/x\n").as_str(), 0),
+        "bash prints {home}/x"
+    );
+    let (out, _err, code) = run("cat <<<~\"/*\"");
+    assert_eq!(
+        (out.as_str(), code),
+        ("~/*\n", 0),
+        "bash prints ~/x, not HOME"
+    );
+    let (out, _err, code) = run("cat <<<~\"/x\"");
+    assert_eq!(
+        (out.as_str(), code),
+        ("~/x\n", 0),
+        "bash prints ~/x, not HOME"
+    );
+    // The contrast: the quote sits after the `/`, so the prefix is unquoted.
+    let (out, _err, code) = run("cat <<<~/\"x\"");
     assert_eq!(
         (out.as_str(), code),
         (format!("{home}/x\n").as_str(), 0),

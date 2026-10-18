@@ -86,3 +86,23 @@ fn set_lists_exported_variable_not_twice() {
     let qs: Vec<&str> = out.lines().filter(|l| *l == "Q=3").collect();
     assert_eq!(qs, ["Q=3"], "stdout={out:?}");
 }
+
+/// Task #281: `set --` substitutes its operand words with their own quote mask,
+/// so a quoted character in a tilde-prefix suppresses tilde expansion (POSIX
+/// #2.6.1) — bash's `set -- ~"/*"` makes `$1` the text `~/*`.
+#[test]
+fn positional_with_quoted_tilde_prefix_stays_literal() {
+    let (out, err, code) = run(r#"set -- ~"/*"; printf "[%s]\n" "$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~/*]\n", "bash gets [~/*]");
+    let (out, err, code) = run(r#"set -- ~"/x"; printf "[%s]\n" "$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~/x]\n", "bash gets [~/x]");
+    // Contrast: the quote after the `/` leaves the prefix unquoted, so bash
+    // makes `$1` `<HOME>/x` — read in-shell, never a hardcoded home path.
+    let (home, _err, code) = run(r#"printf "%s" "$HOME""#);
+    assert_eq!(code, 0);
+    let (out, err, code) = run(r#"set -- ~/"x"; printf "[%s]\n" "$1""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("[{home}/x]\n"), "bash gets [{home}/x]");
+}

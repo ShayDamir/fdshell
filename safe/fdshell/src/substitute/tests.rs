@@ -1023,27 +1023,35 @@ fn tilde_mid_word_untouched() {
 // Tilde expansion must keep the quote mask aligned: the expansion inherits
 // the tilde's bit, and later original bytes keep their own bits even though
 // the expansion consumed input from the shared peekable. The tilde's own bit
-// is `false`, because a **quoted** leading `~` never reaches the arm at all
-// (the test below).
+// is `false`, because a leading `~` whose prefix is quoted never reaches the
+// arm at all (the two tests below). The shape is constrained by task #281:
+// a **quoted `/` in the prefix** makes the word a literal-tilde row, so an
+// alignment test must quote a byte *after* the slash (`~/"a"`, not `~"/a"`),
+// or it silently tests the gate instead of the alignment.
 #[test]
 fn tilde_expansion_keeps_mask_alignment() {
     let cell = dummy_cell();
     let arg = ShortCStr::from(c"~/a");
     let mut cache = HashMap::new();
-    let (res, mask_out) = substitute_arg(&arg, &[false, true, false], &mut cache, &cell).unwrap();
+    let (res, mask_out) = substitute_arg(&arg, &[false, false, true], &mut cache, &cell).unwrap();
     let home = std::env::var("HOME").unwrap();
     assert_eq!(res.as_bytes().unwrap(), format!("{}/a", home).as_bytes());
     assert!(mask_out.iter().take(home.len()).all(|&q| !q));
     assert!(
-        mask_out.get(home.len()).copied().unwrap_or(false),
-        "the byte after the expansion must keep its own (quoted) bit"
+        !mask_out.get(home.len()).copied().unwrap_or(true),
+        "the `/` follows the expansion unquoted, so it keeps a `false` bit"
+    );
+    assert!(
+        mask_out.get(home.len() + 1).copied().unwrap_or(false),
+        "the byte after it must keep its own (quoted) bit"
     );
 }
 
 // A quoted `~` is a literal byte: POSIX removes the quotes after tilde
 // expansion, and bash keeps `printf "[%s]" "~"` → `[~]` and
-// `printf "[%s]" "~/x"` → `[~/x]`. The mask's first bit is the gate, so the
-// arm must not run at all (task #269) — the word records no splittable byte.
+// `printf "[%s]" "~/x"` → `[~/x]`. The mask's first bit is the part of the
+// gate #269 added, so the arm must not run at all — the word records no
+// splittable byte. Task #281 widens the gate to the whole tilde-prefix.
 #[test]
 fn tilde_quoted_first_bit_is_literal() {
     let cell = dummy_cell();
@@ -1057,15 +1065,81 @@ fn tilde_quoted_first_bit_is_literal() {
     assert!(!expanded);
 }
 
-// The gate is the *first* bit only: an unquoted `~` with a quoted tail
-// expands, as bash's `printf "[%s]" ~/x` prints `[<HOME>]`.
+// The gate is **not** bit 0 alone (task #281, POSIX #2.6.1): a tilde expands
+// only when no quoted character appears in the **tilde-prefix** — the word's
+// bytes from `~` through the first `/` inclusive. Measured in bash 5.3.9 with
+// `HOME=/h/o/m/e`, rc 0 in both shells on every row:
+//
+// ```text
+// printf "[%s]" ~"/*"      → [~/*]        printf "[%s]" ~"/*"/sub → [~/*/sub]
+// printf "[%s]" ~"/x"      → [~/x]        printf "[%s]" ~'/'x     → [~/x]
+// printf "[%s]" ~"a"b      → [~ab]        printf "[%s]" ~a"b"     → [~ab]
+// printf "[%s]" ~a/"x"     → [~a/x]       printf "[%s]" ~"root"/* → [~root/*]
+// ```
+//
+// With no `/` the whole word is the prefix (`~"a"b`, `~a"b"`), and the
+// terminating `/`'s own bit counts (`~"/*"`, `~"/x"`, `~'/'x`). `~\/x` →
+// `~/x` and `~\*` → `~*` agree with bash **by construction**: the arm only
+// fires when the byte after `~` is `/` or the end of the word, so a `\<char>`
+// there is already unexpandable — POSIX counts `\X` as a quoted character and
+// fdshell agrees on every observable row, so `prefix_quoted` deliberately has
+// no backslash branch (unobservable without a `~user` lookup).
+//
+// Every expectation is literal, so these rows need no `HOME`; the `~` must
+// keep its own unquoted bit through the copy loop, and a suppressed prefix
+// records no splittable byte.
 #[test]
-fn tilde_quoted_tail_still_expands() {
+fn quoted_tilde_prefix_stays_literal() {
+    let cell = dummy_cell();
+    for (word, mask) in [
+        // `~"/*"`: the only quoted byte is the terminating `/`.
+        (c"~/*", &[false, true, true][..]),
+        // `~"/x"`, and the single-quote spelling `~'/'x`.
+        (c"~/x", &[false, true, false][..]),
+        // `~"/*"/sub`: the quote ends before the rest of the word.
+        (c"~/*/sub", &[false, true, true, false][..]),
+        // `~"a"b`: no `/` ⇒ the whole word is the prefix.
+        (c"~ab", &[false, true, false][..]),
+        // `~a"b"`: same, quoted after the unquoted user-name bytes.
+        (c"~ab", &[false, false, true][..]),
+        // `~root/*` from `~"root"/*`: quoted name, unquoted slash.
+        (
+            c"~root/*",
+            &[false, true, true, true, true, false, false][..],
+        ),
+        // Agreement row, documented: the prefix is unquoted so the arm fires
+        // and `a` is not `/`, so the tilde stays literal on its own rule.
+        (c"~a/x", &[false, false, false, true][..]),
+    ] {
+        let arg = ShortCStr::from(word);
+        let (res, mask_out, expanded) = expand_marked(&cell, &arg, mask);
+        let text = res.as_bytes().unwrap();
+        let want: Vec<bool> = (0..text.len())
+            .map(|i| mask.get(i).copied().unwrap_or(false))
+            .collect();
+        assert_eq!(
+            text,
+            word.to_bytes(),
+            "a quoted tilde-prefix is never expanded"
+        );
+        assert_eq!(mask_out, want, "{word:?}: every byte keeps its own bit");
+        assert!(!expanded, "{word:?}: a quoted prefix runs no expansion arm");
+    }
+}
+
+// The prefix ends at the first `/` **inclusive**, so a quoted byte *after* the
+// slash leaves the tilde expandable: bash's `printf "[%s]" ~/"x"` prints
+// `[<HOME>/x]` (measured with `HOME=/h/o/m/e`). Task #269 pinned this shape as
+// `~/x` with the mask `[false, true, true]`, i.e. the word `~"/x"`, and task
+// #281 measured that row in bash as `[~/x]`: a quoted `/` *is* a quoted
+// character in the tilde-prefix. See `quoted_tilde_prefix_stays_literal`.
+#[test]
+fn tilde_quoted_after_slash_still_expands() {
     let cell = dummy_cell();
     let mut cache = HashMap::new();
     let (res, _) = substitute_arg(
         &ShortCStr::from(c"~/x"),
-        &[false, true, true],
+        &[false, false, true],
         &mut cache,
         &cell,
     )

@@ -313,3 +313,23 @@ fn quoted_dollar_at_in_an_assignment_value_is_glued() {
         assert_eq!(&out, want, "{script:?}");
     }
 }
+
+/// Task #281: an assignment value carries its own quote mask into substitution,
+/// so a quoted character in its tilde-prefix suppresses tilde expansion (POSIX
+/// #2.6.1) — bash's `x=~"/*"` stores `~/*`, never `$HOME/*`.
+#[test]
+fn assignment_value_with_quoted_tilde_prefix_stays_literal() {
+    let (out, err, code) = run(r#"x=~"/*"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~/*]\n", "bash stores [~/*]");
+    let (out, err, code) = run(r#"x=~"/x"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~/x]\n", "bash stores [~/x]");
+    // Contrast, read in-shell (never a hardcoded home path): the quote sits
+    // **after** the `/`, so the prefix is unquoted and bash stores `<HOME>/x`.
+    let (home, _err, code) = run(r#"printf "%s" "$HOME""#);
+    assert_eq!(code, 0);
+    let (out, err, code) = run(r#"x=~/"x"; printf "[%s]\n" "$x""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("[{home}/x]\n"), "bash stores [{home}/x]");
+}

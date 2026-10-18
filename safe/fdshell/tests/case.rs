@@ -125,6 +125,13 @@ fn case_word_quoted_tilde_is_literal() {
     // A quoted `~` in the pattern stays literal, so the expanded word misses it.
     let (out, _err, code) = run("case ~/a in \"~\"/a) echo m;; esac");
     assert_eq!((out.as_str(), code), ("", 0), "bash prints nothing");
+    // Task #281: a quoted character in a tilde-prefix keeps the **word** literal
+    // too, and the unquoted pattern side expands, so the two never meet — both
+    // rows are bash parity (`n`), not a divergence.
+    let (out, _err, code) = run("case ~\"/*\" in ~/*) echo m;; *) echo n;; esac");
+    assert_eq!((out.as_str(), code), ("n\n", 0), "bash prints n");
+    let (out, _err, code) = run("case \"$HOME\"/* in ~\"/*\") echo m;; *) echo n;; esac");
+    assert_eq!((out.as_str(), code), ("n\n", 0), "bash prints n");
 }
 
 /// The pattern-side rows that were fdshell's divergences are bash parity now
