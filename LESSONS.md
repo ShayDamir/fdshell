@@ -146,7 +146,7 @@ Plain `cargo clippy -- -D warnings` does not lint `#[cfg(test)]` code, so a `sus
 -->
 
 ## Redirect source fds must be allocated above the command's highest target
-`resolve_path`/`resolve_dup` cloned sources with `F_DUPFD_CLOEXEC(0)` (lowest free fd), which can land exactly on a redirect target. The `dup2(local, target)` then no-ops and the local's `Drop` closes the target fd — silent truncation (data to fd N is lost, targets closed, multi-redirect interleave clobbers the pre-opened `open_redirect_files` temp). Fix: compute `min_fd = max(export_to)` over the whole redirect list + 1, and allocate/clone open fds (`open.rs` re-home, `resolve.rs` path/dup/var arms) strictly above it. Empirical note: the same hazard in `pipeline/child.rs` pipe clones does NOT reproduce — children inherit the low pipe-fd numbers, so a clone never lands on a file target.
+`resolve_path`/`resolve_dup` cloned sources with `F_DUPFD_CLOEXEC(0)` (lowest free fd), which can land exactly on a redirect target. The `dup2(local, target)` then no-ops and the local's `Drop` closes the target fd — silent truncation (data to fd N is lost, targets closed, multi-redirect interleave clobbers the pre-opened `open_redirect_files` temp). Fix: compute `min_fd = max(export_to)` over the whole redirect list + 1, and allocate/clone open fds (`open.rs` re-home, `resolve.rs` path/dup/var arms) strictly above it. That arm list is not exhaustive: every source-allocating arm takes the same minimum, the `HereDoc`/`HereString` memfd arms included — see "A heredoc source must be allocated above every export target, the target included (task #276)". Empirical note: the same hazard in `pipeline/child.rs` pipe clones does NOT reproduce — children inherit the low pipe-fd numbers, so a clone never lands on a file target.
 
 ## `readlinkat` empty path on a non-link fd is ENOENT, not EINVAL
 The path form of `readlinkat` fails with `EINVAL` on a non-symlink, but the fd form (empty path behind an open handle) fails with `ENOENT` — so `readlink %fd` on a regular file exits 2, not 22. Don't assume both forms share an errno; assert each against real kernel behavior (C repro: `open("f", O_RDWR); readlinkat(fd, "", buf)` → ENOENT).
@@ -2200,11 +2200,13 @@ drift between the two operators.
 
 ## A heredoc source must be allocated above every export target, the target included (task #276)
 
-`redirect/resolve.rs`'s `HereDoc`/`HereString` arms now use
-`clone_above(1).try_clone_above(min_fd)`, where `min_fd` is the maximum over
-**all** the command's targets — the here-doc's own `export_to` included. With
-the unprefixed form the source was always a free slot ≥ 1 and `export_to` was
-0, so the ordering was invisible. With `N<<word` the source can be handed to
+`redirect/resolve.rs`'s `HereDoc`/`HereString` arms now clone the body memfd
+with `heredoc::here_doc(…)?.try_clone_above(min_fd)` (and the `here_string`
+twin), where `min_fd = RedirectDef::max_target(redirects) + 1` is the maximum
+over **all** the command's targets — the here-doc's own `export_to` included.
+With the unprefixed form the source was always a free slot ≥ 1 and
+`export_to` was 0, so the ordering was invisible. With `N<<word` the source
+can be handed to
 the very descriptor it was allocated on: `exec 3<<T` whose source lands on 3
 dup2s a memfd onto itself, which truncates it to 0 bytes (measured: `cat <&3`
 prints nothing). `cat 3<<T 1>&3` and the unit test
@@ -2251,22 +2253,30 @@ accepted equivalents, unkillable because of scanner invariants:
   returns at that byte and never decrements `k` past 0 — the underflow the
   mutant causes is unreachable.
 - `ops.rs` `i + p + 1`→`i + p * 1` in the comment skip (the MISSED one,
-  col 38): `p * 1 ≡ p` — the mutant is *the identical expression*. The review
-  read it as the first `+` (col 34) and predicted an infinite loop at
-  `p == 0`; that mutation (`i * p + 1`) is **caught** by the existing comment
-  tests (in `caught.txt` with both `-` and `*`), and the loop is unreachable
-  for every input: the newline search starts *at* the `#`, so `p >= 1`
-  always; the product equals the sum at `i <= 1`; and at `i >= 2, p >= 2`
-  the product lands exactly one byte short of the newline — inside the
-  comment — where a re-fired comment's own `p` is the same newline minus the
-  new index, so its product lands *past* that newline (the fixed point
-  `i·p + 1 = i + p + 1` has no solution with `i >= 2, p >= 2`). Measured
-  three ways: MISSED in two independent cargo-mutants runs, every hand-built
-  shape (`"  #\n…"`, `" #\n…"`, `" # #\n…"`, `"   # #\n…"`, the double-comment
-  lines) ran the unmutated outcome under the manually applied mutation, and
-  the instrumented scan trace shows identical trajectories. Chasing this
-  mutant with tests is chasing arithmetic identity — record it, do not pin
-  around it.
+  col 38): the mutant's jump is `i + p * 1 = i + p`, the comment's
+  terminating newline — exactly **one byte short** of the unmutated
+  `i + p + 1`, not an identical expression. The extra iteration starts on
+  that newline: the comment gate rejects it (not a `#`) and the operator
+  gate rejects it (not a `<`), so the loop consumes it through
+  `ScanState::advance`, which at a newline is **state-neutral** —
+  `word_active` is already false (the comment gate requires `!word_active`)
+  and `advance` sets it to `!is_word_break(b'\n') = false`; no quote is
+  toggled (the comment gate requires the bare state, so none is open);
+  `paren_depth` is unmoved; and a newline is not `is_token_byte`, so
+  `seen_token` is unchanged. The scan therefore resumes at `i + p + 1` with
+  identical state and no input separates the two expressions: the mutant is
+  unkillable. The review read col 38 as col 34 and predicted an infinite
+  loop at `p == 0`; that mutation (`i * p + 1`) is **caught** by the existing
+  comment tests (in `caught.txt` with both `-` and `*`), and the loop is
+  unreachable for every input: the newline search starts *at* the `#`, so
+  `p >= 1` always — at `i = 1, p = 1` (the comment rows' own shape) the
+  product is `2`, the newline, from which the same state-neutral extra
+  iteration resumes. Measured three ways: MISSED in two independent
+  cargo-mutants runs, every hand-built shape (`"  #\n…"`, `" #\n…"`,
+  `" # #\n…"`, `"   # #\n…"`, the double-comment lines) ran the unmutated
+  outcome under the manually applied mutation, and the instrumented scan
+  trace shows identical trajectories. Chasing this mutant with tests is
+  chasing the newline's state-neutrality — record it, do not pin around it.
 
 ## A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)
 

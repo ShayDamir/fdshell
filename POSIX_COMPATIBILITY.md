@@ -66,7 +66,8 @@ to fd 3 and leaves stdin untouched). fdshell reads `N` with the same rule as
 - The digits must begin the operator's word unescaped: a quoted prefix, a
   quoted operator, an escaped digit, or digits glued to a longer word are word
   data — fdshell passes the whole token to the command (`cat "3"<<EOF` gets
-  the argument `"3"<<EOF`). bash never reads a descriptor number from these
+  the argument `3<<EOF`, its quotes taken as ordinary word quoting and its
+  `<<` as plain word text). bash never reads a descriptor number from these
   shapes either, but it splits the word at the operator (`cat "3"<<EOF` gets
   the argument `3`) and then reads the body lines as the here-document;
   fdshell never splits (the word rule above) and the body lines are commands.

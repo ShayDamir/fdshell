@@ -242,7 +242,8 @@ A number in front of the operator puts the body on that descriptor instead of
 stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
 `exec 3<<EOF` keeps it there for the rest of the script. The number must be
 its own unquoted digit word, as in `3>file` — `cat "3"<<EOF` and `cat \3<<EOF`
-are the argument `"3"<<EOF`, not a here-document
+are the single argument `3<<EOF`, its quotes taken as ordinary word quoting and
+its `<<` as plain word text, not a here-document
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#here-document-descriptor-numbers)).
 `N` is a raw descriptor number, not an fd variable: it has no `%fd`
 counterpart — nothing is bound under a name, `unset %name` closes nothing —
