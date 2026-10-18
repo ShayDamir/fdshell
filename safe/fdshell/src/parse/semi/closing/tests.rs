@@ -22,7 +22,7 @@ fn toks(line: &[u8]) -> Vec<Token> {
 fn nth(t: &[Token], word: &[u8], n: usize) -> usize {
     t.iter()
         .enumerate()
-        .filter(|(_, (tok, _, _, _, _))| tok.as_bytes().is_ok_and(|w| w == word))
+        .filter(|(_, (tok, _, _, _, _, _))| tok.as_bytes().is_ok_and(|w| w == word))
         .nth(n)
         .map(|(i, _)| i)
         .unwrap()

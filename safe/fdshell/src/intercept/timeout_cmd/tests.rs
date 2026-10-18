@@ -13,7 +13,7 @@ fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<CmdError>> 
         .collect();
     let mask: Vec<Vec<bool>> = args.iter().map(|a| vec![false; a.len()]).collect();
     let quoted: Vec<bool> = vec![false; args.len()];
-    parse(&args, &mask, &quoted)
+    parse(&args, &mask, &Vec::new(), &quoted)
 }
 
 /// `parse` with an explicit quote mask per word.
@@ -26,7 +26,7 @@ fn run_masked(
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
         .collect();
     let quoted: Vec<bool> = vec![false; args.len()];
-    parse(&args, mask, &quoted)
+    parse(&args, mask, &Vec::new(), &quoted)
 }
 
 /// `parse` with an explicit quote mask *and* quoted-span flag per word.
@@ -39,7 +39,7 @@ fn run_masked_quoted(
         .iter()
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
         .collect();
-    parse(&args, mask, quoted)
+    parse(&args, mask, &Vec::new(), quoted)
 }
 
 #[test]

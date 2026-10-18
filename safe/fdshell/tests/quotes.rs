@@ -566,6 +566,40 @@ fn quoted_leading_tilde_is_literal() {
     let (out, _err, code) = run(r#"printf "[%s]" ~\/x"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[~/x]", "bash prints [~/x]");
+    // Task #321: a quote pair that contributes **no bytes** leaves no mask bit
+    // at all, so the mask alone cannot say the prefix was quoted — the
+    // tokenizer's span list is what suppresses the expansion. Measured in bash
+    // 5.3.9 with `HOME=/h/o/m/e`, rc 0 in both shells: the empty pairs keep the
+    // word literal, and the same pair *after* the `/` leaves the tilde
+    // expandable (`~/""` is `[<HOME>/]`).
+    for (word, want) in [
+        ("~\"\"", "[~]"),
+        ("~''", "[~]"),
+        ("~\"\"/x", "[~/x]"),
+        ("~''/x", "[~/x]"),
+        ("~\"\"''/x", "[~/x]"),
+        ("\"\"~/x", "[~/x]"),
+        ("~x\"\"", "[~x]"),
+    ] {
+        let (out, err, code) = run(&format!("printf \"[%s]\" {word}"));
+        assert_eq!(code, 0, "{word}: stderr={err}");
+        assert_eq!(out, want, "{word}: bash prints {want}");
+    }
+    // The empty span *after* the prefix's end leaves the tilde expandable:
+    // `printf "[%s]" ~/""` is `[<HOME>/]` in bash.
+    let (out, err, code) = run("printf \"[%s]\" ~/\"\"");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, format!("[{home}/]"), "bash prints [{home}/]");
+    // The `$'…'` spelling of the empty span is a **documented divergence**, not
+    // part of this rule: fdshell has no `$'…'` quoting at all (task #156), so
+    // `~$''/x` is the three bytes `~$` + `/x` here, where bash prints `[~/x]`.
+    // Pinned as measured so #156 has to face the row when it lands.
+    let (out, _err, code) = run("printf \"[%s]\" ~$''/x");
+    assert_eq!(code, 0);
+    assert_eq!(
+        out, "[~$/x]",
+        "bash prints [~/x]: the $'…' gap is task #156"
+    );
 }
 
 /// Task #282: `~` is driven by the `HOME` **shell variable** — the same

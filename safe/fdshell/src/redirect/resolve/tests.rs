@@ -112,7 +112,12 @@ fn here_string_expands_word_and_appends_newline() {
             sys::ImportedStr::new(c"hello".into(), sys::Trace::boundary(sys::Origin::Shell)),
         );
     }
-    let redirects = vec![RedirectDef::here_string(0, c"$x", vec![false; 2])];
+    let redirects = vec![RedirectDef::here_string(
+        0,
+        c"$x",
+        vec![false; 2],
+        Vec::new(),
+    )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
@@ -124,7 +129,7 @@ fn here_string_expands_word_and_appends_newline() {
 #[test]
 fn here_string_empty_word_is_bare_newline() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(0, c"", Vec::new())];
+    let redirects = vec![RedirectDef::here_string(0, c"", Vec::new(), Vec::new())];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -135,7 +140,12 @@ fn here_string_empty_word_is_bare_newline() {
 #[test]
 fn here_string_reads_back_to_eof() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(0, c"abc", vec![false; 3])];
+    let redirects = vec![RedirectDef::here_string(
+        0,
+        c"abc",
+        vec![false; 3],
+        Vec::new(),
+    )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -151,7 +161,12 @@ fn here_string_quoted_escape_pair_keeps_the_backslash() {
     // keeps the backslash of a `\<char>` pair that is not `\$`, `\\` or `` \` ``
     // (bash prints `a\ b`; the empty mask printed `a b` — task #269).
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])];
+    let redirects = vec![RedirectDef::here_string(
+        0,
+        c"a\\ b",
+        vec![true; 4],
+        Vec::new(),
+    )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
@@ -163,7 +178,12 @@ fn here_string_unquoted_escape_pair_folds_the_backslash() {
     // The same word unmasked folds its escape pair (POSIX 2.2.1), the shape of
     // `cat <<<a\ b`, where bash prints `a b` too.
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(0, c"a\\ b", Vec::new())];
+    let redirects = vec![RedirectDef::here_string(
+        0,
+        c"a\\ b",
+        Vec::new(),
+        Vec::new(),
+    )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
@@ -181,7 +201,7 @@ fn numbered_here_string_source_sits_above_the_export_targets() {
     let c = cell();
     let redirects = vec![
         RedirectDef::dup(5, 1),
-        RedirectDef::here_string(3, c"body", vec![false; 4]),
+        RedirectDef::here_string(3, c"body", vec![false; 4], Vec::new()),
     ];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let src = resolved

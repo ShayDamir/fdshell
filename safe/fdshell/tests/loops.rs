@@ -392,6 +392,10 @@ fn for_list_tilde_follows_the_shell_variable_home() {
 /// Task #281 widens the gate: a quoted character anywhere in the tilde-prefix
 /// (the bytes from `~` through the first `/`, the `/` included) suppresses the
 /// expansion, so bash's `for w in ~"/*"` iterates over `~/*` — not `$HOME/*`.
+///
+/// Task #321 adds the pair that contributes no bytes (`for w in ~""`): the
+/// mask has no bit for it, so the for-list words carry the tokenizer's span
+/// list, and bash's `for w in ~""` iterates over `~`.
 #[test]
 fn for_list_quoted_leading_tilde_is_literal() {
     let (out, err, code) = run(r#"for w in "~"; do printf "[%s]\n" "$w"; done"#);
@@ -406,6 +410,21 @@ fn for_list_quoted_leading_tilde_is_literal() {
     let (out, _err, code) = run(r#"for w in ~"/x" y; do printf "[%s]" "$w"; done"#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[~/x][y]", "bash iterates over [~/x] then [y]");
+    // Task #321's zero-byte pairs: measured in bash 5.3.9, rc 0 in both shells
+    // — `for w in ~""` iterates over `[~]`, `for w in ~''/x` over `[~/x]`, and
+    // the empty pair at a word's end (`~x""`) keeps `[~x]`.
+    for (script, want) in [
+        (r#"for w in ~""; do printf "[%s]" "$w"; done"#, "[~]"),
+        (r#"for w in ~''/x; do printf "[%s]" "$w"; done"#, "[~/x]"),
+        (
+            r#"for w in ~"" ~''/x ~x""; do printf "[%s]" "$w"; done"#,
+            "[~][~/x][~x]",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}: bash iterates over {want}");
+    }
 }
 
 /// A quoted command substitution is exactly one field (closes #132): the

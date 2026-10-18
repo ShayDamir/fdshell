@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 use super::tokenize;
+use crate::parse::Token;
 use alloc::{vec, vec::Vec};
 use sys::ShortCStr;
 
@@ -8,7 +9,7 @@ fn words(line: &[u8]) -> Vec<(ShortCStr, Vec<bool>)> {
     tokenize(line)
         .unwrap()
         .into_iter()
-        .map(|(t, _, _, _, mask)| (t, mask))
+        .map(|(t, _, _, _, mask, _spans)| (t, mask))
         .collect()
 }
 
@@ -243,8 +244,8 @@ fn clobber_absorbed_pipe_is_unquoted_in_the_mask() {
 
 // --- Single quotes (task #141). Every expectation below is bash's word text.
 
-/// The full token view of a line: word text, span, `fq`, mask.
-fn full(line: &[u8]) -> Vec<(ShortCStr, usize, usize, bool, Vec<bool>)> {
+/// The full token view of a line: word text, span, `fq`, mask, spans.
+fn full(line: &[u8]) -> Vec<Token> {
     tokenize(line).unwrap()
 }
 
@@ -398,4 +399,53 @@ fn empty_span_after_a_word_is_a_word_of_its_own() {
             ShortCStr::from(c""),
         ]
     );
+}
+
+// Task #321: a quote pair that contributes **no bytes** leaves no mask bit, so
+// the tokenizer records its opening index in the token's `spans` (field 5) —
+// the only place the zero-byte span survives for the tilde gate. The index is
+// the pair's position in the word text, i.e. the text length when the pair
+// opened: `~""/x` records `1` (the `/` follows at index 1), and a pair at the
+// word's end records the word's length (`a~""` → `2`).
+fn spans(line: &[u8]) -> Vec<Vec<usize>> {
+    tokenize(line)
+        .unwrap()
+        .into_iter()
+        .map(|(_t, _s, _e, _fq, _mask, spans)| spans)
+        .collect()
+}
+
+#[test]
+fn empty_quote_pairs_record_their_closing_index() {
+    for (line, want) in [
+        // `~""/x`: the pair sits between the `~` and the `/`.
+        (b"~\"\"/x".as_slice(), vec![vec![1]]),
+        // `~''`: the same shape with single quotes.
+        (b"~''".as_slice(), vec![vec![1]]),
+        // `""~/x`: the pair is at word-text index 0 — before the `~`.
+        (b"\"\"~/x".as_slice(), vec![vec![0]]),
+        // `~/""`: the pair is *after* the `/`, at index 2.
+        (b"~/\"\"".as_slice(), vec![vec![2]]),
+        // `~""''/x`: adjacent pairs each record their own index.
+        (b"~\"\"''/x".as_slice(), vec![vec![1, 1]]),
+        // `~"a"/x`: the pair contributes `a`, so nothing is recorded.
+        (b"~\"a\"/x".as_slice(), vec![vec![]]),
+        // A bare word has no spans at all.
+        (b"echo".as_slice(), vec![vec![]]),
+    ] {
+        assert_eq!(spans(line), want, "{line:?}");
+    }
+}
+
+#[test]
+fn spans_are_per_word_and_reset_between_words() {
+    // `a~"" b~""`: two words, each carrying its own single index — a span
+    // recorded for the first word must not leak into the second (`word_reset`).
+    assert_eq!(spans(b"a~\"\" b~\"\""), vec![vec![2], vec![2]]);
+    // The pair ends the first word: `x "" ~""` is three words.
+    assert_eq!(spans(b"x \"\" ~\"\""), vec![vec![], vec![0], vec![1]]);
+    // The assignment word keeps the pair in its own spans, indexed in the
+    // whole word text (`x=~""` is the text `x=~`, so the index is 3; the
+    // assignment slices it to the value's own index 1 — `envassign::value_spans`).
+    assert_eq!(spans(b"x=~\"\""), vec![vec![3]]);
 }

@@ -568,7 +568,7 @@ fn heredoc_terminator_line_protected() {
     let tokens = tokenize_statement(line).unwrap();
     let prot = protected(line, &tokens);
     // The terminator line `{a,b}` starts at offset 17.
-    let Some(ti) = tokens.iter().position(|(_, s, _, _, _)| *s == 17) else {
+    let Some(ti) = tokens.iter().position(|(_, s, _, _, _, _)| *s == 17) else {
         panic!("no token at the terminator offset");
     };
     assert!(prot.contains(&ti), "prot={prot:?}");

@@ -103,7 +103,7 @@ fn arm_slice(text: &ScriptText, keyword: &[u8]) -> Vec<Token> {
     let closing = closing_keyword_index(&tokens, line).unwrap();
     let kw = tokens
         .iter()
-        .position(|(t, _, _, _, _)| t.eq_bytes(keyword))
+        .position(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
         .unwrap();
     let then = find_preceded_by_semi(&tokens, kw + 1, b"then").unwrap();
     trim_semi(tokens.get(then + 1..closing - 1).unwrap()).to_vec()

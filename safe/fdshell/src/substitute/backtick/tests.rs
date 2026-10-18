@@ -38,7 +38,8 @@ fn body(input: &[u8]) -> Option<Vec<u8>> {
 fn expand(word: &ShortCStr, mask: &[bool]) -> (ShortCStr, Vec<bool>, bool) {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let (text, out_mask, origin) = substitute_arg_marked(word, mask, &mut cache, &cell).unwrap();
+    let (text, out_mask, origin) =
+        substitute_arg_marked(word, mask, &[], &mut cache, &cell).unwrap();
     (text, out_mask, !origin.is_empty())
 }
 
@@ -46,7 +47,8 @@ fn expand(word: &ShortCStr, mask: &[bool]) -> (ShortCStr, Vec<bool>, bool) {
 fn fields(word: &ShortCStr, mask: &[bool]) -> Vec<ShortCStr> {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let (text, out_mask, origin) = substitute_arg_marked(word, mask, &mut cache, &cell).unwrap();
+    let (text, out_mask, origin) =
+        substitute_arg_marked(word, mask, &[], &mut cache, &cell).unwrap();
     assert!(
         !origin.is_empty(),
         "the backtick arm must produce splittable bytes"

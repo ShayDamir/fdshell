@@ -35,10 +35,12 @@ fn cmdline(command: &str, args: &[&str]) -> CommandLine {
         prefix: BuiltinPrefix::None,
         command: word(command),
         command_mask: vec![false; command.len()],
+        command_span: vec![],
         command_quoted: false,
         env_assigns: vec![],
         args: args.iter().map(|a| word(a)).collect(),
         args_mask: args.iter().map(|a| vec![false; a.len()]).collect(),
+        args_span: args.iter().map(|_| vec![]).collect(),
         args_quoted: vec![false; args.len()],
         captures: vec![],
         redirects: vec![],
@@ -60,6 +62,7 @@ fn fields_of(cmdline: &CommandLine, cell: &ForkCell<ShellState>) -> Vec<Vec<u8>>
     fields(
         &cmdline.command,
         &cmdline.command_mask,
+        &cmdline.command_span,
         cmdline.command_quoted,
         cell,
     )

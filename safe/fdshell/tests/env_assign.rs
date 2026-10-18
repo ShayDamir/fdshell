@@ -317,6 +317,11 @@ fn quoted_dollar_at_in_an_assignment_value_is_glued() {
 /// Task #281: an assignment value carries its own quote mask into substitution,
 /// so a quoted character in its tilde-prefix suppresses tilde expansion (POSIX
 /// #2.6.1) — bash's `x=~"/*"` stores `~/*`, never `$HOME/*`.
+///
+/// Task #321 adds the shape the mask cannot represent: a quote pair that
+/// contributes **no bytes** (`x=~""`) leaves no mask bit, and the value's
+/// zero-byte span list suppresses the expansion too — bash's `x=~""` stores
+/// `~` and `x=~''/x` stores `~/x` (measured, rc 0 in both shells).
 #[test]
 fn assignment_value_with_quoted_tilde_prefix_stays_literal() {
     let (out, err, code) = run(r#"x=~"/*"; printf "[%s]\n" "$x""#);
@@ -332,6 +337,35 @@ fn assignment_value_with_quoted_tilde_prefix_stays_literal() {
     let (out, err, code) = run(r#"x=~/"x"; printf "[%s]\n" "$x""#);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, format!("[{home}/x]\n"), "bash stores [{home}/x]");
+    // The zero-byte pairs: bash 5.3.9 stores `[~]` for `x=~""` and `[~/x]` for
+    // `x=~''/x`, while the same shape *after* the `/` expands (`x=~/""` is
+    // `[<HOME>/]`). The value's mask is all-unquoted on these rows.
+    for (script, want) in [
+        (r#"x=~""; printf "[%s]\n" "$x""#, "[~]\n"),
+        (r#"x=~''; printf "[%s]\n" "$x""#, "[~]\n"),
+        (r#"x=~""/x; printf "[%s]\n" "$x""#, "[~/x]\n"),
+        (r#"x=~''/x; printf "[%s]\n" "$x""#, "[~/x]\n"),
+        (
+            r#"x=~/""; printf "[%s]\n" "$x""#,
+            format!("[{home}/]\n").as_str(),
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err:?}");
+        assert_eq!(out, want, "{script}");
+    }
+    // The assignment surfaces that slice the value with the mask's own offset
+    // carry the spans too: a `local` declaration (task #321) — bash's
+    // `f() { local x=~""; … }` stores `[~]`.
+    let (out, err, code) = run(r#"f() { local x=~""; printf "[%s]\n" "$x"; }; f"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[~]\n", "bash stores [~]");
+    // A scoped prefix value is substituted in the shell before the prefix is
+    // applied, so `~` sees the shell's own `HOME` and the pair's zero-byte span
+    // stays invisible to `"$HOME"` (measured: bash prints the inherited `HOME`).
+    let (out, err, code) = run(r#"HOME=~"" printf "[%s]" "$HOME""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("[{home}]"), "bash prints [{home}]");
 }
 
 /// Task #282: an assignment value's tilde reads the `HOME` **shell variable**

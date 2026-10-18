@@ -26,6 +26,7 @@ fn assign(name: &str, value: &str, quoted: bool) -> Assign {
         name: sys::ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap(),
         value: sys::ShortCStr::from_vec(value.as_bytes().to_vec()).unwrap(),
         mask: vec![quoted; value.len()],
+        spans: Vec::new(),
     }
 }
 
@@ -39,6 +40,7 @@ fn word_token(word: &[u8], start: usize) -> Token {
         start + word.len(),
         false,
         vec![false; word.len()],
+        Vec::new(),
     )
 }
 
@@ -77,6 +79,7 @@ fn test_mkdirat_capture() {
             prefix: BuiltinPrefix::Builtin,
             command: c"mkdirat".into(),
             command_mask: vec![false; 7],
+            command_span: vec![],
             command_quoted: false,
             env_assigns: vec![],
             args: vec![
@@ -93,6 +96,7 @@ fn test_mkdirat_capture() {
                 vec![false; 4],
                 vec![false; 3],
             ],
+            args_span: vec![vec![]; 5],
             args_quoted: vec![false; 5],
             captures: vec![Capture {
                 var: c"foo".into(),
@@ -333,7 +337,12 @@ fn test_here_string_prefix_form() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"hello", vec![false; 5])]
+        vec![RedirectDef::here_string(
+            0,
+            c"hello",
+            vec![false; 5],
+            Vec::new()
+        )]
     );
     assert!(cmd.args.is_empty());
 }
@@ -345,7 +354,12 @@ fn test_here_string_keeps_unquoted_spaces() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"a b", vec![true; 3])]
+        vec![RedirectDef::here_string(
+            0,
+            c"a b",
+            vec![true; 3],
+            Vec::new()
+        )]
     );
 }
 
@@ -357,7 +371,12 @@ fn parse_here_string_word_carries_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(
+            0,
+            c"a\\ b",
+            vec![true; 4],
+            Vec::new()
+        )]
     );
     // An unquoted escape pair stays in the *token text* with both bytes
     // unmasked (`\ ` never breaks the token), so the attached word is the
@@ -368,7 +387,12 @@ fn parse_here_string_word_carries_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"a\\ b", vec![false; 4])]
+        vec![RedirectDef::here_string(
+            0,
+            c"a\\ b",
+            vec![false; 4],
+            Vec::new()
+        )]
     );
     // A bare `<<<` takes the next token's mask verbatim.
     let ParsedLine::Cmd(cmd) = parse(b"cat <<< \"a\\ b\"").unwrap() else {
@@ -376,7 +400,12 @@ fn parse_here_string_word_carries_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(
+            0,
+            c"a\\ b",
+            vec![true; 4],
+            Vec::new()
+        )]
     );
 }
 
@@ -390,7 +419,12 @@ fn parse_here_string_mask_of_a_quoted_word_with_a_second_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(
+            0,
+            c"a\\ b",
+            vec![true; 4],
+            Vec::new()
+        )]
     );
     assert_eq!(cmd.args, vec![c"b\\ c".into()]);
     assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
@@ -405,7 +439,12 @@ fn parse_here_string_io_number_prefix_targets_the_descriptor() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(3, c"hello", vec![false; 5])]
+        vec![RedirectDef::here_string(
+            3,
+            c"hello",
+            vec![false; 5],
+            Vec::new()
+        )]
     );
     assert!(cmd.args.is_empty());
     // The unprefixed form keeps fd 0 (`<<<word` is the stdin here-string).
@@ -414,7 +453,12 @@ fn parse_here_string_io_number_prefix_targets_the_descriptor() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(3, c"hello", vec![false; 5])]
+        vec![RedirectDef::here_string(
+            3,
+            c"hello",
+            vec![false; 5],
+            Vec::new()
+        )]
     );
 }
 
@@ -428,14 +472,24 @@ fn parse_here_string_prefixed_word_mask_is_shifted_by_the_prefix() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(3, c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(
+            3,
+            c"a\\ b",
+            vec![true; 4],
+            Vec::new()
+        )]
     );
     let ParsedLine::Cmd(cmd) = parse(b"cat 3<<<\"a\\ b\" b\\ c").unwrap() else {
         panic!("expected Cmd")
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(3, c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(
+            3,
+            c"a\\ b",
+            vec![true; 4],
+            Vec::new()
+        )]
     );
     assert_eq!(cmd.args, vec![c"b\\ c".into()]);
     assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
@@ -451,7 +505,12 @@ fn parse_here_string_prefixed_bare_form_takes_the_next_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(3, c"word", vec![false; 4])]
+        vec![RedirectDef::here_string(
+            3,
+            c"word",
+            vec![false; 4],
+            Vec::new()
+        )]
     );
     assert!(cmd.args.is_empty());
     // `3<<<<<x` is the pinned `cat <<<<<x` shape fd-ified: word `<<x` on fd 3.
@@ -460,7 +519,12 @@ fn parse_here_string_prefixed_bare_form_takes_the_next_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(3, c"<<x", vec![false; 3])]
+        vec![RedirectDef::here_string(
+            3,
+            c"<<x",
+            vec![false; 3],
+            Vec::new()
+        )]
     );
 }
 
@@ -617,7 +681,12 @@ fn test_here_string_bare_takes_next_token() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"word", vec![false; 4])]
+        vec![RedirectDef::here_string(
+            0,
+            c"word",
+            vec![false; 4],
+            Vec::new()
+        )]
     );
     assert!(cmd.args.is_empty());
 }
@@ -629,7 +698,7 @@ fn test_here_string_bare_at_eof_is_empty_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"", Vec::new())]
+        vec![RedirectDef::here_string(0, c"", Vec::new(), Vec::new())]
     );
 }
 
@@ -1782,7 +1851,7 @@ fn tokenize_if_newline_separators() {
     ];
     let expected_pos: &[usize] = &[0, 3, 7, 8, 12, 13, 19, 24, 25];
     assert_eq!(tokens.len(), expected.len());
-    for (i, (token, pos, _, _, _)) in tokens.iter().enumerate() {
+    for (i, (token, pos, _, _, _, _)) in tokens.iter().enumerate() {
         assert_eq!(token.as_bytes().unwrap(), expected[i]);
         assert_eq!(*pos, expected_pos[i]);
     }
@@ -2188,7 +2257,7 @@ fn while_not_starting_with_while_is_a_cmd() {
     assert!(
         !tokens
             .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"while"))
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"while"))
     );
 }
 
@@ -2255,7 +2324,7 @@ fn until_not_starting_with_until_is_a_cmd() {
     assert!(
         !tokens
             .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"until"))
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"until"))
     );
 }
 
@@ -3160,7 +3229,7 @@ fn tokenize_close_paren_position() {
     let tokens = token::tokenize(b"case x in a) echo one;; esac").unwrap();
     let paren_token = tokens
         .iter()
-        .find(|(t, _, _, _, _)| t.eq_bytes(b")"))
+        .find(|(t, _, _, _, _, _)| t.eq_bytes(b")"))
         .unwrap();
     assert_eq!(paren_token.0, c")".into());
     assert_eq!(paren_token.1, 11);
@@ -3476,7 +3545,7 @@ fn parse_here_string_empty_quoted_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"", Vec::new())]
+        vec![RedirectDef::here_string(0, c"", Vec::new(), Vec::new())]
     );
     assert!(cmd.args.is_empty());
 }
@@ -3489,7 +3558,7 @@ fn parse_here_string_empty_quoted_word_keeps_later_args() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(0, c"", Vec::new())]
+        vec![RedirectDef::here_string(0, c"", Vec::new(), Vec::new())]
     );
     assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
 }
@@ -3660,8 +3729,8 @@ fn parse_capture_malformed_index_is_plain_name() {
 #[test]
 fn find_preceded_by_semi_start_zero_no_match() {
     let tokens = [
-        (c"echo".into(), 0, 4, false, vec![]),
-        (c"hi".into(), 5, 7, false, vec![]),
+        (c"echo".into(), 0, 4, false, vec![], vec![]),
+        (c"hi".into(), 5, 7, false, vec![], vec![]),
     ];
     assert_eq!(
         super::semi::find_preceded_by_semi(&tokens, 0, b"echo"),
@@ -3672,10 +3741,10 @@ fn find_preceded_by_semi_start_zero_no_match() {
 #[test]
 fn find_preceded_by_semi_skips_to_start() {
     let tokens = [
-        (c";".into(), 0, 1, false, vec![]),
-        (c"done".into(), 1, 5, false, vec![]),
-        (c";".into(), 6, 7, false, vec![]),
-        (c"done".into(), 7, 11, false, vec![]),
+        (c";".into(), 0, 1, false, vec![], vec![]),
+        (c"done".into(), 1, 5, false, vec![], vec![]),
+        (c";".into(), 6, 7, false, vec![], vec![]),
+        (c"done".into(), 7, 11, false, vec![], vec![]),
     ];
     assert_eq!(
         super::semi::find_preceded_by_semi(&tokens, 2, b"done"),
@@ -3960,7 +4029,7 @@ fn test_token_mask_is_parallel_to_the_word() {
         "%fd <%q \"a\\$b\" $x*y",
     ] {
         let tokens = token::tokenize_statement(line.as_bytes()).unwrap();
-        for (word, _, _, _, mask) in &tokens {
+        for (word, _, _, _, mask, _spans) in &tokens {
             assert_eq!(
                 mask.len(),
                 word.len(),
