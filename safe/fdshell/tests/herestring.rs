@@ -395,12 +395,18 @@ fn prefixed_here_string_shapes_that_are_not_digits_are_word_data() {
 /// A prefixed operator at a run start is fdshell's **command word** (the
 /// operator rule needs a preceding token): the pinned `3<<EOF` twin. bash
 /// opens fd 3 and reports `3: Bad file descriptor`.
+///
+/// Run through `run_fd3_closed`: the trailing `cat <&3` must read a
+/// deterministic fd table. An inherited readable fd 3 (cargo-mutants hands
+/// every test process its jobserver pipes as fds ≥ 3) would make `cat <&3`
+/// block forever and abort the whole mutants baseline — LESSONS (task #276).
 #[test]
 fn prefixed_here_string_at_a_run_start_is_the_command_word() {
-    let (out, err, code) = run("3<<<x; cat <&3");
+    let (out, err, code) = run_fd3_closed("3<<<x; cat <&3");
     assert_eq!(code, 1, "err={err}");
     assert_eq!(out, "");
     assert!(err.contains("\"3<<<x\" not found"), "{err}");
+    assert!(err.contains("fd 3 is not open"), "{err}");
 }
 
 /// The form composes with everything the plain here-string composes with: the
