@@ -2225,18 +2225,17 @@ Recording the measured behaviour as pins and naming the owning task is the
 deliverable; inventing a bash-parity assertion for a gap this task does not own
 is not.
 
-## `operator_delims`' loop-bound and backward-scan mutants are equivalent — the scanner's invariants close the extra step (task #276)
+## `operator_delims`' bound, backward-scan and comment-skip mutants are equivalent — scanner invariants close every probe (task #276)
 
-Task #276's mutation run on the touched files missed six mutants; three are
-killable and pinned (`pipeline.rs` `+=`→`*=` by
+Task #276's mutation runs on the touched files missed, consistently, four
+mutants in `ops.rs` plus the two new-code ones the pins now kill
+(`pipeline.rs` `+=`→`*=` by
 `test_heredoc_pipeline_spec_window_advances_by_operator_count` +
 `heredoc_pipeline_spec_window_survives_a_two_operator_stage`, `io.rs`
 `run == start`→`true` by the quoted-space rows of
 `operator_count_io_number_forms_agree`/`io_number_prefixed_operators_carry_their_fd`
-+ `numbered_heredoc_shape_inside_a_quoted_word_is_word_data`, `ops.rs`
-`i + p + 1`→`i * p + 1` by
-`comment_with_newline_at_index_zero_resumes_on_the_next_line`). The other
-three are accepted equivalents, unkillable because of scanner invariants:
++ `numbered_heredoc_shape_inside_a_quoted_word_is_word_data`). The four are
+accepted equivalents, unkillable because of scanner invariants:
 
 - `ops.rs` `while i < to`→`<=`: at `i == to` the gate reads `line.get(to)`,
   `None` at the end of the span and the run's terminating `\n` (never `<`,
@@ -2251,14 +2250,23 @@ three are accepted equivalents, unkillable because of scanner invariants:
   `preceded`, which implies a token byte before `run`, so the backward scan
   returns at that byte and never decrements `k` past 0 — the underflow the
   mutant causes is unreachable.
-
-The killable comment-skip pin needs `#` at word-start index **1** with its
-newline the next byte: `p == 0` makes the mutant land on `i * p + 1 = 1` —
-the same `#`, so the comment branch re-fires forever and the timeout kills it.
-Every other shape hides the mutant: at `i == 0` the product equals the sum,
-and with `p > 0` (measured on `"  #\ncat <<A\nb\nA\n"`, which stayed MISSED)
-the product lands on a byte before the newline that never re-triggers the
-comment branch.
+- `ops.rs` `i + p + 1`→`i + p * 1` in the comment skip (the MISSED one,
+  col 38): `p * 1 ≡ p` — the mutant is *the identical expression*. The review
+  read it as the first `+` (col 34) and predicted an infinite loop at
+  `p == 0`; that mutation (`i * p + 1`) is **caught** by the existing comment
+  tests (in `caught.txt` with both `-` and `*`), and the loop is unreachable
+  for every input: the newline search starts *at* the `#`, so `p >= 1`
+  always; the product equals the sum at `i <= 1`; and at `i >= 2, p >= 2`
+  the product lands exactly one byte short of the newline — inside the
+  comment — where a re-fired comment's own `p` is the same newline minus the
+  new index, so its product lands *past* that newline (the fixed point
+  `i·p + 1 = i + p + 1` has no solution with `i >= 2, p >= 2`). Measured
+  three ways: MISSED in two independent cargo-mutants runs, every hand-built
+  shape (`"  #\n…"`, `" #\n…"`, `" # #\n…"`, `"   # #\n…"`, the double-comment
+  lines) ran the unmutated outcome under the manually applied mutation, and
+  the instrumented scan trace shows identical trajectories. Chasing this
+  mutant with tests is chasing arithmetic identity — record it, do not pin
+  around it.
 
 ## A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)
 
