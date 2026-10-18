@@ -238,6 +238,13 @@ delimiter (`<<'EOF'`) makes the body literal. `<<-EOF` strips leading tabs
 from the body and the delimiter. A here-document is usually attached to
 `cat`, `read` or another command that reads stdin.
 
+A body line is **data**, at every here-document site: quoting, word
+splitting, globbing, brace expansion, block keywords and every other pre-parse
+rewrite pass over it untouched, and only `$`/`$(…)`/backquotes expand in it (an
+unquoted delimiter). So `cat <<T` with the body line `{a,b}` prints `{a,b}`, and
+so does the same here-document inside a single-line keyword block's arm —
+`if true; then cat <<T; fi` + `{a,b}` + `T` prints `{a,b}`.
+
 A number in front of the operator puts the body on that descriptor instead of
 stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
 `exec 3<<EOF` keeps it there for the rest of the script. The number must be
