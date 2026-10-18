@@ -67,6 +67,84 @@ fn heredoc_open_and_closed() {
     assert!(is_complete(b"cat <<EOF\nhello\nEOF"));
 }
 
+/// Task #322: a here-doc inside a *closed* single-line keyword block keeps
+/// the prompt reading until its body lines arrive — "closed" is the block
+/// text's completeness, not its body stream's (bash attaches the body and
+/// prints `{a,b}`, measured against bash 5.3.9). The top-level twin is
+/// `heredoc_open_and_closed`.
+#[test]
+fn single_line_block_heredoc_continues_for_body() {
+    for open in [
+        b"for x in a; do cat <<T; done".as_slice(),
+        b"if true; then cat <<T; fi".as_slice(),
+        b"while :; do cat <<T; break; done".as_slice(),
+        b"until false; do cat <<T; break; done".as_slice(),
+        b"case x in x) cat <<T;; esac".as_slice(),
+        b"if false; then :; else cat <<T; fi".as_slice(),
+        b"{ cat <<T; }".as_slice(),
+    ] {
+        assert!(
+            !is_complete(open),
+            "{open:?}: the body line has not arrived"
+        );
+        assert!(
+            is_complete(&[open, b"\n{a,b}\nT".as_slice()].concat()),
+            "{open:?}: complete once the body arrives"
+        );
+    }
+}
+
+/// The `elif` arm site: the `E` delimiter keeps the prompt reading, and its
+/// arrival completes the buffer.
+#[test]
+fn elif_block_heredoc_continues_for_body() {
+    assert!(!is_complete(
+        b"if false; then :; elif true; then cat <<E; fi"
+    ));
+    assert!(is_complete(
+        b"if false; then :; elif true; then cat <<E; fi\nbodyE\nE"
+    ));
+}
+
+/// A closed block plus a trailing statement's here-doc on the same line: the
+/// block arm claims its own region head-first, the trailing statement's arm
+/// covers the tail, so the line completes only after both bodies arrive.
+#[test]
+fn closed_block_with_trailing_heredoc_needs_both_bodies() {
+    assert!(!is_complete(b"if true; then cat <<T; fi; cat <<A"));
+    assert!(!is_complete(
+        b"if true; then cat <<T; fi; cat <<A\nbodyT\nT"
+    ));
+    assert!(is_complete(
+        b"if true; then cat <<T; fi; cat <<A\nbodyT\nT\nbodyA\nA"
+    ));
+}
+
+/// A bare `<<` in a closed block is a hard parse error, not a continuation,
+/// mirroring the top-level `heredoc_bare_chevron_is_hard_error_not_continuation`.
+#[test]
+fn bare_chevron_in_closed_block_is_complete() {
+    assert!(is_complete(b"if true; then cat <<; fi"));
+}
+
+/// A here-doc at a closed block's *condition* position reads its body at the
+/// prompt (bash reads it; the script-mode condition-body execution is #138's
+/// rule, pinned in `tests/heredoc.rs`).
+#[test]
+fn condition_position_block_heredoc_continues_for_body() {
+    assert!(!is_complete(b"if cat <<T; then echo x; fi"));
+    assert!(is_complete(b"if cat <<T; then echo x; fi\nbodyT\nT"));
+}
+
+/// With its body arrived the closed block stays complete, and a trailing
+/// statement without a here-doc adds nothing to the check.
+#[test]
+fn closed_block_with_arrived_body_and_trailing_statement_is_complete() {
+    assert!(is_complete(
+        b"if true; then cat <<T; fi; echo after\nbodyT\nT"
+    ));
+}
+
 #[test]
 fn heredoc_empty_quoted_delimiter_completes_on_blank_line() {
     assert!(!is_complete(b"cat <<\"\""));
