@@ -14,11 +14,11 @@ pub(crate) fn find_preceded_by_semi(
     start: usize,
     needle: &[u8],
 ) -> Option<usize> {
-    for (i, (t, _, _, _, _)) in tokens.iter().enumerate().skip(start) {
+    for (i, (t, _, _, _, _, _)) in tokens.iter().enumerate().skip(start) {
         let preceded = i > 0
             && tokens
                 .get(i - 1)
-                .is_some_and(|(p, _, _, _, _)| p.eq_bytes(b";"));
+                .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b";"));
         if t.eq_bytes(needle) && preceded {
             return Some(i);
         }
@@ -29,12 +29,12 @@ pub(crate) fn find_preceded_by_semi(
 pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
     let start = tokens
         .iter()
-        .take_while(|(t, _, _, _, _)| t.eq_bytes(b";"))
+        .take_while(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
         .count();
     let end = tokens
         .iter()
         .rev()
-        .take_while(|(t, _, _, _, _)| t.eq_bytes(b";"))
+        .take_while(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
         .count();
     let end = tokens.len().saturating_sub(end);
     tokens.get(start..end).unwrap_or(&[])
@@ -57,24 +57,29 @@ pub(crate) fn try_join(tokens: &[Token]) -> ShortCStr {
     try_join_masked(tokens).0
 }
 
-/// The joined word of `tokens` **with its mask**: the space inserted between
-/// two tokens takes a `false` bit and every token byte keeps its own, so the
-/// mask stays parallel to the text (task #269: a joined word that is
-/// substituted later needs the mask of the whole join). `try_join` is its
-/// text, so the space-insertion rule lives in exactly one place — the word and
-/// its mask can never drift apart.
-pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<bool>) {
+/// The joined word of `tokens` **with its mask and zero-byte span list**: the
+/// space inserted between two tokens takes a `false` bit and every token byte
+/// keeps its own, so the mask stays parallel to the text (task #269: a joined
+/// word that is substituted later needs the mask of the whole join). Spans
+/// travel with the mask (task #321): each token's span indices shift by the
+/// join offset accumulated before it. `try_join` is its text, so the
+/// space-insertion rule lives in exactly one place — the word, its mask and
+/// its spans can never drift apart.
+pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<bool>, Vec<usize>) {
     let mut out = ShortCStr::new();
     let mut mask = Vec::new();
-    for (t, _, _, _, t_mask) in tokens {
+    let mut spans = Vec::new();
+    for (t, _, _, _, t_mask, t_spans) in tokens {
+        let offset = out.len();
         if !out.is_empty() {
             out.push(c" ");
             mask.push(false);
         }
         out.push(t);
         mask.extend(t_mask.iter().copied());
+        spans.extend(t_spans.iter().map(|&i| offset + i));
     }
-    (out, mask)
+    (out, mask, spans)
 }
 
 /// A verbatim subslice of `text` covering the given tokens' byte ranges.

@@ -17,6 +17,9 @@ pub struct CaseBlock {
     /// tokens' masks with a `false` bit per inserted space (task #269), so the
     /// `case` word is expanded with its own quoting.
     pub word_mask: Vec<bool>,
+    /// Zero-byte quote-span indices of the joined word (task #321), shifted by
+    /// the join offsets like the mask.
+    pub word_span: Vec<usize>,
     pub clauses: Vec<case_clause::CaseClause>,
 }
 
@@ -27,7 +30,7 @@ pub(crate) fn tokens_to_case(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"case")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"case")),
         ParseError::MalformedCaseBlock
     );
 
@@ -35,7 +38,7 @@ pub(crate) fn tokens_to_case(
         .find(|&i| {
             tokens
                 .get(i)
-                .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"in"))
+                .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"in"))
         })
         .ok_or(ParseError::CaseMissingIn)?;
 
@@ -50,7 +53,7 @@ pub(crate) fn tokens_to_case(
     // The closing `esac` is the truncated slice's last token.
     let esac_idx = tokens.len() - 1;
 
-    let (word, word_mask) = try_join_masked(trim_semi(
+    let (word, word_mask, word_span) = try_join_masked(trim_semi(
         tokens.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
     ));
 
@@ -59,6 +62,7 @@ pub(crate) fn tokens_to_case(
     Ok(CaseBlock {
         word,
         word_mask,
+        word_span,
         clauses,
     })
 }
@@ -77,7 +81,7 @@ fn up_to_esac<'a>(tokens: &'a [Token], line: &[u8]) -> Result<&'a [Token], Repor
     };
     ensure!(
         rest.last()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"esac")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"esac")),
         ParseError::CaseMissingEsac
     );
     Ok(rest)

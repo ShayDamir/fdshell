@@ -20,7 +20,7 @@ pub fn parse_here_string(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
-    let Some((t, start, end, fq, mask)) = tokens.get(i) else {
+    let Some((t, start, end, fq, mask, spans)) = tokens.get(i) else {
         return Ok(None);
     };
     if *fq {
@@ -32,19 +32,20 @@ pub fn parse_here_string(
     // `<<<""` is one word whose quoted part contributes no bytes: its word is
     // the empty quoted region, not the next token. A bare `<<<` takes the next
     // token as its word; at end of input the word is empty.
-    let (word, mask, extra) = if has_attached_word(t.len(), prefix) {
+    let (word, mask, spans, extra) = if has_attached_word(t.len(), prefix) {
         (
             t.get(prefix + 3..).ok_or(ParseError::Never)?.clone(),
             word_mask(mask, prefix),
+            word_spans(spans, prefix),
             0,
         )
     } else if super::word_quoted::word_quoted(t, *start, *end) {
-        (ShortCStr::new(), Vec::new(), 0)
+        (ShortCStr::new(), Vec::new(), Vec::new(), 0)
     } else {
         match tokens.get(i + 1) {
             Some(next) if is_bare_operand(&next.0) => bail!(ParseError::InvalidRedirect),
-            Some(next) => (next.0.clone(), next.4.clone(), 1),
-            None => (ShortCStr::new(), Vec::new(), 0),
+            Some(next) => (next.0.clone(), next.4.clone(), next.5.clone(), 1),
+            None => (ShortCStr::new(), Vec::new(), Vec::new(), 0),
         }
     };
     let digits = line.get(*start..op).ok_or(ParseError::Never)?;
@@ -53,7 +54,7 @@ pub fn parse_here_string(
         bail!(ParseError::InvalidHereStringFd { prefix });
     };
     Ok(Some((
-        RedirectDef::here_string(export_to, word, mask),
+        RedirectDef::here_string(export_to, word, mask, spans),
         extra,
     )))
 }
@@ -69,6 +70,17 @@ pub fn parse_here_string(
 /// which `substitute::fully_quoted` reads as quoted.
 pub(crate) fn word_mask(op_mask: &[bool], prefix: usize) -> Vec<bool> {
     op_mask.get(prefix + 3..).unwrap_or_default().to_vec()
+}
+
+/// The here-string word's zero-byte quote spans (task #321): sliced at the
+/// same `prefix + 3` offset as [`word_mask`] and shifted down to word indices.
+pub(crate) fn word_spans(op_spans: &[usize], prefix: usize) -> Vec<usize> {
+    let off = prefix + 3;
+    op_spans
+        .iter()
+        .filter(|&&i| i >= off)
+        .map(|&i| i - off)
+        .collect()
 }
 
 /// Whether the operator token carries its own word: the token is longer than
@@ -94,7 +106,7 @@ fn is_bare_operand(word: &ShortCStr) -> bool {
 /// the bare `<<<` form.
 pub(crate) fn word_indices(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     let mut out: Vec<usize> = Vec::new();
-    for (i, (t, start, end, _fq, _mask)) in tokens.iter().enumerate() {
+    for (i, (t, start, end, _fq, _mask, _spans)) in tokens.iter().enumerate() {
         let Some((_op, prefix)) = string_span(line, *start, *end) else {
             continue;
         };

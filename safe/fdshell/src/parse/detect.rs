@@ -9,7 +9,7 @@ use sys::ShortCStr;
 
 pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let first = match tokens.first() {
-        Some((t, _, _, _, _)) => t,
+        Some((t, _, _, _, _, _)) => t,
         None => return Ok(None),
     };
 

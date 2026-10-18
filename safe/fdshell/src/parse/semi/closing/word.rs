@@ -56,7 +56,7 @@ pub(crate) fn glue_at(tokens: &[Token], i: usize, word: &[u8]) -> Glue {
     let same = |j: usize| {
         tokens
             .get(j)
-            .is_some_and(|(t, _, _, _, _)| t.as_bytes().is_ok_and(|p| p == word))
+            .is_some_and(|(t, _, _, _, _, _)| t.as_bytes().is_ok_and(|p| p == word))
     };
     match (same(i - 1), same(i + 1)) {
         (true, _) => Glue::Tail,
@@ -70,7 +70,7 @@ pub(crate) fn glue_at(tokens: &[Token], i: usize, word: &[u8]) -> Glue {
 pub(crate) fn next_word(tokens: &[Token], i: usize) -> Option<&[u8]> {
     tokens
         .get(i + 1)
-        .and_then(|(t, _, _, _, _)| t.as_bytes().ok())
+        .and_then(|(t, _, _, _, _, _)| t.as_bytes().ok())
 }
 
 /// A cond/pipeline operator token.

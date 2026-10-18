@@ -24,7 +24,10 @@ pub fn parse_elifs(
             let cond = tokens
                 .get(ei + 1..ti - 1)
                 .ok_or(ParseError::MissingCondition)?;
-            if cond.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
+            if cond
+                .last()
+                .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+            {
                 bail!(ParseError::MalformedIfBlock);
             }
             let cond_trimmed = trim_semi(cond);
@@ -36,7 +39,10 @@ pub fn parse_elifs(
                 .or(else_idx)
                 .unwrap_or(fi_idx);
             let raw = tokens.get(ti + 1..next - 1).unwrap_or(&[]);
-            if raw.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
+            if raw
+                .last()
+                .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+            {
                 bail!(ParseError::MalformedIfBlock);
             }
             let eb = part_text(text, block_body(raw, ParseError::EmptyElifBody)?)?;
@@ -56,7 +62,10 @@ pub fn parse_else_body(
     text: &ScriptText,
 ) -> Result<ScriptText, Report<ParseError>> {
     let raw = tokens.get(else_idx + 1..fi_idx - 1).unwrap_or(&[]);
-    if raw.last().is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")) {
+    if raw
+        .last()
+        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+    {
         bail!(ParseError::MalformedIfBlock);
     }
     part_text(text, block_body(raw, ParseError::EmptyElseBody)?)

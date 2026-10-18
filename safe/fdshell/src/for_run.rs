@@ -28,6 +28,7 @@ fn run_for_body(
     let words = crate::expand::expand_for_words(
         &forblock.words,
         &forblock.words_mask,
+        &forblock.words_span,
         &forblock.words_quoted,
         text,
         cell,

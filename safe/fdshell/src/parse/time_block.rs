@@ -33,7 +33,7 @@ pub(super) fn detect(
 ) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let is_prefix = tokens
         .first()
-        .is_some_and(|(w, s, e, _, _)| w.eq_bytes(b"time") && !word_quoted(w, *s, *e));
+        .is_some_and(|(w, s, e, _, _, _)| w.eq_bytes(b"time") && !word_quoted(w, *s, *e));
     if !is_prefix {
         return Ok(None);
     }
@@ -48,12 +48,12 @@ pub(super) fn detect(
     // and so is a quoted `-p` (`time "-p" ls`), so the flag is taken only from an
     // unquoted `-p` right behind a `time`.
     let mut taken = 0usize;
-    while let Some((w, s, e, _, _)) = tokens.get(taken) {
+    while let Some((w, s, e, _, _, _)) = tokens.get(taken) {
         if !w.eq_bytes(b"time") || word_quoted(w, *s, *e) {
             break;
         }
         taken += 1;
-        if let Some((w, s, e, _, _)) = tokens.get(taken)
+        if let Some((w, s, e, _, _, _)) = tokens.get(taken)
             && w.eq_bytes(b"-p")
             && !word_quoted(w, *s, *e)
         {
@@ -89,7 +89,7 @@ fn inner_text(
     tokens: &[Token],
     text: &ScriptText,
 ) -> Result<Option<ScriptText>, Report<ParseError>> {
-    let Some((word, start, end, _, _)) = tokens.first() else {
+    let Some((word, start, end, _, _, _)) = tokens.first() else {
         return Ok(None);
     };
     let line = text.as_bytes().change_context(ParseError::Never)?;

@@ -13,10 +13,12 @@ pub enum RedirectSource {
     },
     /// The here-string word of `<<<`. `mask` is the word's per-byte quote
     /// mask: the word is expanded with its own quoting, so a `\<char>` written
-    /// inside double quotes keeps its backslash (task #269).
+    /// inside double quotes keeps its backslash (task #269). `spans` is the
+    /// parallel zero-byte quote-span list (task #321).
     HereString {
         word: ShortCStr,
         mask: Vec<bool>,
+        spans: Vec<usize>,
     },
     /// Here-doc (`<<EOF`): the body bytes become the stdin of the command.
     /// `expand` runs `$` / backtick expansion in the body (unquoted delimiter).
@@ -40,10 +42,11 @@ impl RedirectSource {
             mask,
         }
     }
-    pub fn here_string(word: impl Into<ShortCStr>, mask: Vec<bool>) -> Self {
+    pub fn here_string(word: impl Into<ShortCStr>, mask: Vec<bool>, spans: Vec<usize>) -> Self {
         Self::HereString {
             word: word.into(),
             mask,
+            spans,
         }
     }
     pub fn here_doc(body: impl Into<ShortCStr>, expand: bool) -> Self {

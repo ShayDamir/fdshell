@@ -41,7 +41,7 @@ pub(crate) fn list_closing_keyword_index(
 fn closing_index(tokens: &[Token], line: &[u8], list: List) -> Option<usize> {
     let mut depth: i32 = 1;
     let mut place = Place::Command;
-    for (i, (t, _, end, _, _)) in tokens.iter().enumerate().skip(1) {
+    for (i, (t, _, end, _, _, _)) in tokens.iter().enumerate().skip(1) {
         // Defensive: the tokens were built from `line`, so their bytes are
         // always valid; an error token means a future tokenizer that hands
         // this scan a token it cannot read, and the scan skips it.

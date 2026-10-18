@@ -20,11 +20,13 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<Token>, Report<ParseError>> {
             if !st.single_char(b)? {
                 st.in_single = false;
                 st.single_start = None;
+                st.close_span();
             }
         } else if st.in_quotes {
             if !st.quoted_char(b, &mut bytes, line)? {
                 st.in_quotes = false;
                 st.quote_start = None;
+                st.close_span();
             }
         } else {
             st.unquoted(b, line, &mut bytes)?;
@@ -40,6 +42,13 @@ pub(super) struct State {
     /// Per-byte quote mask, parallel to `cur`: `true` for bytes consumed
     /// inside double or single quotes (protected from IFS word splitting).
     pub(super) mask: Vec<bool>,
+    /// Word-text indices at which a quote span closed with **no bytes**
+    /// (`""`, `''`): invisible to the mask, recorded for the tilde rule
+    /// (task #321, `substitute/tilde.rs`).
+    pub(super) spans: Vec<usize>,
+    /// Word-text length when the current open quote pair started; a close at
+    /// this length contributed no byte, so the index is recorded.
+    pub(super) span_open: usize,
     pub(super) in_quotes: bool,
     pub(super) quote_start: Option<usize>,
     /// Inside a `'…'` span: its bytes are literal and masked (see
@@ -62,6 +71,8 @@ impl State {
             tokens: Vec::new(),
             cur: ShortCStr::new(),
             mask: Vec::new(),
+            spans: Vec::new(),
+            span_open: 0,
             in_quotes: false,
             quote_start: None,
             in_single: false,
@@ -71,6 +82,15 @@ impl State {
             word_started: false,
             start: 0,
             pos: 0,
+        }
+    }
+
+    /// A quote pair just closed: if it contributed no byte (`cur` is exactly
+    /// as long as when the pair opened), its opening index goes into `spans`
+    /// — the mask has no bit for a span of zero bytes (task #321).
+    pub(super) fn close_span(&mut self) {
+        if self.cur.len() == self.span_open {
+            self.spans.push(self.span_open);
         }
     }
 

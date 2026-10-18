@@ -41,14 +41,14 @@ fn resolve_one(
     match &r.source {
         super::RedirectSource::Var(var) => arms::resolve_var(var, r.export_to, min_fd, cell),
         super::RedirectSource::Path { .. } => arms::resolve_path(r.export_to, min_fd, opened_iter),
-        super::RedirectSource::HereString { word, mask } => Ok(Redirect::Dup {
+        super::RedirectSource::HereString { word, mask, spans } => Ok(Redirect::Dup {
             export_to: r.export_to,
             // The body memfd is cloned above every target like every other
             // source: created on its own target it would make `dup2` a no-op
             // and its `Drop` would close that target (LESSONS). The clone
             // shares the memfd's open file description, so the rewound body
             // survives the original's drop.
-            local: super::herestring::here_string(word, mask, cache, cell)?
+            local: super::herestring::here_string(word, mask, spans, cache, cell)?
                 .try_clone_above(min_fd)
                 .change_context(OpenRedirectError::HereStringCreate)?,
         }),

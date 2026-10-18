@@ -37,7 +37,7 @@ pub(super) fn parse_bare(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let Some((t, _start, _end, _fq, _mask)) = tokens.get(i) else {
+    let Some((t, _start, _end, _fq, _mask, _spans)) = tokens.get(i) else {
         return Ok(None);
     };
     let Some(op) = operator_suffix(t) else {
@@ -52,7 +52,7 @@ pub(super) fn parse_bare(
     let Some(export_to) = super::parse_fd(&prefix, dir) else {
         return Ok(None);
     };
-    let Some((operand, _os, _oe, _ofq, omask)) = tokens.get(i + 1) else {
+    let Some((operand, _os, _oe, _ofq, omask, _spans)) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
     // The operand must be a plain word: the shared bare-operand guard

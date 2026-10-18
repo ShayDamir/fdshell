@@ -15,6 +15,9 @@ pub struct ForBlock {
     pub words: Vec<ShortCStr>,
     /// Per-byte quote masks, parallel to `words`.
     pub words_mask: Vec<Vec<bool>>,
+    /// Zero-byte quote-span indices per word (task #321), parallel to
+    /// `words_mask`.
+    pub words_span: Vec<Vec<usize>>,
     /// Whether each word's raw span contained quotes, parallel to `words`
     /// (see `parse::word_quoted`).
     pub words_quoted: Vec<bool>,
@@ -28,7 +31,7 @@ pub(crate) fn tokens_to_for(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"for")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"for")),
         ParseError::ExpectedFor
     );
     let var = tokens
@@ -39,7 +42,7 @@ pub(crate) fn tokens_to_for(
     let in_pos = tokens
         .iter()
         .skip(2)
-        .position(|(t, _, _, _, _)| t.eq_bytes(b"in"))
+        .position(|(t, _, _, _, _, _)| t.eq_bytes(b"in"))
         .ok_or(ParseError::ExpectedIn)?
         + 2;
 
@@ -57,13 +60,13 @@ pub(crate) fn tokens_to_for(
     ensure!(
         tokens
             .last()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"done")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
     );
     ensure!(
         tokens
             .get(done_idx - 1)
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";")),
         ParseError::ExpectedSemicolonBeforeDone
     );
 
@@ -81,6 +84,7 @@ pub(crate) fn tokens_to_for(
         var,
         words: ws.words,
         words_mask: ws.words_mask,
+        words_span: ws.words_span,
         words_quoted: ws.words_quoted,
         body,
     })

@@ -44,6 +44,7 @@ pub(super) fn passes_through(word: &ShortCStr, mask: &[bool]) -> bool {
 pub(crate) fn fields(
     word: &ShortCStr,
     mask: &[bool],
+    spans: &[usize],
     quoted: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<CmdError>> {
@@ -53,9 +54,11 @@ pub(crate) fn fields(
         return crate::glob::expand(&folded, &folded_mask, cell).change_context(CmdError::Resolve);
     }
     let mask = mask.to_vec();
+    let spans = spans.to_vec();
     crate::substitute::substitute_args(
         core::slice::from_ref(word),
         core::slice::from_ref(&mask),
+        core::slice::from_ref(&spans),
         core::slice::from_ref(&quoted),
         cell,
     )

@@ -21,8 +21,14 @@ pub fn child_main(
     setup_shellfd(child_sock.as_ref(), cell)?;
     apply_redirects(redirects)?;
 
-    let resolved = substitute_args(args, &cmdline.args_mask, &cmdline.args_quoted, cell)
-        .change_context(ChildProcessError::SubstituteFailed)?;
+    let resolved = substitute_args(
+        args,
+        &cmdline.args_mask,
+        &cmdline.args_span,
+        &cmdline.args_quoted,
+        cell,
+    )
+    .change_context(ChildProcessError::SubstituteFailed)?;
     if let Some(sock) = &child_sock {
         let last = resolved.last().cloned().unwrap_or_else(|| cmd.name.clone());
         crate::last_arg::send(sock, &last).change_context(ChildProcessError::LastArgSend)?;

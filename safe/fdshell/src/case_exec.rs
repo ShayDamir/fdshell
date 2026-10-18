@@ -16,8 +16,14 @@ pub(crate) fn run_case(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let (word, _) = substitute_arg(&caseblock.word, &caseblock.word_mask, &mut cache, cell)
-        .change_context(CmdError::Resolve)?;
+    let (word, _) = substitute_arg(
+        &caseblock.word,
+        &caseblock.word_mask,
+        &caseblock.word_span,
+        &mut cache,
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     let word_bytes = word.as_bytes().change_context(CmdError::Never)?;
 
     // POSIX 2.9.4.3 expands a pattern word (tilde, parameter and command
@@ -29,8 +35,14 @@ pub(crate) fn run_case(
     // so `"$p"` keeps an expanded `?` literal and `$p` lets it glob.
     for clause in &caseblock.clauses {
         for pattern in &clause.patterns {
-            let (pat, pat_mask) = substitute_arg(&pattern.text, &pattern.mask, &mut cache, cell)
-                .change_context(CmdError::Resolve)?;
+            let (pat, pat_mask) = substitute_arg(
+                &pattern.text,
+                &pattern.mask,
+                &pattern.spans,
+                &mut cache,
+                cell,
+            )
+            .change_context(CmdError::Resolve)?;
             let pattern_bytes = pat.as_bytes().change_context(CmdError::Never)?;
             // A word pattern has no FNM_PERIOD rule (LESSONS): dotglob = true.
             if match_component(pattern_bytes, &pat_mask, word_bytes, true) {

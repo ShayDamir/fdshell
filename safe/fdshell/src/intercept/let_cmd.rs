@@ -29,7 +29,8 @@ pub(crate) fn run_let(
     let mut status = 0;
     for (i, arg) in cmdline.args.iter().enumerate() {
         let mask = cmdline.args_mask.get(i).cloned().unwrap_or_default();
-        let (expanded, _) = crate::substitute::substitute_arg(arg, &mask, &mut cache, cell)
+        let spans = cmdline.args_span.get(i).cloned().unwrap_or_default();
+        let (expanded, _) = crate::substitute::substitute_arg(arg, &mask, &spans, &mut cache, cell)
             .change_context(CmdError::Resolve)?;
         let bytes = expanded.as_bytes().change_context(CmdError::Resolve)?;
         let value = crate::arith::eval(bytes, cell).change_context(CmdError::Resolve)?;

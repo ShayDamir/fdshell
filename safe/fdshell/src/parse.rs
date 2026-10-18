@@ -44,7 +44,7 @@ pub(crate) mod word_quoted;
 
 pub(crate) use case_block::literal_indices;
 pub use cmdline::{BuiltinPrefix, CommandLine, Pipeline};
-pub use envassign::{Assign, value_mask};
+pub use envassign::{Assign, value_mask, value_spans};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;
@@ -59,10 +59,14 @@ use sys::ShortCStr;
 
 /// A token: its unquoted word (empty for a quoted empty word such as `""`),
 /// the byte range `(start, end)` of its raw text, whether it was fully
-/// quoted, and the per-byte quote mask (parallel to the word; `true` marks
+/// quoted, the per-byte quote mask (parallel to the word; `true` marks
 /// bytes that were inside quotes (double **or** single) and are protected from
-/// IFS word splitting).
-pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>);
+/// IFS word splitting), and the word-text indices at which a quote span closed
+/// **without contributing any byte** (task #321: the mask cannot see a `""` /
+/// `''` pair — zero bytes, zero bits — so the tilde rule consults this list;
+/// `~""/x` → text `~/x`, mask all-`false`, spans `[1]`). Parallel plumbing:
+/// every surface that carries a mask carries this list at the same offset.
+pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>, Vec<usize>);
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     inner_parse(text)
@@ -89,7 +93,7 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
 
     let heredocs = heredoc::layout(line, &raw)?;
 
-    if raw.iter().any(|(t, _, _, _, _)| t.eq_bytes(b"|")) {
+    if raw.iter().any(|(t, _, _, _, _, _)| t.eq_bytes(b"|")) {
         return pipeline::parse_pipeline(&raw, line, &heredocs, text.start);
     }
 

@@ -27,14 +27,16 @@ use crate::state::ShellState;
 
 /// Substitute one word, discarding the byte provenance: the wrapper for
 /// every caller that does not split the result (assignments, heredocs,
-/// `local`/`let`, `case` — the value is stored whole, LESSONS).
+/// `local`/`let`, `case` — the value is stored whole, LESSONS). `spans` is
+/// the word's zero-byte quote-span list, parallel to the mask (task #321).
 pub(crate) fn substitute_arg(
     arg: &ShortCStr,
     mask: &[bool],
+    spans: &[usize],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<bool>), Report<ResolveError>> {
-    let (out, out_mask, _origin) = arg::substitute_arg_marked(arg, mask, cache, cell)?;
+    let (out, out_mask, _origin) = arg::substitute_arg_marked(arg, mask, spans, cache, cell)?;
     Ok((out, out_mask))
 }
 

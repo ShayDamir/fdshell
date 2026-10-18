@@ -16,10 +16,11 @@ use crate::state::ShellState;
 pub fn here_string(
     word: &ShortCStr,
     mask: &[bool],
+    spans: &[usize],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let (data, _) = crate::substitute::substitute_arg(word, mask, cache, cell)
+    let (data, _) = crate::substitute::substitute_arg(word, mask, spans, cache, cell)
         .change_context(OpenRedirectError::HereStringExpand)?;
     let fd = sys::memfd::memfd_create().change_context(OpenRedirectError::HereStringCreate)?;
     let mut payload = Vec::with_capacity(data.len() + 1);

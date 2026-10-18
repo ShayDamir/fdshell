@@ -15,6 +15,7 @@ impl State {
                 end,
                 self.fq,
                 core::mem::take(&mut self.mask),
+                core::mem::take(&mut self.spans),
             ));
         }
     }

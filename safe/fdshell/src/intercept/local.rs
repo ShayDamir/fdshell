@@ -17,7 +17,7 @@ use sys::fork_cell::ForkCell;
 use sys::{ExportedFd, ImportedStr, ScriptText, ShortCStr, Trace};
 
 use crate::error::cmd::CmdError;
-use crate::parse::{CommandLine, value_mask};
+use crate::parse::{CommandLine, value_mask, value_spans};
 use crate::state::ShellState;
 
 pub(crate) fn run_local(
@@ -64,8 +64,8 @@ fn store(state: &mut ShellState, name: &ShortCStr, value: Option<ImportedStr>) {
 
 /// One word per `local` argument: the name, and the expanded value. The word's
 /// mask comes from `args_mask` by index (never `zip`, so a length mismatch
-/// cannot silently drop a word); the value's mask is that word mask sliced at
-/// the `=`.
+/// cannot silently drop a word); the value's mask and zero-byte span list are
+/// that word's mask and spans sliced at the `=`.
 fn expand_words(
     cmdline: &CommandLine,
     text: &ScriptText,
@@ -73,11 +73,13 @@ fn expand_words(
 ) -> Result<Vec<(ShortCStr, Option<ImportedStr>)>, Report<CmdError>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let mut words = Vec::new();
-    let masks = cmdline.args_mask.as_slice();
+    let (masks, spans_at) = (cmdline.args_mask.as_slice(), cmdline.args_span.as_slice());
     for (i, word) in cmdline.args.iter().enumerate() {
         let (name, raw) = split_name(word)?;
         let mask = value_mask(masks.get(i).map_or(&[], Vec::as_slice), name.len());
-        words.push((name, expand_value(raw, &mask, text, &mut cache, cell)?));
+        let spans = value_spans(spans_at.get(i).map_or(&[], Vec::as_slice), name.len());
+        let value = expand_value(raw, &mask, &spans, text, &mut cache, cell)?;
+        words.push((name, value));
     }
     Ok(words)
 }
@@ -89,6 +91,7 @@ fn expand_words(
 fn expand_value(
     raw: Option<ShortCStr>,
     mask: &[bool],
+    spans: &[usize],
     text: &ScriptText,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
@@ -96,7 +99,7 @@ fn expand_value(
     let Some(value) = raw else {
         return Ok(None);
     };
-    let (expanded, _) = crate::substitute::substitute_arg(&value, mask, cache, cell)
+    let (expanded, _) = crate::substitute::substitute_arg(&value, mask, spans, cache, cell)
         .change_context(CmdError::Resolve)?;
     let origin = crate::run_origin::assign_origin(&value, text.origin.clone(), cell)?;
     Ok(Some(ImportedStr::new(
@@ -109,10 +112,8 @@ fn expand_value(
 /// A name is non-empty, outside the `%` fd-var namespace (fd scoping is task
 /// #46), and not an option word, so `-r`/`-a`/`-n` are rejected as names.
 fn split_name(word: &ShortCStr) -> Result<(ShortCStr, Option<ShortCStr>), Report<CmdError>> {
-    let (name, value) = match word.split_once_byte(b'=') {
-        Some((name, value)) => (name, Some(value)),
-        None => (word.clone(), None),
-    };
+    let assigned = word.split_once_byte(b'=').map(|(n, v)| (n, Some(v)));
+    let (name, value) = assigned.unwrap_or((word.clone(), None));
     if name.is_empty() || name.starts_with(b"%") || name.starts_with(b"-") {
         bail!(CmdError::LocalBadName { name: name.clone() });
     }

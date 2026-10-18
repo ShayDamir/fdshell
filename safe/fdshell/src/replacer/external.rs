@@ -16,6 +16,7 @@ use sys::signal;
 pub(super) fn run(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_span: &[Vec<usize>],
     args_quoted: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
@@ -26,8 +27,9 @@ pub(super) fn run(
     // argument pipeline and need no quote encoding.
     let raw = args.first().ok_or(ChildProcessError::MissingArg)?;
     let mask = args_mask.first().map(Vec::as_slice).unwrap_or(&[]);
+    let spans = args_span.first().map(Vec::as_slice).unwrap_or(&[]);
     let quoted = args_quoted.first().copied().unwrap_or(false);
-    let fields = crate::command_word::fields(raw, mask, quoted, cell)
+    let fields = crate::command_word::fields(raw, mask, spans, quoted, cell)
         .change_context(ChildProcessError::ExecFailed)?;
     let binary = fields.first().cloned().unwrap_or_else(ShortCStr::new);
     let rest = args.get(1..).unwrap_or(&[]);
@@ -42,6 +44,7 @@ pub(super) fn run(
         substitute_args(
             rest,
             args_mask.get(1..).unwrap_or(&[]),
+            args_span.get(1..).unwrap_or(&[]),
             args_quoted.get(1..).unwrap_or(&[]),
             cell,
         )

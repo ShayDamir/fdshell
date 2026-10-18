@@ -19,10 +19,10 @@ pub(super) fn finish_command(
 ) -> Result<CommandLine, Report<ParseError>> {
     // The command token precedes the first arg; its mask describes word 0,
     // and the words before it are the command's scoped `NAME=value` prefix.
-    let (command_mask, command_quoted) = tokens
-        .get(args_from - 1)
-        .map(|t| (t.4.clone(), super::word_quoted::word_quoted(&t.0, t.1, t.2)))
-        .unwrap_or((Vec::new(), false));
+    let word0 = tokens.get(args_from - 1);
+    let command_mask = word0.map(|t| t.4.clone()).unwrap_or_default();
+    let command_span = word0.map(|t| t.5.clone()).unwrap_or_default();
+    let command_quoted = word0.is_some_and(|t| super::word_quoted::word_quoted(&t.0, t.1, t.2));
     // Word 0 is a substitution surface (task #268): its escape pairs are folded
     // by the substitution pass, and its fields are split and globbed, so the
     // raw text, mask and quoted flag travel to `command_word::expand` — the
@@ -32,10 +32,12 @@ pub(super) fn finish_command(
         prefix,
         command,
         command_mask,
+        command_span,
         command_quoted,
         env_assigns,
         args: Vec::new(),
         args_mask: Vec::new(),
+        args_span: Vec::new(),
         args_quoted: Vec::new(),
         captures: Vec::new(),
         redirects: Vec::new(),
@@ -44,7 +46,7 @@ pub(super) fn finish_command(
     };
     let mut spec_at = 0usize;
     let mut i = args_from;
-    while let Some((t, ts, te, _fq, mask)) = tokens.get(i) {
+    while let Some((t, ts, te, _fq, mask, spans)) = tokens.get(i) {
         if t.eq_bytes(b";") {
             break;
         }
@@ -75,6 +77,7 @@ pub(super) fn finish_command(
                 None => {
                     cmd.args.push(t.clone());
                     cmd.args_mask.push(mask.clone());
+                    cmd.args_span.push(spans.clone());
                     cmd.args_quoted
                         .push(super::word_quoted::word_quoted(t, *ts, *te));
                 }
@@ -88,6 +91,7 @@ pub(super) fn finish_command(
         } else {
             cmd.args.push(t.clone());
             cmd.args_mask.push(mask.clone());
+            cmd.args_span.push(spans.clone());
             cmd.args_quoted
                 .push(super::word_quoted::word_quoted(t, *ts, *te));
         }

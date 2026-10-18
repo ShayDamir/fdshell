@@ -22,8 +22,14 @@ impl State {
                 self.word_reset();
                 self.start = self.pos;
                 if needs_sep {
-                    self.tokens
-                        .push((sep.into(), self.pos - 1, self.pos, false, Vec::new()));
+                    self.tokens.push((
+                        sep.into(),
+                        self.pos - 1,
+                        self.pos,
+                        false,
+                        Vec::new(),
+                        Vec::new(),
+                    ));
                 }
             }
             b'|' => {
@@ -39,6 +45,7 @@ impl State {
                 self.word_quoted = true;
                 self.in_quotes = true;
                 self.word_started = true;
+                self.span_open = self.cur.len();
                 self.quote_start = Some(self.pos - 1);
             }
             // A `'…'` span is literal word content: both quote bytes are
@@ -88,6 +95,7 @@ impl State {
         self.fq = false;
         self.word_quoted = false;
         self.word_started = false;
+        self.spans = Vec::new();
     }
 
     /// The current word starts unquoted.

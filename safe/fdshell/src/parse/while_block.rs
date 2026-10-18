@@ -26,7 +26,7 @@ pub(crate) fn tokens_to_loop(
 ) -> Result<LoopBlock, Report<ParseError>> {
     if !tokens
         .first()
-        .is_some_and(|(t, _, _, _, _)| t.eq_bytes(keyword))
+        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
     {
         return Err(ParseError::Never.into());
     }

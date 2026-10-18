@@ -19,11 +19,13 @@ pub struct Pattern {
     /// `try_join_masked` inserts between two tokens, so a joined space is
     /// never a pattern byte).
     pub mask: Vec<bool>,
+    /// Zero-byte quote-span indices, parallel to `mask` (task #321).
+    pub spans: Vec<usize>,
 }
 
 /// Join one pattern's tokens into a [`Pattern`]. `trim_semi` stays with the
 /// caller: `try_join_masked` is the single owner of the mask's offsets.
 pub(crate) fn join(tokens: &[Token]) -> Pattern {
-    let (text, mask) = try_join_masked(tokens);
-    Pattern { text, mask }
+    let (text, mask, spans) = try_join_masked(tokens);
+    Pattern { text, mask, spans }
 }

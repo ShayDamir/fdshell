@@ -22,12 +22,15 @@ use crate::state::ShellState;
 /// trigger byte. `Origin` records which output bytes came from an expansion
 /// (field splitting cuts only those, POSIX 2.6.5) and where an embedded `$@`
 /// positional starts a new word; the tilde arm records nothing — bash never
-/// splits the expanded `$HOME` (task #222).
+/// splits the expanded `$HOME` (task #222). `spans` is the word's list of
+/// zero-byte quote-span indices (task #321), input-side only: it feeds the
+/// tilde gate and never affects the output mask.
 ///
 /// Invariant: at the top of each loop iteration `idx == peek.consumed()`.
 pub(super) fn substitute_arg_marked(
     arg: &ShortCStr,
     mask: &[bool],
+    spans: &[usize],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<bool>, Origin), Report<ResolveError>> {
@@ -37,7 +40,7 @@ pub(super) fn substitute_arg_marked(
     let mut origin = Origin::new();
     let mut peek = Counting::new(bytes.iter().copied());
     let mut idx = 0usize;
-    if super::tilde::leads(bytes, mask) {
+    if super::tilde::leads(bytes, mask, spans) {
         super::tilde::expand(&mut peek, &mut idx, mask, cell, &mut out, &mut out_mask)?;
     }
     while let Some(b) = peek.next() {

@@ -60,9 +60,14 @@ fn expand_one(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<EnvAssign, Report<CmdError>> {
-    let (expanded, _) =
-        crate::substitute::substitute_arg(&assign.value, &assign.mask, &mut HashMap::new(), cell)
-            .change_context(CmdError::Resolve)?;
+    let (expanded, _) = crate::substitute::substitute_arg(
+        &assign.value,
+        &assign.mask,
+        &assign.spans,
+        &mut HashMap::new(),
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     let origin = crate::run_origin::assign_origin(&assign.value, text.origin.clone(), cell)?;
     Ok(EnvAssign {
         name: assign.name.clone(),

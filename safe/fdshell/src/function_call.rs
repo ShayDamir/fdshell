@@ -19,6 +19,7 @@ pub(crate) fn call(
     let substituted = crate::substitute::substitute_args(
         &cmdline.args,
         &cmdline.args_mask,
+        &cmdline.args_span,
         &cmdline.args_quoted,
         cell,
     )

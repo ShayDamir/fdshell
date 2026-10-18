@@ -2,6 +2,7 @@ use super::Token;
 use super::classify::parse_redirect;
 use super::semi::closing_keyword_index;
 use super::semi::verbatim;
+use super::value_spans;
 use crate::error::parse::ParseError;
 use crate::redirect::RedirectDef;
 use crate::scan::heredoc::span_operator;
@@ -24,26 +25,24 @@ pub(crate) fn tokens_to_group(
     tokens: &[Token],
     text: &ScriptText,
 ) -> Result<GroupBlock, Report<ParseError>> {
-    ensure!(
-        tokens
-            .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"{")),
-        ParseError::MalformedGroupBlock
-    );
+    let opens_with_brace = tokens
+        .first()
+        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"{"));
+    ensure!(opens_with_brace, ParseError::MalformedGroupBlock);
     let line = text.as_bytes().change_context(ParseError::Never)?;
     let close = closing_keyword_index(tokens, line).ok_or(ParseError::GroupMissingCloseBrace)?;
     let body_tokens = tokens.get(1..close).ok_or(ParseError::Never)?;
-    ensure!(
-        body_tokens.iter().any(|(t, _, _, _, _)| !t.eq_bytes(b";")),
-        ParseError::GroupEmpty
-    );
+    let has_word = body_tokens
+        .iter()
+        .any(|(t, _, _, _, _, _)| !t.eq_bytes(b";"));
+    ensure!(has_word, ParseError::GroupEmpty);
     // POSIX #1.2: `}` must be preceded by `;` or a newline. The tokenizer
     // emits a `;` token for a newline, so `{ echo a` newline `}` is accepted.
     // `closing_keyword_index` skips token 0 (the `{`), so `close` is never 0.
+    let before_close = tokens.get(close.saturating_sub(1));
+    let closes_after_semi = before_close.is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"));
     ensure!(
-        tokens
-            .get(close.saturating_sub(1))
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";")),
+        closes_after_semi,
         ParseError::ExpectedSemicolonBeforeCloseBrace
     );
     // The required `;` stays inside the body span: a `<<` operator's body lines
@@ -65,7 +64,7 @@ fn tail_redirects(tail: &[Token], line: &[u8]) -> Result<Vec<RedirectDef>, Repor
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
-        let (t, start, end, _fq, _mask) = tail.get(i).ok_or(ParseError::Never)?;
+        let (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
         if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
             bail!(ParseError::GroupHereDocNotSupported);
         }
@@ -90,7 +89,7 @@ fn tail_redirects(tail: &[Token], line: &[u8]) -> Result<Vec<RedirectDef>, Repor
 /// mask), so a glued redirect parses as the group's redirection.
 fn split_close(tokens: &[Token], close: usize) -> Vec<Token> {
     let tail = tokens.get(close + 1..).unwrap_or(&[]).to_vec();
-    let Some((t, start, end, fq, mask)) = tokens.get(close).cloned() else {
+    let Some((t, start, end, fq, mask, spans)) = tokens.get(close).cloned() else {
         return tail;
     };
     if t.eq_bytes(b"}") {
@@ -105,6 +104,7 @@ fn split_close(tokens: &[Token], close: usize) -> Vec<Token> {
         end,
         fq,
         mask.get(1..).unwrap_or(&[]).to_vec(),
+        value_spans(&spans, 0),
     )];
     out.extend_from_slice(&tail);
     out

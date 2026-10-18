@@ -22,7 +22,7 @@ pub(super) fn next_arm(
     while pos < done_idx
         && tokens
             .get(pos)
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";"))
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
     {
         pos += 1;
     }
@@ -31,7 +31,7 @@ pub(super) fn next_arm(
     }
     let pat_end = tokens
         .get(pos..done_idx)
-        .and_then(|s| s.iter().position(|(t, _, _, _, _)| t.eq_bytes(b")")))
+        .and_then(|s| s.iter().position(|(t, _, _, _, _, _)| t.eq_bytes(b")")))
         .map(|i| pos + i)
         .ok_or(ParseError::WaitMissingCloseParen)?;
     let (pattern, captures) = pattern::parse_pattern(

@@ -22,17 +22,24 @@ pub(crate) fn run_timeout(
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "timeout", cmdline)?;
-    let cfg = parse::parse(&cmdline.args, &cmdline.args_mask, &cmdline.args_quoted)?;
+    let cfg = parse::parse(
+        &cmdline.args,
+        &cmdline.args_mask,
+        &cmdline.args_span,
+        &cmdline.args_quoted,
+    )?;
     let subcmdline = crate::parse::CommandLine {
         prefix: BuiltinPrefix::None,
         command: cfg.command,
         command_mask: cfg.command_mask,
+        command_span: cfg.command_span,
         command_quoted: cfg.command_quoted,
         // A scoped prefix on `timeout` itself rides in the forked child's
         // inherited state, not in this sub-command line.
         env_assigns: vec![],
         args: cfg.args,
         args_mask: cfg.args_mask,
+        args_span: cfg.args_span,
         args_quoted: cfg.args_quoted,
         captures: vec![],
         redirects: vec![],

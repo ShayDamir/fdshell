@@ -18,9 +18,14 @@ pub(crate) fn set(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
-    let (expanded, _) =
-        crate::substitute::substitute_arg(&assign.value, &assign.mask, &mut HashMap::new(), cell)
-            .change_context(CmdError::Resolve)?;
+    let (expanded, _) = crate::substitute::substitute_arg(
+        &assign.value,
+        &assign.mask,
+        &assign.spans,
+        &mut HashMap::new(),
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     let origin = crate::run_origin::assign_origin(&assign.value, text.origin.clone(), cell)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_var(

@@ -32,7 +32,7 @@ pub fn parse_redirect(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
-    let Some((t, _start, _end, fq, mask)) = tokens.get(i) else {
+    let Some((t, _start, _end, fq, mask, _spans)) = tokens.get(i) else {
         return Ok(None);
     };
     if *fq {

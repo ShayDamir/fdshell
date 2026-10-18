@@ -20,24 +20,32 @@ use crate::state::ShellState;
 /// `~"/*"/sub` → `~/*/sub`, `~"/x"` and `~'/'x` → `~/x` (the terminating `/`'s
 /// own bit counts), while a quote **after** the `/` leaves the prefix unquoted
 /// and the tilde expands (`~/"x"` → `$HOME/x`). A mask shorter than the word
-/// pads as unquoted, like `arg.rs`. The rule lives here, not in `arg.rs`,
-/// which is at its line budget (LESSONS #269).
-pub(super) fn leads(bytes: &[u8], mask: &[bool]) -> bool {
-    bytes.first() == Some(&b'~') && !prefix_quoted(bytes, mask)
+/// pads as unquoted, like `arg.rs`. Task #321 adds the **zero-byte quote
+/// span**: POSIX counts a quote pair as a quoted character even when it
+/// contributes no byte, and the mask has no bit for it, so `spans` — the
+/// word-text indices of quote spans that closed empty (from the tokenizer) —
+/// is consulted in parallel: `~""`, `~''/x` stay literal (`bash 5.3.9: [~]`,
+/// `[~/x]`), and `""~/x` is literal too (the span sits at index 0, the `~`'s
+/// own position — measured `[~/x]`), while `~/""` expands (`$HOME/`, the span
+/// is past the `/`). The rule lives here, not in `arg.rs`, which is at its
+/// line budget (LESSONS #269).
+pub(super) fn leads(bytes: &[u8], mask: &[bool], spans: &[usize]) -> bool {
+    bytes.first() == Some(&b'~') && !prefix_quoted(bytes, mask, spans)
 }
 
 /// `true` when any byte of the tilde-prefix was quoted: the mask bits from
-/// index 0 (the `~` itself, task #269) through the first `/` **inclusive**. A
-/// bare `~` scans indices 0..=1, where index 1 pads to `false` — it must keep
-/// expanding. Backslashes are deliberately not consulted: an unquoted
-/// `\<char>` carries no mask bit and is protected by `escape::unquoted` at
-/// push time, and the arm only fires when the byte after `~` is `/` or the end
-/// of the word, so `~\/x` → `~/x` and `~\*` → `~*` agree with bash by
+/// index 0 (the `~` itself, task #269) through the first `/` **inclusive**,
+/// **or** any zero-byte quote span closed at an index ≤ that end (task #321,
+/// `spans`). A bare `~` scans indices 0..=1, where index 1 pads to `false` —
+/// it must keep expanding. Backslashes are deliberately not consulted: an
+/// unquoted `\<char>` carries no mask bit and is protected by `escape::unquoted`
+/// at push time, and the arm only fires when the byte after `~` is `/` or the
+/// end of the word, so `~\/x` → `~/x` and `~\*` → `~*` agree with bash by
 /// construction (POSIX counts `\X` as a quoted character; unobservable here
 /// because fdshell expands no `~user`).
-fn prefix_quoted(bytes: &[u8], mask: &[bool]) -> bool {
+fn prefix_quoted(bytes: &[u8], mask: &[bool], spans: &[usize]) -> bool {
     let end = bytes.iter().position(|&b| b == b'/').unwrap_or(bytes.len());
-    (0..=end).any(|i| mask.get(i).copied().unwrap_or(false))
+    (0..=end).any(|i| mask.get(i).copied().unwrap_or(false)) || spans.iter().any(|&i| i <= end)
 }
 
 /// Expand the leading `~` already at the front of `peek`. `~` alone or

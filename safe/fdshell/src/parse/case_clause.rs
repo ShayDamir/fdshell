@@ -24,7 +24,7 @@ pub fn parse_clauses(
     while pos < esac_idx {
         if tokens
             .get(pos)
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b";"))
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
         {
             pos += 1;
             continue;

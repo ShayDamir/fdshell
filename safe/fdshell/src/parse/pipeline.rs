@@ -16,7 +16,7 @@ pub fn parse_pipeline(
     let mut commands = Vec::new();
     let mut start = 0;
     let mut spec_at = 0;
-    for (i, (t, _, _, _, _)) in raw.iter().enumerate() {
+    for (i, (t, _, _, _, _, _)) in raw.iter().enumerate() {
         if t.eq_bytes(b"|") {
             ensure!(i != start, ParseError::UnexpectedPipe);
             let cmd = parse_stage(raw, line, specs, &mut spec_at, start, i, set_at)?;
@@ -58,7 +58,7 @@ fn parse_stage(
 fn trim_at_semi(tokens: &[Token]) -> &[Token] {
     let end = tokens
         .iter()
-        .position(|(t, _, _, _, _)| t.eq_bytes(b";"))
+        .position(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
         .unwrap_or(tokens.len());
     tokens.get(..end).unwrap_or(tokens)
 }

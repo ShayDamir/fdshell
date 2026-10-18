@@ -48,17 +48,17 @@ pub enum FdRef {
 /// `wait`, `;`, `readable`, …), so the loop is reachable (a same-line `;`
 /// never arrives — the statement splitter claims it first).
 pub(super) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
-    let Some((_wt, _ws, we, _wq, _wm)) = tokens.first() else {
+    let Some((_wt, _ws, we, _wq, _wm, _ws2)) = tokens.first() else {
         return false;
     };
     let mut pos = 1;
-    while let Some((t, _, _, _, _)) = tokens.get(pos) {
+    while let Some((t, _, _, _, _, _)) = tokens.get(pos) {
         if !t.eq_bytes(b";") {
             break;
         }
         pos += 1;
     }
-    let Some((t, ts, _te, quoted, _tm)) = tokens.get(pos) else {
+    let Some((t, ts, _te, quoted, _tm, _spans)) = tokens.get(pos) else {
         return false;
     };
     if *quoted {
@@ -82,13 +82,13 @@ pub(crate) fn tokens_to_wait(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"wait")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"wait")),
         ParseError::MalformedWaitBlock
     );
     ensure!(
         tokens
             .last()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"done")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
     );
 

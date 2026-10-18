@@ -41,6 +41,7 @@ pub(crate) fn expand<'a>(
     let word = fields(
         &cmdline.command,
         &cmdline.command_mask,
+        &cmdline.command_span,
         cmdline.command_quoted,
         cell,
     )?;
@@ -72,15 +73,17 @@ fn with_fields(
     let (fields, consumed) = consume(cmdline, fields, cell)?;
     let mut fields = fields.into_iter();
     let command = fields.next().unwrap_or_else(ShortCStr::new);
-    let (args, args_mask, args_quoted) = leading_args(fields, cmdline, consumed)?;
+    let (args, args_mask, args_span, args_quoted) = leading_args(fields, cmdline, consumed)?;
     Ok(CommandLine {
         prefix: cmdline.prefix,
         command: command.clone(),
         command_mask: vec![true; command.len()],
+        command_span: Vec::new(),
         command_quoted: true,
         env_assigns: cmdline.env_assigns.clone(),
         args,
         args_mask,
+        args_span,
         args_quoted,
         captures: cmdline.captures.clone(),
         redirects: cmdline.redirects.clone(),

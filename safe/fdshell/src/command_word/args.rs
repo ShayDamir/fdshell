@@ -14,9 +14,9 @@ use crate::state::ShellState;
 
 use super::fields::fields;
 
-/// The `CommandLine` argument trio (`args`, `args_mask`, `args_quoted`) an
-/// expanded word 0 produces.
-pub(super) type LeadingArgs = (Vec<ShortCStr>, Vec<Vec<bool>>, Vec<bool>);
+/// The `CommandLine` argument quartet (`args`, `args_mask`, `args_span`,
+/// `args_quoted`) an expanded word 0 produces.
+pub(super) type LeadingArgs = (Vec<ShortCStr>, Vec<Vec<bool>>, Vec<Vec<usize>>, Vec<bool>);
 
 /// bash: a word 0 whose expansion is empty is not a word, so the next field
 /// becomes the command — consume leading words (each expanded the same way)
@@ -37,9 +37,14 @@ pub(super) fn consume(
             .get(consumed)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
+        let spans = cmdline
+            .args_span
+            .get(consumed)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let quoted = cmdline.args_quoted.get(consumed).copied().unwrap_or(false);
         consumed += 1;
-        word_fields = fields(word, mask, quoted, cell)?;
+        word_fields = fields(word, mask, spans, quoted, cell)?;
     }
     Ok((word_fields, consumed))
 }
@@ -53,17 +58,22 @@ pub(super) fn leading_args(
 ) -> Result<LeadingArgs, Report<CmdError>> {
     let mut args = Vec::new();
     let mut args_mask = Vec::new();
+    let mut args_span = Vec::new();
     let mut args_quoted = Vec::new();
     for field in fields {
         let arg = quote_encode(&field)?;
         args_mask.push(vec![true; arg.len()]);
+        // A quote-encoded field is fully quoted literal text: it has no
+        // zero-byte quote span (task #321, spans are input-side only).
+        args_span.push(Vec::new());
         args_quoted.push(true);
         args.push(arg);
     }
     args.extend_from_slice(cmdline.args.get(consumed..).unwrap_or(&[]));
     args_mask.extend_from_slice(cmdline.args_mask.get(consumed..).unwrap_or(&[]));
+    args_span.extend_from_slice(cmdline.args_span.get(consumed..).unwrap_or(&[]));
     args_quoted.extend_from_slice(cmdline.args_quoted.get(consumed..).unwrap_or(&[]));
-    Ok((args, args_mask, args_quoted))
+    Ok((args, args_mask, args_span, args_quoted))
 }
 
 /// A word-0 field the child receives as an argument is already expanded, and

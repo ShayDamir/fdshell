@@ -26,8 +26,14 @@ impl State {
             Ok(false)
         } else {
             self.emit(self.pos - 1);
-            self.tokens
-                .push((c"|".into(), self.pos - 1, self.pos, false, Vec::new()));
+            self.tokens.push((
+                c"|".into(),
+                self.pos - 1,
+                self.pos,
+                false,
+                Vec::new(),
+                Vec::new(),
+            ));
             Ok(true)
         }
     }

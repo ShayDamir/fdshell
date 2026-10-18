@@ -19,7 +19,7 @@ pub(super) fn parse(
     i: usize,
     direction: RedirectDirection,
 ) -> Result<BgRedirectResult, Report<ParseError>> {
-    let Some((operand, _s, _e, _fq, omask)) = tokens.get(i + 1) else {
+    let Some((operand, _s, _e, _fq, omask, _spans)) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
     if invalid_delimiter(operand) {

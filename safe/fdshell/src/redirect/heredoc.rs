@@ -31,7 +31,9 @@ pub fn here_doc(
     cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
     let data = if expand {
-        crate::substitute::substitute_arg(body, &quoted_context(body.len()), cache, cell)
+        // The body is raw data, not a shell word: its quote characters are not
+        // shell quotes, so it has no zero-byte quote spans (task #321).
+        crate::substitute::substitute_arg(body, &quoted_context(body.len()), &[], cache, cell)
             .change_context(OpenRedirectError::HereDocExpand)?
             .0
     } else {

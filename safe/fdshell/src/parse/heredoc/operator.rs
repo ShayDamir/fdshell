@@ -20,7 +20,7 @@ pub(crate) fn is_operator(line: &[u8], tokens: &[Token], i: usize) -> bool {
     if i == 0 {
         return false;
     }
-    let Some((_t, start, end, fq, _mask)) = tokens.get(i) else {
+    let Some((_t, start, end, fq, _mask, _spans)) = tokens.get(i) else {
         return false;
     };
     if *fq || span_operator(line, *start, *end).is_none() {
@@ -28,7 +28,7 @@ pub(crate) fn is_operator(line: &[u8], tokens: &[Token], i: usize) -> bool {
     }
     !tokens
         .get(i - 1)
-        .is_some_and(|(p, _, _, _, _)| p.eq_bytes(b"|"))
+        .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b"|"))
 }
 
 /// The token index of every heredoc operator (never the command word).
@@ -52,7 +52,7 @@ pub(crate) fn delimiter_token_indices(line: &[u8], tokens: &[Token]) -> Vec<usiz
     operator_indices(line, tokens)
         .into_iter()
         .filter_map(|i| {
-            let (_t, start, end, _fq, _mask) = tokens.get(i)?;
+            let (_t, start, end, _fq, _mask, _spans) = tokens.get(i)?;
             let (op, _prefix) = span_operator(line, *start, *end)?;
             if attached(line, op, *end) {
                 Some(i)
@@ -83,7 +83,7 @@ pub(super) fn operator_at(
     tokens: &[Token],
     i: usize,
 ) -> Result<(Operator, usize), Report<ParseError>> {
-    let Some((_t, start, end, _fq, _mask)) = tokens.get(i) else {
+    let Some((_t, start, end, _fq, _mask, _spans)) = tokens.get(i) else {
         bail!(ParseError::Never);
     };
     let (op, _prefix) = span_operator(line, *start, *end).ok_or(ParseError::Never)?;

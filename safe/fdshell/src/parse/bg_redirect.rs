@@ -23,7 +23,7 @@ pub fn parse_bg_redirect(
     i: usize,
 ) -> Result<Option<(BgRedirectResult, usize)>, Report<ParseError>> {
     // `_fq` (fully quoted) is read for task #250's quoted-word guard.
-    let Some((t, _start, _end, _fq, mask)) = tokens.get(i) else {
+    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
         return Ok(None);
     };
     let Some(rest) = t.strip_prefix(b"&>") else {

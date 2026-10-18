@@ -14,6 +14,9 @@ use sys::ShortCStr;
 pub(super) struct ForWords {
     pub(super) words: Vec<ShortCStr>,
     pub(super) words_mask: Vec<Vec<bool>>,
+    /// Zero-byte quote-span indices per word (task #321), parallel to the
+    /// words and their masks.
+    pub(super) words_span: Vec<Vec<usize>>,
     pub(super) words_quoted: Vec<bool>,
 }
 
@@ -30,19 +33,24 @@ pub(super) fn collect_words(
     );
     let words: Vec<ShortCStr> = word_tokens
         .iter()
-        .map(|(t, _, _, _, _)| t.clone())
+        .map(|(t, _, _, _, _, _)| t.clone())
         .collect();
     let words_mask: Vec<Vec<bool>> = word_tokens
         .iter()
-        .map(|(_, _, _, _, m)| m.clone())
+        .map(|(_, _, _, _, m, _)| m.clone())
+        .collect();
+    let words_span: Vec<Vec<usize>> = word_tokens
+        .iter()
+        .map(|(_, _, _, _, _, s)| s.clone())
         .collect();
     let words_quoted: Vec<bool> = word_tokens
         .iter()
-        .map(|(t, s, e, _, _)| word_quoted::word_quoted(t, *s, *e))
+        .map(|(t, s, e, _, _, _)| word_quoted::word_quoted(t, *s, *e))
         .collect();
     Ok(ForWords {
         words,
         words_mask,
+        words_span,
         words_quoted,
     })
 }

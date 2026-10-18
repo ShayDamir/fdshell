@@ -10,9 +10,11 @@ pub struct TimeoutConfig {
     pub seconds: i64,
     pub command: ShortCStr,
     pub command_mask: Vec<bool>,
+    pub command_span: Vec<usize>,
     pub command_quoted: bool,
     pub args: Vec<ShortCStr>,
     pub args_mask: Vec<Vec<bool>>,
+    pub args_span: Vec<Vec<usize>>,
     pub args_quoted: Vec<bool>,
 }
 
@@ -20,6 +22,7 @@ pub struct TimeoutConfig {
 pub fn parse(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_span: &[Vec<usize>],
     args_quoted: &[bool],
 ) -> Result<TimeoutConfig, Report<CmdError>> {
     let seconds_arg = args.first().ok_or(CmdError::TimeoutMissingSeconds)?;
@@ -30,17 +33,21 @@ pub fn parse(
     // encoding before the substitution pass ever sees the word.
     let command = args.get(1).ok_or(CmdError::TimeoutMissingCommand)?.clone();
     let command_mask = args_mask.get(1).cloned().unwrap_or_default();
+    let command_span = args_span.get(1).cloned().unwrap_or_default();
     let command_quoted = args_quoted.get(1).copied().unwrap_or(false);
     let sub_args: Vec<ShortCStr> = args.get(2..).unwrap_or_default().to_vec();
     let sub_args_mask: Vec<Vec<bool>> = args_mask.get(2..).unwrap_or_default().to_vec();
+    let sub_args_span: Vec<Vec<usize>> = args_span.get(2..).unwrap_or_default().to_vec();
     let sub_args_quoted: Vec<bool> = args_quoted.get(2..).unwrap_or_default().to_vec();
     Ok(TimeoutConfig {
         seconds,
         command,
         command_mask,
+        command_span,
         command_quoted,
         args: sub_args,
         args_mask: sub_args_mask,
+        args_span: sub_args_span,
         args_quoted: sub_args_quoted,
     })
 }

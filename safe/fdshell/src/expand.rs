@@ -22,6 +22,7 @@ use crate::substitute::substitute_args;
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
     words_mask: &[Vec<bool>],
+    words_span: &[Vec<usize>],
     words_quoted: &[bool],
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
@@ -29,10 +30,11 @@ pub(crate) fn expand_for_words(
     let mut out = Vec::new();
     for (i, word) in words.iter().enumerate() {
         let mask = words_mask.get(i).cloned().unwrap_or_default();
+        let spans = words_span.get(i).cloned().unwrap_or_default();
         let quoted = words_quoted.get(i).copied().unwrap_or(false);
         let bs = word.as_bytes().change_context(ResolveError::RefNotFound)?;
         let origin = word_origin(bs);
-        let fields = expand_word(word, &mask, quoted, cell)?;
+        let fields = expand_word(word, &mask, &spans, quoted, cell)?;
         out.extend(
             fields
                 .into_iter()
@@ -48,12 +50,14 @@ pub(crate) fn expand_for_words(
 fn expand_word(
     word: &ShortCStr,
     mask: &Vec<bool>,
+    spans: &Vec<usize>,
     quoted: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     substitute_args(
         core::slice::from_ref(word),
         core::slice::from_ref(mask),
+        core::slice::from_ref(spans),
         core::slice::from_ref(&quoted),
         cell,
     )

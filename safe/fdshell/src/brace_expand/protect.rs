@@ -38,7 +38,7 @@ fn heredoc_terminator_indices(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     for (_start, end) in body_regions(line) {
         if let Some(i) = tokens
             .iter()
-            .position(|(_, ts, _, _, _)| terminator_word(line, end, *ts))
+            .position(|(_, ts, _, _, _, _)| terminator_word(line, end, *ts))
         {
             out.push(i);
         }
@@ -58,7 +58,7 @@ fn terminator_word(line: &[u8], end: usize, ts: usize) -> bool {
 /// The first token is an assignment word (`name=...` with a non-empty name);
 /// bash applies no brace expansion to assignment words.
 fn is_assignment(tokens: &[Token]) -> bool {
-    tokens.first().is_some_and(|(t, _, _, _, _)| {
+    tokens.first().is_some_and(|(t, _, _, _, _, _)| {
         t.split_once_byte(b'=')
             .is_some_and(|(lhs, _)| !lhs.is_empty())
     })

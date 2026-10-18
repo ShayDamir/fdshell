@@ -23,6 +23,7 @@ pub(super) fn run_set_positional(
     let expanded = crate::substitute::substitute_args(
         cmdline.args.get(1..).unwrap_or(&[]),
         cmdline.args_mask.get(1..).unwrap_or(&[]),
+        cmdline.args_span.get(1..).unwrap_or(&[]),
         cmdline.args_quoted.get(1..).unwrap_or(&[]),
         cell,
     )

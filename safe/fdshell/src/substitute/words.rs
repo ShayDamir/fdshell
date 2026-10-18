@@ -19,6 +19,7 @@ use super::split::split_word;
 pub fn substitute_args(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_span: &[Vec<usize>],
     args_quoted: &[bool],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
@@ -26,6 +27,7 @@ pub fn substitute_args(
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     for (i, arg) in args.iter().enumerate() {
         let mask = args_mask.get(i).cloned().unwrap_or_default();
+        let spans = args_span.get(i).cloned().unwrap_or_default();
         let quoted = args_quoted.get(i).copied().unwrap_or(false);
         let before = result.len();
         if arg.eq_bytes(b"$@") || arg.eq_bytes(b"$*") {
@@ -47,7 +49,7 @@ pub fn substitute_args(
             // A fully quoted word is exactly one word — kept even when the
             // expansion is empty (`"${Y:+a}"` → one empty argument).
             let fq = super::fully_quoted(&mask);
-            let (text, mask, origin) = substitute_arg_marked(arg, &mask, &mut cache, cell)?;
+            let (text, mask, origin) = substitute_arg_marked(arg, &mask, &spans, &mut cache, cell)?;
             // Field splitting cuts only the bytes the provenance marks as
             // expansion-produced (POSIX 2.6.5, task #222): a word with no
             // expansion has no delimiter bytes and a fully quoted word has

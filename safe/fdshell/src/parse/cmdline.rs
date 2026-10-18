@@ -29,6 +29,9 @@ pub struct CommandLine {
     /// splitting, pathname expansion); after the expansion the child sees a
     /// fully-quoted mask, so its word-0 rules are no-ops on the name.
     pub command_mask: Vec<bool>,
+    /// Zero-byte quote-span indices of the command word, parallel to
+    /// `command_mask` (task #321).
+    pub command_span: Vec<usize>,
     /// Whether word 0's raw span contained quotes (word 0's counterpart of
     /// `args_quoted`, see `parse::word_quoted`): the quoted-empty rule —
     /// `"$(true)"` has no mask bit that says it, only the span does.
@@ -43,6 +46,9 @@ pub struct CommandLine {
     /// parallel to its arg). `true` marks bytes that were inside double
     /// quotes and are protected from IFS word splitting.
     pub args_mask: Vec<Vec<bool>>,
+    /// Zero-byte quote-span indices for each arg (task #321), parallel to
+    /// `args_mask` and `args`.
+    pub args_span: Vec<Vec<usize>>,
     /// Whether each arg's raw span contained quotes (parallel to `args`;
     /// see `parse::word_quoted`). True for a word like `""$(true)` whose
     /// quoted part expands to nothing — the mask alone cannot say.

@@ -23,7 +23,7 @@ pub(crate) fn tokens_to_if(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _)| t.eq_bytes(b"if")),
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"if")),
         ParseError::MalformedIfBlock
     );
 

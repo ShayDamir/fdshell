@@ -55,7 +55,9 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
 }
 
 fn word_at(tokens: &[Token], i: usize, w: &[u8]) -> bool {
-    tokens.get(i).is_some_and(|(t, _, _, _, _)| t.eq_bytes(w))
+    tokens
+        .get(i)
+        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(w))
 }
 
 #[cfg(test)]

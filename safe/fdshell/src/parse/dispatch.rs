@@ -18,7 +18,7 @@ pub(super) fn dispatch_keyword(
             function_block::tokens_to_function(raw, text)?,
         )));
     }
-    let is = |kw: &[u8]| raw.first().is_some_and(|(t, _, _, _, _)| t.eq_bytes(kw));
+    let is = |kw: &[u8]| raw.first().is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(kw));
     if is(b"{") {
         return Ok(Some(ParsedLine::Group(group_block::tokens_to_group(
             raw, text,

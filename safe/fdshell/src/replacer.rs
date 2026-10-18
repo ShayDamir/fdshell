@@ -14,6 +14,7 @@ use sys::fork_cell::ForkCell;
 pub fn execute(
     args: &[ShortCStr],
     args_mask: &[Vec<bool>],
+    args_span: &[Vec<usize>],
     args_quoted: &[bool],
     redirects: &[crate::redirect::RedirectDef],
     cell: &ForkCell<ShellState>,
@@ -42,6 +43,7 @@ pub fn execute(
         let substituted = substitute_args(
             builtin_args,
             args_mask.get(2..).unwrap_or(&[]),
+            args_span.get(2..).unwrap_or(&[]),
             args_quoted.get(2..).unwrap_or(&[]),
             cell,
         )
@@ -54,6 +56,6 @@ pub fn execute(
         crate::xtrace::trace(builtin_name.as_bytes().unwrap_or(&[]), &substituted, &state);
         child::dispatch::run_builtin(builtin_name.clone(), &refs, builtin_args, &state)
     } else {
-        external::run(args, args_mask, args_quoted, cell)
+        external::run(args, args_mask, args_span, args_quoted, cell)
     }
 }

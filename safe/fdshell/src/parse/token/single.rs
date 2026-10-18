@@ -28,6 +28,7 @@ impl State {
         self.word_quoted = true;
         self.in_single = true;
         self.word_started = true;
+        self.span_open = self.cur.len();
         self.single_start = Some(self.pos - 1);
     }
 
