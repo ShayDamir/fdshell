@@ -1,14 +1,16 @@
 pub(crate) mod extract;
+pub(crate) mod pattern;
 
 use super::Token;
-use super::semi::{trim_semi, try_join};
+use super::semi::trim_semi;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, bail};
-use sys::{ScriptText, ShortCStr};
+use sys::ScriptText;
 
 pub struct CaseClause {
-    pub patterns: Vec<ShortCStr>,
+    /// The clause's `|`-separated patterns, each with its own quote mask.
+    pub patterns: Vec<pattern::Pattern>,
     pub body: ScriptText,
 }
 pub fn parse_clauses(
@@ -41,7 +43,7 @@ fn collect_patterns(
     tokens: &[Token],
     pos: &mut usize,
     esac_idx: usize,
-) -> Result<Vec<ShortCStr>, Report<ParseError>> {
+) -> Result<Vec<pattern::Pattern>, Report<ParseError>> {
     let mut patterns = Vec::new();
     let mut current_pattern = Vec::new();
     while *pos <= esac_idx {
@@ -56,7 +58,7 @@ fn collect_patterns(
             if current_pattern.is_empty() {
                 bail!(ParseError::CaseEmptyPattern);
             }
-            patterns.push(try_join(trim_semi(&current_pattern)));
+            patterns.push(pattern::join(trim_semi(&current_pattern)));
             current_pattern.clear();
             *pos += 1;
         } else {
@@ -71,7 +73,7 @@ fn collect_patterns(
         bail!(ParseError::CaseEmptyPattern);
     }
     if !current_pattern.is_empty() {
-        patterns.push(try_join(trim_semi(&current_pattern)));
+        patterns.push(pattern::join(trim_semi(&current_pattern)));
     }
     Ok(patterns)
 }
