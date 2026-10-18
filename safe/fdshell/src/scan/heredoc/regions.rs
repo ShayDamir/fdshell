@@ -76,6 +76,11 @@ fn semi_terminated_regions(
     let start = line_start(line, run_start);
     let body_start = line_end_after(line, semi);
     let ops = operator_delims(line, start, body_start)?;
+    // Unreachable today by the window-subset invariant (`operator_count` scans a
+    // sub-window with a stricter preceding-token rule, so a non-empty run always
+    // yields a non-empty `ops`), and the guard is what keeps an empty `ops` from
+    // jumping `i` to `body_start` and skipping the line's runs behind the `;`.
+    // LESSONS: a guard no input can reach is recorded, not chased.
     if ops.is_empty() {
         return None;
     }
