@@ -842,6 +842,103 @@ fn scan_function_block_resume_gap_eats_glued_byte() {
     }
 }
 
+/// A `;`-terminated heredoc statement before a function definition and a
+/// heredoc statement after it: the line's body stream is allocated in operator
+/// order, so the pre-block statement takes region 0, the definition claims
+/// **none** (its body's heredocs feed the statements inside it — the body is
+/// re-scanned), and the trailing statement takes the region left over.
+/// (Task #240: on master the trailing statement was fed the pre-block
+/// statement's region — `bodyX` plus its delimiter line as content.)
+#[test]
+fn scan_pre_block_function_and_trailing_share_one_body_stream() {
+    check_shapes(
+        b"cat <<X; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB",
+        &[
+            ("S", 0, 0, false, vec![(38, 46)]),
+            ("B", 8, 25, true, vec![]),
+            ("S", 27, 0, false, vec![]),
+            ("S", 30, 0, false, vec![(46, 53)]),
+        ],
+    );
+}
+
+// Two pre-block operators: the trailing statement takes region 2 of the line.
+#[test]
+fn scan_two_pre_block_heredocs_and_function_take_their_regions() {
+    check_shapes(
+        b"cat <<X; cat <<Y; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyY\nY\nbodyB\nB",
+        &[
+            ("S", 0, 0, false, vec![(47, 55)]),
+            ("S", 9, 0, false, vec![(55, 63)]),
+            ("B", 17, 34, true, vec![]),
+            ("S", 36, 0, false, vec![]),
+            ("S", 39, 0, false, vec![(63, 70)]),
+        ],
+    );
+}
+
+// The `function name { … }` keyword form shares the POSIX form's rule.
+#[test]
+fn scan_pre_block_function_keyword_form_shares_body_stream() {
+    check_shapes(
+        b"cat <<X; function f { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB",
+        &[
+            ("S", 0, 0, false, vec![(45, 53)]),
+            ("B", 8, 32, true, vec![]),
+            ("S", 34, 0, false, vec![]),
+            ("S", 37, 0, false, vec![(53, 60)]),
+        ],
+    );
+}
+
+/// The definition ends the physical line: the resume is pushed past every body
+/// region of the line, so the body lines are never emitted as statements (on
+/// master `bodyX` ran as a command — rc 1).
+#[test]
+fn scan_function_block_ending_line_skips_body_regions() {
+    check_shapes(
+        b"cat <<X; f() { echo hi; }\nbodyX\nX",
+        &[
+            ("S", 0, 0, false, vec![(26, 33)]),
+            ("B", 8, 25, true, vec![]),
+        ],
+    );
+}
+
+// Heredoc statement between the definition and the call: same rule.
+#[test]
+fn scan_heredoc_between_function_block_and_call_shares_body_stream() {
+    check_shapes(
+        b"cat <<X; f() { echo hi; }; cat <<B; f\nbodyX\nX\nbodyB\nB",
+        &[
+            ("S", 0, 0, false, vec![(38, 46)]),
+            ("B", 8, 25, true, vec![]),
+            ("S", 27, 0, false, vec![(46, 53)]),
+            ("S", 36, 0, false, vec![]),
+        ],
+    );
+}
+
+/// The `(kind, off-or-start, end_pos, closed, bodies)` face of every segment a
+/// line produces, in scan order (`off` for statements, unused fields zeroed).
+type Shape = (&'static str, usize, usize, bool, Vec<(usize, usize)>);
+
+fn check_shapes(line: &[u8], want: &[Shape]) {
+    let got: Vec<Shape> = scan_segments(line, false)
+        .iter()
+        .map(|seg| match seg {
+            Segment::Statement { off, bodies, .. } => ("S", *off, 0, false, bodies.clone()),
+            Segment::Block {
+                block_start,
+                end_pos,
+                closed,
+                bodies,
+            } => ("B", *block_start, *end_pos, *closed, bodies.clone()),
+        })
+        .collect();
+    assert_eq!(got, want, "{line:?}");
+}
+
 /// The `{ …; }` group span: the `{` to the end of the statement it opens, so
 /// the trailing redirection, `&&`, and `#` comment are outside the block's own
 /// text and the next statement starts after them.

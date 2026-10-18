@@ -663,6 +663,126 @@ fn heredoc_stmt_before_if_no_condition_heredoc_same_line() {
     assert_eq!(out, "bodyX\ny\nbodyB\n");
 }
 
+// --- Function-definition blocks on a line that also carries heredoc statements
+// (task #240): the definition claims **no** region of its physical line's body
+// stream (its body's here-docs feed the statements inside it, the body is
+// re-scanned), and the regions are allocated per physical line in operator
+// order: the pre-block statements first, the trailing statements last. On
+// master the trailing statement was fed the pre-block statement's body region
+// (`bodyX` plus its delimiter line as content). Every expectation below is
+// bash 5.3.9's own output for the same script. ---
+
+#[test]
+fn heredoc_stmt_before_function_block_and_after_same_line() {
+    let (out, err, code) = run("cat <<X; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nhi\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_two_stmts_before_function_block_and_after_same_line() {
+    let (out, err, code) =
+        run("cat <<X; cat <<Y; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyY\nY\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nbodyY\nhi\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_stmt_before_function_block_ending_line_same_line() {
+    // The definition ends the line: the scan resumes past all of the line's
+    // body regions, so `bodyX` is data, never a command (master: rc 1).
+    let (out, err, code) = run("cat <<X; f() { echo hi; }\nbodyX\nX");
+    assert_eq!((out.as_str(), code), ("bodyX\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn heredoc_stmt_before_function_keyword_form_and_after_same_line() {
+    let (out, err, code) = run("cat <<X; function f { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nhi\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_stmt_before_function_block_two_calls_and_after_same_line() {
+    let (out, err, code) = run("cat <<X; f() { echo hi; }; f; f; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nhi\nhi\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_two_function_defs_redefine_and_trailing_stmt_same_line() {
+    let (out, err, code) =
+        run("cat <<X; f() { echo hi; }; f() { echo second; }; f; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nsecond\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_stmt_between_function_block_and_call_same_line() {
+    let (out, err, code) = run("cat <<X; f() { echo hi; }; cat <<B; f\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nbodyB\nhi\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_stmt_before_function_block_and_conditional_tail_same_line() {
+    let (out, err, code) = run("cat <<X; f() { echo hi; }; f && cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nhi\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_stmt_before_function_block_and_redirected_call_same_line() {
+    let (out, err, code) = run("cat <<X; f() { :; }; f > /dev/null; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_stmt_before_function_block_nested_in_if_body_same_line() {
+    // The same rule inside a keyword block's body (task #242 owns the
+    // nested-combo xtrace shape, not these outputs).
+    let (out, err, code) =
+        run("if true; then cat <<X; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB\nfi");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nhi\nbodyB\n", 0),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn heredoc_in_multiline_function_then_trailing_stmt_same_line() {
+    // Multi-line definition: the trailing statement keeps master's (already
+    // bash-matching) region — regression guard for the multi-line branch.
+    let (out, err, code) = run("f() {\ncat <<A\nin-a\nA\n}\nf; cat <<B\nbodyB\nB");
+    assert_eq!((out.as_str(), code), ("in-a\nbodyB\n", 0), "stderr={err:?}");
+}
+
 #[test]
 fn heredoc_twice_last_wins() {
     // POSIX #2.5: both bodies are kept in operator order and the last redirect

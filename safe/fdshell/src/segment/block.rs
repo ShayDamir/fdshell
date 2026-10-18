@@ -53,32 +53,58 @@ pub(super) fn open_block<'a>(
     pre_resume: usize,
     line_start: usize,
 ) -> (Segment<'a>, usize, usize, usize) {
-    if let Some((end, closed)) = scan_function_block(line, part, start, state.quotes()) {
-        (
-            Segment::Block {
-                block_start: start,
-                end_pos: end,
-                closed,
-                // A function body's heredocs belong to the statements inside it
-                // (the body is re-scanned), never to the definition's span.
-                bodies: Vec::new(),
-            },
-            end + 1,
-            pre_resume,
-            end + 1,
-        )
-    } else {
-        let (segment, resume, floor) =
-            keyword::keyword_block(line, raw, part, start, line_start, state, pre_resume);
-        // Trailing content shares the block's physical line: the line's
-        // bookkeeping (and its global body stream) continues from the line's
-        // start, so the trailing runs' flush skips the regions the block's
-        // operators claimed.
-        let new_start = if resume < heredoc::line_end_after(line, start) {
-            line_start
+    let (segment, resume, floor) =
+        if let Some((end, closed)) = scan_function_block(line, part, start, state.quotes()) {
+            function_block(line, start, end, closed, pre_resume)
         } else {
-            resume
+            keyword::keyword_block(line, raw, part, start, line_start, state, pre_resume)
         };
-        (segment, resume, floor, new_start)
-    }
+    // Trailing content shares the block's physical line: the line's bookkeeping
+    // (and its global body stream) continues from the line's start, so the
+    // trailing runs' flush skips the regions the pre-block statements and the
+    // block's own operators claimed.
+    let new_start = if resume < heredoc::line_end_after(line, start) {
+        line_start
+    } else {
+        resume
+    };
+    (segment, resume, floor, new_start)
+}
+
+/// The `name() { … }` branch: the span is the definition's text and it claims
+/// **no** regions of the line's body stream — a body heredoc belongs to the
+/// statement inside the body (the body is re-scanned), never to the definition.
+/// The resume and the floor follow [`keyword::keyword_block`]'s rule so the scan
+/// never resumes inside a body region: with trailing content on the line the
+/// floor keeps the line's final flush from re-entering the regions claimed on
+/// this line (the pre-block statements' and the body operators'), and when the
+/// definition ends the line the resume is pushed past all of them.
+fn function_block(
+    line: &[u8],
+    start: usize,
+    end: usize,
+    closed: bool,
+    pre_resume: usize,
+) -> (Segment<'_>, usize, usize) {
+    let line_end = heredoc::line_end_after(line, start);
+    // `line_resume` is the end of the line's last body region past the block
+    // (the line end when the bodies are missing) — the same anchor the keyword
+    // branch uses.
+    let (_, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
+    let resume = end + 1;
+    let (resume, floor) = if resume < line_end {
+        (resume, line_resume.max(pre_resume))
+    } else {
+        (resume.max(line_resume).max(pre_resume), 0)
+    };
+    (
+        Segment::Block {
+            block_start: start,
+            end_pos: end,
+            closed,
+            bodies: Vec::new(),
+        },
+        resume,
+        floor,
+    )
 }
