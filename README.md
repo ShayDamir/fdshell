@@ -244,6 +244,10 @@ stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
 its own unquoted digit word, as in `3>file` — `cat "3"<<EOF` and `cat \3<<EOF`
 are the argument `"3"<<EOF`, not a here-document
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#here-document-descriptor-numbers)).
+`N` is a raw descriptor number, not an fd variable: it has no `%fd`
+counterpart — nothing is bound under a name, `unset %name` closes nothing —
+and the descriptor is reachable only as a number in the same command's
+redirections (`3<<EOF <&3`, `exec 4>&3`).
 
 A here-string feeds one expanded word plus a newline:
 

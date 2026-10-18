@@ -65,20 +65,17 @@ to fd 3 and leaves stdin untouched). fdshell reads `N` with the same rule as
 
 - The digits must begin the operator's word unescaped: a quoted prefix, a
   quoted operator, an escaped digit, or digits glued to a longer word are word
-  data (`cat "3"<<EOF`, `cat 3"<<"EOF`, `cat \3<<EOF`, `cat x3<<EOF` all pass
-  the token to the command). bash agrees on every one of these.
+  data — fdshell passes the whole token to the command (`cat "3"<<EOF` gets
+  the argument `"3"<<EOF`). bash never reads a descriptor number from these
+  shapes either, but it splits the word at the operator (`cat "3"<<EOF` gets
+  the argument `3`) and then reads the body lines as the here-document;
+  fdshell never splits (the word rule above) and the body lines are commands.
 - The number is validated as a descriptor, so a run that does not fit is a
   parse error naming it: `cat 99999999999999999999999<<EOF` reports `is not a
   valid descriptor number` where bash passes `999…` as an argument.
 - A number-prefixed `<<` at the start of a run is fdshell's command word
   (`3<<EOF` alone runs `3<<EOF` as a command, rc 1); bash opens fd 3 and
   prints nothing.
-
-The prefix is not recognised on `&>`/`&>>` (`cat 3&>file`, task #314) or on the
-here-string (`cat 3<<<word`, task #312); both keep their current shapes.
-Combining a numbered here-doc with a sibling `>&N`/`<&N` dup
-(`cat 3<<T 1>&3`), with a group body (`{ cat 3<<T; }`) or inside `( … )` hits
-the pre-existing gaps of tasks #178, #315 and #316.
 
 ## `wait` is also a block keyword
 
