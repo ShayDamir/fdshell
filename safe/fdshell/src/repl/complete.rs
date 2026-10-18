@@ -2,17 +2,19 @@
 //! or does it need more lines (continuation)?
 //!
 //! The check reuses the existing byte scanners verbatim (no parser changes):
-//! `scan_segments` reports open keyword/function blocks and heredoc command
-//! lines, and a `ScanState` walk reports open quotes/backticks/`$( )` and a
-//! dangling top-level `&&`/`||`.
+//! `scan_segments` reports open keyword/function blocks, closed blocks whose
+//! here-doc body lines have not arrived, and heredoc command lines, and a
+//! `ScanState` walk reports open quotes/backticks/`$( )` and a dangling
+//! top-level `&&`/`||`.
 
 use crate::scan::heredoc;
 use crate::segment::{Segment, scan_segments};
 
 /// `true` when `line` is a complete construct and can be executed now;
-/// `false` when it is incomplete (an open block, an unterminated heredoc, a
-/// trailing operator, or an unbalanced quote/backtick/`$( )`) and the REPL
-/// should read a continuation line.
+/// `false` when it is incomplete (an open block, an unterminated heredoc —
+/// also one inside a *closed* block whose body lines have not arrived,
+/// task #322 — a trailing operator, or an unbalanced quote/backtick/`$( )`)
+/// and the REPL should read a continuation line.
 pub(crate) fn is_complete(line: &[u8]) -> bool {
     !blocks_or_heredoc_open(line) && !super::trailing::trailing_open(line)
 }
@@ -23,12 +25,24 @@ fn blocks_or_heredoc_open(line: &[u8]) -> bool {
     for seg in scan_segments(line, false) {
         match seg {
             Segment::Block { closed: false, .. } => return true,
+            // A closed block whose own `<<` bodies have not arrived keeps the
+            // prompt reading: "closed" is the block text's completeness, not
+            // its body stream's (task #322, prompt granularity of #311).
+            Segment::Block {
+                closed: true,
+                block_start,
+                end_pos,
+                ..
+            } if heredoc::unterminated(line, block_start, cmd_line_end(line, end_pos)) => {
+                return true;
+            }
             Segment::Statement { off, .. }
                 if heredoc::unterminated(line, off, cmd_line_end(line, off)) =>
             {
                 return true;
             }
-            // A closed block (or any other segment) is complete.
+            // A closed block whose bodies resolved (or any other segment) is
+            // complete.
             _ => {}
         }
     }
