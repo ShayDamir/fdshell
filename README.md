@@ -254,6 +254,13 @@ unquoted delimiter). So `cat <<T` with the body line `{a,b}` prints `{a,b}`, and
 so does the same here-document inside a single-line keyword block's arm —
 `if true; then cat <<T; fi` + `{a,b}` + `T` prints `{a,b}`.
 
+A physical line owns **one** body stream, and its regions are handed out in
+operator order to the operators written on that line: the pre-block statements
+first, then the block's own operators, then the trailing statements. A
+`name() { … }` definition claims none — its body's here-docs feed the
+statements inside it: `cat <<X; f() { echo hi; }; f; cat <<B` + `bodyX`/`X`/
+`bodyB`/`B` prints `bodyX`, `hi`, `bodyB`.
+
 A number in front of the operator puts the body on that descriptor instead of
 stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
 `exec 3<<EOF` keeps it there for the rest of the script. The number must be
