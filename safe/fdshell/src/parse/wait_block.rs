@@ -48,7 +48,7 @@ pub enum FdRef {
 /// `wait`, `;`, `readable`, …), so the loop is reachable (a same-line `;`
 /// never arrives — the statement splitter claims it first).
 pub(super) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
-    let Some((_wt, _ws, we, _wq, _wm, _ws2)) = tokens.first() else {
+    let Some((_wt, _ws, we, _wq, _wm, _spans)) = tokens.first() else {
         return false;
     };
     let mut pos = 1;

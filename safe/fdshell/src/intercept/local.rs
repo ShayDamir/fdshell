@@ -113,7 +113,7 @@ fn expand_value(
 /// #46), and not an option word, so `-r`/`-a`/`-n` are rejected as names.
 fn split_name(word: &ShortCStr) -> Result<(ShortCStr, Option<ShortCStr>), Report<CmdError>> {
     let assigned = word.split_once_byte(b'=').map(|(n, v)| (n, Some(v)));
-    let (name, value) = assigned.unwrap_or((word.clone(), None));
+    let (name, value) = assigned.unwrap_or_else(|| (word.clone(), None));
     if name.is_empty() || name.starts_with(b"%") || name.starts_with(b"-") {
         bail!(CmdError::LocalBadName { name: name.clone() });
     }
