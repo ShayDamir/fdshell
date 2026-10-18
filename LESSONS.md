@@ -906,6 +906,33 @@ the release profile, one un-folded burn costs ~10 ms of user CPU and the same lo
 with `black_box` moved back *after* the loop ~0 ms — the burn is real in release,
 which is the only thing a `utime + stime > 0` assertion needs from it.
 
+## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
+`connect_listen_accept_in_one_script_inet` failed once in the `nix flake check`
+sandbox and passed on re-run, and was filed as timing-sensitive (task #239). The
+script has no inter-process timing dependency at all — `listen`, `connect`,
+`accept` run in one process and `connect` returns once the peer is queued in the
+listener's backlog. The real name collision is in the port the test *picks*:
+`10000 + pid % 20000 + offset`. (a) nextest runs test binaries as separate
+processes in one network namespace, so two binaries with adjacent pids `P`, `P+1`
+and offsets `a`, `a−1` name the **same port**; the second `bind` exits 98
+(`EADDRINUSE`) and the test's `code == 0` fails. (b) The range overlaps the
+kernel's ephemeral source-port range (20000–60999): a loopback `connect` picks
+its source port there, and source == destination fails `connect` (99/22). (c) The
+actively closed connection leaves the port in `TIME_WAIT` ~60 s and the
+`bind`/`listen` builtins set no socket options, so a port reused by a run that
+happens to share a pid binds 98. Every signature is pid-dependent, so every one
+of them "passes on re-run" — read that signature as *shared-name luck* before
+calling anything timing-sensitive. Rule: name test ports uniquely **per call
+site** (the same sequence counter the abstract socket names use), keep the band
+**below** the ephemeral range, and step the pid so adjacent pids do not land on
+the same port. "Let the kernel pick the port" is not available here: there is no
+`getsockname` wrapper in the tree, so a shell test must name the port. A retry
+may re-attempt such a test (bounded, only the port-busy errnos 98/99, fresh port
+each attempt) but may never widen its tolerance — a retry that swallows other
+statuses converts a real failure into a pass. The product-side half (a real
+server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR`) is not a test
+artifact and is tracked separately (task #331).
+
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
 report prints *before* them") carried `.`. `.` is the `source` alias: it runs the script

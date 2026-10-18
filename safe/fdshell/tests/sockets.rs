@@ -30,9 +30,25 @@ fn uniq(tag: &str) -> String {
     )
 }
 
-/// A pid-derived loopback port; `offset` keeps parallel tests apart.
-fn inet_port(offset: u16) -> u16 {
-    (10000u32 + std::process::id() % 20000 + u32::from(offset)) as u16
+/// Above the well-known ports; the span ends below the kernel's ephemeral
+/// range (20000+), so a loopback `connect`'s kernel-chosen source port can
+/// never equal the port a test names (LESSONS: a pid-derived fixed test port
+/// is a shared name, its "passes on re-run" is pid luck, not timing).
+const INET_PORT_BASE: u32 = 5_000;
+const INET_PORT_SPAN: u32 = 14_000;
+
+/// A port for one AF_INET test: unique per **call** (the same `NEXT_ID` the
+/// abstract names use), stepped by a number coprime with the span so two
+/// call sites in one binary never share a port, and stepped by the pid with
+/// a coprime step so concurrent test binaries with adjacent pids do not land
+/// on the same port. The value is not an assertion — only its uniqueness is.
+/// The products are computed in `u64`: a Linux pid reaches 4.1M, and
+/// `pid * 7_919` overflows `u32` under the debug profile's overflow checks.
+fn inet_port() -> u16 {
+    let seq = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let pid = u64::from(std::process::id());
+    let port = u64::from(INET_PORT_BASE) + (pid * 7_919 + seq * 613) % u64::from(INET_PORT_SPAN);
+    u16::try_from(port).unwrap()
 }
 
 fn connect_abstract(name: &str) -> UnixStream {
@@ -67,6 +83,28 @@ fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
         str::from_utf8(&out.stderr).unwrap().to_string(),
         out.status.code().unwrap_or(-1),
     )
+}
+
+/// `EADDRINUSE`/`EADDRNOTAVAIL`: the port is taken. 98 is already pinned in
+/// this file (`bind_abstract_no_file_created`).
+const PORT_BUSY: [i32; 2] = [98, 99];
+const INET_ATTEMPTS: u32 = 5;
+
+/// Run an AF_INET script with a **bounded** retry, each attempt naming a
+/// fresh port. Only the two port-busy exits are retried: every other status
+/// is returned untouched, so a genuine failure still fails the test's own
+/// assertion. No sleeps, at most `INET_ATTEMPTS` script runs, and the
+/// assertions stay exactly as they are (`code == 0`, `out == "got:hi\n"`) —
+/// a retry re-attempts the test, it never widens its tolerance.
+fn run_inet(script: &dyn Fn(u16) -> String) -> (String, String, i32) {
+    let mut last = run(&script(inet_port()));
+    for _ in 1..INET_ATTEMPTS {
+        if !PORT_BUSY.contains(&last.2) {
+            break;
+        }
+        last = run(&script(inet_port()));
+    }
+    last
 }
 
 fn tmpdir(tag: &str) -> std::path::PathBuf {
@@ -153,7 +191,7 @@ fn bind_path_duplicate_while_held_is_eaddrinuse() {
 /// socket is not listening, and the kernel refuses it by design.
 #[test]
 fn bind_inet_loopback() {
-    let port = inet_port(0);
+    let port = inet_port();
     let mut child = spawn_server(&format!(
         "builtin bind --type dgram --bind 127.0.0.1 --port {port} %>%s; sleep 1"
     ));
@@ -262,7 +300,7 @@ fn listen_accept_abstract_roundtrip() {
 /// The AF_INET variant: the test side connects over `std::net::TcpStream`.
 #[test]
 fn listen_accept_inet_roundtrip() {
-    let port = inet_port(1);
+    let port = inet_port();
     let child = spawn_server(&format!(
         "builtin listen --bind 127.0.0.1 --port {port} %>%s; echo ready; \
          builtin accept %s %>%c; read -u %c L; echo \"got:$L\""
@@ -477,14 +515,15 @@ fn connect_listen_accept_in_one_script_abstract() {
 /// The AF_INET one-script variant.
 #[test]
 fn connect_listen_accept_in_one_script_inet() {
-    let port = inet_port(2);
-    let (out, err, code) = run(&format!(
-        "builtin listen --bind 127.0.0.1 --port {port} %>%l; \
-         builtin connect --bind 127.0.0.1 --port {port} %>%c; \
-         builtin accept %l %>%s; \
-         printf \"hi\\n\" >%c; \
-         read -u %s L; echo \"got:$L\""
-    ));
+    let (out, err, code) = run_inet(&|port| {
+        format!(
+            "builtin listen --bind 127.0.0.1 --port {port} %>%l; \
+             builtin connect --bind 127.0.0.1 --port {port} %>%c; \
+             builtin accept %l %>%s; \
+             printf \"hi\\n\" >%c; \
+             read -u %s L; echo \"got:$L\""
+        )
+    });
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "got:hi\n");
 }
@@ -494,14 +533,15 @@ fn connect_listen_accept_in_one_script_inet() {
 /// that calls `listen(2)`).
 #[test]
 fn connect_listen_accept_in_one_script_inet_addr_alias() {
-    let port = inet_port(3);
-    let (out, err, code) = run(&format!(
-        "builtin listen --backlog 4 --addr 127.0.0.1 --port {port} %>%l; \
-         builtin connect --addr 127.0.0.1 --port {port} %>%c; \
-         builtin accept %l %>%s; \
-         printf \"hi\\n\" >%c; \
-         read -u %s L; echo \"got:$L\""
-    ));
+    let (out, err, code) = run_inet(&|port| {
+        format!(
+            "builtin listen --backlog 4 --addr 127.0.0.1 --port {port} %>%l; \
+             builtin connect --addr 127.0.0.1 --port {port} %>%c; \
+             builtin accept %l %>%s; \
+             printf \"hi\\n\" >%c; \
+             read -u %s L; echo \"got:$L\""
+        )
+    });
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "got:hi\n");
 }
