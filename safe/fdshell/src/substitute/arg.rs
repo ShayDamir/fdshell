@@ -38,7 +38,7 @@ pub(super) fn substitute_arg_marked(
     let mut peek = Counting::new(bytes.iter().copied());
     let mut idx = 0usize;
     if super::tilde::leads(bytes, mask) {
-        super::tilde::expand(&mut peek, &mut idx, mask, &mut out, &mut out_mask)?;
+        super::tilde::expand(&mut peek, &mut idx, mask, cell, &mut out, &mut out_mask)?;
     }
     while let Some(b) = peek.next() {
         let quoted = mask.get(idx).copied().unwrap_or(false);

@@ -3,9 +3,11 @@
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
+use sys::fork_cell::ForkCell;
 
 use super::mask::{push_byte, push_expanded};
 use crate::error::resolve::ResolveError;
+use crate::state::ShellState;
 
 /// Whether the word opens a tilde expansion: a leading `~` whose tilde-prefix
 /// — the word's bytes from `~` through the first `/` **inclusive** (the whole
@@ -39,15 +41,22 @@ fn prefix_quoted(bytes: &[u8], mask: &[bool]) -> bool {
 }
 
 /// Expand the leading `~` already at the front of `peek`. `~` alone or
-/// `~/…` becomes `$HOME` (nothing when unset); any other `~x` keeps the
-/// tilde. Consumed input and appended output keep the quote mask aligned.
-/// The pushed `$HOME` bytes are deliberately **not** recorded as a
-/// provenance span: bash never IFS-splits tilde output
-/// (`IFS=,; HOME="a,b"; printf %s ~` → `[a,b]`), so they stay literal.
+/// `~/…` becomes `$HOME` (nothing when `HOME` is set nowhere); any other `~x`
+/// keeps the tilde. Consumed input and appended output keep the quote mask
+/// aligned. `HOME` is read through `ShellState::var_value` — the shell's own
+/// variables first, the inherited environment as the documented fallback —
+/// i.e. the **same lookup `$HOME` uses** (POSIX #2.6.1: tilde expansion takes
+/// the `HOME` shell variable, so `HOME=/tmp/H; echo ~/x` prints `/tmp/H/x`).
+/// fdshell has no password database, so where bash falls back to a login
+/// directory `~` contributes nothing. The pushed `$HOME` bytes are
+/// deliberately **not** recorded as a provenance span: bash never IFS-splits
+/// tilde output (`IFS=,; HOME="a,b"; printf %s ~` → `[a,b]`), so they stay
+/// literal.
 pub(super) fn expand(
     peek: &mut super::mask::Counting<'_>,
     idx: &mut usize,
     mask: &[bool],
+    cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     out_mask: &mut Vec<bool>,
 ) -> Result<(), Report<ResolveError>> {
@@ -56,7 +65,8 @@ pub(super) fn expand(
     let home_q = mask.first().copied().unwrap_or(false);
     match peek.peek() {
         None | Some(&b'/') => {
-            if let Some(home) = sys::env::getenv(c"HOME") {
+            let state = super::borrow_state(cell)?;
+            if let Some(home) = state.var_value(&ShortCStr::from(c"HOME")) {
                 let bytes = home.as_bytes().change_context(ResolveError::RefNotFound)?;
                 push_expanded(out, out_mask, bytes, home_q)?;
             }
