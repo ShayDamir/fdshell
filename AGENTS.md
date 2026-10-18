@@ -116,8 +116,10 @@ Investigation tasks produce **no code** — they produce **Epics**:
 - Each subagent resolves the task itself with `yask_get_task(project, number)`
   and reads only the attachments relevant to its role (`yask_last_attachment`,
   pulling older ones only when needed).
-- Subagents never touch anything outside their own task except when creating
-  a new task for out-of-scope work (below).
+- Subagents never touch anything outside their own task, with two exceptions:
+  creating a new task for out-of-scope work (below), and the **Judge**
+  archiving tasks that the task under review's attachments flag as superseded
+  (each with a `verdict.md` explaining why; see `judge.md`).
 
 ### Attachment conventions
 
@@ -130,7 +132,7 @@ Filenames are the contract; content is markdown unless noted:
 | `investigation.md` | Investigator | result of investigation, attached to created epics |
 | `session-summary.md` | Executor   | what changed, verification results, deviations |
 | `review.md`        | Reviewer     | plan→code verification, findings, verdict    |
-| `verdict.md`       | Judge        | what must be fixed (re-work round)           |
+| `verdict.md`       | Judge        | what must be fixed (re-work round), or why a task was archived as superseded |
 | `unblock.md`       | any agent    | why a task is `Blocked` and what unblocks it |
 
 Attach markdown by writing a temp file under `/tmp` and calling
