@@ -79,7 +79,7 @@ pub(super) fn finish_command(
                         .push(super::word_quoted::word_quoted(t, *ts, *te));
                 }
             }
-        } else if let Some((r, extra)) = super::here_string::parse_here_string(tokens, i)? {
+        } else if let Some((r, extra)) = super::here_string::parse_here_string(line, tokens, i)? {
             bg_redirect::insert_redirect(&mut cmd.redirects, r);
             skip = extra;
         } else if let Some((r, extra)) = crate::parse::classify::parse_redirect(tokens, i)? {

@@ -18,7 +18,7 @@ pub(super) fn protected(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     for i in literal_indices(tokens, line) {
         out.push(i);
     }
-    for i in word_indices(tokens) {
+    for i in word_indices(line, tokens) {
         out.push(i);
     }
     for i in delimiter_token_indices(line, tokens) {

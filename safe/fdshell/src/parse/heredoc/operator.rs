@@ -4,7 +4,7 @@
 use super::super::Token;
 use crate::error::parse::ParseError;
 use crate::scan::heredoc::{
-    Operator, attached, heredoc_fd, invalid_delimiter, operator_delim, span_operator,
+    Operator, attached, invalid_delimiter, io_fd, operator_delim, span_operator,
 };
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
@@ -88,7 +88,7 @@ pub(super) fn operator_at(
     };
     let (op, _prefix) = span_operator(line, *start, *end).ok_or(ParseError::Never)?;
     let digits = line.get(*start..op).ok_or(ParseError::Never)?;
-    let Some(fd) = heredoc_fd(digits) else {
+    let Some(fd) = io_fd(digits) else {
         let prefix = ShortCStr::from_vec(digits.to_vec()).change_context(ParseError::Never)?;
         bail!(ParseError::InvalidHeredocFd { prefix });
     };

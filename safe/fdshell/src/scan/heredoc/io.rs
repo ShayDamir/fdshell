@@ -1,10 +1,13 @@
-//! The raw-byte shape rules a `<<` operator shares between the two levels:
-//! the byte scan (`scan::heredoc::operator_delims`) and the token parser
-//! (`parse::heredoc::is_operator`). The io-number form `[N]<<word` is written
-//! *inside* one word (`cat 3<<T`), so only a raw-byte rule sees it: a token-text
-//! version of the same rule (`3"<<"T` ≡ `3<<T` after quote removal) recreates
-//! the byte/token count mismatch (LESSONS), and a shifted body region is the
-//! symptom (tasks #138/#238).
+//! The raw-byte shape rules the `<<` and `<<<` operators share between the two
+//! levels: the byte scan (`scan::heredoc::operator_delims`) and the token
+//! parser (`parse::heredoc::is_operator`, `parse::here_string`). The io-number
+//! form `[N]<<word` is written *inside* one word (`cat 3<<T`), so only a
+//! raw-byte rule sees it: a token-text version of the same rule (`3"<<"T` ≡
+//! `3<<T` after quote removal) recreates the byte/token count mismatch
+//! (LESSONS), and a shifted body region is the symptom (tasks #138/#238).
+//! The byte scan reads only `<<` (`is_chevron` excludes a `<<<`); the
+//! here-string's own span rule (`string_span`) exists for the token parser, so
+//! the two operators never share a chevron test.
 
 use crate::parse::parse_fd;
 use crate::scan::ScanState;
@@ -17,7 +20,7 @@ use sys::ShortCStr;
 /// form), and when any other byte precedes the digits (`x<<T`, `x3<<T`,
 /// `"3"<<T`, `\3<<T`, `>3<<T`). Purely syntactic: no fd-range test, so both
 /// levels count `999…<<T` identically and only the parse site reports the
-/// range failure (`heredoc_fd`'s `None`).
+/// range failure (`io_fd`'s `None`).
 pub(super) fn io_prefix<'a>(
     line: &'a [u8],
     op_start: usize,
@@ -26,14 +29,41 @@ pub(super) fn io_prefix<'a>(
     if !is_chevron(line, op_start) {
         return None;
     }
-    let mut start = op_start;
-    while start > 0 && line.get(start - 1).is_some_and(u8::is_ascii_digit) {
-        start -= 1;
-    }
-    if start == op_start || !word_start(line, start, state) {
+    let start = digit_run(line, op_start)?;
+    if !word_start(line, start, state) {
         return None;
     }
     Some((start, line.get(start..op_start)?))
+}
+
+/// The decimal digit run that ends at `op`: the index its first digit sits at,
+/// `None` when `op` is not preceded by a digit. Both count levels walk the
+/// digits here, so a run glued to a longer word (`x3<<T`, `x3<<<T`) is rejected
+/// identically at the byte scan and at the token parser.
+fn digit_run(line: &[u8], op: usize) -> Option<usize> {
+    let mut start = op;
+    while start > 0 && line.get(start - 1).is_some_and(u8::is_ascii_digit) {
+        start -= 1;
+    }
+    (start < op).then_some(start)
+}
+
+/// The here-string's raw span: `[io-number] <<<`, the digits beginning the
+/// span — `span_operator`'s rule for the `<<<` operator, and the token parser's
+/// only reading of a here-string (its `prefix` is the shift the word and its
+/// mask are sliced by). Purely syntactic like `span_operator`: `999…<<<T` is a
+/// span, and only the parse site reports the range failure (`io_fd`'s `None`).
+pub(crate) fn string_span(line: &[u8], start: usize, end: usize) -> Option<(usize, usize)> {
+    let at = line.get(start..end)?.iter().position(|&b| b == b'<')?;
+    let op = start + at;
+    if line.get(op..op + 3) != Some(&b"<<<"[..]) {
+        return None;
+    }
+    match digit_run(line, op) {
+        Some(run) if run == start => Some((op, op - run)),
+        None if at == 0 => Some((op, 0)),
+        _ => None,
+    }
 }
 
 /// The io-number form inside a token's raw span: `(chevron_pos, prefix_len)`
@@ -53,11 +83,13 @@ pub(crate) fn span_operator(line: &[u8], start: usize, end: usize) -> Option<(us
     }
 }
 
-/// The here-doc target descriptor: the very rule `N>file` uses
-/// (`parse::redirect::parse_fd`), so one decimal rule decides both families.
-/// `None` when the run does not fit `i32`: the byte scan has no error channel
-/// and counts the operator either way; the parse site reports the failure.
-pub(crate) fn heredoc_fd(digits: &[u8]) -> Option<i32> {
+/// The io-number target descriptor for `N>file`, `N<file`, `N<<word` and
+/// `N<<<word`: the very rule `N>file` uses (`parse::redirect::parse_fd`), so
+/// one decimal rule decides all four operators and the fd-number semantics
+/// cannot drift between them. `None` when the run does not fit `i32`: the byte
+/// scan has no error channel and counts the operator either way; the parse site
+/// reports the failure.
+pub(crate) fn io_fd(digits: &[u8]) -> Option<i32> {
     ShortCStr::from_vec(digits.to_vec())
         .ok()
         .and_then(|prefix| parse_fd(&prefix, b'<'))

@@ -137,6 +137,9 @@ pub(crate) enum ParseError {
     /// here-doc: '{prefix}' is not a valid descriptor number (a decimal fd
     /// number in `0 ..= 2147483647`, as in `N>file`)
     InvalidHeredocFd { prefix: sys::ShortCStr },
+    /// here-string: '{prefix}' is not a valid descriptor number (a decimal fd
+    /// number in `0 ..= 2147483647`, as in `N>file`)
+    InvalidHereStringFd { prefix: sys::ShortCStr },
     /// arithmetic command must be `((expr))` with no trailing words
     MalformedArithCommand,
 }

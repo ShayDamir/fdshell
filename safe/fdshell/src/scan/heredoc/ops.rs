@@ -3,7 +3,7 @@
 
 use crate::scan::ScanState;
 
-use super::io::{heredoc_fd, io_prefix, word_start};
+use super::io::{io_fd, io_prefix, word_start};
 use super::lines::delimiter_span;
 use super::op::Operator;
 use alloc::vec::Vec;
@@ -59,7 +59,7 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
         {
             let dash = line.get(i + 2) == Some(&b'-');
             let (next, raw) = delimiter_span(line, i + 2 + usize::from(dash), to)?;
-            let fd = io.and_then(|(_, digits)| heredoc_fd(digits)).unwrap_or(0);
+            let fd = io.and_then(|(_, digits)| io_fd(digits)).unwrap_or(0);
             found.push(Operator::new(raw, dash, fd));
             while i < next {
                 i = state.advance(line, i);
