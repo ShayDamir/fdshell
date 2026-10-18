@@ -1808,6 +1808,9 @@ fn numbered_heredoc_shape_inside_a_quoted_word_is_word_data() {
 /// argument and there is no here-doc. bash agrees (its io-number must be an
 /// unquoted word of digits); only the exit status of the follow-on commands
 /// differs (fdshell reports 1, bash 127 — pinned in tests/external.rs).
+/// The `cat 3<<<str` row that used to sit in this list is gone: task #312 made
+/// it a here-string on fd 3, and the here-string family pins that shape (and
+/// its own word-data rows) in `tests/herestring.rs`.
 #[test]
 fn numbered_heredoc_prefixes_that_are_not_digits_are_word_data() {
     for (script, needle) in [
@@ -1819,7 +1822,6 @@ fn numbered_heredoc_prefixes_that_are_not_digits_are_word_data() {
         ("cat 3'<<'T\nbody\nT", "cat: '3<<T'"),
         ("cat \\3<<T\nbody\nT", "cat: '3<<T'"),
         ("FD=3; cat $FD<<T\nbody\nT", "cat: '3<<T'"),
-        ("cat 3<<<str", "cat: '3<<<str'"), // task #312 owns the here-string
     ] {
         let (out, err, code) = run(script);
         assert_eq!(code, 1, "script={script:?} err={err}");

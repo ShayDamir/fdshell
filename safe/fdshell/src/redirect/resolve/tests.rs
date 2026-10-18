@@ -112,7 +112,7 @@ fn here_string_expands_word_and_appends_newline() {
             sys::ImportedStr::new(c"hello".into(), sys::Trace::boundary(sys::Origin::Shell)),
         );
     }
-    let redirects = vec![RedirectDef::here_string(c"$x", vec![false; 2])];
+    let redirects = vec![RedirectDef::here_string(0, c"$x", vec![false; 2])];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
@@ -124,7 +124,7 @@ fn here_string_expands_word_and_appends_newline() {
 #[test]
 fn here_string_empty_word_is_bare_newline() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(c"", Vec::new())];
+    let redirects = vec![RedirectDef::here_string(0, c"", Vec::new())];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -135,7 +135,7 @@ fn here_string_empty_word_is_bare_newline() {
 #[test]
 fn here_string_reads_back_to_eof() {
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(c"abc", vec![false; 3])];
+    let redirects = vec![RedirectDef::here_string(0, c"abc", vec![false; 3])];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
@@ -151,7 +151,7 @@ fn here_string_quoted_escape_pair_keeps_the_backslash() {
     // keeps the backslash of a `\<char>` pair that is not `\$`, `\\` or `` \` ``
     // (bash prints `a\ b`; the empty mask printed `a b` — task #269).
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])];
+    let redirects = vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
@@ -163,11 +163,39 @@ fn here_string_unquoted_escape_pair_folds_the_backslash() {
     // The same word unmasked folds its escape pair (POSIX 2.2.1), the shape of
     // `cat <<<a\ b`, where bash prints `a b` too.
     let c = cell();
-    let redirects = vec![RedirectDef::here_string(c"a\\ b", Vec::new())];
+    let redirects = vec![RedirectDef::here_string(0, c"a\\ b", Vec::new())];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
     assert_eq!(buf.get(..n).unwrap(), b"a b\n");
+}
+
+/// The `N<<<word` form's source memfd takes the same minimum as the here-doc's
+/// (`numbered_here_doc_source_sits_above_the_export_targets`): with the
+/// io-number prefix the target is user-visible, so a source allocated on `N`
+/// would make the `dup2` a no-op and its `Drop` close the target (LESSONS
+/// "any new source-allocating redirect arm must take the same minimum";
+/// task #312).
+#[test]
+fn numbered_here_string_source_sits_above_the_export_targets() {
+    let c = cell();
+    let redirects = vec![
+        RedirectDef::dup(5, 1),
+        RedirectDef::here_string(3, c"body", vec![false; 4]),
+    ];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let src = resolved
+        .iter()
+        .find(|r| matches!(r, Redirect::Dup { export_to: 3, .. }))
+        .unwrap();
+    assert!(
+        dup_of(src).as_raw() > 5,
+        "the source fd {} must be above the highest export target",
+        dup_of(src).as_raw()
+    );
+    let mut buf = [0u8; 16];
+    let n = dup_of(src).read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"body\n");
 }
 
 #[test]

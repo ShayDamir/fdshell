@@ -380,6 +380,14 @@ fn here_string_word_is_not_expanded() {
     let (out, err, code) = run("cat <<< {a,b}");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "{a,b}\n");
+    // The io-number form (task #312): the body lands on fd 3, so the brace
+    // protection is observable through the shell's own descriptor.
+    let (out, err, code) = run("exec 3<<< {a,b}; cat <&3");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "{a,b}\n");
+    let (out, err, code) = run("exec 3<<<{a,b}; cat <&3");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "{a,b}\n");
 }
 
 #[test]

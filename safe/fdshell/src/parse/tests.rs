@@ -333,7 +333,7 @@ fn test_here_string_prefix_form() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"hello", vec![false; 5])]
+        vec![RedirectDef::here_string(0, c"hello", vec![false; 5])]
     );
     assert!(cmd.args.is_empty());
 }
@@ -345,7 +345,7 @@ fn test_here_string_keeps_unquoted_spaces() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"a b", vec![true; 3])]
+        vec![RedirectDef::here_string(0, c"a b", vec![true; 3])]
     );
 }
 
@@ -357,7 +357,7 @@ fn parse_here_string_word_carries_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])]
     );
     // An unquoted escape pair stays in the *token text* with both bytes
     // unmasked (`\ ` never breaks the token), so the attached word is the
@@ -368,7 +368,7 @@ fn parse_here_string_word_carries_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"a\\ b", vec![false; 4])]
+        vec![RedirectDef::here_string(0, c"a\\ b", vec![false; 4])]
     );
     // A bare `<<<` takes the next token's mask verbatim.
     let ParsedLine::Cmd(cmd) = parse(b"cat <<< \"a\\ b\"").unwrap() else {
@@ -376,7 +376,7 @@ fn parse_here_string_word_carries_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])]
     );
 }
 
@@ -390,10 +390,78 @@ fn parse_here_string_mask_of_a_quoted_word_with_a_second_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"a\\ b", vec![true; 4])]
+        vec![RedirectDef::here_string(0, c"a\\ b", vec![true; 4])]
     );
     assert_eq!(cmd.args, vec![c"b\\ c".into()]);
     assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
+}
+
+/// The io-number form: the descriptor comes from the raw-byte prefix and the
+/// word is sliced past `prefix + 3` (task #312).
+#[test]
+fn parse_here_string_io_number_prefix_targets_the_descriptor() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat 3<<<hello").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(3, c"hello", vec![false; 5])]
+    );
+    assert!(cmd.args.is_empty());
+    // The unprefixed form keeps fd 0 (`<<<word` is the stdin here-string).
+    let ParsedLine::Cmd(cmd) = parse(b"cat 003<<<hello").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(3, c"hello", vec![false; 5])]
+    );
+}
+
+/// The mask shift is `prefix + 3`, and only `word_mask` owns it (LESSONS #269):
+/// the pair below has **differing** masks, so an off-by-one and an off-by-two
+/// cannot both pass it.
+#[test]
+fn parse_here_string_prefixed_word_mask_is_shifted_by_the_prefix() {
+    let ParsedLine::Cmd(cmd) = parse(b"cat 3<<<\"a\\ b\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(3, c"a\\ b", vec![true; 4])]
+    );
+    let ParsedLine::Cmd(cmd) = parse(b"cat 3<<<\"a\\ b\" b\\ c").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(3, c"a\\ b", vec![true; 4])]
+    );
+    assert_eq!(cmd.args, vec![c"b\\ c".into()]);
+    assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
+}
+
+#[test]
+fn parse_here_string_prefixed_bare_form_takes_the_next_word() {
+    // `3<<< word`: the operator token is `3<<<` (4 bytes), which the unshifted
+    // attached test would read as attached on `<`, so the shift is what makes
+    // this the bare form.
+    let ParsedLine::Cmd(cmd) = parse(b"cat 3<<< word").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(3, c"word", vec![false; 4])]
+    );
+    assert!(cmd.args.is_empty());
+    // `3<<<<<x` is the pinned `cat <<<<<x` shape fd-ified: word `<<x` on fd 3.
+    let ParsedLine::Cmd(cmd) = parse(b"cat 3<<<<<x").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_string(3, c"<<x", vec![false; 3])]
+    );
 }
 
 #[test]
@@ -549,7 +617,7 @@ fn test_here_string_bare_takes_next_token() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"word", vec![false; 4])]
+        vec![RedirectDef::here_string(0, c"word", vec![false; 4])]
     );
     assert!(cmd.args.is_empty());
 }
@@ -561,7 +629,7 @@ fn test_here_string_bare_at_eof_is_empty_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"", Vec::new())]
+        vec![RedirectDef::here_string(0, c"", Vec::new())]
     );
 }
 
@@ -3408,7 +3476,7 @@ fn parse_here_string_empty_quoted_word() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"", Vec::new())]
+        vec![RedirectDef::here_string(0, c"", Vec::new())]
     );
     assert!(cmd.args.is_empty());
 }
@@ -3421,7 +3489,7 @@ fn parse_here_string_empty_quoted_word_keeps_later_args() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::here_string(c"", Vec::new())]
+        vec![RedirectDef::here_string(0, c"", Vec::new())]
     );
     assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
 }

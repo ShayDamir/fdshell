@@ -582,6 +582,19 @@ fn here_string_word_protected() {
     let line = b"cat <<<{a,b}";
     let tokens = tokenize_statement(line).unwrap();
     assert_eq!(protected(line, &tokens), vec![1]);
+    // The io-number form reads the same span rule with the prefix shift (task
+    // #312): `3<<<{a,b}` is attached on the word, `3<<< {a,b}` protects the
+    // following token. Without the shift the attached test would read `<<{a,b}`
+    // and protect nothing.
+    let line = b"cat 3<<< {a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(protected(line, &tokens), vec![2]);
+    let line = b"cat 3<<<{a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(protected(line, &tokens), vec![1]);
+    let line = b"cat 003<<<{a,b}";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(protected(line, &tokens), vec![1]);
 }
 
 #[test]

@@ -1,9 +1,10 @@
 //! Tests for the io-number shape rule shared by the byte scan and the token
 //! parser: `io_prefix` (raw bytes, walking back from the `<<`), `span_operator`
-//! (the token's raw span) and the fd rule delegated to `parse::redirect::parse_fd`.
+//! (the `<<` operator's raw span), `string_span` (the `<<<` operator's raw
+//! span) and the fd rule delegated to `parse::redirect::parse_fd`.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::{heredoc_fd, io_prefix, span_operator};
+use super::{digit_run, io_fd, io_prefix, span_operator, string_span};
 use crate::scan::ScanState;
 
 /// The `<<` of a probe line: the byte index of its first `<`.
@@ -13,7 +14,7 @@ fn chevron(line: &[u8]) -> usize {
 
 /// The io-number prefix, at the byte level: the digit run that begins the
 /// operator's word, with the run's start index. The rule is syntactic, so the
-/// run that overflows `i32` is a prefix too (`heredoc_fd` reports it).
+/// run that overflows `i32` is a prefix too (`io_fd` reports it).
 #[test]
 fn io_prefix_reads_a_word_initial_digit_run() {
     for (line, op, run, digits) in [
@@ -116,11 +117,12 @@ fn span_operator_is_none_for_word_data() {
     }
 }
 
-/// The fd rule is the `N>file` rule itself (`parse::redirect::parse_fd`):
-/// leading zeros fold, and a run that does not fit `i32` is `None` — the byte
-/// scan counts the operator either way and the parse site reports it.
+/// The fd rule is the `N>file` rule itself (`parse::redirect::parse_fd`), shared
+/// by `N<file`, `N<<word` and `N<<<word`: leading zeros fold, and a run that
+/// does not fit `i32` is `None` — the byte scan counts the operator either way
+/// and the parse site reports it.
 #[test]
-fn heredoc_fd_is_the_redirect_fd_rule() {
+fn io_fd_is_the_redirect_fd_rule() {
     for (digits, want) in [
         (b"3".as_slice(), Some(3)),
         (b"0", Some(0)),
@@ -131,6 +133,74 @@ fn heredoc_fd_is_the_redirect_fd_rule() {
         (b"99999999999999999999999", None),
         (b"", Some(0)),
     ] {
-        assert_eq!(heredoc_fd(digits), want, "digits={:?}", digits);
+        assert_eq!(io_fd(digits), want, "digits={:?}", digits);
+    }
+}
+
+/// The digit walk both count levels share: the run's first digit, `None` when
+/// the operator is not preceded by a digit. The rule is syntactic — a run
+/// glued to a longer word (`x3<<T`) **is** a run; the callers reject it by
+/// comparing the run's start with the span/token-word start.
+#[test]
+fn digit_run_walks_back_from_the_operator() {
+    for (line, op, want) in [
+        (b"cat 3<<<T".as_slice(), 5usize, Some(4usize)),
+        (b"cat 3<<T", 5, Some(4)),
+        (b"cat 003<<<U", 7, Some(4)),
+        (b"3<<T", 1, Some(0)),
+        (b"cat <<<T", 4, None),
+        (b"cat <<T", 4, None),
+        (b"cat x<<T", 5, None),
+        (b"cat x3<<T", 6, Some(5)),
+        (b"cat 3\"<<\"T", 6, None),
+        (b"cat \\3<<T", 6, Some(5)),
+    ] {
+        assert_eq!(digit_run(line, op), want, "line={:?}", line);
+    }
+}
+
+/// The `<<<` operator's raw span, mirroring `span_operator`: the prefix length
+/// is what the word and its mask are sliced by, so `3<<<x` is attached on `x`
+/// and `3<<< x` takes the next word (the unshifted test would read `<<x`).
+#[test]
+fn string_span_reports_the_chevron_and_prefix() {
+    for (line, start, end, op, prefix) in [
+        (b"cat 3<<<T".as_slice(), 4usize, 9usize, 5usize, 1usize),
+        (b"cat <<<T", 4, 8, 4, 0),
+        (b"cat 3<<< T", 4, 8, 5, 1),
+        (b"cat <<< T", 4, 7, 4, 0),
+        (b"cat ;3<<<T", 5, 10, 6, 1),
+        (b"cat 003<<<U", 4, 11, 7, 3),
+        (b"cat 12<<<x", 4, 10, 6, 2),
+        (b"3<<<<<x", 0, 7, 1, 1),
+    ] {
+        let (got, pfx) = string_span(line, start, end).unwrap();
+        assert_eq!((got, pfx), (op, prefix), "line={:?}", line);
+    }
+}
+
+/// The here-string's span rule is as raw-byte as the here-doc's: quote removal
+/// and escape folding make the token *text* of all these rows read `3<<<x`,
+/// while their raw spans are word data. A token-text rule would count an
+/// operator here and none at the byte scan (LESSONS, tasks #261/#274).
+#[test]
+fn string_span_is_none_for_word_data() {
+    for (line, start, end) in [
+        (b"cat \"3\"<<<x".as_slice(), 4usize, 12usize),
+        (b"cat \\3<<<x", 4, 10),
+        (b"cat 3\"<<<\"x", 4, 11),
+        (b"cat 3'<<<'x", 4, 11),
+        (b"cat x3<<<y", 4, 10),
+        (b"cat -3<<<T", 4, 10),
+        (b"cat $FD<<<T", 4, 11),
+        (b"cat 3\\\\<<<T", 4, 11),
+        (b"cat a|3<<<T", 4, 11),
+        (b">3<<<x", 0, 6),
+        (b"cat x\" 3<<<T\"", 4, 13),
+        (b"cat <<T", 4, 7),
+        (b"cat <<-T", 4, 8),
+        (b"cat 3<<T", 4, 8),
+    ] {
+        assert!(string_span(line, start, end).is_none(), "line={:?}", line);
     }
 }
