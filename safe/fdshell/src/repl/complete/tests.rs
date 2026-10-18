@@ -145,6 +145,18 @@ fn closed_block_with_arrived_body_and_trailing_statement_is_complete() {
     ));
 }
 
+/// A `<<` word that *begins* a command line is a command word, not an operator
+/// (script-mode pin
+/// `heredoc_after_semicolon_with_no_command_word_consumes_its_body`), so the
+/// closed-block arm's window must never reach it: the line is complete. Pins
+/// `cmd_line_end`'s bound (kills the `||`→`&&` mutant).
+#[test]
+fn statement_initial_chevron_after_a_separator_is_complete() {
+    assert!(is_complete(b"echo x; <<T"));
+    assert!(is_complete(b"if true; then :; fi; <<T"));
+    assert!(is_complete(b"for x in a; do :; done; <<T"));
+}
+
 #[test]
 fn heredoc_empty_quoted_delimiter_completes_on_blank_line() {
     assert!(!is_complete(b"cat <<\"\""));
