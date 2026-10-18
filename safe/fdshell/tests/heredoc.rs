@@ -1222,41 +1222,140 @@ fn single_line_for_and_case_body_heredoc_body_lines_are_opaque() {
     assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err:?}");
 }
 
-/// Task #273's fourth measured divergence, pinned as fdshell's own behaviour: in
-/// append mode an arm's text is rebuilt from the regions its own operators claim,
-/// so the body bytes travel **inside** the arm text and the pre-parse
-/// `brace_expand::expand` pass rewrites a brace word written in the body — every
-/// arm site below prints ` a b` (rc 0) where bash prints `{a,b}`. This is #238's
-/// machinery, already on `master` for `if`/`elif`/`else`/`while`; the `for` and
-/// `case` twins were rc 1 parse errors there, so #273 makes them reachable. Only
-/// the arm sites are affected: the top-level statement path keeps the body
-/// regions out of the line it brace-rewrites
-/// (`tests/brace_expand.rs::heredoc_body_is_verbatim` prints `{a,b}`), and the
-/// body's other expansion neighbours stay in bash parity at the very same arm
-/// sites (`$X` → `zzz`, `$(echo sub)` → `sub`, a literal `a,b` body → `a,b`) —
-/// bash's body expansion is `$`-expansion only, never brace expansion. Task
-/// **#311** owns the root cause (body bytes must stay out of the pre-parse text
-/// passes); when it lands these rows flip to bash parity and the name drops its
-/// `311` suffix.
+/// A body line is **data**: brace expansion never touches it, at every heredoc
+/// site including a single-line keyword block's arm body (append mode), where
+/// the arm's text is rebuilt from the regions its own operators claim and the
+/// body bytes therefore travel *inside* that text. Task **#311** made the
+/// whole-text body scan (`scan::heredoc::body_regions`) resolve a
+/// `;`-terminated command line from its physical line's end, so the pre-parse
+/// `brace_expand::expand` pass blanks the body there exactly as it does in a
+/// newline-terminated statement (`tests/brace_expand.rs::heredoc_body_is_verbatim`).
+/// Every expectation below is bash 5.3.9's own output; the body's `$`-expansion
+/// neighbours (`$X` → `zzz`, `$(echo sub)` → `sub`, a literal `a,b` body →
+/// `a,b`) stay in the same parity — bash's body expansion is `$`-expansion
+/// only, never brace expansion.
 #[test]
-fn single_line_block_body_heredoc_of_a_brace_word_body_stays_measured_until_311() {
+fn single_line_block_body_heredoc_of_a_brace_word_body_is_verbatim() {
     for (script, want) in [
-        ("for x in a; do cat <<T; done\n{a,b}\nT", " a b\n"),
-        ("case x in x) cat <<T;; esac\n{a,b}\nT", " a b\n"),
-        ("case x in x) cat <<T; ;; esac\n{a,b}\nT", " a b\n"),
-        ("if true; then cat <<T; fi\n{a,b}\nT", " a b\n"),
-        ("if false; then :; else cat <<T; fi\n{a,b}\nT", " a b\n"),
+        ("for x in a; do cat <<T; done\n{a,b}\nT", "{a,b}\n"),
+        ("for x in a b; do cat <<T; done\n{a,b}\nT", "{a,b}\n{a,b}\n"),
+        ("case x in x) cat <<T;; esac\n{a,b}\nT", "{a,b}\n"),
+        ("case x in x) cat <<T; ;; esac\n{a,b}\nT", "{a,b}\n"),
+        ("if true; then cat <<T; fi\n{a,b}\nT", "{a,b}\n"),
+        ("if false; then :; else cat <<T; fi\n{a,b}\nT", "{a,b}\n"),
         (
             "if false; then :; elif true; then cat <<T; fi\n{a,b}\nT",
-            " a b\n",
+            "{a,b}\n",
         ),
-        ("while :; do cat <<T; break; done\n{a,b}\nT", " a b\n"),
+        ("while :; do cat <<T; break; done\n{a,b}\nT", "{a,b}\n"),
+        ("until false; do cat <<T; break; done\n{a,b}\nT", "{a,b}\n"),
+        ("if true; then cat <<-T; fi\n\t{a,b}\n\tT", "{a,b}\n"),
+        // Brace-shaped body bytes that are not a group stay literal too.
+        (
+            "if true; then cat <<T; fi\n{1..3} x{a,b}y {a,b\nT",
+            "{1..3} x{a,b}y {a,b\n",
+        ),
     ] {
         let (out, err, code) = run(script);
         assert_eq!(
             (out.as_str(), code),
             (want, 0),
-            "{script}: bash prints '{{a,b}}', rc 0; stderr={err:?}"
+            "{script}: bash prints the body verbatim, rc 0; stderr={err:?}"
+        );
+    }
+}
+
+/// The arm's *delimiter* is protected from brace expansion at arm granularity
+/// too (the block-text twin of
+/// `tests/brace_expand.rs::heredoc_brace_delimiter_is_verbatim`, rc 1 on
+/// `master`): the operator word and its terminating line both stay literal, so
+/// the heredoc terminates and its body runs.
+#[test]
+fn single_line_block_heredoc_of_a_brace_word_delimiter_is_verbatim() {
+    let (out, err, code) = run("if true; then cat <<{a,b}; fi\nBODY\n{a,b}");
+    assert_eq!((out.as_str(), code), ("BODY\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("for x in a; do cat <<{a,b}; done\nBODY\n{a,b}");
+    assert_eq!((out.as_str(), code), ("BODY\n", 0), "stderr={err:?}");
+}
+
+/// The same body rule covers every shape that puts a heredoc command line in a
+/// block's text: the multi-line arm whose arm line ends at a `;`, a block nested
+/// in a block, a pipeline and cond-list tail on the block's closer, the block
+/// inside `$( … )`, a condition-position heredoc, and a block behind a
+/// separator. Every expectation is bash 5.3.9's own output.
+#[test]
+fn block_body_heredoc_of_a_brace_word_body_is_verbatim_in_every_shape() {
+    for (script, want) in [
+        // The multi-line arm whose arm line ends at a `;`.
+        (
+            "if true; then\ncat <<T; echo hi\n{a,b}\nT\nfi",
+            "{a,b}\nhi\n",
+        ),
+        (
+            "if true; then if true; then cat <<T; fi; fi\n{a,b}\nT",
+            "{a,b}\n",
+        ),
+        ("if true; then cat <<T; fi | cat\n{a,b}\nT", "{a,b}\n"),
+        (
+            "echo \"$(if true; then cat <<T; fi\n{a,b}\nT\n)\"",
+            "{a,b}\n",
+        ),
+        (
+            "case x in x) cat <<T;; esac; echo tail\n{a,b}\nT",
+            "{a,b}\ntail\n",
+        ),
+        (
+            "if true; then cat <<T; fi && echo tail\n{a,b}\nT",
+            "{a,b}\ntail\n",
+        ),
+        (
+            "echo a && if true; then cat <<T; fi\n{a,b}\nT",
+            "a\n{a,b}\n",
+        ),
+        // A condition-position heredoc: the body is the condition's data.
+        ("if cat <<T; then echo y; fi\n{a,b}\nT", "{a,b}\ny\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, 0),
+            "{script}: bash prints the body verbatim, rc 0; stderr={err:?}"
+        );
+    }
+}
+
+/// The append-mode shape reaches the text every pre-parse pass sees, so the
+/// same opacity covers all of them: an unbalanced quote byte in the body no
+/// longer reaches the statement tokenizer's quote check (task **#311**, the
+/// body-line half of #266's class; bash prints the body, rc 0). #266 keeps the
+/// **terminator-line** class — `cat <<'a <<b'` + body + `a <<b` and
+/// `cat <<a\"b` + body + `a"b` stay rc 1, measured unchanged by this fix.
+#[test]
+fn single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim() {
+    for (script, want) in [
+        (
+            "for x in a; do cat <<'Q'; done\nbody Q unbalanced '\nQ",
+            "body Q unbalanced '\n",
+        ),
+        (
+            "case q in q) cat <<'Q';; esac\nbody Q unbalanced '\nQ",
+            "body Q unbalanced '\n",
+        ),
+        (
+            "if true; then cat <<'Q'; fi\nbody Q unbalanced '\nQ",
+            "body Q unbalanced '\n",
+        ),
+        (
+            "while :; do cat <<'Q'; break; done\nbody Q unbalanced '\nQ",
+            "body Q unbalanced '\n",
+        ),
+        ("if true; then cat <<T; fi\n'\nT", "'\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, 0),
+            "{script}: bash prints the body, rc 0; stderr={err:?}"
         );
     }
 }
@@ -1320,28 +1419,6 @@ fn case_clause_pattern_of_a_body_heredoc_is_protected_from_brace_expansion() {
     // A pattern that does not match takes no body, in fdshell and in bash.
     let (out, err, code) = run("case a in {a,b}) cat <<T;; esac\nbodyT\nT");
     assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
-}
-
-/// Task #273's measured divergence, pinned as fdshell's own behaviour: a
-/// quoted `<<'Q'` delimiter in a single-line block body leaves the appended
-/// body's lone `'` unterminated, and the *statement* tokenizer that re-splits
-/// the run reports `unmatched quote` (rc 1) before the block ever runs. bash
-/// prints the body, rc 0. The same on master for `if`/`while`/`case` (the
-/// `case` arm text is the statement text there), so #273 introduces nothing:
-/// task **#266** owns the unquoted-delimiter-body line class.
-#[test]
-fn single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_stays_measured_until_266()
- {
-    for script in [
-        "for x in a; do cat <<'Q'; done\nbody Q unbalanced '\nQ",
-        "case q in q) cat <<'Q';; esac\nbody Q unbalanced '\nQ",
-        "if true; then cat <<'Q'; fi\nbody Q unbalanced '\nQ",
-        "while :; do cat <<'Q'; break; done\nbody Q unbalanced '\nQ",
-    ] {
-        let (_out, err, code) = run(script);
-        assert_eq!(code, 1, "{script}: bash prints the body, rc 0");
-        assert!(err.contains("unmatched quote"), "{script}: stderr={err:?}");
-    }
 }
 
 /// Task #273's second measured divergence, pinned as fdshell's own behaviour:

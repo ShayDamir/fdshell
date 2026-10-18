@@ -390,6 +390,20 @@ fn heredoc_body_is_verbatim() {
 }
 
 #[test]
+fn heredoc_body_of_a_semicolon_terminated_statement_is_verbatim() {
+    // The `;`-terminated command line: the body sits on the lines behind the
+    // `;` and is claimed by the whole-text body scan from the physical line's
+    // end (task #311's rule, the same one the block arms use).
+    let (out, err, code) = run("cat <<T; echo hi\n{a,b}\nT");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "{a,b}\nhi\n");
+    // Two operators on one line: one body each, in operator order.
+    let (out, err, code) = run("cat <<A; cat <<B\na\nA\n{b1,b2}\nB");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "a\n{b1,b2}\n");
+}
+
+#[test]
 fn heredoc_brace_delimiter_is_verbatim() {
     // A brace-looking delimiter stays literal in the operator and the
     // terminating line (regression: the terminator was brace-expanded and the
