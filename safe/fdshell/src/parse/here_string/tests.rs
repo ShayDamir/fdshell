@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
-use super::word_indices;
+use super::{parse_here_string, word_indices};
+use crate::error::parse::ParseError;
 use crate::parse::token::tokenize_statement;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -64,4 +65,23 @@ fn word_data_prefixes_protect_nothing() {
     ] {
         assert_eq!(indices(line), Vec::new(), "line={:?}", line);
     }
+}
+
+/// The range failure is reported by the parse site alone (the span rule is
+/// syntactic, like `span_operator`), and it names the prefix: the `N<<word`
+/// twin is `operator_at_rejects_an_io_number_that_is_not_a_descriptor`. A
+/// prefix that fits is an fd, and `2147483647` is the largest one.
+#[test]
+fn parse_here_string_rejects_an_io_number_that_is_not_a_descriptor() {
+    let line = b"cat 99999999999999999999999<<<x";
+    let tokens = tokenize_statement(line).unwrap();
+    let err = parse_here_string(line, &tokens, 1).err().unwrap();
+    assert!(matches!(
+        err.current_context(),
+        ParseError::InvalidHereStringFd { .. }
+    ));
+    let line = b"cat 2147483647<<<x";
+    let tokens = tokenize_statement(line).unwrap();
+    let (def, _extra) = parse_here_string(line, &tokens, 1).unwrap().unwrap();
+    assert_eq!(def.export_to, i32::MAX);
 }
