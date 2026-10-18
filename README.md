@@ -454,6 +454,19 @@ alias ll='ls -l'
 unalias ll
 ```
 
+### Interactive shell
+
+Run with no arguments, fdshell prompts with `fdshell> ` and reads one logical
+input at a time; a construct that is not complete — an open block, an
+unbalanced quote, a dangling `&&`/`||`, or a here-document whose body has not
+arrived — continues under the `> ` prompt until it closes. A here-document's
+body lines are read as continuation lines, **including inside a closed
+single-line keyword block**: `for x in a; do cat <<T; done` + `{a,b}` + `T`
+buffers the two body lines and prints `{a,b}`, like bash. A group-body
+here-document at the prompt (`{ cat <<T; }`) buffers its body lines the same
+way but fails parse with the missing delimiter; the group form is not yet
+supported in script mode either.
+
 ## Strict mode
 
 The `strict` shell option (off by default) turns fdshell into a capability

@@ -2403,3 +2403,40 @@ a literal byte) where bash is a syntax error — a parse-layer divergence of the
 
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)
 `semi_terminated_regions` opens with `line.get(semi) != Some(&b';') || operator_count(line, run_start, semi) == 0` and closes with `if ops.is_empty() { return None }`. Two accepted-equivalent mutant species live there. (1) The `||`→`&&` of the opening guard is **unkillable**: flipping it only changes *which* `;` of a physical line performs the whole-line claim, never *what* is claimed, because the anchor is the line's start and `body_start` is the line's own newline — so a plain `;`-terminated run reaches exactly the regions the run carrying the `<<` reaches (`cat <<T; echo hi` + body + `T` and `echo a; cat <<T; echo hi` + body + `T` produce the same single region, one byte-offset apart), and a newline-terminated run with an operator keeps taking `skip_region`'s path with `semi_terminated_regions` answering `None` under both spellings (`line.get(nl) != Some(&b';')` is true, and under `&&` the proceed path lands on the same missing-delimiter `None`). The individual guards *are* killed (`==`→`!=` on `operator_count`, the `Some(&b';')` pattern), so the pair's `||` is the only residual. (2) The `ops.is_empty()` guard has no reachable false branch at all: `operator_count(line, run_start, semi)` scans a sub-window `[run_start, semi)` with the *stricter* preceding-token rule (`seen_token` starts false at `run_start`), while `operator_delims(line, start, body_start)` scans the whole physical line from `line_start` with `seen_token` already raised by the runs before the `;` — a line-start scan is a superset, so a non-empty run always yields a non-empty `ops` (the coverage report shows the guard's `return None` at zero hits). The guard stays because it is what keeps an empty `ops` from jumping `i` to `body_start` and skipping the line's runs behind the `;` — delete it and the subset invariant becomes load-bearing silently. Rule: prove the invariant in the comment where the guard sits, record the residual here, and let the killers of the reachable guards stay the suite's business.
+
+## "Closed" is the block text's completeness, not its body stream's — the REPL check applies the unterminated rule to closed blocks too (task #322)
+`repl/complete.rs::blocks_or_heredoc_open` decided "keep reading" from open blocks
+(`Segment::Block { closed: false }`) and unterminated **statement** runs only, so a
+single-line keyword block that closed on its own line (`for x in a; do cat <<T; done`)
+reported complete and ran before any body line existed: the delimiter error plus the
+body lines executed as ordinary statements, where bash attaches the body and prints
+it. The fix is one arm: `closed: true` + `heredoc::unterminated(line, block_start,
+cmd_line_end(line, end_pos))` keeps the prompt reading. Three boundaries make the arm
+correct rather than merely more conservative. (1) *Window vs search split, the #319
+rule at block granularity*: the window bounds the **operator scan** to the block's own
+span extended to its command line's terminator (`cmd_line_end(line, end_pos)` — the
+first `;`/`\n` at/after the closer, so a trailing `; cat <<A` is claimed by its own
+Statement arm, not by the block), while the delimiter search starts at
+`line_end_after(block_start)` — the physical line's end — exactly like the statement
+arm. (2) *A bare `<<` in a closed block is a hard error, not a continuation*:
+`unterminated` answers `false` when `operator_delims` finds no delimiter word, so
+`if true; then cat <<; fi` reports at once, mirroring the pinned statement rule.
+(3) *A closed block whose bodies arrived stays complete*: the regions resolve, the
+arm does not fire, and `{ cat <<EOF\nhi\nEOF\n; }`, the quoted-delimiter pins and the
+function/group open-and-close pins stay green — any flip there is a bug in the arm.
+Over-approximation ("ask for one more line") is the safe direction: it is exactly
+bash's PS2 for these shapes, and EOF always breaks the loop and executes the buffer
+(`eof_mid_heredoc_executes_buffer`), so over-prompting cannot hang. Uniformity is
+free: every `Segment::Block` gets the arm — all six keyword arm sites, groups, and
+function bodies; groups **buffer** at the prompt now (`{ cat <<T; }` reads its body
+lines) and then report the missing delimiter on execution, the script-layer group
+gap task #315 owns — the REPL buffers, the parse layer stays #315's. The elif-at-EOF
+row is the same rule as `cond_bodies_of_an_incomplete_line_stream_are_empty` seen
+from the prompt: an incomplete body stream yields regions, the buffer executes and
+fails parse at EOF (rc 0; bash warns and prints the body). `repl/trailing.rs` needs
+nothing: it walks `skip_region` for quote/substitution state and is not a
+`body_regions` consumer — #311's opacity inheritance reaches it through the shared
+scanners, not through this arm. Rule (the #311 one-opacity-rule at prompt
+granularity): a construct is complete only when its **body stream** is complete; a
+closer closes the block's text, never its bodies, so every completeness check that
+knows a block is closed must also ask `unterminated` about the block's own runs.
