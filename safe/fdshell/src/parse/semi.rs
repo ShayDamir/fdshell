@@ -53,16 +53,13 @@ pub(crate) fn block_body(
     Ok(body)
 }
 
-pub(crate) fn try_join(tokens: &[Token]) -> ShortCStr {
-    try_join_masked(tokens).0
-}
-
 /// The joined word of `tokens` **with its mask and zero-byte span list**: the
 /// space inserted between two tokens takes a `false` bit and every token byte
 /// keeps its own, so the mask stays parallel to the text (task #269: a joined
 /// word that is substituted later needs the mask of the whole join). Spans
 /// travel with the mask (task #321): each token's span indices shift by the
-/// join offset accumulated before it. `try_join` is its text, so the
+/// join offset accumulated before it. Call sites take the join's **text** as
+/// `try_join_masked(tokens).0` (`command_word`, `case_block`), so the
 /// space-insertion rule lives in exactly one place — the word, its mask and
 /// its spans can never drift apart.
 pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<bool>, Vec<usize>) {
@@ -99,3 +96,6 @@ pub(crate) fn token_range(tokens: &[Token]) -> (usize, usize) {
         _ => (0, 0),
     }
 }
+
+#[cfg(test)]
+mod tests;
