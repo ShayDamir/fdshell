@@ -286,8 +286,10 @@ fn escaped_separators_keep_one_field() {
 }
 
 /// An escape pair inside a `case` pattern is a literal member: `f\*o` matches
-/// the name `f*o` and never `foobar` (envfilter `glob_match` is `*`-only, so
-/// `?`/`[...]` stay out of scope — task #165).
+/// the name `f*o` and never `foobar`. The pattern carries its own quote mask
+/// (task #280), so the pair folds in the matcher's `\X` arm and the glob
+/// characters of `?`/`[...]` are pattern characters too
+/// (`tests/case.rs::case_pattern_globs_like_a_bash_pattern`).
 #[test]
 fn case_pattern_escape_is_literal() {
     let (out, _err, code) = run("case f*o in f\\*o) builtin echo y;; esac");

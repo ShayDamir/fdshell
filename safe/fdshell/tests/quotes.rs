@@ -7,12 +7,15 @@
 //! Divergences are marked as such:
 //! * `$'…'` is read as the POSIX-sh expansion, so `echo $'x'` is `$x` and not
 //!   bash's `x` — tracked by task #156.
-//! * `case` patterns ignore the quote mask (both quote kinds), tracked by
-//!   task #246 — pinned nowhere in this file.
 //! * An unbalanced quote is a parse error with fdshell's own message and exit
 //!   code 1; bash prints its own syntax error with code 2. The pre-existing
 //!   double-quote case behaves identically, so `'` follows the shell's
 //!   convention (see STYLE.md §4).
+//!
+//! A `case` pattern takes the mask of its own span like every other word
+//! surface (task #280 closed the divergence task #246 tracked); its
+//! single-quoted rows are pinned in `tests/case.rs`
+//! (`case_pattern_quote_mask_is_per_byte`, `case_pattern_mask_and_expansion_match_bash`).
 
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};

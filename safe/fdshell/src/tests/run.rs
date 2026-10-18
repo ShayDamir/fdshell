@@ -1659,6 +1659,75 @@ fn case_alternative_patterns() {
     });
 }
 
+/// Task #280: a `case` pattern is matched with **its own** quote mask by the
+/// mask-aware word matcher, and is expanded as a word. The pairs differ only in
+/// the pattern's quoting, so a mask that ignores quotes cannot pass both.
+#[test]
+fn case_pattern_mask_decides_the_match() {
+    let cases: &[(&[u8], u32)] = &[
+        // A quoted `*` is literal, so only the catch-all clause runs.
+        (
+            b"case abc in \"a*\") umask 0o000;; *) umask 0o077;; esac",
+            0o077,
+        ),
+        // `?` and `[...]` are pattern characters (`glob_match` is `*`-only).
+        (
+            b"case aXx in a?x) umask 0o000;; *) umask 0o077;; esac",
+            0o000,
+        ),
+        (
+            b"case abc in a[b]c) umask 0o000;; *) umask 0o077;; esac",
+            0o000,
+        ),
+        // Per-byte quoting: the star outside the quotes globs.
+        (
+            b"case \"a*b\" in \"a\"*b) umask 0o000;; *) umask 0o077;; esac",
+            0o000,
+        ),
+        // A word pattern has no FNM_PERIOD rule: a leading dot is an ordinary byte.
+        (
+            b"case .abc in ?abc) umask 0o000;; *) umask 0o077;; esac",
+            0o000,
+        ),
+        // A pattern word is expanded; the quotes around its trigger decide.
+        (
+            b"p=a?x; case aXx in $p) umask 0o000;; *) umask 0o077;; esac",
+            0o000,
+        ),
+        (
+            b"p=a?x; case aXx in \"$p\") umask 0o000;; *) umask 0o077;; esac",
+            0o077,
+        ),
+        (
+            b"case ~ in \"$HOME\") umask 0o000;; *) umask 0o077;; esac",
+            0o000,
+        ),
+    ];
+    for (script, want) in cases {
+        child_test(|| {
+            let cell = make_cell();
+            run_script(script, &cell).unwrap();
+            assert_eq!(sys::umask::get(), *want, "{:?}", script);
+        });
+    }
+}
+
+/// Task #280: a pattern's substitution bails the clause (`set -u`, `${x:?msg}`)
+/// with the substitution's own context, and no clause body runs.
+#[test]
+fn case_pattern_substitution_bails() {
+    child_test(|| {
+        let cell = make_cell();
+        let err = run_script(
+            b"set -u; case a in \"$undef\") umask 0o000;; *) umask 0o077;; esac",
+            &cell,
+        )
+        .unwrap_err();
+        assert!(matches!(err.current_context(), CmdError::Resolve));
+        assert_eq!(sys::umask::get(), 0o022, "no clause body ran");
+    });
+}
+
 #[test]
 fn case_no_match_no_else_sets_zero() {
     child_test(|| {

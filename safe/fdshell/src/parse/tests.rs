@@ -2824,7 +2824,7 @@ fn case_simple() {
     assert_eq!(cb.word, c"foo".into());
     assert_eq!(cb.clauses.len(), 1);
     assert_eq!(cb.clauses[0].patterns.len(), 1);
-    assert_eq!(cb.clauses[0].patterns[0], c"foo".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"foo".into());
     assert_eq!(cb.clauses[0].body.data, c"echo one".into());
 }
 
@@ -2847,9 +2847,9 @@ fn case_multiple_clauses() {
     };
     assert_eq!(cb.word, c"x".into());
     assert_eq!(cb.clauses.len(), 2);
-    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a".into());
     assert_eq!(cb.clauses[0].body.data, c"echo one".into());
-    assert_eq!(cb.clauses[1].patterns[0], c"b".into());
+    assert_eq!(cb.clauses[1].patterns[0].text, c"b".into());
     assert_eq!(cb.clauses[1].body.data, c"echo two".into());
 }
 
@@ -2862,9 +2862,57 @@ fn case_alternative_patterns() {
     assert_eq!(cb.word, c"x".into());
     assert_eq!(cb.clauses.len(), 2);
     assert_eq!(cb.clauses[0].patterns.len(), 2);
-    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
-    assert_eq!(cb.clauses[0].patterns[1], c"x".into());
-    assert_eq!(cb.clauses[1].patterns[0], c"*".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a".into());
+    assert_eq!(cb.clauses[0].patterns[1].text, c"x".into());
+    assert_eq!(cb.clauses[1].patterns[0].text, c"*".into());
+}
+
+/// The pattern side of task #269's word rule (task #280): each pattern travels
+/// with a mask parallel to its text, and the escape pair stays in the text —
+/// who wrote it is the mask's answer, and it decides how the pair folds.
+#[test]
+fn case_pattern_carries_its_quote_mask() {
+    let ParsedLine::Case(cb) = parse(b"case x in \"a\\ b\") echo m;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a\\ b".into());
+    assert_eq!(cb.clauses[0].patterns[0].mask, vec![true; 4]);
+
+    // Unquoted, the same 4-byte text means a foldable escape pair.
+    let ParsedLine::Case(cb) = parse(b"case x in a\\ b) echo m;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a\\ b".into());
+    assert_eq!(cb.clauses[0].patterns[0].mask, vec![false; 4]);
+}
+
+#[test]
+fn case_pattern_pair_masks_differ() {
+    // The anti-off-by-one pair of one clause's two `|`-separated patterns
+    // (LESSONS: a same-quoting pair cannot tell an off-by-one from an
+    // off-by-two): the two masks differ, so a shifted mask slice misreads one
+    // of them and the pair cannot both agree.
+    let ParsedLine::Case(cb) = parse(b"case x in \"a?\"|a?) echo m;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses[0].patterns.len(), 2);
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a?".into());
+    assert_eq!(cb.clauses[0].patterns[0].mask, vec![true; 2]);
+    assert_eq!(cb.clauses[0].patterns[1].text, c"a?".into());
+    assert_eq!(cb.clauses[0].patterns[1].mask, vec![false; 2]);
+}
+
+/// fdshell joins a multi-token pattern with a space where bash rejects the shape
+/// (`case "a b" in a b)` is a bash syntax error) — a parse-layer divergence,
+/// pinned here as "fdshell accepts". The inserted space takes a `false` mask
+/// bit, so it stays a literal space byte and never becomes a pattern char.
+#[test]
+fn case_pattern_join_marks_its_inserted_space_unquoted() {
+    let ParsedLine::Case(cb) = parse(b"case \"a b\" in a b) echo m;; esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a b".into());
+    assert_eq!(cb.clauses[0].patterns[0].mask, vec![false; 3]);
 }
 
 #[test]
@@ -2963,7 +3011,7 @@ fn case_empty_body_clause() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses.len(), 1);
-    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a".into());
     assert!(cb.clauses[0].body.data.is_empty());
 }
 
@@ -2975,12 +3023,12 @@ fn case_long_body_catches_skip() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses.len(), 2);
-    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a".into());
     assert_eq!(
         cb.clauses[0].body.data,
         c"echo hello world foo bar baz".into()
     );
-    assert_eq!(cb.clauses[1].patterns[0], c"b".into());
+    assert_eq!(cb.clauses[1].patterns[0].text, c"b".into());
     assert_eq!(cb.clauses[1].body.data, c"echo two".into());
 }
 
@@ -2990,7 +3038,7 @@ fn case_esac_as_pattern_word() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses.len(), 1);
-    assert_eq!(cb.clauses[0].patterns[0], c"esac".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"esac".into());
     assert_eq!(cb.clauses[0].body.data, c"echo yes".into());
 }
 
@@ -3000,7 +3048,7 @@ fn case_leading_semi_skipped() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses.len(), 1);
-    assert_eq!(cb.clauses[0].patterns[0], c"a".into());
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a".into());
     assert_eq!(cb.clauses[0].body.data, c"echo one".into());
 }
 
