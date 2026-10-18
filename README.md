@@ -280,8 +280,13 @@ echo ~"/*"        # ~/*          (a quoted character in the tilde-prefix —
 echo ~user/x      # ~user/x      (no password database: `~user` stays literal)
 ```
 
-`~` reads `HOME` from the environment fdshell was started with; assigning a
-shell variable `HOME=…` does not move it.
+`~` and `~/x` read `HOME` through the **shell variable** — the same lookup
+`$HOME` uses: the shell's own variables first, then the environment fdshell
+was started with. A `HOME=/tmp/H` assignment therefore moves `~` exactly as it
+moves `$HOME` (`echo ~/x` → `/tmp/H/x`), and an empty `HOME` leaves the rest of
+the word (`HOME=; echo ~/x` → `/x`). When `HOME` is set in neither table `~`
+contributes nothing, where bash falls back to a login directory from the
+password database — an accepted divergence, like `~user` above.
 
 ### Variables
 
