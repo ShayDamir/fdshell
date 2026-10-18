@@ -2293,3 +2293,59 @@ whose expected behaviour depends on a descriptor's *inherited* state must
 create that state in the child itself, never rely on the harness (the
 precedent for the inherited-fd class is "`/proc` fd-table assertions must
 exclude the harness's own pipe targets").
+
+## A `case` pattern is a word: fold it, expand it, and match it with its own mask (task #280)
+
+`case_exec` matched the clause patterns with `envfilter::glob::glob_match`, the
+`*`-only matcher that takes no mask and folds every `\X` pair. The parse layer
+had nothing to give it: `CaseClause::patterns` was `Vec<ShortCStr>`, the joined
+token text with the quote bytes already stripped. Closing the gap is one rule
+with four consequences:
+
+1. **A pattern must be folded before the matcher reads it, and only
+   `substitute_arg`'s quoted arm does that.** `match_component` reads a *masked*
+   `\` as a literal backslash, and the single-quote encoding (LESSONS: task #141)
+   puts `\$`, `\\`, `` \` `` in the text of every `'…'` span — so a pattern taken
+   straight from the token text stops matching its own span: `'a$b'` requires a
+   literal backslash in the word. `glob_match`'s built-in `\X` fold was hiding
+   this: pass the masked text to `match_component` without folding and the
+   single-quote rows break. `substitute_arg(text, mask, …)` is the fold **and**
+   the expansion in one call; `bytes::fold::fold_word` is the fold alone (the
+   fallback if a substitution surface ever needs one).
+2. **The mask it returns is the pattern-quoting signal for the expansion.**
+   Expansion bytes inherit their trigger's bit (LESSONS: `mask::realign`), which
+   is exactly bash's `"$p"`/`$p` pattern pair: `p='a?x'` with `case aXx in $p)`
+   matches, with `"$p")` it does not. A pattern that is *not* expanded cannot
+   express that pair at all, which is why the plan chose "expand" over
+   "mask-only-fold": a folded-but-never-expanded pattern is a half-state, and
+   half-states of this surface keep coming back as follow-up tasks (#246 → #280).
+3. **A word pattern is not a pathname.** `dotglob = true` (the existing
+   "Word patterns have no `FNM_PERIOD` rule" entry, cited by
+   `substitute/param_op/pattern.rs`), `set -f` does not touch it (measured:
+   `set -f; case abc in a*)` matches in bash), and a pattern word is never
+   IFS-split (`v="x y"; case y in $v)` matches nothing in bash). Pass
+   `match_component(pat, mask, name, true)`; nothing in `options` belongs in
+   `case_exec`.
+4. **bash expands patterns lazily, one pattern at a time, stopping at the first
+   match.** Measured: `case a in z) echo x;; a|$(touch f)) echo m;; esac` prints
+   `m` and creates **no** `f`; `case q in z|$(touch f)|a) echo m;; esac` creates
+   `f`. The loop must therefore substitute *inside* the match loop, not once per
+   clause — an "optimisation" that expands a clause's whole pattern list up front
+   changes a side effect. (Both rows print what bash prints; the plan's table had
+   the second row's bash column as `m`, measured here as empty — LESSONS:
+   "Measure the plan's bash table".)
+
+`Pattern { text, mask }` (new `parse/case_clause/pattern.rs`) is joined by
+`semi::try_join_masked`, the same loop #269 made the mask's only owner, so the
+inserted inter-token space carries a `false` bit and never becomes a pattern
+byte. `envfilter::glob::glob_match` keeps its `*`-only semantics and its
+signature: its callers are env filters, which carry no mask.
+
+Gaps this task leaves measured, not fixed: a `case` pattern is **one** word, so
+`set -- a b; case a in "$@")` matches in bash and not here — task **#319**;
+bracket negation `[^…]` is unknown to `glob/match/bracket.rs` (only `!`), so
+`case ab in a[^c])` matches in bash and not here — task **#320**; and fdshell
+joins a multi-token pattern (`case "a b" in a b)` matches, the inserted space is
+a literal byte) where bash is a syntax error — a parse-layer divergence of the
+"Operators are recognized at word starts" family, pinned as
+`tests/case.rs::multi_token_case_pattern_is_accepted`, not a POSIX list entry.
