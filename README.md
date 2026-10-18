@@ -251,7 +251,7 @@ stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
 its own unquoted digit word, as in `3>file` — `cat "3"<<EOF` and `cat \3<<EOF`
 are the single argument `3<<EOF`, its quotes taken as ordinary word quoting and
 its `<<` as plain word text, not a here-document
-([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#here-document-descriptor-numbers)).
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#here-document-and-here-string-descriptor-numbers)).
 `N` is a raw descriptor number, not an fd variable: it has no `%fd`
 counterpart — nothing is bound under a name, `unset %name` closes nothing —
 and the descriptor is reachable only as a number in the same command's
@@ -262,6 +262,18 @@ A here-string feeds one expanded word plus a newline:
 ```shell
 read -u 0 LINE <<<"hello $name"
 ```
+
+A number in front of the operator puts the word on that descriptor instead of
+stdin, under the here-doc's raw-byte number rule: `cat 3<<<text` makes `text\n`
+fd 3's input and leaves stdin alone, and `exec 3<<<text` keeps it there for the
+rest of the script (`exec 3<<<text; cat <&3` prints `text`). The number must be
+its own unquoted digit word, as in `3>file` — `cat "3"<<<x`, `cat 3"<<<"x` and
+`cat \3<<<x` are the single argument `3<<<x`, its quotes taken as ordinary word
+quoting and its `<<<` as plain word text, not a here-string
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#here-document-and-here-string-descriptor-numbers)).
+`N` is a raw descriptor number, not an fd variable: it has no `%fd` counterpart
+and is reachable only as a number in the same command's redirections, or from
+the shell's own table after an `exec`.
 
 ## The shell language
 
