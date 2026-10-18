@@ -233,6 +233,23 @@ fn leading_tilde_takes_the_substitution_path() {
     assert_eq!(bytes(&out.command), b"~bin/ls");
 }
 
+/// Task #282: word 0's tilde follows the `HOME` **shell variable**, so a
+/// `HOME` in the state's own table wins over the inherited environment — the
+/// command word is one word like any other and inherits the rule through
+/// `substitute_arg` (bash: `HOME=/h/o/m/e /bin/ls` runs `/h/o/m/e/bin/ls`).
+#[test]
+fn leading_tilde_in_a_command_word_follows_the_state_home() {
+    let cell = cell();
+    cell.borrow_mut().unwrap().set_var(
+        ShortCStr::from(c"HOME"),
+        sys::ImportedStr::shell(ShortCStr::from(c"/h/o/m/e")),
+    );
+    let out = expand(&cmdline("~/bin/ls", &[]), &cell)
+        .unwrap()
+        .into_owned();
+    assert_eq!(bytes(&out.command), b"/h/o/m/e/bin/ls");
+}
+
 /// A parameter expansion in word 0 names the command (`$` is a trigger byte).
 #[test]
 fn parameter_expansion_names_the_command() {

@@ -1148,6 +1148,136 @@ fn tilde_quoted_after_slash_still_expands() {
     assert_eq!(res.as_bytes().unwrap(), format!("{}/x", home).as_bytes());
 }
 
+// Task #282: `~` reads the `HOME` **shell variable** — `ShellState::var_value`,
+// the shell's own `strings` first and the inherited `environ` as the fallback —
+// exactly the lookup `$HOME` uses (POSIX #2.6.1). Measured in bash 5.3.9:
+//
+// ```text
+// HOME=/tmp/H; printf "[%s] %s" ~ "$HOME"  → [/tmp/H] /tmp/H
+// HOME=/tmp/H; printf "[%s]" ~/x           → [/tmp/H/x]
+// HOME=;       printf "[%s]" ~/x           → [/x]
+// env -u HOME; printf "[%s]" ~             → [/home/damir]   (login directory)
+// ```
+//
+// `State`/`Env` below name the two tables; the rows whose two tables disagree
+// are what a `getenv`-based lookup cannot pass.
+fn set_state_home(cell: &ForkCell<ShellState>, value: &'static core::ffi::CStr) {
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(ShortCStr::from(c"HOME"), is_(value));
+}
+
+fn set_env_home(cell: &ForkCell<ShellState>, value: &'static core::ffi::CStr) {
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((ShortCStr::from(c"HOME"), ShortCStr::from(value)));
+}
+
+#[test]
+fn tilde_follows_the_shell_variable_home() {
+    let cell = dummy_cell();
+    set_state_home(&cell, c"/h/o/m/e");
+    let mut cache = HashMap::new();
+    for (word, want) in [(c"~", c"/h/o/m/e"), (c"~/x", c"/h/o/m/e/x")] {
+        let (res, _) = substitute_arg(&ShortCStr::from(word), &[], &mut cache, &cell).unwrap();
+        assert_eq!(res.as_bytes().unwrap(), want.to_bytes(), "{word:?}");
+    }
+    // The row is only meaningful while the shell variable and the process
+    // environment of this test process disagree.
+    assert_ne!(
+        ShortCStr::from(c"/h/o/m/e").as_bytes().unwrap(),
+        std::env::var("HOME").unwrap().as_bytes()
+    );
+}
+
+#[test]
+fn tilde_state_home_beats_the_inherited_home() {
+    let cell = env_cell();
+    set_env_home(&cell, c"env/home");
+    set_state_home(&cell, c"/h/o/m/e");
+    let mut cache = HashMap::new();
+    for (word, want) in [(c"~", c"/h/o/m/e"), (c"~/x", c"/h/o/m/e/x")] {
+        let (res, _) = substitute_arg(&ShortCStr::from(word), &[], &mut cache, &cell).unwrap();
+        assert_eq!(res.as_bytes().unwrap(), want.to_bytes(), "{word:?}");
+    }
+}
+
+#[test]
+fn tilde_falls_back_to_the_inherited_home() {
+    // `HOME` set only in the inherited environment: the documented fallback
+    // (`$HOME` resolves the same way — `dollar_resolves_inherited_env_var`).
+    let cell = env_cell();
+    set_env_home(&cell, c"a,b");
+    let mut cache = HashMap::new();
+    for (word, want) in [(c"~", c"a,b"), (c"~/x", c"a,b/x")] {
+        let (res, _) = substitute_arg(&ShortCStr::from(word), &[], &mut cache, &cell).unwrap();
+        assert_eq!(res.as_bytes().unwrap(), want.to_bytes(), "{word:?}");
+    }
+}
+
+#[test]
+fn tilde_unset_home_pushes_nothing() {
+    // `HOME` in neither table: fdshell pushes nothing. bash reads a login
+    // directory from the password database (`env -u HOME; printf %s ~` →
+    // `/home/damir`) — an accepted divergence (README), pinned here as-is.
+    let cell = env_cell();
+    let mut cache = HashMap::new();
+    for (word, want) in [(c"~", c""), (c"~/x", c"/x")] {
+        let (res, _) = substitute_arg(&ShortCStr::from(word), &[], &mut cache, &cell).unwrap();
+        assert_eq!(res.as_bytes().unwrap(), want.to_bytes(), "{word:?}");
+    }
+}
+
+#[test]
+fn tilde_empty_home_expands_to_empty() {
+    // `HOME=""` is set-but-empty, so bash expands it to the empty string:
+    // `HOME=; printf "[%s]" ~/x` → `[/x]`, `… ~` → `[]`. POSIX #2.6.1 would
+    // want a login directory for an empty `HOME` too; bash does not, and this
+    // row is agreement — do not "align" it with POSIX.
+    let cell = env_cell();
+    set_state_home(&cell, c"");
+    set_env_home(&cell, c"a,b");
+    let mut cache = HashMap::new();
+    for (word, want) in [(c"~", c""), (c"~/x", c"/x")] {
+        let (res, _) = substitute_arg(&ShortCStr::from(word), &[], &mut cache, &cell).unwrap();
+        assert_eq!(res.as_bytes().unwrap(), want.to_bytes(), "{word:?}");
+    }
+}
+
+#[test]
+fn nounset_unset_home_tilde_is_not_an_error() {
+    // The tilde arm goes through `var_value`, not the nounset-checked
+    // `param_value` path: `set -u; printf "[%s]" ~` is `[]` with rc 0 in bash.
+    let cell = env_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"~"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"");
+    assert!(!expanded);
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"~/x"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"/x");
+    assert!(!expanded);
+}
+
+// Gate + state lookup in one word: the prefix stays unquoted, so the arm
+// fires on the **state** `HOME` and only the byte after the `/` is quoted —
+// bash's `HOME=/h/o/m/e; printf "[%s]" ~/"x"` prints `[/h/o/m/e/x]`.
+#[test]
+fn tilde_state_home_with_quoted_tail_expands() {
+    let cell = env_cell();
+    set_state_home(&cell, c"/h/o/m/e");
+    set_env_home(&cell, c"a,b");
+    let (res, mask, expanded) =
+        expand_marked(&cell, &ShortCStr::from(c"~/x"), &[false, false, true]);
+    let home = c"/h/o/m/e".to_bytes();
+    assert_eq!(res.as_bytes().unwrap(), [home, b"/x"].concat().as_slice());
+    let mut want = vec![false; home.len() + 1];
+    want.push(true);
+    assert_eq!(mask, want, "the expanded bytes inherit the `~`'s bit");
+    assert!(!expanded, "the tilde records no splittable bytes");
+}
+
 // Field splitting applies to the bytes an expansion produced (POSIX 2.6.5),
 // so `substitute_args` feeds the provenance list to the splitter (task #222,
 // superseding the `expanded` bit of task #133). A word whose arms produced
@@ -1247,6 +1377,17 @@ fn leading_tilde_output_is_never_splittable() {
     let home = std::env::var("HOME").unwrap();
     assert_eq!(res.as_bytes().unwrap(), home.as_bytes());
     assert!(!expanded, "the tilde records no splittable bytes");
+    // Task #282: the same rule for a `HOME` that comes from the shell's own
+    // table, not the inherited environment (bash: `IFS=,; HOME=a,b; printf
+    // %s ~` is the single field `[a,b]`).
+    let cell = env_cell();
+    set_state_home(&cell, c"a,b");
+    let (res, _, expanded) = expand_marked(&cell, &ShortCStr::from(c"~"), &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a,b");
+    assert!(
+        !expanded,
+        "state `HOME` bytes are as un-splittable as any other"
+    );
 }
 
 #[test]
