@@ -296,6 +296,11 @@ echo ~/x          # $HOME/x
 echo ~"/*"        # ~/*          (a quoted character in the tilde-prefix —
                                  # the bytes up to the first `/`, the `/`
                                  # included — suppresses tilde expansion)
+echo ~""          # ~            (a quote pair counts as a quoted character
+                                 # even when it contributes no bytes: `~""`,
+                                 # `~''`, `~""/x` and `""~/x` all stay literal,
+                                 # while `~/""` expands — the pair sits after
+                                 # the prefix's end)
 echo ~user/x      # ~user/x      (no password database: `~user` stays literal)
 ```
 
