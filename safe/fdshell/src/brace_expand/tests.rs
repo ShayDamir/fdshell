@@ -658,6 +658,21 @@ fn heredoc_body_is_verbatim() {
 }
 
 #[test]
+fn heredoc_body_of_a_semicolon_terminated_block_line_is_verbatim() {
+    // The block-granularity twin of `heredoc_body_is_verbatim` (task #311): a
+    // single-line block's arm ends its command line at a `;`, and its body
+    // travels inside the text the arm is later sliced from, so the whole-text
+    // body scan must blank it here too.
+    for line in [
+        "if true; then cat <<T; fi\n{a,b}\nT\n",
+        "for x in a; do cat <<T; done\n{a,b}\nT\n",
+        "case x in x) cat <<T;; esac\n{a,b}\nT\n",
+    ] {
+        assert_eq!(expand_line(line), line.as_bytes().to_vec(), "{line:?}");
+    }
+}
+
+#[test]
 fn heredoc_brace_delimiter_is_verbatim() {
     // A delimiter that looks like a brace group must stay literal, both in
     // the operator and in the terminating line (regression: the terminator

@@ -295,6 +295,52 @@ fn body_regions_multiple_commands() {
     assert_eq!(body_regions(line), vec![(8, 10), (20, 22)]);
 }
 
+// A `;`-terminated command line — a single-line block's arm — claims its body
+// from the physical line's end (the segment layer's rule at arm granularity,
+// task #311): the region is the body lines, ending at the delimiter line's start.
+#[test]
+fn body_regions_of_a_semicolon_terminated_arm_line() {
+    let line = b"if true; then cat <<T; fi\n{a,b}\nT\n";
+    assert_eq!(body_regions(line), vec![(26, 32)]);
+    let line = b"for x in a; do cat <<T; done\n{a,b}\nT\n";
+    assert_eq!(body_regions(line), vec![(29, 35)]);
+    let line = b"case x in x) cat <<T;; esac\n{a,b}\nT\n";
+    assert_eq!(body_regions(line), vec![(28, 34)]);
+    // The `<<-` form: the region ends at the tab-indented line's start.
+    let line = b"if true; then cat <<-T; fi\n\t{a,b}\n\tT\n";
+    assert_eq!(body_regions(line), vec![(27, 34)]);
+}
+
+// Every `<<` of the line claims one region, in global per-line operator order;
+// the runs behind the `;` on the same line are consumed by the resume index,
+// so the line's regions are counted once.
+#[test]
+fn body_regions_of_two_operators_on_one_semicolon_terminated_line() {
+    let line = b"cat <<A; cat <<B\nb1\nA\nb2\nB\n";
+    assert_eq!(body_regions(line), vec![(17, 20), (22, 25)]);
+    let line = b"if true; then cat <<T <<U; fi\nb1\nT\nb2\nU\n";
+    assert_eq!(body_regions(line), vec![(30, 33), (35, 38)]);
+    // Only the operator's own body blanks: the statements behind the `;` stay
+    // tokens, and the run after the region is scanned as usual.
+    let line = b"cat <<T; echo hi\nb\nT\necho after";
+    assert_eq!(body_regions(line), vec![(17, 19)]);
+}
+
+// A `;`-terminated line with no `<<` in the run, a `<<` that is not an operator
+// (quotes, `$( … )`, a comment), and a missing delimiter line all keep the
+// "no region" outcome: the parse layer's own error, as before.
+#[test]
+fn body_regions_of_a_semicolon_terminated_run_without_a_region() {
+    assert!(body_regions(b"echo hi; echo x\n").is_empty());
+    assert!(body_regions(b"cat <<T; echo hi\nb\nNOPE").is_empty());
+    assert!(body_regions(b"if true; then echo \"a <<b\"; fi\n").is_empty());
+    assert!(
+        body_regions(b"if true; then echo $(echo <<b); fi\n").is_empty(),
+        "a `<<` inside `$( … )` is substitution text"
+    );
+    assert!(body_regions(b"if true; then echo hi # <<T; fi\nb\nT\n").is_empty());
+}
+
 // `unterminated` is the REPL's "keep reading" signal for a `<<` run.
 
 // No `<<` operator: not a heredoc, not unterminated.
