@@ -1600,6 +1600,41 @@ fn numbered_heredoc_in_a_block_targets_the_descriptor() {
     assert_eq!(out, "body\n");
 }
 
+/// The io-number form composes with the multi-line positions the region
+/// machinery of #138/#238 established: a single-line block body, a block
+/// **condition**, and the `for`/`case` bodies. Each body line there is a
+/// command name, so `rc == 0` is the assertion that the line's operator
+/// claimed its body region and the body never ran as statements; the `exec`
+/// twins show the body lands on fd 3 in the same positions. Measured against
+/// bash 5.3.9 (`if` condition row: `t`; the rest: empty stdout).
+#[test]
+fn numbered_heredoc_composes_with_the_block_condition_and_loop_positions() {
+    for (script, want) in [
+        ("if true; then cat 3<<T; fi\nnotacmd\nT", ""),
+        ("if cat 3<<T; then echo t; fi\nnotacmd\nT", "t\n"),
+        ("for x in a; do cat 3<<T; done\nnotacmd\nT", ""),
+        ("case a in a) cat 3<<T;; esac\nnotacmd\nT", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, 0),
+            "script={script:?} err={err}"
+        );
+    }
+    for script in [
+        "for x in a; do exec 3<<T; done\nbody\nT\ncat <&3",
+        "case a in a) exec 3<<T;; esac\nbody\nT\ncat <&3",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("body\n", 0),
+            "script={script:?} err={err}"
+        );
+    }
+}
+
 #[test]
 fn numbered_heredoc_is_not_a_path_open() {
     // The old defect opened the path `<T` (`failed to open redirection path`);
@@ -1648,11 +1683,15 @@ fn heredoc_pipeline_spec_window_survives_a_two_operator_stage() {
 }
 
 /// A `#` comment at word-start index 1 on the run's first **line**, its
-/// newline the very next byte: the skip lands on `i + p + 1` with `p == 0`
-/// and the next line's operator is still found — prints `b`, rc 0,
-/// bash-identical. A multiplied skip (`i * p + 1`) lands back on the same `#`
-/// and loops forever (unit twin
-/// `comment_at_index_one_with_next_line_newline_resumes_the_scan`).
+/// newline the very next byte (`i = 1`, `p = 1`): the skip lands on
+/// `i + p + 1 = 3`, the first byte of the next line, and that line's operator
+/// is still found — prints `b`, rc 0, bash-identical. This row pins the
+/// comment skip at `i > 0, p > 0`, the shape the index-0 rows do not cover; it
+/// kills no comment mutant (`p >= 1` always, so the multiplied `i * p + 1`
+/// lands on the newline at 2 and the extra iteration consumes it
+/// state-neutrally — LESSONS; the mutants are killed by the index-0 rows).
+/// Unit twin
+/// `comment_at_index_one_with_next_line_newline_resumes_the_scan`.
 #[test]
 fn comment_line_at_a_run_start_leaves_the_next_line_operator() {
     let (out, _err, code) = run(" #\ncat <<A\nb\nA");

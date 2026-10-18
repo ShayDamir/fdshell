@@ -54,14 +54,16 @@ fn comment_at_run_start_skips_its_text() {
     assert_eq!(operator_delims(line, 0, line.len()).unwrap().len(), 0);
 }
 
-/// A comment whose `#` sits at word-start index `i = 1` and whose newline is
-/// the very next byte (`p == 0`): the skip lands on `i + p + 1 = 2`, the
-/// newline, and the next line's operator counts 1. A skip that multiplies
-/// computes `i * p + 1 = 1` — the same `#` at a bare word start, so the
-/// comment branch fires again and the scan loops forever (killed by the
-/// mutant timeout). Only this shape is observable: with `p > 0` the product
-/// equals the sum for `i == 0`, and at `i > 1` the product lands *before* the
-/// newline on a byte that never re-triggers the comment branch.
+/// A comment whose `#` sits at word-start index `i = 1` with its newline the
+/// very next byte (`p = 1`): the skip lands on `i + p + 1 = 3`, the first byte
+/// of the next line, and that line's operator counts 1. The row pins the
+/// comment skip at `i > 0, p > 0`, which no index-0 row covers; it kills no
+/// mutant, because the newline search starts *at* the `#` so `p >= 1` always,
+/// and the multiplied skip computes `i * p + 1 = 2` — the comment's own
+/// newline, from which the loop resumes at 3 with identical state
+/// (`ScanState::advance` is state-neutral at a newline). The comment mutants
+/// are killed by the index-0 rows; `ops.rs:36:38` is the accepted equivalent
+/// (LESSONS).
 #[test]
 fn comment_at_index_one_with_next_line_newline_resumes_the_scan() {
     let line = b" #\ncat <<A\nb\nA\n";

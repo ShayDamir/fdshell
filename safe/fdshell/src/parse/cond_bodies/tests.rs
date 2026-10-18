@@ -31,6 +31,28 @@ fn condition_bodies_extracted_from_block_text() {
     );
 }
 
+/// The io-number form claims its region in the condition exactly like the
+/// unprefixed one: `3<<A` is the condition's operator and the region after the
+/// condition line is its body (task #276 — the fd-carrying operator is
+/// position-independent; the integration twin is
+/// `numbered_heredoc_composes_with_the_block_condition_and_loop_positions`).
+#[test]
+fn condition_bodies_extracted_from_an_io_number_operator() {
+    let line = b"if cat 3<<A; then echo yes; fi\nbodyA\nA";
+    let text = ScriptText::new(
+        ShortCStr::from_vec(line.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    let tokens = tokenize_statement(line).unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
+    assert_eq!(
+        condition_bodies(&text, cond_tokens),
+        vec![ShortCStr::from_vec(b"bodyA\nA".to_vec()).unwrap()]
+    );
+}
+
 /// A condition without `<<` operators yields no bodies.
 #[test]
 fn condition_bodies_no_operators_is_empty() {
@@ -237,6 +259,20 @@ fn claimed_regions_of_an_arm_with_two_operators_are_in_order() {
 #[test]
 fn claimed_regions_of_an_extension_mode_slice_sit_inside_the_token_range() {
     let line = b"if true; then cat <<T\nbodyT\nT\nfi";
+    let regions = arm_regions_of(line, b"if");
+    assert_eq!(regions.len(), 1);
+    let &(s, e) = regions.first().unwrap();
+    assert_eq!(line.get(s..e).unwrap(), b"bodyT\nT\n");
+    assert!(s < arm_token_range_end(line, b"if"));
+}
+
+/// The io-number form claims the same single region in an arm body written
+/// across lines (the shape of the block body `if true; then cat 3<<T; fi`
+/// carries its body text): the region is the body line plus the delimiter
+/// line, inside the slice's token range (task #276).
+#[test]
+fn claimed_regions_of_an_io_number_operator_in_an_arm_body() {
+    let line = b"if true; then cat 3<<T\nbodyT\nT\nfi";
     let regions = arm_regions_of(line, b"if");
     assert_eq!(regions.len(), 1);
     let &(s, e) = regions.first().unwrap();
