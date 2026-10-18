@@ -194,6 +194,22 @@ fn here_string_tilde_follows_its_mask() {
     );
 }
 
+/// Task #282: the here-string word's tilde follows the `HOME` **shell
+/// variable** — `HOME=/tmp/H; cat <<<~/x` is `/tmp/H/x` in bash 5.3.9, and an
+/// empty `HOME` leaves just the `/x`.
+#[test]
+fn here_string_tilde_follows_the_shell_variable_home() {
+    for (script, want) in [
+        ("HOME=/tmp/H; cat <<<~/x", "/tmp/H/x\n"),
+        ("HOME=/tmp/H; cat <<<~", "/tmp/H\n"),
+        ("HOME=; cat <<<~/x", "/x\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
 /// Accepted divergence (task #222, to be closed by task #288): the here-string
 /// word becomes the redirect's text and is never split, so a **quoted** `$@`
 /// keeps task #222's separator-free join and the positionals glue, where bash

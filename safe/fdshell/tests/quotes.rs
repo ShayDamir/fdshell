@@ -39,6 +39,29 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// `run` with an explicit child environment (task #282): `(key, value)` sets
+/// the pair, and the `"\0"` value *removes* the key — the only way to give
+/// the child no `HOME` at all, since the harness runs with one.
+fn run_env(script: &str, env: &[(&str, &str)]) -> (String, String, i32) {
+    let mut cmd = Command::new(BIN);
+    cmd.args(["-c", script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env {
+        if *value == "\0" {
+            cmd.env_remove(key);
+        } else {
+            cmd.env(key, value);
+        }
+    }
+    let output = cmd.output().unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 /// A scratch dir holding `names` as empty files; `run_in` runs there so globs
 /// and redirects see exactly these files.
 fn scratch(names: &[&str]) -> std::path::PathBuf {
@@ -545,11 +568,80 @@ fn quoted_leading_tilde_is_literal() {
     assert_eq!(out, "[~/x]", "bash prints [~/x]");
 }
 
-/// Task #223: when the byte right after `$` starts a new quote region the
-/// `$` is a literal byte and nothing is consumed — the region cap on the name
-/// scan has no name to read. bash's `printf "[%s]" "$"v` prints `[$v]`, so
-/// this is parity, not a divergence; it is the same rule `$'…'` and `$"…"`
-/// already follow (see `dollar_quote_keeps_the_dollar`).
+/// Task #282: `~` is driven by the `HOME` **shell variable** — the same
+/// lookup `$HOME` uses (the shell's own variables first, the environment
+/// fdshell started with as the fallback), POSIX #2.6.1's rule. Every row is
+/// bash 5.3.9's own output, measured on this machine.
+///
+/// ```text
+/// HOME=/tmp/H; printf "[%s] %s" ~ "$HOME"  → [/tmp/H] /tmp/H
+/// HOME=/tmp/H; printf "[%s]" ~/x           → [/tmp/H/x]
+/// HOME=/tmp/H; printf "[%s]" ~/"x"         → [/tmp/H/x]
+/// HOME=/tmp/H; export HOME; printf %s ~    → [/tmp/H]
+/// HOME=;       printf "[%s]" ~/x           → [/x]
+/// HOME=/tmp/H printf "[%s]" ~              → the inherited HOME, § below
+/// env HOME=a,b (no assignment) printf %s ~ → [a,b]
+/// ```
+#[test]
+fn shell_variable_home_drives_tilde() {
+    for (script, want) in [
+        (r#"HOME=/tmp/H; printf "[%s]" ~"#, "[/tmp/H]"),
+        (r#"HOME=/tmp/H; printf "[%s]" ~/x"#, "[/tmp/H/x]"),
+        (
+            r#"HOME=/tmp/H; printf "[%s] %s" ~ "$HOME""#,
+            "[/tmp/H] /tmp/H",
+        ),
+        (r#"HOME=/tmp/H; printf "[%s]" ~/"x""#, "[/tmp/H/x]"),
+        (r#"HOME=/tmp/H; export HOME; printf "[%s]" ~"#, "[/tmp/H]"),
+        // An empty `HOME` is set, so it expands to nothing. POSIX #2.6.1 would
+        // want a login directory for an empty `HOME`; bash prints `/x` — this
+        // row is agreement with bash, not with POSIX.
+        (r#"HOME=; printf "[%s]" ~/x"#, "[/x]"),
+        (r#"HOME=; printf "[%s]" ~"#, "[]"),
+        // The gate (#269 + #281) is untouched by the lookup change.
+        (r#"HOME=/tmp/H; printf "[%s]" "~""#, "[~]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}");
+    }
+    // The scoped prefix assignment: tilde expansion runs *before* the prefix
+    // is applied, so `~` sees the inherited `HOME` — exactly what `$HOME`
+    // sees in the same shape (measured: both print the inherited HOME).
+    let (tilde, err, code) = run(r#"HOME=/tmp/H printf "[%s]" ~"#);
+    assert_eq!(code, 0, "stderr={err}");
+    let (dollar, err, code) = run(r#"HOME=/tmp/H printf "[%s]" "$HOME""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(
+        tilde, dollar,
+        "a prefix `HOME` moves neither `~` nor `$HOME`"
+    );
+    assert_ne!(tilde, "[/tmp/H]", "bash: the inherited HOME, not /tmp/H");
+    // Fallback: `HOME` only in the inherited environment (no assignment).
+    let (out, err, code) = run_env(r#"IFS=,; builtin printf "[%s]" ~"#, &[("HOME", "a,b")]);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[a,b]", "the inherited HOME is the fallback");
+}
+
+/// Task #282's accepted divergence, pinned as measured: with `HOME` set
+/// nowhere, bash falls back to a login directory from the password database
+/// (`/home/damir` here) and fdshell's `~` contributes nothing. `HOME` is
+/// *removed* from the child's environment, so no fallback exists.
+#[test]
+fn tilde_without_home_contributes_nothing() {
+    for (script, want) in [
+        (r#"printf "[%s]" ~"#, "[]"),
+        (r#"printf "[%s]" ~/x"#, "[/x]"),
+        // nounset never fires on `~`: it is not a parameter reference (bash
+        // prints its login directory with rc 0 in the same shape).
+        (r#"set -u; printf "[%s]" ~"#, "[]"),
+    ] {
+        let (out, err, code) = run_env(script, &[("HOME", "\0")]);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}: bash prints the login directory");
+    }
+}
+
 #[test]
 fn dollar_at_a_region_end_is_a_literal_byte() {
     let (out, err, code) = run(r#"v=q; printf "[%s]" "$"v"#);

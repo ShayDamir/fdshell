@@ -134,6 +134,27 @@ fn case_word_quoted_tilde_is_literal() {
     assert_eq!((out.as_str(), code), ("n\n", 0), "bash prints n");
 }
 
+/// Task #282: `~` on **both** sides of a `case` follows the `HOME` shell
+/// variable, so a `HOME=…` assignment moves the word and the lazily expanded
+/// pattern together. bash 5.3.9 prints `m` for the first two rows and nothing
+/// for the third (its `~x` is an unknown user, fdshell's is a literal tilde —
+/// the same text, so both miss `/tmp/H/x`).
+#[test]
+fn case_tilde_follows_the_shell_variable_home() {
+    for (script, want) in [
+        ("HOME=/tmp/H; case ~/x in ~/x) echo m;; esac", "m\n"),
+        ("HOME=/tmp/H; case /tmp/H/x in ~/x) echo m;; esac", "m\n"),
+        (
+            "HOME=/tmp/H; case /tmp/H/x in ~x) echo m;; *) echo n;; esac",
+            "n\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
 /// The pattern-side rows that were fdshell's divergences are bash parity now
 /// (task #280): the pattern keeps the escape pair it was written with, and an
 /// expansion inside a pattern is expanded — quoted, so its bytes stay literal.

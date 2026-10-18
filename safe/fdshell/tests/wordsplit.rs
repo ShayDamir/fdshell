@@ -20,9 +20,9 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
-/// `substitute/tilde.rs` reads `$HOME` from the **process** environment (task
-/// #287 owns the shell-variable rule), so the tilde pins pass `HOME` to the
-/// child. `IFS` is assigned **inside** the script: bash resets an `IFS`
+/// `substitute/tilde.rs` reads `HOME` through `ShellState::var_value` (task
+/// #282), so the fallback `HOME` below is passed to the child in its
+/// environment. `IFS` is assigned **inside** the script: bash resets an `IFS`
 /// inherited from the environment to its own default, so `IFS=, bash -c …` is
 /// not the comparison.
 fn run_with_home(script: &str, home: &str) -> (String, String, i32) {
@@ -1091,8 +1091,10 @@ fn expansion_bytes_split_and_literal_bytes_glue_across_a_word() {
 
 /// Task #222: the tilde arm records **no** expansion bytes, so the expanded
 /// `$HOME` is never `IFS`-split — bash's rule (`IFS=,; HOME="a,b"; printf %s
-/// ~` is one field `[a,b]`). The `$HOME` of a `~` is read from the process
-/// environment (task #287), hence `run_with_home`. bash 5.3.9 values.
+/// ~` is one field `[a,b]`). These rows assign no `HOME`, so the child's
+/// inherited `HOME` is the fallback the lookup uses (task #282), hence
+/// `run_with_home`; the state-assignment twin of this test is
+/// `state_home_drives_the_tilde_and_stays_un_splittable`. bash 5.3.9 values.
 #[test]
 fn tilde_output_is_never_split_by_ifs() {
     let cases: &[(&str, &str)] = &[
@@ -1114,4 +1116,30 @@ fn tilde_output_is_never_split_by_ifs() {
     let (out, err, code) = run_with_home(r#"IFS=,; builtin printf "[%s]" $HOME"#, "a,b");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[a][b]", "unquoted: the expansion's own byte cuts");
+}
+
+/// Task #282: the same rows with `HOME` assigned **inside** the script — the
+/// tilde then reads the shell variable, not the inherited environment (the
+/// child env carries no `HOME` of its own here, so a `getenv`-based lookup
+/// prints the user's home and every row fails). The expanded bytes stay
+/// un-splittable whatever their source is (`IFS=,; HOME=a,b; printf %s ~` is
+/// bash's single field `[a,b]`). bash 5.3.9 values.
+#[test]
+fn state_home_drives_the_tilde_and_stays_un_splittable() {
+    for (script, want) in [
+        (r#"IFS=,; HOME=a,b; builtin printf "[%s]" ~"#, "[a,b]"),
+        (r#"IFS=,; HOME=a,b; builtin printf "[%s]" ~/x"#, "[a,b/x]"),
+        // The contrast: the `$HOME` expansion's own bytes *are* splittable.
+        (r#"IFS=,; HOME=a,b; builtin printf "[%s]" $HOME"#, "[a][b]"),
+        (
+            r#"IFS=,; HOME=a,b; builtin printf "[%s]" "~"$HOME"#,
+            "[~a][b]",
+        ),
+        // The state's `HOME` shadows the inherited one on every surface.
+        (r#"IFS=,; HOME=z,y; builtin printf "[%s]" ~"#, "[z,y]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}");
+    }
 }

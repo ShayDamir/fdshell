@@ -318,3 +318,25 @@ fn local_value_with_quoted_tilde_prefix_stays_literal() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, format!("[{home}/x]\n"), "bash stores [{home}/x]");
 }
+
+/// Task #282: `local HOME=…` shadows the shell variable that drives `~`, so
+/// inside the call the tilde follows the local value and after the frame
+/// pops it follows the caller's (`$HOME` behaves identically; bash 5.3.9).
+#[test]
+fn local_home_drives_the_tilde_inside_the_call() {
+    let (out, err, code) =
+        run(r#"f(){ local HOME=/tmp/H; printf "[%s]\n" ~; printf "[%s]\n" "$HOME"; }; f"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "[/tmp/H]\n[/tmp/H]\n",
+        "bash prints the local HOME twice"
+    );
+    // After the frame the caller's HOME is back and drives the tilde again —
+    // read in-shell, never a hardcoded home path.
+    let (home, _err, code) = run(r#"printf "%s" "$HOME""#);
+    assert_eq!(code, 0);
+    let (out, err, code) =
+        run(r#"f(){ local HOME=/tmp/H; printf "[%s]\n" ~/x; }; f; printf "[%s]\n" ~/x"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("[/tmp/H/x]\n[{home}/x]\n"));
+}

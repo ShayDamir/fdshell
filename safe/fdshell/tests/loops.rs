@@ -357,6 +357,33 @@ fn for_list_word_expands_leading_tilde() {
     assert_eq!(out, "[a~b]\n");
 }
 
+/// Task #282: the for-list tilde follows the `HOME` **shell variable** — a
+/// `HOME=…` assignment moves `~` exactly as it moves `$HOME` (POSIX #2.6.1,
+/// bash 5.3.9: `HOME=/tmp/H; for w in ~/x; do …` iterates over `/tmp/H/x`).
+#[test]
+fn for_list_tilde_follows_the_shell_variable_home() {
+    for (script, want) in [
+        (
+            r#"HOME=/tmp/H; for w in ~/x; do printf "[%s]\n" "$w"; done"#,
+            "[/tmp/H/x]\n",
+        ),
+        (
+            r#"HOME=/tmp/H; for w in ~ "$HOME"; do printf "[%s]\n" "$w"; done"#,
+            "[/tmp/H]\n[/tmp/H]\n",
+        ),
+        // A `HOME` assigned in a prefix position of the `for` word is not a
+        // shell assignment; the for-list word is substituted in the shell.
+        (
+            r#"HOME=/tmp/H; for w in ~x; do printf "[%s]\n" "$w"; done"#,
+            "[~x]\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
 /// A **quoted** leading `~` is a literal byte (POSIX expands tildes before
 /// quote removal, and bash's `for w in "~"` iterates over `~`) — task #269's
 /// mask gate in `substitute/tilde.rs`. With the empty mask fdshell expanded

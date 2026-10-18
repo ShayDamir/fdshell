@@ -333,3 +333,27 @@ fn assignment_value_with_quoted_tilde_prefix_stays_literal() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, format!("[{home}/x]\n"), "bash stores [{home}/x]");
 }
+
+/// Task #282: an assignment value's tilde reads the `HOME` **shell variable**
+/// (POSIX #2.6.1), so a `HOME=…` assignment on the same line is already the
+/// value `~` expands to — bash's `HOME=/tmp/H; x=~/x` stores `/tmp/H/x`.
+#[test]
+fn assignment_value_tilde_follows_the_shell_variable_home() {
+    for (script, want) in [
+        (
+            r#"HOME=/tmp/H; x=~/x; printf "[%s]\n" "$x""#,
+            "[/tmp/H/x]\n",
+        ),
+        (r#"HOME=/tmp/H; x=~; printf "[%s]\n" "$x""#, "[/tmp/H]\n"),
+        // The value is stored whole: `HOME` carries a comma, the tilde's
+        // bytes never split (task #222's provenance rule).
+        (
+            r#"IFS=,; HOME=a,b; x=~/x; printf "[%s]\n" "$x""#,
+            "[a,b/x]\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err}");
+        assert_eq!(out, want, "{script}");
+    }
+}
