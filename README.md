@@ -212,6 +212,12 @@ builtin openat2 --dirfd %CWD --flags O_CREAT --flags O_WRONLY --mode 0644 log %>
 echo "written through the variable" >%log
 ```
 
+An operand that begins with `<`, `>`, `&` or `%` is a file name when that
+byte is quoted — `echo hi > "&f"` opens `&f`, as bash does — and a syntax
+error when it is not (`> &f`); the spaced `%var` operand stays a syntax
+error, the fd-variable targets being the attached `>%var` / `&>%var` forms
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
+
 `set -o noclobber` (`set -C`) refuses a `>` that would overwrite an existing
 file; `>|` is the explicit override. Several redirections may be written on
 one command; they are applied in order, so the last one on a given descriptor
@@ -236,7 +242,10 @@ EOF
 An unquoted delimiter expands `$`/`$(…)`/backticks in the body; a quoted
 delimiter (`<<'EOF'`) makes the body literal. `<<-EOF` strips leading tabs
 from the body and the delimiter. A here-document is usually attached to
-`cat`, `read` or another command that reads stdin.
+`cat`, `read` or another command that reads stdin. A bare delimiter word
+that begins with `<`, `>`, `&` or `%` is a delimiter when that byte is
+quoted (`cat << "<x"` + body + `<x` prints the body, as bash); unquoted it
+is a syntax error.
 
 A body line is **data**, at every here-document site: quoting, word
 splitting, globbing, brace expansion, block keywords and every other pre-parse
@@ -262,6 +271,9 @@ A here-string feeds one expanded word plus a newline:
 ```shell
 read -u 0 LINE <<<"hello $name"
 ```
+
+A quoted word that begins with `<`, `>`, `&` or `%` is that word:
+`cat <<< "<x"` prints `<x`, as bash; an unquoted one is a syntax error.
 
 A number in front of the operator puts the word on that descriptor instead of
 stdin, under the here-doc's raw-byte number rule: `cat 3<<<text` makes `text\n`

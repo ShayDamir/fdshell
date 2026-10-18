@@ -286,6 +286,44 @@ fn layout_bare_operator_before_redirect_word_is_invalid() {
     }
 }
 
+/// Task #323: the same guard on a **quoted** operand does not fire — POSIX
+/// #4.1 removes quotes after tokenization, so `"<< x"`'s word is the plain
+/// `<x`. Each bare form yields one operator whose delimiter is the
+/// quote-removed word, marked quoted, with the `<<-` marker carried; the
+/// multi-line body ends at the stripped terminator and stays literal.
+#[test]
+fn layout_bare_quoted_operator_delimiter_is_a_delimiter() {
+    for (line, want) in [
+        (b"cat << \"<x\"".as_slice(), b"<x".as_slice()),
+        (b"cat << \"&x\"", b"&x"),
+        (b"cat << \"%x\"", b"%x"),
+        (b"cat <<- \"<x\"", b"<x"),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let (op, extra) = operator_at(line, &tokens, 1).unwrap();
+        assert_eq!(op.delim.as_slice(), want, "line={:?}", line);
+        assert!(op.quoted, "line={:?}", line);
+        assert_eq!(op.strip, line.starts_with(b"cat <<-"), "line={:?}", line);
+        assert_eq!(extra, 1, "the bare form consumes the delimiter word");
+    }
+    for (line, body) in [
+        (b"cat << \"<x\"\nbody\n<x".as_slice(), b"body\n".as_slice()),
+        (b"cat << \"&x\"\nbody\n&x", b"body\n"),
+        (b"cat << \"%x\"\nbody\n%x", b"body\n"),
+        (b"cat <<- \"<x\"\n\tbody\n\t<x", b"body\n"),
+    ] {
+        let s = specs(line);
+        assert_eq!(s.len(), 1, "line={:?}", line);
+        assert_eq!(
+            s[0].body,
+            ShortCStr::from_vec(body.to_vec()).unwrap(),
+            "line={:?}",
+            line
+        );
+        assert!(!s[0].expand, "a quoted delimiter never expands");
+    }
+}
+
 #[test]
 fn operator_count_skips_command_word() {
     // index 0 is the command word even when it looks like an operator.
@@ -321,6 +359,11 @@ fn operator_count_per_stage() {
 /// The byte-level and token-level operator counts agree on every supported
 /// form — attached, bare, `<<-`, quoted — and on `#` comments (the tokenizer
 /// never yields a `<<` from one, so the byte scanner must skip it whole).
+/// The quoted bare delimiters (task #323) are the mask-gated pair: the byte
+/// level reads the raw span's first byte and the token level reads the
+/// operand's quote mask, so `cat << "<x"` counts 1 on both sides
+/// (`scan/heredoc/ops/tests.rs::bare_quoted_operator_delimiter_counts_one_at_both_levels`
+/// pins the byte side; the unquoted twins stay errors — the guard rows above).
 #[test]
 fn operator_count_byte_and_token_levels_agree() {
     for line in [
@@ -333,6 +376,10 @@ fn operator_count_byte_and_token_levels_agree() {
         b"cat <<A # <<B\n",
         b"echo a#b <<X",
         b"cat <<A | tr <<B",
+        b"cat << \"<x\"",
+        b"cat << \"&x\"",
+        b"cat << \"%x\"",
+        b"cat <<- \"<x\"",
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

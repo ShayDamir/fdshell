@@ -478,9 +478,10 @@ fn prefixed_here_string_operator_tail_and_empty_word() {
 
 /// Divergences pinned as measured, each owned by the task named in its
 /// comment: `&` background is a parse error for every command (#313 family); a
-/// redirect after a group's `}` is not attached to the group (#187/#191); the
-/// shared bare-operand guard fires on the *word text* of a quoted operand
-/// (#323), so `cat 3<<< "<x"` is a syntax error where bash feeds `<x\n` to fd 3.
+/// redirect after a group's `}` is not attached to the group (#187/#191).
+/// Task #323 fixed the third row of this test (the guard read the operand's
+/// *word text*, so a quoted `<x` was a syntax error); it is now a bash-parity
+/// row pinned in `prefixed_here_string_quoted_operator_word_is_a_word`.
 #[test]
 fn prefixed_here_string_measured_divergences_name_their_owner() {
     let (out, err, code) = run("cat 3<<<x &");
@@ -490,10 +491,42 @@ fn prefixed_here_string_measured_divergences_name_their_owner() {
     let (out, err, code) = run("{ cat; } 3<<<x");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
     assert!(err.contains("group: unexpected word after '}'"), "{err}");
+}
 
-    let (out, err, code) = run("cat 3<<< \"<x\"");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
-    assert!(err.contains("invalid redirect syntax"), "{err}");
+/// Task #323: the bare form's operand guard is mask-gated, so a *quoted*
+/// word beginning with an operator byte is the word it looks like — bash
+/// prints it (rc 0). Unquoted operator operands stay the pinned syntax
+/// errors (`parse/tests.rs::test_here_string_bare_before_redirect_is_error`);
+/// the unquoted `%v` stays fdshell's fd-variable namespace rejection, the
+/// documented divergence (POSIX_COMPATIBILITY, task #323 §A).
+#[test]
+fn here_string_quoted_operator_word_is_a_word() {
+    for (script, want) in [
+        ("cat <<< \"<x\"", "<x\n"),
+        ("cat <<< \">x\"", ">x\n"),
+        ("cat <<< \"&x\"", "&x\n"),
+        ("cat <<< '%v'", "%v\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The prefixed twin (the row #312 pinned as a divergence): fd 3 gets the
+/// quoted word, stdin stays untouched (the `run_fd3_closed` rows print
+/// nothing, as bash), and the content reads back through the fd table.
+#[test]
+fn prefixed_here_string_quoted_operator_word_is_a_word() {
+    for (script, want) in [
+        ("exec 3<<< \"<x\"; cat <&3", "<x\n"),
+        ("exec 3<<< \">x\"; cat <&3", ">x\n"),
+        ("exec 3<<< '%v'; cat <&3", "%v\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    let (out, err, code) = run_fd3_closed("cat 3<<< \"<x\"");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
 }
 
 /// An expansion failure in the prefixed word is reported like the stdin form's

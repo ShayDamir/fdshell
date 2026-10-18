@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::{Operator, operator_delim, untab, untab_body};
+use super::{Operator, invalid_delimiter, operator_delim, untab, untab_body};
+use sys::ShortCStr;
 
 #[test]
 fn operator_delim_attached_word_is_plain() {
@@ -150,4 +151,51 @@ fn operator_matches_the_stripped_quoted_delimiter() {
     let dash = Operator::new(b"'a'bc", true, 0);
     assert!(dash.matches(b"\tabc"));
     assert!(!dash.matches(b"\ta'bc"));
+}
+
+/// The bare-operand guard's operator-byte arm reads the operand's **quote
+/// mask** (task #323): `&`, `<`, `>`, `%` make the word an operator only when
+/// that byte is unquoted — POSIX #4.1 removes quotes after tokenization, so
+/// `"&f"` is a plain word where `&f` is a syntax error. The mask is parallel
+/// to the word text (the tokenizer contract); a missing bit pads to
+/// *unquoted*, so an empty mask keeps the text-only rule. `""`, `;` and `|`
+/// are mask-independent arms of `invalid_delimiter`. One positive row per
+/// operator byte keeps the four arms killable.
+#[test]
+fn invalid_delimiter_gates_operator_bytes_on_the_quote_mask() {
+    let (t, f) = (true, false);
+    for (word, mask, want) in [
+        // Quoted leading byte: an ordinary word in bash (`> "&f"` opens `&f`).
+        (b"&f".as_slice(), &[t][..], false),
+        (b"<x", &[t], false),
+        (b">x", &[t], false),
+        (b"%x", &[t], false),
+        (b"&f", &[t, f], false),
+        // Unquoted leading byte: the operator (bash syntax errors, one row
+        // per arm byte).
+        (b"&f", &[f], true),
+        (b"<x", &[f], true),
+        (b">x", &[f], true),
+        (b"%x", &[f], true),
+        (b"&f", &[f, t], true),
+        // A missing bit pads to unquoted: the text-only rule.
+        (b"&f", &[f][..0], true),
+        (b"%x", &[f][..0], true),
+        // Mask-independent arms and plain words.
+        (b"", &[f], true),
+        (b";", &[f], true),
+        (b"|", &[f], true),
+        (b"abc", &[f], false),
+        (b"x&f", &[f], false),
+        (b"--", &[f], false),
+    ] {
+        let word = ShortCStr::from_vec(word.to_vec()).unwrap();
+        assert_eq!(
+            invalid_delimiter(&word, mask),
+            want,
+            "word={:?} mask={:?}",
+            word,
+            mask
+        );
+    }
 }

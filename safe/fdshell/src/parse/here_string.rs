@@ -1,7 +1,7 @@
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::redirect::RedirectDef;
-use crate::scan::heredoc::{io_fd, string_span};
+use crate::scan::heredoc::{io_fd, operator_word, string_span};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
@@ -43,7 +43,7 @@ pub fn parse_here_string(
         (ShortCStr::new(), Vec::new(), Vec::new(), 0)
     } else {
         match tokens.get(i + 1) {
-            Some(next) if is_bare_operand(&next.0) => bail!(ParseError::InvalidRedirect),
+            Some(next) if operator_word(&next.0, &next.4) => bail!(ParseError::InvalidRedirect),
             Some(next) => (next.0.clone(), next.4.clone(), next.5.clone(), 1),
             None => (ShortCStr::new(), Vec::new(), Vec::new(), 0),
         }
@@ -89,16 +89,6 @@ pub(crate) fn word_spans(op_spans: &[usize], prefix: usize) -> Vec<usize> {
 /// parse and the brace-protection consumer cannot drift.
 fn has_attached_word(len: usize, prefix: usize) -> bool {
     len > prefix + 3
-}
-
-/// The bare form's operand guard: an operand may not start with an operator
-/// byte (the same rule as the bare `<<` delimiter, `invalid_delimiter`, and the
-/// bare `>`/`<` redirects — keep the three in lockstep; owned by task #323).
-fn is_bare_operand(word: &ShortCStr) -> bool {
-    word.starts_with(b"<")
-        || word.starts_with(b">")
-        || word.starts_with(b"&")
-        || word.starts_with(b"%")
 }
 
 /// The token index of every here-string word: the operator token in the

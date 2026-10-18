@@ -86,16 +86,30 @@ pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
 /// `>`/`>>`/`<`/`<>`/`>|` path and a bare `&>`/`&>>` path may not be a
 /// separator or another operator. A `)` never forms a token (the tokenizer
 /// emits a `;` separator instead), so the `;` arm covers the `<<`-before-`)`
-/// case. Every bare-operand site calls this one function, so the families
-/// cannot drift apart.
-pub(crate) fn invalid_delimiter(word: &ShortCStr) -> bool {
-    word.is_empty()
-        || word.starts_with(b"<")
-        || word.starts_with(b">")
-        || word.starts_with(b"&")
-        || word.starts_with(b"%")
-        || word.eq_bytes(b";")
-        || word.eq_bytes(b"|")
+/// case. The operator-byte arm is mask-gated ([`operator_word`]): the gate
+/// reads the operand's **quote mask**, never its text alone. Every
+/// bare-operand site calls this one function, so the families cannot drift
+/// apart.
+pub(crate) fn invalid_delimiter(word: &ShortCStr, mask: &[bool]) -> bool {
+    word.is_empty() || operator_word(word, mask) || word.eq_bytes(b";") || word.eq_bytes(b"|")
+}
+
+/// The operator-byte arm of the bare-operand rule, gated on the operand's own
+/// quote mask: `<`, `>`, `&`, `%` make a word an operator only when the byte
+/// is **unquoted**. POSIX #4.1 removes quotes after tokenization, so `"&f"`
+/// is a plain word where `&f` is an operator. Byte-level twin:
+/// `lines::delimiter_span` already gates on the raw span's first byte, so the
+/// token level must read the mask and not the word text (LESSONS: byte-level
+/// and token-level counts agree). A missing mask bit pads to *unquoted*, the
+/// house idiom (`substitute/tilde.rs::prefix_quoted`), so a short/empty mask
+/// degrades to the text-only rule. `\X`-escaped operands need no arm: the
+/// text starts with `\`, so no arm fires.
+pub(crate) fn operator_word(word: &ShortCStr, mask: &[bool]) -> bool {
+    !mask.first().copied().unwrap_or(false)
+        && (word.starts_with(b"<")
+            || word.starts_with(b">")
+            || word.starts_with(b"&")
+            || word.starts_with(b"%"))
 }
 
 /// `span` without its leading tabs — the form a `<<-` delimiter line is

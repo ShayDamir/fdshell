@@ -726,6 +726,28 @@ fn heredoc_delimiter_single_quote_forms_in_heredoc_shapes() {
     assert_eq!((out.as_str(), code), ("$X\n", 0), "stderr={err:?}");
 }
 
+/// Task #323: the bare form's delimiter guard is mask-gated, so a **quoted**
+/// delimiter word beginning with an operator byte is a delimiter — bash reads
+/// the body (rc 0), the terminator line is the quote-removed word, and the
+/// quoting makes the body literal. The `<<-` form keeps its tab-stripping
+/// marker (tab-indented body *and* terminator). Unquoted operator-shaped
+/// delimiters stay syntax errors
+/// (`layout_bare_operator_before_redirect_word_is_invalid`, `cat << <x`).
+#[test]
+fn heredoc_bare_quoted_operator_delimiter_is_a_delimiter() {
+    for (script, want) in [
+        ("cat << \"<x\"\nbody\n<x", "body\n"),
+        ("cat << \"&x\"\nbody\n&x", "body\n"),
+        ("cat << \"%x\"\nbody\n%x", "body\n"),
+        ("cat <<- \"<x\"\n\tbody\n\t<x", "body\n"),
+        // A quoted delimiter makes the body literal.
+        ("X=v; cat << \"<x\"\n$X\n<x", "$X\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
 // --- `;`-terminated heredocs in a single-line block body (task #238) -------
 //
 // A single-line block's text carries its body regions **after** the closing

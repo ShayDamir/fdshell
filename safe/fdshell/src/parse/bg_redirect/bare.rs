@@ -22,7 +22,7 @@ pub(super) fn parse(
     let Some((operand, _s, _e, _fq, omask, _spans)) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    if invalid_delimiter(operand) {
+    if invalid_delimiter(operand, omask) {
         bail!(ParseError::InvalidRedirect);
     }
     // A `/dev/fd/N` operand stays a path source: the attached `&>/dev/fd/N`

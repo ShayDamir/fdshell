@@ -426,3 +426,48 @@ fn io_number_prefixed_operators_carry_their_fd() {
         alloc::vec![3, 4]
     );
 }
+
+/// The bare-delimiter guard at the two levels (task #323): the byte level
+/// gates on the **raw span's** first byte (`lines::delimiter_span`) and the
+/// token level gates on the operand's **quote mask**
+/// (`op::operator_word`) — one rule read at each level, so the counts agree.
+/// A quoted delimiter (`<< "<x"`) is a plain word: the scan finds one
+/// operator with the quote-removed word as its delimiter (the token level
+/// counts the same 1 and accepts it —
+/// `parse/heredoc/tests.rs::operator_count_byte_and_token_levels_agree` and
+/// `layout_bare_quoted_operator_delimiter_is_a_delimiter`). An unquoted
+/// operator-shaped delimiter is the `None` arm: a bare `<<` with a rejected
+/// delimiter word yields no operator scan at all, matching the token level's
+/// syntax error
+/// (`parse/heredoc/tests.rs::layout_bare_operator_before_redirect_word_is_invalid`)
+/// — no body region is claimed on either side.
+#[test]
+fn bare_quoted_operator_delimiter_counts_one_at_both_levels() {
+    for (line, want, delim) in [
+        (b"cat << \"<x\"".as_slice(), 1usize, Some(b"<x".as_slice())),
+        (b"cat << \"&x\"", 1, Some(b"&x")),
+        (b"cat << \"%x\"", 1, Some(b"%x")),
+        (b"cat <<- \"<x\"", 1, Some(b"<x")),
+    ] {
+        let ops = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(ops.len(), want, "line={:?}", line);
+        if let Some(delim) = delim {
+            assert_eq!(&ops[0].delim, delim, "line={:?}", line);
+        }
+    }
+    // Unquoted: the raw-byte rule rejects the delimiter word, so the scan
+    // reports "no delimiter" (`None`) — the token layer reports the syntax
+    // error, and neither side claims a body region.
+    for line in [
+        b"cat << <x".as_slice(),
+        b"cat << >x",
+        b"cat << &x",
+        b"cat << %x",
+    ] {
+        assert!(
+            operator_delims(line, 0, line.len()).is_none(),
+            "line={:?}",
+            line
+        );
+    }
+}

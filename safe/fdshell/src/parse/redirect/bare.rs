@@ -56,9 +56,10 @@ pub(super) fn parse_bare(
         bail!(ParseError::InvalidRedirect);
     };
     // The operand must be a plain word: the shared bare-operand guard
-    // (`scan::heredoc::op::invalid_delimiter`), also used by the bare `<<`
-    // delimiter and the bare `&>` / `&>>` form.
-    if invalid_delimiter(operand) {
+    // (`scan::heredoc::op::invalid_delimiter`, mask-gated on the operand's
+    // own quote mask), also used by the bare `<<` delimiter and the bare
+    // `&>` / `&>>` form.
+    if invalid_delimiter(operand, omask) {
         bail!(ParseError::InvalidRedirect);
     }
     if let Some(n) = super::super::fd_path::fd_path_target(operand) {

@@ -102,7 +102,7 @@ pub(super) fn operator_at(
     let Some(next) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    if invalid_delimiter(&next.0) {
+    if invalid_delimiter(&next.0, &next.4) {
         bail!(ParseError::InvalidRedirect);
     }
     let raw = line.get(next.1..next.2).ok_or(ParseError::Never)?;

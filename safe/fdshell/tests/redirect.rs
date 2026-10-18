@@ -2,6 +2,7 @@
 
 use std::process::Command;
 use std::str;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
@@ -717,4 +718,156 @@ fn space_separated_combined_redirect_fd_path() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hi\n", "stdout={out:?}");
     assert_eq!(body, "hi\n");
+}
+
+// --- the bare-operand guard is mask-gated (task #323) -----------------------
+//
+// The operand of a bare `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` is an operator only
+// when the leading `<`/`>`/`&`/`%` byte is **unquoted**: POSIX #4.1 removes
+// quotes after tokenization, so bash opens the file `&f` for `> "&f"` while
+// `> &f` is a syntax error (bash rc 2, fdshell rc 1). Every expectation is
+// `bash -c` (5.3.9) and this tree's build, measured 2026-10-18 in a scratch
+// dir (literal `&`-leading names; pid + counter per test — LESSONS "tests in
+// one binary share the process").
+fn scratch(tag: &str) -> std::path::PathBuf {
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-redirect-{tag}-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn bare_write_redirect_quoted_operator_operand_is_a_file() {
+    let dir = scratch("qwrite");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; echo hi > \"&f\"; cat \"&f\""));
+    let body = std::fs::read_to_string(std::path::Path::new(dir).join("&f")).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err:?}");
+    assert_eq!(body, "hi\n");
+}
+
+#[test]
+fn bare_read_redirect_quoted_operator_operand_is_a_file() {
+    let dir = scratch("qread");
+    let dir = dir.to_str().unwrap();
+    std::fs::write(std::path::Path::new(dir).join("&f"), b"data\n").unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; cat < \"&f\""));
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!((out.as_str(), code), ("data\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn bare_append_redirect_quoted_operator_operand_appends() {
+    let dir = scratch("qappend");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!(
+        "cd {dir}; echo a >> \"&f\"; echo b >> \"&f\"; cat \"&f\""
+    ));
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!((out.as_str(), code), ("a\nb\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn numbered_readwrite_clobber_quoted_operator_operands_are_files() {
+    let dir = scratch("qforms");
+    let dir = dir.to_str().unwrap();
+    // `3>` and `<>` redirect fd 3 / fd 0 — stdout keeps `hi`, and the operand
+    // keeps its content (`<>` opens read-write, writing nothing); `>|` and `>`
+    // redirect stdout into it. All four open the `&`-leading file (bash rc 0).
+    std::fs::write(std::path::Path::new(dir).join("&f<>"), b"keep\n").unwrap();
+    for (op, want_out, want_body) in [
+        ("3>", "hi\n", ""),
+        ("<>", "hi\nkeep\n", "keep\n"),
+        (">|", "hi\n", "hi\n"),
+        (">", "hi\n", "hi\n"),
+    ] {
+        let (out, err, code) = run(&format!(
+            "cd {dir}; echo hi {op} \"&f{op}\"; cat \"&f{op}\""
+        ));
+        let body =
+            std::fs::read_to_string(std::path::Path::new(dir).join(format!("&f{op}"))).unwrap();
+        assert_eq!((out.as_str(), code), (want_out, 0), "{op}: stderr={err:?}");
+        assert_eq!(body, want_body, "{op}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn combined_redirect_quoted_operator_operand_is_a_file() {
+    let dir = scratch("qcombined");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; echo hi &> \"&f\"; cat \"&f\""));
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err:?}");
+    let (out, err, code) = run(&format!(
+        "cd {dir}; echo a &>> \"&g\"; echo e 2>&1 &>> \"&g\"; cat \"&g\""
+    ));
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!((out.as_str(), code), ("a\ne\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn partially_quoted_operator_operand_is_a_file() {
+    // `"&"f`: the quoted leading byte is what the mask gate reads; the word
+    // is `&f` and bash creates the file `&f` (rc 0).
+    let dir = scratch("qpartial");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; echo hi > \"&\"f; cat \"&f\""));
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn multi_redirect_quoted_operator_operands_match_bash() {
+    let dir = scratch("qmulti");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!(
+        "cd {dir}; echo seed > \"&f\"; cat > \"&f\" < \"&f\""
+    ));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run(&format!("cd {dir}; cat >> \"&f\" << \"Q\"\nbody\nQ"));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let body = std::fs::read_to_string(std::path::Path::new(dir).join("&f")).unwrap();
+    assert_eq!(body, "body\n", "the `>` truncated, the heredoc appended");
+    let (out, err, code) = run(&format!("cd {dir}; cat <<< \">x\" 2> \"&g\""));
+    assert!(
+        std::path::Path::new(dir).join("&g").exists(),
+        "the stderr redirect created its file"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!((out.as_str(), code), (">x\n", 0), "stderr={err:?}");
+}
+
+#[test]
+fn unquoted_operator_operands_stay_syntax_errors() {
+    // The unquoted operands keep their current rc: bash gives rc 2 for the
+    // `&`/`<`/`>` shapes (fdshell's parse error is rc 1), `> ""&f` is bash's
+    // `>` taking `""` then `&` as a control operator (rc 127), and `> %v` /
+    // `<<< %v` is fdshell's deliberate `%`-namespace guard arm (POSIX_COMPATIBILITY:
+    // the spaced `%var` operand is rejected so it never silently creates a file
+    // named `%v`; where bash creates it, rc 0). The quoted empty operand
+    // `> ""` stays the guard's `is_empty` arm — owning task #330, bash's
+    // `bash: : No such file` is also rc 1.
+    for script in [
+        "cat > &f",
+        "cat > &\"f\"",
+        "cat > \"\"&f",
+        "cat > %v",
+        "cat <<< %v",
+        "cat > \"\"",
+    ] {
+        let dir = scratch("unquoted");
+        let dir = dir.to_str().unwrap();
+        let (out, err, code) = run(&format!("cd {dir}; {script}"));
+        let files: Vec<_> = std::fs::read_dir(dir).unwrap().collect();
+        std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("invalid redirect"), "{script}: stderr={err:?}");
+        assert!(
+            files.is_empty(),
+            "{script}: the rejected operand created a file in {dir:?}"
+        );
+    }
 }

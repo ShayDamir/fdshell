@@ -57,6 +57,18 @@ echo hi >file       # both: write `hi` to `file`
 
 Write a space (or a quote) between a word and an operator that follows it.
 
+The same raw-byte rule decides the operand side: an operand of a bare `<<`,
+`<<<`, `>`, `>>`, `<`, `<>`, `>|`, `&>` or `&>>` is an operator (and a syntax
+error) only when its leading `<`, `>`, `&` or `%` byte is **unquoted**.
+POSIX removes quotes after tokenization (#4.1), so a quoted byte is ordinary
+word text and bash opens the word as a file — fdshell matches it:
+`> "&f"` opens `&f`, `cat <<< "<x"` is the word `<x`, while `> &"f"` keeps
+its `&` unquoted and stays a syntax error in both shells. The one
+intentional exception is the `%`-namespace arm: the *spaced* fd-variable
+form is never a plain file operand (`> %v` is fdshell's syntax error where
+POSIX creates a file named `%v`) — the fd-variable targets are the attached
+`>%var` and `&>%var` forms of the section above.
+
 ## Here-document and here-string descriptor numbers
 
 `[N]<<word` delivers the body to descriptor `N` (`cat 3<<EOF` writes the body
@@ -90,9 +102,6 @@ The `<<<` form's remaining differences from bash:
   shape, fd-ified); bash rejects it as a syntax error (rc 2).
 - A bare `3<<<` at end of input takes the empty word, printing a lone newline
   to fd 3; bash rejects it as a syntax error (rc 2).
-- `cat 3<<< "<x"` is a syntax error: the bare form's operand may not start
-  with `<`, and the guard reads the operand's *word text*, so a quoted `<x`
-  trips it (task #323). bash feeds `<x\n` to fd 3.
 - An expansion failure in the word is an error (`cat 3<<<$99999999999999999999`
   reports `index or value too large`); bash expands it to the empty word and
   prints a newline.
