@@ -66,5 +66,16 @@ pub(crate) fn operator_count(line: &[u8], from: usize, to: usize) -> usize {
         .unwrap_or(0)
 }
 
+/// The start of the physical line that contains `pos` (the index just past the
+/// newline preceding it, `0` when there is none). Every whole-line operator
+/// scan anchors here: the window and the skip derived from it are one pair
+/// (LESSONS), so the three callers that need it share this one rule.
+pub(crate) fn line_start(line: &[u8], pos: usize) -> usize {
+    line.get(0..pos)
+        .and_then(|head| head.iter().rposition(|&b| b == b'\n'))
+        .map(|n| n + 1)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests;

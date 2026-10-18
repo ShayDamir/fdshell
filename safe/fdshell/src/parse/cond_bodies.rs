@@ -10,7 +10,7 @@ use super::Token;
 use super::heredoc::operators;
 use super::semi::token_range;
 use crate::scan::heredoc::{
-    Operator, body_regions_full, line_end_after, operator_count, operator_delims,
+    Operator, body_regions_full, line_end_after, line_start, operator_count, operator_delims,
 };
 use alloc::vec::Vec;
 use sys::ScriptText;
@@ -57,7 +57,7 @@ pub(crate) fn claimed_regions(text: &ScriptText, tokens: &[Token]) -> Vec<(usize
     };
     // Regions already claimed on the slice's own physical line by the
     // operators written before it (an earlier arm's heredoc).
-    let claimed_before = operator_count(line, line_start_of(line, start), start);
+    let claimed_before = operator_count(line, line_start(line, start), start);
     regions
         .into_iter()
         .skip(claimed_before)
@@ -68,14 +68,7 @@ pub(crate) fn claimed_regions(text: &ScriptText, tokens: &[Token]) -> Vec<(usize
 /// Every `<<` operator on the slice's physical line, in operator order (empty
 /// when the line has none).
 fn all_operators(line: &[u8], line_end: usize, start: usize) -> Vec<Operator> {
-    operator_delims(line, line_start_of(line, start), line_end).unwrap_or_default()
-}
-
-/// The start of the physical line that contains `pos`.
-fn line_start_of(line: &[u8], pos: usize) -> usize {
-    line.get(0..pos)
-        .and_then(|head| head.iter().rposition(|&b| b == b'\n').map(|n| n + 1))
-        .unwrap_or(0)
+    operator_delims(line, line_start(line, start), line_end).unwrap_or_default()
 }
 
 #[cfg(test)]

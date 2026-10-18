@@ -3,7 +3,7 @@
 //! including unbalanced quotes).
 
 use super::super::{Boundary, ScanState, boundary, skip_comment};
-use super::{body_spans, line_end_after, operator_count, operator_delims, skip_region};
+use super::{body_spans, line_end_after, line_start, operator_count, operator_delims, skip_region};
 use alloc::vec::Vec;
 
 /// The opaque body regions of the text, in order: for every heredoc command
@@ -80,11 +80,4 @@ fn semi_terminated_regions(
         return None;
     }
     body_spans(line, body_start, &ops).ok()
-}
-
-/// The start of the physical line that contains `pos`.
-fn line_start(line: &[u8], pos: usize) -> usize {
-    line.get(0..pos)
-        .and_then(|head| head.iter().rposition(|&b| b == b'\n').map(|n| n + 1))
-        .unwrap_or(0)
 }

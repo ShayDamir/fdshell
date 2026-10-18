@@ -159,7 +159,7 @@ fn condition_bodies_window_is_bounded_to_the_conditions_line() {
     );
 }
 
-/// `line_start_of` is panic-free on a text starting with a newline: the anchor
+/// `scan::heredoc::line_start` is panic-free on a text starting with a newline: the anchor
 /// is byte 1 and the condition keeps its region. (This is what kills the
 /// `cond_bodies.rs:63:75` `+` → `-` mutant: at `n = 0` it computes `0 - 1`,
 /// a `usize` underflow — LESSONS.)
@@ -177,7 +177,7 @@ fn condition_bodies_of_a_text_starting_with_a_newline() {
 /// newline, so the region is the next line's text up to the operator's
 /// delimiter line (the shape bash rejects with a syntax error — the accepted
 /// divergence README records, and `script.rs` bails on it too). This is the
-/// text that exercises `line_start_of`'s non-trivial window: on this **success
+/// text that exercises `scan::heredoc::line_start`'s non-trivial window: on this **success
 /// path** the operators its window spans and the `skip` it computes shift
 /// together, so the extraction is invariant to the window's start (LESSONS;
 /// `condition_bodies_window_is_bounded_to_the_conditions_line` pins the

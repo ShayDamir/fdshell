@@ -6,7 +6,7 @@
 //! exactly as every other layer does.
 
 use crate::scan::ScanState;
-use crate::scan::heredoc::line_bodies_for_line;
+use crate::scan::heredoc::{line_bodies_for_line, line_start};
 use alloc::vec::Vec;
 
 /// What the region walk makes of a run that ends at a newline.
@@ -50,16 +50,7 @@ pub(super) fn step(line: &[u8], run_start: usize, nl: usize, block_depth: i32) -
 /// command bytes; the bodies are `run_cond_list`'s own `bodies`) gets none: the
 /// helper starts a region past the text end and returns an empty list.
 fn regions(line: &[u8], run_start: usize, nl: usize) -> (Vec<(usize, usize)>, usize) {
-    line_bodies_for_line(line, line_start_of(line, run_start), nl + 1)
-}
-
-/// The start of the physical line containing `run_start` (the index just
-/// past the newline that precedes it, `0` when there is none).
-fn line_start_of(line: &[u8], run_start: usize) -> usize {
-    line.get(0..run_start)
-        .and_then(|s| s.iter().rposition(|&b| b == b'\n'))
-        .map(|p| p + 1)
-        .unwrap_or(0)
+    line_bodies_for_line(line, line_start(line, run_start), nl + 1)
 }
 
 /// The earliest top-level `&&` / `||` of the region `line[start..end]`, with
