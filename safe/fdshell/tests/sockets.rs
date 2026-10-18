@@ -9,6 +9,7 @@
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::fs::FileTypeExt;
@@ -36,6 +37,16 @@ fn uniq(tag: &str) -> String {
 /// is a shared name, its "passes on re-run" is pid luck, not timing).
 const INET_PORT_BASE: u32 = 5_000;
 const INET_PORT_SPAN: u32 = 14_000;
+
+/// The floor of the kernel's ephemeral source-port range (Linux's default is
+/// 20000–60999; hosts may start higher). Test ports stay strictly below it.
+const EPHEMERAL_PORT_FLOOR: u32 = 20_000;
+
+// The band must end below the ephemeral range: pinned at compile time so a
+// future `INET_PORT_BASE`/`INET_PORT_SPAN` edit cannot silently re-open the
+// collision the unique naming closed (the runtime half of the pin is
+// `inet_ports_are_unique_and_below_the_ephemeral_range`).
+const _: () = assert!(INET_PORT_BASE + INET_PORT_SPAN <= EPHEMERAL_PORT_FLOOR);
 
 /// A port for one AF_INET test: unique per **call** (the same `NEXT_ID` the
 /// abstract names use), stepped by a number coprime with the span so two
@@ -183,6 +194,25 @@ fn bind_path_duplicate_while_held_is_eaddrinuse() {
     assert!(out.is_empty(), "stdout={out:?}");
     let _ = std::fs::remove_file(dir.join("sock"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Pin of the AF_INET port-naming rule the tests below rest on (LESSONS: a
+/// pid-derived test port is a shared name; "passes on re-run" is pid luck):
+/// every `inet_port()` lands below the kernel's ephemeral range, and
+/// successive calls never repeat a port. Both properties are load-bearing —
+/// a `INET_PORT_BASE`/`INET_PORT_SPAN` edit that breaks either silently
+/// restores the `EADDRINUSE` (98) flake task #239 removed.
+#[test]
+fn inet_ports_are_unique_and_below_the_ephemeral_range() {
+    let mut seen = HashSet::new();
+    for _ in 0..INET_ATTEMPTS * 8 {
+        let port = inet_port();
+        assert!(
+            (INET_PORT_BASE as u16..EPHEMERAL_PORT_FLOOR as u16).contains(&port),
+            "port {port} is not in the band below the ephemeral range"
+        );
+        assert!(seen.insert(port), "port {port} reused by a later call");
+    }
 }
 
 /// `bind --bind ADDR --port N` binds a real AF_INET v4 endpoint: a UDP
