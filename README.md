@@ -272,7 +272,16 @@ meaning of `x`:
 echo 'a   b'      # a   b        (spaces are data)
 echo "hi $name"   # expands the variable
 echo a\ b         # a b          (one word)
+echo ~            # $HOME        (a quoted `~` is a literal byte: `echo "~"`)
+echo ~/x          # $HOME/x
+echo ~"/*"        # ~/*          (a quoted character in the tilde-prefix —
+                                 # the bytes up to the first `/`, the `/`
+                                 # included — suppresses tilde expansion)
+echo ~user/x      # ~user/x      (no password database: `~user` stays literal)
 ```
+
+`~` reads `HOME` from the environment fdshell was started with; assigning a
+shell variable `HOME=…` does not move it.
 
 ### Variables
 
