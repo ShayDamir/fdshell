@@ -19,6 +19,26 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// Run with the shell's fd 3 **closed from the start**: `sh` closes it before
+/// `exec`-ing fdshell, so the fd 3 the child sees is deterministic whatever
+/// the harness inherited (cargo-mutants hands every test process its
+/// jobserver pipes as open fds ≥ 3 — LESSONS). A pin that asserts the
+/// parent's fd 3 is *closed* through this helper; one that occupies fd 3
+/// opens a pipe and passes its read end as fd 3.
+fn run_fd3_closed(script: &str) -> (String, String, i32) {
+    let output = Command::new("sh")
+        .args(["-c", "exec 3>&-; exec \"$0\" -c \"$1\"", BIN, script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 #[test]
 fn heredoc_feeds_stdin() {
     let (out, _err, code) = run("cat <<EOF\nline1\nline2\nEOF");
@@ -1615,6 +1635,58 @@ fn numbered_heredoc_in_a_pipeline_and_cond_list() {
     assert_eq!(out, "yes\n");
 }
 
+/// A stage's share of the body regions is `count` long and the walk advances
+/// by that count, so a stage with **two** operators leaves the next stage's
+/// own body: `wc -c` counts `ccc\n` = 4, bash-identical (a walk that multiplies
+/// instead of adds hands stage 2 `aaaa\n` = 5; the unit twin is
+/// `test_heredoc_pipeline_spec_window_advances_by_operator_count`).
+#[test]
+fn heredoc_pipeline_spec_window_survives_a_two_operator_stage() {
+    let (out, _err, code) = run("cat <<A <<B | wc -c <<C\naaaa\nA\nbb\nB\nccc\nC");
+    assert_eq!(code, 0);
+    assert_eq!(out, "4\n");
+}
+
+/// A `#` comment at word-start index 1 on the run's first **line**, its
+/// newline the very next byte: the skip lands on `i + p + 1` with `p == 0`
+/// and the next line's operator is still found — prints `b`, rc 0,
+/// bash-identical. A multiplied skip (`i * p + 1`) lands back on the same `#`
+/// and loops forever (unit twin
+/// `comment_at_index_one_with_next_line_newline_resumes_the_scan`).
+#[test]
+fn comment_line_at_a_run_start_leaves_the_next_line_operator() {
+    let (out, _err, code) = run(" #\ncat <<A\nb\nA");
+    assert_eq!(code, 0);
+    assert_eq!(out, "b\n");
+}
+
+/// A digit run *inside a quoted word* is word data: `cat x" 3<<T"` passes the
+/// whole word to `cat` (rc 1) and the body lines run as statements. The
+/// quoted span has a space at index 4 — a raw-byte word start **inside** the
+/// token — and the token-level rule must reject a prefix that does not begin
+/// the span, or the token count claims an operator the byte scan never sees
+/// (the count-agreement rule, LESSONS).
+#[test]
+fn numbered_heredoc_shape_inside_a_quoted_word_is_word_data() {
+    for script in [
+        "cat x\" 3<<T\"\nbody\nT",
+        "cat \" 3<<T\"\nbody\nT",
+        "cat x' 3<<T'\nbody\nT",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "script={script:?} err={err}");
+        assert_eq!(out, "", "script={script:?}");
+        // The whole word reaches `cat`; no here-doc, no fd-3 operator.
+        assert!(err.contains("No such file"), "script={script:?} err={err}");
+        assert!(!err.contains("valid descriptor number"), "{err}");
+        // The body lines are statements, not a consumed here-doc body.
+        assert!(
+            err.contains("\"body\" not found"),
+            "script={script:?} err={err}"
+        );
+    }
+}
+
 /// The `N<<word` rule reads raw bytes, so a prefix that is quoted, escaped or
 /// glued to a longer word is word data: the token reaches the child as one
 /// argument and there is no here-doc. bash agrees (its io-number must be an
@@ -1683,8 +1755,11 @@ fn numbered_heredoc_known_divergences() {
 
     // A sibling `>&N` dup takes its source from the parent's fd table, so the
     // descriptor that `3<<T` opens in the same command is invisible to it
-    // (task #178, order of redirections).
-    let (out, err, code) = run("cat 3<<T 1>&3\nbody\nT");
+    // (task #178, order of redirections). Run through `run_fd3_closed`: the
+    // assertion is that fd 3 is closed *in the parent*, which only holds on a
+    // deterministic fd table (an inherited fd 3 — cargo-mutants' jobserver —
+    // would make `1>&3` succeed).
+    let (out, err, code) = run_fd3_closed("cat 3<<T 1>&3\nbody\nT");
     assert_eq!(code, 1);
     assert_eq!(out, "");
     assert!(err.contains("fd 3 is not open"), "{err}");

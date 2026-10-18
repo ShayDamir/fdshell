@@ -517,6 +517,31 @@ fn test_heredoc_pipeline_stage_trimmed() {
     assert!(pl.commands[1].redirects.is_empty());
 }
 
+/// The per-stage spec window advances by each stage's **count**, so a stage
+/// with two operators shifts the next stage's window past both bodies: stage 2
+/// gets `ccc\n`, its own body, never `aaaa\n` (a `*spec_at * count` reset
+/// hands it the first body and `wc -c` prints 5, measured).
+#[test]
+fn test_heredoc_pipeline_spec_window_advances_by_operator_count() {
+    let ParsedLine::Pipeline(pl) =
+        parse(b"cat <<A <<B | wc -c <<C\naaaa\nA\nbb\nB\nccc\nC").unwrap()
+    else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pl.commands.len(), 2);
+    assert_eq!(
+        pl.commands[0].redirects,
+        vec![
+            RedirectDef::here_doc(0, c"aaaa\n", true),
+            RedirectDef::here_doc(0, c"bb\n", true),
+        ]
+    );
+    assert_eq!(
+        pl.commands[1].redirects,
+        vec![RedirectDef::here_doc(0, c"ccc\n", true)]
+    );
+}
+
 #[test]
 fn test_here_string_bare_takes_next_token() {
     let ParsedLine::Cmd(cmd) = parse(b"cat <<< word").unwrap() else {

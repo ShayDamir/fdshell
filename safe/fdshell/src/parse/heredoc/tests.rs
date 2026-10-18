@@ -619,6 +619,16 @@ fn operator_count_io_number_forms_agree() {
         (b"cat a|3<<T", 0),
         (b"cat 3<<<x", 0),
         (b"cat <<<x", 0),
+        // A digit run behind a *quoted* space sits at a raw-byte word start
+        // inside the token's span: `span_operator` only accepts a prefix that
+        // *begins* the span, so these stay word data at both levels (0/0).
+        // Without that guard the token layer counts an fd-3 operator with a
+        // shifted delimiter while the byte scan counts 0 — the exact mismatch
+        // the guard exists to prevent (task #276's review, mutant
+        // `io.rs: run == start -> true`).
+        (b"cat x\" 3<<T\"", 0),
+        (b"cat \" 3<<T\"", 0),
+        (b"cat x' 3<<T'", 0),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

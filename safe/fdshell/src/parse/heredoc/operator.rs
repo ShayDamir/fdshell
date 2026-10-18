@@ -68,12 +68,10 @@ pub(crate) fn operators(
     line: &[u8],
     tokens: &[Token],
 ) -> Result<Vec<Operator>, Report<ParseError>> {
-    let mut found = Vec::new();
-    for i in operator_indices(line, tokens) {
-        let (op, _extra) = operator_at(line, tokens, i)?;
-        found.push(op);
-    }
-    Ok(found)
+    operator_indices(line, tokens)
+        .into_iter()
+        .map(|i| operator_at(line, tokens, i).map(|(op, _extra)| op))
+        .collect()
 }
 
 /// The operator at `i`: its delimiter and target descriptor, and how many

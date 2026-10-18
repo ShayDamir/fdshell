@@ -54,6 +54,22 @@ fn comment_at_run_start_skips_its_text() {
     assert_eq!(operator_delims(line, 0, line.len()).unwrap().len(), 0);
 }
 
+/// A comment whose `#` sits at word-start index `i = 1` and whose newline is
+/// the very next byte (`p == 0`): the skip lands on `i + p + 1 = 2`, the
+/// newline, and the next line's operator counts 1. A skip that multiplies
+/// computes `i * p + 1 = 1` — the same `#` at a bare word start, so the
+/// comment branch fires again and the scan loops forever (killed by the
+/// mutant timeout). Only this shape is observable: with `p > 0` the product
+/// equals the sum for `i == 0`, and at `i > 1` the product lands *before* the
+/// newline on a byte that never re-triggers the comment branch.
+#[test]
+fn comment_at_index_one_with_next_line_newline_resumes_the_scan() {
+    let line = b" #\ncat <<A\nb\nA\n";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].delim, b"A");
+}
+
 /// POSIX #4.1: the escape pair `\<` folds to a literal `<`, so `echo a\<<X`
 /// keeps the word `a<<X` and has no operator (the tokenizer agrees: the word
 /// is one token, no `<<` is emitted).
@@ -358,6 +374,14 @@ fn io_number_prefixed_operators_carry_their_fd() {
         (b"cat a|3<<T", 0),
         (b"cat 3<<<x", 0),
         (b"cat <<<x", 0),
+        // A digit run with a *quoted* space before it is word data: the run is
+        // a raw-byte word start inside the quoted span, and the token-level
+        // rule rejects a prefix that does not begin the span (the guard in
+        // `span_operator`, pinned at the token level by the twin rows in
+        // `operator_count_io_number_forms_agree`).
+        (b"cat x\" 3<<T\"", 0),
+        (b"cat \" 3<<T\"", 0),
+        (b"cat x' 3<<T'", 0),
     ] {
         let ops = operator_delims(line, 0, line.len()).unwrap();
         assert_eq!(ops.len(), want, "line={:?}", line);

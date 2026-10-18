@@ -2224,3 +2224,54 @@ against a descriptor a sibling redirect of the same command opens (task #178).
 Recording the measured behaviour as pins and naming the owning task is the
 deliverable; inventing a bash-parity assertion for a gap this task does not own
 is not.
+
+## `operator_delims`' loop-bound and backward-scan mutants are equivalent — the scanner's invariants close the extra step (task #276)
+
+Task #276's mutation run on the touched files missed six mutants; three are
+killable and pinned (`pipeline.rs` `+=`→`*=` by
+`test_heredoc_pipeline_spec_window_advances_by_operator_count` +
+`heredoc_pipeline_spec_window_survives_a_two_operator_stage`, `io.rs`
+`run == start`→`true` by the quoted-space rows of
+`operator_count_io_number_forms_agree`/`io_number_prefixed_operators_carry_their_fd`
++ `numbered_heredoc_shape_inside_a_quoted_word_is_word_data`, `ops.rs`
+`i + p + 1`→`i * p + 1` by
+`comment_with_newline_at_index_zero_resumes_on_the_next_line`). The other
+three are accepted equivalents, unkillable because of scanner invariants:
+
+- `ops.rs` `while i < to`→`<=`: at `i == to` the gate reads `line.get(to)`,
+  `None` at the end of the span and the run's terminating `\n` (never `<`,
+  never a word-start `#`) inside the extra iteration.
+- `ops.rs` `while i < next`→`<=`: the extra `advance` consumes the byte at
+  `next`, and the only state the operator branch derives from that byte is
+  `seen_token`, already true whenever the branch is entered (`token_before`
+  implies a consumed token byte, and every jump in `ScanState::advance`
+  starts on one); quote/escape state is identical because both paths `advance`
+  over it.
+- `ops.rs` `while k > 0`→`>=` in `precedes_pipe`: it is reached only after
+  `preceded`, which implies a token byte before `run`, so the backward scan
+  returns at that byte and never decrements `k` past 0 — the underflow the
+  mutant causes is unreachable.
+
+The killable comment-skip pin needs `#` at word-start index **1** with its
+newline the next byte: `p == 0` makes the mutant land on `i * p + 1 = 1` —
+the same `#`, so the comment branch re-fires forever and the timeout kills it.
+Every other shape hides the mutant: at `i == 0` the product equals the sum,
+and with `p > 0` (measured on `"  #\ncat <<A\nb\nA\n"`, which stayed MISSED)
+the product lands on a byte before the newline that never re-triggers the
+comment branch.
+
+## A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)
+
+`cat 3<<T 1>&3` diverges (rc 1, `fd 3 is not open`) only when fd 3 is closed
+in fdshell's inherited fd table. `run()` inherits whatever the harness holds,
+and cargo-mutants hands every test process its jobserver pipes on fds ≥ 3 —
+so the pin passed under nextest, failed under a shell with `exec 3< /dev/null`
+in the parent, and aborted the mutants' unmutated baseline outright (no
+mutant of the 14 files got tested). The fix is not to drop the assertion (the
+#178 divergence is real) but to make the child's start state deterministic:
+spawn through `sh -c 'exec 3>&-; exec "$BIN" -c "$1"'` (`run_fd3_closed`) —
+or occupy fd 3 with a pipe and pin that outcome. Rule: a process-level pin
+whose expected behaviour depends on a descriptor's *inherited* state must
+create that state in the child itself, never rely on the harness (the
+precedent for the inherited-fd class is "`/proc` fd-table assertions must
+exclude the harness's own pipe targets").
