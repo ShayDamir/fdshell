@@ -349,10 +349,21 @@ fn test_getsockname_uds_path_reports_name() {
 }
 
 /// A non-socket fd surfaces the kernel errno through the wrapper; `cvt`
-/// carries no syscall name, so it appears as `UNKNOWN` (see above).
+/// carries no syscall name, so it appears as `UNKNOWN` (see above). The
+/// bound path socket beside the memfd makes the contrast explicit: same
+/// call, `Ok` on a bound socket, `ENOTSOCK` on a plain fd.
 #[test]
 fn test_getsockname_on_non_socket_is_enotsock() {
-    let _sock = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-sockets-gsn-notsock-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sock_path = dir.join("sock");
+    let sock = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    sys::net::bind_uds_path(&sock, cstr(sock_path.to_str().unwrap())).unwrap();
+    sys::net::getsockname(&sock).unwrap();
     let memfd = sys::memfd::memfd_create().unwrap();
     let err = sys::net::getsockname(&memfd).unwrap_err();
     assert_eq!(
@@ -362,4 +373,16 @@ fn test_getsockname_on_non_socket_is_enotsock() {
             syscall: UNKNOWN
         }
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A family beyond AF_UNIX/AF_INET v4 is rejected by name (task #254): the
+/// read-back is defined for the two families this wrapper decodes. The
+/// socket is unbound and names no port, so the pin stays collision-free
+/// under concurrent suite runs.
+#[test]
+fn test_getsockname_on_other_family_is_einval() {
+    let fd = sys::net::socket(libc::AF_INET6, libc::SOCK_STREAM).unwrap();
+    let err = sys::net::getsockname(&fd).unwrap_err();
+    assert_eq!(err, sys::SyscallError::EINVAL("getsockname"));
 }
