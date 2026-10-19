@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,6 +8,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + tag + counter), removed on drop — the
+/// `tests/verity.rs` shape. pid + counter is unique among *live* processes only,
+/// so the dir must die with its process: pids are recycled, and a dir that
+/// outlives its process is a later run's inherited dir, with the earlier run's
+/// files in it (LESSONS, task #255). Removal is `.ok()`-tolerant: teardown
+/// never panics, and it runs on the panicking test's unwind, which is exactly
+/// the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
 
 /// Run a script with the child's cwd set to `cwd` so relative patterns hit
 /// the scratch dir (the test harness itself runs from the repo root).
@@ -27,7 +43,10 @@ fn run(cwd: &str, script: &str) -> (String, String, i32) {
 
 /// Scratch dir with the plan's layout: `a1 a2 b1 x .hidden file` and
 /// `sub/{alpha,beta,gamma}`; each test gets its own dir (pid + counter).
-fn scratch(tag: &str) -> String {
+/// Returns the path and the guard that removes it: bind the guard to a name
+/// (`let (dir, _scratch) = …`), because a bare `let _ = …` drops at once and
+/// deletes the dir mid-test.
+fn scratch(tag: &str) -> (String, Scratch) {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-glob-{tag}-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
@@ -39,12 +58,13 @@ fn scratch(tag: &str) -> String {
     for name in ["alpha", "beta", "gamma"] {
         std::fs::write(sub.join(name), name.as_bytes()).unwrap();
     }
-    dir.to_str().unwrap().to_string()
+    let path = dir.to_str().unwrap().to_string();
+    (path, Scratch(dir))
 }
 
 #[test]
 fn star_matches_sorted_and_excludes_dots() {
-    let dir = scratch("star");
+    let (dir, _scratch) = scratch("star");
     let (out, _err, code) = run(&dir, "echo a*");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2\n");
@@ -54,12 +74,11 @@ fn star_matches_sorted_and_excludes_dots() {
     let (out, _err, code) = run(&dir, "echo ?");
     assert_eq!(code, 0);
     assert_eq!(out, "x\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn bracket_expressions_match() {
-    let dir = scratch("bracket");
+    let (dir, _scratch) = scratch("bracket");
     let (out, _err, code) = run(&dir, "echo [ab]1");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 b1\n");
@@ -69,12 +88,11 @@ fn bracket_expressions_match() {
     let (out, _err, code) = run(&dir, "echo [a-z]1");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 b1\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn no_match_is_verbatim_or_nullglobbed() {
-    let dir = scratch("nomatch");
+    let (dir, _scratch) = scratch("nomatch");
     let (out, _err, code) = run(&dir, "echo zzz*");
     assert_eq!(code, 0);
     assert_eq!(out, "zzz*\n");
@@ -85,19 +103,17 @@ fn no_match_is_verbatim_or_nullglobbed() {
     let (out, _err, code) = run(&dir, "echo .h??den");
     assert_eq!(code, 0);
     assert_eq!(out, ".hidden\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn quoted_bytes_are_literal() {
-    let dir = scratch("quoted");
+    let (dir, _scratch) = scratch("quoted");
     let (out, _err, code) = run(&dir, "echo \"a*\"");
     assert_eq!(code, 0);
     assert_eq!(out, "a*\n");
     let (out, _err, code) = run(&dir, "echo \"a\"1");
     assert_eq!(code, 0);
     assert_eq!(out, "a1\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -108,60 +124,56 @@ fn escaped_star_is_not_a_pattern() {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-glob-esc-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
+    let _guard = Scratch(dir.clone());
     std::fs::write(dir.join("a*"), b"star").unwrap();
     let (out, _err, code) = run(dir.to_str().unwrap(), "echo a\\*");
     assert_eq!(code, 0);
     assert_eq!(out, "a*\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn subdirectory_patterns() {
-    let dir = scratch("subdir");
+    let (dir, _scratch) = scratch("subdir");
     let (out, _err, code) = run(&dir, "echo sub/*");
     assert_eq!(code, 0);
     assert_eq!(out, "sub/alpha sub/beta sub/gamma\n");
     let (out, _err, code) = run(&dir, "echo */gamma");
     assert_eq!(code, 0);
     assert_eq!(out, "sub/gamma\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn trailing_slash_is_directories_only() {
-    let dir = scratch("trailing");
+    let (dir, _scratch) = scratch("trailing");
     let (out, _err, code) = run(&dir, "echo sub/");
     assert_eq!(code, 0);
     assert_eq!(out, "sub/\n");
     let (out, _err, code) = run(&dir, "echo */");
     assert_eq!(code, 0);
     assert_eq!(out, "sub/\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn symlink_to_dir_is_followed() {
-    let dir = scratch("symlink");
-    let path = std::path::PathBuf::from(&dir);
+    let (dir, _scratch) = scratch("symlink");
+    let path = PathBuf::from(&dir);
     std::os::unix::fs::symlink(path.join("sub"), path.join("link")).unwrap();
     let (out, _err, code) = run(&dir, "echo link/*");
     assert_eq!(code, 0);
     assert_eq!(out, "link/alpha link/beta link/gamma\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn absolute_pattern() {
-    let dir = scratch("absolute");
+    let (dir, _scratch) = scratch("absolute");
     let (out, _err, code) = run(&dir, &format!("echo {dir}/a*"));
     assert_eq!(code, 0);
     assert_eq!(out, format!("{dir}/a1 {dir}/a2\n"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn for_list_words_glob() {
-    let dir = scratch("forlist");
+    let (dir, _scratch) = scratch("forlist");
     let (out, _err, code) = run(&dir, "for f in a*; do echo $f; done");
     assert_eq!(code, 0);
     assert_eq!(out, "a1\na2\n");
@@ -170,7 +182,6 @@ fn for_list_words_glob() {
     let (out, _err, code) = run(&dir, "for f in \"a*\"; do echo $f; done");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A for-list word is pathname-expanded **after** substitution (task #131):
@@ -179,7 +190,7 @@ fn for_list_words_glob() {
 /// a `$(…)` output is globbed too.
 #[test]
 fn for_list_globbed_after_expansion() {
-    let dir = scratch("forglob");
+    let (dir, _scratch) = scratch("forglob");
     let (out, _err, code) = run(&dir, r#"x=a*; for f in $x; do printf "[%s]\n" "$f"; done"#);
     assert_eq!(code, 0);
     assert_eq!(out, "[a1]\n[a2]\n");
@@ -195,12 +206,11 @@ fn for_list_globbed_after_expansion() {
     );
     assert_eq!(code, 0);
     assert_eq!(out, "[a1]\n[a2]\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn set_words_glob_and_dollar_at_reglobs() {
-    let dir = scratch("setwords");
+    let (dir, _scratch) = scratch("setwords");
     // `set --` words glob, and `$1` is the first globbed word.
     let (out, _err, code) = run(&dir, "set -- b*; echo $1");
     assert_eq!(code, 0);
@@ -212,37 +222,33 @@ fn set_words_glob_and_dollar_at_reglobs() {
     let (out, _err, code) = run(&dir, "set -- \"a*\"; echo $@");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn pipeline_stage_args_glob() {
-    let dir = scratch("pipeline");
+    let (dir, _scratch) = scratch("pipeline");
     let (out, _err, code) = run(&dir, "echo a* | cat");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn builtin_args_glob() {
-    let dir = scratch("builtin");
+    let (dir, _scratch) = scratch("builtin");
     let (out, _err, code) = run(&dir, r#"builtin printf "%s\n" sub/*"#);
     assert_eq!(code, 0);
     assert_eq!(out, "sub/alpha\nsub/beta\nsub/gamma\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn unclosed_bracket_is_literal() {
-    let dir = scratch("unclosed");
+    let (dir, _scratch) = scratch("unclosed");
     let (out, _err, code) = run(&dir, "echo [abc");
     assert_eq!(code, 0);
     assert_eq!(out, "[abc\n");
     let (out, _err, code) = run(&dir, "echo x[abc");
     assert_eq!(code, 0);
     assert_eq!(out, "x[abc\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -252,6 +258,7 @@ fn star_lists_directory_larger_than_one_getdents_buffer() {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-glob-big-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
+    let _guard = Scratch(dir.clone());
     for i in 0..200 {
         std::fs::write(dir.join(format!("f{i:03}")), b"x").unwrap();
     }
@@ -259,7 +266,6 @@ fn star_lists_directory_larger_than_one_getdents_buffer() {
     assert_eq!(code, 0);
     let names: Vec<String> = (0..200).map(|i| format!("f{i:03}")).collect();
     assert_eq!(out, format!("{}\n", names.join(" ")));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Write an executable POSIX script so command-name globbing can exec it.
@@ -274,7 +280,7 @@ fn write_script(dir: &str, name: &str, body: &str) {
 
 #[test]
 fn dotglob_lists_dotfiles() {
-    let dir = scratch("dotglob");
+    let (dir, _scratch) = scratch("dotglob");
     // `*` with dotglob includes the dotfile but never `.`/`..`.
     let (out, _err, code) = run(&dir, "shopt -s dotglob; echo *");
     assert_eq!(code, 0);
@@ -292,12 +298,11 @@ fn dotglob_lists_dotfiles() {
     let (out, _err, code) = run(&dir, "echo *");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2 b1 file sub x\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn failglob_errors_on_no_match() {
-    let dir = scratch("failglob");
+    let (dir, _scratch) = scratch("failglob");
     let (out, err, code) = run(&dir, "shopt -s failglob; echo zzz*");
     assert_ne!(code, 0);
     assert!(err.contains("no match"), "stderr: {err}");
@@ -311,12 +316,11 @@ fn failglob_errors_on_no_match() {
     let (out, _err, code) = run(&dir, "shopt -s failglob; echo a*");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn posix_class_matches() {
-    let dir = scratch("class");
+    let (dir, _scratch) = scratch("class");
     let (out, _err, code) = run(&dir, "echo [[:alpha:]]*");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 a2 b1 file sub x\n");
@@ -324,7 +328,6 @@ fn posix_class_matches() {
     let (out, _err, code) = run(&dir, "echo [[:digit:]]*");
     assert_eq!(code, 0);
     assert_eq!(out, "[[:digit:]]*\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -339,18 +342,18 @@ fn class_as_last_member_does_not_leak_past_the_bracket() {
         c
     ));
     std::fs::create_dir_all(&dir).unwrap();
+    let _guard = Scratch(dir.clone());
     for name in ["]xy", "xxy", "5xy"] {
         std::fs::write(dir.join(name), b"").unwrap();
     }
     let (out, _err, code) = run(dir.to_str().unwrap(), "echo [[:digit:]]xy");
     assert_eq!(code, 0);
     assert_eq!(out, "5xy\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn redirect_target_globs() {
-    let dir = scratch("redir");
+    let (dir, _scratch) = scratch("redir");
     // Two `a*` matches: ambiguous redirect, nothing written.
     let (_out, err, code) = run(&dir, "echo hi >a*");
     assert_ne!(code, 0);
@@ -369,12 +372,11 @@ fn redirect_target_globs() {
         std::fs::read_to_string(dir.as_str().to_owned() + "/zzz*").unwrap(),
         "hi\n"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn command_name_globs() {
-    let dir = scratch("cmdname");
+    let (dir, _scratch) = scratch("cmdname");
     write_script(&dir, "run.sh", "#!/bin/sh\necho ran\n");
     // Sole match: the match is the command.
     let (out, _err, code) = run(&dir, "./run.s*");
@@ -386,5 +388,4 @@ fn command_name_globs() {
     let (out, _err, code) = run(&dir, "./c*.sh");
     assert_eq!(code, 0);
     assert_eq!(out, "got:./c2.sh\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -5,6 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use std::path::PathBuf;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -16,10 +17,26 @@ use crate::state::ShellState;
 
 static COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
+/// A per-test scratch dir (pid + counter), removed on drop — the `tests/verity.rs`
+/// shape. pid + counter is unique among *live* processes only, so the dir must
+/// die with its process: pids are recycled, and a dir that outlives its process
+/// is a later run's inherited dir, with the earlier run's files in it (LESSONS,
+/// task #255). Removal is `.ok()`-tolerant so a concurrent suite run can never
+/// turn teardown into an ENOENT panic.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
 /// A scratch dir with `a1 a2 b1 x .hidden file sub/{alpha,beta,gamma}` (the
 /// single-char `x` exercises `?`); each test gets its own (unit-test cwd is
-/// the repo root, so patterns below are absolute).
-fn scratch() -> String {
+/// the repo root, so patterns below are absolute). Returns the path and the
+/// guard that removes it: bind the guard to a name (`let (dir, _scratch) = …`),
+/// because a bare `let _ = …` drops at once and deletes the dir mid-test.
+fn scratch() -> (String, Scratch) {
     let c = COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-glob-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -29,7 +46,8 @@ fn scratch() -> String {
     for name in ["alpha", "beta", "gamma"] {
         std::fs::write(dir.join("sub").join(name), b"").unwrap();
     }
-    String::from(dir.to_str().unwrap())
+    let path = String::from(dir.to_str().unwrap());
+    (path, Scratch(dir))
 }
 
 fn word(s: &str) -> ShortCStr {
@@ -59,7 +77,7 @@ fn expand_to_bytes_masked(
 #[test]
 fn star_matches_sorted_and_excludes_dots() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let out = expand_to_bytes(&cell, &format!("{dir}/*"));
     assert_eq!(
         out,
@@ -85,7 +103,7 @@ fn non_pattern_word_passes_through_fs_free() {
 #[test]
 fn no_match_keeps_word_verbatim_by_default() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/zzz*")),
         vec![format!("{dir}/zzz*").into_bytes()]
@@ -96,7 +114,7 @@ fn no_match_keeps_word_verbatim_by_default() {
 fn noglob_passes_pattern_through_verbatim() {
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().options |= NOGLOB;
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     // A matching pattern is not expanded: the word passes through unchanged.
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/*")),
@@ -110,7 +128,7 @@ fn noglob_passes_pattern_through_verbatim() {
 fn no_match_disappears_with_nullglob() {
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().options |= NULLGLOB;
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/zzz*")),
         Vec::<Vec<u8>>::new()
@@ -129,7 +147,7 @@ fn no_match_disappears_with_nullglob() {
 fn no_match_errors_with_failglob() {
     let cell = ForkCell::new(ShellState::new());
     cell.borrow_mut().unwrap().options |= FAILGLOB;
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     // failglob errors on a pattern with no matches (the `GlobNoMatch` arm).
     let report = expand(&word(&format!("{dir}/zzz*")), &[], &cell)
         .err()
@@ -154,7 +172,7 @@ fn no_match_errors_with_failglob() {
 #[test]
 fn question_matches_one_char_but_not_dots() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     // `?` matches the single-char `x`, never `.`/`..`/`.hidden` (FNM_PERIOD).
     let names = expand_to_bytes(&cell, &format!("{dir}/?"));
     assert_eq!(names, vec![format!("{dir}/x").into_bytes()]);
@@ -164,7 +182,7 @@ fn question_matches_one_char_but_not_dots() {
 #[test]
 fn dot_leading_patterns_match_dot_entries() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     // `.*` (a component whose first byte is a literal `.`) matches the real
     // dotfiles only — bash never lists `.`/`..` for any pattern.
     assert_eq!(
@@ -187,7 +205,7 @@ fn dot_leading_patterns_match_dot_entries() {
 #[test]
 fn trailing_slash_yields_directories_only() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/*/")),
         vec![format!("{dir}/sub/").into_bytes()]
@@ -202,7 +220,7 @@ fn trailing_slash_yields_directories_only() {
 #[test]
 fn nested_pattern_walks_intermediate_components() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     assert_eq!(
         expand_to_bytes(&cell, &format!("{dir}/sub/*")),
         vec![
@@ -223,7 +241,7 @@ fn nested_pattern_walks_intermediate_components() {
 #[test]
 fn escaped_star_word_is_not_a_pattern() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     std::fs::write(format!("{dir}/ax"), b"").unwrap();
     // The token text keeps the pair.
     assert_eq!(
@@ -248,7 +266,7 @@ fn escaped_star_word_is_not_a_pattern() {
 #[test]
 fn relative_pattern_walks_from_the_base_fd() {
     let cell = ForkCell::new(ShellState::new());
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let base = sys::openat2::open(
         CString::new(dir.as_str()).unwrap().as_c_str(),
         sys::fcntl::O_DIRECTORY,
@@ -262,5 +280,16 @@ fn relative_pattern_walks_from_the_base_fd() {
     assert_eq!(names, vec![b"a1".to_vec(), b"a2".to_vec()]);
     // No base: the same pattern is CWD-rooted and finds nothing here.
     assert!(matches(&word("a*"), &[], &cell, None).unwrap().is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The leak this file had (task #255): a scratch dir named `fdshell-glob-{pid}-{counter}`
+/// outlives its process, and a later suite run with a recycled pid inherits it with
+/// another test's files in it. The guard removes the dir on drop, so the naming is
+/// collision-free — pinned here on the normal path, and by every failing test's unwind.
+#[test]
+fn scratch_dir_is_removed_on_drop() {
+    let (dir, scratch) = scratch();
+    assert!(PathBuf::from(&dir).exists());
+    drop(scratch);
+    assert!(!PathBuf::from(&dir).exists());
 }
