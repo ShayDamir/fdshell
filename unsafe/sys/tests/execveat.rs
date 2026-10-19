@@ -2,9 +2,11 @@
 
 use core::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::AtomicU64;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::execveat::AT_EMPTY_PATH;
 
 /// Path to the test helper binary that exits with 42.
@@ -43,13 +45,36 @@ fn execveat_ok_path() {
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn test_dir() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn test_dir() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
         "fdshell-execveat-test-{}-{}",
         std::process::id(),
         c
-    ))
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 /// Helper: creates a script with shebang, opens it, forks, runs execveat(fd, "", AT_EMPTY_PATH).
@@ -57,8 +82,6 @@ fn test_dir() -> std::path::PathBuf {
 /// `expect_ok` is whether execveat is expected to succeed (child exits 42) or fail (child exits 1).
 fn execveat_script(script: &[u8], cloexec: bool, expect_ok: bool) {
     let dir = test_dir();
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
     let script_path = dir.join("script.sh");
     std::fs::write(&script_path, script).unwrap();
     {
@@ -96,7 +119,6 @@ fn execveat_script(script: &[u8], cloexec: bool, expect_ok: bool) {
             }
         }
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

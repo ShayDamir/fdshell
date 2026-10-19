@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 
 use std::ffi::CString;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 use sys::getdents64::{Iter, getdents};
@@ -13,9 +14,30 @@ const DT_DIR: u32 = (sys::stat::S_IFDIR & 0o170000) >> 12;
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// A scratch directory holding regular files `a`, `b`, `c` and a subdir `sub`;
-/// each test gets its own dir.
-fn scratch() -> PathBuf {
+/// each test gets its own dir, removed when the test's guard drops.
+fn scratch() -> Scratch {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-gd64-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
@@ -23,7 +45,7 @@ fn scratch() -> PathBuf {
         std::fs::write(dir.join(name), name.as_bytes()).unwrap();
     }
     std::fs::create_dir_all(dir.join("sub")).unwrap();
-    dir
+    Scratch(dir)
 }
 
 fn cstr(p: &std::path::Path) -> CString {
@@ -114,6 +136,7 @@ fn empty_directory_lists_only_dot_dirs() {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-gd64-empty-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
+    let _guard = Scratch(dir.clone());
     let dir_fd = open(cstr(&dir).as_c_str(), libc::O_RDONLY | libc::O_CLOEXEC).unwrap();
     let names: Vec<String> = list_all(&dir_fd)
         .into_iter()
@@ -126,14 +149,14 @@ fn empty_directory_lists_only_dot_dirs() {
 
 /// Scratch dir with 256 files `file-000`..`file-255` (~8 KiB of records), so
 /// a 4 KiB buffer needs more than one `getdents64` pass.
-fn big_scratch() -> PathBuf {
+fn big_scratch() -> Scratch {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-gd64-big-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     for i in 0..256u32 {
         std::fs::write(dir.join(format!("file-{:03}", i)), b"").unwrap();
     }
-    dir
+    Scratch(dir)
 }
 
 #[test]

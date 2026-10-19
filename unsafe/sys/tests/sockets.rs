@@ -6,19 +6,57 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use std::io::{Read, Write};
+use std::ops::Deref;
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{SocketAddr, UnixStream};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+/// `sock_path` keeps the guarded prefix short (`fdshell-sockets-<tag>-<pid>-<c>`)
+/// so the bound `…/sock` stays well under `sun_path`'s 108 bytes.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// A unique abstract-namespace name: tests in this binary share one pid, so
 /// the counter keeps parallel tests apart; the pid keeps binaries apart.
 fn abs_name(tag: &str) -> String {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("fdshell-{tag}-{}-{c}", std::process::id())
+}
+
+/// A pid + counter scratch dir named after `tag` (the old fixed prefixes
+/// `fdshell-sockets-<tag>-…`), removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-sockets-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 fn cstr(s: &str) -> std::ffi::CString {
@@ -71,12 +109,7 @@ fn test_bind_uds_abstract_max_length() {
 
 #[test]
 fn test_bind_uds_path_creates_file() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-sockets-path-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("path");
     let sock_path = dir.join("sock");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
     sys::net::bind_uds_path(&fd, cstr(sock_path.to_str().unwrap())).unwrap();
@@ -85,7 +118,6 @@ fn test_bind_uds_path_creates_file() {
         meta.file_type().is_socket(),
         "bind must create a socket file"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -186,12 +218,7 @@ fn test_connect_uds_abstract_roundtrip() {
 
 #[test]
 fn test_connect_uds_path_roundtrip() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-sockets-connect-path-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("connect-path");
     let sock_path = dir.join("sock");
     let listener = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
     sys::net::bind_uds_path(&listener, cstr(sock_path.to_str().unwrap())).unwrap();
@@ -210,23 +237,16 @@ fn test_connect_uds_path_roundtrip() {
         got += n;
     }
     assert_eq!(&buf, b"ok\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `connect` never creates a socket file: a path nobody bound is `ENOENT`.
 #[test]
 fn test_connect_uds_path_to_unbound_path_is_enoent() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-sockets-connect-missing-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("connect-missing");
     let missing = dir.join("never-bound");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
     let err = sys::net::connect_uds_path(&fd, cstr(missing.to_str().unwrap())).unwrap_err();
     assert_eq!(err, sys::SyscallError::ENOENT(UNKNOWN));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -330,12 +350,7 @@ fn test_getsockname_uds_abstract_reports_name() {
 /// LESSONS temp-path rule, tolerant teardown.
 #[test]
 fn test_getsockname_uds_path_reports_name() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-sockets-gsn-path-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("gsn-path");
     let sock_path = dir.join("sock");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
     sys::net::bind_uds_path(&fd, cstr(sock_path.to_str().unwrap())).unwrap();
@@ -345,7 +360,6 @@ fn test_getsockname_uds_path_reports_name() {
         }
         other => panic!("AF_UNIX socket must report a Unix name, got {other:?}"),
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A non-socket fd surfaces the kernel errno through the wrapper; `cvt`
@@ -354,12 +368,7 @@ fn test_getsockname_uds_path_reports_name() {
 /// call, `Ok` on a bound socket, `ENOTSOCK` on a plain fd.
 #[test]
 fn test_getsockname_on_non_socket_is_enotsock() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-sockets-gsn-notsock-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("gsn-notsock");
     let sock_path = dir.join("sock");
     let sock = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
     sys::net::bind_uds_path(&sock, cstr(sock_path.to_str().unwrap())).unwrap();
@@ -373,7 +382,6 @@ fn test_getsockname_on_non_socket_is_enotsock() {
             syscall: UNKNOWN
         }
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A family beyond AF_UNIX/AF_INET v4 is rejected by name (task #254): the

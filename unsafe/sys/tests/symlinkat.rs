@@ -1,12 +1,37 @@
 #![allow(clippy::unwrap_used)]
 
-use std::sync::atomic::AtomicU64;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn test_dir() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("fdshell-symlinkat-{}-{}", std::process::id(), c))
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-symlinkat-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 fn open_dir(path: &std::path::Path) -> sys::LocalFd {
@@ -26,8 +51,7 @@ fn open_dir(path: &std::path::Path) -> sys::LocalFd {
 
 #[test]
 fn symlinkat_creates_link() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     std::fs::write(dir.join("target"), b"content").unwrap();
     let link = dir.join("link");
 
@@ -41,13 +65,11 @@ fn symlinkat_creates_link() {
         std::fs::read_link(&link).unwrap(),
         std::path::Path::new("target")
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn symlinkat_eexist() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let dirfd = open_dir(&dir);
     let target = std::ffi::CString::new("t").unwrap();
     let newpath = std::ffi::CString::new("link").unwrap();
@@ -55,26 +77,22 @@ fn symlinkat_eexist() {
 
     let err = sys::fileat::symlinkat(&target, dirfd.at(), &newpath).unwrap_err();
     assert_eq!(err, sys::SyscallError::EEXIST("unknown"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn symlinkat_missing_parent_is_enoent() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let dirfd = open_dir(&dir);
     // `nope/link`: the parent `nope` does not exist.
     let target = std::ffi::CString::new("t").unwrap();
     let newpath = std::ffi::CString::new("nope/link").unwrap();
     let err = sys::fileat::symlinkat(&target, dirfd.at(), &newpath).unwrap_err();
     assert_eq!(err, sys::SyscallError::ENOENT("unknown"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn symlinkat_nondirectory_dirfd_is_enotdir() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let file = dir.join("f");
     std::fs::write(&file, b"x").unwrap();
     let cfile = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
@@ -91,5 +109,4 @@ fn symlinkat_nondirectory_dirfd_is_enotdir() {
         }
     );
     drop(fd);
-    let _ = std::fs::remove_dir_all(&dir);
 }

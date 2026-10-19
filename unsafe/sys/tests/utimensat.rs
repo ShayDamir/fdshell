@@ -1,12 +1,37 @@
 #![allow(clippy::unwrap_used)]
 
-use std::sync::atomic::AtomicU64;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn test_dir() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("fdshell-utimensat-{}-{}", std::process::id(), c))
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-utimensat-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 fn open_dir(path: &std::path::Path) -> sys::LocalFd {
@@ -61,20 +86,17 @@ const OMIT: sys::fileat::Timespec = sys::fileat::Timespec {
 
 #[test]
 fn utimensat_sets_epoch() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     std::fs::write(dir.join("f"), b"x").unwrap();
     let dirfd = open_dir(&dir);
     let path = std::ffi::CString::new("f").unwrap();
     sys::fileat::utimensat(dirfd.at(), &path, &epoch(1234567890), &epoch(1234567890), 0).unwrap();
     assert_eq!(mtime_secs(&dir.join("f")), 1234567890);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn utimensat_now_is_current() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     std::fs::write(dir.join("f"), b"x").unwrap();
     let dirfd = open_dir(&dir);
     let path = std::ffi::CString::new("f").unwrap();
@@ -88,13 +110,11 @@ fn utimensat_now_is_current() {
         (m - real).abs() <= 5,
         "mtime {m} not within 5s of now {real}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn utimensat_omit_leaves_mtime() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     std::fs::write(dir.join("f"), b"x").unwrap();
     let dirfd = open_dir(&dir);
     let path = std::ffi::CString::new("f").unwrap();
@@ -113,13 +133,11 @@ fn utimensat_omit_leaves_mtime() {
         1111111111,
         "atime must move to now"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn utimensat_nofollow_updates_link_not_target() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let target = dir.join("target");
     std::fs::write(&target, b"x").unwrap();
     let link = dir.join("link");
@@ -151,24 +169,20 @@ fn utimensat_nofollow_updates_link_not_target() {
         2222222222,
         "target mtime must be untouched"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn utimensat_enoent() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let dirfd = open_dir(&dir);
     let path = std::ffi::CString::new("nope").unwrap();
     let err = sys::fileat::utimensat(dirfd.at(), &path, &NOW, &NOW, 0).unwrap_err();
     assert_eq!(err, sys::SyscallError::ENOENT("unknown"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn utimensat_nondirectory_dirfd_is_enotdir() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let file = dir.join("f");
     std::fs::write(&file, b"x").unwrap();
     let cfile = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
@@ -183,5 +197,4 @@ fn utimensat_nondirectory_dirfd_is_enotdir() {
         }
     );
     drop(fd);
-    let _ = std::fs::remove_dir_all(&dir);
 }
