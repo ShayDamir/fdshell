@@ -10,7 +10,7 @@ mod position;
 mod quoted;
 mod wait;
 
-use quoted::quoted_word;
+pub(crate) use quoted::quoted_word;
 
 pub(crate) use function::{definer_len, function_def_name, name_len};
 pub(crate) use pair::pair_payload;

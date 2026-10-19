@@ -57,3 +57,22 @@ fn case_word_join_keeps_the_zero_byte_span() {
     assert_eq!(word_mask, vec![false; 3], "mask parallel to the text");
     assert_eq!(word_span, vec![1, 2]);
 }
+
+/// `find_preceded_by_semi` reads `needle` through the keyword gate
+/// (`keyword_word`, task #247): a quoted `then`/`done` is a command word, so
+/// the block finds no keyword — the parse error is the bash-parity outcome
+/// (bash rejects the shape with a syntax error).
+#[test]
+fn preceded_by_semi_needs_an_unquoted_keyword_word() {
+    let find = |line: &[u8], start: usize, needle: &[u8]| {
+        super::find_preceded_by_semi(&tokenize(line).unwrap(), start, needle, line)
+    };
+    assert_eq!(find(b"if true; then echo a; fi", 1, b"then"), Some(3));
+    assert_eq!(find(b"if true; 'then' echo a; fi", 1, b"then"), None);
+    assert_eq!(find(b"if true; \"then\" echo a; fi", 1, b"then"), None);
+    // The empty quote pair contributes no byte and no mask bit — the span
+    // rule catches it (task #321's lesson, at the keyword gate).
+    assert_eq!(find(b"if true; ''then echo a; fi", 1, b"then"), None);
+    assert_eq!(find(b"while :; do :; done", 1, b"done"), Some(6));
+    assert_eq!(find(b"while :; do :; 'done'", 1, b"done"), None);
+}

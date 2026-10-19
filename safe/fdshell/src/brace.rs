@@ -9,7 +9,7 @@ pub(crate) fn scan_function_block(
     start: usize,
     quotes: Quotes,
 ) -> Option<(usize, bool)> {
-    function_def_name(part)?;
+    function_def_name(part, line, start)?;
     let brace = line
         .get(start..)
         .and_then(|s| s.iter().position(|&b| b == b'{'))

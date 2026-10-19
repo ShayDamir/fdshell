@@ -74,7 +74,7 @@ fn trails_cond_op(body: &[u8]) -> bool {
 /// `cond/boundary::opens_group` consumes this rule (task #235).
 pub(crate) fn definer_at_run(line: &[u8], start: usize, brace: usize) -> bool {
     let body = line.get(start..brace).unwrap_or(b"").trim_ascii();
-    opens_definer(body) || trails_definer(body)
+    opens_definer(body, line, start) || trails_definer(body, line, start)
 }
 
 /// The run text is the definer words plus `(`/`)`/whitespace filler and
@@ -82,8 +82,9 @@ pub(crate) fn definer_at_run(line: &[u8], start: usize, brace: usize) -> bool {
 /// so a plain `{ …; }` keeps [`group_at_run`]'s answer. A *word* filler
 /// (`f() echo { a && b; }`) never joins a definer run: bash rejects it with a
 /// syntax error and fdshell keeps that error visible.
-fn opens_definer(text: &[u8]) -> bool {
-    definer_len(text).is_some_and(|len| text.get(len..).unwrap_or(b"").iter().all(filler))
+fn opens_definer(text: &[u8], line: &[u8], start: usize) -> bool {
+    definer_len(text, line, start)
+        .is_some_and(|len| text.get(len..).unwrap_or(b"").iter().all(filler))
 }
 
 /// Filler bytes allowed behind the definer words, permissive exactly as far
@@ -95,10 +96,11 @@ fn filler(b: &u8) -> bool {
 
 /// `true && f()`, `false || function f`: the run's tail after its last `&&` /
 /// `||` is a definer run — the mid-run twin of [`trails_cond_op`]'s
-/// `x && time { …; }`. The scan is quote-blind as `ends_cond_op` is: the
-/// cond layer reaches this text with its regions already skipped.
-fn trails_definer(text: &[u8]) -> bool {
-    last_cond_op(text).is_some_and(|end| opens_definer(text.get(end..).unwrap_or(b"")))
+/// `x && time { …; }`. The definer's quote gate (task #247) rides on
+/// [`definer_len`], so a quoted definer word is word data here too.
+fn trails_definer(text: &[u8], line: &[u8], start: usize) -> bool {
+    last_cond_op(text)
+        .is_some_and(|end| opens_definer(text.get(end..).unwrap_or(b""), line, start + end))
 }
 
 /// The byte just past the run's last `&&` / `||`, `None` when it has none.

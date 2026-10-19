@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::word_quoted;
+use alloc::vec::Vec;
 use sys::ShortCStr;
 
 /// `(word bytes, start, end)`: the unquoted word and its raw span.
@@ -77,4 +78,40 @@ fn single_quoted_words_are_quoted() {
     // `<<'EOF'` attached heredoc form: operator bytes plus a quoted span.
     assert!(case(b"<<EOF", 0, 7));
     assert!(!case(b"<<EOF", 0, 5));
+}
+
+/// `keyword_word` is the parse layer's keyword-recognition gate (task #247):
+/// true only for a word whose *text* is the keyword **and** whose raw span
+/// carries no quote byte. The quote spellings are bash's command-word rows —
+/// `""if`/`''if` have no mask bit and `i"f"` is not `fully_quoted`, so only
+/// the span rule catches them (see `keywords::quoted::quoted_word`).
+#[test]
+fn keyword_word_gates_every_quote_spelling() {
+    for (line, end, want) in [
+        (b"if x".as_slice(), 2usize, true),
+        (b"'if' x".as_slice(), 4, false),
+        (b"\"if\" x".as_slice(), 4, false),
+        (b"i\"f\" x".as_slice(), 4, false),
+        (b"\"\"if x".as_slice(), 4, false),
+        (b"''if x".as_slice(), 4, false),
+        (b"\"i\"f x".as_slice(), 4, false),
+        (b" echo \"a\" if".as_slice(), 12, true),
+    ] {
+        let tok = (
+            ShortCStr::from(c"if"),
+            0,
+            end,
+            false,
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(
+            super::keyword_word(&tok, line, b"if"),
+            want,
+            "{line:?} (end {end})"
+        );
+    }
+    // The text must match the keyword too: the gate is not a quoting test alone.
+    let tok = (ShortCStr::from(c"fi"), 0, 2, false, Vec::new(), Vec::new());
+    assert!(!super::keyword_word(&tok, b"fi|", b"if"));
 }

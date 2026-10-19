@@ -98,9 +98,12 @@ fn keyword_form_definer_shapes() {
     }
 }
 
+/// Name leniency is a *word* rule: an option-shaped word is a name, and a
+/// **quoted** word is not (task #247, POSIX §2.9.1 — bash: `` 'f'': not a valid
+/// identifier ``). A reserved word as the name stays the lenient case.
 #[test]
 fn keyword_form_keeps_the_name_leniency() {
-    // A reserved word, an option-shaped word, and a quoted word are names.
+    // A reserved word and an option-shaped word are names.
     let crate::parse::ParsedLine::Function(def) = parse(b"function if { echo hi; }") else {
         panic!("expected Function");
     };
@@ -109,11 +112,19 @@ fn keyword_form_keeps_the_name_leniency() {
         panic!("expected Function");
     };
     assert!(def.name.eq_bytes(b"-a"));
-    // A quoted name is stored as its unquoted word (the token's word).
-    let crate::parse::ParsedLine::Function(def) = parse(b"function \"f\" { echo hi; }") else {
-        panic!("expected Function");
-    };
-    assert!(def.name.eq_bytes(b"f"));
+    // A quoted definer name is word data: no definition (bash rc 1, the same
+    // "not a valid identifier" the name lookup then reports).
+    for text in [
+        &b"function \"f\" { echo hi; }"[..],
+        &b"function 'f'() { echo hi; }"[..],
+        &b"function 'if' { echo hi; }"[..],
+        &b"function f'oo' { echo hi; }"[..],
+    ] {
+        assert!(
+            !matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} is not a definition"
+        );
+    }
 }
 
 /// The definer rule rejects a `function` word with no definer name.
@@ -156,4 +167,36 @@ fn keyword_word_as_posix_name_is_a_function() {
     };
     assert!(def.name.eq_bytes(b"function"));
     assert!(def.body.data.eq_bytes(b"echo fn"));
+}
+
+/// Task #247: every definer word is quote-gated, so a quoted `function`, a
+/// quoted `name(` and a quoted body brace all leave the shape a command line
+/// (bash: `` 'function' f() `` is a syntax error, `` f'oo'() `` and `` 'f'() ``
+/// are `` not a valid identifier ``). The unquoted forms are unchanged.
+#[test]
+fn quoted_definer_words_do_not_define() {
+    for text in [
+        &b"'function' f() { echo hi; }"[..],
+        &b"\"function\" f() { echo hi; }"[..],
+        &b"''function f() { echo hi; }"[..],
+        &b"f'oo'() { echo hi; }"[..],
+        &b"'foo'() { echo hi; }"[..],
+        &b"foo'(') { echo hi; }"[..],
+    ] {
+        assert!(
+            !matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} is not a definition"
+        );
+    }
+    // The unquoted twins are definitions, with the same name and body.
+    for (text, name) in [
+        (&b"foo() { echo hi; }"[..], b"foo".as_slice()),
+        (&b"function foo { echo hi; }"[..], b"foo".as_slice()),
+    ] {
+        let crate::parse::ParsedLine::Function(def) = parse(text) else {
+            panic!("expected Function for {text:?}");
+        };
+        assert!(def.name.eq_bytes(name), "name of {text:?}");
+        assert!(def.body.data.eq_bytes(b"echo hi"), "body of {text:?}");
+    }
 }

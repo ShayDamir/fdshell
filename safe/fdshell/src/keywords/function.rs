@@ -2,6 +2,8 @@
 //! scanner (`brace::scan_function_block`) and the token-level parse dispatch
 //! (`parse::function_block`), so the two layers accept the same shapes.
 
+use super::quoted_word;
+
 /// The definer name length in a definer word: non-empty, no whitespace, `{`,
 /// `}` or `)`, and no `(` except as the last byte (the POSIX opener's `(`,
 /// whose `)` is the next word). `None` = not a definer word.
@@ -27,12 +29,34 @@ pub(crate) fn name_len(word: &[u8]) -> Option<usize> {
 /// `word` is the definer text as the segment scanner sees it, and its word
 /// split is the tokenizer's (`)` is the separator token), so the definer words
 /// here are exactly the definer tokens of the same text.
-pub(crate) fn function_def_name(word: &[u8]) -> Option<&[u8]> {
+///
+/// The quote gate (task #247, [`quoted_word`]): a definer word written with
+/// quote bytes is word data — bash rejects `'function' f() { … }`,
+/// `function 'f'() { … }` and `f'oo'() { … }` (`'f'`: not a valid identifier`)
+/// and fdshell must not claim the block at the byte level either, or its
+/// quote-removal rewrites the definer into a shape the parse layer accepts.
+pub(crate) fn function_def_name<'a>(word: &'a [u8], line: &[u8], start: usize) -> Option<&'a [u8]> {
     let (head, second) = def_words(word);
-    if head.is_some_and(|w| w == b"function") {
-        return second.and_then(name);
+    let head_len = head?.len();
+    // The gap between the definer words: the whitespace `skip_word` left at the
+    // head's end, plus the `)` it stops at (the keyword form's `name)` split).
+    let rest = word.get(head_len..).unwrap_or(b"");
+    let gap = rest.iter().take_while(|b| b.is_ascii_whitespace()).count()
+        + usize::from(rest.first() == Some(&b')'));
+    // `quoted_word` breaks its scan at the POSIX `(`, so the gate measures the
+    // name's own bytes: the head minus its last byte in the POSIX form, the
+    // name word's end in the keyword form.
+    let quoted_at = |end: usize| quoted_word(line, start + end);
+    if head == Some(b"function") {
+        let name_word = name(second.filter(|w| name(w).is_some())?)?;
+        if quoted_at(head_len) || quoted_at(head_len + gap + name_word.len()) {
+            return None;
+        }
+        return Some(name_word);
     }
-    head.filter(|w| w.ends_with(b"(")).and_then(name)
+    head.filter(|w| w.ends_with(b"("))
+        .and_then(name)
+        .filter(|_| !quoted_at(head_len - 1))
 }
 
 /// The byte length of the definer words at the start of `word`: the definer
@@ -42,8 +66,8 @@ pub(crate) fn function_def_name(word: &[u8]) -> Option<&[u8]> {
 /// definer. `segment/group/prefix.rs::definer_at_run` measures the filler
 /// behind the returned length, so the run rule and this definer rule are one
 /// implementation (task #235).
-pub(crate) fn definer_len(word: &[u8]) -> Option<usize> {
-    function_def_name(word)?;
+pub(crate) fn definer_len(word: &[u8], line: &[u8], start: usize) -> Option<usize> {
+    function_def_name(word, line, start)?;
     let (head, rest) = skip_word(word);
     if head.is_some_and(|w| w == b"function") {
         return Some(word.len() - skip_word(rest).1.len());

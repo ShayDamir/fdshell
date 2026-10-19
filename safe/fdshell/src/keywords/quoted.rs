@@ -6,7 +6,12 @@ use crate::bytes::{QUOTE, SQUOTE};
 /// `"{"` are words (POSIX §2.9.1 recognizes only unquoted keyword tokens, and
 /// bash treats a quoted keyword as a command word). The word's raw span is the
 /// run ending at `word_end`, back to the byte that breaks a word.
-pub(super) fn quoted_word(line: &[u8], word_end: usize) -> bool {
+///
+/// The one keyword-recognition gate at both granularities: [`keyword_delta`]
+/// opens with it, and the parse layer calls it through
+/// `parse::word_quoted::keyword_word` (task #247), so the block-depth scan and
+/// the block builders cannot disagree.
+pub(crate) fn quoted_word(line: &[u8], word_end: usize) -> bool {
     let mut i = word_end;
     let mut quoted = false;
     while i > 0 {

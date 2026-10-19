@@ -3728,18 +3728,20 @@ fn parse_capture_malformed_index_is_plain_name() {
 
 #[test]
 fn find_preceded_by_semi_start_zero_no_match() {
+    let line = b"echo hi";
     let tokens = [
         (c"echo".into(), 0, 4, false, vec![], vec![]),
         (c"hi".into(), 5, 7, false, vec![], vec![]),
     ];
     assert_eq!(
-        super::semi::find_preceded_by_semi(&tokens, 0, b"echo"),
+        super::semi::find_preceded_by_semi(&tokens, 0, b"echo", line),
         None
     );
 }
 
 #[test]
 fn find_preceded_by_semi_skips_to_start() {
+    let line = b";done;done";
     let tokens = [
         (c";".into(), 0, 1, false, vec![], vec![]),
         (c"done".into(), 1, 5, false, vec![], vec![]),
@@ -3747,7 +3749,7 @@ fn find_preceded_by_semi_skips_to_start() {
         (c"done".into(), 7, 11, false, vec![], vec![]),
     ];
     assert_eq!(
-        super::semi::find_preceded_by_semi(&tokens, 2, b"done"),
+        super::semi::find_preceded_by_semi(&tokens, 2, b"done", line),
         Some(3)
     );
 }

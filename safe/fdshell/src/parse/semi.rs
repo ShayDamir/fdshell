@@ -1,4 +1,5 @@
 use super::Token;
+use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
@@ -9,17 +10,22 @@ mod closing;
 
 pub(crate) use closing::{List, closing_keyword_index, list_closing_keyword_index, up_to_closing};
 
+/// The `;`-preceded keyword word after `start`: `needle` is a keyword only
+/// when it carries no quote byte ([`keyword_word`], task #247), so a quoted
+/// `then`/`do`/`else` is a command word and the block reports its own missing
+/// keyword (bash: a syntax error).
 pub(crate) fn find_preceded_by_semi(
     tokens: &[Token],
     start: usize,
     needle: &[u8],
+    line: &[u8],
 ) -> Option<usize> {
-    for (i, (t, _, _, _, _, _)) in tokens.iter().enumerate().skip(start) {
+    for (i, tok) in tokens.iter().enumerate().skip(start) {
         let preceded = i > 0
             && tokens
                 .get(i - 1)
                 .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b";"));
-        if t.eq_bytes(needle) && preceded {
+        if keyword_word(tok, line, needle) && preceded {
             return Some(i);
         }
     }

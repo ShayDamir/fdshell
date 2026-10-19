@@ -5,6 +5,7 @@ pub(crate) use literal::literal_indices;
 use super::Token;
 use super::case_clause;
 use super::semi::{List, list_closing_keyword_index, trim_semi, try_join_masked};
+use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
@@ -34,11 +35,12 @@ pub(crate) fn tokens_to_case(
         ParseError::MalformedCaseBlock
     );
 
+    let line = text.as_bytes().change_context(ParseError::Never)?;
     let in_idx = (1..tokens.len())
         .find(|&i| {
             tokens
                 .get(i)
-                .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"in"))
+                .is_some_and(|tok| keyword_word(tok, line, b"in"))
         })
         .ok_or(ParseError::CaseMissingIn)?;
 
@@ -48,7 +50,6 @@ pub(crate) fn tokens_to_case(
     // list, so a closer-shaped **pattern** (`case x in done) …`) stays word
     // data. The `in` index is a prefix index, so the truncation (which cuts a
     // suffix) leaves it valid.
-    let line = text.as_bytes().change_context(ParseError::Never)?;
     let tokens = up_to_esac(tokens, line)?;
     // The closing `esac` is the truncated slice's last token.
     let esac_idx = tokens.len() - 1;

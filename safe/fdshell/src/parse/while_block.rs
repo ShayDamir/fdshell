@@ -38,7 +38,7 @@ pub(crate) fn tokens_to_loop(
     // The closing `done` is the truncated slice's last token.
     let done_idx = tokens.len() - 1;
 
-    let do_idx = find_preceded_by_semi(tokens, 1, b"do").ok_or(ParseError::ExpectedDo)?;
+    let do_idx = find_preceded_by_semi(tokens, 1, b"do", line).ok_or(ParseError::ExpectedDo)?;
     ensure!(do_idx >= 2, ParseError::ExpectedCondition);
 
     let cond_tokens = trim_semi(tokens.get(1..do_idx).ok_or(ParseError::ExpectedDo)?);

@@ -195,3 +195,26 @@ fn quoted_keyword_words_are_data() {
     assert_eq!(keyword_delta(b"fi", b"fi|", 2), Some(-1));
     assert_eq!(keyword_delta(b"{", b"{ x }", 1), Some(1));
 }
+
+/// The gate's span rule, pinned at the byte level for the spellings the
+/// parse layer gates through `parse::word_quoted::keyword_word` (task #247):
+/// the quote bytes of the word's own run decide, and the scan stops at the
+/// word break, so a *preceding* quoted word never taints the next word.
+#[test]
+fn quoted_word_reads_the_word_span_not_the_line() {
+    assert!(!quoted_word(b"if x", 2));
+    assert!(quoted_word(b"'if' x", 4));
+    assert!(quoted_word(b"\"if\" x", 4));
+    assert!(quoted_word(b"i\"f\" x", 4));
+    // The empty pairs have no mask bit on the keyword bytes — only the span
+    // sees them (bash: both are command words).
+    assert!(quoted_word(b"\"\"if x", 4));
+    assert!(quoted_word(b"''if x", 4));
+    assert!(quoted_word(b"\"i\"f x", 4));
+    // The scan stops at the word break: the `if` after a quoted word is
+    // unquoted on its own span.
+    assert!(!quoted_word(b"echo \"a\" if", 12));
+    // A quoted keyword word scores no keyword delta, the unquoted one does.
+    assert_eq!(keyword_delta(b"\"\"if", b"\"\"if x", 4), None);
+    assert_eq!(keyword_delta(b"if", b"if x", 2), Some(1));
+}

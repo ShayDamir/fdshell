@@ -66,3 +66,37 @@ fn word_mask_of_an_empty_word_is_empty() {
     assert_eq!(case_word, sc(b""));
     assert!(mask.is_empty());
 }
+
+/// The `in` search is quote-gated (task #247): a quoted `in` is word data, so
+/// the block reports its missing `in` (bash: a syntax error, rc 2). The word
+/// rules of the clause list are untouched: a complete empty block and a
+/// closer-shaped **pattern** stay as they were (task #273).
+#[test]
+fn in_word_is_a_keyword_only_when_unquoted() {
+    let clause_count = |line: &[u8]| {
+        let text = stext(line);
+        let tokens = tokenize_statement(line).ok()?;
+        tokens_to_case(&tokens, &text).map(|b| b.clauses.len()).ok()
+    };
+    let missing_in = |line: &[u8]| {
+        let text = stext(line);
+        let tokens = tokenize_statement(line).unwrap();
+        matches!(
+            tokens_to_case(&tokens, &text).map(|_| ()),
+            Err(report)
+                if matches!(
+                    report.current_context(),
+                    crate::error::parse::ParseError::CaseMissingIn
+                )
+        )
+    };
+    assert_eq!(clause_count(b"case x in esac"), Some(0));
+    assert_eq!(clause_count(b"case x in done) echo D;; esac"), Some(1));
+    for line in [
+        b"case x 'in' a) echo A;; esac".as_slice(),
+        b"case x \"in\" a) echo A;; esac",
+        b"case x ''in a) echo A;; esac",
+    ] {
+        assert!(missing_in(line), "{line:?} must report the missing `in`");
+    }
+}

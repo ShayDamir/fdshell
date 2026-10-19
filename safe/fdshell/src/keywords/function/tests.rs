@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 /// The definer name `function_def_name` reports, as bytes.
 fn def(word: &[u8]) -> Option<Vec<u8>> {
-    super::function_def_name(word).map(|w| w.to_vec())
+    super::function_def_name(word, word, 0).map(|w| w.to_vec())
 }
 
 #[test]
@@ -46,9 +46,40 @@ fn definer_words_of_the_accepted_forms() {
     assert_eq!(def(b"function f  {"), Some(b"f".to_vec()));
     // A reserved word as the name (the POSIX `if() {…}` leniency).
     assert_eq!(def(b"function if {"), Some(b"if".to_vec()));
-    // Quoted names keep their quotes, and an option-shaped name is a name.
-    assert_eq!(def(b"function \"f\" {"), Some(b"\"f\"".to_vec()));
+    // An option-shaped name is a name.
     assert_eq!(def(b"function -a f {"), Some(b"-a".to_vec()));
+}
+
+/// The quote gate (task #247): a definer word written with quote bytes is
+/// word data, exactly as the token-level gate in `parse::function_block`
+/// reads it — bash rejects all four spellings (`'f'`: not a valid identifier
+/// for the name, a syntax error for the quoted keyword), and the byte-level
+/// scan must not claim the block either, or its quote-removal rewrites the
+/// definer into a shape the parse layer accepts.
+#[test]
+fn quoted_definer_words_are_not_definers() {
+    assert_eq!(def(b"function \"f\" {"), None);
+    assert_eq!(def(b"function 'f'() {"), None);
+    assert_eq!(
+        def(b"f'oo'() {"),
+        None,
+        "the POSIX name word carries quotes"
+    );
+    assert_eq!(
+        def(b"foo'('() {"),
+        None,
+        "a quote glued behind the name is a quote in the word"
+    );
+    // The gate reads the line at `start`, so a quoted keyword behind a
+    // leading offset is caught at the offset, not at 0.
+    assert_eq!(
+        super::function_def_name(b"\'function\' f (", b"  'function' f (", 2),
+        None
+    );
+    assert_eq!(
+        super::function_def_name(b"f() {", b"  f() {", 2),
+        Some(b"f".as_slice())
+    );
 }
 
 #[test]
@@ -93,25 +124,28 @@ fn glued_close_paren_after_the_keyword_is_its_own_word() {
 #[test]
 fn definer_len_spans_the_definer_words() {
     // POSIX: the name word and the `)` closing its `(`.
-    assert_eq!(definer_len(b"f("), Some(2));
-    assert_eq!(definer_len(b"f()"), Some(3));
-    assert_eq!(definer_len(b"f(){"), Some(3));
+    assert_eq!(definer_len(b"f(", b"f(", 0), Some(2));
+    assert_eq!(definer_len(b"f()", b"f()", 0), Some(3));
+    assert_eq!(definer_len(b"f(){", b"f(){", 0), Some(3));
     // Keyword form: `function` + the name word, parens included when glued.
-    assert_eq!(definer_len(b"function f"), Some(10));
-    assert_eq!(definer_len(b"function f()"), Some(11));
+    assert_eq!(definer_len(b"function f", b"function f", 0), Some(10));
+    assert_eq!(definer_len(b"function f()", b"function f()", 0), Some(11));
     // A split `()` after the name is not definer words — it is filler for the
     // run rule (`function f ( ) {` is accepted, LESSONS "Byte-level definer
     // words must be the tokenizer's tokens").
-    assert_eq!(definer_len(b"function f ( )"), Some(10));
+    assert_eq!(
+        definer_len(b"function f ( )", b"function f ( )", 0),
+        Some(10)
+    );
     // A word after the definer words is no definer text either: `f` is the
     // name and the trailing `x` run is dropped by the parse layer.
-    assert_eq!(definer_len(b"function f x"), Some(10));
+    assert_eq!(definer_len(b"function f x", b"function f x", 0), Some(10));
 }
 
 #[test]
 fn definer_len_rejects_non_definers() {
     // POSIX needs its glued `(`; `function` glued to the opener has no name.
-    assert_eq!(definer_len(b"f () "), None);
-    assert_eq!(definer_len(b"function)f"), None);
-    assert_eq!(definer_len(b""), None);
+    assert_eq!(definer_len(b"f () ", b"f () ", 0), None);
+    assert_eq!(definer_len(b"function)f", b"function)f", 0), None);
+    assert_eq!(definer_len(b"", b"", 0), None);
 }

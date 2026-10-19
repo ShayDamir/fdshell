@@ -22,7 +22,7 @@ fn condition_bodies_extracted_from_block_text() {
         Origin::Shell,
     );
     let tokens = tokenize_statement(line).unwrap();
-    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then", line).unwrap();
     let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
     let bodies = condition_bodies(&text, cond_tokens);
     assert_eq!(
@@ -45,7 +45,7 @@ fn condition_bodies_extracted_from_an_io_number_operator() {
         Origin::Shell,
     );
     let tokens = tokenize_statement(line).unwrap();
-    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then", line).unwrap();
     let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
     assert_eq!(
         condition_bodies(&text, cond_tokens),
@@ -63,7 +63,7 @@ fn condition_bodies_no_operators_is_empty() {
         Origin::Shell,
     );
     let tokens = tokenize_statement(line).unwrap();
-    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then", line).unwrap();
     let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
     assert!(condition_bodies(&text, cond_tokens).is_empty());
 }
@@ -78,7 +78,7 @@ fn condition_bodies_multiple_operators_are_in_order() {
         Origin::Shell,
     );
     let tokens = tokenize_statement(line).unwrap();
-    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then", line).unwrap();
     let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
     let bodies = condition_bodies(&text, cond_tokens);
     assert_eq!(
@@ -193,7 +193,7 @@ fn condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition() {
         Origin::Shell,
     );
     let tokens = tokenize_statement(line).unwrap();
-    let do_idx = find_preceded_by_semi(&tokens, 1, b"do").unwrap();
+    let do_idx = find_preceded_by_semi(&tokens, 1, b"do", line).unwrap();
     let cond_tokens = trim_semi(tokens.get(1..do_idx).unwrap());
     assert_eq!(
         condition_bodies(&text, cond_tokens),
@@ -216,7 +216,7 @@ fn condition_bodies_of_a_pre_sliced_block_text() {
         Origin::Shell,
     );
     let tokens = tokenize_statement(line).unwrap();
-    let first_then = find_preceded_by_semi(&tokens, 1, b"then").unwrap();
+    let first_then = find_preceded_by_semi(&tokens, 1, b"then", line).unwrap();
     let cond_tokens = trim_semi(tokens.get(1..first_then).unwrap());
     assert_eq!(
         condition_bodies(&text, cond_tokens),
@@ -300,7 +300,7 @@ fn cond_bodies_of(line: &[u8], keyword: &[u8]) -> Vec<ShortCStr> {
         .iter()
         .position(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
         .unwrap();
-    let then = find_preceded_by_semi(&tokens, kw + 1, b"then").unwrap();
+    let then = find_preceded_by_semi(&tokens, kw + 1, b"then", line).unwrap();
     condition_bodies(&text, trim_semi(tokens.get(kw + 1..then).unwrap()))
 }
 
@@ -328,6 +328,6 @@ fn arm_slice(line: &[u8], keyword: &[u8]) -> Vec<Token> {
         .iter()
         .position(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
         .unwrap();
-    let then = find_preceded_by_semi(&tokens, kw + 1, b"then").unwrap();
+    let then = find_preceded_by_semi(&tokens, kw + 1, b"then", line).unwrap();
     trim_semi(tokens.get(then + 1..closing - 1).unwrap()).to_vec()
 }

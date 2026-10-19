@@ -80,7 +80,7 @@ fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) -> Option<u
             line.len()
         });
     }
-    function_def_name(tail)?;
+    function_def_name(tail, line, i)?;
     let brace = tail.iter().position(|&b| b == b'{')?;
     let (close, closed) = scan_brace_block(line, i + brace + 1, quotes);
     Some(if closed { close + 1 } else { line.len() })

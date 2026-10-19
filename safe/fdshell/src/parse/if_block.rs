@@ -34,7 +34,8 @@ pub(crate) fn tokens_to_if(
     // The closing `fi` is the truncated slice's last token.
     let fi_idx = tokens.len() - 1;
 
-    let first_then = find_preceded_by_semi(tokens, 1, b"then").ok_or(ParseError::MissingThen)?;
+    let first_then =
+        find_preceded_by_semi(tokens, 1, b"then", line).ok_or(ParseError::MissingThen)?;
 
     let cond_tokens = trim_semi(
         tokens
@@ -47,13 +48,13 @@ pub(crate) fn tokens_to_if(
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
-    while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif") {
-        let then_idx = find_preceded_by_semi(tokens, elif_idx, b"then")
+    while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif", line) {
+        let then_idx = find_preceded_by_semi(tokens, elif_idx, b"then", line)
             .ok_or(ParseError::MissingThenAfterElif)?;
         elif_pairs.push((elif_idx, then_idx));
         pos = then_idx;
     }
-    let else_idx = find_preceded_by_semi(tokens, pos, b"else");
+    let else_idx = find_preceded_by_semi(tokens, pos, b"else", line);
 
     let first_end = match elif_pairs.first() {
         Some(&(ei, _)) => ei,
