@@ -16,7 +16,10 @@ pub(crate) struct Operator {
     /// The delimiter word: every quote byte stripped, unquoted escape pairs
     /// folded.
     pub(crate) delim: Vec<u8>,
-    /// A quoted delimiter: the body is literal.
+    /// A quoted delimiter: the body is literal. POSIX XCU 2.3 quotes the word
+    /// on any quote operator, so this is set by a `"`/`'` marker byte **or a
+    /// folded unquoted escape pair** (`<<E\OF`, `<<\E\O\F`); a trailing lone
+    /// `\` is no pair and quotes nothing.
     pub(crate) quoted: bool,
     /// The `<<-` form: strip leading tabs from the body and the terminator.
     pub(crate) strip: bool,
@@ -31,9 +34,12 @@ impl Operator {
     /// `EOF`) and POSIX quote removal drops every `"`/`'` marker byte (so
     /// `<<"Q"` delimits `Q` and `<<a'b'c` delimits `abc`). Folding and
     /// stripping share one pass because an escaped quote (`a\'b`) is data and
-    /// must not read as a marker (LESSONS). `quoted` reports a quote marker
-    /// byte anywhere in the word, `strip` is the `<<-` marker, and `fd` is the
-    /// io-number of the `[N]<<` form (`0` for the unprefixed form).
+    /// must not read as a marker (LESSONS). `quoted` reports a POSIX quote
+    /// operator anywhere in the word — a marker byte, **or a folded escape
+    /// pair** (`\` is a quote operator, POSIX XCU 2.3, so `<<E\OF` quotes the
+    /// body exactly like `<<"EOF"`; task #263). `strip` is the `<<-` marker,
+    /// and `fd` is the io-number of the `[N]<<` form (`0` for the unprefixed
+    /// form).
     pub(crate) fn new(raw: &[u8], strip: bool, fd: i32) -> Self {
         let (delim, quoted) = fold_quotes(raw);
         Self {

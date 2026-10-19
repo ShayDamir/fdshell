@@ -5,8 +5,10 @@
 //! quote state off the raw bytes and keeps the quote bytes, [`fold_quotes`]
 //! reads the same raw bytes and applies POSIX quote removal on top of the
 //! folding (every `"`/`'` byte is dropped, in the same pass, and the caller is
-//! told whether a quote byte was seen), [`fold_mask`] reads the quote state
-//! from a word's quote mask (the tokenizer strips the quotes from word text).
+//! told whether a POSIX **quote operator** was seen — a `"`/`'` marker byte or
+//! a folded escape pair, since `\` is a quote operator too), [`fold_mask`]
+//! reads the quote state from a word's quote mask (the tokenizer strips the
+//! quotes from word text).
 
 use crate::bytes::{QUOTE, SQUOTE};
 use alloc::vec::Vec;
@@ -23,9 +25,12 @@ pub(crate) fn fold(raw: &[u8]) -> Vec<u8> {
 /// POSIX quote removal plus escape folding on raw bytes: every `"`/`'`
 /// **marker** byte is dropped and every unquoted `\X` pair folds to `X` in the
 /// same pass, so a heredoc delimiter word `a'b'c` delimits `abc` and an
-/// escaped quote (`a\'b`) survives as data. The flag reports a quote marker
-/// byte in any position (a quoted delimiter makes a here-doc body literal);
-/// an escaped quote is data, so it does not set it.
+/// escaped quote (`a\'b`) survives as data. The flag reports a POSIX
+/// **quote operator** (POSIX XCU 2.3: `\` is one), i.e. a marker byte in any
+/// position **or a folded unquoted escape pair** — a quoted delimiter makes a
+/// here-doc body literal, and `<<E\OF` is quoted exactly like `<<"EOF"`
+/// (task #263). An escaped quote is data in the text, and a trailing lone `\`
+/// is no pair, so neither alone quotes: `E\` stays unquoted.
 pub(crate) fn fold_quotes(raw: &[u8]) -> (Vec<u8>, bool) {
     fold_impl(raw, false)
 }
@@ -33,7 +38,10 @@ pub(crate) fn fold_quotes(raw: &[u8]) -> (Vec<u8>, bool) {
 /// The shared state machine. `keep_quotes` writes the quote marker bytes into
 /// the output ([`fold`]) or applies quote removal ([`fold_quotes`]); the quote
 /// state itself is identical for both, which is why one machine serves both
-/// rules. The returned flag is `true` when a quote marker byte was seen.
+/// rules. The returned flag is `true` when a POSIX quote operator was seen: a
+/// marker byte, or an escape pair the pass folded (`\` is a quote operator,
+/// POSIX XCU 2.3). A trailing `\` with no byte to escape is no pair, so it
+/// quotes nothing.
 fn fold_impl(raw: &[u8], keep_quotes: bool) -> (Vec<u8>, bool) {
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -58,7 +66,13 @@ fn fold_impl(raw: &[u8], keep_quotes: bool) -> (Vec<u8>, bool) {
         } else if b == b'\\' && !quoted && !single {
             i += 1;
             match raw.get(i) {
-                Some(&c) => out.push(c),
+                // A pair is consumed: POSIX XCU 2.3 counts the `\` a quote
+                // operator, so the word that carried it is quoted.
+                Some(&c) => {
+                    out.push(c);
+                    has_quote = true;
+                }
+                // No pair: the lone `\` keeps its backslash and quotes nothing.
                 None => out.push(b),
             }
             i += 1;
