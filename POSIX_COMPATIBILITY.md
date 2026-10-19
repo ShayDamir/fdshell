@@ -149,9 +149,11 @@ fdshell gates only the block layer and leaves these keywords quoted-blind
 
 A second divergence is mechanical: fdshell parses a script **statement by
 statement**, where bash parses the whole input before running any of it, so a
-quoted opener runs as a command and the rest of the input keeps executing
-(`'while' :; do echo a; break; done` prints `a` here and nothing in bash, rc
-2). The same rule decides a **multi-line** quoted definer: when the body of
+quoted opener runs as a command and the rest of the input keeps executing:
+`'while' :; do echo a; break; done` runs its statements one at a time
+(`"while" not found`, `"do" not found`, `'break' is not inside a loop`) and
+prints nothing, rc 1, where bash parses the whole input first and aborts with
+rc 2. The same rule decides a **multi-line** quoted definer: when the body of
 `function 'f' { … }` (or `f'oo'() { … }`) is spread over several lines, the
 brace becomes a group statement and its body runs — fdshell prints `hi` with
 rc 1, while bash reports `'f'`: not a valid identifier and prints nothing.
