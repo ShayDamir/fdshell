@@ -45,6 +45,12 @@ word. fdshell additionally reads `&name` as a task variable:
   between fd 1 and fd 2 (bash's `> f 2>&1`), so the streams append to each
   other; `cmd > f 2> f` stays two opens. In POSIX, `cmd &> file` is a
   background command followed by a truncating redirection.
+- Divergence within the family: the `&>` def's fd-2 half is applied in fd 1's
+  slot of the command's redirection table, so a later fd-2 redirection wins it.
+  `cmd 2>&- &> f` fails (rc 1, fd 2 closed) and `cmd 2>&1 &> f` sends fd 2 to
+  the **pre-redirect** fd 1, where bash applies `&>` later and reopens fd 2
+  onto `f`. Pinned with the measured values in
+  `safe/fdshell/tests/redirect.rs`; owned by task #337.
 
 ## Operators are recognized at word starts
 

@@ -2534,3 +2534,23 @@ test process `try_clone_above(2)` already returns ≥ 3 — so the pin that fold
 `extra_to` into `min_fd` is `combined_def_target_folds_into_the_source_minimum`,
 which closes fd 2 first: the hole is what makes a source landing on the fd-2
 target observable (its `Drop` closes the target, and the fd-2 write fails).
+Cost the plan miscounted (measured on this branch, 3/3 runs, against bash
+5.3.9 and master `b68878c`): `extra_to` is a *target*, so it must participate
+in `insert_redirect`'s fd-sorted table (the `partition_point` entry above —
+"the last entry for a fd wins"), and the current def shape does **not** put it
+there: the fd-2 half is applied in **fd 1's slot**, i.e. before every def that
+targets fd 2. A `2>&-` / `2>&1` written *after* `&>` therefore wins fd 2, where
+bash applies `&>` later and reopens it. `f(){ echo e >&2; }; f 2>&- &> f` →
+rc 1, `f` created empty, fatal `launch failed → redirect file open failed →
+fd 2 is not open` (bash rc 0 with `e\n`, master rc 0 with `e\n`);
+`f 2>&- &>> f` → rc 1, `f` = `hi\n` (bash `hi\ne\n`); `f 2>&1 &> f` →
+`f` = `hi\n` and `e\n` on the terminal, fd 2 being the **pre-redirect** fd 1
+(master `e\n\n`, bash `hi\ne\n`). Recorded as measured pins:
+`tests/redirect.rs::combined_redirect_after_close_stderr_fails`,
+`combined_append_after_close_stderr_fails` and
+`combined_redirect_after_dup_stderr_to_stdout_keeps_pre_redirect_fd1`; task
+#337 owns the ordering fix — give the def's two targets two *table* entries
+that share one open by **identity** (never path equality: `> f 2> f` stays two
+opens, pinned byte-for-byte above), so the fd-2 half lands in the fd-2 key
+region. Sorting the whole def by its max target is **not** a valid shortcut:
+it moves fd 1's half out of fd 1's slot and breaks `cmd &> a > b`.

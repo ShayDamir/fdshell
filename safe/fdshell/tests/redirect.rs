@@ -842,6 +842,86 @@ fn combined_redirect_noclobber_creates_fresh_file() {
     assert_eq!(out, "hi\ne\n", "stdout={out:?}");
 }
 
+// --- the `&>` def's fd-2 half is applied in fd 1's table slot (task #251) ----
+//
+// Cause: `insert_redirect` keeps a command's redirect list sorted by
+// `export_to` ("the last entry for a fd wins"), and the `&>` def carries its
+// second target in `extra_to`, which is **not** a table entry. So the def's
+// fd-2 half is applied in fd 1's slot — before every def that targets fd 2 —
+// and a `2>&-` / `2>&1` written *after* `&>` wins fd 2, where bash applies
+// `&>` later and reopens it. These three shapes are the recorded consequences,
+// measured on this branch (3/3 runs each) against bash 5.3.9 and master
+// `b68878c`, 2026-10-19. Task #337 owns the fix: two *table* entries sharing
+// one open by identity, never path equality (`> f 2> f` stays two opens —
+// `separate_write_and_stderr_redirects_keep_two_opens`).
+
+#[test]
+fn combined_redirect_after_close_stderr_fails() {
+    // `f 2>&- &> z`: the later `2>&-` wins fd 2, so fd 2 is closed and the
+    // child's own `>&2` has nothing to duplicate. fdshell's launch failure is
+    // fatal, so the trailing `echo rc=$?` never runs. bash 5.3.9: rc 0, stdout
+    // `rc=0`, `z` = `e\n`; master `b68878c`: rc 0, `z` = `e\n`.
+    let path = temp_path("combined_after_close_stderr");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo e >&2; }}; f 2>&- &> {path}; echo rc=$?"
+    ));
+    let body = std::fs::read(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        out.is_empty(),
+        "the fatal launch aborts the shell, stdout={out:?}"
+    );
+    assert!(
+        err.contains("launch failed") && err.contains("fd 2 is not open"),
+        "stderr={err:?}"
+    );
+    assert!(
+        body.is_empty(),
+        "the operand is opened before the fd-2 failure, got {body:?}"
+    );
+}
+
+#[test]
+fn combined_append_after_close_stderr_fails() {
+    // The same shape through `&>>`: `echo hi` reaches the file, `echo e >&2`
+    // fails and the shell aborts. bash 5.3.9: rc 0, stdout `rc=0`, `z` =
+    // `hi\ne\n`; master `b68878c`: rc 0, `z` = `hi\ne\n`.
+    let path = temp_path("combined_append_after_close_stderr");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f 2>&- &>> {path}; echo rc=$?"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(
+        err.contains("launch failed") && err.contains("fd 2 is not open"),
+        "stderr={err:?}"
+    );
+    assert_eq!(body, "hi\n", "only fd 1's half of the def survives");
+}
+
+#[test]
+fn combined_redirect_after_dup_stderr_to_stdout_keeps_pre_redirect_fd1() {
+    // `f 2>&1 &> z`: the later `2>&1` wins fd 2 and is resolved against fd 1
+    // **before** `&>`'s export, so fd 2 ends as the pre-redirect fd 1 (the
+    // terminal) and the `>&2` write escapes there. bash 5.3.9: `z` = `hi\ne\n`,
+    // terminal silent; master `b68878c`: `z` = `e\n\n`, terminal silent.
+    // (#337's class: resolve-then-export sees the pre-redirect fd 1.)
+    let path = temp_path("combined_after_dup_stderr");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!("f(){{ echo hi; echo e >&2; }}; f 2>&1 &> {path}"));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "e\n", "fd 2 is the pre-redirect fd 1, stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(body, "hi\n", "fd 1 keeps the shared open description");
+}
+
 // --- the bare-operand guard is mask-gated (task #323) -----------------------
 //
 // The operand of a bare `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` is an operator only
