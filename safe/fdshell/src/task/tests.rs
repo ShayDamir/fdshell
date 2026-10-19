@@ -82,8 +82,8 @@ fn posix_wait_by_pid_reaps_only_named() {
     assert_ne!(p1, p2);
     posix_wait(&[pid_arg(p1)], &mut state).unwrap();
     // Only the named task is reaped; the other remains.
-    assert_eq!(state.jobs.named.len(), 1);
-    assert!(state.jobs.named.contains_key(&ShortCStr::from(c"two")));
+    assert_eq!(state.jobs.named_len(), 1);
+    assert!(state.jobs.contains_named(&ShortCStr::from(c"two")));
     // Clean up the remaining task.
     let _ = posix_wait(&[], &mut state).unwrap();
 }

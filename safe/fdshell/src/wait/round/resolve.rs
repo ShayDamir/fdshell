@@ -47,8 +47,7 @@ pub(super) fn resolve(
         FdRef::Task(name) => {
             let task = state
                 .jobs
-                .named
-                .get(name)
+                .get_named(name)
                 .ok_or(WaitError::TaskNotFound { name: name.clone() })?;
             let (e, m) = events(kind, true);
             out.push(PollEntry::new(

@@ -66,7 +66,7 @@ fn run_and_exit(parsed: &ParsedLine, text: &ScriptText, cell: &ForkCell<ShellSta
 fn last_status_code(cell: &ForkCell<ShellState>) -> i32 {
     cell.borrow()
         .map(|state| state.last_status.exit_code())
-        .unwrap_or_else(|_| 1)
+        .unwrap_or(1)
 }
 
 #[cfg(test)]

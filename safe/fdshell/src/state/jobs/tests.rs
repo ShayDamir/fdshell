@@ -18,7 +18,9 @@ fn child_task() -> Task {
     }
 }
 
-/// Reap every task of a drained/depleted table (the tests' teardown).
+/// Reap every task of a drained/depleted table (the tests' teardown: each
+/// removal hands back a live child, and every one of them is waited here, so
+/// the test leaves no zombie behind).
 fn reap(tasks: impl IntoIterator<Item = Task>) {
     for task in tasks {
         let _ = task.pidfd.wait_pidfd_rusage();
@@ -34,9 +36,8 @@ fn push_anon_appends_in_fifo_order() {
     let (first_pid, second_pid) = (first.child_pid, second.child_pid);
     jobs.push_anon(first);
     jobs.push_anon(second);
-    assert_eq!(jobs.anon.len(), 2);
-    assert_eq!(jobs.anon[0].child_pid, first_pid);
-    assert_eq!(jobs.anon[1].child_pid, second_pid);
+    assert_eq!(jobs.anon_len(), 2);
+    assert_eq!(jobs.anon_pids(), vec![first_pid, second_pid]);
     assert!(!jobs.is_empty());
     reap(jobs.drain_anon());
     assert!(jobs.is_empty());
@@ -53,11 +54,16 @@ fn remove_by_pid_rotates_the_deque_and_pops_the_job() {
     // The tail job: the two before it rotate to the tail, keeping FIFO order.
     let got = jobs.remove_by_pid(pc).unwrap();
     assert_eq!(got.child_pid, pc);
+    assert_eq!(jobs.anon_pids(), vec![pa, pb]);
+    reap([got]);
+    // The front job: no rotation needed, the deque order is unchanged.
     let got = jobs.remove_by_pid(pa).unwrap();
     assert_eq!(got.child_pid, pa);
+    assert_eq!(jobs.anon_pids(), vec![pb]);
+    reap([got]);
     let got = jobs.remove_by_pid(pb).unwrap();
     assert_eq!(got.child_pid, pb);
-    assert!(jobs.anon.is_empty());
+    assert_eq!(jobs.anon_len(), 0);
     reap([got]);
 }
 
@@ -70,8 +76,8 @@ fn remove_by_pid_prefers_the_named_table() {
     jobs.insert_named(name.clone(), task);
     let got = jobs.remove_by_pid(pid).unwrap();
     assert_eq!(got.child_pid, pid);
-    assert!(jobs.named.is_empty(), "the named entry was the handle");
-    assert!(jobs.anon.is_empty());
+    assert_eq!(jobs.named_len(), 0, "the named entry was the handle");
+    assert_eq!(jobs.anon_len(), 0);
     reap([got]);
     assert!(jobs.remove_by_pid(pid).is_none());
 }
@@ -82,8 +88,10 @@ fn named_keys_lists_the_named_table() {
     let task = child_task();
     let name = ShortCStr::from_vec(b"k1".to_vec()).unwrap();
     jobs.insert_named(name.clone(), task);
-    assert_eq!(jobs.named_keys(), vec![name]);
-    reap(core::mem::take(&mut jobs.named).into_values());
+    assert_eq!(jobs.named_keys(), vec![name.clone()]);
+    assert!(jobs.contains_named(&name));
+    reap(jobs.drain_named());
+    assert!(!jobs.contains_named(&name));
 }
 
 #[test]
@@ -98,7 +106,7 @@ fn anon_deque_is_untouched_by_removal_of_a_name() {
         jobs.remove_named(&ShortCStr::from_vec(b"gone".to_vec()).unwrap())
             .is_none()
     );
-    assert_eq!(jobs.anon.len(), 1);
-    assert_eq!(jobs.anon[0].child_pid, pid);
+    assert_eq!(jobs.anon_len(), 1);
+    assert_eq!(jobs.anon_pids(), vec![pid]);
     reap(jobs.drain_anon());
 }

@@ -47,8 +47,8 @@ fn spawn_records_a_nameless_job_and_continues() {
     let control = spawn(&parsed, &text, &cell).unwrap();
     assert!(control.is_none());
     let state = cell.borrow().unwrap();
-    assert_eq!(state.jobs.anon.len(), 1);
-    assert_eq!(state.last_bg_pid, state.jobs.anon[0].child_pid.into());
+    assert_eq!(state.jobs.anon_len(), 1);
+    assert_eq!(state.last_bg_pid, state.jobs.anon_pids()[0].into());
     assert!(matches!(
         state.last_status,
         sys::siginfo::WaitStatus::Exited(0)
@@ -74,7 +74,7 @@ fn child_exits_with_the_status_of_its_own_statement() {
         let parsed = parse(&text).unwrap();
         spawn(&parsed, &text, &cell).unwrap();
         let mut state = cell.borrow_mut().unwrap();
-        let pid = state.jobs.anon[0].child_pid;
+        let pid = state.jobs.anon_pids()[0];
         let arg = ShortCStr::from_vec(alloc::format!("{}", pid.as_raw()).into_bytes()).unwrap();
         let status = crate::task::posix_wait(&[arg], &mut state).unwrap();
         let code = status.exit_code();
@@ -93,7 +93,7 @@ fn child_error_path_exits_one() {
     let parsed = parse(&text).unwrap();
     spawn(&parsed, &text, &cell).unwrap();
     let mut state = cell.borrow_mut().unwrap();
-    let pid = state.jobs.anon[0].child_pid;
+    let pid = state.jobs.anon_pids()[0];
     let arg = ShortCStr::from_vec(alloc::format!("{}", pid.as_raw()).into_bytes()).unwrap();
     let status = crate::task::posix_wait(&[arg], &mut state).unwrap();
     assert_eq!(status.exit_code(), 1);
@@ -109,7 +109,7 @@ fn loop_control_dies_with_the_child() {
     let control = spawn(&parsed, &text, &cell).unwrap();
     assert!(control.is_none());
     let mut state = cell.borrow_mut().unwrap();
-    assert_eq!(state.jobs.anon.len(), 1);
+    assert_eq!(state.jobs.anon_len(), 1);
     crate::task::posix_wait(&[], &mut state).unwrap();
 }
 

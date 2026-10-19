@@ -235,7 +235,7 @@ fn finished_task_preloads_status_and_reaps() {
         .unwrap();
         let s = cell.borrow().unwrap();
         assert_eq!(s.last_status.exit_code(), 0);
-        assert!(!s.jobs.named.contains_key(&ShortCStr::from(c"job")));
+        assert!(!s.jobs.contains_named(&ShortCStr::from(c"job")));
     });
 }
 

@@ -2663,7 +2663,7 @@ fn async_operator_records_a_nameless_job() {
         let cell = make_cell();
         run_script(b"builtin true &", &cell).unwrap();
         let mut state = borrow_state_mut(&cell);
-        assert_eq!(state.jobs.anon.len(), 1);
+        assert_eq!(state.jobs.anon_len(), 1);
         assert!(state.last_bg_pid.is_some());
         assert!(matches!(state.last_status, WaitStatus::Exited(0)));
         crate::task::posix_wait(&[], &mut state).unwrap();

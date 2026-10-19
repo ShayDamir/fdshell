@@ -12,9 +12,11 @@ use hashbrown::HashMap;
 use sys::ShortCStr;
 
 /// Both background-job tables: named (pidvar form) and anonymous (plain `&`).
+/// The tables stay private — callers go through the getters and the removals
+/// below, so no caller can reindex or reorder a job behind `wait`'s back.
 pub(crate) struct Jobs {
-    pub(crate) named: HashMap<ShortCStr, Task>,
-    pub(crate) anon: VecDeque<Task>,
+    named: HashMap<ShortCStr, Task>,
+    anon: VecDeque<Task>,
 }
 
 impl Jobs {
@@ -41,6 +43,31 @@ impl Jobs {
         self.named.remove(name)
     }
 
+    /// The named job stored under `name` (`wait { &task }` arms poll its pidfd).
+    pub(crate) fn get_named(&self, name: &ShortCStr) -> Option<&Task> {
+        self.named.get(name)
+    }
+
+    /// `true` when the named table holds `name`.
+    pub(crate) fn contains_named(&self, name: &ShortCStr) -> bool {
+        self.named.contains_key(name)
+    }
+
+    /// The named table's job count.
+    pub(crate) fn named_len(&self) -> usize {
+        self.named.len()
+    }
+
+    /// The nameless deque's job count.
+    pub(crate) fn anon_len(&self) -> usize {
+        self.anon.len()
+    }
+
+    /// The nameless jobs' child pids, in FIFO order (`$!` is the last one).
+    pub(crate) fn anon_pids(&self) -> Vec<sys::Pid> {
+        self.anon.iter().map(|task| task.child_pid).collect()
+    }
+
     /// The named table's keys, in iteration order (`wait` without operands).
     pub(crate) fn named_keys(&self) -> Vec<ShortCStr> {
         self.named.keys().cloned().collect()
@@ -58,8 +85,7 @@ impl Jobs {
             return self.named.remove(&key);
         }
         let at = self.anon.iter().position(|task| task.child_pid == pid)?;
-        let mut head: VecDeque<Task> = self.anon.drain(..at).collect();
-        self.anon.append(&mut head);
+        self.rotate_anon(at);
         self.anon.pop_front()
     }
 
@@ -68,9 +94,21 @@ impl Jobs {
         core::mem::take(&mut self.anon)
     }
 
+    /// Drain the named table (every job, in iteration order).
+    pub(crate) fn drain_named(&mut self) -> Vec<Task> {
+        core::mem::take(&mut self.named).into_values().collect()
+    }
+
     /// `true` when neither table holds a job.
     pub(crate) fn is_empty(&self) -> bool {
         self.named.is_empty() && self.anon.is_empty()
+    }
+
+    /// Rotate the deque so the entry at `at` becomes its front, keeping the
+    /// FIFO order of the rest (the entry `wait <pid>` is about to pop).
+    fn rotate_anon(&mut self, at: usize) {
+        let mut head: VecDeque<Task> = self.anon.drain(..at).collect();
+        self.anon.append(&mut head);
     }
 }
 
