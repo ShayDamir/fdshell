@@ -470,12 +470,15 @@ case "$1" in
 esac
 ```
 
-`break` and `continue` accept an optional loop count (`break 2`). The status
-of a command is `0` for success and non-zero for failure, so `&&` runs the
-next command only on success and `||` only on failure:
+`break` and `continue` accept an optional loop count (`break 2`), and are builtins
+whose own status is `0`: right after a loop that ends through one of them, `$?` is
+`0`, not the status of the last command that ran. The status of a command is `0`
+for success and non-zero for failure, so `&&` runs the next command only on success
+and `||` only on failure:
 
 ```shell
 make && echo built || echo "build failed"
+for x in 1 2 3; do false; break; done; echo $?   # 0
 ```
 
 ### Functions and groups
