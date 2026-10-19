@@ -52,8 +52,8 @@ pub(crate) fn dispatch(
 fn reap_task(name: &ShortCStr, cell: &ForkCell<ShellState>) -> Result<(), Report<WaitError>> {
     let mut s = cell.borrow_mut().change_context(WaitError::Never)?;
     let task = s
-        .tasks
-        .remove(name)
+        .jobs
+        .remove_named(name)
         .ok_or(WaitError::TaskNotFound { name: name.clone() })?;
     let (status, times) = task
         .pidfd

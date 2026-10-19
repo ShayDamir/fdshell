@@ -56,7 +56,7 @@ fn st(b: &[u8]) -> ScriptText {
 }
 
 fn run_one(b: &[u8], cell: &ForkCell<ShellState>) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::run::run_one(&st(b), cell)
+    crate::run::run_one(&st(b), cell, false)
 }
 
 fn run_script(
@@ -70,7 +70,7 @@ fn run_cond_list(
     b: &[u8],
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::cond::run_cond_list(&st(b), &[], cell, false)
+    crate::cond::run_cond_list(&st(b), &[], cell, false, false)
 }
 
 fn run_cond_list_bodies(
@@ -78,7 +78,7 @@ fn run_cond_list_bodies(
     bodies: &[Vec<u8>],
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::cond::run_cond_list(&st(b), bodies, cell, false)
+    crate::cond::run_cond_list(&st(b), bodies, cell, false, false)
 }
 
 fn handle(b: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
@@ -192,7 +192,7 @@ fn waitpid_one_task() {
             let cell = make_cell();
             {
                 let mut state = borrow_state_mut(&cell);
-                state.tasks.insert(
+                state.jobs.insert_named(
                     ShortCStr::from(c"mytask"),
                     Task {
                         pidfd,
@@ -205,13 +205,15 @@ fn waitpid_one_task() {
             run_one(b"waitpid &mytask", &cell).unwrap();
             let state = borrow_state(&cell);
             assert!(matches!(state.last_status, WaitStatus::Exited(42)));
-            assert!(state.tasks.is_empty());
+            assert!(state.jobs.is_empty());
         }
     }
 }
 
+/// POSIX: `waitpid`/`wait` with no operands reaps every job and returns 0
+/// (measured against bash, task #326) — not the last reaped child's status.
 #[test]
-fn waitpid_all_tasks() {
+fn waitpid_all_tasks_returns_zero() {
     let (ret1, pidfd1_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     let pidfd1 = match pidfd1_opt {
         None => sys::exit(42),
@@ -225,7 +227,7 @@ fn waitpid_all_tasks() {
     let cell = make_cell();
     {
         let mut state = borrow_state_mut(&cell);
-        state.tasks.insert(
+        state.jobs.insert_named(
             ShortCStr::from(c"task1"),
             Task {
                 pidfd: pidfd1,
@@ -234,7 +236,7 @@ fn waitpid_all_tasks() {
                 captures: Vec::new(),
             },
         );
-        state.tasks.insert(
+        state.jobs.insert_named(
             ShortCStr::from(c"task2"),
             Task {
                 pidfd: pidfd2,
@@ -246,12 +248,8 @@ fn waitpid_all_tasks() {
     }
     run_one(b"waitpid", &cell).unwrap();
     let state = borrow_state(&cell);
-    let ok = match state.last_status {
-        WaitStatus::Exited(c) => c == 42 || c == 7,
-        _ => false,
-    };
-    assert!(ok);
-    assert!(state.tasks.is_empty());
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+    assert!(state.jobs.is_empty());
 }
 
 #[test]
@@ -997,7 +995,7 @@ fn errexit_exempt_final_part_does_not_exit() {
         let cell = make_cell();
         borrow_state_mut(&cell).options |= crate::options::ERREXIT;
         // Exempt (an `if`/`while` condition): the failure does not stop.
-        let control = crate::cond::run_cond_list(&st(b"false"), &[], &cell, true).unwrap();
+        let control = crate::cond::run_cond_list(&st(b"false"), &[], &cell, true, false).unwrap();
         assert!(control.is_none());
     });
 }
@@ -2624,5 +2622,51 @@ fn short_circuited_break_leaves_the_failure_status() {
         let cell = make_cell();
         run_script(b"for x in 1; do false && break; done", &cell).unwrap();
         assert_eq!(borrow_state(&cell).last_status.exit_code(), 1);
+    });
+}
+
+/// The plain-`&` pre-pass (`script.rs`): an invalid split bails **before
+/// executing any** segment — bash's preflight property, pinned by the
+/// assignment above the `;`-terminated `&` never reaching the variable table.
+#[test]
+fn async_invalid_split_bails_before_any_statement_runs() {
+    for script in [
+        b"x=1 & ; builtin echo b".as_slice(),
+        b"x=1 & | builtin cat".as_slice(),
+        b"x=1 & & builtin echo b".as_slice(),
+        b"x=1 ; & builtin echo b".as_slice(),
+        b"& builtin echo b".as_slice(),
+    ] {
+        let cell = make_cell();
+        let e = run_script(script, &cell).unwrap_err();
+        assert!(matches!(e.current_context(), CmdError::Parse), "{script:?}");
+        assert!(
+            matches!(
+                e.downcast_ref::<crate::error::parse::ParseError>(),
+                Some(crate::error::parse::ParseError::UnexpectedChar { ch: b'&' })
+            ),
+            "{script:?}"
+        );
+        let state = borrow_state(&cell);
+        assert!(
+            state.strings.get::<sys::ShortCStr>(&c"x".into()).is_none(),
+            "nothing ran: {script:?}"
+        );
+    }
+}
+
+/// A valid plain `&` records a nameless job and the script continues with
+/// status 0; `wait` (POSIX, no operands) drains the deque.
+#[test]
+fn async_operator_records_a_nameless_job() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"builtin true &", &cell).unwrap();
+        let mut state = borrow_state_mut(&cell);
+        assert_eq!(state.jobs.anon.len(), 1);
+        assert!(state.last_bg_pid.is_some());
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        crate::task::posix_wait(&[], &mut state).unwrap();
+        assert!(state.jobs.is_empty());
     });
 }

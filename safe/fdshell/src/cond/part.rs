@@ -12,7 +12,8 @@ use sys::fork_cell::ForkCell;
 /// Run the conditional part spanning `line[start..i]` as a subsliced
 /// statement. When the part carries heredoc bodies, the part text is
 /// reconstructed as the command bytes plus a newline plus the bodies, so the
-/// parse layer sees a contiguous heredoc.
+/// parse layer sees a contiguous heredoc. `background` is the plain-`&` flag
+/// of the list's last part (see [`crate::cond::run_cond_list`]).
 pub(crate) fn run_part(
     text: &ScriptText,
     line: &[u8],
@@ -20,6 +21,7 @@ pub(crate) fn run_part(
     i: usize,
     bodies: &[Vec<u8>],
     cell: &ForkCell<ShellState>,
+    background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let raw = line.get(start..i).unwrap_or(b"");
     if raw.trim_ascii().is_empty() {
@@ -31,10 +33,10 @@ pub(crate) fn run_part(
         let part_text = text
             .subslice(part_start, i - part_start)
             .ok_or(CmdError::Never)?;
-        return crate::run::run_one(&part_text, cell);
+        return crate::run::run_one(&part_text, cell, background);
     }
     let part_text = reconstruct(text, line, part_start, i, bodies)?;
-    crate::run::run_one(&part_text, cell)
+    crate::run::run_one(&part_text, cell, background)
 }
 
 /// Reconstruct a part's text: the command bytes plus a newline plus the

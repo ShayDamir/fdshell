@@ -26,7 +26,7 @@ pub fn finish_cmd(
     match cmdline.pidvar {
         Some(name) => {
             state.last_bg_pid = Some(outcome.child_pid);
-            state.tasks.insert(
+            state.jobs.insert_named(
                 name,
                 crate::task::Task {
                     pidfd: outcome.pidfd,

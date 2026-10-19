@@ -6,13 +6,13 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
-/// Fork a child (exits 0) and register it in `state.tasks` under `name`.
+/// Fork a child (exits 0) and register it in the named job table under `name`.
 fn spawn_task(state: &mut ShellState, name: &[u8]) -> sys::Pid {
     let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     match pidfd_opt {
         None => sys::exit(0),
         Some(pidfd) => {
-            state.tasks.insert(
+            state.jobs.insert_named(
                 ShortCStr::from_vec(name.to_vec()).unwrap(),
                 Task {
                     pidfd,
@@ -43,7 +43,7 @@ fn posix_wait_by_pid_reaps_child() {
     let pid = spawn_task(&mut state, b"bg");
     let status = posix_wait(&[pid_arg(pid)], &mut state).unwrap();
     assert!(matches!(status, WaitStatus::Exited(0)));
-    assert!(state.tasks.is_empty());
+    assert!(state.jobs.is_empty());
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn posix_wait_no_arg_reaps_all() {
     spawn_task(&mut state, b"two");
     let status = posix_wait(&[], &mut state).unwrap();
     assert!(matches!(status, WaitStatus::Exited(0)));
-    assert!(state.tasks.is_empty());
+    assert!(state.jobs.is_empty());
 }
 
 #[test]
@@ -82,8 +82,8 @@ fn posix_wait_by_pid_reaps_only_named() {
     assert_ne!(p1, p2);
     posix_wait(&[pid_arg(p1)], &mut state).unwrap();
     // Only the named task is reaped; the other remains.
-    assert_eq!(state.tasks.len(), 1);
-    assert!(state.tasks.contains_key(&ShortCStr::from(c"two")));
+    assert_eq!(state.jobs.named.len(), 1);
+    assert!(state.jobs.named.contains_key(&ShortCStr::from(c"two")));
     // Clean up the remaining task.
     let _ = posix_wait(&[], &mut state).unwrap();
 }

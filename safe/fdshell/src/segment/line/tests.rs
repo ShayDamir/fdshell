@@ -4,8 +4,19 @@
 
 use super::flush_line;
 use crate::segment::Segment;
+use crate::segment::book::Run;
 use alloc::vec;
 use alloc::vec::Vec;
+
+/// A buffered run with its background flag off (the tests probe the flush's
+/// body/offset bookkeeping; the flag itself is pinned in `segment/bg/tests.rs`).
+fn run(bytes: &[u8], off: usize) -> Run<'_> {
+    Run {
+        bytes,
+        off,
+        background: false,
+    }
+}
 
 /// Check a flushed statement segment's fields.
 fn check_statement(segment: &Segment<'_>, cmd: &[u8], off: usize, bodies: &[(usize, usize)]) {
@@ -14,12 +25,14 @@ fn check_statement(segment: &Segment<'_>, cmd: &[u8], off: usize, bodies: &[(usi
             cmd: c,
             off: o,
             bodies: b,
+            ..
         } => {
             assert_eq!(*c, cmd);
             assert_eq!(*o, off);
             assert_eq!(b, bodies);
         }
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("expected Statement"),
     }
 }
 
@@ -32,27 +45,30 @@ fn flush_line_attaches_bodies_in_operator_order() {
     //  0       7  8 9 10      17  18                 24 25 26            32 33
     let line = b"cat <<A && cat <<B\nbodyA\nA\nbodyB\nB";
     let mut segments = Vec::new();
-    let mut runs = vec![
-        (b"cat <<A" as &[u8], 0usize),
-        (b"cat <<B" as &[u8], 11usize),
-    ];
+    let mut runs = vec![run(b"cat <<A", 0), run(b"cat <<B", 11)];
     let resume = flush_line(&mut segments, line, 0, 18, &mut runs);
     assert_eq!(segments.len(), 2);
     match &segments[0] {
-        Segment::Statement { cmd, off, bodies } => {
+        Segment::Statement {
+            cmd, off, bodies, ..
+        } => {
             assert_eq!(*cmd, b"cat <<A");
             assert_eq!(*off, 0);
             assert_eq!(bodies, &vec![(19, 27)]);
         }
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("expected Statement"),
     }
     match &segments[1] {
-        Segment::Statement { cmd, off, bodies } => {
+        Segment::Statement {
+            cmd, off, bodies, ..
+        } => {
             assert_eq!(*cmd, b"cat <<B");
             assert_eq!(*off, 11);
             assert_eq!(bodies, &vec![(27, 34)]);
         }
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("expected Statement"),
     }
     assert_eq!(resume, 34);
 }
@@ -65,7 +81,7 @@ fn flush_line_semicolon_terminated_line() {
     //  0       8  9        19     20           24      25     28
     let line = b"cat <<EOF; echo done\nbody\nEOF";
     let mut segments = Vec::new();
-    let mut runs = vec![(b"cat <<EOF" as &[u8], 0usize)];
+    let mut runs = vec![run(b"cat <<EOF", 0)];
     let resume = flush_line(&mut segments, line, 0, 20, &mut runs);
     check_statement(&segments[0], b"cat <<EOF", 0, &[(21, 29)]);
     assert_eq!(resume, 29);
@@ -79,7 +95,7 @@ fn flush_line_multi_line_runs_are_body_less() {
     let line = b"cat <<EOF # c\necho x\nbody\nEOF";
     let mut segments = Vec::new();
     // The run was buffered on physical line 0 but flushed at line 1's end.
-    let mut runs = vec![(b"cat <<EOF" as &[u8], 0usize)];
+    let mut runs = vec![run(b"cat <<EOF", 0)];
     let resume = flush_line(&mut segments, line, 14, 20, &mut runs);
     check_statement(&segments[0], b"cat <<EOF", 0, &[]);
     assert_eq!(resume, 20);
@@ -93,27 +109,30 @@ fn flush_line_no_operator_run_gets_no_bodies() {
     //  0       5  6    7      15    16  17         21      22     25
     let line = b"echo x; cat <<EOF\nbody\nEOF";
     let mut segments = Vec::new();
-    let mut runs = vec![
-        (b"echo x" as &[u8], 0usize),
-        (b"cat <<EOF" as &[u8], 8usize),
-    ];
+    let mut runs = vec![run(b"echo x", 0), run(b"cat <<EOF", 8)];
     let resume = flush_line(&mut segments, line, 0, 17, &mut runs);
     assert_eq!(segments.len(), 2);
     match &segments[0] {
-        Segment::Statement { cmd, off, bodies } => {
+        Segment::Statement {
+            cmd, off, bodies, ..
+        } => {
             assert_eq!(*cmd, b"echo x");
             assert_eq!(*off, 0);
             assert!(bodies.is_empty());
         }
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("expected Statement"),
     }
     match &segments[1] {
-        Segment::Statement { cmd, off, bodies } => {
+        Segment::Statement {
+            cmd, off, bodies, ..
+        } => {
             assert_eq!(*cmd, b"cat <<EOF");
             assert_eq!(*off, 8);
             assert_eq!(bodies, &vec![(18, 26)]);
         }
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("expected Statement"),
     }
     assert_eq!(resume, 26);
 }

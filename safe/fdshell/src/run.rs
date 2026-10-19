@@ -7,6 +7,7 @@ use crate::loop_control::LoopControl;
 use crate::parse::ParsedLine;
 use crate::state::ShellState;
 
+mod async_job;
 mod cmd;
 mod parent;
 mod pipeline;
@@ -14,21 +15,28 @@ mod pipeline;
 pub(crate) fn run_one(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
+    background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let text = crate::alias_expand::expand_alias(text, cell)?;
     let text = crate::brace_expand::expand(&text)?;
     let parsed = crate::parse::parse(&text).change_context(CmdError::Parse)?;
-    run_parsed(&parsed, &text, cell)
+    run_parsed(&parsed, &text, cell, background)
 }
 
 /// Dispatch an already-parsed statement. Split out of [`run_one`] so the
 /// `time` hook can run its inner statement through the identical path.
+/// `background` is the plain-`&` flag: a `Cmd`/`Pipeline` with it becomes an
+/// async job (see [`async_job`]); every other arm runs foreground (measured
+/// divergence, task #326 — compound background is a filed follow-up).
 pub(crate) fn run_parsed(
     parsed: &ParsedLine,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
+    background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     match parsed {
+        ParsedLine::Cmd(cmdline) if background => async_job::spawn(parsed, text, cell),
+        ParsedLine::Pipeline(pipeline) if background => async_job::spawn(parsed, text, cell),
         ParsedLine::Cmd(cmdline) => cmd::run_cmd(cmdline, text, cell),
         ParsedLine::Pipeline(pipeline) => pipeline::run_pipeline(pipeline, text, cell),
         ParsedLine::For(forblock) => {

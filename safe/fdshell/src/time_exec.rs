@@ -53,7 +53,7 @@ fn run_inner(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     match &block.inner {
-        Some(inner) => crate::run::run_parsed(inner, &block.inner_text, cell),
+        Some(inner) => crate::run::run_parsed(inner, &block.inner_text, cell, false),
         None => {
             cell.borrow_mut()
                 .change_context(CmdError::Never)?

@@ -5,31 +5,19 @@ use hashbrown::HashMap;
 use sys::ImportedStr;
 use sys::LocalFd;
 use sys::ShortCStr;
-use sys::Trace;
 use sys::siginfo::WaitStatus;
 
 use crate::envfilter::EnvFilter;
-use crate::task::Task;
 use frames::VarFrame;
+use jobs::Jobs;
 
-/// An fd variable: an owned descriptor together with its provenance trace.
-pub struct FdVar {
-    pub fd: LocalFd,
-    pub trace: Trace,
-}
-
-/// An fd array element: an owned descriptor, the name of the variable or
-/// SHELLFD tag it originated from (its provenance), and its trace.
-pub struct FdArrayEntry {
-    pub fd: LocalFd,
-    pub source: ShortCStr,
-    pub trace: Trace,
-}
+pub use fds::{FdArrayEntry, FdVar};
 
 pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, FdVar>,
     pub(crate) arrays: HashMap<ShortCStr, Vec<FdArrayEntry>>,
-    pub(crate) tasks: HashMap<ShortCStr, Task>,
+    /// The background jobs: named (pidvar) + nameless (plain `&`) — see [`Jobs`].
+    pub(crate) jobs: Jobs,
     pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
     pub(crate) exports: HashMap<ShortCStr, ImportedStr>,
     /// `$1..$N` only; 0-based storage (`get(k)` is `$(k + 1)`).
@@ -66,7 +54,7 @@ impl ShellState {
         ShellState {
             fds: HashMap::new(),
             arrays: HashMap::new(),
-            tasks: HashMap::new(),
+            jobs: Jobs::new(),
             strings: HashMap::new(),
             exports: HashMap::new(),
             positional: VecDeque::new(),
@@ -101,7 +89,9 @@ impl Default for ShellState {
 
 mod arrays;
 mod cwd;
+pub(crate) mod fds;
 pub(crate) mod frames;
+pub(crate) mod jobs;
 mod options;
 mod setters;
 

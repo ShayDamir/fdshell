@@ -50,7 +50,12 @@ pub(super) fn finish_command(
         if t.eq_bytes(b";") {
             break;
         }
-        if t.eq_bytes(b"&") {
+        // A bare `&` token is a parse error here: the scanner consumes every
+        // statement-terminating `&` (task #326), so one reaching the parse
+        // layer is the empty-command family (`echo a && & echo b` — bash's
+        // syntax error too). A quoted or escaped `&` is an ordinary argument
+        // (`echo "&"` prints `&`, measured bash).
+        if t.eq_bytes(b"&") && *te - *ts == t.len() {
             bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
         let mut skip = 0usize;

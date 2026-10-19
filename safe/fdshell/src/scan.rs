@@ -81,13 +81,17 @@ impl Quotes {
     }
 }
 
-/// What sits at position `i`: a comment, a separator, or an ordinary char.
+/// What sits at position `i`: a comment, a separator, an async-`&` boundary,
+/// or an ordinary char.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Boundary {
     /// A `#` comment starts here (not inside quotes or backticks).
     Comment,
     /// A separator (`;`, newline, or end of line) that ends the current token.
     Separator,
+    /// The plain `&` async operator (POSIX #3.9.4.1): a bare `&` at a word
+    /// start that ends the statement and runs it asynchronously (task #326).
+    Async,
     /// An ordinary character with no special meaning at the boundary level.
     Char,
 }
@@ -107,10 +111,14 @@ pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
     if is_sep {
         return Boundary::Separator;
     }
+    if bare && state.paren_depth == 0 && bg::is_bg(line, i, state) {
+        return Boundary::Async;
+    }
     Boundary::Char
 }
 
 mod advance;
+pub(crate) mod bg;
 pub(crate) mod heredoc;
 mod skip;
 

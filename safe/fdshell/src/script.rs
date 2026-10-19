@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::cmd::CmdError;
+use crate::error::parse::ParseError;
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use sys::ScriptText;
@@ -13,13 +14,32 @@ pub(crate) fn run_script(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
-    for segment in crate::segment::scan_segments(line, false) {
+    let segments = crate::segment::scan_segments(line, false);
+    // The bash preflight: an invalid plain-`&` split is a parse error that
+    // runs nothing, so the whole scan is checked before any segment executes.
+    if segments
+        .iter()
+        .any(|seg| matches!(seg, Segment::AsyncInvalid))
+    {
+        // `bail!` cannot carry the `.change_context()` this cross-crate
+        // conversion needs (STYLE §4.14): construct the report explicitly.
+        return Err(
+            Report::new(ParseError::UnexpectedChar { ch: b'&' }).change_context(CmdError::Parse)
+        );
+    }
+    for segment in segments {
         match segment {
-            Segment::Statement { cmd, off, bodies } => {
+            Segment::Statement {
+                cmd,
+                off,
+                bodies,
+                background,
+            } => {
                 crate::verbose::trace(line.get(off..off + cmd.len()).unwrap_or(b""), cell);
                 let part = sub(text, off, cmd.len())?;
                 let body_bytes = extract_bodies(line, &bodies);
-                if let Some(control) = crate::cond::run_cond_list(&part, &body_bytes, cell, false)?
+                if let Some(control) =
+                    crate::cond::run_cond_list(&part, &body_bytes, cell, false, background)?
                 {
                     return Ok(Some(control));
                 }
@@ -44,11 +64,16 @@ pub(crate) fn run_script(
                 // span) claims no regions here and keeps its verbatim text.
                 let full = sub(text, cmd_start, raw.trim_ascii().len())?;
                 let body_bytes = extract_bodies(line, &bodies);
-                if let Some(control) = crate::cond::run_cond_list(&full, &body_bytes, cell, false)?
+                // A block statement's own `&` runs it foreground (measured
+                // divergence, task #326 — compound background is a follow-up).
+                if let Some(control) =
+                    crate::cond::run_cond_list(&full, &body_bytes, cell, false, false)?
                 {
                     return Ok(Some(control));
                 }
             }
+            // Unreachable: the pre-pass above bails on every invalid split.
+            Segment::AsyncInvalid => {}
         }
     }
     Ok(None)

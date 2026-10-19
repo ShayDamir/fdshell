@@ -218,7 +218,7 @@ fn finished_task_preloads_status_and_reaps() {
         let cell = make_cell();
         {
             let mut s = cell.borrow_mut().unwrap();
-            s.tasks.insert(
+            s.jobs.insert_named(
                 c"job".into(),
                 Task {
                     pidfd,
@@ -235,7 +235,7 @@ fn finished_task_preloads_status_and_reaps() {
         .unwrap();
         let s = cell.borrow().unwrap();
         assert_eq!(s.last_status.exit_code(), 0);
-        assert!(!s.tasks.contains_key(&ShortCStr::from(c"job")));
+        assert!(!s.jobs.named.contains_key(&ShortCStr::from(c"job")));
     });
 }
 

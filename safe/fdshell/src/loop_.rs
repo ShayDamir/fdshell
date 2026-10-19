@@ -37,7 +37,7 @@ fn run_loop_body(
         // own signal: the condition runs inside this loop's level (`in_loop`), so
         // it is consumed here exactly like the body's.
         if let Some(control) =
-            crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true)?
+            crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true, false)?
         {
             match at_level(control) {
                 AtLevel::Stop => break,

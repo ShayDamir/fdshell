@@ -27,6 +27,7 @@ fn scan_at(line: &[u8], start: usize) -> (usize, usize, bool, usize, Vec<(usize,
             bodies,
         } => (block_start, end_pos, closed, resume, bodies),
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -158,5 +159,6 @@ fn skip_is_bounded_to_the_blocks_physical_line() {
             assert_eq!(bodies, vec![(45, 61)]);
         }
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }

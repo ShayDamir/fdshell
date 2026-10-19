@@ -20,3 +20,9 @@ map_err_ignore = "deny"
 result_unit_err = "deny"
 unused_io_amount = "deny"
 
+
+# Incremental compilation caches stale MIR bodies for small predicate edits in
+# this workspace (task #326 debugging): a rebuilt rlib kept the previous `is_bg`
+# body while picking up its edited callees. Disable it — the crates are small.
+[profile.dev]
+incremental = false

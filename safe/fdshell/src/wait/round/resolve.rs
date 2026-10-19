@@ -46,7 +46,8 @@ pub(super) fn resolve(
         }
         FdRef::Task(name) => {
             let task = state
-                .tasks
+                .jobs
+                .named
                 .get(name)
                 .ok_or(WaitError::TaskNotFound { name: name.clone() })?;
             let (e, m) = events(kind, true);

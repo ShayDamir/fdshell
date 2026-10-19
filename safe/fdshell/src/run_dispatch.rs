@@ -43,7 +43,9 @@ pub(crate) fn run_simple(
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             state.fds.remove(var);
             state.arrays.remove(var);
-            state.tasks.remove(var);
+            // `unset` detaches a named task only — a plain-`&` job is unnamed
+            // and stays `wait`'s to reap (task #326).
+            state.jobs.remove_named(var);
             state.set_last_arg(var.clone());
             state.set_last_exit(0);
         }

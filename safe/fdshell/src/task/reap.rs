@@ -1,9 +1,7 @@
 use crate::error::task::TaskError;
 use crate::state::ShellState;
 use crate::task::Task;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
 use sys::siginfo::WaitStatus;
 
 /// Block on `task`'s pidfd and commit its captures on a clean exit.
@@ -22,15 +20,18 @@ pub(super) fn reap(task: Task, state: &mut ShellState) -> Result<WaitStatus, Rep
     Ok(status)
 }
 
-/// Reap every background task; the last reaped status wins.
+/// Reap every background job: the named table, then the plain-`&` deque in
+/// FIFO order. POSIX: `wait` with no operands returns 0 (measured against
+/// bash), so the reaped statuses feed only the accumulated child times.
 pub(super) fn wait_all(state: &mut ShellState) -> Result<WaitStatus, Report<TaskError>> {
-    let mut last = WaitStatus::Exited(0);
-    let keys: Vec<ShortCStr> = state.tasks.keys().cloned().collect();
-    for key in keys {
-        let Some(task) = state.tasks.remove(&key) else {
+    for key in state.jobs.named_keys() {
+        let Some(task) = state.jobs.remove_named(&key) else {
             continue;
         };
-        last = reap(task, state)?;
+        reap(task, state)?;
     }
-    Ok(last)
+    for task in state.jobs.drain_anon() {
+        reap(task, state)?;
+    }
+    Ok(WaitStatus::Exited(0))
 }

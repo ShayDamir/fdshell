@@ -26,6 +26,7 @@ fn scan_time_prefixed_keyword_block() {
                 assert!(*closed, "{:?}", line);
             }
             Segment::Statement { cmd, .. } => panic!("expected Block, got {:?}", cmd),
+            Segment::AsyncInvalid => panic!("unexpected async marker"),
         }
     }
 }
@@ -48,6 +49,7 @@ fn scan_time_prefixed_group_span_starts_at_the_prefix() {
             assert!(*closed);
         }
         Segment::Statement { cmd, .. } => panic!("expected Block, got {:?}", cmd),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
     // `time echo { …` is a command whose argument is a brace: not a group.
     let segments = scan_segments(b"time echo { a; }", false);
@@ -70,6 +72,7 @@ fn scan_if_block_end_pos() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -89,6 +92,7 @@ fn scan_for_block_end_pos() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -108,6 +112,7 @@ fn scan_case_block_end_pos() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -118,6 +123,7 @@ fn scan_statement_no_block() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo hello"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -181,6 +187,7 @@ fn scan_if_with_leading_whitespace() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -200,6 +207,7 @@ fn scan_for_with_leading_whitespace() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -308,6 +316,7 @@ fn scan_comment_on_block_line() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -351,6 +360,7 @@ fn scan_block_not_closed() {
             assert!(!*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -410,6 +420,7 @@ fn scan_statement_semicolon_inside_dollar_paren() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a; b)"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -420,6 +431,7 @@ fn scan_statement_semicolon_inside_nested_dollar_paren() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a $(b; c) d)"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -430,6 +442,7 @@ fn scan_statement_semicolon_inside_backtick() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo `a; b`"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -440,6 +453,7 @@ fn scan_statement_semicolon_inside_dollar_paren_with_newline() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a\nb)"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -466,6 +480,7 @@ fn scan_statement_plain_paren_inside_dollar_paren() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a (b; c) d)"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -492,6 +507,7 @@ fn scan_statement_backtick_paren_isolated() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a `b) ; c` d)"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -570,6 +586,7 @@ fn scan_statement_heredoc_spans_body() {
                 cmd: s1,
                 off: off1,
                 bodies: b1,
+                ..
             },
             Segment::Statement {
                 cmd: s2, off: off2, ..
@@ -596,6 +613,7 @@ fn scan_statement_after_heredoc() {
                 cmd: s1,
                 off: off1,
                 bodies: b1,
+                ..
             },
             Segment::Statement {
                 cmd: s2, off: off2, ..
@@ -678,6 +696,7 @@ fn scan_pre_block_block_and_trailing_share_one_body_stream() {
                 cmd: pre,
                 off: pre_off,
                 bodies: pre_bodies,
+                ..
             },
             Segment::Block {
                 block_start,
@@ -689,6 +708,7 @@ fn scan_pre_block_block_and_trailing_share_one_body_stream() {
                 cmd: tail,
                 off: tail_off,
                 bodies: tail_bodies,
+                ..
             },
         ) => {
             assert_eq!(pre, b"cat <<X");
@@ -715,6 +735,7 @@ fn scan_wait_pid_is_statement() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"wait 123"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -726,6 +747,7 @@ fn scan_bare_wait_is_statement() {
     match &segments[0] {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"wait"),
         Segment::Block { .. } => panic!("expected Statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -746,6 +768,7 @@ fn scan_wait_block_opens_on_subsequent_line() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -766,6 +789,7 @@ fn scan_wait_block_opens_on_same_line_keyword() {
             assert!(*closed);
         }
         Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 
@@ -934,6 +958,7 @@ fn check_shapes(line: &[u8], want: &[Shape]) {
                 closed,
                 bodies,
             } => ("B", *block_start, *end_pos, *closed, bodies.clone()),
+            Segment::AsyncInvalid => ("A", 0, 0, false, Vec::new()),
         })
         .collect();
     assert_eq!(got, want, "{line:?}");
@@ -968,6 +993,7 @@ fn check_block(line: &[u8], want: (usize, usize, bool)) {
             bodies: _,
         } => assert_eq!((*block_start, *end_pos, *closed), want, "{line:?}"),
         Segment::Statement { .. } => panic!("{line:?} must be a group block"),
+        Segment::AsyncInvalid => panic!("{line:?} must be a group block"),
     }
 }
 
@@ -983,6 +1009,7 @@ fn check_segments(line: &[u8], want: &[(usize, usize, bool)]) {
                 bodies: _,
             } => Some((*block_start, *end_pos, *closed)),
             Segment::Statement { .. } => None,
+            Segment::AsyncInvalid => None,
         })
         .collect();
     assert_eq!(blocks, want, "{line:?}");
@@ -1070,6 +1097,7 @@ fn statements(line: &[u8]) -> Vec<Vec<u8>> {
                 end_pos,
                 ..
             } => line.get(*block_start..*end_pos).unwrap_or(b"").to_vec(),
+            Segment::AsyncInvalid => Vec::new(),
         })
         .collect()
 }

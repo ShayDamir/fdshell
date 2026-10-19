@@ -22,16 +22,18 @@ pub fn try_wait(
     match args.first() {
         Some(arg) => {
             let key = arg.strip_prefix(b"&").ok_or(TaskError::BadArg)?;
-            let task = state.tasks.remove(&key).ok_or(TaskError::NotFound)?;
+            let task = state.jobs.remove_named(&key).ok_or(TaskError::NotFound)?;
             reap::reap(task, state)
         }
         None => reap::wait_all(state),
     }
 }
 
-/// POSIX `wait [pid…]`: reap the named pids (every task when no argument) and
-/// return the last reaped status. A non-numeric argument is `BadPid`; an
-/// unknown pid is `NotFound`.
+/// POSIX `wait [pid…]`: reap the named pids (every job when no argument) and
+/// return the last reaped status (POSIX: no operands → 0, see [`reap::wait_all`]).
+/// A pid search covers the named jobs first, then the plain-`&` jobs
+/// (`wait $!` of an async command — task #326). A non-numeric argument is
+/// `BadPid`; an unknown pid is `NotFound`.
 pub fn posix_wait(
     args: &[ShortCStr],
     state: &mut ShellState,
@@ -45,13 +47,10 @@ pub fn posix_wait(
             .parse()
             .change_context(TaskError::BadPid { arg: arg.clone() })?;
         let target = sys::Pid::from_raw(pid);
-        let key = state
-            .tasks
-            .iter()
-            .find(|(_, t)| t.child_pid == target)
-            .map(|(k, _)| k.clone())
+        let task = state
+            .jobs
+            .remove_by_pid(target)
             .ok_or(TaskError::NotFound)?;
-        let task = state.tasks.remove(&key).ok_or(TaskError::NotFound)?;
         last = reap::reap(task, state)?;
     }
     Ok(last)

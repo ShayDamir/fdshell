@@ -88,7 +88,11 @@ fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize) {
         match boundary(line, i, &state) {
             Boundary::Separator => return (i, i + 1),
             Boundary::Comment => return (i, skip_comment(line, i)),
-            Boundary::Char => {
+            // A group swallows a trailing `&` as word data (word_active is set
+            // by the scan), exactly like a `Char`: the group's text carries the
+            // `&` to the parse layer, which keeps its pinned group `&` error
+            // (task #326 — group backgrounding stays #188/#192's).
+            Boundary::Char | Boundary::Async => {
                 i = if state.at_word_start() && opens_at(line, i) {
                     skip_group(line, i, &mut state)
                 } else {

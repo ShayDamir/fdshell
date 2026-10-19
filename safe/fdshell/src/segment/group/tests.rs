@@ -21,6 +21,7 @@ fn span(line: &[u8], end: usize, resume: usize) {
             assert!(closed, "{line:?} must be a closed group");
         }
         Segment::Statement { .. } => panic!("{line:?} must be a block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
     assert_eq!(got_resume, resume, "resume of {line:?}");
     assert_eq!(floor, resume, "floor of {line:?}");
@@ -55,6 +56,7 @@ fn unclosed_group_is_open() {
             assert!(!closed);
         }
         Segment::Statement { .. } => panic!("expected an open group"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
     assert_eq!(resume, 9);
 }
@@ -79,6 +81,7 @@ fn group_resume_never_reopens_the_group_body() {
             assert!(closed);
         }
         Segment::Statement { .. } => panic!("expected a group block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
     assert_eq!(resume, line.len());
     assert_eq!(floor, line.len());
@@ -124,6 +127,7 @@ fn group_after_and_stays_a_cond_part_not_a_block() {
             );
         }
         Segment::Block { .. } => panic!("{line:?} must stay one statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
 

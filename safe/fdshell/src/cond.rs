@@ -13,12 +13,15 @@ use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
 /// `exempt` disables errexit on the list's final segment (the conditions of
-/// `if`/`while`/`until` are exempt, as in bash).
+/// `if`/`while`/`until` are exempt, as in bash). `background` marks the list's
+/// **last** part to run asynchronously (the plain `&` ends the statement after
+/// that part — task #326); the preceding parts of the list run foreground.
 pub(crate) fn run_cond_list(
     text: &ScriptText,
     bodies: &[Vec<u8>],
     cell: &ForkCell<ShellState>,
     exempt: bool,
+    background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let mut state = ScanState::new();
@@ -28,7 +31,9 @@ pub(crate) fn run_cond_list(
         let (i, is_or) = boundary::next_boundary(line, start, &mut state);
         let part_bodies = parts::take_bodies(line, start, i, bodies, &mut body_idx);
         if i == line.len() {
-            if let Some(control) = part::run_part(text, line, start, i, &part_bodies, cell)? {
+            if let Some(control) =
+                part::run_part(text, line, start, i, &part_bodies, cell, background)?
+            {
                 return Ok(Some(control));
             }
             // Errexit only for a final part that actually ran: a list that
@@ -40,7 +45,10 @@ pub(crate) fn run_cond_list(
             break;
         }
         if !parts::is_empty_part(line, start, i) {
-            if let Some(control) = part::run_part(text, line, start, i, &part_bodies, cell)? {
+            // A non-final part of the list always runs foreground: the plain
+            // `&` flag marks only the list's last part.
+            if let Some(control) = part::run_part(text, line, start, i, &part_bodies, cell, false)?
+            {
                 return Ok(Some(control));
             }
             let st = cell.borrow().change_context(CmdError::Never)?;

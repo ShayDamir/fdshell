@@ -118,6 +118,7 @@ fn body_that_closes_the_saved_copy_fails_the_command() {
     let report = crate::script::run_script(&st(script.as_bytes()), &cell)
         .err()
         .unwrap();
+
     assert_eq!(
         report.current_context().to_string(),
         "redirection failed",
