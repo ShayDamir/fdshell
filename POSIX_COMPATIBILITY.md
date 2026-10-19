@@ -129,6 +129,24 @@ starts a block where POSIX would run the builtin with no arguments; then the
 lines after it are parsed as arms. Writing `wait;` (or `wait $!`) keeps the
 POSIX meaning.
 
+## Quoted keywords are command words, quoted control keywords are not
+
+POSIX §2.9.1 recognizes a reserved word only when none of its characters is
+quoted, and fdshell follows it at every layer of the parse: a word whose raw
+span carries a quote byte is data, so `'if' x`, `"while" x`, `i"f" x`, `""case
+x`, `if true; ''then echo a; fi` and `f'oo'() { :; }` are command words and
+syntax errors exactly as bash makes them.
+
+The one accepted divergence is the family of keywords fdshell implements
+without a builtin of that name: bash runs `'break' 1`, `'continue' 1`,
+`'return' 3`, `'umask' 022` and `'unset' zz` as its **builtins** (the quoted
+word is looked up, and the builtin answers), where fdshell keeps the keyword
+and answers with its own message (`'break' is not inside a loop`, rc 1) or its
+own parse rule (`'unset' zz`: `variable must start with '%'`). Gating those
+words on §2.9.1 would trade a real builtin run for `break: not found`, so
+fdshell gates only the block layer and leaves these keywords quoted-blind
+(task #335 owns the decision, together with the builtins it needs).
+
 ## `-c` mode keeps its own `$0`
 
 POSIX: `sh -c 'echo $0' name` prints `name`. fdshell sets `$0` to the

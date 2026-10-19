@@ -331,6 +331,22 @@ the word (`HOME=; echo ~/x` → `/x`). When `HOME` is set in neither table `~`
 contributes nothing, where bash falls back to a login directory from the
 password database — an accepted divergence, like `~user` above.
 
+A **quoted word is never a keyword** (POSIX §2.9.1): the block keywords are
+recognized only on a word whose own span carries no quote byte, so every
+spelling of a keyword with quotes is a command name — `'if'`, `"if"`, `i"f"`,
+`""if`, `''if` and `"i"f` all look up the command `if`, and the same holds for
+`while`, `until`, `for`, `case`, `{`, `function`, `then`/`else`/`elif`/`do`/`in`
+and the `name(` definer of a function definition:
+
+```shell
+'if' x        # command `if`: not found (fdshell exits 1; bash 127)
+f'oo'() { :; } # not a definition: the word `foo(` is not a valid name
+```
+
+A `\`-escaped word (`\if`) was never a keyword here: its text is `\if`, so it
+is looked up in `PATH` in both shells. The command-not-found exit code is
+fdshell's shell-wide **1**, not bash's 127.
+
 ### Variables
 
 `name=value` sets a shell variable; `$name` or `${name}` reads it:
