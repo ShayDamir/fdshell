@@ -276,24 +276,88 @@ fn quoted_keyword_words_are_command_words() {
     assert_eq!((out.as_str(), code), ("ran-then\n", 0), "stderr={err:?}");
 }
 
-/// Divergence (task #247): a quoted `if`/`while`/`for`/`until`/`case` at the
-/// start of a statement is still parsed as the keyword, so it is a syntax
-/// error; bash runs it as a command word (POSIX §2.9.1 recognizes a reserved
-/// word only when it is unquoted). This is the pre-existing double-quote
-/// behavior — task #141 made `'…'` behave identically, which is the point of
-/// that task; the bash-parity fix is #247. Pinned so #247's fix is visible.
+/// Task #247 (POSIX §2.9.1): a block-opener keyword written with quote bytes
+/// is a **command word**, as bash does — the gate is the word's raw span
+/// (`keywords::quoted::quoted_word`), so every spelling that carries a quote
+/// byte is data: `'if'`, `"if"`, `i"f"`, `""if`, `''if`, `"i"f`. The scratch
+/// `PATH` holds a stub per name, so "looked up in `PATH` as a command name" is
+/// proved, not inferred from a not-found message (bash: `if: command not
+/// found`, rc 127; fdshell's command-not-found code is 1, a shell-wide
+/// convention, so the *name* is pinned, not the code).
 #[test]
-fn quoted_block_openers_are_still_keywords() {
+fn quoted_block_openers_are_command_words() {
+    let bin = scratch_bin(&[
+        "if", "while", "until", "for", "case", "{", "function", "then", "else",
+    ]);
+    for (script, want) in [
+        ("'if' x", "ran-if\n"),
+        ("\"if\" x", "ran-if\n"),
+        ("i\"f\" x", "ran-if\n"),
+        ("\"\"if x", "ran-if\n"),
+        ("''if x", "ran-if\n"),
+        ("\"i\"f x", "ran-if\n"),
+        ("'while' x", "ran-while\n"),
+        ("'until' x", "ran-until\n"),
+        ("'for' x", "ran-for\n"),
+        ("'case' x", "ran-case\n"),
+        ("'{' x", "ran-{\n"),
+        ("'function' x", "ran-function\n"),
+    ] {
+        let (out, err, code) = run_with_path(&bin, script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // No stub: the shell reports the quoted word's own name as the missing
+    // command (rc 1, the shell-wide convention — bash prints 127).
+    let (out, err, code) = run("echo a; 'if' true");
+    assert_eq!((out.as_str(), code), ("a\n", 1), "stderr={err:?}");
+    assert!(err.contains(r#""if""#), "stderr={err:?}");
+    // The keyword words *inside* a block are gated too: the block reports its
+    // own missing keyword (bash: a syntax error, rc 2, runs nothing; fdshell
+    // reports the parse error with rc 1 — the rc-1-vs-2 family).
     for (script, needle) in [
-        ("'if' x", "missing 'fi'"),
-        ("\"if\" x", "missing 'fi'"),
-        ("'while' x", "expected 'done'"),
-        ("'for' x", "expected 'in'"),
-        ("'case' x", "missing 'in'"),
+        ("if true; 'then' echo a; fi", "missing 'then'"),
+        ("if true; ''then echo a; fi", "missing 'then'"),
+        ("if true; \"\"then echo a; fi", "missing 'then'"),
+        ("for i 'in' a; do echo $i; done", "expected 'in'"),
+        ("for i in a b; 'do' echo $i; done", "expected 'do'"),
+        ("for i in a b; \"\"do echo $i; done", "expected 'do'"),
+        ("case x 'in' a) echo A;; esac", "case: missing 'in'"),
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(err.contains(needle), "{script}: stderr={err:?}");
+    }
+    // A quoted `else`/`elif` in the closer position is a command word run
+    // *after* the arm that parsed: bash prints the same `a` and then its
+    // `else: command not found`.
+    let (out, err, code) = run("if true; then echo a; 'else' echo b; fi");
+    assert_eq!((out.as_str(), code), ("a\n", 1), "stderr={err:?}");
+    assert!(err.contains(r#""else""#), "stderr={err:?}");
+    let (out, err, code) = run("if true; then echo a; 'elif' false; then echo b; fi");
+    assert_eq!((out.as_str(), code), ("a\n", 1), "stderr={err:?}");
+    assert!(err.contains(r#""elif""#), "stderr={err:?}");
+    // A quoted definer word defines no function (bash: `` 'f'': not a valid
+    // identifier ``), and the shape falls back to the `function` command.
+    for script in [
+        "'function' f() { echo hi; }; f",
+        "function 'f'() { echo hi; }; f",
+        "f'oo'() { echo hi; }; f",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(err.contains("not found"), "{script}: stderr={err:?}");
+    }
+    // Accepted divergence (plan §8): fdshell parses statement by statement, so a
+    // quoted opener runs as a command and the *rest of the line* runs too; bash
+    // parses the whole line first and dies on the syntax error (rc 2, runs
+    // nothing). Pinning the fallout keeps the multi-statement blast radius visible.
+    for script in [
+        "'while' :; do echo a; break; done",
+        "'if' true; then echo b; fi",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(err.contains("not found"), "{script}: stderr={err:?}");
     }
 }
 

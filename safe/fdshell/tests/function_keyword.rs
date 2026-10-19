@@ -143,14 +143,25 @@ fn keyword_form_without_a_definer_name_is_a_command() {
     assert!(err.contains(r#""function" not found"#), "stderr={err}");
 }
 
-/// Name leniency is inherited from the POSIX form: an option-shaped word is the
-/// name, and a quoted name is stored unquoted (bash rejects both).
+/// Name leniency is inherited from the POSIX form: an option-shaped word is
+/// the name (bash rejects it — a documented leniency). A **quoted** name is
+/// not a name at all (task #247, POSIX §2.9.1): the definer words are gated
+/// on their quote bytes at both granularities, so the shape falls back to the
+/// `function` command, exactly as bash's `` `"f"': not a valid identifier ``
+/// (fdshell rc 1, bash rc 1).
 #[test]
 fn definer_name_leniency_is_inherited() {
     let (out, err, rc) = run("function -a f { echo hi; }; -a");
     assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
-    let (out, err, rc) = run("function \"f\" { echo hi; }; f");
-    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+    for script in [
+        r#"function "f" { echo hi; }; f"#,
+        "function 'f'() { echo hi; }; f",
+        "function 'f' { echo hi; }; f",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "script={script}: stderr={err}");
+        assert!(err.contains("not found"), "script={script}: stderr={err}");
+    }
     // A name that is also a block keyword: the definition wins, and the trailing
     // bare keyword is a parse error (as the POSIX `if() { … }; if` pin).
     let (out, err, rc) = run("function if { echo hi; }; if");
