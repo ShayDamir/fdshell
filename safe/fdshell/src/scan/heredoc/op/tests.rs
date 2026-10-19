@@ -122,21 +122,52 @@ fn operator_new_strips_every_quote_byte() {
     }
 }
 
-/// An escaped quote is data (the pair folds in the same pass that strips), and
-/// an unquoted escape pair folds: neither sets `quoted`, so the body expands
-/// (task #263 owns the `\`-quotes-the-delimiter rule).
+/// The delimiter word's *text* keeps an escaped quote as data (the pair folds
+/// in the strip pass), while the *pair itself* is a POSIX quote operator and
+/// therefore **quotes** the word: `<<a\'b` delimits `a'b` with a literal body,
+/// `<<E\OF` delimits `EOF` with a literal body (POSIX XCU 2.3, task #263).
 #[test]
-fn operator_new_folds_escapes_and_keeps_an_escaped_quote_as_data() {
+fn operator_new_folds_escapes_and_quotes_the_delimiter() {
     let op = Operator::new(b"a\\'b", false, 0);
     assert_eq!(op.delim, b"a'b" as &[u8]);
-    assert!(!op.quoted);
+    assert!(op.quoted);
     let op = Operator::new(b"E\\OF", false, 0);
     assert_eq!(op.delim, b"EOF" as &[u8]);
-    assert!(!op.quoted);
+    assert!(op.quoted);
     // A quoted pair survives: the delimiter is the literal `E\OF`.
     let op = Operator::new(b"\"E\\OF\"", false, 0);
     assert_eq!(op.delim, b"E\\OF" as &[u8]);
     assert!(op.quoted);
+}
+
+/// A trailing `\` escapes nothing, so it is no pair: the delimiter keeps its
+/// backslash and the word stays unquoted. Kill test for "the flag is set by
+/// any `\` byte" and for swapping the two arms of the fold's escape case.
+#[test]
+fn operator_new_a_trailing_backslash_is_not_a_pair() {
+    let op = Operator::new(b"E\\", false, 0);
+    assert_eq!(op.delim, b"E\\" as &[u8]);
+    assert!(!op.quoted, "a lone trailing `\\` quotes nothing");
+}
+
+/// Every form of a folded pair quotes the delimiter, with and without the
+/// `<<-` marker (the flag is derived in the fold, so `strip` cannot change it).
+#[test]
+fn operator_new_a_folded_pair_quotes_every_form() {
+    for (raw, want) in [
+        (b"\\E\\O\\F" as &[u8], b"EOF" as &[u8]),
+        (b"E\\OF", b"EOF"),
+        (b"\\\\$HOME", b"\\$HOME"),
+        (b"\\$HOME", b"$HOME"),
+        (b"EO\\F", b"EOF"),
+    ] {
+        for strip in [false, true] {
+            let op = Operator::new(raw, strip, 0);
+            assert_eq!(op.delim, want, "raw={:?}", raw);
+            assert!(op.quoted, "raw={:?} strip={:?}", raw, strip);
+            assert_eq!(op.strip, strip);
+        }
+    }
 }
 
 /// A quoted delimiter's terminator is the stripped word, byte-exactly.

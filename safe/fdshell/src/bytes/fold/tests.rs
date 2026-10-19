@@ -61,23 +61,26 @@ fn fold_quotes_keeps_the_spaces_of_a_quoted_span() {
 }
 
 /// The folding runs in the same pass: an unquoted pair folds and the trailing
-/// `\` keeps its backslash. No quote byte means no quoting, so `<<E\OF` keeps
-/// the body expanding.
+/// `\` keeps its backslash. A folded pair is a POSIX quote operator, so it
+/// **quotes** the word (task #263); the trailing lone `\` is no pair and
+/// leaves the word unquoted.
 #[test]
 fn fold_quotes_folds_unquoted_escape_pairs_in_the_same_pass() {
-    assert_eq!(fold_quotes(b"a\\*b"), (b"a*b".to_vec(), false));
-    assert_eq!(fold_quotes(b"E\\OF"), (b"EOF".to_vec(), false));
-    // A trailing `\` keeps it, exactly like `fold`.
+    assert_eq!(fold_quotes(b"a\\*b"), (b"a*b".to_vec(), true));
+    assert_eq!(fold_quotes(b"E\\OF"), (b"EOF".to_vec(), true));
+    // A trailing `\` keeps it, exactly like `fold`, and quotes nothing.
     assert_eq!(fold_quotes(b"E\\"), (b"E\\".to_vec(), false));
 }
 
 /// An escaped quote is data, not a marker: it stays in the text (folded to the
-/// quote byte) and does not make the delimiter quoted. Folding first and
-/// stripping in the same pass is what makes this decidable (LESSONS).
+/// quote byte). The pair that produced it is a quote operator, so the word is
+/// quoted — the *text* and the *flag* answer different questions (task #263).
+/// Folding first and stripping in the same pass is what makes this decidable
+/// (LESSONS).
 #[test]
 fn fold_quotes_keeps_an_escaped_quote_as_data() {
-    assert_eq!(fold_quotes(b"a\\'b"), (b"a'b".to_vec(), false));
-    assert_eq!(fold_quotes(b"a\\\"b"), (b"a\"b".to_vec(), false));
+    assert_eq!(fold_quotes(b"a\\'b"), (b"a'b".to_vec(), true));
+    assert_eq!(fold_quotes(b"a\\\"b"), (b"a\"b".to_vec(), true));
 }
 
 /// A quoted span keeps its pair: POSIX #4.2 drops the backslash only at
@@ -85,6 +88,30 @@ fn fold_quotes_keeps_an_escaped_quote_as_data() {
 #[test]
 fn fold_quotes_keeps_a_quoted_escape_pair() {
     assert_eq!(fold_quotes(b"\"E\\OF\""), (b"E\\OF".to_vec(), true));
+}
+
+/// POSIX XCU 2.3 counts `\` a quote operator, so a word quoted *only* by
+/// escape pairs is quoted (`<<\E\O\F`, `<<E\OF`): the body is literal. The two
+/// negative rows are the kill tests for "set the flag on any `\` byte" — a
+/// trailing lone `\` escapes nothing, so it is no pair and quotes nothing.
+#[test]
+fn fold_quotes_counts_a_folded_escape_pair_as_a_quote_operator() {
+    for (raw, want) in [
+        (b"E\\OF" as &[u8], b"EOF" as &[u8]),
+        (b"\\E\\O\\F", b"EOF"),
+        (b"\\\\EOF", b"\\EOF"),
+        (b"\\$HOME", b"$HOME"),
+        (b"a\\'b", b"a'b"),
+        (b"a\\\"b", b"a\"b"),
+        (b"a\\*b", b"a*b"),
+    ] {
+        let (got, quoted) = fold_quotes(raw);
+        assert_eq!(got, want, "raw={raw:?}");
+        assert!(quoted, "a folded pair quotes the word: raw={raw:?}");
+    }
+    // No pair, no quote operator: a trailing `\`, and a plain word.
+    assert_eq!(fold_quotes(b"E\\"), (b"E\\".to_vec(), false));
+    assert_eq!(fold_quotes(b"EOF"), (b"EOF".to_vec(), false));
 }
 
 /// Nesting: a `"` written in a `'…'` span is data, a `'` written in `"…"` is

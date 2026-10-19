@@ -65,8 +65,9 @@ fn layout_delimiter_quote_removal_is_literal() {
     }
 }
 
-/// An escaped quote is data, so `<<a\"b` delimits the literal `a"b` and — with
-/// no quote byte in the word — the body keeps expanding.
+/// An escaped quote is data in the delimiter **text** (`<<a\"b` delimits the
+/// literal `a"b`), and the pair that produced it is a POSIX quote operator, so
+/// the word is **quoted** and the body literal (POSIX XCU 2.3, task #263).
 /// A delimiter word that contains a `<<` is one operator at both levels on its
 /// command line (pinned in `scan/heredoc/ops/tests.rs` and by the agreement
 /// rows above). Its multi-line form (`cat <<'a <<b'` + body + `a <<b`) is not
@@ -82,7 +83,7 @@ fn layout_escaped_quote_delimiter_word_is_a_literal_delimiter() {
     )
     .unwrap();
     assert_eq!(op.delim, b"a\"b" as &[u8]);
-    assert!(!op.quoted);
+    assert!(op.quoted);
     assert_eq!(extra, 0);
 }
 
@@ -717,12 +718,14 @@ fn delimiter_indices_bare_form_at_end_of_input() {
 
 /// POSIX #4.1: the delimiter word folds its unquoted escape pairs, so
 /// `<<E\OF` delimits `EOF` and the delimiter line `EOF` ends the body.
+/// POSIX XCU 2.3: that same pair is a quote operator, so the body is literal
+/// (task #263 — `expand` is false, exactly like `<<"EOF"`).
 #[test]
 fn layout_escaped_delimiter_folds() {
-    let s = specs(b"cat <<E\\OF\nbody\nEOF\n");
+    let s = specs(b"cat <<E\\OF\n$X\nEOF\n");
     assert_eq!(s.len(), 1);
-    assert_eq!(s[0].body, ShortCStr::from_vec(b"body\n".to_vec()).unwrap());
-    assert!(s[0].expand);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"$X\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
     // A delimiter line keeps its raw bytes, so `E\OF` never matches the folded
     // delimiter `EOF`: the statement is unterminated, not silently cut.
     let line = b"cat <<EOF\nbody\nE\\OF\n";
@@ -737,6 +740,115 @@ fn layout_quoted_escaped_delimiter_is_literal() {
     let s = specs(b"cat <<\"E\\OF\"\nbody\nE\\OF\n");
     assert_eq!(s.len(), 1);
     assert_eq!(s[0].body, ShortCStr::from_vec(b"body\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
+}
+
+/// POSIX XCU 2.3: a delimiter word that contains any quote operator is quoted,
+/// and `\` is one — so `<<\E\O\F`, whose word has no `"`/`'` at all, makes the
+/// body literal while the word still folds to the delimiter `EOF` (task #263).
+#[test]
+fn layout_backslash_delimiter_is_literal() {
+    for line in [
+        b"cat <<\\E\\O\\F\n$X\nEOF\n" as &[u8],
+        b"cat <<E\\OF\n$X\nEOF\n",
+        b"cat <<EO\\F\n$X\nEOF\n",
+        b"cat <<\\EOF\n$X\nEOF\n",
+    ] {
+        let s = specs(line);
+        assert_eq!(s.len(), 1, "line={:?}", line);
+        assert_eq!(
+            s[0].body,
+            ShortCStr::from_vec(b"$X\n".to_vec()).unwrap(),
+            "line={:?}",
+            line
+        );
+        assert!(
+            !s[0].expand,
+            "a `\\` in the word quotes the body: line={:?}",
+            line
+        );
+    }
+}
+
+/// A quoted body is verbatim bytes on both counts: `$`-expansion is off
+/// (`expand == false`) and no `\<newline>` continuation is stripped from it
+/// (the same `op.quoted` gate drives both, `parse/heredoc.rs`).
+#[test]
+fn layout_escaped_delimiter_keeps_the_body_verbatim() {
+    for (line, want) in [
+        (
+            b"cat <<E\\OF\n$(echo hi)\nEOF\n" as &[u8],
+            b"$(echo hi)\n" as &[u8],
+        ),
+        (b"cat <<E\\OF\n`echo hi`\nEOF\n", b"`echo hi`\n"),
+        (b"cat <<E\\OF\n\\$X\nEOF\n", b"\\$X\n"),
+        (b"cat <<E\\OF\na\\\nb\nEOF\n", b"a\\\nb\n"),
+    ] {
+        let s = specs(line);
+        assert_eq!(s.len(), 1, "line={:?}", line);
+        assert_eq!(
+            s[0].body,
+            ShortCStr::from_vec(want.to_vec()).unwrap(),
+            "line={:?}",
+            line
+        );
+        assert!(!s[0].expand, "line={:?}", line);
+    }
+}
+
+/// The `<<-` form keeps stripping tabs with an escape-quoted delimiter: the
+/// flag is derived in the fold, independent of `strip`.
+#[test]
+fn layout_dashed_escaped_delimiter_is_literal_and_stripped() {
+    let s = specs(b"cat <<-E\\OF\n\t$X\n\tEOF\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"$X\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
+}
+
+/// The bare form inherits the marker and quotes the body the same way: the
+/// delimiter word is read raw at the token level too (`operator_at`).
+#[test]
+fn layout_bare_escaped_delimiter_is_literal() {
+    for line in [
+        b"cat << E\\OF\n$X\nEOF\n" as &[u8],
+        b"cat <<- E\\OF\n\t$X\n\tEOF\n",
+        b"cat << \\E\\O\\F\n$X\nEOF\n",
+    ] {
+        let s = specs(line);
+        assert_eq!(s.len(), 1, "line={:?}", line);
+        assert_eq!(
+            s[0].body,
+            ShortCStr::from_vec(b"$X\n".to_vec()).unwrap(),
+            "line={:?}",
+            line
+        );
+        assert!(!s[0].expand, "line={:?}", line);
+    }
+}
+
+/// Two escape-quoted delimiters of one command are two operators, both quoted
+/// (the per-operator flag is not diluted by the neighbour).
+#[test]
+fn layout_two_escaped_delimiters_of_one_command_are_literal() {
+    let s = specs(b"cat <<A\\X <<B\\Y\n$X\nAX\n$X\nBY\n");
+    assert_eq!(s.len(), 2);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"$X\n".to_vec()).unwrap());
+    assert_eq!(s[1].body, ShortCStr::from_vec(b"$X\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
+    assert!(!s[1].expand);
+}
+
+/// An escaped `$` in the delimiter word folds to the literal `$HOME` delimiter
+/// and quotes the body: the body's `$( … )` is never run (task #263).
+#[test]
+fn layout_escaped_dollar_delimiter_is_literal() {
+    let s = specs(b"cat <<\\$HOME\n$(echo hi)\n$HOME\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(
+        s[0].body,
+        ShortCStr::from_vec(b"$(echo hi)\n".to_vec()).unwrap()
+    );
     assert!(!s[0].expand);
 }
 

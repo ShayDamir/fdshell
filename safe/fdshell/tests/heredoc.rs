@@ -81,6 +81,113 @@ fn heredoc_quoted_delimiter_is_literal() {
     assert_eq!(out, "$X\n");
 }
 
+/// POSIX XCU 2.3 quotes the delimiter word on **any** quote operator, and `\`
+/// is one: a word with no `"`/`'` at all is quoted by its escape pairs alone,
+/// so `<<\E\O\F` delimits the folded `EOF` with a literal body.
+#[test]
+fn heredoc_backslash_delimiter_is_literal() {
+    for (script, want) in [
+        ("X=zzz; cat <<\\E\\O\\F\n$X\nEOF", "$X\n"),
+        ("X=zzz; cat <<\\EOF\n$X\nEOF", "$X\n"),
+        ("X=zzz; cat <<\\$HOME\n$(echo hi)\n$HOME", "$(echo hi)\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?} script={script:?}");
+        assert_eq!(
+            out, *want,
+            "the word is quoted by its pairs: script={script:?}"
+        );
+    }
+}
+
+/// Every position of the pair quotes the word: `<<E\OF`, `<<EO\F`, `<<\EOF`.
+#[test]
+fn heredoc_escaped_delimiter_is_literal() {
+    for script in [
+        "X=zzz; cat <<E\\OF\n$X\nEOF",
+        "X=zzz; cat <<EO\\F\n$X\nEOF",
+        "X=zzz; cat <<\\EOF\n$X\nEOF",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?} script={script:?}");
+        assert_eq!(out, "$X\n", "script={script:?}");
+    }
+}
+
+/// `<<\\EOF` folds to the delimiter `\EOF` (the pair `\\` is the fold, the
+/// folded pair is the quoting), so the terminator line is the literal `\EOF`
+/// and the body is literal.
+#[test]
+fn heredoc_escaped_pair_delimiter_matches_its_folded_terminator() {
+    let (out, err, code) = run("X=zzz; cat <<\\\\EOF\n$X\n\\EOF");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$X\n");
+}
+
+/// An escaped quote is data in the delimiter text (`<<a\'b\'c` delimits
+/// `a'b'c`, a balanced terminator), and the pairs quote the body (task #263).
+#[test]
+fn heredoc_escaped_quote_delimiter_is_literal() {
+    let (out, err, code) = run("X=zzz; cat <<a\\'b\\'c\n$X\na'b'c");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$X\n");
+}
+
+/// The `<<-` form keeps stripping tabs with an escape-quoted delimiter.
+#[test]
+fn heredoc_dash_escaped_delimiter_is_literal_and_stripped() {
+    let (out, err, code) = run("X=zzz; cat <<-E\\OF\n\t$X\n\tb\n\tEOF");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$X\nb\n");
+}
+
+/// The bare form inherits the marker and quotes the body the same way.
+#[test]
+fn heredoc_bare_escaped_delimiter_is_literal() {
+    for script in [
+        "X=zzz; cat <<- E\\OF\n\t$X\n\tEOF",
+        "X=zzz; cat << E\\OF\n$X\nEOF",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?} script={script:?}");
+        assert_eq!(out, "$X\n", "script={script:?}");
+    }
+}
+
+/// A quoted body is verbatim on both counts: no `$`/`$( … )`/backtick
+/// expansion, and no `\<newline>` continuation stripped (same `quoted` gate).
+#[test]
+fn heredoc_escaped_delimiter_body_keeps_substitutions_and_continuations() {
+    for (script, want) in [
+        ("X=zzz; cat <<E\\OF\n$(echo hi)\nEOF", "$(echo hi)\n"),
+        ("X=zzz; cat <<E\\OF\n`echo hi`\nEOF", "`echo hi`\n"),
+        ("X=zzz; cat <<E\\OF\n\\$X\nEOF", "\\$X\n"),
+        ("X=zzz; cat <<E\\OF\na\\\nb\nEOF", "a\\\nb\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?} script={script:?}");
+        assert_eq!(out, *want, "script={script:?}");
+    }
+}
+
+/// Two escape-quoted heredocs on one command line: bash's fd 0 ends up the
+/// **last** body, literal (`cat <<A\X <<B\Y` — the second body follows `AX`).
+#[test]
+fn heredoc_two_escaped_delimiters_on_one_line_are_literal() {
+    let (out, err, code) = run("X=zzz; cat <<A\\X <<B\\Y\n$X\nAX\n$X\nBY");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$X\n");
+}
+
+/// A block arm's heredoc: the command line ends at `fi`, the body follows the
+/// block line, and the escape-quoted delimiter keeps it literal.
+#[test]
+fn heredoc_block_arm_escaped_delimiter_is_literal() {
+    let (out, err, code) = run("X=zzz; if true; then cat <<E\\OF; fi\n$X\nEOF");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$X\n");
+}
+
 #[test]
 fn heredoc_bare_form_takes_next_word() {
     let (out, _err, code) = run("cat << Q\nbody\nQ");

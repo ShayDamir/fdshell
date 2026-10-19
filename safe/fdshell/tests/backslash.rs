@@ -261,12 +261,18 @@ fn quoted_escape_rules_are_unchanged() {
 }
 
 /// A delimiter word folds its unquoted escape pairs (`<<E\OF` delimits `EOF`),
-/// a quoted delimiter keeps the pair, and `echo a\<<X` is one word.
+/// a quoted delimiter keeps the pair, and `echo a\<<X` is one word. The same
+/// pair is a POSIX quote operator, so it also makes the body literal (task
+/// #263): the fold is what matches the `EOF` terminator, the escape is what
+/// keeps `$X` unexpanded.
 #[test]
 fn heredoc_delimiter_folds_escape_pairs() {
     let (out, err, code) = run("cat <<E\\OF\nbody\nEOF\n");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "body\n");
+    let (out, err, code) = run("X=zzz; cat <<E\\OF\n$X\nEOF\n");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$X\n", "a folded pair delimits AND quotes the body");
     // A quoted delimiter: the pair is literal, so the terminator is `E\OF`.
     let (out, err, code) = run("cat <<\"E\\OF\"\nbody\nE\\OF\n");
     assert_eq!(code, 0, "stderr={err:?}");

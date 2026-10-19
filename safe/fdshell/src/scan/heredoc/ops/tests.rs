@@ -95,14 +95,17 @@ fn delimiter_folds_escape_pairs() {
     let line = b"cat <<E\\OF\n";
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops[0].delim, b"EOF");
+    assert!(ops[0].quoted, "the folded pair quotes the word");
     assert!(!ops[0].strip);
     let line = b"cat <<\\!EOF\n";
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops[0].delim, b"!EOF");
+    assert!(ops[0].quoted, "the folded pair quotes the word");
 }
 
 /// A quoted delimiter keeps the pair inside the quotes (POSIX #4.2), and the
-/// `<<-` marker folds the escape pairs outside the quotes.
+/// `<<-` marker folds the escape pairs outside the quotes — the folded pair
+/// quotes the word, exactly like the plain form (task #263).
 #[test]
 fn quoted_delimiter_keeps_the_pair() {
     let line = b"cat <<\"E\\OF\"\n";
@@ -113,12 +116,13 @@ fn quoted_delimiter_keeps_the_pair() {
     let ops = operator_delims(line, 0, line.len()).unwrap();
     assert_eq!(ops[0].delim, b"EOF");
     assert!(ops[0].strip);
-    assert!(!ops[0].quoted);
+    assert!(ops[0].quoted);
 }
 
 /// The delimiter word is a word at the byte level too: quote removal drops
-/// every `"`/`'` byte (not one surrounding pair) and any quoting marks the
-/// delimiter quoted, so the body is literal (task #207).
+/// every `"`/`'` byte (not one surrounding pair) and any POSIX quote operator
+/// marks the delimiter quoted, so the body is literal (task #207; the escaped
+/// pair's own quote-operator half is task #263's).
 #[test]
 fn delimiter_strips_every_quote_byte() {
     for (line, want, strip, quoted) in [
@@ -132,15 +136,46 @@ fn delimiter_strips_every_quote_byte() {
         (b"cat <<\"a b\"", b"a b", false, true),
         (b"cat <<a\"b c\"d", b"ab cd", false, true),
         (b"cat << 'a b'", b"a b", false, true),
-        // An escaped quote is data: the delimiter quotes nothing, so the body
-        // expands (`<<a\"b` — task #263 owns the `\`-quotes-the-delimiter rule).
-        (b"cat <<a\\\"b", b"a\"b", false, false),
+        // An escaped quote is data in the *text*: the delimiter is the literal
+        // `a"b`. The pair that made it is a quote operator, so the word is
+        // quoted and the body literal (POSIX XCU 2.3, task #263).
+        (b"cat <<a\\\"b", b"a\"b", false, true),
     ] {
         let ops = operator_delims(line, 0, line.len()).unwrap();
         assert_eq!(ops.len(), 1, "line={:?}", line);
         assert_eq!(ops[0].delim, want, "line={:?}", line);
         assert_eq!(ops[0].strip, strip, "line={:?}", line);
         assert_eq!(ops[0].quoted, quoted, "line={:?}", line);
+    }
+}
+
+/// A delimiter word quoted only by escape pairs is ONE word at the byte level
+/// (the pairs cut no word span: `<<\E\O\F` is one delimiter, not five) and is
+/// quoted, because POSIX XCU 2.3 counts `\` a quote operator (task #263).
+#[test]
+fn delimiter_of_a_backslash_word_is_one_operator_and_quoted() {
+    for (line, want, strip) in [
+        (b"cat <<\\E\\O\\F" as &[u8], b"EOF" as &[u8], false),
+        (b"cat <<E\\OF", b"EOF", false),
+        (b"cat <<-E\\OF", b"EOF", true),
+        (b"cat << E\\OF", b"EOF", false),
+        (b"cat <<\\$HOME", b"$HOME", false),
+        (b"cat <<\\\\EOF", b"\\EOF", false),
+    ] {
+        let ops = operator_delims(line, 0, line.len()).unwrap();
+        assert_eq!(
+            ops.len(),
+            1,
+            "a `\\` pair never cuts the word: line={:?}",
+            line
+        );
+        assert_eq!(ops[0].delim, want, "line={:?}", line);
+        assert_eq!(ops[0].strip, strip, "line={:?}", line);
+        assert!(
+            ops[0].quoted,
+            "a folded pair quotes the delimiter: line={:?}",
+            line
+        );
     }
 }
 
