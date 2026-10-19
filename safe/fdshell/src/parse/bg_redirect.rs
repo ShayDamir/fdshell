@@ -14,8 +14,9 @@ pub struct BgRedirectResult {
     pub bg_force: bool,
 }
 
-/// A `&>`-family token: the combined redirect (the same target on fd 1 and fd
-/// 2) or a background job's pid variable. Second field: tokens the operator
+/// A `&>`-family token: the combined redirect (one open shared by fd 1 and fd
+/// 2, emitted as a single `RedirectDef::combined`) or a background job's pid
+/// variable. Second field: tokens the operator
 /// consumes (1 for the bare `&>` / `&>>`, which takes the next token as its
 /// path operand, 0 for every attached form).
 pub fn parse_bg_redirect(
@@ -58,19 +59,12 @@ pub fn parse_bg_redirect(
         let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
         RedirectSource::path(path, path_mask)
     };
-    let r1 = RedirectDef {
-        export_to: 1,
-        direction,
-        source: source.clone(),
-    };
-    let r2 = RedirectDef {
-        export_to: 2,
-        direction,
-        source,
-    };
+    // One operator, one open: the single def carries fd 1 as `export_to` and
+    // fd 2 as `extra_to`, and both are fed by the same opened description.
+    let def = RedirectDef::combined(direction, source);
     Ok(Some((
         BgRedirectResult {
-            redirects: vec![r1, r2],
+            redirects: vec![def],
             pidvar: None,
             bg_force: false,
         },

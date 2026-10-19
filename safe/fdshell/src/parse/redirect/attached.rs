@@ -66,6 +66,7 @@ fn parse_path_redirect(
         // so the operator's direction is kept here only to carry `>|` through.
         return Ok(Some(RedirectDef {
             export_to,
+            extra_to: None,
             direction,
             source: RedirectSource::var(name),
         }));
@@ -78,6 +79,7 @@ fn parse_path_redirect(
     let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
     Ok(Some(RedirectDef {
         export_to,
+        extra_to: None,
         direction,
         source: RedirectSource::path(rest, path_mask),
     }))

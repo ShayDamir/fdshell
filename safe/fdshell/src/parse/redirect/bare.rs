@@ -67,6 +67,7 @@ pub(super) fn parse_bare(
     }
     Ok(Some(RedirectDef {
         export_to,
+        extra_to: None,
         direction: direction(&op),
         source: RedirectSource::path(operand.clone(), omask.clone()),
     }))

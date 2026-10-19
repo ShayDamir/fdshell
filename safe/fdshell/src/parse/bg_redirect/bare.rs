@@ -9,8 +9,8 @@ use crate::scan::heredoc::invalid_delimiter;
 use alloc::vec;
 use error_stack::{Report, bail};
 
-/// The bare combined redirect at `i`: its operand is the next token and both
-/// fd 1 and fd 2 are redirected to it (bash's `&> file` is `> file 2> file`),
+/// The bare combined redirect at `i`: its operand is the next token and one
+/// open of it is shared by fd 1 and fd 2 (bash's `&> file` is `> file 2>&1`),
 /// with the operator's direction. The operand is a plain word carrying its own
 /// quote mask; a missing operand, a separator or another operator is an
 /// `invalid redirect` syntax error.
@@ -30,18 +30,7 @@ pub(super) fn parse(
     // effect (the `>` family's `RedirectDef::dup` is recorded in LESSONS).
     let source = RedirectSource::path(operand.clone(), omask.clone());
     Ok(BgRedirectResult {
-        redirects: vec![
-            RedirectDef {
-                export_to: 1,
-                direction,
-                source: source.clone(),
-            },
-            RedirectDef {
-                export_to: 2,
-                direction,
-                source,
-            },
-        ],
+        redirects: vec![RedirectDef::combined(direction, source)],
         pidvar: None,
         bg_force: false,
     })
