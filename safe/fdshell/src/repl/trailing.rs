@@ -55,9 +55,11 @@ fn is_bare(state: &ScanState) -> bool {
 }
 
 /// The length of the top-level cond-list operator at `i`: `&&` (2) or `||`
-/// (2). A lone `&` is not an operator (fdshell has no backgrounding), and a
-/// lone `|` is not a continuation (the pipeline parser cannot span a `|`
-/// across a newline, so a trailing `|` stays a hard parse error).
+/// (2). A lone `&` is not a continuation: it is the plain async operator
+/// (task #326) and a complete input the boundary loop already ended, so the
+/// REPL executes it at once. A lone `|` is not a continuation either (the
+/// pipeline parser cannot span a `|` across a newline, so a trailing `|`
+/// stays a hard parse error).
 fn top_level_op(line: &[u8], i: usize) -> Option<usize> {
     match line.get(i).copied() {
         Some(b'&') if line.get(i + 1) == Some(&b'&') => Some(2),

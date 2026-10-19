@@ -83,6 +83,16 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   `echo a &` followed by a `;` line (`echo a &\n; echo b`) streams: line 1
   executes and the `;` line is fdshell's accepted empty statement, where bash
   stops with rc 2 (the same-line `& ;` form matches bash).
+- **Line deferral** (the accepted divergence behind those multi-line shapes):
+  a line whose first non-blank byte is `&` claims the statement buffered above
+  it, so `echo a\n& echo b` is `echo a` as **one background job** plus
+  `echo b` in the foreground (both print, rc 0), and `echo a &\n& echo b`
+  marks the same statement background twice over — where bash rejects the
+  line-opening `&` with rc 2. fdshell scans each line as its own statement
+  text, so the flush of a line is deferred exactly to give that `&` a target;
+  the deferral is also what lets `echo a &\necho b` run both statements
+  bash-like. Pinned in `safe/fdshell/tests/async.rs` and in
+  `safe/fdshell/src/segment/bg/tests.rs`.
 
 ## Operators are recognized at word starts
 
