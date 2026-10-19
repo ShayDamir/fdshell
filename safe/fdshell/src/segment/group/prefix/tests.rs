@@ -133,6 +133,10 @@ fn definer_gate_measures_the_run_from_its_own_first_byte() {
         (b"   function f { echo hi; }".as_slice(), 3, 14),
         (b"   function  f { echo hi; }".as_slice(), 3, 15),
         (b"echo a; true && function f { echo a; }".as_slice(), 8, 27),
+        // A `start` sitting on the run's leading whitespace, exactly as the
+        // segment scanner's run start arrives here.
+        (b"  function f { echo hi; }".as_slice(), 0, 13),
+        (b"echo a;  function f { echo hi; }".as_slice(), 7, 20),
     ] {
         assert!(definer_at_run(line, start, brace), "{line:?}");
     }
@@ -145,6 +149,8 @@ fn definer_gate_measures_the_run_from_its_own_first_byte() {
             8,
             30,
         ),
+        (b"  function 'f' { echo hi; }".as_slice(), 0, 15),
+        (b"echo a;  function 'f' { echo hi; }".as_slice(), 7, 22),
     ] {
         assert!(!definer_at_run(line, start, brace), "{line:?}");
     }

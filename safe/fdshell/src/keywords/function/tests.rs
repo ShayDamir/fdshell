@@ -89,6 +89,10 @@ fn quoted_definer_words_are_not_definers() {
     assert_eq!(def(b"function  '' {"), None);
     assert_eq!(def(b"function  'f' {"), None);
     assert_eq!(def(b"function\t'f' {"), None);
+    // A name whose *last* byte is the quote byte, at a gap of 2: the gate must
+    // land on the name word's own end, since a one-byte shift drops that byte
+    // and the word reads as unquoted.
+    assert_eq!(def(b"function  f\" {"), None);
     // The same, at a `start` that is not the line's beginning.
     assert_eq!(
         super::function_def_name(b"function  'f' {", b"   function  'f' {", 3),
