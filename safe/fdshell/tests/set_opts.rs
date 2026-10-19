@@ -38,14 +38,36 @@ fn run_in(cwd: &str, script: &str) -> (String, String, i32) {
     )
 }
 
-fn scratch() -> String {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> (String, Scratch) {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-setopts-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     for name in ["a1", "a2"] {
         std::fs::write(dir.join(name), name.as_bytes()).unwrap();
     }
-    dir.to_str().unwrap().to_string()
+    (dir.to_str().unwrap().to_string(), Scratch(dir))
 }
 
 // --- -e / +e (errexit) ---
@@ -159,7 +181,7 @@ fn noglob_keeps_star_literal() {
 
 #[test]
 fn noglob_off_expands_again() {
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let (out, _err, code) = run_in(&dir, "set -f; set +f; echo a*");
     assert_eq!(code, 0, "out={out:?}");
     assert_eq!(out, "a1 a2\n");
@@ -167,7 +189,7 @@ fn noglob_off_expands_again() {
 
 #[test]
 fn noglob_on_keeps_matching_pattern_literal() {
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let (out, _err, code) = run_in(&dir, "set -f; echo a*");
     assert_eq!(code, 0, "out={out:?}");
     assert_eq!(out, "a*\n");
@@ -223,7 +245,7 @@ fn cluster_errexit_flag_stops_the_shell() {
 
 #[test]
 fn cluster_clears_every_named_flag() {
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     // `-f` alone keeps the pattern literal; `+ef` clears noglob (and errexit).
     let (out, _err, code) = run_in(&dir, "set -f; set +ef; echo a*");
     assert_eq!(code, 0, "stderr={_err:?}");
@@ -232,7 +254,7 @@ fn cluster_clears_every_named_flag() {
 
 #[test]
 fn cluster_leaves_the_flags_it_does_not_name() {
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let (out, _err, code) = run_in(&dir, "set -f; set +e; echo a*");
     assert_eq!(code, 0, "stderr={_err:?}");
     assert_eq!(out, "a*\n", "`f` is untouched by `set +e`");
@@ -328,7 +350,7 @@ fn lone_sign_still_falls_through_to_external_lookup() {
 /// table but the cluster parser did not accept it (task #231).
 #[test]
 fn short_noclobber_flag_blocks_overwrite() {
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     // `scratch()` writes `a1`/`a2`, so `a1` is an existing target.
     let (out, err, code) = run_in(&dir, "set -C; builtin echo q > a1");
     assert_eq!(code, 1, "stderr={err:?}");
@@ -343,7 +365,7 @@ fn short_noclobber_flag_blocks_overwrite() {
 
 #[test]
 fn short_noclobber_flag_restores_overwrite_when_cleared() {
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let (out, err, code) = run_in(&dir, "set -C; set +C; builtin echo q > a1; cat a1");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "q\n", "stdout={out:?}");
@@ -363,7 +385,7 @@ fn short_noclobber_flag_shows_in_dollar_dash_and_clusters() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[]\n", "stdout={out:?}");
     // `>|` is still the bypass under the short flag (bash: rc 0, target truncated).
-    let dir = scratch();
+    let (dir, _scratch) = scratch();
     let (out, err, code) = run_in(&dir, "set -C; builtin echo q >| a1; cat a1");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "q\n", "stdout={out:?}");

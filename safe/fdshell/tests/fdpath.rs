@@ -28,9 +28,41 @@ fn run(script: &str, stdin: &str) -> (String, String, i32) {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    let path = std::env::temp_dir().join(format!("fdpath_{tag}_{}.txt", std::process::id()));
-    path.to_str().unwrap().to_string()
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-fdpath-<tag>-<pid>-<counter>`;
+/// returns the path of a `.txt` file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-fdpath-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (
+        dir.join(format!("{tag}.txt")).to_str().unwrap().to_string(),
+        Scratch(dir),
+    )
 }
 
 #[test]
@@ -42,22 +74,20 @@ fn fd_path_redirect_reads_pipe_stdin() {
 
 #[test]
 fn fd_path_redirect_reads_file_fd() {
-    let path = temp_path("file");
+    let (path, _scratch) = temp_path("file");
     std::fs::write(&path, b"abc\n").unwrap();
     let (out, err, code) = run(&format!("exec 3<{path}; cat </dev/fd/3; exec 3>&-"), "");
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "abc\n");
 }
 
 #[test]
 fn fd_path_redirect_writes_to_fd() {
-    let path = temp_path("write");
+    let (path, _scratch) = temp_path("write");
     let (out, err, code) = run(
         &format!("exec 3>{path}; echo hi >/dev/fd/3; exec 3>&-; cat {path}"),
         "",
     );
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hi\n");
 }

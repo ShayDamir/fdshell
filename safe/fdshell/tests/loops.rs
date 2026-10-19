@@ -178,11 +178,46 @@ fn continue_2_in_while_advances_outer_for() {
     assert_eq!(out, "i=3\n");
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-loops-<tag>-<pid>-<counter>`,
+/// removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-loops-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
 /// `source` shares the caller's loop depth, so `break 2` in a sourced file exits
 /// both loops. Measured: only `end` printed (bash agrees).
 #[test]
 fn source_break_2_exits_both_loops() {
-    let path = std::env::temp_dir().join(format!("fdshell_loops_source_{}", std::process::id()));
+    let dir = scratch("source");
+    let path = dir.join("src.sh");
     std::fs::write(&path, "break 2\n").unwrap();
     let script = format!(
         "for a in 1 2; do for b in 1 2; do source {}; echo inner; done; echo outer; done; echo end",
@@ -192,7 +227,6 @@ fn source_break_2_exits_both_loops() {
         let (out, _err, code) = run(&script);
         (out, code)
     };
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0);
     assert_eq!(out, "end\n");
 }
@@ -576,8 +610,7 @@ fn for_list_backtick_output_elides_trailing_empty_field() {
 /// directory with `ab ac zz`: `[ab]`, `[ac]`, `[zz]`.
 #[test]
 fn for_list_backtick_fields_are_globbed() {
-    let dir = std::env::temp_dir().join(format!("fdshell-loops-glob-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("glob");
     for name in ["ab", "ac", "zz"] {
         std::fs::write(dir.join(name), name.as_bytes()).unwrap();
     }
@@ -598,7 +631,6 @@ fn for_list_backtick_fields_are_globbed() {
         assert_eq!(output.status.code().unwrap_or(-1), 0, "{script:?}: {err}");
         assert_eq!(out, "[ab]\n[ac]\n[zz]\n", "{script:?}");
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Task #220: the backtick fields reach the same `glob::expand` as the
@@ -609,8 +641,7 @@ fn for_list_backtick_fields_are_globbed() {
 /// both forms print nothing with `nullglob`, and `[*]` with `set -f`.
 #[test]
 fn for_list_backtick_fields_respect_glob_options() {
-    let dir = std::env::temp_dir().join(format!("fdshell-loops-globopt-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("globopt");
     for name in ["ab", "ac", "zz"] {
         std::fs::write(dir.join(name), name.as_bytes()).unwrap();
     }
@@ -638,7 +669,6 @@ fn for_list_backtick_fields_respect_glob_options() {
         assert_eq!(output.status.code().unwrap_or(-1), 0, "{script:?}: {err}");
         assert_eq!(out, want, "{script:?}");
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Task #137: `&&` / `||` in a `while`/`until` condition is the loop's own cond

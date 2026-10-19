@@ -99,12 +99,44 @@ fn hash_lookup_prints_and_caches() {
     assert!(out.is_empty());
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-hash-<tag>-<pid>-<counter>`, removed
+/// when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-hash-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
 /// A pinned path wins over PATH order for the actual exec: two different
 /// `exec_ok` binaries on PATH, the pin selects the second one.
 #[test]
 fn hash_pin_wins_over_path_order() {
-    let dir = std::env::temp_dir().join(format!("fdshell-hash-pin-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("pin");
     let b = dir.join("exec_ok");
     std::fs::write(&b, b"#!/bin/sh\necho from-B\nexit 7\n").unwrap();
     {
@@ -123,7 +155,6 @@ fn hash_pin_wins_over_path_order() {
         .stderr(Stdio::piped())
         .output()
         .unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
     let stdout = str::from_utf8(&output.stdout).unwrap();
     let stderr = str::from_utf8(&output.stderr).unwrap();
     assert!(
@@ -146,9 +177,8 @@ fn hash_builtin_not_cached() {
 
 /// A scratch `PATH` dir of executable files, so `hash`'s folded name matches a real
 /// file (bash `hash a\*` finds the file named `a*`).
-fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("fdshell-hash-esc-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+fn scratch_bin(names: &[&str]) -> Scratch {
+    let dir = scratch("esc");
     for name in names {
         let path = dir.join(name);
         std::fs::write(&path, "#!/bin/sh\necho ran\n").unwrap();
@@ -208,5 +238,4 @@ fn hash_name_folds_escape_pairs() {
         out.is_empty(),
         "the folded key must be removed, stdout={out:?}"
     );
-    let _ = std::fs::remove_dir_all(&bin);
 }

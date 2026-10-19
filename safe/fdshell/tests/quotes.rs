@@ -64,14 +64,36 @@ fn run_env(script: &str, env: &[(&str, &str)]) -> (String, String, i32) {
 
 /// A scratch dir holding `names` as empty files; `run_in` runs there so globs
 /// and redirects see exactly these files.
-fn scratch(names: &[&str]) -> std::path::PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch(names: &[&str]) -> Scratch {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-quote-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     for name in names {
         std::fs::write(dir.join(name), b"").unwrap();
     }
-    dir
+    Scratch(dir)
 }
 
 fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
@@ -91,7 +113,7 @@ fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
 
 /// A scratch dir of executable stubs used as a `PATH` prefix: a quoted command
 /// name is looked up as a real file, and each stub prints its own name.
-fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
+fn scratch_bin(names: &[&str]) -> Scratch {
     let dir = scratch(names);
     for name in names {
         let path = dir.join(name);

@@ -21,13 +21,33 @@ fn run(script: &str) -> (String, String, i32) {
 }
 
 /// A per-test scratch directory (tests in one binary share the pid, so the
-/// counter keeps the directories from colliding).
-fn scratch() -> std::path::PathBuf {
+/// counter keeps the directories from colliding). The dir is removed when the
+/// guard drops: pid + counter is unique among *live* processes only, and a
+/// dir that outlives its process is a later run's inherited dir (LESSONS,
+/// task #255; sweep task #342). Removal is `.ok()`-tolerant: teardown never
+/// panics, and it runs on a failing test's unwind, which is exactly the test
+/// that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-pattern-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 /// Every expression is assigned to a variable, then all variables are printed
@@ -211,16 +231,15 @@ fn quoted_pattern_bytes_keep_their_mask_bit_in_the_braces() {
 fn stripped_result_is_a_normal_word_and_globs() {
     // `a*x` stripped to `*x` is an unquoted pattern word, so it globs to the
     // scratch file `zx` — and a fully quoted word stays literal.
-    let dir = scratch();
-    std::fs::write(dir.join("zx"), "").unwrap();
-    let dir = dir.to_str().unwrap().to_string();
+    let _scratch = scratch();
+    std::fs::write(_scratch.join("zx"), "").unwrap();
+    let dir = _scratch.to_str().unwrap().to_string();
     let (out, err, code) = run(&format!("cd {dir}; v=a*x; echo ${{v#a}}"));
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "zx\n");
     let (out, err, code) = run(&format!("cd {dir}; v=a*x; echo \"${{v#a}}\""));
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "*x\n");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // --- the operator scan is positional ---

@@ -30,9 +30,44 @@ fn output(child: Child) -> (String, String) {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    let path = std::env::temp_dir().join(format!("sendmsg_{tag}_{}.txt", std::process::id()));
-    path.to_str().unwrap().to_string()
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-sendmsg-<tag>-<pid>-<counter>`;
+/// returns the path of a `.txt` file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-sendmsg-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    (
+        dir.join(format!("{tag}.txt")).to_str().unwrap().to_string(),
+        Scratch(dir),
+    )
 }
 
 /// The payload arrives as a string var and the fd var is a usable dup of the
@@ -40,7 +75,7 @@ fn temp_path(tag: &str) -> String {
 #[test]
 fn payload_and_fd_roundtrip() {
     let (a_sock, b_sock) = UnixStream::pair().unwrap();
-    let path = temp_path("roundtrip");
+    let (path, _scratch) = temp_path("roundtrip");
     std::fs::write(&path, b"").unwrap();
 
     let a = spawn(a_sock, "recvmsg 0 MSG %f2; echo \"$MSG\"; echo data >%f2");
@@ -53,14 +88,13 @@ fn payload_and_fd_roundtrip() {
 
     assert_eq!(out, "hello\n", "stderr={err:?}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "data\n");
-    let _ = std::fs::remove_file(&path);
 }
 
 /// `--msgfd %in N` sends the first N bytes read from an fd var as the payload.
 #[test]
 fn msgfd_payload() {
     let (a_sock, b_sock) = UnixStream::pair().unwrap();
-    let in_path = temp_path("msgfd_in");
+    let (in_path, _sinpath) = temp_path("msgfd_in");
     std::fs::write(&in_path, b"abcdef\n").unwrap();
 
     let a = spawn(a_sock, "recvmsg 0 MSG; echo \"$MSG\"");
@@ -72,7 +106,6 @@ fn msgfd_payload() {
     let _ = b.wait();
 
     assert_eq!(out, "abcd\n", "stderr={err:?}");
-    let _ = std::fs::remove_file(&in_path);
 }
 
 /// A 2 KiB payload round-trips intact — larger than the 1088 B a
@@ -80,7 +113,7 @@ fn msgfd_payload() {
 #[test]
 fn payload_larger_than_one_kib() {
     let (a_sock, b_sock) = UnixStream::pair().unwrap();
-    let in_path = temp_path("big");
+    let (in_path, _sinpath) = temp_path("big");
     let data = "a".repeat(2048);
     std::fs::write(&in_path, data.as_bytes()).unwrap();
 
@@ -93,15 +126,14 @@ fn payload_larger_than_one_kib() {
     let _ = b.wait();
 
     assert_eq!(out, format!("{data}\n"), "stderr={err:?}");
-    let _ = std::fs::remove_file(&in_path);
 }
 
 /// Repeated `--fd` vars arrive in declared order, each usable.
 #[test]
 fn multiple_fd_vars_arrive_in_order() {
     let (a_sock, b_sock) = UnixStream::pair().unwrap();
-    let p1 = temp_path("multi_1");
-    let p2 = temp_path("multi_2");
+    let (p1, _sp1) = temp_path("multi_1");
+    let (p2, _sp2) = temp_path("multi_2");
     std::fs::write(&p1, b"").unwrap();
     std::fs::write(&p2, b"").unwrap();
 
@@ -123,8 +155,6 @@ fn multiple_fd_vars_arrive_in_order() {
     assert_eq!(out, "two\n", "stderr={err:?}");
     assert_eq!(std::fs::read_to_string(&p1).unwrap(), "one\n");
     assert_eq!(std::fs::read_to_string(&p2).unwrap(), "two\n");
-    let _ = std::fs::remove_file(&p1);
-    let _ = std::fs::remove_file(&p2);
 }
 
 /// `sendmsg` with an unknown flag is a clean error (exit 1).

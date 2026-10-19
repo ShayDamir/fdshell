@@ -23,18 +23,40 @@ fn run(script: &str) -> (String, String, i32) {
 }
 
 /// A scratch dir with `a1 a2 ax foo.bar foo2` (the star/brace cases need real
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// files to prove an escaped pattern byte never globs); each test gets its own.
-fn scratch(names: &[&str]) -> std::path::PathBuf {
+fn scratch(names: &[&str]) -> Scratch {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-esc-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     for name in names {
         std::fs::write(dir.join(name), b"").unwrap();
     }
-    dir
+    Scratch(dir)
 }
 
-fn run_in(dir: &std::path::PathBuf, script: &str) -> (String, String, i32) {
+fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
     let output = Command::new(BIN)
         .current_dir(dir)
         .args(["-c", script])
@@ -51,7 +73,7 @@ fn run_in(dir: &std::path::PathBuf, script: &str) -> (String, String, i32) {
 
 /// A scratch dir of executable files, used as a scratch `PATH` so the folded
 /// command name is looked up as a real file (bash runs `a\*` for a file `a*`).
-fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
+fn scratch_bin(names: &[&str]) -> Scratch {
     let dir = scratch(names);
     for name in names {
         let path = dir.join(name);
@@ -62,7 +84,7 @@ fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
 }
 
 /// A scratch `PATH` dir of executable files with given script bodies.
-fn scratch_bins(named: &[(&str, &str)]) -> std::path::PathBuf {
+fn scratch_bins(named: &[(&str, &str)]) -> Scratch {
     let dir = scratch(&[]);
     for (name, body) in named {
         let path = dir.join(name);
@@ -94,7 +116,7 @@ fn run_with_path(
     )
 }
 
-fn names_in(dir: &std::path::PathBuf) -> Vec<String> {
+fn names_in(dir: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
@@ -119,7 +141,6 @@ fn escaped_star_is_a_literal_word() {
     let (out, _err, code) = run_in(&dir, "echo f\\oo\\.*");
     assert_eq!(code, 0);
     assert_eq!(out, "foo.bar\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The escaped space is one word byte: the pair is not an IFS split point.
@@ -406,8 +427,6 @@ fn folded_command_name_is_looked_up_in_path() {
     let (out, err, code) = run_with_path(&cwd, &bin, "\\X=1");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "ran\n");
-    let _ = std::fs::remove_dir_all(&cwd);
-    let _ = std::fs::remove_dir_all(&bin);
 }
 
 /// A redirect target is folded at open time: `> a\*b` writes the file named
@@ -430,7 +449,6 @@ fn redirect_target_folds_escape_pairs() {
     let (out, err, code) = run_in(&dir, "cat < a\\*b");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hi\nyo\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The `for … in` list words are folded before globbing: `a\ b` is one word,
@@ -448,7 +466,6 @@ fn for_list_words_fold_escape_pairs() {
     let (out, _err, code) = run_in(&dir, "for x in a*; do printf \"[%s]\" \"$x\"; done");
     assert_eq!(code, 0);
     assert_eq!(out, "[a*][a1]");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Accepted divergence, pinned: fdshell matches alias names on the raw token
@@ -501,6 +518,4 @@ fn command_keyword_keeps_the_name_word_out_of_the_env_prefix() {
         assert_eq!(code, 0, "{script}: stderr={err:?}");
         assert_eq!(out, "[]\n", "{script}: bash prints []");
     }
-    let _ = std::fs::remove_dir_all(&cwd);
-    let _ = std::fs::remove_dir_all(&bin);
 }

@@ -118,7 +118,35 @@ fn run_inet(script: &dyn Fn(u16) -> String) -> (String, String, i32) {
     last
 }
 
-fn tmpdir(tag: &str) -> std::path::PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for Scratch {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+fn tmpdir(tag: &str) -> Scratch {
     let mut p = std::env::temp_dir();
     p.push(format!(
         "fdshell-sock-{tag}_{}_{}",
@@ -126,7 +154,7 @@ fn tmpdir(tag: &str) -> std::path::PathBuf {
         NEXT_ID.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&p).unwrap();
-    p
+    Scratch(p)
 }
 
 /// Spawn a shell that serves on a unique abstract address until the test
@@ -180,8 +208,6 @@ fn bind_path_creates_socket_file() {
     std::fs::remove_file(dir.join("sock")).unwrap();
     let (_out, err, code) = run_in(&dir, "builtin bind sock %>%s");
     assert_eq!(code, 0, "stderr={err:?}");
-    let _ = std::fs::remove_file(dir.join("sock"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A second bind to the same path while the first fd var is held: the
@@ -192,8 +218,6 @@ fn bind_path_duplicate_while_held_is_eaddrinuse() {
     let (out, err, code) = run_in(&dir, "builtin bind sock %>%s1; builtin bind sock %>%s2");
     assert_eq!(code, 98, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
-    let _ = std::fs::remove_file(dir.join("sock"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Pin of the AF_INET port-naming rule the tests below rest on (LESSONS: a
@@ -646,7 +670,6 @@ fn connect_uds_path_to_external_listener() {
         str::from_utf8(&out.stderr).unwrap()
     );
     assert_eq!(str::from_utf8(&out.stdout).unwrap(), "got:yo\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `connect` to an unbound abstract name: `ECONNREFUSED` (111), matching

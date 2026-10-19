@@ -180,11 +180,49 @@ fn load_script_reads_data_until_eof() {
     });
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-cli_args-<tag>-<pid>-<counter>`, removed
+/// when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-cli_args-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
 /// A script file larger than the 64 MiB cap must fail with a clean,
 /// actionable error instead of allocating until OOM.
 #[test]
 fn oversized_script_fails_with_size_limit_error() {
-    let path = std::env::temp_dir().join(format!("fdshell-it-big-script-{}", std::process::id()));
+    let dir = scratch("big");
+    let path = dir.join("big.sh");
     // Sparse file: set_len allocates nothing in the test process.
     let file = std::fs::File::create(&path).unwrap();
     file.set_len(64 * 1024 * 1024 + 1).unwrap();
@@ -198,7 +236,6 @@ fn oversized_script_fails_with_size_limit_error() {
         .unwrap();
 
     let stderr = str::from_utf8(&output.stderr).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert!(
         stderr.contains("script exceeds the size limit"),
         "expected the script size-limit error, exit={:?} stderr={stderr}",

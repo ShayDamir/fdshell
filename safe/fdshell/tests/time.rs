@@ -331,12 +331,46 @@ fn inner_redirect_leaves_report_on_stderr() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-time-<tag>-<pid>-<counter>`, removed
+/// when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-time-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
 /// `.`/`source` runs the script in *this* shell and returns, so the report
 /// covers the sourced script and prints after it: the sourced script writes to
 /// the same stderr, and `sourced` comes before the report.
 #[test]
 fn sourced_script_is_timed_and_reports_after_it() {
-    let path = std::env::temp_dir().join(format!("fdshell_time_source_{}", std::process::id()));
+    let dir = scratch("source");
+    let path = dir.join("src.sh");
     std::fs::write(&path, "sleep 0.3; echo sourced 1>&2\n").unwrap();
     for verb in [".", "source"] {
         let script = format!("time -p {verb} {}", path.display());
@@ -355,7 +389,6 @@ fn sourced_script_is_timed_and_reports_after_it() {
             "the sourced output comes before the report: {report}"
         );
     }
-    std::fs::remove_file(&path).ok();
 }
 
 /// A whole `time [-p]` prefix run in front of a cond-part group is transparent,

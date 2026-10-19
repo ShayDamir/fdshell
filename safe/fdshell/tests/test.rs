@@ -77,9 +77,43 @@ fn set_dashdash_clears_positional() {
     assert_eq!(out, "z");
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-test-<tag>-<pid>-<counter>`, removed
+/// when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-test-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
 #[test]
 fn exec_redirect_only_applies_to_shell() {
-    let path = std::env::temp_dir().join(format!("fdshell_exec_redirect_{}", std::process::id()));
+    let dir = scratch("exec_redirect");
+    let path = dir.join("out");
     let script = format!("exec 1>{}; printf hi", path.display());
     let (out, _err, code) = run(&script);
     assert_eq!(code, 0);
@@ -175,8 +209,8 @@ fn param_expansion_question_colon_fails_command() {
 
 #[test]
 fn exec_with_command_and_redirect_still_execs() {
-    let path =
-        std::env::temp_dir().join(format!("fdshell_exec_cmd_redirect_{}", std::process::id()));
+    let dir = scratch("exec_cmd_redirect");
+    let path = dir.join("out");
     let script = format!("exec printf abc 1>{}", path.display());
     let (out, _err, code) = run(&script);
     assert_eq!(code, 0);
@@ -193,8 +227,8 @@ fn exec_with_command_no_redirect_becomes() {
 
 #[test]
 fn exec_stdin_redirect_feeds_read() {
-    let in_path =
-        std::env::temp_dir().join(format!("fdshell_exec_stdin_in_{}", std::process::id()));
+    let dir = scratch("exec_stdin_in");
+    let in_path = dir.join("in");
     std::fs::write(&in_path, "abc\n").unwrap();
     let script = format!("exec <{}; read v; printf \"$v\"", in_path.display());
     let (out, _err, code) = run(&script);
@@ -282,7 +316,8 @@ fn dollar_paren_keyword_in_block_body_does_not_break_parse() {
 
 #[test]
 fn fdsize_operators_on_fd_var_and_path() {
-    let path = std::env::temp_dir().join(format!("fdshell_fdsize_{}", std::process::id()));
+    let dir = scratch("fdsize");
+    let path = dir.join("f");
     std::fs::write(&path, b"12345").unwrap(); // 5 bytes
     let p = path.display().to_string();
     // Size 5 vs bounds: == true for both, < true for `-`, > true for `+`.
@@ -300,7 +335,6 @@ fn fdsize_operators_on_fd_var_and_path() {
     let (out, _err, code) = run(&script);
     assert_eq!(code, 0);
     assert_eq!(out, "abcehjkm");
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

@@ -19,9 +19,41 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    let path = std::env::temp_dir().join(format!("group_{tag}_{}.txt", std::process::id()));
-    path.to_str().unwrap().to_string()
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-group-<tag>-<pid>-<counter>`;
+/// returns the path of a `.txt` file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-group-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (
+        dir.join(format!("{tag}.txt")).to_str().unwrap().to_string(),
+        Scratch(dir),
+    )
 }
 
 /// Read the redirect target and remove it.
@@ -44,7 +76,7 @@ fn group_body_runs_in_the_current_shell() {
 /// own fds come back at the group end, so the next command writes to stdout.
 #[test]
 fn group_redirect_is_scoped_to_the_group() {
-    let (a, b) = (temp_path("out"), temp_path("after"));
+    let ((a, _sa), (b, _sb)) = (temp_path("out"), temp_path("after"));
     let (out, err, rc) = run(&format!("{{ echo a; }} > {a}; echo after > {b}"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
     assert_eq!(body(&a), "a\n");
@@ -63,7 +95,7 @@ fn group_status_is_the_last_body_command() {
 /// clean and the target file is what the group wrote to fd 2.
 #[test]
 fn stderr_redirect_is_scoped() {
-    let a = temp_path("err");
+    let (a, _sa) = temp_path("err");
     let (out, err, rc) = run(&format!("{{ echo a; }} 2>{a}"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("a\n", "", 0));
     assert_eq!(body(&a), "");
@@ -87,7 +119,7 @@ fn groups_are_cond_list_parts() {
 /// writes to the shell's stdout: `b` is printed, `a` is in the file.
 #[test]
 fn trailing_redirect_then_and_part() {
-    let a = temp_path("and");
+    let (a, _sa) = temp_path("and");
     let (out, err, rc) = run(&format!("{{ echo a; }}>{a} && echo b"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("b\n", "", 0));
     assert_eq!(body(&a), "a\n");
@@ -113,7 +145,7 @@ fn cd_in_the_group_persists() {
 /// subshell, so the redirection is not undone at the group end (bash agrees).
 #[test]
 fn exec_in_a_group_is_persistent() {
-    let a = temp_path("exec");
+    let (a, _sa) = temp_path("exec");
     let (out, err, rc) = run(&format!("{{ exec >{a} ; }}; echo after"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
     assert_eq!(body(&a), "after\n");
@@ -272,7 +304,7 @@ fn unclosed_group_is_a_parse_error() {
 /// file, and the process's own stderr stays clean.
 #[test]
 fn body_stderr_goes_to_the_group_file() {
-    let f = temp_path("body_err");
+    let (f, _sf) = temp_path("body_err");
     let (out, err, rc) = run(&format!("{{ cat missing; }} 2>{f}"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 1));
     assert!(
@@ -306,7 +338,7 @@ fn or_after_the_group() {
 /// The glued `}>out` form writes the group's output to the file.
 #[test]
 fn glued_redirect_after_the_brace_writes_the_file() {
-    let a = temp_path("glued");
+    let (a, _sa) = temp_path("glued");
     let (out, err, rc) = run(&format!("{{ echo a; }}>{a}"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
     assert_eq!(body(&a), "a\n");
@@ -383,13 +415,13 @@ fn cond_operator_inside_the_group_body_is_the_bodys() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\n", "", 0));
     let (out, _, rc) = run("{ echo a && false; echo c; }");
     assert_eq!((out.as_str(), rc), ("a\nc\n", 0));
-    let a = temp_path("nested_and");
+    let (a, _sa) = temp_path("nested_and");
     let (out, _, rc) = run(&format!("{{ echo a; }} && {{ echo b; }}>{a}; echo c"));
     assert_eq!((out.as_str(), rc), ("a\nc\n", 0));
     assert_eq!(body(&a), "b\n");
     let (out, _, rc) = run("{ echo a; } && { echo b; } && echo c");
     assert_eq!((out.as_str(), rc), ("a\nb\nc\n", 0));
-    let f = temp_path("tail_and");
+    let (f, _sf) = temp_path("tail_and");
     let (out, _, rc) = run(&format!("{{ echo a; }}>{f} && echo b"));
     assert_eq!((out.as_str(), rc), ("b\n", 0));
     assert_eq!(body(&f), "a\n");

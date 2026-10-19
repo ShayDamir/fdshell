@@ -38,9 +38,34 @@ fn path_with(dir: &str) -> String {
     format!("{dir}:{}", std::env::var("PATH").unwrap_or_default())
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Write an executable `#!/bin/sh` script named `name` in a fresh temp dir.
-fn make_external(tag: &str, name: &str, body: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("command_{tag}_{}", std::process::id()));
+fn make_external(tag: &str, name: &str, body: &str) -> (std::path::PathBuf, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("command_{tag}_{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     let exe = dir.join(name);
     std::fs::write(&exe, body).unwrap();
@@ -49,7 +74,7 @@ fn make_external(tag: &str, name: &str, body: &str) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    exe
+    (exe, Scratch(dir))
 }
 
 #[test]
@@ -78,17 +103,16 @@ fn command_unknown_name_falls_through_to_path() {
 
 #[test]
 fn command_runs_external() {
-    let exe = make_external("ext", "cmd_ext_xyz", "#!/bin/sh\necho EXTERNAL\n");
+    let (exe, _scratch) = make_external("ext", "cmd_ext_xyz", "#!/bin/sh\necho EXTERNAL\n");
     let dir = exe.parent().unwrap().to_str().unwrap();
     let (out, err, code) = run_with_path(&path_with(dir), "command cmd_ext_xyz");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "EXTERNAL\n");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn command_runs_external_with_args() {
-    let exe = make_external(
+    let (exe, _scratch) = make_external(
         "extargs",
         "cmd_ext_xyz",
         "#!/bin/sh\necho EXTERNAL \"$@\"\n",
@@ -97,19 +121,17 @@ fn command_runs_external_with_args() {
     let (out, err, code) = run_with_path(&path_with(dir), "command cmd_ext_xyz a b");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "EXTERNAL a b\n");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn command_prefers_builtin_over_path_shadow() {
     // `command` implies builtin-first: a PATH shadow of a builtin name is
     // bypassed (unlike a bare name with `builtin_first` off).
-    let exe = make_external("shadow", "echo", "#!/bin/sh\necho SHADOWED \"$@\"\n");
+    let (exe, _scratch) = make_external("shadow", "echo", "#!/bin/sh\necho SHADOWED \"$@\"\n");
     let dir = exe.parent().unwrap().to_str().unwrap();
     let (out, err, code) = run_with_path(&path_with(dir), "command echo hi");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hi\n");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

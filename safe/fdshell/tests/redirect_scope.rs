@@ -19,9 +19,41 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    let path = std::env::temp_dir().join(format!("scope_{tag}_{}.txt", std::process::id()));
-    path.to_str().unwrap().to_string()
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-scope-<tag>-<pid>-<counter>`;
+/// returns the path of a `.txt` file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-scope-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (
+        dir.join(format!("{tag}.txt")).to_str().unwrap().to_string(),
+        Scratch(dir),
+    )
 }
 
 /// Read the redirect target and remove it.
@@ -40,26 +72,23 @@ fn write_file(path: &str, text: &str) {
 /// back for the next command.
 #[test]
 fn function_write_redirect_applies_and_is_scoped() {
-    let a = temp_path("fn_write_a");
-    let b = temp_path("fn_write_b");
+    let (a, _sa) = temp_path("fn_write_a");
+    let (b, _sb) = temp_path("fn_write_b");
     let (out, err, code) = run(&format!(
         "f(){{ echo in-f; }}; f > {a}; echo after > {b}; echo A=[$(cat {a})] B=[$(cat {b})]"
     ));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "A=[in-f] B=[after]\n", "stdout={out:?}");
-    let _ = std::fs::remove_file(&a);
-    let _ = std::fs::remove_file(&b);
 }
 
 /// `f < in` feeds the function body's stdin; the shell's stdin is untouched.
 #[test]
 fn function_stdin_redirect_applies() {
-    let in_path = temp_path("fn_read_in");
+    let (in_path, _sinpath) = temp_path("fn_read_in");
     write_file(&in_path, "hello\n");
     let (out, err, code) = run(&format!(
         "f(){{ read v; echo \"[in-f $v]\"; }}; f < {in_path}; echo after"
     ));
-    let _ = std::fs::remove_file(&in_path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[in-f hello]\nafter\n", "stdout={out:?}");
 }
@@ -76,8 +105,8 @@ fn function_heredoc_applies() {
 /// was still opened/truncated.
 #[test]
 fn function_redirect_is_last_wins() {
-    let a = temp_path("fn_last_a");
-    let b = temp_path("fn_last_b");
+    let (a, _sa) = temp_path("fn_last_a");
+    let (b, _sb) = temp_path("fn_last_b");
     let (out, err, code) = run(&format!("f(){{ echo hi; }}; f > {a} > {b}"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -89,8 +118,8 @@ fn function_redirect_is_last_wins() {
 /// the shell's fd 1 back so the next command writes to stdout.
 #[test]
 fn nested_function_redirect_restores_the_outer_first() {
-    let a = temp_path("nested_a");
-    let b = temp_path("nested_b");
+    let (a, _sa) = temp_path("nested_a");
+    let (b, _sb) = temp_path("nested_b");
     let (out, err, code) = run(&format!(
         "f(){{ g(){{ echo g; }}; g; echo f; }}; f > {a}; echo after > {b}"
     ));
@@ -104,9 +133,8 @@ fn nested_function_redirect_restores_the_outer_first() {
 /// in the pre-`cd` directory), and the `cd` itself persists.
 #[test]
 fn cd_redirect_applies_and_is_scoped() {
-    let a = temp_path("cd_a");
+    let (a, _sa) = temp_path("cd_a");
     let (out, err, code) = run(&format!("cd /tmp > {a}; pwd; echo after"));
-    let _ = std::fs::remove_file(&a);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "/tmp\nafter\n", "stdout={out:?}");
 }
@@ -114,7 +142,7 @@ fn cd_redirect_applies_and_is_scoped() {
 /// `eval` runs in the shell, so its redirect reaches the evaluated command.
 #[test]
 fn eval_redirect_applies() {
-    let a = temp_path("eval_a");
+    let (a, _sa) = temp_path("eval_a");
     let (out, err, code) = run(&format!("eval echo hi > {a}"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -124,11 +152,10 @@ fn eval_redirect_applies() {
 /// `source` runs the file in the shell, so the redirect applies to it.
 #[test]
 fn source_redirect_applies() {
-    let src = temp_path("eval_src");
-    let a = temp_path("source_a");
+    let (src, _ssrc) = temp_path("eval_src");
+    let (a, _sa) = temp_path("source_a");
     write_file(&src, "echo sourced\n");
     let (out, err, code) = run(&format!("source {src} > {a}"));
-    let _ = std::fs::remove_file(&src);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
     assert_eq!(body(&a), "sourced\n");
@@ -139,9 +166,9 @@ fn source_redirect_applies() {
 /// opens the file with nothing written to it.
 #[test]
 fn colon_applies_redirect() {
-    let a = temp_path("colon_write");
-    let in_path = temp_path("colon_read");
-    let e = temp_path("colon_err");
+    let (a, _sa) = temp_path("colon_write");
+    let (in_path, _sinpath) = temp_path("colon_read");
+    let (e, _se) = temp_path("colon_err");
     write_file(&in_path, "hello\n");
     let (out, err, code) = run(&format!(": > {a}; : < {in_path}; : 2> {e}; echo done"));
     assert_eq!(code, 0, "stderr={err:?}");
@@ -162,7 +189,7 @@ fn colon_applies_redirect() {
 /// the rc divergence is accepted and documented in README.
 #[test]
 fn shift_applies_redirect() {
-    let a = temp_path("shift_a");
+    let (a, _sa) = temp_path("shift_a");
     let (out, err, code) = run(&format!("shift > {a}"));
     assert_eq!(
         code, 0,
@@ -176,7 +203,7 @@ fn shift_applies_redirect() {
 /// itself has no output, and stdout is back for the next command.
 #[test]
 fn local_applies_redirect_inside_a_function() {
-    let a = temp_path("local_a");
+    let (a, _sa) = temp_path("local_a");
     let (out, err, code) = run(&format!("f(){{ local x=1 > {a}; echo after; }}; f"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "after\n", "stdout={out:?}");
@@ -187,7 +214,7 @@ fn local_applies_redirect_inside_a_function() {
 /// fdshell's own, so only the fact that output reached the file is pinned.
 #[test]
 fn times_redirect_writes_to_the_file() {
-    let a = temp_path("times_a");
+    let (a, _sa) = temp_path("times_a");
     let (out, err, code) = run(&format!("times > {a}"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -197,7 +224,7 @@ fn times_redirect_writes_to_the_file() {
 /// A forked external under `timeout` inherits the redirection of the command.
 #[test]
 fn timeout_redirect_reaches_the_child() {
-    let a = temp_path("timeout_a");
+    let (a, _sa) = temp_path("timeout_a");
     let (out, err, code) = run(&format!("timeout 1 echo hi > {a}"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -208,7 +235,7 @@ fn timeout_redirect_reaches_the_child() {
 /// is the file for the rest of the script (a scoped restore does not undo it).
 #[test]
 fn exec_redirect_stays_permanent() {
-    let a = temp_path("exec_permanent");
+    let (a, _sa) = temp_path("exec_permanent");
     let (out, err, code) = run(&format!("exec > {a}; echo after"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -219,8 +246,8 @@ fn exec_redirect_stays_permanent() {
 /// the shell's fd 1 is back, so the next command's redirect writes to its file.
 #[test]
 fn exec_inside_function_restores_at_call_end() {
-    let a = temp_path("exec_in_fn_a");
-    let b = temp_path("exec_in_fn_b");
+    let (a, _sa) = temp_path("exec_in_fn_a");
+    let (b, _sb) = temp_path("exec_in_fn_b");
     let (out, err, code) = run(&format!("f(){{ exec > {a}; }}; f; echo after > {b}"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -232,13 +259,12 @@ fn exec_inside_function_restores_at_call_end() {
 /// restore: fd 3 is closed inside `f` and usable again after it.
 #[test]
 fn closed_fd_redirect_is_restored_after_the_call() {
-    let in_path = temp_path("closed_in");
-    let a = temp_path("closed_a");
+    let (in_path, _sinpath) = temp_path("closed_in");
+    let (a, _sa) = temp_path("closed_a");
     write_file(&in_path, "hello\n");
     let (out, err, code) = run(&format!(
         "exec 3< {in_path}; f(){{ echo x; }}; f > {a} 3>&-; cat <&3; echo after"
     ));
-    let _ = std::fs::remove_file(&in_path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hello\nafter\n", "stdout={out:?}");
     assert_eq!(body(&a), "x\n");
@@ -257,7 +283,7 @@ fn closed_fd_redirect_is_restored_after_the_call() {
 /// copy unreachable is task #184; until then this rc-1 divergence is accepted.
 #[test]
 fn body_that_closes_the_saved_copy_fails_the_call() {
-    let a = temp_path("lost_save_a");
+    let (a, _sa) = temp_path("lost_save_a");
     let (out, err, code) = run(&format!("f(){{ echo ok; exec 6>&-; }}; f > {a}"));
     assert_eq!(
         code, 1,
@@ -295,19 +321,17 @@ fn failing_redirect_open_skips_the_function_body() {
 /// survives the call.
 #[test]
 fn scoped_restore_survives_a_nonzero_handler_status() {
-    let a = temp_path("nonzero_a");
+    let (a, _sa) = temp_path("nonzero_a");
     let (out, err, code) = run(&format!(
         "f(){{ return 3; }}; f > {a}; echo after; f > {a}; true"
     ));
-    let _ = std::fs::remove_file(&a);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "after\n", "stdout={out:?}");
 }
 #[test]
 fn capture_on_in_process_builtin_stays_rejected() {
-    let a = temp_path("capture_reject");
+    let (a, _sa) = temp_path("capture_reject");
     let (out, err, code) = run(&format!("read %>%x > {a}"));
-    let _ = std::fs::remove_file(&a);
     assert_eq!(code, 1);
     assert_eq!(out, "");
     assert!(err.contains("captures are not supported"), "stderr={err:?}");
@@ -316,7 +340,7 @@ fn capture_on_in_process_builtin_stays_rejected() {
 /// A function call forks, so its capture and its redirect both work.
 #[test]
 fn capture_on_function_call_is_accepted() {
-    let a = temp_path("capture_call");
+    let (a, _sa) = temp_path("capture_call");
     let (out, err, code) = run(&format!("f(){{ echo x; }}; f %>%x > {a}"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "");
@@ -329,8 +353,8 @@ fn capture_on_function_call_is_accepted() {
 /// `q2` = `after`.
 #[test]
 fn clobber_applies_to_the_call_and_the_scope_restores() {
-    let q1 = temp_path("clobber_call_q1");
-    let q2 = temp_path("clobber_call_q2");
+    let (q1, _sq1) = temp_path("clobber_call_q1");
+    let (q2, _sq2) = temp_path("clobber_call_q2");
     std::fs::write(&q1, b"old1\n").unwrap();
     std::fs::write(&q2, b"old2\n").unwrap();
     let (out, err, code) = run(&format!(
@@ -338,8 +362,6 @@ fn clobber_applies_to_the_call_and_the_scope_restores() {
     ));
     let first = std::fs::read_to_string(&q1).unwrap();
     let second = std::fs::read_to_string(&q2).unwrap();
-    let _ = std::fs::remove_file(&q1);
-    let _ = std::fs::remove_file(&q2);
     assert_eq!(code, 0, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert_eq!(first, "in\n", "the call's clobber target");
@@ -351,16 +373,14 @@ fn clobber_applies_to_the_call_and_the_scope_restores() {
 /// original file afterwards.
 #[test]
 fn clobber_call_restores_the_closed_fd_target() {
-    let in_path = temp_path("clobber_closed_in");
-    let q = temp_path("clobber_closed_q");
+    let (in_path, _sinpath) = temp_path("clobber_closed_in");
+    let (q, _sq) = temp_path("clobber_closed_q");
     write_file(&in_path, "hello\n");
     std::fs::write(&q, b"old\n").unwrap();
     let (out, err, code) = run(&format!(
         "set -o noclobber; exec 3< {in_path}; g(){{ echo x; }}; g >| {q} 3>&-; cat <&3; echo after"
     ));
     let body = std::fs::read_to_string(&q).unwrap();
-    let _ = std::fs::remove_file(&in_path);
-    let _ = std::fs::remove_file(&q);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hello\nafter\n", "stdout={out:?}");
     assert_eq!(body, "x\n");

@@ -31,9 +31,44 @@ fn output(child: Child) -> (String, String, i32) {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    let path = std::env::temp_dir().join(format!("recvmsg_{tag}_{}.txt", std::process::id()));
-    path.to_str().unwrap().to_string()
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-recvmsg-<tag>-<pid>-<counter>`;
+/// returns the path of a `.txt` file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-recvmsg-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    (
+        dir.join(format!("{tag}.txt")).to_str().unwrap().to_string(),
+        Scratch(dir),
+    )
 }
 
 /// Real uid/gid of this user from `/proc/self/status` (the sender is our
@@ -84,7 +119,7 @@ fn cred_captures_sender_identity() {
 #[test]
 fn wait_readable_arm_receives_after_delay() {
     let (a_sock, b_sock) = UnixStream::pair().unwrap();
-    let path = temp_path("wait");
+    let (path, _scratch) = temp_path("wait");
     std::fs::write(&path, b"").unwrap();
 
     let a = spawn(
@@ -105,7 +140,6 @@ fn wait_readable_arm_receives_after_delay() {
     assert!(out.contains("got ready"), "stdout={out:?} stderr={err:?}");
     assert!(!out.contains("TIMEOUT"), "stdout={out:?}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "data\n");
-    let _ = std::fs::remove_file(&path);
 }
 
 /// Peer closed the socket: the var is set empty and the command exits 1.

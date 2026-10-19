@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,14 +24,36 @@ fn run(script: &str) -> (String, String, i32) {
 
 /// A fresh empty dir: the lazy-expansion pins run there so a pattern's
 /// `$(touch f)` creates a file the test then inspects.
-fn scratch_dir() -> PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch_dir() -> Scratch {
     let dir = std::env::temp_dir().join(format!(
         "fdshell-case-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 fn run_in(dir: &Path, script: &str) -> (String, String, i32) {

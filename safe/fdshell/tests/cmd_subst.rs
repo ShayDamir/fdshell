@@ -332,9 +332,31 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static WORD0_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Scratch dir for the word-0 glob pins: an executable `ea` that echoes its
 /// own argv, plus `eb`, `ed` (glob fillers) and `zz` (a plain argument).
-fn word0_scratch() -> String {
+fn word0_scratch() -> (String, Scratch) {
     let c = WORD0_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-word0-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
@@ -344,7 +366,7 @@ fn word0_scratch() -> String {
     for name in ["eb", "ed", "zz"] {
         std::fs::write(dir.join(name), name.as_bytes()).unwrap();
     }
-    dir.to_str().unwrap().to_string()
+    (dir.to_str().unwrap().to_string(), Scratch(dir))
 }
 
 /// Run with the child's cwd inside `dir`, so relative word-0 patterns resolve
@@ -506,21 +528,20 @@ fn word0_tilde_expands() {
 /// (`ran ./eb ./ed zz`) in the same scratch layout.
 #[test]
 fn word0_glob_of_the_expansion_first_field_is_the_command() {
-    let dir = word0_scratch();
+    let (dir, _scratch) = word0_scratch();
     let (out, err, rc) = run_in(&dir, "$(echo ./e)* zz");
     assert_eq!(rc, 0, "stderr={err}");
     assert_eq!(out, "ran ./eb ./ed zz\n");
     let (out, err, rc) = run_in(&dir, "./e* zz");
     assert_eq!(rc, 0, "stderr={err}");
     assert_eq!(out, "ran ./eb ./ed zz\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// With `failglob` a word-0 pattern that matches nothing is a clean,
 /// actionable error (no `no match`, no hang): the shell reports the pattern.
 #[test]
 fn word0_failglob_reports_a_clean_error() {
-    let dir = word0_scratch();
+    let (dir, _scratch) = word0_scratch();
     let (_out, err, rc) = run_in(&dir, "shopt -s failglob; nope* echo");
     assert_ne!(rc, 0, "failglob must fail the command");
     assert!(err.contains("no match"), "{err}");
@@ -529,7 +550,6 @@ fn word0_failglob_reports_a_clean_error() {
     let (_out, err, rc) = run_in(&dir, "nope* echo");
     assert_ne!(rc, 0, "an unmatched literal pattern is a missing command");
     assert!(err.contains("nope*"), "{err}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Every pipeline stage expands its own word 0, and a `set -e` prefix is not
@@ -622,7 +642,7 @@ fn word0_nesting_cap_reports_the_message() {
 /// measured equal to fdshell's `exec` on every spelling here.
 #[test]
 fn word0_exec_and_become_expand_their_command_word() {
-    let dir = word0_scratch();
+    let (dir, _scratch) = word0_scratch();
     for (script, want) in [
         ("exec $(echo echo) hi", "hi\n"),
         ("exec ./e* zz", "ran ./eb ./ed zz\n"),
@@ -639,7 +659,6 @@ fn word0_exec_and_become_expand_their_command_word() {
         assert_eq!(rc, 0, "{script:?} must run pwd, stderr={err}");
         assert_eq!(out, format!("{dir}\n"), "{script:?} prints the cwd");
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `timeout`'s target word is a word-0 position: the sub-command line is built
@@ -681,13 +700,12 @@ fn word0_function_lookup_uses_the_expanded_name() {
 /// parity: `cd` prints the new pwd, `exit 7` exits 7).
 #[test]
 fn word0_in_process_builtins_see_the_expanded_name() {
-    let dir = word0_scratch();
+    let (dir, _scratch) = word0_scratch();
     let (out, err, rc) = run(&format!("$(echo cd) {dir}; pwd"));
     assert_eq!(rc, 0, "the expanded cd must move the shell, stderr={err}");
     assert_eq!(out, format!("{dir}\n"), "the shell's cwd must be {dir}");
     let (_out, _err, rc) = run("$(echo exit) 7");
     assert_eq!(rc, 7, "the expanded exit must end the shell with 7");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The glob rules of the expansion, pinned as words in the scratch layout
@@ -698,7 +716,7 @@ fn word0_in_process_builtins_see_the_expanded_name() {
 /// newline in the expansion is an `IFS` delimiter.
 #[test]
 fn word0_glob_rules_apply_as_words() {
-    let dir = word0_scratch();
+    let (dir, _scratch) = word0_scratch();
     for (script, name) in [
         (r#"shopt -s nullglob; $(echo "nope*") zz"#, "zz"),
         (r#"shopt -s nullglob; $(echo "e*") zz"#, "ea"),
@@ -717,7 +735,6 @@ fn word0_glob_rules_apply_as_words() {
     let (out, err, rc) = run_in(&dir, r#"$(printf "echo\nhi") zz"#);
     assert_eq!(rc, 0, "stderr={err}");
     assert_eq!(out, "hi zz\n", "newline splits the expansion");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Every statement path expands its own word 0: an `if` condition, a loop body,
@@ -771,7 +788,7 @@ fn word0_scoped_ifs_divergence() {
 /// *number*, where bash (no fd vars) passes the text `%s`.
 #[test]
 fn word0_leading_fields_take_the_argv_fd_substitution() {
-    let dir = word0_scratch();
+    let (dir, _scratch) = word0_scratch();
     let (out, err, rc) = run_in(&dir, r#"signalfd %s 10; w="%s"; $(echo ./ea; echo "$w")"#);
     assert_eq!(rc, 0, "stderr={err}");
     let fields = out.trim_end().strip_prefix("ran ").unwrap_or_default();
@@ -779,5 +796,4 @@ fn word0_leading_fields_take_the_argv_fd_substitution() {
         !fields.is_empty() && fields.chars().all(|c| c.is_ascii_digit()),
         "the leading field must be substituted with the fd number, stdout={out:?}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1144,6 +1144,41 @@ fn single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty() {
     assert_eq!((out.as_str(), code), ("", 1));
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. The fixed name
+/// `fdshell-task238` was shared by every concurrent suite run, and pid
+/// recycling inherits a dead run's dir (LESSONS, task #255; sweep task #342).
+/// Removal is `.ok()`-tolerant: teardown never panics, and it runs on a
+/// failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-heredoc-<tag>-<pid>-<counter>`,
+/// removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-heredoc-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
 /// Task #238's out-of-scope interaction, pinned as measured: a block trailing
 /// redirect writes the **arm's** stdout, as for a heredoc-free block
 /// (`if true; then echo hi; fi > out` behaves identically on master); bash
@@ -1155,8 +1190,7 @@ fn single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty() {
 /// `> out` and its `>>` twin for every block, plus the heredoc-free twins.
 #[test]
 fn single_line_block_body_heredoc_with_block_trailing_redirect() {
-    let dir = std::env::temp_dir().join("fdshell-task238");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("task238");
     // Task #273 makes the `for` and `case` twins of this shape reachable (on
     // `master` they were the parse errors of the untruncated closer search).
     for (script, want) in [

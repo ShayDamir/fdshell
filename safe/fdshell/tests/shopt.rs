@@ -19,17 +19,64 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    let path = std::env::temp_dir().join(format!("shopt_{tag}_{}.txt", std::process::id()));
-    path.to_str().unwrap().to_string()
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for Scratch {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-shopt-<tag>-<pid>-<counter>`,
+/// removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-shopt-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
+/// A pid + counter scratch dir `fdshell-shopt-<tag>-<pid>-<counter>`;
+/// returns the path of a `.txt` file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-shopt-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (
+        dir.join(format!("{tag}.txt")).to_str().unwrap().to_string(),
+        Scratch(dir),
+    )
 }
 
 #[test]
 fn noclobber_blocks_overwrite() {
-    let path = temp_path("noclobber");
+    let (path, _scratch) = temp_path("noclobber");
     std::fs::write(&path, b"keep\n").unwrap();
     let (out, err, code) = run(&format!("set -o noclobber; echo hi >{path}"));
-    let _ = std::fs::remove_file(&path);
     assert_ne!(code, 0);
     assert!(err.contains("noclobber"), "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
@@ -40,11 +87,10 @@ fn noclobber_blocks_overwrite() {
 // exits 0 with `f` = `NEW`; the `>` control exits 1 and leaves `f` unchanged.
 #[test]
 fn clobber_bypasses_noclobber_on_an_existing_file() {
-    let path = temp_path("clobber");
+    let (path, _scratch) = temp_path("clobber");
     std::fs::write(&path, b"keep\n").unwrap();
     let (out, err, code) = run(&format!("set -o noclobber; echo NEW >|{path}"));
     let content = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert_eq!(content, "NEW\n");
@@ -53,7 +99,6 @@ fn clobber_bypasses_noclobber_on_an_existing_file() {
     std::fs::write(&path, b"keep\n").unwrap();
     let (_out2, err2, code2) = run(&format!("set -o noclobber; echo NEW >{path}"));
     let content2 = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code2, 1, "stderr={err2:?}");
     assert!(err2.contains("noclobber"), "stderr={err2:?}");
     assert_eq!(content2, "keep\n");
@@ -62,8 +107,7 @@ fn clobber_bypasses_noclobber_on_an_existing_file() {
 // `>|` also creates a file that does not exist (bash 5.3.9: rc 0, `hi\n`).
 #[test]
 fn clobber_creates_a_new_file_under_noclobber() {
-    let path = temp_path("clobber_new");
-    let _ = std::fs::remove_file(&path);
+    let (path, _scratch) = temp_path("clobber_new");
     let (out, err, code) = run(&format!("set -o noclobber; echo hi >|{path}"));
     let content = std::fs::read_to_string(&path);
     let _ = std::fs::remove_file(&path);
@@ -76,12 +120,11 @@ fn clobber_creates_a_new_file_under_noclobber() {
 // succeeds and `echo e >&2` lands in `f`.
 #[test]
 fn clobber_bypasses_noclobber_on_stderr() {
-    let path = temp_path("clobber_stderr");
+    let (path, _scratch) = temp_path("clobber_stderr");
     std::fs::write(&path, b"keep\n").unwrap();
     let (out, err, code) = run(&format!(
         "set -o noclobber; exec 2>|{path}; echo e >&2; echo out; cat {path}"
     ));
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "out\ne\n", "stdout={out:?}");
 }
@@ -91,11 +134,10 @@ fn clobber_bypasses_noclobber_on_stderr() {
 // noclobber and leaves the file unchanged.
 #[test]
 fn exec_clobber_is_permanent_and_bypasses_noclobber() {
-    let path = temp_path("clobber_exec");
+    let (path, _scratch) = temp_path("clobber_exec");
     std::fs::write(&path, b"keep\n").unwrap();
     let (out, err, code) = run(&format!("set -o noclobber; exec >|{path}; echo hi"));
     let content = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert_eq!(content, "hi\n");
@@ -103,7 +145,6 @@ fn exec_clobber_is_permanent_and_bypasses_noclobber() {
     std::fs::write(&path, b"keep\n").unwrap();
     let (_out2, err2, code2) = run(&format!("set -o noclobber; exec >{path}; echo hi"));
     let content2 = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code2, 1, "stderr={err2:?}");
     assert_eq!(content2, "keep\n");
 }
@@ -113,13 +154,12 @@ fn exec_clobber_is_permanent_and_bypasses_noclobber() {
 // still reports the option on (bash 5.3.9: `set -o` prints `noclobber on`).
 #[test]
 fn clobber_does_not_change_the_noclobber_option() {
-    let path = temp_path("clobber_state");
+    let (path, _scratch) = temp_path("clobber_state");
     std::fs::write(&path, b"keep\n").unwrap();
     let (out, err, code) = run(&format!(
         "set -o noclobber; echo NEW >|{path}; set -o; echo hi >{path}"
     ));
     let content = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(out.contains("noclobber on"), "stdout={out:?}");
     // `>|` truncated the file, then the `>` control blocked on the (now
@@ -129,24 +169,22 @@ fn clobber_does_not_change_the_noclobber_option() {
 
 #[test]
 fn noclobber_allows_new_files() {
-    let path = temp_path("newfile");
+    let (path, _scratch) = temp_path("newfile");
     let _ = std::fs::remove_file(&path);
     let (_out, err, code) = run(&format!("set -o noclobber; echo hi >{path}"));
     let content = std::fs::read_to_string(&path);
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(content.unwrap(), "hi\n");
 }
 
 #[test]
 fn shopt_u_reenables_overwrite_in_same_shell() {
-    let path = temp_path("toggle");
+    let (path, _scratch) = temp_path("toggle");
     std::fs::write(&path, b"old\n").unwrap();
     let (_out, err, code) = run(&format!(
         "shopt -s noclobber; shopt -u noclobber; echo new >{path}"
     ));
     let content = std::fs::read_to_string(&path);
-    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(content.unwrap(), "new\n");
 }
@@ -195,15 +233,13 @@ fn shopt_lists_options() {
 
 #[test]
 fn noclobber_readonly_dir_is_open_error() {
-    let dir = std::env::temp_dir().join(format!("shopt_ro_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("ro");
     let ro = std::os::unix::fs::PermissionsExt::from_mode(0o555);
     std::fs::set_permissions(&dir, ro).unwrap();
     let target_path = dir.join("newfile");
     let target = target_path.to_str().unwrap();
     let (_out, err, code) = run(&format!("set -o noclobber; echo hi >{target}"));
     std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
     assert_ne!(code, 0);
     assert!(!err.contains("noclobber"), "stderr={err:?}");
     assert!(err.contains("open"), "stderr={err:?}");

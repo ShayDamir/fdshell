@@ -10,17 +10,43 @@ fn run(script: &str) -> std::process::Output {
     Command::new(BIN).args(["-c", script]).output().unwrap()
 }
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// A scratch `PATH` dir of executable files, so `timeout`'s folded target word is
 /// looked up as a real file (bash runs `timeout 1 a\*` for a file named `a*`).
-fn scratch_bin(names: &[&str]) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("fdshell-esc-timeout-{}", std::process::id()));
+fn scratch_bin(names: &[&str]) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-esc-timeout-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
     for name in names {
         let path = dir.join(name);
         std::fs::write(&path, "#!/bin/sh\necho ran\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    dir
+    Scratch(dir)
 }
 
 fn run_with_path(bin_dir: &std::path::Path, script: &str) -> (String, String, i32) {
@@ -142,5 +168,4 @@ fn timeout_folds_the_target_command_word() {
     let (_out, err, code) = run_with_path(&bin, "timeout 1 \"e\\cho\" hi");
     assert_eq!(code, 1, "the quoted pair is not folded, stderr={err:?}");
     assert!(err.contains("e\\cho"), "stderr={err:?}");
-    let _ = std::fs::remove_dir_all(&bin);
 }

@@ -38,12 +38,33 @@ fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
     )
 }
 
-fn scratch(tag: &str) -> std::path::PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it
+/// runs on a failing test's unwind, which is exactly the test that used to
+/// leak.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch(tag: &str) -> Scratch {
     let dir =
         std::env::temp_dir().join(format!("fdshell-cond_blocks-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 // Task #236 section: keyword words in argument position inside a block body.
@@ -647,7 +668,6 @@ fn keyword_shaped_argument_words_do_not_swallow_the_cond_operators() {
     let (out, err, code) = run_in(&dir, "echo x > if && echo b");
     assert_eq!((out.as_str(), code), ("b\n", 0), "stderr={err}");
     assert_eq!(std::fs::read_to_string(dir.join("if")).unwrap(), "x\n");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Task #235: `&&` / `||` written in a function definition's **body** are body
