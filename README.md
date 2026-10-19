@@ -101,6 +101,27 @@ variable `&server`; `&>|&server` overwrites an existing task. Because a pidfd
 stays valid and unique for the lifetime of the child, this avoids the
 PID-reuse races of the traditional `$!` / `kill` pattern.
 
+The plain POSIX `&` operator backgrounds a statement with no name at all. The
+job is the shell forked: the child runs the statement through the identical
+foreground path (functions, builtins, `cd`, a pipeline as one job) and exits
+with its status, while the parent records the child as a **nameless job** that
+`$!` reports and `wait` reaps, and continues immediately with status 0:
+
+```shell
+sleep 3 &              # background job, the shell keeps going
+echo hi & echo fg      # both run; the parent never waits for the job
+sleep 3 &
+wait                   # reap every nameless job
+```
+
+A nameless job's state changes die with the child, so `cd /tmp &`, `exit &`
+and `break &` leave the parent untouched. `&` is only the operator at a
+word's start: `a&b` stays one word, `"&"` is data, `&&`, `&>file`, `N>&N` and
+`|&` keep their meanings, and a `>` before it owns the byte (`cat > &f` is a
+redirect). A `&` must terminate a command — `& echo b`, `echo a ; & b`,
+`echo a & ; echo b` and `echo a & | cat` are parse errors that run **nothing**,
+as in bash.
+
 The POSIX `wait [pid…]` builtin reaps background tasks by pid (or every task
 when given no argument) and sets `$?` to the last reaped status; `$!` holds
 the last background pid:
@@ -108,7 +129,9 @@ the last background pid:
 ```shell
 builtin false &>&j
 wait $!            # reap by pid; $? is the child's exit status
-wait               # reap every background task
+wait               # reap every background task (POSIX: status 0)
+echo hi &
+wait $!            # reap a nameless job by pid; $? is its exit status
 ```
 
 ### Event-case `wait`
@@ -504,8 +527,9 @@ shell, so its assignments and `cd` survive it.
 ### Pipelines and lists
 
 `cmd1 | cmd2` connects cmd1's stdout to cmd2's stdin. `;` separates
-statements, `&&`/`||` gate them, and `&` is the background operator (fdshell
-also offers named background tasks, above). `time cmd` reports how long cmd
+statements, `&&`/`||` gate them, and a trailing `&` turns the statement before
+it into a background job (fdshell also offers the named form `cmd &>&name`,
+above). `time cmd` reports how long cmd
 took; `timeout seconds cmd` stops it after a deadline.
 
 ### Aliases

@@ -52,6 +52,38 @@ word. fdshell additionally reads `&name` as a task variable:
   onto `f`. Pinned with the measured values in
   `safe/fdshell/tests/redirect.rs`; owned by task #337.
 
+POSIX also uses a trailing `&` as the async control operator (POSIX
+#3.9.4.1: `echo hi &` runs `echo hi` asynchronously). fdshell supports it:
+the statement before the `&` runs as a **nameless background job** — the shell
+forks itself, the child runs the statement through the identical foreground
+path and exits with its status, the parent records the child as a job `$!`
+reports and `wait` / `wait <pid>` reap, and continues with status 0.
+`safe/fdshell/tests/async.rs` pins the family.
+
+- The `&` is the operator only at a word's start: `a&b` stays one word (the
+  word rule above), `"&"` and `\&` are data, `&&`'s second byte, `N>&N`,
+  `|&`, `<&N` and `(&`/`)&` keep their meanings, and a `>`/`<` written before
+  it across spaces owns the byte — bash tokenizes `>&` as one operator, so
+  `cat > &f` is a redirect (fdshell's "invalid redirect"), never a split.
+- bash's preflight property is kept: an invalid split — nothing to terminate
+  (`& echo b`), a `;`-terminated target (`echo a ; & b`), or a `;`/`|`/`&`
+  peeked behind the `&` (`echo a & ; echo b`, `echo a & | cat`,
+  `echo a & & b`) — is a parse error (rc 1) that runs **nothing**.
+- `wait` with no operands returns 0 whatever the reaped jobs' statuses were
+  (POSIX 2.14; `false & wait; echo $?` → `0`, bash 5.3.9 measured identical).
+- Measured divergences, all pinned: a top-level **compound** with a trailing
+  `&` (`if :; then echo x; fi & echo y`, `time cmd &`) and an
+  **assignment-only** statement (`x=1 &`) run **foreground** — only `Cmd` and
+  `Pipeline` become async jobs; bash backgrounds the whole thing as one job
+  (owners #352, #353). `echo a && echo b &` is two jobs where bash makes one
+  (identical output set and rc). A `%>%name` capture on a backgrounded command
+  commits in the discarded child, so the parent never sees the fd variable —
+  the named capture form for background stays `cmd &>&name`. `$!` for a
+  backgrounded pipeline is the job's shell pid, not the last stage's.
+  `echo a &` followed by a `;` line (`echo a &\n; echo b`) streams: line 1
+  executes and the `;` line is fdshell's accepted empty statement, where bash
+  stops with rc 2 (the same-line `& ;` form matches bash).
+
 ## Operators are recognized at word starts
 
 In POSIX, a redirection operator is recognized wherever it appears outside
@@ -118,8 +150,6 @@ The `<<<` form's remaining differences from bash:
   the body (`cat 3<<<text <&3`). Owning task: #178/#183 (order of redirections).
 - A redirect written after a group's `}` is not attached to the group
   (`{ cat; } 3<<<x` is a parse error); owning tasks: #187/#191.
-- `cat 3<<<x &` is a parse error because `&` background is one for every
-  command; owning task: #313 family.
 
 ## `wait` is also a block keyword
 
