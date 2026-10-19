@@ -935,13 +935,17 @@ of them "passes on re-run" — read that signature as *shared-name luck* before
 calling anything timing-sensitive. Rule: name test ports uniquely **per call
 site** (the same sequence counter the abstract socket names use), keep the band
 **below** the ephemeral range, and step the pid so adjacent pids do not land on
-the same port. "Let the kernel pick the port" is not available here: there is no
-`getsockname` wrapper in the tree, so a shell test must name the port. A retry
-may re-attempt such a test (bounded, only the port-busy errnos 98/99, fresh port
-each attempt) but may never widen its tolerance — a retry that swallows other
-statuses converts a real failure into a pass. The product-side half (a real
-server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR`) is not a test
-artifact and is tracked separately (task #331).
+the same port. "Let the kernel pick the port" is not available to a *shell*
+test — the child binds a kernel-assigned port it cannot report back through
+the script, so the e2e harness must name the port (`inet_port` + the bounded
+98/99 retry in `safe/fdshell/tests/sockets.rs`); the in-process half is
+closed by task #254, which adds the `sys::net::getsockname` wrapper so a test
+that binds in its own process reads the port back and names nothing. A retry
+may re-attempt such a test (bounded, only the port-busy errnos 98/99, fresh
+port each attempt) but may never widen its tolerance — a retry that swallows
+other statuses converts a real failure into a pass. The product-side half (a
+real server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR`) is not a
+test artifact and is tracked separately (task #331).
 
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
@@ -2554,3 +2558,31 @@ that share one open by **identity** (never path equality: `> f 2> f` stays two
 opens, pinned byte-for-byte above), so the fd-2 half lands in the fd-2 key
 region. Sorting the whole def by its max target is **not** a valid shortcut:
 it moves fd 1's half out of fd 1's slot and breaks `cmd &> a > b`.
+
+## A test that binds in its own process names no port: bind 0 and read it back
+`listen_handler_addr_alias_sends_listening_socket` derived its TCP port as
+`30000 + pid % 10000` and failed once in 48 full-suite runs under
+`cargo mutants -j4` — four concurrent runs of the same suite; two processes
+landed on the same port, `bind` returned 98, and the test's `unwrap` panicked
+with `syscall failed` (task #254, found by task #159's load harness). This is
+the shared-name class of the entry above, and the fix there ("name ports
+uniquely per call site") is the *wrong* tool in-process: no naming scheme
+beats not naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free
+*at assignment time*, so concurrent suite runs cannot collide, and the
+assignee never re-binds a port that is `TIME_WAIT` for itself — and
+`sys::net::getsockname` (added here, with its pins in `unsafe/sys/tests/
+sockets.rs`) reads the port back off the socket the test captured.
+Reading back works exactly when the socket is in the test's own fd table (the
+unit tests receive it via `recv_fd`); where it is not — a shell child binding
+`--port 0` — the port cannot be reported through the script, and the e2e
+band+retry scheme of task #239 stays right. Two rules for the fix itself: do
+not widen tolerance (no sleeps, no retries, no `let _ =` on the client
+connect; the port-busy retry stays at the shell layer, per #239), and pin the
+read-back for exactness, not just non-zero: a live `TcpStream::connect` to the
+reported port kills the `from_be`→`from_le` byte-order mutant (measured:
+both AF_INET listen tests and the sys pin fail on the swapped read-back;
+cargo-mutants does not generate byte-order mutants, so apply it by hand).
+The plan's pre-change reproduction harness (16 concurrent copies of the two
+tests × 12 iterations, and 48 full-suite runs) measured 0 failures on this
+host — the observed 1-in-48 rate means "reproduction failed to fire" is
+compatible with the bug; a pid-derived port's silence is luck, not proof.

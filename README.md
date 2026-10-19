@@ -557,7 +557,8 @@ builtin accept %l %>%conns[8]     # up to 8 connections
 
 `@name` is the abstract socket namespace (no filesystem object); a path is a
 filesystem socket the script must `unlinkat` after use; `--addr ADDR --port N`
-is AF_INET v4. Backgrounding an `accept` (`builtin accept %l %>%c &>&t;
+is AF_INET v4, and `--port 0` asks the kernel for a free ephemeral port.
+Backgrounding an `accept` (`builtin accept %l %>%c &>&t;
 waitpid &t`) or using it in a `wait readable` arm keeps the script responsive.
 
 `sendmsg` and `recvmsg` move a byte payload together with any number of fd
