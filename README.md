@@ -252,9 +252,14 @@ line two
 EOF
 ```
 
-An unquoted delimiter expands `$`/`$(…)`/backticks in the body; a quoted
-delimiter (`<<'EOF'`) makes the body literal. `<<-EOF` strips leading tabs
-from the body and the delimiter. A here-document is usually attached to
+An unquoted delimiter expands `$`/`$(…)`/backticks in the body. A **quoted**
+delimiter makes the body literal, and any quote operator in the delimiter word
+quotes it — `<<'EOF'`, `<<"EOF"`, `<<E\OF`, `<<EO\F`, `<<\E\O\F`, `<<\$HOME`
+(POSIX XCU 2.3 counts `\` a quote operator, so the escape-only word `<<E\OF`
+quotes the body exactly like `<<"EOF"`). The word is folded for matching, so
+`<<E\OF` delimits `EOF`, and a quoted body is verbatim: nothing expands in it
+and no `\<newline>` continuation is stripped from it. `<<-EOF` strips leading
+tabs from the body and the delimiter. A here-document is usually attached to
 `cat`, `read` or another command that reads stdin. A bare delimiter word
 that begins with `<`, `>`, `&` or `%` is a delimiter when that byte is
 quoted (`cat << "<x"` + body + `<x` prints the body, as bash); unquoted it
