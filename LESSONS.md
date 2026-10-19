@@ -2570,8 +2570,9 @@ uniquely per call site") is the *wrong* tool in-process: no naming scheme
 beats not naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free
 *at assignment time*, so concurrent suite runs cannot collide, and the
 assignee never re-binds a port that is `TIME_WAIT` for itself — and
-`sys::net::getsockname` (added here, with its pins in `unsafe/sys/tests/
-sockets.rs`) reads the port back off the socket the test captured.
+`sys::net::getsockname` (added here, with its pins in
+`unsafe/sys/tests/sockets.rs`) reads the port back off the socket the test
+captured.
 Reading back works exactly when the socket is in the test's own fd table (the
 unit tests receive it via `recv_fd`); where it is not — a shell child binding
 `--port 0` — the port cannot be reported through the script, and the e2e
@@ -2583,6 +2584,15 @@ reported port kills the `from_be`→`from_le` byte-order mutant (measured:
 both AF_INET listen tests and the sys pin fail on the swapped read-back;
 cargo-mutants does not generate byte-order mutants, so apply it by hand).
 The plan's pre-change reproduction harness (16 concurrent copies of the two
-tests × 12 iterations, and 48 full-suite runs) measured 0 failures on this
-host — the observed 1-in-48 rate means "reproduction failed to fire" is
+tests × 12 iterations, and 48 full-suite runs) measured 0 listen failures on
+this host — the observed 1-in-48 rate means "reproduction failed to fire" is
 compatible with the bug; a pid-derived port's silence is luck, not proof.
+(That same pre-change 48-run suite had 1 failure in the verity family —
+pre-existing, unrelated to this rule, tracked as task #340.)
+Three `ok_or(SyscallError::Never)?` arms in `net/getsockname.rs` are
+unreachable *by construction*: the `min(sun_path.len())` clamp makes
+`get(..n)` always `Some`; `first().is_some_and(…)` implies non-empty, so
+`get(1..)` is always `Some`; `position(…).unwrap_or(len) ≤ len`, so
+`get(..end)` is always `Some`. Their 0 coverage hits are the proof, not a
+gap: STYLE §4.10 sanctions the `Never` + `?` shape, so a later "coverage
+fix" must not delete these guards.
