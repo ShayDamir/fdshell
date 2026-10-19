@@ -102,7 +102,7 @@ fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
             let dash = line.get(i + 2) == Some(&b'-');
             let fd = io.and_then(|(_, digits)| io_fd(digits)).unwrap_or(0);
             found.push(Site { op: i, dash, fd });
-            let tail = i + 2 + usize::from(dash);
+            let tail = if dash { i + 3 } else { i + 2 };
             let next = delimiter_span(line, tail, to).map_or(tail, |(next, _)| next);
             while i < next {
                 i = state.advance(line, i);

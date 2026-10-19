@@ -627,3 +627,57 @@ fn precedes_pipe_walks_only_whitespace() {
     assert!(!pipe::precedes_pipe(b"a >| <<EOF", 6));
     assert!(!pipe::precedes_pipe(b"\"| <<EOF", 4));
 }
+
+/// The walk stops at `to`: a window that ends inside the line never reads the
+/// bytes behind it, so an operator that *starts* at `to` is not a site. The
+/// same shape kills the loop's `i <= to` mutant, which would walk one byte
+/// past the window and push a phantom site (`operator_count` is called on
+/// sub-windows by the segment/cond layers, so this is their real input).
+#[test]
+fn window_end_is_exclusive() {
+    let line = b"cat <<A <<B";
+    assert_eq!(
+        operator_count(line, 0, 8),
+        1,
+        "the window ends at the space"
+    );
+    assert_eq!(
+        operator_delims(line, 0, 8).map(|ops| ops.len()),
+        Some(1),
+        "line={:?}",
+        line
+    );
+    assert_eq!(operator_count(line, 0, line.len()), 2, "the full line");
+    assert_eq!(
+        operator_count(line, 2, line.len()),
+        2,
+        "mid-token window start"
+    );
+    assert_eq!(
+        operator_count(line, 9, line.len()),
+        0,
+        "a window that opens on the operator has no preceding token",
+    );
+    assert_eq!(
+        operator_count(line, 7, line.len()),
+        0,
+        "the same from the space before it",
+    );
+}
+
+/// The `<<-` marker consumes exactly its one byte: the walk resumes after it,
+/// so a second operator on the same line is still found and keeps its own
+/// delimiter (`i + 2 + dash`, and the `dash`-offset mutants' kill pin).
+#[test]
+fn dash_marker_leaves_the_next_operator_visible() {
+    let line = b"cat <<-A <<B";
+    let ops = operator_delims(line, 0, line.len()).unwrap();
+    assert_eq!(ops.len(), 2, "line={:?}", line);
+    assert_eq!(ops[0].delim, b"A");
+    assert!(ops[0].strip);
+    assert_eq!(ops[1].delim, b"B");
+    assert!(!ops[1].strip);
+    assert_eq!(operator_count(line, 0, line.len()), 2);
+    // The bare `<<-` at the window end keeps its own site and stops there.
+    assert_eq!(operator_count(b"cat <<-", 0, 7), 1);
+}
