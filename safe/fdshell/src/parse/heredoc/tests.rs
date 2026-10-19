@@ -380,6 +380,16 @@ fn operator_count_byte_and_token_levels_agree() {
         b"cat << \"&x\"",
         b"cat << \"%x\"",
         b"cat <<- \"<x\"",
+        // Task #261's four residual classes, measured on `master` and pinned
+        // here at one place (`operator_count_pipe_predecessors_agree`,
+        // `operator_count_invalid_delimiter_agree`,
+        // `operator_count_leading_newline_agree` carry the rest).
+        b"x\\| <<EOF",
+        b"\"|\" <<EOF",
+        b"'|' <<EOF",
+        b">> << <<EOF",
+        b"cat <<- <<EOF",
+        b"\\n<<EOF".as_slice(),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
@@ -511,6 +521,148 @@ fn operator_count_quoted_delimiter_forms_agree() {
         (b"cat <<-\"a <<b\"", 1),
         (b"cat <<a'b'c && cat <<d'e'f", 2),
         (b"cat <<\"a <<b\" | tr <<\"c <<d\"", 2),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
+        assert_eq!(byte, want, "line={:?}", line);
+    }
+}
+
+/// Class 1 of task #261: the pipeline-pipe predecessor test at both levels.
+/// A pipeline `|` is a stage boundary (0 operators); an escaped `\|` and a
+/// quoted `"|"`, `'|'` are **word** tokens whose text is `|`, so the `<<`
+/// behind them is an operator (1) — `is_operator` reads the predecessor
+/// token's raw span (`parse::redirect::pipe_token_span`), and the byte scan
+/// reads the mask + escape walk (`parse::redirect::pipeline_pipe`). Before the
+/// fix the escaped pair read 0/1 and the quoted pair 1/0: the same
+/// token-text-vs-raw-bytes trap in both directions.
+#[test]
+fn operator_count_pipe_predecessors_agree() {
+    for (line, want) in [
+        (b"| <<EOF".as_slice(), 0usize),
+        (b"> | <<EOF", 0),
+        (b"a >| b | <<EOF", 0),
+        (b"cat \"a>\"| <<EOF", 0),
+        (b"cat x\\>| <<EOF", 0),
+        (b"\\| <<EOF", 1),
+        (b"x\\| <<EOF", 1),
+        (b"echo x\\| <<EOF", 1),
+        (b"\"|\" <<EOF", 1),
+        (b"'|' <<EOF", 1),
+        (b"echo \"|\" <<EOF", 1),
+        (b"echo '|' <<EOF", 1),
+        (b"cat x\\>a>| <<EOF", 1),
+        (b"echo x\\| <<EOF\nbody\nEOF", 1),
+        (b"echo \"|\" <<EOF\nbody\nEOF", 1),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
+        assert_eq!(byte, want, "line={:?}", line);
+    }
+}
+
+/// Class 3 of task #261: an invalid/missing delimiter word never changes the
+/// **count**. `is_operator` has no delimiter test, so the token layer counts
+/// every `<<` (the trailing `<<` of `>> << <<EOF` included, and it bails
+/// `InvalidRedirect` at the parse site), while the byte scan used to map a
+/// `delimiter_span` `None` to a count of 0 for the whole window. The region
+/// layer keeps its `None` (`scan/heredoc/ops/tests.rs::count_counts_sites_delims_keeps_none`),
+/// so no body region is claimed on these lines and every error path stays as
+/// pinned (`safe/fdshell/tests/heredoc.rs::heredoc_invalid_delimiter_*`).
+#[test]
+fn operator_count_invalid_delimiter_agree() {
+    for (line, want) in [
+        (b">> << <<EOF".as_slice(), 2usize),
+        (b"cat <<- <<EOF", 2),
+        (b"cat << <x", 1),
+        (b"cat << &x", 1),
+        (b"cat << %x", 1),
+        (b"cat << \"<x\"", 1),
+        (b"cat <<- <<EOF ; cat <<B", 3),
+        (b"cat <<- <<EOF && cat <<B", 3),
+        (b">> << <<EOF && cat <<B", 3),
+        (b"cat <<A ; cat <<- <<X ; cat <<B", 4),
+        (b"if true; then cat <<- <<X; fi", 2),
+        (b"cat <<- <<X; fi", 2),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
+        assert_eq!(byte, want, "line={:?}", line);
+    }
+}
+
+/// Class 4 of task #261: a newline is a separator token (`token/step.rs`
+/// emits `;` for `\n` and `)`, and no token for ` `/`\t`), so a
+/// newline-leading run has a preceding token and its `<<` is an operator at
+/// both levels. The space/tab rows keep the other half of the mirror: they
+/// contribute no token, so the run-start `<<` stays the command word (0) and
+/// the `is_token_byte` mutants stay killable.
+#[test]
+fn operator_count_leading_newline_agree() {
+    for (line, want) in [
+        (b"\n<<EOF".as_slice(), 1usize),
+        (b"\n<<EOF <<B", 2),
+        (b"\n<<EOF\nbody\nEOF", 1),
+        (b"true &&\n<<B\nbody\nB", 1),
+        (b"x\n<<EOF\nbody\nEOF", 1),
+        (b"&&\n<<EOF", 1),
+        (b"cat <<A\n<<B", 2),
+        (b"<<EOF", 0),
+        (b" <<EOF", 0),
+        (b"\t<<EOF", 0),
+        (b"# x\n<<EOF", 0),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
+        assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
+        assert_eq!(byte, want, "line={:?}", line);
+    }
+}
+
+/// Class 2 of task #261: the **pinned divergence**, asserted as a divergence.
+/// The `(( … ))` and `$( … )` regions are opaque to the byte scan
+/// (`ScanState::advance` consumes `((`/`$(` whole and the `bare` gate hides
+/// everything inside), and that opacity is load-bearing: `x=$(cat <<EOF … )`
+/// runs only because the byte scan ignores the `<<` inside the substitution,
+/// and counting the arithmetic `<<` of `(( 1 << 2 )) && cat <<B` would empty
+/// the line's region stream and steal `cat <<B`'s body. The token layer
+/// counts those `<<` (they are ordinary tokens) and nothing observable
+/// depends on it: `((expr)`-with-trailing-words is intercepted in
+/// `parse/arith_cmd` before any heredoc allocation. So these pairs are
+/// pinned byte≠token, and a future "alignment" must re-read this test.
+#[test]
+fn arith_region_count_divergence_is_pinned() {
+    for (line, byte, token) in [
+        (b"(( <<EOF".as_slice(), 0usize, 1usize),
+        (b"(( 1 <<EOF", 0, 1),
+        (b"(( x <<EOF", 0, 1),
+        (b"(( 1 << 2 ))", 0, 1),
+        (b"(( <<EOF\nbody\nEOF", 0, 1),
+        // The line the region-corruption argument rests on: the arith `<<`
+        // counted at the byte level would claim `2` as its delimiter, find no
+        // `2` line, and leave `cat <<B` without a body.
+        (b"(( 1 << 2 )) && cat <<B", 1, 2),
+        (b"(( 1 << 2 )); cat <<B\nbody\nB".as_slice(), 1, 2),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        assert_eq!(
+            crate::scan::heredoc::operator_count(line, 0, line.len()),
+            byte,
+            "line={:?}",
+            line
+        );
+        assert_eq!(operator_count(line, &tokens), token, "line={:?}", line);
+    }
+    // The agreements of the same family: `((1<<2))` is one word at both levels
+    // (`io::word_start` rejects a digit run glued to a longer word), and a
+    // substitution is one token, so its `<<` counts 0 at both levels.
+    for (line, want) in [
+        (b"((1<<2))".as_slice(), 0usize),
+        (b"echo $((1<<2))", 0),
+        (b"x=$(cat <<EOF\nbody\nEOF\n)", 0),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

@@ -2074,3 +2074,183 @@ fn numbered_heredoc_known_divergences() {
     assert_eq!(out, "");
     assert!(err.contains("\"(\" not found"), "{err}");
 }
+
+// --- Task #261: the byte/token `<<`-count residuals of task #185. Four shape
+// classes were left diverging by the `seen_word` → `seen_token` fix: an escaped
+// or quoted `|` before the operator, an `((`-leading run, an invalid/missing
+// delimiter word, and a newline-leading run. Every row below is measured
+// against bash 5.3.9 (stdin `/dev/null`); the bash value is in the comment, and
+// the shapes bash treats as a syntax error (rc 2) stay in fdshell's rc-1
+// families. Nothing here changes the delimiter-validity errors or #185's pins.
+// ---
+
+/// An escaped `|` is one word (`x\|` is word content for the tokenizer), so the
+/// `<<` behind it is an operator, not a pipeline command word: the run claims
+/// its body and the command prints its word. Master counted 0/1 and reported
+/// `missing terminating delimiter line 'EOF'`; bash prints the word (rc 0).
+#[test]
+fn heredoc_escaped_pipe_predecessor_is_a_word_not_a_stage() {
+    for (script, want) in [
+        ("echo x\\| <<EOF\nbody\nEOF", "x|\n"),
+        ("echo \\| <<EOF\nbody\nEOF", "|\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// The quoted twin, measured byte 1 / token 0 on master (the token layer read
+/// the *text* of the preceding token, and `"|"`/`'|'` are text `|`): `is_operator`
+/// and the pipeline split now read the token's raw span. bash prints the word
+/// (rc 0), and so does fdshell.
+#[test]
+fn heredoc_quoted_pipe_predecessor_is_a_word_not_a_stage() {
+    for (script, want) in [
+        ("echo \"|\" <<EOF\nbody\nEOF", "|\n"),
+        ("echo '|' <<EOF\nbody\nEOF", "|\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// The pipeline twin of the quoted case: a quoted `>` never terminates a word,
+/// so the `|` **is** a pipeline pipe and the shape stays in the pipeline family
+/// (`<<EOF` becomes the second stage's command word). Unchanged by task #261 at
+/// both levels (byte 0 / token 0, pinned in
+/// `parse/heredoc/tests.rs::operator_count_pipe_predecessors_agree`); bash runs
+/// the pipeline and its rc is 0.
+#[test]
+fn heredoc_quoted_gt_word_keeps_the_pipeline_split() {
+    let (out, err, code) = run("echo \"a>\"| <<EOF\nbody\nEOF");
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
+    // No heredoc operator on the line, so no region is claimed and the body
+    // lines are the pipeline's own commands (`tests/redirect.rs::quoted_operator_word_keeps_the_pipe_and_the_body_free`).
+    assert!(err.contains("\"body\" not found"), "stderr={err:?}");
+    let (out, err, code) = run("cat \"a>\"| <<EOF\nbody\nEOF");
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(err.contains("cat: 'a>'"), "stderr={err:?}");
+}
+
+/// The `(( … ))` region stays opaque to the byte scan (its `<<` is counted by
+/// the token layer only, and `arith_cmd` intercepts the line before any heredoc
+/// allocation). Every shape here is measured byte 0 / token 1 and stays the
+/// arithmetic parse error, rc 1 (bash rc 2); the body lines never run.
+#[test]
+fn heredoc_arith_command_region_stays_opaque_to_the_byte_scan() {
+    for script in [
+        "(( <<EOF\nbody\nEOF",
+        "(( 1 <<EOF\nbody\nEOF",
+        "(( x <<EOF\nbody\nEOF",
+        "(( x ; cat <<B\nbody\nB",
+        "(( x ; cat <<B; fi\nbody\nB",
+        "true && (( x ; cat <<B\nbody\nB",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (1, ""), "script={script:?}");
+        assert!(
+            err.contains("arithmetic command must be `((expr))` with no trailing words"),
+            "stderr={err:?}"
+        );
+        assert!(
+            !err.contains("\"body\" not found"),
+            "body must not leak: {err:?}"
+        );
+    }
+}
+
+/// The load-bearing half of the same rule: the `$( … )` and closed `(( … ))`
+/// regions are opaque, so their heredocs keep their bodies. Counting the
+/// arithmetic `<<` (what `is_operator` counts) would empty the line's region
+/// stream and steal `cat <<B`'s body; these are the rc-0 pins that gate it.
+/// bash 5.3.9 agrees on every row except the last, where it warns about the
+/// inner heredoc and exits 1.
+#[test]
+fn heredoc_substitution_and_closed_arith_regions_keep_their_bodies() {
+    for (script, want) in [
+        ("(( 1 << 2 )) && cat <<B\nbody\nB", "body\n"),
+        ("(( 1 << 2 )); cat <<B\nbody\nB", "body\n"),
+        ("x=$(cat <<EOF\nbody\nEOF\n); echo \"$x\"", "body\n"),
+        ("echo \"$(cat <<EOF\nb\nEOF\n)\"", "b\n"),
+        ("cat <<A\n$(echo x <<Q\nq\nQ)\nA", "x\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, want),
+            "script={script:?} err={err:?}"
+        );
+    }
+}
+
+/// Class 3: a bare `<<` whose delimiter word starts with `<`, `>`, `&`, `%` (or
+/// that has no delimiter at all) is counted at both levels and stays the
+/// parse-layer syntax error. The count no longer zeroes the window, the region
+/// layer keeps its `None`, and every message is what master printed (the
+/// window-subset invariant is what makes the split allocation-neutral).
+/// bash is rc 2 on all of them; `cat << %x` is rc 0 there (a warning only).
+#[test]
+fn heredoc_invalid_delimiter_keeps_the_parse_errors() {
+    for script in [
+        ">> << <<EOF\nbody\nEOF",
+        "cat <<- <<EOF\nbody\nEOF",
+        "cat << <<A && cat <<B\nbody\nA\nB",
+        "cat <<- <<EOF && cat <<B\nbody\nEOF\nB",
+        ">> << <<EOF && cat <<B\nbody\nB",
+        "if true; then cat <<- <<X; fi\nbody\nX",
+        "cat << <x\nbody\nx",
+        "cat << &x\nbody\nx",
+        "cat << %x\nbody\nx",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (1, ""), "script={script:?}");
+        assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
+    }
+    // The multi-part line: the first operator's delimiter line is what the
+    // parse reports, unchanged, and no body line is executed.
+    let (out, err, code) = run("cat <<A ; cat <<- <<X ; cat <<B\na\nA\nX\nB");
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(
+        err.contains("missing terminating delimiter line 'A'"),
+        "stderr={err:?}"
+    );
+    assert!(
+        !err.contains("\"X\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
+/// Class 4: the tokenizer's separator arm emits a `;` token for a newline, so a
+/// newline-leading run has a preceding token, claims its body region, and
+/// reports **one** error (its operator word) where master ran the body lines as
+/// commands (`"<<EOF"`, `"body"`, `"EOF"`). rc stays 1; bash is rc 0 for the
+/// "heredoc with no command word" family (task #345 owns that gap), and for the
+/// `x` row it is the `x: command not found` status the heredoc replaces.
+#[test]
+fn heredoc_leading_newline_consumes_its_body() {
+    let (out, err, code) = run("\n<<EOF\nbody\nEOF");
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"body\" not found"),
+        "body must not leak: {err:?}"
+    );
+    let (out, err, code) = run("true &&\n<<B\nbody\nB");
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(err.contains("\"<<B\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"body\" not found"),
+        "body must not leak: {err:?}"
+    );
+    let (out, err, code) = run("x\n<<EOF\nbody\nEOF");
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(err.contains("\"x\" not found"), "stderr={err:?}");
+    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
+    assert!(
+        !err.contains("\"body\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
