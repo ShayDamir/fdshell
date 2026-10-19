@@ -9,6 +9,8 @@ use sys::{Origin, ShortCStr, Trace};
 use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 use std::format;
+use std::ops::Deref;
+use std::path::PathBuf;
 
 use super::handle_ls;
 use super::parse::{Target, ls_parse};
@@ -30,15 +32,44 @@ fn is_invalid(e: &error_stack::Report<BuiltinError>, what: &'static str) -> bool
     matches!(e.current_context(), BuiltinError::InvalidArgument(s) if *s == what)
 }
 
-fn tmp(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("fdshell-ls-{}", name))
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. A *fixed* name
+/// (`fdshell-ls-<name>`) is shared by every concurrent suite run with no pid
+/// recycling at all, and pid + counter is unique among *live* processes only
+/// — so the scratch must die with its process: pids are recycled, and a dir
+/// that outlives its process is a later run's inherited dir with that run's
+/// files in it (LESSONS, tasks #255/#318; sweep #342). Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
 }
 
-/// A temp directory registered as fd var `%d` (opened read-only, O_DIRECTORY).
-fn state_with_dir() -> ShellState {
-    let dir = tmp("dir");
-    let _ = std::fs::remove_dir_all(&dir);
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named `fdshell-ls-<tag>-<pid>-<counter>`,
+/// removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-ls-{tag}-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
+/// A temp directory registered as fd var `%d` (opened read-only,
+/// O_DIRECTORY). Returns the state plus the scratch dir's drop guard.
+fn state_with_dir() -> (ShellState, Scratch) {
+    let dir = scratch("dir");
     std::fs::write(dir.join("entry"), b"x").unwrap();
     let c = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
     let fd = sys::openat2::open(
@@ -54,7 +85,7 @@ fn state_with_dir() -> ShellState {
             trace: Trace::boundary(Origin::Shell),
         },
     );
-    state
+    (state, dir)
 }
 
 #[test]
@@ -162,7 +193,7 @@ fn help() {
 
 #[test]
 fn handler_fd_form_lists_the_dir() {
-    let state = state_with_dir();
+    let (state, _scratch) = state_with_dir();
     with_refs(&["%d"], |refs, origs| {
         assert_eq!(
             handle_ls(&Ctx::new(c"ls".into(), refs, origs, &state)).unwrap(),
@@ -173,10 +204,8 @@ fn handler_fd_form_lists_the_dir() {
 
 #[test]
 fn handler_path_form_lists_the_dir() {
-    let dir = tmp("pathform");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    with_refs(&[dir.to_str().unwrap()], |refs, origs| {
+    let _scratch = scratch("pathform");
+    with_refs(&[_scratch.to_str().unwrap()], |refs, origs| {
         assert_eq!(
             handle_ls(&Ctx::new(c"ls".into(), refs, origs, &ShellState::new())).unwrap(),
             0

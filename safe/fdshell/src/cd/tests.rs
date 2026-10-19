@@ -1,7 +1,44 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 use super::*;
 use crate::state::{FdVar, ShellState};
+use alloc::format;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::siginfo::WaitStatus;
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. A *fixed* name
+/// (`fdshell-cd-test`) is shared by every concurrent suite run with no pid
+/// recycling at all, and a dir that outlives its process is itself the
+/// collision: pids get recycled, and a later run inherits the earlier run's
+/// dir with that run's files in it (LESSONS, tasks #255/#318; sweep #342).
+/// Removal is `.ok()`-tolerant: teardown never panics, and it runs on a
+/// failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named `fdshell-cd-<tag>-<pid>-<counter>`,
+/// removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-cd-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
 
 fn pos() -> Position {
     Position::new(1, 1)
@@ -134,9 +171,7 @@ fn cd_move_cwd_to_oldcwd() {
 fn cd_file_fails() {
     child_test(|| {
         let mut state = ShellState::new();
-        let dir = std::env::temp_dir().join("fdshell-cd-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = scratch("test");
         let file_path = dir.join("testfile");
         std::fs::write(&file_path, b"hello\n").unwrap();
 
@@ -147,8 +182,6 @@ fn cd_file_fails() {
         let short_path = sys::ShortCStr::from_vec(path_str.as_bytes().to_vec()).unwrap();
         let e = cd(&[short_path], &mut state, pos()).unwrap_err();
         assert!(matches!(e.current_context(), CdError::CdPathOpen));
-
-        std::fs::remove_dir_all(&dir).unwrap();
     });
 }
 
@@ -156,8 +189,7 @@ fn cd_file_fails() {
 fn cd_symlink_to_dir_fails() {
     child_test(|| {
         let mut state = ShellState::new();
-        let dir = std::env::temp_dir().join("fdshell-cd-symlink-test");
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = scratch("symlink-test");
         std::fs::create_dir_all(dir.join("realdir")).unwrap();
         std::os::unix::fs::symlink(dir.join("realdir"), dir.join("link_to_dir")).unwrap();
 
@@ -169,7 +201,5 @@ fn cd_symlink_to_dir_fails() {
         let short_path = sys::ShortCStr::from_vec(path_str.as_bytes().to_vec()).unwrap();
         let e = cd(&[short_path], &mut state, pos()).unwrap_err();
         assert!(matches!(e.current_context(), CdError::CdPathOpen));
-
-        std::fs::remove_dir_all(&dir).unwrap();
     });
 }

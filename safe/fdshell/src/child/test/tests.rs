@@ -14,9 +14,11 @@ use sys::{Origin, ShortCStr, Trace};
 use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 use std::format;
+use std::ops::Deref;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{eval, handle_test};
 
@@ -39,9 +41,39 @@ fn run(args: &[&str], state: &ShellState) -> Result<i32, error_stack::Report<Bui
     with_refs(args, |refs, origs| eval(refs, origs, state))
 }
 
-/// A unique temp path, namespaced by pid so parallel tests do not collide.
-fn tmp(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("fdshell-test-{}.{}", std::process::id(), name))
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now, so the
+/// `remove_file` teardowns are the guard's job. Removal is `.ok()`-tolerant:
+/// teardown never panics, and it runs on a failing test's unwind, which is
+/// exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A unique per-test scratch dir named `fdshell-test-<tag>-<pid>-<counter>`
+/// (`fdshell-test-<pid>.<name>` files live inside it now), removed when the
+/// test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-test-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 fn cstr(path: &Path) -> CString {
@@ -255,9 +287,10 @@ fn kind_and_mode_ops() {
 #[test]
 fn file_tests_on_paths() {
     let state = ShellState::new();
-    let file = tmp("path-file");
+    let _scratch = scratch("path");
+    let file = _scratch.join("path-file");
     std::fs::write(&file, b"x").unwrap();
-    let link = tmp("path-link");
+    let link = _scratch.join("path-link");
     symlink(&file, &link).unwrap();
     let dir = std::env::temp_dir();
 
@@ -286,16 +319,15 @@ fn file_tests_on_paths() {
         run(&["-L", "/nonexistent-fdshell-test"], &state).unwrap(),
         1
     );
-    let _ = std::fs::remove_file(&link);
-    let _ = std::fs::remove_file(&file);
 }
 
 #[test]
 fn file_tests_on_fd_vars() {
+    let _scratch = scratch("fd");
     let mut state = ShellState::new();
-    let file = tmp("fd-file");
+    let file = _scratch.join("fd-file");
     std::fs::write(&file, b"x").unwrap();
-    let link = tmp("fd-link");
+    let link = _scratch.join("fd-link");
     symlink(&file, &link).unwrap();
     let dir = std::env::temp_dir();
 
@@ -339,16 +371,15 @@ fn file_tests_on_fd_vars() {
         with_refs(&["-e", "%missing"], |r, o| eval(r, o, &state)).unwrap(),
         1
     );
-    let _ = std::fs::remove_file(&link);
-    let _ = std::fs::remove_file(&file);
 }
 
 #[test]
 fn permission_tests_on_paths() {
+    let _scratch = scratch("perm");
     let state = ShellState::new();
-    let rw = tmp("perm-rw");
+    let rw = _scratch.join("perm-rw");
     make_file(&rw, 0o666);
-    let x = tmp("perm-x");
+    let x = _scratch.join("perm-x");
     make_file(&x, 0o111);
     let rws = rw.to_str().unwrap();
     let xs = x.to_str().unwrap();
@@ -356,14 +387,13 @@ fn permission_tests_on_paths() {
     assert_eq!(run(&["-w", rws], &state).unwrap(), 0);
     assert_eq!(run(&["-x", rws], &state).unwrap(), 1);
     assert_eq!(run(&["-x", xs], &state).unwrap(), 0);
-    let _ = std::fs::remove_file(&rw);
-    let _ = std::fs::remove_file(&x);
 }
 
 #[test]
 fn permission_tests_on_fd_vars() {
+    let _scratch = scratch("perm");
     let mut state = ShellState::new();
-    let rw = tmp("perm-fd");
+    let rw = _scratch.join("perm-fd");
     make_file(&rw, 0o666);
     let fd = sys::openat2::open(cstr(&rw), O_RDONLY).unwrap();
     ins(&mut state, c"p", fd);
@@ -380,13 +410,13 @@ fn permission_tests_on_fd_vars() {
         with_refs(&["-x", "%p"], |r, o| eval(r, o, &state)).unwrap(),
         1
     );
-    let _ = std::fs::remove_file(&rw);
 }
 
 #[test]
 fn tty_test_false_for_regular_file() {
+    let _scratch = scratch("tty");
     let mut state = ShellState::new();
-    let file = tmp("tty-file");
+    let file = _scratch.join("tty-file");
     std::fs::write(&file, b"x").unwrap();
     let fd = sys::openat2::open(cstr(&file), O_RDONLY).unwrap();
     ins(&mut state, c"f", fd);
@@ -400,7 +430,6 @@ fn tty_test_false_for_regular_file() {
         1
     );
     assert_eq!(run(&["-t", "0"], &state).unwrap(), 1);
-    let _ = std::fs::remove_file(&file);
 }
 
 #[test]
@@ -425,8 +454,13 @@ fn tty_test_true_for_pty() {
 
 #[test]
 fn binary_mtime_tests() {
+    let _scratch = scratch("mt");
     let state = ShellState::new();
-    let (fa, fb, fc) = (tmp("mt-a"), tmp("mt-b"), tmp("mt-c"));
+    let (fa, fb, fc) = (
+        _scratch.join("mt-a"),
+        _scratch.join("mt-b"),
+        _scratch.join("mt-c"),
+    );
     touch(&fa, 100);
     touch(&fb, 200);
     touch(&fc, 100); // same mtime as fa
@@ -457,9 +491,10 @@ fn binary_mtime_tests() {
 
 #[test]
 fn binary_same_inode_tests() {
+    let _scratch = scratch("same");
     let mut state = ShellState::new();
-    let fa = tmp("same-a");
-    let fb = tmp("same-b");
+    let fa = _scratch.join("same-a");
+    let fb = _scratch.join("same-b");
     std::fs::write(&fa, b"x").unwrap();
     std::fs::write(&fb, b"y").unwrap();
 
@@ -517,14 +552,13 @@ fn binary_same_inode_tests() {
         with_refs(&["%pr", "-ef", "%pw"], |r, o| eval(r, o, &state)).unwrap(),
         0
     );
-    let _ = std::fs::remove_file(&fa);
-    let _ = std::fs::remove_file(&fb);
 }
 
 #[test]
 fn fdsize_on_fd_var_boundaries() {
+    let _scratch = scratch("fdsize");
     let mut state = ShellState::new();
-    let file = tmp("fdsize-fd");
+    let file = _scratch.join("fdsize-fd");
     std::fs::write(&file, b"12345").unwrap(); // size 5
     let fd = sys::openat2::open(cstr(&file), O_RDONLY).unwrap();
     ins(&mut state, c"f", fd);
@@ -559,13 +593,13 @@ fn fdsize_on_fd_var_boundaries() {
         with_refs(&["-fdsize+0", "%missing"], |r, o| eval(r, o, &state)).unwrap(),
         1
     );
-    let _ = std::fs::remove_file(&file);
 }
 
 #[test]
 fn fdsize_on_path_operand() {
+    let _scratch = scratch("fdsize");
     let state = ShellState::new();
-    let file = tmp("fdsize-path");
+    let file = _scratch.join("fdsize-path");
     std::fs::write(&file, b"12345").unwrap(); // size 5
     let p = file.to_str().unwrap();
     assert_eq!(run(&["-fdsize+5", p], &state).unwrap(), 0);
@@ -576,13 +610,13 @@ fn fdsize_on_path_operand() {
         run(&["-fdsize+0", "/nonexistent-fdshell-test"], &state).unwrap(),
         1
     );
-    let _ = std::fs::remove_file(&file);
 }
 
 #[test]
 fn fdsize_bracket_form() {
+    let _scratch = scratch("fdsize");
     let mut state = ShellState::new();
-    let file = tmp("fdsize-bracket");
+    let file = _scratch.join("fdsize-bracket");
     std::fs::write(&file, b"12345").unwrap(); // size 5
     let fd = sys::openat2::open(cstr(&file), O_RDONLY).unwrap();
     ins(&mut state, c"f", fd);
@@ -601,7 +635,6 @@ fn fdsize_bracket_form() {
         .unwrap(),
         1
     );
-    let _ = std::fs::remove_file(&file);
 }
 
 #[test]

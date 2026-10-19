@@ -1,8 +1,48 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 use crate::redirect::RedirectDef;
+use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. The fixed name
+/// `fdshell_exec_redirect_test` had no cleanup at all: concurrent runs shared
+/// it and pid recycling inherited the old file (LESSONS, task #255; sweep
+/// task #342). The file lives inside this dir now. Removal is `.ok()`-tolerant:
+/// teardown never panics, and it runs on a failing test's unwind, which is
+/// exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir `fdshell-become_cmd-<tag>-<pid>-<counter>`,
+/// removed when the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-become_cmd-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
 
 fn make_exec_cmdline(redirects: Vec<RedirectDef>) -> CommandLine {
     CommandLine {
@@ -25,7 +65,8 @@ fn make_exec_cmdline(redirects: Vec<RedirectDef>) -> CommandLine {
 
 #[test]
 fn apply_redirects_dup2s_var_fd_onto_target() {
-    let path = std::env::temp_dir().join("fdshell_exec_redirect_test");
+    let dir = scratch("redirect");
+    let path = dir.join("f");
     let cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let fd = sys::openat2::open(
         cstr.as_c_str(),

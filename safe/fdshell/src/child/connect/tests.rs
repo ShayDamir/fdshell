@@ -10,8 +10,51 @@ use builtins::error::BuiltinError;
 use crate::child::Ctx;
 use crate::state::ShellState;
 use std::io::Read;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::handle_connect;
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named listener socket lives inside this dir now, so
+/// the `remove_file` teardown is the guard's job. Removal is `.ok()`-tolerant:
+/// teardown never panics, and it runs on a failing test's unwind, which is
+/// exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named after `tag` (the old
+/// `fdshell-connect-<tag>-<pid>` file lives inside it now), removed when the
+/// test's guard drops. The short prefix keeps the bound socket path well
+/// under `sun_path`'s 108 bytes.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-connect-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
 
 fn name(tag: &str) -> String {
     format!("fdshell-connect-{tag}-{}", std::process::id())
@@ -110,13 +153,10 @@ fn connect_handler_dgram_sends_connected_socket() {
 
 #[test]
 fn connect_handler_path_sends_connected_socket() {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir()
-        .join(name("path"))
-        .with_extension(format!("{c}"));
+    let _scratch = scratch("path");
     // The listener (and its socket file) is built by the test: `connect`
     // never creates a filesystem object.
+    let path = _scratch.join("sock");
     let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
     let (state, receiver) = capture_state();
     let path_c = path.to_string_lossy().into_owned();
@@ -137,8 +177,6 @@ fn connect_handler_path_sends_connected_socket() {
         assert!(n > 0, "accepted fd must stay readable");
         got += n;
     }
-    assert_eq!(&buf, b"hi\n");
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

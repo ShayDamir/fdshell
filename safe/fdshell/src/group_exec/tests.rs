@@ -8,8 +8,35 @@ use sys::{Origin, Position, ScriptText, ShortCStr};
 
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::run_group;
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 fn text(b: &[u8]) -> ScriptText {
     ScriptText::new(
@@ -34,12 +61,14 @@ fn var<'a>(state: &'a ShellState, name: &'static CStr) -> Option<&'a ShortCStr> 
     state.strings.get::<ShortCStr>(&name.into()).map(|v| &**v)
 }
 
-fn temp_path(tag: &str) -> String {
-    std::env::temp_dir()
-        .join(format!("fdshell_group_{tag}_{}", std::process::id()))
-        .to_str()
-        .unwrap()
-        .to_string()
+/// A pid + counter scratch dir (the old `fdshell_group_<tag>_<pid>` files
+/// live inside it now); returns the path plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell_group_{tag}_{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.join("f").to_str().unwrap().to_string(), Scratch(dir))
 }
 
 /// Read the redirect target and remove it.
@@ -94,8 +123,8 @@ fn loop_control_propagates_out_of_the_body() {
 /// The group's redirection is applied for the body and fd 1 is back after it.
 #[test]
 fn redirect_applies_for_the_group_and_is_restored() {
-    let a = temp_path("apply_a");
-    let b = temp_path("apply_b");
+    let (a, _sa) = temp_path("apply_a");
+    let (b, _sb) = temp_path("apply_b");
     let before = link(1);
     let cell = make_cell();
     run_group(
@@ -157,12 +186,11 @@ fn failing_open_skips_the_body_and_errors_are_restored() {
     assert_eq!(var(&cell.borrow().unwrap(), c"x"), None);
 
     let before = link(1);
-    let target = temp_path("body_err");
+    let (target, _scratch) = temp_path("body_err");
     run_group(
         &group_of(&format!("{{ nosuchcmd; }} > {target}").into_bytes()),
         &cell,
     )
     .unwrap();
     assert_eq!(link(1), before, "the restore runs on the body's error path");
-    let _ = std::fs::remove_file(&target);
 }

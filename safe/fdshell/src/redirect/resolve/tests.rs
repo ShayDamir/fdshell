@@ -4,6 +4,33 @@ use crate::redirect::{RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 fn cell() -> ForkCell<ShellState> {
     ForkCell::new(ShellState::new())
@@ -344,12 +371,17 @@ fn here_doc_source_is_above_its_zero_target() {
     assert!(dup_of(doc).as_raw() > 0);
 }
 
-fn temp_path(tag: &str) -> String {
-    std::env::temp_dir()
-        .join(format!("fdshell_resolve_{tag}_{}", std::process::id()))
-        .to_str()
-        .unwrap()
-        .to_string()
+/// A pid + counter scratch dir (the old `fdshell_resolve_<tag>_<pid>` files
+/// live inside it now); returns the path plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell_resolve_{tag}_{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.join("f").to_str().unwrap().to_string(), Scratch(dir))
 }
 
 fn cstr(s: &str) -> ShortCStr {
@@ -391,7 +423,7 @@ fn pair_of(resolved: &[Redirect], first: i32, second: i32) -> (LocalFd, LocalFd)
 #[test]
 fn combined_path_def_resolves_to_a_pair_from_one_open() {
     let c = cell();
-    let path = temp_path("combined_pair");
+    let (path, _scratch) = temp_path("combined_pair");
     let src = vec![open_file(&path)];
     let redirects = vec![RedirectDef::combined(
         RedirectDirection::Write,
@@ -409,7 +441,6 @@ fn combined_path_def_resolves_to_a_pair_from_one_open() {
     drop((fd1, fd2));
     drop(resolved);
     let body = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(body, "hi\ne\n", "one description: the offsets are shared");
 }
 
@@ -419,7 +450,7 @@ fn combined_path_def_resolves_to_a_pair_from_one_open() {
 #[test]
 fn combined_var_def_resolves_to_a_pair_from_one_table_fd() {
     let c = cell();
-    let path = temp_path("combined_var_pair");
+    let (path, _scratch) = temp_path("combined_var_pair");
     {
         let mut state = c.borrow_mut().unwrap();
         state.fds.insert(
@@ -442,7 +473,6 @@ fn combined_var_def_resolves_to_a_pair_from_one_table_fd() {
     drop((fd1, fd2));
     drop(resolved);
     let body = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(body, "hi\ne\n");
 }
 
@@ -452,7 +482,7 @@ fn combined_var_def_resolves_to_a_pair_from_one_table_fd() {
 #[test]
 fn two_path_defs_keep_two_independent_opens() {
     let c = cell();
-    let path = temp_path("two_opens");
+    let (path, _scratch) = temp_path("two_opens");
     let src = vec![open_file(&path), open_file(&path)];
     let redirects = vec![
         RedirectDef::write_path(1, cstr(&path)),
@@ -466,7 +496,6 @@ fn two_path_defs_keep_two_independent_opens() {
     drop((fd1, fd2));
     drop(resolved);
     let body = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(
         body, "e\n\n",
         "fd 2's open starts at offset 0 and overwrites fd 1"

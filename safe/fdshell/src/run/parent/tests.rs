@@ -3,6 +3,33 @@ use super::*;
 use crate::error::redirect::OpenRedirectError;
 use alloc::format;
 use alloc::string::{String, ToString};
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 fn cell() -> ForkCell<ShellState> {
     ForkCell::new(ShellState::new())
@@ -16,12 +43,15 @@ fn st(b: &[u8]) -> ScriptText {
     )
 }
 
-fn temp_path(tag: &str) -> String {
-    std::env::temp_dir()
-        .join(format!("fdshell_parent_{tag}_{}", std::process::id()))
-        .to_str()
-        .unwrap()
-        .to_string()
+/// A pid + counter scratch dir named after `tag` (the old
+/// `fdshell_parent_<tag>_<pid>` files live inside it now); returns the path
+/// of a file in it plus the guard — bind both.
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell_parent_{tag}_{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.join("f").to_str().unwrap().to_string(), Scratch(dir))
 }
 
 fn cstr(s: &String) -> sys::ShortCStr {
@@ -79,8 +109,8 @@ fn saved_copy_fd(orig: &String, target: i32, path: &String, cell: &ForkCell<Shel
 /// script-visible range. The floor that makes the copy unreachable is task #184.
 #[test]
 fn body_that_closes_the_saved_copy_fails_the_command() {
-    let orig = temp_path("orig");
-    let target = temp_path("target");
+    let (orig, _so) = temp_path("orig");
+    let (target, _st) = temp_path("target");
     open_at(&orig, 9);
     let copy = saved_copy_fd(&orig, 9, &target, &cell());
     let script = format!("f(){{ exec {copy}>&-; }}; f 9> {target}");
@@ -130,8 +160,6 @@ fn body_that_closes_the_saved_copy_fails_the_command() {
         "the body closed the saved copy, so the restore had no source (fd {copy})"
     );
     let body = std::fs::read_to_string(&target).unwrap();
-    let _ = std::fs::remove_file(&target);
-    let _ = std::fs::remove_file(&orig);
     let _ = sys::dup::close(9);
     assert_eq!(body, "", "the redirect created the target file");
 }

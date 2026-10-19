@@ -4,17 +4,47 @@ use crate::redirect::{RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now. Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 fn cell() -> ForkCell<ShellState> {
     ForkCell::new(ShellState::new())
 }
 
-fn temp_path(tag: &str) -> String {
-    std::env::temp_dir()
-        .join(format!("fdshell_scope_{tag}_{}", std::process::id()))
-        .to_str()
-        .unwrap()
-        .to_string()
+/// A pid + counter scratch dir named after `tag` (the old
+/// `fdshell_scope_<tag>_<pid>` files live inside it now); returns the path of
+/// a file in it plus the guard — bind both (`let (a, _sa) = …`).
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell_scope_{tag}_{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.join("f").to_str().unwrap().to_string(), Scratch(dir))
 }
 
 fn cstr(s: &String) -> sys::ShortCStr {
@@ -56,8 +86,8 @@ fn body(path: &String) -> String {
 fn open_applies_the_redirection_and_restore_restores_stdout() {
     // Two successive file targets, one per scope: the second scope saves the fd
     // the first restore put back, so the save/restore cycle is repeatable.
-    let a = temp_path("stdout_a");
-    let b = temp_path("stdout_b");
+    let (a, _sa) = temp_path("stdout_a");
+    let (b, _sb) = temp_path("stdout_b");
     let before = link(1);
     let cell = cell();
     let scope = Scope::open(&[RedirectDef::write_path(1, cstr(&a))], &cell).unwrap();
@@ -107,8 +137,8 @@ fn restore_of_a_closed_fd_leaves_it_closed() {
 
 #[test]
 fn restore_of_an_open_fd_reopens_the_original() {
-    let a = temp_path("orig_a");
-    let b = temp_path("orig_b");
+    let (a, _sa) = temp_path("orig_a");
+    let (b, _sb) = temp_path("orig_b");
     open_at(&a, 9);
     assert_eq!(link(9), std::path::Path::new(&a));
     let cell = cell();
@@ -124,14 +154,12 @@ fn restore_of_an_open_fd_reopens_the_original() {
         std::path::Path::new(&a),
         "fd 9 is back on the file it saved"
     );
-    let _ = std::fs::remove_file(&a);
-    let _ = std::fs::remove_file(&b);
 }
 
 #[test]
 fn last_wins_within_one_scope() {
-    let a = temp_path("lw_a");
-    let b = temp_path("lw_b");
+    let (a, _sa) = temp_path("lw_a");
+    let (b, _sb) = temp_path("lw_b");
     let before = link(1);
     let cell = cell();
     // Two write targets to fd 1 in source order: the list is sorted by fd and
@@ -172,8 +200,8 @@ fn reverse_restore_leaves_the_shell_fd_on_its_original_target() {
     // stdout, so the post-restore write is observable by absence: a forward
     // restore ends on the loser `a`, so this write lands in `a` and the
     // `a`-is-empty assertion fails.
-    let a = temp_path("rev_a");
-    let b = temp_path("rev_b");
+    let (a, _sa) = temp_path("rev_a");
+    let (b, _sb) = temp_path("rev_b");
     let before = link(1);
     let cell = cell();
     let scope = Scope::open(
@@ -206,9 +234,9 @@ fn post_restore_write_lands_on_the_restored_target() {
     // post-restore write is observable in its body. The save copies `orig`'s
     // file description (offset included), so the restore resumes it where the
     // shell left off, and `after` appends to `orig`.
-    let orig = temp_path("rw_orig");
-    let a = temp_path("rw_a");
-    let b = temp_path("rw_b");
+    let (orig, _so) = temp_path("rw_orig");
+    let (a, _sa) = temp_path("rw_a");
+    let (b, _sb) = temp_path("rw_b");
     open_at(&orig, 9);
     write_fd(9, b"orig\n");
     let cell = cell();
@@ -249,7 +277,7 @@ fn post_restore_write_lands_on_the_restored_target() {
 /// back on restore.
 #[test]
 fn combined_def_shares_one_description_between_fd1_and_fd2() {
-    let a = temp_path("combined_share");
+    let (a, _sa) = temp_path("combined_share");
     let out_before = link(1);
     let err_before = link(2);
     let cell = cell();
@@ -281,7 +309,7 @@ fn combined_def_shares_one_description_between_fd1_and_fd2() {
 #[test]
 fn combined_def_target_folds_into_the_source_minimum() {
     let _ = sys::dup::close(2);
-    let a = temp_path("combined_min_fd");
+    let (a, _sa) = temp_path("combined_min_fd");
     let out_before = link(1);
     let cell = cell();
     let scope = Scope::open(
@@ -331,7 +359,7 @@ fn restore_of_a_lost_saved_copy_is_a_redirect_error() {
     // `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`);
     // this unit pin is the deterministic version, independent of where the copy
     // lands.
-    let a = temp_path("lost_copy_a");
+    let (a, _sa) = temp_path("lost_copy_a");
     let cell = cell();
     let scope = Scope::open(&[RedirectDef::write_path(1, cstr(&a))], &cell).unwrap();
     let copy = scope.saved.first().unwrap().1.as_ref().unwrap().as_raw();
@@ -348,7 +376,7 @@ fn saved_copy_survives_a_later_dup2() {
     // `2>&1` `dup2` — which closes fd 2 — would clobber it, so the restore would
     // put the wrong fd back on stdout. Saving above every target keeps it safe.
     let _ = sys::dup::close(2);
-    let a = temp_path("dup_a");
+    let (a, _sa) = temp_path("dup_a");
     let before = link(1);
     let cell = cell();
     let scope = Scope::open(

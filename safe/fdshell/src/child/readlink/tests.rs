@@ -9,6 +9,8 @@ use sys::{Origin, ShortCStr, Trace};
 use crate::child::Ctx;
 use crate::state::{FdVar, ShellState};
 use std::format;
+use std::ops::Deref;
+use std::path::PathBuf;
 
 use super::handle_readlink;
 use super::parse::{Target, readlink_parse};
@@ -30,16 +32,45 @@ fn is_invalid(e: &error_stack::Report<BuiltinError>, what: &'static str) -> bool
     matches!(e.current_context(), BuiltinError::InvalidArgument(s) if *s == what)
 }
 
-fn tmp(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("fdshell-readlink-{}.{}", std::process::id(), name))
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir (old `fdshell-readlink-<pid>.<name>` files
+/// live inside it now), removed when the test's guard drops.
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-readlink-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 /// A temp symlink `link` -> `target` with its own fd var `%f` (O_PATH fd on
-/// the link itself).
-fn state_with_symlink() -> ShellState {
-    let target = tmp("target");
+/// the link itself). Returns the state plus the scratch dir's drop guard.
+fn state_with_symlink() -> (ShellState, Scratch) {
+    let dir = scratch();
+    let target = dir.join("target");
     std::fs::write(&target, b"x").unwrap();
-    let link = tmp("link");
+    let link = dir.join("link");
     let _ = std::fs::remove_file(&link);
     std::os::unix::fs::symlink("target-name", &link).unwrap();
     let c = std::ffi::CString::new(link.to_str().unwrap()).unwrap();
@@ -56,14 +87,14 @@ fn state_with_symlink() -> ShellState {
             trace: Trace::boundary(Origin::Shell),
         },
     );
-    state
+    (state, dir)
 }
 
 /// A temp dir holding a `g.txt` -> `target-name` symlink, registered as fd
-/// var `%d`; O_PATH|O_DIRECTORY keeps the handle on the dir itself.
-fn state_with_dir_link() -> ShellState {
-    let dir = tmp("dir");
-    std::fs::create_dir_all(&dir).unwrap();
+/// var `%d`; O_PATH|O_DIRECTORY keeps the handle on the dir itself. Returns
+/// the state plus the scratch dir's drop guard.
+fn state_with_dir_link() -> (ShellState, Scratch) {
+    let dir = scratch();
     let _ = std::fs::remove_file(dir.join("g.txt"));
     std::os::unix::fs::symlink("target-name", dir.join("g.txt")).unwrap();
     let c = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
@@ -80,14 +111,16 @@ fn state_with_dir_link() -> ShellState {
             trace: Trace::boundary(Origin::Shell),
         },
     );
-    state
+    (state, dir)
 }
 
 /// A temp symlink whose target is 4095 bytes — the kernel's maximum —
-/// registered as fd var `%f`.
-fn state_with_long_link() -> ShellState {
+/// registered as fd var `%f`. Returns the state plus the scratch dir's drop
+/// guard.
+fn state_with_long_link() -> (ShellState, Scratch) {
+    let dir = scratch();
     let target = "a".repeat(4095);
-    let link = tmp("longlink");
+    let link = dir.join("longlink");
     let _ = std::fs::remove_file(&link);
     std::os::unix::fs::symlink(&target, &link).unwrap();
     let c = std::ffi::CString::new(link.to_str().unwrap()).unwrap();
@@ -104,7 +137,7 @@ fn state_with_long_link() -> ShellState {
             trace: Trace::boundary(Origin::Shell),
         },
     );
-    state
+    (state, dir)
 }
 
 #[test]
@@ -215,7 +248,7 @@ fn help() {
 
 #[test]
 fn handler_fd_form_reads_the_link() {
-    let state = state_with_symlink();
+    let (state, _scratch) = state_with_symlink();
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
             handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap(),
@@ -261,7 +294,7 @@ fn handler_unset_dir_var() {
 
 #[test]
 fn handler_dir_var_resolves_against_fd() {
-    let state = state_with_dir_link();
+    let (state, _scratch) = state_with_dir_link();
     with_refs(&["g.txt", "--dir", "%d"], |refs, origs| {
         assert_eq!(
             handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap(),
@@ -272,7 +305,7 @@ fn handler_dir_var_resolves_against_fd() {
 
 #[test]
 fn handler_long_target_fits_the_buffer() {
-    let state = state_with_long_link();
+    let (state, _scratch) = state_with_long_link();
     with_refs(&["%f"], |refs, origs| {
         assert_eq!(
             handle_readlink(&Ctx::new(c"readlink".into(), refs, origs, &state)).unwrap(),

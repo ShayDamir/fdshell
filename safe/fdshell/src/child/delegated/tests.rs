@@ -10,32 +10,68 @@ use alloc::format;
 use alloc::string::ToString;
 use core::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-fn temp_file() -> (sys::LocalFd, std::path::PathBuf) {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). The pid-named temp files live inside this dir now, so the
+/// `remove_file` teardowns are the guard's job. Removal is `.ok()`-tolerant:
+/// teardown never panics, and it runs on a failing test's unwind, which is
+/// exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named after `tag` (the old
+/// `fdshell-<tag>-<pid>-<counter>` files live inside it now), removed when
+/// the test's guard drops.
+fn scratch(tag: &str) -> Scratch {
     let c = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path =
-        std::env::temp_dir().join(format!("fdshell-fchmod-test-{}-{}", std::process::id(), c));
+    let dir = std::env::temp_dir().join(format!("fdshell-{tag}-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
+/// A regular file inside a guarded per-test dir: the fd, its path, and the
+/// dir's drop guard — bind all three.
+fn temp_file() -> (sys::LocalFd, PathBuf, Scratch) {
+    let dir = scratch("fchmod-test");
+    let path = dir.join("f");
     let path_c = CString::new(path.to_str().unwrap()).unwrap();
     let fd = sys::openat2::open(
         path_c.as_c_str(),
         sys::fcntl::O_CREAT | sys::fcntl::O_WRONLY,
     )
     .unwrap();
-    (fd, path)
+    (fd, path, dir)
 }
 
 #[test]
 fn fchmod_success_returns_zero() {
-    let (local, path) = temp_file();
+    let (local, _path, _scratch) = temp_file();
     let exported = local.export().unwrap();
     let fd_c = CString::new(exported.as_raw().to_string()).unwrap();
     let refs: [&CStr; 2] = [c"644", fd_c.as_c_str()];
     let result = handle_fchmod(&Ctx::new(c"fchmod".into(), &refs, &[], &ShellState::new()));
     assert_eq!(result.unwrap(), 0);
     drop(local);
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -46,7 +82,7 @@ fn fchmod_no_args_is_error() {
 
 #[test]
 fn unlinkat_success_returns_zero() {
-    let (local, path) = temp_file();
+    let (local, path, _scratch) = temp_file();
     let path_c = CString::new(path.to_str().unwrap()).unwrap();
     let refs: [&CStr; 1] = [path_c.as_c_str()];
     let result = handle_unlinkat(&Ctx::new(
@@ -68,13 +104,8 @@ fn unlinkat_no_args_is_error() {
 
 #[test]
 fn symlinkat_success_returns_zero() {
-    static LINK_COUNTER: AtomicU64 = AtomicU64::new(0);
-    let c = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let link = std::env::temp_dir().join(format!(
-        "fdshell-symlinkat-handler-{}-{}",
-        std::process::id(),
-        c
-    ));
+    let _scratch = scratch("symlinkat-handler");
+    let link = _scratch.join("link");
     let link_c = CString::new(link.to_str().unwrap()).unwrap();
     let refs: [&CStr; 2] = [c"target", link_c.as_c_str()];
     let result = handle_symlinkat(&Ctx::new(
@@ -88,7 +119,6 @@ fn symlinkat_success_returns_zero() {
         std::fs::symlink_metadata(&link).is_ok(),
         "link should exist"
     );
-    let _ = std::fs::remove_file(&link);
 }
 
 #[test]
@@ -99,7 +129,7 @@ fn symlinkat_no_args_is_error() {
 
 #[test]
 fn utimensat_success_returns_zero() {
-    let (local, path) = temp_file();
+    let (local, path, _scratch) = temp_file();
     let path_c = CString::new(path.to_str().unwrap()).unwrap();
     let refs: [&CStr; 3] = [c"--mtime", c"1234567890", path_c.as_c_str()];
     let result = handle_utimensat(&Ctx::new(
@@ -110,7 +140,6 @@ fn utimensat_success_returns_zero() {
     ));
     assert_eq!(result.unwrap(), 0);
     drop(local);
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

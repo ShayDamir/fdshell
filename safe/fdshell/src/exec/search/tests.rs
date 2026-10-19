@@ -3,8 +3,10 @@
 use alloc::ffi::CString;
 use alloc::format;
 use alloc::string::{String, ToString};
+use std::ops::Deref;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::AtomicU64;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use hashbrown::HashMap;
 use sys::LocalFd;
@@ -19,20 +21,40 @@ use crate::exec::{resolve_path, resolve_path_str};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// A scratch dir holding an executable `mybin`. The PATH *loop* itself (its
 /// entries, their order) is read from the process environment and is pinned by
 /// the integration tests in `tests/strict.rs`; these unit tests take the search
 /// base fd directly, so they need no environment manipulation (the safe crates
 /// forbid the `unsafe` `std::env::set_var`).
-fn scratch() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-search-{}-{}", std::process::id(), c));
-    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let helper = dir.join("mybin");
     std::fs::write(&helper, b"#!/bin/sh\necho SEARCH-OK\n").unwrap();
     std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
-    dir
+    Scratch(dir)
 }
 
 fn cstr(path: &str) -> CString {
@@ -113,7 +135,6 @@ fn strict_relative_join_needs_no_dot_prefix() {
     std::fs::copy(dir.join("mybin"), dir.join("sub").join("mybin")).unwrap();
     let name = resolve_path_str(&word("prog"), &t, true, Some(&base)).unwrap();
     assert_eq!(name.as_bytes().unwrap(), b"sub/mybin");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The strict base: a relative pathname opens through the pinned dirfd; with
@@ -229,7 +250,6 @@ fn relative_program_path_follows_the_process_cwd() {
             );
         }
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The pinned `%CWD` fd is strict mode's resolution base; `ShellState::new()`
@@ -246,7 +266,6 @@ fn shell_state_exposes_the_strict_base() {
     assert!(state.cwd_fd().is_some());
     state.options |= crate::options::STRICT;
     assert!(state.strict());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The strict base is a `LocalFd` borrowed as an `AtFd` view, and the path
@@ -262,7 +281,6 @@ fn base_fd_opens_the_target_through_openat2() {
         &sys::openat2::OpenHow::new(O_PATH as u64, 0),
     );
     assert!(fd.is_ok());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A `:`-separated empty `PATH` entry is `.` under strict (bash) and skipped
