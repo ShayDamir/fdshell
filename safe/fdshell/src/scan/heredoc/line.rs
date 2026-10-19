@@ -57,15 +57,6 @@ pub(crate) fn line_bodies_for_line(
     }
 }
 
-/// The number of `<<` operators in the run `line[from..to]` (0 when a bare
-/// `<<` has no delimiter word). The byte-level count the execution layer uses
-/// to assign a line's body regions to its parts.
-pub(crate) fn operator_count(line: &[u8], from: usize, to: usize) -> usize {
-    operator_delims(line, from, to)
-        .map(|ops| ops.len())
-        .unwrap_or(0)
-}
-
 /// The start of the physical line that contains `pos` (the index just past the
 /// newline preceding it, `0` when there is none). Every whole-line operator
 /// scan anchors here: the window and the skip derived from it are one pair

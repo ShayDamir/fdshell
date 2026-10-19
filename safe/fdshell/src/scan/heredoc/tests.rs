@@ -380,3 +380,30 @@ fn unterminated_semicolon_terminated_is_true() {
 fn unterminated_empty_quoted_delimiter_is_true() {
     assert!(unterminated(b"cat <<\"\"", 0, 8));
 }
+
+/// `semi_terminated_regions`' empty-`ops` guard is **live** (task #261 renamed
+/// it from "unreachable"): the run window counts the operator while the line
+/// window hides it behind an unclosed `((` region, so the line's `ops` is empty.
+/// The guard is what keeps that case from jumping `i` to `body_start` and
+/// skipping the line's runs behind the `;`; the valid twin claims its body, as
+/// every block-arm pin does.
+#[test]
+fn semi_terminated_regions_guard_is_live() {
+    let line = b"(( x ; cat <<B; fi\nbody\nB";
+    assert_eq!(
+        super::operator_count(line, 6, 14),
+        1,
+        "the run window counts its operator"
+    );
+    assert!(
+        super::regions::semi_terminated_regions(line, 6, 14).is_none(),
+        "the line window hides it behind the unclosed `((`: the guard fires"
+    );
+    assert!(
+        body_regions(line).is_empty(),
+        "and the whole-text scan claims no region"
+    );
+    let line = b"if true; then cat <<T; fi\nbody\nT";
+    assert!(super::regions::semi_terminated_regions(line, 8, 21).is_some());
+    assert_eq!(body_regions(line), vec![(26, 31)]);
+}

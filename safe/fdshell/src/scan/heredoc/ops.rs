@@ -1,5 +1,7 @@
 //! The byte-level `<<` operator scan for a run, shared by the skip helpers
-//! and the line-body extraction.
+//! and the line-body extraction. The walk yields operator **sites**; the
+//! delimiter is read from a site on demand, so the operator *count* never
+//! depends on delimiter validity (see [`operator_count`]).
 
 use crate::scan::ScanState;
 
@@ -7,22 +9,62 @@ use super::io::{io_fd, io_prefix, word_start};
 use super::lines::delimiter_span;
 use super::op::Operator;
 use alloc::vec::Vec;
+use pipe::{precedes_pipe, token_before};
+
+mod pipe;
+
+/// One `<<` operator site: the index of its first `<`, the `<<-` marker and the
+/// io-number descriptor. Deliberately no delimiter: the count is a shape count,
+/// and the delimiter's validity is the parse layer's error (`operator_at`'s
+/// `InvalidRedirect`), not a counting gate.
+struct Site {
+    op: usize,
+    dash: bool,
+    fd: i32,
+}
 
 /// The `Operator` of every `<<` in the run, in order. `None` when a bare
-/// `<<` (or `<<-`) has no delimiter word. A `#` comment (outside quotes, at
-/// a word start) is skipped whole, so a `<<` in a comment is not an operator
-/// (the tokenizer never yields it, and the two counts must agree).
+/// `<<` (or `<<-`) has no delimiter word, which is what the region/skip layer
+/// needs: a line whose operators it cannot read claims no body region, so the
+/// parse layer reports the shape. A `#` comment (outside quotes, at a word
+/// start) is skipped whole, so a `<<` in a comment is not an operator (the
+/// tokenizer never yields it, and the two counts must agree).
 ///
 /// A `<<` counts as an operator when a token precedes its word and that token
 /// is not a pipeline `|` — the byte mirror of `parse::heredoc::is_operator`
-/// (`i != 0 && prev != b"|"`). A `<<` at the run start is the command word
-/// and never counts. The io-number form (`3<<T`, `0<<-T`) is read through the
+/// (`i != 0 && prev != |`). A `<<` at the run start is the command word and
+/// never counts. The io-number form (`3<<T`, `0<<-T`) is read through the
 /// shared `io::io_prefix`, so its digits begin the operator's word and the
 /// operator carries their fd; `io::span_operator` is the token-level half of
 /// that same rule (LESSONS: the byte-level and token-level counts must agree).
 pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator>> {
-    let mut state = ScanState::new();
     let mut found: Vec<Operator> = Vec::new();
+    for site in sites(line, from, to) {
+        let (_, raw) = delimiter_span(line, site.op + 2 + usize::from(site.dash), to)?;
+        found.push(Operator::new(raw, site.dash, site.fd));
+    }
+    Some(found)
+}
+
+/// The number of `<<` operators in the run `line[from..to]`: exactly what the
+/// token layer counts (`parse::heredoc::is_operator` has no delimiter test, so
+/// a bare `<<` with an invalid delimiter is counted there too). Delimiter
+/// validity is the parse's business; the region layer's `operator_delims` keeps
+/// its `None`, and the window-subset invariant (`regions.rs`) makes the split
+/// allocation-neutral: every counting window sits inside the physical line's
+/// window, whose region list is empty exactly when a delimiter is unreadable.
+pub(crate) fn operator_count(line: &[u8], from: usize, to: usize) -> usize {
+    sites(line, from, to).len()
+}
+
+/// Every `<<` site of the run `line[from..to]`, in order. The walk gates are
+/// the token layer's rules (see [`operator_delims`]' doc); `delimiter_span` is
+/// used only to step past the operator's word, and on `None` (a bare `<<` with
+/// no readable delimiter) the site is still recorded and the walk continues at
+/// the operator's own tail.
+fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
+    let mut state = ScanState::new();
+    let mut found: Vec<Site> = Vec::new();
     let mut seen_token = false;
     let mut i = from;
     while i < to {
@@ -34,7 +76,7 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
                 .and_then(|s| s.iter().position(|&b| b == b'\n'))
             {
                 Some(p) => i = i + p + 1,
-                None => return Some(found),
+                None => return found,
             }
             continue;
         }
@@ -58,9 +100,10 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
             && !precedes_pipe(line, run)
         {
             let dash = line.get(i + 2) == Some(&b'-');
-            let (next, raw) = delimiter_span(line, i + 2 + usize::from(dash), to)?;
             let fd = io.and_then(|(_, digits)| io_fd(digits)).unwrap_or(0);
-            found.push(Operator::new(raw, dash, fd));
+            found.push(Site { op: i, dash, fd });
+            let tail = i + 2 + usize::from(dash);
+            let next = delimiter_span(line, tail, to).map_or(tail, |(next, _)| next);
             while i < next {
                 i = state.advance(line, i);
             }
@@ -70,54 +113,11 @@ pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec
         // arms jump 2+ bytes, so the post-jump byte is not the token's first byte.
         let byte = line.get(i).copied();
         i = state.advance(line, i);
-        if byte.is_some_and(is_token_byte) {
+        if byte.is_some_and(pipe::is_token_byte) {
             seen_token = true;
         }
     }
-    Some(found)
-}
-
-/// The byte at a consumed position starts (or continues) a token: any
-/// non-whitespace byte, except a pipeline `|`, which is a stage boundary with
-/// no token of its own — `parse::heredoc::is_operator` rejects a `<<` whose
-/// previous token is `|`, and a `|`-leading run has no preceding token at all
-/// (`| <<EOF`). A `|` absorbed into a `>|` clobber is operator content of its
-/// word, decided by `precedes_pipe`, never here. `;`/`&&` ARE tokens for the
-/// tokenizer, so they count here: `cat <<A ; <<B` is two operators at both levels.
-fn is_token_byte(b: u8) -> bool {
-    !b.is_ascii_whitespace() && b != b'|'
-}
-
-/// A token byte sits in `line[from..run]`: the byte mirror of `is_operator`'s
-/// `i != 0` for an operator whose word begins at `run` (its io-number digits
-/// belong to that word, so they never count as the preceding token — a run
-/// that opens with only whitespace has none, exactly as the whitespace-leading
-/// `<<` rows of `is_token_byte` decide).
-fn token_before(line: &[u8], from: usize, run: usize) -> bool {
-    line.get(from..run)
-        .unwrap_or_default()
-        .iter()
-        .any(|&b| is_token_byte(b))
-}
-
-/// A `|` with only whitespace between it and `i`: a pipeline position, where
-/// `<<` is a command word, not an operator. A `|` absorbed into a `>|` clobber
-/// operator is not a pipeline position: `parse::redirect::clobber_pipe` is the
-/// ONE rule, the same `>`-terminated word test the tokenizer applies to the
-/// word's raw bytes + mask (`parse/token_pipe.rs`), so the byte and token
-/// counts cannot diverge (LESSONS: byte-level and token-level rules must
-/// agree).
-fn precedes_pipe(line: &[u8], i: usize) -> bool {
-    let mut k = i;
-    while k > 0 {
-        k -= 1;
-        match line.get(k) {
-            Some(&b' ') | Some(b'\t') => continue,
-            Some(b'|') => return !crate::parse::clobber_pipe(line, k),
-            _ => return false,
-        }
-    }
-    false
+    found
 }
 
 #[cfg(test)]

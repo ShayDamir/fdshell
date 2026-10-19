@@ -65,7 +65,7 @@ pub(crate) fn body_regions(line: &[u8]) -> Vec<(usize, usize)> {
 /// consumed by the returned resume index, so the line's regions are counted
 /// once. `None` when the separator is not a `;`, the run writes no operator,
 /// or a delimiter line is missing (the parse layer's own error, as before).
-fn semi_terminated_regions(
+pub(super) fn semi_terminated_regions(
     line: &[u8],
     run_start: usize,
     semi: usize,
@@ -76,10 +76,13 @@ fn semi_terminated_regions(
     let start = line_start(line, run_start);
     let body_start = line_end_after(line, semi);
     let ops = operator_delims(line, start, body_start)?;
-    // Unreachable today by the window-subset invariant (`operator_count` scans a
-    // sub-window with a stricter preceding-token rule, so a non-empty run always
-    // yields a non-empty `ops`), and the guard is what keeps an empty `ops` from
-    // jumping `i` to `body_start` and skipping the line's runs behind the `;`.
+    // Live guard, and it needs no window-subset argument any more: `operator_count`
+    // counts the same sites `operator_delims` reads (task #261), so an empty `ops`
+    // with a non-empty run means the *line* window hides the operator that the run
+    // window sees — an unclosed `((` (or `$(`) region: `(( x ; cat <<B; fi` counts 1
+    // in the `cat <<B` run and 0 over the line. The guard is what keeps that
+    // operator from jumping `i` to `body_start` and skipping the line's runs behind
+    // the `;`; pinned in `scan/heredoc/tests.rs::semi_terminated_regions_guard_is_live`.
     // LESSONS: a guard no input can reach is recorded, not chased.
     if ops.is_empty() {
         return None;

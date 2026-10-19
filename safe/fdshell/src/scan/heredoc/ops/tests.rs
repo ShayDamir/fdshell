@@ -3,6 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::operator_delims;
+use super::{operator_count, pipe};
 
 /// A `#` comment (outside quotes, at a word start) is skipped whole: a `<<`
 /// inside it is not an operator.
@@ -470,4 +471,159 @@ fn bare_quoted_operator_delimiter_counts_one_at_both_levels() {
             line
         );
     }
+}
+
+/// `operator_count` counts the `<<` operators in a run (the same rule the
+/// token layer applies, and the count the execution layer uses to hand out
+/// body regions).
+#[test]
+fn operator_count_counts_operators() {
+    let line = b"cat <<A && cat <<B";
+    assert_eq!(operator_count(line, 0, 8), 1);
+    assert_eq!(operator_count(line, 10, 18), 1);
+    assert_eq!(operator_count(line, 0, 18), 2);
+}
+
+/// The pipeline-pipe predecessor rule, byte side (`ops::pipe::precedes_pipe` →
+/// `parse::redirect::pipeline_pipe`): a pipeline `|` hides the operator, an
+/// escaped `\|` and a quoted `"|"`/`'|'` are word content so the `<<` counts,
+/// and a `|` absorbed into a `>|` clobber is operator content, so it stays
+/// pipe-like (a pipeline position). The token-level agreement of every row is
+/// pinned in `parse/heredoc/tests.rs::operator_count_pipe_predecessors_agree`.
+#[test]
+fn escaped_and_quoted_pipe_predecessors_count_the_operator() {
+    for (line, want) in [
+        // A pipeline pipe: a stage boundary, the `<<` is a command word.
+        (b"| <<EOF".as_slice(), 0usize),
+        (b"> | <<EOF", 0),
+        (b"a >| b | <<EOF", 0),
+        (b"cat \"a>\"| <<EOF", 0),
+        (b"cat x\\>| <<EOF", 0),
+        // An escaped `|` is one word (`\|`, `x\|`): the tokenizer emits a word
+        // token, not a pipe token, so the `<<` is an operator.
+        (b"\\| <<EOF", 1),
+        (b"x\\| <<EOF", 1),
+        (b"echo x\\| <<EOF", 1),
+        (b"cat x\\| <<EOF", 1),
+        // A quoted `|` is word content for the same reason.
+        (b"\"|\" <<EOF", 1),
+        (b"'|' <<EOF", 1),
+        (b"echo \"|\" <<EOF", 1),
+        // The absorbed-`|` twin of the escaped form: `x\>a>|` is `>`-terminated,
+        // so the `|` is a clobber byte and the run is a pipeline position.
+        (b"cat x\\>a>| <<EOF", 1),
+    ] {
+        assert_eq!(operator_count(line, 0, line.len()), want, "line={:?}", line);
+        // Every row above has a readable delimiter, so the region layer's scan
+        // and the count agree on the same number.
+        assert_eq!(
+            operator_delims(line, 0, line.len()).map(|ops| ops.len()),
+            Some(want),
+            "line={:?}",
+            line
+        );
+    }
+}
+
+/// The count is a shape count: delimiter validity is not a gate
+/// (`parse::heredoc::is_operator` has none either), while `operator_delims`
+/// keeps its `None` so no body region is claimed on a line the parse layer
+/// reports as invalid. This is task #261's class 3: the counts agree on the
+/// sites, the region layer stays exactly as pinned (`regions.rs`,
+/// `line_bodies_for_line`), and the window-subset invariant is what makes the
+/// split allocation-neutral.
+#[test]
+fn count_counts_sites_delims_keeps_none() {
+    for (line, want) in [
+        (b">> << <<EOF".as_slice(), 2usize),
+        (b"cat <<- <<EOF", 2),
+        (b"cat << <x", 1),
+        (b"cat << >x", 1),
+        (b"cat << &x", 1),
+        (b"cat << %x", 1),
+        (b"cat <<- <<EOF ; cat <<B", 3),
+        (b"cat <<- <<EOF && cat <<B", 3),
+        (b">> << <<EOF && cat <<B", 3),
+        (b"cat <<A ; cat <<- <<X ; cat <<B", 4),
+        (b"if true; then cat <<- <<X; fi", 2),
+        (b"cat <<- <<X; fi", 2),
+    ] {
+        assert_eq!(operator_count(line, 0, line.len()), want, "line={:?}", line);
+        assert!(
+            operator_delims(line, 0, line.len()).is_none(),
+            "line={:?}",
+            line
+        );
+    }
+    // The valid twins keep both readers agreeing on one operator.
+    for line in [b"cat << A".as_slice(), b"cat <<A", b"cat <<- A"] {
+        assert_eq!(operator_count(line, 0, line.len()), 1, "line={:?}", line);
+        assert_eq!(
+            operator_delims(line, 0, line.len()).map(|ops| ops.len()),
+            Some(1),
+            "line={:?}",
+            line
+        );
+    }
+}
+
+/// The tokenizer's separator arm emits a `;` token for a newline (and for a
+/// `)`), and no token for a space or a tab, so a newline-leading run has a
+/// preceding token and its `<<` is an operator; a space/tab-leading run has
+/// none. `&&\n<<EOF` and `x\n<<EOF` already agreed through their first token;
+/// the comment row keeps the byte scan's own rule (`#` skips its line whole, so
+/// the comment's newline is never read as a token byte).
+#[test]
+fn newline_is_a_token_byte_space_and_tab_are_not() {
+    for (line, want) in [
+        (b"\n<<EOF".as_slice(), 1usize),
+        (b"\n<<EOF <<B", 2),
+        (b"\n<<EOF\nbody\nEOF", 1),
+        (b"x\n<<EOF", 1),
+        (b"&&\n<<EOF", 1),
+        (b"<<EOF", 0),
+        (b" <<EOF", 0),
+        (b"\t<<EOF", 0),
+        (b" \t <<EOF", 0),
+        (b"# x\n<<EOF", 0),
+    ] {
+        assert_eq!(operator_count(line, 0, line.len()), want, "line={:?}", line);
+    }
+}
+
+/// The `(( … ))` / `$( … )` region is opaque to the byte scan
+/// (`ScanState::advance` consumes `((` and `$(` as one unit and the `bare`
+/// gate hides everything inside it). Counting an arithmetic `<<` would corrupt
+/// the line's region stream, so this is the **pinned divergence** from the
+/// token layer — `parse/heredoc/tests.rs::arith_region_count_divergence_is_pinned`
+/// pins the pairs, and `((1<<2))` agrees at 0 through `io::word_start`.
+#[test]
+fn arithmetic_and_substitution_regions_are_opaque() {
+    for (line, want) in [
+        (b"(( <<EOF".as_slice(), 0usize),
+        (b"(( 1 <<EOF", 0),
+        (b"(( x <<EOF", 0),
+        (b"((1<<2))", 0),
+        (b"(( 1 << 2 ))", 0),
+        (b"echo $((1<<2))", 0),
+        (b"x=$(cat <<EOF\nbody\nEOF\n)", 0),
+        // Only the region *after* the closed arithmetic command is counted.
+        (b"(( 1 << 2 )) && cat <<B", 1),
+        (b"(( 1 << 2 )); cat <<B", 1),
+    ] {
+        assert_eq!(operator_count(line, 0, line.len()), want, "line={:?}", line);
+    }
+}
+
+/// The `precedes_pipe` walk reads bytes between the operator's word start and
+/// the `|` (`ops::pipe::precedes_pipe`): whitespace is skipped, any other byte
+/// ends the walk. Pinned directly because the count arms hide it.
+#[test]
+fn precedes_pipe_walks_only_whitespace() {
+    assert!(pipe::precedes_pipe(b"| <<EOF", 2));
+    assert!(pipe::precedes_pipe(b"   | <<EOF", 5));
+    assert!(pipe::precedes_pipe(b"a| <<EOF", 2));
+    assert!(!pipe::precedes_pipe(b"x <<EOF", 4));
+    assert!(!pipe::precedes_pipe(b"a >| <<EOF", 6));
+    assert!(!pipe::precedes_pipe(b"\"| <<EOF", 4));
 }

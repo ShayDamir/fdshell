@@ -1,6 +1,6 @@
 //! Tests for the physical-line heredoc helpers.
 
-use super::{line_bodies_for_line, line_end_after, operator_count};
+use super::{line_bodies_for_line, line_end_after};
 use alloc::vec;
 
 /// `line_end_after` finds the first unquoted newline at or after `from`.
@@ -41,13 +41,4 @@ fn line_bodies_for_line_no_operators_is_empty() {
     let (bodies, resume) = line_bodies_for_line(line, 0, 10);
     assert!(bodies.is_empty());
     assert_eq!(resume, 10);
-}
-
-/// `operator_count` counts the `<<` operators in a run.
-#[test]
-fn operator_count_counts_operators() {
-    let line = b"cat <<A && cat <<B";
-    assert_eq!(operator_count(line, 0, 8), 1);
-    assert_eq!(operator_count(line, 10, 18), 1);
-    assert_eq!(operator_count(line, 0, 18), 2);
 }
