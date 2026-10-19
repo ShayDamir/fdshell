@@ -506,14 +506,14 @@ fn trailing_operator_after_a_multi_line_block_is_gated() {
 /// carries a nested block with a trailing operator. The heredoc-free text
 /// keeps the block opaque (the nested `fi` scores inside, LESSONS #137 gate
 /// 3), so the `&&` is the body's own cond list; the failing-gate row prints
-/// nothing — its rc 1 (bash rc 0) is task #262's pinned `break`-status
-/// divergence, not this shape's.
+/// nothing and its rc is the `break`'s 0 (bash's, measured 2026-10-19 — the
+/// status gap this row used to pin as 1 was task #262's, now fixed).
 #[test]
 fn nested_multi_line_blocks_keep_their_operators_inside() {
     let (out, err, code) = run("while :; do\nif true; then echo t; fi && echo x\nbreak\ndone");
     assert_eq!((out.as_str(), code), ("t\nx\n", 0), "stderr={err}");
     let (out, err, code) = run("while :; do\nif true; then false; fi && echo x\nbreak\ndone");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
 }
 
 /// `set -e` rows of the task: the errexit rules around mid-run blocks are

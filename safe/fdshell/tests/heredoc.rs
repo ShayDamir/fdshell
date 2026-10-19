@@ -1048,12 +1048,13 @@ fn block_with_heredoc_keeps_its_operators_in_its_own_cond_list() {
 
 /// Task #234, the failing-body twin of the pin above: `a && b` is the block's
 /// own cond list, `a` is the shell's missing-command report (rc 1, README
-/// "Errors"; bash prints `a: command not found` and its `break` leaves rc 0 —
-/// the `break`-status divergence of task #262). stdout is what the pin asserts.
+/// "Errors"), and the `break` that ends the loop leaves rc 0 — bash's, measured
+/// 2026-10-19; the gap this pin used to assert (rc 1) was task #262's, now
+/// fixed. stdout is the block's heredoc plus nothing else.
 #[test]
 fn block_with_heredoc_runs_a_failing_body_cond_list() {
     let (out, _err, code) = run("while cat <<X; do a && b; break; done\nbody\nX");
-    assert_eq!((out.as_str(), code), ("body\n", 1));
+    assert_eq!((out.as_str(), code), ("body\n", 0));
 }
 
 /// Task #234: the operator written on a heredoc's **delimiter line** is region

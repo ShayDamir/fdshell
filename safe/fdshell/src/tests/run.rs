@@ -2571,3 +2571,58 @@ fn break_in_for_fd_array_list_exits_both_loops() {
         assert_eq!(var_bytes(&cell, b"g"), b"1");
     });
 }
+
+// ——— Task #262: the status a `break`/`continue` leaves behind (bash: 0) ———
+
+/// `break` is a builtin whose own run succeeded, so a loop that exits through it
+/// reports 0 — not the status of the command that ran before it (bash:
+/// `while :; do false; break; done` leaves `$?` = 0, master left 1).
+#[test]
+fn break_after_a_failing_command_leaves_status_zero() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"while :; do false; break; done", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+        assert_eq!(state.loop_depth, 0);
+    });
+}
+
+/// The `continue` twin in a `for` list: the signal is the last thing the iteration
+/// runs, so its 0 is the loop's status.
+#[test]
+fn continue_after_a_failing_command_leaves_status_zero() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"for x in 1 2; do false; continue; done", &cell).unwrap();
+        assert_eq!(borrow_state(&cell).last_status.exit_code(), 0);
+    });
+}
+
+/// `break 2` at depth 2 hands the remainder to the outer level and carries its 0 all
+/// the way out — the propagation path bash measures at 0.
+#[test]
+fn break_2_propagates_outward_with_status_zero() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"for a in 1 2; do for b in 1 2; do false; break 2; done; done",
+            &cell,
+        )
+        .unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 0);
+        assert_eq!(state.loop_depth, 0);
+    });
+}
+
+/// The guard against zeroing the status on every `break` *statement*: a
+/// short-circuited `break` never runs, so the failing command stays the status.
+#[test]
+fn short_circuited_break_leaves_the_failure_status() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"for x in 1; do false && break; done", &cell).unwrap();
+        assert_eq!(borrow_state(&cell).last_status.exit_code(), 1);
+    });
+}

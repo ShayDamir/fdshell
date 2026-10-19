@@ -946,17 +946,18 @@ fn return_in_an_elif_condition_leaves_the_function() {
     assert_eq!(err, "");
 }
 
-/// Row 18: the body ran, and a later condition `break` ends the loop. Only the
-/// stdout is pinned: the loop's own status diverges (bash `echo rc=$?` → 0,
-/// fdshell → 1, measured 2026-10-13) because `break` does not zero `$?` — task
-/// #262 owns that; task #164 owns the loop's condition-status rule.
+/// Row 18: the body ran, and a later condition `break` ends the loop. The
+/// status is pinned too (task #262, measured 2026-10-19): the `break` is a
+/// builtin whose own run succeeded, so `echo rc=$?` is 0 — the loop's
+/// condition-status rule (bash also reports 0 when its condition ends false)
+/// is task #164's, and is not exercised by this shape.
 #[test]
 fn break_in_the_condition_after_the_body_ran_ends_the_loop() {
     let (out, err, code) = run_bounded(
-        "i=0; while if [ $i -lt 2 ]; then :; else break; fi; do i=$((i+1)); echo body; done; echo i=$i",
+        "i=0; while if [ $i -lt 2 ]; then :; else break; fi; do i=$((i+1)); echo body; done; echo i=$i rc=$?",
     );
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out, "body\nbody\ni=2\n");
+    assert_eq!(out, "body\nbody\ni=2 rc=0\n");
     assert_eq!(err, "");
 }
 
@@ -1055,4 +1056,136 @@ fn mid_run_builtin_wait_keeps_the_loop_body() {
         let (out, err, code) = run_bounded(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
     }
+}
+
+// ——— Task #262: `break`/`continue` are builtins whose own status is 0 ———
+//
+// A loop that exits through a `break`/`continue` reports the *signal's* status,
+// not the status of the last command that ran: bash's builtins return 0, so
+// `false; break` leaves `$?` = 0. Every expectation below was measured against
+// `bash -c` (bash 5.3.9, 2026-10-19), and the `echo rc=$?` each script ends in
+// is the observation. master printed `rc=1` on every row that ends via a
+// control. Loops that run forever when a raised control is dropped are bounded
+// ([`run_bounded`]).
+
+/// `break` after a failing command in a `for` list. Measured `rc=0` (master `rc=1`).
+#[test]
+fn break_after_a_failing_command_leaves_status_zero() {
+    let (out, err, code) = run("for x in 1 2 3; do false; break; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// The `while` twin — `while :`, so a dropped `break` would run forever: bounded.
+/// Measured `rc=0` (master `rc=1`).
+#[test]
+fn break_after_a_failing_command_in_a_while_leaves_status_zero() {
+    let (out, err, code) = run_bounded("while true; do false; break; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// An `if` is transparent, so the `break` in its then-body is the loop's signal and
+/// its 0 is the loop's status; `echo x` never runs. Measured `rc=0` (master `rc=1`).
+#[test]
+fn break_in_an_if_then_body_after_a_failure_leaves_status_zero() {
+    let (out, err, code) =
+        run("for x in 1 2 3; do if true; then false; break; fi; echo x; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// `continue` after a failing command: it is the last thing that runs in the
+/// iteration, so its 0 is the loop's final status. Measured `rc=0` (master `rc=1`).
+#[test]
+fn continue_after_a_failing_command_leaves_status_zero() {
+    let (out, err, code) = run("for x in 1 2; do false; continue; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// Same with a tail command: the `continue` skips it, so nothing overwrites the
+/// signal's 0. Measured `rc=0`, no `tail` line (master `rc=1`).
+#[test]
+fn continue_leaves_status_zero_and_skips_the_rest_of_the_iteration() {
+    let (out, err, code) = run("for x in 1 2 3; do false; continue; echo tail; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// `continue` in a `while` whose guard is endless and whose body breaks after a few
+/// iterations: every iteration ends on the signal's 0 and the final `break` raises
+/// its own 0. Measured `rc=0`; bounded, since the guard is `while :`.
+#[test]
+fn continue_in_a_bounded_while_leaves_status_zero() {
+    let (out, err, code) = run_bounded(
+        "i=0; while :; do false; i=$((i+1)); if (( i > 2 )); then break; fi; continue; done; echo rc=$?",
+    );
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// Two signals in one iteration: the last one raised owns the status. Measured `rc=0`
+/// (master `rc=1`).
+#[test]
+fn continue_then_break_in_one_iteration_leaves_status_zero() {
+    let (out, err, code) = run("for x in 1 2 3; do false; continue; break; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// `break 2` crosses the inner level and hands the remainder outward: bash measures
+/// `rc=0` on that propagation path too. Measured `rc=0`, no `inner` (master `rc=1`).
+#[test]
+fn break_2_after_a_failure_leaves_status_zero() {
+    let (out, err, code) =
+        run("for a in 1 2; do for b in 1 2; do false; break 2; done; echo inner; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// The `continue 2` twin of the propagation path. Measured `rc=0`, no `inner`
+/// (master `rc=1`).
+#[test]
+fn continue_2_after_a_failure_leaves_status_zero() {
+    let (out, err, code) = run(
+        "for a in 1 2; do for b in 1 2; do false; continue 2; done; echo inner; done; echo rc=$?",
+    );
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// A `{ …; }` group is a transparent level: the signal reaches the loop with its 0.
+/// Measured `rc=0`, no `x` (master `rc=1`).
+#[test]
+fn break_in_a_group_after_a_failure_leaves_status_zero() {
+    let (out, err, code) = run("for a in 1 2; do { false; break; }; echo x; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// A `case` arm is transparent too. Measured `rc=0`, no `x` (master `rc=1`).
+#[test]
+fn break_in_a_case_arm_after_a_failure_leaves_status_zero() {
+    let (out, err, code) =
+        run("for a in 1 2; do case $a in 1) false; break;; esac; echo x; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
+}
+
+/// The guard against zeroing unconditionally: a short-circuited `break` never runs,
+/// so the failing command's status survives. Measured `rc=1` in both shells.
+#[test]
+fn short_circuited_break_keeps_the_failure_status() {
+    let (out, err, code) = run("for x in 1; do false && break; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err}");
+    let (out, err, code) = run("for a in 1 2; do false && break; echo x; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("x\nx\nrc=0\n", 0), "stderr={err}");
+}
+
+/// The loop's 0 feeds the next cond part: with master the loop ended on 1 and the
+/// `&&` tail never ran. Measured `after` + `rc=0`.
+#[test]
+fn continue_leaves_the_loop_status_for_the_next_cond_part() {
+    let (out, err, code) = run("for x in 1 2; do false; continue; done && echo after; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("after\nrc=0\n", 0), "stderr={err}");
+}
+
+/// A `break` that leaves a function frame carries the same 0 — it is the function's
+/// status. Only the status is pinned: fdshell keeps its accepted function-boundary
+/// divergence (task #203) — the loop exits at the first call where bash warns and
+/// keeps running. Measured `rc=0` in both shells (master `rc=1`).
+#[test]
+fn break_leaving_a_function_frame_leaves_status_zero() {
+    let (out, err, code) = run("f() { false; break; }; for a in 1 2; do f; done; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
 }

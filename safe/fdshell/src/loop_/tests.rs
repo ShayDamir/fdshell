@@ -159,3 +159,47 @@ fn continue_in_the_body_skips_the_rest_of_the_iteration() {
     assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
     assert!(var(&cell, "result").is_some_and(|v| v.eq_bytes(b"2")));
 }
+
+/// Task #262 (condition-context twin): a `break` raised in a condition is a builtin
+/// that ran successfully, so the loop reports 0. Here the body never ran, so the
+/// loop's own `!ran_body` zeroing already covers the value — this pins the shape
+/// against a future refactor moving the zeroing around.
+#[test]
+fn break_in_the_condition_before_the_body_ran_leaves_status_zero() {
+    let cell = make_cell();
+    let block = loop_block(b"while if :; then false; break; fi; do result=1; done");
+    assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
+    assert!(var(&cell, "result").is_none());
+    assert_eq!(status(&cell), 0);
+    assert_eq!(depth(&cell), 0);
+}
+
+/// Task #262: the condition `break` after the body ran — the `false` that precedes
+/// it is not the loop's status, the signal's 0 is (bash `echo rc=$?` → 0, master 1).
+#[test]
+fn break_in_the_condition_after_the_body_ran_leaves_status_zero() {
+    let cell = make_cell();
+    seed(&cell, b"i=0");
+    let block = loop_block(
+        b"while if (( i < 3 )); then :; else false; break; fi; do result=$i; i=$((i+1)); done",
+    );
+    assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
+    assert!(var(&cell, "result").is_some_and(|v| v.eq_bytes(b"2")));
+    assert_eq!(status(&cell), 0);
+    assert_eq!(depth(&cell), 0);
+}
+
+/// Task #262: a `continue` raised in the condition advances the loop, and the 0 it
+/// leaves is what the loop reports when the re-tested condition ends it.
+#[test]
+fn continue_in_the_condition_leaves_status_zero_after_the_loop() {
+    let cell = make_cell();
+    seed(&cell, b"i=0");
+    let block = loop_block(
+        b"while i=$((i+1)) && (( i < 3 )) && if :; then false; continue; fi; do result=1; done",
+    );
+    assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
+    assert!(var(&cell, "result").is_none());
+    assert!(var(&cell, "i").is_some_and(|v| v.eq_bytes(b"3")));
+    assert_eq!(status(&cell), 0);
+}
