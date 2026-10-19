@@ -73,8 +73,12 @@ fn trails_cond_op(body: &[u8]) -> bool {
 /// layer asks "is this brace's text opaque" (yes), so only
 /// `cond/boundary::opens_group` consumes this rule (task #235).
 pub(crate) fn definer_at_run(line: &[u8], start: usize, brace: usize) -> bool {
-    let body = line.get(start..brace).unwrap_or(b"").trim_ascii();
-    opens_definer(body, line, start) || trails_definer(body, line, start)
+    let raw = line.get(start..brace).unwrap_or(b"");
+    let body = raw.trim_ascii();
+    // The definer gate walks `line` from the run text's first byte, so the
+    // trimmed body is measured from its own start (`span_start`'s pattern).
+    let base = start + (raw.len() - raw.trim_ascii_start().len());
+    opens_definer(body, line, base) || trails_definer(body, line, base)
 }
 
 /// The run text is the definer words plus `(`/`)`/whitespace filler and

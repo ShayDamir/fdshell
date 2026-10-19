@@ -68,7 +68,8 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         if !in_block
             && !part.is_empty()
             && (keyword_delta(part, line, word_end) == Some(1)
-                || scan_function_block(line, part, book.start, book.state.quotes()).is_some())
+                || scan_function_block(line, part, book.start + lead, book.state.quotes())
+                    .is_some())
         {
             block::open(line, raw, &mut book);
         } else {

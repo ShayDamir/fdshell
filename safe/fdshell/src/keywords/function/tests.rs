@@ -44,6 +44,9 @@ fn definer_words_of_the_accepted_forms() {
     assert_eq!(def(b"function f ( ) {"), Some(b"f".to_vec()));
     // Extra whitespace between the name and the brace is skipped.
     assert_eq!(def(b"function f  {"), Some(b"f".to_vec()));
+    // A wide gap is walked, not summed: the gate lands on the name word itself.
+    assert_eq!(def(b"function  f {"), Some(b"f".to_vec()));
+    assert_eq!(def(b"function\tf {"), Some(b"f".to_vec()));
     // A reserved word as the name (the POSIX `if() {…}` leniency).
     assert_eq!(def(b"function if {"), Some(b"if".to_vec()));
     // An option-shaped name is a name.
@@ -79,6 +82,26 @@ fn quoted_definer_words_are_not_definers() {
     assert_eq!(
         super::function_def_name(b"f() {", b"  f() {", 2),
         Some(b"f".as_slice())
+    );
+    // The gap is walked on `line`, so a wide gap makes each offset of the walk
+    // measurable: `function` + gap 2 + a quoted name of length 2/3, and a tab
+    // gap. A sum of those offsets lands the gate outside the name word.
+    assert_eq!(def(b"function  '' {"), None);
+    assert_eq!(def(b"function  'f' {"), None);
+    assert_eq!(def(b"function\t'f' {"), None);
+    // The same, at a `start` that is not the line's beginning.
+    assert_eq!(
+        super::function_def_name(b"function  'f' {", b"   function  'f' {", 3),
+        None
+    );
+    assert_eq!(
+        super::function_def_name(b"function  f {", b"   function  f {", 3),
+        Some(b"f".as_slice())
+    );
+    assert_eq!(
+        super::function_def_name(b"'f'() {", b"  'f'() {", 2),
+        None,
+        "the POSIX gate reads the name at the offset, not at 0"
     );
 }
 
@@ -140,6 +163,8 @@ fn definer_len_spans_the_definer_words() {
     // A word after the definer words is no definer text either: `f` is the
     // name and the trailing `x` run is dropped by the parse layer.
     assert_eq!(definer_len(b"function f x", b"function f x", 0), Some(10));
+    // A wide gap does not change the definer words' length.
+    assert_eq!(definer_len(b"function  f", b"function  f", 0), Some(11));
 }
 
 #[test]

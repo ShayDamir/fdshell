@@ -284,6 +284,11 @@ fn quoted_keyword_words_are_command_words() {
 /// proved, not inferred from a not-found message (bash: `if: command not
 /// found`, rc 127; fdshell's command-not-found code is 1, a shell-wide
 /// convention, so the *name* is pinned, not the code).
+///
+/// The definer rows pin stdout as well as the code: on one line the quoted
+/// definer's body never runs (bash's stdout too), and the multi-line forms are
+/// pinned as the accepted divergence they are (fdshell runs the body group,
+/// bash prints nothing).
 #[test]
 fn quoted_block_openers_are_command_words() {
     let bin = scratch_bin(&[
@@ -337,15 +342,39 @@ fn quoted_block_openers_are_command_words() {
     assert_eq!((out.as_str(), code), ("a\n", 1), "stderr={err:?}");
     assert!(err.contains(r#""elif""#), "stderr={err:?}");
     // A quoted definer word defines no function (bash: `` 'f'': not a valid
-    // identifier ``), and the shape falls back to the `function` command.
-    for script in [
-        "'function' f() { echo hi; }; f",
-        "function 'f'() { echo hi; }; f",
-        "f'oo'() { echo hi; }; f",
+    // identifier ``), and the shape falls back to the `function` command. On one
+    // line nothing of the body runs, so the stdout is bash's stdout (empty, and
+    // `a` for the row that starts with a statement of its own).
+    for (script, want) in [
+        ("'function' f() { echo hi; }; f", ""),
+        ("function 'f'() { echo hi; }; f", ""),
+        ("f'oo'() { echo hi; }; f", ""),
+        ("function 'f' { echo hi; }; f", ""),
+        ("echo a; function 'f' { echo hi; }; f", "a\n"),
     ] {
-        let (_out, err, code) = run(script);
-        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 1), "{script}: stderr={err:?}");
         assert!(err.contains("not found"), "{script}: stderr={err:?}");
+    }
+    // Accepted divergence (task #247): the **multi-line** forms run their body as
+    // the `{ …; }` group the definer's brace becomes, where bash aborts the whole
+    // input with `'f'`: not a valid identifier (rc 127, prints nothing) — the
+    // same "parse statement by statement" family as the rows below. The
+    // byte-level gate walks `line` from the definer word's own byte, so the
+    // verdict is indentation-invariant: every leading width prints the same.
+    for indent in ["", " ", "  ", "   "] {
+        for script in [
+            format!("{indent}function 'f' {{\necho hi\n}}\nf"),
+            format!("{indent}f'oo'() {{\necho hi\n}}\nf"),
+        ] {
+            let (out, err, code) = run(&script);
+            assert_eq!(
+                (out.as_str(), code),
+                ("hi\n", 1),
+                "{script}: stderr={err:?}"
+            );
+            assert!(err.contains("not found"), "{script}: stderr={err:?}");
+        }
     }
     // Accepted divergence (plan §8): fdshell parses statement by statement, so a
     // quoted opener runs as a command and the *rest of the line* runs too; bash

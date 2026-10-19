@@ -119,6 +119,37 @@ fn definer_mid_run_after_a_cond_operator_opens_the_body_group() {
     }
 }
 
+/// The gate's `start` alignment (task #247): `definer_at_run` trims the run, so
+/// it measures the definer words from the byte the trimmed text starts at. A
+/// `start` left at the run's untrimmed position shifts the quote gate by the
+/// leading whitespace — the verdict would flip with the indentation width, and a
+/// `start + end` → `start * end` shift of the mid-run walk is only measurable at
+/// `start > 0`.
+#[test]
+fn definer_gate_measures_the_run_from_its_own_first_byte() {
+    for (line, start, brace) in [
+        // An indented definer, a wide gap, and a mid-run definer whose run
+        // starts after `;` and behind `&&`.
+        (b"   function f { echo hi; }".as_slice(), 3, 14),
+        (b"   function  f { echo hi; }".as_slice(), 3, 15),
+        (b"echo a; true && function f { echo a; }".as_slice(), 8, 27),
+    ] {
+        assert!(definer_at_run(line, start, brace), "{line:?}");
+    }
+    for (line, start, brace) in [
+        // The same runs with a quoted definer word: no definer at any start.
+        (b"   function 'f' { echo hi; }".as_slice(), 3, 16),
+        (b"   f'oo'() { echo hi; }".as_slice(), 3, 11),
+        (
+            b"echo a; true && function  'f' { echo a; }".as_slice(),
+            8,
+            30,
+        ),
+    ] {
+        assert!(!definer_at_run(line, start, brace), "{line:?}");
+    }
+}
+
 #[test]
 fn non_definer_runs_are_no_body_openers() {
     for (line, start, brace) in [

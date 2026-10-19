@@ -3,6 +3,7 @@ pub(super) mod keyword;
 mod length;
 pub(super) mod midrun;
 use crate::brace::scan_function_block;
+use crate::keywords::leading_ws;
 use crate::scan::ScanState;
 use crate::scan::heredoc;
 use crate::segment::book::Book;
@@ -53,8 +54,10 @@ pub(super) fn open_block<'a>(
     pre_resume: usize,
     line_start: usize,
 ) -> (Segment<'a>, usize, usize, usize) {
+    // The definer gate walks `line` from `part`'s own first byte, not the run's.
+    let def_start = start + leading_ws(raw);
     let (segment, resume, floor) =
-        if let Some((end, closed)) = scan_function_block(line, part, start, state.quotes()) {
+        if let Some((end, closed)) = scan_function_block(line, part, def_start, state.quotes()) {
             function_block(line, start, end, closed, pre_resume)
         } else {
             keyword::keyword_block(line, raw, part, start, line_start, state, pre_resume)

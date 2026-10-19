@@ -2,7 +2,8 @@ use crate::keywords::function_def_name;
 use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
 /// If `part` opens a `name() { … }` block, return the exclusive end position
-/// and whether the block was closed. `quotes` is the quote state at `start`.
+/// and whether the block was closed. `quotes` is the quote state at `start`,
+/// and `start` is `part`'s first byte in `line` (the definer gate's contract).
 pub(crate) fn scan_function_block(
     line: &[u8],
     part: &[u8],

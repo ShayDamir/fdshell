@@ -12,7 +12,7 @@ mod wait;
 
 pub(crate) use quoted::quoted_word;
 
-pub(crate) use function::{definer_len, function_def_name, name_len};
+pub(crate) use function::{definer_len, function_def_name, leading_ws, name_len};
 pub(crate) use pair::pair_payload;
 pub(crate) use position::{Glue, Place, after, scores};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};

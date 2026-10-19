@@ -30,33 +30,34 @@ pub(crate) fn name_len(word: &[u8]) -> Option<usize> {
 /// split is the tokenizer's (`)` is the separator token), so the definer words
 /// here are exactly the definer tokens of the same text.
 ///
+/// `start` is the index in `line` of `word`'s **first byte**. Every caller
+/// hands over the byte its own text starts at, never the run's untrimmed start:
+/// the gate walks `line` from `word`'s leading whitespace, exactly as the
+/// sibling keyword scan seeds itself with `start + leading_ws + kw_len`.
+///
 /// The quote gate (task #247, [`quoted_word`]): a definer word written with
 /// quote bytes is word data — bash rejects `'function' f() { … }`,
 /// `function 'f'() { … }` and `f'oo'() { … }` (`'f'`: not a valid identifier`)
 /// and fdshell must not claim the block at the byte level either, or its
 /// quote-removal rewrites the definer into a shape the parse layer accepts.
+/// `quoted_word` breaks its scan at the POSIX `(`, so the gate reads the name's
+/// own bytes: the head minus its `(` in the POSIX form, the name word's own end
+/// in the keyword form.
 pub(crate) fn function_def_name<'a>(word: &'a [u8], line: &[u8], start: usize) -> Option<&'a [u8]> {
     let (head, second) = def_words(word);
     let head_len = head?.len();
-    // The gap between the definer words: the whitespace `skip_word` left at the
-    // head's end, plus the `)` it stops at (the keyword form's `name)` split).
-    let rest = word.get(head_len..).unwrap_or(b"");
-    let gap = rest.iter().take_while(|b| b.is_ascii_whitespace()).count()
-        + usize::from(rest.first() == Some(&b')'));
-    // `quoted_word` breaks its scan at the POSIX `(`, so the gate measures the
-    // name's own bytes: the head minus its last byte in the POSIX form, the
-    // name word's end in the keyword form.
-    let quoted_at = |end: usize| quoted_word(line, start + end);
+    let head_end = start.checked_add(leading_ws(word))?.checked_add(head_len)?;
+    // The walk from the head to the name word, measured on `line`.
+    let name_start = head_end.checked_add(gap(line.get(head_end..)?))?;
+    let posix_end = head_end.checked_sub(1)?;
     if head == Some(b"function") {
         let name_word = name(second.filter(|w| name(w).is_some())?)?;
-        if quoted_at(head_len) || quoted_at(head_len + gap + name_word.len()) {
-            return None;
-        }
-        return Some(name_word);
+        let name_end = name_start.checked_add(name_word.len())?;
+        return (!quoted_word(line, name_end)).then_some(name_word);
     }
     head.filter(|w| w.ends_with(b"("))
         .and_then(name)
-        .filter(|_| !quoted_at(head_len - 1))
+        .filter(|_| !quoted_word(line, posix_end))
 }
 
 /// The byte length of the definer words at the start of `word`: the definer
@@ -81,6 +82,19 @@ fn name(word: &[u8]) -> Option<&[u8]> {
     word.get(..name_len(word)?)
 }
 
+/// The whitespace run at the start of `word`: `word`'s first byte sits at
+/// `start + leading_ws(word)` in the line the caller passed — the seed term
+/// [`function_def_name`] and `keyword_block`'s scan both need (LESSONS).
+pub(crate) fn leading_ws(word: &[u8]) -> usize {
+    word.iter().take_while(|b| b.is_ascii_whitespace()).count()
+}
+
+/// The gap between two definer words: the whitespace `skip_word` leaves at the
+/// first word's end, plus the `)` it stops at (the keyword form's `name)` split).
+fn gap(rest: &[u8]) -> usize {
+    leading_ws(rest) + usize::from(rest.first() == Some(&b')'))
+}
+
 /// The first two definer words of `word`, split at whitespace and `)`.
 fn def_words(word: &[u8]) -> (Option<&[u8]>, Option<&[u8]>) {
     let (first, rest) = skip_word(word);
@@ -93,8 +107,7 @@ fn def_words(word: &[u8]) -> (Option<&[u8]>, Option<&[u8]>) {
 /// the start of the text returned with it. Leading whitespace is skipped; an
 /// empty body gives `None`.
 fn skip_word(word: &[u8]) -> (Option<&[u8]>, &[u8]) {
-    let start = word.iter().take_while(|b| b.is_ascii_whitespace()).count();
-    let body = word.get(start..).unwrap_or(b"");
+    let body = word.get(leading_ws(word)..).unwrap_or(b"");
     let end = body
         .iter()
         .take_while(|b| !(b.is_ascii_whitespace() || **b == b')'))

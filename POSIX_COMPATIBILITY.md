@@ -147,6 +147,16 @@ words on §2.9.1 would trade a real builtin run for `break: not found`, so
 fdshell gates only the block layer and leaves these keywords quoted-blind
 (task #335 owns the decision, together with the builtins it needs).
 
+A second divergence is mechanical: fdshell parses a script **statement by
+statement**, where bash parses the whole input before running any of it, so a
+quoted opener runs as a command and the rest of the input keeps executing
+(`'while' :; do echo a; break; done` prints `a` here and nothing in bash, rc
+2). The same rule decides a **multi-line** quoted definer: when the body of
+`function 'f' { … }` (or `f'oo'() { … }`) is spread over several lines, the
+brace becomes a group statement and its body runs — fdshell prints `hi` with
+rc 1, while bash reports `'f'`: not a valid identifier and prints nothing.
+Written on one line the body never runs, so those forms agree on stdout.
+
 ## `-c` mode keeps its own `$0`
 
 POSIX: `sh -c 'echo $0' name` prints `name`. fdshell sets `$0` to the
