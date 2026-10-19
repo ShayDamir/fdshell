@@ -13,6 +13,40 @@ use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
 use sys::{Origin, Position, ScriptText};
 
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop — the `tests/verity.rs`
+/// shape (LESSONS "Tests in one binary share the process: pid-only temp paths
+/// collide"). Drop's removal is `.ok()`-tolerant so a concurrent suite run can
+/// never turn teardown into an ENOENT panic.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn new() -> Self {
+        let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "fdshell-fdexplain-e2e-{}-{}",
+            std::process::id(),
+            c
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
 fn st(b: &[u8]) -> ScriptText {
     ScriptText::new(
         ShortCStr::from_vec(b.to_vec()).unwrap(),
@@ -2212,16 +2246,14 @@ fn fdexplain_assigned_fd_is_transitive() {
 
 #[test]
 fn fdexplain_end_to_end_capture_origin() {
-    let dir = std::env::temp_dir().join("fdshell-fdexplain-e2e");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("target"), b"x").unwrap();
+    let scratch = Scratch::new();
+    std::fs::write(scratch.join("target"), b"x").unwrap();
 
     let out = capture_stdout(|| {
         let cell = make_cell();
         {
             let mut state = borrow_state_mut(&cell);
-            let path = dir.to_str().unwrap().as_bytes().to_vec();
+            let path = scratch.to_str().unwrap().as_bytes().to_vec();
             let path = ShortCStr::from_vec(path).unwrap();
             let cwd = sys::openat2::open(path.export(), sys::fcntl::O_DIRECTORY).unwrap();
             state.insert_cwd(cwd);
@@ -2233,7 +2265,7 @@ fn fdexplain_end_to_end_capture_origin() {
         .unwrap();
         run_one(b"fdexplain %f", &cell).unwrap();
     });
-    std::fs::remove_dir_all(&dir).unwrap();
+    drop(scratch); // teardown before the assertion; Drop's removal is `.ok()`-tolerant
     assert_eq!(out, b"%f (set on line 1, column 1, from tag openat2)\n");
 }
 
