@@ -477,16 +477,18 @@ fn prefixed_here_string_operator_tail_and_empty_word() {
 }
 
 /// Divergences pinned as measured, each owned by the task named in its
-/// comment: `&` background is a parse error for every command (#313 family); a
-/// redirect after a group's `}` is not attached to the group (#187/#191).
+/// comment: a redirect after a group's `}` is not attached to the group
+/// (#187/#191). The first row's `&` half closed with task #326 (the plain-`&`
+/// async operator): `cat 3<<<x &` is now a background job, bash-parity
+/// (measured: empty — the herestring feeds descriptor 3, closed in bash's `-c`
+/// too, and the child's write error dies in the discarded child), rc 0.
 /// Task #323 fixed the third row of this test (the guard read the operand's
 /// *word text*, so a quoted `<x` was a syntax error); it is now a bash-parity
 /// row pinned in `prefixed_here_string_quoted_operator_word_is_a_word`.
 #[test]
 fn prefixed_here_string_measured_divergences_name_their_owner() {
-    let (out, err, code) = run("cat 3<<<x &");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
-    assert!(err.contains("unexpected character"), "{err}");
+    let (out, _err, code) = run("cat 3<<<x &");
+    assert_eq!((out.as_str(), code), ("", 0));
 
     let (out, err, code) = run("{ cat; } 3<<<x");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");

@@ -97,9 +97,10 @@ fn builtin_wait_after_a_cond_operator_stays_the_builtin() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(str::from_utf8(&out.stdout).unwrap(), "tail\n");
     assert_eq!(str::from_utf8(&out.stderr).unwrap(), "");
-    // The builtin ran: the reaped child's status is the chain's status.
+    // POSIX (measured against bash): `wait` with no operands returns 0, whatever
+    // the reaped jobs' statuses were — task #326 moved fdshell to that rule.
     let out = run("builtin false &>&j; true && wait; builtin echo tail=$?");
-    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "tail=1\n");
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "tail=0\n");
     // A skipped chain never runs it, and the tail of the run still runs.
     let out = run("builtin true &>&j; false && wait; builtin echo tail");
     assert_eq!(
