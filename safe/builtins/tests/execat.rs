@@ -3,8 +3,10 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::AtomicU64;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::fcntl::{O_DIRECTORY, O_PATH};
 use sys::siginfo::WaitStatus;
 
@@ -93,9 +95,33 @@ fn var_pathname_argv() {
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn test_dir() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("fdshell-execat-test-{}-{}", std::process::id(), c))
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-execat-test-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 fn open_test_dir(dir: &std::path::Path) -> sys::LocalFd {
@@ -122,8 +148,7 @@ fn exec_child(f: impl FnOnce()) {
 
 #[test]
 fn execat_exec_ok() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let target = dir.join("mybin");
     std::fs::copy(EXEC_OK, &target).unwrap();
     {
@@ -138,13 +163,11 @@ fn execat_exec_ok() {
             Err(_) => sys::exit(1),
         }
     });
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn execat_exec_missing_fails() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let dirfd = open_test_dir(&dir);
     exec_child(|| {
         let r = builtins::execat::execat_exec(dirfd.at(), c"nope-xxxxxxxx", &[c"x"], &[]);
@@ -154,5 +177,4 @@ fn execat_exec_missing_fails() {
             sys::exit(42);
         }
     });
-    let _ = std::fs::remove_dir_all(&dir);
 }

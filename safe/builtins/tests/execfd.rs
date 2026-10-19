@@ -3,7 +3,9 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use std::sync::atomic::AtomicU64;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::fcntl::O_PATH;
 use sys::siginfo::WaitStatus;
 
@@ -93,9 +95,33 @@ fn var_with_program_args() {
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn test_dir() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("fdshell-execfd-test-{}-{}", std::process::id(), c))
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("fdshell-execfd-test-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 fn exec_child(f: impl FnOnce()) {
@@ -129,8 +155,7 @@ fn execfd_exec_ok() {
 
 #[test]
 fn execfd_exec_nonexecutable_fails() {
-    let dir = test_dir();
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     let script_path = dir.join("noscript.sh");
     std::fs::write(&script_path, b"#!/bin/sh\nexit 7\n").unwrap();
     let cs = CString::new(script_path.to_str().unwrap()).unwrap();
@@ -141,5 +166,4 @@ fn execfd_exec_nonexecutable_fails() {
             Err(_) => sys::exit(42),
         },
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }

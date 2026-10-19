@@ -3,14 +3,38 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::fcntl::O_RDONLY;
 use sys::shellfd::TAG_MAX;
 
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[test]
 fn test_openat2_exec() {
-    let dir = std::env::temp_dir().join("fdshell-test-openat2-exec");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch("exec");
     let file_path = dir.join("testfile");
     std::fs::write(&file_path, b"hello\n").unwrap();
 
@@ -42,7 +66,6 @@ fn test_openat2_exec() {
 
     drop(fd);
     drop(receiver);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// An open, CLOEXEC-clear fd number that `ImportedFd::try_from` accepts.
@@ -56,18 +79,17 @@ fn numeric_fd() -> (CString, sys::ExportedFd) {
     (s, exported)
 }
 
-fn scratch(name: &str) -> std::path::PathBuf {
+/// A pid + counter scratch dir named after `name`, removed when the test's
+/// guard drops.
+fn scratch(name: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "fdshell-test-openat2-sameas-{}-{}-{}",
-        name,
+        "fdshell-test-openat2-sameas-{name}-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        c
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 #[test]
@@ -136,7 +158,6 @@ fn test_openat2_exec_same_as_match() {
 
     drop(fd);
     drop(receiver);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -187,5 +208,4 @@ fn test_openat2_exec_same_as_mismatch_sends_nothing() {
     }
 
     drop(receiver);
-    std::fs::remove_dir_all(&dir).unwrap();
 }

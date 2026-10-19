@@ -4,6 +4,8 @@ use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::Report;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
 use sys::fileat::AT_REMOVEDIR;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
@@ -171,11 +173,32 @@ const ENOTDIR: i32 = 20;
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn scratch() -> std::path::PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-unlinkat-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 /// A directory fd for `path`, exported to a number the parse can consume.
@@ -198,7 +221,6 @@ fn exec_unlinks_file() {
     assert!(file.exists());
     run_exec(&[file.to_str().unwrap()]).unwrap();
     assert!(!file.exists());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -208,7 +230,6 @@ fn exec_unlinks_dir_with_removedir() {
     std::fs::create_dir_all(&sub).unwrap();
     run_exec(&["--flags", "AT_REMOVEDIR", sub.to_str().unwrap()]).unwrap();
     assert!(!sub.exists());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -218,7 +239,6 @@ fn exec_dir_without_flag_is_eisdir() {
     std::fs::create_dir_all(&sub).unwrap();
     let e = run_exec(&[sub.to_str().unwrap()]).unwrap_err();
     assert_eq!(errno_of(&e), EISDIR);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -227,7 +247,6 @@ fn exec_missing_path_is_enoent() {
     let missing = dir.join("nope");
     let e = run_exec(&[missing.to_str().unwrap()]).unwrap_err();
     assert_eq!(errno_of(&e), ENOENT);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -241,7 +260,6 @@ fn exec_nondirectory_dirfd_is_enotdir() {
     let e = run_exec(&["--dirfd", &s, "victim"]).unwrap_err();
     assert_eq!(errno_of(&e), ENOTDIR);
     drop(fd);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -259,7 +277,6 @@ fn exec_resolves_against_dirfd() {
 
     assert!(!sub.join("g").exists(), "sub/g should be gone");
     assert!(dir.join("g").exists(), "root g must survive");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // --- strict (capability) mode ------------------------------------------------

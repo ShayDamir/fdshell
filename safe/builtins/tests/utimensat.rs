@@ -5,6 +5,8 @@ use builtins::utimensat::parse::TimeSpec;
 use core::ffi::CStr;
 use error_stack::Report;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -223,11 +225,32 @@ const ENOTDIR: i32 = 20;
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn scratch() -> std::path::PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-utimensat-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 /// mtime in epoch seconds, following symlinks (stat).
@@ -255,7 +278,6 @@ fn exec_sets_mtime() {
     std::fs::write(&file, b"x").unwrap();
     run_exec(&["--mtime", "1234567890", file.to_str().unwrap()]).unwrap();
     assert_eq!(mtime_secs(&file), 1234567890);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -273,7 +295,6 @@ fn exec_now_is_current() {
         (m - real).abs() <= 5,
         "mtime {m} not within 5s of now {real}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -305,7 +326,6 @@ fn exec_omit_leaves_atime() {
         "atime must be untouched by omit"
     );
     assert_eq!(mtime_secs(&file), 2222222222, "mtime must be set");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -339,7 +359,6 @@ fn exec_nofollow_updates_link_not_target() {
         2222222222,
         "target mtime must be untouched"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -348,7 +367,6 @@ fn exec_missing_path_is_enoent() {
     let missing = dir.join("nope");
     let e = run_exec(&["--mtime", "now", missing.to_str().unwrap()]).unwrap_err();
     assert_eq!(errno_of(&e), ENOENT);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -362,7 +380,6 @@ fn exec_nondirectory_dirfd_is_enotdir() {
     let e = run_exec(&["--dirfd", &s, "--mtime", "now", "f"]).unwrap_err();
     assert_eq!(errno_of(&e), ENOTDIR);
     drop(fd);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // --- strict (capability) mode ------------------------------------------------

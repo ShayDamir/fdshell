@@ -3,10 +3,33 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
-use std::sync::atomic::AtomicU64;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::shellfd::TAG_MAX;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -231,10 +254,13 @@ fn eq_syntax() {
 }
 
 /// A scratch dir with pid + atomic counter: tests in this binary share the
-/// process and run on parallel threads (LESSONS: pid-only paths collide).
-fn test_dir() -> std::path::PathBuf {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("fdshell-mkfifoat-{}-{}", std::process::id(), c))
+/// process and run on parallel threads (LESSONS: pid-only paths collide);
+/// the dir is removed when the test's guard drops.
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-mkfifoat-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 /// Runs `mkfifoat_exec` on `args` and returns the received handle, asserting
@@ -267,8 +293,7 @@ fn run_exec(args: &[&CStr], expected_tag: &[u8]) -> sys::LocalFd {
 /// arm) and sends a handle tagged `fifo` that is the created FIFO.
 #[test]
 fn mkfifoat_exec_sends_fifo_handle() {
-    let dir = test_dir();
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch();
     let path = dir.join("pipe");
     let cpath = CString::new(path.to_str().unwrap()).unwrap();
 
@@ -290,7 +315,6 @@ fn mkfifoat_exec_sends_fifo_handle() {
     assert_eq!(st.dev, st2.dev);
 
     drop(fd);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Regression for the mode-0 trap: `mkfifoat` with no `--mode` must create the
@@ -298,8 +322,7 @@ fn mkfifoat_exec_sends_fifo_handle() {
 /// and leave the FIFO on disk with no fd).
 #[test]
 fn mkfifoat_exec_without_mode() {
-    let dir = test_dir();
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch();
     let cpath = CString::new(dir.join("pipe").to_str().unwrap()).unwrap();
 
     let fd = run_exec(&[cpath.as_c_str()], b"fifo");
@@ -315,15 +338,13 @@ fn mkfifoat_exec_without_mode() {
     assert_eq!(st.mode & 0o200, 0o200, "owner must keep the w bit");
 
     drop(fd);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// With `--dirfd`, the FIFO is created inside the given directory (the
 /// `ImportedFd::at` arm).
 #[test]
 fn mkfifoat_exec_with_dirfd() {
-    let dir = test_dir();
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch();
     let cdir = CString::new(dir.to_str().unwrap()).unwrap();
     // O_DIRECTORY (O_RDONLY is 0) so the handle is a directory fd.
     let dir_local = sys::openat2::open(&cdir, sys::fcntl::O_DIRECTORY).unwrap();
@@ -360,7 +381,6 @@ fn mkfifoat_exec_with_dirfd() {
     // `dir_fd` is a non-owning export (like the mkdirat test's); its dup is
     // closed when the test process exits. Only the owning `dir_local` drops.
     drop(dir_local);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Special bits (setuid/setgid/sticky) are stripped: only `mode & 0o777` is
@@ -368,8 +388,7 @@ fn mkfifoat_exec_with_dirfd() {
 /// equality holds in any environment.
 #[test]
 fn mkfifoat_exec_masks_special_bits() {
-    let dir = test_dir();
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch();
     let cpath = CString::new(dir.join("pipe").to_str().unwrap()).unwrap();
 
     let mode_arg = CString::from(c"--mode");
@@ -381,7 +400,6 @@ fn mkfifoat_exec_masks_special_bits() {
     assert_eq!(st.mode & 0o7777, 0o600, "special bits must be stripped");
 
     drop(fd);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // --- strict (capability) mode ------------------------------------------------

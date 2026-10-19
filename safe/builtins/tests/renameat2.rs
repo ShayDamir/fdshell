@@ -3,7 +3,65 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::fileat::{RENAME_EXCHANGE, RENAME_NOREPLACE, RENAME_WHITEOUT};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). A *fixed* name is shared by every concurrent suite run with no
+/// pid recycling at all, so it gets pid + counter too (task #342). Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-test-renameat2-exec-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
+
+#[test]
+fn test_renameat2_exec() {
+    let dir = scratch();
+
+    let old_path = dir.join("old.txt");
+    let new_path = dir.join("new.txt");
+    std::fs::write(&old_path, "hello").unwrap();
+
+    let old_cs = CString::new(old_path.to_str().unwrap()).unwrap();
+    let new_cs = CString::new(new_path.to_str().unwrap()).unwrap();
+    let args = [old_cs.as_c_str(), new_cs.as_c_str()];
+    let cfg = builtins::renameat2::parse::renameat2_parse(&args, false).unwrap();
+    builtins::renameat2::renameat2_exec(&cfg).unwrap();
+
+    assert!(!old_path.exists(), "old path should not exist after rename");
+    assert!(new_path.exists(), "new path should exist after rename");
+    assert_eq!(std::fs::read_to_string(&new_path).unwrap(), "hello");
+}
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -197,29 +255,6 @@ fn eq_syntax() {
     assert_ok(&["--flags=RENAME_EXCHANGE", "old", "new"], |cfg| {
         assert_eq!(cfg.flags, RENAME_EXCHANGE);
     });
-}
-
-#[test]
-fn test_renameat2_exec() {
-    let dir = std::env::temp_dir().join("fdshell-test-renameat2-exec");
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let old_path = dir.join("old.txt");
-    let new_path = dir.join("new.txt");
-    std::fs::write(&old_path, "hello").unwrap();
-
-    let old_cs = CString::new(old_path.to_str().unwrap()).unwrap();
-    let new_cs = CString::new(new_path.to_str().unwrap()).unwrap();
-    let args = [old_cs.as_c_str(), new_cs.as_c_str()];
-    let cfg = builtins::renameat2::parse::renameat2_parse(&args, false).unwrap();
-    builtins::renameat2::renameat2_exec(&cfg).unwrap();
-
-    assert!(!old_path.exists(), "old path should not exist after rename");
-    assert!(new_path.exists(), "new path should exist after rename");
-    assert_eq!(std::fs::read_to_string(&new_path).unwrap(), "hello");
-
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // --- strict (capability) mode ------------------------------------------------

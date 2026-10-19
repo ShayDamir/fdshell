@@ -4,6 +4,8 @@ use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::Report;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -146,11 +148,32 @@ const ENOTDIR: i32 = 20;
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn scratch() -> std::path::PathBuf {
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn scratch() -> Scratch {
     let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-symlinkat-{}-{}", std::process::id(), c));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 /// A directory fd for `path`, exported to a number the parse can consume.
@@ -174,7 +197,6 @@ fn exec_creates_link() {
         std::fs::read_link(&link).unwrap(),
         std::path::Path::new("target")
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -187,7 +209,6 @@ fn exec_stores_content_verbatim() {
         std::fs::read_link(&link).unwrap(),
         std::path::Path::new("no/such/target")
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -208,7 +229,6 @@ fn exec_resolves_against_dirfd() {
         std::fs::symlink_metadata(dir.join("l")).is_err(),
         "root l must not exist"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -218,7 +238,6 @@ fn exec_existing_link_is_eexist() {
     run_exec(&["t", link.to_str().unwrap()]).unwrap();
     let e = run_exec(&["t", link.to_str().unwrap()]).unwrap_err();
     assert_eq!(errno_of(&e), EEXIST);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -227,7 +246,6 @@ fn exec_missing_parent_is_enoent() {
     let missing = dir.join("nope").join("link");
     let e = run_exec(&["t", missing.to_str().unwrap()]).unwrap_err();
     assert_eq!(errno_of(&e), ENOENT);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -241,7 +259,6 @@ fn exec_nondirectory_dirfd_is_enotdir() {
     let e = run_exec(&["--dirfd", &s, "t", "l"]).unwrap_err();
     assert_eq!(errno_of(&e), ENOTDIR);
     drop(fd);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // --- strict (capability) mode ------------------------------------------------

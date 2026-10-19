@@ -3,7 +3,47 @@
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sys::shellfd::TAG_MAX;
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
+/// unique among *live* processes only, so the scratch must die with its
+/// process: pids are recycled, and a dir that outlives its process is a later
+/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
+/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
+/// on a failing test's unwind, which is exactly the test that used to leak.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named after `tag` (the old
+/// `fdshell-test-mkdirat-<tag>-…` prefixes), removed when the test's guard
+/// drops.
+fn scratch(tag: &str) -> Scratch {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-test-mkdirat-{tag}-{}-{}",
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
+}
 
 fn with_args<F: FnOnce(&[&CStr])>(strings: &[&str], f: F) {
     let owned: Vec<CString> = strings.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -228,15 +268,7 @@ fn eq_syntax() {
 
 #[test]
 fn test_mkdirat_exec() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-test-mkdirat-exec-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch("exec");
     let subdir_path = dir.join("subdir");
 
     let cpath = CString::new(subdir_path.to_str().unwrap()).unwrap();
@@ -278,7 +310,6 @@ fn test_mkdirat_exec() {
 
     drop(fd);
     drop(receiver);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Regression for the mode-0 trap: `mkdirat` with no `--mode` must create the
@@ -286,15 +317,7 @@ fn test_mkdirat_exec() {
 /// its own reopen and leave the directory on disk with no fd).
 #[test]
 fn test_mkdirat_exec_without_mode() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-test-mkdirat-modeless-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch("modeless");
     let cpath = CString::new(dir.join("subdir").to_str().unwrap()).unwrap();
 
     let (shell_a, shell_b) = sys::net::socketpair().unwrap();
@@ -328,20 +351,11 @@ fn test_mkdirat_exec_without_mode() {
 
     drop(fd);
     drop(receiver);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
 fn test_mkdirat_exec_masks_special_bits() {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-test-mkdirat-mask-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir(&dir).unwrap();
+    let dir = scratch("mask");
     let subdir_path = dir.join("subdir");
 
     let cpath = CString::new(subdir_path.to_str().unwrap()).unwrap();
@@ -373,7 +387,6 @@ fn test_mkdirat_exec_masks_special_bits() {
 
     drop(fd);
     drop(receiver);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // --- strict (capability) mode ------------------------------------------------
