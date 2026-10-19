@@ -1,11 +1,13 @@
 //! Integration tests for the socket-lifecycle wrappers
 //! (`sys::net::{socket, bind_uds_path, bind_uds_abstract, bind_inet,
-//! connect_uds_path, connect_uds_abstract, connect_inet, listen, accept}`).
+//! connect_uds_path, connect_uds_abstract, connect_inet, listen, accept,
+//! getsockname}`).
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use std::io::{Read, Write};
 use std::os::linux::net::SocketAddrExt;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{SocketAddr, UnixStream};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -90,6 +92,12 @@ fn test_bind_uds_path_creates_file() {
 fn test_bind_inet_loopback_port_zero() {
     let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
     sys::net::bind_inet(&fd, cstr("127.0.0.1"), 0).unwrap();
+    // Port 0 asks the kernel for a port; `getsockname` must report the one
+    // it assigned (task #254: the read-back is what lets a test bind 0).
+    match sys::net::getsockname(&fd).unwrap() {
+        sys::net::SockName::Inet { port } => assert_ne!(port, 0),
+        other => panic!("AF_INET socket must report an Inet name, got {other:?}"),
+    }
 }
 
 #[test]
@@ -278,6 +286,79 @@ fn test_connect_refused_when_nothing_bound() {
         err,
         sys::SyscallError::Other {
             errno: libc::ECONNREFUSED,
+            syscall: UNKNOWN
+        }
+    );
+}
+
+/// `getsockname` read-back of an AF_INET `port 0` bind is the live endpoint
+/// in host byte order: a real client connects to the reported port, so a
+/// byte-swapped (`from_le`) read-back lands on a port nothing listens on
+/// and the connect fails. (Binding a second socket to the reported port to
+/// pin byte order is not possible — the kernel-assigned port is live on the
+/// first socket, so the second `bind` is `EADDRINUSE`.)
+#[test]
+fn test_getsockname_inet_reports_bound_port() {
+    let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
+    sys::net::bind_inet(&fd, cstr("127.0.0.1"), 0).unwrap();
+    sys::net::listen(&fd, 1).unwrap();
+    let port = match sys::net::getsockname(&fd).unwrap() {
+        sys::net::SockName::Inet { port } => port,
+        other => panic!("AF_INET socket must report an Inet name, got {other:?}"),
+    };
+    assert_ne!(port, 0, "port 0 must come back kernel-assigned");
+    let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    drop(client);
+}
+
+/// Abstract form: the read-back is the name without its leading NUL, so
+/// this pins the family dispatch, the `sun_path` offset and the
+/// `addrlen`-bounded slice (abstract names are length-significant).
+#[test]
+fn test_getsockname_uds_abstract_reports_name() {
+    let name = abs_name("gsn-abs");
+    let (fd, _peer) = sys::net::socketpair().unwrap();
+    sys::net::bind_uds_abstract(&fd, cstr(&name)).unwrap();
+    match sys::net::getsockname(&fd).unwrap() {
+        sys::net::SockName::Unix { name: got } => assert_eq!(got, name.as_bytes()),
+        other => panic!("AF_UNIX socket must report a Unix name, got {other:?}"),
+    }
+}
+
+/// Path form: the read-back is the bound path truncated at the terminating
+/// NUL (the kernel pads the full `sockaddr_un`). pid+counter dir per the
+/// LESSONS temp-path rule, tolerant teardown.
+#[test]
+fn test_getsockname_uds_path_reports_name() {
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-sockets-gsn-path-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sock_path = dir.join("sock");
+    let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    sys::net::bind_uds_path(&fd, cstr(sock_path.to_str().unwrap())).unwrap();
+    match sys::net::getsockname(&fd).unwrap() {
+        sys::net::SockName::Unix { name: got } => {
+            assert_eq!(got, sock_path.as_os_str().as_bytes())
+        }
+        other => panic!("AF_UNIX socket must report a Unix name, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A non-socket fd surfaces the kernel errno through the wrapper; `cvt`
+/// carries no syscall name, so it appears as `UNKNOWN` (see above).
+#[test]
+fn test_getsockname_on_non_socket_is_enotsock() {
+    let _sock = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
+    let memfd = sys::memfd::memfd_create().unwrap();
+    let err = sys::net::getsockname(&memfd).unwrap_err();
+    assert_eq!(
+        err,
+        sys::SyscallError::Other {
+            errno: libc::ENOTSOCK,
             syscall: UNKNOWN
         }
     );

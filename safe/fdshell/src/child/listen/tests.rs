@@ -44,6 +44,38 @@ fn connect_abstract(name: &str) -> std::os::unix::net::UnixStream {
     std::os::unix::net::UnixStream::connect_addr(&addr).unwrap()
 }
 
+/// Run `listen <flag> 127.0.0.1 --port 0`, receive the listening socket off
+/// the capture socket, and return it. Port 0 lets the kernel pick the port
+/// and `getsockname` reads it back: the test names no port, so concurrent
+/// suite runs cannot collide (LESSONS task #239, closed in-process by task
+/// #254). One helper for both spellings keeps `--addr` and `--bind` from
+/// drifting apart.
+fn listen_inet_zero(state: &ShellState, receiver: &sys::LocalFd, flag: &str) -> sys::LocalFd {
+    with_refs(&[flag, "127.0.0.1", "--port", "0"], |refs| {
+        assert_eq!(
+            handle_listen(&Ctx::new(c"listen".into(), refs, &[], state)).unwrap(),
+            0
+        );
+    });
+    let mut buf = [0u8; sys::shellfd::TAG_MAX];
+    let pid = sys::Pid::from_raw(std::process::id() as i32);
+    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
+    assert_eq!(tag.to_bytes(), b"listen");
+    fd.verify().unwrap();
+    fd
+}
+
+/// The kernel-assigned port read back off the `--port 0` listening socket.
+fn inet_port(fd: &sys::LocalFd) -> u16 {
+    match sys::net::getsockname(fd).unwrap() {
+        sys::net::SockName::Inet { port } => {
+            assert_ne!(port, 0, "port 0 must come back kernel-assigned");
+            port
+        }
+        other => panic!("AF_INET bind must report an Inet name, got {other:?}"),
+    }
+}
+
 #[test]
 fn listen_handler_sends_listening_socket() {
     let (state, receiver) = capture_state();
@@ -73,21 +105,8 @@ fn listen_handler_sends_listening_socket() {
 #[test]
 fn listen_handler_inet_sends_listening_socket() {
     let (state, receiver) = capture_state();
-    let port: u16 = (20000 + std::process::id() % 10000) as u16;
-    with_refs(
-        &["--bind", "127.0.0.1", "--port", &format!("{port}")],
-        |refs| {
-            assert_eq!(
-                handle_listen(&Ctx::new(c"listen".into(), refs, &[], &state)).unwrap(),
-                0
-            );
-        },
-    );
-    let mut buf = [0u8; sys::shellfd::TAG_MAX];
-    let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
-    fd.verify().unwrap();
-    assert_eq!(tag.to_bytes(), b"listen");
+    let fd = listen_inet_zero(&state, &receiver, "--bind");
+    let port = inet_port(&fd);
     let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
     let nready = sys::poll::poll(&mut pfd, 2000).unwrap();
@@ -102,21 +121,8 @@ fn listen_handler_inet_sends_listening_socket() {
 fn listen_handler_addr_alias_sends_listening_socket() {
     // `--addr` is the address-shaped spelling of the AF_INET endpoint.
     let (state, receiver) = capture_state();
-    let port: u16 = (30000 + std::process::id() % 10000) as u16;
-    with_refs(
-        &["--addr", "127.0.0.1", "--port", &format!("{port}")],
-        |refs| {
-            assert_eq!(
-                handle_listen(&Ctx::new(c"listen".into(), refs, &[], &state)).unwrap(),
-                0
-            );
-        },
-    );
-    let mut buf = [0u8; sys::shellfd::TAG_MAX];
-    let pid = sys::Pid::from_raw(std::process::id() as i32);
-    let (fd, tag) = receiver.recv_fd(&mut buf, pid).unwrap();
-    fd.verify().unwrap();
-    assert_eq!(tag.to_bytes(), b"listen");
+    let fd = listen_inet_zero(&state, &receiver, "--addr");
+    let port = inet_port(&fd);
     let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
     let nready = sys::poll::poll(&mut pfd, 2000).unwrap();
