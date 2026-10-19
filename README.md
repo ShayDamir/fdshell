@@ -188,8 +188,8 @@ A redirection sends one of a command's descriptors somewhere else:
 | `<` | read stdin (fd 0) |
 | `<>` | open a file for both reading and writing |
 | `>|` | write, even when `noclobber` is on |
-| `&>` | write stdout **and** stderr (fd 1 and fd 2) |
-| `&>>` | append stdout and stderr |
+| `&>` | write stdout **and** stderr (fd 1 and fd 2), opening the file once and sharing it |
+| `&>>` | append stdout and stderr (one open, shared by fd 1 and fd 2) |
 
 A number before the operator selects the descriptor: `2> err` sends stderr
 to `err`; without a prefix, `>`/`>>`/`>|`/`&>`/`&>>` mean fd 1 and `<`/`<>`
@@ -202,6 +202,12 @@ cat < out.txt                 # read it back
 sort out.txt 2> errors.txt    # stderr to a file
 cmd &> log.txt                # both output streams to one file
 ```
+
+`&>` / `&>>` open their operand **once** and put the same open file description
+on fd 1 and fd 2, as bash's `> f 2>&1` does, so the two streams append to each
+other (`echo hi; echo e >&2` writes `hi\ne\n`). Writing the same file with two
+operators — `cmd > f 2> f` — is two separate opens, and the second one
+truncates at offset 0.
 
 The target of `>` can also be `%var` (an fd variable), `/dev/fd/N` (a copy of
 the open fd `N`), `>&1` (a copy of fd 1), `2>&%f` (a copy of the fd `%f`

@@ -2487,3 +2487,50 @@ scanners, not through this arm. Rule (the #311 one-opacity-rule at prompt
 granularity): a construct is complete only when its **body stream** is complete; a
 closer closes the block's text, never its bodies, so every completeness check that
 knows a block is closed must also ask `unterminated` about the block's own runs.
+
+## The `&>` family is one operator, so one open, so one description shared by fd 1 and fd 2 (task #251)
+`cmd &> f` is bash's `> f 2>&1`: one `open()`, `dup2`'d onto fd 1 **and** fd 2,
+so the two streams share one offset and append to each other. fdshell emitted
+**two** `RedirectDef`s with the same `Path` source (fd 1 and fd 2), and
+`open_redirect_files` opens one fd per `Path` source — two descriptions at
+independent offsets, fd 2's open truncating at 0 and overwriting fd 1's bytes
+(`echo hi; echo e >&2` wrote `e\n\n`, bash writes `hi\ne\n`). The second face of
+the same double open is `noclobber` on a **fresh** target: fd 1's exclusive
+create makes the path exist, fd 2's second exclusive open hits its own file and
+reports `Noclobber`, so `set -o noclobber; cmd &> fresh` failed where bash
+succeeds (`noclobber_creates_fresh_combined_target`).
+Rule: the sharing is keyed on the **operator**, never on the path. A path-keyed
+share in `resolve_redirects` would fix `&>` and silently break `> f 2> f`, whose
+two operators mean two opens; that shape is pinned byte-for-byte (`e\n\n`, in
+`redirect/resolve/tests.rs::two_path_defs_keep_two_independent_opens` and
+`tests/redirect.rs::separate_write_and_stderr_redirects_keep_two_opens`)
+so the sharing cannot be generalized to paths.
+Data model: `RedirectDef::combined` carries fd 1 in `export_to` and fd 2 in the
+new `extra_to`, and `max_target` folds **both** — `extra_to` is a *target*, and
+a source clone landing on it makes the `dup2` a no-op whose drop closes the
+target (the "redirect source fds above the highest target" rule above).
+fd 2 is fed by a **second clone of the same source fd** (`F_DUPFD_CLOEXEC`
+shares the description, `dup2` shares it too), *not* by emitting
+`RedirectDef::dup(2, 1)`: every consumer resolves all defs before exporting any
+of them, so a resolve-time dup of fd 1 captures the **pre-redirect** fd 1 —
+exactly the apply-order divergence task #337 owns. Building `&>` on that form
+would make a correct open depend on an unresolved design decision; the clone
+form has no apply-order dependence at all.
+Pin layers, one per observable (a missing pair, a second open, a wrong order):
+parse shape (`combined_def`, one def with `extra_to: Some(2)`), open count
+(`combined_def_opens_the_path_once`: exactly one fd, fd ≥ 3), resolve shape
+(`combined_path_def_resolves_to_a_pair_from_one_open`: two `Redirect`s, fd 1
+then fd 2, distinct fds ≥ 3, one consumed source, file bytes `hi\ne\n`), the
+in-shell scope (`combined_def_shares_one_description_between_fd1_and_fd2`) and
+the integration bytes (`combined_redirect_shares_one_file_description`,
+`exec_combined_redirect_shares_one_file_description`, the append order, the
+`/dev/fd/N` operand, `combined_redirect_noclobber_blocks_existing_file` and
+`combined_redirect_noclobber_creates_fresh_file`). The `Option<i32>` arms are
+mutant-prone (`extra_to: Some(2)`→`None`, `pair_of -> Ok(None)`, the pair's
+clone losing its `min_fd`, the pair pushed before its fd-1 twin); every one of
+them was measured by mutating the source and running the suite. The fd-≥-3
+assertions alone do **not** kill the `min_fd` mutants — with fds 0–2 open in the
+test process `try_clone_above(2)` already returns ≥ 3 — so the pin that folds
+`extra_to` into `min_fd` is `combined_def_target_folds_into_the_source_minimum`,
+which closes fd 2 first: the hole is what makes a source landing on the fd-2
+target observable (its `Drop` closes the target, and the fd-2 write fails).

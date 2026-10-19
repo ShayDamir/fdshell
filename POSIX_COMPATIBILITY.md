@@ -40,9 +40,11 @@ word. fdshell additionally reads `&name` as a task variable:
   plus its capture context) under `&name`; `&>|&name` overwrites an existing
   task.
 - `waitpid &name` waits for that task.
-- `&>` and `&>>` redirect stdout and stderr together (a bash extension). In
-  POSIX, `cmd &> file` is a background command followed by a truncating
-  redirection.
+- `&>` and `&>>` redirect stdout and stderr together (a bash extension). Like
+  bash they open the operand **once** and share that open file description
+  between fd 1 and fd 2 (bash's `> f 2>&1`), so the streams append to each
+  other; `cmd > f 2> f` stays two opens. In POSIX, `cmd &> file` is a
+  background command followed by a truncating redirection.
 
 ## Operators are recognized at word starts
 
