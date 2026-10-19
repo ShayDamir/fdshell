@@ -225,6 +225,19 @@ fn trailing_and_and_spans_lines() {
     assert!(!err.contains("parse error"), "stderr: {err:?}");
 }
 
+/// A trailing plain `&` (task #326) is **complete** input, not a continuation:
+/// the line executes at once (one read, one prompt — no `>` continuation
+/// prompt), the job runs in the background, the prompt returns, and the next
+/// line's `wait` reaps it.
+#[test]
+fn trailing_ampersand_is_complete_input() {
+    let (out, err, code) = run_repl("echo hi &\nwait\nexit\n");
+    assert_eq!(code, 0, "stderr: {err:?}");
+    assert!(out.contains("hi"), "output: {out:?}");
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    assert!(!err.contains("parse error"), "stderr: {err:?}");
+}
+
 #[test]
 fn unbalanced_quote_spans_lines() {
     let (out, _err, code) = run_repl("echo \"a\nb\"\nexit\n");

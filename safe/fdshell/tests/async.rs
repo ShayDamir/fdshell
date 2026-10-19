@@ -41,6 +41,29 @@ fn rc(out: &std::process::Output) -> i32 {
     out.status.code().unwrap_or(-1)
 }
 
+/// Run with the shell's fd 3 **closed from the start**: `sh` closes it before
+/// `exec`-ing fdshell, so the fd 3 the child (and every background child it
+/// forks) inherits is deterministic whatever the harness held. A pin that
+/// asserts fd 3 is *closed* goes through this helper — `cargo-mutants` hands
+/// every test process its jobserver pipes as open fds ≥ 3, which would flip
+/// those outcomes and break the unmutated baseline (LESSONS, task #276).
+/// stdin is `/dev/null` too: a backgrounded `cat` inherits it, and a stdin
+/// that never reaches EOF would keep the pin's own `wait` blocked.
+fn run_fd3_closed(script: &str) -> (String, String, i32) {
+    let output = Command::new("sh")
+        .args(["-c", "exec 3>&-; exec \"$0\" -c \"$1\"", BIN, script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 fn contains_all(out: &std::process::Output, want: &[&str]) {
     let stdout = str::from_utf8(&out.stdout).unwrap().to_string();
     for w in want {
@@ -55,6 +78,17 @@ fn async_statement_runs_and_is_reaped_by_wait() {
     let out = run("builtin echo hi &\nwait");
     assert_eq!(rc(&out), 0);
     assert_eq!(lines(&out), ["hi"]);
+}
+
+/// A shell function with a trailing `&` runs **in the forked child** (bash
+/// parity, measured identical: `in`, rc 0) — the child's copy of the state
+/// carries the function table the parent defined, so the async job is the
+/// whole command, not an external lookup.
+#[test]
+fn function_in_background_runs_in_the_child() {
+    let out = run("f(){ builtin echo in; }; f &\nwait");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(lines(&out), ["in"]);
 }
 
 /// Two `&` on one line are two jobs (bash parity): both run, `wait` reaps both.
@@ -233,16 +267,15 @@ fn here_doc_with_trailing_ampersand_prints_its_body() {
 /// A here-string on fd 3 with a trailing `&` runs the job at rc 0 and prints
 /// nothing — bash parity (`cat 3<<<x` puts the text on fd 3, `cat` reads
 /// stdin; measured identical in both, with and without the `&`). The #313
-/// family row in `POSIX_COMPATIBILITY.md` (a parse error) is retired.
+/// family row in `POSIX_COMPATIBILITY.md` (a parse error) is retired. Run
+/// through [`run_fd3_closed`]: the outcome is fd-3-state-dependent (an
+/// inherited open fd 3 would change what the child's `cat` inherits) and its
+/// stdin is the harness's, so the run is made deterministic at both.
 #[test]
 fn here_string_on_fd3_with_trailing_ampersand_matches_bash() {
-    let out = run("cat 3<<<x &\nwait");
-    assert_eq!(rc(&out), 0);
-    assert!(
-        lines(&out).is_empty(),
-        "stdout={:?}",
-        str::from_utf8(&out.stdout)
-    );
+    let (out, _err, code) = run_fd3_closed("cat 3<<<x &\nwait");
+    assert_eq!(code, 0);
+    assert!(out.lines().next().is_none(), "want no stdout, got {out:?}");
 }
 
 /// Quoting and escaping own the `&`: a quoted/escaped `&` is word data, never
@@ -278,16 +311,11 @@ fn ampersand_glued_to_an_operator_is_not_async() {
     assert_eq!(rc(&out), 0);
     assert_eq!(lines(&out), ["and"]);
     // `N>&N` is the fd-dup operator: fd 3 is closed, so the *redirect* fails
-    // (an async `&` here would have launched `echo` in the background).
-    let out = run("builtin echo three 1>&3");
-    assert_eq!(rc(&out), 1);
-    assert!(
-        str::from_utf8(&out.stderr)
-            .unwrap()
-            .contains("fd 3 is not open"),
-        "stderr={:?}",
-        str::from_utf8(&out.stderr)
-    );
+    // (an async `&` here would have launched `echo` in the background). Run
+    // through [`run_fd3_closed`]: the assertion is about the inherited fd 3.
+    let (_out, err, code) = run_fd3_closed("builtin echo three 1>&3");
+    assert_eq!(code, 1);
+    assert!(err.contains("fd 3 is not open"), "{err}");
 }
 
 /// `cd x &` (a parent-side builtin in the discarded child): the child's `cd`
