@@ -43,9 +43,9 @@ fn glued_after(line: &[u8], i: usize) -> bool {
 /// (`&x`: `waitpid &x`, `unset &x` — fdshell's name convention, LESSONS);
 /// `&&`/`&>` are the operator family (owned by `glued_after`).
 fn token_end(line: &[u8], i: usize) -> bool {
-    !matches!(
+    matches!(
         line.get(i + 1),
-        Some(b) if !matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'>' | b'<' | b'(' | b')' | b'\\')
+        None | Some(b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'>' | b'<' | b'(' | b')' | b'\\')
     )
 }
 
@@ -60,3 +60,6 @@ fn redirect_ahead(line: &[u8], i: usize) -> bool {
     }
     matches!(line.get(j), Some(&b'>') | Some(&b'<'))
 }
+
+#[cfg(test)]
+mod tests;
