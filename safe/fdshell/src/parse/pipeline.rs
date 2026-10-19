@@ -2,7 +2,7 @@ use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::command::parse_command;
 use crate::parse::heredoc::{HeredocBody, operator_count};
-use crate::parse::{CommandLine, ParsedLine, Pipeline};
+use crate::parse::{CommandLine, ParsedLine, Pipeline, pipe_token_span};
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
 use sys::Position;
@@ -16,8 +16,8 @@ pub fn parse_pipeline(
     let mut commands = Vec::new();
     let mut start = 0;
     let mut spec_at = 0;
-    for (i, (t, _, _, _, _, _)) in raw.iter().enumerate() {
-        if t.eq_bytes(b"|") {
+    for (i, (_t, ts, te, _fq, _mask, _spans)) in raw.iter().enumerate() {
+        if pipe_token_span(line, *ts, *te) {
             ensure!(i != start, ParseError::UnexpectedPipe);
             let cmd = parse_stage(raw, line, specs, &mut spec_at, start, i, set_at)?;
             commands.push(cmd);

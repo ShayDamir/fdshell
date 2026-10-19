@@ -7,6 +7,11 @@
 
 use crate::bytes::SQUOTE;
 use alloc::vec::Vec;
+use pipe::word_start;
+
+mod pipe;
+
+pub(crate) use pipe::{pipe_token_span, pipeline_pipe};
 
 /// The shared rule: the word's last byte is `>`, unquoted and not the second
 /// byte of an escape pair, and no unquoted `>`/`<` byte comes before it — so
@@ -74,20 +79,14 @@ pub(crate) fn quote_mask(line: &[u8], e: usize) -> Vec<bool> {
 /// Whether the `|` at `k` is the byte of a `>|` clobber operator, so it is an
 /// operator byte, not a pipeline pipe, and it does not break a word. Callers
 /// pass a `k` they have already matched to a `|`; the word is the run that ends
-/// at `k - 1`, back to a byte that ends a word: whitespace, `;`, newline, or
-/// `)` — `scan::advance::is_word_break` without `|`, `<` and `>`, because an
-/// absorbed `|` is part of the operator word and operator bytes never break a
-/// word (as in the tokenizer).
+/// at `k - 1`, back to a byte that ends a word ([`pipe::word_start`], the same
+/// scan [`pipe::pipeline_pipe`] walks): whitespace, `;`, newline, or `)` —
+/// `scan::advance::is_word_break` without `|`, `<` and `>`, because an absorbed
+/// `|` is part of the operator word and operator bytes never break a word (as in
+/// the tokenizer).
 pub(crate) fn clobber_pipe(line: &[u8], k: usize) -> bool {
     let mask = quote_mask(line, k);
-    let mut s = k;
-    while s > 0
-        && line
-            .get(s - 1)
-            .is_some_and(|&b| !matches!(b, b' ' | b'\t' | b';' | b'\n' | b')'))
-    {
-        s -= 1;
-    }
+    let s = word_start(line, k);
     let word = line.get(s..k).unwrap_or(b"");
     clobber_word(word, mask.get(s..k).unwrap_or(&[]))
 }

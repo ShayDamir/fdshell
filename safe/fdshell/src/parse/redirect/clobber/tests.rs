@@ -2,6 +2,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use super::clobber_pipe;
 use super::quote_mask;
 
 /// All-false mask of a byte run, for the "is this byte quoted?" reads.
@@ -46,22 +47,19 @@ fn span_masks_the_escape_and_the_quote_bytes() {
 /// pipe, exactly as after a double-quoted one (`'a>'|b` is a pipeline).
 #[test]
 fn span_terminated_by_operator_byte_is_a_pipe() {
+    assert!(clobber_pipe(b"a>|b", 2), "`>|` is an operator");
     assert!(
-        crate::parse::clobber_pipe(b"a>|b", 2),
-        "`>|` is an operator"
-    );
-    assert!(
-        !crate::parse::clobber_pipe(b"a'>|b", 4),
+        !clobber_pipe(b"a'>|b", 4),
         "the `>` is inside a span: the `|` is a pipe"
     );
     assert!(
-        !crate::parse::clobber_pipe(b"a\">|b", 4),
+        !clobber_pipe(b"a\">|b", 4),
         "the double-quoted case, unchanged"
     );
     // The `'` written inside `"` is data: the `>` is masked, so the `|` is a
     // pipe (`echo "a'b>"c` prints `a'b>c`).
     assert!(
-        !crate::parse::clobber_pipe(b"a\"'b>\"|c", 6),
+        !clobber_pipe(b"a\"'b>\"|c", 6),
         "the `'` in `\"` opens no span, the `>` stays quoted"
     );
 }

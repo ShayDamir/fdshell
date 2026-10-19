@@ -3,6 +3,7 @@
 
 use super::super::Token;
 use crate::error::parse::ParseError;
+use crate::parse::pipe_token_span;
 use crate::scan::heredoc::{
     Operator, attached, invalid_delimiter, io_fd, operator_delim, span_operator,
 };
@@ -15,7 +16,11 @@ use sys::ShortCStr;
 /// word, never in a pipeline position. The shape test reads the token's **raw
 /// span** and the shared `span_operator`, never the token text: quote removal
 /// makes `3"<<"T` read exactly like `3<<T`, and a token-text rule for a
-/// raw-byte structure is the byte/token count mismatch (LESSONS).
+/// raw-byte structure is the byte/token count mismatch (LESSONS). The
+/// predecessor test is the same rule: only a span of exactly one `|` byte is
+/// the tokenizer's pipe token, so a quoted `"|"`/`'|'` and an escaped `\|`
+/// (word tokens whose *text* is `|`) leave the `<<` an operator —
+/// `parse::redirect::pipeline_pipe` is that rule on the byte side.
 pub(crate) fn is_operator(line: &[u8], tokens: &[Token], i: usize) -> bool {
     if i == 0 {
         return false;
@@ -28,7 +33,7 @@ pub(crate) fn is_operator(line: &[u8], tokens: &[Token], i: usize) -> bool {
     }
     !tokens
         .get(i - 1)
-        .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b"|"))
+        .is_some_and(|(_p, ps, pe, _fq, _m, _s)| pipe_token_span(line, *ps, *pe))
 }
 
 /// The token index of every heredoc operator (never the command word).

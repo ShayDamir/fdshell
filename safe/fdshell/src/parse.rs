@@ -49,7 +49,7 @@ pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
 pub use line::ParsedLine;
 pub(crate) use redirect::parse_fd;
-pub(crate) use redirect::{clobber_pipe, clobber_word};
+pub(crate) use redirect::{clobber_word, pipe_token_span, pipeline_pipe};
 pub(crate) use time_block::TimeBlock;
 
 use crate::error::parse::ParseError;
@@ -93,7 +93,10 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
 
     let heredocs = heredoc::layout(line, &raw)?;
 
-    if raw.iter().any(|(t, _, _, _, _, _)| t.eq_bytes(b"|")) {
+    if raw
+        .iter()
+        .any(|(_t, start, end, _fq, _mask, _spans)| pipe_token_span(line, *start, *end))
+    {
         return pipeline::parse_pipeline(&raw, line, &heredocs, text.start);
     }
 

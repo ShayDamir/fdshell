@@ -1,7 +1,7 @@
 mod attached;
 mod bare;
 mod clobber;
-pub(crate) use clobber::{clobber_pipe, clobber_word};
+pub(crate) use clobber::{clobber_word, pipe_token_span, pipeline_pipe};
 
 use crate::error::parse::ParseError;
 use crate::parse::Token;
