@@ -720,6 +720,128 @@ fn space_separated_combined_redirect_fd_path() {
     assert_eq!(body, "hi\n");
 }
 
+// --- the `&>` family opens its operand once (task #251) ---------------------
+//
+// `cmd &> f` is bash's `> f 2>&1`: one `open()`, `dup2`'d onto fd 1 and fd 2,
+// so the two streams share one offset and append to each other. Every value
+// below is `bash -c` (5.3.9) measured 2026-10-19 in a scratch dir; the old
+// two-open behavior wrote `e\n\n` in the first two tests (fd 2's open landed at
+// offset 0 and overwrote fd 1's bytes).
+
+#[test]
+fn combined_redirect_shares_one_file_description() {
+    let path = temp_path("combined_shared");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f &> {path}; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(body, "hi\ne\n", "fd 2's write appends after fd 1's");
+    assert_eq!(out, "hi\ne\n", "stdout={out:?}");
+}
+
+#[test]
+fn exec_combined_redirect_shares_one_file_description() {
+    // The in-shell (`exec`) scope. The shell's own fds are redirected, so fd 1
+    // and fd 2 are saved to fd 3 and restored at the end — the probe's tail
+    // `exec 1>&2` would make the `cat` write into the file it reads.
+    let path = temp_path("exec_combined_shared");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "exec 3>&1; exec &> {path}; echo hi; echo e >&2; exec 1>&3; exec 2>&3; exec 3>&-; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(body, "hi\ne\n", "the scope shares one description too");
+    assert_eq!(out, "hi\ne\n", "stdout={out:?}");
+}
+
+#[test]
+fn combined_append_writes_in_order() {
+    let path = temp_path("combined_append_order");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f &>> {path}; f &>> {path}; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(body, "hi\ne\nhi\ne\n");
+    assert_eq!(out, "hi\ne\nhi\ne\n", "stdout={out:?}");
+}
+
+#[test]
+fn combined_redirect_fd_path_operand_shares_one_description() {
+    // `&> /dev/fd/4` stays a path source (LESSONS), and the sharing rule
+    // applies to it: the single open of the magic path lands on the fd the
+    // shell's `exec 4>` holds, and fd 1 and fd 2 append to each other.
+    let path = temp_path("combined_shared_fd_path");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "exec 4> {path}; f(){{ echo hi; echo e >&2; }}; f &> /dev/fd/4; exec 4>&-; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(body, "hi\ne\n");
+    assert_eq!(out, "hi\ne\n", "stdout={out:?}");
+}
+
+#[test]
+fn separate_write_and_stderr_redirects_keep_two_opens() {
+    // Two operators, two opens: `> f 2> f` is **not** the `&>` family, and fd 2
+    // truncates at offset 0, overwriting fd 1's write. The trailing newline of
+    // `hi\n` survives at byte 2 — the exact bytes are pinned so a "share every
+    // same-path pair" change cannot pass.
+    let path = temp_path("two_opens");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f > {path} 2> {path}; cat {path}"
+    ));
+    let body = std::fs::read(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(body, b"e\n\n", "the second open wins at offset 0");
+    assert_eq!(out, "e\n\n", "stdout={out:?}");
+}
+
+#[test]
+fn combined_redirect_noclobber_blocks_existing_file() {
+    let path = temp_path("combined_noclobber");
+    std::fs::write(&path, b"old\n").unwrap();
+    let (_out, err, code) = run(&format!(
+        "set -o noclobber; f(){{ echo hi; echo e >&2; }}; f &> {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("cannot overwrite existing file"),
+        "stderr={err:?}"
+    );
+    assert_eq!(body, "old\n", "the blocked open leaves the file untouched");
+}
+
+#[test]
+fn combined_redirect_noclobber_creates_fresh_file() {
+    // The two-open form failed here: fd 1's exclusive create made the path
+    // exist, and fd 2's second exclusive open then hit `EEXIST` (bash opens
+    // once, so `noclobber` is a no-op on a fresh file).
+    let path = temp_path("combined_noclobber_fresh");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "set -o noclobber; f(){{ echo hi; echo e >&2; }}; f &> {path}; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(body, "hi\ne\n");
+    assert_eq!(out, "hi\ne\n", "stdout={out:?}");
+}
+
 // --- the bare-operand guard is mask-gated (task #323) -----------------------
 //
 // The operand of a bare `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` is an operator only

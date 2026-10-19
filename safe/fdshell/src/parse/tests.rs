@@ -58,6 +58,21 @@ fn parse(line: &[u8]) -> Result<ParsedLine, Report<ParseError>> {
 fn path_def(export_to: i32, direction: RedirectDirection, path: &str) -> RedirectDef {
     RedirectDef {
         export_to,
+        extra_to: None,
+        direction,
+        source: RedirectSource::path(
+            sys::ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
+            vec![false; path.len()],
+        ),
+    }
+}
+
+/// The `&>` family's def shape: one open (`export_to` = fd 1, `extra_to` = fd 2),
+/// unquoted quote mask, as the parser produces it for an unquoted path word.
+fn combined_def(direction: RedirectDirection, path: &str) -> RedirectDef {
+    RedirectDef {
+        export_to: 1,
+        extra_to: Some(2),
         direction,
         source: RedirectSource::path(
             sys::ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
@@ -264,6 +279,7 @@ fn test_stdin_redirect() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 0,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Var(c"input".into()),
         }]
@@ -717,6 +733,7 @@ fn test_fd_dup_redirect_stderr_to_stdout() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 2,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Dup(1),
         }]
@@ -733,6 +750,7 @@ fn test_fd_dup_redirect_stdin_from_stdout() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 0,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Dup(1),
         }]
@@ -748,6 +766,7 @@ fn test_fd_dup_redirect_bare_prefix() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 1,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Dup(1),
         }]
@@ -763,6 +782,7 @@ fn test_fd_close_redirect() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 3,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Close,
         }]
@@ -778,6 +798,7 @@ fn test_fd_dup_var_redirect_stderr() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 2,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Var(c"name".into()),
         }]
@@ -793,6 +814,7 @@ fn test_fd_dup_var_redirect_stdin() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 0,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Var(c"name".into()),
         }]
@@ -808,6 +830,7 @@ fn test_fd_dup_var_redirect_bare_prefix() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 1,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Var(c"name".into()),
         }]
@@ -841,6 +864,7 @@ fn test_fd_path_redirect_dups_fd() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 0,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Dup(3),
         }]
@@ -856,6 +880,7 @@ fn test_fd_path_redirect_numbered_write() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 5,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Dup(2),
         }]
@@ -910,6 +935,7 @@ fn test_rw_redirect_defaults_to_fd_zero() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 0,
+            extra_to: None,
             direction: RedirectDirection::Rw,
             source: RedirectSource::path(c"file", vec![false; 4]),
         }]
@@ -925,6 +951,7 @@ fn test_rw_redirect_numbered() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 3,
+            extra_to: None,
             direction: RedirectDirection::Rw,
             source: RedirectSource::path(c"file", vec![false; 4]),
         }]
@@ -1003,6 +1030,7 @@ fn test_space_separated_redirect_quoted_path() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 1,
+            extra_to: None,
             direction: RedirectDirection::Write,
             source: RedirectSource::path(c"my file", vec![true; 7]),
         }]
@@ -1130,6 +1158,7 @@ fn test_clobber_var_form() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 1,
+            extra_to: None,
             direction: RedirectDirection::Clobber,
             source: RedirectSource::Var(c"log".into()),
         }]
@@ -1153,6 +1182,7 @@ fn test_clobber_bare_quoted_path() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 1,
+            extra_to: None,
             direction: RedirectDirection::Clobber,
             source: RedirectSource::path(c"my file", vec![true; 7]),
         }]
@@ -1201,6 +1231,7 @@ fn test_fd_var_target_after_each_operator() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 3,
+            extra_to: None,
             direction: RedirectDirection::Read,
             source: RedirectSource::Var(c"x".into()),
         }]
@@ -1212,6 +1243,7 @@ fn test_fd_var_target_after_each_operator() {
         cmd.redirects,
         vec![RedirectDef {
             export_to: 0,
+            extra_to: None,
             direction: RedirectDirection::Rw,
             source: RedirectSource::Var(c"x".into()),
         }]
@@ -1253,10 +1285,7 @@ fn test_combined_redirect() {
 
     assert_eq!(
         cmd.redirects,
-        vec![
-            path_def(1, RedirectDirection::Write, "out.log"),
-            path_def(2, RedirectDirection::Write, "out.log"),
-        ]
+        vec![combined_def(RedirectDirection::Write, "out.log"),]
     );
 }
 
@@ -1268,10 +1297,7 @@ fn test_combined_redirect_append() {
 
     assert_eq!(
         cmd.redirects,
-        vec![
-            path_def(1, RedirectDirection::Append, "out.log"),
-            path_def(2, RedirectDirection::Append, "out.log"),
-        ]
+        vec![combined_def(RedirectDirection::Append, "out.log"),]
     );
 }
 
@@ -1283,7 +1309,10 @@ fn test_combined_redirect_var() {
 
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef::var(1, c"log"), RedirectDef::var(2, c"log"),]
+        vec![RedirectDef::combined(
+            RedirectDirection::Write,
+            RedirectSource::Var(c"log".into()),
+        )]
     );
 }
 
@@ -1295,8 +1324,7 @@ fn test_combined_redirect_then_stderr_redirect() {
     assert_eq!(
         cmd.redirects,
         vec![
-            path_def(1, RedirectDirection::Write, "file"),
-            path_def(2, RedirectDirection::Write, "file"),
+            combined_def(RedirectDirection::Write, "file"),
             path_def(2, RedirectDirection::Write, "other"),
         ]
     );
@@ -1311,8 +1339,7 @@ fn test_fd1_redirect_then_combined_last_wins() {
         cmd.redirects,
         vec![
             path_def(1, RedirectDirection::Write, "other"),
-            path_def(1, RedirectDirection::Write, "file"),
-            path_def(2, RedirectDirection::Write, "file"),
+            combined_def(RedirectDirection::Write, "file"),
         ]
     );
 }
@@ -1395,24 +1422,17 @@ fn test_combined_redirect_append_var() {
 
     assert_eq!(
         cmd.redirects,
-        vec![
-            RedirectDef {
-                export_to: 1,
-                direction: RedirectDirection::Append,
-                source: RedirectSource::Var(c"log".into()),
-            },
-            RedirectDef {
-                export_to: 2,
-                direction: RedirectDirection::Append,
-                source: RedirectSource::Var(c"log".into()),
-            },
-        ]
+        vec![RedirectDef::combined(
+            RedirectDirection::Append,
+            RedirectSource::Var(c"log".into()),
+        )]
     );
 }
 
 // The bare `&>` / `&>>` forms take the next word as their operand, with the
 // plain-word rule the bare `>` family uses (task #145). Measured against bash
-// 5.3: `cmd &> f` is `cmd > f 2> f`, and the operand is never an argument.
+// 5.3: `cmd &> f` opens `f` once and shares it between fd 1 and fd 2 (bash's
+// `> f 2>&1`), and the operand is never an argument.
 
 #[test]
 fn test_bare_combined_redirect_takes_next_token() {
@@ -1421,10 +1441,7 @@ fn test_bare_combined_redirect_takes_next_token() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![
-            path_def(1, RedirectDirection::Write, "out.log"),
-            path_def(2, RedirectDirection::Write, "out.log"),
-        ]
+        vec![combined_def(RedirectDirection::Write, "out.log"),]
     );
     assert!(cmd.args.is_empty(), "the operand must not leak into args");
 }
@@ -1436,10 +1453,7 @@ fn test_bare_combined_append_takes_next_token() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![
-            path_def(1, RedirectDirection::Append, "out.log"),
-            path_def(2, RedirectDirection::Append, "out.log"),
-        ]
+        vec![combined_def(RedirectDirection::Append, "out.log"),]
     );
     assert!(cmd.args.is_empty(), "the operand must not leak into args");
 }
@@ -1451,18 +1465,12 @@ fn test_bare_combined_operand_keeps_its_quote_mask() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![
-            RedirectDef {
-                export_to: 1,
-                direction: RedirectDirection::Write,
-                source: RedirectSource::path(c"a b.log", vec![true; 7]),
-            },
-            RedirectDef {
-                export_to: 2,
-                direction: RedirectDirection::Write,
-                source: RedirectSource::path(c"a b.log", vec![true; 7]),
-            },
-        ]
+        vec![RedirectDef {
+            export_to: 1,
+            extra_to: Some(2),
+            direction: RedirectDirection::Write,
+            source: RedirectSource::path(c"a b.log", vec![true; 7]),
+        }]
     );
     assert!(cmd.args.is_empty());
 }
@@ -1475,10 +1483,7 @@ fn test_bare_combined_following_words_stay_args() {
     assert_eq!(cmd.args, vec![c"a".into(), c"b".into()]);
     assert_eq!(
         cmd.redirects,
-        vec![
-            path_def(1, RedirectDirection::Write, "f"),
-            path_def(2, RedirectDirection::Write, "f"),
-        ]
+        vec![combined_def(RedirectDirection::Write, "f"),]
     );
 }
 
@@ -1489,10 +1494,7 @@ fn test_bare_combined_in_pipeline_stage() {
     };
     assert_eq!(
         pl.commands[0].redirects,
-        vec![
-            path_def(1, RedirectDirection::Write, "f"),
-            path_def(2, RedirectDirection::Write, "f"),
-        ]
+        vec![combined_def(RedirectDirection::Write, "f"),]
     );
     assert_eq!(pl.commands[0].command, c"echo".into());
     assert_eq!(
@@ -1531,10 +1533,7 @@ fn test_bare_combined_fd_path_operand_is_a_path() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![
-            path_def(1, RedirectDirection::Write, "/dev/fd/3"),
-            path_def(2, RedirectDirection::Write, "/dev/fd/3"),
-        ]
+        vec![combined_def(RedirectDirection::Write, "/dev/fd/3"),]
     );
 }
 
@@ -1547,8 +1546,7 @@ fn test_bare_combined_operand_does_not_shift_the_heredoc_body() {
         cmd.redirects,
         vec![
             RedirectDef::here_doc(0, c"body\n", true),
-            path_def(1, RedirectDirection::Write, "f"),
-            path_def(2, RedirectDirection::Write, "f"),
+            combined_def(RedirectDirection::Write, "f"),
         ]
     );
     assert_eq!(cmd.args, vec![c"a".into()]);

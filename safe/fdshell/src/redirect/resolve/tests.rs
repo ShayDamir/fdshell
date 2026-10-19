@@ -1,5 +1,8 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::redirect::{RedirectDirection, RedirectSource};
+use alloc::format;
+use alloc::string::{String, ToString};
 use alloc::vec;
 
 fn cell() -> ForkCell<ShellState> {
@@ -339,4 +342,133 @@ fn here_doc_source_is_above_its_zero_target() {
     let resolved = resolve_redirects(&[RedirectDef::here_doc(0, c"x\n", true)], &[], &c).unwrap();
     let doc = resolved.first().unwrap();
     assert!(dup_of(doc).as_raw() > 0);
+}
+
+fn temp_path(tag: &str) -> String {
+    std::env::temp_dir()
+        .join(format!("fdshell_resolve_{tag}_{}", std::process::id()))
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+fn cstr(s: &str) -> ShortCStr {
+    ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap()
+}
+
+/// Open `path` as a fresh regular file: the shared-offset pins below measure
+/// its bytes after the resolved fds have written through it.
+fn open_file(path: &str) -> LocalFd {
+    let name = sys::ExportedCStr::from(cstr(path));
+    sys::openat2::open(
+        &name,
+        sys::fcntl::O_RDWR + sys::fcntl::O_CREAT + sys::fcntl::O_TRUNC,
+    )
+    .unwrap()
+}
+
+fn pair_of(resolved: &[Redirect], first: i32, second: i32) -> (LocalFd, LocalFd) {
+    assert_eq!(resolved.len(), 2, "one def, two targets");
+    let (a, b) = (resolved.first().unwrap(), resolved.get(1).unwrap());
+    assert!(
+        matches!(a, Redirect::Dup { export_to, .. } if export_to == &first),
+        "the pair's first target is fd {first}"
+    );
+    assert!(
+        matches!(b, Redirect::Dup { export_to, .. } if export_to == &second),
+        "the pair's second target is fd {second}"
+    );
+    (
+        dup_of(a).try_clone().unwrap(),
+        dup_of(b).try_clone().unwrap(),
+    )
+}
+
+/// The `&>` family's def resolves to a **pair**: fd 1 first, then fd 2, both
+/// fed by clones of the *same* pre-opened fd — one open, one file description,
+/// so the fd-2 write appends after the fd-1 write (bash's `> f 2>&1`; task #251
+/// replaces the old two-open behavior, where fd 2 landed at offset 0).
+#[test]
+fn combined_path_def_resolves_to_a_pair_from_one_open() {
+    let c = cell();
+    let path = temp_path("combined_pair");
+    let src = vec![open_file(&path)];
+    let redirects = vec![RedirectDef::combined(
+        RedirectDirection::Write,
+        RedirectSource::path(cstr(&path), Vec::new()),
+    )];
+    let resolved = resolve_redirects(&redirects, &src, &c).unwrap();
+    let (fd1, fd2) = pair_of(&resolved, 1, 2);
+    assert!(
+        fd1.as_raw() >= 3 && fd2.as_raw() >= 3,
+        "both clones sit above every target of the command"
+    );
+    assert_ne!(fd1.as_raw(), fd2.as_raw(), "two distinct descriptors");
+    fd1.write_all(b"hi\n").unwrap();
+    fd2.write_all(b"e\n").unwrap();
+    drop((fd1, fd2));
+    drop(resolved);
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(body, "hi\ne\n", "one description: the offsets are shared");
+}
+
+/// `&> %var` shares the fd variable's description the same way: one operator,
+/// one description, two targets. fdshell has no bash counterpart for this form,
+/// so the sharing is pinned here to make any future change deliberate.
+#[test]
+fn combined_var_def_resolves_to_a_pair_from_one_table_fd() {
+    let c = cell();
+    let path = temp_path("combined_var_pair");
+    {
+        let mut state = c.borrow_mut().unwrap();
+        state.fds.insert(
+            c"log".into(),
+            crate::state::FdVar {
+                fd: open_file(&path),
+                trace: sys::Trace::boundary(sys::Origin::Shell),
+            },
+        );
+    }
+    let redirects = vec![RedirectDef::combined(
+        RedirectDirection::Append,
+        RedirectSource::Var(c"log".into()),
+    )];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let (fd1, fd2) = pair_of(&resolved, 1, 2);
+    assert!(fd1.as_raw() >= 3 && fd2.as_raw() >= 3);
+    fd1.write_all(b"hi\n").unwrap();
+    fd2.write_all(b"e\n").unwrap();
+    drop((fd1, fd2));
+    drop(resolved);
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(body, "hi\ne\n");
+}
+
+/// The pair is only the `&>` family's: every other source arm yields exactly
+/// one `Redirect`, so `> f 2> f` (two defs) keeps two independent opens — the
+/// fd-2 open truncates at offset 0 and overwrites fd 1's bytes, bash included.
+#[test]
+fn two_path_defs_keep_two_independent_opens() {
+    let c = cell();
+    let path = temp_path("two_opens");
+    let src = vec![open_file(&path), open_file(&path)];
+    let redirects = vec![
+        RedirectDef::write_path(1, cstr(&path)),
+        RedirectDef::write_path(2, cstr(&path)),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &c).unwrap();
+    assert_eq!(resolved.len(), 2, "two defs, two opens, no pair");
+    let (fd1, fd2) = pair_of(&resolved, 1, 2);
+    fd1.write_all(b"hi\n").unwrap();
+    fd2.write_all(b"e\n").unwrap();
+    drop((fd1, fd2));
+    drop(resolved);
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(
+        body, "e\n\n",
+        "fd 2's open starts at offset 0 and overwrites fd 1"
+    );
 }

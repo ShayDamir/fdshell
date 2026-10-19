@@ -34,6 +34,7 @@ fn multi_match_target_is_ambiguous_redirect() {
     let path = ShortCStr::from_vec(format!("{dir}/a*").into_bytes()).unwrap();
     let def = RedirectDef {
         export_to: 1,
+        extra_to: None,
         direction: RedirectDirection::Write,
         source: RedirectSource::path(path, Vec::new()),
     };
@@ -52,6 +53,7 @@ fn single_match_target_opens_the_match() {
     let path = ShortCStr::from_vec(format!("{dir}/a1").into_bytes()).unwrap();
     let def = RedirectDef {
         export_to: 1,
+        extra_to: None,
         direction: RedirectDirection::Write,
         source: RedirectSource::path(path, Vec::new()),
     };
@@ -78,12 +80,104 @@ fn cell_with(dir: &str, options: u32) -> ForkCell<ShellState> {
 fn write_def(path: &str) -> RedirectDef {
     RedirectDef {
         export_to: 1,
+        extra_to: None,
         direction: RedirectDirection::Write,
         source: RedirectSource::path(
             ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
             Vec::new(),
         ),
     }
+}
+
+/// The `&>` family's def: fd 1 (`export_to`) and fd 2 (`extra_to`) share the
+/// def's single open (task #251).
+fn combined_def(path: &str) -> RedirectDef {
+    RedirectDef {
+        export_to: 1,
+        extra_to: Some(2),
+        direction: RedirectDirection::Write,
+        source: RedirectSource::path(
+            ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
+            Vec::new(),
+        ),
+    }
+}
+
+/// The single-open pin: one `combined` def yields **one** opened fd, above
+/// every target of the command, and the path is opened exactly once (fd 2 is
+/// fed by a clone of that fd in `resolve`, not by a second open).
+#[test]
+fn combined_def_opens_the_path_once() {
+    let dir = scratch();
+    let abs = format!("{dir}/a1");
+    let cell = ForkCell::new(ShellState::new());
+    let fds = open_redirect_files(&[combined_def(&abs)], &cell).unwrap();
+    assert_eq!(
+        fds.len(),
+        1,
+        "one operator, one open: fd 2 is a clone, not a second open"
+    );
+    assert!(
+        fds.first().unwrap().as_raw() >= 3,
+        "the open sits above the def's highest target (fd 2)",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same under strict mode: the combined target is opened once through the
+/// pinned `%CWD` base fd.
+#[test]
+fn strict_combined_def_opens_the_target_once() {
+    let dir = scratch();
+    std::fs::remove_file(format!("{dir}/a1")).unwrap();
+    let fds = open_redirect_files(&[combined_def("a1")], &cell_with(&dir, STRICT)).unwrap();
+    assert_eq!(fds.len(), 1);
+    assert!(std::path::Path::new(&format!("{dir}/a1")).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `noclobber` gates the combined `&>` exactly like the plain `>`: its
+/// direction is `Write`, so an existing target is refused and untouched.
+#[test]
+fn noclobber_rejects_existing_combined_target() {
+    let dir = scratch();
+    std::fs::write(format!("{dir}/a1"), b"keep").unwrap();
+    let abs = format!("{dir}/a1");
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.options |= NOCLOBBER;
+    }
+    let report = open_redirect_files(&[combined_def(&abs)], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::Noclobber { .. }
+    ));
+    assert_eq!(
+        std::fs::read_to_string(format!("{dir}/a1")).unwrap(),
+        "keep"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The fresh target under `noclobber` is created **once**: a second exclusive
+/// open of the same path would hit the file the first open just created and
+/// report `Noclobber` (the two-open bug, task #251).
+#[test]
+fn noclobber_creates_fresh_combined_target() {
+    let dir = scratch();
+    std::fs::remove_file(format!("{dir}/a1")).unwrap();
+    let abs = format!("{dir}/a1");
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.options |= NOCLOBBER;
+    }
+    let fds = open_redirect_files(&[combined_def(&abs)], &cell).unwrap();
+    assert_eq!(fds.len(), 1, "the fresh target is opened once");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Strict opens a relative target through the pinned `%CWD` fd: the word is

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::redirect::{RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -239,6 +240,65 @@ fn post_restore_write_lands_on_the_restored_target() {
     );
     assert_eq!(body(&a), "");
     assert_eq!(body(&b), "body");
+}
+
+/// The `&>` family in the in-shell scope (`exec &> f`, a function body, an
+/// in-process builtin): the single open is shared by fd 1 and fd 2, so fd 2's
+/// write appends after fd 1's — bash's `hi\ne\n`, where the two-open form wrote
+/// `e\n\n` (fd 2's open landed at offset 0; task #251). Both shell fds come
+/// back on restore.
+#[test]
+fn combined_def_shares_one_description_between_fd1_and_fd2() {
+    let a = temp_path("combined_share");
+    let out_before = link(1);
+    let err_before = link(2);
+    let cell = cell();
+    let scope = Scope::open(
+        &[RedirectDef::combined(
+            RedirectDirection::Write,
+            RedirectSource::path(cstr(&a), Vec::new()),
+        )],
+        &cell,
+    )
+    .unwrap();
+    write_fd(1, b"hi\n");
+    write_fd(2, b"e\n");
+    scope.restore().unwrap();
+    assert_eq!(link(1), out_before, "fd 1 is back on the shell's stdout");
+    assert_eq!(link(2), err_before, "fd 2 is back on the shell's stderr");
+    assert_eq!(
+        body(&a),
+        "hi\ne\n",
+        "one description: fd 2's write follows fd 1's, not offset 0"
+    );
+}
+
+/// The `max_target` fold is observable with fd 2 closed: the combined def's
+/// fd-2 target must raise the minimum, or the def's own pre-open lands on fd 2
+/// and its `Drop` closes the target the def just installed (LESSONS "redirect
+/// source fds must be allocated above the command's highest target"). With the
+/// `extra_to` half removed the fd-2 write fails with `EBADF`.
+#[test]
+fn combined_def_target_folds_into_the_source_minimum() {
+    let _ = sys::dup::close(2);
+    let a = temp_path("combined_min_fd");
+    let out_before = link(1);
+    let cell = cell();
+    let scope = Scope::open(
+        &[RedirectDef::combined(
+            RedirectDirection::Write,
+            RedirectSource::path(cstr(&a), Vec::new()),
+        )],
+        &cell,
+    )
+    .unwrap();
+    write_fd(1, b"hi\n");
+    write_fd(2, b"e\n");
+    scope.restore().unwrap();
+    assert_eq!(link(1), out_before, "fd 1 is restored");
+    // Give the harness a stderr again so a failure below is reportable.
+    open_at(&"/dev/null".to_string(), 2);
+    assert_eq!(body(&a), "hi\ne\n");
 }
 
 #[test]
