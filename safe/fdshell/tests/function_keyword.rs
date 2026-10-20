@@ -259,3 +259,25 @@ fn xtrace_traces_the_call_not_the_definition() {
     assert!(err.contains("+ echo hi"), "stderr={err}");
     assert!(!err.contains("function f"), "stderr={err}");
 }
+
+/// A `& ;` inside a function body is rejected at the **call** (task #355):
+/// the body text carries the glued `;`, the call's scan marks the split
+/// invalid and runs nothing — bash rc 2, fdshell rc 1, no output. A
+/// definition that is never called parses lazily: rc 0 (bash parses the body
+/// at definition time, rc 2 — the documented lazy-parse divergence of
+/// `tests/block_bodies.rs::ampersand_only_body_is_not_an_empty_body`).
+#[test]
+fn ampersand_then_semicolon_in_a_function_body_is_rejected_at_the_call() {
+    let (out, err, rc) = run("f(){ echo a & ; }; f");
+    assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("unexpected character"), "{err}");
+    let (out, err, rc) = run("function f { echo a & ; }; f");
+    assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("unexpected character"), "{err}");
+    let (out, _err, rc) = run("f(){ echo a & ; }");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("", 0),
+        "bash rc 2: lazy-parse divergence"
+    );
+}

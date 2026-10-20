@@ -499,6 +499,45 @@ fn every_block_shape_backgrounds_its_ampersand_statement() {
     }
 }
 
+/// The `& ;` **inside** a block body runs nothing (task #355): the body slice
+/// keeps the glued `;`, the body's own scan marks the split invalid, and the
+/// preflight bails before anything executes — rc 1, empty stdout, the
+/// redirect target **absent** (the job never forked; LESSONS: pin at the
+/// filesystem), stderr the scanner's `unexpected character` (bash rc 2).
+#[test]
+fn invalid_block_bodies_run_nothing() {
+    for shape in [
+        "for i in 1; do builtin echo a >{f} & ; done",
+        "if true; then builtin echo a >{f} & ; fi",
+        "{ builtin echo a >{f} & ; }",
+        "f(){ builtin echo a >{f} & ; }; f",
+        "case x in x) builtin echo a >{f} & ; ;; esac",
+    ] {
+        let f = scratch("invalblk");
+        let script = shape.replace("{f}", &f);
+        let out = run(&script);
+        assert_eq!(
+            rc(&out),
+            1,
+            "shape {shape:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert_eq!(str::from_utf8(&out.stdout).unwrap(), "", "shape {shape:?}");
+        assert!(
+            str::from_utf8(&out.stderr)
+                .unwrap()
+                .contains("unexpected character"),
+            "shape {shape:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert!(
+            !std::path::Path::new(&f).exists(),
+            "shape {shape:?}: the job ran"
+        );
+        let _ = std::fs::remove_file(&f);
+    }
+}
+
 /// A `for` body with two `&` is two jobs, and so is a group's body and a `case`
 /// arm's: every iteration/arm runs both statements in the background.
 #[test]

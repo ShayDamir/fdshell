@@ -4339,8 +4339,50 @@ fn ampersand_in_a_block_body_is_a_list_terminator() {
     assert_eq!(fd.body.data, c"echo hi &".into());
 }
 
+/// The `& ;` written inside a block body stays **in the body text** (task
+/// #355): the body slice carries the split, and the body's own scan is what
+/// rejects it (bash's rc-2 family, fdshell rc 1, nothing runs). Every shape
+/// of the accepted #354 family gains exactly the glued `;`.
+#[test]
+fn ampersand_then_semicolon_stays_in_the_body_text() {
+    let line = b"for i in 1; do echo hi & ; done";
+    let fb = for_block::tokens_to_for(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(fb.body.data, c"echo hi & ;".into());
+
+    let line = b"while :; do echo hi & ; break; done";
+    let wb = while_block::tokens_to_loop(&token::tokenize(line).unwrap(), b"while", &stext(line))
+        .unwrap();
+    assert_eq!(wb.body.data, c"echo hi & ; break".into());
+
+    let line = b"if true; then echo a & ; fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.then_body.data, c"echo a & ;".into());
+
+    let line = b"if true; then :; else echo b & ; fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.else_body.unwrap().data, c"echo b & ;".into());
+
+    let line = b"if false; then :; elif true; then echo e & ; fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.elifs[0].body.data, c"echo e & ;".into());
+
+    let line = b"f(){ echo hi & ; }";
+    let fd =
+        function_block::tokens_to_function(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(fd.body.data, c"echo hi & ;".into());
+
+    // The condition slice carries the split too (its scan rejects it):
+    // task #356's condition-job work starts from the accepted `&`-only form.
+    let line = b"if true & ; then echo x; fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.condition.data, c"true & ;".into());
+}
+
 /// The `&`-terminated arm of the `case` clause: the arm body keeps the `&` and
-/// the clause closer (`;;`, `;;esac`, `esac`) is found behind it.
+/// the clause closer (`;;`, `;;esac`, `esac`) is found behind it. The `& ;`
+/// form keeps the glued `;` too (task #355): the pair head is the statement
+/// terminator, not the `;;` separator — while the **glued** `;;` behind the
+/// `&` stays the separator bash accepts (the four rc-0 forms above).
 #[test]
 fn ampersand_terminated_case_clause_keeps_the_ampersand() {
     for line in [
@@ -4354,6 +4396,10 @@ fn ampersand_terminated_case_clause_keeps_the_ampersand() {
         assert_eq!(block.clauses.len(), 1, "{line:?}");
         assert_eq!(block.clauses[0].body.data, c"echo a &".into(), "{line:?}");
     }
+    let line = b"case x in x) echo a & ; ;; esac";
+    let block = case_block::tokens_to_case(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(block.clauses.len(), 1);
+    assert_eq!(block.clauses[0].body.data, c"echo a & ;".into());
 }
 
 /// `for`'s word list stays strict: the `&` is **not** a `do`-position

@@ -1213,3 +1213,56 @@ fn ampersand_in_a_for_word_list_is_a_parse_error() {
     assert_eq!((out.as_str(), rc), ("", 1));
     assert!(err.contains("expected 'do'"), "{err}");
 }
+
+/// A `& ;` written **inside a loop body** runs nothing (task #355): the body
+/// slice keeps the `;` glued behind the `&`, the body's own scan rejects the
+/// split, and the loop never runs — fdshell rc 1, bash rc 2. Bounded like the
+/// accepted shape above: a regression that lets the body run re-opens the
+/// unbounded `while`/`until` hang.
+#[test]
+fn ampersand_then_semicolon_in_a_loop_body_runs_nothing() {
+    for script in [
+        "for i in 1; do echo a & ; done",
+        "for i in 1 2; do echo a & ; done",
+        "while :; do echo a & ; done",
+        "until false; do echo a & ; done",
+        "while :; do echo a & ; break; done",
+        "until false; do echo a & ; break; done",
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
+    }
+}
+
+/// The `for` **word list** is not statement text: the body-slice rule of task
+/// #355 does not reach it, and there the `&` is an ordinary word byte —
+/// `for i in 1 & ; do echo x; done` runs two iterations (`1` and `&`),
+/// pin-as-measured where bash stops with rc 2.
+#[test]
+fn ampersand_in_a_for_word_list_before_the_do_runs_the_amp_as_a_word() {
+    let (out, _err, rc) = run("for i in 1 & ; do echo x; done");
+    assert_eq!((out.as_str(), rc), ("x\nx\n", 0), "bash rc 2");
+}
+
+/// The split-time guard already covers the cond-pair and glued forms behind
+/// the `&` in a body: `&|` and `& &` are invalid splits that run nothing
+/// (bash rc 2, fdshell rc 1). The `&& ;` row is the **dangling-pair** family
+/// of task #358: the tokenizer's `&&` is one word, not the plain `&`, the
+/// `;` trims off the body slice, and the body's scan runs the dangling pair's
+/// left side — pin-as-measured rc 0 where bash stops with rc 2.
+#[test]
+fn ampersand_pair_forms_in_a_loop_body_are_their_own_families() {
+    for script in [
+        "for i in 1; do echo a &| cat; done",
+        "for i in 1; do echo a & & done",
+    ] {
+        let (out, _err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+    }
+    let (out, _err, rc) = run_bounded("for i in 1; do echo a && ; done");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("a\n", 0),
+        "bash rc 2: #358's dangling pair"
+    );
+}

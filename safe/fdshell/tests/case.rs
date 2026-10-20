@@ -513,9 +513,13 @@ fn two_ampersands_in_one_case_arm_run_both_statements() {
 
 /// The arm's `&` does not loosen the clause rules: a `&` behind a `&` is
 /// bash's syntax error and fdshell's invalid split (rc 1), a `;;` behind a `&`
-/// **outside** a block is the same (rc 1, not the case arm's leniency), and the
-/// `& ;` form inside an arm stays the accepted divergence of task #355 (bash
-/// rc 2, fdshell rc 0 — `trim_semi` cuts that `;` out of the arm body).
+/// **outside** a block is the same (rc 1, not the case arm's leniency), and
+/// the `& ;` form inside an arm is rejected (task #355): the pair head glued
+/// behind the `&` is the statement terminator, not the `;;` separator, so the
+/// arm body carries `& ;` and its own scan runs nothing (bash rc 2, fdshell
+/// rc 1). The **glued** `;;` forms behind the `&` (`& ;;`, `&;;`, `& ;;esac`)
+/// are the clause separator bash accepts and stay rc 0 (`tests/async.rs`'s
+/// `block_shapes`).
 #[test]
 fn ampersand_in_an_arm_keeps_the_clause_rules() {
     for script in [
@@ -529,10 +533,12 @@ fn ampersand_in_an_arm_keeps_the_clause_rules() {
             "script {script:?}: bash rc 2"
         );
     }
-    let (out, _err, code) = run("case x in x) echo a & ; ;; esac");
-    assert_eq!(
-        (out.as_str(), code),
-        ("a\n", 0),
-        "the `& ;` divergence's owner is task #355"
-    );
+    for script in [
+        "case x in x) echo a & ; ;; esac",
+        "case x in x) echo a & ; echo b ;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains("unexpected character"), "{script}: {err}");
+    }
 }

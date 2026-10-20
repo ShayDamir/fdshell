@@ -1059,24 +1059,44 @@ fn ampersand_terminated_condition_parses_and_runs() {
     assert_eq!((out.as_str(), rc), ("", 0), "#356: bash prints x");
 }
 
-/// The `& ;` written **inside a block body** is fdshell's accepted divergence,
-/// owner **task #355**: `trim_semi` cuts the `;` after the `&` out of the body
-/// text, so the statement runs and rc is 0 where bash stops with rc 2 and runs
-/// nothing. Pinned so #355's fix flips a named pin.
+/// The `& ;` written **inside a block body** is rejected (task #355 fixed the
+/// accepted divergence this pin used to record): the body slice **keeps** the
+/// `;` glued behind the `&`, so the body's own scan marks the split invalid
+/// and runs nothing — fdshell rc 1 where bash stops with rc 2 (the documented
+/// rc-1-vs-2 family, README "Errors"). The taken arms and the condition slice
+/// all reach that scan; an **untaken** arm's body is parsed, never scanned,
+/// and stays the lazy-parse divergence pinned at
+/// `tests/block_bodies.rs::ampersand_only_body_is_not_an_empty_body`.
 #[test]
-fn ampersand_then_semicolon_in_a_body_is_accepted() {
+fn ampersand_then_semicolon_in_a_body_is_rejected() {
     for script in [
         "for i in 1; do echo a & ; done",
         "if true; then echo a & ; fi",
+        "if false; then :; else echo a & ; fi",
         "if false; then :; elif true; then echo a & ; fi",
+        "if true; then echo a & ; elif false; then :; fi",
+        "if true & ; then echo x; fi",
         "case x in x) echo a & ; ;; esac",
+        "f(){ echo a & ; }; f",
     ] {
-        let (out, _err, rc) = run(script);
-        assert_eq!((out.as_str(), rc), ("a\n", 0), "{script}: bash rc 2");
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
+        assert!(err.contains("unexpected character"), "{script}: {err}");
     }
     // The `while` twin puts the `;` **after** the `&` inside the body's own
-    // statement list, so the body's scan flags the invalid split: rc 1, bash
-    // rc 2 (the documented rc-1-vs-2 family).
+    // statement list, so the body's scan flagged the invalid split before the
+    // rule too: rc 1, bash rc 2 (the documented rc-1-vs-2 family).
     let (out, _err, rc) = run("while :; do echo a & ; break; done");
     assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2");
+    // The untaken arms parse, never scan: rc 0 with the `& ;` body that never
+    // runs (bash rejects the shape at parse time, rc 2 — the lazy-parse
+    // divergence of `block_bodies.rs`, now the family's owner).
+    for script in [
+        "if true; then :; else echo a & ; fi",
+        "case y in x) echo a & ; ;; esac",
+        "f(){ echo a & ; }",
+    ] {
+        let (out, _err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 0), "{script}: bash rc 2");
+    }
 }

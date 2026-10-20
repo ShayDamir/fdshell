@@ -60,8 +60,9 @@ fn case_word_join_keeps_the_zero_byte_span() {
 
 /// `body_end` is the exclusive end of a body slice written before a closer:
 /// POSIX's `;` before the closer is dropped, the plain `&` terminator is kept
-/// (the body's own scan makes it a background job, task #354), and a word the
-/// closer is glued to stays in the body.
+/// (the body's own scan makes it a background job, task #354), a `;` glued
+/// right behind that `&` is kept (the body's scan rejects the split, task
+/// #355), and a word the closer is glued to stays in the body.
 #[test]
 fn body_end_keeps_the_amp_and_drops_the_semi() {
     let end = |line: &[u8], closer: &[u8]| {
@@ -70,12 +71,14 @@ fn body_end_keeps_the_amp_and_drops_the_semi() {
             .iter()
             .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
             .unwrap();
-        super::body_end(&tokens, idx)
+        super::body_end(&tokens, line, idx)
     };
     // `;`-terminated body: the `;` before the closer is not body text.
     assert_eq!(end(b"if true; then echo a; fi", b"fi"), 6);
     // `&`-terminated body: the `&` is body text.
     assert_eq!(end(b"if true; then echo a & fi", b"fi"), 7);
+    // `& ;`-terminated body: the glued `;` is body text too (task #355).
+    assert_eq!(end(b"if true; then echo a & ; fi", b"fi"), 8);
     // A closer glued to the body keeps that word in the body.
     assert_eq!(end(b"if true; then echo hi fi", b"fi"), 6);
     // Nothing written before the closer (`then` itself, or an empty body).

@@ -85,3 +85,34 @@ fn a_quoted_clause_keyword_behind_the_amp_is_no_keyword() {
         None
     );
 }
+
+/// `amp_semi` reads the **trailing** `;` token of each line: true only for a
+/// real `;` byte glued behind the plain `&` (task #355). A newline token is
+/// never glue (`do echo a &\ndone` is the bash-accepted shape), a word behind
+/// the `;` is not the plain `&`, and index 0 has no predecessor.
+#[test]
+fn amp_semi_is_the_real_semi_byte_behind_the_amp() {
+    let glued = |line: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        let idx = tokens
+            .iter()
+            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+            .unwrap();
+        amp_semi(&tokens, line, idx)
+    };
+    assert!(glued(b"for i in 1; do echo a & ; done"));
+    assert!(!glued(b"for i in 1; do echo a &\ndone"), "a newline token");
+    assert!(!glued(b"for i in 1; do echo a ; done"), "behind a word");
+    assert!(!glued(b"; fi"), "index 0: no predecessor");
+    assert!(!glued(b"a ; fi"), "a word behind the `;`");
+    // The `;` byte behind a **glued** `&&` pair is one word, not the plain
+    // `&` (the dangling-pair family, task #358): no glue.
+    assert!(!glued(b"for i in 1; do echo a && ; done"));
+    // Off the end: no token at `idx`.
+    let tokens = tokenize(b"for i in 1; do echo a & ; done").unwrap();
+    assert!(!amp_semi(
+        &tokens,
+        b"for i in 1; do echo a & ; done",
+        tokens.len()
+    ));
+}

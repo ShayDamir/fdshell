@@ -2722,6 +2722,30 @@ fn block_body_ampersand_records_a_job() {
     }
 }
 
+/// The `& ;` written inside a block body runs **nothing** (task #355): the
+/// body text carries the glued `;`, its own scan marks the split invalid, and
+/// the preflight bails before any segment executes — an `Err` out of
+/// `run_script` with no job record and no `$!` (bash: the same shape is a
+/// syntax error, rc 2).
+#[test]
+fn block_body_ampersand_then_semicolon_records_no_job() {
+    for script in [
+        b"for i in 1 2; do builtin true & ; done".as_slice(),
+        b"if true; then builtin true & ; fi".as_slice(),
+        b"case x in x) builtin true & ; ;; esac".as_slice(),
+        b"f(){ builtin true & ; }; f".as_slice(),
+        b"while :; do builtin true & ; break; done".as_slice(),
+    ] {
+        child_test(|| {
+            let cell = make_cell();
+            assert!(run_script(script, &cell).is_err(), "{script:?}");
+            let state = borrow_state(&cell);
+            assert_eq!(state.jobs.anon_len(), 0, "{script:?}: a job ran");
+            assert!(state.last_bg_pid.is_none(), "{script:?}: $! moved");
+        });
+    }
+}
+
 /// An `if` condition terminated by the plain `&` parses (task #354's
 /// `Term::SemiAmp` rule) and runs the condition as its own command list: the
 /// arm is taken, no job record exists yet (the condition job is task #356's).

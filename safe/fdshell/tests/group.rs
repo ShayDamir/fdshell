@@ -612,13 +612,20 @@ fn ampersand_in_the_group_body_is_a_background_job() {
 
 /// The `&` does not loosen the closer rule: a word before `}` that is no
 /// list terminator is still the pinned parse error, and the invalid splits
-/// (`& &`, `& ;`) run nothing — bash rc 2, fdshell rc 1.
+/// (`& &`, `& ;`, and the `& ;` forms with more statements) run nothing —
+/// bash rc 2, fdshell rc 1 (task #355: the group body slice has always
+/// carried the `;`, its scan is what rejects the split).
 #[test]
 fn ampersand_does_not_loosen_the_group_closer_rule() {
     let (out, err, rc) = run("{ echo a }");
     assert_eq!((out.as_str(), rc), ("", 1));
     assert!(err.contains("expected ';' before '}'"), "{err}");
-    for script in ["{ echo a & & echo b; }", "{ echo hi & ; }"] {
+    for script in [
+        "{ echo a & & echo b; }",
+        "{ echo hi & ; }",
+        "{ echo a & ;}",
+        "{ echo a & ; echo b; }",
+    ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}");
         assert!(
