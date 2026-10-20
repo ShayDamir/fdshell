@@ -4285,8 +4285,8 @@ fn test_env_assign_prefix_stops_before_the_keyword_name_word() {
 /// A word-start plain `&` is a **command-list terminator** in every block
 /// position (task #354): the body slice keeps the `&` — the body's own scan is
 /// what marks the background flag — and each closer glued behind it is found.
-/// A `&`-terminated **condition** is cut at the `&`, which is the rule the
-/// `&`-terminated arm of #356 stands on.
+/// A `&`-terminated **condition** is cut at the `&` and carries the job's fact
+/// as the parsed block's `cond_background` flag (task #356).
 #[test]
 fn ampersand_in_a_block_body_is_a_list_terminator() {
     let line = b"for i in 1; do echo hi & done";
@@ -4306,21 +4306,43 @@ fn ampersand_in_a_block_body_is_a_list_terminator() {
         c":".into(),
         "the `&` is cut from the cond"
     );
+    assert!(wb.cond_background, "the cut `&` is the job's flag");
     assert_eq!(wb.body.data, c"echo x".into());
 
     let line = b"while :; do echo hi & done";
     let wb = while_block::tokens_to_loop(&token::tokenize(line).unwrap(), b"while", &stext(line))
         .unwrap();
     assert_eq!(wb.body.data, c"echo hi &".into());
+    assert!(!wb.cond_background, "a body `&` never sets the cond flag");
 
     let line = b"if true; then echo hi & fi";
     let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
     assert_eq!(ib.then_body.data, c"echo hi &".into());
+    assert!(!ib.cond_background, "a body `&` never sets the cond flag");
 
     let line = b"if true & then echo x; fi";
     let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
     assert_eq!(ib.condition.data, c"true".into());
     assert_eq!(ib.then_body.data, c"echo x".into());
+    assert!(ib.cond_background);
+
+    for line in [
+        b"if true &\nthen echo x; fi".as_slice(),
+        b"if true &\n\nthen echo x; fi".as_slice(),
+    ] {
+        let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+        assert_eq!(ib.condition.data, c"true".into(), "{line:?}");
+        assert!(
+            ib.cond_background,
+            "a newline `;` token steps back: {line:?}"
+        );
+    }
+
+    let line = b"while : &\ndo echo x; done";
+    let wb = while_block::tokens_to_loop(&token::tokenize(line).unwrap(), b"while", &stext(line))
+        .unwrap();
+    assert_eq!(wb.condition.data, c":".into());
+    assert!(wb.cond_background);
 
     let line = b"if true; then echo a & else echo b & fi";
     let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
@@ -4331,6 +4353,12 @@ fn ampersand_in_a_block_body_is_a_list_terminator() {
     let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
     assert_eq!(ib.elifs[0].cond.data, c"true".into());
     assert_eq!(ib.elifs[0].body.data, c"echo e &".into());
+    assert!(ib.elifs[0].cond_background);
+    assert!(!ib.cond_background, "the `if` condition stays foreground");
+
+    let line = b"if false; then :; elif true; then echo e; fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert!(!ib.elifs[0].cond_background);
 
     let line = b"f(){ echo hi & }";
     let fd =
@@ -4371,11 +4399,13 @@ fn ampersand_then_semicolon_stays_in_the_body_text() {
         function_block::tokens_to_function(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
     assert_eq!(fd.body.data, c"echo hi & ;".into());
 
-    // The condition slice carries the split too (its scan rejects it):
-    // task #356's condition-job work starts from the accepted `&`-only form.
+    // The condition slice carries the split too (its scan rejects it) and the
+    // `&`-terminator flag stays false: the real `;` byte stops the walk, so
+    // `& ;` records no job (task #356, #355's rc-1 family).
     let line = b"if true & ; then echo x; fi";
     let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
     assert_eq!(ib.condition.data, c"true & ;".into());
+    assert!(!ib.cond_background);
 }
 
 /// The `&`-terminated arm of the `case` clause: the arm body keeps the `&` and

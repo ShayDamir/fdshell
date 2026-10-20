@@ -140,3 +140,35 @@ fn bad_break_count_in_a_condition_is_a_parse_abort() {
         "{report:?}"
     );
 }
+
+/// The `&`-terminated condition's job fact reaches `run_if`'s two cond-list
+/// sites as the parsed block's `cond_background` field (task #356): the plain
+/// `&` sets it, a newline `;` token steps back to it, and the `& ;` form (a real
+/// `;` byte, task #355) never does. Pinned on the **field**, so both sites are
+/// covered without a fork: the flag is the fact's single owner, and the
+/// run-side job is pinned in `tests/run.rs`.
+#[test]
+fn ampersand_terminated_condition_flags_the_block() {
+    assert!(if_block(b"if true & then builtin true; fi").cond_background);
+    assert!(
+        if_block(b"if true &\nthen builtin true; fi").cond_background,
+        "bash reads `&` newline `then` as `& then`"
+    );
+    assert!(
+        !if_block(b"if true & ; then builtin true; fi").cond_background,
+        "the `& ;` slice stays #355's parse error, with no job"
+    );
+    assert!(!if_block(b"if true; then builtin true; fi").cond_background);
+    assert!(
+        !if_block(b"if true; then builtin true & fi").cond_background,
+        "a body `&` belongs to the body's own scan"
+    );
+    let block = if_block(b"if (( 0 )); then :; elif true & then builtin true; fi");
+    assert!(
+        block.elifs[0].cond_background,
+        "the `elif` arm flags itself"
+    );
+    assert!(!block.cond_background, "and never the `if` condition");
+    let block = if_block(b"if (( 0 )); then :; elif true & ; then builtin true; fi");
+    assert!(!block.elifs[0].cond_background);
+}

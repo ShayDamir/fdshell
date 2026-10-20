@@ -2726,7 +2726,9 @@ fn block_body_ampersand_records_a_job() {
 /// body text carries the glued `;`, its own scan marks the split invalid, and
 /// the preflight bails before any segment executes — an `Err` out of
 /// `run_script` with no job record and no `$!` (bash: the same shape is a
-/// syntax error, rc 2).
+/// syntax error, rc 2). The condition-position twins (task #356): the `;`
+/// **byte** stops the flag's walk, so the parse error stays one and no job is
+/// recorded.
 #[test]
 fn block_body_ampersand_then_semicolon_records_no_job() {
     for script in [
@@ -2735,6 +2737,9 @@ fn block_body_ampersand_then_semicolon_records_no_job() {
         b"case x in x) builtin true & ; ;; esac".as_slice(),
         b"f(){ builtin true & ; }; f".as_slice(),
         b"while :; do builtin true & ; break; done".as_slice(),
+        b"if true & ; then builtin true; fi".as_slice(),
+        b"while : & ; do builtin true; break; done".as_slice(),
+        b"if false; then :; elif true & ; then builtin true; fi".as_slice(),
     ] {
         child_test(|| {
             let cell = make_cell();
@@ -2746,27 +2751,114 @@ fn block_body_ampersand_then_semicolon_records_no_job() {
     }
 }
 
-/// An `if` condition terminated by the plain `&` parses (task #354's
-/// `Term::SemiAmp` rule) and runs the condition as its own command list: the
-/// arm is taken, no job record exists yet (the condition job is task #356's).
+/// A `&`-terminated block **condition** records exactly one nameless job per
+/// condition run (task #356): `trim_condition` cuts the `&` from the condition
+/// text, so the parsed block's `cond_background` flag is the fact's single
+/// owner and reaches `run_cond_list`'s `background` argument. The arm it gates
+/// sees the async status 0, `$!` is the job, and `wait` (POSIX, no operands)
+/// drains the deque — the **job record** is the pin, never the output (LESSONS).
 #[test]
-fn ampersand_terminated_condition_runs_foreground() {
+fn ampersand_terminated_condition_records_one_nameless_job() {
     for script in [
         b"if true & then builtin true; fi".as_slice(),
         b"while : & do builtin true; break; done".as_slice(),
+        b"until : & do builtin true; break; done".as_slice(),
         b"if false; then :; elif true & then builtin true; fi".as_slice(),
+        b"if true &\nthen builtin true; fi".as_slice(),
+        b"if true && false & then builtin true; fi".as_slice(),
+    ] {
+        child_test(|| {
+            let cell = make_cell();
+            run_script(script, &cell).unwrap();
+            let mut state = borrow_state_mut(&cell);
+            assert_eq!(state.jobs.anon_len(), 1, "{script:?}: one job per run");
+            assert_eq!(
+                state.last_bg_pid,
+                state.jobs.anon_pids()[0].into(),
+                "{script:?}: $! reports the job"
+            );
+            assert!(
+                matches!(state.last_status, WaitStatus::Exited(0)),
+                "{script:?}: the arm is gated by the async status 0"
+            );
+            crate::task::posix_wait(&[], &mut state).unwrap();
+            assert!(state.jobs.is_empty(), "{script:?}: wait reaps it");
+        });
+    }
+}
+
+/// A `&`-terminated loop condition is **one job per condition evaluation**: the
+/// flag is loop-level, so a loop of three iterations records three jobs (the
+/// count is the iteration pin, task #356).
+#[test]
+fn ampersand_terminated_condition_records_a_job_per_iteration() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(
+            b"i=0; while : & do i=$((i+1)); [ $i -ge 3 ] && break; done",
+            &cell,
+        )
+        .unwrap();
+        let mut state = borrow_state_mut(&cell);
+        assert_eq!(state.jobs.anon_len(), 3, "one job per iteration");
+        crate::task::posix_wait(&[], &mut state).unwrap();
+        assert!(state.jobs.is_empty());
+    });
+}
+
+/// The flag is **inert** when the cond-list's last part is empty: `if true && &
+/// then` runs the `true` foreground, records no job, and takes the arm on the
+/// status the list left (measured rc 0, no job; bash rejects the shape rc 2 —
+/// the pre-existing leniency family). A mutant on the predicate's `&` arm that
+/// only flips this shape is equivalent to the flag's run-side empty-part guard
+/// (`cond/part.rs`), and this pin is the proof (task #356).
+#[test]
+fn ampersand_terminated_condition_with_an_empty_last_part_records_no_job() {
+    for script in [
+        b"if true && & then builtin true; fi".as_slice(),
+        b"if & then builtin true; fi".as_slice(),
     ] {
         child_test(|| {
             let cell = make_cell();
             run_script(script, &cell).unwrap();
             let state = borrow_state(&cell);
-            assert_eq!(state.jobs.anon_len(), 0, "{script:?}: #356 owns the job");
-            assert!(
-                matches!(state.last_status, WaitStatus::Exited(0)),
-                "{script:?}"
+            assert_eq!(
+                state.jobs.anon_len(),
+                0,
+                "{script:?}: no part to background"
             );
+            assert!(state.last_bg_pid.is_none(), "{script:?}: $! moved");
         });
     }
+}
+
+/// The condition's **side effects stay in the discarded child** (task #356, the
+/// same rule as a backgrounded statement): `cd` never reaches the parent's cwd
+/// and `exit` never stops the script — bash parity, measured.
+#[test]
+fn ampersand_terminated_condition_side_effects_die_with_the_child() {
+    child_test(|| {
+        let cell = make_cell();
+        let before = std::env::current_dir().unwrap();
+        run_script(b"if cd /tmp & then builtin true; fi", &cell).unwrap();
+        assert_eq!(
+            std::env::current_dir().unwrap(),
+            before,
+            "the parent's cwd is untouched"
+        );
+        let mut state = borrow_state_mut(&cell);
+        crate::task::posix_wait(&[], &mut state).unwrap();
+        drop(state);
+        run_script(b"if exit & then result=1; fi", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert!(
+            state
+                .strings
+                .get::<sys::ShortCStr>(&c"result".into())
+                .is_some(),
+            "the script kept running and took the arm"
+        );
+    });
 }
 
 /// The unclosed block span of the `&`-in-block-text family: the script-level

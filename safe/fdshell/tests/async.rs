@@ -790,3 +790,185 @@ fn a_heredoc_behind_an_ampersand_inside_a_block_prints_both_bodies() {
         );
     }
 }
+
+// ─── Task #356: a `&`-terminated block **condition** is a background job ───
+//
+// POSIX 2.9/2.14 read a block condition as a compound list, whose terminators
+// include the plain `&`. `trim_condition` cuts that `&` from the condition text,
+// so the parsed block's `cond_background` flag is the fact's single owner and
+// `run_cond_list`'s `background` argument makes the job (one per condition run,
+// so a loop records one per iteration). Every pin ends with `wait`; async output
+// is compared as a **set**, never as an order (LESSONS).
+
+/// The acceptance shapes record one nameless job each: `$!` is a numeric pid for
+/// the `if`, the `while`, the `until`, the `elif` arm, and the `&`-newline and
+/// blank-line forms (bash reads `&` newline `then` exactly as `& then`).
+#[test]
+fn a_conditional_terminated_by_ampersand_records_one_job() {
+    for shape in [
+        "if true & then builtin true; fi",
+        "while : & do break; done",
+        "until : & do break; done",
+        "if false; then :; elif true & then builtin true; fi",
+        "if true &\nthen builtin true; fi",
+        "if true &\n\nthen builtin true; fi",
+    ] {
+        let out = run(&format!("{shape}\nbuiltin echo pid=$!; wait"));
+        assert_eq!(rc(&out), 0, "shape {shape:?}");
+        assert!(
+            reported_pid(&out) > 0,
+            "shape {shape:?}: no job recorded, stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+}
+
+/// The arm/loop that a `&`-terminated condition gates sees the **async status
+/// 0** (bash parity, measured): `if false & then echo t; else echo f; fi` takes
+/// the `then` arm, `while false &` runs its body once, and an `until` stops at
+/// once — where master gated on the condition's own status.
+#[test]
+fn a_conditional_terminates_the_arm_it_gates() {
+    let out = run("if false & then builtin echo t; else builtin echo f; fi\nwait");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(lines(&out), ["t"]);
+    let out = run("while false & do builtin echo x; break; done\nwait");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(lines(&out), ["x"]);
+    let out = run("until false & do builtin echo x; break; done\nwait");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(lines(&out), Vec::<String>::new());
+}
+
+/// The condition's side effects die with the child: a `cd` written in a
+/// `&`-terminated condition never moves the parent's cwd (bash parity; master's
+/// foreground condition moved it).
+#[test]
+fn a_conditional_job_leaves_the_parent_cwd() {
+    let cwd = std::env::current_dir().unwrap();
+    let out = run("if cd /tmp & then builtin true; fi\nbuiltin pwd\nwait");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(
+        str::from_utf8(&out.stdout).unwrap().trim(),
+        cwd.to_string_lossy().trim_end_matches('/'),
+        "stdout={:?}",
+        str::from_utf8(&out.stdout)
+    );
+}
+
+/// `exit` in a `&`-terminated condition dies with the child: the script keeps
+/// running and takes the arm (bash prints `x` then `tail`).
+#[test]
+fn exit_in_a_conditional_leaves_the_script_running() {
+    let out = run("if exit & then builtin echo x; fi\nbuiltin echo tail\nwait");
+    assert_eq!(rc(&out), 0);
+    contains_all(&out, &["x", "tail"]);
+}
+
+/// Pinned divergence (owner **#362**, measured identical on master): a
+/// loop-control **keyword** with the `&` is not a `Cmd`/`Pipeline`, so
+/// `run_parsed` runs it in the parent — the `break` ends the loop before its
+/// body ever runs, where bash (the whole condition is the child) prints `x`
+/// then `tail`. Pinned as measured, bounded by the `break` in the body.
+#[test]
+fn break_in_a_conditional_ends_the_loop_here() {
+    let out = run("while break & do builtin echo x; break; done\nbuiltin echo tail\nwait");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(lines(&out), ["tail"], "bash prints x too: #362");
+}
+
+/// A here-doc carried by a `&`-terminated condition keeps its body region (the
+/// condition's bodies travel as `run_cond_list`'s `bodies`; the flag changes no
+/// slice) and records its job: the body prints from the child, the arm prints
+/// in the parent, `$!` is the job. Async output has no order, so the lines are
+/// a set.
+#[test]
+fn a_conditional_with_a_heredoc_prints_its_body_and_records_a_job() {
+    let out = run("if cat <<A & then builtin echo x; fi\nbody\nA\nbuiltin echo pid=$!; wait");
+    assert_eq!(rc(&out), 0);
+    assert!(
+        reported_pid(&out) > 0,
+        "stdout={}",
+        str::from_utf8(&out.stdout).unwrap_or_default()
+    );
+    let mut got: Vec<String> = lines(&out)
+        .into_iter()
+        .filter(|l| !l.starts_with("pid="))
+        .collect();
+    got.sort();
+    assert_eq!(got, ["body", "x"]);
+}
+
+/// One job **per condition run**: a three-iteration loop records three jobs, so
+/// the scratch file's line count is the iteration pin and `$!` reports the last
+/// job (row 19).
+#[test]
+fn a_conditional_records_one_job_per_iteration() {
+    let f = scratch("cond-iter");
+    let out = run(&format!(
+        "i=0; while : & do i=$((i+1)); builtin echo $i >>{f}; [ $i -ge 3 ] && break; done\n\
+         builtin echo pid=$!; wait"
+    ));
+    assert_eq!(rc(&out), 0);
+    assert_eq!(contents(&f), "1\n2\n3\n");
+    assert!(reported_pid(&out) > 0, "$! is the last job");
+}
+
+/// The residual divergences of the family, pinned as measured with their owners
+/// (all measured against bash 5.3.9 the same way as the rows above):
+///
+/// * a **compound** condition runs foreground — `run_parsed` backgrounds only
+///   `Cmd`/`Pipeline`, so `{ … } &` / `for … done &` as a condition records no
+///   job and prints in the parent (owner **#352**);
+/// * a condition whose last part is **short-circuited away** records no job and
+///   gates on that part's status, where bash backgrounds the whole AND-list
+///   (owner **#352**);
+/// * a `&` on its **own line** behind the condition is the deferral family
+///   (owner **#313**): fdshell accepts it and, since the slice ends in the `&`,
+///   records the job;
+/// * an **empty** last part (`if true && &`, `if &`) makes the flag inert — no
+///   part runs, no job (owner **#299** for the empty condition);
+/// * `if true; & then` is the `; &` leniency (owner **#313**): the slice ends in
+///   the plain `&`, so the job is recorded where bash stops with rc 2.
+#[test]
+fn a_conditional_family_pins_the_measured_divergences() {
+    for shape in [
+        "if { builtin echo g; } & then builtin echo x; fi",
+        "if for i in 1; do builtin echo y; done & then builtin echo x; fi",
+        "if false && true & then builtin echo x; else builtin echo f; fi",
+        "if true && & then builtin echo x; fi",
+        "if & then builtin echo x; fi",
+    ] {
+        let out = run(&format!("{shape}\nbuiltin echo pid=$!; wait"));
+        assert_eq!(rc(&out), 0, "shape {shape:?}");
+        assert_eq!(
+            reported_pid(&out),
+            -1,
+            "shape {shape:?}: no job is recorded here, stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+    // The compound condition prints in the parent, in order, where bash
+    // backgrounds the whole compound (#352): `g` before `x`.
+    let out = run("if { builtin echo g; } & then builtin echo x; fi\nwait");
+    let stdout = str::from_utf8(&out.stdout).unwrap().to_string();
+    assert_eq!(
+        (stdout.find('g'), stdout.find('x')),
+        (Some(0), Some(2)),
+        "stdout={stdout}"
+    );
+    // The `&` on its own line and the `; &` form: accepted here, and the slice
+    // ends in the plain `&`, so the job is recorded (#313; bash stops rc 2).
+    for shape in [
+        "if true\n&\nthen builtin echo x; fi",
+        "if true; & then builtin echo x; fi",
+    ] {
+        let out = run(&format!("{shape}\nbuiltin echo pid=$!; wait"));
+        assert_eq!(rc(&out), 0, "shape {shape:?}: bash rc 2");
+        assert!(
+            reported_pid(&out) > 0,
+            "shape {shape:?}: stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+}

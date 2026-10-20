@@ -1228,6 +1228,8 @@ fn ampersand_then_semicolon_in_a_loop_body_runs_nothing() {
         "until false; do echo a & ; done",
         "while :; do echo a & ; break; done",
         "until false; do echo a & ; break; done",
+        "while : & ; do echo a; break; done",
+        "until false & ; do echo a; break; done",
     ] {
         let (out, err, rc) = run_bounded(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
@@ -1265,4 +1267,55 @@ fn ampersand_pair_forms_in_a_loop_body_are_their_own_families() {
         ("a\n", 0),
         "bash rc 2: #358's dangling pair"
     );
+}
+
+/// A `&`-terminated loop **condition** is one background job per condition
+/// evaluation (task #356): the flag is loop-level, so a three-iteration loop
+/// records three jobs. The scratch file's line count **is** the iteration pin,
+/// and the `$!` the script appends to it is the last job's pid — never read
+/// `$!` out of stdout, which every background child shares (LESSONS). Bounded:
+/// a `&`-terminated condition whose `break` is dropped is a fork bomb in bash
+/// too.
+#[test]
+fn ampersand_terminated_condition_records_a_job_per_iteration() {
+    let dir = scratch("cond-bg");
+    let f = dir.join("n").to_str().unwrap().to_string();
+    let script = format!(
+        "i=0; while : & do i=$((i+1)); builtin echo $i >>{f}; [ $i -ge 3 ] && break; done\n\
+         builtin echo \"last=$!\" >>{f}\nwait"
+    );
+    let (out, err, rc) = run_bounded(&script);
+    assert_eq!((out.as_str(), rc), ("", 0), "stderr={err}");
+    let text = std::fs::read_to_string(&f).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.get(..3).map(<[_]>::to_vec).unwrap_or_default(),
+        ["1", "2", "3"],
+        "one iteration per job"
+    );
+    let last = lines
+        .get(3)
+        .and_then(|l| l.strip_prefix("last="))
+        .unwrap_or_default();
+    let pid: i64 = last.parse().unwrap_or_default();
+    assert!(pid > 0, "$! = {last:?}, not a job pid");
+}
+
+/// The status a `&`-terminated condition gates on is the **async 0** (task
+/// #356, bash parity): `while false & do echo x; break; done` runs its body,
+/// where master's foreground condition ran nothing. `until` sees the same 0 and
+/// stops at once, so its body never runs — in bash either.
+#[test]
+fn ampersand_terminated_loop_condition_gates_on_the_async_status() {
+    for (script, want) in [
+        ("while : & do echo x; break; done", "x\n"),
+        ("while false & do echo x; break; done", "x\n"),
+        ("while true & do echo x; break; done", "x\n"),
+        ("until false & do echo x; break; done", ""),
+        ("until true & do echo x; break; done", ""),
+        ("while : &\ndo echo x; break; done", "x\n"),
+    ] {
+        let (out, err, rc) = run_bounded(&format!("{script}\nwait"));
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
 }

@@ -203,3 +203,24 @@ fn continue_in_the_condition_leaves_status_zero_after_the_loop() {
     assert!(var(&cell, "i").is_some_and(|v| v.eq_bytes(b"3")));
     assert_eq!(status(&cell), 0);
 }
+
+/// The loop twin of the flag (task #356): it is **loop-level**, so a
+/// `&`-terminated condition is one job per condition evaluation, and the `& ;`
+/// form (a real `;` byte) never sets it.
+#[test]
+fn ampersand_terminated_condition_flags_the_loop_block() {
+    assert!(loop_block(b"while : & do builtin true; done").cond_background);
+    assert!(
+        loop_block(b"while : &\ndo builtin true; done").cond_background,
+        "bash reads `&` newline `do` as `& do`"
+    );
+    assert!(loop_block(b"until : & do builtin true; done").cond_background);
+    assert!(
+        !loop_block(b"while : & ; do builtin true; done").cond_background,
+        "the `& ;` slice stays #355's parse error, with no job"
+    );
+    assert!(
+        !loop_block(b"while :; do builtin true & done").cond_background,
+        "a body `&` belongs to the body's own scan"
+    );
+}

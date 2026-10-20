@@ -67,6 +67,15 @@ fn scratch(tag: &str) -> Scratch {
     Scratch(dir)
 }
 
+/// A file the child wrote in its scratch dir (a background job's pid, its body,
+/// the parent's `pwd`): the scratch-dir idiom of
+/// [`ampersand_in_an_if_body_backgrounds_the_statement`] — stdout is shared with
+/// every background child, so a file is the only race-free channel. `""` when
+/// the child never wrote it (a preflight parse error runs nothing).
+fn record(dir: &std::path::Path, name: &str) -> String {
+    std::fs::read_to_string(dir.join(name)).unwrap_or_default()
+}
+
 // Task #236 section: keyword words in argument position inside a block body.
 // Every shape is measured against `bash -c` (5.3.9). The `echo done` row of
 // [`keyword_words_in_argument_position_split_the_body_operators`] runs under
@@ -1035,28 +1044,104 @@ fn ampersand_in_an_if_body_backgrounds_the_statement() {
     assert_eq!(record("body"), "x", "the body statement ran as a job");
 }
 
-/// A `&`-terminated block **condition** parses and runs with bash's rc/output
-/// (this task's `Term::SemiAmp` rule): the condition runs in the foreground with
-/// no job record, so the status that gates the arm is the condition's own. The
-/// background job of a `&`-terminated condition is **task #356**'s; the pinned
-/// rows are the rc/output parity bash shows today.
+/// A `&`-terminated block **condition** runs as a background job (task #356):
+/// the condition's side effects stay in the discarded child, the arm/loop it
+/// gates sees the async status **0** — so `if false & then echo x` prints `x`
+/// and `until false & do echo x; break; done` prints nothing, like bash — and
+/// the whole AND-list behind it is the job (`if true && false & then echo x;
+/// fi` prints `x`, bash's output). Every script ends with `wait` so the
+/// background child closes the stdout pipe deterministically.
 #[test]
 fn ampersand_terminated_condition_parses_and_runs() {
     for (script, want) in [
         ("if true & then echo x; fi", "x\n"),
         ("if true & then echo x; else echo y; fi", "x\n"),
-        ("if false & then echo x; else echo y; fi", "y\n"),
+        ("if false & then echo x; else echo y; fi", "x\n"),
         ("while : & do echo x; break; done", "x\n"),
-        ("until false & do echo x; break; done", "x\n"),
+        ("while false & do echo x; break; done", "x\n"),
+        ("until false & do echo x; break; done", ""),
+        ("until true & do echo x; break; done", ""),
         ("if false; then :; elif true & then echo e; fi", "e\n"),
+        (
+            "if false; then :; elif false & then echo e; else echo l; fi",
+            "e\n",
+        ),
+        ("if true &\nthen echo x; fi", "x\n"),
+        ("if true &\n\nthen echo x; fi", "x\n"),
+        ("while : &\ndo echo x; break; done", "x\n"),
+        ("if true && false & then echo x; fi", "x\n"),
     ] {
         let (out, err, rc) = run(&format!("{script}\nwait"));
         assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
     }
-    // The condition job is missing, so an AND-list condition gates the arm where
-    // bash (status 0 of the backgrounded list) takes it: #356's divergence.
-    let (out, _err, rc) = run("if true && false & then echo x; fi\nwait");
-    assert_eq!((out.as_str(), rc), ("", 0), "#356: bash prints x");
+    // A condition whose last part is short-circuited away records no job and
+    // gates on that part's status, where bash backgrounds the **whole** list
+    // (measured divergence, owner #352): bash prints `x`, fdshell prints `f`.
+    let (out, _err, rc) = run("if false && true & then echo x; else echo f; fi\nwait");
+    assert_eq!((out.as_str(), rc), ("f\n", 0), "bash prints x: #352");
+}
+
+/// The **job record** of a `&`-terminated condition (task #356): `$!` is a
+/// numeric pid for every shape. The pid is read from a **file** in a scratch
+/// dir, never out of stdout — a backgrounded child shares this process's stdout
+/// pipe, and reading `$!` from it is a measured load flake (the comment in
+/// [`ampersand_in_an_if_body_backgrounds_the_statement`]: 10 contaminations in
+/// 300 runs).
+#[test]
+fn ampersand_terminated_condition_records_a_job() {
+    let dir = scratch("cond-job-pid");
+    for (tag, script) in [
+        ("if", "if true & then builtin true; fi"),
+        ("while", "while : & do break; done"),
+        ("until", "until false & do break; done"),
+        (
+            "elif",
+            "if false; then :; elif true & then builtin true; fi",
+        ),
+        ("newline", "if true &\nthen builtin true; fi"),
+        ("andlist", "if true && true & then builtin true; fi"),
+    ] {
+        let (out, err, rc) = run_in(&dir, &format!("{script}\nbuiltin echo $! >{tag}\nwait"));
+        assert_eq!((out.as_str(), rc), ("", 0), "{script}: {err}");
+        let pid: i64 = record(&dir, tag).trim().parse().unwrap_or_default();
+        assert!(
+            pid > 0,
+            "{script}: $! = {:?}, not a job pid",
+            record(&dir, tag)
+        );
+    }
+    // The `& ;` shape records nothing: it stays the rc-1 parse error (task #355)
+    // and the **preflight** bails, so the script writes no file at all.
+    for script in [
+        "if true & ; then builtin true; fi",
+        "while : & ; do builtin true; break; done",
+        "if false; then :; elif true & ; then builtin true; fi",
+    ] {
+        std::fs::remove_file(dir.join("amp")).ok();
+        let (out, _err, rc) = run_in(&dir, &format!("{script}\nbuiltin echo $! >amp"));
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+        assert!(
+            record(&dir, "amp").is_empty(),
+            "{script}: the script ran, $! moved"
+        );
+    }
+}
+
+/// The condition's side effects die with the child (task #356): a `cd` written
+/// in a `&`-terminated condition leaves the parent's cwd where it was (bash
+/// parity — master's foreground condition moved it).
+#[test]
+fn ampersand_terminated_condition_leaves_the_parent_cwd() {
+    let dir = scratch("cond-cwd");
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let (out, err, rc) = run_in(
+        &dir,
+        "if cd sub & then builtin true; fi\nbuiltin pwd >cwd\nwait",
+    );
+    assert_eq!((out.as_str(), rc), ("", 0), "{err}");
+    let got = record(&dir, "cwd");
+    let got = got.trim();
+    assert_eq!(got, dir.to_str().unwrap(), "the parent's cwd is untouched");
 }
 
 /// The `& ;` written **inside a block body** is rejected (task #355 fixed the
