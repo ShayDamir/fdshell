@@ -10,6 +10,7 @@ mod io;
 mod line;
 mod lines;
 mod op;
+mod opaque;
 mod ops;
 mod regions;
 
@@ -21,8 +22,9 @@ pub(crate) use line::{line_bodies_for_line, line_end_after, line_start};
 pub(crate) use lines::first_unquoted_newline;
 pub(crate) use op::operator_word;
 pub(crate) use op::{Operator, attached, invalid_delimiter, operator_delim};
+pub(crate) use opaque::operator_count_opaque;
 pub(crate) use ops::{operator_count, operator_delims};
-pub(crate) use regions::body_regions;
+pub(crate) use regions::{body_regions, terminator_spans};
 
 /// If `line[run_start..run_end]` is a heredoc command line, return the index
 /// of the newline terminating the last delimiter line (or `line.len()` when

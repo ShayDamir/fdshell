@@ -1,6 +1,8 @@
 //! Whole-text scan for the opaque heredoc body regions, so the tokenizer can
 //! blank body bytes before tokenizing (a body may contain any bytes,
-//! including unbalanced quotes).
+//! including unbalanced quotes). The delimiter lines are the second half of the
+//! same scan ([`terminator_spans`]): one definition of what is heredoc
+//! structure, so an opacity change cannot drift between the two halves.
 
 use super::super::{Boundary, ScanState, boundary, skip_comment};
 use super::{body_spans, line_end_after, line_start, operator_count, operator_delims, skip_region};
@@ -53,6 +55,30 @@ pub(crate) fn body_regions(line: &[u8]) -> Vec<(usize, usize)> {
         }
     }
     regions
+}
+
+/// The delimiter (terminator) lines of the text's heredocs: the span of each
+/// delimiter line's **bytes**, its terminating newline excluded (an empty
+/// delimiter line yields no span). Derived from [`body_regions`], so the body
+/// and its terminator line are one scan and cannot drift: a terminator line is
+/// heredoc structure, never command bytes — an operator count must not see its
+/// bytes, and its quote bytes must never reach the tokenizer's quote check.
+/// The line is scanned as opaque data (a terminator may carry an unbalanced
+/// quote byte), so the newline search is a plain byte scan.
+pub(crate) fn terminator_spans(line: &[u8]) -> Vec<(usize, usize)> {
+    body_regions(line)
+        .into_iter()
+        .map(|(_start, term_start)| (term_start, terminator_end(line, term_start)))
+        .filter(|(start, stop)| stop > start)
+        .collect()
+}
+
+/// The end of the delimiter line that starts at `start`: the index of its
+/// terminating newline, or `line.len()` when it is the text's last line.
+pub(crate) fn terminator_end(line: &[u8], start: usize) -> usize {
+    line.get(start..)
+        .and_then(|s| s.iter().position(|&b| b == b'\n'))
+        .map_or(line.len(), |p| start + p)
 }
 
 /// The regions of a heredoc command line terminated by `;` — a single-line

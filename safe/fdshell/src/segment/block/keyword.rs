@@ -67,7 +67,14 @@ pub(super) fn keyword_block<'a>(
         // `line_resume` is the resume floor's anchor: the end of the line's
         // last body region (the line end when the bodies are missing).
         let (_, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
-        let k = heredoc::operator_count(line, start, block_start_pos);
+        // The block's command text spans lines (a multi-line block's condition
+        // body+terminator sit before its closer), so the count is the
+        // window-blind one: those regions are heredoc structure, never the
+        // block's operators. Regions claimed by an operator written **before**
+        // this window are kept visible — a pre-block heredoc's region covers
+        // the block's own line, and blinding it would hide the closer
+        // (`tests::skip_is_bounded_to_the_blocks_physical_line`).
+        let k = heredoc::operator_count_opaque(line, start, block_start_pos);
         // `k == 0` claims no region: skip the whole-line region scan for it.
         let bodies = if k == 0 {
             Vec::new()

@@ -31,7 +31,10 @@ pub(crate) fn skip_to_or(
 
 /// The next `n` body bytes for the part `line[start..end]`, where `n` is the
 /// part's byte-level `<<` operator count. The bodies are in global operator
-/// order, so the part's share is the next `n` entries.
+/// order, so the part's share is the next `n` entries. The count is the
+/// **window-blind** one: a part's text is a block/arm text (`cond/part.rs::reconstruct`)
+/// and spans body and terminator lines, whose bytes are heredoc structure and
+/// never the part's operators.
 pub(crate) fn take_bodies(
     line: &[u8],
     start: usize,
@@ -39,7 +42,7 @@ pub(crate) fn take_bodies(
     bodies: &[Vec<u8>],
     body_idx: &mut usize,
 ) -> Vec<Vec<u8>> {
-    let n = heredoc::operator_count(line, start, end);
+    let n = heredoc::operator_count_opaque(line, start, end);
     let mut out = Vec::new();
     for _ in 0..n {
         if let Some(body) = bodies.get(*body_idx) {

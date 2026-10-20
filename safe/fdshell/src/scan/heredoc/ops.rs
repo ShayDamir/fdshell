@@ -17,7 +17,7 @@ mod pipe;
 /// io-number descriptor. Deliberately no delimiter: the count is a shape count,
 /// and the delimiter's validity is the parse layer's error (`operator_at`'s
 /// `InvalidRedirect`), not a counting gate.
-struct Site {
+pub(crate) struct Site {
     op: usize,
     dash: bool,
     fd: i32,
@@ -61,8 +61,9 @@ pub(crate) fn operator_count(line: &[u8], from: usize, to: usize) -> usize {
 /// the token layer's rules (see [`operator_delims`]' doc); `delimiter_span` is
 /// used only to step past the operator's word, and on `None` (a bare `<<` with
 /// no readable delimiter) the site is still recorded and the walk continues at
-/// the operator's own tail.
-fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
+/// the operator's own tail. `pub(crate)` for the window-blind count
+/// ([`super::opaque`]), which reuses this walker unchanged.
+pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
     let mut state = ScanState::new();
     let mut found: Vec<Site> = Vec::new();
     let mut seen_token = false;
