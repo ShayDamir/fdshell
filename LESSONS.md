@@ -932,6 +932,29 @@ the release profile, one un-folded burn costs ~10 ms of user CPU and the same lo
 with `black_box` moved back *after* the loop ~0 ms — the burn is real in release,
 which is the only thing a `utime + stime > 0` assertion needs from it.
 
+The same coin flip reaches the `times` builtin's **children** fields (task
+#267): `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
+burned CPU in a backgrounded child, `wait`ed for it, and asserted the *children
+user time* field is `> 0.00`. `times` prints `child_utime` and `child_stime` as
+two separate fields (`safe/fdshell/src/intercept/times.rs`, fed by
+`add_child_times` from each reap's `waitid` rusage), so a reaped child's CPU
+attributed wholly to system zeroes the asserted field while the child plainly
+ran — the #194 scheduler coin flip, relocated. Fixed the same way: the test
+asserts the printed sum (user + system), keeps the burn loop, and reads `> 0` as
+"the report is non-degenerate", never as "the burn ran". The centisecond print
+floor is new information for this entry: `centis` truncates the two fields
+**independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not
+the truncation of the total and its floor sits on a *single* field — one field
+prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both*
+fields are, i.e. only when the whole child CPU is under 200 µs. Rule: measure a
+`times`-style burn against that print floor, never against the printed unit's
+nominal resolution (the printed unit is the centisecond = 10 ms; the resolution
+is a hundredth of it). Measured in release, the test's 5000-iteration shell loop
+puts the children line at `47.43`–`50.75` user + `4.38`–`5.60` system
+(centiseconds: ~475–505 ms user, ~44–56 ms system) — every field is 50–5000×
+above the floor, so the sum's `> 0` is both attribution-independent and
+floor-independent.
+
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
 `connect_listen_accept_in_one_script_inet` failed once in the `nix flake check`
 sandbox and passed on re-run, and was filed as timing-sensitive (task #239). The
