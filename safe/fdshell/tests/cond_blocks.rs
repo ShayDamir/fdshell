@@ -1010,18 +1010,29 @@ fn ampersand_in_an_if_body_backgrounds_the_statement() {
         let (out, err, rc) = run(&format!("{script}\nwait"));
         assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
     }
-    // A body glued to the closer keeps its `&`: the job record is the pin
-    // (LESSONS), not the output — the `&` is what the body's scan marks.
-    let (out, err, rc) = run("if true; then builtin echo x & fi\nbuiltin echo pid=$!; wait");
-    assert_eq!(rc, 0, "{err}");
-    assert!(out.contains("x"), "stdout={out}");
-    let pid: i64 = out
-        .lines()
-        .find(|l| l.starts_with("pid="))
-        .and_then(|l| l.get(4..))
-        .and_then(|d| d.trim().parse().ok())
-        .unwrap_or_default();
-    assert!(pid > 0, "stdout={out}");
+    // A body glued to the closer keeps its `&`. The pins are the **job record**
+    // and the job's own files, read from a scratch dir the child cannot write
+    // into: the backgrounded child shares this process's stdout, so reading the
+    // `$!` line out of stdout is a load flake (measured on the previous pin: 10
+    // contaminated readings in 300 runs — `pid=1263737x` — and a real failure of
+    // `cargo mutants`' unmutated baseline, LESSONS).
+    let dir = scratch("if-body-pid");
+    let (out, err, rc) = run_in(
+        &dir,
+        "if true; then builtin true & fi\nbuiltin echo $! >pid\nif true; then builtin echo x >body & fi\nwait",
+    );
+    assert_eq!((out.as_str(), rc), ("", 0), "{err}");
+    let record = |name: &str| {
+        std::fs::read_to_string(dir.join(name))
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    let pid: i64 = record("pid").parse().unwrap_or_default();
+    assert!(pid > 0, "$! = {:?}, not a job pid", record("pid"));
+    // The echoing variant, pinned as a job record too: the statement's output
+    // went to its own file, so a background child never pollutes the parent's.
+    assert_eq!(record("body"), "x", "the body statement ran as a job");
 }
 
 /// A `&`-terminated block **condition** parses and runs with bash's rc/output
