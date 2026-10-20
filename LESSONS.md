@@ -2753,3 +2753,14 @@ them **as-is** (`tests/redirect.rs::partially_quoted_combined_word_stays_an_oper
 and names their owner, #264 (which defers to #274's blocked user ruling on
 word-splitting) — pinning a deviation is coordination, adopting it silently is
 not.
+
+Mutation note for the gate line: `cargo mutants` (27.1.0) generates **no**
+mutant for an `if *fq {` gate — a deref of the `&bool` bound by the token
+pattern is not a mutation site for it, in `parse_bg_redirect` and in the two
+older gates (`parse/redirect.rs`, `parse/here_string.rs`) alike. What it does
+generate for the parser is the whole-function value mutants; the `Ok(None)` one
+is caught, the `Default::default()` pair is unviable (`BgRedirectResult` has no
+`Default`). So a mutation run reporting no mutant at the gate line reports the
+tool's blind spot, not a hole in the pins — the pins that own this rule are the
+four-arm set above, and they fail on the ungated tree (verified by stashing the
+gate: 7 unit + 4 integration pins fail, the deviation pin passes).
