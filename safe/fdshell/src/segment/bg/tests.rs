@@ -118,6 +118,14 @@ fn an_ampersand_never_targets_an_already_terminated_run() {
 /// newline whose next line opens with the plain `&` leaves the line's runs
 /// buffered, so that `&` claims them as its target and the flush resumes on
 /// the following line.
+///
+/// The indented rows are the load-bearing ones: `bg::async_ahead` skips
+/// spaces and tabs between the newline and the `&`, so a row whose `&` sits at
+/// the line start cannot tell the skip loop from one that never advances.
+/// Without them a backwards loop (`j -= 1`) stops on the newline and reports
+/// "no `&` ahead": the runs flush above it, and the `&` below loses its
+/// target (`AsyncInvalid`, bash's shape here is rc 2 with line 1 executed —
+/// the deferral divergence documented in POSIX_COMPATIBILITY).
 #[test]
 fn a_line_opening_with_ampersand_defers_the_flush_above_it() {
     let cases: &[(&[u8], &[(&str, bool)])] = &[
@@ -127,6 +135,9 @@ fn a_line_opening_with_ampersand_defers_the_flush_above_it() {
             b"echo a\n& echo b\nwait",
             &[("S", true), ("S", false), ("S", false)],
         ),
+        (b"echo a\n & echo b\n", &[("S", true), ("S", false)]),
+        (b"echo a\n\t& echo b\n", &[("S", true), ("S", false)]),
+        (b"echo a \n \t & echo b\n", &[("S", true), ("S", false)]),
     ];
     for (line, want) in cases {
         assert_eq!(&faces(line), want, "{line:?}");

@@ -408,6 +408,33 @@ fn ampersand_on_the_next_line_claims_the_statement_above_it() {
     assert_eq!(got, (String::from("a\n"), String::from("b\n")));
 }
 
+/// The deferral claims the statement above a `&` that opens its line **after
+/// indentation**: the newline-to-`&` gap is spaces and tabs, so the claim
+/// depends on `bg::async_ahead` skipping exactly the blanks between them.
+/// Both statements run, `wait` reaps, rc 0 (bash: `a` then rc 2 — the
+/// deferral divergence documented in POSIX_COMPATIBILITY).
+#[test]
+fn indented_ampersand_on_the_next_line_claims_the_statement_above_it() {
+    for indent in [" ", "\t", " \t "] {
+        let (a, b) = (scratch("mla"), scratch("mlb"));
+        let out = run(&format!(
+            "builtin echo a >{a}\n{indent}& builtin echo b >{b}\nwait"
+        ));
+        let got = (contents(&a), contents(&b));
+        assert_eq!(
+            rc(&out),
+            0,
+            "indent {indent:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert_eq!(
+            got,
+            (String::from("a\n"), String::from("b\n")),
+            "indent {indent:?}"
+        );
+    }
+}
+
 /// No stray background child survives the script: the parent's own `wait`
 /// reaps every job, so the harness's pipe closes (hermeticity).
 #[test]
