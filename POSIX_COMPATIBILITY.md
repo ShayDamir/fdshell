@@ -103,12 +103,39 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   prints nothing where bash prints `x` (the background list's status gates the
   arm) — the condition's job is task #356's; `echo a & ;` **inside a body**
   (`for i in 1; do echo a & ; done`) runs the statement with rc 0 where bash
-  stops with rc 2 — task #355's; `{ echo <<T & }` plus body hits the here-doc
-  region seam of task #313. The rule does not loosen the statement-level guard:
+   stops with rc 2 — task #355's; `{ echo <<T & }` plus body hits the
+   **single-line group** here-doc gap of task **#315** (the same shape without
+   the `&`, `{ cat <<T; }`, reports it identically; the multi-line group body is
+   fine). The rule does not loosen the statement-level guard:
+
   `echo a & ;; echo b` **outside** a block is bash's syntax error, rc 1. Pinned
   in `safe/fdshell/tests/async.rs`, `loops.rs`, `group.rs`, `case.rs`,
   `cond_blocks.rs`, `block_bodies.rs`, `repl.rs` and the `segment`/`parse` unit
   tests.
+- A **here-doc** travels with the statement its `&` terminates, and a second
+  here-doc written **behind** the `&` on the same line is a separate statement
+  with its own body: `cat <<A & cat <<B` plus the four body lines prints both
+  bodies with rc 0 in both shells (fdshell printed `x` and then ran `y`/`B` as
+  commands). The line's body regions are one stream, allocated in operator
+  order, so the prefix takes region 0 and the suffix region 1. The shape
+  composes with the io-number form (`cat 3<<B` behind the `&`), `<<'B'`, `<<-B`,
+  a pipeline suffix (`cat <<B | wc -l`), several `&` on one line, and every
+  block/arm position (`if … fi`, `{ … }`, `f(){ … }`, `for … done`,
+  `case … esac`). Measured divergences, all pinned:
+  a **redirect-only** suffix behind the `&` (`cat <<A & <<B`, `echo hi <<T & <<U`)
+  runs `<<B` as a command word (bash runs a bare redirection, rc 0) — owners
+  **#303** and **#345**; the glued `cat <<A& cat <<B` keeps the tokenizer's
+  word rule (`&` is an ordinary word byte, so the byte-level delimiter is `A&`)
+  and reports the missing terminator; a `#` comment behind the `&` ends the
+  physical line, so the suffix run is flushed body-less (the rule the
+  comment-terminated line has always had); a bare `<<` behind the `&` is
+  `invalid redirect syntax` rc 1 where bash is rc 2; a body that never arrives
+  empties the **whole line's** region list (owner **#275**); a **block opened
+  behind the `&`** (`cat <<A & if true; then cat <<B … fi`) prints the prefix's
+  body lines twice, since the block's span has to cover them — the one-job async
+  list family **#352**/**#316**. Async output has no order, so the pins give each
+  writer its own file. Pinned in `safe/fdshell/tests/async.rs`, `heredoc.rs`,
+  `repl.rs` and the `segment` unit tests.
 - **Line deferral** (the accepted divergence behind those multi-line shapes):
   a line whose first non-blank byte is `&` (indentation counts: `echo a\n & echo b`
   is the same shape) claims the statement buffered above

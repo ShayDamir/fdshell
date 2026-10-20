@@ -124,6 +124,22 @@ redirect). A `&` must terminate a command — `& echo b`, `echo a ; & b`,
 `echo a & ; echo b` and `echo a & | cat` are parse errors that run **nothing**,
 as in bash.
 
+A **here-doc** belongs to the statement the `&` terminates: the body lines under
+that line are its body, not statements of the shell. A second here-doc written
+**behind** the `&` on the same line is a statement of its own, and each operator
+takes the body it owns — the line's body regions are handed out in operator
+order:
+
+```shell
+cat <<A & cat <<B    # the job runs `cat <<A`; `cat <<B` runs in the foreground
+x                    # the background statement's body
+A                    # its delimiter line
+y                    # the foreground statement's body
+B
+wait                 # reap the job; a `wait` with lines below it opens the
+                     # event-`wait` block, so write `wait;` or keep it last
+```
+
 A `&` written **inside a block's text** separates statements inside the block;
 it does not end the block. The closer may sit right behind it on the same line,
 and the statement in front of the `&` becomes a background job of the body, so

@@ -2887,3 +2887,57 @@ by a per-iteration redirect target, see above — fails an unrelated test with a
 message that names neither. After a suite run, check `git status --porcelain`
 for `??` in the crate directory, and never name a scratch file with something
 the shell is supposed to expand.
+
+## A physical line's region list is one global stream, so a boundary that flushes mid-line must leave the cursor on the line (task #313)
+
+`cat <<A & cat <<B` + four body lines printed `x` and then ran `y`/`B` as
+commands: the plain `&` flushes the runs it terminates, and `segment/bg.rs::mark`
+parked the cursor at that flush's **resume** — the end of the physical line's
+**last** body region — while also bumping `book.line_start` past the `&`. The
+command text behind the `&` was therefore never scanned, and its body lines
+became statements. Every other separator is fine because it flushes at a
+boundary the region stream does not straddle: the `;`/newline flush sees the
+whole line, and the `&&`/`||` layer hands out bodies by the same global count
+(`cond/parts.rs::take_bodies`).
+
+The invariant ("bodies are allocated in **global per-line operator order**",
+the entry above) has a cursor half that the `&` split was missing: a physical
+line's region list is **one** stream, so a boundary that flushes *inside* a line
+must (1) claim only its own prefix regions, (2) leave the cursor **on the line**
+(`amp + 1`) so the text behind it is scanned as runs, (3) keep `line_start` at
+the physical line's start, so the suffix flush's `assigned` =
+`operator_count(line, line_start, run.off)` picks the suffix's region by its
+**global** index, and (4) publish its resume as `book.body_floor`, so no later
+flush of that line resumes inside a claimed region. `mark`'s tail guard
+(`if book.i <= amp`) stays the sole advancement rule (see the #326 entry);
+`segment.rs` still `continue`s after the `Async` arm.
+
+**Measure the plan's fix, not only its bug.** The plan's §2.1 widened
+`flush_line`'s region window from the flush's to the physical line's bounds
+(`heredoc::line_start` / `line_end_after`). Measured, that widening is
+**unnecessary** — with `line_start` untouched, the suffix flush's window *is*
+already the physical line — and it **costs** the glued form: the window that
+swallows the `&` reads the operator's word as `A&` (`&` is an ordinary word byte
+for the tokenizer, `scan::heredoc::lines::token_word_end`), so the delimiter is
+unreadable, the whole line's region list is empty, and `cat <<A&` + body — at
+bash parity on `master` — becomes `missing terminating delimiter line`. One
+unit pin (`segment/line/tests.rs::flush_line_indexes_the_line_stream_globally`)
+records the two flushes of the same line and the index each uses; keep the
+window where the caller put it. The two rows the widening was meant to fix
+(`cat <<A & cat <<B # note`, glued `cat <<A& cat <<B`) are not new rules: a run
+that trails its physical line is flushed body-less
+(`flush_line_multi_line_runs_are_body_less`) and a line whose operator word is
+unreadable claims no regions (#275's all-or-nothing granularity). They stay
+pin-as-measured divergences.
+
+Pin-writing rules, both of them bitten here: a background-job pin **reaps** its
+job, and `wait` must be the script's **last** line, written `wait;`, or
+`wait $!` — a bare `wait` at the end of a line inside a multi-line script opens
+fdshell's event-`wait` **block** (`POSIX_COMPATIBILITY.md`), so a pin ending
+`…\nwait\necho tail` is a parse error at `script.rs:53`. Async output has **no**
+order: the *same* binary printed `x y` and `y x` on consecutive runs of the same
+script, so compare line **sets** (the `lines()` helper sorts) or give each writer
+its own file; pinning the concatenation is a flake. fd-3 rows go through
+`run_fd3_closed` (LESSONS/#312), and `git status --porcelain` after the run
+catches a leaked `async-*` scratch file before it breaks
+`glob::tests::relative_pattern_walks_from_the_base_fd`.
