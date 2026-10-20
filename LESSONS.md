@@ -2814,6 +2814,17 @@ The operator-end offset has **exactly one owner**: `path_offset` in
 `attached.rs` and `bg_redirect.rs` *is* the gate's `to` bound (one past the
 operator's last byte) — name it in a comment at both sites, do not add a
 second offset (LESSONS: mask/word/quotation offsets have exactly one owner).
+Mutation notes for the gates: the dup arm's `&`-bit read (`attached.rs`,
+`quoted_bytes(mask, op_pos + 1, op_pos + 2)`) has a provably equivalent
+mutant — `op_pos + 1` → `op_pos * 1` widens the range by the operator byte
+at `op_pos`, which the first-byte gate has already proven unquoted, so no
+input distinguishes it (the surviving `replace + with *` in a mutation run
+here is this equivalence, not a pin gap). The killable arms: the `op_end`
+width of the `&>` gate needs rows quoting the **third** byte of the
+three-byte forms (`&">"&p`, `&>"&"p`, `&>"|"&p` — a shortened gate turns
+them into pidvar jobs, so pin stdout *order* and the no-file listing), and
+the multi-digit dup fall-through (`12>"&"x` opens the file `&x` at fd 12,
+bash parity).
 
 Measured flips worth naming: a coincidental parity turned into a documented
 divergence (`echo a "&">x`: fdshell today wrote `x` = `a` like bash's
