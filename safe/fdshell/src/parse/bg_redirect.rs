@@ -18,15 +18,22 @@ pub struct BgRedirectResult {
 /// 2, emitted as a single `RedirectDef::combined`) or a background job's pid
 /// variable. Second field: tokens the operator
 /// consumes (1 for the bare `&>` / `&>>`, which takes the next token as its
-/// path operand, 0 for every attached form).
+/// path operand, 0 for every attached form). Fully quoted tokens are never
+/// `&>`-family operators.
 pub fn parse_bg_redirect(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(BgRedirectResult, usize)>, Report<ParseError>> {
-    // `_fq` (fully quoted) is read for task #250's quoted-word guard.
-    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
+    let Some((t, _start, _end, fq, mask, _spans)) = tokens.get(i) else {
         return Ok(None);
     };
+    // A fully quoted word is a plain argument, never an operator — POSIX #4.1
+    // removes quotes after tokenization. Same gate as `parse_redirect` and
+    // `parse_here_string`, and it must sit at the top so every arm below
+    // (`&>f`, `&>>f`, the bare forms, `&>&name`, `&>|&name`) is covered.
+    if *fq {
+        return Ok(None);
+    }
     let Some(rest) = t.strip_prefix(b"&>") else {
         return Ok(None);
     };
