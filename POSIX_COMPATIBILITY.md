@@ -39,6 +39,11 @@ word. fdshell additionally reads `&name` as a task variable:
 - `cmd &>&name` starts `cmd` in the background and stores the task (a pidfd
   plus its capture context) under `&name`; `&>|&name` overwrites an existing
   task.
+- Quoting the whole word quotes the operator: `cmd '&>&name'` is a plain
+  argument in both shells (`echo hi '&>&name'` prints `hi &>&name` and launches
+  no task, rc 0). The **unquoted** form is fdshell's extension — bash rejects
+  `echo hi &>&name` with rc 2 (`syntax error near unexpected token '&'`),
+  fdshell records the task and prints `hi`.
 - `waitpid &name` waits for that task.
 - `&>` and `&>>` redirect stdout and stderr together (a bash extension). Like
   bash they open the operand **once** and share that open file description
@@ -107,6 +112,19 @@ echo hi >file       # both: write `hi` to `file`
 ```
 
 Write a space (or a quote) between a word and an operator that follows it.
+
+A **fully quoted** operator word is never an operator — the gate every fdshell
+redirect parser opens with, the `&>` family included: `echo '&>f'` prints `&>f`
+and opens nothing, `echo hi '&>' f` prints `hi &> f` and opens nothing, and
+`cmd '&>&name'` is an argument that starts no background task. POSIX #4.1
+removes quotes after tokenization, so bash does the same.
+
+A word that only *starts* quoted is fdshell's word rule, the deviation this
+section is about: fdshell reads the operator from the word's **text**, bash
+never does (measured 2026-10-20 with bash 5.3.9, pinned in
+`safe/fdshell/tests/redirect.rs`, owned by task #264) — `echo '&>'f` writes
+fdshell's `f` where bash prints `&>f` and opens nothing, and `echo x "&">y`
+writes `y` = `x` where bash writes `y` = `x &`.
 
 The same raw-byte rule decides the operand side: an operand of a bare `<<`,
 `<<<`, `>`, `>>`, `<`, `<>`, `>|`, `&>` or `&>>` is an operator (and a syntax

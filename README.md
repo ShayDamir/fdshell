@@ -99,7 +99,9 @@ waitpid &server
 The shell stores the task (a pidfd plus its capture context) in the task
 variable `&server`; `&>|&server` overwrites an existing task. Because a pidfd
 stays valid and unique for the lifetime of the child, this avoids the
-PID-reuse races of the traditional `$!` / `kill` pattern.
+PID-reuse races of the traditional `$!` / `kill` pattern. Quoting the whole
+word quotes the operator: `run_server '&>&server'` is a plain argument and
+launches no task, as bash does.
 
 The plain POSIX `&` operator backgrounds a statement with no name at all. The
 job is the shell forked: the child runs the statement through the identical
@@ -252,6 +254,14 @@ An operand that begins with `<`, `>`, `&` or `%` is a file name when that
 byte is quoted — `echo hi > "&f"` opens `&f`, as bash does — and a syntax
 error when it is not (`> &f`); the spaced `%var` operand stays a syntax
 error, the fd-variable targets being the attached `>%var` / `&>%var` forms
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
+
+On the operator side, the `&>` family — like every other redirect operator — is
+recognized at a **word start**, and a fully quoted word is a plain argument:
+`echo '&>f'` prints `&>f` and opens nothing, and `cmd '&>&name'` is an argument,
+not a background task. A word that only *starts* quoted (`'&>'f`, `"&">f`) is
+read by fdshell's word rule — its text begins with the operator, so it
+redirects, where bash prints the literal
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
 
 `set -o noclobber` (`set -C`) refuses a `>` that would overwrite an existing

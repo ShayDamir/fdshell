@@ -2710,3 +2710,46 @@ and `tests/async.rs::indented_ampersand_on_the_next_line_claims_the_statement_ab
 (bash on those shapes: `a`, then rc 2 — the documented line-deferral divergence).
 Rule for the next mutation run: a whitespace-skipping loop is only pinned by rows
 that **have** whitespace to skip, so such a loop needs at least one indented row.
+
+## An operator parser gates on `fq` first and on the mask for the operand; the `&>` family was missing the first gate (task #250)
+
+A redirect parser has two quoting rules to read, on two different bytes. The
+**operator word** is gated on the token's `fq` flag — POSIX #4.1 removes quotes
+after tokenization, so a fully quoted word is a plain argument (`parse_redirect`
+and `parse_here_string` open with `if *fq { return Ok(None); }`). The bare
+operator's **operand** is gated on the leading `<`/`>`/`&`/`%` byte's mask bit
+(`scan::heredoc::op::operator_word`, task #323: `> "&f"` opens `&f`).
+`parse_bg_redirect` read only the text and the mask, so `echo '&>q.txt'` created
+`q.txt` where bash prints the literal. `fq` is **not** `fully_quoted(mask)`: the
+mask of a fully quoted word with an expansion (`"&>$(echo x)f"`) is all-`true`
+and an emptiness-based gate reads it as an operator, while `""$(true)` has no
+mask bit at all (see "An empty quoted region contributes no bytes…").
+
+The gate belongs at the **top of the parser**, never on the redirect
+construction: `parse_bg_redirect` has four arms over the same word start
+(`&>f`, `&>>f`, the bare `&>` + next token, `&>&name`, `&>|&name`), and a
+path-arm-only gate leaves `echo hi '&>&name'` recording a background job (the
+literal word eaten, its output arriving *after* the next statement's) and
+`echo hi '&>' f` eating `f` as its operand. The minimum pin set is therefore
+each arm fully quoted, in both layers: `parse/tests.rs` for the parse shape
+(`args`, `redirects.is_empty()`, **`pidvar.is_none()`**, **`!bg_force`** — the
+last two are what a partial fix passes without) and `tests/redirect.rs` for the
+filesystem fact (the scratch listing must be empty: the stdout assert alone
+cannot tell a redirect from an argument that happens to print nothing).
+
+One side effect is worth naming: the top gate also aligns the byte-level heredoc
+count with the token layer. `echo a '&>' b <<EOF` counted one body at byte level
+while the token layer turned the quoted `&>` into a bare operator that swallowed
+the next word — `b`, or the `<<EOF` itself, an `invalid redirect` parse error.
+After the gate both layers see the same words and the line runs, as bash
+(`parse/tests.rs::test_fully_quoted_bare_operator_does_not_swallow_a_heredoc`).
+
+No arm is needed for a `\&>`-leading word: its token text starts with `\`, so
+`strip_prefix(b"&>")` already fails — the same rule LESSONS records for `\if`.
+The **partially quoted** forms (`'&>'f`, `"&">y`, and the mask side `2'>'g`,
+`'1'>f`) are a different decision on a different byte: fdshell reads the
+operator from the word's text where bash prints the literal. Task #250 pins
+them **as-is** (`tests/redirect.rs::partially_quoted_combined_word_stays_an_operator`)
+and names their owner, #264 (which defers to #274's blocked user ruling on
+word-splitting) — pinning a deviation is coordination, adopting it silently is
+not.
