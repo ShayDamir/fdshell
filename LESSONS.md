@@ -2645,3 +2645,41 @@ fdshell's parse layer is fed contiguous statement text, and bash rejects an asyn
 
 ## POSIX `wait` with no operands returns 0, whatever the reaped jobs exited with
 POSIX 2.14 (`wait` with no arguments) is not "the last job's status": `false & wait; echo $?` is `0` in bash 5.3.9 and in POSIX. fdshell's `reap::wait_all` returns `Exited(0)` for the same reason the pid form keeps the child's status: the no-operand form's contract is "reap everything, succeed". `wait <pid>` keeps reporting that child's exit code (`false & wait $!; echo $?` → `1`, pinned in `tests/wait.rs` and `tests/async.rs`). Do not "fix" the no-operand form to propagate a child's failure — it is parity, not a gap.
+
+## A background-job pin must pin the **job record**, never the output (task #326)
+
+`run_parsed`'s `Pipeline(pipeline) if background` arm was a missed mutant: with the
+guard replaced by `false` a backgrounded pipeline runs **foreground**, and every
+output-based pin in the suite passes anyway — the pipeline prints the same bytes
+either way, the parent's status is 0 in both shapes (POSIX no-operand `wait`
+reports 0 whatever the jobs exited with), and the script's rc is 0. Two rows kill
+it, and both pin state the output cannot see: `tests/run.rs::async_pipeline_records_one_nameless_job`
+(asserts `jobs.anon_len() == 1`, `$!` equals the deque's pid, and one `wait`
+empties the table) and `tests/async.rs::pipeline_is_one_async_job` (asserts the
+`$!` line is numeric and `> 0`: a foreground pipeline never sets `last_bg_pid`, so
+`$!` prints empty and the row fails). Rule: for a `&` job, the observable is the
+**record** (`jobs` table + `last_bg_pid`), because the child's stdout and the
+parent's status are deliberately identical to the foreground run. The same rule
+explains why every async pin ends with `wait` (LESSONS: a background child
+inherits stdout) — the reaping is part of the pin, not hygiene bolted on.
+
+## The cond-list gate window starts behind the pair; its 2-byte back-step is equivalent until it underflows (task #326)
+
+`cargo mutants` missed `cond.rs:62:31` (`let after = i + 2` → `i - 2`) in the
+short-circuit gate path. Analysis: `gate_end` scans for the first depth-0 `;`/`\n`
+from `after`, and the 2 bytes the mutant adds to the window's front are the pair's
+own bytes plus the whitespace before it — a statement's text has no top-level `;`
+or newline there (the segment split consumed them), and the pair bytes score
+nothing (`|` is no keyword, opens no group), so for every shape with a **multi-byte**
+left operand the scan returns the same gate end and takes the same bodies:
+unkillable. It is killable at exactly one offset: a **one-byte** left operand
+glued to the pair (`:||echo b`) puts the operator at `i == 1`, where `i - 2`
+underflows — in the dev profile (what nextest and `cargo mutants` build) the
+shell dies with rc 101 where bash and fdshell print nothing at rc 0; in release
+the wrapped index finds no separator and the gate ends at the same byte, so the
+mutant is equivalent there. Pinned by
+`tests/glued_pair.rs::one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair`
+(`:||echo b`, `:||echo b; echo after`, the `&&` twin and the spaced twins, all
+measured against bash 5.3.9): the row pins the shape, the dev profile does the
+killing. Record it here so a future run reads the `Missed` line for this mutant
+in a release-profile run as the equivalence, not as a gap.
