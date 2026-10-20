@@ -106,11 +106,32 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   echo a & ; fi` runs nothing at rc 0). `for`'s word list is not statement
   text and stays lenient: `for i in 1 & do :; done` is a parse error (bash rc
   2, fdshell rc 1), and `for i in 1 & ; do echo x; done` runs the `&` as a
-  word (bash rc 2, fdshell rc 0 — pinned). Measured divergences, all pinned:
-  a `&`-terminated **condition** runs in the foreground, so
-  `if true && false & then echo x; fi` prints nothing where bash prints `x`
-  (the background list's status gates the arm) — the condition's job is task
-  #356's; `{ echo <<T & }` plus body hits the
+  word (bash rc 2, fdshell rc 0 — pinned). A `&`-terminated **condition**
+  (`if true & then echo x; fi`, `while : & do …; break; done`, the `elif` twin)
+  is a background job of its own: **one nameless job per condition run**, so a
+  loop records one per iteration, `$!` reports it and `wait` reaps it. The
+  condition slice **cuts** that `&` (the cut feeds the here-doc body indexing
+  and the `& ;` scan, and the parse layer rejects a bare `&`), so the fact
+  travels as the parsed block's `cond_background` flag into the conditional
+  list's background argument. The arm/loop it gates sees the **async status 0**
+  — `if false & then echo x; else echo y; fi` prints `x`,
+  `while false & do echo x; break; done` prints `x`,
+  `until false & do echo x; break; done` prints nothing — and the condition's
+  side effects die with the child (`if cd /tmp & then :; fi` leaves the cwd
+  alone, `if exit &` leaves the script running). The `&` **newline** form is
+  the same shape (`if true &` newline `then echo x; fi` is a job), and
+  `if true && false & then echo x; fi` prints `x` like bash. Measured
+  divergences of the condition family, all pinned: a condition whose last part
+  is **short-circuited away** records no job and gates on that part's status
+  (`if false && true & then echo x; fi` prints nothing where bash prints `x`,
+  and `if cd a && cd a &` cds in the parent) and a **compound** last part
+  (`{ … } &`, `for … done &` written as a condition) runs foreground — bash
+  backgrounds the whole list/compound, owner **#352**; a `&` on its **own
+  line** behind the condition is the deferral family, owner **#313**; an
+  **empty** condition (`if & then`, `while & do`) has no part to background and
+  records no job, owner **#299**; `break`/`continue`/`return` written with the
+  `&` reach the **parent** (the loop-control keyword is not a `Cmd`), owner
+  **#362**; `{ echo <<T & }` plus body hits the
    **single-line group** here-doc gap of task **#315** (the same shape without
    the `&`, `{ cat <<T; }`, reports it identically; the multi-line group body is
    fine). The rule does not loosen the statement-level guard:

@@ -2994,3 +2994,62 @@ shape that separates the two. And the body-slice rule is a **statement-text**
 rule: the `for` word list, `case` patterns and the `case` word keep the plain
 `trim_semi` — `for i in 1 & ; do echo x; done` runs the `&` as a word (pin
 measured, follow-up).
+
+## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
+
+`if true & then echo x; fi` parsed and ran (task #354) with **no** job: the
+condition text goes to `run_cond_list` (`if_exec.rs`, `loop_.rs`) and its `&`
+was already gone — `trim_condition` **cuts** it — so nothing marked a part
+background, the arm gated on the condition's own status, and `cd`/`exit` in a
+condition reached the parent. bash records one background job per condition run.
+
+Body and condition are **different carriers** of the same fact, and the #354
+rule ("the body slice keeps the `&`, its own scan marks the flag — a flag
+threaded through the `run*` layers is a second source of truth") has its
+boundary exactly there. A body is **re-scanned** (`run_script` →
+`segment::scan_segments`, the single validator), so its text carries the `&`. A
+condition is never scanned: `run_part` → `run_one` → `parse`, and the parse
+layer rejects a bare `&` (`parse/command_args.rs:58` `UnexpectedChar { ch: b'&' }`),
+so keeping the `&` in the condition text turns every accepted `&`-terminated
+condition into rc 1. Making the text carry it would need a **second** split-time
+validator in the run layer (the glued-byte rules of `segment/bg::mark`, and
+`cond/part.rs::reconstruct`'s heredoc rebuild), running on every statement of
+every script, where a statement's text never ends in a bare `&`. The cut is
+load-bearing (it feeds the condition's `cond_bodies` heredoc indexing and the
+`& ;` scan of #355), so the fact lives nowhere in the text: the parse layer
+computes it once (`parse/semi/trim.rs::condition_background` →
+`IfBlock`/`ElifArm`/`LoopBlock::cond_background`) and hands it to
+`run_cond_list`'s **existing** `background` argument. No `run*` signature grew;
+the flag has one owner.
+
+The predicate reads the `;` **token's byte** (#355's rule reused): a newline
+byte steps the walk back — `if true &` newline `then` is a job, measured, exactly
+like `& then` — while a real `;` byte stops it, so `if true & ; then` stays #355's
+rc-1 parse error with no job. The two arms are killable **only as a pair of
+slice-level unit pins** (`parse/semi/trim/tests.rs` asserts the bool on the very
+slice `trim_condition` receives); rc pins cannot tell them apart, and the
+flag's effect is invisible to rc where the cond-list's last part is empty:
+`if true && & then` sets the flag and records **no** job (`cond/part.rs`
+returns early on an empty part; measured rc 0, no job, bash rc 2) — a mutant on
+the predicate's `&` arm that flips only that shape is an equivalence class, and
+that pin is the proof. The `for` word list never calls the predicate (its `do`
+search stays `Term::Semi`), so the acceptance's "must not leak" half holds by
+construction.
+
+Job pins for a condition: the **record** is the observable, one per condition
+**run** — so a `&`-terminated loop condition records one job per iteration (the
+count is the iteration pin), every pin ends with `wait`, loop rows go through
+`run_bounded` (a dropped control signal makes such a loop re-test forever, and a
+background child must be killed on the bound), and in `tests/cond_blocks.rs` the
+pid comes from a **file** in the scratch dir (`run_in` + `builtin echo $! >pid`),
+never out of stdout: 10 contaminated readings in 300 runs are measured in that
+file's own comment.
+
+Two divergences the measurements named as their own tasks, pinned as-is: a
+loop-control **keyword** with the `&` (`while break & do echo x; break; done`)
+reaches the parent, because `run.rs::run_parsed` backgrounds only the
+`Cmd`/`Pipeline` arms (**#362**; `exit &` is parity because `exit` is a builtin,
+and `run/async_job/tests.rs::loop_control_dies_with_the_child` pins the `spawn`
+level, one layer below `run_parsed`); a compound condition (`{ … } &`,
+`for … done &`) and a short-circuited last part (`if false && true &`) stay
+foreground (**#352**), the same arm list.

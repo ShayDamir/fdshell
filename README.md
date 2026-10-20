@@ -149,17 +149,25 @@ and the statement in front of the `&` becomes a background job of the body, so
 for i in 1 2; do echo hi & done    # one job per iteration, `done` closes the loop
 { echo hi & }                      # the group's body statement runs as a job
 case x in x) echo a & ;; esac      # `;;` ends the arm, `esac` ends the block
-if true & then echo x; fi          # a `&`-terminated condition parses
+if true & then echo x; fi          # a `&`-terminated condition runs as a job
 f(){ echo hi & }                   # the function body keeps its `&`
 ```
 
 `for`'s word list stays strict — `for i in 1 & do :; done` is a parse error —
 and a `&` behind a `&`, or a `;;` behind a `&` outside a block (`echo a & ;;
-echo b`), is the parse error that runs nothing. The condition form above runs
-its condition in the foreground; the background job of a `&`-terminated
-condition is not implemented yet, so an `if true && false & then echo x; fi`
-arm is gated by the foreground status (bash prints `x`, fdshell prints
-nothing).
+echo b`), is the parse error that runs nothing. A `&`-terminated **condition**
+is a background job too, one per condition run, so a loop records one per
+iteration (`while : & do …; break; done`): the arm it gates sees the async
+status 0 (`if true & then echo x; fi` prints `x`, and so does
+`if false & then echo x; else echo y; fi`), the condition's side effects stay
+in the discarded child (`if cd /tmp & then :; fi` leaves the cwd alone), and the
+`&`-newline form is the same shape (`if true &` newline `then echo x; fi`). An
+AND-list condition is the job too: `if true && false & then echo x; fi` prints
+`x` like bash. What stays divergent: a condition whose last part is
+short-circuited away (`if false && true & then echo x; fi`) records no job and
+gates on that part's status, and a **compound** condition (`{ … } &`,
+`for … done &`) runs foreground — bash backgrounds the whole list/compound
+(owner #352).
 
 The POSIX `wait [pid…]` builtin reaps background tasks by pid (or every task
 when given no argument) and sets `$?` to the last reaped status; `$!` holds
