@@ -38,9 +38,12 @@ pub(crate) fn amp_semi(tokens: &[Token], line: &[u8], idx: usize) -> bool {
     if !t.eq_bytes(b";") || line.get(*start) != Some(&b';') {
         return false;
     }
+    let Some(prev) = idx.checked_sub(1) else {
+        return false;
+    };
     tokens
-        .get(idx.saturating_sub(1))
-        .is_some_and(|(p, _, _, _, _, _)| idx > 0 && p.eq_bytes(b"&"))
+        .get(prev)
+        .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b"&"))
 }
 
 /// The terminator set of one [`Term`] test.
