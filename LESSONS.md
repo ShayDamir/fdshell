@@ -2680,6 +2680,33 @@ the wrapped index finds no separator and the gate ends at the same byte, so the
 mutant is equivalent there. Pinned by
 `tests/glued_pair.rs::one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair`
 (`:||echo b`, `:||echo b; echo after`, the `&&` twin and the spaced twins, all
-measured against bash 5.3.9): the row pins the shape, the dev profile does the
-killing. Record it here so a future run reads the `Missed` line for this mutant
-in a release-profile run as the equivalence, not as a gap.
+ measured against bash 5.3.9): the row pins the shape, the dev profile does the
+ killing. Record it here so a future run reads the `Missed` line for this mutant
+ in a release-profile run as the equivalence, not as a gap.
+
+## A clamp the tail guard already enforces is a provably equivalent mutant: delete it, and pin a cursor rule with the rows that need it (task #326, round 3)
+
+`segment/bg::mark` advanced its cursor twice over: `book.i = resume.max(amp + 1)`
+after flushing the runs the `&` terminated, **and** the tail guard
+`if book.i <= amp { book.start = amp + 1; book.i = amp + 1; }`. `cargo mutants`
+missed `replace + with *` in the clamp: `resume.max(amp) == resume.max(amp + 1)`
+wherever the clamp runs (on the valid path `resume.max(amp + 1) ≥ amp + 1`, so
+the guard was inert; on the invalid path the clamp line never executes), so **no
+input distinguishes the arms** — a test cannot kill it. Rule: when two
+consecutive rules compute the same advancement, keep exactly one and say in a
+comment that it is the sole rule. The clamp is gone (`book.i = resume;`; the tail
+guard is now the only advancement rule) and the file's mutant count drops by two.
+
+The same run *also* missed `replace += with -=` in `bg::async_ahead`'s
+blank-skip loop, and that one **is** killable: every deferral row so far wrote
+the `&` immediately after the newline, where the loop performs no iteration, so
+an advancing and a backwards loop agree there. Rows whose `&` is **indented**
+(`echo a\n & echo b`, plus the tab and space-tab twins) separate them — with
+`j -= 1` the loop stops on the newline, `async_ahead` reports "no `&` ahead",
+the runs flush above it, and the `&` below is targetless (`AsyncInvalid`, rc 1,
+whereas the deferral runs both statements). Pinned in
+`segment/bg/tests.rs::a_line_opening_with_ampersand_defers_the_flush_above_it`
+and `tests/async.rs::indented_ampersand_on_the_next_line_claims_the_statement_above_it`
+(bash on those shapes: `a`, then rc 2 — the documented line-deferral divergence).
+Rule for the next mutation run: a whitespace-skipping loop is only pinned by rows
+that **have** whitespace to skip, so such a loop needs at least one indented row.

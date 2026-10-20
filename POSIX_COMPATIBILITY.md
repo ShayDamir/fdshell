@@ -84,7 +84,8 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   executes and the `;` line is fdshell's accepted empty statement, where bash
   stops with rc 2 (the same-line `& ;` form matches bash).
 - **Line deferral** (the accepted divergence behind those multi-line shapes):
-  a line whose first non-blank byte is `&` claims the statement buffered above
+  a line whose first non-blank byte is `&` (indentation counts: `echo a\n & echo b`
+  is the same shape) claims the statement buffered above
   it, so `echo a\n& echo b` is `echo a` as **one background job** plus
   `echo b` in the foreground (both print, rc 0), and `echo a &\n& echo b`
   marks the same statement background twice over — where bash rejects the
