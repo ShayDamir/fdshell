@@ -2952,3 +2952,45 @@ advancement rule directly below normalizes every value ≤ `amp` to `amp + 1`
 "clamp the tail guard already enforces" entry above records, reached from the
 other side. Deleting the tail guard is *not* an option (that entry pins what it
 protects); the arm's value is only the **fast path** of a rule with one owner.
+
+## A `;` token is a newline in disguise: the body-slice rule must read the token's byte (task #355)
+
+`for i in 1; do echo a & ; done` ran `a` with rc 0 where bash stops with rc 2:
+`trim_semi` cut the trailing `;` **token** off the body slice, the body text
+ended at the `&`, and `segment/bg/split.rs::peek` saw end-of-input behind it —
+a valid split. The fix is one rule, in the layer that cuts the slice: a `;`
+token glued right behind a plain `&` is kept **in the body text**
+(`parse/semi/trim.rs::trim_body` / `body_end` / `trim_condition`, predicate
+`preceded::amp_semi`), and the body's own `run_script` scan marks the split
+invalid and runs nothing — no new error path, no flag threading, exactly the
+#354 rule "the body's own scan is what marks the flag" read one byte further.
+
+The tokenizer emits a `;` **token** for a `;` byte, a newline **and** `)`
+(`parse/token/step.rs`), with the token's byte range pointing at the real byte.
+So every body-slice rule that wants bash's *same-line* semantics must test
+`line[token.start] == b';'` — `do echo a & ; done` is bash's rc 2 while
+`do echo a &\ndone` is bash's rc 0, and the two differ **only** in a byte the
+token list spells identically. The "obvious" additions are provably equivalent
+mutants: a "newline in the gap" test cannot fire (a newline emits its own `;`
+token, so no newline can sit between the `&` and the glued `;`), and the
+`;`-byte arm vs the `&` arm are observably equivalent in the body's scan (a
+trailing `;`/newline byte in body text is inert for it). Record them as
+equivalences and kill the predicate's arms with **body-text unit pins**
+(`parse/semi/trim/tests.rs` asserts the slice's text, never the rc) — rc/output
+pins cannot see a kept `;`.
+
+`;;` is a **glued** pair (`head.end == tail.start`), `; ;` is not, and the glue
+is what distinguishes a `case` clause separator from a statement terminator:
+`x) echo a & ;; esac` keeps the accepted `echo a &` body (the pair head is the
+separator), `x) echo a & ; ;; esac` keeps the `& ;` in the arm (the head is a
+terminator, the leftover tail is absorbed by `parse_clauses`' leading-`;`
+skip). Read the glue from the pair's byte ranges, never from the token words.
+
+Keep the leniency in the layer that needs it (the #354 entry): relaxing
+`split.rs::peek` fixes nothing (`echo a & ; echo b` at statement level is
+already bash's rc-2 shape fdshell reports rc 1) and relaxing the **token**
+check rejects `… &\ndone`, which bash accepts — the token's byte is the only
+shape that separates the two. And the body-slice rule is a **statement-text**
+rule: the `for` word list, `case` patterns and the `case` word keep the plain
+`trim_semi` — `for i in 1 & ; do echo x; done` runs the `&` as a word (pin
+measured, follow-up).

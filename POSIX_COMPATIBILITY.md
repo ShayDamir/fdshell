@@ -96,14 +96,21 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   body's job list is the shell's, `$!` and `wait` see it). At the parse layer the
   word-start `&` is a command-list terminator, so each closer glued after it
   (`& done`, `& }`, `& fi`, `& ;;`, `& esac`) is found, and the body slice
-  **keeps** the `&` — the body's own scan is what marks the flag. `for`'s word
-  list stays strict: `for i in 1 & do :; done` is a parse error (bash rc 2,
-  fdshell rc 1). Measured divergences, all pinned: a `&`-terminated
-  **condition** runs in the foreground, so `if true && false & then echo x; fi`
-  prints nothing where bash prints `x` (the background list's status gates the
-  arm) — the condition's job is task #356's; `echo a & ;` **inside a body**
-  (`for i in 1; do echo a & ; done`) runs the statement with rc 0 where bash
-   stops with rc 2 — task #355's; `{ echo <<T & }` plus body hits the
+  **keeps** the `&` — the body's own scan is what marks the flag. A `;` glued
+  right behind the `&` is **kept in the body too** (`for i in 1; do echo a & ;
+  done`): the body's own scan then reports the split bash calls a syntax
+  error — rc 1, nothing runs (bash rc 2) — in every body, arm, condition and
+  function-def position; the multi-line `&` newline `;` form streams as bash
+  runs line 1 (the `;` line is fdshell's accepted divergence), and an
+  **untaken** arm's body is parsed, never scanned (`if true; then :; else
+  echo a & ; fi` runs nothing at rc 0). `for`'s word list is not statement
+  text and stays lenient: `for i in 1 & do :; done` is a parse error (bash rc
+  2, fdshell rc 1), and `for i in 1 & ; do echo x; done` runs the `&` as a
+  word (bash rc 2, fdshell rc 0 — pinned). Measured divergences, all pinned:
+  a `&`-terminated **condition** runs in the foreground, so
+  `if true && false & then echo x; fi` prints nothing where bash prints `x`
+  (the background list's status gates the arm) — the condition's job is task
+  #356's; `{ echo <<T & }` plus body hits the
    **single-line group** here-doc gap of task **#315** (the same shape without
    the `&`, `{ cat <<T; }`, reports it identically; the multi-line group body is
    fine). The rule does not loosen the statement-level guard:
