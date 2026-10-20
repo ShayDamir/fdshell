@@ -128,3 +128,19 @@ fn child_state_never_reaches_the_parent() {
     // The parent's own cwd is untouched: the child's `cd` died with the child.
     assert_eq!(std::env::current_dir().unwrap(), before);
 }
+
+/// A **here-doc-carrying** statement spawned as a nameless job (task #313):
+/// the split hands `spawn` the statement with its body attached, the job record
+/// is the one `$!` reports, and `wait` reaps it with the statement's own status
+/// — the acceptance phrase "the background job is reaped", pinned at the layer
+/// that owns the job table.
+#[test]
+fn a_heredoc_statement_spawns_a_job_and_is_reaped() {
+    let statuses = spawn_and_reap(b"builtin echo hi <<T\nT");
+    assert_eq!(statuses.len(), 1, "one job record for one `&`");
+    // `WaitStatus` is not `Copy`, so the status is matched through the slice.
+    assert!(
+        matches!(statuses.first(), Some(sys::siginfo::WaitStatus::Exited(0))),
+        "the job exits 0 (its `echo` ran)"
+    );
+}

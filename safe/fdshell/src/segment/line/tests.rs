@@ -136,3 +136,30 @@ fn flush_line_no_operator_run_gets_no_bodies() {
     }
     assert_eq!(resume, 26);
 }
+
+/// The plain-`&` split (task #313) flushes the same physical line **twice**:
+/// the `&` flushes the runs it terminates with a window that ends at the `&`,
+/// and the line's newline flushes the runs written behind it. Both index the
+/// line's one region stream by the operators' position in the **line**, so the
+/// suffix run takes region 1 and never re-claims region 0.
+#[test]
+fn flush_line_indexes_the_line_stream_globally() {
+    //  c a t   < < A   &   c a t   < < B \n x \n A \n y \n B
+    //  0       4     8   10      14  17  18  19 20 21 22  24
+    let line = b"cat <<A & cat <<B\nx\nA\ny\nB";
+    // The `&` flush: the prefix run, window `[0, amp)`.
+    let mut segments = Vec::new();
+    let mut runs = vec![run(b"cat <<A", 0)];
+    let resume = flush_line(&mut segments, line, 0, 8, &mut runs);
+    check_statement(&segments[0], b"cat <<A", 0, &[(18, 22)]);
+    assert_eq!(resume, 21, "the newline ending the last delimiter line");
+
+    // The line's own flush: only the suffix run is buffered, and its global
+    // operator index (`cat <<B` follows one operator written before the `&`)
+    // picks region 1 of the same stream.
+    let mut segments = Vec::new();
+    let mut runs = vec![run(b"cat <<B", 10)];
+    let resume = flush_line(&mut segments, line, 0, 17, &mut runs);
+    check_statement(&segments[0], b"cat <<B", 10, &[(22, 25)]);
+    assert_eq!(resume, 25, "past the line's last region");
+}

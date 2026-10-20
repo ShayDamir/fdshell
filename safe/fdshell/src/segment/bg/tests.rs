@@ -40,6 +40,33 @@ fn seg_bytes(line: &[u8]) -> Vec<&[u8]> {
         .collect()
 }
 
+/// The `(cmd, bodies, background)` face of every segment a line produces: a
+/// statement's command bytes, the **text** of each body region it claims (in
+/// the line's own bytes), and its async flag. A block prints `B`, the
+/// invalid-split marker `A`; both claim no body region here.
+fn statements(line: &[u8]) -> Vec<(&[u8], Vec<&[u8]>, bool)> {
+    scan_segments(line, false)
+        .iter()
+        .map(|seg| match seg {
+            Segment::Statement {
+                cmd,
+                bodies,
+                background,
+                ..
+            } => (
+                *cmd,
+                bodies
+                    .iter()
+                    .map(|&(s, e)| line.get(s..e).unwrap_or(b""))
+                    .collect(),
+                *background,
+            ),
+            Segment::Block { .. } => (b"B".as_slice(), Vec::new(), false),
+            Segment::AsyncInvalid => (b"A".as_slice(), Vec::new(), false),
+        })
+        .collect()
+}
+
 /// The `(kind, background)` face of every segment a line produces
 /// (`A` = the invalid-split marker, `B` = a block, `S` = a statement).
 fn faces(line: &[u8]) -> Vec<(&'static str, bool)> {
@@ -246,5 +273,246 @@ fn ampersand_inside_a_block_text_is_classified_the_same() {
         faces(b"echo a & ;; echo b"),
         alloc::vec![("A", false), ("S", false)],
         "the peek guard still fires at statement level"
+    );
+}
+
+/// Task #313: a plain `&` **mid-line** splits the physical line into two
+/// statements, and each claims the body regions of its **own** operators out
+/// of the line's one global region stream (in operator order). Before the fix
+/// the flush parked the cursor past the line's regions, so the suffix's body
+/// lines ran as statements (`y`/`B` "not found"); the whole suffix was lost.
+#[test]
+fn a_heredoc_behind_an_ampersand_claims_its_own_region() {
+    // The plain form: the prefix is backgrounded, the suffix runs foreground.
+    assert_eq!(
+        statements(b"cat <<A & cat <<B\nx\nA\ny\nB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<B".as_slice(),
+                alloc::vec![b"y\nB".as_slice()],
+                false
+            ),
+        ],
+    );
+    // The same delimiter word on both sides: the regions stay in operator
+    // order, the delimiter's text never merges them.
+    assert_eq!(
+        statements(b"cat <<T & cat <<T\nx\nT\ny\nT"),
+        alloc::vec![
+            (
+                b"cat <<T".as_slice(),
+                alloc::vec![b"x\nT\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<T".as_slice(),
+                alloc::vec![b"y\nT".as_slice()],
+                false
+            ),
+        ],
+    );
+    // Whitespace around the `&` (the load-bearing row for the skip loop).
+    assert_eq!(
+        statements(b"cat <<A &   cat <<B\nx\nA\ny\nB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<B".as_slice(),
+                alloc::vec![b"y\nB".as_slice()],
+                false
+            ),
+        ],
+    );
+    // The `<<-` and io-number suffixes: the region keeps its raw bytes.
+    assert_eq!(
+        statements(b"cat <<A & cat <<-B\nx\nA\n\ty\n\tB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<-B".as_slice(),
+                alloc::vec![b"\ty\n\tB".as_slice()],
+                false
+            ),
+        ],
+    );
+    assert_eq!(
+        statements(b"cat <<A & cat 3<<B\nx\nA\ny\nB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (
+                b"cat 3<<B".as_slice(),
+                alloc::vec![b"y\nB".as_slice()],
+                false
+            ),
+        ],
+    );
+    // A pipeline suffix is one statement, its operator claims one region.
+    assert_eq!(
+        statements(b"cat <<A & cat <<B | wc -l\nx\nA\ny\nB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<B | wc -l".as_slice(),
+                alloc::vec![b"y\nB".as_slice()],
+                false
+            ),
+        ],
+    );
+    // Three jobs on one line: every `&` ends its own list, the runs behind it
+    // are the next statement (LESSONS #326: a `&` never re-targets a flushed run).
+    assert_eq!(
+        statements(b"cat <<A & cat <<B & cat <<C\nx\nA\ny\nB\nz\nC"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<B".as_slice(),
+                alloc::vec![b"y\nB\n".as_slice()],
+                true
+            ),
+            (
+                b"cat <<C".as_slice(),
+                alloc::vec![b"z\nC".as_slice()],
+                false
+            ),
+        ],
+    );
+}
+
+/// The `&` that **ends** its physical line keeps the region jump it has always
+/// made: the cursor goes past the body regions (the body lines are never
+/// statements), and the deferral of `async_ahead` below them is untouched.
+#[test]
+fn an_ampersand_that_ends_the_line_keeps_the_region_jump() {
+    // `&` at the very end: one statement, no body to claim (no body lines).
+    assert_eq!(
+        statements(b"cat <<A &"),
+        alloc::vec![(b"cat <<A".as_slice(), alloc::vec![], true)],
+    );
+    assert_eq!(
+        statements(b"cat <<A &\nbody\nA\n"),
+        alloc::vec![(
+            b"cat <<A".as_slice(),
+            alloc::vec![b"body\nA\n".as_slice()],
+            true
+        )],
+    );
+    // A `#` comment behind the `&` ends the line as a comment does: the scan
+    // jumps past the region, so the body lines stay a body.
+    assert_eq!(
+        statements(b"cat <<A & # note\nx\nA"),
+        alloc::vec![(b"cat <<A".as_slice(), alloc::vec![b"x\nA".as_slice()], true)],
+    );
+    // A body that never arrives: no region for anybody (the all-or-nothing
+    // line rule, owner #275), the split itself stays valid.
+    assert_eq!(
+        statements(b"cat <<A & cat <<B\n"),
+        alloc::vec![
+            (b"cat <<A".as_slice(), alloc::vec![], true),
+            (b"cat <<B".as_slice(), alloc::vec![], false),
+        ],
+    );
+}
+
+/// The suffix runs behind a `&` whose line **cannot** carry them keep the
+/// shape the same shapes without a `&` already had (the pinned divergences,
+/// `tests/heredoc.rs`): a `#` comment behind the `&` ends the physical line
+/// for the suffix, so its run is flushed body-less; a glued `&` is a word byte
+/// of the delimiter (`token_word_end`), so the line's region list is empty.
+#[test]
+fn a_suffix_the_line_cannot_carry_is_flushed_body_less() {
+    // `cat <<A & cat <<B # note`: the comment ends the physical line, so the
+    // suffix's run trails it and is emitted body-less (the rule
+    // `segment/line/tests.rs::flush_line_multi_line_runs_are_body_less` pins);
+    // the parse layer bails on `cat <<B` (measured rc 1, bash rc 0).
+    assert_eq!(
+        statements(b"cat <<A & cat <<B # note\nx\nA\ny\nB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (b"cat <<B".as_slice(), alloc::vec![], false),
+            (b"x".as_slice(), alloc::vec![], false),
+            (b"y".as_slice(), alloc::vec![], false),
+            (b"B".as_slice(), alloc::vec![], false),
+        ],
+    );
+    // Glued `<<A&`: the byte-level delimiter is `A&`, unreadable as `A`, so the
+    // line's region list is empty and the suffix is body-less (owner: the
+    // tokenizer's `&`-is-a-word-byte rule, `token_word_end`).
+    assert_eq!(
+        statements(b"cat <<A& cat <<B\nx\nA\ny\nB"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (b"cat <<B".as_slice(), alloc::vec![], false),
+            (b"y".as_slice(), alloc::vec![], false),
+            (b"B".as_slice(), alloc::vec![], false),
+        ],
+    );
+    // A bare `<<` behind the `&`: the prefix flush's window ends before the
+    // unreadable operator, so it keeps its own region; the suffix flush's
+    // whole-line list is empty, and the parse layer reports the shape
+    // (`invalid redirect syntax`, measured rc 1; bash rc 2).
+    assert_eq!(
+        statements(b"cat <<A & cat <<\nx\nA"),
+        alloc::vec![
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA".as_slice()], true),
+            (b"cat <<".as_slice(), alloc::vec![], false),
+        ],
+    );
+}
+
+/// A `&`-terminated heredoc run in front of a **block** on the same physical
+/// line: the prefix claims its region, the block keeps the rest of the line's
+/// region stream (the `body_floor` the flush leaves behind is what stops a
+/// later flush of this line from re-entering a claimed region).
+#[test]
+fn an_ampersand_in_front_of_a_block_leaves_the_block_the_rest() {
+    assert_eq!(
+        statements(b"cat <<A & if true; then cat <<B\nx\nA\ny\nB\nfi"),
+        alloc::vec![
+            (
+                b"cat <<A".as_slice(),
+                alloc::vec![b"x\nA\n".as_slice()],
+                true
+            ),
+            (b"B".as_slice(), alloc::vec![], false),
+        ],
+    );
+    // The `&` inside a block's text is the block's own business (task #354):
+    // one block segment, no split at the top level.
+    assert_eq!(
+        statements(b"if true; then cat <<A & cat <<B\nx\nA\ny\nB\nfi"),
+        alloc::vec![(b"B".as_slice(), alloc::vec![], false)],
     );
 }

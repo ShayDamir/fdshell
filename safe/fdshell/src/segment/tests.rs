@@ -1317,3 +1317,42 @@ fn scan_ampersand_outside_a_block_is_unchanged() {
         Segment::AsyncInvalid => panic!("expected the open case span"),
     }
 }
+
+/// The plain-`&` split (task #313) is the third adjacency on a physical line:
+/// the backgrounded statement and the statement written **behind** the `&`
+/// share the line's body stream in operator order, exactly as the pre-block
+/// and trailing statements of
+/// [`scan_pre_block_block_and_trailing_share_one_body_stream`] do. Before the
+/// fix the `&` flush parked the cursor past the whole line's regions, so the
+/// suffix's body lines were scanned as statements.
+#[test]
+fn scan_ampersand_separated_heredocs_share_one_body_stream() {
+    let segments = scan_segments(b"cat <<A & cat <<B\nx\nA\ny\nB", false);
+    assert_eq!(segments.len(), 2);
+    match (&segments[0], &segments[1]) {
+        (
+            Segment::Statement {
+                cmd: head,
+                off: head_off,
+                bodies: head_bodies,
+                background: head_bg,
+            },
+            Segment::Statement {
+                cmd: tail,
+                off: tail_off,
+                bodies: tail_bodies,
+                background: tail_bg,
+            },
+        ) => {
+            assert_eq!(head, b"cat <<A");
+            assert_eq!(*head_off, 0);
+            assert_eq!(head_bodies, &vec![(18, 22)], "region 0: `x` + `A`");
+            assert!(*head_bg, "the `&` backgrounds the run it terminates");
+            assert_eq!(tail, b"cat <<B");
+            assert_eq!(*tail_off, 10);
+            assert_eq!(tail_bodies, &vec![(22, 25)], "region 1: `y` + `B`");
+            assert!(!*tail_bg, "the suffix runs in the foreground");
+        }
+        _ => panic!("expected two Statement segments"),
+    }
+}
