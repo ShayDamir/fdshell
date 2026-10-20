@@ -204,3 +204,31 @@ fn quoted_combined_operator_bytes_are_arguments() {
     let (redirects, _, _) = bg_of(b"echo &>\"f\"").unwrap();
     assert_eq!(redirects.len(), 1);
 }
+
+/// The 3-byte operator arms (`&>>`, `&>&name`, `&>|&name`) extend the gate to
+/// the **third** byte: a word quoting only that byte opens nothing and
+/// records no job (the pidvar arms are the kill: a shortened gate turns
+/// these words into background jobs). fdshell's word rule (the word-split
+/// family owns bash's split of a leading `&` control operator).
+#[test]
+fn quoted_third_operator_byte_of_the_three_byte_forms_is_an_argument() {
+    for line in [
+        b"echo &\">\">f".as_slice(),
+        b"echo &\">\"&p",
+        b"echo &>\"&\"p",
+        b"echo &>\"|\"&p",
+    ] {
+        assert!(
+            bg_of(line).is_none(),
+            "{line:?}: no redirect from a quoted operator"
+        );
+    }
+}
+
+/// The dup arm's `&` gate with a multi-digit io-number: `12> "&" x` ends the
+/// operator at the quoted `&`, and fd 12 opens the **file** `&x` — the file
+/// bash's `12> "&" x` creates too (measured 2026-10-20, parity).
+#[test]
+fn quoted_dup_ampersand_after_a_multi_digit_io_number_is_a_path() {
+    assert_path(b"echo 12>\"&\"x", 12, RedirectDirection::Write, "&x");
+}

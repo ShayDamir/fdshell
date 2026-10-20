@@ -1343,6 +1343,42 @@ fn bare_quoted_operator_is_an_argument() {
 }
 
 #[test]
+fn quoted_third_operator_byte_starts_no_background_job() {
+    // The 3-byte arms (`&>>`, `&>&name`, `&>|&name`) gate their third byte
+    // too: a word quoting it is an argument — it prints before the next
+    // statement and records **no** background job (a shortened gate turns the
+    // pidvar words into jobs, whose output arrives after `tail`). bash
+    // splits the leading `&` into a control operator here (the word-split
+    // family: rc 0/2 with syntax noise, `&p`/`|` files); fdshell's word rule
+    // keeps the whole word an argument, measured 2026-10-20.
+    let dir = scratch("q_third");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo &\">\">f; echo tail", "&>>f\ntail\n"),
+        ("echo &\">\"&p; echo tail", "&>&p\ntail\n"),
+        ("echo &>\"&\"p; echo tail", "&>&p\ntail\n"),
+        ("echo &>\"|\"&p; echo tail", "&>|&p\ntail\n"),
+    ] {
+        assert_word_opens_no_file(dir, script, want);
+    }
+}
+
+#[test]
+fn quoted_dup_ampersand_after_a_multi_digit_fd_opens_the_path() {
+    // `12> "&" x`: the quoted `&` ends the operator, fd 12 opens the file
+    // `&x` (empty) — bash creates the same file (measured 2026-10-20).
+    let dir = scratch("q_multi_fd");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; echo a 12>\"&\"x"));
+    assert_eq!((out.as_str(), code), ("a\n", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("&x")).unwrap(),
+        "",
+        "fd 12 opens the file `&x`"
+    );
+}
+
+#[test]
 fn accepted_quoted_io_number_argument_list_divergences() {
     // What this task does NOT fix (the word-split family): fdshell never
     // splits a word at an operator byte, so the quoted digits never become
