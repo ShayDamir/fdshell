@@ -14,18 +14,21 @@ use sys::ShortCStr;
 /// task #276's `<<` twin). Returns the redirect (the word with **its own**
 /// quote mask, task #269, on the `N<<<word` descriptor — 0 for the unprefixed
 /// form) and how many following tokens the operator consumes (1 for the bare
-/// form). Quoted tokens are never here-strings.
+/// form). The operator-quoting rule (task #264: a redirect is made of
+/// **unquoted** bytes) is *structural* here, the byte-level twin of the
+/// token-level `redirect::quoted_bytes` gate: `string_span` matches the raw
+/// span, so a leading quote byte kills the io-number (a digit must begin the
+/// span) and a quote byte between the `<`s kills the `<<<`. That is why
+/// `cat 3'<<<'x`, `cat 3"<<<"x` and every fully quoted word are word data at
+/// both levels.
 pub fn parse_here_string(
     line: &[u8],
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
-    let Some((t, start, end, fq, mask, spans)) = tokens.get(i) else {
+    let Some((t, start, end, _fq, mask, spans)) = tokens.get(i) else {
         return Ok(None);
     };
-    if *fq {
-        return Ok(None);
-    }
     let Some((op, prefix)) = string_span(line, *start, *end) else {
         return Ok(None);
     };

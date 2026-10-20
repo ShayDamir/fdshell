@@ -19,7 +19,12 @@ pub(crate) use pipe::{pipe_token_span, pipeline_pipe};
 /// `<>`, `a>b` and `x\>` are not. A `%`-leading word (the capture operator)
 /// keeps its own absorption, where earlier operator bytes do not disqualify it.
 /// `quoted[i]` is true when byte `i` is inside quotes (double or single), so a
-/// quoted `>` never terminates an operator word.
+/// quoted `>` never terminates an operator word: the `quoted.get(last)` arm is
+/// the same fact as the token-level quoting gate (`redirect::quoted_bytes`,
+/// task #264) applied to the word-break question — `'1'>|f` absorbs the `|`
+/// and clobbers fd 1 at **both** levels. The `bytes.first() == Some(&b'%')`
+/// arm is the `%`-prefixed capture operator's own rule (`parse/capture.rs`),
+/// exempt from that gate.
 pub(crate) fn clobber_word(bytes: &[u8], quoted: &[bool]) -> bool {
     let last = bytes.len().saturating_sub(1);
     if bytes.get(last) != Some(&b'>') || quoted.get(last) == Some(&true) {

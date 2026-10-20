@@ -3,16 +3,19 @@ use crate::redirect::RedirectDef;
 use error_stack::Report;
 use sys::ShortCStr;
 
-use super::redirect::parse_fd;
+use super::redirect::token_fd;
 
 /// Parse `>&N` (dup), `>&-` (close), and `>&%var` (dup from an fd variable)
-/// redirections; other `&…` tails are not redirects.
+/// redirections; other `&…` tails are not redirects. The io-number prefix
+/// goes through `token_fd`: only **unquoted** digits select a descriptor,
+/// so a quoted `'2'>&1` dups at the operator's default fd 1.
 pub fn parse_fd_dup_redirect(
     after_op: &ShortCStr,
     prefix: &ShortCStr,
+    mask: &[bool],
     dir: u8,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let Some(export_to) = parse_fd(prefix, dir) else {
+    let Some(export_to) = token_fd(prefix, mask, dir) else {
         return Ok(None);
     };
     let rest = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;

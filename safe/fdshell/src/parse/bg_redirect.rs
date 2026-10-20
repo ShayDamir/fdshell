@@ -18,25 +18,29 @@ pub struct BgRedirectResult {
 /// 2, emitted as a single `RedirectDef::combined`) or a background job's pid
 /// variable. Second field: tokens the operator
 /// consumes (1 for the bare `&>` / `&>>`, which takes the next token as its
-/// path operand, 0 for every attached form). Fully quoted tokens are never
-/// `&>`-family operators.
+/// path operand, 0 for every attached form). The quoting gate covers every
+/// arm — a fully quoted word, and any word with a quote byte in the
+/// operator, is a plain argument (task #250's `fq` rule generalized).
 pub fn parse_bg_redirect(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(BgRedirectResult, usize)>, Report<ParseError>> {
-    let Some((t, _start, _end, fq, mask, _spans)) = tokens.get(i) else {
+    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
         return Ok(None);
     };
-    // A fully quoted word is a plain argument, never an operator — POSIX #4.1
-    // removes quotes after tokenization. Same gate as `parse_redirect` and
-    // `parse_here_string`, and it must sit at the top so every arm below
-    // (`&>f`, `&>>f`, the bare forms, `&>&name`, `&>|&name`) is covered.
-    if *fq {
-        return Ok(None);
-    }
     let Some(rest) = t.strip_prefix(b"&>") else {
         return Ok(None);
     };
+    // The quoting gate: `&>` is 2 operator bytes, `&>>` / `&>&name` /
+    // `&>|&name` are 3 (POSIX XCU 2.9.1 reads only unquoted operator bytes),
+    // so a quote byte anywhere in the operator makes the word an argument.
+    // One gate covers every arm below; `path_offset` in the path arms equals
+    // `op_end` — the same index, one owner (LESSONS).
+    let op_end =
+        2 + usize::from(rest.starts_with(b">") || rest.starts_with(b"&") || rest.starts_with(b"|"));
+    if crate::parse::redirect::quoted_bytes(mask, 0, op_end) {
+        return Ok(None);
+    }
     if let Some(name) = rest.strip_prefix(b"|&") {
         return Ok(Some(pidvar(name, true)));
     }
@@ -62,6 +66,8 @@ pub fn parse_bg_redirect(
         RedirectSource::Var(path.get(1..).ok_or(ParseError::Never)?)
     } else {
         // The path is the token suffix after `&>` (and `>`); align its mask.
+        // `path_offset` is the gate's `op_end` for these arms: the index one
+        // past the operator's last byte.
         let path_offset = 2 + (rest_len - path.len());
         let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
         RedirectSource::path(path, path_mask)

@@ -32,24 +32,31 @@ pub(super) fn is_bare(s: &ShortCStr) -> bool {
 }
 
 /// The bare operator at `i`: its operand is the next token. A non-numeric
-/// fd prefix is not a redirect — the token stays an argument.
+/// fd prefix is not a redirect — the token stays an argument. A quote byte
+/// anywhere in the operator is the gate (`quoted_bytes`): the token is an
+/// ordinary argument, as bash prints it (POSIX XCU 2.9.1).
 pub(super) fn parse_bare(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let Some((t, _start, _end, _fq, _mask, _spans)) = tokens.get(i) else {
+    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
         return Ok(None);
     };
     let Some(op) = operator_suffix(t) else {
         return Ok(None);
     };
+    // A bare operator's bytes run from the suffix to the token end, so the
+    // suffix start is the gate's `from`.
+    if super::quoted_bytes(mask, t.len() - op.len(), t.len()) {
+        return Ok(None);
+    }
     let prefix = t.get(..t.len() - op.len()).ok_or(ParseError::Never)?;
     let dir = if op.eq_bytes(b"<") || op.eq_bytes(b"<>") {
         b'<'
     } else {
         b'>'
     };
-    let Some(export_to) = super::parse_fd(&prefix, dir) else {
+    let Some(export_to) = super::token_fd(&prefix, mask, dir) else {
         return Ok(None);
     };
     let Some((operand, _os, _oe, _ofq, omask, _spans)) = tokens.get(i + 1) else {
