@@ -2714,9 +2714,11 @@ that **have** whitespace to skip, so such a loop needs at least one indented row
 ## An operator parser gates on `fq` first and on the mask for the operand; the `&>` family was missing the first gate (task #250)
 
 A redirect parser has two quoting rules to read, on two different bytes. The
-**operator word** is gated on the token's `fq` flag — POSIX #4.1 removes quotes
-after tokenization, so a fully quoted word is a plain argument (`parse_redirect`
-and `parse_here_string` open with `if *fq { return Ok(None); }`). The bare
+**operator word** was gated on the token's `fq` flag — POSIX #4.1 removes
+quotes after tokenization, so a fully quoted word is a plain argument
+(`parse_redirect` and `parse_here_string` opened with `if *fq { return
+Ok(None); }`, #250 added the same to `parse_bg_redirect`; #264 replaced all
+three with the mask gate of the next entry). The bare
 operator's **operand** is gated on the leading `<`/`>`/`&`/`%` byte's mask bit
 (`scan::heredoc::op::operator_word`, task #323: `> "&f"` opens `&f`).
 `parse_bg_redirect` read only the text and the mask, so `echo '&>q.txt'` created
@@ -2747,20 +2749,78 @@ After the gate both layers see the same words and the line runs, as bash
 No arm is needed for a `\&>`-leading word: its token text starts with `\`, so
 `strip_prefix(b"&>")` already fails — the same rule LESSONS records for `\if`.
 The **partially quoted** forms (`'&>'f`, `"&">y`, and the mask side `2'>'g`,
-`'1'>f`) are a different decision on a different byte: fdshell reads the
-operator from the word's text where bash prints the literal. Task #250 pins
-them **as-is** (`tests/redirect.rs::partially_quoted_combined_word_stays_an_operator`)
-and names their owner, #264 (which defers to #274's blocked user ruling on
-word-splitting) — pinning a deviation is coordination, adopting it silently is
-not.
+`'1'>f`) are a different decision on a different byte, and #250 **pinned them
+as-is** (`tests/redirect.rs`, naming owner #264) — pinning a deviation is
+coordination, adopting it silently is not. #264 ruled the family and flipped
+those pins; the general mask gate and the deleted `fq` guards are the next
+entry.
 
 Mutation note for the gate line: `cargo mutants` (27.1.0) generates **no**
 mutant for an `if *fq {` gate — a deref of the `&bool` bound by the token
 pattern is not a mutation site for it, in `parse_bg_redirect` and in the two
-older gates (`parse/redirect.rs`, `parse/here_string.rs`) alike. What it does
+older gates (`parse/redirect.rs`, `parse/here_string.rs`) alike (all three
+`fq` guards are gone since #264, subsumed by the mask gate below — the blind
+spot applies to any future `fq`-style deref gate). What it does
 generate for the parser is the whole-function value mutants; the `Ok(None)` one
 is caught, the `Default::default()` pair is unviable (`BgRedirectResult` has no
 `Default`). So a mutation run reporting no mutant at the gate line reports the
 tool's blind spot, not a hole in the pins — the pins that own this rule are the
 four-arm set above, and they fail on the ungated tree (verified by stashing the
 gate: 7 unit + 4 integration pins fail, the deviation pin passes).
+
+## A redirect is made of unquoted bytes: one mask gate per parser, the `fq` guards are its redundant copy (task #264)
+
+POSIX XCU 2.9.1 (`<redirection> ::= [[io-number] redirection-operator] word`)
+reads a redirect from **unquoted** bytes, so a quote byte ends the operator
+and begins the word (R1), and quoted digits are no io-number — the operator
+takes its default descriptor (R2). One gate function,
+`parse/redirect.rs::quoted_bytes(mask, from, to)` (mask slice, pad-past-end
+= unquoted, the house idiom), plus `token_fd` for the digit rule; each parser
+calls it once: `bare.rs` (whole operator suffix), `attached.rs` (first
+operator byte, the dup arm's `&`, the operator tail into `redirect_op`),
+`bg_redirect.rs` (the `&>`/`&>>`/`&>&`/`&>|` operator prefix). The
+operand-side twin is `scan::heredoc::op::operator_word` (#323); the
+byte-level twins that already encode the rule structurally are
+`clobber_word` (a quoted `>` never terminates the operator word — `'1'>|f`
+absorbs the `|` at **both** levels) and the raw-span readers
+`io_prefix`/`span_operator`/`string_span` (a quote byte between the `<`s
+kills the heredoc/here-string operator; the digits must begin the span).
+The `%`-prefixed capture operator (`parse/capture.rs`) is exempt:
+`clobber_word`'s percent arm is its own rule, do not extend the gate there.
+The byte scan never recognizes a `>`-family operator, so **do not build a
+byte-level copy of the gate** — the two layers already agree through
+`clobber_word`.
+
+R2's rationale is measured, not guessed: the naive "quoted digits ⇒ no
+redirect at all" **regresses** `'1'>|f` (bash-parity clobber of fd 1 today:
+the operator bytes are unquoted, the redirect stands, the quoted digit takes
+the default fd 1 — the descriptor bash used). `token_fd` encodes exactly
+that: digits ∧ quoted ⇒ empty prefix ⇒ `parse_fd`'s default.
+
+`fq` is a **weaker copy of R1**, derivable from `parse/token/step.rs`: the
+flag is set only when a quote opens an empty word and cleared by
+`word_start()` on the first unquoted byte, so a fully quoted word has every
+operator byte quoted and the mask gate fires on it. The three
+`if *fq { return Ok(None); }` guards (`parse_redirect`, `parse_here_string`,
+`parse_bg_redirect` #250) were guards duplicated inside the gate — deleted.
+Order that proves it: land the gates, run the **full** suite, delete the
+guards, run the full suite again (#250 measured `cargo mutants` to be blind
+at an `if *fq {` line, so only the suite can show the redundancy). Here-string
+`fq` was redundant for a second, structural reason: `string_span` requires
+the digits at the raw span's start, and an `fq` word's raw span starts with a
+quote byte.
+
+The operator-end offset has **exactly one owner**: `path_offset` in
+`attached.rs` and `bg_redirect.rs` *is* the gate's `to` bound (one past the
+operator's last byte) — name it in a comment at both sites, do not add a
+second offset (LESSONS: mask/word/quotation offsets have exactly one owner).
+
+Measured flips worth naming: a coincidental parity turned into a documented
+divergence (`echo a "&">x`: fdshell today wrote `x` = `a` like bash's
+`x` = `a &`; under the gate the word prints `a &>x` and no file — the
+word-split family owns it); rc 1 → rc 0 (`echo hi 1'>'` was an
+`invalid redirect` parse error, `echo a '<'f` an ENOENT open,
+`echo a '&>'%v` an unset-fd-variable error); a report-text flip
+(`cat "<f_in"x` now reports `cat: '<f_inx'`, the argument, as bash does).
+Pin a redirect bug's fix at the **filesystem** (the scratch listing), not
+only stdout: every row of the family shows its truth in which files exist.

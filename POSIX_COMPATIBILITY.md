@@ -119,12 +119,22 @@ and opens nothing, `echo hi '&>' f` prints `hi &> f` and opens nothing, and
 `cmd '&>&name'` is an argument that starts no background task. POSIX #4.1
 removes quotes after tokenization, so bash does the same.
 
-A word that only *starts* quoted is fdshell's word rule, the deviation this
-section is about: fdshell reads the operator from the word's **text**, bash
-never does (measured 2026-10-20 with bash 5.3.9, pinned in
-`safe/fdshell/tests/redirect.rs`, owned by task #264) — `echo '&>'f` writes
-fdshell's `f` where bash prints `&>f` and opens nothing, and `echo x "&">y`
-writes `y` = `x` where bash writes `y` = `x &`.
+The same rule extends **into** the operator (POSIX XCU 2.9.1, task #264): a
+redirection is built from unquoted io-number digits and unquoted operator
+bytes, so a quote byte ends the operator there. fdshell gates its redirect
+parsers on the token's quote mask, and these forms are bash parity:
+`2'>'g`, `1">"f`, `1">|"f`, `'<'f`, `'>'f`, `'>>'f`, `'>|'f`, `'&>'f`,
+`'&>>'f`, `'&>'%v`, `2'>&1'`, `2>"&"1` and `>"&"f` (the quoted `&` ends the
+operator, so the *file* `&1` / `&f` opens), `1'>'` (an argument, not a parse
+error), and a quoted io-number `'2'>f` — the operator keeps its default
+descriptor (fd 1), the digit is no fd.
+
+The surviving divergence is the **argument list**: bash *splits* a word at an
+unquoted operator byte, fdshell never does, so bash's `echo x '1'>g` writes
+`x 1` into `g` (the quoted `1` is an argument) where fdshell writes `x`, and
+the same split keeps bash's `echo x "&">y` writing `y` = `x &`, `echo a
+2\>>f`, `echo a \1>f`, `echo a 2&>f` and `cat '3'<<EOF` behaving as their
+word rules dictate.
 
 The same raw-byte rule decides the operand side: an operand of a bare `<<`,
 `<<<`, `>`, `>>`, `<`, `<>`, `>|`, `&>` or `&>>` is an operator (and a syntax

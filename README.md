@@ -256,13 +256,15 @@ error when it is not (`> &f`); the spaced `%var` operand stays a syntax
 error, the fd-variable targets being the attached `>%var` / `&>%var` forms
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
 
-On the operator side, the `&>` family — like every other redirect operator — is
-recognized at a **word start**, and a fully quoted word is a plain argument:
-`echo '&>f'` prints `&>f` and opens nothing, and `cmd '&>&name'` is an argument,
-not a background task. A word that only *starts* quoted (`'&>'f`, `"&">f`) is
-read by fdshell's word rule — its text begins with the operator, so it
-redirects, where bash prints the literal
-([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
+On the operator side, a redirection is made of **unquoted** bytes: the
+descriptor digits and every operator byte. A quote byte inside them ends the
+operator, so the word is an ordinary argument: `echo '&>f'` and `echo 2'>'g`
+print their literal and open nothing, and `cmd '&>&name'` is an argument, not
+a background task. A quoted byte *after* the first operator byte ends the
+operator there, so `echo a > "&"f` opens the file `&f`. Quoted digits are not
+a descriptor number, so `'2'>f` sends **stdout** to `f` (`>`'s default fd) —
+with the digits not an argument: fdshell never splits a word at an operator
+byte ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
 
 `set -o noclobber` (`set -C`) refuses a `>` that would overwrite an existing
 file; `>|` is the explicit override. Several redirections may be written on
