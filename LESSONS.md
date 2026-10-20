@@ -949,11 +949,11 @@ prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both*
 fields are, i.e. only when the whole child CPU is under 200 µs. Rule: measure a
 `times`-style burn against that print floor, never against the printed unit's
 nominal resolution (the printed unit is the centisecond = 10 ms; the resolution
-is a hundredth of it). Measured in release, the test's 5000-iteration shell loop
-puts the children line at `47.43`–`50.75` user + `4.38`–`5.60` system
-(centiseconds: ~475–505 ms user, ~44–56 ms system) — every field is 50–5000×
-above the floor, so the sum's `> 0` is both attribution-independent and
-floor-independent.
+is a hundredth of it). Measured in release on the development host (10 runs),
+the test's 5000-iteration shell loop puts the children line at `47.43`–`50.75`
+user + `4.38`–`5.60` system (centiseconds: ~475–505 ms user, ~44–56 ms system) —
+each field sits 440–4750× above the floor, so the sum's `> 0` is both
+attribution-independent and floor-independent.
 
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
 `connect_listen_accept_in_one_script_inet` failed once in the `nix flake check`
