@@ -557,6 +557,34 @@ fn a_terminator_line_with_an_unbalanced_quote_tokenizes() {
     }
 }
 
+/// The mask decision keys on the **body** regions, never on the terminator list
+/// alone: an empty delimiter line yields no terminator span (its bytes are
+/// empty), and its body is opaque data just like any other — the unbalanced `'`
+/// of `cat <<''` + `'` + the blank line must never reach the quote check.
+#[test]
+fn the_body_of_an_empty_delimiter_line_is_blank_too() {
+    for line in [
+        b"cat <<''\n'\n\n".as_slice(),
+        b"cat <<''\n\"x\" | cat\n\n".as_slice(),
+        b"cat <<''\n$(\n\n".as_slice(),
+    ] {
+        assert!(
+            super::statement::tokenize_statement(line).is_ok(),
+            "{line:?}: the body of an empty delimiter is blanked"
+        );
+        assert_eq!(
+            statement_text(line),
+            vec![
+                ShortCStr::from(c"cat"),
+                ShortCStr::from(c"<<"),
+                ShortCStr::from(c";"),
+                ShortCStr::from(c";"),
+            ],
+            "{line:?}: the body is not tokenized into command words"
+        );
+    }
+}
+
 /// The byte set the tokenizer reads as syntax (POSIX metacharacters, quote
 /// operators, expansion/escape triggers, fdshell's `%` capture marker, and the
 /// blanks that keep a terminator's words apart). `{`/`}` are **not** in the set

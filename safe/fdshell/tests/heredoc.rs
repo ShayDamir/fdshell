@@ -2554,6 +2554,24 @@ fn a_terminator_line_with_an_unbalanced_quote_is_data() {
     }
 }
 
+/// The mask decision in `tokenize_statement` keys on the **body** regions, not
+/// on the terminator list: an empty delimiter line (`<<''`) has no bytes of its
+/// own, so it yields no terminator span, and its body is opaque data exactly
+/// like any other body — an unbalanced quote, a pipeline, an unterminated `$(`.
+#[test]
+fn the_body_of_an_empty_delimiter_line_is_data() {
+    for (script, want) in [
+        ("cat <<''\n'\n\n", "'\n"),
+        ("cat <<''\n\"x\" | cat\n\n", "\"x\" | cat\n"),
+        ("cat <<''\n$(\n\n", "$(\n"),
+        ("cat <<''\nbody\n\necho after", "body\nafter\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
 /// A `|` on the terminator line is not a pipeline pipe, and a chevron
 /// delimiter in a pipeline stage keeps the stage: the terminator is the stage's
 /// own data.
