@@ -415,3 +415,85 @@ fn multi_token_case_pattern_is_accepted() {
     let (out, err, code) = run("case a b in \"a b\") echo m;; esac");
     assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
 }
+
+/// The plain `&` is a command-list terminator **inside a `case` arm's text**
+/// (task #354): every closer form of the arm — `& ;;`, `&;;`, `& ;;esac`,
+/// `& esac`, the multi-line arm with the `&` glued to the arm's line, and the
+/// arm whose statement is a cond list — parses, and the arm's statement runs as
+/// a background job. The pin is the job's file plus `wait`, never stdout order
+/// (LESSONS).
+#[test]
+fn ampersand_in_a_case_arm_is_a_background_job() {
+    for shape in [
+        "case x in x) builtin echo a >{f} & ;; esac",
+        "case x in x) builtin echo a >{f} &;; esac",
+        "case x in x) builtin echo a >{f} & ;;esac",
+        "case x in x) builtin echo a >{f} & esac",
+        "case x in x) builtin echo a >{f} &\n;;\nesac",
+        "case x in x) builtin true && builtin echo a >{f} & ;; esac",
+    ] {
+        let dir = scratch_dir();
+        let f = dir.join("arm.txt").to_str().unwrap().to_string();
+        let script = shape.replace("{f}", &f) + "\nwait";
+        let (out, err, code) = run_in(&dir, &script);
+        assert_eq!((out.as_str(), code), ("", 0), "shape {shape:?}: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&f).unwrap_or_default(),
+            "a\n",
+            "shape {shape:?}"
+        );
+    }
+}
+
+/// Two `&` in one arm are two jobs; the arm whose closer is the bare `esac`
+/// (no `;;`) behaves the same (bash prints both, rc 0).
+#[test]
+fn two_ampersands_in_one_case_arm_run_both_statements() {
+    for shape in [
+        "case x in x) builtin echo a >{a} & builtin echo b >{b} & ;; esac",
+        "case x in x) builtin echo a >{a} & builtin echo b >{b} & esac",
+    ] {
+        let dir = scratch_dir();
+        let (a, b) = (dir.join("a.txt"), dir.join("b.txt"));
+        let script = shape
+            .replace("{a}", a.to_str().unwrap())
+            .replace("{b}", b.to_str().unwrap())
+            + "\nwait";
+        let (out, err, code) = run_in(&dir, &script);
+        assert_eq!((out.as_str(), code), ("", 0), "shape {shape:?}: {err}");
+        assert_eq!(
+            (
+                std::fs::read_to_string(&a).unwrap_or_default(),
+                std::fs::read_to_string(&b).unwrap_or_default()
+            ),
+            (String::from("a\n"), String::from("b\n")),
+            "shape {shape:?}"
+        );
+    }
+}
+
+/// The arm's `&` does not loosen the clause rules: a `&` behind a `&` is
+/// bash's syntax error and fdshell's invalid split (rc 1), a `;;` behind a `&`
+/// **outside** a block is the same (rc 1, not the case arm's leniency), and the
+/// `& ;` form inside an arm stays the accepted divergence of task #355 (bash
+/// rc 2, fdshell rc 0 — `trim_semi` cuts that `;` out of the arm body).
+#[test]
+fn ampersand_in_an_arm_keeps_the_clause_rules() {
+    for script in [
+        "case x in x) echo a & & echo b ;; esac",
+        "case x in x) echo a & ;; echo b",
+    ] {
+        let (out, _err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "script {script:?}: bash rc 2"
+        );
+    }
+    let (out, _err, code) = run("case x in x) echo a & ; ;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("a\n", 0),
+        "the `& ;` divergence's owner is task #355"
+    );
+}

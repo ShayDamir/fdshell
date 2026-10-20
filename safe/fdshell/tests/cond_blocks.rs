@@ -994,3 +994,78 @@ fn in_block_bodies_that_never_return_run_forever() {
         );
     }
 }
+
+/// A plain `&` inside an `if` body is a command-list terminator (task #354): the
+/// arms whose closing keyword follows the `&` on the same line parse, and the
+/// **taken** arm's statement runs as a background job. The `else` keyword behind
+/// the `&` is found, where master ran `else` as a command (`"else" not found`).
+#[test]
+fn ampersand_in_an_if_body_backgrounds_the_statement() {
+    for (script, want) in [
+        ("if true; then echo a & else echo b & fi", "a\n"),
+        ("if false; then echo a & else echo b & fi", "b\n"),
+        ("if true; then echo a & elif false; then echo c & fi", "a\n"),
+        ("if false; then :; elif true; then echo e & fi", "e\n"),
+    ] {
+        let (out, err, rc) = run(&format!("{script}\nwait"));
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+    // A body glued to the closer keeps its `&`: the job record is the pin
+    // (LESSONS), not the output — the `&` is what the body's scan marks.
+    let (out, err, rc) = run("if true; then builtin echo x & fi\nbuiltin echo pid=$!; wait");
+    assert_eq!(rc, 0, "{err}");
+    assert!(out.contains("x"), "stdout={out}");
+    let pid: i64 = out
+        .lines()
+        .find(|l| l.starts_with("pid="))
+        .and_then(|l| l.get(4..))
+        .and_then(|d| d.trim().parse().ok())
+        .unwrap_or_default();
+    assert!(pid > 0, "stdout={out}");
+}
+
+/// A `&`-terminated block **condition** parses and runs with bash's rc/output
+/// (this task's `Term::SemiAmp` rule): the condition runs in the foreground with
+/// no job record, so the status that gates the arm is the condition's own. The
+/// background job of a `&`-terminated condition is **task #356**'s; the pinned
+/// rows are the rc/output parity bash shows today.
+#[test]
+fn ampersand_terminated_condition_parses_and_runs() {
+    for (script, want) in [
+        ("if true & then echo x; fi", "x\n"),
+        ("if true & then echo x; else echo y; fi", "x\n"),
+        ("if false & then echo x; else echo y; fi", "y\n"),
+        ("while : & do echo x; break; done", "x\n"),
+        ("until false & do echo x; break; done", "x\n"),
+        ("if false; then :; elif true & then echo e; fi", "e\n"),
+    ] {
+        let (out, err, rc) = run(&format!("{script}\nwait"));
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+    // The condition job is missing, so an AND-list condition gates the arm where
+    // bash (status 0 of the backgrounded list) takes it: #356's divergence.
+    let (out, _err, rc) = run("if true && false & then echo x; fi\nwait");
+    assert_eq!((out.as_str(), rc), ("", 0), "#356: bash prints x");
+}
+
+/// The `& ;` written **inside a block body** is fdshell's accepted divergence,
+/// owner **task #355**: `trim_semi` cuts the `;` after the `&` out of the body
+/// text, so the statement runs and rc is 0 where bash stops with rc 2 and runs
+/// nothing. Pinned so #355's fix flips a named pin.
+#[test]
+fn ampersand_then_semicolon_in_a_body_is_accepted() {
+    for script in [
+        "for i in 1; do echo a & ; done",
+        "if true; then echo a & ; fi",
+        "if false; then :; elif true; then echo a & ; fi",
+        "case x in x) echo a & ; ;; esac",
+    ] {
+        let (out, _err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("a\n", 0), "{script}: bash rc 2");
+    }
+    // The `while` twin puts the `;` **after** the `&` inside the body's own
+    // statement list, so the body's scan flags the invalid split: rc 1, bash
+    // rc 2 (the documented rc-1-vs-2 family).
+    let (out, _err, rc) = run("while :; do echo a & ; break; done");
+    assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2");
+}

@@ -354,17 +354,19 @@ fn brace_shaped_words_at_top_level_are_data() {
 
 /// A literal `{` argument inside a block body prints the brace, as bash does. A
 /// literal `}` argument consumes the block's closing keyword: `if true; then
-/// echo }; fi` reports the `'then' body is empty` parse error (rc 1) where bash
-/// prints `}` — the accepted cost of counting every brace word as the block
-/// depth (the message was `"fi" not found` before the empty-body rule of task
-/// #233: the closer consumed by the brace leaves an empty body range).
+/// echo }; fi` runs the body's `echo` and then the `fi` behind the consumed
+/// closer is a command (`"fi" not found`, rc 1) where bash prints `}` — the
+/// accepted cost of counting every brace word as the block depth. The body slice
+/// keeps the word the closer is glued to since task #354 (the plain-`&`
+/// terminator rule), so the message is back to the pre-#233 `"fi" not found`
+/// rather than `'then' body is empty`.
 #[test]
 fn literal_brace_argument_in_a_block_body() {
     let (out, err, rc) = run("if true; then echo {; fi");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
     let (out, err, rc) = run("if true; then echo }; fi");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains("'then' body is empty"), "{err}");
+    assert_eq!((out.as_str(), rc), ("\n", 1));
+    assert!(err.contains("\"fi\" not found"), "{err}");
     let (out, err, rc) = run("case x in x) echo {;; esac");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
 }
@@ -582,4 +584,46 @@ fn quoted_region_inside_groups_and_conditions() {
 fn definer_body_keeps_the_nested_group_depth() {
     let (out, err, rc) = run("f() { echo a; { echo b && echo c; } && echo d; }; f");
     assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\nc\nd\n", "", 0));
+}
+
+/// The plain `&` is a command-list terminator **inside the group's text** (task
+/// #354): the single-line group whose `}` follows the `&` parses, and its body
+/// statement runs as a background job — `wait` reaps it, and the body's file is
+/// the pin, not stdout order (LESSONS).
+#[test]
+fn ampersand_in_the_group_body_is_a_background_job() {
+    let (a, _sa) = temp_path("bg");
+    let (out, err, rc) = run(&format!("{{ builtin echo hi >{a} & }}\nwait"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0), "{err}");
+    assert_eq!(body(&a), "hi\n");
+    // Two `&` in one body are two jobs.
+    let (b, _sb) = temp_path("bg2");
+    let (out, err, rc) = run(&format!(
+        "{{ builtin echo a >{a} & builtin echo b >{b} & }}\nwait"
+    ));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0), "{err}");
+    assert_eq!((body(&a), body(&b)), ("a\n".into(), "b\n".into()));
+    // A group as a cond part: the same rule reaches the body.
+    let (c, _sc) = temp_path("bg3");
+    let (out, err, rc) = run(&format!("true && {{ builtin echo x >{c} & }}\nwait"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0), "{err}");
+    assert_eq!(body(&c), "x\n");
+}
+
+/// The `&` does not loosen the closer rule: a word before `}` that is no
+/// list terminator is still the pinned parse error, and the invalid splits
+/// (`& &`, `& ;`) run nothing — bash rc 2, fdshell rc 1.
+#[test]
+fn ampersand_does_not_loosen_the_group_closer_rule() {
+    let (out, err, rc) = run("{ echo a }");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("expected ';' before '}'"), "{err}");
+    for script in ["{ echo a & & echo b; }", "{ echo hi & ; }"] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}");
+        assert!(
+            err.contains("unexpected character in this context"),
+            "{script}: {err}"
+        );
+    }
 }

@@ -219,3 +219,30 @@ fn bash_parity_forms_stay_green() {
     let (out, err, code) = run("");
     assert_eq!((out.as_str(), code), ("", 0), "stderr: {err}");
 }
+
+/// A body of **only** the plain `&` is not an empty body: `block_body` accepts
+/// it (POSIX's terminator is a word of its own in fdshell's token list), and the
+/// body's own scan is what rejects the shape — the invalid split, rc 1 where
+/// bash stops with rc 2 (the documented rc-1-vs-2 family). The empty-body
+/// messages of this file must not fire on it (task #354).
+#[test]
+fn ampersand_only_body_is_not_an_empty_body() {
+    for script in [
+        "if true; then & fi",
+        "if true; then ; & fi",
+        "while :; do & done",
+        "for i in 1; do & done",
+        "{ & }",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+        assert!(
+            !err.contains("body is empty"),
+            "{script}: the empty-body rule fired: {err}"
+        );
+    }
+    // The untaken arm is parsed, never scanned: rc 0 with the `&` body of an
+    // `else` arm that never runs (bash rejects the shape at parse time, rc 2).
+    let (out, _err, rc) = run("if true; then :; else & fi");
+    assert_eq!((out.as_str(), rc), ("", 0), "bash rc 2");
+}

@@ -454,3 +454,180 @@ fn jobs_do_not_outlive_the_script() {
         ]
     );
 }
+
+// --- a plain `&` inside a block's text (task #354) ---
+
+/// The shapes of the block family: the `&` is written **inside** a single-line
+/// block whose closing keyword follows it on the same line (the output file is
+/// `{f}`), and the statement must run as a background job **inside the block
+/// body** (bash 5.3.9 parity, measured). The multi-line shapes ride along: the
+/// body line is its own statement there, and the two paths must not diverge.
+fn block_shapes() -> Vec<String> {
+    vec![
+        "for i in 1; do builtin echo hi >{f} & done".into(),
+        "{ builtin echo hi >{f} & }".into(),
+        "f(){ builtin echo hi >{f} & }; f".into(),
+        "function f { builtin echo hi >{f} & }; f".into(),
+        "function f() { builtin echo hi >{f} & }; f".into(),
+        "case x in x) builtin echo hi >{f} & ;; esac".into(),
+        "case x in x) builtin echo hi >{f} & esac".into(),
+        "case x in x) builtin echo hi >{f} &;; esac".into(),
+        "case x in x) builtin echo hi >{f} & ;;esac".into(),
+        "case x in x) builtin true && builtin echo hi >{f} & ;; esac".into(),
+        "true && { builtin echo hi >{f} & }".into(),
+        "while :; do builtin echo hi >{f} & break; done".into(),
+        "if true; then builtin echo hi >{f} & fi".into(),
+        "case x in x) builtin echo hi >{f} &\n;;\nesac".into(),
+    ]
+}
+
+/// Every block shape runs its `&`-terminated statement as a job: the file
+/// appears, `wait` reaps the job, rc 0.
+#[test]
+fn every_block_shape_backgrounds_its_ampersand_statement() {
+    for shape in block_shapes() {
+        let f = scratch("blkshape");
+        let script = shape.replace("{f}", &f);
+        let out = run(&format!("{script}\nwait"));
+        assert_eq!(
+            rc(&out),
+            0,
+            "shape {shape:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert_eq!(contents(&f), "hi\n", "shape {shape:?}");
+    }
+}
+
+/// A `for` body with two `&` is two jobs, and so is a group's body and a `case`
+/// arm's: every iteration/arm runs both statements in the background.
+#[test]
+fn two_ampersands_in_one_block_body_are_two_jobs() {
+    for shape in [
+        "for i in 1; do builtin echo a >{a} & builtin echo b >{b} & done",
+        "{ builtin echo a >{a} & builtin echo b >{b} & }",
+        "case x in x) builtin echo a >{a} & builtin echo b >{b} & ;; esac",
+        "case x in x) builtin echo a >{a} & builtin echo b >{b} & esac",
+    ] {
+        let (a, b) = (scratch("blk2a"), scratch("blk2b"));
+        let script = shape.replace("{a}", &a).replace("{b}", &b);
+        let out = run(&format!("{script}\nwait"));
+        let got = (contents(&a), contents(&b));
+        assert_eq!(
+            rc(&out),
+            0,
+            "shape {shape:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert_eq!(
+            got,
+            (String::from("a\n"), String::from("b\n")),
+            "shape {shape:?}"
+        );
+    }
+}
+
+/// A `for` loop runs the body's job on **every** iteration: two iterations
+/// append twice, and one `wait` reaps both. (The count pins the iteration: a
+/// `>` target carrying `$i` is fdshell's own expansion divergence, so the file
+/// name stays fixed here.)
+#[test]
+fn for_loop_runs_the_body_job_every_iteration() {
+    let s = scratch("forbody");
+    let out = run(&format!(
+        "for i in 1 2; do builtin echo hi >>{s} & done\nwait"
+    ));
+    let body = contents(&s);
+    assert_eq!(rc(&out), 0);
+    assert_eq!(body.lines().count(), 2, "body={body:?}");
+}
+
+/// The block body's job is a real job record: `$!` reports its pid numerically
+/// (the pins the "the `&` before a closer is eaten" mutant class — the body
+/// text keeps the `&`).
+#[test]
+fn block_body_job_reports_its_pid() {
+    for shape in [
+        "for i in 1; do builtin true & done",
+        "{ builtin true & }",
+        "case x in x) builtin true & ;; esac",
+        "if true; then builtin true & fi",
+        "f(){ builtin true & }; f",
+    ] {
+        let out = run(&format!("{shape}\nbuiltin echo pid=$!; wait"));
+        assert_eq!(rc(&out), 0, "shape {shape:?}");
+        assert!(
+            reported_pid(&out) > 0,
+            "shape {shape:?}: stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+}
+
+/// An `if` body whose `then` and `else` arms both end in `&`: the taken arm's
+/// statement is a job, the untaken arm is not run at all (bash parity).
+#[test]
+fn if_arms_background_their_own_statements() {
+    let (t, e) = (scratch("ifthen"), scratch("ifelse"));
+    let script = format!("if true; then builtin echo a >{t} & else builtin echo b >{e} & fi\nwait");
+    let out = run(&script);
+    let (taken, untaken) = (contents(&t), contents(&e));
+    assert_eq!(rc(&out), 0);
+    assert_eq!(taken, "a\n");
+    assert_eq!(untaken, "");
+}
+
+/// A block body with a `<<` operator and a trailing `&` keeps its heredoc body
+/// (the append-mode offset moves with the `&` token, task #354's risk R5): the
+/// empty line prints, rc 0, as bash. The `case` and `for` shapes are measured
+/// identical; the group shape stays #313's seam.
+#[test]
+fn heredoc_in_a_block_body_with_a_trailing_ampersand() {
+    for shape in [
+        "for i in 1; do builtin echo <<T & done",
+        "case x in x) builtin echo <<T & ;; esac",
+        "if true; then builtin echo <<T & fi",
+    ] {
+        let out = run(&format!("{shape}\nT\nwait"));
+        assert_eq!(rc(&out), 0, "shape {shape:?}");
+        assert_eq!(
+            lines(&out),
+            [String::new()],
+            "shape {shape:?}: stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+}
+
+/// The `& ;;` peek guard stays closed to a `case` arm: a `;;` **outside** a
+/// block (`echo a & ;; echo b`) is bash's syntax error, rc 2, fdshell rc 1 —
+/// the relaxation `split.rs::peek` must never get.
+#[test]
+fn a_semi_semi_outside_a_block_stays_an_invalid_split() {
+    for script in [
+        "builtin echo a & ;; builtin echo b",
+        "builtin echo a & ; builtin echo b",
+        "builtin echo a & & builtin echo b",
+    ] {
+        let out = run(script);
+        assert_eq!(rc(&out), 1, "script {script:?}");
+        assert!(
+            str::from_utf8(&out.stderr)
+                .unwrap_or_default()
+                .contains("unexpected character in this context"),
+            "script {script:?}"
+        );
+    }
+    // The `case` twin: the opener gate owns the run, and the block the `&`
+    // leaves behind is unclosed, so the script-level parse error is the report
+    // (bash rc 2, fdshell rc 1 — the documented rc-1-vs-2 family).
+    let out = run("case x in x) builtin echo a & ;; builtin echo b");
+    assert_eq!(rc(&out), 1);
+    assert!(
+        str::from_utf8(&out.stderr)
+            .unwrap_or_default()
+            .contains("parse error"),
+        "stderr={}",
+        str::from_utf8(&out.stderr).unwrap_or_default()
+    );
+}

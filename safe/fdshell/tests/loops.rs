@@ -1189,3 +1189,27 @@ fn break_leaving_a_function_frame_leaves_status_zero() {
     let (out, err, code) = run("f() { false; break; }; for a in 1 2; do f; done; echo rc=$?");
     assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err}");
 }
+
+/// A single-line loop whose body statement ends with the plain `&` (task #354):
+/// the `&` is a command-list terminator inside the block's text, so the shape
+/// parses and the statement runs **inside the body** as a background job. Bounded
+/// because a regression in the closer rule can make the loop unbounded.
+#[test]
+fn loop_body_statement_with_trailing_ampersand_runs() {
+    let (out, err, rc) = run_bounded("for i in 1; do echo hi & done\nwait");
+    assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
+    let (out, err, rc) = run_bounded("while :; do echo hi & break; done\nwait");
+    assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
+    let (out, err, rc) = run_bounded("until false; do echo hi & break; done\nwait");
+    assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
+}
+
+/// A `for` **word list** takes no list terminator (POSIX #2.9.1: the `do`
+/// follows the list), so `for i in 1 & do` stays a parse error — bash rc 2,
+/// fdshell rc 1 (the documented rc-1-vs-2 family, README "Errors").
+#[test]
+fn ampersand_in_a_for_word_list_is_a_parse_error() {
+    let (out, err, rc) = run("for i in 1 & do echo x; done");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("expected 'do'"), "{err}");
+}

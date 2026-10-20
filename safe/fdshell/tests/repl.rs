@@ -455,3 +455,19 @@ fn unclosed_midrun_constructs_report_at_once() {
         );
     }
 }
+
+/// A single-line `case` whose arm ends with the plain `&` and whose `esac` has
+/// not arrived (task #354): the block-opener gate owns the run, so the shape
+/// enters the `> ` continuation buffer instead of answering the first line with
+/// the statement split's parse error. The buffer's job is reaped by the `wait`
+/// line (LESSONS: an async pin ends with `wait`).
+#[test]
+fn ampersand_in_a_case_arm_buffers_until_the_closer_arrives() {
+    let (out, err, code) = run_repl("case x in x) echo a & ;;\nesac\nwait\nexit\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(out.contains("> "), "no continuation prompt: {out:?}");
+    // Three prompts: the shape, the joined buffer, `exit` — one per read.
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    assert!(out.contains("a"), "stdout: {out:?}");
+    assert!(!err.contains("parse error"), "parse error: {err}");
+}
