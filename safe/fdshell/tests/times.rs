@@ -47,23 +47,28 @@ fn times_value_lines_are_centiseconds() {
     );
 }
 
-/// After burning CPU in a backgrounded child and `wait`ing on it, the
-/// children user time is > 0.00.
+/// After burning CPU in a backgrounded child and `wait`ing on it, the children's
+/// *total* CPU time (user + system) is > 0.00. Which of the two fields a reaped
+/// child's CPU lands in is the kernel's accounting choice, so the assertion is
+/// on the sum, never on user alone (LESSONS.md: "A CPU-burn timing test measures
+/// nothing in a release build").
 #[test]
-fn times_children_time_increases_after_wait() {
+fn times_children_total_time_increases_after_wait() {
     let out = run("n=0; while [ $n -lt 5000 ]; do n=$((n+1)); done &>&j; wait $!; times");
     let stdout = str::from_utf8(&out.stdout).unwrap();
-    // The children value line is the last numeric line; its first field
-    // (children user time) must be > 0.00 after a CPU-burning child.
+    // The children value line is the last numeric line: `<user>\t<sys>` in
+    // centiseconds. Both fields are read so the assertion below is on their sum:
+    // `> 0` reads "the report is non-degenerate", never "the burn ran".
     let child_line = stdout
         .lines()
         .rfind(|l| l.trim_start().starts_with(|c: char| c.is_ascii_digit()))
         .unwrap()
         .trim_start();
-    let child_user = child_line.split_whitespace().next().unwrap();
-    let secs: f64 = child_user.parse().unwrap();
+    let fields: Vec<&str> = child_line.split_whitespace().collect();
+    let user: f64 = fields.first().copied().unwrap().parse().unwrap();
+    let sys: f64 = fields.get(1).copied().unwrap().parse().unwrap();
     assert!(
-        secs > 0.0,
-        "expected children user time > 0.00, got {child_user}; stdout={stdout}"
+        user + sys > 0.0,
+        "expected children CPU time (user + system) > 0.00, got {user} + {sys}; stdout={stdout}"
     );
 }
