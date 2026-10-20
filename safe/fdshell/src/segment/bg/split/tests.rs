@@ -137,3 +137,47 @@ fn mark_marks_the_run_the_pending_word_or_the_flushed_statement() {
         _ => panic!("statement expected"),
     }
 }
+
+/// The `;`-behind-the-`&` guard is a **statement-level** rule, and task #354
+/// does not widen it: with a run to terminate, a `;` behind the `&` (the `;;` of
+/// a case clause, a stray `;`) is bash's "syntax error, nothing runs". A case
+/// arm's `& ;;` never reaches this check — the block scan owns that run — so
+/// these rows are the guard's own pins. A newline ends the peek (the accepted
+/// multi-line divergence), so `&\n;` passes.
+#[test]
+fn valid_is_decided_by_the_byte_behind_the_ampersand() {
+    let runs = || {
+        vec![Run {
+            bytes: b"echo a".as_slice(),
+            off: 0,
+            background: false,
+        }]
+    };
+    for line in [
+        b"echo a & ;; echo b".as_slice(),
+        b"echo a &; echo b".as_slice(),
+        b"echo a &|b".as_slice(),
+        b"echo a && b".as_slice(),
+    ] {
+        let mut runs = runs();
+        let mut segs: Vec<Segment> = Vec::new();
+        let at = line.iter().position(|&b| b == b'&').unwrap();
+        assert!(
+            !split(line, 0, at, b"", &mut runs, &mut segs, false).valid(),
+            "{line:?}: a `;`/`|`/`&` behind the `&` is invalid"
+        );
+    }
+    for line in [
+        b"echo a & echo b".as_slice(),
+        b"echo a &\n; echo b".as_slice(),
+        b"echo a &".as_slice(),
+    ] {
+        let mut runs = runs();
+        let mut segs: Vec<Segment> = Vec::new();
+        let at = line.iter().position(|&b| b == b'&').unwrap();
+        assert!(
+            split(line, 0, at, b"", &mut runs, &mut segs, false).valid(),
+            "{line:?}: the guard passes (a word behind, a newline, or EOS)"
+        );
+    }
+}

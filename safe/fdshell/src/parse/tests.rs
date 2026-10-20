@@ -3896,7 +3896,7 @@ fn find_preceded_by_semi_start_zero_no_match() {
         (c"hi".into(), 5, 7, false, vec![], vec![]),
     ];
     assert_eq!(
-        super::semi::find_preceded_by_semi(&tokens, 0, b"echo", line),
+        super::semi::find_preceded_by(&tokens, 0, b"echo", line, super::semi::Term::Semi),
         None
     );
 }
@@ -3911,7 +3911,7 @@ fn find_preceded_by_semi_skips_to_start() {
         (c"done".into(), 7, 11, false, vec![], vec![]),
     ];
     assert_eq!(
-        super::semi::find_preceded_by_semi(&tokens, 2, b"done", line),
+        super::semi::find_preceded_by(&tokens, 2, b"done", line, super::semi::Term::Semi),
         Some(3)
     );
 }
@@ -4280,4 +4280,86 @@ fn test_env_assign_prefix_stops_before_the_keyword_name_word() {
     assert_eq!(cmd.env_assigns, vec![assign("A", "2", false)]);
     assert_eq!(cmd.command, c"X=1".into());
     assert_eq!(cmd.args, Vec::new());
+}
+
+/// A word-start plain `&` is a **command-list terminator** in every block
+/// position (task #354): the body slice keeps the `&` — the body's own scan is
+/// what marks the background flag — and each closer glued behind it is found.
+/// A `&`-terminated **condition** is cut at the `&`, which is the rule the
+/// `&`-terminated arm of #356 stands on.
+#[test]
+fn ampersand_in_a_block_body_is_a_list_terminator() {
+    let line = b"for i in 1; do echo hi & done";
+    let fb = for_block::tokens_to_for(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(fb.body.data, c"echo hi &".into());
+
+    let line = b"{ echo hi & }";
+    let gb = group_block::tokens_to_group(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(gb.body.data, c"echo hi &".into());
+    assert!(gb.redirects.is_empty());
+
+    let line = b"while : & do echo x; done";
+    let wb = while_block::tokens_to_loop(&token::tokenize(line).unwrap(), b"while", &stext(line))
+        .unwrap();
+    assert_eq!(
+        wb.condition.data,
+        c":".into(),
+        "the `&` is cut from the cond"
+    );
+    assert_eq!(wb.body.data, c"echo x".into());
+
+    let line = b"while :; do echo hi & done";
+    let wb = while_block::tokens_to_loop(&token::tokenize(line).unwrap(), b"while", &stext(line))
+        .unwrap();
+    assert_eq!(wb.body.data, c"echo hi &".into());
+
+    let line = b"if true; then echo hi & fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.then_body.data, c"echo hi &".into());
+
+    let line = b"if true & then echo x; fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.condition.data, c"true".into());
+    assert_eq!(ib.then_body.data, c"echo x".into());
+
+    let line = b"if true; then echo a & else echo b & fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.then_body.data, c"echo a &".into());
+    assert_eq!(ib.else_body.unwrap().data, c"echo b &".into());
+
+    let line = b"if false; then :; elif true & then echo e & fi";
+    let ib = if_block::tokens_to_if(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(ib.elifs[0].cond.data, c"true".into());
+    assert_eq!(ib.elifs[0].body.data, c"echo e &".into());
+
+    let line = b"f(){ echo hi & }";
+    let fd =
+        function_block::tokens_to_function(&token::tokenize(line).unwrap(), &stext(line)).unwrap();
+    assert_eq!(fd.name, c"f".into());
+    assert_eq!(fd.body.data, c"echo hi &".into());
+}
+
+/// The `&`-terminated arm of the `case` clause: the arm body keeps the `&` and
+/// the clause closer (`;;`, `;;esac`, `esac`) is found behind it.
+#[test]
+fn ampersand_terminated_case_clause_keeps_the_ampersand() {
+    for line in [
+        b"case x in x) echo a & ;; esac".as_slice(),
+        b"case x in x) echo a &;; esac".as_slice(),
+        b"case x in x) echo a & ;;esac".as_slice(),
+        b"case x in x) echo a & esac".as_slice(),
+    ] {
+        let block = case_block::tokens_to_case(&token::tokenize(line).unwrap(), &stext(line))
+            .unwrap_or_else(|e| panic!("{line:?}: {e}"));
+        assert_eq!(block.clauses.len(), 1, "{line:?}");
+        assert_eq!(block.clauses[0].body.data, c"echo a &".into(), "{line:?}");
+    }
+}
+
+/// `for`'s word list stays strict: the `&` is **not** a `do`-position
+/// terminator, so `for i in 1 & do :; done` is a parse error (bash rc 2).
+#[test]
+fn ampersand_in_a_for_word_list_is_not_a_do_terminator() {
+    let line = b"for i in 1 & do :; done";
+    assert!(for_block::tokens_to_for(&token::tokenize(line).unwrap(), &stext(line)).is_err());
 }

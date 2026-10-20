@@ -1208,3 +1208,112 @@ fn run_start_blocks_and_unclosed_midruns_keep_their_shapes() {
     );
     assert_eq!(statements(b"true && if"), vec![b"true && if".to_vec()]);
 }
+
+/// The plain `&` written **inside a block's text** is a separator inside the
+/// span, not the statement split's async marker (task #354): the block-opener
+/// gate owns the run, so every closer form — `& ;;`, `&;;`, `& ;;esac`,
+/// `& esac`, the glued multi-line arm, the `& }` of a group, the `&` of a
+/// function body, the `&`-terminated condition — yields one closed
+/// `Segment::Block`, and the `&` stays in the span's text.
+#[test]
+fn scan_ampersand_inside_block_text_stays_in_the_span() {
+    for line in [
+        b"case x in x) echo a & ;; esac".as_slice(),
+        b"case x in x) echo a &;; esac".as_slice(),
+        b"case x in x) echo a & ;;esac".as_slice(),
+        b"case x in x) echo a & esac".as_slice(),
+        b"case x in x) echo a &\nesac".as_slice(),
+        b"if true & then echo x; fi".as_slice(),
+        b"if true; then echo x & fi".as_slice(),
+        b"for i in 1; do echo hi & done".as_slice(),
+        b"while :; do echo hi & break; done".as_slice(),
+        b"{ echo hi & }".as_slice(),
+        b"f(){ echo hi & }".as_slice(),
+    ] {
+        let segments = scan_segments(line, false);
+        assert_eq!(
+            segments.len(),
+            1,
+            "{:?} -> {} segments",
+            line,
+            segments.len()
+        );
+        match &segments[0] {
+            Segment::Block {
+                block_start,
+                end_pos,
+                closed,
+                ..
+            } => {
+                assert_eq!(*block_start, 0, "{:?}", line);
+                assert_eq!(*end_pos, line.len(), "{:?}", line);
+                assert!(*closed, "span not closed: {:?}", line);
+            }
+            Segment::Statement { cmd, .. } => {
+                panic!("expected one closed Block, got a statement split: {cmd:?}")
+            }
+            Segment::AsyncInvalid => panic!("unexpected async marker: {:?}", line),
+        }
+    }
+    // A function block plus a tail command: the span ends at the `}`, the tail
+    // is its own statement.
+    let segments = scan_segments(b"f(){ echo hi & }; f", false);
+    assert_eq!(segments.len(), 2);
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+            ..
+        } => {
+            assert_eq!((*block_start, *end_pos, *closed), (0, 16, true));
+        }
+        Segment::Statement { .. } => panic!("expected the function block first"),
+        Segment::AsyncInvalid => panic!("expected the function block first"),
+    }
+    match &segments[1] {
+        Segment::Statement { cmd, .. } => assert_eq!(*cmd, b"f".as_slice()),
+        Segment::Block { .. } => panic!("expected the tail statement"),
+        Segment::AsyncInvalid => panic!("expected the tail statement"),
+    }
+}
+
+/// The gate does **not** widen the statement split: a plain `&` outside any
+/// block is the async marker exactly as before (the span's text loses the `&`),
+/// and a `;;` behind it is the invalid split the `peek` guard catches — the
+/// guard is untouched, so `echo a & ;; echo b` is still `AsyncInvalid` at
+/// statement level and inside a block body (`in_block = true`).
+#[test]
+fn scan_ampersand_outside_a_block_is_unchanged() {
+    let segments = scan_segments(b"echo hi &", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Statement { cmd, .. } => assert_eq!(*cmd, b"echo hi".as_slice()),
+        Segment::Block { .. } => panic!("expected the async statement"),
+        Segment::AsyncInvalid => panic!("expected the async statement"),
+    }
+    for in_block in [false, true] {
+        for line in [
+            b"echo a & ;; echo b".as_slice(),
+            b"echo a &;;echo b".as_slice(),
+        ] {
+            let segments = scan_segments(line, in_block);
+            assert_eq!(segments.len(), 2, "{:?} in_block={in_block}", line);
+            assert!(
+                matches!(segments[0], Segment::AsyncInvalid),
+                "the peek guard must still fire: {:?} in_block={in_block}",
+                line
+            );
+        }
+    }
+    // A case arm whose `;;` is behind the `&` never reaches the guard: the arm's
+    // scan owns the run, and with no `esac` the span simply stays open (the
+    // script-level parse error, bash's rc 2).
+    let segments = scan_segments(b"case x in x) echo a & ;; echo b", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block { closed, .. } => assert!(!*closed, "the span must stay open"),
+        Segment::Statement { .. } => panic!("expected the open case span"),
+        Segment::AsyncInvalid => panic!("expected the open case span"),
+    }
+}

@@ -2692,3 +2692,73 @@ fn async_pipeline_records_one_nameless_job() {
         assert!(state.jobs.is_empty());
     });
 }
+
+/// A plain `&` written **inside a block's text** marks the statement inside the
+/// body (task #354): every shape records its job in the shell's job table, and
+/// the closer glued behind the `&` never eats it — the job record is the pin,
+/// never the output (LESSONS). `wait` (POSIX, no operands) drains the deque.
+#[test]
+fn block_body_ampersand_records_a_job() {
+    for (script, want) in [
+        (b"for i in 1 2; do builtin true & done".as_slice(), 2usize),
+        (b"case x in x) builtin true & ;; esac".as_slice(), 1),
+        (b"case x in x) builtin true & esac".as_slice(), 1),
+        (b"{ builtin true & }".as_slice(), 1),
+        (b"if true; then builtin true & fi".as_slice(), 1),
+        (b"if false; then :; else builtin true & fi".as_slice(), 1),
+        (b"while :; do builtin true & break; done".as_slice(), 1),
+        (b"f(){ builtin true & }; f".as_slice(), 1),
+        (b"true && { builtin true & }".as_slice(), 1),
+    ] {
+        child_test(|| {
+            let cell = make_cell();
+            run_script(script, &cell).unwrap();
+            let mut state = borrow_state_mut(&cell);
+            assert_eq!(state.jobs.anon_len(), want, "{script:?}");
+            assert!(state.last_bg_pid.is_some(), "{script:?}");
+            crate::task::posix_wait(&[], &mut state).unwrap();
+            assert!(state.jobs.is_empty(), "{script:?}");
+        });
+    }
+}
+
+/// An `if` condition terminated by the plain `&` parses (task #354's
+/// `Term::SemiAmp` rule) and runs the condition as its own command list: the
+/// arm is taken, no job record exists yet (the condition job is task #356's).
+#[test]
+fn ampersand_terminated_condition_runs_foreground() {
+    for script in [
+        b"if true & then builtin true; fi".as_slice(),
+        b"while : & do builtin true; break; done".as_slice(),
+        b"if false; then :; elif true & then builtin true; fi".as_slice(),
+    ] {
+        child_test(|| {
+            let cell = make_cell();
+            run_script(script, &cell).unwrap();
+            let state = borrow_state(&cell);
+            assert_eq!(state.jobs.anon_len(), 0, "{script:?}: #356 owns the job");
+            assert!(
+                matches!(state.last_status, WaitStatus::Exited(0)),
+                "{script:?}"
+            );
+        });
+    }
+}
+
+/// The unclosed block span of the `&`-in-block-text family: the script-level
+/// parse error, with **nothing executed**. The message is not pinned (the shape
+/// is bash's "unexpected end of file", rc 2, fdshell's rc 1).
+#[test]
+fn unclosed_block_with_an_ampersand_is_a_parse_error() {
+    for script in [
+        b"if x & echo y".as_slice(),
+        b"while x & echo y".as_slice(),
+        b"for i in 1 & echo x".as_slice(),
+        b"case x in y) echo a & echo b".as_slice(),
+        b"f(){ echo a &".as_slice(),
+    ] {
+        let cell = make_cell();
+        let e = run_script(script, &cell).unwrap_err();
+        assert!(matches!(e.current_context(), CmdError::Parse), "{script:?}");
+    }
+}

@@ -359,3 +359,40 @@ fn unpaired_span_and_dangling_operator_need_continuation() {
         assert!(!is_complete(line), "{line:?} needs a continuation line");
     }
 }
+
+/// A plain `&` inside a block's text (task #354) leaves the **line-completeness**
+/// decision alone: a shape with its closer is complete (the REPL runs it), an
+/// unclosed one is the `> ` continuation buffer, and the statement-level `&` is
+/// unchanged. The scanner gate is what makes the closed shapes complete again —
+/// before it, `case x in x) echo a & ;; esac` was an incomplete line answered
+/// with the statement split's parse error.
+#[test]
+fn ampersand_inside_block_text_keeps_the_completeness_rule() {
+    for line in [
+        b"case x in x) echo a & ;; esac".as_slice(),
+        b"case x in x) echo a & ;;esac".as_slice(),
+        b"case x in x) echo a & ;;\nesac".as_slice(),
+        b"for i in 1; do echo hi & done".as_slice(),
+        b"while :; do echo hi & break; done".as_slice(),
+        b"{ echo hi & }".as_slice(),
+        b"f(){ echo hi & }".as_slice(),
+        b"if true & then echo x; fi".as_slice(),
+        b"if true; then echo x & fi".as_slice(),
+        b"echo hi &".as_slice(),
+    ] {
+        assert!(is_complete(line), "{line:?} must be complete");
+    }
+    // The closer has not arrived: the buffer keeps reading.
+    // (the `;;`-behind-the-`&` shape with no `esac` is one of them: the span
+    // stays open, and the buffer reads on — the script form of that line is a
+    // parse error, bash's rc 2.)
+    for line in [
+        b"case x in x) echo a & ;;".as_slice(),
+        b"case x in x) echo a & ;; echo b".as_slice(),
+        b"if x & echo y".as_slice(),
+        b"for i in 1 & echo x".as_slice(),
+        b"f(){ echo a &".as_slice(),
+    ] {
+        assert!(!is_complete(line), "{line:?} must be incomplete");
+    }
+}

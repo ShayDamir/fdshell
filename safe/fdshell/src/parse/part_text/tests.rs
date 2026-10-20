@@ -4,7 +4,7 @@
 
 use super::part_text;
 use crate::parse::Token;
-use crate::parse::semi::{closing_keyword_index, find_preceded_by_semi, trim_semi, verbatim};
+use crate::parse::semi::{Term, closing_keyword_index, find_preceded_by, trim_semi, verbatim};
 use crate::parse::token::tokenize_statement;
 use alloc::vec::Vec;
 use sys::{Origin, Position, ScriptText, ShortCStr};
@@ -105,6 +105,6 @@ fn arm_slice(text: &ScriptText, keyword: &[u8]) -> Vec<Token> {
         .iter()
         .position(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
         .unwrap();
-    let then = find_preceded_by_semi(&tokens, kw + 1, b"then", line).unwrap();
+    let then = find_preceded_by(&tokens, kw + 1, b"then", line, Term::Semi).unwrap();
     trim_semi(tokens.get(then + 1..closing - 1).unwrap()).to_vec()
 }

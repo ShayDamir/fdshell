@@ -58,21 +58,27 @@ fn case_word_join_keeps_the_zero_byte_span() {
     assert_eq!(word_span, vec![1, 2]);
 }
 
-/// `find_preceded_by_semi` reads `needle` through the keyword gate
-/// (`keyword_word`, task #247): a quoted `then`/`done` is a command word, so
-/// the block finds no keyword — the parse error is the bash-parity outcome
-/// (bash rejects the shape with a syntax error).
+/// `body_end` is the exclusive end of a body slice written before a closer:
+/// POSIX's `;` before the closer is dropped, the plain `&` terminator is kept
+/// (the body's own scan makes it a background job, task #354), and a word the
+/// closer is glued to stays in the body.
 #[test]
-fn preceded_by_semi_needs_an_unquoted_keyword_word() {
-    let find = |line: &[u8], start: usize, needle: &[u8]| {
-        super::find_preceded_by_semi(&tokenize(line).unwrap(), start, needle, line)
+fn body_end_keeps_the_amp_and_drops_the_semi() {
+    let end = |line: &[u8], closer: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        let idx = tokens
+            .iter()
+            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
+            .unwrap();
+        super::body_end(&tokens, idx)
     };
-    assert_eq!(find(b"if true; then echo a; fi", 1, b"then"), Some(3));
-    assert_eq!(find(b"if true; 'then' echo a; fi", 1, b"then"), None);
-    assert_eq!(find(b"if true; \"then\" echo a; fi", 1, b"then"), None);
-    // The empty quote pair contributes no byte and no mask bit — the span
-    // rule catches it (task #321's lesson, at the keyword gate).
-    assert_eq!(find(b"if true; ''then echo a; fi", 1, b"then"), None);
-    assert_eq!(find(b"while :; do :; done", 1, b"done"), Some(6));
-    assert_eq!(find(b"while :; do :; 'done'", 1, b"done"), None);
+    // `;`-terminated body: the `;` before the closer is not body text.
+    assert_eq!(end(b"if true; then echo a; fi", b"fi"), 6);
+    // `&`-terminated body: the `&` is body text.
+    assert_eq!(end(b"if true; then echo a & fi", b"fi"), 7);
+    // A closer glued to the body keeps that word in the body.
+    assert_eq!(end(b"if true; then echo hi fi", b"fi"), 6);
+    // Nothing written before the closer (`then` itself, or an empty body).
+    assert_eq!(end(b"if true; then fi", b"fi"), 4);
+    assert_eq!(end(b"if true; then; fi", b"fi"), 4);
 }

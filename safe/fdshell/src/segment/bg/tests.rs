@@ -209,3 +209,42 @@ fn group_tail_swallows_the_ampersand_and_the_next_line_splits() {
         [("B", false), ("S", false)]
     );
 }
+
+/// The boundary classifier is untouched by task #354: a plain `&` **inside a
+/// block's text** is classified `Async` exactly as outside one — the gate that
+/// keeps it inside the span lives in the scanner's block arm (see
+/// `segment::block::opener`), not in the classification. At segment level the
+/// face of such a line is the block (`B`), never the async marker; a `;;` behind
+/// a `&` **outside** a block is the invalid split (`A`) the `peek` guard of
+/// [`super::split`] catches, and it stays that way — a case arm's `& ;;` never
+/// reaches that guard, because the block scan owns the run.
+#[test]
+fn ampersand_inside_a_block_text_is_classified_the_same() {
+    for line in [
+        b"case x in x) echo a & ;; esac".as_slice(),
+        b"for i in 1; do echo hi & done".as_slice(),
+        b"{ echo hi & }".as_slice(),
+        b"f(){ echo hi & }".as_slice(),
+        b"if true & then echo x; fi".as_slice(),
+    ] {
+        assert_eq!(
+            classes(line).as_slice(),
+            &[Boundary::Async],
+            "{:?}: the `&` is one Async boundary",
+            line
+        );
+        assert_eq!(
+            faces(line),
+            alloc::vec![("B", false)],
+            "{:?} -> faces",
+            line
+        );
+    }
+    // The statement-level guard, unchanged: `;;` behind the `&` is the invalid
+    // split, and the arm-shaped line behind a closed block is not its business.
+    assert_eq!(
+        faces(b"echo a & ;; echo b"),
+        alloc::vec![("A", false), ("S", false)],
+        "the peek guard still fires at statement level"
+    );
+}
