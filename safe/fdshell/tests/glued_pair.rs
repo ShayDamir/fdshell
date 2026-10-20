@@ -106,3 +106,26 @@ fn short_circuit_gate_skips_the_gated_list_and_resumes_behind_it() {
     let (out, err, code) = run_bounded("echo a || { echo b; } && echo c");
     assert_eq!((out.as_str(), code), ("a\n", 0), "stderr={err}");
 }
+
+/// Task #326: the gate's window starts **right behind the pair**, so it never
+/// reaches back over the pair's own bytes. A **one-byte** left operand glued
+/// to the pair (`:`, the shell's own command) puts the operator at offset 1 —
+/// the row that kills `cond.rs`'s `let after = i - 2` mutant: in the dev
+/// profile (what nextest and `cargo mutants` build) the back-step underflows
+/// and the shell dies with rc 101, and in release the wrapped index finds no
+/// separator so the gate ends at the same byte (the mutant is equivalent
+/// there, so the row pins the *shape* and the profile does the killing —
+/// LESSONS, task #326). All rows measured against bash 5.3.9: identical.
+#[test]
+fn one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair() {
+    let (out, err, code) = run_bounded(":||echo b");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    let (out, err, code) = run_bounded(":||echo b; echo after");
+    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err}");
+    // Its twins: the `&&` pair runs the tail, the spaced `||` short-circuits
+    // to the `;` exactly like the glued form.
+    let (out, err, code) = run_bounded(":&&echo b");
+    assert_eq!((out.as_str(), code), ("b\n", 0), "stderr={err}");
+    let (out, err, code) = run_bounded(": || echo b; echo after");
+    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err}");
+}

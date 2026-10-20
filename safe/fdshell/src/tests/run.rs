@@ -2670,3 +2670,25 @@ fn async_operator_records_a_nameless_job() {
         assert!(state.jobs.is_empty());
     });
 }
+
+/// The `Pipeline` arm of the plain `&` (task #326): a backgrounded pipeline is
+/// **one** nameless job — the shell forks and the child runs the whole
+/// pipeline — never a foreground pipeline. The job's own status is read
+/// through the pid form of `wait` (POSIX: the no-operand form reports 0).
+#[test]
+fn async_pipeline_records_one_nameless_job() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"builtin false | builtin true &", &cell).unwrap();
+        let mut state = borrow_state_mut(&cell);
+        assert_eq!(state.jobs.anon_len(), 1, "the pipeline is one job");
+        assert_eq!(
+            state.last_bg_pid,
+            state.jobs.anon_pids()[0].into(),
+            "$! reports the job"
+        );
+        assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+        crate::task::posix_wait(&[], &mut state).unwrap();
+        assert!(state.jobs.is_empty());
+    });
+}

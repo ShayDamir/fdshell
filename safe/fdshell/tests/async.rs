@@ -71,6 +71,16 @@ fn contains_all(out: &std::process::Output, want: &[&str]) {
     }
 }
 
+/// The number behind the first `pid=` in stdout, read digit-by-digit: the
+/// background child shares the pipe, so its line may land *before* the
+/// parent's, and only the digits of the parent's own line are the pid.
+fn reported_pid(out: &std::process::Output) -> i64 {
+    let stdout = str::from_utf8(&out.stdout).unwrap().to_string();
+    let tail = stdout.split("pid=").nth(1).unwrap_or_default();
+    let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().unwrap_or(-1)
+}
+
 /// `echo hi &` is a background job: it runs, the shell continues, `wait` reaps
 /// it, and the script's status is 0.
 #[test]
@@ -135,21 +145,26 @@ fn wait_by_pid_reports_the_failing_child() {
 fn last_bg_pid_is_reported_numerically() {
     let out = run("builtin true &\nbuiltin echo pid=$!; wait");
     assert_eq!(rc(&out), 0);
-    let pid = str::from_utf8(&out.stdout)
-        .unwrap()
-        .split("pid=")
-        .nth(1)
-        .and_then(|s| s.trim().parse::<i64>().ok())
-        .unwrap();
-    assert!(pid > 0, "stdout={:?}", str::from_utf8(&out.stdout));
+    assert!(
+        reported_pid(&out) > 0,
+        "stdout={:?}",
+        str::from_utf8(&out.stdout)
+    );
 }
 
-/// A pipeline with a trailing `&` is one job, reaped by one `wait`.
+/// A pipeline with a trailing `&` is one job, reaped by one `wait`, and `$!`
+/// reports the job's pid (numeric, > 0 — for a pipeline it is the job's shell
+/// pid, not the last stage's: measured divergence, so only "numeric" pins).
 #[test]
 fn pipeline_is_one_async_job() {
-    let out = run("builtin echo a | builtin echo b &\nwait");
+    let out = run("builtin echo a | builtin echo b &\nbuiltin echo pid=$!; wait");
     assert_eq!(rc(&out), 0);
     contains_all(&out, &["b"]);
+    assert!(
+        reported_pid(&out) > 0,
+        "stdout={:?}",
+        str::from_utf8(&out.stdout)
+    );
 }
 
 /// `echo a && echo b &` is two async jobs in fdshell where bash backgrounds the
