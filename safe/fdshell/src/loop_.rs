@@ -30,15 +30,17 @@ fn run_loop_body(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let cond_bodies = body_bytes(&block.cond_bodies);
+    // The condition's `&`-terminator flag (task #356), read once: it is
+    // loop-level, so every condition test below records its own job.
+    let bg = block.cond_background;
     let mut ran_body = false;
     loop {
         // A `break`/`continue` raised inside the condition (an `if` then-body, a
         // `{ …; }` group, a `case` arm, a function called from it) is the loop's
         // own signal: the condition runs inside this loop's level (`in_loop`), so
         // it is consumed here exactly like the body's.
-        if let Some(control) =
-            crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true, false)?
-        {
+        let control = crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true, bg)?;
+        if let Some(control) = control {
             match at_level(control) {
                 AtLevel::Stop => break,
                 // The loop's next iteration is the next condition test, body skipped:

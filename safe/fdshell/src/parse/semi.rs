@@ -11,7 +11,9 @@ mod trim;
 
 pub(crate) use closing::{List, closing_keyword_index, list_closing_keyword_index, up_to_closing};
 pub(crate) use preceded::{Term, amp_semi, find_preceded_by, is_list_terminator};
-pub(crate) use trim::{block_body, body_end, trim_body, trim_condition, trim_semi};
+pub(crate) use trim::{
+    block_body, body_end, condition_background, trim_body, trim_condition, trim_semi,
+};
 
 /// The joined word of `tokens` **with its mask and zero-byte span list**: the
 /// space inserted between two tokens takes a `false` bit and every token byte

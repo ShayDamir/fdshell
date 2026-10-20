@@ -5,6 +5,7 @@ use super::part_text::part_text;
 use super::semi::amp_semi;
 use super::semi::block_body;
 use super::semi::body_end;
+use super::semi::condition_background;
 use super::semi::trim_condition;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
@@ -27,7 +28,8 @@ pub fn parse_elifs(
             // The token before a clause keyword is POSIX's `;` and drops out;
             // a plain `&` stays (task #354: `elif true & then …`, and a body
             // whose last statement the `&` backgrounds), and so does a `;`
-            // glued behind that `&` (task #355).
+            // glued behind that `&` (task #355). The arm's own condition flag
+            // is read off this same slice (task #356).
             let cond = tokens
                 .get(ei + 1..body_end(tokens, line, ti))
                 .ok_or(ParseError::MissingCondition)?;
@@ -53,6 +55,7 @@ pub fn parse_elifs(
                 cond: ec,
                 body: eb,
                 cond_bodies,
+                cond_background: condition_background(cond, line),
             })
         })
         .collect::<Result<Vec<_>, Report<ParseError>>>()

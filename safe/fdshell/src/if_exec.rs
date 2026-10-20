@@ -21,7 +21,13 @@ pub(crate) fn run_if(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let cond_bodies = body_bytes(&ifblock.cond_bodies);
-    let control = crate::repl::run_cond_list(&ifblock.condition, &cond_bodies, cell, true, false)?;
+    let control = crate::repl::run_cond_list(
+        &ifblock.condition,
+        &cond_bodies,
+        cell,
+        true,
+        ifblock.cond_background,
+    )?;
     if let Some(control) = control {
         // An `if` is not a loop level (README "Loop control"), so the signal is
         // the caller's: propagate it whole, consuming nothing.
@@ -38,7 +44,8 @@ pub(crate) fn run_if(
     }
     for arm in &ifblock.elifs {
         let arm_bodies = body_bytes(&arm.cond_bodies);
-        let control = crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell, true, false)?;
+        let control =
+            crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell, true, arm.cond_background)?;
         if let Some(control) = control {
             return Ok(Some(control));
         }

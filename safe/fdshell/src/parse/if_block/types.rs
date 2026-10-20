@@ -7,6 +7,9 @@ pub struct ElifArm {
     pub body: ScriptText,
     /// The condition's heredoc bodies (in operator order; empty when none).
     pub cond_bodies: Vec<ShortCStr>,
+    /// The condition was terminated by the plain `&`: it runs as a background
+    /// job (`condition_background`, task #356).
+    pub cond_background: bool,
 }
 
 pub struct IfBlock {
@@ -16,4 +19,7 @@ pub struct IfBlock {
     pub else_body: Option<ScriptText>,
     /// The condition's heredoc bodies (in operator order; empty when none).
     pub cond_bodies: Vec<ShortCStr>,
+    /// The condition was terminated by the plain `&`: it runs as a background
+    /// job (`condition_background`, task #356).
+    pub cond_background: bool,
 }

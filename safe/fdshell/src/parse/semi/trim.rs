@@ -75,10 +75,10 @@ pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
 /// A **condition** slice: on top of [`trim_body`], the plain `&` that precedes
 /// a clause keyword terminates the compound list, and the condition is run as
 /// its own command list (its scanner never saw the `&`, so nothing here
-/// consumes it): `if true & then …` runs `true` as the condition (task #354;
-/// the background job of a `&`-terminated condition is #356's). A `& ;`
-/// behind the condition keeps its `;` (task #355), so the condition text
-/// carries the split its own scan rejects.
+/// consumes it): `if true & then …` runs `true` as the condition (task #354).
+/// The cut `&` is the job's fact, read by [`condition_background`] (task #356).
+/// A `& ;` behind the condition keeps its `;` (task #355), so the condition
+/// text carries the split its own scan rejects.
 pub(crate) fn trim_condition<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token] {
     let body = trim_body(tokens, line);
     let amp = usize::from(
@@ -87,6 +87,33 @@ pub(crate) fn trim_condition<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token
     );
     let end = body.len().saturating_sub(amp);
     body.get(..end).unwrap_or(&[])
+}
+
+/// Whether a condition slice ends in the plain `&` that terminates the compound
+/// list (task #356): [`trim_condition`] **cuts** that `&` from the condition
+/// text — the condition runs as its own command list, whose parse layer rejects
+/// a bare `&` — so the returned flag is the fact's single owner, handed to
+/// `run_cond_list`'s existing `background` argument by `if_exec`/`loop_`.
+/// Trailing `;` **tokens** whose byte is a newline (or `)`) step back: bash
+/// reads `if true &` newline `then` exactly like `if true & then` (measured). A
+/// `;` **byte** stops the walk — that slice is the condition's own parse error
+/// and must stay one (task #355). The byte test is [`amp_semi`]'s: the
+/// tokenizer emits a `;` token for a `;` byte, a newline and `)` alike.
+pub(crate) fn condition_background(tokens: &[Token], line: &[u8]) -> bool {
+    let mut end = tokens.len();
+    while end > 0 && is_newline_semi(tokens.get(end - 1), line) {
+        end -= 1;
+    }
+    tokens
+        .get(end.saturating_sub(1))
+        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"&"))
+}
+
+/// The `;` **token** points at a newline (or `)`) byte, so it is a newline in
+/// disguise, never the `;` that ends a condition (`false` for a word and for a
+/// `;` byte, [`amp_semi`]'s pair arm).
+fn is_newline_semi(tok: Option<&Token>, line: &[u8]) -> bool {
+    tok.is_some_and(|(t, start, _, _, _, _)| t.eq_bytes(b";") && line.get(*start) != Some(&b';'))
 }
 
 /// A block arm's body tokens: `tokens` with the `;`s bracketing it trimmed

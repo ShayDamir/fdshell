@@ -9,6 +9,7 @@ use super::semi::List;
 use super::semi::Term;
 use super::semi::block_body;
 use super::semi::body_end;
+use super::semi::condition_background;
 use super::semi::find_preceded_by;
 use super::semi::trim_condition;
 use super::semi::up_to_closing;
@@ -37,16 +38,16 @@ pub(crate) fn tokens_to_if(
     let fi_idx = tokens.len() - 1;
 
     // An `if`/`elif` condition is a compound list: `then` may sit behind the
-    // plain `&` as behind a `;` (task #354).
+    // plain `&` as behind a `;` (task #354), and that `&` is the condition's
+    // background-job flag (task #356, `condition_background`).
     let first_then =
         find_preceded_by(tokens, 1, b"then", line, Term::SemiAmp).ok_or(ParseError::MissingThen)?;
 
-    let cond_tokens = trim_condition(
-        tokens
-            .get(1..first_then)
-            .ok_or(ParseError::MissingCondition)?,
-        line,
-    );
+    let cond_slice = tokens
+        .get(1..first_then)
+        .ok_or(ParseError::MissingCondition)?;
+    let cond_tokens = trim_condition(cond_slice, line);
+    let cond_background = condition_background(cond_slice, line);
 
     let condition = span_verbatim(
         text,
@@ -91,6 +92,7 @@ pub(crate) fn tokens_to_if(
         elifs,
         else_body,
         cond_bodies,
+        cond_background,
     })
 }
 
