@@ -41,7 +41,7 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
             &mut book.runs,
         )
         .max(book.body_floor);
-        book.i = resume.max(amp + 1);
+        book.i = resume;
         book.start = book.i;
         book.line_start = book.line_start.max(amp);
         // The `&` terminates the run it marked: no `;` precedes it any more.
@@ -51,6 +51,9 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
         book.runs.clear();
     }
     book.state.word_active = false;
+    // Sole advancement rule: a flush that resumed at or before the `&` (an
+    // empty target, a body-floor clamp) must never park the cursor on the
+    // `&` it just consumed — the scan would re-read it forever.
     if book.i <= amp {
         book.start = amp + 1;
         book.i = amp + 1;
