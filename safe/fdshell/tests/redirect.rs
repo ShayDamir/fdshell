@@ -1086,3 +1086,116 @@ fn unquoted_operator_operands_stay_syntax_errors() {
         );
     }
 }
+
+// --- a fully quoted `&>`-family word is a plain argument (task #250) ---------
+//
+// `parse_bg_redirect` gates on the token's `fq` flag, the gate every other
+// redirect parser opens with: POSIX #4.1 removes quotes after tokenization, so
+// a fully quoted word is never an operator. Every value below is `bash -c`
+// (5.3.9) and this tree's build, measured 2026-10-20 in a scratch dir; the
+// scratch listing is the assert that kills the redirect arms.
+
+/// Run `script` in `dir` and assert its stdout/rc plus the bash-measured fact
+/// that the fully quoted `&>`-family word created **no** file.
+fn assert_word_opens_no_file(dir: &str, script: &str, want_out: &str) {
+    let (out, err, code) = run(&format!("cd {dir}; {script}"));
+    assert_eq!(
+        (out.as_str(), code),
+        (want_out, 0),
+        "{script}: stderr={err:?}"
+    );
+    let files: Vec<_> = std::fs::read_dir(dir).unwrap().collect();
+    assert!(
+        files.is_empty(),
+        "{script}: the fully quoted word created a file in {dir:?}"
+    );
+}
+
+#[test]
+fn fully_quoted_combined_word_is_an_argument() {
+    let dir = scratch("fq_combined");
+    let dir = dir.to_str().unwrap();
+    for (word, want) in [
+        ("'&>q.txt'", "&>q.txt\n"),
+        ("\"&>q.txt\"", "&>q.txt\n"),
+        ("'&>>q.txt'", "&>>q.txt\n"),
+    ] {
+        assert_word_opens_no_file(dir, &format!("echo {word}"), want);
+    }
+}
+
+#[test]
+fn fully_quoted_bare_combined_operator_is_an_argument() {
+    // The bare arms take the next token as their operand: both words stay
+    // arguments, and bash opens nothing.
+    let dir = scratch("fq_bare");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo hi '&>' f", "hi &> f\n"),
+        ("echo hi '&>>' f", "hi &>> f\n"),
+    ] {
+        assert_word_opens_no_file(dir, script, want);
+    }
+}
+
+#[test]
+fn fully_quoted_pidvar_word_is_an_argument() {
+    // The unquoted `&>&p` form *backgrounds* its command, which is what makes
+    // the full-stdout assert the discriminator: the ungated tree eats the
+    // literal word and prints `tail\nhi\n`, the gated tree keeps the literal
+    // and prints it first. Probing the pid variable asserts nothing —
+    // measured, it reads empty for a `&>&p` job too.
+    let dir = scratch("fq_pidvar");
+    let dir = dir.to_str().unwrap();
+    for (word, want) in [
+        ("'&>&p'", "hi &>&p\ntail\n"),
+        ("'&>|&p'", "hi &>|&p\ntail\n"),
+    ] {
+        let script = format!("echo hi {word}; builtin echo tail");
+        assert_word_opens_no_file(dir, &script, want);
+    }
+}
+
+#[test]
+fn fully_quoted_bare_combined_operator_with_a_heredoc_is_an_argument() {
+    // The byte-level heredoc scan honors quotes, so the body was already one
+    // region; the token layer turned the quoted `&>` into a bare operator that
+    // took the next word (`b`) — or the `<<EOF` itself, the second row's
+    // `invalid redirect` parse error (rc 1) — as its operand. After the gate
+    // the two layers count the same words and the line runs, as bash does.
+    let dir = scratch("fq_heredoc");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo a '&>' b <<EOF\nbody\nEOF", "a &> b\n"),
+        ("echo '&>' <<EOF\nbody\nEOF", "&>\n"),
+    ] {
+        assert_word_opens_no_file(dir, script, want);
+    }
+}
+
+#[test]
+fn partially_quoted_combined_word_stays_an_operator() {
+    // Deviation pin, no behavior change: task #250 gates the `fq` flag only.
+    // fdshell reads the operator from the word's *text*, so a word that only
+    // *starts* quoted keeps redirecting where bash prints the literal and
+    // opens nothing: `'&>'f` is bash `&>f` on stdout / fdshell's `f` holding
+    // the `echo` newline; `echo x "&">y` is bash's `y` = `x &` / fdshell's
+    // `y` = `x`. Measured 2026-10-20; the mask side of this family belongs to
+    // task #264.
+    let dir = scratch("partial_operator_word");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; echo '&>'f"));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap(),
+        "\n",
+        "fdshell's `'&>'f` opens `f` (`echo`'s own newline lands in it)"
+    );
+    let (out, err, code) = run(&format!("cd {dir}; echo x \"&\">y"));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("y")).unwrap(),
+        "x\n",
+        "fdshell's `\"&\">y` writes `x` to `y` (bash: `x &`)"
+    );
+}

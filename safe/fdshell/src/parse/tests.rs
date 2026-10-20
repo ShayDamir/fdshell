@@ -1552,6 +1552,167 @@ fn test_bare_combined_operand_does_not_shift_the_heredoc_body() {
     assert_eq!(cmd.args, vec![c"a".into()]);
 }
 
+// --- a fully quoted `&>`-family word is a plain argument (task #250) ---------
+//
+// POSIX #4.1 removes quotes after tokenization, so a fully quoted word is
+// never an operator: `parse_bg_redirect` opens with the same `fq` gate
+// `parse_redirect` and `parse_here_string` have. The gate covers the whole
+// function — the attached, bare, pidvar and force-pidvar arms alike — so the
+// `pidvar` / `bg_force` asserts below are the point of the pidvar test: a
+// gate on the redirect construction alone passes without them.
+// Every expectation is `bash -c` (5.3.9) measured 2026-10-20 in a scratch dir.
+
+/// The one-word shape of a fully quoted `&>`-family word: `cmd` is `echo`, the
+/// word is the single argument, and the command carries no redirect, no job.
+fn assert_quoted_word_is_an_argument(line: &str, want: &str) {
+    let ParsedLine::Cmd(cmd) = parse(line.as_bytes()).unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.command, c"echo".into(), "{line:?}");
+    assert_eq!(
+        cmd.args,
+        vec![sys::ShortCStr::from_vec(want.as_bytes().to_vec()).unwrap()],
+        "{line:?}"
+    );
+    assert!(cmd.redirects.is_empty(), "{line:?}");
+    assert!(
+        cmd.pidvar.is_none(),
+        "{line:?}: a fully quoted word records no job"
+    );
+    assert!(!cmd.bg_force, "{line:?}: a fully quoted word forces no job");
+}
+
+#[test]
+fn test_fully_quoted_combined_word_is_an_argument() {
+    // The attached write and append arms.
+    for (line, want) in [
+        ("echo '&>q.txt'", "&>q.txt"),
+        ("echo \"&>q.txt\"", "&>q.txt"),
+        ("echo '&>>q.txt'", "&>>q.txt"),
+    ] {
+        assert_quoted_word_is_an_argument(line, want);
+    }
+}
+
+#[test]
+fn test_fully_quoted_pidvar_forms_are_arguments() {
+    // The two pidvar arms: `&>&name` and `&>|&name`.
+    for (line, want) in [
+        ("echo '&>&name'", "&>&name"),
+        ("echo '&>|&name'", "&>|&name"),
+    ] {
+        assert_quoted_word_is_an_argument(line, want);
+    }
+}
+
+#[test]
+fn test_fully_quoted_bare_combined_operator_is_an_argument() {
+    // The bare arms take the *next* token as their operand, so both words stay
+    // arguments: bash prints `hi &> f` and opens nothing.
+    for (line, op) in [("echo '&>' f", "&>"), ("echo '&>>' f", "&>>")] {
+        let ParsedLine::Cmd(cmd) = parse(line.as_bytes()).unwrap() else {
+            panic!("expected Cmd")
+        };
+        assert_eq!(cmd.command, c"echo".into(), "{line:?}");
+        let op = sys::ShortCStr::from_vec(op.as_bytes().to_vec()).unwrap();
+        assert_eq!(cmd.args, vec![op, c"f".into()], "{line:?}");
+        assert!(cmd.redirects.is_empty(), "{line:?}");
+    }
+}
+
+#[test]
+fn test_fully_quoted_operator_with_expansion_is_an_argument() {
+    // The whole word is quoted *including* its expansion, so its mask is
+    // all-`true`. A gate keyed on mask emptiness would read this word as an
+    // operator and create a file named `$(echo x)f` (measured, old tree);
+    // `fq` is the flag the tokenizer sets for exactly this shape.
+    let ParsedLine::Cmd(cmd) = parse(b"echo \"&>$(echo x)f\"").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"&>$(echo x)f".into()]);
+    assert!(cmd.redirects.is_empty());
+}
+
+#[test]
+fn test_quoted_operator_forms_keep_their_side_by_side_rule() {
+    // Fully quoted: a plain word (bash parity, task #250's gate).
+    let ParsedLine::Cmd(cmd) = parse(b"echo '&>' f").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"&>".into(), c"f".into()]);
+    assert!(cmd.redirects.is_empty());
+    // Unquoted: the operator, unchanged.
+    let ParsedLine::Cmd(cmd) = parse(b"echo &> f").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(
+        cmd.redirects,
+        vec![combined_def(RedirectDirection::Write, "f"),]
+    );
+    assert!(cmd.args.is_empty());
+    // Partially quoted: fdshell reads the operator from the word's *text*, so
+    // these keep redirecting where bash prints the literal and opens nothing
+    // (measured 2026-10-20). Pinned as-is: the mask side of this family is
+    // task #264's ruling, not #250's.
+    let ParsedLine::Cmd(cmd) = parse(b"echo '&>'f").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert!(cmd.args.is_empty(), "`'&>'f` is one operator word");
+    assert_eq!(
+        cmd.redirects,
+        vec![combined_def(RedirectDirection::Write, "f"),]
+    );
+    let ParsedLine::Cmd(cmd) = parse(b"echo a \"&\">b").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"a".into()]);
+    assert_eq!(
+        cmd.redirects,
+        vec![combined_def(RedirectDirection::Write, "b"),]
+    );
+}
+
+#[test]
+fn test_fully_quoted_combined_in_pipeline_stage() {
+    // Pipeline stages route through the same `finish_command` dispatch, so the
+    // single gate covers them: no second path into the `&>` family.
+    let ParsedLine::Pipeline(pl) = parse(b"echo '&>f' | cat").unwrap() else {
+        panic!("expected Pipeline")
+    };
+    assert_eq!(pl.commands[0].args, vec![c"&>f".into()]);
+    assert!(pl.commands[0].redirects.is_empty());
+    assert!(pl.commands[0].pidvar.is_none());
+    assert_eq!(pl.commands[1].command, c"cat".into());
+    assert!(pl.commands[1].args.is_empty());
+    assert!(pl.commands[1].redirects.is_empty());
+}
+
+#[test]
+fn test_fully_quoted_bare_operator_does_not_swallow_a_heredoc() {
+    // The byte-level heredoc scan honors quotes and counts the `<<EOF` body;
+    // the token layer used to turn the quoted `&>` into a bare operator that
+    // took the next word (`b`) — or the `<<EOF` itself, a parse error — as its
+    // operand. After the gate both layers see the same words: the `&>` is an
+    // argument and the heredoc is fd 0's redirect. bash parity, measured
+    // 2026-10-20 (`echo a &> b` prints `a &> b`, opens nothing).
+    let ParsedLine::Cmd(cmd) = parse(b"echo a '&>' b <<EOF\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"a".into(), c"&>".into(), c"b".into()]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_doc(0, c"body\n", true)]
+    );
+    let ParsedLine::Cmd(cmd) = parse(b"echo '&>' <<EOF\nbody\nEOF").unwrap() else {
+        panic!("expected Cmd")
+    };
+    assert_eq!(cmd.args, vec![c"&>".into()]);
+    assert_eq!(
+        cmd.redirects,
+        vec![RedirectDef::here_doc(0, c"body\n", true)]
+    );
+}
+
 #[test]
 fn test_renameat2() {
     let ParsedLine::Cmd(cmd) =
