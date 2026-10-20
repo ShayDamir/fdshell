@@ -445,6 +445,45 @@ fn ampersand_in_a_case_arm_is_a_background_job() {
     }
 }
 
+/// A comment written **behind** an arm closed at the `&` is still a comment:
+/// when the block-opener gate opens the run at the `&` it clears
+/// `book.state.word_active` (the separator arm's rule, task #354's risk R2), so
+/// the `esac` ends the block cleanly and the `#` that follows is never eaten as
+/// word data. bash 5.3.9 runs the arm's job and ignores the comment, rc 0; the
+/// pin is the job's file plus `wait`, not stdout (LESSONS).
+#[test]
+fn comment_after_a_case_block_closed_at_the_ampersand_is_a_comment() {
+    let dir = scratch_dir();
+    let f = dir.join("arm.txt").to_str().unwrap().to_string();
+    let script = format!("case x in x) builtin echo a >{f} & ;; esac # tail\nwait");
+    let (out, err, code) = run_in(&dir, &script);
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap_or_default(),
+        "a\n",
+        "the tail comment swallowed the arm's job"
+    );
+}
+
+/// A `case` block whose arm statement **and** the block itself both end in `&`
+/// (the block-level `&` is task **#352**'s family): bash forks the block as a
+/// job and the arm's statement as a job inside it, rc 0. Two jobs share stdout,
+/// so the pin is the arm's file plus `wait` — never the stdout bytes or their
+/// order (LESSONS).
+#[test]
+fn case_block_and_its_arm_statement_can_both_be_backgrounded() {
+    let dir = scratch_dir();
+    let f = dir.join("arm.txt").to_str().unwrap().to_string();
+    let script = format!("case x in x) builtin echo a >{f} & ;; esac &\nwait");
+    let (out, err, code) = run_in(&dir, &script);
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap_or_default(),
+        "a\n",
+        "#352: the block and its arm are both jobs; bash writes `a`"
+    );
+}
+
 /// Two `&` in one arm are two jobs; the arm whose closer is the bare `esac`
 /// (no `;;`) behaves the same (bash prints both, rc 0).
 #[test]
