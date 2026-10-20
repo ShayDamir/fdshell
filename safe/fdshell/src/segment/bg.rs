@@ -8,6 +8,7 @@
 use super::Segment;
 use super::book::Book;
 use super::line::flush_line;
+use crate::scan::heredoc;
 
 pub(super) mod split;
 use split::Split;
@@ -41,9 +42,21 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
             &mut book.runs,
         )
         .max(book.body_floor);
-        book.i = resume;
+        // The flush's resume is past every body region the physical line
+        // claims, so no later flush of this line may resume below it.
+        book.body_floor = resume;
+        // Command text behind the `&` on the same physical line is a **new
+        // statement** (task #313): the scan resumes right after the `&` and
+        // keeps the line's start, so the suffix's flush indexes the line's
+        // whole region list and claims the regions its own operators own.
+        // A line that ends at the `&` (blank, or a `#` comment behind it)
+        // keeps jumping past the body regions.
+        book.i = if line_continues(line, amp) {
+            amp + 1
+        } else {
+            resume
+        };
         book.start = book.i;
-        book.line_start = book.line_start.max(amp);
         // The `&` terminates the run it marked: no `;` precedes it any more.
         book.sep_since_run = false;
     } else {
@@ -58,6 +71,16 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
         book.start = amp + 1;
         book.i = amp + 1;
     }
+}
+
+/// `true` when command text follows the `&` on its own physical line: the
+/// bytes behind it, up to the line's newline, are non-blank and open with
+/// something other than a `#` comment. A comment-behind-`&` line ends at the
+/// `&`, so the scan keeps the body-region jump.
+fn line_continues(line: &[u8], amp: usize) -> bool {
+    let end = heredoc::line_end_after(line, amp);
+    let tail = line.get(amp + 1..end).unwrap_or(b"").trim_ascii();
+    !tail.is_empty() && !tail.starts_with(b"#")
 }
 
 /// A line whose first non-blank byte is `&` follows `i` (a newline split
