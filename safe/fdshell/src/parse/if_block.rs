@@ -6,9 +6,11 @@ use super::Token;
 use super::cond_bodies::condition_bodies;
 use super::part_text::part_text;
 use super::semi::List;
+use super::semi::Term;
 use super::semi::block_body;
-use super::semi::find_preceded_by_semi;
-use super::semi::trim_semi;
+use super::semi::body_end;
+use super::semi::find_preceded_by;
+use super::semi::trim_condition;
 use super::semi::up_to_closing;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
@@ -34,10 +36,12 @@ pub(crate) fn tokens_to_if(
     // The closing `fi` is the truncated slice's last token.
     let fi_idx = tokens.len() - 1;
 
+    // An `if`/`elif` condition is a compound list: `then` may sit behind the
+    // plain `&` as behind a `;` (task #354).
     let first_then =
-        find_preceded_by_semi(tokens, 1, b"then", line).ok_or(ParseError::MissingThen)?;
+        find_preceded_by(tokens, 1, b"then", line, Term::SemiAmp).ok_or(ParseError::MissingThen)?;
 
-    let cond_tokens = trim_semi(
+    let cond_tokens = trim_condition(
         tokens
             .get(1..first_then)
             .ok_or(ParseError::MissingCondition)?,
@@ -48,21 +52,24 @@ pub(crate) fn tokens_to_if(
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
-    while let Some(elif_idx) = find_preceded_by_semi(tokens, pos, b"elif", line) {
-        let then_idx = find_preceded_by_semi(tokens, elif_idx, b"then", line)
+    while let Some(elif_idx) = find_preceded_by(tokens, pos, b"elif", line, Term::SemiAmp) {
+        let then_idx = find_preceded_by(tokens, elif_idx, b"then", line, Term::SemiAmp)
             .ok_or(ParseError::MissingThenAfterElif)?;
         elif_pairs.push((elif_idx, then_idx));
         pos = then_idx;
     }
-    let else_idx = find_preceded_by_semi(tokens, pos, b"else", line);
+    let else_idx = find_preceded_by(tokens, pos, b"else", line, Term::SemiAmp);
 
     let first_end = match elif_pairs.first() {
         Some(&(ei, _)) => ei,
         None => else_idx.unwrap_or(fi_idx),
     };
-    // `first_end - 1` drops the `;` before the next keyword (POSIX requires it);
-    // a body glued to the closer has no token left here, so it is an empty body.
-    let raw = tokens.get(first_then + 1..first_end - 1).unwrap_or(&[]);
+    // The token before the closer is POSIX's `;` and drops out of the body, a
+    // plain `&` stays (it backgrounds the body's last statement, task #354), and
+    // so does any other word the closer is glued to.
+    let raw = tokens
+        .get(first_then + 1..body_end(tokens, first_end))
+        .unwrap_or(&[]);
     let then_body = part_text(text, block_body(raw, ParseError::EmptyThenBody)?)?;
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
@@ -86,5 +93,5 @@ fn span_verbatim(
     to: usize,
     err: ParseError,
 ) -> Result<ScriptText, Report<ParseError>> {
-    verbatim(text, trim_semi(tokens.get(from..to).ok_or(err)?))
+    verbatim(text, trim_condition(tokens.get(from..to).ok_or(err)?))
 }

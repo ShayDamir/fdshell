@@ -2,6 +2,7 @@ use super::Segment;
 pub(super) mod keyword;
 mod length;
 pub(super) mod midrun;
+pub(super) mod opener;
 use crate::brace::scan_function_block;
 use crate::keywords::leading_ws;
 use crate::scan::ScanState;
@@ -15,6 +16,9 @@ use alloc::vec::Vec;
 /// the block segment is pushed, and the cursor is rewound past the block's span
 /// with the line start the trailing runs continue from and the resume floor for
 /// the rest of the physical line.
+///
+/// The gate that picks this branch is the shared [`opener`] rule: the separator
+/// arm and the plain-`&` arm read it identically (task #354).
 pub(super) fn open<'a>(line: &'a [u8], raw: &[u8], book: &mut Book<'a>) {
     let (start, line_start) = (book.start, book.line_start);
     let part = raw.trim_ascii();

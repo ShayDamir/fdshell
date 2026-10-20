@@ -1,15 +1,16 @@
 use super::Token;
-use super::classify::parse_redirect;
 use super::semi::closing_keyword_index;
+use super::semi::is_list_terminator;
 use super::semi::verbatim;
 use super::value_spans;
 use crate::error::parse::ParseError;
 use crate::redirect::RedirectDef;
-use crate::scan::heredoc::span_operator;
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, bail, ensure};
+use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
+
+mod tail;
 
 /// The `{ …; }` group command (POSIX #1.2): the body text to run in the
 /// current shell, and the redirections written after the closing brace.
@@ -19,8 +20,9 @@ pub struct GroupBlock {
     pub redirects: Vec<RedirectDef>,
 }
 
-/// Parse the group tokens: the body between the braces, the required `;` (or
-/// newline) before `}`, and the trailing redirections.
+/// Parse the group tokens: the body between the braces, the required list
+/// terminator (`;`, newline or the plain `&`) before `}`, and the trailing
+/// redirections.
 pub(crate) fn tokens_to_group(
     tokens: &[Token],
     text: &ScriptText,
@@ -36,52 +38,22 @@ pub(crate) fn tokens_to_group(
         .iter()
         .any(|(t, _, _, _, _, _)| !t.eq_bytes(b";"));
     ensure!(has_word, ParseError::GroupEmpty);
-    // POSIX #1.2: `}` must be preceded by `;` or a newline. The tokenizer
-    // emits a `;` token for a newline, so `{ echo a` newline `}` is accepted.
-    // `closing_keyword_index` skips token 0 (the `{`), so `close` is never 0.
+    // POSIX #1.2: `}` must be preceded by a command-list terminator. The
+    // tokenizer emits a `;` token for a newline, so `{ echo a` newline `}` is
+    // accepted, and the plain `&` backgrounds the body's last statement
+    // (task #354: `{ echo hi & }`). `closing_keyword_index` skips token 0 (the
+    // `{`), so `close` is never 0.
     let before_close = tokens.get(close.saturating_sub(1));
-    let closes_after_semi = before_close.is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"));
     ensure!(
-        closes_after_semi,
+        before_close.is_some_and(is_list_terminator),
         ParseError::ExpectedSemicolonBeforeCloseBrace
     );
-    // The required `;` stays inside the body span: a `<<` operator's body lines
-    // sit between it and the operator, so trimming the trailing side would cut
-    // them out of the body text (the block-text-carries-its-bodies rule).
+    // The required terminator stays inside the body span: a `<<` operator's body
+    // lines sit between it and the operator, so trimming the trailing side would
+    // cut them out of the body text (the block-text-carries-its-bodies rule).
     let body = verbatim(text, body_tokens)?;
-    let redirects = tail_redirects(&split_close(tokens, close), line)?;
+    let redirects = tail::redirects(&split_close(tokens, close), line)?;
     Ok(GroupBlock { body, redirects })
-}
-
-/// The redirections written after `}`, in source order. A here-doc/here-string
-/// operator is checked first (it starts with `<`, which the read redirect would
-/// otherwise swallow); a pipeline, background, here-doc, or here-string form on
-/// the group is a parse error (each is a separate task), and so is a trailing
-/// plain word. The here-doc test is the shared raw-span shape rule, so the
-/// io-number form `{ …; } 3<<T` keeps the here-doc message instead of
-/// degrading to a trailing word.
-fn tail_redirects(tail: &[Token], line: &[u8]) -> Result<Vec<RedirectDef>, Report<ParseError>> {
-    let mut redirects = Vec::new();
-    let mut i = 0;
-    while i < tail.len() {
-        let (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
-        if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
-            bail!(ParseError::GroupHereDocNotSupported);
-        }
-        if let Some((def, extra)) = parse_redirect(tail, i)? {
-            redirects.push(def);
-            i += extra + 1;
-            continue;
-        }
-        if t.eq_bytes(b"|") {
-            bail!(ParseError::UnexpectedPipe);
-        }
-        if t.starts_with(b"&") {
-            bail!(ParseError::UnexpectedChar { ch: b'&' });
-        }
-        bail!(ParseError::GroupTrailingWord);
-    }
-    Ok(redirects)
 }
 
 /// The tokens after the closing brace, with `}` split off the glued form

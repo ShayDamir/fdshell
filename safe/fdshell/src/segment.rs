@@ -4,8 +4,6 @@ pub(super) mod book;
 pub(crate) mod group;
 mod line;
 
-use crate::brace::scan_function_block;
-use crate::keywords::{first_word_end, keyword_delta};
 use crate::scan::{Boundary, boundary};
 use alloc::vec::Vec;
 use book::{Book, Run};
@@ -71,9 +69,11 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             }
             // `mark` owns the cursor for the whole split (it flushes the runs
             // the `&` terminates), so the separator machinery must not touch
-            // the index it left behind.
+            // the index it left behind. The same opener gate the separator arm
+            // applies decides which branch this is: a run that opens a block is
+            // opened as a block, so the `&` stays inside the block's text.
             Boundary::Async => {
-                bg::mark(line, &mut book);
+                block::opener::open_at_amp(line, &mut book, in_block);
                 continue;
             }
             _ => {}
@@ -83,14 +83,8 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         let raw = line.get(book.start..book.i).unwrap_or(b"");
         let part = raw.trim_ascii();
         let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-        let word_end = first_word_end(part, book.start + lead);
 
-        if !in_block
-            && !part.is_empty()
-            && (keyword_delta(part, line, word_end) == Some(1)
-                || scan_function_block(line, part, book.start + lead, book.state.quotes())
-                    .is_some())
-        {
+        if !in_block && block::opener::opens_run(line, raw, book.start, book.state.quotes()) {
             block::open(line, raw, &mut book);
         } else {
             if !part.is_empty() {

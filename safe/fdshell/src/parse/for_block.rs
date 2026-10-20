@@ -3,7 +3,9 @@ mod words;
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::part_text::part_text;
-use crate::parse::semi::{List, block_body, find_preceded_by_semi, up_to_closing};
+use crate::parse::semi::{
+    List, Term, block_body, find_preceded_by, is_list_terminator, up_to_closing,
+};
 use crate::parse::word_quoted::keyword_word;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
@@ -48,8 +50,10 @@ pub(crate) fn tokens_to_for(
         .ok_or(ParseError::ExpectedIn)?
         + 2;
 
+    // The `for` word list takes no list terminator (`for i in 1 & do` is bash's
+    // syntax error), so its `do` is searched with `;` alone.
     let do_idx =
-        find_preceded_by_semi(tokens, in_pos, b"do", line).ok_or(ParseError::ExpectedDo)?;
+        find_preceded_by(tokens, in_pos, b"do", line, Term::Semi).ok_or(ParseError::ExpectedDo)?;
 
     // A body-position heredoc's bodies sit in the block text after the closing
     // `done`: the tokens past it are body data, not block structure (task #273,
@@ -65,10 +69,11 @@ pub(crate) fn tokens_to_for(
             .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
     );
+    // POSIX #2.9.1: the closer is preceded by a command-list terminator — `;`
+    // (a newline tokenizes as one), or the plain `&` that backgrounds the body's
+    // last statement (task #354: `for i in 1; do echo hi & done`).
     ensure!(
-        tokens
-            .get(done_idx - 1)
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";")),
+        tokens.get(done_idx - 1).is_some_and(is_list_terminator),
         ParseError::ExpectedSemicolonBeforeDone
     );
 

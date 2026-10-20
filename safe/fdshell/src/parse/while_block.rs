@@ -1,8 +1,8 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::cond_bodies::condition_bodies;
-use crate::parse::semi::{List, block_body, find_preceded_by_semi, up_to_closing};
-use crate::parse::semi::{trim_semi, verbatim};
+use crate::parse::semi::{List, Term, block_body, find_preceded_by, up_to_closing};
+use crate::parse::semi::{trim_condition, verbatim};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -38,10 +38,13 @@ pub(crate) fn tokens_to_loop(
     // The closing `done` is the truncated slice's last token.
     let done_idx = tokens.len() - 1;
 
-    let do_idx = find_preceded_by_semi(tokens, 1, b"do", line).ok_or(ParseError::ExpectedDo)?;
+    // A loop condition is a compound list, so its `do` may be preceded by the
+    // plain `&` (task #354: `while : & do :; done`; the job itself is #356's).
+    let do_idx =
+        find_preceded_by(tokens, 1, b"do", line, Term::SemiAmp).ok_or(ParseError::ExpectedDo)?;
     ensure!(do_idx >= 2, ParseError::ExpectedCondition);
 
-    let cond_tokens = trim_semi(tokens.get(1..do_idx).ok_or(ParseError::ExpectedDo)?);
+    let cond_tokens = trim_condition(tokens.get(1..do_idx).ok_or(ParseError::ExpectedDo)?);
     let condition = verbatim(text, cond_tokens)?;
     let cond_bodies = condition_bodies(text, cond_tokens);
 

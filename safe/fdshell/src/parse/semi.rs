@@ -1,5 +1,4 @@
 use super::Token;
-use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
@@ -7,31 +6,29 @@ use sys::ScriptText;
 use sys::ShortCStr;
 
 mod closing;
+mod preceded;
 
 pub(crate) use closing::{List, closing_keyword_index, list_closing_keyword_index, up_to_closing};
+pub(crate) use preceded::{Term, find_preceded_by, is_list_terminator};
 
-/// The `;`-preceded keyword word after `start`: `needle` is a keyword only
-/// when it carries no quote byte ([`keyword_word`], task #247), so a quoted
-/// `then`/`do`/`else` is a command word and the block reports its own missing
-/// keyword (bash: a syntax error).
-pub(crate) fn find_preceded_by_semi(
-    tokens: &[Token],
-    start: usize,
-    needle: &[u8],
-    line: &[u8],
-) -> Option<usize> {
-    for (i, tok) in tokens.iter().enumerate().skip(start) {
-        let preceded = i > 0
-            && tokens
-                .get(i - 1)
-                .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b";"));
-        if keyword_word(tok, line, needle) && preceded {
-            return Some(i);
-        }
+/// The exclusive end of a body slice written **before** the closer at
+/// `closer_idx`: POSIX's `;` there is dropped (the body text ends at its last
+/// command), a plain-`&` terminator is **kept** — the body's own scan turns it
+/// into a background job (task #354) — and any other word the closer is glued to
+/// stays in the body, as `if_block` applies today.
+pub(crate) fn body_end(tokens: &[Token], closer_idx: usize) -> usize {
+    let glued = tokens
+        .get(closer_idx.saturating_sub(1))
+        .is_some_and(|(t, _, _, _, _, _)| !t.eq_bytes(b";"));
+    if glued {
+        closer_idx
+    } else {
+        closer_idx.saturating_sub(1)
     }
-    None
 }
 
+/// The body tokens with the `;`s bracketing them trimmed: the `;` a shell
+/// separator leaves around a body is not a word of the body.
 pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
     let start = tokens
         .iter()
@@ -44,6 +41,21 @@ pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
         .count();
     let end = tokens.len().saturating_sub(end);
     tokens.get(start..end).unwrap_or(&[])
+}
+
+/// A **condition** slice: on top of [`trim_semi`], the plain `&` that precedes a
+/// clause keyword terminates the compound list, and the condition is run as its
+/// own command list (its scanner never saw the `&`, so nothing here consumes it):
+/// `if true & then …` runs `true` as the condition (task #354; the background
+/// job of a `&`-terminated condition is #356's).
+pub(crate) fn trim_condition(tokens: &[Token]) -> &[Token] {
+    let body = trim_semi(tokens);
+    let amp = usize::from(
+        body.last()
+            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"&")),
+    );
+    let end = body.len().saturating_sub(amp);
+    body.get(..end).unwrap_or(&[])
 }
 
 /// A block arm's body tokens: `tokens` with the `;`s bracketing it trimmed,
