@@ -471,3 +471,34 @@ fn ampersand_in_a_case_arm_buffers_until_the_closer_arrives() {
     assert!(out.contains("a"), "stdout: {out:?}");
     assert!(!err.contains("parse error"), "parse error: {err}");
 }
+
+/// A here-doc statement **behind** a plain `&` on the same line (task #313):
+/// the prompt keeps reading the four body lines (`> ` ×4 — both bodies), the
+/// buffer runs with both bodies attached, and no body line is ever treated as
+/// a statement (before the fix the suffix's body lines answered as `y` and `B`
+/// "not found"). The background job is reaped by the `wait` line, and the
+/// prompt count is one per read: the shape, `wait`, `exit`.
+#[test]
+fn heredocs_on_both_sides_of_an_ampersand_span_their_lines() {
+    let (out, err, code) = run_repl("cat <<A & cat <<B\nx\nA\ny\nB\nwait\nexit\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(
+        out.starts_with("fdshell> > > > > "),
+        "four continuations expected: {out:?}"
+    );
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    // The continuation prompts, counted outside the `fdshell> ` prompts (each
+    // of which ends in `> `).
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        4,
+        "continuations: {out:?}"
+    );
+    // The bodies are the output; their order is the job's, so never pinned.
+    assert!(out.contains('x') && out.contains('y'), "stdout: {out:?}");
+    assert!(
+        !err.contains("not found"),
+        "body line ran as a statement: {err}"
+    );
+    assert!(!err.contains("parse error"), "parse error: {err}");
+}

@@ -2362,3 +2362,150 @@ fn heredoc_leading_newline_consumes_its_body() {
         "body must not leak: {err:?}"
     );
 }
+
+/// Task #313: the shapes behind a plain `&` that fdshell and bash still
+/// disagree on, pinned **as measured** (never silently accepted) with the owner
+/// named. Every row was measured against `bash -c` on 2026-10-20.
+///
+/// * A `#` comment behind the `&`: the comment ends the physical line
+///   (`Book::resume_past`), so the run behind the `&` trails its own line and
+///   is flushed body-less — the rule
+///   `segment/line/tests.rs::flush_line_multi_line_runs_are_body_less` pins,
+///   and the twin `cat <<A # note` (no `&`) has always reported the same way.
+///   fdshell rc 1, bash rc 0 with both bodies.
+/// * Glued `<<A&`: `&` is a **word byte** for the tokenizer
+///   (`scan::heredoc::lines::token_word_end` says so explicitly), so the
+///   byte-level delimiter is `A&` and the line's region list is empty. Owner:
+///   the glued-pair family (the tokenizer's split set), not this task.
+/// * A redirect-only suffix (`<<B` / `<<U` with no command word): bash runs a
+///   bare redirection; fdshell runs `<<B` as a command word. Owners **#303**
+///   and **#345**.
+#[test]
+fn a_heredoc_behind_an_ampersand_known_divergences() {
+    // The `#`-behind-`&` row and its glued twin: the prefix job runs (its body
+    // prints), the suffix is the parse error.
+    for (script, delim) in [
+        ("cat <<A & cat <<B # note\nx\nA\ny\nB", "B"),
+        ("cat <<A& cat <<B\nx\nA\ny\nB", "B"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "script {script:?}: out={out}");
+        assert!(
+            err.contains(&format!("missing terminating delimiter line '{delim}'")),
+            "script {script:?}: stderr={err}"
+        );
+    }
+    // The redirect-only suffix: the prefix's body prints, the suffix is a
+    // command lookup (bash: rc 0, no complaint).
+    for (script, word) in [
+        ("cat <<A & <<B\nx\nA\ny\nB", "\"<<B\""),
+        ("echo hi <<T & <<U\nbody\nT\nb2\nU", "\"<<U\""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "script {script:?}: out={out}");
+        assert!(
+            err.contains(&format!("failed to resolve command path: {word}")),
+            "script {script:?}: stderr={err}"
+        );
+    }
+}
+
+/// Task #313, the all-or-nothing rows of the same family. A physical line's
+/// region list is computed whole: an operator whose body is missing, or whose
+/// delimiter cannot be read, takes the **whole line's** list with it, so every
+/// statement on that line is body-less and the parse layer reports the shape
+/// (owner **#275**). bash reads to EOF with a warning and runs on.
+#[test]
+fn a_heredoc_behind_an_ampersand_reports_a_missing_body() {
+    // The first body never arrives: `A` is the report (bash: two EOF warnings,
+    // rc 0).
+    let (out, err, code) = run("cat <<A & cat <<B\ny\nB");
+    assert_eq!(code, 1, "out={out}");
+    assert!(
+        err.contains("missing terminating delimiter line 'A'"),
+        "stderr={err}"
+    );
+    // `cat <<A &` with no body lines at all: bash warns at EOF and exits 0.
+    let (_out, err, code) = run("cat <<A &");
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("missing terminating delimiter line 'A'"),
+        "stderr={err}"
+    );
+    // A bare `<<` behind the `&`: bash's rc 2 syntax error, fdshell's rc 1
+    // `invalid redirect syntax` — the same rc family, after the fix the prefix
+    // prints its body first.
+    let (out, err, code) = run("cat <<A & cat <<\nx\nA");
+    assert_eq!(code, 1, "out={out}");
+    assert!(err.contains("invalid redirect syntax"), "stderr={err}");
+    // Unterminated bodies next to the `&` (the pre-existing heredoc rule,
+    // owner #266 for the terminator-is-statement-text case): bash warns and
+    // reads to EOF, fdshell bails.
+    for script in [
+        "echo hi <<T &\nbody\n T\necho after",
+        "echo hi <<T &\nbody\nT; echo after",
+        "echo hi <<T &\r\nbody\r\nT\r\n",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "script {script:?}");
+        assert!(
+            err.contains("missing terminating delimiter line 'T'"),
+            "script {script:?}: stderr={err}"
+        );
+    }
+}
+
+/// Task #313, the deferral and block-behind-`&` rows (measured 2026-10-20):
+///
+/// * `cat <<A\n & cat <<B` — the line-deferral of task #326 (a newline whose
+///   next line opens with `&`): fdshell attaches both bodies and runs the pair
+///   (rc 0), bash runs the line as garbage (`"y" not found`, rc 127). fdshell
+///   is the *nicer* side here; the row pins it so the deferral cannot regress
+///   into the junk shape.
+/// * `cat <<A & cat <<B` + a third heredoc line below: both shells produce
+///   junk (the body of the third operator lands in the middle of the run).
+/// * `cat <<A & if true; then cat <<B … fi` — a **block opened behind the
+///   `&`**: the block's span necessarily covers the prefix's body lines, so
+///   they become statements of the block body (`x`, `A` printed twice). Owners
+///   **#352**/**#316** (the one-job async list family); bash prints both bodies.
+#[test]
+fn a_heredoc_behind_an_ampersand_deferral_and_block_rows() {
+    let (out, err, code) = run("cat <<A\n & cat <<B\nx\nA\ny\nB");
+    assert_eq!(code, 0, "out={out} stderr={err}");
+    let mut lines: Vec<&str> = out.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["x", "y"], "stdout={out}");
+
+    let (out, _err, code) = run("cat <<A & cat <<B\ncat <<C\nx\nA\ny\nB\nz\nC");
+    assert_eq!(code, 1);
+    // The job's output has no order, so the lines are a set (LESSONS).
+    let mut lines: Vec<&str> = out.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["cat <<C", "x", "y"], "stdout={out}");
+
+    let (out, _err, code) = run("cat <<A & if true; then cat <<B\nx\nA\ny\nB\nfi");
+    assert_eq!(code, 0);
+    // Set again: the backgrounded prefix and the block body interleave.
+    let mut lines: Vec<&str> = out.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["A", "x", "x", "y"], "stdout={out}");
+}
+
+/// Task #313, the case-arm rows. `case x in x) echo hi <<T & ;; esac` with the
+/// body **below** runs the arm's statement with its body (bash rc 0, identical
+/// — the block-text `&` of task #354); with the `case` unclosed (`& ;;` and no
+/// closer behind) fdshell reports the missing terminator where bash reports its
+/// rc 2 EOF syntax error (the block-text `& ;;` family, #354/#355).
+#[test]
+fn a_heredoc_at_the_end_of_a_case_arm_with_an_ampersand() {
+    let (out, err, code) = run("case x in x) echo hi <<T & ;; esac\nbody\nT");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+
+    let (_out, err, code) = run("case x in x) echo hi <<T & ;;\nesac");
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("missing terminating delimiter line 'T'"),
+        "stderr={err}"
+    );
+}

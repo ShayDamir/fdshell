@@ -631,3 +631,123 @@ fn a_semi_semi_outside_a_block_stays_an_invalid_split() {
         str::from_utf8(&out.stderr).unwrap_or_default()
     );
 }
+
+/// Task #313: a here-doc statement written **behind** a plain `&` on the same
+/// physical line is a statement of its own, with its own body region. bash
+/// backgrounds the prefix and runs the suffix in the foreground; the measured
+/// pair (both bodies, rc 0) is now identical. Before the fix the suffix's body
+/// lines ran as statements (`"y" not found`, `"B" not found`): the flush the
+/// `&` performed parked the cursor past the whole line's body regions, so the
+/// suffix command text was never scanned.
+///
+/// Every row ends with `wait` as its **last** line: a bare `wait` at the end of
+/// a line inside a multi-line script opens fdshell's event-`wait` block
+/// (`POSIX_COMPATIBILITY.md` "`wait` is also a block keyword"), and the reap is
+/// what closes the harness's stdout pipe. Output is compared as a **set**:
+/// parent and child interleave, order is never pinned (LESSONS).
+#[test]
+fn a_heredoc_behind_an_ampersand_prints_both_bodies() {
+    for (shape, want) in [
+        ("cat <<A & cat <<B\nx\nA\ny\nB", vec!["x", "y"]),
+        ("cat <<A & cat <<'B'\nx\nA\ny\nB", vec!["x", "y"]),
+        ("cat <<A & cat <<-B\nx\nA\n\ty\n\tB", vec!["x", "y"]),
+        ("cat <<A & cat <<B | wc -l\nx\nA\ny\nB", vec!["1", "x"]),
+        (
+            "cat <<A & cat <<B & cat <<C\nx\nA\ny\nB\nz\nC",
+            vec!["x", "y", "z"],
+        ),
+        ("cat <<A & cat <<B\t\nx\nA\ny\nB", vec!["x", "y"]),
+        ("cat <<A   &   cat <<B\nx\nA\ny\nB", vec!["x", "y"]),
+    ] {
+        let out = run(&format!("{shape}\nwait"));
+        assert_eq!(
+            rc(&out),
+            0,
+            "shape {shape:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert_eq!(
+            lines(&out),
+            want,
+            "shape {shape:?}: stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+}
+
+/// The io-number twin (`cat 3<<B` behind the `&`, the form task #276 measures):
+/// the suffix body goes to the descriptor, so stdout carries the prefix's body
+/// only. The fd 3 state goes through `run_fd3_closed` (LESSONS, task #312).
+#[test]
+fn a_heredoc_on_fd3_behind_an_ampersand_writes_to_the_descriptor() {
+    let (out, err, code) = run_fd3_closed("cat <<A & cat 3<<B\nx\nA\ny\nB\nexec 3>&-\nwait");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["x"], "stdout={out}");
+}
+
+/// A statement written after the pair runs once the bodies are reaped: all
+/// three lines land, rc 0 (measured identical to bash). `wait;` is the
+/// statement form — a bare `wait` at the line end opens the event-`wait` block.
+#[test]
+fn a_statement_follows_the_heredoc_pair_behind_an_ampersand() {
+    let out = run("cat <<A & cat <<B\nx\nA\ny\nB\nwait;\nbuiltin echo tail");
+    assert_eq!(rc(&out), 0);
+    assert_eq!(lines(&out), ["tail", "x", "y"]);
+}
+
+/// The async **ordering** rule for a here-doc job: the backgrounded body's
+/// stdout has no order relative to the parent's, so the job's stdout goes to a
+/// file (LESSONS: a background-job pin pins the job record, never the output).
+/// bash writes the same bytes to the same file.
+#[test]
+fn the_backgrounded_heredoc_writes_its_body_to_its_own_file() {
+    let s = scratch("bgdoc");
+    let out = run(&format!("cat <<T >{s} &\nbody\nT\nwait"));
+    let body = contents(&s);
+    assert_eq!(rc(&out), 0, "stderr={:?}", str::from_utf8(&out.stderr));
+    assert_eq!(body, "body\n");
+}
+
+/// `$!` reports a here-doc-carrying async job numerically and `wait` reaps it
+/// (the acceptance phrase "the background job is reaped"; fdshell, like
+/// `bash -c`, never joins background jobs at shell exit — reaping is `wait`'s).
+#[test]
+fn a_backgrounded_heredoc_reports_and_reaps_its_job() {
+    let out = run("cat <<T &\nbody\nT\nbuiltin echo pid=$!; wait");
+    assert_eq!(rc(&out), 0);
+    assert!(
+        reported_pid(&out) > 0,
+        "stdout={}",
+        str::from_utf8(&out.stdout).unwrap_or_default()
+    );
+    contains_all(&out, &["body"]);
+}
+
+/// The block-position twins: a plain `&` **inside a block's text** terminates
+/// its statement (task #354) and the here-doc statement behind it on the same
+/// line is a new statement of the same body, owning its own region. All five
+/// closers measured identical to bash: both bodies, rc 0.
+#[test]
+fn a_heredoc_behind_an_ampersand_inside_a_block_prints_both_bodies() {
+    for shape in [
+        "if true; then cat <<A & cat <<B\nx\nA\ny\nB\nfi",
+        "{ cat <<A & cat <<B\nx\nA\ny\nB\n}",
+        "f(){ cat <<A & cat <<B\nx\nA\ny\nB\n}\nf",
+        "for i in 1; do cat <<A & cat <<B\nx\nA\ny\nB\ndone",
+        "case x in x) cat <<A & cat <<B\nx\nA\ny\nB\n;;\nesac",
+    ] {
+        let out = run(shape);
+        assert_eq!(
+            rc(&out),
+            0,
+            "shape {shape:?}: {:?}",
+            str::from_utf8(&out.stderr)
+        );
+        assert_eq!(
+            lines(&out),
+            ["x", "y"],
+            "shape {shape:?}: stdout={}",
+            str::from_utf8(&out.stdout).unwrap_or_default()
+        );
+    }
+}
