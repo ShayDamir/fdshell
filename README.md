@@ -352,6 +352,15 @@ unquoted delimiter). So `cat <<T` with the body line `{a,b}` prints `{a,b}`, and
 so does the same here-document inside a single-line keyword block's arm —
 `if true; then cat <<T; fi` + `{a,b}` + `T` prints `{a,b}`.
 
+The **delimiter line** is heredoc structure, not a command line: its
+metacharacters, quotes and expansion bytes are inert, so a delimiter word may
+contain them and its own terminator line is matched literally —
+`cat <<'a <<b'` + `body` + `a <<b`, `cat <<'a|b'` + `body` + `a|b` and
+`cat <<a\"b` + `body` + `a"b` all print `body` (rc 0, as bash). Its words stay,
+so a block keeps the delimiter line inside its own text and the statement
+written behind a terminator (`cat <<'a <<b' && echo after` + body + terminator)
+is a separate statement.
+
 A physical line owns **one** body stream, and its regions are handed out in
 operator order to the operators written on that line: the pre-block statements
 first, then the block's own operators, then the trailing statements. A
