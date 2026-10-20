@@ -2941,3 +2941,14 @@ its own file; pinning the concatenation is a flake. fd-3 rows go through
 `run_fd3_closed` (LESSONS/#312), and `git status --porcelain` after the run
 catches a leaked `async-*` scratch file before it breaks
 `glob::tests::relative_pattern_walks_from_the_base_fd`.
+
+The two missed mutants of this change (`cargo mutants -f
+safe/fdshell/src/segment/bg.rs`, 27.1.0, 22 mutants: 20 caught) are
+`mark`'s `amp + 1` → `amp * 1` and `→ amp - 1` in the `line_continues` arm. Both
+are **provably equivalent** to the original and are accepted: the sole
+advancement rule directly below normalizes every value ≤ `amp` to `amp + 1`
+(`if book.i <= amp { book.start = amp + 1; book.i = amp + 1 }`), so the final
+`Book` state is identical byte-for-byte — the same equivalence class the
+"clamp the tail guard already enforces" entry above records, reached from the
+other side. Deleting the tail guard is *not* an option (that entry pins what it
+protects); the arm's value is only the **fast path** of a rule with one owner.
