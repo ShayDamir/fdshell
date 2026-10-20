@@ -24,6 +24,25 @@ pub(crate) fn is_list_terminator(tok: &Token) -> bool {
     tok.0.eq_bytes(b";") || tok.0.eq_bytes(b"&")
 }
 
+/// The `;` **token** at `idx` of `tokens` is glued right behind a plain `&`
+/// when `tokens[idx-1]` is the `&` and the byte the token points at in `line`
+/// is a real `;`. The byte test is the whole rule: the tokenizer emits a `;`
+/// token for a `;` byte, a newline and `)` alike ([`crate::parse::token`]),
+/// and bash's semantics distinguish them — `do echo a & ; done` is a syntax
+/// error, `do echo a &\ndone` is valid (task #355). A newline token is never
+/// glue; `false` at index 0, on any word behind a non-`&`, and off the end.
+pub(crate) fn amp_semi(tokens: &[Token], line: &[u8], idx: usize) -> bool {
+    let Some((t, start, _, _, _, _)) = tokens.get(idx) else {
+        return false;
+    };
+    if !t.eq_bytes(b";") || line.get(*start) != Some(&b';') {
+        return false;
+    }
+    tokens
+        .get(idx.saturating_sub(1))
+        .is_some_and(|(p, _, _, _, _, _)| idx > 0 && p.eq_bytes(b"&"))
+}
+
 /// The terminator set of one [`Term`] test.
 fn precedes(tok: &Token, term: Term) -> bool {
     match term {

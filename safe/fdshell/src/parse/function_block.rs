@@ -1,5 +1,5 @@
 use super::Token;
-use super::semi::{trim_semi, verbatim};
+use super::semi::{trim_body, verbatim};
 use super::word_quoted::{keyword_word, word_quoted};
 use crate::error::parse::ParseError;
 use crate::keywords::{name_len, quoted_word};
@@ -88,7 +88,7 @@ pub(crate) fn tokens_to_function(
     let body_tokens = tokens
         .get(open + 1..close)
         .ok_or(ParseError::FunctionMissingCloseBrace)?;
-    let body = verbatim(text, trim_semi(body_tokens))?;
+    let body = verbatim(text, trim_body(body_tokens, line))?;
     Ok(FunctionDef { name, body })
 }
 

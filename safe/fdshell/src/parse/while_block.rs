@@ -44,7 +44,7 @@ pub(crate) fn tokens_to_loop(
         find_preceded_by(tokens, 1, b"do", line, Term::SemiAmp).ok_or(ParseError::ExpectedDo)?;
     ensure!(do_idx >= 2, ParseError::ExpectedCondition);
 
-    let cond_tokens = trim_condition(tokens.get(1..do_idx).ok_or(ParseError::ExpectedDo)?);
+    let cond_tokens = trim_condition(tokens.get(1..do_idx).ok_or(ParseError::ExpectedDo)?, line);
     let condition = verbatim(text, cond_tokens)?;
     let cond_bodies = condition_bodies(text, cond_tokens);
 
@@ -52,6 +52,7 @@ pub(crate) fn tokens_to_loop(
         text,
         block_body(
             tokens.get(do_idx + 1..done_idx).unwrap_or(&[]),
+            line,
             ParseError::EmptyDoBody,
         )?,
     )?;

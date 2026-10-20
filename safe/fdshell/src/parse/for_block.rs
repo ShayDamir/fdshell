@@ -81,6 +81,7 @@ pub(crate) fn tokens_to_for(
         text,
         block_body(
             tokens.get(do_idx + 1..done_idx).unwrap_or(&[]),
+            line,
             ParseError::EmptyDoBody,
         )?,
     )?;

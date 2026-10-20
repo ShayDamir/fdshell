@@ -1,8 +1,8 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::part_text::part_text;
-use crate::parse::semi::trim_semi;
-use error_stack::Report;
+use crate::parse::semi::{amp_semi, trim_body};
+use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 
 /// Extract one clause body starting at `body_start`, up to the `;;`
@@ -20,6 +20,7 @@ pub(crate) fn body(
     body_start: usize,
     esac_idx: usize,
 ) -> Result<(ScriptText, usize), Report<ParseError>> {
+    let line = text.as_bytes().change_context(ParseError::Never)?;
     let body_slice = tokens.get(body_start..esac_idx).unwrap_or(&[]);
     let end = body_slice
         .windows(2)
@@ -27,13 +28,27 @@ pub(crate) fn body(
         .map(|i| body_start + i);
     match end {
         Some(end) => {
-            let b = part_text(text, trim_semi(tokens.get(body_start..end).unwrap_or(&[])))?;
+            // A `;` glued behind a plain `&` is the statement terminator, not
+            // the `;;` clause separator (task #355): keep the pair's head in
+            // the body so the arm's own scan reports the `& ;` split (bash
+            // rc 2); a glued `;;` pair is the separator itself, and the
+            // resume stays past the pair — the leftover tail of a non-glued
+            // pair is absorbed by `parse_clauses`' leading-`;` skip.
+            let head_glued = tokens
+                .get(end)
+                .zip(tokens.get(end + 1))
+                .is_some_and(|(h, t)| h.2 == t.1);
+            let keep = usize::from(!head_glued && amp_semi(body_slice, line, end - body_start));
+            let b = part_text(
+                text,
+                trim_body(tokens.get(body_start..end + keep).unwrap_or(&[]), line),
+            )?;
             Ok((b, end + 2))
         }
         None => {
             let b = part_text(
                 text,
-                trim_semi(tokens.get(body_start..esac_idx).unwrap_or(&[])),
+                trim_body(tokens.get(body_start..esac_idx).unwrap_or(&[]), line),
             )?;
             Ok((b, esac_idx))
         }

@@ -45,9 +45,17 @@ pub(crate) fn tokens_to_if(
         tokens
             .get(1..first_then)
             .ok_or(ParseError::MissingCondition)?,
+        line,
     );
 
-    let condition = span_verbatim(text, tokens, 1, first_then, ParseError::MissingCondition)?;
+    let condition = span_verbatim(
+        text,
+        tokens,
+        1,
+        first_then,
+        line,
+        ParseError::MissingCondition,
+    )?;
     let cond_bodies = condition_bodies(text, cond_tokens);
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
@@ -65,12 +73,13 @@ pub(crate) fn tokens_to_if(
         None => else_idx.unwrap_or(fi_idx),
     };
     // The token before the closer is POSIX's `;` and drops out of the body, a
-    // plain `&` stays (it backgrounds the body's last statement, task #354), and
-    // so does any other word the closer is glued to.
+    // plain `&` stays (it backgrounds the body's last statement, task #354),
+    // so does a `;` glued right behind that `&` (the body's own scan rejects
+    // the split, task #355), and so does any other word the closer is glued to.
     let raw = tokens
-        .get(first_then + 1..body_end(tokens, first_end))
+        .get(first_then + 1..body_end(tokens, line, first_end))
         .unwrap_or(&[]);
-    let then_body = part_text(text, block_body(raw, ParseError::EmptyThenBody)?)?;
+    let then_body = part_text(text, block_body(raw, line, ParseError::EmptyThenBody)?)?;
 
     let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
     let else_body = else_idx
@@ -85,13 +94,15 @@ pub(crate) fn tokens_to_if(
     })
 }
 
-/// The verbatim text of `tokens[from..to]`; `err` when the range is absent.
+/// The verbatim text of `tokens[from..to]` as a trimmed condition slice;
+/// `err` when the range is absent.
 fn span_verbatim(
     text: &ScriptText,
     tokens: &[Token],
     from: usize,
     to: usize,
+    line: &[u8],
     err: ParseError,
 ) -> Result<ScriptText, Report<ParseError>> {
-    verbatim(text, trim_condition(tokens.get(from..to).ok_or(err)?))
+    verbatim(text, trim_condition(tokens.get(from..to).ok_or(err)?, line))
 }
