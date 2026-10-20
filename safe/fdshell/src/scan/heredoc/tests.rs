@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::{body_regions, skip, skip_region, unterminated};
+use super::{body_regions, skip, skip_region, terminator_spans, unterminated};
 use alloc::vec;
 
 /// The delimiter word is a word, so it gets POSIX quote removal in
@@ -339,6 +339,62 @@ fn body_regions_of_a_semicolon_terminated_run_without_a_region() {
         "a `<<` inside `$( … )` is substitution text"
     );
     assert!(body_regions(b"if true; then echo hi # <<T; fi\nb\nT\n").is_empty());
+}
+
+// The delimiter line is the second half of the same scan: one span per heredoc,
+// its bytes only (the terminating newline excluded), derived from the region's
+// terminator start. Two operators on one line yield two spans, in order.
+#[test]
+fn terminator_spans_are_the_delimiter_lines_of_the_regions() {
+    assert_eq!(
+        terminator_spans(b"cat <<EOF\nbody\nEOF\necho x"),
+        vec![(15, 18)]
+    );
+    // The delimiter is the last line and the text has no trailing newline: the
+    // span runs to `line.len()`.
+    assert_eq!(terminator_spans(b"cat <<EOF\nbody\nEOF"), vec![(15, 18)]);
+    assert_eq!(
+        terminator_spans(b"cat <<A; cat <<B\nb1\nA\nb2\nB\n"),
+        vec![(20, 21), (25, 26)]
+    );
+}
+
+// A `;`-terminated arm line (`regions::semi_terminated_regions`) has its delimiter
+// line on the following lines, and so does a tab-indented `<<-` terminator:
+// the span is the line's bytes, indentation included.
+#[test]
+fn terminator_spans_of_a_semicolon_terminated_arm_line() {
+    assert_eq!(
+        terminator_spans(b"if true; then cat <<T; fi\n{a,b}\nT\n"),
+        vec![(32, 33)]
+    );
+    assert_eq!(
+        terminator_spans(b"if true; then cat <<-T; fi\n\t{a,b}\n\tT\n"),
+        vec![(34, 36)]
+    );
+}
+
+// An empty delimiter line has no bytes of its own (its newline is excluded), so
+// it yields no span; a missing delimiter line yields no region at all, hence no
+// span — the parse layer's `missing terminating delimiter line` stays its error.
+#[test]
+fn terminator_spans_of_an_empty_or_missing_delimiter_line() {
+    assert!(terminator_spans(b"cat <<''\nbody\n\n").is_empty());
+    assert!(terminator_spans(b"cat <<EOF\nbody").is_empty());
+    assert!(terminator_spans(b"cat <<EOF\nbody\nNOPE").is_empty());
+}
+
+// A terminator line may carry an unbalanced quote byte (`<<a\"b` delimits the
+// literal `a"b`, task #207's rule), so its span is scanned as opaque data: the
+// span covers the quote bytes exactly, and the region ends where they start.
+#[test]
+fn terminator_spans_of_an_unbalanced_quote_delimiter_line() {
+    let line = b"cat <<a\\\"b\nbody\na\"b";
+    assert_eq!(body_regions(line), vec![(11, 16)]);
+    assert_eq!(terminator_spans(line), vec![(16, 19)]);
+    let line = b"cat <<'a <<b'\nbody\na <<b\n";
+    assert_eq!(body_regions(line), vec![(14, 19)]);
+    assert_eq!(terminator_spans(line), vec![(19, 24)]);
 }
 
 // `unterminated` is the REPL's "keep reading" signal for a `<<` run.

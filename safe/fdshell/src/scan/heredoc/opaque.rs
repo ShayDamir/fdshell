@@ -47,3 +47,5 @@ pub(crate) fn operator_count_opaque(line: &[u8], from: usize, to: usize) -> usiz
     found + sites(line, pos, to).len()
 }
 
+#[cfg(test)]
+mod tests;

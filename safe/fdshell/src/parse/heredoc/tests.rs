@@ -398,6 +398,35 @@ fn operator_count_byte_and_token_levels_agree() {
     }
 }
 
+/// A **terminator line** is heredoc structure at both levels: a text that
+/// carries one counts only the operators written on its command lines, and
+/// `layout` allocates exactly one spec per operator. The byte side of the same
+/// rule is `scan/heredoc/opaque/tests.rs`; the two counts must agree, or the
+/// global per-line body allocation shifts and the delimiter-shaped residue is
+/// parsed as a command (task #266).
+#[test]
+fn a_terminator_line_is_not_an_operator_at_either_level() {
+    for (line, want) in [
+        (b"cat <<'a <<b'\nbody\na <<b".as_slice(), 1usize),
+        (b"cat <<\"a <<b\"\nbody\na <<b", 1),
+        (b"cat <<a\\\"b\nbody\na\"b", 1),
+        (b"cat <<'a|b'\nbody\na|b", 1),
+        (b"cat <<'a$(b'\nbody\na$(b", 1),
+        (b"cat <<'a`b'\nbody\na`b", 1),
+        (b"cat <<'a <<b' <<EOF\nbodyA\nbodyB\na <<b\nEOF", 2),
+        (b"cat <<EOF <<'a <<b'\nbodyA\nbodyB\nEOF\na <<b", 2),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        assert_eq!(operator_count(line, &tokens), want, "line={:?}", line);
+        assert_eq!(
+            layout(line, &tokens).unwrap().len(),
+            want,
+            "line={:?}",
+            line
+        );
+    }
+}
+
 /// POSIX #2.2 `>|`: the `|` absorbed into a clobber operator is an operator
 /// byte, so it is neither a pipeline position nor a word break. The two counts
 /// must agree on every clobber form, including `cat >| <<EOF` (one operator:

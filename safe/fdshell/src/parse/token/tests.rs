@@ -449,3 +449,126 @@ fn spans_are_per_word_and_reset_between_words() {
     // assignment slices it to the value's own index 1 — `envassign::value_spans`).
     assert_eq!(spans(b"x=~\"\""), vec![vec![3]]);
 }
+
+// --- Task #266: a delimiter (terminator) line is heredoc structure, never
+// command bytes. `tokenize_statement` blanks its **syntax** bytes (the set
+// `is_structural` defines) and keeps its **words** and its newline: a terminator
+// shaped like a command line yields no operator, no pipe, no substitution and
+// no `unmatched quote`, while the words the block machinery measures its text
+// slices by stay, and the `;` token of the newline keeps the following statement
+// separate.
+// ---
+
+/// The word texts of `tokenize_statement` (bodies blanked, terminator syntax
+/// blanked, offsets preserved).
+fn statement_text(line: &[u8]) -> Vec<ShortCStr> {
+    super::statement::tokenize_statement(line)
+        .unwrap()
+        .into_iter()
+        .map(|(t, _, _, _, _, _)| t)
+        .collect()
+}
+
+/// The terminator's own `<<`, `|`, `$(`, backtick and quote bytes are gone from
+/// the token stream; its words and the separator newline stay. Every row is a
+/// shape that `master` tokenized as command bytes (rc 1: an operator count that
+/// shifts the body allocation, a pipeline split, or `unmatched quote`).
+#[test]
+fn a_terminator_line_keeps_its_words_and_loses_its_syntax() {
+    // A plain delimiter: the terminator word and the statement behind it.
+    assert_eq!(
+        statement_text(b"cat <<T\nbody\nT\na <<b"),
+        vec![
+            ShortCStr::from(c"cat"),
+            ShortCStr::from(c"<<T"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"T"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"a"),
+            ShortCStr::from(c"<<b"),
+        ],
+        "the statement **behind** a terminator keeps its own operators"
+    );
+    for (line, want) in [
+        (
+            b"cat <<'a <<b'\nbody\na <<b".as_slice(),
+            vec![
+                ShortCStr::from(c"cat"),
+                ShortCStr::from(c"<<a <<b"),
+                ShortCStr::from(c";"),
+                ShortCStr::from(c"a"),
+                ShortCStr::from(c"b"),
+            ],
+        ),
+        (
+            b"cat <<a\\\"b\nbody\na\"b".as_slice(),
+            vec![
+                ShortCStr::from(c"cat"),
+                ShortCStr::from(c"<<a\\\"b"),
+                ShortCStr::from(c";"),
+                ShortCStr::from(c"a"),
+                ShortCStr::from(c"b"),
+            ],
+        ),
+        (
+            b"cat <<'a|b'\nbody\na|b".as_slice(),
+            vec![
+                ShortCStr::from(c"cat"),
+                ShortCStr::from(c"<<a|b"),
+                ShortCStr::from(c";"),
+                ShortCStr::from(c"a"),
+                ShortCStr::from(c"b"),
+            ],
+        ),
+    ] {
+        assert_eq!(statement_text(line), want, "{line:?}");
+    }
+    // A terminator plus a trailing statement: the `;` of the terminator's
+    // newline keeps `echo after` a separate statement.
+    assert_eq!(
+        statement_text(b"cat <<'a <<b'\nbody\na <<b\necho after"),
+        vec![
+            ShortCStr::from(c"cat"),
+            ShortCStr::from(c"<<a <<b"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"a"),
+            ShortCStr::from(c"b"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"after"),
+        ]
+    );
+}
+
+/// A terminator line carrying an unbalanced quote is opaque data, exactly like a
+/// body line: tokenizing must not fail (the quote check never sees its bytes).
+#[test]
+fn a_terminator_line_with_an_unbalanced_quote_tokenizes() {
+    for line in [
+        b"cat <<a\\\"b\nbody\na\"b".as_slice(),
+        b"cat <<'a\"b'\nbody\na\"b".as_slice(),
+        b"cat <<'a$('b'\nbody\na$('b".as_slice(),
+        b"cat <<'a`b'\nbody\na`b".as_slice(),
+    ] {
+        assert!(
+            super::statement::tokenize_statement(line).is_ok(),
+            "{line:?}: an unbalanced terminator quote is terminator data"
+        );
+    }
+}
+
+/// The byte set the tokenizer reads as syntax (POSIX metacharacters, quote
+/// operators, expansion/escape triggers, fdshell's `%` capture marker, and the
+/// blanks that keep a terminator's words apart). `{`/`}` are **not** in the set
+/// (brace expansion is a pre-parse pass on the original text, with its own
+/// terminator protection), and neither are the word bytes, the digits or the
+/// newline: the words and the newline stay.
+#[test]
+fn is_structural_is_the_tokenizer_syntax_byte_set() {
+    for b in b";&()<>\x7c$ \x60\"'\\#~%\t".iter() {
+        assert!(super::statement::is_structural(*b), "{b:?} is syntax");
+    }
+    for b in b"{}abcXY079_*[].,:!?/-=+@^\n".iter() {
+        assert!(!super::statement::is_structural(*b), "{b:?} is a word byte");
+    }
+}

@@ -2509,3 +2509,202 @@ fn a_heredoc_at_the_end_of_a_case_arm_with_an_ampersand() {
         "stderr={err}"
     );
 }
+
+// --- Task #266: a here-doc **terminator line** is heredoc structure, never
+// command bytes. The delimiter word is a word (task #207), so it may contain a
+// `<<`, an unbalanced quote byte, a `|`, a substitution — and the line that
+// carries it, which travels inside the statement text, must stay opaque to the
+// statement layers. Every row below is measured against bash 5.3.9 and was rc 1
+// on `master` (the terminator's own `<<` counted as an operator at both levels,
+// shifting the global per-line body allocation; its quote byte reaching the
+// tokenizer's quote check; its `|` splitting a pipeline).
+// ---
+
+/// A terminator line whose delimiter word contains a chevron is data: the
+/// command prints its body, rc 0. `"` twin and the trailing-statement twin of
+/// the same shape.
+#[test]
+fn a_terminator_line_with_a_chevron_is_data() {
+    for (script, want) in [
+        ("cat <<'a <<b'\nbody\na <<b", "body\n"),
+        ("cat <<\"a <<b\"\nbody\na <<b", "body\n"),
+        ("cat - <<'a <<b'\nbody\na <<b", "body\n"),
+        ("cat <<'a <<b'\nbody\na <<b\necho after", "body\nafter\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// The escaped-quote delimiter rule (task #207) produces a terminator line with
+/// an **unbalanced** quote byte; such a line must never reach the tokenizer's
+/// quote check, exactly as an unbalanced body line does not.
+#[test]
+fn a_terminator_line_with_an_unbalanced_quote_is_data() {
+    for script in [
+        "cat <<a\\\"b\nbody\na\"b",
+        "cat <<'a\"b'\nbody\na\"b",
+        "cat <<'a$(b'\nbody\na$(b",
+        "cat <<'a`b'\nbody\na`b",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// A `|` on the terminator line is not a pipeline pipe, and a chevron
+/// delimiter in a pipeline stage keeps the stage: the terminator is the stage's
+/// own data.
+#[test]
+fn a_terminator_line_with_a_pipe_is_not_a_pipeline() {
+    for (script, want) in [
+        ("cat <<'a|b'\nbody\na|b", "body\n"),
+        ("cat <<'a <<b' | cat\nbody\na <<b", "body\n"),
+        ("cat <<'a <<b' | wc -l\nbody\na <<b", "1\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// Every single-line keyword-block position: the arm body, the loop body, the
+/// `for`/`case` bodies. The terminator line travels inside the arm text
+/// (`cond/part.rs::reconstruct`), so the arm's operator count must be blind to
+/// it and the arm's own closer stays visible.
+#[test]
+fn a_terminator_line_in_a_single_line_block_is_data() {
+    for (script, want) in [
+        ("if true; then cat <<'a <<b'; fi\nbody\na <<b", "body\n"),
+        (
+            "while :; do cat <<'a <<b'; break; done\nbody\na <<b",
+            "body\n",
+        ),
+        ("for x in a; do cat <<'a <<b'; done\nbody\na <<b", "body\n"),
+        ("case x in x) cat <<'a <<b';; esac\nbody\na <<b", "body\n"),
+        (
+            "if false; then :; elif cat <<'a <<b'; then echo T; fi\nbody\na <<b",
+            "body\nT\n",
+        ),
+        (
+            "if false; then :; else cat <<'a <<b'; fi\nbody\na <<b",
+            "body\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// A `<<` in a block **condition**: the condition's own operator claims its
+/// region, the terminator line is condition data, and the arm runs.
+#[test]
+fn a_terminator_line_of_a_block_condition_keeps_its_arm() {
+    let (out, err, code) = run("if cat <<'a <<b'; then echo T; fi\nbody\na <<b");
+    assert_eq!((code, out.as_str()), (0, "body\nT\n"), "stderr={err:?}");
+    let (out, err, code) = run("while cat <<'a <<b'; do break; done\nbody\na <<b");
+    assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+    assert_eq!(err, "");
+}
+
+/// The statement after a terminator is a separate statement: the terminator's
+/// newline keeps its `;` token, so a `&&` tail runs, the next here-doc claims
+/// its own body, and two operators on one line each get theirs.
+#[test]
+fn a_terminator_line_after_a_block_is_a_separate_statement() {
+    let (out, err, code) = run("cat <<'a <<b' && echo after\nbody\na <<b");
+    assert_eq!((code, out.as_str()), (0, "body\nafter\n"), "stderr={err:?}");
+    let (out, err, code) = run("cat <<'a <<b'\nbody\na <<b\ncat <<'c <<d'\nbody2\nc <<d");
+    assert_eq!((code, out.as_str()), (0, "body\nbody2\n"), "stderr={err:?}");
+    let (out, err, code) = run("cat <<'a <<b'\nbody\na <<b\necho x <<'e <<f'\nbody2\ne <<f");
+    assert_eq!((code, out.as_str()), (0, "body\nx\n"), "stderr={err:?}");
+    assert_eq!(err, "");
+}
+
+/// Two operators on one command line, one of them chevron-delimited, in both
+/// orders: the second here-doc is the command's stdin, and the terminator lines
+/// of both are data. `cat -` (dash form) and the tab-indented `<<-` terminator
+/// of a chevron delimiter are the same rule.
+#[test]
+fn two_operators_of_which_one_is_a_chevron_delimiter_claim_their_bodies() {
+    for (script, want) in [
+        ("cat <<EOF <<'a <<b'\nbodyA\nbodyB\nEOF\na <<b", ""),
+        ("cat <<'a <<b' <<EOF\nbodyA\nbodyB\na <<b\nEOF", ""),
+        ("cat <<-'a <<b'\n\tbody\n\ta <<b", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// A multi-line group body, a function body, and a command substitution: the
+/// terminator line sits inside the span, and the statement behind the group's
+/// closer is separate. The **single-line** group stays diverging (task **#315**:
+/// a here-doc in a `{ …; }` body claims no body region), pinned below.
+#[test]
+fn a_terminator_line_in_a_group_a_function_and_a_substitution_is_data() {
+    for (script, want) in [
+        ("{ cat <<'a <<b'\nbody\na <<b\n}\n", "body\n"),
+        ("f(){ cat <<'a <<b'\nbody\na <<b\n}\nf\n", "body\n"),
+        ("echo $(cat <<'a <<b'\nbody\na <<b\n)\n", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+    // The single-line group: #315's shape, unchanged by this rule (the group
+    // claims no region, so the body lines are statements and rc is 1).
+    let (out, err, code) = run("{ cat <<'a <<b'; }\nbody\na <<b");
+    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
+    assert!(
+        err.contains("missing terminating delimiter line 'a <<b'"),
+        "stderr={err}"
+    );
+    // `( … )` is not a subshell: #316.
+    let (out, err, code) = run("( cat <<'a <<b' )\nbody\na <<b");
+    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
+    assert!(err.contains("\"(\" not found"), "stderr={err}");
+}
+
+/// The `%` capture marker and `~` on a terminator line are already bash parity
+/// (the tokenizer's `%` is a capture marker, `~` a tilde trigger: both are
+/// syntax bytes blanked with the rest of the terminator's syntax). Kept as
+/// regression pins for the byte set of `tokenize_statement::is_structural`.
+#[test]
+fn a_terminator_line_with_a_capture_marker_or_tilde_is_data() {
+    for script in ["cat <<'a%b'\nbody\na%b", "cat <<'a~b'\nbody\na~b"] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+        assert_eq!(err, "");
+    }
+}
+
+/// Divergences of the same family that this rule does **not** own, pinned at
+/// their measured rc 1 with the task that owns each one: a delimiter word cut at
+/// escaped whitespace (**#349**), and an io-number here-doc whose fd a sibling
+/// `<&3` of the same command cannot see (**#363**, filed from task #266's
+/// planning round; measured identical on `master`).
+#[test]
+fn chevron_terminator_known_divergences() {
+    // #349: the delimiter word ends at the escaped space, so the terminator
+    // line `a b` never matches. bash prints the body (rc 0).
+    let (out, err, code) = run("cat <<a\\ b\nbody\na b");
+    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
+    assert!(
+        err.contains("missing terminating delimiter line 'a b'"),
+        "stderr={err}"
+    );
+
+    // #363: `<&3` takes its source from the parent's fd table, so the fd the
+    // io-number here-doc opens in the same command is invisible to it. Run
+    // through `run_fd3_closed` so fd 3 is closed in the parent (LESSONS: an
+    // inherited fd 3 makes the assertion depend on the harness). bash prints
+    // the body (rc 0).
+    let (out, err, code) = run_fd3_closed("cat 3<<'a <<b' <&3\nbody\na <<b");
+    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
+    assert!(err.contains("fd 3 is not open"), "stderr={err}");
+}
