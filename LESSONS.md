@@ -2663,6 +2663,17 @@ parent's status are deliberately identical to the foreground run. The same rule
 explains why every async pin ends with `wait` (LESSONS: a background child
 inherits stdout) — the reaping is part of the pin, not hygiene bolted on.
 
+Task #354 extended the rule **into a block body**, where it matters more: a
+statement backgrounded inside `for`/`case`/`if`/`{}`/function text lands in the
+same shell job table, so the pins are `jobs.anon_len() == 2` for
+`for i in 1 2; do builtin true & done` (one job **per iteration** — the count is
+the iteration pin) and a numeric `$!` after the block. Output cannot see any of
+it: the body's text prints the same bytes foreground or background, and a job
+that is never reaped leaks silently. The one shape the file name cannot carry is
+a per-iteration target: a redirect target's `$i` is **not** expanded by fdshell
+(measured, a pre-existing divergence), so `for i in 1 2; do echo $i >f-$i & done`
+writes a single literal `f-$i` file. Use `>>` on a fixed name and count lines.
+
 ## The cond-list gate window starts behind the pair; its 2-byte back-step is equivalent until it underflows (task #326)
 
 `cargo mutants` missed `cond.rs:62:31` (`let after = i + 2` → `i - 2`) in the
@@ -2835,3 +2846,44 @@ word-split family owns it); rc 1 → rc 0 (`echo hi 1'>'` was an
 (`cat "<f_in"x` now reports `cat: '<f_inx'`, the argument, as bash does).
 Pin a redirect bug's fix at the **filesystem** (the scratch listing), not
 only stdout: every row of the family shows its truth in which files exist.
+
+## The block-opener gate is a separator rule, so every arm that flushes a run must consult it (task #354)
+
+A plain `&` inside a block's text (`for i in 1; do echo hi & done`, `{ echo hi & }`,
+`case x in x) echo a & ;; esac`, `f(){ echo hi & }`) was the statement split's
+async marker: the run behind the `&` was flushed as a backgrounded statement and
+the block's closer never arrived, so the whole line died as a parse error. The
+gate that decides "does this run open a block" lived in the scanner's *separator*
+arm only; the `Async` arm duplicated the flush and skipped the predicate. Rule: a
+predicate that classifies the text being flushed has **one owner**
+(`segment/block/opener.rs::opens_run`), and *every* arm that flushes a run —
+separator, `&&`/`||`, and the `&` — has to call it; two copies of the gate drift
+apart the moment one gains a case. `open_at_amp` is the same story one layer
+deeper: the block opener must be opened with `word_active` cleared, exactly as
+the separator arm does, or the opener word is scanned a second time.
+
+At the parse layer the fix is a **terminator set**, not a flag. A word-start `&`
+is a command-list terminator (`parse/semi/preceded.rs`, `Term::Semi` /
+`Term::SemiAmp`) at every closer position, and the body slice **keeps** the `&`:
+the body's own `run_script` scan marks the background flag, so no `background`
+parameter threads through `run*`. Do not "propagate" the flag from the outer
+parse — the outer parse does not know the body's shape, and a flag threaded
+through three layers of `run*` signatures is a second source of truth for a fact
+the text already carries.
+
+Keep the leniency in the layer that needs it. Relaxing the statement-level `peek`
+guard (`segment/bg/split.rs`, a `;` behind the `&` is bash's "syntax error,
+nothing runs") would have been the one-line fix for the `case x in x) echo a & ;;
+esac` shape, and it leaks: `echo a & ;; echo b` at statement level is bash's rc 2
+and fdshell's parse error, and it stays so because a case arm's `;;` behind a `&`
+never reaches that guard — the block scan owns the run. Measure each shape against
+bash before choosing the layer; the two shapes look identical and are not.
+
+The suite's own artifact is worth remembering: `tests/async.rs`'s `scratch(tag)`
+is a **cwd-relative** name (`async-<tag>-<pid>`, removed by `contents()`), and
+`glob::tests::relative_pattern_walks_from_the_base_fd` asserts that `a*` matches
+**nothing** in the crate directory. A leaked `async-*` file — trivially produced
+by a per-iteration redirect target, see above — fails an unrelated test with a
+message that names neither. After a suite run, check `git status --porcelain`
+for `??` in the crate directory, and never name a scratch file with something
+the shell is supposed to expand.

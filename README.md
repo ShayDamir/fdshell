@@ -124,6 +124,27 @@ redirect). A `&` must terminate a command — `& echo b`, `echo a ; & b`,
 `echo a & ; echo b` and `echo a & | cat` are parse errors that run **nothing**,
 as in bash.
 
+A `&` written **inside a block's text** separates statements inside the block;
+it does not end the block. The closer may sit right behind it on the same line,
+and the statement in front of the `&` becomes a background job of the body, so
+`$!` and `wait` see it:
+
+```shell
+for i in 1 2; do echo hi & done    # one job per iteration, `done` closes the loop
+{ echo hi & }                      # the group's body statement runs as a job
+case x in x) echo a & ;; esac      # `;;` ends the arm, `esac` ends the block
+if true & then echo x; fi          # a `&`-terminated condition parses
+f(){ echo hi & }                   # the function body keeps its `&`
+```
+
+`for`'s word list stays strict — `for i in 1 & do :; done` is a parse error —
+and a `&` behind a `&`, or a `;;` behind a `&` outside a block (`echo a & ;;
+echo b`), is the parse error that runs nothing. The condition form above runs
+its condition in the foreground; the background job of a `&`-terminated
+condition is not implemented yet, so an `if true && false & then echo x; fi`
+arm is gated by the foreground status (bash prints `x`, fdshell prints
+nothing).
+
 The POSIX `wait [pid…]` builtin reaps background tasks by pid (or every task
 when given no argument) and sets `$?` to the last reaped status; `$!` holds
 the last background pid:

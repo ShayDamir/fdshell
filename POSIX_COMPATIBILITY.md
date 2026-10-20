@@ -88,6 +88,27 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   `echo a &` followed by a `;` line (`echo a &\n; echo b`) streams: line 1
   executes and the `;` line is fdshell's accepted empty statement, where bash
   stops with rc 2 (the same-line `& ;` form matches bash).
+- A plain `&` written **inside a block's text** is a separator inside the span
+  (`for i in 1; do echo hi & done`, `{ echo hi & }`, `f(){ echo hi & }`,
+  `case x in x) echo a & ;; esac`, `if true & then echo x; fi`): the block stays
+  one segment, its closer may sit right behind the `&` on the same line, and the
+  statement in front of the `&` runs as a background job **in the body** (the
+  body's job list is the shell's, `$!` and `wait` see it). At the parse layer the
+  word-start `&` is a command-list terminator, so each closer glued after it
+  (`& done`, `& }`, `& fi`, `& ;;`, `& esac`) is found, and the body slice
+  **keeps** the `&` — the body's own scan is what marks the flag. `for`'s word
+  list stays strict: `for i in 1 & do :; done` is a parse error (bash rc 2,
+  fdshell rc 1). Measured divergences, all pinned: a `&`-terminated
+  **condition** runs in the foreground, so `if true && false & then echo x; fi`
+  prints nothing where bash prints `x` (the background list's status gates the
+  arm) — the condition's job is task #356's; `echo a & ;` **inside a body**
+  (`for i in 1; do echo a & ; done`) runs the statement with rc 0 where bash
+  stops with rc 2 — task #355's; `{ echo <<T & }` plus body hits the here-doc
+  region seam of task #313. The rule does not loosen the statement-level guard:
+  `echo a & ;; echo b` **outside** a block is bash's syntax error, rc 1. Pinned
+  in `safe/fdshell/tests/async.rs`, `loops.rs`, `group.rs`, `case.rs`,
+  `cond_blocks.rs`, `block_bodies.rs`, `repl.rs` and the `segment`/`parse` unit
+  tests.
 - **Line deferral** (the accepted divergence behind those multi-line shapes):
   a line whose first non-blank byte is `&` (indentation counts: `echo a\n & echo b`
   is the same shape) claims the statement buffered above
