@@ -1552,15 +1552,18 @@ fn test_bare_combined_operand_does_not_shift_the_heredoc_body() {
     assert_eq!(cmd.args, vec![c"a".into()]);
 }
 
-// --- a fully quoted `&>`-family word is a plain argument (task #250) ---------
+// --- quoted bytes end a `&>`-family operator (tasks #250, #264) --------------
 //
-// POSIX #4.1 removes quotes after tokenization, so a fully quoted word is
-// never an operator: `parse_bg_redirect` opens with the same `fq` gate
-// `parse_redirect` and `parse_here_string` have. The gate covers the whole
-// function — the attached, bare, pidvar and force-pidvar arms alike — so the
-// `pidvar` / `bg_force` asserts below are the point of the pidvar test: a
-// gate on the redirect construction alone passes without them.
-// Every expectation is `bash -c` (5.3.9) measured 2026-10-20 in a scratch dir.
+// POSIX XCU 2.9.1 builds a redirection out of **unquoted** bytes, so a quote
+// byte ends the operator and begins the word. `parse_bg_redirect` gates the
+// whole family on the mask (`redirect::quoted_bytes`): fully quoted words —
+// the `fq` flag task #250 gated, implied by the mask rule — and words whose
+// operator bytes are only *partially* quoted are plain arguments. The gate
+// covers the whole function — the attached, bare, pidvar and force-pidvar
+// arms alike — so the `pidvar` / `bg_force` asserts below are the point of
+// the pidvar test: a gate on the redirect construction alone passes without
+// them. Every expectation is `bash -c` (5.3.9) measured 2026-10-20 in a
+// scratch dir.
 
 /// The one-word shape of a fully quoted `&>`-family word: `cmd` is `echo`, the
 /// word is the single argument, and the command carries no redirect, no job.
@@ -1650,26 +1653,26 @@ fn test_quoted_operator_forms_keep_their_side_by_side_rule() {
         vec![combined_def(RedirectDirection::Write, "f"),]
     );
     assert!(cmd.args.is_empty());
-    // Partially quoted: fdshell reads the operator from the word's *text*, so
-    // these keep redirecting where bash prints the literal and opens nothing
-    // (measured 2026-10-20). Pinned as-is: the mask side of this family is
-    // task #264's ruling, not #250's.
+    // Partially quoted: a quote byte in the operator ends it (POSIX XCU
+    // 2.9.1), so these words are arguments and open nothing — bash parity
+    // for `'&>'f` (measured 2026-10-20: bash prints `&>f`, opens nothing).
     let ParsedLine::Cmd(cmd) = parse(b"echo '&>'f").unwrap() else {
         panic!("expected Cmd")
     };
-    assert!(cmd.args.is_empty(), "`'&>'f` is one operator word");
-    assert_eq!(
-        cmd.redirects,
-        vec![combined_def(RedirectDirection::Write, "f"),]
+    assert_eq!(cmd.args, vec![c"&>f".into()]);
+    assert!(cmd.redirects.is_empty(), "`'&>'f` is one plain word");
+    assert!(
+        cmd.pidvar.is_none() && !cmd.bg_force,
+        "no job from a quoted operator"
     );
+    // `"&">b`: fdshell's word rule keeps the whole word an argument; bash
+    // splits at the unquoted `>` and writes `b` = `x &` (the word-split
+    // family, POSIX_COMPATIBILITY "Operators are recognized at word starts").
     let ParsedLine::Cmd(cmd) = parse(b"echo a \"&\">b").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.args, vec![c"a".into()]);
-    assert_eq!(
-        cmd.redirects,
-        vec![combined_def(RedirectDirection::Write, "b"),]
-    );
+    assert_eq!(cmd.args, vec![c"a".into(), c"&>b".into()]);
+    assert!(cmd.redirects.is_empty());
 }
 
 #[test]

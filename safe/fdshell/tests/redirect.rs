@@ -1087,13 +1087,16 @@ fn unquoted_operator_operands_stay_syntax_errors() {
     }
 }
 
-// --- a fully quoted `&>`-family word is a plain argument (task #250) ---------
+// --- quoted bytes end a redirect operator (tasks #250, #264) -----------------
 //
-// `parse_bg_redirect` gates on the token's `fq` flag, the gate every other
-// redirect parser opens with: POSIX #4.1 removes quotes after tokenization, so
-// a fully quoted word is never an operator. Every value below is `bash -c`
-// (5.3.9) and this tree's build, measured 2026-10-20 in a scratch dir; the
-// scratch listing is the assert that kills the redirect arms.
+// POSIX XCU 2.9.1 builds a redirection out of **unquoted** bytes: the
+// io-number digits and every operator byte. A quote byte ends the operator
+// and begins the word, so a fully quoted word — and any word with a quote
+// byte in its operator — is a plain argument. The parsers gate on the
+// token's quote mask (`redirect::quoted_bytes`, subsuming #250's `fq` flag).
+// Every value below is `bash -c` (5.3.9) and this tree's build, measured
+// 2026-10-20 in a scratch dir; the scratch listing is the assert that kills
+// the redirect arms.
 
 /// Run `script` in `dir` and assert its stdout/rc plus the bash-measured fact
 /// that the fully quoted `&>`-family word created **no** file.
@@ -1174,28 +1177,219 @@ fn fully_quoted_bare_combined_operator_with_a_heredoc_is_an_argument() {
 }
 
 #[test]
-fn partially_quoted_combined_word_stays_an_operator() {
-    // Deviation pin, no behavior change: task #250 gates the `fq` flag only.
-    // fdshell reads the operator from the word's *text*, so a word that only
-    // *starts* quoted keeps redirecting where bash prints the literal and
-    // opens nothing: `'&>'f` is bash `&>f` on stdout / fdshell's `f` holding
-    // the `echo` newline; `echo x "&">y` is bash's `y` = `x &` / fdshell's
-    // `y` = `x`. Measured 2026-10-20; the mask side of this family belongs to
-    // task #264.
+fn quoted_combined_operator_bytes_are_an_argument() {
+    // Task #264 flips the deviation #250 pinned as-is: a quote byte inside
+    // the `&>` operator ends the operator (POSIX XCU 2.9.1 reads only
+    // unquoted operator bytes), so the word is an argument. `'&>'f` is bash
+    // parity: bash prints `&>f` and opens nothing (measured 2026-10-20).
+    // `"&">y` is the documented divergence: bash splits the word at the
+    // unquoted `>` and writes `y` = `x &`; fdshell never splits a word at an
+    // operator byte, so the whole word prints (`POSIX_COMPATIBILITY.md`
+    // "Operators are recognized at word starts", the word-split family).
     let dir = scratch("partial_operator_word");
     let dir = dir.to_str().unwrap();
-    let (out, err, code) = run(&format!("cd {dir}; echo '&>'f"));
+    assert_word_opens_no_file(dir, "echo '&>'f", "&>f\n");
+    assert_word_opens_no_file(dir, "echo x \"&\">y", "x &>y\n");
+    // The append and var twins: `'&>>'f` and `'&>'%v` print their literal
+    // text in bash, and the gate keeps them arguments here too — the `%v`
+    // twin no longer dies on the unset fd variable (bash rc 0).
+    assert_word_opens_no_file(dir, "echo a '&>>'f", "a &>>f\n");
+    assert_word_opens_no_file(dir, "echo a '&>'%v", "a &>%v\n");
+}
+
+// --- the partial-quoting family, task #264 -----------------------------------
+//
+// POSIX XCU 2.9.1: `<redirection> ::= [[io-number] redirection-operator] word`
+// over **unquoted** bytes. A quoted first operator byte makes the whole word
+// an argument; a quoted *continuation* byte ends the operator there and the
+// rest is the operand word; quoted digits are no io-number, so the operator
+// takes its default descriptor. Every row is `bash -c` (5.3.9) and this
+// tree's build, measured 2026-10-20, each shell in its own scratch dir.
+
+#[test]
+fn quoted_operator_byte_is_an_argument() {
+    // R1, first operator byte quoted: bash prints the literal and opens
+    // nothing; the gate makes fdshell do exactly that (bash parity).
+    let dir = scratch("q_op_first");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo y 2'>'g2", "y 2>g2\n"),
+        ("echo w 1'>'g4", "w 1>g4\n"),
+        ("echo a 1\">\"f", "a 1>f\n"),
+        ("echo a 1\">f\"g", "a 1>fg\n"),
+        ("echo a 1'>>'g", "a 1>>g\n"),
+        ("echo a 1'<>'g", "a 1<>g\n"),
+        ("echo a '>'f", "a >f\n"),
+        ("echo a '>>'f", "a >>f\n"),
+        ("echo a '>|'f", "a >|f\n"),
+        ("echo a 2'>&1'", "a 2>&1\n"),
+    ] {
+        assert_word_opens_no_file(dir, script, want);
+    }
+}
+
+#[test]
+fn quoted_clobber_byte_is_an_argument() {
+    // The `>|` twin of the same rule, with and without `noclobber`: bash
+    // prints `a 1>|f` and opens nothing in both.
+    let dir = scratch("q_clobber");
+    let dir = dir.to_str().unwrap();
+    assert_word_opens_no_file(dir, "echo a 1\">|\"f", "a 1>|f\n");
+    assert_word_opens_no_file(dir, "set -o noclobber; echo a 1\">|\"f", "a 1>|f\n");
+}
+
+#[test]
+fn quoted_dup_byte_makes_the_operand_a_path() {
+    // R1's continuation clause: the quoted `&` ends the operator, so the
+    // operand is the *word* from that byte — bash opens the files `&1` and
+    // `&f` (measured: `&1` empty from fd 2, `&f` = `a` from fd 1).
+    let dir = scratch("q_dup_path");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; echo a 2>\"&\"1"));
+    assert_eq!((out.as_str(), code), ("a\n", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("&1")).unwrap(),
+        "",
+        "fd 2 opens the file `&1`"
+    );
+    let (out, err, code) = run(&format!("cd {dir}; echo a >\"&\"f"));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("&f")).unwrap(),
+        "a\n",
+        "fd 1 opens the file `&f`"
+    );
+}
+
+#[test]
+fn quoted_read_operator_is_an_argument() {
+    // `<` first byte quoted: bash prints the literal (rc 0) and `cat` takes
+    // the word as its *file argument* — the report names the argument, not a
+    // redirect open. rc 1 → rc 0 flips (`echo a '<'f`) and the report-text
+    // flip (`cat "<f_in"x`) are the intentional ones (bash parity).
+    let dir = scratch("q_read");
+    let dir = dir.to_str().unwrap();
+    assert_word_opens_no_file(dir, "echo a '<'f", "a <f\n");
+    let (out, err, code) = run(&format!("cd {dir}; cat \"<f_in\"x"));
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("<f_inx"),
+        "the report names the argument: {err:?}"
+    );
+    // The mixed row: the quoted-`>` word is an argument; the `<` word stays
+    // a redirect of the *word* `1h` (unquoted `<`), which fails to open —
+    // rc 1 in both shells (bash reports `1h: No such file`, fdshell the
+    // redirect open; the message text is fdshell's chain).
+    let (out, err, code) = run(&format!("cd {dir}; cat 2'>'g <'1'h"));
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    let files: Vec<_> = std::fs::read_dir(dir).unwrap().collect();
+    assert!(files.is_empty(), "the failed open created no file: {err:?}");
+}
+
+#[test]
+fn quoted_io_number_takes_the_default_descriptor() {
+    // R2: quoted digits are no io-number, so `>` / `>|` take their default
+    // fd 1 — the file gets the stdout and stdout goes empty (fd 1 really
+    // moved). The surviving divergence is the *argument list*: bash splits
+    // `'2'>g` into the argument `2` plus the operator, so bash's `g` =
+    // `x 2` (POSIX_COMPATIBILITY "Operators are recognized at word starts").
+    let dir = scratch("q_fd");
+    let dir = dir.to_str().unwrap();
+    for (script, file, want) in [
+        ("echo x '2'>g", "g", "x\n"),
+        ("echo x \"2\">g", "g", "x\n"),
+        ("echo a \"2\">|f", "f", "a\n"),
+    ] {
+        let (out, err, code) = run(&format!("cd {dir}; {script}"));
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(
+            std::fs::read_to_string(std::path::Path::new(dir).join(file)).unwrap(),
+            want,
+            "{script}: the default fd 1 moved into `{file}`"
+        );
+        std::fs::remove_file(std::path::Path::new(dir).join(file)).ok();
+    }
+}
+
+#[test]
+fn quoted_io_number_keeps_the_clobber_parity() {
+    // `'1'>|f` is bash-parity today and stays it: the `>|` bytes are unquoted
+    // (the redirect stands, the `|` is absorbed by `clobber_word` at byte
+    // level too), the quoted digit is no io-number, so fd 1 — the descriptor
+    // bash used — is clobbered. bash's `f` = `a 1` is the argument-list
+    // divergence; fdshell's `f` = `a`.
+    let dir = scratch("q_clobber_parity");
+    let dir = dir.to_str().unwrap();
+    for script in ["echo a '1'>|f", "set -o noclobber; echo a '1'>|f"] {
+        let (out, err, code) = run(&format!("cd {dir}; {script}"));
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(
+            std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap(),
+            "a\n",
+            "{script}: fd 1 clobbered `f`"
+        );
+        std::fs::remove_file(std::path::Path::new(dir).join("f")).ok();
+    }
+}
+
+#[test]
+fn bare_quoted_operator_is_an_argument() {
+    // `1'>'` is the bare-token shape of R1: rc 1 `invalid redirect syntax`
+    // (the operator bailing on its missing operand) flips to rc 0 printing
+    // `hi 1>`, the bash parity the task measured.
+    let dir = scratch("bare_quoted");
+    let dir = dir.to_str().unwrap();
+    assert_word_opens_no_file(dir, "echo hi 1'>'", "hi 1>\n");
+}
+
+#[test]
+fn accepted_quoted_io_number_argument_list_divergences() {
+    // What this task does NOT fix (the word-split family): fdshell never
+    // splits a word at an operator byte, so the quoted digits never become
+    // arguments. The descriptor is bash's (R2) but the argument list is
+    // fdshell's, and the files differ from bash's by exactly the digits.
+    // Pinned deliberately (POSIX_COMPATIBILITY "Operators are recognized at
+    // word starts" owns the family).
+    let dir = scratch("q_diverge");
+    let dir = dir.to_str().unwrap();
+    // bash: `g1 = "x 1"`.
+    let (out, err, code) = run(&format!("cd {dir}; echo x '1'>g1"));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("g1")).unwrap(),
+        "x\n",
+        "bash's g1 = `x 1` (the word-split family)"
+    );
+    std::fs::remove_file(std::path::Path::new(dir).join("g1")).ok();
+    // bash: `f` empty, `g = "a 1 2"` — two redirects, the last to fd 1 wins.
+    let (out, err, code) = run(&format!("cd {dir}; echo a '1'>f '2'>g"));
     assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
     assert_eq!(
         std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap(),
-        "\n",
-        "fdshell's `'&>'f` opens `f` (`echo`'s own newline lands in it)"
+        "",
+        "the earlier `>f` was opened and truncated"
     );
-    let (out, err, code) = run(&format!("cd {dir}; echo x \"&\">y"));
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("g")).unwrap(),
+        "a\n",
+        "bash's g = `a 1 2`"
+    );
+    std::fs::remove_file(std::path::Path::new(dir).join("f")).ok();
+    std::fs::remove_file(std::path::Path::new(dir).join("g")).ok();
+    // bash: `f = "1"` (`printf %s` gets the digit argument).
+    let (out, err, code) = run(&format!("cd {dir}; printf %s '1'>f"));
     assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
     assert_eq!(
-        std::fs::read_to_string(std::path::Path::new(dir).join("y")).unwrap(),
-        "x\n",
-        "fdshell's `\"&\">y` writes `x` to `y` (bash: `x &`)"
+        std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap(),
+        "",
+        "bash's f = `1` (the digit is an argument there, not here)"
+    );
+    // The `2'>'&3` word-split row: bash splits into `2>` + backgrounded `&3`
+    // (stdout `a 2>`, rc 127); fdshell keeps the word an argument, rc 0.
+    let (out, err, code) = run(&format!("cd {dir}; echo a 2'>'&3"));
+    assert_eq!(
+        (out.as_str(), code),
+        ("a 2>&3\n", 0),
+        "bash: `a 2>` + rc 127 (the word-split family), stderr={err:?}"
     );
 }
