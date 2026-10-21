@@ -634,11 +634,22 @@ expansion produces **no field at all** — `cd "$@"` with no positionals,
 to the previous directory even where a directory named `-` exists; that
 directory is reached by any other path, `cd ./-`.
 
+The bare `cd` reads `HOME` through the **same lookup `$HOME` and `~` use**: the
+shell's own variables first, then the environment fdshell was started with. A
+`HOME=/tmp/H` assignment therefore moves the bare `cd` exactly as it moves
+`$HOME` and `~`, and a `local HOME=/tmp/H` shadow moves it inside the function;
+the scoped `HOME=/tmp/H cd` prefix moves it too and is undone after the
+command, as in bash. Set in neither table the report is `$HOME not set` at
+rc 1 — bash's `cd` answers `cd: HOME not set` at the same rc, so here the two
+agree: bash's password-database login directory is `~`'s fallback, not `cd`'s.
+
 The accepted divergences of the same shape: two or more fields is
 `cd: too many arguments` at fdshell's rc 1 and **aborts the script** (bash
 returns 2 and the script continues, the task #179 family); `cd ""` is the open
-failure on the empty path, where bash says `cd: null directory`; a scoped
-`IFS=` prefix splits the expansion on the *scoped* `IFS` (`v=a:b; IFS=: cd $v`
+failure on the empty path, where bash says `cd: null directory`, and the
+empty-`HOME` form `HOME=; cd` is that same open failure at rc 1, where bash
+leaves the directory alone at rc 0; a scoped `IFS=` prefix splits the
+expansion on the *scoped* `IFS` (`v=a:b; IFS=: cd $v`
 is two fields here, one name in bash — the
 `tests/cmd_subst.rs::word0_scoped_ifs_divergence` family); `cd`'s option words
 `--`, `-L`, `-P` and `-x` are operands (task #380); `$_` keeps the raw word
