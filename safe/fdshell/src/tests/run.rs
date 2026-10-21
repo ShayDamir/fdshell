@@ -1964,6 +1964,60 @@ fn array_unset_closes_all_entries() {
     assert!(state.fds.contains_key(&ShortCStr::from(c"src")));
 }
 
+/// `unset NAME` (no `%`) takes the name out of **every** store that holds it:
+/// the string table, the export attribute, and the inherited `environ` row —
+/// the row task #287 recorded as "not expressible" (task #290). Dropping the
+/// `environ` half leaves `var_value` answering from the inherited snapshot and
+/// `exec::environ::get_environ` exporting the name.
+#[test]
+fn unset_plain_name_clears_every_store() {
+    let cell = make_cell();
+    run_script(b"v=1; export v", &cell).unwrap();
+    run_script(b"unset v PATH", &cell).unwrap();
+    let state = borrow_state(&cell);
+    let v = ShortCStr::from(c"v");
+    let path = ShortCStr::from(c"PATH");
+    assert!(!state.strings.contains_key(&v), "the value is gone");
+    assert!(!state.exports.contains_key(&v), "the export is gone");
+    assert!(
+        !state.environ.iter().any(|(k, _)| *k == path),
+        "the inherited row is gone"
+    );
+    assert!(state.var_value(&path).is_none(), "$PATH answers empty");
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+/// `unset IFS` restores the **default** split set (space, tab, newline), it
+/// does not leave the old separators in force, and the name is unbound
+/// afterwards (bash, measured).
+#[test]
+fn unset_ifs_restores_the_default_split_set() {
+    let cell = make_cell();
+    run_script(b"IFS=,", &cell).unwrap();
+    assert_eq!(borrow_state(&cell).ifs, ShortCStr::from(c","));
+    run_script(b"unset IFS", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(state.ifs, ShellState::default_ifs());
+    assert!(state.strings.get(&ShortCStr::from(c"IFS")).is_none());
+}
+
+/// `$_` is the last operand's stored name, and with **no** operands bash's
+/// fallback is the command word itself (`unset; echo $_` → `unset`).
+#[test]
+fn unset_last_arg_is_the_operand_or_the_keyword() {
+    let cell = make_cell();
+    run_script(b"true seed; unset a b", &cell).unwrap();
+    assert_eq!(
+        borrow_state(&cell).var_value(&ShortCStr::from(c"_")),
+        Some(&ShortCStr::from(c"b"))
+    );
+    run_script(b"unset", &cell).unwrap();
+    assert_eq!(
+        borrow_state(&cell).var_value(&ShortCStr::from(c"_")),
+        Some(&ShortCStr::from(c"unset"))
+    );
+}
+
 #[test]
 fn for_over_array_runs_body_per_entry() {
     let out = capture_stdout(|| {
