@@ -224,3 +224,16 @@ fn substitution_region_does_not_move_the_word_boundaries() {
     // name-validity rule is task #166's, so a change here is a deliberate edit).
     assert_eq!(def(b"$F() {"), Some(b"$F".to_vec()));
 }
+
+/// The region jump lands **just past the region's closing `)`**, so the word end
+/// is the byte the tokenizer's word split lands on. Pinning the offsets, not just
+/// the `None`s: the rule is stated over word offsets, and a jump aimed at the
+/// region's own `(` (a `+` → `*` mutant of the start offset) re-enters the region
+/// and claims the text behind it — invisible through `name_len`'s strictness
+/// today, a live divergence from the tokenizer as soon as #166 loosens it.
+#[test]
+fn word_end_region_offsets() {
+    assert_eq!(word_end(b"$(echo a))x"), 9);
+    assert_eq!(word_end(b"$()x)"), 4);
+    assert_eq!(word_end(b"$( echo a ) x)"), 11);
+}

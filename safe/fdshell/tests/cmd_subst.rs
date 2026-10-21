@@ -888,6 +888,30 @@ fn word0_substitution_with_a_space_body_in_a_pipeline_and_background() {
     assert_eq!((out.as_str(), rc), ("written\n", 0), "stderr={err}");
 }
 
+/// The block/statement paths in the space-opened spelling, pinned so the fix
+/// cannot "help" them by accident (plan §5). The function-body row is exactly the
+/// accidental help: master answered the bare `parse error` rc 1 there, the fix
+/// runs the body at rc 0 — bash's own answer. Every row measured against
+/// `bash -c` 5.3.9 on this branch.
+#[test]
+fn space_body_substitution_runs_in_a_function_body_and_block_statements() {
+    let cases: &[(&str, &str)] = &[
+        ("f() { $( echo true ); }; f", ""),
+        ("f() { echo $( echo hi ); }; f", "hi\n"),
+        ("if $( echo true ); then echo yes; fi", "yes\n"),
+        (
+            "for i in $( echo a ) $( echo b ); do echo \"$i\"; done",
+            "a\nb\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(err, "", "{script:?} must report nothing, stderr={err}");
+        assert_eq!(&out, want, "{script:?}");
+    }
+}
+
 /// Pinned as-is, the task that owns it filed: a `$( … )` word in **definer**
 /// position (before a `{` body) is not a function definition, so fdshell runs
 /// the words (`hi`, `}` — not found, rc 1) where bash rejects the line at parse
