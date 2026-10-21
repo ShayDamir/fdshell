@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use super::claimed_bodies;
 use super::claimed_regions;
 use super::condition_bodies;
 use crate::parse::Token;
@@ -131,10 +132,12 @@ fn condition_bodies_skip_is_zero_on_a_bare_condition_line() {
     );
 }
 
-/// A line whose body stream is incomplete yields no bodies: the regions are
-/// allocated for **all** the line's operators in order, so a missing delimiter
-/// line anywhere on the line leaves the condition with nothing to claim (the
-/// parse layer reports the missing delimiter).
+/// A line whose **first** operator has no delimiter line yields no bodies at
+/// all: the greedy allocation claims nothing when `found == 0`, and the parse
+/// layer reports the missing delimiter (task #275 keeps this fallback; task
+/// #364 owns bash's end-of-file warning). A missing delimiter line **behind**
+/// the first operator no longer starves the condition — see
+/// `claimed_bodies_of_an_arm_survive_a_later_unterminated_operator`.
 #[test]
 fn condition_bodies_of_an_incomplete_line_stream_are_empty() {
     // The `then` arm's `<<X` has no body: its delimiter line is searched first
@@ -285,6 +288,76 @@ fn claimed_regions_of_an_io_number_operator_in_an_arm_body() {
 fn claimed_regions_of_a_slice_without_operators_are_empty() {
     let line = b"if true; then echo x; fi";
     assert!(arm_regions_of(line, b"if").is_empty());
+}
+
+/// Task #275: the line's regions are allocated **one entry per operator**, so an
+/// unterminated operator behind an arm leaves the arm its own complete body, and
+/// the missing one carries its synthesized delimiter line (the integration twin
+/// is `single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm`).
+#[test]
+fn claimed_bodies_of_an_arm_survive_a_later_unterminated_operator() {
+    let line = b"if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT";
+    let text = text_of(line);
+    let slice = arm_slice(line, b"if");
+    let regions = claimed_regions(&text, &slice);
+    assert_eq!(regions.len(), 2, "one entry per operator");
+    let bodies = claimed_bodies(&text, &slice);
+    assert_eq!(
+        bodies.first().map(|b| b.as_slice()),
+        Some(b"bodyT\nT\n".as_slice()),
+        "the arm whose delimiter line arrived keeps its body"
+    );
+    assert_eq!(
+        bodies.get(1).map(|b| b.as_slice()),
+        Some(b"E\n".as_slice()),
+        "the unterminated operator carries its synthesized delimiter line"
+    );
+}
+
+/// The same shape's condition half: the `elif` condition's body of a partially
+/// complete stream is the synthesized delimiter line, so its rebuilt command
+/// line parses as a heredoc with an **empty** body.
+#[test]
+fn condition_bodies_of_a_partial_stream_are_the_synthesized_delimiter_line() {
+    let line = b"if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT";
+    assert_eq!(
+        cond_bodies_of(line, b"elif"),
+        vec![ShortCStr::from_vec(b"E\n".to_vec()).unwrap()]
+    );
+}
+
+/// The mirror of that shape: the line's **first** operator (`<<T`, in the `then`
+/// arm) is the unterminated one, so `found == 0` and the whole line claims
+/// nothing — the arm and the `elif` condition are both body-less, and the parse
+/// layer reports the missing delimiter (the family task **#364** owns).
+#[test]
+fn claimed_bodies_of_a_line_whose_first_operator_is_unterminated_are_empty() {
+    let line = b"if false; then cat <<T; elif cat <<E; then echo b; fi\nbodyE\nE";
+    let text = text_of(line);
+    assert!(claimed_regions(&text, &arm_slice(line, b"if")).is_empty());
+    assert!(claimed_bodies(&text, &arm_slice(line, b"if")).is_empty());
+    assert!(cond_bodies_of(line, b"elif").is_empty());
+}
+
+/// The pre-slice `skip` stays exact with a tail region present: a tail claim is
+/// an entry of its own, so the condition written after one complete operator
+/// takes its own region and never the tail.
+#[test]
+fn condition_bodies_skip_is_exact_when_a_tail_region_is_present() {
+    let line = b"if true; then cat <<X; elif cat <<A; then cat <<E; fi\nbodyX\nX\nbodyA\nA";
+    assert_eq!(
+        cond_bodies_of(line, b"elif"),
+        vec![ShortCStr::from_vec(b"bodyA\nA\n".to_vec()).unwrap()]
+    );
+}
+
+/// A `ScriptText` over `line`, at the origin every block text carries.
+fn text_of(line: &[u8]) -> ScriptText {
+    ScriptText::new(
+        ShortCStr::from_vec(line.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    )
 }
 
 /// The condition of the arm opened by `keyword` (`elif`), as the parse layer

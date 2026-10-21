@@ -19,7 +19,7 @@ fn run(bytes: &[u8], off: usize) -> Run<'_> {
 }
 
 /// Check a flushed statement segment's fields.
-fn check_statement(segment: &Segment<'_>, cmd: &[u8], off: usize, bodies: &[(usize, usize)]) {
+fn check_statement(segment: &Segment<'_>, cmd: &[u8], off: usize, bodies: &[Vec<u8>]) {
     match segment {
         Segment::Statement {
             cmd: c,
@@ -36,7 +36,7 @@ fn check_statement(segment: &Segment<'_>, cmd: &[u8], off: usize, bodies: &[(usi
     }
 }
 
-/// A single-line flush attaches the line's body regions to the runs in
+/// A single-line flush attaches the line's body bytes to the runs in
 /// operator order. `line_end` is the newline's position (the segment-flush
 /// convention).
 #[test]
@@ -54,7 +54,7 @@ fn flush_line_attaches_bodies_in_operator_order() {
         } => {
             assert_eq!(*cmd, b"cat <<A");
             assert_eq!(*off, 0);
-            assert_eq!(bodies, &vec![(19, 27)]);
+            assert_eq!(bodies, &vec![b"bodyA\nA\n".to_vec()]);
         }
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
@@ -65,7 +65,7 @@ fn flush_line_attaches_bodies_in_operator_order() {
         } => {
             assert_eq!(*cmd, b"cat <<B");
             assert_eq!(*off, 11);
-            assert_eq!(bodies, &vec![(27, 34)]);
+            assert_eq!(bodies, &vec![b"bodyB\nB".to_vec()]);
         }
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
@@ -83,7 +83,7 @@ fn flush_line_semicolon_terminated_line() {
     let mut segments = Vec::new();
     let mut runs = vec![run(b"cat <<EOF", 0)];
     let resume = flush_line(&mut segments, line, 0, 20, &mut runs);
-    check_statement(&segments[0], b"cat <<EOF", 0, &[(21, 29)]);
+    check_statement(&segments[0], b"cat <<EOF", 0, &[b"body\nEOF".to_vec()]);
     assert_eq!(resume, 29);
 }
 
@@ -129,7 +129,7 @@ fn flush_line_no_operator_run_gets_no_bodies() {
         } => {
             assert_eq!(*cmd, b"cat <<EOF");
             assert_eq!(*off, 8);
-            assert_eq!(bodies, &vec![(18, 26)]);
+            assert_eq!(bodies, &vec![b"body\nEOF".to_vec()]);
         }
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
@@ -151,7 +151,7 @@ fn flush_line_indexes_the_line_stream_globally() {
     let mut segments = Vec::new();
     let mut runs = vec![run(b"cat <<A", 0)];
     let resume = flush_line(&mut segments, line, 0, 8, &mut runs);
-    check_statement(&segments[0], b"cat <<A", 0, &[(18, 22)]);
+    check_statement(&segments[0], b"cat <<A", 0, &[b"x\nA\n".to_vec()]);
     assert_eq!(resume, 21, "the newline ending the last delimiter line");
 
     // The line's own flush: only the suffix run is buffered, and its global
@@ -160,6 +160,6 @@ fn flush_line_indexes_the_line_stream_globally() {
     let mut segments = Vec::new();
     let mut runs = vec![run(b"cat <<B", 10)];
     let resume = flush_line(&mut segments, line, 0, 17, &mut runs);
-    check_statement(&segments[0], b"cat <<B", 10, &[(22, 25)]);
+    check_statement(&segments[0], b"cat <<B", 10, &[b"y\nB".to_vec()]);
     assert_eq!(resume, 25, "past the line's last region");
 }

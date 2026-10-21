@@ -17,13 +17,14 @@ use alloc::vec::Vec;
 /// is the start of the physical line whose body stream the block reads.
 ///
 /// The block claims **its own** regions of that line's body stream (see
-/// [`claimed_regions`]), and the segment carries them in `bodies` when they
-/// sit entirely past the block's command text (**append mode**): the span then
-/// stops at the closing keyword's separator, so a trailing statement's text is
-/// outside the block, and `script.rs` hands the regions to `run_cond_list` as
-/// the block's bodies — exactly like a statement's (task #234), so the part
-/// that owns the `<<` operator is the one that gets its body. The regions are
-/// appended after the command line, in operator order.
+/// [`heredoc::claimed_line_bodies`]), and the segment carries their bytes in
+/// `bodies` when they sit entirely past the block's command text (**append
+/// mode**): the span then stops at the closing keyword's separator, so a
+/// trailing statement's text is outside the block, and `script.rs` hands the
+/// body bytes to `run_cond_list` as the block's bodies — exactly like a
+/// statement's (task #234), so the part that owns the `<<` operator is the one
+/// that gets its body. The bodies are appended after the command line, in
+/// operator order.
 ///
 /// When the regions are interleaved with the block's own lines (a multi-line
 /// block with a heredoc in its body), the segment carries no bodies and the
@@ -79,9 +80,10 @@ pub(super) fn keyword_block<'a>(
         let bodies = if k == 0 {
             Vec::new()
         } else {
-            let claimed = claimed_regions(line, line_start, start, line_end, k);
+            let (claimed, contents) =
+                heredoc::claimed_line_bodies(line, line_start, start, line_end, k);
             if claimed.first().is_some_and(|&(s, _)| s >= end) {
-                claimed
+                contents
             } else {
                 // Extension mode: forward-only — the span keeps the block text.
                 end = match claimed.last() {
@@ -113,25 +115,6 @@ pub(super) fn keyword_block<'a>(
         resume,
         floor,
     )
-}
-
-/// The body regions the block's own `k` operators claim from its physical
-/// line's body stream: the regions of the whole line's operators, in operator
-/// order, starting after the `p` operators written on that line **before** the
-/// block (`p` = the pre-block statements' operators, which already claimed the
-/// head of the stream — the same rule `segment/line.rs::flush_line` applies to
-/// trailing statements). An empty list when the block has no operator or the
-/// line's bodies are missing.
-fn claimed_regions(
-    line: &[u8],
-    line_start: usize,
-    start: usize,
-    line_end: usize,
-    k: usize,
-) -> Vec<(usize, usize)> {
-    let claimed_before = heredoc::operator_count(line, line_start, start);
-    let (all, _) = heredoc::line_bodies_for_line(line, line_start, line_end);
-    all.into_iter().skip(claimed_before).take(k).collect()
 }
 
 #[cfg(test)]

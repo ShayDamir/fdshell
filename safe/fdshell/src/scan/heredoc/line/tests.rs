@@ -1,7 +1,8 @@
 //! Tests for the physical-line heredoc helpers.
 
-use super::{line_bodies_for_line, line_end_after, line_start};
+use super::{line_bodies_for_line, line_body_contents, line_end_after, line_start};
 use alloc::vec;
+use alloc::vec::Vec;
 
 /// `line_end_after` finds the first unquoted newline at or after `from`.
 #[test]
@@ -41,6 +42,51 @@ fn line_bodies_for_line_no_operators_is_empty() {
     let (bodies, resume) = line_bodies_for_line(line, 0, 10);
     assert!(bodies.is_empty());
     assert_eq!(resume, 10);
+}
+
+/// A **partial** stream (the first operator's delimiter line present, a later
+/// one's missing): the line keeps the region of the operator whose body
+/// arrived, the missing one claims the rest of the stream, and the resume is
+/// the text end, so the claimed bytes are never scanned as commands (task #275).
+#[test]
+fn line_bodies_of_a_partial_stream_keep_the_complete_regions() {
+    let line = b"cat <<T; cat <<E\nbodyT\nT";
+    let (bodies, resume) = line_bodies_for_line(line, 0, 16);
+    assert_eq!(bodies, vec![(17, 24), (25, 24)]);
+    assert_eq!(resume, line.len());
+    let contents = line_body_contents(line, 0, 16);
+    assert_eq!(contents.1, line.len());
+    let texts: Vec<&[u8]> = contents.0.iter().map(|b| b.as_slice()).collect();
+    assert_eq!(texts, vec![b"bodyT\nT\n".as_slice(), b"E\n".as_slice()]);
+}
+
+/// The line's **first** delimiter line missing: nothing is claimed and the
+/// resume is the line end, byte-identical to the pre-#275 rule — the parse
+/// layer reports the shape (the `found == 0` family, task #364 owns bash's
+/// end-of-file warning).
+#[test]
+fn line_bodies_of_a_first_missing_delimiter_are_empty() {
+    let line = b"cat <<E; cat <<T\nbodyT\nT";
+    assert_eq!(line_bodies_for_line(line, 0, 16), (Vec::new(), 16usize));
+    assert_eq!(
+        line_body_contents(line, 0, 16),
+        (Vec::<Vec<u8>>::new(), 16usize)
+    );
+}
+
+/// A window claims the line's allocation **after** the operators written before
+/// it, and a tail claim is an entry of its own: with a tail region present the
+/// `skip`/`take` stays exact, the window taking the synthesized body.
+#[test]
+fn claimed_line_bodies_skip_the_operators_written_before_the_window() {
+    let line = b"cat <<T; cat <<E\nbodyT\nT";
+    let (regions, bodies) = super::claimed_line_bodies(line, 0, 10, 16, 1);
+    assert_eq!(regions, vec![(25, 24)]);
+    assert_eq!(bodies, vec![b"E\n".to_vec()]);
+    // The whole window (both operators) keeps both entries, in order.
+    let (all, texts) = super::claimed_line_bodies(line, 0, 0, 16, 2);
+    assert_eq!(all, vec![(17, 24), (25, 24)]);
+    assert_eq!(texts, vec![b"bodyT\nT\n".to_vec(), b"E\n".to_vec()]);
 }
 
 /// `line_start` is the index **past** the preceding newline: the whole-line

@@ -19,5 +19,5 @@ pub(crate) fn unterminated(line: &[u8], run_start: usize, run_end: usize) -> boo
         _ => return false,
     };
     let line_end = line_end_after(line, run_start);
-    body_regions_full(line, line_end, &ops).is_err()
+    body_regions_full(line, line_end, &ops).found < ops.len()
 }

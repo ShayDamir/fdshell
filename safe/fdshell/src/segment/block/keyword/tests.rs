@@ -14,7 +14,7 @@ fn scan(line: &[u8]) -> (usize, usize, bool, usize) {
 /// physical line starts at 0, as the segment scanner calls it. `pre_resume` is
 /// the line end: the pin asserts on the span and the body regions, not on the
 /// floor wiring (pinned by `segment/tests.rs`).
-fn scan_at(line: &[u8], start: usize) -> (usize, usize, bool, usize, Vec<(usize, usize)>) {
+fn scan_at(line: &[u8], start: usize) -> (usize, usize, bool, usize, Vec<Vec<u8>>) {
     let raw = line.get(start..).unwrap_or(b"");
     let part = raw.trim_ascii();
     let (segment, resume, _floor) =
@@ -59,13 +59,14 @@ fn prefixed_keyword_scan_lands_where_the_unprefixed_one_does() {
     }
 }
 
-/// A pin: (line, block start, expected span end, expected claimed regions).
-type Appended = (&'static [u8], usize, usize, Vec<(usize, usize)>);
+/// A pin: (line, block start, expected span end, expected claimed body bytes).
+type Appended = (&'static [u8], usize, usize, Vec<Vec<u8>>);
 
-/// Append mode: the block claims **its own** regions of its physical line's
-/// body stream (regions `p..p+k`, where `p` is the number of `<<` operators
-/// written on that line before the block) and its span stops at the closing
-/// keyword's separator, so a trailing statement's text stays outside the block.
+/// Append mode: the block claims **its own** bodies of its physical line's
+/// body stream (the regions of operators `p..p+k`, where `p` is the number of
+/// `<<` operators written on that line before the block) and its span stops at
+/// the closing keyword's separator, so a trailing statement's text stays
+/// outside the block.
 #[test]
 fn append_mode_claims_the_blocks_own_regions() {
     let cases: [Appended; 5] = [
@@ -74,21 +75,21 @@ fn append_mode_claims_the_blocks_own_regions() {
             b"cat <<X; if cat <<A; then echo y; fi; cat <<B\nbodyX\nX\nbodyA\nA\nbodyB\nB",
             9,
             36,
-            vec![(54, 62)],
+            vec![b"bodyA\nA\n".to_vec()],
         ),
         // p = 2: two pre-block operators own regions 0 and 1.
         (
             b"cat <<X; cat <<Y; if cat <<A; then echo y; fi; cat <<B\nbodyX\nX\nbodyY\nY\nbodyA\nA\nbodyB\nB",
             18,
             45,
-            vec![(71, 79)],
+            vec![b"bodyA\nA\n".to_vec()],
         ),
         // p = 0, trailing statement: the regions are contiguous with the text.
         (
             b"if cat <<A; then echo y; fi; cat <<B\nbodyA\nA\nbodyB\nB",
             0,
             27,
-            vec![(37, 45)],
+            vec![b"bodyA\nA\n".to_vec()],
         ),
         // k = 0 (no operator in the block text): no regions are claimed.
         (
@@ -100,14 +101,14 @@ fn append_mode_claims_the_blocks_own_regions() {
         // A `;`-terminated heredoc in a single-line block body: the region
         // starts just past the closing keyword's separator, so the rebuilt text
         // (`cmd + "\n" + region`) is byte-identical to the extended span.
-        (b"if true; then cat <<T; fi\nbodyT\nT", 0, 25, vec![(26, 33)]),
+        (b"if true; then cat <<T; fi\nbodyT\nT", 0, 25, vec![b"bodyT\nT".to_vec()]),
     ];
     for (line, start, end_pos, bodies) in cases {
         let got = scan_at(line, start);
         assert!(got.2, "{line:?} must close");
         assert_eq!(got.0, start, "{line:?}");
         assert_eq!(got.1, end_pos, "{line:?}: span end");
-        assert_eq!(got.4, bodies, "{line:?}: claimed regions");
+        assert_eq!(got.4, bodies, "{line:?}: claimed bodies");
     }
 }
 
@@ -122,14 +123,14 @@ fn extension_mode_keeps_the_span_and_no_bodies() {
     let line = b"if cat <<A; then\necho y\nfi\nbodyA\nA";
     let got = scan_at(line, 0);
     assert_eq!(got.1, line.len(), "span end");
-    assert_eq!(got.4, Vec::new(), "no regions in extension mode");
+    assert_eq!(got.4, Vec::<Vec<u8>>::new(), "no bodies in extension mode");
 
     // Missing bodies: the region list is empty and the extension falls back to
     // the line's resume, with no regions carried.
     let line = b"while cat <<X; do a && b; X\ndone\necho after";
     let got = scan_at(line, 0);
     assert_eq!(got.1, 32, "span end is the closing keyword's separator");
-    assert_eq!(got.4, Vec::new());
+    assert_eq!(got.4, Vec::<Vec<u8>>::new());
 }
 
 /// A pre-block statement on an **earlier** physical line claims nothing in the
@@ -153,10 +154,10 @@ fn skip_is_bounded_to_the_blocks_physical_line() {
         } => {
             assert_eq!(block_start, 8);
             assert!(closed);
-            // The block's line owns the stream from 8: its regions start after
-            // *that* line's newline, and `<<B`'s region is outside the span.
+            // The block's line owns the stream from 8: its bodies start after
+            // *that* line's newline, and `<<B`'s body is outside the span.
             assert_eq!(end_pos, 35);
-            assert_eq!(bodies, vec![(45, 61)]);
+            assert_eq!(bodies, vec![b"bodyX\nX\nbodyA\nA\n".to_vec()]);
         }
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),

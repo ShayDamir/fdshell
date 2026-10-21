@@ -41,10 +41,10 @@ fn seg_bytes(line: &[u8]) -> Vec<&[u8]> {
 }
 
 /// The `(cmd, bodies, background)` face of every segment a line produces: a
-/// statement's command bytes, the **text** of each body region it claims (in
-/// the line's own bytes), and its async flag. A block prints `B`, the
-/// invalid-split marker `A`; both claim no body region here.
-fn statements(line: &[u8]) -> Vec<(&[u8], Vec<&[u8]>, bool)> {
+/// statement's command bytes, the body bytes it claims (in operator order),
+/// and its async flag. A block prints `B`, the invalid-split marker `A`; both
+/// claim no body here.
+fn statements(line: &[u8]) -> Vec<(&[u8], Vec<Vec<u8>>, bool)> {
     scan_segments(line, false)
         .iter()
         .map(|seg| match seg {
@@ -53,14 +53,7 @@ fn statements(line: &[u8]) -> Vec<(&[u8], Vec<&[u8]>, bool)> {
                 bodies,
                 background,
                 ..
-            } => (
-                *cmd,
-                bodies
-                    .iter()
-                    .map(|&(s, e)| line.get(s..e).unwrap_or(b""))
-                    .collect(),
-                *background,
-            ),
+            } => (*cmd, bodies.clone(), *background),
             Segment::Block { .. } => (b"B".as_slice(), Vec::new(), false),
             Segment::AsyncInvalid => (b"A".as_slice(), Vec::new(), false),
         })
@@ -287,16 +280,8 @@ fn a_heredoc_behind_an_ampersand_claims_its_own_region() {
     assert_eq!(
         statements(b"cat <<A & cat <<B\nx\nA\ny\nB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
-            (
-                b"cat <<B".as_slice(),
-                alloc::vec![b"y\nB".as_slice()],
-                false
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
+            (b"cat <<B".as_slice(), alloc::vec![b"y\nB".to_vec()], false),
         ],
     );
     // The same delimiter word on both sides: the regions stay in operator
@@ -304,46 +289,26 @@ fn a_heredoc_behind_an_ampersand_claims_its_own_region() {
     assert_eq!(
         statements(b"cat <<T & cat <<T\nx\nT\ny\nT"),
         alloc::vec![
-            (
-                b"cat <<T".as_slice(),
-                alloc::vec![b"x\nT\n".as_slice()],
-                true
-            ),
-            (
-                b"cat <<T".as_slice(),
-                alloc::vec![b"y\nT".as_slice()],
-                false
-            ),
+            (b"cat <<T".as_slice(), alloc::vec![b"x\nT\n".to_vec()], true),
+            (b"cat <<T".as_slice(), alloc::vec![b"y\nT".to_vec()], false),
         ],
     );
     // Whitespace around the `&` (the load-bearing row for the skip loop).
     assert_eq!(
         statements(b"cat <<A &   cat <<B\nx\nA\ny\nB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
-            (
-                b"cat <<B".as_slice(),
-                alloc::vec![b"y\nB".as_slice()],
-                false
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
+            (b"cat <<B".as_slice(), alloc::vec![b"y\nB".to_vec()], false),
         ],
     );
     // The `<<-` and io-number suffixes: the region keeps its raw bytes.
     assert_eq!(
         statements(b"cat <<A & cat <<-B\nx\nA\n\ty\n\tB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
             (
                 b"cat <<-B".as_slice(),
-                alloc::vec![b"\ty\n\tB".as_slice()],
+                alloc::vec![b"\ty\n\tB".to_vec()],
                 false
             ),
         ],
@@ -351,30 +316,18 @@ fn a_heredoc_behind_an_ampersand_claims_its_own_region() {
     assert_eq!(
         statements(b"cat <<A & cat 3<<B\nx\nA\ny\nB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
-            (
-                b"cat 3<<B".as_slice(),
-                alloc::vec![b"y\nB".as_slice()],
-                false
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
+            (b"cat 3<<B".as_slice(), alloc::vec![b"y\nB".to_vec()], false),
         ],
     );
     // A pipeline suffix is one statement, its operator claims one region.
     assert_eq!(
         statements(b"cat <<A & cat <<B | wc -l\nx\nA\ny\nB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
             (
                 b"cat <<B | wc -l".as_slice(),
-                alloc::vec![b"y\nB".as_slice()],
+                alloc::vec![b"y\nB".to_vec()],
                 false
             ),
         ],
@@ -384,21 +337,9 @@ fn a_heredoc_behind_an_ampersand_claims_its_own_region() {
     assert_eq!(
         statements(b"cat <<A & cat <<B & cat <<C\nx\nA\ny\nB\nz\nC"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
-            (
-                b"cat <<B".as_slice(),
-                alloc::vec![b"y\nB\n".as_slice()],
-                true
-            ),
-            (
-                b"cat <<C".as_slice(),
-                alloc::vec![b"z\nC".as_slice()],
-                false
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
+            (b"cat <<B".as_slice(), alloc::vec![b"y\nB\n".to_vec()], true),
+            (b"cat <<C".as_slice(), alloc::vec![b"z\nC".to_vec()], false),
         ],
     );
 }
@@ -417,7 +358,7 @@ fn an_ampersand_that_ends_the_line_keeps_the_region_jump() {
         statements(b"cat <<A &\nbody\nA\n"),
         alloc::vec![(
             b"cat <<A".as_slice(),
-            alloc::vec![b"body\nA\n".as_slice()],
+            alloc::vec![b"body\nA\n".to_vec()],
             true
         )],
     );
@@ -425,7 +366,7 @@ fn an_ampersand_that_ends_the_line_keeps_the_region_jump() {
     // jumps past the region, so the body lines stay a body.
     assert_eq!(
         statements(b"cat <<A & # note\nx\nA"),
-        alloc::vec![(b"cat <<A".as_slice(), alloc::vec![b"x\nA".as_slice()], true)],
+        alloc::vec![(b"cat <<A".as_slice(), alloc::vec![b"x\nA".to_vec()], true)],
     );
     // A body that never arrives: no region for anybody (the all-or-nothing
     // line rule, owner #275), the split itself stays valid.
@@ -452,11 +393,7 @@ fn a_suffix_the_line_cannot_carry_is_flushed_body_less() {
     assert_eq!(
         statements(b"cat <<A & cat <<B # note\nx\nA\ny\nB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
             (b"cat <<B".as_slice(), alloc::vec![], false),
             (b"x".as_slice(), alloc::vec![], false),
             (b"y".as_slice(), alloc::vec![], false),
@@ -469,11 +406,7 @@ fn a_suffix_the_line_cannot_carry_is_flushed_body_less() {
     assert_eq!(
         statements(b"cat <<A& cat <<B\nx\nA\ny\nB"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
             (b"cat <<B".as_slice(), alloc::vec![], false),
             (b"y".as_slice(), alloc::vec![], false),
             (b"B".as_slice(), alloc::vec![], false),
@@ -486,7 +419,7 @@ fn a_suffix_the_line_cannot_carry_is_flushed_body_less() {
     assert_eq!(
         statements(b"cat <<A & cat <<\nx\nA"),
         alloc::vec![
-            (b"cat <<A".as_slice(), alloc::vec![b"x\nA".as_slice()], true),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA".to_vec()], true),
             (b"cat <<".as_slice(), alloc::vec![], false),
         ],
     );
@@ -501,11 +434,7 @@ fn an_ampersand_in_front_of_a_block_leaves_the_block_the_rest() {
     assert_eq!(
         statements(b"cat <<A & if true; then cat <<B\nx\nA\ny\nB\nfi"),
         alloc::vec![
-            (
-                b"cat <<A".as_slice(),
-                alloc::vec![b"x\nA\n".as_slice()],
-                true
-            ),
+            (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
             (b"B".as_slice(), alloc::vec![], false),
         ],
     );

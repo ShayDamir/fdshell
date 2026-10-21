@@ -11,13 +11,13 @@ use book::{Book, Run};
 /// A segment of a script line extracted by the scanner.
 pub(crate) enum Segment<'a> {
     /// Simple statement: the command bytes (`cmd`), its offset in the line
-    /// (`off`), its heredoc body regions (`bodies`, empty when the statement
+    /// (`off`), its heredoc body bytes (`bodies`, empty when the statement
     /// has no heredoc), and the plain-`&` flag marking its **last** run to
     /// run asynchronously (`background`, task #326).
     Statement {
         cmd: &'a [u8],
         off: usize,
-        bodies: Vec<(usize, usize)>,
+        bodies: Vec<Vec<u8>>,
         background: bool,
     },
     /// A plain `&` whose split is invalid (nothing to terminate, `;`-separated
@@ -32,11 +32,11 @@ pub(crate) enum Segment<'a> {
         end_pos: usize,
         /// Whether the closing keyword was found.
         closed: bool,
-        /// The block's own heredoc body regions, appended to its text; empty
+        /// The block's own heredoc body bytes, appended to its text; empty
         /// when the block carries no `<<` operator, or when its bodies are
         /// interleaved with its lines (extension mode, see
         /// [`block::keyword::keyword_block`]).
-        bodies: Vec<(usize, usize)>,
+        bodies: Vec<Vec<u8>>,
     },
 }
 

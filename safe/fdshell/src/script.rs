@@ -1,5 +1,4 @@
 use crate::segment::Segment;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::cmd::CmdError;
@@ -37,9 +36,8 @@ pub(crate) fn run_script(
             } => {
                 crate::verbose::trace(line.get(off..off + cmd.len()).unwrap_or(b""), cell);
                 let part = sub(text, off, cmd.len())?;
-                let body_bytes = extract_bodies(line, &bodies);
                 if let Some(control) =
-                    crate::cond::run_cond_list(&part, &body_bytes, cell, false, background)?
+                    crate::cond::run_cond_list(&part, &bodies, cell, false, background)?
                 {
                     return Ok(Some(control));
                 }
@@ -56,18 +54,17 @@ pub(crate) fn run_script(
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
                 let cmd_start = block_start + lead;
                 // The block's text is its **command** bytes only, and its body
-                // regions travel as `run_cond_list`'s bodies exactly like a
+                // bytes travel as `run_cond_list`'s bodies exactly like a
                 // statement's (task #234): `cond::parts::take_bodies` gives the
                 // part that owns the `<<` operator its own body, so a split
                 // past the closing keyword never leaves a heredoc part bodyless.
                 // An extension-mode block (a condition's bodies are inside the
-                // span) claims no regions here and keeps its verbatim text.
+                // span) claims no bodies here and keeps its verbatim text.
                 let full = sub(text, cmd_start, raw.trim_ascii().len())?;
-                let body_bytes = extract_bodies(line, &bodies);
                 // A block statement's own `&` runs it foreground (measured
                 // divergence, task #326 — compound background is a follow-up).
                 if let Some(control) =
-                    crate::cond::run_cond_list(&full, &body_bytes, cell, false, false)?
+                    crate::cond::run_cond_list(&full, &bodies, cell, false, false)?
                 {
                     return Ok(Some(control));
                 }
@@ -77,15 +74,6 @@ pub(crate) fn run_script(
         }
     }
     Ok(None)
-}
-
-/// Extract the body bytes of a segment's heredoc regions (statements and
-/// append-mode blocks both hand them to `run_cond_list`).
-fn extract_bodies(line: &[u8], bodies: &[(usize, usize)]) -> Vec<Vec<u8>> {
-    bodies
-        .iter()
-        .map(|&(s, e)| line.get(s..e).unwrap_or(b"").to_vec())
-        .collect()
 }
 
 /// Subslice of a validated offset range; `None` is an internal invariant breach.

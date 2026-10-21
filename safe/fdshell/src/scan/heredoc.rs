@@ -16,9 +16,11 @@ mod regions;
 
 pub(crate) use body::body_spans;
 pub(crate) use cont::unterminated;
-pub(crate) use full::body_regions_full;
+pub(crate) use full::{body_regions_full, contents as body_contents};
 pub(crate) use io::{io_fd, span_operator, string_span};
-pub(crate) use line::{line_bodies_for_line, line_end_after, line_start};
+pub(crate) use line::{
+    claimed_line_bodies, line_bodies_for_line, line_body_contents, line_end_after, line_start,
+};
 pub(crate) use lines::first_unquoted_newline;
 pub(crate) use op::operator_word;
 pub(crate) use op::{Operator, attached, invalid_delimiter, operator_delim};

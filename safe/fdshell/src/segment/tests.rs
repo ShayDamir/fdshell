@@ -594,7 +594,7 @@ fn scan_statement_heredoc_spans_body() {
         ) => {
             assert_eq!(s1, b"cat <<EOF");
             assert_eq!(*off1, 0);
-            assert_eq!(b1, &vec![(10, 19)]);
+            assert_eq!(b1, &vec![b"body\nEOF\n".to_vec()]);
             assert_eq!(s2, b"echo after");
             assert_eq!(*off2, 19);
         }
@@ -621,7 +621,7 @@ fn scan_statement_after_heredoc() {
         ) => {
             assert_eq!(s1, b"cat <<Q");
             assert_eq!(*off1, 2);
-            assert_eq!(b1, &vec![(10, 14)]);
+            assert_eq!(b1, &vec![b"x\nQ\n".to_vec()]);
             assert_eq!(s2, b"b");
             assert_eq!(*off2, 14);
         }
@@ -713,14 +713,18 @@ fn scan_pre_block_block_and_trailing_share_one_body_stream() {
         ) => {
             assert_eq!(pre, b"cat <<X");
             assert_eq!(*pre_off, 0);
-            assert_eq!(pre_bodies, &vec![(46, 54)]);
+            assert_eq!(pre_bodies, &vec![b"bodyX\nX\n".to_vec()]);
             assert_eq!(*block_start, 8, "the run start, leading space included");
             assert_eq!(*end_pos, 36, "the span stops at the closing keyword");
             assert!(*closed);
-            assert_eq!(bodies, &vec![(54, 62)], "the block's own region");
+            assert_eq!(
+                bodies,
+                &vec![b"bodyA\nA\n".to_vec()],
+                "the block's own body"
+            );
             assert_eq!(tail, b"cat <<B");
             assert_eq!(*tail_off, 38);
-            assert_eq!(tail_bodies, &vec![(62, 69)]);
+            assert_eq!(tail_bodies, &vec![b"bodyB\nB".to_vec()]);
         }
         _ => panic!("expected Statement, Block, Statement"),
     }
@@ -878,10 +882,10 @@ fn scan_pre_block_function_and_trailing_share_one_body_stream() {
     check_shapes(
         b"cat <<X; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB",
         &[
-            ("S", 0, 0, false, vec![(38, 46)]),
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
             ("B", 8, 25, true, vec![]),
             ("S", 27, 0, false, vec![]),
-            ("S", 30, 0, false, vec![(46, 53)]),
+            ("S", 30, 0, false, vec![b"bodyB\nB".to_vec()]),
         ],
     );
 }
@@ -892,11 +896,11 @@ fn scan_two_pre_block_heredocs_and_function_take_their_regions() {
     check_shapes(
         b"cat <<X; cat <<Y; f() { echo hi; }; f; cat <<B\nbodyX\nX\nbodyY\nY\nbodyB\nB",
         &[
-            ("S", 0, 0, false, vec![(47, 55)]),
-            ("S", 9, 0, false, vec![(55, 63)]),
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
+            ("S", 9, 0, false, vec![b"bodyY\nY\n".to_vec()]),
             ("B", 17, 34, true, vec![]),
             ("S", 36, 0, false, vec![]),
-            ("S", 39, 0, false, vec![(63, 70)]),
+            ("S", 39, 0, false, vec![b"bodyB\nB".to_vec()]),
         ],
     );
 }
@@ -907,10 +911,10 @@ fn scan_pre_block_function_keyword_form_shares_body_stream() {
     check_shapes(
         b"cat <<X; function f { echo hi; }; f; cat <<B\nbodyX\nX\nbodyB\nB",
         &[
-            ("S", 0, 0, false, vec![(45, 53)]),
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
             ("B", 8, 32, true, vec![]),
             ("S", 34, 0, false, vec![]),
-            ("S", 37, 0, false, vec![(53, 60)]),
+            ("S", 37, 0, false, vec![b"bodyB\nB".to_vec()]),
         ],
     );
 }
@@ -923,7 +927,7 @@ fn scan_function_block_ending_line_skips_body_regions() {
     check_shapes(
         b"cat <<X; f() { echo hi; }\nbodyX\nX",
         &[
-            ("S", 0, 0, false, vec![(26, 33)]),
+            ("S", 0, 0, false, vec![b"bodyX\nX".to_vec()]),
             ("B", 8, 25, true, vec![]),
         ],
     );
@@ -935,9 +939,9 @@ fn scan_heredoc_between_function_block_and_call_shares_body_stream() {
     check_shapes(
         b"cat <<X; f() { echo hi; }; cat <<B; f\nbodyX\nX\nbodyB\nB",
         &[
-            ("S", 0, 0, false, vec![(38, 46)]),
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
             ("B", 8, 25, true, vec![]),
-            ("S", 27, 0, false, vec![(46, 53)]),
+            ("S", 27, 0, false, vec![b"bodyB\nB".to_vec()]),
             ("S", 36, 0, false, vec![]),
         ],
     );
@@ -945,7 +949,7 @@ fn scan_heredoc_between_function_block_and_call_shares_body_stream() {
 
 /// The `(kind, off-or-start, end_pos, closed, bodies)` face of every segment a
 /// line produces, in scan order (`off` for statements, unused fields zeroed).
-type Shape = (&'static str, usize, usize, bool, Vec<(usize, usize)>);
+type Shape = (&'static str, usize, usize, bool, Vec<Vec<u8>>);
 
 fn check_shapes(line: &[u8], want: &[Shape]) {
     let got: Vec<Shape> = scan_segments(line, false)
@@ -1346,11 +1350,11 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
         ) => {
             assert_eq!(head, b"cat <<A");
             assert_eq!(*head_off, 0);
-            assert_eq!(head_bodies, &vec![(18, 22)], "region 0: `x` + `A`");
+            assert_eq!(head_bodies, &vec![b"x\nA\n".to_vec()], "body 0: `x` + `A`");
             assert!(*head_bg, "the `&` backgrounds the run it terminates");
             assert_eq!(tail, b"cat <<B");
             assert_eq!(*tail_off, 10);
-            assert_eq!(tail_bodies, &vec![(22, 25)], "region 1: `y` + `B`");
+            assert_eq!(tail_bodies, &vec![b"y\nB".to_vec()], "body 1: `y` + `B`");
             assert!(!*tail_bg, "the suffix runs in the foreground");
         }
         _ => panic!("expected two Statement segments"),

@@ -1,5 +1,5 @@
 //! Flush the buffered runs of a physical line as statement segments,
-//! attaching the line's heredoc body regions (in operator order).
+//! attaching the line's heredoc body bytes (in operator order).
 
 use crate::scan::heredoc;
 use crate::segment::Segment;
@@ -27,9 +27,10 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
 }
 
 /// Flush the buffered runs of the current physical line as statements,
-/// attaching the line's heredoc body regions (in operator order). Returns the
-/// resume index (end of the last body region, or the line end). A block's
-/// condition bodies are handled by the block-text parse, not here.
+/// attaching the line's heredoc body bytes (in operator order). Returns the
+/// resume index (the end of the last claimed region — the text end when a
+/// missing delimiter line claimed the rest of the stream — or the line end). A
+/// block's condition bodies are handled by the block-text parse, not here.
 ///
 /// Runs buffered from an earlier physical line (a trailing `#` comment
 /// deferred the flush past the line's newline) are emitted body-less: a
@@ -50,11 +51,11 @@ pub(crate) fn flush_line<'a>(
     }
     let single_line = runs.first().is_none_or(|run| run.off >= line_start);
     let (bodies, resume) = if single_line {
-        heredoc::line_bodies_for_line(line, line_start, line_end)
+        heredoc::line_body_contents(line, line_start, line_end)
     } else {
         (Vec::new(), line_end)
     };
-    // Regions already claimed by operators before the first run: a block's
+    // Body bytes already claimed by operators before the first run: a block's
     // condition operators, when the runs trail a block on the same line (the
     // line's body stream is global, in operator order).
     let mut assigned = runs
@@ -63,8 +64,7 @@ pub(crate) fn flush_line<'a>(
         .unwrap_or(0);
     for run in runs.drain(..) {
         let n = heredoc::operator_count(line, run.off, run.off + run.bytes.len());
-        let run_bodies: Vec<(usize, usize)> =
-            bodies.iter().skip(assigned).take(n).copied().collect();
+        let run_bodies: Vec<Vec<u8>> = bodies.iter().skip(assigned).take(n).cloned().collect();
         assigned += n;
         segments.push(Segment::Statement {
             cmd: run.bytes,

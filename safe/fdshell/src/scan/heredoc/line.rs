@@ -4,7 +4,7 @@
 
 use crate::scan::ScanState;
 
-use super::full::body_regions_full;
+use super::full::{body_regions_full, contents};
 use super::operator_delims;
 use alloc::vec::Vec;
 
@@ -25,23 +25,32 @@ pub(crate) fn line_end_after(line: &[u8], from: usize) -> usize {
     line.len()
 }
 
-/// The full body regions (in operator order) of a physical line's `<<`
-/// operators, plus the resume index (end of the last delimiter line). The
-/// regions start just after the line's newline, so a `;`-terminated operator
-/// line still finds its body on the following lines. `(empty, line_end)` when
-/// the line has no operators or the body is missing.
+/// The body stream of the physical line `line[line_start..line_end]`: its
+/// claimed regions, their bytes, and the resume index — the single allocation
+/// point the three extractions below share, so the ranges and the bytes cannot
+/// drift apart (one entry per operator keeps the two lists index-aligned with
+/// the operator order, LESSONS).
 ///
-/// `line_end` is the command line's end: the newline's position (segment
-/// flush) or the index just past it (block-condition extension); the body
-/// starts just past that newline in both cases.
-pub(crate) fn line_bodies_for_line(
+/// `line_end` is the command line's end: the newline's position (segment flush)
+/// or the index just past it (block-condition extension); the body starts just
+/// past that newline in both cases. The resume is the end of the last delimiter
+/// line, and the text end when a missing delimiter line claimed the rest of the
+/// stream (its bytes are body data, never commands).
+///
+/// `(empty, empty, line_end)` — the line claims nothing, and the parse layer
+/// reports the shape — when it has no operator, when an operator's delimiter
+/// word is unreadable, when the stream starts at/past the text end (no body
+/// lines at all), or when its **first** delimiter line is missing
+/// (`found == 0`, task #275's residual family).
+fn line_stream_bodies(
     line: &[u8],
     line_start: usize,
     line_end: usize,
-) -> (Vec<(usize, usize)>, usize) {
-    let ops = match operator_delims(line, line_start, line_end) {
-        Some(ops) if !ops.is_empty() => ops,
-        _ => return (Vec::new(), line_end),
+) -> (Vec<(usize, usize)>, Vec<Vec<u8>>, usize) {
+    let nothing = (Vec::new(), Vec::new(), line_end);
+    let Some(ops) = operator_delims(line, line_start, line_end).filter(|ops| !ops.is_empty())
+    else {
+        return nothing;
     };
     let body_start = if line_end > 0 && line.get(line_end - 1) == Some(&b'\n') {
         line_end
@@ -49,12 +58,62 @@ pub(crate) fn line_bodies_for_line(
         line_end_after(line, line_end)
     };
     if body_start >= line.len() {
-        return (Vec::new(), line_end);
+        return nothing;
     }
-    match body_regions_full(line, body_start, &ops) {
-        Ok((regions, resume)) => (regions, resume),
-        Err(_) => (Vec::new(), line_end),
+    let alloc = body_regions_full(line, body_start, &ops);
+    if alloc.regions.is_empty() {
+        return nothing;
     }
+    let resume = alloc.resume;
+    let bodies = contents(line, &ops, &alloc);
+    (alloc.regions, bodies, resume)
+}
+
+/// The full body regions (in operator order) of a physical line's `<<`
+/// operators, plus the resume index. The regions start just after the line's
+/// newline, so a `;`-terminated operator line still finds its body on the
+/// following lines.
+pub(crate) fn line_bodies_for_line(
+    line: &[u8],
+    line_start: usize,
+    line_end: usize,
+) -> (Vec<(usize, usize)>, usize) {
+    let (regions, _, resume) = line_stream_bodies(line, line_start, line_end);
+    (regions, resume)
+}
+
+/// The body **bytes** of a physical line's `<<` operators, in operator order,
+/// plus the resume index. A region whose delimiter line never arrived carries
+/// that line synthesized ([`contents`]), so the command line rebuilt from
+/// these bytes parses as a complete heredoc (task #275).
+pub(crate) fn line_body_contents(
+    line: &[u8],
+    line_start: usize,
+    line_end: usize,
+) -> (Vec<Vec<u8>>, usize) {
+    let (_, bodies, resume) = line_stream_bodies(line, line_start, line_end);
+    (bodies, resume)
+}
+
+/// The regions **and** the bytes the `k` operators written in the window
+/// `line[start..]` claim from their physical line's body stream: the line's
+/// allocation starting after the `p` operators written on that line **before**
+/// the window (the same skip `segment/line.rs::flush_line` applies to a
+/// block's trailing statements, and `parse/cond_bodies.rs` to an arm slice).
+/// The skip and the take stay one arithmetic unit with the window (LESSONS).
+pub(crate) fn claimed_line_bodies(
+    line: &[u8],
+    line_start: usize,
+    start: usize,
+    line_end: usize,
+    k: usize,
+) -> (Vec<(usize, usize)>, Vec<Vec<u8>>) {
+    let skip = super::operator_count(line, line_start, start);
+    let (regions, bodies, _) = line_stream_bodies(line, line_start, line_end);
+    (
+        regions.into_iter().skip(skip).take(k).collect(),
+        bodies.into_iter().skip(skip).take(k).collect(),
+    )
 }
 
 /// The start of the physical line that contains `pos` (the index just past the
