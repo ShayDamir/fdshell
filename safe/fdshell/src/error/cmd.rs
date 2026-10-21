@@ -23,6 +23,8 @@ pub enum CmdError {
     Resolve,
     /// cd failed
     Cd,
+    /// cd: too many arguments
+    CdTooManyArgs,
     /// invalid export name
     ExportName,
     /// fd pass-through failed

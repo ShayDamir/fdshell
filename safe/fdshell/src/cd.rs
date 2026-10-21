@@ -5,16 +5,35 @@ use crate::state::{FdVar, ShellState};
 use sys::fcntl::{O_DIRECTORY, O_NOFOLLOW};
 use sys::{LocalFd, Origin, Position, ShortCStr, Trace};
 
-pub fn cd(
-    args: &[ShortCStr],
+/// The directory to move to. The caller (`intercept/cd.rs`) decides **which**
+/// form a `cd` line is: it owns the raw word, the expanded fields and the
+/// usage error, while `cd` only opens the target it is handed.
+#[derive(Debug)]
+pub(crate) enum CdTarget {
+    /// `$HOME`: the bare `cd`, and every operand whose expansion produced no
+    /// field at all (`cd "$@"` with an empty positional deque).
+    Home,
+    /// `OLDPWD`: the `cd -` form, which bash reads on the **expanded** field
+    /// (`D=-; cd "$D"` is the old cwd even when a directory named `-` exists).
+    OldCwd,
+    /// The fdshell-only `%name` form, read on the **raw** word: `name` carries
+    /// **no** `%`, the fd table's key shape. Expanding the word would hand the
+    /// fd *number* to the path arm and drop the stored `Origin`.
+    Var(ShortCStr),
+    /// A path, opened relative to the shell's cwd.
+    Path(ShortCStr),
+}
+
+pub(crate) fn cd(
+    target: CdTarget,
     state: &mut ShellState,
     set_at: Position,
 ) -> Result<(), Report<CdError>> {
-    let (new_fd, origin) = match args.first() {
-        None => cd_home()?,
-        Some(arg) if arg.eq_bytes(b"-") => cd_var(&c"%OLDCWD".into(), state)?,
-        Some(arg) if arg.starts_with(b"%") => cd_var(arg, state)?,
-        Some(path) => cd_path(path)?,
+    let (new_fd, origin) = match target {
+        CdTarget::Home => cd_home()?,
+        CdTarget::OldCwd => cd_var(&c"OLDCWD".into(), state)?,
+        CdTarget::Var(name) => cd_var(&name, state)?,
+        CdTarget::Path(path) => cd_path(&path)?,
     };
     new_fd.fchdir().change_context(CdError::CdPathOpen)?;
     state.move_cwd(new_fd, origin, set_at);
@@ -27,9 +46,12 @@ fn cd_home() -> Result<(LocalFd, Origin), Report<CdError>> {
     Ok((fd, Origin::EnvVar(ShortCStr::from(c"HOME"))))
 }
 
-fn cd_var(arg: &ShortCStr, state: &ShellState) -> Result<(LocalFd, Origin), Report<CdError>> {
-    let name = arg.strip_prefix(b"%").ok_or(CdError::Never)?;
-    let src = state.fds.get(&name).ok_or(CdError::FdNotSet)?;
+/// Open the fd variable `%name`. The fd table is keyed by the **bare** name
+/// (the `%` is the word's syntax, `substitute/percent.rs` looks the same name
+/// up), so `name` arrives without it — the caller strips the prefix off the
+/// raw word ([`CdTarget::Var`]) and the `%` is never added back.
+fn cd_var(name: &ShortCStr, state: &ShellState) -> Result<(LocalFd, Origin), Report<CdError>> {
+    let src = state.fds.get(name).ok_or(CdError::FdNotSet)?;
     let fd = src.fd.try_clone().change_context(CdError::CdPathOpen)?;
     Ok((fd, src.trace.origin.clone()))
 }
