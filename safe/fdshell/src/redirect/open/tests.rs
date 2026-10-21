@@ -380,6 +380,29 @@ fn multi_field_target_is_ambiguous() {
     ));
 }
 
+/// A target whose expansion **fails** carries the substitution error under
+/// `TargetExpand`, and the cause stays in the chain: `$((1/0))` is the arith
+/// division error, not an ambiguous redirect and not an open (the integration
+/// pin is `tests/redirect.rs::a_failing_target_expansion_keeps_its_cause`).
+#[test]
+fn a_failing_expansion_reports_target_expand() {
+    let (_dir, _scratch) = scratch();
+    let cell = ForkCell::new(ShellState::new());
+    let report = open_redirect_files(&[word_def("$((1/0))", false)], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::TargetExpand
+    ));
+    // The cause survives the `change_context`: the rendered chain names the
+    // arith error (LESSONS §4: one `change_context`, the chain stays readable).
+    assert!(
+        format!("{report:?}").contains("division"),
+        "the arith cause must stay in the chain, got {report:?}"
+    );
+}
+
 /// Strict mode's absolute ban runs on the **expansion**: `> $abs` under strict
 /// is the ban, not a filesystem-root open (the hole strict mode exists to
 /// close, README "Strict mode").
