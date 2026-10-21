@@ -2856,3 +2856,49 @@ fn chevron_terminator_known_divergences() {
     assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
     assert!(err.contains("fd 3 is not open"), "stderr={err}");
 }
+
+/// The here-doc **delimiter word** is a quote-removal surface, never a
+/// substitution surface (task #278's scope decision, measured in bash 5.3.9):
+/// `cat <<$(echo EOF)` delimits on the literal `$(echo EOF)`, exactly the word
+/// as written. The `<<<` word beside it **is** a substitution surface
+/// (`cat <<< $(echo hi)` prints `hi`), so the two neighbouring surfaces must
+/// not be "unified" — the target expansion of #278 leaves both as measured.
+///
+/// fdshell's terminator-line rule (#266: the terminator's syntax bytes are
+/// blanked for the tokenizer) reads `$(echo EOF)` as `EOF`, so a delimiter word
+/// that carries a substitution region can never be terminated: both rows below
+/// are the divergence task **#372** owns, pinned at their measured rc.
+#[test]
+fn substitution_delimiter_word_is_literal() {
+    // bash: the delimiter is the literal `$(echo EOF)`, the body is `body` and
+    // `EOF`, and the warning says `wanted $(echo EOF)` (rc 0). fdshell: the
+    // delimiter word is the same literal, so the `EOF` line never matches.
+    let (out, err, code) = run("cat <<$(echo EOF)\nbody\nEOF\n");
+    assert_eq!(
+        (code, out.as_str()),
+        (1, ""),
+        "bash prints `body` + `EOF` at rc 0; stderr={err:?}"
+    );
+    assert!(
+        err.contains("missing terminating delimiter line '$(echo EOF)'"),
+        "the delimiter word is literal, stderr={err}"
+    );
+    // bash matches the literal terminator line and prints the body (rc 0);
+    // fdshell's blanked terminator reads `EOF` → #372.
+    let (out, err, code) = run("cat <<$(echo EOF)\nbody\n$(echo EOF)\n");
+    assert_eq!(
+        (code, out.as_str()),
+        (1, ""),
+        "bash prints `body` at rc 0 (#372); stderr={err:?}"
+    );
+    assert!(
+        err.contains("missing terminating delimiter line"),
+        "stderr={err}"
+    );
+    // The neighbouring surface that *is* a substitution surface, unchanged.
+    let (out, err, code) = run("cat <<< $(echo hi)");
+    assert_eq!((code, out.as_str()), (0, "hi\n"), "stderr={err:?}");
+    // A quoted delimiter keeps its body literal, region bytes included.
+    let (out, err, code) = run("cat <<'$(echo EOF)'\nbody\n$(echo EOF)\n");
+    assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+}

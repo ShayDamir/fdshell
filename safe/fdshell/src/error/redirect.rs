@@ -26,6 +26,8 @@ pub(crate) enum OpenRedirectError {
     /// strict mode forbids absolute redirect targets (use a path relative to
     /// the shell's working directory)
     StrictAbsoluteTarget { name: sys::ShortCStr },
+    /// failed to expand the redirect target
+    TargetExpand,
     /// failed to glob the redirect target
     Glob,
     /// failed to duplicate fd {n}; the descriptor table may be full

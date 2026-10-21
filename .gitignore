@@ -1,4 +1,9 @@
 target
+# `target` above is unanchored, so it also hides a **source** directory of that
+# name; STYLE.md §2.9 puts `redirect::open::target`'s submodules in exactly such
+# a directory, and an ignored file is silently dropped from the nix build
+# (AGENTS.md). Re-include this one path.
+!safe/fdshell/src/redirect/open/target/
 result
 *.profraw
 PLAN.md

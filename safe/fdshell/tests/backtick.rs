@@ -138,3 +138,68 @@ fn backtick_unbounded_output_is_capped() {
         "oversized command substitution should fail the command"
     );
 }
+
+/// A per-test scratch dir (pid + counter), removed on drop — the house pattern
+/// (LESSONS, task #255): pids are recycled, so the dir must die with its
+/// process, and removal is `.ok()`-tolerant so teardown never panics.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A scratch dir for the target pins, with the child's cwd inside it.
+fn scratch() -> (String, Scratch) {
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-backtick-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.to_str().unwrap().to_string(), Scratch(dir))
+}
+
+/// Run with the cwd inside `dir`, so a relative target lands in the scratch.
+fn run_in(dir: &str, script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .current_dir(dir)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// A backtick region in a redirect **target** expands (task #278): bash
+/// creates `f` for `` > `echo f` `` and `ab` for the mid-word form; the
+/// single-quoted region is the only suppression, so `'`echo f`'` names the
+/// literal file. The target is the second surface of word 0's pipeline.
+#[test]
+fn backtick_in_a_redirect_target_expands() {
+    let (dir, _scratch) = scratch();
+    for (script, want) in [
+        ("echo hi > `echo f`", "f"),
+        ("echo hi > a`echo b`", "ab"),
+        ("echo hi > \"`echo f`\"", "f"),
+        ("echo hi > '`echo f`'", "`echo f`"),
+    ] {
+        let (out, err, code) = run_in(&dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err}");
+        assert!(
+            std::path::Path::new(&dir).join(want).exists(),
+            "{script}: bash creates `{want}`"
+        );
+    }
+}

@@ -17,6 +17,8 @@ mod words;
 
 pub use words::substitute_args;
 
+pub(crate) use fields::word_fields;
+
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;

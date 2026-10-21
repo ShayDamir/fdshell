@@ -952,3 +952,29 @@ fn unterminated_substitution_reports_cleanly() {
         );
     }
 }
+
+/// Word 0 and the redirect target are the **same** substitution surface: one
+/// script expands both positions (task #268 built the pipeline, task #278 gave
+/// it to the target), so the command name comes from word 0 and the file name
+/// from the target. Measured against bash 5.3.9, which writes `hi` into `f`.
+#[test]
+fn word0_and_the_redirect_target_expand_in_one_command() {
+    let (dir, _scratch) = word0_scratch();
+    let (out, err, rc) = run_in(&dir, "$(echo echo) hi > $(echo f); cat f");
+    assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
+
+    // The quoted-target rule is word 0's rule too: `"` does not suppress the
+    // region, `'` does, so the literal name becomes the file.
+    let (out, err, rc) = run_in(&dir, "echo hi > '$(echo f)'");
+    assert_eq!((out.as_str(), rc), ("", 0), "stderr={err}");
+    assert!(
+        std::path::Path::new(&dir).join("$(echo f)").exists(),
+        "the single-quoted target is the literal name"
+    );
+
+    // A target expanding to two fields is bash's `ambiguous redirect` (rc 1),
+    // while word 0 takes the first field and keeps the rest as arguments.
+    let (out, err, rc) = run_in(&dir, "echo hi > $(echo a; echo b)");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(err.contains("ambiguous redirect"), "stderr={err}");
+}

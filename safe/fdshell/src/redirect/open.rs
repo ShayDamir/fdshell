@@ -7,6 +7,8 @@ use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
+use hashbrown::HashMap;
+use sys::ExportedFd;
 use sys::LocalFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -48,9 +50,21 @@ pub fn open_redirect_files(
         .checked_add(1)
         .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
     let mut fds = Vec::new();
+    // One `%fd` cache per open call: the target word runs through the
+    // substitution pipeline, whose `%name` arm looks fds up in a cache exactly
+    // as the argument pipeline does (`substitute/words.rs`).
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     for r in redirects {
-        if let RedirectSource::Path { path, mask, .. } = &r.source {
-            let opened = open_redirect(r, path, mask, noclobber, base.as_ref(), min_fd, cell)?;
+        if let RedirectSource::Path { .. } = &r.source {
+            let opened = open_redirect(
+                r,
+                &r.source,
+                &mut cache,
+                noclobber,
+                base.as_ref(),
+                min_fd,
+                cell,
+            )?;
             fds.push(opened);
         }
     }
@@ -59,17 +73,17 @@ pub fn open_redirect_files(
 
 fn open_redirect(
     r: &RedirectDef,
-    path: &ShortCStr,
-    mask: &[bool],
+    source: &RedirectSource,
+    cache: &mut HashMap<ShortCStr, ExportedFd>,
     noclobber: bool,
     base: Option<&LocalFd>,
     min_fd: i32,
     cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
     if let Some(base) = base {
-        return strict::target(r, base, min_fd, noclobber, cell);
+        return strict::target(r, source, cache, base, min_fd, noclobber, cell);
     }
-    let opened = cwd::open(r, path, mask, noclobber && r.write_flag(), cell)?;
+    let opened = cwd::open(r, source, cache, noclobber && r.write_flag(), cell)?;
     // Re-home the freshly opened fd above every redirect target of this
     // command: a `dup2` of another redirect must never clobber the open
     // fd and then have this descriptor's drop close the target.

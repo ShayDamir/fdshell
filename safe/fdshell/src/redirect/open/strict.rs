@@ -9,8 +9,10 @@ use super::target;
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use error_stack::{Report, ResultExt};
+use hashbrown::HashMap;
 use sys::AtFd;
 use sys::ExportedCStr;
+use sys::ExportedFd;
 use sys::LocalFd;
 use sys::ShortCStr;
 use sys::SyscallError;
@@ -20,26 +22,25 @@ use sys::openat2::OpenHow;
 
 use crate::state::ShellState;
 
-/// One path redirect target under strict: glob it rooted at the pinned `%CWD`
-/// fd `base`, open it through `base`, clone it above every redirect target of
-/// the command (a `dup2` of another redirect must never clobber the open fd
-/// and then have this descriptor's drop close the target).
+/// One path redirect target under strict: expand and glob it rooted at the
+/// pinned `%CWD` fd `base` (the absolute ban runs on every **expanded**
+/// field), open it through `base`, clone it above every redirect target of the
+/// command (a `dup2` of another redirect must never clobber the open fd and
+/// then have this descriptor's drop close the target).
 pub(super) fn target(
     def: &RedirectDef,
+    source: &RedirectSource,
+    cache: &mut HashMap<ShortCStr, ExportedFd>,
     base: &LocalFd,
     min_fd: i32,
     noclobber: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let (path, mask) = match &def.source {
-        RedirectSource::Path { path, mask, .. } => (path, mask.as_slice()),
-        _ => return Err(Report::new(OpenRedirectError::Never)),
-    };
-    let target_name = target::resolve(path, mask, Some(base), cell)?;
+    let target_name = target::resolve(source, cache, Some(base), cell)?;
     let name = target_name.export();
     let noclobber_flag = noclobber && def.write_flag();
     let opened = match noclobber_flag {
-        true => noclobber_open(&name, path, base),
+        true => noclobber_open(&name, &target_name, base),
         false => open(&name, &open_how(def), base),
     }?;
     let rehomed = opened
@@ -69,7 +70,8 @@ fn open(
 }
 
 /// `noclobber` under strict: an exclusive create through the pinned dirfd;
-/// `EEXIST` means the target exists.
+/// `EEXIST` means the target exists, and the refusal names the **expanded**
+/// target (bash: `set -C; n=f; echo hi > $n` → `f: cannot overwrite`).
 fn noclobber_open(
     name: &ExportedCStr,
     path: &ShortCStr,

@@ -301,6 +301,35 @@ error when it is not (`> &f`); the spaced `%var` operand stays a syntax
 error, the fd-variable targets being the attached `>%var` / `&>%var` forms
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
 
+The target of a `>`-family operator is a **word**: `$( … )`, `` ` … ` ``,
+`$(( … ))`, `$name`, `${name…}`, `$@`/`$*` and a leading `~` expand in it, the
+result is split on `IFS`, and each field is expanded against the filesystem,
+relative to the last `builtin cd`.
+
+```shell
+echo hi > $(echo f)      # writes the file `f`
+echo hi > "$(echo f)"    # the same: `"` never suppresses `$( … )`
+echo hi > '$(echo f)'    # the file named `$(echo f)`: `'` does suppress
+d=sub; echo hi > $d/x    # opens `sub/x`
+echo hi > a1*            # the one match of `a1*`
+```
+
+The target must expand to **exactly one word**. A target that expands to
+nothing (`> $(true)`, `> $@` with no positionals) or to several
+(`n="a b"; echo hi > $n`, a glob with two matches) is an `ambiguous redirect`
+(rc 1) and the command does not run. An unmatched pattern keeps its literal
+word — `> zzz*` creates the file `zzz*`, which is also what `set -f` gives —
+and the `shopt -s nullglob`/`failglob` behaviour on a redirect word is the
+accepted divergence (task #369). A quoted byte never splits and never globs,
+and never suppresses a substitution region: only `'` does.
+
+The fd target forms are decided at parse time — the attached `>%var`,
+`/dev/fd/N`, `>&N` — so a `%` byte inside a target word is file-name data:
+`> a%b` creates `a%b`. The `>&N` duplicate word is not a word to expand
+(`>&$(echo 1)` reads the `1` literally, task #370). In strict mode the ban on
+an absolute target is checked on the **expanded** word, so a target expanding
+to `/etc/x` is refused before anything is opened.
+
 On the operator side, a redirection is made of **unquoted** bytes: the
 descriptor digits and every operator byte. A quote byte inside them ends the
 operator, so the word is an ordinary argument: `echo '&>f'` and `echo 2'>'g`
@@ -528,6 +557,13 @@ function definition — the shapes bash writes as definitions carry no region. A
 unterminated region (`$( echo true`) is reported as `unexpected end of input`
 with the caret, rc 1.
 
+The region expands in every word position the shell expands: a command name
+(word 0), an argument, an assignment value, a `for` list, a here-string word,
+and a **redirection target** (`echo hi > $(echo f)` writes the file `f`, see
+[Redirection](#redirection)). The here-document **delimiter** word is the
+exception — it is quote-removal only, so `cat <<$(echo EOF)` delimits on the
+literal `$(echo EOF)`.
+
 ### Word splitting and pathname expansion
 
 The result of an expansion is split into words on the `IFS` bytes (space, tab
@@ -669,9 +705,10 @@ While `strict` is on, `openat2`, `mkdirat`, `mkfifoat`, `renameat2`,
 have no per-command `--dirfd`, so strict resolves them through the shell's
 pinned `%CWD` descriptor and bans filesystem-root paths: a redirect target, a
 program word containing `/`, a `hash` pin, and every absolute `PATH` entry
-must stay relative. `exec`/`become` inherit the ban. `cd ..` remains the
-user's own escape hatch: the base follows the shell, exactly as a relative
-path does.
+must stay relative — the target check runs on the **expanded** word, so a
+target expanding to `/etc/x` is refused as well. `exec`/`become` inherit the
+ban. `cd ..` remains the user's own escape hatch: the base follows the shell,
+exactly as a relative path does.
 
 ## Sockets
 

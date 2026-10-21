@@ -1429,3 +1429,347 @@ fn accepted_quoted_io_number_argument_list_divergences() {
         "bash: `a 2>` + rc 127 (the word-split family), stderr={err:?}"
     );
 }
+
+// --- the redirect target is a substitution surface (task #278) --------------
+//
+// The target word goes through the word pipeline: `$( … )`, `` ` … ` ``,
+// `$(( … ))`, `$name`, `${name…}`, `~` expand, the result is split on `IFS`,
+// and every field is globbed (README "Redirection"). The target must expand to
+// **exactly one** word: 0 words (`> $(true)`) and >1 (`n="a b"; > $n`) are
+// bash's `ambiguous redirect`, and an unmatched pattern keeps its literal word
+// (`nullglob`/`failglob` are task #369). Every value below is `bash -c` 5.3.9
+// and this tree's build, measured 2026-10-21 in a scratch dir seeded with
+// `a1 a2 sub/`; the scratch listing is the assert.
+
+/// A scratch dir seeded with `a1 a2 sub/`, the shape the glob rows need.
+fn seeded(tag: &str) -> Scratch {
+    let dir = scratch(tag);
+    for name in ["a1", "a2"] {
+        std::fs::write(dir.join(name), b"").unwrap();
+    }
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    dir
+}
+
+/// Run `script` in `dir` and return its `(stdout, stderr, rc)` plus the sorted
+/// directory listing.
+fn run_ls(dir: &str, script: &str) -> (String, String, i32, Vec<String>) {
+    let (out, err, code) = run(&format!("cd {dir}; {script}"));
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
+        .collect();
+    files.sort();
+    (out, err, code, files)
+}
+
+/// The names `dir` holds beyond the seeded `a1 a2 sub`: what the script created.
+fn created(files: &[String]) -> Vec<String> {
+    files
+        .iter()
+        .filter(|f| !matches!(f.as_str(), "a1" | "a2" | "sub"))
+        .cloned()
+        .collect()
+}
+
+/// Drop every file the rows create, keeping the seed: rows share one dir.
+fn clean(dir: &str) {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    for name in created(&names) {
+        std::fs::remove_file(std::path::Path::new(dir).join(name)).ok();
+    }
+}
+
+/// The expansions bash runs in a redirection word, each producing exactly one
+/// name. `> $(echo f)` is the report's headline: bash writes `f`, and fdshell
+/// used to create a file named `$(echo f)`.
+#[test]
+fn substituted_target_creates_the_expanded_name() {
+    let dir = seeded("sub_target");
+    let dir = dir.to_str().unwrap();
+    for (script, want, stdout) in [
+        ("echo hi > $(echo f)", "f", ""),
+        ("echo hi >$(echo f)", "f", ""),
+        ("echo hi >> $(echo f)", "f", ""),
+        ("echo hi >| $(echo f)", "f", ""),
+        ("echo hi &> $(echo f)", "f", ""),
+        // `<>` with no io-number is fd **0** (POSIX's `<> file` opens it for
+        // reading and writing on the input side), so `echo` keeps stdout.
+        ("echo hi <> $(echo f)", "f", "hi\n"),
+        ("echo hi 2> $(echo f)", "f", "hi\n"),
+        ("echo hi > `echo f`", "f", ""),
+        ("echo hi > a`echo b`", "ab", ""),
+        ("n=f; echo hi > $n", "f", ""),
+        ("echo hi > ${n}", "f", ""),
+        ("echo hi > pre$(echo mid)post", "premidpost", ""),
+        ("echo hi > $(echo a)$(echo b)", "ab", ""),
+        ("echo hi > $((1+1))", "2", ""),
+        ("echo hi >f$((1))", "f1", ""),
+        ("echo hi > a\\*b$(true)", "a*b", ""),
+        ("echo hi >\\|$(echo f)", "|f", ""),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, &format!("n=f; {script}"));
+        assert_eq!(
+            (out.as_str(), code),
+            (stdout, 0),
+            "{script}: stderr={err:?}"
+        );
+        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+    }
+}
+
+/// The two quoted-target rules bash draws between the quote kinds: double
+/// quotes do **not** suppress `$( … )` (`> "$(echo f)"` writes `f`), single
+/// quotes do (`> '$(echo f)'` writes `$(echo f)`), and a quoted pattern byte
+/// never globs (`> "$p"` with `p='a*'` writes the file `a*`).
+#[test]
+fn quoted_target_rules_follow_the_quote_kind() {
+    let dir = seeded("sub_quoted");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo hi > \"$(echo f)\"", "f"),
+        ("echo hi > '$(echo f)'", "$(echo f)"),
+        ("echo hi > \"$(echo a; echo b)\"", "a\nb"),
+        ("p='a*'; echo hi > \"$p\"", "a*"),
+        ("echo hi > '~'", "~"),
+        ("echo hi > ~\"\"", "~"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+    }
+}
+
+/// The `ambiguous redirect` arms, 0 and >1 fields alike: nothing is created and
+/// rc is 1. `$(echo \*)` shows the expansion being globbed **again**, `a*` the
+/// two-match glob the rule has always covered.
+#[test]
+fn target_expanding_to_zero_or_several_fields_is_ambiguous() {
+    let dir = seeded("sub_ambiguous");
+    let dir = dir.to_str().unwrap();
+    for script in [
+        "n=\"a b\"; echo hi > $n",
+        "echo hi > $(echo a; echo b)",
+        "echo hi > $(true)",
+        "n=; echo hi > $n",
+        "set --; echo hi > $@",
+        "echo hi > $(echo \"f g\")",
+        "echo hi > $(echo \\*)",
+        "echo hi > a*",
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("ambiguous redirect"), "{script}: {err:?}");
+        assert!(created(&files).is_empty(), "{script}: created a file");
+    }
+}
+
+/// The rc of a failed redirection stays fdshell's, not bash's: the script
+/// aborts (`echo after` never runs), where bash skips only the command. Task
+/// #179 owns the difference, so this is the pin that keeps it visible.
+#[test]
+fn ambiguous_redirect_aborts_the_script_and_names_179() {
+    let dir = seeded("sub_abort");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code, files) = run_ls(dir, "echo hi > $(true); echo after");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        !out.contains("after"),
+        "bash prints `after` and skips only the command (#179)"
+    );
+    assert!(created(&files).is_empty());
+}
+
+/// The redirect's own glob policy: an unmatched pattern opens the pattern word,
+/// `set -f` passes the pattern through. The `nullglob`/`failglob` rows are the
+/// accepted divergence — bash deletes/errs the word and reports `ambiguous
+/// redirect` / `no match`, fdshell opens the literal pattern (task #369).
+#[test]
+fn unmatched_pattern_target_keeps_its_literal_word() {
+    let dir = seeded("sub_pattern");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo hi > zzz*", "zzz*"),
+        ("set -f; echo hi > a*", "a*"),
+        ("shopt -s nullglob; echo hi > zzz*", "zzz*"),
+        ("shopt -s failglob; echo hi > zzz*", "zzz*"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+    }
+    // One match opens the match (`a1*` → `a1`), and an expansion landing in a
+    // subdirectory opens there (`$d/x` → `sub/x`); both write into seeded
+    // names, so the created-set stays empty and `cat` is the assert.
+    for script in ["d=sub; echo hi > $d/x; cat sub/x", "echo hi > a1*; cat a1"] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("hi\n", 0),
+            "{script}: stderr={err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+}
+
+/// The leading `~` of a target expands (bash: `> ~` opens `$HOME` and fails
+/// `Is a directory`), a `~name` stays literal (no password database here), and
+/// a quoted tilde stays literal (task #269's rule, same mask).
+#[test]
+fn tilde_in_a_target_expands_with_its_own_rules() {
+    let dir = seeded("sub_tilde");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo hi > ~x", "~x"),
+        ("n=f; echo hi > ~$n", "~f"),
+        ("echo hi > ~/sub/x", ""),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, &format!("HOME={dir}; {script}"));
+        if want.is_empty() {
+            // `~/sub/x` opens under the expanded HOME: one level deep, so the
+            // top-level listing is unchanged and the open succeeds.
+            assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+            assert!(created(&files).is_empty(), "{script}: {files:?}");
+            continue;
+        }
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+    }
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, &format!("HOME={dir}; echo hi > ~"));
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash: `/home/…: Is a directory', rc 1; stderr={err:?}"
+    );
+    assert!(
+        created(&files).is_empty(),
+        "the expanded HOME is the dir itself"
+    );
+}
+
+/// The target expands in the **pipeline child** too, where the open happens in
+/// the forked stage: a `$( … )` there forks a grandchild (the shape argument
+/// substitution already has in the child).
+#[test]
+fn pipeline_stage_target_expands_in_the_child() {
+    let dir = seeded("sub_pipe");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code, files) = run_ls(dir, "echo a | echo b > $(echo f)");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), vec!["f".to_string()]);
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap(),
+        "b\n"
+    );
+}
+
+/// `exec >$(echo f)` has no command to run, so the redirection (and its
+/// expansion) stays for the rest of the script.
+#[test]
+fn exec_target_expands_and_stays() {
+    let dir = seeded("sub_exec");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code, files) = run_ls(dir, "exec > $(echo f); echo hi");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), vec!["f".to_string()]);
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap(),
+        "hi\n"
+    );
+}
+
+/// The `%` byte stays out of the target's trigger gate, measured in bash:
+/// `> a%b` and `> a%CWD/x` are file names, not fd lookups, and the spaced `%v`
+/// operand stays the `%`-namespace guard's syntax error (POSIX_COMPATIBILITY
+/// "Operators are recognized at word starts", #323). The `a%log$(echo x)` row
+/// is the accepted leak task #371 owns: a word with **another** trigger reaches
+/// the `%name` arm, so the fd variable name expands (unset here, so bash and
+/// fdshell agree on `a%logx`).
+#[test]
+fn percent_bytes_in_a_target_stay_file_name_data() {
+    let dir = seeded("sub_percent");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo hi > a%b", "a%b"),
+        ("echo hi > a%log$(echo x)", "a%logx"),
+        ("echo hi > $(echo \"%log\")", "%log"),
+        // The `%fd` target the shell *does* own is a parse-time variable
+        // source (the attached `>%name` form), never a word to expand.
+        (
+            "builtin openat2 --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 log %>%log; echo x >%log",
+            "log",
+        ),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+    }
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo hi > a%CWD/x");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash: ENOENT for that name, rc 1; stderr={err:?}"
+    );
+    assert!(created(&files).is_empty(), "{files:?}");
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "printf x > %3");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("invalid redirect"), "the #323 gate: {err:?}");
+    assert!(created(&files).is_empty(), "{files:?}");
+}
+
+/// Two shapes that stay as they were, pinned so the new surface cannot move
+/// them: the `>&N` dup word is **not** expanded (task #370), and a `<>` glued
+/// after a non-digit prefix stays an argument (POSIX_COMPATIBILITY "Operators
+/// are recognized at word starts"), where bash redirects.
+#[test]
+fn the_dup_word_and_a_non_digit_prefixed_operator_stay_unexpanded() {
+    let dir = seeded("sub_dup");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo hi >&$(echo 1)");
+    assert_eq!(
+        (out.as_str(), code),
+        ("hi >&1\n", 0),
+        "bash dups fd 1 and prints `hi` (#370); stderr={err:?}"
+    );
+    assert!(created(&files).is_empty(), "{files:?}");
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo hi<>$(echo f)");
+    assert_eq!(
+        (out.as_str(), code),
+        ("hi<>f\n", 0),
+        "bash creates `f` and prints `hi` (the word rule); stderr={err:?}"
+    );
+    assert!(created(&files).is_empty(), "{files:?}");
+}
+
+/// A quoted empty operand stays the operand gate's parse error, where bash
+/// opens `''` and fails `ENOENT` (#303/#323 own the operand shapes): the
+/// quoted-empty word rule the target expansion adds is therefore unreachable
+/// for the bare and attached forms, and this pin keeps that true.
+#[test]
+fn quoted_empty_target_stays_a_parse_error() {
+    let dir = seeded("sub_empty");
+    let dir = dir.to_str().unwrap();
+    for script in ["echo hi > \"\"", "echo hi >\"\""] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("invalid redirect"), "{script}: {err:?}");
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+}
