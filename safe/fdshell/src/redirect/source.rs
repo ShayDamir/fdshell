@@ -7,9 +7,15 @@ pub enum RedirectSource {
     Var(ShortCStr),
     /// A filesystem path word. `mask` is the per-byte quote mask: which
     /// pattern bytes are quoted (unquoted `*`/`?`/`[...]` glob the target).
+    /// `spans` is the parallel zero-byte quote-span list (task #321) and
+    /// `quoted` says the word's raw span carried quotes — both feed the word
+    /// expansion the target goes through (task #278): the tilde rule reads
+    /// `spans`, `quoted` keeps one empty word when the expansion is empty.
     Path {
         path: ShortCStr,
         mask: Vec<bool>,
+        spans: Vec<usize>,
+        quoted: bool,
     },
     /// The here-string word of `<<<`. `mask` is the word's per-byte quote
     /// mask: the word is expanded with its own quoting, so a `\<char>` written
@@ -40,6 +46,25 @@ impl RedirectSource {
         Self::Path {
             path: name.into(),
             mask,
+            spans: Vec::new(),
+            quoted: false,
+        }
+    }
+    /// The target word as the parser derived it (`parse/redirect/path_word.rs`):
+    /// the word, its own quote mask, its zero-byte quote spans and its
+    /// `quoted` flag — the same quadruple an argument word carries, so the
+    /// target expands exactly like an argument (task #278).
+    pub fn path_word(
+        path: impl Into<ShortCStr>,
+        mask: Vec<bool>,
+        spans: Vec<usize>,
+        quoted: bool,
+    ) -> Self {
+        Self::Path {
+            path: path.into(),
+            mask,
+            spans,
+            quoted,
         }
     }
     pub fn here_string(word: impl Into<ShortCStr>, mask: Vec<bool>, spans: Vec<usize>) -> Self {

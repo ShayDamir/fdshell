@@ -32,7 +32,7 @@ pub(super) fn target(
     cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
     let (path, mask) = match &def.source {
-        RedirectSource::Path { path, mask } => (path, mask.as_slice()),
+        RedirectSource::Path { path, mask, .. } => (path, mask.as_slice()),
         _ => return Err(Report::new(OpenRedirectError::Never)),
     };
     let target_name = target::resolve(path, mask, Some(base), cell)?;

@@ -2,6 +2,7 @@
 //! token (`>file`, `2>&1`, `>|file`, `3<%var`).
 
 use crate::error::parse::ParseError;
+use crate::parse::Token;
 use crate::parse::fd_dup::parse_fd_dup_redirect;
 use crate::parse::fd_path::fd_path_target;
 use crate::parse::redirect_op::redirect_op;
@@ -14,10 +15,8 @@ use sys::ShortCStr;
 /// `>`/`<` is its last byte is bare and is handled before this. A **quoted**
 /// first operator byte ends the operator (POSIX XCU 2.9.1 reads only
 /// unquoted bytes): the token is an ordinary argument, as bash prints it.
-pub(super) fn attached(
-    s: &ShortCStr,
-    mask: &[bool],
-) -> Result<Option<RedirectDef>, Report<ParseError>> {
+pub(super) fn attached(t: &Token) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    let (s, _start, _end, _fq, mask, _spans) = t;
     let bytes = s.as_bytes().change_context(ParseError::Never)?;
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,
@@ -52,16 +51,16 @@ pub(super) fn attached(
     {
         return parse_fd_dup_redirect(&after_op, &prefix, mask, dir);
     }
-    parse_path_redirect(s, mask, op_pos, dir, &prefix)
+    parse_path_redirect(t, op_pos, dir, &prefix)
 }
 
 fn parse_path_redirect(
-    s: &ShortCStr,
-    mask: &[bool],
+    t: &Token,
     op_pos: usize,
     dir: u8,
     prefix: &ShortCStr,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
+    let (s, _start, _end, _fq, mask, _spans) = t;
     let after_op = s.get(op_pos + 1..).ok_or(ParseError::InvalidRedirect)?;
     let after_op_len = after_op.len();
     // The operator tail's mask: `redirect_op` gates its `>|`/`>>`/`<>`
@@ -86,16 +85,17 @@ fn parse_path_redirect(
     if let Some(n) = fd_path_target(&rest) {
         return Ok(Some(RedirectDef::dup(export_to, n)));
     }
-    // The path is the token suffix after the operator; align its quote mask.
-    // `path_offset` is exactly the index one past the operator's last byte —
-    // the gate's `to` bound (one owner of that offset, LESSONS).
+    // The path is the token suffix after the operator, with its mask and its
+    // zero-byte quote spans sliced at the same offset (`path_word`, one owner
+    // of that offset with the here-string word, LESSONS). `path_offset` is
+    // exactly the index one past the operator's last byte — the gate's `to`
+    // bound.
     let path_offset = op_pos + 1 + (after_op_len - rest.len());
-    let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
     Ok(Some(RedirectDef {
         export_to,
         extra_to: None,
         direction,
-        source: RedirectSource::path(rest, path_mask),
+        source: super::path_word::suffix(t, path_offset)?,
     }))
 }
 

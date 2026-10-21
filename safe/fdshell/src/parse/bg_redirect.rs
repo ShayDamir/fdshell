@@ -25,9 +25,10 @@ pub fn parse_bg_redirect(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(BgRedirectResult, usize)>, Report<ParseError>> {
-    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
+    let Some(token) = tokens.get(i) else {
         return Ok(None);
     };
+    let (t, _start, _end, _fq, mask, _spans) = token;
     let Some(rest) = t.strip_prefix(b"&>") else {
         return Ok(None);
     };
@@ -65,12 +66,12 @@ pub fn parse_bg_redirect(
     let source = if path.starts_with(b"%") {
         RedirectSource::Var(path.get(1..).ok_or(ParseError::Never)?)
     } else {
-        // The path is the token suffix after `&>` (and `>`); align its mask.
+        // The path is the token suffix after `&>` (and `>`), with its mask and
+        // its zero-byte quote spans sliced at the same offset (`path_word`).
         // `path_offset` is the gate's `op_end` for these arms: the index one
         // past the operator's last byte.
         let path_offset = 2 + (rest_len - path.len());
-        let path_mask = mask.get(path_offset..).unwrap_or(&[]).to_vec();
-        RedirectSource::path(path, path_mask)
+        crate::parse::redirect::path_word::suffix(token, path_offset)?
     };
     // One operator, one open: the single def carries fd 1 as `export_to` and
     // fd 2 as `extra_to`, and both are fed by the same opened description.

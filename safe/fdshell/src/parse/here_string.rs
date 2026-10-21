@@ -35,11 +35,12 @@ pub fn parse_here_string(
     // `<<<""` is one word whose quoted part contributes no bytes: its word is
     // the empty quoted region, not the next token. A bare `<<<` takes the next
     // token as its word; at end of input the word is empty.
+    let off = prefix + 3;
     let (word, mask, spans, extra) = if has_attached_word(t.len(), prefix) {
         (
-            t.get(prefix + 3..).ok_or(ParseError::Never)?.clone(),
-            word_mask(mask, prefix),
-            word_spans(spans, prefix),
+            t.get(off..).ok_or(ParseError::Never)?.clone(),
+            word_mask(mask, off),
+            word_spans(spans, off),
             0,
         )
     } else if super::word_quoted::word_quoted(t, *start, *end) {
@@ -62,27 +63,29 @@ pub fn parse_here_string(
     )))
 }
 
-/// The here-string word's mask: the operator token's mask sliced past the
-/// `[io-number] <<<` prefix. This is the **only** place that offset exists, so
-/// the word and its mask cannot drift apart (LESSONS: slice the word, its mask
-/// and its quoted flags with the same offset). The prefix digits are raw bytes
-/// by construction — `string_span` only reports a span whose digits begin it —
-/// so the token text's first `prefix + 3` bytes are 1:1 with the mask. A mask
-/// shorter than the word degrades to unquoted, the same padding
+/// The attached word's mask: the operator token's mask sliced at the **word's
+/// offset** inside the token. For a here-string that offset is `prefix + 3`
+/// (the `[io-number] <<<` operator); a path redirect passes its own offset one
+/// past the operator's last byte (`parse/redirect/path_word.rs`, task #278).
+/// This is the only slicer of a token mask for an attached word, so the word
+/// and its mask cannot drift apart (LESSONS: slice the word, its mask and its
+/// quoted flags with the same offset). The here-string's prefix digits are raw
+/// bytes by construction — `string_span` only reports a span whose digits
+/// begin it — so the token text's first `prefix + 3` bytes are 1:1 with the
+/// mask. A mask shorter than the word degrades to unquoted, the same padding
 /// `substitute/arg.rs` applies; the empty word of `<<<""` keeps the empty mask,
 /// which `substitute::fully_quoted` reads as quoted.
-pub(crate) fn word_mask(op_mask: &[bool], prefix: usize) -> Vec<bool> {
-    op_mask.get(prefix + 3..).unwrap_or_default().to_vec()
+pub(crate) fn word_mask(op_mask: &[bool], offset: usize) -> Vec<bool> {
+    op_mask.get(offset..).unwrap_or_default().to_vec()
 }
 
-/// The here-string word's zero-byte quote spans (task #321): sliced at the
-/// same `prefix + 3` offset as [`word_mask`] and shifted down to word indices.
-pub(crate) fn word_spans(op_spans: &[usize], prefix: usize) -> Vec<usize> {
-    let off = prefix + 3;
+/// The attached word's zero-byte quote spans (task #321): sliced at the same
+/// `offset` as [`word_mask`] and shifted down to word indices.
+pub(crate) fn word_spans(op_spans: &[usize], offset: usize) -> Vec<usize> {
     op_spans
         .iter()
-        .filter(|&&i| i >= off)
-        .map(|&i| i - off)
+        .filter(|&&i| i >= offset)
+        .map(|&i| i - offset)
         .collect()
 }
 

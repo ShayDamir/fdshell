@@ -4,7 +4,7 @@
 use super::BgRedirectResult;
 use crate::error::parse::ParseError;
 use crate::parse::Token;
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use crate::redirect::{RedirectDef, RedirectDirection};
 use crate::scan::heredoc::invalid_delimiter;
 use alloc::vec;
 use error_stack::{Report, bail};
@@ -19,16 +19,17 @@ pub(super) fn parse(
     i: usize,
     direction: RedirectDirection,
 ) -> Result<BgRedirectResult, Report<ParseError>> {
-    let Some((operand, _s, _e, _fq, omask, _spans)) = tokens.get(i + 1) else {
+    let Some(operand) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    if invalid_delimiter(operand, omask) {
+    let (word, _s, _e, _fq, omask, _spans) = operand;
+    if invalid_delimiter(word, omask) {
         bail!(ParseError::InvalidRedirect);
     }
     // A `/dev/fd/N` operand stays a path source: the attached `&>/dev/fd/N`
     // form has always opened the magic path, and the kernel dup is the same
     // effect (the `>` family's `RedirectDef::dup` is recorded in LESSONS).
-    let source = RedirectSource::path(operand.clone(), omask.clone());
+    let source = crate::parse::redirect::path_word::full(operand);
     Ok(BgRedirectResult {
         redirects: vec![RedirectDef::combined(direction, source)],
         pidvar: None,

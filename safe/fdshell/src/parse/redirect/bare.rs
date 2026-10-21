@@ -4,7 +4,7 @@
 
 use crate::error::parse::ParseError;
 use crate::parse::Token;
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use crate::redirect::{RedirectDef, RedirectDirection};
 use crate::scan::heredoc::invalid_delimiter;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
@@ -59,24 +59,25 @@ pub(super) fn parse_bare(
     let Some(export_to) = super::token_fd(&prefix, mask, dir) else {
         return Ok(None);
     };
-    let Some((operand, _os, _oe, _ofq, omask, _spans)) = tokens.get(i + 1) else {
+    let Some(operand) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
+    let (word, _os, _oe, _ofq, omask, _ospans) = operand;
     // The operand must be a plain word: the shared bare-operand guard
     // (`scan::heredoc::op::invalid_delimiter`, mask-gated on the operand's
     // own quote mask), also used by the bare `<<` delimiter and the bare
     // `&>` / `&>>` form.
-    if invalid_delimiter(operand, omask) {
+    if invalid_delimiter(word, omask) {
         bail!(ParseError::InvalidRedirect);
     }
-    if let Some(n) = super::super::fd_path::fd_path_target(operand) {
+    if let Some(n) = super::super::fd_path::fd_path_target(word) {
         return Ok(Some(RedirectDef::dup(export_to, n)));
     }
     Ok(Some(RedirectDef {
         export_to,
         extra_to: None,
         direction: direction(&op),
-        source: RedirectSource::path(operand.clone(), omask.clone()),
+        source: super::path_word::full(operand),
     }))
 }
 

@@ -13,8 +13,7 @@ use crate::redirect::{RedirectDef, RedirectSource};
 /// The attached form of the operator token (token 1) of a probe line.
 fn attached_of(line: &[u8]) -> Option<RedirectDef> {
     let tokens = tokenize_statement(line).unwrap();
-    let (t, _s, _e, _fq, mask, _spans) = tokens.get(1)?;
-    attached(t, mask).unwrap()
+    attached(tokens.get(1)?).unwrap()
 }
 
 fn assert_path(line: &[u8], export_to: i32) {

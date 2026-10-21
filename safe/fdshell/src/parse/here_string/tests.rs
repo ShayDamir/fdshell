@@ -86,23 +86,25 @@ fn parse_here_string_rejects_an_io_number_that_is_not_a_descriptor() {
     assert_eq!(def.export_to, i32::MAX);
 }
 
-/// The here-string word's zero-byte span slice (task #321): `prefix + 3` is the
-/// only owner of the operator's length, so the offset, the drop and the shift
-/// are pinned on raw lists. `<<<""` is the pair at the word's start (`prefix 0`,
-/// index 3 → 0), `3<<<""` the same with an io-number (`prefix 1`, index 4 → 0),
-/// and `3<<<~/x""` the pair after the word's own bytes (index 7 → 3): a shift
-/// to `+` gives 6, a shift to `/` gives 1, a `prefix * 3` offset gives 3, and a
-/// reversed drop keeps the index 2 pair of `3<<<""` (index 2 < 4).
+/// The attached word's zero-byte span slice (task #321, shared with the path
+/// redirect's target word since task #278): the caller owns the operator's
+/// length (the here-string's `prefix + 3`), `word_spans` owns the offset, the
+/// drop and the shift, pinned here on raw lists. `<<<""` is the pair at the
+/// word's start (offset `3`, index 3 → 0), `3<<<""` the same with an io-number
+/// (offset `4`, index 4 → 0), and `3<<<~/x""` the pair after the word's own
+/// bytes (index 7 → 3): a shift to `+` gives 6, a shift to `/` gives 1, a
+/// `prefix * 3` offset gives 3, and a reversed drop keeps the index 2 pair of
+/// `3<<<""` (index 2 < 4).
 #[test]
 fn word_spans_slice_at_the_operator_offset() {
-    for (spans, prefix, want) in [
-        (&[3][..], 0, vec![0]),
-        (&[4][..], 1, vec![0]),
-        (&[7][..], 1, vec![3]),
-        (&[2][..], 1, Vec::new()),
-        (&[0, 4, 7][..], 1, vec![0, 3]),
-        (&[][..], 1, Vec::new()),
+    for (spans, offset, want) in [
+        (&[3][..], 3, vec![0]),
+        (&[4][..], 4, vec![0]),
+        (&[7][..], 4, vec![3]),
+        (&[2][..], 4, Vec::new()),
+        (&[0, 4, 7][..], 4, vec![0, 3]),
+        (&[][..], 4, Vec::new()),
     ] {
-        assert_eq!(word_spans(spans, prefix), want, "{spans:?} prefix {prefix}");
+        assert_eq!(word_spans(spans, offset), want, "{spans:?} offset {offset}");
     }
 }

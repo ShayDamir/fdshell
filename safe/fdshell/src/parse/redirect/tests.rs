@@ -11,6 +11,7 @@ use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::redirect::{parse_redirect, quoted_bytes, token_fd};
 use crate::parse::token::tokenize_statement;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use alloc::vec;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -231,4 +232,88 @@ fn quoted_third_operator_byte_of_the_three_byte_forms_is_an_argument() {
 #[test]
 fn quoted_dup_ampersand_after_a_multi_digit_io_number_is_a_path() {
     assert_path(b"echo 12>\"&\"x", 12, RedirectDirection::Write, "&x");
+}
+
+/// The target word's quoting **quadruple** (task #278): the opener expands the
+/// target as a word, so the bare form hands over the operand token's own mask,
+/// zero-byte quote spans and `quoted` flag, and the attached form slices the
+/// mask and **shifts** the spans at the operator offset. An unshifted span
+/// index is invisible on a `~`-free word, so every probe carries a `~` gate.
+#[test]
+fn bare_target_carries_the_operand_quoting() {
+    assert_target(
+        b"echo x > \"a b\"",
+        RedirectSource::path_word(c"a b", vec![true; 3], Vec::new(), true),
+    );
+    assert_target(
+        b"echo x > f",
+        RedirectSource::path_word(c"f", vec![false], Vec::new(), false),
+    );
+    // The empty pair closed at the word's index 1, and POSIX counts it inside
+    // the tilde-prefix, so `> ~""` is the literal `~` (bash's file `~`).
+    assert_target(
+        b"echo x > ~\"\"",
+        RedirectSource::path_word(c"~", vec![false], vec![1], true),
+    );
+    assert_target(
+        b"echo x > ~$n",
+        RedirectSource::path_word(c"~$n", vec![false; 3], Vec::new(), false),
+    );
+}
+
+/// The attached arms: the suffix word, its mask slice and its shifted spans
+/// must agree, and the mask slice is not the whole token's. `f$(echo y)` is
+/// the substitution case: every byte arrives **unquoted**, the rule bash shows
+/// by creating the file `f` for `> "$(echo f)"` while `'$(echo f)'` stays
+/// literal.
+#[test]
+fn attached_target_slices_and_shifts_at_the_operator_offset() {
+    assert_target(
+        b"echo x >\"a b\"",
+        RedirectSource::path_word(c"a b", vec![true; 3], Vec::new(), true),
+    );
+    // The token's pair is at index 2 (the `~` is the token's second byte); the
+    // suffix word starts one byte in, so it must arrive as index 1.
+    assert_target(
+        b"echo x >~\"\"",
+        RedirectSource::path_word(c"~", vec![false], vec![1], true),
+    );
+    assert_target(
+        b"echo x >f$(echo y)",
+        RedirectSource::path_word(c"f$(echo y)", vec![false; 10], Vec::new(), false),
+    );
+    assert_target(
+        b"echo x >| f",
+        RedirectSource::path_word(c"f", vec![false], Vec::new(), false),
+    );
+    // The `&>` family's two arms: attached and bare.
+    assert_target(
+        b"echo x &>~\"\"",
+        RedirectSource::path_word(c"~", vec![false], vec![1], true),
+    );
+    assert_target(
+        b"echo x &> \"a b\"",
+        RedirectSource::path_word(c"a b", vec![true; 3], Vec::new(), true),
+    );
+}
+
+/// The target source of a probe line's operator token (token **2** of every
+/// probe below, `echo x <op>…`): the `>`-family parser, falling back to the
+/// `&>`-family one (one helper for both families' quadruples).
+fn target_of(line: &[u8]) -> RedirectSource {
+    let tokens = tokenize_statement(line).unwrap();
+    if let Some((def, _n)) = parse_redirect(&tokens, 2).unwrap() {
+        return def.source;
+    }
+    parse_bg_redirect(&tokens, 2)
+        .unwrap()
+        .unwrap()
+        .0
+        .redirects
+        .remove(0)
+        .source
+}
+
+fn assert_target(line: &[u8], want: RedirectSource) {
+    assert_eq!(target_of(line), want, "{line:?}");
 }

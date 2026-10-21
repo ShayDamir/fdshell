@@ -1032,7 +1032,7 @@ fn test_space_separated_redirect_quoted_path() {
             export_to: 1,
             extra_to: None,
             direction: RedirectDirection::Write,
-            source: RedirectSource::path(c"my file", vec![true; 7]),
+            source: RedirectSource::path_word(c"my file", vec![true; 7], Vec::new(), true),
         }]
     );
 }
@@ -1184,7 +1184,7 @@ fn test_clobber_bare_quoted_path() {
             export_to: 1,
             extra_to: None,
             direction: RedirectDirection::Clobber,
-            source: RedirectSource::path(c"my file", vec![true; 7]),
+            source: RedirectSource::path_word(c"my file", vec![true; 7], Vec::new(), true),
         }]
     );
 }
@@ -1469,7 +1469,7 @@ fn test_bare_combined_operand_keeps_its_quote_mask() {
             export_to: 1,
             extra_to: Some(2),
             direction: RedirectDirection::Write,
-            source: RedirectSource::path(c"a b.log", vec![true; 7]),
+            source: RedirectSource::path_word(c"a b.log", vec![true; 7], Vec::new(), true),
         }]
     );
     assert!(cmd.args.is_empty());

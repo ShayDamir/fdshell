@@ -1,6 +1,7 @@
 mod attached;
 mod bare;
 mod clobber;
+pub(crate) mod path_word;
 pub(crate) use clobber::{clobber_word, pipe_token_span, pipeline_pipe};
 
 use crate::error::parse::ParseError;
@@ -65,13 +66,14 @@ pub fn parse_redirect(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
-    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
+    let Some(token) = tokens.get(i) else {
         return Ok(None);
     };
+    let (t, _start, _end, _fq, _mask, _spans) = token;
     if bare::is_bare(t) {
         return bare::parse_bare(tokens, i).map(|def| def.map(|d| (d, 1)));
     }
-    Ok(attached::attached(t, mask)?.map(|def| (def, 0)))
+    Ok(attached::attached(token)?.map(|def| (def, 0)))
 }
 
 #[cfg(test)]

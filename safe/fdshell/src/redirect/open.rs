@@ -49,7 +49,7 @@ pub fn open_redirect_files(
         .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
     let mut fds = Vec::new();
     for r in redirects {
-        if let RedirectSource::Path { path, mask } = &r.source {
+        if let RedirectSource::Path { path, mask, .. } = &r.source {
             let opened = open_redirect(r, path, mask, noclobber, base.as_ref(), min_fd, cell)?;
             fds.push(opened);
         }
