@@ -2307,6 +2307,35 @@ fn unquoted_empty_cmd_subst_is_no_words() {
     assert!(result.is_empty());
 }
 
+/// The quoted-empty rule belongs at **field** level, before pathname expansion
+/// (task #278): `"$x"zzz*` with an empty `x` *does* yield a field (`zzz*`), so
+/// no empty word is synthesized for it, and `nullglob` then deletes the
+/// unmatched pattern — bash: `$#` = 0. Splitting `substitute_args` into
+/// `word_fields` + the caller's glob moved the rule off its post-glob check,
+/// which used to pad exactly this word to one empty argument (`$#` = 1).
+#[test]
+fn quoted_word_deleted_by_nullglob_yields_no_argument() {
+    let cell = dummy_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NULLGLOB;
+    // `quoted_len` is the quoted prefix (`"${empty}"`, `"$(true)"`), the rest
+    // is the unquoted pattern that follows it.
+    for (word, quoted_len) in [(c"${empty}zzz*", 8usize), (c"$(true)zzz*", 7)] {
+        let text = ShortCStr::from(word);
+        let pattern_len = text.as_bytes().unwrap().len() - quoted_len;
+        let mut mask = vec![true; quoted_len];
+        mask.extend(vec![false; pattern_len]);
+        let result = super::substitute_args(
+            &alloc::vec![text],
+            &alloc::vec![mask],
+            &[],
+            &alloc::vec![true],
+            &cell,
+        )
+        .unwrap();
+        assert!(result.is_empty(), "{word:?} → {result:?}");
+    }
+}
+
 #[test]
 fn mixed_quoting_empty_expansion_keeps_empty_word() {
     // `a ""$(true) b`: the flag vector must map to the right words — only the
