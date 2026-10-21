@@ -90,6 +90,32 @@ fn run_in(cwd: &std::path::Path, home: &std::path::Path, script: &str) -> (Strin
     )
 }
 
+/// `run_in` with the child's environment spelled out pair by pair (the shape of
+/// `tests/quotes.rs::run_env`, task #282): a `"\0"` value **removes** the key,
+/// the only way to give the child no `HOME` at all, since the harness runs with
+/// one. Task #287's rows need both an inherited `HOME` and no `HOME` at all.
+fn run_env(cwd: &std::path::Path, env: &[(&str, &str)], script: &str) -> (String, String, i32) {
+    let mut cmd = Command::new(BIN);
+    cmd.args(["-c", script])
+        .current_dir(cwd)
+        .env("PATH", test_path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env {
+        if *value == "\0" {
+            cmd.env_remove(key);
+        } else {
+            cmd.env(key, value);
+        }
+    }
+    let output = cmd.output().unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 /// Every expansion family reaches the directory: `$name`, `$( … )`, backticks,
 /// `$(( … ))`, `"$@"` and a function parameter. bash cds to `<w>/sub` for each.
 #[test]
@@ -140,6 +166,96 @@ fn cd_zero_fields_and_tilde_are_home() {
             "script {script:?} must cd into HOME"
         );
     }
+}
+
+/// The bare `cd` reads `HOME` through the **shell variable** — the shell's own
+/// variables first, the environment fdshell started with as the fallback — i.e.
+/// the same lookup `$HOME` and `~` use (task #287, LESSONS #282: one fact, one
+/// lookup). Every bash column was measured in `bash -c` (5.3.9) with the child's
+/// inherited `HOME` = `S1` and a second scratch dir `S2`:
+///
+/// ```text
+/// HOME=S2; cd; pwd                       bash S2        fdshell before S1
+/// HOME=S2; export HOME; cd; pwd          bash S2        fdshell before S1
+/// HOME=; cd; pwd                         bash <cwd>, rc 0 (a silent no-op)
+/// cd; pwd            (env HOME=S1)       bash S1
+/// cd; pwd            (no HOME in env)    bash rc 1, `cd: HOME not set`
+/// HOME=S2 cd; pwd; echo $HOME            bash S2 then S1
+/// f(){ local HOME=S2; cd; pwd; }; f      bash S2        fdshell before S1
+/// ```
+///
+/// The inherited-only row (`cd; pwd` → `S1`) is the keep-green
+/// `cd_literal_rows_stay_green` and `cd_zero_fields_and_tilde_are_home` pair,
+/// which run through `run_in`. The plan's `unset HOME` probe of that fallback
+/// is **not expressible** here: fdshell's `unset` is fd-only, so `unset HOME`
+/// is the parse error `variable must start with '%'` (measured, rc 1), and
+/// `HOME` cannot be taken away from a running shell at all — the fallback row
+/// is pinned by an inherited-only `HOME` (and, in the unit file, by clearing
+/// `state.environ`), never by an unassignment.
+#[test]
+fn cd_home_is_the_shell_variable() {
+    let work = workdir("homevar");
+    let s1 = scratch("homevar-s1");
+    let s2 = scratch("homevar-s2");
+    let inherited = s1.display().to_string();
+    let assigned = s2.display().to_string();
+    let env: [(&str, &str); 1] = [("HOME", &inherited)];
+
+    // The shell assignment wins over the inherited row, plain and through
+    // `export` (which goes through the same `set_var` entry).
+    for script in [
+        format!("HOME={assigned}; cd; builtin pwd"),
+        format!("HOME={assigned}; export HOME; cd; builtin pwd"),
+    ] {
+        let (out, err, code) = run_env(&work, &env, &script);
+        assert_eq!(code, 0, "script {script:?}: stderr={err:?}");
+        assert_eq!(
+            out.trim(),
+            assigned,
+            "script {script:?} must cd into the shell variable's HOME"
+        );
+    }
+
+    // An **empty** `HOME` is a value, so the target is the empty path: the open
+    // failure on `""` at rc 1, the `cd ""` family, and the run aborts. bash
+    // 5.3.9 makes it a silent no-op (`rc 0`, the cwd unchanged) — divergence.
+    let (out, err, code) = run_env(&work, &env, "HOME=; cd; builtin echo after");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "the run aborts: {out:?}");
+    assert!(err.contains("ENOENT"), "stderr={err:?}");
+
+    // `HOME` set in **neither** table: `$HOME not set` at rc 1. bash 5.3.9
+    // prints `cd: HOME not set` at the same rc (measured) — no
+    // password-database login directory for `cd`, so this row agrees.
+    let (out, err, code) = run_env(&work, &[("HOME", "\0")], "cd; builtin echo after");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "the run aborts: {out:?}");
+    assert!(err.contains("HOME not set"), "stderr={err:?}");
+
+    // The scoped prefix form: `run_env::apply` lands before the intercept, so
+    // the bare `cd` sees `S2` and the assignment is undone after the command —
+    // bash 5.3.9 prints `S2` then `S1`, and fdshell agrees on both halves.
+    let (out, err, code) = run_env(
+        &work,
+        &env,
+        &format!("HOME={assigned} cd; builtin pwd; builtin echo home=$HOME"),
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out.trim(),
+        format!("{assigned}\nhome={inherited}"),
+        "the prefix moves the bare cd and is undone after it"
+    );
+
+    // A `local` shadow lives in the shell's own table, so it follows for free
+    // (the #282 `local HOME` precedent for `~`).
+    let (out, err, code) = run_env(
+        &work,
+        &env,
+        &format!("f(){{ local HOME={assigned}; cd; builtin pwd; }}; f"),
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out.trim(), assigned, "the local shadow must drive the cd");
 }
 
 /// The glob rows are the pipeline's own policy: one match cds, many matches are

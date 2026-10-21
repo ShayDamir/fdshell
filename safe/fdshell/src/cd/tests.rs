@@ -5,6 +5,7 @@ use alloc::format;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use sys::ImportedStr;
 use sys::siginfo::WaitStatus;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -44,6 +45,20 @@ fn pos() -> Position {
     Position::new(1, 1)
 }
 
+/// A path as the `ShortCStr` the target arms take.
+fn sc(path: &std::path::Path) -> sys::ShortCStr {
+    sys::ShortCStr::from_vec(path.to_str().unwrap().as_bytes().to_vec()).unwrap()
+}
+
+/// A scratch dir holding a `marker` file, so a bare `cd` can be verified by a
+/// **relative** open of that name: it lands only in the directory the shell
+/// variable named (the startup `HOME` carries no marker).
+fn home_dir(tag: &str) -> Scratch {
+    let dir = scratch(tag);
+    std::fs::write(dir.join("marker"), b"x").unwrap();
+    dir
+}
+
 fn child_test(f: impl FnOnce()) {
     let (_, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
     match pidfd_opt {
@@ -74,6 +89,9 @@ fn cd_to_tmp() {
 
 #[test]
 fn cd_to_home() {
+    // The **fallback** row: `HOME` in the inherited `environ` snapshot only
+    // (the harness env), the shell's `strings` empty — the same lookup `$HOME`
+    // and `~` use.
     let home = std::env::var_os("HOME");
     let Some(home_path) = home else {
         child_test(|| {
@@ -97,6 +115,83 @@ fn cd_to_home() {
             assert!(matches!(e.current_context(), CdError::CdPathOpen));
         });
     }
+}
+
+/// Task #287: the bare `cd` reads `HOME` through `ShellState::var_value` — the
+/// shell's own variables first, the inherited `environ` snapshot as the
+/// documented fallback — the same lookup `$HOME` and `~` use, **never** the live
+/// process environment. Measured in bash 5.3.9 (`cd; pwd` after
+/// `HOME=<scratch>` prints `<scratch>`, rc 0); the shell assignment and the
+/// inherited row deliberately disagree here, so reading the environ first, or
+/// the process environment, lands on `/tmp`, where the marker's relative open
+/// fails.
+#[test]
+fn cd_home_prefers_the_shell_variable() {
+    let dir = home_dir("home-var");
+    child_test(|| {
+        let mut state = ShellState::new();
+        state.environ.clear();
+        state.environ.push((c"HOME".into(), c"/tmp".into()));
+        state.set_var(c"HOME".into(), ImportedStr::shell(sc(&dir)));
+        cd(CdTarget::Home, &mut state, pos()).unwrap();
+        // `cd` fchdir'd the child, so this lands only in the directory the
+        // shell variable named.
+        sys::openat2::open(c"marker", sys::fcntl::O_RDONLY).unwrap();
+        // The provenance of the moved CWD still names the `HOME` fact.
+        let cwd = state.fds.get::<sys::ShortCStr>(&c"CWD".into()).unwrap();
+        assert_eq!(cwd.trace.origin, Origin::EnvVar(ShortCStr::from(c"HOME")));
+    });
+}
+
+/// The fallback row with a real target: `HOME` named in no shell variable, only
+/// in the inherited table, so the lookup must not stop at `strings`.
+#[test]
+fn cd_home_falls_back_to_the_inherited_environ() {
+    let dir = home_dir("home-env");
+    child_test(|| {
+        let mut state = ShellState::new();
+        state.environ.clear();
+        state.environ.push((c"HOME".into(), sc(&dir)));
+        cd(CdTarget::Home, &mut state, pos()).unwrap();
+        sys::openat2::open(c"marker", sys::fcntl::O_RDONLY).unwrap();
+    });
+}
+
+/// `HOME=""` is a **value**, not an unset: the target is the empty path, so the
+/// failure is the open on `""` (`CdPathOpen`), never `HomeNotSet`. bash 5.3.9
+/// makes the bare `cd` a silent no-op there (`HOME=; cd; pwd` → the cwd, rc 0),
+/// the `cd ""` family; fdshell reports the open failure at rc 1.
+///
+/// Both failure rows run **in the test process**, not in a `child_test` fork: a
+/// failed `cd` never reaches `fchdir`, so they move nothing, and the fork's
+/// child exits on a raw `sys::exit`, which drops its gcov counters — forking
+/// them would leave the two arms at 0 hits in `nix build .#coverage` (LESSONS:
+/// "Integration tests contribute no coverage").
+#[test]
+fn cd_home_empty_is_the_open_failure() {
+    let mut state = ShellState::new();
+    // The inherited row points at a real directory: an empty shell value read
+    // as "unset" would succeed there instead of failing the open.
+    state.environ.clear();
+    state.environ.push((c"HOME".into(), c"/tmp".into()));
+    state.set_var(c"HOME".into(), ImportedStr::shell(ShortCStr::new()));
+    let e = cd(CdTarget::Home, &mut state, pos()).unwrap_err();
+    assert!(matches!(e.current_context(), CdError::CdPathOpen));
+}
+
+/// `HOME` in **neither** table is `HomeNotSet`. bash 5.3.9 prints
+/// `cd: HOME not set` at rc 1 for the bare `cd` (measured — the
+/// password-database login directory is `~`'s fallback, not `cd`'s), so the
+/// report and the rc agree.
+#[test]
+fn cd_home_unset_reports_home_not_set() {
+    let mut state = ShellState::new();
+    // The harness env has a `HOME`, so clearing the snapshot is what makes this
+    // row mean "set in neither table" (a live-environ lookup would find the
+    // developer's home and succeed).
+    state.environ.clear();
+    let e = cd(CdTarget::Home, &mut state, pos()).unwrap_err();
+    assert!(matches!(e.current_context(), CdError::HomeNotSet));
 }
 
 #[test]
