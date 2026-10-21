@@ -368,7 +368,7 @@ The REPL's completeness check treats a trailing top-level `&&`/`||` as "keep rea
 In the REPL's trailing check (`repl/trailing.rs`, used by `repl/complete.rs`), `trailing_open` records a `&&`/`||` as the last top-level operator only when `is_bare(&state)` is true (no open quote, single-quote span, backtick, or `$( )` substitution). `is_bare` carries mutants no input can kill: the function's `-> true`, and each `&&`→`||` on its single expression (`!state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0`). They are equivalent because an in-quote / in-span / in-backtick / in-`$( )` `&&`/`||` can never be the *last* top-level operator with a whitespace tail: a balanced quote leaves a non-whitespace closing `"` (or `'`, backtick / `)`) after it, and an unbalanced one makes the buffer incomplete via the `in_quote` / `in_single` / `in_backtick` / `paren_depth` checks independently. The gate is dead weight for every input that reaches it — accepted equivalent mutants, recorded here so future `cargo mutants` runs and reviews do not re-flag them (the plan's "Mutant hygiene" note anticipated exactly this). Task #141 added the `!state.in_single` conjunct: it is the same class (an unterminated `'` is reported by the quote check in `trailing_open`, and a terminated span leaves a non-whitespace `'` tail), so the `in_single` mutants of `is_bare` are accepted as equivalent too.
 
 ## A single-quoted literal is stored in the double-quote escape form
-Task #141 gives the tokenizer a single-quote state, but the quote **mask** stays `Vec<bool>` — it is read by ~15 consumers (word splitting, globbing, param-op patterns, clobber/redirect detection, `word_quoted`, `args_quoted`, for-list words), and a per-byte quote *kind* would touch every one of them. So a `'…'` span is encoded as the text the **double-quote arms** of the word readers produce: `\` → `\\`, `$` → `\$`, `` ` `` → `` \` ``, every other byte verbatim, all with mask bits `true` (the `` ` `` pair was added by task #216: the substitution pass reads an unescaped backtick as a command substitution, so the literal backtick of a `'…'` span must reach it in the same escape encoding `$` uses). Word text is read by exactly two layers, and both decode that encoding to the literal bytes: `substitute/arg.rs` (quoted arm, POSIX 2.2.2: `\$`→`$`, `\\`→`\`, `` \` ``→`` ` ``, any other `\X` keeps the backslash) and `bytes/fold.rs::fold_mask` (the path for a word that never reaches substitution — a command name and a redirect target, each a *no-trigger* word since tasks #268 and #278 moved those two positions to substitution surfaces, and a `builtin`/`hash` name), whose quoted arm #141 aligned with `arg.rs` so one rule decides both. The encoding is **mask-independent**: `\$`/`\\` fold to the same literals under the POSIX 2.2.1 (unquoted) *and* 2.2.2 (quoted) arms, so an assignment value is right with and without the mask — the paths are `run_dispatch/assign_str.rs` and `run_env::expand_one` (mask-carrying since task #217, and pinned mask-independent by `tests/env_assign.rs::single_quoted_value_is_mask_independent`) and the empty-mask `case_exec` (task #269); that is why #141 needs nothing from #217. Consequences to remember when touching a scanner: (1) inside `'…'` there is **no escape pair** (POSIX 2.2.3) — every `in_single` test must precede the `\` arm, or a span's `\` swallows the next byte (`echo 'a\'` → `a\`, `echo 'a\b'` → `a\b`); (2) `$'x'` is read as the POSIX-sh expansion — the `b'$' if peek == SQUOTE` arm pushes `\$` with mask `false`, so the word is `$x`, never a silent expansion of the variable `x` (bash's ANSI-C gives `x`; accepted divergence, task #156); (3) `fold` and `fold_quotes` read quote bytes off raw text and `fold_mask` reads the mask — keep all three in lockstep: they are one state machine (`fold_impl`) with three contracts (task #207 added `fold_quotes`, the raw-text **quote removal** a heredoc delimiter word gets; `fold` keeps the quote bytes and is now used by its pins alone).
+Task #141 gives the tokenizer a single-quote state, but the quote **mask** stays `Vec<bool>` — it is read by ~15 consumers (word splitting, globbing, param-op patterns, clobber/redirect detection, `word_quoted`, `args_quoted`, for-list words), and a per-byte quote *kind* would touch every one of them. **Task #285 paid that bill**, and this warning was right in shape: `Vec<MaskBit>` touched ~95 sites in 48 files (`CommandLine.args_mask`, `ForBlock.words_mask`, `Assign.mask`, `Token.mask`, `substitute_arg(s)`, `fold_mask`, `pattern_mask`, the redirect and `spans` carriers). What made it mechanical is the discipline the entry predicts: keep **one accessor** for the `bool` reading (`MaskBit::quoted()` / `mask::quoted_at`), so a consumer that only asks "quoted?" changes type and nothing else, and let exactly one function (`region_len`) read the three-state bit. `args_quoted`/`words_quoted` stay `Vec<bool>` — they are per-word flags, not a mask — which is why the change is 48 files and not the whole crate. So a `'…'` span is encoded as the text the **double-quote arms** of the word readers produce: `\` → `\\`, `$` → `\$`, `` ` `` → `` \` ``, every other byte verbatim, all with mask bits `true` (the `` ` `` pair was added by task #216: the substitution pass reads an unescaped backtick as a command substitution, so the literal backtick of a `'…'` span must reach it in the same escape encoding `$` uses). Word text is read by exactly two layers, and both decode that encoding to the literal bytes: `substitute/arg.rs` (quoted arm, POSIX 2.2.2: `\$`→`$`, `\\`→`\`, `` \` ``→`` ` ``, any other `\X` keeps the backslash) and `bytes/fold.rs::fold_mask` (the path for a word that never reaches substitution — a command name and a redirect target, each a *no-trigger* word since tasks #268 and #278 moved those two positions to substitution surfaces, and a `builtin`/`hash` name), whose quoted arm #141 aligned with `arg.rs` so one rule decides both. The encoding is **mask-independent**: `\$`/`\\` fold to the same literals under the POSIX 2.2.1 (unquoted) *and* 2.2.2 (quoted) arms, so an assignment value is right with and without the mask — the paths are `run_dispatch/assign_str.rs` and `run_env::expand_one` (mask-carrying since task #217, and pinned mask-independent by `tests/env_assign.rs::single_quoted_value_is_mask_independent`) and the empty-mask `case_exec` (task #269); that is why #141 needs nothing from #217. Consequences to remember when touching a scanner: (1) inside `'…'` there is **no escape pair** (POSIX 2.2.3) — every `in_single` test must precede the `\` arm, or a span's `\` swallows the next byte (`echo 'a\'` → `a\`, `echo 'a\b'` → `a\b`); (2) `$'x'` is read as the POSIX-sh expansion — the `b'$' if peek == SQUOTE` arm pushes `\$` with mask `false`, so the word is `$x`, never a silent expansion of the variable `x` (bash's ANSI-C gives `x`; accepted divergence, task #156); (3) `fold` and `fold_quotes` read quote bytes off raw text and `fold_mask` reads the mask — keep all three in lockstep: they are one state machine (`fold_impl`) with three contracts (task #207 added `fold_quotes`, the raw-text **quote removal** a heredoc delimiter word gets; `fold` keeps the quote bytes and is now used by its pins alone).
 
 ## tokei 14 miscounts every line after a `b'"'` byte literal — quote bytes are `bytes::QUOTE`
 The LoC gate (`tools/complexity.py`, tokei 14.0.0) parses Rust, and its parser reads a `b'"'` byte literal as the *start of a string*: from that line on, comment and blank lines are swallowed into the "string" and miscounted as code. `parse/token/step.rs` measured 81 (true ~73) and `brace_expand/gobbler.rs` 89 (true ~77) purely from this artifact, which had parked them in the 80–90 band that task #85 clears. The fix is structural, not cosmetic: shared quote bytes live in `crate::bytes` (`pub(crate) const QUOTE: u8 = b'"'`), so the literal exists exactly once, in a file too small for the inflation to matter, and the scanners match on the named constant (`QUOTE => …`, `c == QUOTE`). Do not write `b'"'` (or reach for `0x22`) at scanner use sites: it re-introduces the miscount and silently re-inflates the file's LoC by every comment/blank line after it.
@@ -1929,8 +1929,9 @@ sibling rule above, which is what makes that index trustworthy).
   its joined word mask, so each is one full run and stays greedy by the *run*
   rule. Do not go looking for a substitution caller that passes an empty mask —
   there is none (LESSONS: "No substitution surface takes an empty mask").
-  Pinned: `region_len_measures_the_trigger_byte_region`, and the heredoc row
-  `$v"bc"` → `q"bc"`.
+  Pinned: `region_len_measures_the_trigger_byte_region`,
+  `region_len_stops_at_the_next_region_start`, and the heredoc row `$v"bc"` →
+  `q"bc"`.
 - **`limit == 0` means the next byte starts a new region**, so the trigger is
   literal and consumes nothing: `$"v"` → `$v`, `"$"v` → `$v` (bash prints `v`
   for the ANSI-C/locale `$"…"` family — the divergence the `$'x'` → `$x` bullet
@@ -1939,12 +1940,32 @@ sibling rule above, which is what makes that index trustworthy).
   `bare_dollar_marks_expansion` pins; do not "clean up" the flag here.
   The `%` arm needs no special case: an empty name takes the existing
   literal-`%` fallback and consumes nothing.
-- **A boolean mask cannot express adjacent quoted regions.** `"$v""b"` is the
-  text `vb` with an all-true mask, so the run is one region and the name keeps
-  collecting: fdshell prints `[VB]`, bash `[qb]`; `"$1""2"` gives `[]` where
-  bash gives `[A2]`. Accepted divergence (task #285 owns the region-id model),
-  pinned in `tests/quotes.rs::adjacent_quoted_regions_keep_collecting_the_name`
-  with a README bullet, so #285 has the expectations to delete.
+- **A region boundary is a bit, not an index (task #285).** `"$v""b"` is the
+  text `vb`, and under a `bool` mask every byte of it is `true`: one region, so
+  the name collects `vb` and fdshell printed `[VB]` where bash prints `[qb]`
+  (`"$1""2"` → `[]` vs `[A2]`). The mask is now `Vec<MaskBit>`
+  (`Unquoted | QuotedStart | Quoted`): `QuotedStart` closes the region before it,
+  `region_len` compares **bits**, so the run stops there and the name ends at the
+  closing quote — bash's rule, now at parity. Pinned by
+  `tests/quotes.rs::adjacent_quoted_regions_end_the_name` (the four report rows)
+  and the adjacency rows of the `wordsplit`/`env_assign` glued-literal tables.
+  Three rules keep the bit honest:
+  1. **Only the tokenizer mints a `QuotedStart`** — `State::push_masked` /
+     `push_masked_run` in `parse/token/mask.rs`, the two places that know the
+     quote state machine (`word_reset` and `close_span` clear the "region open"
+     flag). Every mask derived from a plain `bool` — expansion output, a folded
+     word, a synthesized operator word, `command_mask` — goes through
+     `MaskBit::from_quoted` and so never invents a boundary it cannot see. A mask
+     **slice** keeps its bits verbatim: a slice starting mid-region starts with
+     `Quoted`, which is the correct reading.
+  2. **`quoted()` is the old `bool`.** A consumer that only asks "is this byte
+     quoted?" reads one accessor (`MaskBit::quoted` / `mask::quoted_at`) and
+     changes type and nothing else; exactly one function, `region_len`, reads the
+     three-state bit. That accessor is what made a 48-file type change mechanical.
+  3. **A derived mask is region-blind by construction.** `region_len` over a
+     derived all-`Quoted` mask returns the full run, so the heredoc-body and
+     `case_exec` callers stay greedy under the *run* rule above, and the `&[]`
+     padding is untouched (`region_len(&[], 3) == usize::MAX`).
 - **Bind every name a mask-alignment test probes** (LESSONS): with `vb`
   unbound, `"$v"b` prints `[]` for the greedy scan, for the cap *and* for the
   byte loss, so a test that binds nothing measures nothing. The pins glue a

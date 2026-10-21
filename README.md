@@ -533,6 +533,13 @@ the arguments, `$#` the argument count, `$0` the program name, `$?` the last
 status, `$$` the shell pid, `$!` the last background pid. `"$@"` expands to
 the arguments as separate words; `"$*"` joins them with the first `IFS` byte.
 
+A **bare** name — `$v`, `$1`, `%fd` — ends at the closing quote of the quote
+region that holds the trigger byte, as it does in bash: `"$v"bc` is `v` plus the
+literal `bc`, `"$v""b"` is `v` plus `b` (the second `"` opens a new region),
+`"$1""2"` is `$1` plus `2`, and `"$v"'x'y` is the value of `v` plus `x` plus `y`.
+Inside one region the name stays greedy (`"x$vbc"` is the value of `vbc`), and
+the braced forms are unaffected — `${name}` ends at its `}`.
+
 ### Command substitution
 
 `$(cmd)` and `` `cmd` `` run `cmd` and substitute its output:
