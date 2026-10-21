@@ -368,6 +368,18 @@ first, then the block's own operators, then the trailing statements. A
 statements inside it: `cat <<X; f() { echo hi; }; f; cat <<B` + `bodyX`/`X`/
 `bodyB`/`B` prints `bodyX`, `hi`, `bodyB`.
 
+The stream is read **greedily, one body per operator**, as bash reads it: each
+operator's body starts where the previous operator's delimiter line ended, and
+an operator whose delimiter line never arrives takes what is left of the stream
+as its body (empty when nothing is left) — the operators behind it get an empty
+body, and the body lines never run as commands. So `cat <<T; cat <<E` +
+`bodyT`/`T`/`extra` prints `bodyT` and `extra` (rc 0), and
+`if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT`/`T` prints
+`bodyT` (rc 0). What stays a limitation is the **first** operator's missing
+delimiter line: `cat <<E` + `body` reports
+`here-doc: missing terminating delimiter line 'E'` (rc 1), where bash warns
+`here-document … delimited by end-of-file` and runs.
+
 A number in front of the operator puts the body on that descriptor instead of
 stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
 `exec 3<<EOF` keeps it there for the rest of the script. The number must be
