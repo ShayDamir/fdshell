@@ -294,8 +294,11 @@ The one accepted divergence is the family of keywords fdshell implements
 without a builtin of that name: bash runs `'break' 1`, `'continue' 1`,
 `'return' 3`, `'umask' 022` and `'unset' zz` as its **builtins** (the quoted
 word is looked up, and the builtin answers), where fdshell keeps the keyword
-and answers with its own message (`'break' is not inside a loop`, rc 1) or its
-own parse rule (`'unset' zz`: `variable must start with '%'`). Gating those
+and answers with its own message (`'break' is not inside a loop`, rc 1).
+`'unset' zz` is the row where the two coincide **by accident**: the quoted word
+is still the keyword here, and since task #290 every word after `unset` is an
+operand — a plain name is a shell variable, no operand is a parse error — so
+fdshell removes `zz` at rc 0 exactly as the builtin does. Gating those
 words on §2.9.1 would trade a real builtin run for `break: not found`, so
 fdshell gates only the block layer and leaves these keywords quoted-blind
 (task #335 owns the decision, together with the builtins it needs).

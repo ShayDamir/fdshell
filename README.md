@@ -514,6 +514,17 @@ An unset variable expands to the empty string; `set -u` makes that an error
 instead. `local name=value` (inside a function) scopes a variable to the
 current call. `read name` reads a line from stdin into a variable.
 
+`unset name…` removes each named shell variable — its value, its export
+attribute and the inherited environment row it came from, all three, so the
+name leaves `$name`, `${name:-word}` and the child environment together (after
+`unset HOME` the bare `cd` reports `HOME not set`). The `%` spelling stays
+fdshell's fd form: `unset %name` closes the fd variable (descriptor, fd array,
+named task) and `unset %arr[%src]` removes one array entry. An unbound name is
+a silent no-op with exit status 0, a bare `unset` does nothing, and
+`unset IFS` restores the default split set (space, tab, newline). No operand is
+validated: `unset 1abc` names a variable no expansion can reach and exits 0,
+which is what bash does too.
+
 ### Parameter expansion
 
 | Form | Result |

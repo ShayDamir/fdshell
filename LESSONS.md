@@ -3281,3 +3281,61 @@ and `run/async_job/tests.rs::loop_control_dies_with_the_child` pins the `spawn`
 level, one layer below `run_parsed`); a compound condition (`{ … } &`,
 `for … done &`) and a short-circuited last part (`if false && true &`) stay
 foreground (**#352**), the same arm list.
+
+## A parse-level keyword inherits an operand grammar — check the grammar you inherit (task #290)
+
+`unset` is a parse-level keyword (`parse/detect_keyword.rs`), and it was written
+as the fd-variable keyword's twin: its operand list reused the `%`-prefix
+grammar, so `unset v` — bash's spelling, advertised by fdshell's own `help`
+("Remove variable") and listed in the README — was a **hard parse error**
+(`variable must start with '%'`). The failure mode is worse than the missing
+feature: a parse error is a statement-level loss, so `unset v; echo hi` printed
+**nothing** and exited 1, and no shell variable could ever be unassigned. The
+check to apply before reusing another keyword's operand grammar is to write down
+what that grammar **rejects**; every rejection at parse level is a whole
+statement, not one word.
+
+Measurement set the scope, and it says **accept everything**: bash 5.3.9
+validates no operand of `unset` at all — `unset 1abc`, `unset a-b`, `unset ""`,
+`unset 1`, `unset '$#'`, `unset -v v` are all rc 0, the ones naming no variable
+silent. So the parity fix is "each word is a name, an unbound name is a
+run-time no-op" and the detector becomes **infallible**; adding
+`not a valid identifier` validation (the shape task **#166** proposed) would be
+a parity loss, and retires `unset` from that task's list (**#387** records the
+measurement; `export`/`read`/`for` keep bash's check). fdshell's single measured
+divergence is option *validation*: `unset -x` is bash's rc-2 `invalid option`,
+fdshell's rc 0. Deleting the two now-unreachable `ParseError` variants
+(`ExpectedVariableNameAfterUnset`, `VariableMustStartWithPercent`, STYLE §4.16 /
+§4.17) is the signal that the parse layer has no decision left to make — a
+future option surface (`-f`, `-v`, namerefs) must reintroduce errors
+deliberately, not keep them around.
+
+One fact, one owner: a shell variable lives in **four** places — `strings`,
+`exports`, the inherited `environ` row, and `ifs` when the name is `IFS` — so
+the removal is one `ShellState::unset_var` sitting next to `set_var`, which
+owns the write side and the `IFS` sync. Missing the `environ` half is
+invisible to a naive test and breaks the real ones: `substitute/resolve.rs::var_value`
+answers `$HOME` / `${HOME:-x}` from the inherited snapshot, and
+`exec/environ.rs::get_environ` keeps exporting the name, which is exactly the
+row task #287 had to record as **"not expressible"** in `tests/cd_expand.rs`
+(`unset HOME` could not be written at all). With the `environ` half,
+`unset HOME; cd` is bash's `HOME not set` at rc 1, and the fallback lookup has
+a test that reaches it.
+
+Namespaces and `$_` are the parts that stayed: `%name` is the fd namespace
+(STYLE §5) — it closes the descriptor, drops the fd array of that name and
+detaches a **named** task only (a plain-`&` job is unnamed and stays `wait`'s,
+task #326) — and a plain name touches no fd, so `unset x` and `unset %x` on the
+same name are different statements, both pinned. `$_` is the **last operand's**
+stored name (the word as written for a shell variable, `%`-stripped for an fd
+one, the array name for `%arr[%src]`), and for a keyword with **no** operands
+bash's fallback is the command word itself (`unset; echo $_` → `unset`), the
+same shape fdshell already had for `true`. A quoted operand needs no extra
+code: a `Token`'s text is already the unquoted word, so `unset "v w"` names
+`v w`.
+
+Two divergences stay open on purpose and are pinned as measured, not fixed
+here: `unset NAME` leaves a **function** of that name defined (**#386**, bash
+removes it → `command not found`), and `unset` reached through `builtin`
+(`builtin unset %x`) is still `"unset" is not a shell builtin`, owned by
+**#335** with the rest of the quoted-keyword gate.
