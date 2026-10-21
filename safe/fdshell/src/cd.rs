@@ -11,7 +11,10 @@ use sys::{LocalFd, Origin, Position, ShortCStr, Trace};
 #[derive(Debug)]
 pub(crate) enum CdTarget {
     /// `$HOME`: the bare `cd`, and every operand whose expansion produced no
-    /// field at all (`cd "$@"` with an empty positional deque).
+    /// field at all (`cd "$@"` with an empty positional deque). `HOME` is read
+    /// through [`ShellState::var_value`] — the shell's variables first, the
+    /// startup `environ` snapshot as the fallback — i.e. the same lookup
+    /// `$HOME` and `~` use, never the live process environment (LESSONS #282).
     Home,
     /// `OLDPWD`: the `cd -` form, which bash reads on the **expanded** field
     /// (`D=-; cd "$D"` is the old cwd even when a directory named `-` exists).
@@ -30,7 +33,7 @@ pub(crate) fn cd(
     set_at: Position,
 ) -> Result<(), Report<CdError>> {
     let (new_fd, origin) = match target {
-        CdTarget::Home => cd_home()?,
+        CdTarget::Home => cd_home(state)?,
         CdTarget::OldCwd => cd_var(&c"OLDCWD".into(), state)?,
         CdTarget::Var(name) => cd_var(&name, state)?,
         CdTarget::Path(path) => cd_path(&path)?,
@@ -40,9 +43,22 @@ pub(crate) fn cd(
     Ok(())
 }
 
-fn cd_home() -> Result<(LocalFd, Origin), Report<CdError>> {
-    let home = sys::env::getenv(c"HOME").ok_or(CdError::HomeNotSet)?;
-    let fd = open_dir(&home)?;
+/// The bare `cd`'s target: `HOME` read through [`ShellState::var_value`] — the
+/// shell's own variables first, the startup `environ` snapshot as the fallback
+/// — the **same lookup `$HOME` and `~` use** (`substitute/resolve.rs`,
+/// `substitute/tilde.rs`), so `HOME=/tmp/H; cd` lands in `/tmp/H` (LESSONS
+/// #282: one fact, one lookup, one source; `sys::env::getenv` was the live
+/// process environment and could only drift). `HOME` set in neither table is
+/// [`CdError::HomeNotSet`]; an **empty** `HOME` is a value, so it reaches the
+/// open and fails there. The provenance stays `Origin::EnvVar(HOME)`, as
+/// before: it names the `HOME` fact, and the "environment variable HOME"
+/// wording of `child/explain.rs` is the known imprecision of that variant
+/// (renaming it touches `unsafe/sys`, out of this file's scope).
+fn cd_home(state: &ShellState) -> Result<(LocalFd, Origin), Report<CdError>> {
+    let home = state
+        .var_value(&ShortCStr::from(c"HOME"))
+        .ok_or(CdError::HomeNotSet)?;
+    let fd = open_dir(home)?;
     Ok((fd, Origin::EnvVar(ShortCStr::from(c"HOME"))))
 }
 
