@@ -1773,3 +1773,36 @@ fn quoted_empty_target_stays_a_parse_error() {
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
 }
+
+/// A target whose expansion **fails** keeps its cause in the chain and creates
+/// nothing: the arith error rides under `failed to expand the redirect target`
+/// (`OpenRedirectError::TargetExpand`) at rc 1, where bash reports the same
+/// arithmetic failure at rc 1. An unsupported parameter form is a 0-field
+/// expansion, so `${x@}` lands on bash's `ambiguous redirect` instead. The arith
+/// rows are task #213's redirect half, measured in bash 5.3.9.
+#[test]
+fn a_failing_target_expansion_keeps_its_cause() {
+    let dir = seeded("sub_expand_fail");
+    let dir = dir.to_str().unwrap();
+    for (script, needle) in [
+        ("echo hi > $((1/0))", "division"),
+        ("echo hi > $((x+))", "syntax"),
+        ("echo hi > a$((1/0))", "division"),
+        ("echo hi > $(echo a)$((1/0))", "division"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("failed to expand the redirect target"),
+            "{script}: the chain must name the target, stderr={err}"
+        );
+        assert!(err.contains(needle), "{script}: stderr={err}");
+        assert!(created(&files).is_empty(), "{script}: created a file");
+    }
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo hi > ${x@}");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect"), "stderr={err}");
+    assert!(created(&files).is_empty(), "{files:?}");
+}
