@@ -232,6 +232,29 @@ fn strict_bans_absolute_globbed_target() {
     assert!(err.contains("absolute"), "stderr={err:?}");
 }
 
+/// The ban runs on the **expanded** field, not on the word as written
+/// (task #278): the target `$(builtin echo <abs>)` is relative-looking text
+/// whose single field is absolute, and it is banned before the walk, so a
+/// strict shell never resolves a redirect at the filesystem root. bash has no
+/// strict mode (it writes the file), so this row is measured against README
+/// "Strict mode"; `builtin` keeps the substitution in-process, where strict's
+/// ban on absolute program paths cannot shadow the redirect's own message.
+#[test]
+fn strict_bans_absolute_target_after_expansion() {
+    let dir = Scratch::new();
+    let abs = dir.join("out").to_str().unwrap().to_string();
+    let out = run_path(
+        &dir,
+        ".",
+        &format!("shopt -s strict; builtin echo hi > $(builtin echo {abs})"),
+    );
+    assert!(!out.status.success(), "stdout={:?}", stdout(&out));
+    let err = stderr(&out);
+    assert!(err.contains("strict"), "stderr={err:?}");
+    assert!(err.contains("absolute"), "stderr={err:?}");
+    assert!(!dir.join("out").exists(), "the target must not be created");
+}
+
 /// A relative globbed target is globbed under strict (rooted at the `%CWD`
 /// base fd) and opened as its single match.
 #[test]
