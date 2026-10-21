@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::str;
 
@@ -9,6 +9,9 @@ const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 /// The prompt printed before every read. Pinned byte-for-byte: it is the
 /// counter the blank-line tests below use, so it pins one prompt per read.
 const PROMPT: &str = "fdshell> ";
+
+/// The `ignoreeof` hint printed at an ignored EOF (task #291).
+const HINT: &str = "use `exit' to leave";
 
 /// Spawn the REPL (no `-c`), pipe `input` to stdin, close it, and capture
 /// stdout/stderr/exit code.
@@ -32,6 +35,39 @@ fn run_repl(input: &str) -> (String, String, i32) {
         str::from_utf8(&output.stderr).unwrap().to_string(),
         output.status.code().unwrap_or(-1),
     )
+}
+
+/// Spawn the REPL under a pty (`script -qec <bin>`, so `isatty(0)` is true),
+/// write `input`, close the pty's stdin (that does deliver a pty EOF), settle,
+/// and report stdout plus whether the shell was still alive.
+///
+/// No stdout read loop: after the `ignoreeof` hint a pty with closed stdin
+/// delivers nothing, so a blocking `read` hangs to nextest's 10 s
+/// slow-timeout. Sleep → `try_wait` → `kill` → drain is the shape that bounds
+/// the output. The pty echoes the input and inserts `\r\n`, so assertions
+/// `contains` and count matches, never exact stdout equality.
+fn run_tty(input: &str) -> (String, bool) {
+    let mut child = Command::new("script")
+        .args(["-qec", BIN, "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let alive = child.try_wait().unwrap().is_none();
+    if alive {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output().unwrap();
+    (str::from_utf8(&output.stdout).unwrap().to_string(), alive)
 }
 
 /// A single input line beyond the size cap must fail with the size error
@@ -291,41 +327,35 @@ fn eof_mid_if_executes_buffer() {
     assert!(err.contains("parse error"), "stderr: {err:?}");
 }
 
+/// `ignoreeof` on a terminal, EOF mid-continuation: the terminal delivers one
+/// EOF event, the hint prints and the shell stays alive at the `> ` prompt
+/// (measured: `fdshell> > use \`exit' to leave\r\n> `, then blocked).
 #[test]
-fn ignoreeof_mid_continuation_keeps_shell_alive() {
-    let mut child = Command::new(BIN)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    // Piped stdin is not a tty, so `ignoreeof` starts off; enable it
-    // explicitly, start an if-block, then close stdin: the shell must stay
-    // alive and hint how to leave.
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"set -o ignoreeof\nif true; then\n")
-        .unwrap();
-    drop(child.stdin.take().unwrap());
-    let mut data = Vec::new();
-    let mut buf = [0u8; 1024];
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while data.windows(19).all(|w| w != b"use `exit' to leave")
-        && std::time::Instant::now() < deadline
-    {
-        let n = child.stdout.as_mut().unwrap().read(&mut buf).unwrap();
-        assert!(n > 0, "shell exited on EOF: {data:?}");
-        data.extend_from_slice(buf.get(..n).unwrap());
-    }
-    assert!(
-        data.windows(19).any(|w| w == b"use `exit' to leave"),
-        "no ignoreeof hint: {data:?}"
+fn ignoreeof_mid_continuation_keeps_shell_alive_on_terminal() {
+    let (out, alive) = run_tty("if true; then\n");
+    assert!(alive, "shell died at tty EOF mid-continuation: {out:?}");
+    assert_eq!(
+        out.matches(HINT).count(),
+        1,
+        "ignoreeof hint count: {out:?}"
     );
-    assert!(child.try_wait().unwrap().is_none(), "shell died on EOF");
-    let _ = child.kill();
-    let _ = child.wait();
+    assert!(
+        out.replace(PROMPT, "").contains("> "),
+        "continuation prompt missing: {out:?}"
+    );
+}
+
+/// The same shape over a pipe ends the input: the continuation read hits EOF,
+/// `ignoreeof` hints and the buffer is executed (the `eof_mid_if_executes_buffer`
+/// parse error), then the next primary read hits the same EOF and hints again —
+/// two hints, one per EOF read, and rc 0. A shell that kept reading the closed
+/// pipe would print the hint forever (the task #291 spin).
+#[test]
+fn ignoreeof_mid_continuation_on_pipe_exits() {
+    let (out, err, code) = run_repl("set -o ignoreeof\nif true; then\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert!(err.contains("parse error"), "stderr: {err:?}");
+    assert_eq!(out.matches(HINT).count(), 2, "stdout: {out:?}");
 }
 
 #[test]
