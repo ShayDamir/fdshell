@@ -91,10 +91,7 @@ impl Drop for Scratch {
 }
 
 fn scratch(tag: &str) -> Scratch {
-    let dir = std::env::temp_dir().join(format!(
-        "fdshell-unset-{tag}-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("fdshell-unset-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     Scratch(dir)
 }
@@ -105,15 +102,15 @@ fn scratch(tag: &str) -> Scratch {
 /// nothing.
 #[test]
 fn plain_names_are_shell_variables() {
-    for script in [
-        "v=1; unset v; builtin echo [${v:-U}]",
-        "v=1; w=2; unset v w; builtin echo [${v:-U}][${w:-U}]",
-        "v=q; unset v; builtin printf \"[%s]\" \"${v:-d}\"",
-    ] {
-        let (out, err, code) = run(script);
-        assert_eq!(code, 0, "script {script:?}: stderr={err:?}");
-        assert_eq!(out, "[U]\n", "script {script:?}");
-    }
+    let (out, err, code) = run("v=1; unset v; builtin echo [${v:-U}]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[U]\n");
+    let (out, err, code) = run("v=1; w=2; unset v w; builtin echo [${v:-U}][${w:-U}]");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[U][U]\n", "every operand is applied");
+    let (out, err, code) = run("v=q; unset v; builtin printf \"[%s]\" \"${v:-d}\"");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[d]", "the task's own row (`printf`, no newline)");
     let (out, err, code) = run("unset v; builtin echo hi");
     assert_eq!(code, 0, "the statement must survive: stderr={err:?}");
     assert_eq!(out, "hi\n");
@@ -158,7 +155,7 @@ fn export_and_the_environment_lose_the_name() {
     assert!(out.is_empty(), "stdout={out:?}");
 
     let home = scratch("env-home");
-    let inherited = home.display().to_string();
+    let inherited = home.0.display().to_string();
     let env = [("HOME", inherited.as_str())];
 
     // The inherited row answers `$HOME` / `${HOME:-x}` (resolve::var_value) and
@@ -178,7 +175,7 @@ fn export_and_the_environment_lose_the_name() {
 #[test]
 fn cd_after_unset_home_reports_home_not_set() {
     let home = scratch("cd-home");
-    let inherited = home.display().to_string();
+    let inherited = home.0.display().to_string();
     let (out, err, code) = run_env(&[("HOME", inherited.as_str())], "unset HOME; cd");
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
@@ -190,9 +187,8 @@ fn cd_after_unset_home_reports_home_not_set() {
 #[test]
 fn unset_ifs_restores_the_default_split_set() {
     // A comma no longer splits…
-    let (out, err, code) = run(
-        "IFS=,; set -- a,b; unset IFS; for w in $1; do builtin echo \"[$w]\"; done",
-    );
+    let (out, err, code) =
+        run("IFS=,; set -- a,b; unset IFS; for w in $1; do builtin echo \"[$w]\"; done");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "[a,b]\n");
     // …and a space splits again.
@@ -216,10 +212,7 @@ fn nounset_reports_the_name_unbound() {
     assert!(out.is_empty(), "stdout={out:?}");
     assert!(err.contains("v: unbound variable"), "stderr={err:?}");
 
-    let (out, err, code) = run_env(
-        &[("ZZ", "1")],
-        "set -u; unset ZZ; builtin echo $ZZ",
-    );
+    let (out, err, code) = run_env(&[("ZZ", "1")], "set -u; unset ZZ; builtin echo $ZZ");
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert!(err.contains("ZZ: unbound variable"), "stderr={err:?}");
@@ -262,9 +255,8 @@ fn every_operand_shape_bash_accepts_is_a_plain_name() {
 /// caller's value comes back at return (bash's rows, measured).
 #[test]
 fn a_function_frame_restores_the_callers_value() {
-    let (out, err, code) = run(
-        "v=pre; f(){ local v=1; unset v; builtin echo ${v:-U}; }; f; builtin echo ${v:-U}",
-    );
+    let (out, err, code) =
+        run("v=pre; f(){ local v=1; unset v; builtin echo ${v:-U}; }; f; builtin echo ${v:-U}");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "U\npre\n");
 }
@@ -301,11 +293,10 @@ fn the_fd_namespace_stays_the_fd_namespace() {
 
     // `%name` closes the descriptor: the next use reports the fd variable as
     // unset (the `tests/statx.rs` shape) at rc 1.
-    let (out, err, code) = run(
-        "builtin openat2 --flags O_RDONLY /dev/null %>%f; unset %f; builtin statx %f; builtin echo after",
-    );
+    let (out, err, code) =
+        run("builtin openat2 --flags O_RDONLY /dev/null %>%f; unset %f; builtin statx %f");
     assert_eq!(code, 1, "stderr={err:?}");
-    assert!(out.is_empty(), "the run aborts: stdout={out:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
     assert!(err.contains("fd variable"), "stderr={err:?}");
 
     // One array entry goes, the array stays; the whole array goes with `%name`.

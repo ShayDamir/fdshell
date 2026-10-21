@@ -1797,19 +1797,25 @@ fn test_assign_fd_non_numeric_index_is_plain_name() {
 
 #[test]
 fn test_unset_array_entry() {
-    let ParsedLine::UnsetArrayEntry { var, source } = parse(b"unset %arr[%conn]").unwrap() else {
-        panic!("expected UnsetArrayEntry")
+    let ParsedLine::Unset(targets) = parse(b"unset %arr[%conn]").unwrap() else {
+        panic!("expected Unset")
     };
-    assert_eq!(var, c"arr".into());
-    assert_eq!(source, c"conn".into());
+    let [UnsetTarget::FdArrayEntry { var, source }] = targets.as_slice() else {
+        panic!("expected one fd-array-entry target")
+    };
+    assert_eq!(*var, c"arr".into());
+    assert_eq!(*source, c"conn".into());
 }
 
 #[test]
 fn test_unset_array_entry_malformed_is_plain_unset() {
-    let ParsedLine::Unset(var) = parse(b"unset %arr[conn]").unwrap() else {
+    let ParsedLine::Unset(targets) = parse(b"unset %arr[conn]").unwrap() else {
         panic!("expected Unset")
     };
-    assert_eq!(var, c"arr[conn]".into());
+    let [UnsetTarget::Fd(var)] = targets.as_slice() else {
+        panic!("expected one fd target")
+    };
+    assert_eq!(*var, c"arr[conn]".into());
 }
 
 #[test]
@@ -1866,20 +1872,51 @@ fn test_assign_str_percent_value_is_literal() {
 
 #[test]
 fn test_unset() {
-    let ParsedLine::Unset(var) = parse(b"unset %client").unwrap() else {
+    let ParsedLine::Unset(targets) = parse(b"unset %client").unwrap() else {
         panic!("expected Unset")
     };
-
-    assert_eq!(var, c"client".into());
+    let [UnsetTarget::Fd(var)] = targets.as_slice() else {
+        panic!("expected one fd target")
+    };
+    assert_eq!(*var, c"client".into());
 }
 
 #[test]
 fn test_unset_missing_is_ok() {
-    let ParsedLine::Unset(var) = parse(b"unset %nonexistent").unwrap() else {
+    // The run layer decides "unbound" (rc 0, silent); the parse layer has no
+    // operand it can reject, so `%nonexistent` parses like any other word.
+    let ParsedLine::Unset(targets) = parse(b"unset %nonexistent").unwrap() else {
         panic!("expected Unset")
     };
+    let [UnsetTarget::Fd(var)] = targets.as_slice() else {
+        panic!("expected one fd target")
+    };
+    assert_eq!(*var, c"nonexistent".into());
+}
 
-    assert_eq!(var, c"nonexistent".into());
+#[test]
+fn test_unset_plain_names() {
+    // `unset name…` is bash's spelling: every word is a target, in order, and a
+    // plain word is a shell variable (task #290).
+    let ParsedLine::Unset(targets) = parse(b"unset v %f w").unwrap() else {
+        panic!("expected Unset")
+    };
+    let [UnsetTarget::Var(v), UnsetTarget::Fd(f), UnsetTarget::Var(w)] = targets.as_slice() else {
+        panic!("expected var, fd, var")
+    };
+    assert_eq!(*v, c"v".into());
+    assert_eq!(*f, c"f".into());
+    assert_eq!(*w, c"w".into());
+}
+
+#[test]
+fn test_unset_no_operand_is_empty_list() {
+    // bash runs a bare `unset` as a no-op at rc 0, so the parse layer must
+    // produce a statement, not an error.
+    let ParsedLine::Unset(targets) = parse(b"unset").unwrap() else {
+        panic!("expected Unset")
+    };
+    assert!(targets.is_empty());
 }
 
 #[test]

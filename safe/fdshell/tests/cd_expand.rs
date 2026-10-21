@@ -182,16 +182,16 @@ fn cd_zero_fields_and_tilde_are_home() {
 /// cd; pwd            (no HOME in env)    bash rc 1, `cd: HOME not set`
 /// HOME=S2 cd; pwd; echo $HOME            bash S2 then S1
 /// f(){ local HOME=S2; cd; pwd; }; f      bash S2        fdshell before S1
+/// unset HOME; cd; pwd  (env HOME=S1)     bash rc 1 `cd: HOME not set`   fdshell rc 1, run aborts (task #290)
+/// HOME=S2; unset HOME; cd; pwd           bash rc 1 `cd: HOME not set`   fdshell rc 1, run aborts
 /// ```
 ///
 /// The inherited-only row (`cd; pwd` → `S1`) is the keep-green
 /// `cd_literal_rows_stay_green` and `cd_zero_fields_and_tilde_are_home` pair,
-/// which run through `run_in`. The plan's `unset HOME` probe of that fallback
-/// is **not expressible** here: fdshell's `unset` is fd-only, so `unset HOME`
-/// is the parse error `variable must start with '%'` (measured, rc 1), and
-/// `HOME` cannot be taken away from a running shell at all — the fallback row
-/// is pinned by an inherited-only `HOME` (and, in the unit file, by clearing
-/// `state.environ`), never by an unassignment.
+/// which run through `run_in`. The `unset HOME` probe of that fallback became
+/// expressible with task #290 (`unset NAME` took over the shell-variable
+/// spelling, including the inherited `environ` row), and it is pinned at the
+/// bottom of this test.
 #[test]
 fn cd_home_is_the_shell_variable() {
     let work = workdir("homevar");
@@ -256,6 +256,34 @@ fn cd_home_is_the_shell_variable() {
     );
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out.trim(), assigned, "the local shadow must drive the cd");
+
+    // The `unset HOME` probe of the **fallback** half, expressible since task
+    // #290 took `unset NAME` over to shell variables: taking the inherited
+    // `HOME` away leaves the bare `cd` with no target, and an assignment made
+    // *before* the unset is gone with it (bash 5.3.9 measured, inherited
+    // `HOME=S1`):
+    //
+    // ```text
+    // unset HOME; cd; pwd            bash rc 1 `cd: HOME not set`, pwd prints the cwd
+    // HOME=S2; unset HOME; cd; pwd   bash rc 1 `cd: HOME not set`, pwd prints the cwd
+    // ```
+    //
+    // fdshell reports the same words at the same rc, and its rc-1 report
+    // **aborts the run** (the accepted family), so the row pins the message and
+    // the rc — the continuation is what bash's `pwd` prints and fdshell never
+    // reaches.
+    for script in [
+        "unset HOME; cd".to_string(),
+        format!("HOME={assigned}; unset HOME; cd"),
+    ] {
+        let (out, err, code) = run_env(&work, &env, &script);
+        assert_eq!(code, 1, "script {script:?}: stderr={err:?}");
+        assert!(out.is_empty(), "script {script:?}: stdout={out:?}");
+        assert!(
+            err.contains("HOME not set"),
+            "script {script:?}: stderr={err:?}"
+        );
+    }
 }
 
 /// The glob rows are the pipeline's own policy: one match cds, many matches are
