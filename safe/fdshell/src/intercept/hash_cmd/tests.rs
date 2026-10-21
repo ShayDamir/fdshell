@@ -141,6 +141,20 @@ fn zero_fields_is_a_bare_listing() {
     }
 }
 
+/// The bare listing with entries present runs to completion and exits 0 (its
+/// `name<TAB>path` bytes land on the test's own stdout, captured by nextest;
+/// the listing format is pinned at integration level by
+/// `tests/hash.rs::hash_pins_and_lists`).
+#[test]
+fn bare_hash_lists_a_non_empty_table() {
+    let cell = ForkCell::new(ShellState::new());
+    run(&["a", "/tmp/a"], &cell).unwrap();
+    run(&["b", "/tmp/b"], &cell).unwrap();
+    run(&[], &cell).unwrap();
+    assert_eq!(status(&cell), 0);
+    assert_eq!(entry(&cell, "a").as_deref(), Some(b"/tmp/a".as_slice()));
+}
+
 /// `hash -r name…` (fdshell's extension) removes the **expanded** name.
 #[test]
 fn dash_r_removes_the_expanded_name() {
