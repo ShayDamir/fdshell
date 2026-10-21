@@ -1940,6 +1940,28 @@ sibling rule above, which is what makes that index trustworthy).
   `bare_dollar_marks_expansion` pins; do not "clean up" the flag here.
   The `%` arm needs no special case: an empty name takes the existing
   literal-`%` fallback and consumes nothing.
+- **Both name-shaped arms of the `$` arm share that one guard** (task #286):
+  `dollar::region_ends_at_dollar(limit, out)` is the whole rule, called as the
+  first statement of the name arm and of the **digit** arm, **before** the digit
+  arm's `peek.next()` — consuming the first digit unconditionally was the
+  asymmetry, and it made `$"1"` expand positional 1 (`[A]`) in a family where
+  the name arm prints the literal (`$v`). Measured on bash 5.3.9, fdshell after
+  the guard: `$"1"` → `$1` (bash `1`), `$"12"` → `$12` (bash `12`), `a$"1"b` →
+  `a$1b` (bash `a1b`), `$"0"` → `$0` (bash `0`, no program name), `"$"1` → `$1`
+  and `"$"12` → `$12` (**parity** — bash prints the same), `"$"v` → `$v`
+  (parity). One consequence is a status change worth knowing: in this family
+  `set -u` stops bailing, because the arm expands nothing and an expansion that
+  expands nothing has no unbound name — `set -u; set --; printf "[%s]" $"1"` is
+  `[$1]` rc 0 in fdshell, and bash prints `[1]` rc 0. Pinned by
+  `substitute/tests.rs::positional_at_region_end_is_literal_and_consumes_nothing`
+  and `tests/quotes.rs::locale_family_digits_obey_the_region_cap`; README's
+  Parameter-expansion section states the family rule.
+  The **cap is a region cap, not an "is the region empty" test**: one byte of
+  region is enough to expand, so `"$1"2` is `[A2]` and `"$1a"` is `[Aa]` — those
+  rows are the discriminants that keep the guard honest (and keep the digit arm
+  alive, see the sibling entry). bash extends the same cap to the
+  **special-parameter** arms (`"$"?` → `$?`, `"$"#` → `$#`, measured, all literal
+  in bash); fdshell expands all of them — **task #384** owns that half.
 - **A region boundary is a bit, not an index (task #285).** `"$v""b"` is the
   text `vb`, and under a `bool` mask every byte of it is `true`: one region, so
   the name collects `vb` and fdshell printed `[VB]` where bash prints `[qb]`
@@ -1997,7 +2019,7 @@ goes from bash-agreeing on 8 of them to bash-agreeing on 2.
 | `printf "[%s]" "$1_2"` | `[A_2]` | `[]` | `[A_2]` |
 | `set -u; printf "[%s]" "$1a"` | `[Aa]`, rc 0 | `1a: unbound variable`, rc 1 | `[Aa]` |
 | `set -- "$1a"; printf "[%s]\n" "$@"` | `[Aa]` | `[]` | `[Aa]` |
-| `printf "[%s]" $"1"` | `[A]` | `[$1]` | `[1]` |
+| `printf "[%s]" $"1"` | `[A]` (pre-#286; `[$1]` now) | `[$1]` | `[1]` |
 
 bash ends a positional reference at the first non-digit, so the digits are the index and the
 name bytes after them are literal text; a scan that reads the whole name looks up the parameter
@@ -2013,10 +2035,17 @@ Two rules. (1) An arm is not redundant just because a catch-all arm accepts its 
 the catch-all does with **more** than the arm's byte class, not with the same bytes. (2) An
 equivalence claim for a mutant is a measurement over shapes, never an argument over the shared
 lookup — record it as accepted-equivalent only after a probe corpus shows no difference (the
-sibling entry below is one that genuinely has none). The `$"1"` row stays unpinned on purpose: it
-is the accepted `$"…"` ANSI-C/locale family (`$"v"` → `$v`, bash `v`), and in that family the digit
-arm ignores the region cap the name arm honours (`[A]` where the name arm's `limit == 0` rule gives
-`[$1]`), so touching the arm needs that family resolved first.
+sibling entry below is one that genuinely has none). The `$"1"` row is now pinned, at `[$1]`
+(task #286 resolved the `$"…"` family it was waiting on): the digit arm obeys the name arm's
+region cap through the shared `dollar::region_ends_at_dollar` guard, so inside that family the arm
+expands nothing and the shape prints `[$1]` **with and without** the arm. It therefore no longer
+discriminates the arm at all. Measured by deleting the arm on this task's branch: exactly two tests
+fail — `tests/positional.rs::positional_digit_run_ends_at_a_name_byte` (the `"$1a"` → `[Aa]` vs
+`[]`, `"$1abc"`, `set -u; "$1a"` rows) and `tests/quotes.rs::locale_family_digits_obey_the_region_cap`
+(its own `"$1a"` → `[Aa]` row; the `limit >= 1` rows `"$1"2` → `[A2]` and `$1"2"` → `[A2]` print the
+same with and without the arm). The rule to keep: **an arm-guard probe must put the name byte
+inside the region** — a literal glued outside it (`"$1"2`) is the reading both arms produce, so it
+measures nothing.
 ## `%name`'s guard is an accepted equivalent mutant: `collect_name` self-guards the name bytes
 `substitute/percent.rs`'s arm guard `Some(c) if c.is_ascii_alphanumeric() || c == b'_'` mutates to
 `true` and survives, because the guard is enforced a second time inside `collect_name`'s own loop:

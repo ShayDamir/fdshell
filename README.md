@@ -540,6 +540,23 @@ literal `bc`, `"$v""b"` is `v` plus `b` (the second `"` opens a new region),
 Inside one region the name stays greedy (`"x$vbc"` is the value of `vbc`), and
 the braced forms are unaffected — `${name}` ends at its `}`.
 
+A digit run obeys the **same** cap, so a region that ends right after the `$`
+leaves no name and no digit: the arm consumes nothing, the `$` is a literal
+byte, and the text after it is literal text. That is the one reading of the
+`$'…'` and `$"…"` spellings, an **accepted divergence** from bash, which treats
+them as an ANSI-C / locale translation and expands inside the span:
+
+```shell
+printf "%s" $'v'     # $v     (bash v)
+printf "%s" $"v"     # $v     (bash v)
+printf "%s" $"1"     # $1     (bash 1, positional 1)
+printf "%s" $"12"    # $12    (bash 12)
+printf "%s" "$"12    # $12    (bash prints $12 too: parity)
+```
+
+Because nothing there is a parameter reference, `set -u` has nothing to report
+and the status stays 0.
+
 ### Command substitution
 
 `$(cmd)` and `` `cmd` `` run `cmd` and substitute its output:
