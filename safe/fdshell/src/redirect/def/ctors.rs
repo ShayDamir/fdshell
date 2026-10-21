@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 
 use super::RedirectDef;
+use crate::mask::MaskBit;
 use crate::redirect::{RedirectDirection, RedirectSource};
 
 impl RedirectDef {
@@ -51,7 +52,7 @@ impl RedirectDef {
     pub fn here_string(
         export_to: i32,
         word: impl Into<ShortCStr>,
-        mask: Vec<bool>,
+        mask: Vec<MaskBit>,
         spans: Vec<usize>,
     ) -> Self {
         RedirectDef {

@@ -1,4 +1,5 @@
 use super::{class_contains, class_end, is_class_start};
+use crate::mask::MaskBit::{Quoted, Unquoted};
 
 #[test]
 fn is_class_start_detects_unquoted_colon() {
@@ -9,7 +10,9 @@ fn is_class_start_detects_unquoted_colon() {
     // A quoted `[` is literal, not a class start.
     assert!(!is_class_start(
         b"[:alpha:]]",
-        &[true, false, false, false, false, false, false],
+        &[
+            Quoted, Unquoted, Unquoted, Unquoted, Unquoted, Unquoted, Unquoted
+        ],
         0
     ));
 }

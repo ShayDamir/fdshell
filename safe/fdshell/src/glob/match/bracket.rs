@@ -10,10 +10,11 @@
 mod class;
 mod span;
 
+use crate::mask::MaskBit;
 pub(in crate::glob) use span::{quoted, span};
 
 /// Whether `b` is a member of the (valid) bracket expression at `at_open`.
-pub(super) fn contains(bytes: &[u8], mask: &[bool], at_open: usize, b: u8) -> bool {
+pub(super) fn contains(bytes: &[u8], mask: &[MaskBit], at_open: usize, b: u8) -> bool {
     let mut i = at_open + 1;
     let mut negated = false;
     if bytes.get(i) == Some(&b'!') && !quoted(mask, i) {
@@ -49,9 +50,8 @@ pub(super) fn contains(bytes: &[u8], mask: &[bool], at_open: usize, b: u8) -> bo
             // A `]` right after the class closes the expression (the class
             // was its last member); without this the scan would leak past
             // the bracket and claim trailing bytes as members.
-            let nxt = match bytes.get(close).copied() {
-                Some(n) => n,
-                None => return negated,
+            let Some(nxt) = bytes.get(close).copied() else {
+                return negated;
             };
             if nxt == b']' && !quoted(mask, close) {
                 return negated;

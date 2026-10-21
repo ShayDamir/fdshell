@@ -8,6 +8,8 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::state::ShellState;
 use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::mask::Counting;
@@ -35,7 +37,7 @@ fn body(input: &[u8]) -> Option<Vec<u8>> {
 /// the expanded text, its mask and the splitting signal (`true` exactly when
 /// the arm produced splittable bytes — the provenance of task #222,
 /// superseding the `expanded` flag of task #133).
-fn expand(word: &ShortCStr, mask: &[bool]) -> (ShortCStr, Vec<bool>, bool) {
+fn expand(word: &ShortCStr, mask: &[MaskBit]) -> (ShortCStr, Vec<MaskBit>, bool) {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (text, out_mask, origin) =
@@ -44,7 +46,7 @@ fn expand(word: &ShortCStr, mask: &[bool]) -> (ShortCStr, Vec<bool>, bool) {
 }
 
 /// The arm's output after the pipeline's `IFS` split (default `IFS`).
-fn fields(word: &ShortCStr, mask: &[bool]) -> Vec<ShortCStr> {
+fn fields(word: &ShortCStr, mask: &[MaskBit]) -> Vec<ShortCStr> {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (text, out_mask, origin) =
@@ -105,21 +107,21 @@ fn scan_body_reports_a_nul_byte() {
 #[test]
 fn whole_word_output_is_the_body_result() {
     let word = ShortCStr::from(c"`echo hi`");
-    let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert_eq!(text.as_bytes().unwrap(), b"hi");
-    assert_eq!(mask, vec![false; 2]);
+    assert_eq!(mask, vec![Unquoted; 2]);
     assert!(expanded);
 }
 
 #[test]
 fn unquoted_output_is_unprotected_and_splits() {
     let word = ShortCStr::from(c"x`echo a b`y");
-    let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert_eq!(text.as_bytes().unwrap(), b"xa by");
     assert!(expanded);
-    assert_eq!(mask, vec![false; 5]);
+    assert_eq!(mask, vec![Unquoted; 5]);
     assert_eq!(
-        fields(&word, &vec![false; word.len()]),
+        fields(&word, &vec![Unquoted; word.len()]),
         [ShortCStr::from(c"xa"), ShortCStr::from(c"by"),]
     );
 }
@@ -127,10 +129,10 @@ fn unquoted_output_is_unprotected_and_splits() {
 #[test]
 fn quoted_output_takes_the_trigger_bit_and_never_splits() {
     let word = ShortCStr::from(c"`echo a b`");
-    let (text, mask, expanded) = expand(&word, &vec![true; word.len()]);
+    let (text, mask, expanded) = expand(&word, &vec![Quoted; word.len()]);
     assert_eq!(text.as_bytes().unwrap(), b"a b");
     assert!(expanded);
-    assert_eq!(mask, vec![true; 3]);
+    assert_eq!(mask, vec![Quoted; 3]);
     // One word whatever `IFS` is: every output byte carries a quoted bit.
     let cell = cell();
     cell.borrow_mut().unwrap().ifs = ShortCStr::from(c",");
@@ -146,7 +148,7 @@ fn quoted_output_takes_the_trigger_bit_and_never_splits() {
 #[test]
 fn trailing_newlines_are_stripped() {
     let word = ShortCStr::from(c"`printf \"x\\n\\n\"`");
-    let (text, _mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, _mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert_eq!(text.as_bytes().unwrap(), b"x");
     assert!(expanded);
 }
@@ -154,7 +156,7 @@ fn trailing_newlines_are_stripped() {
 #[test]
 fn empty_body_records_no_splittable_bytes() {
     let word = ShortCStr::from(c"``");
-    let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert!(text.as_bytes().unwrap().is_empty());
     assert!(mask.is_empty());
     // Task #222: an arm that produced no bytes has nothing to split; the
@@ -171,7 +173,7 @@ fn dollar_paren_inside_a_backtick_is_the_childs_whole_script() {
     // nothing, so the capture is empty and the word ends up empty. bash takes
     // the same path (`a: command not found`, empty stdout).
     let word = ShortCStr::from(c"`$(echo a)`");
-    let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert!(text.as_bytes().unwrap().is_empty());
     assert!(mask.is_empty());
     assert!(!expanded, "no bytes, nothing splittable (task #222)");
@@ -182,7 +184,7 @@ fn nested_backtick_inside_a_dollar_paren_runs() {
     // The `$( … )` body is the child's text; its own backtick arg goes
     // through the child's pipeline, so the value comes back (`a`, as bash).
     let word = ShortCStr::from(c"$(echo `echo a`)");
-    let (text, _mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, _mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert_eq!(text.as_bytes().unwrap(), b"a");
     assert!(expanded);
 }
@@ -211,8 +213,8 @@ fn escaped_backtick_is_data_not_an_arm() {
     // `\<backtick>` is taken by the escape arm before the backtick arm could
     // see it: the byte stays literal and its mask bit is the escape's `true`.
     let word = ShortCStr::from(c"a\\`b");
-    let (text, mask, expanded) = expand(&word, &vec![false; word.len()]);
+    let (text, mask, expanded) = expand(&word, &vec![Unquoted; word.len()]);
     assert_eq!(text.as_bytes().unwrap(), b"a`b");
-    assert_eq!(mask, vec![false, true, false]);
+    assert_eq!(mask, vec![Unquoted, Quoted, Unquoted]);
     assert!(!expanded);
 }

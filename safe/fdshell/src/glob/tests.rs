@@ -12,6 +12,8 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::glob::expand;
 use crate::glob::matches;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::Unquoted;
 use crate::options::{FAILGLOB, NOGLOB, NULLGLOB};
 use crate::state::ShellState;
 
@@ -65,7 +67,7 @@ fn expand_to_bytes(cell: &ForkCell<ShellState>, w: &str) -> Vec<Vec<u8>> {
 fn expand_to_bytes_masked(
     cell: &ForkCell<ShellState>,
     w: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
 ) -> Vec<Vec<u8>> {
     expand(w, mask, cell)
         .unwrap()
@@ -252,8 +254,8 @@ fn escaped_star_word_is_not_a_pattern() {
     // `ax` file.
     let w = word(&format!("{dir}/a*"));
     // Bytes: the dir, then `/`, `a`, `*` — only the `*` is mask-protected.
-    let mut mask = vec![false; dir.len() + 3];
-    *mask.get_mut(dir.len() + 2).unwrap() = true;
+    let mut mask = vec![Unquoted; dir.len() + 3];
+    *mask.get_mut(dir.len() + 2).unwrap() = MaskBit::Quoted;
     assert_eq!(
         expand_to_bytes_masked(&cell, &w, &mask),
         vec![format!("{dir}/a*").into_bytes()]

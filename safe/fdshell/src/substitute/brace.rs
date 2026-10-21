@@ -4,11 +4,12 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 pub(crate) fn handle_brace(
     peek: &mut super::mask::Counting<'_>,
-    mask: &[bool],
+    mask: &[MaskBit],
     start: usize,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,

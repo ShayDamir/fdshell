@@ -1,14 +1,17 @@
 //! Bracket-expression span: where a `[...]` ends, and the per-byte quote test
 //! the span and membership scans share.
 
-/// True when the byte at `i` was consumed inside double quotes.
-pub(in crate::glob) fn quoted(mask: &[bool], i: usize) -> bool {
-    mask.get(i).is_some_and(|&q| q)
+use crate::mask::{MaskBit, quoted_at};
+
+/// True when the byte at `i` was consumed inside quotes. A bit past the mask is
+/// unquoted, so a mask shorter than the pattern leaves the rest unquoted.
+pub(in crate::glob) fn quoted(mask: &[MaskBit], i: usize) -> bool {
+    quoted_at(mask, i)
 }
 
 /// End (one past the closing `]`) of the bracket expression opened by the
 /// unquoted `[` at `at_open`, or `None` when the expression is unclosed.
-pub(in crate::glob) fn span(bytes: &[u8], mask: &[bool], at_open: usize) -> Option<usize> {
+pub(in crate::glob) fn span(bytes: &[u8], mask: &[MaskBit], at_open: usize) -> Option<usize> {
     let mut i = at_open + 1;
     if bytes.get(i) == Some(&b'!') && !quoted(mask, i) {
         i += 1;

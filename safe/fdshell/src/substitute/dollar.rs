@@ -4,6 +4,7 @@ use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -14,7 +15,7 @@ use super::origin::Origin;
 /// byte after `$` (the `${…}` arm reads the mask under its own content
 /// bytes), and the name cap of the trigger byte's quote region.
 pub(crate) struct Region<'a> {
-    pub mask: &'a [bool],
+    pub mask: &'a [MaskBit],
     pub start: usize,
     pub limit: usize,
 }

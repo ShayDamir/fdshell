@@ -10,6 +10,7 @@ use sys::fork_cell::ForkCell;
 use super::mask::push_expanded;
 use crate::cmd_subst::run_and_capture;
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 /// The caller consumed the opening backtick; the body is scanned, run in a
@@ -19,7 +20,7 @@ pub(super) fn handle(
     peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
-    out_mask: &mut Vec<bool>,
+    out_mask: &mut Vec<MaskBit>,
     quoted: bool,
 ) -> Result<(), Report<ResolveError>> {
     let body = scan_body(peek)?;

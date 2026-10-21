@@ -11,6 +11,8 @@ use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
 use crate::glob::match_component;
+use crate::mask::MaskBit;
+use crate::mask::quoted_at;
 use crate::state::ShellState;
 use crate::substitute::borrow_state;
 
@@ -22,7 +24,7 @@ pub(super) fn apply(
     name: &ShortCStr,
     op: ParamOp,
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     content_start: usize,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
@@ -52,10 +54,10 @@ pub(super) fn apply(
 /// word index of the first pattern byte), padded with `false` when the mask is
 /// shorter than the pattern. The tokenizer strips `"` bytes from the word text,
 /// so a quoted pattern byte is a masked byte, never a `"` byte.
-fn pattern_mask(mask: &[bool], start: usize, len: usize) -> Vec<bool> {
+fn pattern_mask(mask: &[MaskBit], start: usize, len: usize) -> Vec<MaskBit> {
     let mut out = Vec::new();
     for i in 0..len {
-        out.push(mask.get(start + i).is_some_and(|&q| q));
+        out.push(MaskBit::from_quoted(quoted_at(mask, start + i)));
     }
     out
 }
@@ -63,7 +65,7 @@ fn pattern_mask(mask: &[bool], start: usize, len: usize) -> Vec<bool> {
 /// Length of the anchored prefix (`prefix`) or suffix of `value` that matches
 /// `pat` in full, `0` when nothing matches (so nothing is stripped). Shortest
 /// scans candidate lengths ascending, longest descending, first hit wins.
-fn strip_len(value: &[u8], pat: &[u8], pat_mask: &[bool], longest: bool, prefix: bool) -> usize {
+fn strip_len(value: &[u8], pat: &[u8], pat_mask: &[MaskBit], longest: bool, prefix: bool) -> usize {
     let n = value.len();
     for cand in 0..=n {
         let k = if longest { n - cand } else { cand };

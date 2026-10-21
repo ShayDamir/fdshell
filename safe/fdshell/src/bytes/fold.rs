@@ -11,6 +11,7 @@
 //! quotes from word text).
 
 use crate::bytes::{QUOTE, SQUOTE};
+use crate::mask::{MaskBit, quoted_at};
 use alloc::vec::Vec;
 use sys::{ShortCStr, ShortCStrError};
 
@@ -85,23 +86,25 @@ fn fold_impl(raw: &[u8], keep_quotes: bool) -> (Vec<u8>, bool) {
 }
 
 /// `bytes` with every unquoted escape pair `\X` folded to `X`, and the quote
-/// `mask` aligned to the folded text. The quote state comes from the mask (a
+/// `mask` aligned to the folded text. The output mask is **derived** from the
+/// quoted-ness of each byte, never from its region: a folded word claims no
+/// quote-region boundary the mask of the input could not see. The quote state comes from the mask (a
 /// word's text has no `"` bytes), so the escaped byte of an unquoted pair
 /// comes out protected (`true` — it never splits on IFS or globs), a quoted
 /// `\$`/`\\` pair drops its backslash exactly like POSIX #4.2 and like the
 /// substitution pass (`substitute/arg.rs`), any other quoted pair keeps it, and
 /// a trailing `\` keeps its backslash with its own mask bit.
-pub(crate) fn fold_mask(bytes: &[u8], mask: &[bool]) -> (Vec<u8>, Vec<bool>) {
+pub(crate) fn fold_mask(bytes: &[u8], mask: &[MaskBit]) -> (Vec<u8>, Vec<MaskBit>) {
     let mut out = Vec::new();
     let mut out_mask = Vec::new();
     let mut i = 0usize;
     while let Some(&b) = bytes.get(i) {
-        let quoted = mask.get(i).copied().unwrap_or(false);
+        let quoted = quoted_at(mask, i);
         match bytes.get(i + 1) {
             // Unquoted pair: drop the backslash, protect the escaped byte.
             Some(&c) if b == b'\\' && !quoted => {
                 out.push(c);
-                out_mask.push(true);
+                out_mask.push(MaskBit::Quoted);
                 i += 2;
             }
             // Quoted `\$`, `\\` and `` \` ``: POSIX #4.2 drops the backslash.
@@ -111,12 +114,12 @@ pub(crate) fn fold_mask(bytes: &[u8], mask: &[bool]) -> (Vec<u8>, Vec<bool>) {
             // single-quote encoding relies on that).
             Some(&c @ (b'$' | b'\\' | b'`')) if b == b'\\' => {
                 out.push(c);
-                out_mask.push(quoted);
+                out_mask.push(MaskBit::from_quoted(quoted));
                 i += 2;
             }
             _ => {
                 out.push(b);
-                out_mask.push(quoted);
+                out_mask.push(MaskBit::from_quoted(quoted));
                 i += 1;
             }
         }
@@ -127,8 +130,8 @@ pub(crate) fn fold_mask(bytes: &[u8], mask: &[bool]) -> (Vec<u8>, Vec<bool>) {
 /// [`fold_mask`] on a word, returning the folded word with its aligned mask.
 pub(crate) fn fold_word(
     word: &ShortCStr,
-    mask: &[bool],
-) -> Result<(ShortCStr, Vec<bool>), ShortCStrError> {
+    mask: &[MaskBit],
+) -> Result<(ShortCStr, Vec<MaskBit>), ShortCStrError> {
     let (bytes, out_mask) = fold_mask(word.as_bytes()?, mask);
     Ok((ShortCStr::from_vec(bytes)?, out_mask))
 }

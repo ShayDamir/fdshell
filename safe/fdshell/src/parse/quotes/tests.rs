@@ -1,5 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, QuotedStart, Unquoted};
+use crate::mask::tests::runs;
 use crate::parse::token;
 use crate::parse::token::State;
 use alloc::vec;
@@ -11,7 +14,7 @@ fn toks(line: &[u8]) -> Vec<crate::parse::Token> {
     token::tokenize(line).unwrap()
 }
 
-fn mask_of(line: &[u8]) -> Vec<bool> {
+fn mask_of(line: &[u8]) -> Vec<MaskBit> {
     toks(line)[0].4.clone()
 }
 
@@ -42,7 +45,10 @@ fn quoted_region_keeps_the_quote_open_and_the_mask_parallel() {
             t.0.as_bytes().unwrap().len(),
             "{line:?}: one mask bit per byte"
         );
-        assert!(t.4.iter().all(|&q| q), "{line:?}: the region is quoted");
+        assert!(
+            t.4.iter().copied().all(MaskBit::quoted),
+            "{line:?}: the region is quoted"
+        );
     }
 }
 
@@ -55,8 +61,8 @@ fn quoted_nested_dollar_paren_is_one_word_with_a_quoted_region() {
     assert_eq!(tokens[0].0.as_bytes().unwrap(), b"a$(echo \"x y\")");
     assert_eq!((tokens[0].1, tokens[0].2), (0, 16));
     assert!(!tokens[0].3, "the word starts unquoted");
-    let mut mask = vec![false];
-    mask.extend(vec![true; 13]);
+    let mut mask = vec![Unquoted, QuotedStart];
+    mask.extend(vec![Quoted; 12]);
     assert_eq!(tokens[0].4, mask);
 }
 
@@ -69,7 +75,7 @@ fn quoted_dollar_paren_with_inner_quotes_is_fully_quoted() {
     assert_eq!(tokens[0].0.as_bytes().unwrap(), b"$(printf \"a b\")");
     assert_eq!((tokens[0].1, tokens[0].2), (0, 17));
     assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, vec![true; 15]);
+    assert_eq!(tokens[0].4, runs(&[(true, 15)]));
 }
 
 // Row 10/11: the `${ … }` body's quotes are markers, so they are dropped from
@@ -82,7 +88,7 @@ fn quoted_brace_region_drops_its_inner_quotes() {
     assert_eq!(tokens[0].0.as_bytes().unwrap(), b"${u:-z w}");
     assert_eq!((tokens[0].1, tokens[0].2), (0, 13));
     assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, vec![true; 9]);
+    assert_eq!(tokens[0].4, runs(&[(true, 9)]));
     assert!(
         crate::parse::word_quoted::word_quoted(&tokens[0].0, tokens[0].1, tokens[0].2),
         "the span holds the 4 dropped quote bytes"
@@ -97,7 +103,7 @@ fn quoted_brace_region_drops_its_inner_quotes() {
 fn quoted_backtick_region_is_one_word() {
     assert_eq!(text_of(b"\"`printf \"q r\"`\""), b"`printf q r`".to_vec());
     assert_eq!(span_of(b"\"`printf \"q r\"`\""), (0, 16));
-    assert_eq!(mask_of(b"\"`printf \"q r\"`\""), vec![true; 12]);
+    assert_eq!(mask_of(b"\"`printf \"q r\"`\""), runs(&[(true, 12)]));
 }
 
 // Rows 4–8: the separators inside a quoted region are word bytes, so the
@@ -128,7 +134,10 @@ fn nested_quoted_regions_are_one_word() {
         "the inner region closes first"
     );
     assert_eq!(span_of(b"\"$(echo \"$(echo deep)\")\""), (0, 24));
-    assert_eq!(mask_of(b"\"$(echo \"$(echo deep)\")\""), vec![true; 22]);
+    assert_eq!(
+        mask_of(b"\"$(echo \"$(echo deep)\")\""),
+        runs(&[(true, 22)])
+    );
     assert_eq!(toks(b"\"a$(printf \" b\")c\"").len(), 1, "row 14");
 }
 
@@ -139,7 +148,7 @@ fn quoted_region_without_inner_quotes_keeps_the_all_true_mask() {
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0.as_bytes().unwrap(), b"$(true)");
     assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, vec![true; 7]);
+    assert_eq!(tokens[0].4, runs(&[(true, 7)]));
 }
 
 // An unterminated `$( … )` keeps the existing `unexpected eof` report, with
@@ -190,7 +199,7 @@ fn unterminated_quoted_region_reports_the_outer_quote() {
 fn unpaired_trailing_quote_closes_the_word_and_keeps_the_region_literal() {
     assert_eq!(text_of(b"\"${v#a\""), b"${v#a".to_vec());
     assert_eq!(span_of(b"\"${v#a\""), (0, 7));
-    assert_eq!(mask_of(b"\"${v#a\""), vec![true; 5]);
+    assert_eq!(mask_of(b"\"${v#a\""), runs(&[(true, 5)]));
     assert_eq!(text_of(b"\"x`y\""), b"x`y".to_vec());
     assert_eq!(text_of(b"\"a${b\""), b"a${b".to_vec());
 }
@@ -209,7 +218,7 @@ fn region_after_a_closed_quote_keeps_the_unquoted_mask() {
     assert_eq!((tokens[0].1, tokens[0].2), (0, 15));
     assert_eq!(
         tokens[0].4,
-        vec![false; 13],
+        runs(&[(false, 13)]),
         "no byte of the region is quoted"
     );
     assert!(!tokens[0].3, "the quote closed before the region");
@@ -279,7 +288,7 @@ fn quoted_char_reports_the_quote_still_open_after_a_region() {
     }
     assert!(closed, "the trailing quote closes the region's word");
     assert_eq!(st.cur.as_bytes().unwrap(), b"$(true)");
-    assert_eq!(st.mask, vec![true; 7]);
+    assert_eq!(st.mask, runs(&[(true, 7)]));
     assert_eq!(st.pos, 9, "pos is the exclusive end of the consumed bytes");
 }
 

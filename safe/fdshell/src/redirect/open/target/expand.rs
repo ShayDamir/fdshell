@@ -10,6 +10,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::redirect::OpenRedirectError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 use super::{ban_absolute, one_name};
@@ -27,7 +28,7 @@ use super::{ban_absolute, one_name};
 /// `ambiguous redirect` as bash reports, while `> zzz*` still creates `zzz*`.
 pub(super) fn target(
     path: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     spans: &[usize],
     quoted: bool,
     base: Option<&LocalFd>,

@@ -40,6 +40,7 @@ mod launch;
 mod loop_;
 mod loop_control;
 pub mod main_cli;
+mod mask;
 mod nest;
 mod options;
 mod paren_scan;

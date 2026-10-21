@@ -1,4 +1,5 @@
 use crate::capture::Capture;
+use crate::mask::MaskBit;
 use crate::parse::Assign;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
@@ -28,7 +29,7 @@ pub struct CommandLine {
     /// Word 0 is expanded by `command_word` with this mask (substitution, IFS
     /// splitting, pathname expansion); after the expansion the child sees a
     /// fully-quoted mask, so its word-0 rules are no-ops on the name.
-    pub command_mask: Vec<bool>,
+    pub command_mask: Vec<MaskBit>,
     /// Zero-byte quote-span indices of the command word, parallel to
     /// `command_mask` (task #321).
     pub command_span: Vec<usize>,
@@ -45,7 +46,7 @@ pub struct CommandLine {
     /// Per-byte quote mask for each arg (parallel to `args`, each mask
     /// parallel to its arg). `true` marks bytes that were inside double
     /// quotes and are protected from IFS word splitting.
-    pub args_mask: Vec<Vec<bool>>,
+    pub args_mask: Vec<Vec<MaskBit>>,
     /// Zero-byte quote-span indices for each arg (task #321), parallel to
     /// `args_mask` and `args`.
     pub args_span: Vec<Vec<usize>>,

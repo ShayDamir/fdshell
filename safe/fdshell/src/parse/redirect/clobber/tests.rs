@@ -4,9 +4,11 @@ use alloc::vec::Vec;
 
 use super::clobber_pipe;
 use super::quote_mask;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 
 /// All-false mask of a byte run, for the "is this byte quoted?" reads.
-fn quoted(line: &[u8]) -> Vec<bool> {
+fn quoted(line: &[u8]) -> Vec<MaskBit> {
     quote_mask(line, line.len())
 }
 
@@ -19,12 +21,15 @@ fn single_quote_span_masks_its_bytes() {
     // closing marker are `true` (the mask is pushed before the toggle).
     assert_eq!(
         quoted(b"a'bcd'e"),
-        vec![false, false, true, true, true, true, false]
+        vec![Unquoted, Unquoted, Quoted, Quoted, Quoted, Quoted, Unquoted]
     );
     // `''` is an empty span: only the marker bytes, the closing one masked.
-    assert_eq!(quoted(b"''"), vec![false, true]);
+    assert_eq!(quoted(b"''"), vec![Unquoted, Quoted]);
     // A `"` written inside a span is data (mask `true`), not a toggle.
-    assert_eq!(quoted(b"'a\"b'"), vec![false, true, true, true, true]);
+    assert_eq!(
+        quoted(b"'a\"b'"),
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted]
+    );
 }
 
 /// The span and the double-quote state mask independently; an unquoted escape
@@ -33,14 +38,20 @@ fn single_quote_span_masks_its_bytes() {
 #[test]
 fn span_masks_the_escape_and_the_quote_bytes() {
     // Unquoted escape pair: `\>` is two unquoted bytes.
-    assert_eq!(quoted(b"a\\>b"), vec![false, false, false, false]);
+    assert_eq!(
+        quoted(b"a\\>b"),
+        vec![Unquoted, Unquoted, Unquoted, Unquoted]
+    );
     // In a span the backslash is one data byte: every span byte is masked.
     assert_eq!(
         quoted(b"'a\\>b'"),
-        vec![false, true, true, true, true, true]
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted, Quoted]
     );
     // A span inside double quotes: the `'` is a data byte of the outer span.
-    assert_eq!(quoted(b"\"a'b\""), vec![false, true, true, true, true]);
+    assert_eq!(
+        quoted(b"\"a'b\""),
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted]
+    );
 }
 
 /// `clobber_pipe`: a `|` right after a `'…'` span ending in `>` is a pipeline
@@ -74,17 +85,20 @@ fn each_quote_arm_is_gated_by_the_other_state() {
     // `'a"b'c`: the `"` is span data, `c` is bare again.
     assert_eq!(
         quoted(b"'a\"b'c"),
-        vec![false, true, true, true, true, false]
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted, Unquoted]
     );
     // `"a'b"c>`: the `'` opens nothing, so `c`/`>` are bare after the `"`.
     assert_eq!(
         quoted(b"\"a'b\"c>"),
-        vec![false, true, true, true, true, false, false]
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted, Unquoted, Unquoted]
     );
     // `'a\>'`: 5 source bytes, 5 mask entries — no pair consumed the `>`.
-    assert_eq!(quoted(b"'a\\>'"), vec![false, true, true, true, true]);
+    assert_eq!(
+        quoted(b"'a\\>'"),
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted]
+    );
     // The unquoted baseline keeps its pair: `\>` is two bare bytes.
-    assert_eq!(quoted(b"a\\>"), vec![false, false, false]);
+    assert_eq!(quoted(b"a\\>"), vec![Unquoted, Unquoted, Unquoted]);
 }
 
 /// The escape arm is the only place that consumes a pair, and its gate is what
@@ -94,14 +108,17 @@ fn each_quote_arm_is_gated_by_the_other_state() {
 #[test]
 fn escape_pair_never_leaves_a_toggle_behind() {
     // `a\"b`: the pair is two bare bytes and the `"` is its tail, not a toggle.
-    assert_eq!(quoted(b"a\\\"b"), vec![false, false, false, false]);
+    assert_eq!(
+        quoted(b"a\\\"b"),
+        vec![Unquoted, Unquoted, Unquoted, Unquoted]
+    );
     // Without the backslash the `"` opens a span: the mask is parallel to the
     // bytes, one entry each.
-    assert_eq!(quoted(b"a\"b"), vec![false, false, true]);
+    assert_eq!(quoted(b"a\"b"), vec![Unquoted, Unquoted, Quoted]);
     // A `\'` written in `"` is span data (`"` gates the pair), so the closing
     // `"` still closes the span and the `b` after it is bare.
     assert_eq!(
         quoted(b"\"a\\'\"b"),
-        vec![false, true, true, true, true, false]
+        vec![Unquoted, Quoted, Quoted, Quoted, Quoted, Unquoted]
     );
 }

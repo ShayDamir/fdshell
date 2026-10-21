@@ -2,6 +2,7 @@ mod words;
 
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{
     List, Term, block_body, find_preceded_by, is_list_terminator, up_to_closing,
@@ -17,7 +18,7 @@ pub struct ForBlock {
     pub var: ShortCStr,
     pub words: Vec<ShortCStr>,
     /// Per-byte quote masks, parallel to `words`.
-    pub words_mask: Vec<Vec<bool>>,
+    pub words_mask: Vec<Vec<MaskBit>>,
     /// Zero-byte quote-span indices per word (task #321), parallel to
     /// `words_mask`.
     pub words_span: Vec<Vec<usize>>,

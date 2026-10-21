@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::{Operator, invalid_delimiter, operator_delim, untab, untab_body};
+use crate::mask::MaskBit;
 use sys::ShortCStr;
 
 #[test]
@@ -194,7 +195,7 @@ fn operator_matches_the_stripped_quoted_delimiter() {
 /// operator byte keeps the four arms killable.
 #[test]
 fn invalid_delimiter_gates_operator_bytes_on_the_quote_mask() {
-    let (t, f) = (true, false);
+    let (t, f) = (MaskBit::Quoted, MaskBit::Unquoted);
     for (word, mask, want) in [
         // Quoted leading byte: an ordinary word in bash (`> "&f"` opens `&f`).
         (b"&f".as_slice(), &[t][..], false),

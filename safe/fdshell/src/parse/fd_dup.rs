@@ -1,4 +1,5 @@
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::redirect::RedirectDef;
 use error_stack::Report;
 use sys::ShortCStr;
@@ -12,7 +13,7 @@ use super::redirect::token_fd;
 pub fn parse_fd_dup_redirect(
     after_op: &ShortCStr,
     prefix: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     dir: u8,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
     let Some(export_to) = token_fd(prefix, mask, dir) else {

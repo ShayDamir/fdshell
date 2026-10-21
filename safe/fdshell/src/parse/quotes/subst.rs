@@ -2,32 +2,14 @@
 //! double-quote scanner (task #130).
 //!
 //! A nested region is scanned as one unit: its bytes go into the word with
-//! mask bit `true` (the region is quoted material), `pos` advances by every raw
+//! quoted mask bits (the region is quoted material), `pos` advances by every raw
 //! byte it consumed, and the enclosing quote stays open across it — an inner
 //! `"` never closes the outer quoted region.
 
 use super::super::token::State;
 use crate::error::parse::ParseError;
 use crate::region_scan::{scan_backtick, scan_brace};
-use error_stack::{Report, ResultExt};
-
-/// Push one quoted word byte (a region delimiter) with its mask bit.
-fn push_byte(st: &mut State, b: u8) -> Result<(), Report<ParseError>> {
-    st.cur
-        .push_byte(b)
-        .change_context(ParseError::InvalidChar { ch: 0 })?;
-    st.mask.push(true);
-    Ok(())
-}
-
-/// Push a region body: one mask bit per byte pushed.
-fn push_body(st: &mut State, body: &[u8]) -> Result<(), Report<ParseError>> {
-    st.cur
-        .push_checked(body)
-        .change_context(ParseError::InvalidChar { ch: 0 })?;
-    st.mask.extend(core::iter::repeat_n(true, body.len()));
-    Ok(())
-}
+use error_stack::Report;
 
 /// Consume the region's raw bytes from the stream: the scanner worked on the
 /// slice, so the stream is advanced by the bytes after the caller's byte
@@ -63,11 +45,11 @@ pub(super) fn brace(
     take(bytes, consumed);
     // `consumed` starts at the `$`, which the token loop already counted.
     st.pos += consumed.saturating_sub(1);
-    push_byte(st, b'$')?;
-    push_byte(st, b'{')?;
-    push_body(st, &body)?;
+    st.push_masked(b'$', true)?;
+    st.push_masked(b'{', true)?;
+    st.push_masked_run(&body, true)?;
     if closed {
-        push_byte(st, b'}')?;
+        st.push_masked(b'}', true)?;
     }
     Ok(())
 }
@@ -85,10 +67,10 @@ pub(super) fn backtick(
     take(bytes, consumed);
     // `consumed` starts at the backtick, which the token loop already counted.
     st.pos += consumed.saturating_sub(1);
-    push_byte(st, b'`')?;
-    push_body(st, &body)?;
+    st.push_masked(b'`', true)?;
+    st.push_masked_run(&body, true)?;
     if closed {
-        push_byte(st, b'`')?;
+        st.push_masked(b'`', true)?;
     }
     Ok(())
 }

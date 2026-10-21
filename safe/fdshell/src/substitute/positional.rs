@@ -6,6 +6,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 use super::borrow_state;
@@ -38,22 +39,22 @@ pub(super) fn expand_positional_word(
     is_star: bool,
     fq: bool,
     cell: &ForkCell<ShellState>,
-) -> Result<Vec<(ShortCStr, Vec<bool>)>, Report<ResolveError>> {
+) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
     let state = borrow_state(cell)?;
     if fq && is_star {
         let sep = first_ifs_byte(&state.ifs)?;
         let word = join(&state.positional, sep)?;
-        let mask = vec![true; word.len()];
+        let mask = vec![MaskBit::Quoted; word.len()];
         return Ok(vec![(word, mask)]);
     }
     let mut out = Vec::new();
     for p in &state.positional {
         if fq {
-            out.push((p.value.clone(), vec![true; p.value.len()]));
+            out.push((p.value.clone(), vec![MaskBit::Quoted; p.value.len()]));
         } else {
             for (field, mask) in split_word(&p.value, &[], &state.ifs, &Origin::all(p.value.len()))?
             {
-                out.push((field, vec![false; mask.len()]));
+                out.push((field, vec![MaskBit::Unquoted; mask.len()]));
             }
         }
     }

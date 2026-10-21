@@ -3,6 +3,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 mod op;
@@ -70,7 +71,7 @@ pub(super) fn apply_param_op(
     name: &ShortCStr,
     op: ParamOp,
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     content_start: usize,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,

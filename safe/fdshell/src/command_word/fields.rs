@@ -8,12 +8,13 @@ use sys::fork_cell::ForkCell;
 
 use crate::bytes::fold::fold_word;
 use crate::error::cmd::CmdError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 /// The word is its own single field: no expansion trigger, no escape pair to
 /// fold, no unquoted pattern byte to glob. The fast path that keeps a plain
 /// command name (`echo`, `ls`, `cd`) borrowed — no allocation at all.
-pub(super) fn passes_through(word: &ShortCStr, mask: &[bool]) -> bool {
+pub(super) fn passes_through(word: &ShortCStr, mask: &[MaskBit]) -> bool {
     word.as_bytes().is_ok_and(|bytes| {
         !crate::substitute::has_trigger(bytes)
             && !bytes.contains(&b'\\')
@@ -33,7 +34,7 @@ pub(super) fn passes_through(word: &ShortCStr, mask: &[bool]) -> bool {
 /// (LESSONS: the escape pair is folded at every word surface).
 pub(crate) fn fields(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     spans: &[usize],
     quoted: bool,
     cell: &ForkCell<ShellState>,

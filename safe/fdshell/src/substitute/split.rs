@@ -4,6 +4,8 @@ use sys::ShortCStr;
 
 use super::origin::Origin;
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
+use crate::mask::quoted_at;
 
 /// Split a word on the shell's `IFS` characters, cutting **only expansion
 /// bytes** (POSIX 2.6.5, task #222): a byte delimits a field only when it is
@@ -31,13 +33,13 @@ use crate::error::resolve::ResolveError;
 /// keeps its (empty) field — an unquoted empty positional vanishes.
 pub(crate) fn split_word(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     ifs: &ShortCStr,
     origin: &Origin,
-) -> Result<Vec<(ShortCStr, Vec<bool>)>, Report<ResolveError>> {
+) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
     let bytes = word.as_bytes().change_context(ResolveError::RefNotFound)?;
     let ifs_bytes = ifs.as_bytes().change_context(ResolveError::RefNotFound)?;
-    let quoted = |i: usize| mask.get(i).copied().unwrap_or(false);
+    let quoted = |i: usize| quoted_at(mask, i);
     let is_ws = |b: u8| (b == b' ' || b == b'\t' || b == b'\n') && ifs_bytes.contains(&b);
     let is_ifs = |b: u8| ifs_bytes.contains(&b);
     let free = |i: usize| origin.splittable(i) && !quoted(i);
@@ -89,7 +91,7 @@ pub(crate) fn split_word(
             trailing = true;
         } else {
             cur.push_byte(b).change_context(ResolveError::NulByte)?;
-            cur_mask.push(quoted(i));
+            cur_mask.push(MaskBit::from_quoted(quoted(i)));
             trailing = false;
         }
         i += 1;

@@ -3,6 +3,7 @@
 
 use super::super::Token;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::parse::semi::trim_semi;
 use crate::parse::word_quoted;
 use alloc::vec::Vec;
@@ -13,7 +14,7 @@ use sys::ShortCStr;
 /// the words) and per-word quoted flags (see `parse::word_quoted`).
 pub(super) struct ForWords {
     pub(super) words: Vec<ShortCStr>,
-    pub(super) words_mask: Vec<Vec<bool>>,
+    pub(super) words_mask: Vec<Vec<MaskBit>>,
     /// Zero-byte quote-span indices per word (task #321), parallel to the
     /// words and their masks.
     pub(super) words_span: Vec<Vec<usize>>,
@@ -35,7 +36,7 @@ pub(super) fn collect_words(
         .iter()
         .map(|(t, _, _, _, _, _)| t.clone())
         .collect();
-    let words_mask: Vec<Vec<bool>> = word_tokens
+    let words_mask: Vec<Vec<MaskBit>> = word_tokens
         .iter()
         .map(|(_, _, _, _, m, _)| m.clone())
         .collect();

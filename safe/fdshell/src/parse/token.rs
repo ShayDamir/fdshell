@@ -1,4 +1,5 @@
 mod escape;
+mod mask;
 mod single;
 mod statement;
 mod step;
@@ -7,6 +8,7 @@ pub(crate) use statement::tokenize_statement;
 
 use super::Token;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
+use crate::mask::MaskBit;
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ShortCStr;
@@ -39,9 +41,10 @@ pub fn tokenize(line: &[u8]) -> Result<Vec<Token>, Report<ParseError>> {
 pub(super) struct State {
     pub(super) tokens: Vec<Token>,
     pub(super) cur: ShortCStr,
-    /// Per-byte quote mask, parallel to `cur`: `true` for bytes consumed
-    /// inside double or single quotes (protected from IFS word splitting).
-    pub(super) mask: Vec<bool>,
+    /// Per-byte quote mask, parallel to `cur`: the quote state of every word
+    /// byte (protected from IFS word splitting), with the byte that **starts**
+    /// a quote region spelled out ([`mask`], task #285).
+    pub(super) mask: Vec<MaskBit>,
     /// Word-text indices at which a quote span closed with **no bytes**
     /// (`""`, `''`): invisible to the mask, recorded for the tilde rule
     /// (task #321, `substitute/tilde.rs`).
@@ -49,6 +52,9 @@ pub(super) struct State {
     /// Word-text length when the current open quote pair started; a close at
     /// this length contributed no byte, so the index is recorded.
     pub(super) span_open: usize,
+    /// A quote region is open: the next quoted byte continues it, so it is not
+    /// a region start ([`mask`], task #285).
+    pub(super) region_open: bool,
     pub(super) in_quotes: bool,
     pub(super) quote_start: Option<usize>,
     /// Inside a `'…'` span: its bytes are literal and masked (see
@@ -73,6 +79,7 @@ impl State {
             mask: Vec::new(),
             spans: Vec::new(),
             span_open: 0,
+            region_open: false,
             in_quotes: false,
             quote_start: None,
             in_single: false,
@@ -82,15 +89,6 @@ impl State {
             word_started: false,
             start: 0,
             pos: 0,
-        }
-    }
-
-    /// A quote pair just closed: if it contributed no byte (`cur` is exactly
-    /// as long as when the pair opened), its opening index goes into `spans`
-    /// — the mask has no bit for a span of zero bytes (task #321).
-    pub(super) fn close_span(&mut self) {
-        if self.cur.len() == self.span_open {
-            self.spans.push(self.span_open);
         }
     }
 

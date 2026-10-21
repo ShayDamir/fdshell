@@ -6,6 +6,7 @@ mod expand;
 
 use crate::bytes::fold::fold_word;
 use crate::error::redirect::OpenRedirectError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt, bail};
 use hashbrown::HashMap;
@@ -57,7 +58,7 @@ pub(super) fn resolve(
 /// name, `failglob` does not apply to a redirect).
 fn literal(
     path: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     base: Option<&LocalFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<ShortCStr, Report<OpenRedirectError>> {

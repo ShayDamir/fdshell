@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use super::token::State;
 use crate::error::parse::ParseError;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 
 impl State {
     /// Handle pipe character `|`. Returns whether a pipe token was emitted.
@@ -19,10 +19,7 @@ impl State {
             .as_bytes()
             .is_ok_and(|bytes| crate::parse::clobber_word(bytes, &self.mask));
         if is_redir {
-            self.cur
-                .push_byte(b'|')
-                .change_context(ParseError::InvalidChar { ch: 0 })?;
-            self.mask.push(false);
+            self.push_masked(b'|', false)?;
             Ok(false)
         } else {
             self.emit(self.pos - 1);

@@ -7,6 +7,7 @@ use super::case_clause;
 use super::semi::{List, list_closing_keyword_index, trim_semi, try_join_masked};
 use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -17,7 +18,7 @@ pub struct CaseBlock {
     /// The per-byte quote mask of `word`, parallel to it: the joined word
     /// tokens' masks with a `false` bit per inserted space (task #269), so the
     /// `case` word is expanded with its own quoting.
-    pub word_mask: Vec<bool>,
+    pub word_mask: Vec<MaskBit>,
     /// Zero-byte quote-span indices of the joined word (task #321), shifted by
     /// the join offsets like the mask.
     pub word_span: Vec<usize>,

@@ -6,6 +6,7 @@ use core::borrow::Borrow;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::parse::{BuiltinPrefix, CommandLine, Pipeline};
 use crate::state::ShellState;
 
@@ -34,12 +35,12 @@ fn cmdline(command: &str, args: &[&str]) -> CommandLine {
     CommandLine {
         prefix: BuiltinPrefix::None,
         command: word(command),
-        command_mask: vec![false; command.len()],
+        command_mask: vec![Unquoted; command.len()],
         command_span: vec![],
         command_quoted: false,
         env_assigns: vec![],
         args: args.iter().map(|a| word(a)).collect(),
-        args_mask: args.iter().map(|a| vec![false; a.len()]).collect(),
+        args_mask: args.iter().map(|a| vec![Unquoted; a.len()]).collect(),
         args_span: args.iter().map(|_| vec![]).collect(),
         args_quoted: vec![false; args.len()],
         captures: vec![],
@@ -53,7 +54,7 @@ fn cmdline(command: &str, args: &[&str]) -> CommandLine {
 /// bit `true`, plus the quoted span (`"$( … )"` shape).
 fn quoted_cmd(command: &str) -> CommandLine {
     let mut cmd = cmdline(command, &[]);
-    cmd.command_mask = vec![true; command.len()];
+    cmd.command_mask = vec![Quoted; command.len()];
     cmd.command_quoted = true;
     cmd
 }
@@ -94,7 +95,7 @@ fn quoted_trigger_bytes_still_expand() {
     let cmd = quoted_cmd("$(echo echo)");
     let out = expand(&cmd, &cell).unwrap().into_owned();
     assert_eq!(bytes(&out.command), b"echo");
-    assert_eq!(out.command_mask, vec![true; 4]);
+    assert_eq!(out.command_mask, vec![Quoted; 4]);
 }
 
 /// The whole-word form names the command; the backtick form inherits the rule.
@@ -142,7 +143,7 @@ fn leading_fields_arrive_quote_encoded() {
         .into_owned();
     assert_eq!(bytes(&out.command), b"echo");
     assert_eq!(bytes(out.args.first().unwrap()), br"\$HOME");
-    assert_eq!(out.args_mask.first().unwrap(), &vec![true; 6]);
+    assert_eq!(out.args_mask.first().unwrap(), &vec![Quoted; 6]);
     assert!(out.args_quoted.first().unwrap());
     let out = expand(&cmdline("$(echo echo '`cmd`')", &[]), &cell)
         .unwrap()
@@ -174,7 +175,7 @@ fn quoted_empty_expansion_is_the_empty_name() {
     let cell = cell();
     let mut cmd = quoted_cmd("$(true)");
     cmd.args = vec![word("echo")];
-    cmd.args_mask = vec![vec![false; 4]];
+    cmd.args_mask = vec![vec![Unquoted; 4]];
     cmd.args_quoted = vec![false];
     let out = expand(&cmd, &cell).unwrap().into_owned();
     assert_eq!(bytes(&out.command), b"");

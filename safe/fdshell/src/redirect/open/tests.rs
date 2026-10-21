@@ -11,6 +11,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::redirect::OpenRedirectError;
+use crate::mask::MaskBit::Unquoted;
 use crate::options::{NOCLOBBER, STRICT};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource, open_redirect_files};
 use crate::state::ShellState;
@@ -314,7 +315,7 @@ fn word_def(word: &str, quoted: bool) -> RedirectDef {
         direction: RedirectDirection::Write,
         source: RedirectSource::path_word(
             ShortCStr::from_vec(word.as_bytes().to_vec()).unwrap(),
-            vec![false; word.len()],
+            vec![Unquoted; word.len()],
             Vec::new(),
             quoted,
         ),

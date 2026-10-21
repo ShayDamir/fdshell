@@ -6,6 +6,7 @@ use sys::ShortCStr;
 
 use super::list::join;
 use super::split::Parts;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 
 fn parts(w: &[u8]) -> Parts {
     super::split::split(w, &[])
@@ -53,7 +54,7 @@ fn double_slash_collapses_empty_component() {
 #[test]
 fn quoted_slash_does_not_split() {
     // `a/"b/c"`: the second slash is inside quotes and stays in the name.
-    let p = super::split::split(b"a/b/c", &[false, false, true, true, true]);
+    let p = super::split::split(b"a/b/c", &[Unquoted, Unquoted, Quoted, Quoted, Quoted]);
     assert_eq!(comp_names(&p), vec![b"a".as_slice(), b"b/c".as_slice()]);
     assert!(!p.dir_only);
 }

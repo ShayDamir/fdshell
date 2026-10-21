@@ -1,9 +1,7 @@
 use super::token::State;
 use crate::error::parse::{ParseError, report_unexpected_eof};
 use crate::paren_scan::scan_dollar_paren_body;
-use core::iter::repeat_n;
-use error_stack::{Report, ResultExt};
-use sys::ShortCStrError;
+use error_stack::Report;
 
 impl State {
     /// Read a `$(…)` command substitution into the current word.
@@ -19,10 +17,8 @@ impl State {
         quoted: bool,
     ) -> Result<(), Report<ParseError>> {
         let start = self.pos - 1;
-        self.push_region_byte(b'$', quoted)
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        self.push_region_byte(b'(', quoted)
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
+        self.push_masked(b'$', quoted)?;
+        self.push_masked(b'(', quoted)?;
         bytes.next(); // consume '('
         self.pos += 1;
         let Some(body) = scan_dollar_paren_body(bytes) else {
@@ -30,19 +26,8 @@ impl State {
         };
         // The stream consumed the body plus the closing `)`.
         self.pos += body.len() + 1;
-        self.cur
-            .push_checked(&body)
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        self.mask.extend(repeat_n(quoted, body.len()));
-        self.push_region_byte(b')', quoted)
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        Ok(())
-    }
-
-    /// One delimiter byte of a `$( … )` region: its text byte and its mask bit.
-    fn push_region_byte(&mut self, b: u8, quoted: bool) -> Result<(), ShortCStrError> {
-        self.cur.push_byte(b)?;
-        self.mask.push(quoted);
+        self.push_masked_run(&body, quoted)?;
+        self.push_masked(b')', quoted)?;
         Ok(())
     }
 }

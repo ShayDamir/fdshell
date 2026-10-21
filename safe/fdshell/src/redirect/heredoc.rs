@@ -9,6 +9,7 @@ use sys::ShortCStr;
 use sys::fcntl::SEEK_SET;
 use sys::fork_cell::ForkCell;
 
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 /// The body's quote mask: an expandable here-doc body **is** a quoted context
@@ -17,8 +18,8 @@ use crate::state::ShellState;
 /// backticks still expand, and a leading `~` stays literal (the mask gate of
 /// `substitute/tilde.rs`, task #269). `\<newline>` is never seen here: the
 /// parse layer removed those continuations (`parse/heredoc/strip.rs`).
-fn quoted_context(len: usize) -> Vec<bool> {
-    vec![true; len]
+fn quoted_context(len: usize) -> Vec<MaskBit> {
+    vec![MaskBit::Quoted; len]
 }
 
 /// Back the here-doc body with a seeked-to-zero memfd as the new stdin.

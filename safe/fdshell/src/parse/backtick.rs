@@ -1,6 +1,6 @@
 use super::token::State;
 use crate::error::parse::{ParseError, report_unexpected_eof};
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 
 impl State {
     /// Read a `` `…` `` backtick substitution into the current word.
@@ -10,18 +10,12 @@ impl State {
         line: &[u8],
     ) -> Result<(), Report<ParseError>> {
         let start = self.pos - 1;
-        self.cur
-            .push_byte(b'`')
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        self.mask.push(false);
+        self.push_masked(b'`', false)?;
         loop {
             match bytes.next() {
                 Some(b'`') => {
                     self.pos += 1;
-                    self.cur
-                        .push_byte(b'`')
-                        .change_context(ParseError::InvalidChar { ch: 0 })?;
-                    self.mask.push(false);
+                    self.push_masked(b'`', false)?;
                     return Ok(());
                 }
                 Some(b'\\') => {
@@ -33,24 +27,15 @@ impl State {
                     match bytes.next() {
                         Some(c) => {
                             self.pos += 1;
-                            self.cur
-                                .push_byte(b'\\')
-                                .change_context(ParseError::InvalidChar { ch: 0 })?;
-                            self.mask.push(false);
-                            self.cur
-                                .push_byte(c)
-                                .change_context(ParseError::InvalidChar { ch: 0 })?;
-                            self.mask.push(false);
+                            self.push_masked(b'\\', false)?;
+                            self.push_masked(c, false)?;
                         }
                         None => return Err(report_unexpected_eof(line, start)),
                     }
                 }
                 Some(c) => {
                     self.pos += 1;
-                    self.cur
-                        .push_byte(c)
-                        .change_context(ParseError::InvalidChar { ch: 0 })?;
-                    self.mask.push(false);
+                    self.push_masked(c, false)?;
                 }
                 None => return Err(report_unexpected_eof(line, start)),
             }

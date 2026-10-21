@@ -7,6 +7,8 @@ use sys::fork_cell::ForkCell;
 
 use super::mask::{push_byte, push_expanded};
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
+use crate::mask::quoted_at;
 use crate::state::ShellState;
 
 /// Whether the word opens a tilde expansion: a leading `~` whose tilde-prefix
@@ -29,7 +31,7 @@ use crate::state::ShellState;
 /// own position — measured `[~/x]`), while `~/""` expands (`$HOME/`, the span
 /// is past the `/`). The rule lives here, not in `arg.rs`, which is at its
 /// line budget (LESSONS #269).
-pub(super) fn leads(bytes: &[u8], mask: &[bool], spans: &[usize]) -> bool {
+pub(super) fn leads(bytes: &[u8], mask: &[MaskBit], spans: &[usize]) -> bool {
     bytes.first() == Some(&b'~') && !prefix_quoted(bytes, mask, spans)
 }
 
@@ -43,9 +45,9 @@ pub(super) fn leads(bytes: &[u8], mask: &[bool], spans: &[usize]) -> bool {
 /// end of the word, so `~\/x` → `~/x` and `~\*` → `~*` agree with bash by
 /// construction (POSIX counts `\X` as a quoted character; unobservable here
 /// because fdshell expands no `~user`).
-fn prefix_quoted(bytes: &[u8], mask: &[bool], spans: &[usize]) -> bool {
+fn prefix_quoted(bytes: &[u8], mask: &[MaskBit], spans: &[usize]) -> bool {
     let end = bytes.iter().position(|&b| b == b'/').unwrap_or(bytes.len());
-    (0..=end).any(|i| mask.get(i).copied().unwrap_or(false)) || spans.iter().any(|&i| i <= end)
+    (0..=end).any(|i| quoted_at(mask, i)) || spans.iter().any(|&i| i <= end)
 }
 
 /// Expand the leading `~` already at the front of `peek`. `~` alone or
@@ -63,14 +65,14 @@ fn prefix_quoted(bytes: &[u8], mask: &[bool], spans: &[usize]) -> bool {
 pub(super) fn expand(
     peek: &mut super::mask::Counting<'_>,
     idx: &mut usize,
-    mask: &[bool],
+    mask: &[MaskBit],
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
-    out_mask: &mut Vec<bool>,
+    out_mask: &mut Vec<MaskBit>,
 ) -> Result<(), Report<ResolveError>> {
     peek.next();
     *idx += 1;
-    let home_q = mask.first().copied().unwrap_or(false);
+    let home_q = quoted_at(mask, 0);
     match peek.peek() {
         None | Some(&b'/') => {
             let state = super::borrow_state(cell)?;

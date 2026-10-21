@@ -1,6 +1,7 @@
 //! Leading `NAME=value` words on a command (POSIX 2.9.1 scoped assignments).
 
 use super::Token;
+use crate::mask::MaskBit;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -14,7 +15,7 @@ use sys::ShortCStr;
 pub struct Assign {
     pub name: ShortCStr,
     pub value: ShortCStr,
-    pub mask: Vec<bool>,
+    pub mask: Vec<MaskBit>,
     pub spans: Vec<usize>,
 }
 
@@ -23,7 +24,7 @@ pub struct Assign {
 /// surfaces cannot drift apart (LESSONS: slice the word, its mask and its
 /// quoted flags with the same offset). A mask shorter than the value degrades
 /// to unquoted, the same padding `substitute/arg.rs` applies.
-pub fn value_mask(word_mask: &[bool], name_len: usize) -> Vec<bool> {
+pub fn value_mask(word_mask: &[MaskBit], name_len: usize) -> Vec<MaskBit> {
     word_mask.get(name_len + 1..).unwrap_or_default().to_vec()
 }
 
@@ -83,7 +84,7 @@ fn assign_at(tokens: &[Token], i: usize) -> Option<Assign> {
 /// The `Assign` for one word plus its word mask and zero-byte span list:
 /// `None` when the word is not an assignment word. The value's mask and spans
 /// are sliced here, once, by `value_mask` and `value_spans`.
-fn assign_of(word: &ShortCStr, word_mask: &[bool], word_spans: &[usize]) -> Option<Assign> {
+fn assign_of(word: &ShortCStr, word_mask: &[MaskBit], word_spans: &[usize]) -> Option<Assign> {
     let (name, value) = word.split_once_byte(b'=')?;
     if name.is_empty() || name.starts_with(b"%") || name.contains(b'\\') {
         return None;

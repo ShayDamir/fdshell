@@ -23,6 +23,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::cmd::CmdError;
+use crate::mask::MaskBit;
 use crate::parse::{CommandLine, Pipeline};
 use crate::state::ShellState;
 
@@ -77,7 +78,7 @@ fn with_fields(
     Ok(CommandLine {
         prefix: cmdline.prefix,
         command: command.clone(),
-        command_mask: vec![true; command.len()],
+        command_mask: vec![MaskBit::Quoted; command.len()],
         command_span: Vec::new(),
         command_quoted: true,
         env_assigns: cmdline.env_assigns.clone(),

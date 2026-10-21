@@ -3,6 +3,7 @@ mod external;
 use crate::bytes::fold::fold_word;
 use crate::child;
 use crate::error::child_process::ChildProcessError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
 use alloc::vec::Vec;
@@ -13,7 +14,7 @@ use sys::fork_cell::ForkCell;
 
 pub fn execute(
     args: &[ShortCStr],
-    args_mask: &[Vec<bool>],
+    args_mask: &[Vec<MaskBit>],
     args_span: &[Vec<usize>],
     args_quoted: &[bool],
     redirects: &[crate::redirect::RedirectDef],

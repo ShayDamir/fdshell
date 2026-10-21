@@ -7,6 +7,9 @@
 //! (LESSONS: the tokenizer's per-byte mask, not a re-derived quote scan).
 
 #![allow(clippy::unwrap_used)]
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::Unquoted;
+use crate::mask::tests::runs;
 use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::redirect::{parse_redirect, quoted_bytes, token_fd};
 use crate::parse::token::tokenize_statement;
@@ -17,7 +20,7 @@ use sys::ShortCStr;
 
 /// The operator token (token 1) of a probe line: its text, mask, and the
 /// `>`/`<` byte position — the prefix and the gate's `from` bound.
-fn op_token(line: &[u8]) -> (ShortCStr, Vec<bool>, usize) {
+fn op_token(line: &[u8]) -> (ShortCStr, Vec<MaskBit>, usize) {
     let tokens = tokenize_statement(line).unwrap();
     let (t, _s, _e, _fq, mask, _spans) = tokens.get(1).unwrap();
     let bytes = t.as_bytes().unwrap();
@@ -243,21 +246,21 @@ fn quoted_dup_ampersand_after_a_multi_digit_io_number_is_a_path() {
 fn bare_target_carries_the_operand_quoting() {
     assert_target(
         b"echo x > \"a b\"",
-        RedirectSource::path_word(c"a b", vec![true; 3], Vec::new(), true),
+        RedirectSource::path_word(c"a b", runs(&[(true, 3)]), Vec::new(), true),
     );
     assert_target(
         b"echo x > f",
-        RedirectSource::path_word(c"f", vec![false], Vec::new(), false),
+        RedirectSource::path_word(c"f", vec![Unquoted], Vec::new(), false),
     );
     // The empty pair closed at the word's index 1, and POSIX counts it inside
     // the tilde-prefix, so `> ~""` is the literal `~` (bash's file `~`).
     assert_target(
         b"echo x > ~\"\"",
-        RedirectSource::path_word(c"~", vec![false], vec![1], true),
+        RedirectSource::path_word(c"~", vec![Unquoted], vec![1], true),
     );
     assert_target(
         b"echo x > ~$n",
-        RedirectSource::path_word(c"~$n", vec![false; 3], Vec::new(), false),
+        RedirectSource::path_word(c"~$n", runs(&[(false, 3)]), Vec::new(), false),
     );
 }
 
@@ -270,30 +273,30 @@ fn bare_target_carries_the_operand_quoting() {
 fn attached_target_slices_and_shifts_at_the_operator_offset() {
     assert_target(
         b"echo x >\"a b\"",
-        RedirectSource::path_word(c"a b", vec![true; 3], Vec::new(), true),
+        RedirectSource::path_word(c"a b", runs(&[(true, 3)]), Vec::new(), true),
     );
     // The token's pair is at index 2 (the `~` is the token's second byte); the
     // suffix word starts one byte in, so it must arrive as index 1.
     assert_target(
         b"echo x >~\"\"",
-        RedirectSource::path_word(c"~", vec![false], vec![1], true),
+        RedirectSource::path_word(c"~", vec![Unquoted], vec![1], true),
     );
     assert_target(
         b"echo x >f$(echo y)",
-        RedirectSource::path_word(c"f$(echo y)", vec![false; 10], Vec::new(), false),
+        RedirectSource::path_word(c"f$(echo y)", runs(&[(false, 10)]), Vec::new(), false),
     );
     assert_target(
         b"echo x >| f",
-        RedirectSource::path_word(c"f", vec![false], Vec::new(), false),
+        RedirectSource::path_word(c"f", vec![Unquoted], Vec::new(), false),
     );
     // The `&>` family's two arms: attached and bare.
     assert_target(
         b"echo x &>~\"\"",
-        RedirectSource::path_word(c"~", vec![false], vec![1], true),
+        RedirectSource::path_word(c"~", vec![Unquoted], vec![1], true),
     );
     assert_target(
         b"echo x &> \"a b\"",
-        RedirectSource::path_word(c"a b", vec![true; 3], Vec::new(), true),
+        RedirectSource::path_word(c"a b", runs(&[(true, 3)]), Vec::new(), true),
     );
 }
 

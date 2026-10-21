@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
 use super::tokens_to_case;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::Unquoted;
+use crate::mask::tests::runs;
 use crate::parse::token::tokenize_statement;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -15,7 +18,7 @@ fn stext(bytes: &[u8]) -> ScriptText {
 }
 
 /// The `case` word and its mask, as the parser hands them to `case_exec`.
-fn word_of(line: &[u8]) -> (ShortCStr, Vec<bool>) {
+fn word_of(line: &[u8]) -> (ShortCStr, Vec<MaskBit>) {
     let text = stext(line);
     let tokens = tokenize_statement(line).unwrap();
     let block = tokens_to_case(&tokens, &text).unwrap();
@@ -32,7 +35,7 @@ fn sc(text: &[u8]) -> ShortCStr {
 fn word_mask_of_a_quoted_word() {
     assert_eq!(
         word_of(b"case \"a\\ b\" in *) echo m;; esac"),
-        (sc(b"a\\ b"), vec![true; 4])
+        (sc(b"a\\ b"), runs(&[(true, 4)]))
     );
 }
 
@@ -42,7 +45,7 @@ fn word_mask_of_a_quoted_word() {
 fn word_mask_of_an_unquoted_word() {
     assert_eq!(
         word_of(b"case a\\ b in *) echo m;; esac"),
-        (sc(b"a\\ b"), vec![false; 4])
+        (sc(b"a\\ b"), vec![Unquoted; 4])
     );
 }
 
@@ -52,7 +55,7 @@ fn word_mask_of_an_unquoted_word() {
 fn word_mask_of_a_joined_word() {
     let (case_word, mask) = word_of(b"case a \"b c\" d in *) echo m;; esac");
     assert_eq!(case_word, sc(b"a b c d"));
-    assert_eq!(mask, vec![false, false, true, true, true, false, false]);
+    assert_eq!(mask, runs(&[(false, 2), (true, 3), (false, 2)]));
 }
 
 /// The word region is `;`-trimmed, and an empty region keeps an empty mask —

@@ -4,12 +4,14 @@
 //! the enclosing `[...]`; an unrecognized `name` (or an unclosed `[:`) is not
 //! a class — its bytes are literal members (bash behavior).
 
+use crate::mask::MaskBit;
+
 const UPPER: core::ops::RangeInclusive<u8> = b'A'..=b'Z';
 const LOWER: core::ops::RangeInclusive<u8> = b'a'..=b'z';
 const DIGIT: core::ops::RangeInclusive<u8> = b'0'..=b'9';
 
 /// True when an unquoted `[:` begins a candidate class at `i` (the `[`).
-pub(in crate::glob) fn is_class_start(bytes: &[u8], mask: &[bool], i: usize) -> bool {
+pub(in crate::glob) fn is_class_start(bytes: &[u8], mask: &[MaskBit], i: usize) -> bool {
     !super::quoted(mask, i) && bytes.get(i) == Some(&b'[') && bytes.get(i + 1) == Some(&b':')
 }
 
@@ -32,7 +34,7 @@ pub(in crate::glob) fn class_end(bytes: &[u8], i: usize) -> Option<usize> {
 /// an unrecognized name) — the caller treats its bytes as literal members.
 pub(in crate::glob) fn class_member(
     bytes: &[u8],
-    mask: &[bool],
+    mask: &[MaskBit],
     i: usize,
     b: u8,
 ) -> Option<(usize, bool)> {

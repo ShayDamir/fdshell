@@ -1,5 +1,6 @@
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ScriptText;
@@ -16,15 +17,16 @@ pub(crate) use trim::{
 };
 
 /// The joined word of `tokens` **with its mask and zero-byte span list**: the
-/// space inserted between two tokens takes a `false` bit and every token byte
-/// keeps its own, so the mask stays parallel to the text (task #269: a joined
+/// space inserted between two tokens takes an unquoted bit and every token byte
+/// keeps its own (so a token that opens a quote region keeps its region start),
+/// so the mask stays parallel to the text (task #269: a joined
 /// word that is substituted later needs the mask of the whole join). Spans
 /// travel with the mask (task #321): each token's span indices shift by the
 /// join offset accumulated before it. Call sites take the join's **text** as
 /// `try_join_masked(tokens).0` (`command_word`, `case_block`), so the
 /// space-insertion rule lives in exactly one place — the word, its mask and
 /// its spans can never drift apart.
-pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<bool>, Vec<usize>) {
+pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<MaskBit>, Vec<usize>) {
     let mut out = ShortCStr::new();
     let mut mask = Vec::new();
     let mut spans = Vec::new();
@@ -32,7 +34,7 @@ pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<bool>, Vec<us
         let offset = out.len();
         if !out.is_empty() {
             out.push(c" ");
-            mask.push(false);
+            mask.push(MaskBit::Unquoted);
         }
         out.push(t);
         mask.extend(t_mask.iter().copied());

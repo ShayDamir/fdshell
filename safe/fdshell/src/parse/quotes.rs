@@ -1,6 +1,6 @@
 use super::token::State;
 use crate::error::parse::{ParseError, report_unexpected_eof};
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 
 mod subst;
 
@@ -46,30 +46,18 @@ impl State {
                 match c {
                     b'\n' => Ok(true),
                     b'"' => {
-                        self.cur
-                            .push_byte(c)
-                            .change_context(ParseError::InvalidChar { ch: 0 })?;
-                        self.mask.push(true);
+                        self.push_masked(c, true)?;
                         Ok(true)
                     }
                     _ => {
-                        self.cur
-                            .push_byte(b'\\')
-                            .change_context(ParseError::InvalidChar { ch: 0 })?;
-                        self.mask.push(true);
-                        self.cur
-                            .push_byte(c)
-                            .change_context(ParseError::InvalidChar { ch: 0 })?;
-                        self.mask.push(true);
+                        self.push_masked(b'\\', true)?;
+                        self.push_masked(c, true)?;
                         Ok(true)
                     }
                 }
             }
             _ => {
-                self.cur
-                    .push_byte(b)
-                    .change_context(ParseError::InvalidChar { ch: 0 })?;
-                self.mask.push(true);
+                self.push_masked(b, true)?;
                 Ok(true)
             }
         }

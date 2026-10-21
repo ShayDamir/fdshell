@@ -1,11 +1,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 use super::tokenize;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::Unquoted;
+use crate::mask::tests::runs;
 use crate::parse::Token;
 use alloc::{vec, vec::Vec};
 use sys::ShortCStr;
 
 /// The word text plus its quote mask of every token of `line`.
-fn words(line: &[u8]) -> Vec<(ShortCStr, Vec<bool>)> {
+fn words(line: &[u8]) -> Vec<(ShortCStr, Vec<MaskBit>)> {
     tokenize(line)
         .unwrap()
         .into_iter()
@@ -26,7 +29,7 @@ fn escape_pair_stays_in_the_word_text() {
     assert_eq!(w[1].0, ShortCStr::from(c"a\\*"));
     assert_eq!(
         w[1].1,
-        vec![false, false, false],
+        vec![Unquoted, Unquoted, Unquoted],
         "the pair bytes are unquoted"
     );
 }
@@ -110,7 +113,7 @@ fn quoted_escape_rules_are_unchanged() {
     assert_eq!(w[3].0, ShortCStr::from(c"a\"b"));
     assert_eq!(w[4].0, ShortCStr::from(c"a\\nc"));
     assert!(
-        w[1].1.iter().all(|q| *q),
+        w[1].1.iter().copied().all(MaskBit::quoted),
         "quoted bytes stay mask-protected"
     );
 }
@@ -233,11 +236,11 @@ fn quoted_word_is_not_terminated_by_the_operator_byte() {
 fn clobber_absorbed_pipe_is_unquoted_in_the_mask() {
     let w = words(b"echo hi >|\"my file\"");
     assert_eq!(w[2].0, ShortCStr::from(c">|my file"));
-    assert!(!w[2].1[0], "the `>` byte is unquoted");
-    assert!(!w[2].1[1], "the absorbed `|` byte is unquoted");
+    assert!(!w[2].1[0].quoted(), "the `>` byte is unquoted");
+    assert!(!w[2].1[1].quoted(), "the absorbed `|` byte is unquoted");
     assert_eq!(
         w[2].1[2..],
-        vec![true; 7],
+        runs(&[(true, 7)]),
         "the quoted path is mask-protected"
     );
 }
@@ -261,7 +264,7 @@ fn single_quoted_span_is_one_masked_word() {
     );
     assert_eq!(w[1].1, 5, "the span is the quoted word");
     assert!(w[1].3, "the word starts quoted (fq)");
-    assert_eq!(w[1].4, vec![true; 3], "every span byte is masked");
+    assert_eq!(w[1].4, runs(&[(true, 3)]), "every span byte is masked");
 }
 
 // `'a'b'c'` is one word (`abc`): adjacent spans concatenate, as bash does.
@@ -307,7 +310,7 @@ fn single_quotes_inside_double_quotes_are_literal() {
 fn single_quoted_backslash_is_encoded_as_an_escape_pair() {
     let w = full(b"echo 'a\\bc'");
     assert_eq!(w[1].0, ShortCStr::from(c"a\\\\bc"));
-    assert_eq!(w[1].4, vec![true; 5], "every encoded byte is masked");
+    assert_eq!(w[1].4, runs(&[(true, 5)]), "every encoded byte is masked");
 }
 
 // The `$` of a single-quoted span goes in as `\$` so the substitution pass
@@ -316,7 +319,7 @@ fn single_quoted_backslash_is_encoded_as_an_escape_pair() {
 fn single_quoted_dollar_is_encoded_as_an_escaped_dollar() {
     let w = full(b"echo 'a$b'");
     assert_eq!(w[1].0, ShortCStr::from(c"a\\$b"));
-    assert_eq!(w[1].4, vec![true; 4]);
+    assert_eq!(w[1].4, runs(&[(true, 4)]));
     assert_eq!(
         super::super::super::bytes::fold::fold_mask(w[1].0.as_bytes().unwrap(), &w[1].4).0,
         b"a$b".to_vec(),
@@ -330,7 +333,7 @@ fn single_quoted_dollar_is_encoded_as_an_escaped_dollar() {
 fn dollar_single_quote_is_the_posix_sh_reading() {
     let w = full(b"echo $'x'");
     assert_eq!(w[1].0, ShortCStr::from(c"\\$x"));
-    assert_eq!(w[1].4, vec![false, false, true]);
+    assert_eq!(w[1].4, runs(&[(false, 2), (true, 1)]));
     assert!(!w[1].3, "the word starts unquoted");
 }
 
@@ -363,7 +366,7 @@ fn double_quote_inside_span_does_not_toggle() {
         ShortCStr::from(c"a\"b"),
         "the span is one literal word: the inner quote is a data byte, not a toggle"
     );
-    assert_eq!(w[1].4, vec![true; 3]);
+    assert_eq!(w[1].4, runs(&[(true, 3)]));
 }
 
 // An unbalanced `'` is an `UnbalancedQuote` reported at the opening byte: the

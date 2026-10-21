@@ -12,6 +12,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 use super::arg::substitute_arg_marked;
@@ -32,12 +33,12 @@ use super::split::split_word;
 /// pattern on no match).
 pub(crate) fn word_fields(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     spans: &[usize],
     quoted: bool,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
-) -> Result<Vec<(ShortCStr, Vec<bool>)>, Report<ResolveError>> {
+) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
     let fq = super::fully_quoted(mask);
     if word.eq_bytes(b"$@") || word.eq_bytes(b"$*") {
         return positional_fields(word.eq_bytes(b"$*"), fq, quoted, cell);
@@ -74,7 +75,7 @@ fn positional_fields(
     fq: bool,
     quoted: bool,
     cell: &ForkCell<ShellState>,
-) -> Result<Vec<(ShortCStr, Vec<bool>)>, Report<ResolveError>> {
+) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
     let mut fields = expand_positional_word(is_star, fq, cell)?;
     if fq && !is_star {
         return Ok(fields);
@@ -87,7 +88,7 @@ fn positional_fields(
 /// word (`""$(true)`, `""$@` with no positionals). The empty field carries the
 /// empty mask, which `fully_quoted` reads as quoted, so the caller's glob
 /// leaves it alone.
-fn push_quoted_empty(fields: &mut Vec<(ShortCStr, Vec<bool>)>, quoted: bool) {
+fn push_quoted_empty(fields: &mut Vec<(ShortCStr, Vec<MaskBit>)>, quoted: bool) {
     if quoted && fields.is_empty() {
         fields.push((ShortCStr::new(), Vec::new()));
     }

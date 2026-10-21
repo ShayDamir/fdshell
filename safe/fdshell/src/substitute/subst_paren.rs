@@ -8,6 +8,7 @@ use sys::fork_cell::ForkCell;
 
 use super::mask::push_expanded;
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::paren_scan::scan_paren_body;
 use crate::state::ShellState;
 
@@ -16,7 +17,7 @@ pub(super) fn handle_dollar_paren(
     peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
-    out_mask: &mut Vec<bool>,
+    out_mask: &mut Vec<MaskBit>,
     quoted: bool,
 ) -> Result<(), Report<ResolveError>> {
     if peek.peek() == Some(&b'(') {
@@ -34,7 +35,7 @@ fn arith_body(
     peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
-    out_mask: &mut Vec<bool>,
+    out_mask: &mut Vec<MaskBit>,
     quoted: bool,
 ) -> Result<(), Report<ResolveError>> {
     let Some(body) = scan_paren_body(peek, 2) else {

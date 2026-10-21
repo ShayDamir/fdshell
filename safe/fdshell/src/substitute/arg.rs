@@ -11,9 +11,12 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use super::dollar::Region;
-use super::mask::{Counting, push_byte, realign, region_len};
+use super::mask::{Counting, push_byte, realign};
 use super::origin::Origin;
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
+use crate::mask::quoted_at;
+use crate::mask::region_len;
 use crate::state::ShellState;
 
 /// Substitute one word, returning the expanded text, a parallel quote mask
@@ -29,11 +32,11 @@ use crate::state::ShellState;
 /// Invariant: at the top of each loop iteration `idx == peek.consumed()`.
 pub(super) fn substitute_arg_marked(
     arg: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     spans: &[usize],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
-) -> Result<(ShortCStr, Vec<bool>, Origin), Report<ResolveError>> {
+) -> Result<(ShortCStr, Vec<MaskBit>, Origin), Report<ResolveError>> {
     let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
     let mut out = ShortCStr::new();
     let mut out_mask = Vec::new();
@@ -44,7 +47,7 @@ pub(super) fn substitute_arg_marked(
         super::tilde::expand(&mut peek, &mut idx, mask, cell, &mut out, &mut out_mask)?;
     }
     while let Some(b) = peek.next() {
-        let quoted = mask.get(idx).copied().unwrap_or(false);
+        let quoted = quoted_at(mask, idx);
         // A name arm (`$name`, `%name`, `$N`) reads at most the quote region of
         // its own trigger byte: `idx` is that byte's word index here, before
         // the arm's peek-ahead moves it.

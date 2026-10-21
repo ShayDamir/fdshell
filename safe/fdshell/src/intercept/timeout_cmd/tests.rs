@@ -5,13 +5,15 @@ use sys::ShortCStr;
 
 use super::parse::parse;
 use crate::error::cmd::CmdError;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 
 fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
     let args: Vec<ShortCStr> = words
         .iter()
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
         .collect();
-    let mask: Vec<Vec<bool>> = args.iter().map(|a| vec![false; a.len()]).collect();
+    let mask: Vec<Vec<MaskBit>> = args.iter().map(|a| vec![Unquoted; a.len()]).collect();
     let quoted: Vec<bool> = vec![false; args.len()];
     parse(&args, &mask, &Vec::new(), &quoted)
 }
@@ -19,7 +21,7 @@ fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<CmdError>> 
 /// `parse` with an explicit quote mask per word.
 fn run_masked(
     words: &[&str],
-    mask: &[Vec<bool>],
+    mask: &[Vec<MaskBit>],
 ) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
     let args: Vec<ShortCStr> = words
         .iter()
@@ -32,7 +34,7 @@ fn run_masked(
 /// `parse` with an explicit quote mask *and* quoted-span flag per word.
 fn run_masked_quoted(
     words: &[&str],
-    mask: &[Vec<bool>],
+    mask: &[Vec<MaskBit>],
     quoted: &[bool],
 ) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
     let args: Vec<ShortCStr> = words
@@ -116,7 +118,7 @@ fn negative_seconds() {
 fn target_word_is_raw_for_the_word_zero_expansion() {
     let p = run(&["1", "e\\cho", "hi"]).unwrap();
     assert_eq!(p.command.as_bytes().unwrap(), b"e\\cho");
-    assert_eq!(p.command_mask, vec![false; 5]);
+    assert_eq!(p.command_mask, vec![Unquoted; 5]);
     assert!(!p.command_quoted);
     assert_eq!(p.args.len(), 1);
     assert_eq!(p.args.first().unwrap().as_bytes().unwrap(), b"hi");
@@ -127,9 +129,9 @@ fn target_word_is_raw_for_the_word_zero_expansion() {
 /// quoted span flag is the quoted-empty rule for word 0.
 #[test]
 fn quoted_target_word_keeps_the_pair() {
-    let p = run_masked(&["1", "e\\cho"], &[vec![false], vec![true; 5]]).unwrap();
+    let p = run_masked(&["1", "e\\cho"], &[vec![Unquoted], vec![Quoted; 5]]).unwrap();
     assert_eq!(p.command.as_bytes().unwrap(), b"e\\cho");
-    assert_eq!(p.command_mask, vec![true; 5]);
+    assert_eq!(p.command_mask, vec![Quoted; 5]);
     assert!(!p.command_quoted);
 }
 
@@ -139,7 +141,7 @@ fn quoted_target_word_keeps_the_pair() {
 fn quoted_span_flag_rides_on_the_target_word() {
     let p = run_masked_quoted(
         &["1", "$(true)", "hi"],
-        &[vec![false], vec![false; 7], vec![false]],
+        &[vec![Unquoted], vec![Unquoted; 7], vec![Unquoted]],
         &[false, true, false],
     )
     .unwrap();

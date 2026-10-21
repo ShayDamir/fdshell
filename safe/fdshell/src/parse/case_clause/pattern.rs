@@ -5,6 +5,7 @@
 //! backslash and the single-quote encoding (`'a$b'` reaches the text as
 //! `a\$b`) folds away.
 
+use crate::mask::MaskBit;
 use crate::parse::Token;
 use crate::parse::semi::try_join_masked;
 use alloc::vec::Vec;
@@ -18,7 +19,7 @@ pub struct Pattern {
     /// Per-byte quote mask, parallel to `text` (`false` for the space
     /// `try_join_masked` inserts between two tokens, so a joined space is
     /// never a pattern byte).
-    pub mask: Vec<bool>,
+    pub mask: Vec<MaskBit>,
     /// Zero-byte quote-span indices, parallel to `mask` (task #321).
     pub spans: Vec<usize>,
 }

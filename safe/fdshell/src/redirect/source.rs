@@ -1,3 +1,4 @@
+use crate::mask::MaskBit;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -13,7 +14,7 @@ pub enum RedirectSource {
     /// `spans`, `quoted` keeps one empty word when the expansion is empty.
     Path {
         path: ShortCStr,
-        mask: Vec<bool>,
+        mask: Vec<MaskBit>,
         spans: Vec<usize>,
         quoted: bool,
     },
@@ -23,7 +24,7 @@ pub enum RedirectSource {
     /// parallel zero-byte quote-span list (task #321).
     HereString {
         word: ShortCStr,
-        mask: Vec<bool>,
+        mask: Vec<MaskBit>,
         spans: Vec<usize>,
     },
     /// Here-doc (`<<EOF`): the body bytes become the stdin of the command.
@@ -42,7 +43,7 @@ impl RedirectSource {
     pub fn var(name: impl Into<ShortCStr>) -> Self {
         Self::Var(name.into())
     }
-    pub fn path(name: impl Into<ShortCStr>, mask: Vec<bool>) -> Self {
+    pub fn path(name: impl Into<ShortCStr>, mask: Vec<MaskBit>) -> Self {
         Self::Path {
             path: name.into(),
             mask,
@@ -56,7 +57,7 @@ impl RedirectSource {
     /// target expands exactly like an argument (task #278).
     pub fn path_word(
         path: impl Into<ShortCStr>,
-        mask: Vec<bool>,
+        mask: Vec<MaskBit>,
         spans: Vec<usize>,
         quoted: bool,
     ) -> Self {
@@ -67,7 +68,7 @@ impl RedirectSource {
             quoted,
         }
     }
-    pub fn here_string(word: impl Into<ShortCStr>, mask: Vec<bool>, spans: Vec<usize>) -> Self {
+    pub fn here_string(word: impl Into<ShortCStr>, mask: Vec<MaskBit>, spans: Vec<usize>) -> Self {
         Self::HereString {
             word: word.into(),
             mask,

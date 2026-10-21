@@ -5,6 +5,8 @@ use alloc::vec::Vec;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr, Trace};
 
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::parse::{Assign, BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 
@@ -129,7 +131,7 @@ fn apply_child_sets_strings_and_exports() {
 
 /// A `CommandLine` carrying exactly one scoped prefix word `name=value` with
 /// the given per-byte value mask; everything else is inert.
-fn cmd_with_assign(name: &str, value: &str, mask: Vec<bool>) -> CommandLine {
+fn cmd_with_assign(name: &str, value: &str, mask: Vec<MaskBit>) -> CommandLine {
     CommandLine {
         prefix: BuiltinPrefix::None,
         command: ShortCStr::from_vec(b"cmd".to_vec()).unwrap(),
@@ -155,7 +157,7 @@ fn cmd_with_assign(name: &str, value: &str, mask: Vec<bool>) -> CommandLine {
 
 /// The value a scoped prefix stores in the shell's environment: expand, apply,
 /// read back.
-fn expanded_value(name: &str, value: &str, mask: Vec<bool>) -> ShortCStr {
+fn expanded_value(name: &str, value: &str, mask: Vec<MaskBit>) -> ShortCStr {
     let cell = cell_with(&[]);
     let cl = cmd_with_assign(name, value, mask);
     let text = ScriptText::new(
@@ -180,7 +182,7 @@ fn expand_expands_value_words_against_state() {
         env_assigns: vec![Assign {
             name: ShortCStr::from_vec(b"FOO".to_vec()).unwrap(),
             value: ShortCStr::from_vec(b"$A".to_vec()).unwrap(),
-            mask: vec![false; 2],
+            mask: vec![Unquoted; 2],
             spans: vec![],
         }],
         args: vec![],
@@ -210,8 +212,14 @@ fn expand_expands_value_words_against_state() {
 /// nothing and fails the second.
 #[test]
 fn expand_uses_the_value_words_own_quote_mask() {
-    assert_eq!(expanded_value("x", "a\\ b", vec![true; 4]), c"a\\ b".into());
-    assert_eq!(expanded_value("x", "a\\ b", vec![false; 4]), c"a b".into());
+    assert_eq!(
+        expanded_value("x", "a\\ b", vec![Quoted; 4]),
+        c"a\\ b".into()
+    );
+    assert_eq!(
+        expanded_value("x", "a\\ b", vec![Unquoted; 4]),
+        c"a b".into()
+    );
 }
 
 /// The mask changes folding only: a quoted value word is stored whole, with no
@@ -219,6 +227,6 @@ fn expand_uses_the_value_words_own_quote_mask() {
 /// `x="*"` stays the literal star).
 #[test]
 fn expand_stores_the_quoted_value_whole() {
-    assert_eq!(expanded_value("x", "a b", vec![true; 3]), c"a b".into());
-    assert_eq!(expanded_value("x", "*", vec![true]), c"*".into());
+    assert_eq!(expanded_value("x", "a b", vec![Quoted; 3]), c"a b".into());
+    assert_eq!(expanded_value("x", "*", vec![Quoted]), c"*".into());
 }

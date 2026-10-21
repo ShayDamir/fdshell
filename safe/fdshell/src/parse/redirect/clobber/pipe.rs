@@ -10,6 +10,7 @@
 //! token-level counts must agree).
 
 use super::{clobber_pipe, quote_mask};
+use crate::mask::quoted_at;
 
 /// The `|` at `k` is the tokenizer's pipe-token byte: it sits outside every
 /// quote span, it is not the tail of an unquoted `\X` escape pair, and it is
@@ -18,14 +19,14 @@ use super::{clobber_pipe, quote_mask};
 /// before the `clobber_pipe` word walk is ever needed.
 pub(crate) fn pipeline_pipe(line: &[u8], k: usize) -> bool {
     let mask = quote_mask(line, k + 1);
-    if mask.get(k) == Some(&true) {
+    if quoted_at(&mask, k) {
         return false;
     }
     // `clobber_word`'s escape-pair walk over the same word: a walk that jumps
     // past `k` read `k` as a pair's tail (`x\|` is one word, no pipe in it).
     let mut i = word_start(line, k);
     while i < k {
-        let escapes = mask.get(i) != Some(&true) && line.get(i) == Some(&b'\\');
+        let escapes = !quoted_at(&mask, i) && line.get(i) == Some(&b'\\');
         i += 1 + usize::from(escapes);
     }
     i == k && !clobber_pipe(line, k)

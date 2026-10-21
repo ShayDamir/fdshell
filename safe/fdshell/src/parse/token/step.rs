@@ -4,7 +4,7 @@ use super::super::comment::skip_comment;
 use super::State;
 use crate::bytes::{QUOTE, SQUOTE};
 use crate::error::parse::ParseError;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 
 impl State {
     /// Handle one unquoted byte of the line, updating the token state.
@@ -81,17 +81,16 @@ impl State {
             }
             _ => {
                 self.word_start();
-                self.cur
-                    .push_byte(b)
-                    .change_context(ParseError::InvalidChar { ch: 0 })?;
-                self.mask.push(false);
+                self.push_masked(b, false)?;
             }
         }
         Ok(())
     }
 
-    /// Word state after a separator: the next byte starts a fresh word.
+    /// Word state after a separator: the next byte starts a fresh word, and the
+    /// first quoted byte of the new word opens a quote region.
     fn word_reset(&mut self) {
+        self.region_open = false;
         self.fq = false;
         self.word_quoted = false;
         self.word_started = false;

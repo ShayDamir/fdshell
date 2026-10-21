@@ -3,6 +3,8 @@
 //! its body goes to (`N<<word`).
 
 use crate::bytes::fold::fold_quotes;
+use crate::mask::MaskBit;
+use crate::mask::quoted_at;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -96,7 +98,7 @@ pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
 /// reads the operand's **quote mask**, never its text alone. Every
 /// bare-operand site calls this one function, so the families cannot drift
 /// apart.
-pub(crate) fn invalid_delimiter(word: &ShortCStr, mask: &[bool]) -> bool {
+pub(crate) fn invalid_delimiter(word: &ShortCStr, mask: &[MaskBit]) -> bool {
     word.is_empty() || operator_word(word, mask) || word.eq_bytes(b";") || word.eq_bytes(b"|")
 }
 
@@ -110,8 +112,8 @@ pub(crate) fn invalid_delimiter(word: &ShortCStr, mask: &[bool]) -> bool {
 /// house idiom (`substitute/tilde.rs::prefix_quoted`), so a short/empty mask
 /// degrades to the text-only rule. `\X`-escaped operands need no arm: the
 /// text starts with `\`, so no arm fires.
-pub(crate) fn operator_word(word: &ShortCStr, mask: &[bool]) -> bool {
-    !mask.first().copied().unwrap_or(false)
+pub(crate) fn operator_word(word: &ShortCStr, mask: &[MaskBit]) -> bool {
+    !quoted_at(mask, 0)
         && (word.starts_with(b"<")
             || word.starts_with(b">")
             || word.starts_with(b"&")

@@ -8,6 +8,7 @@ use sys::ShortCStr;
 use sys::fcntl::SEEK_SET;
 use sys::fork_cell::ForkCell;
 
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 /// Expand the word **with its own quote mask** and back it with a
@@ -15,7 +16,7 @@ use crate::state::ShellState;
 /// not a word byte, so it takes no mask bit.
 pub fn here_string(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     spans: &[usize],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,

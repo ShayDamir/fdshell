@@ -5,6 +5,7 @@ pub(crate) mod path_word;
 pub(crate) use clobber::{clobber_word, pipe_token_span, pipeline_pipe};
 
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::parse::Token;
 use crate::redirect::RedirectDef;
 use error_stack::Report;
@@ -32,8 +33,12 @@ pub(crate) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
 /// pads to *unquoted*, the house idiom (`scan::heredoc::op::operator_word`,
 /// `substitute/tilde.rs::prefix_quoted`). The operand-side twin of this rule
 /// is `operator_word`; no site re-derives either.
-pub(crate) fn quoted_bytes(mask: &[bool], from: usize, to: usize) -> bool {
-    mask.get(from..to).unwrap_or(&[]).iter().any(|&bit| bit)
+pub(crate) fn quoted_bytes(mask: &[MaskBit], from: usize, to: usize) -> bool {
+    mask.get(from..to)
+        .unwrap_or(&[])
+        .iter()
+        .copied()
+        .any(MaskBit::quoted)
 }
 
 /// The descriptor a redirect *token* selects: `parse_fd`'s digit rule plus
@@ -42,7 +47,7 @@ pub(crate) fn quoted_bytes(mask: &[bool], from: usize, to: usize) -> bool {
 /// prefix (letters, `%`, an escaped `\2`) stays "no redirect": fdshell never
 /// splits a word at an operator byte (POSIX_COMPATIBILITY "Operators are
 /// recognized at word starts").
-pub(crate) fn token_fd(prefix: &ShortCStr, mask: &[bool], dir: u8) -> Option<i32> {
+pub(crate) fn token_fd(prefix: &ShortCStr, mask: &[MaskBit], dir: u8) -> Option<i32> {
     let digits = match prefix.as_bytes() {
         Ok(d) => !d.is_empty() && d.iter().all(u8::is_ascii_digit),
         Err(_) => false,

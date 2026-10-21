@@ -4,6 +4,7 @@
 use crate::child;
 use crate::error::child_process::ChildProcessError;
 use crate::exec;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
 use alloc::vec::Vec;
@@ -15,7 +16,7 @@ use sys::signal;
 
 pub(super) fn run(
     args: &[ShortCStr],
-    args_mask: &[Vec<bool>],
+    args_mask: &[Vec<MaskBit>],
     args_span: &[Vec<usize>],
     args_quoted: &[bool],
     cell: &ForkCell<ShellState>,

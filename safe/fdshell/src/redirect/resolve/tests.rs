@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::redirect::{RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -145,7 +146,7 @@ fn here_string_expands_word_and_appends_newline() {
     let redirects = vec![RedirectDef::here_string(
         0,
         c"$x",
-        vec![false; 2],
+        vec![Unquoted; 2],
         Vec::new(),
     )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
@@ -173,7 +174,7 @@ fn here_string_reads_back_to_eof() {
     let redirects = vec![RedirectDef::here_string(
         0,
         c"abc",
-        vec![false; 3],
+        vec![Unquoted; 3],
         Vec::new(),
     )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
@@ -194,7 +195,7 @@ fn here_string_quoted_escape_pair_keeps_the_backslash() {
     let redirects = vec![RedirectDef::here_string(
         0,
         c"a\\ b",
-        vec![true; 4],
+        vec![Quoted; 4],
         Vec::new(),
     )];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
@@ -231,7 +232,7 @@ fn numbered_here_string_source_sits_above_the_export_targets() {
     let c = cell();
     let redirects = vec![
         RedirectDef::dup(5, 1),
-        RedirectDef::here_string(3, c"body", vec![false; 4], Vec::new()),
+        RedirectDef::here_string(3, c"body", vec![Unquoted; 4], Vec::new()),
     ];
     let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
     let src = resolved

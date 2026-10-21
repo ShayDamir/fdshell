@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -7,7 +9,7 @@ fn m(pat: &[u8], name: &[u8]) -> bool {
     super::match_component(pat, &[], name, false)
 }
 
-fn m_masked(pat: &[u8], mask: &[bool], name: &[u8]) -> bool {
+fn m_masked(pat: &[u8], mask: &[MaskBit], name: &[u8]) -> bool {
     super::match_component(pat, mask, name, false)
 }
 
@@ -62,12 +64,12 @@ fn unquoted_backslash_escapes_the_next_byte() {
 #[test]
 fn quoted_bytes_are_always_literal() {
     // `a"*"` (mask bit 1 set) matches only the literal name `a*`.
-    assert!(m_masked(b"a*", &[false, true], b"a*"));
-    assert!(!m_masked(b"a*", &[false, true], b"ax"));
+    assert!(m_masked(b"a*", &[Unquoted, Quoted], b"a*"));
+    assert!(!m_masked(b"a*", &[Unquoted, Quoted], b"ax"));
     // Quoted `?` and `[` are literal too.
-    assert!(m_masked(b"?", &[true], b"?"));
-    assert!(!m_masked(b"?", &[true], b"z"));
-    assert!(m_masked(b"[a", &[false, true], b"[a"));
+    assert!(m_masked(b"?", &[Quoted], b"?"));
+    assert!(!m_masked(b"?", &[Quoted], b"z"));
+    assert!(m_masked(b"[a", &[Unquoted, Quoted], b"[a"));
 }
 
 #[test]
@@ -124,13 +126,37 @@ fn bracket_invalid_range_matches_nothing_in_its_span() {
 #[test]
 fn bracket_quoted_bytes_are_literal_members() {
     // A quoted `]` is a class member; the next unquoted `]` closes.
-    assert!(m_masked(b"[]]]", &[false, true, false, false], b"]]"));
-    assert!(!m_masked(b"[]]]", &[false, true, false, false], b"]"));
-    assert!(!m_masked(b"[]]]", &[false, true, false, false], b"a]"));
+    assert!(m_masked(
+        b"[]]]",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"]]"
+    ));
+    assert!(!m_masked(
+        b"[]]]",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"]"
+    ));
+    assert!(!m_masked(
+        b"[]]]",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"a]"
+    ));
     // The first `]` after `[` is a member even when quoted.
-    assert!(m_masked(b"[]a]", &[false, true, false, false], b"]"));
-    assert!(m_masked(b"[]a]", &[false, true, false, false], b"a"));
-    assert!(!m_masked(b"[]a]", &[false, true, false, false], b"b"));
+    assert!(m_masked(
+        b"[]a]",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"]"
+    ));
+    assert!(m_masked(
+        b"[]a]",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"a"
+    ));
+    assert!(!m_masked(
+        b"[]a]",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"b"
+    ));
 }
 
 #[test]
@@ -148,16 +174,24 @@ fn bracket_backslash_escapes_are_literal_members() {
     // unquoted `]` closes.
     assert!(m_masked(
         b"[\\]]x",
-        &[false, true, false, false, false],
+        &[Unquoted, Quoted, Unquoted, Unquoted, Unquoted],
         b"\\]x"
     ));
     assert!(!m_masked(
         b"[\\]]x",
-        &[false, true, false, false, false],
+        &[Unquoted, Quoted, Unquoted, Unquoted, Unquoted],
         b"]x"
     ));
-    assert!(m_masked(b"[\\]x", &[false, true, false, false], b"\\x"));
-    assert!(!m_masked(b"[\\]x", &[false, true, false, false], b"]x"));
+    assert!(m_masked(
+        b"[\\]x",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"\\x"
+    ));
+    assert!(!m_masked(
+        b"[\\]x",
+        &[Unquoted, Quoted, Unquoted, Unquoted],
+        b"]x"
+    ));
 }
 
 #[test]
@@ -166,17 +200,17 @@ fn bracket_quoted_close_continues_the_class() {
     // the unquoted `]` closes.
     assert!(m_masked(
         b"[ab]c]",
-        &[false, false, false, true, false, false],
+        &[Unquoted, Unquoted, Unquoted, Quoted, Unquoted, Unquoted],
         b"c"
     ));
     assert!(m_masked(
         b"[ab]c]",
-        &[false, false, false, true, false, false],
+        &[Unquoted, Unquoted, Unquoted, Quoted, Unquoted, Unquoted],
         b"]"
     ));
     assert!(!m_masked(
         b"[ab]c]",
-        &[false, false, false, true, false, false],
+        &[Unquoted, Unquoted, Unquoted, Quoted, Unquoted, Unquoted],
         b"d"
     ));
     // The class ends at the unquoted `]`: later pattern bytes are literals,
@@ -254,8 +288,8 @@ fn dotglob_does_not_match_dot_or_dotdot_via_bare_star() {
 #[test]
 fn dotglob_quoted_leading_byte_still_literal() {
     // A quoted leading `*` is literal regardless of dotglob.
-    assert!(!m_masked(b"*", &[true], b".x"));
-    assert!(m_masked(b"*", &[true], b"*"));
+    assert!(!m_masked(b"*", &[Quoted], b".x"));
+    assert!(m_masked(b"*", &[Quoted], b"*"));
 }
 
 #[test]
@@ -321,7 +355,9 @@ fn an_empty_name_class_is_literal_members() {
 #[test]
 fn posix_class_quoted_bracket_is_literal() {
     // A quoted `[` does not open a class: the whole word is one literal.
-    let mask = [true, false, false, false, false, false, false, false, false];
+    let mask = [
+        Quoted, Unquoted, Unquoted, Unquoted, Unquoted, Unquoted, Unquoted, Unquoted, Unquoted,
+    ];
     assert!(m_masked(b"[:alpha:]]", &mask, b"[:alpha:]]"));
     assert!(!m_masked(b"[:alpha:]]", &mask, b"a"));
 }
@@ -339,9 +375,15 @@ fn has_unquoted_pattern_table() {
     assert!(!super::has_unquoted_pattern(b"x[:b", &[]));
     assert!(!super::has_unquoted_pattern(b"a\\*", &[]));
     assert!(!super::has_unquoted_pattern(b"\\[", &[]));
-    assert!(!super::has_unquoted_pattern(b"a*", &[false, true]));
-    assert!(super::has_unquoted_pattern(b"a*b", &[false, false, false]));
-    assert!(!super::has_unquoted_pattern(b"a*b", &[false, true, false]));
+    assert!(!super::has_unquoted_pattern(b"a*", &[Unquoted, Quoted]));
+    assert!(super::has_unquoted_pattern(
+        b"a*b",
+        &[Unquoted, Unquoted, Unquoted]
+    ));
+    assert!(!super::has_unquoted_pattern(
+        b"a*b",
+        &[Unquoted, Quoted, Unquoted]
+    ));
 }
 
 #[test]
@@ -384,7 +426,7 @@ fn heavy_star_backtracking_stays_finite() {
 fn escaped_pairs_are_literal_and_the_rest_globs() {
     // The substituted word: the `.` pair is folded to `.` and mask-protected,
     // so the star globs the tail only after a literal `.`.
-    let mask = [false, true, false, true, false];
+    let mask = [Unquoted, Quoted, Unquoted, Quoted, Unquoted];
     assert!(m_masked(b"foo.*", &mask, b"foo.bar"));
     assert!(!m_masked(b"foo.*", &mask, b"foo2"));
     // The token text keeps the pairs: the escaped `.` is literal, the star
@@ -395,8 +437,8 @@ fn escaped_pairs_are_literal_and_the_rest_globs() {
 
 #[test]
 fn masked_star_is_not_a_pattern_byte() {
-    assert!(!super::has_unquoted_pattern(b"a*", &[false, true]));
-    assert!(super::has_unquoted_pattern(b"a*", &[false, false]));
+    assert!(!super::has_unquoted_pattern(b"a*", &[Unquoted, Quoted]));
+    assert!(super::has_unquoted_pattern(b"a*", &[Unquoted, Unquoted]));
     // The token text keeps the pair, and the `\` skip makes the escaped byte
     // literal: `a\*` has no pattern byte, `a\\*` has a literal `\` pair
     // followed by a pattern `*`.

@@ -9,6 +9,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::cmd::CmdError;
+use crate::mask::MaskBit;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
 
@@ -16,7 +17,12 @@ use super::fields::fields;
 
 /// The `CommandLine` argument quartet (`args`, `args_mask`, `args_span`,
 /// `args_quoted`) an expanded word 0 produces.
-pub(super) type LeadingArgs = (Vec<ShortCStr>, Vec<Vec<bool>>, Vec<Vec<usize>>, Vec<bool>);
+pub(super) type LeadingArgs = (
+    Vec<ShortCStr>,
+    Vec<Vec<MaskBit>>,
+    Vec<Vec<usize>>,
+    Vec<bool>,
+);
 
 /// bash: a word 0 whose expansion is empty is not a word, so the next field
 /// becomes the command — consume leading words (each expanded the same way)
@@ -62,7 +68,7 @@ pub(super) fn leading_args(
     let mut args_quoted = Vec::new();
     for field in fields {
         let arg = quote_encode(&field)?;
-        args_mask.push(vec![true; arg.len()]);
+        args_mask.push(vec![MaskBit::Quoted; arg.len()]);
         // A quote-encoded field is fully quoted literal text: it has no
         // zero-byte quote span (task #321, spans are input-side only).
         args_span.push(Vec::new());

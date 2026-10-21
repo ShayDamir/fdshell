@@ -1,4 +1,5 @@
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::parse::Token;
 use crate::redirect::RedirectDef;
 use crate::scan::heredoc::{io_fd, operator_word, string_span};
@@ -75,7 +76,7 @@ pub fn parse_here_string(
 /// mask. A mask shorter than the word degrades to unquoted, the same padding
 /// `substitute/arg.rs` applies; the empty word of `<<<""` keeps the empty mask,
 /// which `substitute::fully_quoted` reads as quoted.
-pub(crate) fn word_mask(op_mask: &[bool], offset: usize) -> Vec<bool> {
+pub(crate) fn word_mask(op_mask: &[MaskBit], offset: usize) -> Vec<MaskBit> {
     op_mask.get(offset..).unwrap_or_default().to_vec()
 }
 

@@ -5,6 +5,8 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 
 use super::split_word;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::substitute::origin::Origin;
 
 fn scs(text: &str) -> ShortCStr {
@@ -22,7 +24,7 @@ fn split(word: &str, ifs: &str) -> Vec<Vec<u8>> {
 }
 
 /// Split with a per-byte quote mask: `true` marks IFS-protected bytes.
-fn split_masked(word: &str, mask: &[bool], ifs: &str) -> Vec<Vec<u8>> {
+fn split_masked(word: &str, mask: &[MaskBit], ifs: &str) -> Vec<Vec<u8>> {
     split_word(&scs(word), mask, &scs(ifs), &Origin::all(word.len()))
         .unwrap()
         .iter()
@@ -63,7 +65,7 @@ fn split_origin_quoted(word: &str, boundaries: &[usize], ifs: &str) -> Vec<Vec<u
     for &i in boundaries {
         origin.boundary(i, true);
     }
-    let mask = vec![true; word.len()];
+    let mask = vec![Quoted; word.len()];
     split_word(&scs(word), &mask, &scs(ifs), &origin)
         .unwrap()
         .iter()
@@ -168,7 +170,11 @@ fn mixed_ifs_whitespace_after_non_ws_keeps_empty() {
 fn masked_ifs_whitespace_never_splits() {
     // `x"a b"c`: the quoted space is data, the word stays whole.
     assert_eq!(
-        split_masked("xa bc", &[false, true, true, true, false], " \t\n"),
+        split_masked(
+            "xa bc",
+            &[Unquoted, Quoted, Quoted, Quoted, Unquoted],
+            " \t\n"
+        ),
         vec![b"xa bc".to_vec()]
     );
 }
@@ -176,7 +182,7 @@ fn masked_ifs_whitespace_never_splits() {
 #[test]
 fn masked_non_whitespace_ifs_never_delimits() {
     assert_eq!(
-        split_masked("a:b", &[false, true, false], ":"),
+        split_masked("a:b", &[Unquoted, Quoted, Unquoted], ":"),
         vec![b"a:b".to_vec()]
     );
 }
@@ -186,7 +192,7 @@ fn split_fields_carry_their_mask() {
     // `a"*"b c` (the quoted `*` is masked): each field keeps its span's bits.
     let pairs = split_word(
         &ShortCStr::from_vec(b"a*b c".to_vec()).unwrap(),
-        &[false, true, false, false, false],
+        &[Unquoted, Quoted, Unquoted, Unquoted, Unquoted],
         &ShortCStr::from_vec(" \t\n".as_bytes().to_vec()).unwrap(),
         &Origin::all(5),
     )
@@ -197,8 +203,8 @@ fn split_fields_carry_their_mask() {
             .map(|(s, m)| (s.as_bytes().unwrap().to_vec(), m.clone()))
             .collect::<Vec<_>>(),
         vec![
-            (b"a*b".to_vec(), vec![false, true, false]),
-            (b"c".to_vec(), vec![false]),
+            (b"a*b".to_vec(), vec![Unquoted, Quoted, Unquoted]),
+            (b"c".to_vec(), vec![Unquoted]),
         ]
     );
 }
@@ -207,7 +213,7 @@ fn split_fields_carry_their_mask() {
 fn masked_leading_trailing_whitespace_is_kept() {
     // Quoted spaces at the word edges are not trimmed.
     assert_eq!(
-        split_masked(" a ", &[true, false, true], " \t\n"),
+        split_masked(" a ", &[Quoted, Unquoted, Quoted], " \t\n"),
         vec![b" a ".to_vec()]
     );
 }
@@ -216,7 +222,11 @@ fn masked_leading_trailing_whitespace_is_kept() {
 fn whitespace_run_stops_at_protected_byte() {
     // `a" "  b`: quoted space kept, the unquoted run after it still splits.
     assert_eq!(
-        split_masked("a   b", &[false, true, false, false, false], " \t\n"),
+        split_masked(
+            "a   b",
+            &[Unquoted, Quoted, Unquoted, Unquoted, Unquoted],
+            " \t\n"
+        ),
         vec![b"a ".to_vec(), b"b".to_vec()]
     );
 }
@@ -225,7 +235,11 @@ fn whitespace_run_stops_at_protected_byte() {
 fn protected_byte_inside_run_is_data() {
     // `a "  b"`: unquoted space delimits, the quoted run is one field.
     assert_eq!(
-        split_masked("a   b", &[false, false, true, true, false], " \t\n"),
+        split_masked(
+            "a   b",
+            &[Unquoted, Unquoted, Quoted, Quoted, Unquoted],
+            " \t\n"
+        ),
         vec![b"a".to_vec(), b"  b".to_vec()]
     );
 }

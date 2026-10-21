@@ -1,5 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::Quoted;
+use crate::mask::MaskBit::{QuotedStart, Unquoted};
 use crate::parse::token::State;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -80,12 +83,12 @@ fn a_region_after_word_bytes_keeps_the_mask_parallel() {
     let line = b"x\"$(echo \"a b\")\"";
     let (mut st, mut bytes) = at(line, 2);
     st.cur.push(c"x");
-    st.mask.push(false);
+    st.mask.push(MaskBit::Unquoted);
     st.start = 0;
     dollar_paren(&mut st, &mut bytes, line).unwrap();
     assert_eq!(st.cur.as_bytes().unwrap(), b"x$(echo \"a b\")");
-    let mut mask = vec![false];
-    mask.extend(vec![true; 13]);
+    let mut mask = vec![Unquoted, QuotedStart];
+    mask.extend(vec![Quoted; 12]);
     assert_eq!(st.mask, mask, "the mask is parallel to the whole word");
 }
 
@@ -96,8 +99,12 @@ fn region_bytes_are_masked_as_quoted() {
     let line = b"\"${u:-\"z w\"}\"";
     let (mut st, mut bytes) = at(line, 1);
     brace(&mut st, &mut bytes, line).unwrap();
-    let mask: Vec<bool> = st.mask.clone();
-    assert!(mask.iter().all(|&q| q), "all {} bits", mask.len());
+    let mask: Vec<MaskBit> = st.mask.clone();
+    assert!(
+        mask.iter().copied().all(MaskBit::quoted),
+        "all {} bits",
+        mask.len()
+    );
     assert_eq!(mask.len(), 9);
 }
 

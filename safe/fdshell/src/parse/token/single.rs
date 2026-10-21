@@ -1,11 +1,13 @@
 //! The single-quote span state machine (task #141).
 //!
-//! A `'…'` span contributes literal bytes to the word and mask bits `true` —
+//! A `'…'` span contributes literal bytes to the word and quoted mask bits —
 //! exactly the double-quote meaning: the bytes are protected from IFS splitting
-//! and globbing. The mask carries no quote *kind*, so the literal is written in
-//! the double-quote escape form (`\` → `\\`, `$` → `\$`, `` ` `` → `` \` ``,
-//! any other byte verbatim): both readers of word text (`substitute/arg.rs`'s
-//! quoted arm, `bytes/fold.rs::fold_mask`) fold those pairs back to the literal
+//! and globbing, and the span is one quote region (its first byte is a
+//! `QuotedStart`, task #285). The bit carries no quote *kind* beyond that, so
+//! the literal is written in the double-quote escape form (`\` → `\\`, `$` →
+//! `\$`, `` ` `` → `` \` ``, any other byte verbatim): both readers of word text
+//! (`substitute/arg.rs`'s quoted arm, `bytes/fold.rs::fold_mask`) fold those
+//! pairs back to the literal
 //! byte, and the unquoted arms fold them the same way, so the encoding is
 //! correct with and without the mask (LESSONS: a single-quoted literal is
 //! stored in the double-quote escape form). A backtick needs the pair for the
@@ -15,7 +17,7 @@
 use super::State;
 use crate::bytes::SQUOTE;
 use crate::error::parse::ParseError;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 
 impl State {
     /// Open a `'…'` span on the current byte: the span is quoted word content,
@@ -41,9 +43,9 @@ impl State {
             return Ok(false);
         }
         if matches!(b, b'\\' | b'$' | b'`') {
-            self.push_quoted(b'\\')?;
+            self.push_masked(b'\\', true)?;
         }
-        self.push_quoted(b)?;
+        self.push_masked(b, true)?;
         Ok(true)
     }
 
@@ -53,25 +55,7 @@ impl State {
     /// ANSI-C quoting (accepted divergence, see the README; task #156).
     pub(super) fn dollar_quote(&mut self) -> Result<(), Report<ParseError>> {
         self.word_start();
-        self.push_literal(b'\\')?;
-        self.push_literal(b'$')
-    }
-
-    /// Push one byte whose mask bit marks it as quoted.
-    fn push_quoted(&mut self, b: u8) -> Result<(), Report<ParseError>> {
-        self.cur
-            .push_byte(b)
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        self.mask.push(true);
-        Ok(())
-    }
-
-    /// Push one unquoted byte (mask `false`).
-    fn push_literal(&mut self, b: u8) -> Result<(), Report<ParseError>> {
-        self.cur
-            .push_byte(b)
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        self.mask.push(false);
-        Ok(())
+        self.push_masked(b'\\', false)?;
+        self.push_masked(b'$', false)
     }
 }

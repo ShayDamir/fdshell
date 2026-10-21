@@ -1,6 +1,7 @@
 use super::*;
 use crate::capture::Capture;
 use crate::cd::cd;
+use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use alloc::format;
 use alloc::vec;
@@ -56,7 +57,7 @@ fn make_cmdline_masked(words: &[&str], quoted: &[bool]) -> CommandLine {
     cmdline.args_mask = words
         .iter()
         .zip(quoted)
-        .map(|(w, &q)| vec![q; w.len()])
+        .map(|(w, &q)| vec![MaskBit::from_quoted(q); w.len()])
         .collect();
     cmdline.args_quoted = quoted.to_vec();
     cmdline

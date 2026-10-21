@@ -11,6 +11,7 @@ use sys::openat2::{OpenHow, openat2};
 use sys::{AtFd, LocalFd, ShortCStr};
 
 use super::r#match as m;
+use crate::mask::MaskBit;
 
 /// All matching full result strings, bytewise-sorted; empty when nothing
 /// matches. A directory that cannot be opened or listed drops its branch
@@ -21,7 +22,7 @@ use super::r#match as m;
 /// fd — or at the process CWD when `base` is `None`.
 pub(super) fn walk(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     dotglob: bool,
     base: Option<&LocalFd>,
 ) -> Vec<Vec<u8>> {

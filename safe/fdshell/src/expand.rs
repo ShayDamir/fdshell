@@ -6,6 +6,7 @@ use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, ScriptText, ShortCStr, Trace};
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::run_origin::has_cmd_subst;
 use crate::state::ShellState;
 use crate::substitute::substitute_args;
@@ -21,7 +22,7 @@ use crate::substitute::substitute_args;
 /// mapping the per-word quote mask, quoted flag and provenance need.
 pub(crate) fn expand_for_words(
     words: &[ShortCStr],
-    words_mask: &[Vec<bool>],
+    words_mask: &[Vec<MaskBit>],
     words_span: &[Vec<usize>],
     words_quoted: &[bool],
     text: &ScriptText,
@@ -49,7 +50,7 @@ pub(crate) fn expand_for_words(
 /// (task #216), and its fields are pathname-expanded by `substitute_args`.
 fn expand_word(
     word: &ShortCStr,
-    mask: &Vec<bool>,
+    mask: &Vec<MaskBit>,
     spans: &Vec<usize>,
     quoted: bool,
     cell: &ForkCell<ShellState>,

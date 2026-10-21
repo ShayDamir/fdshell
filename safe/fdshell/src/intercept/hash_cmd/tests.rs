@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::intercept::try_intercept;
+use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use alloc::format;
 use alloc::vec;
@@ -29,7 +30,10 @@ fn cmdline(args: &[&str], quoted: bool) -> CommandLine {
         command_quoted: false,
         env_assigns: vec![],
         args: args.iter().map(|a| s(a)).collect(),
-        args_mask: args.iter().map(|a| vec![quoted; a.len()]).collect(),
+        args_mask: args
+            .iter()
+            .map(|a| vec![MaskBit::from_quoted(quoted); a.len()])
+            .collect(),
         args_span: vec![vec![]; args.len()],
         args_quoted: vec![quoted; args.len()],
         captures: vec![],

@@ -3,13 +3,14 @@
 use alloc::vec::Vec;
 
 use crate::glob::r#match as m;
+use crate::mask::MaskBit;
 
 /// One pattern component: its bytes, the parallel quote mask, and whether it
 /// holds any unquoted pattern byte (literal components are opened directly
 /// instead of listing the directory).
 pub(super) struct Comp {
     pub(super) pat: Vec<u8>,
-    pub(super) mask: Vec<bool>,
+    pub(super) mask: Vec<MaskBit>,
     pub(super) literal: bool,
 }
 
@@ -23,7 +24,7 @@ pub(super) struct Parts {
 /// whole valid bracket spans never split. Empty components are dropped
 /// (`a//b` ≡ `a/b`); a leading `/` marks the pattern absolute and a trailing
 /// unquoted `/` demands directories only.
-pub(super) fn split(bytes: &[u8], mask: &[bool]) -> Parts {
+pub(super) fn split(bytes: &[u8], mask: &[MaskBit]) -> Parts {
     let mut comps = Vec::new();
     let mut absolute = false;
     let mut start = 0usize;
@@ -59,7 +60,7 @@ pub(super) fn split(bytes: &[u8], mask: &[bool]) -> Parts {
     }
 }
 
-fn component(bytes: &[u8], mask: &[bool], start: usize, end: usize) -> Comp {
+fn component(bytes: &[u8], mask: &[MaskBit], start: usize, end: usize) -> Comp {
     let pat = bytes.get(start..end).unwrap_or(b"").to_vec();
     let mask = mask.get(start..end).unwrap_or(&[]).to_vec();
     let literal = !m::has_unquoted_pattern(&pat, &mask);

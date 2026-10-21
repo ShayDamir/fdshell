@@ -4,6 +4,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::{fold, fold_mask, fold_quotes, fold_word};
+use crate::mask::MaskBit::{Quoted, Unquoted};
 use sys::ShortCStr;
 
 #[test]
@@ -127,13 +128,13 @@ fn fold_quotes_treats_a_quote_in_the_other_span_as_data() {
 fn mask_fold_folds_unquoted_pair_and_protects_the_escaped_byte() {
     // Word text carries no `"` bytes, so the quote state is the mask.
     assert_eq!(
-        fold_mask(b"a\\*b", &[false, false, false, false]),
-        (b"a*b".to_vec(), vec![false, true, false])
+        fold_mask(b"a\\*b", &[Unquoted, Unquoted, Unquoted, Unquoted]),
+        (b"a*b".to_vec(), vec![Unquoted, Quoted, Unquoted])
     );
     // `\\` folds to one backslash, protected from splitting and globbing.
     assert_eq!(
-        fold_mask(b"a\\\\b", &[false, false, false, false]),
-        (b"a\\b".to_vec(), vec![false, true, false])
+        fold_mask(b"a\\\\b", &[Unquoted, Unquoted, Unquoted, Unquoted]),
+        (b"a\\b".to_vec(), vec![Unquoted, Quoted, Unquoted])
     );
 }
 
@@ -141,20 +142,23 @@ fn mask_fold_folds_unquoted_pair_and_protects_the_escaped_byte() {
 fn mask_fold_keeps_a_quoted_pair() {
     // POSIX #4.2: every byte of the pair was inside double quotes.
     assert_eq!(
-        fold_mask(b"a\\*b", &[true, true, true, true]),
-        (b"a\\*b".to_vec(), vec![true, true, true, true])
+        fold_mask(b"a\\*b", &[Quoted, Quoted, Quoted, Quoted]),
+        (b"a\\*b".to_vec(), vec![Quoted, Quoted, Quoted, Quoted])
     );
 }
 
 #[test]
 fn mask_fold_keeps_a_trailing_backslash() {
     assert_eq!(
-        fold_mask(b"a\\", &[false, false]),
-        (b"a\\".to_vec(), vec![false, false])
+        fold_mask(b"a\\", &[Unquoted, Unquoted]),
+        (b"a\\".to_vec(), vec![Unquoted, Unquoted])
     );
-    assert_eq!(fold_mask(b"", &[false]), (Vec::new(), Vec::new()));
+    assert_eq!(fold_mask(b"", &[Unquoted]), (Vec::new(), Vec::new()));
     // A short mask reads as unquoted.
-    assert_eq!(fold_mask(b"a\\b", &[]), (b"ab".to_vec(), vec![false, true]));
+    assert_eq!(
+        fold_mask(b"a\\b", &[]),
+        (b"ab".to_vec(), vec![Unquoted, Quoted])
+    );
 }
 
 #[test]
@@ -162,32 +166,41 @@ fn mask_fold_mixes_unquoted_and_quoted_regions() {
     // An unquoted pair followed by quoted bytes: the index bookkeeping must
     // keep reading the mask at the right byte.
     assert_eq!(
-        fold_mask(b"a\\*bc", &[false, false, false, false, true]),
-        (b"a*bc".to_vec(), vec![false, true, false, true])
+        fold_mask(b"a\\*bc", &[Unquoted, Unquoted, Unquoted, Unquoted, Quoted]),
+        (b"a*bc".to_vec(), vec![Unquoted, Quoted, Unquoted, Quoted])
     );
     // Quoted bytes first, then an unquoted pair.
     assert_eq!(
-        fold_mask(b"ab\\*c", &[true, true, false, false, false]),
-        (b"ab*c".to_vec(), vec![true, true, true, false])
+        fold_mask(b"ab\\*c", &[Quoted, Quoted, Unquoted, Unquoted, Unquoted]),
+        (b"ab*c".to_vec(), vec![Quoted, Quoted, Quoted, Unquoted])
     );
     // A quoted pair in the middle keeps its backslash and the rest folds.
     assert_eq!(
-        fold_mask(b"a\\b\\*c", &[false, true, true, false, false]),
-        (b"a\\b*c".to_vec(), vec![false, true, true, true, false])
+        fold_mask(b"a\\b\\*c", &[Unquoted, Quoted, Quoted, Unquoted, Unquoted]),
+        (
+            b"a\\b*c".to_vec(),
+            vec![Unquoted, Quoted, Quoted, Quoted, Unquoted]
+        )
     );
 }
 
 #[test]
 fn fold_word_returns_a_shortcstr_with_the_aligned_mask() {
-    let (word, mask) = fold_word(&ShortCStr::from(c"a\\*b"), &[false, false, false, false])
-        .expect("folded word is NUL-free");
+    let (word, mask) = fold_word(
+        &ShortCStr::from(c"a\\*b"),
+        &[Unquoted, Unquoted, Unquoted, Unquoted],
+    )
+    .expect("folded word is NUL-free");
     assert_eq!(word.as_bytes().expect("bytes"), b"a*b");
-    assert_eq!(mask, vec![false, true, false]);
+    assert_eq!(mask, vec![Unquoted, Quoted, Unquoted]);
     // A word with no pair is returned unchanged (a fresh ShortCStr).
-    let (word, mask) = fold_word(&ShortCStr::from(c"echo"), &[false, false, false, false])
-        .expect("folded word is NUL-free");
+    let (word, mask) = fold_word(
+        &ShortCStr::from(c"echo"),
+        &[Unquoted, Unquoted, Unquoted, Unquoted],
+    )
+    .expect("folded word is NUL-free");
     assert_eq!(word.as_bytes().expect("bytes"), b"echo");
-    assert_eq!(mask, vec![false, false, false, false]);
+    assert_eq!(mask, vec![Unquoted, Unquoted, Unquoted, Unquoted]);
 }
 
 /// A `'…'` span has no escape pair at all (POSIX §2.2.3): every byte written in
@@ -216,22 +229,22 @@ fn fold_keeps_every_byte_of_a_single_quote_span() {
 fn fold_mask_round_trips_the_single_quote_encoding() {
     // `'a\b'` → word `a\\b`, mask all quoted → `a\b`.
     assert_eq!(
-        fold_mask(b"a\\\\b", &[true, true, true, true]),
-        (b"a\\b".to_vec(), vec![true, true, true])
+        fold_mask(b"a\\\\b", &[Quoted, Quoted, Quoted, Quoted]),
+        (b"a\\b".to_vec(), vec![Quoted, Quoted, Quoted])
     );
     // `'$'` → word `\$`, mask quoted → `$` (no substitution pass involved).
     assert_eq!(
-        fold_mask(b"\\$", &[true, true]),
-        (b"$".to_vec(), vec![true])
+        fold_mask(b"\\$", &[Quoted, Quoted]),
+        (b"$".to_vec(), vec![Quoted])
     );
     // An unquoted pair folds the same way, protecting the escaped byte.
     assert_eq!(
-        fold_mask(b"\\$", &[false, false]),
-        (b"$".to_vec(), vec![true])
+        fold_mask(b"\\$", &[Unquoted, Unquoted]),
+        (b"$".to_vec(), vec![Quoted])
     );
     // Any other quoted pair keeps its backslash (POSIX #4.2 lists only these).
     assert_eq!(
-        fold_mask(b"a\\*b", &[true, true, true, true]),
-        (b"a\\*b".to_vec(), vec![true, true, true, true])
+        fold_mask(b"a\\*b", &[Quoted, Quoted, Quoted, Quoted]),
+        (b"a\\*b".to_vec(), vec![Quoted, Quoted, Quoted, Quoted])
     );
 }

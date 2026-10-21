@@ -1,4 +1,5 @@
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::parse::redirect::quoted_bytes;
 use crate::redirect::RedirectDirection;
 use error_stack::{Report, ensure};
@@ -14,7 +15,7 @@ use sys::ShortCStr;
 pub(super) fn redirect_op(
     dir: u8,
     after_op: ShortCStr,
-    after_mask: &[bool],
+    after_mask: &[MaskBit],
 ) -> Result<(ShortCStr, RedirectDirection), Report<ParseError>> {
     let quoted_next = quoted_bytes(after_mask, 0, 1);
     if !quoted_next && dir == b'>' && after_op.starts_with(b"|") {

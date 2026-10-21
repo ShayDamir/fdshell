@@ -6,6 +6,7 @@ use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 
 /// Counts the bytes it **hands out**; a peeked byte is counted only when it is
 /// later handed out. `consumed` is therefore exactly the index of the next
@@ -59,19 +60,19 @@ impl Iterator for Counting<'_> {
 
 pub(super) fn push_byte(
     out: &mut ShortCStr,
-    mask: &mut Vec<bool>,
+    mask: &mut Vec<MaskBit>,
     b: u8,
     quoted: bool,
 ) -> Result<(), Report<ResolveError>> {
     out.push_byte(b).change_context(ResolveError::NulByte)?;
-    mask.push(quoted);
+    mask.push(MaskBit::from_quoted(quoted));
     Ok(())
 }
 
 /// Append `text` to `out`, marking every byte with `quoted` in `mask`.
 pub(super) fn push_expanded(
     out: &mut ShortCStr,
-    mask: &mut Vec<bool>,
+    mask: &mut Vec<MaskBit>,
     text: &[u8],
     quoted: bool,
 ) -> Result<(), Report<ResolveError>> {
@@ -82,28 +83,13 @@ pub(super) fn push_expanded(
     Ok(())
 }
 
-/// Extend `mask` with `quoted` bits until it is as long as `len`.
-fn pad_mask(mask: &mut Vec<bool>, before: usize, len: usize, quoted: bool) {
+/// Extend `mask` with `quoted` bits until it is as long as `len`. Expansion
+/// output has no quote regions of its own, so every bit is a plain
+/// quoted/unquoted one: a derived mask never claims a region start.
+fn pad_mask(mask: &mut Vec<MaskBit>, before: usize, len: usize, quoted: bool) {
     for _ in before..len {
-        mask.push(quoted);
+        mask.push(MaskBit::from_quoted(quoted));
     }
-}
-
-/// Bytes a name arm may consume from `from`: the length of the run of mask
-/// bits equal to the bit at `from`, i.e. the quote region that byte belongs
-/// to. A name cannot cross out of the region its trigger byte sits in,
-/// because the tokenizer's quote regions are what end a name (bash expands
-/// `"$v"bc` as the parameter `v` plus the literal `bc`). A missing bit (an
-/// empty mask) carries no information, so the run is unbounded and the
-/// collection is mask-independent.
-pub(super) fn region_len(mask: &[bool], from: usize) -> usize {
-    let Some(&quoted) = mask.get(from) else {
-        return usize::MAX;
-    };
-    mask.iter()
-        .skip(from)
-        .take_while(|&bit| *bit == quoted)
-        .count()
 }
 
 /// After a helper consumed input from the shared peekable, sync `idx` to the
@@ -111,7 +97,7 @@ pub(super) fn region_len(mask: &[bool], from: usize) -> usize {
 pub(super) fn realign(
     idx: &mut usize,
     peek: &Counting<'_>,
-    mask: &mut Vec<bool>,
+    mask: &mut Vec<MaskBit>,
     before: usize,
     out: &ShortCStr,
     quoted: bool,

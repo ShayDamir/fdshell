@@ -3,6 +3,8 @@ use super::*;
 use crate::capture::Capture;
 use crate::error::cmd::CmdError;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit::Unquoted;
+use crate::mask::tests::runs;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::string::ToString;
 use alloc::vec;
@@ -25,7 +27,7 @@ fn assign(name: &str, value: &str, quoted: bool) -> Assign {
     Assign {
         name: sys::ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap(),
         value: sys::ShortCStr::from_vec(value.as_bytes().to_vec()).unwrap(),
-        mask: vec![quoted; value.len()],
+        mask: vec![MaskBit::from_quoted(quoted); value.len()],
         spans: Vec::new(),
     }
 }
@@ -39,7 +41,7 @@ fn word_token(word: &[u8], start: usize) -> Token {
         start,
         start + word.len(),
         false,
-        vec![false; word.len()],
+        vec![Unquoted; word.len()],
         Vec::new(),
     )
 }
@@ -62,7 +64,7 @@ fn path_def(export_to: i32, direction: RedirectDirection, path: &str) -> Redirec
         direction,
         source: RedirectSource::path(
             sys::ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
-            vec![false; path.len()],
+            vec![Unquoted; path.len()],
         ),
     }
 }
@@ -76,7 +78,7 @@ fn combined_def(direction: RedirectDirection, path: &str) -> RedirectDef {
         direction,
         source: RedirectSource::path(
             sys::ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
-            vec![false; path.len()],
+            vec![Unquoted; path.len()],
         ),
     }
 }
@@ -93,7 +95,7 @@ fn test_mkdirat_capture() {
         CommandLine {
             prefix: BuiltinPrefix::Builtin,
             command: c"mkdirat".into(),
-            command_mask: vec![false; 7],
+            command_mask: vec![Unquoted; 7],
             command_span: vec![],
             command_quoted: false,
             env_assigns: vec![],
@@ -105,11 +107,11 @@ fn test_mkdirat_capture() {
                 c"foo".into(),
             ],
             args_mask: vec![
-                vec![false; 6],
-                vec![false; 3],
-                vec![false; 7],
-                vec![false; 4],
-                vec![false; 3],
+                vec![Unquoted; 6],
+                vec![Unquoted; 3],
+                vec![Unquoted; 7],
+                vec![Unquoted; 4],
+                vec![Unquoted; 3],
             ],
             args_span: vec![vec![]; 5],
             args_quoted: vec![false; 5],
@@ -356,7 +358,7 @@ fn test_here_string_prefix_form() {
         vec![RedirectDef::here_string(
             0,
             c"hello",
-            vec![false; 5],
+            vec![Unquoted; 5],
             Vec::new()
         )]
     );
@@ -373,7 +375,7 @@ fn test_here_string_keeps_unquoted_spaces() {
         vec![RedirectDef::here_string(
             0,
             c"a b",
-            vec![true; 3],
+            runs(&[(true, 3)]),
             Vec::new()
         )]
     );
@@ -390,7 +392,7 @@ fn parse_here_string_word_carries_its_quote_mask() {
         vec![RedirectDef::here_string(
             0,
             c"a\\ b",
-            vec![true; 4],
+            runs(&[(true, 4)]),
             Vec::new()
         )]
     );
@@ -406,7 +408,7 @@ fn parse_here_string_word_carries_its_quote_mask() {
         vec![RedirectDef::here_string(
             0,
             c"a\\ b",
-            vec![false; 4],
+            vec![Unquoted; 4],
             Vec::new()
         )]
     );
@@ -419,7 +421,7 @@ fn parse_here_string_word_carries_its_quote_mask() {
         vec![RedirectDef::here_string(
             0,
             c"a\\ b",
-            vec![true; 4],
+            runs(&[(true, 4)]),
             Vec::new()
         )]
     );
@@ -438,12 +440,12 @@ fn parse_here_string_mask_of_a_quoted_word_with_a_second_word() {
         vec![RedirectDef::here_string(
             0,
             c"a\\ b",
-            vec![true; 4],
+            runs(&[(true, 4)]),
             Vec::new()
         )]
     );
     assert_eq!(cmd.args, vec![c"b\\ c".into()]);
-    assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
+    assert_eq!(cmd.args_mask, vec![vec![Unquoted; 4]]);
 }
 
 /// The io-number form: the descriptor comes from the raw-byte prefix and the
@@ -458,7 +460,7 @@ fn parse_here_string_io_number_prefix_targets_the_descriptor() {
         vec![RedirectDef::here_string(
             3,
             c"hello",
-            vec![false; 5],
+            vec![Unquoted; 5],
             Vec::new()
         )]
     );
@@ -472,7 +474,7 @@ fn parse_here_string_io_number_prefix_targets_the_descriptor() {
         vec![RedirectDef::here_string(
             3,
             c"hello",
-            vec![false; 5],
+            vec![Unquoted; 5],
             Vec::new()
         )]
     );
@@ -491,7 +493,7 @@ fn parse_here_string_prefixed_word_mask_is_shifted_by_the_prefix() {
         vec![RedirectDef::here_string(
             3,
             c"a\\ b",
-            vec![true; 4],
+            runs(&[(true, 4)]),
             Vec::new()
         )]
     );
@@ -503,12 +505,12 @@ fn parse_here_string_prefixed_word_mask_is_shifted_by_the_prefix() {
         vec![RedirectDef::here_string(
             3,
             c"a\\ b",
-            vec![true; 4],
+            runs(&[(true, 4)]),
             Vec::new()
         )]
     );
     assert_eq!(cmd.args, vec![c"b\\ c".into()]);
-    assert_eq!(cmd.args_mask, vec![vec![false; 4]]);
+    assert_eq!(cmd.args_mask, vec![vec![Unquoted; 4]]);
 }
 
 #[test]
@@ -524,7 +526,7 @@ fn parse_here_string_prefixed_bare_form_takes_the_next_word() {
         vec![RedirectDef::here_string(
             3,
             c"word",
-            vec![false; 4],
+            vec![Unquoted; 4],
             Vec::new()
         )]
     );
@@ -538,7 +540,7 @@ fn parse_here_string_prefixed_bare_form_takes_the_next_word() {
         vec![RedirectDef::here_string(
             3,
             c"<<x",
-            vec![false; 3],
+            vec![Unquoted; 3],
             Vec::new()
         )]
     );
@@ -700,7 +702,7 @@ fn test_here_string_bare_takes_next_token() {
         vec![RedirectDef::here_string(
             0,
             c"word",
-            vec![false; 4],
+            vec![Unquoted; 4],
             Vec::new()
         )]
     );
@@ -937,7 +939,7 @@ fn test_rw_redirect_defaults_to_fd_zero() {
             export_to: 0,
             extra_to: None,
             direction: RedirectDirection::Rw,
-            source: RedirectSource::path(c"file", vec![false; 4]),
+            source: RedirectSource::path(c"file", vec![Unquoted; 4]),
         }]
     );
 }
@@ -953,7 +955,7 @@ fn test_rw_redirect_numbered() {
             export_to: 3,
             extra_to: None,
             direction: RedirectDirection::Rw,
-            source: RedirectSource::path(c"file", vec![false; 4]),
+            source: RedirectSource::path(c"file", vec![Unquoted; 4]),
         }]
     );
 }
@@ -1032,7 +1034,7 @@ fn test_space_separated_redirect_quoted_path() {
             export_to: 1,
             extra_to: None,
             direction: RedirectDirection::Write,
-            source: RedirectSource::path_word(c"my file", vec![true; 7], Vec::new(), true),
+            source: RedirectSource::path_word(c"my file", runs(&[(true, 7)]), Vec::new(), true),
         }]
     );
 }
@@ -1184,7 +1186,7 @@ fn test_clobber_bare_quoted_path() {
             export_to: 1,
             extra_to: None,
             direction: RedirectDirection::Clobber,
-            source: RedirectSource::path_word(c"my file", vec![true; 7], Vec::new(), true),
+            source: RedirectSource::path_word(c"my file", runs(&[(true, 7)]), Vec::new(), true),
         }]
     );
 }
@@ -1469,7 +1471,7 @@ fn test_bare_combined_operand_keeps_its_quote_mask() {
             export_to: 1,
             extra_to: Some(2),
             direction: RedirectDirection::Write,
-            source: RedirectSource::path_word(c"a b.log", vec![true; 7], Vec::new(), true),
+            source: RedirectSource::path_word(c"a b.log", runs(&[(true, 7)]), Vec::new(), true),
         }]
     );
     assert!(cmd.args.is_empty());
@@ -1817,7 +1819,7 @@ fn test_assign_str_simple() {
     };
     assert_eq!(a.name, c"var".into());
     assert_eq!(a.value, c"hello".into());
-    assert_eq!(a.mask, vec![false; 5]);
+    assert_eq!(a.mask, vec![Unquoted; 5]);
 }
 
 #[test]
@@ -1837,7 +1839,7 @@ fn test_assign_str_quoted_spaces() {
     };
     assert_eq!(a.name, c"var".into());
     assert_eq!(a.value, c"foo bar".into());
-    assert_eq!(a.mask, vec![true; 7]);
+    assert_eq!(a.mask, runs(&[(true, 7)]));
 }
 
 #[test]
@@ -1859,7 +1861,7 @@ fn test_assign_str_percent_value_is_literal() {
     };
     assert_eq!(a.name, c"var".into());
     assert_eq!(a.value, c"%othervar".into());
-    assert_eq!(a.mask, vec![false; 9]);
+    assert_eq!(a.mask, vec![Unquoted; 9]);
 }
 
 #[test]
@@ -3135,7 +3137,7 @@ fn case_word_carries_its_quote_mask() {
         panic!("expected Case")
     };
     assert_eq!(cb.word, c"a\\ b".into());
-    assert_eq!(cb.word_mask, vec![true; 4]);
+    assert_eq!(cb.word_mask, runs(&[(true, 4)]));
 }
 
 #[test]
@@ -3175,14 +3177,14 @@ fn case_pattern_carries_its_quote_mask() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses[0].patterns[0].text, c"a\\ b".into());
-    assert_eq!(cb.clauses[0].patterns[0].mask, vec![true; 4]);
+    assert_eq!(cb.clauses[0].patterns[0].mask, runs(&[(true, 4)]));
 
     // Unquoted, the same 4-byte text means a foldable escape pair.
     let ParsedLine::Case(cb) = parse(b"case x in a\\ b) echo m;; esac").unwrap() else {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses[0].patterns[0].text, c"a\\ b".into());
-    assert_eq!(cb.clauses[0].patterns[0].mask, vec![false; 4]);
+    assert_eq!(cb.clauses[0].patterns[0].mask, vec![Unquoted; 4]);
 }
 
 #[test]
@@ -3196,9 +3198,9 @@ fn case_pattern_pair_masks_differ() {
     };
     assert_eq!(cb.clauses[0].patterns.len(), 2);
     assert_eq!(cb.clauses[0].patterns[0].text, c"a?".into());
-    assert_eq!(cb.clauses[0].patterns[0].mask, vec![true; 2]);
+    assert_eq!(cb.clauses[0].patterns[0].mask, runs(&[(true, 2)]));
     assert_eq!(cb.clauses[0].patterns[1].text, c"a?".into());
-    assert_eq!(cb.clauses[0].patterns[1].mask, vec![false; 2]);
+    assert_eq!(cb.clauses[0].patterns[1].mask, vec![Unquoted; 2]);
 }
 
 /// fdshell joins a multi-token pattern with a space where bash rejects the shape
@@ -3211,7 +3213,7 @@ fn case_pattern_join_marks_its_inserted_space_unquoted() {
         panic!("expected Case")
     };
     assert_eq!(cb.clauses[0].patterns[0].text, c"a b".into());
-    assert_eq!(cb.clauses[0].patterns[0].mask, vec![false; 3]);
+    assert_eq!(cb.clauses[0].patterns[0].mask, vec![Unquoted; 3]);
 }
 
 #[test]
@@ -3634,7 +3636,7 @@ fn tokenize_empty_quote_then_word() {
     assert!(tokens[0].3);
     assert!(tokens[0].4.is_empty());
     assert_eq!(tokens[1].0, c"x".into());
-    assert_eq!(tokens[1].4, vec![false]);
+    assert_eq!(tokens[1].4, vec![Unquoted]);
 }
 
 #[test]
@@ -3665,7 +3667,7 @@ fn tokenize_quoted_dollar_paren_is_all_true_mask() {
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0, c"$(true)".into());
     assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, vec![true; 7]);
+    assert_eq!(tokens[0].4, runs(&[(true, 7)]));
 }
 
 #[test]
@@ -3675,7 +3677,7 @@ fn parse_empty_quoted_arg_kept_with_empty_mask() {
     };
     assert_eq!(cmd.command, c"cmd".into());
     assert_eq!(cmd.args, vec![c"".into(), c"x".into()]);
-    assert_eq!(cmd.args_mask, vec![vec![], vec![false]]);
+    assert_eq!(cmd.args_mask, vec![vec![], vec![Unquoted]]);
     assert_eq!(cmd.args_quoted, vec![true, false]);
 }
 
@@ -3733,7 +3735,7 @@ fn tokenize_mixed_quotes_mark_quoted_bytes() {
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].0.as_bytes().unwrap(), b"xa bc");
     assert!(!tokens[0].3);
-    assert_eq!(tokens[0].4, vec![false, true, true, true, false]);
+    assert_eq!(tokens[0].4, runs(&[(false, 1), (true, 3), (false, 1)]));
 }
 
 #[test]
@@ -3741,7 +3743,7 @@ fn tokenize_fully_quoted_word_has_all_true_mask() {
     let tokens = token::tokenize(b"\"a b\"").unwrap();
     assert_eq!(tokens.len(), 1);
     assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, vec![true; 3]);
+    assert_eq!(tokens[0].4, runs(&[(true, 3)]));
 }
 
 #[test]
@@ -3749,7 +3751,7 @@ fn tokenize_unquoted_word_has_all_false_mask() {
     let tokens = token::tokenize(b"abc").unwrap();
     assert_eq!(tokens.len(), 1);
     assert!(!tokens[0].3);
-    assert_eq!(tokens[0].4, vec![false; 3]);
+    assert_eq!(tokens[0].4, vec![Unquoted; 3]);
 }
 
 #[test]
@@ -3762,8 +3764,8 @@ fn parse_fully_quoted_dollar_at_preserves_flag() {
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"%s\\n");
     assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args_mask.len(), 2);
-    assert!(cmd.args_mask[0].iter().all(|&q| q));
-    assert!(cmd.args_mask[1].iter().all(|&q| q));
+    assert!(cmd.args_mask[0].iter().copied().all(MaskBit::quoted));
+    assert!(cmd.args_mask[1].iter().copied().all(MaskBit::quoted));
     assert_eq!(cmd.args_quoted, vec![true, true]);
 }
 
@@ -3778,9 +3780,9 @@ fn parse_fully_quoted_dollar_at_middle_preserves_flag() {
     assert_eq!(cmd.args[1].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args[2].as_bytes().unwrap(), b"extra");
     assert_eq!(cmd.args_mask.len(), 3);
-    assert!(cmd.args_mask[0].iter().all(|&q| q));
-    assert!(cmd.args_mask[1].iter().all(|&q| q));
-    assert!(cmd.args_mask[2].iter().all(|&q| !q));
+    assert!(cmd.args_mask[0].iter().copied().all(MaskBit::quoted));
+    assert!(cmd.args_mask[1].iter().copied().all(MaskBit::quoted));
+    assert!(cmd.args_mask[2].iter().copied().all(|b| !b.quoted()));
     assert_eq!(cmd.args_quoted, vec![true, true, false]);
 }
 
@@ -3792,7 +3794,7 @@ fn parse_fully_quoted_dollar_star_preserves_flag() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$*");
     assert_eq!(cmd.args_mask.len(), 1);
-    assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert!(cmd.args_mask[0].iter().copied().all(MaskBit::quoted));
     assert_eq!(cmd.args_quoted, vec![true]);
 }
 
@@ -3804,7 +3806,7 @@ fn parse_unquoted_dollar_at_has_false_flag() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"$@");
     assert_eq!(cmd.args_mask.len(), 1);
-    assert!(cmd.args_mask[0].iter().all(|&q| !q));
+    assert!(cmd.args_mask[0].iter().copied().all(|b| !b.quoted()));
     assert_eq!(cmd.args_quoted, vec![false]);
 }
 
@@ -3816,7 +3818,7 @@ fn parse_fully_quoted_literal_preserves_flag() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].as_bytes().unwrap(), b"hello world");
     assert_eq!(cmd.args_mask.len(), 1);
-    assert!(cmd.args_mask[0].iter().all(|&q| q));
+    assert!(cmd.args_mask[0].iter().copied().all(MaskBit::quoted));
     assert_eq!(cmd.args_quoted, vec![true]);
 }
 
@@ -3827,9 +3829,9 @@ fn parse_mixed_quoted_args_preserves_flags() {
     };
     assert_eq!(cmd.args.len(), 3);
     assert_eq!(cmd.args_mask.len(), 3);
-    assert!(cmd.args_mask[0].iter().all(|&q| q));
-    assert!(cmd.args_mask[1].iter().all(|&q| q));
-    assert!(cmd.args_mask[2].iter().all(|&q| !q));
+    assert!(cmd.args_mask[0].iter().copied().all(MaskBit::quoted));
+    assert!(cmd.args_mask[1].iter().copied().all(MaskBit::quoted));
+    assert!(cmd.args_mask[2].iter().copied().all(|b| !b.quoted()));
     assert_eq!(cmd.args_quoted, vec![true, true, false]);
 }
 
@@ -4030,7 +4032,7 @@ fn test_env_assign_single_bare_statement_is_assign_str() {
     };
     assert_eq!(a.name, c"FOO".into());
     assert_eq!(a.value, c"bar".into());
-    assert_eq!(a.mask, vec![false; 3]);
+    assert_eq!(a.mask, vec![Unquoted; 3]);
 }
 
 #[test]
@@ -4043,7 +4045,7 @@ fn test_env_assign_bare_before_semicolon_token_is_assign_str() {
     };
     assert_eq!(a.name, c"FOO".into());
     assert_eq!(a.value, c"bar".into());
-    assert_eq!(a.mask, vec![false; 3]);
+    assert_eq!(a.mask, vec![Unquoted; 3]);
 }
 
 #[test]
@@ -4125,7 +4127,7 @@ fn test_env_assign_escaped_name_is_not_an_assignment() {
     };
     assert!(cmd.env_assigns.is_empty());
     assert_eq!(cmd.command, c"\\X=1".into());
-    assert_eq!(cmd.command_mask, vec![false; 4]);
+    assert_eq!(cmd.command_mask, vec![Unquoted; 4]);
     assert_eq!(cmd.args, vec![c"cmd".into()]);
 
     let ParsedLine::Cmd(cmd) = parse(b"X\\=1 cmd").unwrap() else {
@@ -4133,7 +4135,7 @@ fn test_env_assign_escaped_name_is_not_an_assignment() {
     };
     assert!(cmd.env_assigns.is_empty());
     assert_eq!(cmd.command, c"X\\=1".into());
-    assert_eq!(cmd.command_mask, vec![false; 4]);
+    assert_eq!(cmd.command_mask, vec![Unquoted; 4]);
     assert_eq!(cmd.args, vec![c"cmd".into()]);
 }
 
@@ -4147,7 +4149,7 @@ fn test_env_assign_value_keeps_the_escape_pair() {
         panic!("expected Cmd")
     };
     assert_eq!(cmd.env_assigns, vec![assign("X", "a\\ b", false)]);
-    assert_eq!(cmd.env_assigns[0].mask, vec![false; 4]);
+    assert_eq!(cmd.env_assigns[0].mask, vec![Unquoted; 4]);
     assert_eq!(cmd.command, c"cmd".into());
 }
 
@@ -4162,9 +4164,9 @@ fn test_env_assign_value_mask_is_sliced_at_the_equals() {
     };
     assert_eq!(cmd.env_assigns.len(), 2);
     assert_eq!(cmd.env_assigns[0].value, c"a\\ b".into());
-    assert_eq!(cmd.env_assigns[0].mask, vec![true; 4]);
+    assert_eq!(cmd.env_assigns[0].mask, runs(&[(true, 4)]));
     assert_eq!(cmd.env_assigns[1].value, c"b\\ c".into());
-    assert_eq!(cmd.env_assigns[1].mask, vec![false; 4]);
+    assert_eq!(cmd.env_assigns[1].mask, vec![Unquoted; 4]);
     assert_eq!(cmd.command, c"cmd".into());
 }
 
@@ -4178,7 +4180,7 @@ fn test_env_assign_value_mask_of_a_quoted_name() {
     };
     assert_eq!(a.name, c"x".into());
     assert_eq!(a.value, c"a\\ b".into());
-    assert_eq!(a.mask, vec![true; 4]);
+    assert_eq!(a.mask, runs(&[(true, 4)]));
 }
 
 /// The value's zero-byte span slice (`value_spans`, task #321) shares

@@ -26,6 +26,7 @@ use sys::fork_cell::{ForkCell, Ref};
 use sys::{ExportedFd, ShortCStr};
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 /// Substitute one word, discarding the byte provenance: the wrapper for
@@ -34,11 +35,11 @@ use crate::state::ShellState;
 /// the word's zero-byte quote-span list, parallel to the mask (task #321).
 pub(crate) fn substitute_arg(
     arg: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     spans: &[usize],
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
-) -> Result<(ShortCStr, Vec<bool>), Report<ResolveError>> {
+) -> Result<(ShortCStr, Vec<MaskBit>), Report<ResolveError>> {
     let (out, out_mask, _origin) = arg::substitute_arg_marked(arg, mask, spans, cache, cell)?;
     Ok((out, out_mask))
 }
@@ -53,8 +54,8 @@ pub(crate) fn borrow_state(
 /// or when the word is empty — an empty mask only arises from quoted
 /// material (a quoted empty word like `""`, or a quoted expansion that
 /// produced nothing), which is one word even when empty.
-pub(super) fn fully_quoted(mask: &[bool]) -> bool {
-    mask.is_empty() || mask.iter().all(|&q| q)
+pub(super) fn fully_quoted(mask: &[MaskBit]) -> bool {
+    mask.is_empty() || mask.iter().copied().all(MaskBit::quoted)
 }
 
 /// A word whose bytes can start an expansion: `$`, a backtick, a `%`, or a

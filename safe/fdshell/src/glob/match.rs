@@ -2,10 +2,12 @@
 
 pub(in crate::glob) mod bracket;
 
+use crate::mask::MaskBit;
+
 /// True when `bytes` (parallel quote `mask`) holds an unquoted, unescaped
 /// `*` or `?`, or an unquoted `[` opening a valid bracket expression.
 /// Quoted bytes never count; unquoted `\X` pairs are literal.
-pub(crate) fn has_unquoted_pattern(bytes: &[u8], mask: &[bool]) -> bool {
+pub(crate) fn has_unquoted_pattern(bytes: &[u8], mask: &[MaskBit]) -> bool {
     let mut i = 0usize;
     while let Some(&b) = bytes.get(i) {
         if bracket::quoted(mask, i) {
@@ -33,7 +35,7 @@ pub(crate) fn has_unquoted_pattern(bytes: &[u8], mask: &[bool]) -> bool {
 /// pattern has no `FNM_PERIOD` rule, so `d=.abc` with `${d#*c}` strips the
 /// whole value — measured against bash 5.3.9, where the pathname glob with
 /// `dotglob` off refuses the leading dot.
-pub(crate) fn match_component(pat: &[u8], mask: &[bool], name: &[u8], dotglob: bool) -> bool {
+pub(crate) fn match_component(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob: bool) -> bool {
     if dot_blocked(pat, mask, name, dotglob) {
         return false;
     }
@@ -90,7 +92,7 @@ pub(crate) fn match_component(pat: &[u8], mask: &[bool], name: &[u8], dotglob: b
 /// A name starting with `.` needs a literal first pattern byte: a leading
 /// unquoted `*`, `?`, or valid `[...]` cannot consume it — unless `dotglob`
 /// is set, in which case those pattern bytes may eat the leading `.`.
-fn dot_blocked(pat: &[u8], mask: &[bool], name: &[u8], dotglob: bool) -> bool {
+fn dot_blocked(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob: bool) -> bool {
     if name.first() != Some(&b'.') || dotglob {
         return false;
     }

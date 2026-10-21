@@ -1,6 +1,6 @@
 use super::State;
 use crate::error::parse::ParseError;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 
 impl State {
     /// Read an unquoted escape pair `\X` into the current word: both bytes go
@@ -14,16 +14,10 @@ impl State {
         &mut self,
         bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     ) -> Result<(), Report<ParseError>> {
-        self.cur
-            .push_byte(b'\\')
-            .change_context(ParseError::InvalidChar { ch: 0 })?;
-        self.mask.push(false);
+        self.push_masked(b'\\', false)?;
         if let Some(c) = bytes.next() {
             self.pos += 1;
-            self.cur
-                .push_byte(c)
-                .change_context(ParseError::InvalidChar { ch: 0 })?;
-            self.mask.push(false);
+            self.push_masked(c, false)?;
         }
         Ok(())
     }

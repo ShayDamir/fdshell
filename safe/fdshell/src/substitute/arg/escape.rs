@@ -7,6 +7,7 @@ use error_stack::Report;
 use sys::ShortCStr;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::substitute::mask::{Counting, push_byte};
 
 /// Unquoted POSIX #4.1: `\X` removes the backslash and the escaped byte
@@ -17,7 +18,7 @@ pub(super) fn unquoted(
     peek: &mut Counting<'_>,
     idx: &mut usize,
     out: &mut ShortCStr,
-    mask: &mut Vec<bool>,
+    mask: &mut Vec<MaskBit>,
 ) -> Result<(), Report<ResolveError>> {
     match peek.next() {
         Some(b'\n') => *idx += 1,
@@ -38,7 +39,7 @@ pub(super) fn quoted(
     peek: &mut Counting<'_>,
     idx: &mut usize,
     out: &mut ShortCStr,
-    mask: &mut Vec<bool>,
+    mask: &mut Vec<MaskBit>,
     quoted: bool,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek() {

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 use crate::capture::Capture;
+use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::frames::{pop_frame, push_frame};
 use alloc::vec;
@@ -31,7 +32,10 @@ fn make_cmdline_with_masks(args: &[&str], quoted: bool) -> CommandLine {
         command_quoted: false,
         env_assigns: vec![],
         args: args.iter().map(|a| s(a.as_bytes())).collect(),
-        args_mask: args.iter().map(|a| vec![quoted; a.len()]).collect(),
+        args_mask: args
+            .iter()
+            .map(|a| vec![MaskBit::from_quoted(quoted); a.len()])
+            .collect(),
         args_span: vec![vec![]; args.len()],
         args_quoted: vec![quoted; args.len()],
         captures: vec![],

@@ -53,6 +53,7 @@ pub(crate) use redirect::{clobber_word, pipe_token_span, pipeline_pipe};
 pub(crate) use time_block::TimeBlock;
 
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::ShortCStr;
@@ -66,7 +67,7 @@ use sys::ShortCStr;
 /// `''` pair — zero bytes, zero bits — so the tilde rule consults this list;
 /// `~""/x` → text `~/x`, mask all-`false`, spans `[1]`). Parallel plumbing:
 /// every surface that carries a mask carries this list at the same offset.
-pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<bool>, Vec<usize>);
+pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<MaskBit>, Vec<usize>);
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     inner_parse(text)

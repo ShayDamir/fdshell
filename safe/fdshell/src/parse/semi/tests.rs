@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::try_join_masked;
+use crate::mask::MaskBit;
+use crate::mask::MaskBit::Unquoted;
 use crate::parse::token::tokenize;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -8,7 +10,7 @@ use sys::ShortCStr;
 /// `try_join_masked` of every token of `line`: the joined text, its mask and its
 /// zero-byte span list. Task #321: the spans shift by the join offset, and a
 /// joined list nothing walks is a free mutant — so the lists are pinned here.
-fn join(line: &[u8]) -> (ShortCStr, Vec<bool>, Vec<usize>) {
+fn join(line: &[u8]) -> (ShortCStr, Vec<MaskBit>, Vec<usize>) {
     try_join_masked(&tokenize(line).unwrap())
 }
 
@@ -20,13 +22,13 @@ fn joined_spans_shift_by_the_join_offset() {
     // shift to `*` gives 3, and the tilde gate reads a different prefix.
     let (text, mask, spans) = join(b"~/a b\"\"");
     assert_eq!(text, ShortCStr::from(c"~/a b"));
-    assert_eq!(mask, vec![false; 5], "mask parallel to the text");
+    assert_eq!(mask, vec![Unquoted; 5], "mask parallel to the text");
     assert_eq!(spans, vec![4]);
     // A leading pair keeps its index 0 (`""~/x` is the tilde-prefix shape the
     // gate reads at 0) and the second token's pair is shifted: `[0, 4]`.
     let (text, mask, spans) = join(b"\"\"~/x b\"\"");
     assert_eq!(text, ShortCStr::from(c"~/x b"));
-    assert_eq!(mask, vec![false; 5]);
+    assert_eq!(mask, vec![Unquoted; 5]);
     assert_eq!(spans, vec![0, 4]);
 }
 
@@ -43,7 +45,7 @@ fn case_word_join_keeps_the_zero_byte_span() {
         .unwrap();
     let (word, word_mask, word_span) = try_join_masked(tokens.get(1..in_idx).unwrap());
     assert_eq!(word, ShortCStr::from(c"~"));
-    assert_eq!(word_mask, vec![false]);
+    assert_eq!(word_mask, vec![Unquoted]);
     assert_eq!(word_span, vec![1]);
     // Two word tokens with a pair in each: the offsets are 0 and 1, and the
     // joined list keeps each pair's own shifted index.
@@ -54,7 +56,7 @@ fn case_word_join_keeps_the_zero_byte_span() {
         .unwrap();
     let (word, word_mask, word_span) = try_join_masked(tokens.get(1..in_idx).unwrap());
     assert_eq!(word, ShortCStr::from(c"~ x"));
-    assert_eq!(word_mask, vec![false; 3], "mask parallel to the text");
+    assert_eq!(word_mask, vec![Unquoted; 3], "mask parallel to the text");
     assert_eq!(word_span, vec![1, 2]);
 }
 

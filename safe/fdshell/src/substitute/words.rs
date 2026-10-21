@@ -8,6 +8,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 use super::fields::word_fields;
@@ -18,7 +19,7 @@ use super::fields::word_fields;
 /// fd `cache` is shared by every word of the call, as the `%fd` lookups repeat.
 pub fn substitute_args(
     args: &[ShortCStr],
-    args_mask: &[Vec<bool>],
+    args_mask: &[Vec<MaskBit>],
     args_span: &[Vec<usize>],
     args_quoted: &[bool],
     cell: &ForkCell<ShellState>,
@@ -41,7 +42,7 @@ pub fn substitute_args(
 fn push_word(
     result: &mut Vec<ShortCStr>,
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<ResolveError>> {
     if super::fully_quoted(mask) {

@@ -19,6 +19,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
+use crate::mask::MaskBit;
 use crate::options;
 use crate::state::ShellState;
 
@@ -31,7 +32,7 @@ use crate::state::ShellState;
 /// pinned `%CWD` fd) or at the process CWD when `base` is `None`.
 pub(crate) fn matches(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     cell: &ForkCell<ShellState>,
     base: Option<&LocalFd>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
@@ -63,7 +64,7 @@ pub(crate) fn matches(
 /// full paths (callers assign any trace origin).
 pub(crate) fn expand(
     word: &ShortCStr,
-    mask: &[bool],
+    mask: &[MaskBit],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<ResolveError>> {
     // Word/command-name expansion stays CWD-rooted (bash semantics): the
