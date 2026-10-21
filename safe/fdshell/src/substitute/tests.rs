@@ -12,6 +12,7 @@ use crate::error::resolve::ResolveError;
 use crate::state::{FdVar, ShellState};
 
 use super::arg::substitute_arg_marked;
+use super::fields::word_fields;
 use super::mask::Counting;
 use super::origin::Origin;
 use super::substitute_arg;
@@ -3613,4 +3614,44 @@ fn dollar_star_arm_records_one_span_and_no_boundary() {
 fn exported_fd(raw: i32) -> ExportedFd {
     let (src, _dst) = sys::pipe::pipe2(0).unwrap();
     src.export_to(raw).unwrap()
+}
+
+/// `word_fields` is exactly the **pre-glob** half of `substitute_args`:
+/// pathname-expanding its fields with the argument policy reproduces
+/// `substitute_args`' word list. The redirect target calls `word_fields` and
+/// globs with its own policy (base = the pinned `%CWD`, literal on no match),
+/// so the half they share must stay one pipeline (task #278).
+#[test]
+fn word_fields_are_the_pre_glob_step_of_substitute_args() {
+    let cell = dummy_cell();
+    for word in [
+        c"plain",
+        c"$var",
+        c"$multi_word",
+        c"$empty",
+        c"x$var",
+        c"${var}",
+        c"nomatch*",
+        c"$@",
+        c"$*",
+    ] {
+        let w = ShortCStr::from(word);
+        let mut cache = HashMap::new();
+        let fields = word_fields(&w, &[], &[], false, &mut cache, &cell).unwrap();
+        let mut want: Vec<ShortCStr> = Vec::new();
+        for (field, mask) in &fields {
+            // `substitute_args::push_word`: a fully quoted field is kept
+            // whole, any other field is pathname-expanded.
+            if super::fully_quoted(mask) {
+                want.push(field.clone());
+                continue;
+            }
+            for expanded in crate::glob::expand(field, mask, &cell).unwrap() {
+                want.push(expanded);
+            }
+        }
+        let got =
+            super::substitute_args(core::slice::from_ref(&w), &[], &[], &[false], &cell).unwrap();
+        assert_eq!(got, want, "word {word:?}");
+    }
 }

@@ -10,22 +10,12 @@ use crate::bytes::fold::fold_word;
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 
-/// A word whose bytes can start an expansion: `$`, a backtick, a `%`, or a
-/// leading `~`. This is a **raw-text** test, never a mask test: `"$(echo ls)"`
-/// carries mask `true` on every byte and must still expand (bash doubles
-/// quotes do not suppress command substitution), so a mask-gated word is an
-/// unsound false negative. A false positive is harmless — every arm of the
-/// pipeline is correct on a word with no trigger.
-fn has_trigger(bytes: &[u8]) -> bool {
-    bytes.first() == Some(&b'~') || bytes.iter().any(|b| matches!(b, b'$' | b'`' | b'%'))
-}
-
 /// The word is its own single field: no expansion trigger, no escape pair to
 /// fold, no unquoted pattern byte to glob. The fast path that keeps a plain
 /// command name (`echo`, `ls`, `cd`) borrowed — no allocation at all.
 pub(super) fn passes_through(word: &ShortCStr, mask: &[bool]) -> bool {
     word.as_bytes().is_ok_and(|bytes| {
-        !has_trigger(bytes)
+        !crate::substitute::has_trigger(bytes)
             && !bytes.contains(&b'\\')
             && !crate::glob::has_unquoted_pattern(bytes, mask)
     })
@@ -49,7 +39,7 @@ pub(crate) fn fields(
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<CmdError>> {
     let bytes = word.as_bytes().change_context(CmdError::Never)?;
-    if !has_trigger(bytes) {
+    if !crate::substitute::has_trigger(bytes) {
         let (folded, folded_mask) = fold_word(word, mask).change_context(CmdError::Never)?;
         return crate::glob::expand(&folded, &folded_mask, cell).change_context(CmdError::Resolve);
     }
