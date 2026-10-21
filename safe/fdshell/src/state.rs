@@ -43,6 +43,10 @@ pub struct ShellState {
     pub(crate) eval_depth: u32,
     pub(crate) ifs: ShortCStr,
     pub(crate) options: u32,
+    /// The REPL's interactive flag: true when its stdin is a terminal (bash's
+    /// "interactive shell"). Seeds the default `ignoreeof` and gates the EOF
+    /// policy; false in `-c` and script-file modes.
+    pub(crate) interactive: bool,
     pub(crate) capture_limit: usize,
     pub(crate) hash_table: HashMap<ShortCStr, ShortCStr>,
     pub(crate) aliases: HashMap<ShortCStr, ShortCStr>,
@@ -80,6 +84,7 @@ impl ShellState {
             eval_depth: 0,
             ifs: Self::default_ifs(),
             options: crate::options::DEFAULTS,
+            interactive: false,
             capture_limit: crate::cmd_subst::MAX_CAPTURED,
             hash_table: HashMap::new(),
             aliases: HashMap::new(),

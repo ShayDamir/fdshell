@@ -50,8 +50,9 @@ impl LineReader {
 
 /// Write `prompt`, then read one line from `sys::IN` into `buf` (up to, not
 /// including, the terminating `\n`). Returns whether the REPL should keep
-/// reading: `true` on a line, or on EOF with `ignoreeof` on (the hint is
-/// printed); `false` on EOF with `ignoreeof` off. Fails with
+/// reading: `true` on a line, or on EOF with `ignoreeof` on in an
+/// interactive (terminal) loop; `false` on EOF with `ignoreeof` off, and on
+/// EOF with it on over a pipe (the hint is printed either way). Fails with
 /// [`AppError::LineTooLarge`] once `buf` would grow past `limit` bytes; the
 /// caller reuses `buf` across the continuation loop, so the cap also bounds
 /// the whole accumulated multi-line construct.
@@ -94,15 +95,23 @@ fn append_capped(buf: &mut Vec<u8>, take: &[u8], limit: usize) -> Result<(), Rep
     Ok(())
 }
 
-/// End of input: with `ignoreeof` on, hint how to leave and keep the shell
-/// alive (bash compat); otherwise exit.
+/// End of input: with `ignoreeof` on, hint how to leave, and keep the shell
+/// alive only in the interactive (terminal) loop — a pipe's EOF is sticky, so
+/// continuing there livelocks. Otherwise exit (bash, task #291).
 pub(crate) fn eof_continues(cell: &ForkCell<ShellState>) -> Result<bool, Report<AppError>> {
-    let state = cell.borrow().change_context(AppError::Borrow)?;
-    if state.options & crate::options::IGNOREEOF == 0 {
+    let (ignoreeof, interactive) = {
+        let state = cell.borrow().change_context(AppError::Borrow)?;
+        (
+            state.options & crate::options::IGNOREEOF != 0,
+            state.interactive,
+        )
+    };
+    if !ignoreeof {
         return Ok(false);
     }
+    // The shared `Ref` above is dropped: `write_all` is a syscall.
     sys::OUT
         .write_all(b"use `exit' to leave\n")
         .change_context(AppError::Read)?;
-    Ok(true)
+    Ok(interactive)
 }

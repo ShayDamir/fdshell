@@ -33,19 +33,23 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     }
 }
 
-/// Seed `$0` with the invocation name for interactive mode. Only this path
-/// needs it: `-c` and script-file modes seed it before dispatching.
+/// Seed `$0` with the invocation name and the interactive flag for the REPL.
+/// Only this path needs them: `-c` and script-file modes seed `$0` before
+/// dispatching and never enter the read loop.
 fn seed_state(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     let program = ImportedStr::shell(ShortCStr::from(c"fdshell"));
-    cell.borrow_mut()
-        .change_context(AppError::Borrow)?
-        .set_program_name(program);
-    // Like bash, `ignoreeof` is on only when stdin is a terminal, so a
-    // stray Ctrl+D does not kill an interactive shell; piped input
-    // still exits on EOF. The seed borrow above is already dropped: `is_tty`
-    // is a syscall, and a held `RefMut` poisons every nested borrow.
-    if sys::IN.is_tty().change_context(AppError::Read)? {
-        cell.borrow_mut().change_context(AppError::Borrow)?.options |= IGNOREEOF;
+    // The `is_tty` syscall precedes the borrow: it is a syscall, and a held
+    // `RefMut` poisons every nested borrow.
+    let interactive = sys::IN.is_tty().change_context(AppError::Read)?;
+    let mut state = cell.borrow_mut().change_context(AppError::Borrow)?;
+    state.set_program_name(program);
+    state.interactive = interactive;
+    // Like bash, `ignoreeof` is on only when stdin is a terminal, so a stray
+    // Ctrl+D does not kill an interactive shell. The flag is cached because
+    // the EOF policy is the conjunction of the option bit and interactivity:
+    // a pipe's EOF is sticky, so ignoring it there livelocks (task #291).
+    if interactive {
+        state.options |= IGNOREEOF;
     }
     Ok(())
 }
@@ -77,8 +81,8 @@ fn read_input(
 /// Buffer incomplete input (open blocks, unterminated heredocs, trailing
 /// operators, unbalanced quotes) until it forms a complete construct. On EOF
 /// with `ignoreeof` off, stop and execute what we have (bash: incomplete
-/// input at EOF runs and reports the parse error); with `ignoreeof` on,
-/// `read_line` keeps the shell alive.
+/// input at EOF runs and reports the parse error); with `ignoreeof` on, a
+/// terminal keeps the shell alive and a pipe ends the input (task #291).
 fn read_continuation(
     cell: &ForkCell<ShellState>,
     buf: &mut Vec<u8>,
