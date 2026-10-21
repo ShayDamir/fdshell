@@ -477,7 +477,11 @@ fn dollar_quote_keeps_the_dollar() {
     assert_eq!((out.as_str(), code), ("a$b cd\n", 0), "stderr={err:?}");
     // The same family (task #223): bash's `$"…"` is a locale translation and
     // in the C locale it is the span's text; fdshell reads the `$` as the
-    // POSIX-sh expansion, so `v=q; printf "[%s]" $"v"` prints `[$v]`.
+    // POSIX-sh expansion, so `v=q; printf "[%s]" $"v"` prints `[$v]`. The
+    // family's digit shapes are pinned by
+    // `locale_family_digits_obey_the_region_cap` (task #286): the digit arm
+    // honours the same region cap as the name arm, so `$"1"` is `[$1]` and not
+    // positional 1.
     let (out, err, code) = run(r#"v=q; printf "[%s]" $"v""#);
     assert_eq!((out.as_str(), code), ("[$v]", 0), "stderr={err:?}");
 }
@@ -803,6 +807,65 @@ fn dollar_at_a_region_end_is_a_literal_byte() {
     // literal `,` glues).
     let (out, err, code) = run(r#"IFS=,; v=q; printf "[%s]" "$"v,a"#);
     assert_eq!((out.as_str(), code), ("[$v,a]", 0), "stderr={err:?}");
+}
+
+/// The **digit** shapes of the same `$'…'`/`$"…"` family obey the very region
+/// cap a bare name does (task #286): the trigger byte's quote region ends at
+/// the `$`, so the arm consumes nothing and the `$` is a literal byte, with the
+/// digits reaching the word as literal text. bash reads `$"…"` as a locale
+/// translation and in the C locale it expands the span's text (`$"1"` is
+/// positional 1 = `1`), which is the divergence README documents for `$"v"`;
+/// the `"$"1` spelling is parity. Every expectation is bash 5.3.9's output for
+/// the same script (the bash column in each comment).
+#[test]
+fn locale_family_digits_obey_the_region_cap() {
+    for (script, want) in [
+        // The family divergence: `$"1"` is the text `$1` (bash `[1]`).
+        (r#"set -- A B; printf "[%s]" $"1""#, "[$1]"),
+        (r#"set -- A B; printf "[%s]" $"12""#, "[$12]"),
+        (r#"set -- A B; printf "[%s]" $"1"x"#, "[$1x]"),
+        (r#"set -- A B; printf "[%s]" a$"1"b"#, "[a$1b]"),
+        // `$"0"`: no program-name expansion in the family (bash `[0]`).
+        (r#"printf "[%s]" $"0""#, "[$0]"),
+        // The empty span of the family stays the `$` byte (bash `[]`). Escaped
+        // string, not a raw one: `r#"…$""#` would end at the `""#`.
+        ("printf \"[%s]\" $\"\"", "[$]"),
+        // `set -u` no longer bails in this family: nothing is a parameter
+        // reference, so there is nothing unbound (bash `[1]`, rc 0).
+        (r#"set -u; set --; printf "[%s]" $"1""#, "[$1]"),
+        // Parity: the `"$"1` spelling, and bash agrees byte for byte.
+        (r#"set -- A B; printf "[%s]" "$"1"#, "[$1]"),
+        (r#"set -- A B; printf "[%s]" "$"12"#, "[$12]"),
+        // A region with one byte left expands: the cap is a **region** cap, so
+        // these rows keep the digit arm alive (the mutant discriminant).
+        (r#"set -- A B; printf "[%s]" "$1"2"#, "[A2]"),
+        (r#"set -- A B; printf "[%s]" "$1"abc"#, "[Aabc]"),
+        (r#"set -- A B; printf "[%s]" $1"2""#, "[A2]"),
+        (r#"set -- A B; printf "[%s]" "$1a""#, "[Aa]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // Splitting: the literal `$` is arm output and the digits are literal
+    // bytes, so the word reaches the splitter as one field (bash `[1,a]`).
+    let (out, err, code) = run(r#"IFS=,; set -- A B; printf "[%s]" $"1",a"#);
+    assert_eq!((out.as_str(), code), ("[$1,a]", 0), "stderr={err:?}");
+    for (script, want) in [
+        (
+            r#"IFS=,; set -- A B; set -- $"1",a; printf "[%s]\n" "$@""#,
+            "[$1,a]\n",
+        ),
+        (
+            r#"IFS=,; set -- A B; set -- "$"1,a; printf "[%s]\n" "$@""#,
+            "[$1,a]\n",
+        ),
+        // Word count: the family word is one word, never zero words.
+        (r#"set -- A B; set -- $"1"; printf "<%s>\n" "$@""#, "<$1>\n"),
+        (r#"set -- A B; set -- $""; printf "<%s>\n" "$@""#, "<$>\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
 }
 
 /// A quote region ends a bare name (task #285): the mask spells where each

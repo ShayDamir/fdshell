@@ -47,7 +47,10 @@ impl ShellState {
 /// `$0` and the nounset rule live in `positional_value`, shared with the braced
 /// path so the two forms agree. `limit` caps the run at the trigger byte's
 /// quote region, exactly as a variable name is capped (`"$1"2` is `$1` plus
-/// the literal `2`).
+/// the literal `2`). `limit >= 1` here: the caller owns the `limit == 0`
+/// reading (a region that ends at the `$` expands nothing and leaves the `$`
+/// literal, `dollar::region_ends_at_dollar`), so `first_digit` is always
+/// inside the region.
 pub(super) fn resolve_positional_index(
     first_digit: u8,
     peek: &mut super::mask::Counting<'_>,

@@ -3545,6 +3545,45 @@ fn dollar_at_region_end_is_literal() {
     assert!(expanded);
 }
 
+#[test]
+fn positional_at_region_end_is_literal_and_consumes_nothing() {
+    // `"$"12`: the byte after `$` starts a new region, so the digit arm obeys
+    // the name arm's cap (`region_ends_at_dollar`) — no digit is consumed, the
+    // `$` is literal and the digits reach the loop as literal bytes: `$12`,
+    // where bash's locale translation prints `12` (the `$"…"` family, README
+    // accepted divergence). The positionals are bound, so the pin measures the
+    // cap and not an unset parameter.
+    let cell = dummy_cell();
+    cell.borrow_mut().unwrap().set_positional(
+        [c"A", c"B"]
+            .into_iter()
+            .map(ShortCStr::from)
+            .map(ImportedStr::shell)
+            .collect(),
+    );
+    let (res, mask, expanded) = expand_marked(
+        &cell,
+        &ShortCStr::from(c"$12"),
+        &[Quoted, Unquoted, Unquoted],
+        &[],
+    );
+    assert_eq!(res.as_bytes().unwrap(), b"$12");
+    assert_eq!(mask, vec![Quoted, Unquoted, Unquoted]);
+    assert!(
+        expanded,
+        "the `$` arm ran, so its byte reaches the splitter"
+    );
+    // One digit, the same cap: `"$"1` is `$1` (bash prints `$1` — parity).
+    let (res, mask, expanded) =
+        expand_marked(&cell, &ShortCStr::from(c"$1"), &[Quoted, Unquoted], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"$1");
+    assert_eq!(mask, vec![Quoted, Unquoted]);
+    assert!(expanded);
+    // The cap is a **region** cap: one byte of region is enough to expand `$1`
+    // and leave the literal `2` outside it (`"$1"2` is `[A2]`, bash parity).
+    assert_eq!(expand(&cell, c"$12", &[Quoted, Quoted, Unquoted]), b"A2");
+}
+
 /// The arm as the pipeline runs it, handing back the full provenance.
 fn expand_origin(
     cell: &ForkCell<ShellState>,

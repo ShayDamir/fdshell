@@ -20,6 +20,19 @@ pub(crate) struct Region<'a> {
     pub limit: usize,
 }
 
+/// The region cap both name-shaped arms of the `$` arm obey: when the trigger
+/// byte's quote region ends at the `$`, no reference can start, so the arm
+/// consumes nothing and the `$` is a literal byte (`"$"v` is `$v`, `$"1"` is
+/// `$1` — the `$'…'`/`$"…"` reading, README accepted divergence). `true` means
+/// the literal byte is written and the arm is done.
+fn region_ends_at_dollar(limit: usize, out: &mut ShortCStr) -> bool {
+    if limit == 0 {
+        out.push(c"$");
+        return true;
+    }
+    false
+}
+
 pub(crate) fn dollar_subst(
     peek: &mut super::mask::Counting<'_>,
     cell: &ForkCell<ShellState>,
@@ -52,6 +65,14 @@ pub(crate) fn dollar_subst(
         Some(b'@') | Some(b'*') => at_star::expand(peek, cell, out, quoted, origin)?,
         Some(c @ b'0'..=b'9') => {
             // `$0` is the program name; `$1, $2, ... $N` are the positionals.
+            // The digit run is capped at the trigger byte's quote region
+            // exactly as a name is, so a region that ends at the `$` leaves no
+            // digit: the `$` is literal and the digits reach the loop as
+            // literal bytes — the `$"…"` family (`$"1"` is `$1`, bash `1`;
+            // `"$"12` is `$12`, bash parity).
+            if region_ends_at_dollar(limit, out) {
+                return Ok(());
+            }
             peek.next();
             let state = super::borrow_state(cell)?;
             super::resolve::resolve_positional_index(c, peek, &state, out, limit)?;
@@ -61,8 +82,7 @@ pub(crate) fn dollar_subst(
             // (`"$v"bc` is the parameter `v` plus the literal `bc`), so a
             // region that ends at the `$` leaves no name and the `$` is
             // literal — the same rule `$'…'` and `$"…"` already follow.
-            if limit == 0 {
-                out.push(c"$");
+            if region_ends_at_dollar(limit, out) {
                 return Ok(());
             }
             let name_scs = super::percent::collect_name(peek, limit)?;
