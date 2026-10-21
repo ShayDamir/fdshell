@@ -580,6 +580,52 @@ expansion; `shopt -s dotglob` lets patterns match a leading dot;
 `shopt -s nullglob` deletes a pattern with no match; `shopt -s failglob`
 makes it an error.
 
+### Command lookup table (`hash`)
+
+`hash` is the table of resolved program paths: a successful `PATH` search
+records its result there, and a later run of the same name skips the scan.
+
+```shell
+hash                         # list the table, one `name<TAB>path` line per entry
+hash ls                      # look `ls` up, print the path, cache it
+hash mytool /opt/bin/mytool  # pin the name to a path (fdshell extension)
+hash -r                      # clear the table
+hash -r mytool               # drop one entry (fdshell extension)
+hash -d ls                   # drop one entry (bash's `-d`)
+```
+
+Every word `hash` consumes is an ordinary word: `$name`, `$( … )`, backticks,
+`$(( … ))`, `~`, `%fd`, `IFS` splitting and pathname expansion all apply to
+the name words and to the pin path, with the usual quoting rule (`"` never
+suppresses an expansion, `'` does) and the usual glob policy (`set -f`,
+`shopt -s nullglob`/`failglob`/`dotglob`).
+
+```shell
+hash $(echo ls)              # the name `ls`
+hash '$(echo ls)'            # the literal name `$(echo ls)`
+hash *                       # one name per match in the current directory
+set -f; hash *               # with `noglob`, the pattern itself
+```
+
+The option word is read **after** the expansion, so `hash $(echo -r)` clears
+the table. An expansion-free name folds its escape pairs as every word does,
+so `hash a\*` looks up the name `a*` (and its `*` is protected, so it never
+globs). The table is keyed by the **expanded** name — the shape the shell
+stores when it runs a command, so the two keys meet. 0 fields is the bare
+listing: `hash $(true)` and `hash $@` with no positionals print the table
+instead of looking up an empty name.
+
+fdshell's accepted divergences from bash, all owned by task #375 (the
+`-l`/`-t`/`-p` option and listing surface): `hash NAME PATH` pins the entry
+(bash hashes each name), `hash -r NAME…` removes those entries (bash ignores
+the names), `hash NAME` prints the resolved path (bash prints nothing), a
+bare `hash` of an empty table prints nothing (bash says
+`hash: hash table empty`), a name with a `/` reports `hash: NAME: not found`
+(bash accepts it silently), a third field is `hash: bad usage …` (bash
+hashes each name), and a bare `hash -d` is the same usage error (bash's
+getopt diagnostic). `hash -d NAME` on a name with no entry reports
+`hash: NAME: not found` and exits 1, as bash does.
+
 ### Brace expansion
 
 `{a,b,c}` produces one word per alternative, and `{1..5}` a range:
@@ -705,8 +751,9 @@ While `strict` is on, `openat2`, `mkdirat`, `mkfifoat`, `renameat2`,
 have no per-command `--dirfd`, so strict resolves them through the shell's
 pinned `%CWD` descriptor and bans filesystem-root paths: a redirect target, a
 program word containing `/`, a `hash` pin, and every absolute `PATH` entry
-must stay relative — the target check runs on the **expanded** word, so a
-target expanding to `/etc/x` is refused as well. `exec`/`become` inherit the
+must stay relative — the check runs on the **expanded** word, so a target
+expanding to `/etc/x` is refused as well, and so is a `hash` pin whose path
+only the expansion makes absolute (`hash fdprobe $PWD/target`). `exec`/`become` inherit the
 ban. `cd ..` remains the user's own escape hatch: the base follows the shell,
 exactly as a relative path does.
 
