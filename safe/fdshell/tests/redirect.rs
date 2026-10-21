@@ -1692,30 +1692,67 @@ fn exec_target_expands_and_stays() {
 /// The `%` byte stays out of the target's trigger gate, measured in bash:
 /// `> a%b` and `> a%CWD/x` are file names, not fd lookups, and the spaced `%v`
 /// operand stays the `%`-namespace guard's syntax error (POSIX_COMPATIBILITY
-/// "Operators are recognized at word starts", #323). The `a%log$(echo x)` row
-/// is the accepted leak task #371 owns: a word with **another** trigger reaches
-/// the `%name` arm, so the fd variable name expands (unset here, so bash and
-/// fdshell agree on `a%logx`).
+/// "Operators are recognized at word starts", #323).
+///
+/// The two rows with a **live** `%log` fd are what pins the gate: `%` alone
+/// never triggers the expansion, so `> a%log` keeps its bytes (bash agrees, and
+/// expanding the fd would create `a<fd>`), while a word carrying *another*
+/// trigger reaches the `%name` arm — the accepted leak task #371 owns, pinned
+/// here in the shape that actually diverges (`a<fd>x`, where bash writes
+/// `a%logx`).
 #[test]
 fn percent_bytes_in_a_target_stay_file_name_data() {
     let dir = seeded("sub_percent");
     let dir = dir.to_str().unwrap();
+    // Opening `%log` is the fdshell extension bash has no equivalent of; the
+    // `openat2` command itself creates `log`, so both names are expected.
+    const OPEN: &str =
+        "builtin openat2 --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 log";
     for (script, want) in [
-        ("echo hi > a%b", "a%b"),
-        ("echo hi > a%log$(echo x)", "a%logx"),
-        ("echo hi > $(echo \"%log\")", "%log"),
+        ("echo hi > a%b", &["a%b"][..]),
+        // `%log` unset: the fd name collapses to nothing, so bash and fdshell
+        // agree on `a%logx` and the leak is invisible here — the live-fd row
+        // below is what pins it.
+        ("echo hi > a%log$(echo x)", &["a%logx"]),
+        ("echo hi > $(echo \"%log\")", &["%log"]),
         // The `%fd` target the shell *does* own is a parse-time variable
         // source (the attached `>%name` form), never a word to expand.
+        (&format!("{OPEN} %>%log; echo x >%log"), &["log"]),
+        // `%` is the word's only trigger byte: no expansion, so the fd variable
+        // name stays file-name data. `target_trigger -> true` creates `a<fd>`.
         (
-            "builtin openat2 --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 log %>%log; echo x >%log",
-            "log",
+            &format!("{OPEN} %>%log; echo hi > a%log"),
+            &["a%log", "log"],
         ),
     ] {
         clean(dir);
         let (out, err, code, files) = run_ls(dir, script);
         assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
-        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+        let want: Vec<String> = want.iter().map(|w| w.to_string()).collect();
+        assert_eq!(created(&files), want, "{script}");
     }
+    // The #371 divergence, with the fd **open**: a `$` trigger puts the whole
+    // word through substitution, so the `%log` name resolves to its fd number.
+    // bash writes the literal `a%logx`; fdshell writes `a<fd>x` (the fd number
+    // depends on how many fds the process holds, so the shape is asserted).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, &format!("{OPEN} %>%log; echo hi > a%log$(echo x)"));
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let names = created(&files);
+    assert_eq!(names.len(), 2, "the target plus `log`: {names:?}");
+    let name = names
+        .iter()
+        .find(|f| f.starts_with('a'))
+        .unwrap()
+        .to_string();
+    let fd_number = name
+        .strip_prefix('a')
+        .and_then(|n| n.strip_suffix('x'))
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    assert!(
+        fd_number.is_some(),
+        "the fd number replaces the `%log` name, where bash writes `a%logx`: {name}"
+    );
     clean(dir);
     let (out, err, code, files) = run_ls(dir, "echo hi > a%CWD/x");
     assert_eq!(
