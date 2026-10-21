@@ -44,11 +44,11 @@ pub(crate) fn run_hash(
 }
 
 /// Options are read on the expanded fields: `hash $(echo -r)` clears the
-/// table, `hash -d $(echo ls)` deletes the expanded name. `names` is the
-/// operand list after the option word (or after the name, for the pin form).
-fn dispatch(names_all: &[ShortCStr], state: &mut ShellState) -> Result<i32, Report<CmdError>> {
-    let operands = names_all.get(1..).unwrap_or(&[]);
-    match names_all.first() {
+/// table, `hash -d $(echo ls)` deletes the expanded name. `operands` is the
+/// field list after the option word (or after the name, for the pin form).
+fn dispatch(fields: &[ShortCStr], state: &mut ShellState) -> Result<i32, Report<CmdError>> {
+    let operands = fields.get(1..).unwrap_or(&[]);
+    match fields.first() {
         None => Ok(state.list_hash()),
         Some(flag) if flag.eq_bytes(b"-r") => Ok(state.remove_hash(operands)),
         Some(flag) if flag.eq_bytes(b"-d") => drop::delete_names(operands, state),
