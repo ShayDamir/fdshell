@@ -464,7 +464,11 @@ f'oo'() { :; } # not a definition: the word `foo(` is not a valid name
 
 A `\`-escaped word (`\if`) was never a keyword here: its text is `\if`, so it
 is looked up in `PATH` in both shells. The command-not-found exit code is
-fdshell's shell-wide **1**, not bash's 127.
+fdshell's shell-wide **1**, not bash's 127. The same word-unit rule covers a
+`$( … )` region: the region is one word, so its `(` is never the definer
+opener's `(` and `$( echo true ) { :; }` runs the words instead of opening a
+definition. An unclosed block names the keyword it wants —
+`'if' is missing its closing 'fi'` — and fails with that same parse-error rc 1.
 
 ### Variables
 
@@ -508,6 +512,21 @@ the arguments as separate words; `"$*"` joins them with the first `IFS` byte.
 files=$(ls)
 echo "there are $(echo "$files" | wc -l) entries"
 ```
+
+A `$( … )` region is **one word**, at every level of the scanner, so whitespace
+inside it is body text and never breaks the word: a body that starts with a
+space is an ordinary command word and an ordinary assignment value.
+
+```shell
+$( echo true )       # runs `true` (word 0), not a parse error
+$( echo echo ) hi    # hi
+x=$( echo a )$( echo b )   # x is `ab`
+```
+
+A word that carries a substitution region is never the `name(` definer of a
+function definition — the shapes bash writes as definitions carry no region. An
+unterminated region (`$( echo true`) is reported as `unexpected end of input`
+with the caret, rc 1.
 
 ### Word splitting and pathname expansion
 

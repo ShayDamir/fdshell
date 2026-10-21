@@ -178,3 +178,49 @@ fn definer_len_rejects_non_definers() {
     assert_eq!(definer_len(b"function)f", b"function)f", 0), None);
     assert_eq!(definer_len(b"", b"", 0), None);
 }
+
+/// Task #277: the byte word walk consumes a `$( … )` region **whole**, because
+/// `parse/token/step.rs` reads it as one word. Ungated, `$( echo true )` at a
+/// run start split to the word `$(`, `name_len` read it as the definer of the
+/// function `$`, and the run died as an unclosed `name() {` block where bash
+/// runs `true`. The same walk owns the assignment-value spelling.
+#[test]
+fn definer_word_consumes_a_substitution_region() {
+    for word in [
+        b"$( echo true )".as_slice(),
+        b"$( echo true)",
+        b"$(  echo true )",
+        b"x=$( echo a )",
+        b"$(echo a)b(",
+        b"$(echo a)(",
+        b"a$(b",
+        b"x=$( echo a ) f() {",
+        // The empty region: its `)` is the word's last byte, `(` is not.
+        b"$()",
+        // A region behind a name-shaped head is still one word.
+        b"f$( echo x )(",
+    ] {
+        assert_eq!(def(word), None, "a region-carrying word is no definer");
+    }
+    // An unterminated region claims the rest of the word — and the walk
+    // terminates (a `map_or(0, …)`/`map_or(i, …)` jump hangs the scan).
+    assert_eq!(def(b"$( echo true"), None);
+    assert_eq!(def(b"a$( echo true"), None);
+}
+
+/// The region jump must not over-consume: a word with no `$(` is split exactly
+/// as before, and a `)` right behind a region is the tokenizer's own word.
+#[test]
+fn substitution_region_does_not_move_the_word_boundaries() {
+    assert_eq!(def(b"f() { echo hi"), Some(b"f".to_vec()));
+    // A glued `(` with a split closer is the accepted `f( ) {` form; the fully
+    // split `f ( ) {` stays rejected by both layers (LESSONS, task #235).
+    assert_eq!(def(b"f( ) { echo hi"), Some(b"f".to_vec()));
+    assert_eq!(def(b"f ( ) { echo hi"), None, "split parens stay rejected");
+    assert_eq!(def(b"$(echo a))x"), None, "the `)` is the next word");
+    assert_eq!(name_len(b"a b"), None);
+    assert_eq!(definer_len(b"f(", b"f(", 0), Some(2));
+    // A `$` that is not a region opener is an ordinary name byte (the
+    // name-validity rule is task #166's, so a change here is a deliberate edit).
+    assert_eq!(def(b"$F() {"), Some(b"$F".to_vec()));
+}

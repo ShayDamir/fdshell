@@ -31,6 +31,25 @@ Use `.current_context()` to extract the context from `Report<T>`.
 Non-UTF-8 bytes use `from_utf8_lossy` — correct for errors. For data paths, use `as_bytes()`/`as_c_str()` (lossless).
 `report_*` functions that know the position must attach the input line alongside `ParsePosition`.
 
+## An unclosed block is a statement-layer report, so it must name the construct
+`ensure!(closed, CmdError::Parse)` printed the bare `parse error` with a Rust
+source frame and nothing a user can act on (`╰╴at safe/fdshell/src/script.rs:51:17`
+for `{ echo a`, `if true; then echo a`, `f() {` alike — task #277, STYLE §4.7). The
+layer that detects the missing closer owns the message: `script/unclosed.rs` builds
+`ParseError::MissingBlockCloser { opener, closer }` (`'if' is missing its closing 'fi'`,
+`'f()' is missing its closing '}'`) and attaches the `ParsePosition` caret under the
+opener, the mechanism `report_unbalanced_quote` uses. The opener word is the run's
+first word up to whitespace or `;`, with the `time [-p]` prefix run skipped through the
+shared `keywords::time_prefix_len` (`time while true` is named `while`, LESSONS
+"A statement-prefix keyword must be transparent in *every* first-word scorer"). The
+closer is a static `CStr` (`c"fi"`, `c"done"`, `c"esac"`, `c"}"`) converted with
+`ShortCStr::from`, so only the opener — user bytes — needs the `from_vec`
+NUL-impossible → `ParseError::Never` arm (STYLE §4.17, the shape of
+`parse/heredoc::unterminated`); splitting `report` from `parse_error` is what lets the
+unit test assert the variant, not just its context. **The exit code does not move:** a
+parse error is the shell-wide rc 1 (the rc-1-vs-2 family), and naming the construct
+does not make it bash's rc 2. Pins: `script/tests.rs`, `tests/cond_blocks.rs::unclosed_block_names_the_closer_it_wants`.
+
 ## `.change_context()` with same-message variants causes duplicate Display output
 Outer variant should describe *what* failed, inner describes *why*. Avoid "Y → because Y" chains.
 
@@ -808,6 +827,35 @@ word and never consumed. Consuming the glued `)` claimed `function)f g { … }` 
 (rc 0, killed by `keywords/function/tests.rs::glued_close_paren_after_the_keyword_is_its_own_word`).
 The same alignment makes `function f ( ) {`
 work, and keeps `f ( ) {` (POSIX form, split parens) rejected by both layers.
+
+**A byte-level word rule must be stated over the unit the tokenizer emits, and
+the tokenizer's unit here is a whole `$( … )` region.** `parse/token/step.rs`
+reads `$(` with `read_dollar_paren` and returns the closed region as **one word
+token**, so the byte word split must consume a `$(` region whole (task #277:
+`keywords/function.rs::word_end` jumps to the region's end through
+`paren_scan::scan_at`, the same entry point `scan/advance/subst.rs` and
+`arith/expand.rs` use — one implementation at both levels, no per-position
+special case). Ungated, the split stopped at the whitespace inside the region:
+`$( echo true )` at a run start became the word `$(`, `name_len` read it as the
+definer of the function `$` (a `(` is legal as a word's last byte),
+`brace::scan_function_block` found no `{`, and the statement died as a bare
+`parse error` rc 1 where bash runs `true`; the same walk owns the
+assignment-value spelling `x=$( echo a )`, whose head word was `x=$(`. The
+`$(echo true )` spelling was never broken — its first byte-run `$(echo` has the
+`(` *not* last, so `name_len` already rejected it, which is exactly the
+space-after-`$(` only pattern. Consequences, both pinned: an unterminated region
+claims the rest of the word (`map_or(body.len(), …)`) so the gate can never pair
+a word behind a region the tokenizer rejects with a `{`, and the jump stays
+terminating (`keywords/function/tests.rs::definer_word_consumes_a_substitution_region`;
+a `map_or(0, …)`/`map_or(i, …)` mutant hangs the scan, so the unterminated rows
+are the kill); the byte gate now rejects **every** word that carries a
+substitution region, so the definer-position shapes bash rejects at parse time
+(`$( echo hi ) { :; }`, `x$( echo hi ) { :; }`, `$() { :; }`) stay simple
+commands fdshell runs at rc 1 — the rc-2 family, filed as its own task, and the
+name-validity rule (`a$b()`, `$F()`) belongs to task **#166**, which is why
+`def(b"$F() {")` is pinned to `Some(b"$F")` here.
+Pins: `keywords/function/tests.rs`, `segment/tests.rs::scan_substitution_region_at_a_run_start_is_a_statement`,
+`tests/cmd_subst.rs::word0_substitution_body_starting_with_a_space_*`.
 
 ## `cargo mutants` dies with a nutmeg "View mutex" panic when the filesystem is full
 Symptom: the run aborts in its first two minutes with

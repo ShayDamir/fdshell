@@ -797,3 +797,134 @@ fn word0_leading_fields_take_the_argv_fd_substitution() {
         "the leading field must be substituted with the fd number, stdout={out:?}"
     );
 }
+
+/// Task #277: a `$( … )` region is one word for every scanner, so a body that
+/// starts with a space is an ordinary command word in word 0 — bash's own
+/// behavior. Before the fix the byte-level word split stopped inside the region,
+/// the leading `$(` read as the definer of the function `$`, and the statement
+/// died as a bare `parse error` rc 1. Every row measured against `bash -c` 5.3.9.
+#[test]
+fn word0_substitution_body_starting_with_a_space_runs() {
+    for script in [
+        "$( echo true)",
+        "$( echo true )",
+        "$(  echo true )",
+        "$( echo true ) zz",
+        "$( echo true ) &",
+        "true && $( echo true )",
+        "$( echo true ) && $( echo true )",
+        // The spellings that already worked: pinned so the fix cannot regress them.
+        "$(echo true)",
+        "$(echo true )",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must run, stderr={err}");
+        assert_eq!(out, "", "{script:?}");
+    }
+}
+
+/// A multi-word region body expands to the command name *and* leaves the rest of
+/// the line as its arguments: `$( echo echo ) hi` prints `hi` in both shells.
+#[test]
+fn word0_substitution_body_starting_with_a_space_multi_word_body() {
+    for (script, want) in [
+        ("$( echo echo ) hi", "hi\n"),
+        ("$( echo echo) hi", "hi\n"),
+        ("$(echo echo ) hi", "hi\n"),
+        ("$(echo echo) hi", "hi\n"),
+        ("$( echo echo ) $( echo hi )", "hi\n"),
+        ("echo a; $( echo echo ) b", "a\nb\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must run, stderr={err}");
+        assert_eq!(out, want, "{script:?}");
+    }
+}
+
+/// The inner substitution names the command that is missing: `$( $(echo echo) hi )`
+/// runs `hi`. fdshell's command-not-found status is the shell-wide 1, not bash's
+/// 127 (README "Words and quoting").
+#[test]
+fn word0_substitution_of_a_substitution_reports_the_inner_command() {
+    let (_out, err, rc) = run("$( $(echo echo) hi )");
+    assert_eq!(rc, 1);
+    assert!(err.contains("hi"), "stderr must name `hi`, got {err}");
+    assert!(
+        !err.contains("parse error"),
+        "no bare parse error, stderr={err}"
+    );
+}
+
+/// The assignment-value position is the same word walk: a space-opened body in
+/// `x=$( … )` assigns, and two regions in one value concatenate.
+#[test]
+fn assignment_value_substitution_body_starting_with_a_space_assigns() {
+    for (script, want) in [
+        (r#"x=$( echo -n ab ); echo "[$x]""#, "[ab]\n"),
+        (r#"x=$( echo a )$( echo b ); echo "[$x]""#, "[ab]\n"),
+        (r#"x=$( echo "a  b" ); echo "[$x]""#, "[a  b]\n"),
+        ("x=$( echo true )", ""),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(rc, 0, "{script:?} must run, stderr={err}");
+        assert_eq!(out, want, "{script:?}");
+    }
+}
+
+/// The space-opened body reaches every statement shape: a pipeline stage, a
+/// redirect target, a group. All rc 0, as in bash.
+#[test]
+fn word0_substitution_with_a_space_body_in_a_pipeline_and_background() {
+    let (out, err, rc) = run("echo $( echo hi ) | cat");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(out, "hi\n");
+    let (dir, _scratch) = word0_scratch();
+    // Word 0 expands to `true`, so the statement runs the builtin with its
+    // stdout redirected: the file exists (bash: the same, rc 0).
+    let (out, err, rc) = run_in(
+        &dir,
+        "$( echo true ) > out277; test -f out277 && echo written",
+    );
+    assert_eq!((out.as_str(), rc), ("written\n", 0), "stderr={err}");
+}
+
+/// Pinned as-is, the task that owns it filed: a `$( … )` word in **definer**
+/// position (before a `{` body) is not a function definition, so fdshell runs
+/// the words (`hi`, `}` — not found, rc 1) where bash rejects the line at parse
+/// time with a syntax error rc 2. The definer gate now rejects every word that
+/// carries a substitution region, exactly as the tokenizer's word split does.
+#[test]
+fn definer_position_substitution_word_is_not_a_definition() {
+    for script in ["$( echo hi ) { :; }", "x$( echo hi ) { :; }", "$() { :; }"] {
+        let (_out, err, rc) = run(script);
+        assert_eq!(rc, 1, "{script:?}, stderr={err}");
+        assert!(
+            err.contains("not found"),
+            "{script:?} must look the words up, stderr={err}"
+        );
+        assert!(
+            !err.contains("parse error"),
+            "{script:?} is not a parse error, stderr={err}"
+        );
+    }
+}
+
+/// An unterminated region is the tokenizer's clean report, not the statement
+/// layer's: `unexpected end of input` with the caret, rc 1 (bash rc 2). The
+/// byte-level gate must claim the rest of the word behind it, never pair it with
+/// a `{`.
+#[test]
+fn unterminated_substitution_reports_cleanly() {
+    for script in ["$( echo true", "$( echo true && echo b"] {
+        let (_out, err, rc) = run(script);
+        assert_eq!(rc, 1, "{script:?}");
+        assert!(
+            err.contains("unexpected end of input"),
+            "{script:?} must report the EOF, stderr={err}"
+        );
+        assert!(
+            !err.contains("is missing its closing"),
+            "{script:?} must not report an unclosed block, stderr={err}"
+        );
+    }
+}

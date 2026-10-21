@@ -1185,3 +1185,29 @@ fn ampersand_then_semicolon_in_a_body_is_rejected() {
         assert_eq!((out.as_str(), rc), ("", 0), "{script}: bash rc 2");
     }
 }
+
+/// Task #277 facet 2: an unclosed block is a statement-layer report, so it
+/// names the construct and the keyword it wants, with the caret under the opener
+/// (STYLE §4.7). The rc is the shell-wide 1 of a parse failure (bash: rc 2, the
+/// documented rc-1-vs-2 family).
+#[test]
+fn unclosed_block_names_the_closer_it_wants() {
+    for (script, want) in [
+        ("if true; then echo a", "'if' is missing its closing 'fi'"),
+        ("for i in a", "'for' is missing its closing 'done'"),
+        ("while true", "'while' is missing its closing 'done'"),
+        ("until false", "'until' is missing its closing 'done'"),
+        ("case 1 in", "'case' is missing its closing 'esac'"),
+        ("{ echo a", "'{' is missing its closing '}'"),
+        ("f() {", "'f()' is missing its closing '}'"),
+        ("function f", "'function' is missing its closing '}'"),
+        // The `time` prefix is transparent: the keyword behind it is named.
+        ("time while true", "'while' is missing its closing 'done'"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains(want), "{script}: stderr={err}");
+        // The `ParsePosition` attachment prints the line and its caret.
+        assert!(err.contains(script), "{script}: stderr={err}");
+    }
+}

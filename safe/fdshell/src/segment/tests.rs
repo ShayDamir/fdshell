@@ -1360,3 +1360,49 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
         _ => panic!("expected two Statement segments"),
     }
 }
+
+/// Task #277 end-to-end: a run whose first word carries a `$( … )` region that
+/// starts with a space is a **statement**, not an unclosed `name() {` block.
+/// Ungated, the byte word split stopped inside the region, `name_len` read the
+/// leading `$(` as the definer of the function `$`, and the scan claimed a block
+/// that never closed (`parse error`, rc 1) where bash runs the substitution.
+#[test]
+fn scan_substitution_region_at_a_run_start_is_a_statement() {
+    for (line, cmd, background) in [
+        (
+            b"$( echo true )".as_slice(),
+            b"$( echo true )".as_slice(),
+            false,
+        ),
+        (b"$( echo true)", b"$( echo true)", false),
+        (b"$(  echo true )", b"$(  echo true )", false),
+        (b"$( echo true ) zz", b"$( echo true ) zz", false),
+        (b"x=$( echo a )", b"x=$( echo a )", false),
+        (
+            b"x=$( echo a )$( echo b )",
+            b"x=$( echo a )$( echo b )",
+            false,
+        ),
+        (b"$( echo true ) &", b"$( echo true )", true),
+    ] {
+        let segments = scan_segments(line, false);
+        assert_eq!(segments.len(), 1, "{line:?} must be one segment");
+        match &segments[0] {
+            Segment::Statement {
+                cmd: got,
+                off,
+                bodies,
+                background: bg,
+            } => {
+                assert_eq!(*got, cmd, "{line:?} is one statement");
+                assert_eq!(*off, 0, "{line:?}");
+                assert!(bodies.is_empty(), "{line:?}");
+                assert_eq!(*bg, background, "{line:?}");
+            }
+            Segment::Block { closed, .. } => {
+                panic!("{line:?} opened a block (closed {closed}), expected a statement")
+            }
+            Segment::AsyncInvalid => panic!("{line:?} is a valid split"),
+        }
+    }
+}

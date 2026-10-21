@@ -1,5 +1,5 @@
 use crate::segment::Segment;
-use error_stack::{Report, ResultExt, ensure};
+use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
 use crate::error::parse::ParseError;
@@ -7,6 +7,8 @@ use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
+
+mod unclosed;
 
 pub(crate) fn run_script(
     text: &ScriptText,
@@ -48,7 +50,11 @@ pub(crate) fn run_script(
                 closed,
                 bodies,
             } => {
-                ensure!(closed, CmdError::Parse);
+                if !closed {
+                    // Named, not bare: `'if' is missing its closing 'fi'` with
+                    // the caret under the opener (task #277, STYLE §4.7).
+                    return Err(unclosed::report(line, block_start));
+                }
                 let raw = line.get(block_start..end_pos).unwrap_or(b"");
                 crate::verbose::trace(raw.trim_ascii(), cell);
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
@@ -81,3 +87,6 @@ fn sub(text: &ScriptText, off: usize, len: usize) -> Result<ScriptText, Report<C
     let t = text.subslice(off, len).ok_or(CmdError::Never)?;
     Ok(t)
 }
+
+#[cfg(test)]
+mod tests;
