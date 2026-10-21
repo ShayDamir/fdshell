@@ -1,15 +1,20 @@
-//! `hash [-r] [name [path]]` — the command lookup table (bash compat).
+//! `hash [-rd] [name [path]]` — the command lookup table (bash compat).
 //!
 //! External lookups consult the table before PATH (`exec::resolve_path_str`)
 //! and successful PATH searches store their result, so a pinned or cached
-//! path skips the scan. Args are not expanded (like `set -o` names).
+//! path skips the scan. Every word `hash` consumes is a **substitution**
+//! surface: the words go through the argument pipeline (`substitute_args` —
+//! tilde, `$name`, `$( … )`, backticks, `$(( … ))`, `%fd`, escape pairs, IFS
+//! splitting, pathname expansion), and the options are parsed on the
+//! **expanded** fields, as bash parses them after expansion. The table is
+//! keyed by the expanded name, the same shape `prehash` stores for an
+//! expanded word 0, so `hash a\*` and `a\*` meet on the key `a*`.
 
+mod drop;
 mod pin;
 
-use crate::bytes::fold::fold_word;
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -21,47 +26,34 @@ pub(crate) fn run_hash(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept(line, "hash", cmdline)?;
     crate::xtrace::trace_cmd(b"hash", cmdline, cell);
+    // The expansion re-borrows the `ForkCell` (IFS, `dotglob`, `%fd`), so it
+    // runs **before** the state borrow — never across it (LESSONS "Never hold
+    // a ForkCell borrow across a recursive call that re-borrows").
+    let words = crate::substitute::substitute_args(
+        &cmdline.args,
+        &cmdline.args_mask,
+        &cmdline.args_span,
+        &cmdline.args_quoted,
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    // `hash`'s words never go through substitution, so they are folded here
-    // (POSIX #4.1): the table is keyed by the *folded* command name (`prehash`
-    // stores word 0 folded), so `hash a\*` queries the key `a*` as bash's does.
-    let exit = match cmdline.args.first() {
-        None => state.list_hash(),
-        Some(raw) => {
-            let name = fold_name(raw, mask_at(&cmdline.args_mask, 0))?;
-            if name.eq_bytes(b"-r") {
-                state.remove_hash(&fold_names(
-                    cmdline.args.get(1..).unwrap_or(&[]),
-                    cmdline.args_mask.get(1..).unwrap_or(&[]),
-                )?)
-            } else {
-                pin::lookup_or_pin(&name, cmdline, &mut state)?
-            }
-        }
-    };
+    let exit = dispatch(&words, &mut state)?;
     state.set_last_exit(exit);
     Ok(true)
 }
 
-fn mask_at(masks: &[Vec<bool>], i: usize) -> &[bool] {
-    masks.get(i).map(Vec::as_slice).unwrap_or(&[])
-}
-
-/// The folded name word, as the table's key.
-fn fold_name(word: &ShortCStr, mask: &[bool]) -> Result<ShortCStr, Report<CmdError>> {
-    Ok(fold_word(word, mask).change_context(CmdError::Never)?.0)
-}
-
-/// Every name of `hash -r name…`, folded to match the table's folded keys.
-fn fold_names(
-    words: &[ShortCStr],
-    masks: &[Vec<bool>],
-) -> Result<Vec<ShortCStr>, Report<CmdError>> {
-    words
-        .iter()
-        .zip(masks)
-        .map(|(w, m)| fold_name(w, m))
-        .collect()
+/// Options are read on the expanded fields: `hash $(echo -r)` clears the
+/// table, `hash -d $(echo ls)` deletes the expanded name. `names` is the
+/// operand list after the option word (or after the name, for the pin form).
+fn dispatch(names_all: &[ShortCStr], state: &mut ShellState) -> Result<i32, Report<CmdError>> {
+    let operands = names_all.get(1..).unwrap_or(&[]);
+    match names_all.first() {
+        None => Ok(state.list_hash()),
+        Some(flag) if flag.eq_bytes(b"-r") => Ok(state.remove_hash(operands)),
+        Some(flag) if flag.eq_bytes(b"-d") => drop::delete_names(operands, state),
+        Some(name) => pin::lookup_or_pin(name, operands, state),
+    }
 }
 
 impl ShellState {
@@ -95,3 +87,6 @@ fn write_line(name: &ShortCStr, path: &ShortCStr) -> Result<(), Report<CmdError>
     sys::OUT.write_all(bytes).change_context(CmdError::Never)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

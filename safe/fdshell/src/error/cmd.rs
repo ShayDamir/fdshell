@@ -81,7 +81,7 @@ pub enum CmdError {
     ArrayIndexOutOfRange { name: sys::ShortCStr, index: usize },
     /// {0} {1}: '{2}' is not a byte count
     CaptureLimitBad(&'static str, &'static str, sys::ShortCStr),
-    /// hash: bad usage (hash [-r] [name [path]])
+    /// hash: bad usage (hash [-rd] [name [path]])
     HashUsage,
     /// let: expression expected
     LetExpressionExpected,
