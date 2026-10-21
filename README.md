@@ -818,6 +818,16 @@ here-document at the prompt (`{ cat <<T; }`) buffers its body lines the same
 way but fails parse with the missing delimiter; the group form is not yet
 supported in script mode either.
 
+End of input is the `ignoreeof` policy (`set -o ignoreeof`, `set -i`, on by
+default when stdin is a terminal): on a **terminal** an EOF prints
+``use `exit' to leave`` and the shell keeps reading, so a stray Ctrl+D is
+harmless; on a **pipe or file** — script input — the same EOF prints the hint
+once per read and the shell exits 0, because a pipe's EOF repeats and
+ignoring it would print the hint forever. bash exits 0 silently on that same
+pipe (its non-interactive `set -i` is a `set: -i: invalid option` error, so a
+bash script never reaches the policy); fdshell keeps the hint, the only
+observable that shows the option took effect.
+
 ## Strict mode
 
 The `strict` shell option (off by default) turns fdshell into a capability

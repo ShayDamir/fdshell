@@ -174,7 +174,7 @@ The child wrote the `$_` word into a memfd (offset left at EOF) and sent the fd 
 `let state = cell.borrow(); …use…; let mut state = cell.borrow_mut()…` failed at runtime with "cannot borrow mutably – shared borrows are active": the shadowed `Ref` guard lives until the end of the enclosing scope, not until the shadowing binding. Compile-time borrow checking doesn't catch this (separate `Ref`/`RefMut` types), so it survives review and clippy. Wrap the shared-borrow section in a `{ … }` block before the mutable re-borrow (see `run_set_xtrace`).
 
 ## Test tty-gated behavior from safe-crate integration tests via `script`
-`safe/fdshell` has no `libc` dev-dep (safe crates forbid unsafe), so a pty can't be opened in its tests. To exercise code gated on stdin being a terminal, spawn the binary under util-linux `script -qec <bin> /dev/null` with piped stdin — `script` attaches a pty and forwards the pipe into it, making `isatty(0)` true. util-linux is already a test-environment requirement (the nextest wrapper's `prlimit`), so this costs nothing. The REPL's tty-default `ignoreeof` (`|=`→`&=` mutant) was unkillable by any piped-stdin test — only the `script`-wrapped test reaches that branch.
+`safe/fdshell` has no `libc` dev-dep (safe crates forbid unsafe), so a pty can't be opened in its tests. To exercise code gated on stdin being a terminal, spawn the binary under util-linux `script -qec <bin> /dev/null` with piped stdin — `script` attaches a pty and forwards the pipe into it, making `isatty(0)` true. util-linux is already a test-environment requirement (the nextest wrapper's `prlimit`), so this costs nothing. The REPL's tty-default `ignoreeof` (`|=`→`&=` mutant) was unkillable by any piped-stdin test — only the `script`-wrapped test reaches that branch. Task #291 adds three facts: closing the test's own stdin **does** deliver a pty EOF (the shell prints the hint, then blocks in `read`), so EOF-driven tty arms are pinnable this way; structure them *sleep → `try_wait` → `kill` → drain* (`wait_with_output`), **never** a stdout read loop — after the hint a pty with closed stdin delivers nothing, so a blocking `read` hangs until nextest's 10 s slow-timeout ends the test (a spin regression is still caught, by the hint-count assertion: the pty's writer blocks on a full pipe); and pty output carries `\r\n` plus the echoed input, so assert with `contains` / `matches(..).count()`, never exact stdout equality. The general testability rule behind it: caching a syscall's answer in `ShellState` (`interactive`, seeded once where the syscall already ran) moves the branch from *syscall time* into **data** a unit test reaches in-process, and stops repeating the syscall — fd 0 can be re-pointed by `exec 0<file`, so the answer is not even stable.
 
 ## `cargo mutants` runs only the mutated package's own tests unless `--test-workspace true`
 By default cargo-mutants runs only the test targets of the package being mutated. This repo's `unsafe/sys` wrappers are exercised mostly through `safe/fdshell` / `safe/builtins` tests, so a mutation in a sys function no `unsafe/sys/tests/` test covers is reported MISSED even when an fdshell test would kill it — and the fdshell test binary is not rebuilt for a sys mutation (symptom: the sys mutant's line shows `0s test` while an fdshell-only mutant shows `~2s test`). Two fixes: pass `--test-workspace true` (slower — every mutant runs the whole ~1800-test suite), or give each sys wrapper its own integration test in `unsafe/sys/tests/` (preferred — keeps per-crate runs fast and tests the wrapper at its own layer). The latter is the convention; e.g. `unsafe/sys/tests/{access,tty,pipe}.rs` cover the `test` builtin's sys side. When a tty is an *fd var* rather than stdin, `sys::pty::openpty()` (returns CLOEXEC `LocalFd`s) is cleaner than the `script` wrapper above: register the slave as an fd var and drive it through the normal `%var` path.
@@ -3339,3 +3339,26 @@ here: `unset NAME` leaves a **function** of that name defined (**#386**, bash
 removes it → `command not found`), and `unset` reached through `builtin`
 (`builtin unset %x`) is still `"unset" is not a shell builtin`, owned by
 **#335** with the rest of the quoted-keyword gate.
+
+## EOF is sticky on a pipe and an event on a terminal: an "ignore it" policy needs the interactivity gate, not only its option bit
+
+The REPL's EOF policy was the option bit alone: `ignoreeof` on ⇒ print
+``use `exit' to leave`` and read again. `read(2)` on a pipe at EOF returns 0
+**forever**, so the loop livelocked — `printf 'set -i\n' | fdshell` printed
+4,607,705 hint lines in 2 s and was killed by the timeout (rc 124), same for
+`set -o ignoreeof`, both on `master`. A terminal hides the bug: there EOF is an
+**event**, so the shell prints exactly one hint and blocks in `read`, which is
+what the old pty-adjacent tests saw and pinned as "stays alive".
+**Rule:** an option that means "ignore this EOF" is the conjunction of its bit
+**and** "this loop is interactive" wherever the input can reach a permanent
+end — bash shapes it identically (a non-interactive shell exits at EOF:
+`echo 'set -o ignoreeof' | bash` → rc 0, and `echo 'set -i' | bash` is
+`set: -i: invalid option` rc 2, so a bash script never reaches the policy).
+Pin the whole 2 × 2 matrix in-process on the cached state (`repl/tests.rs`:
+`ignoreeof` × `interactive`, with the `true`/`false` pair at equal option
+values killing the `&&`→`|`, `&=`→`|=` and `== 0`→`!= 0` mutants), because the
+tty arm of a *syscall-time* branch is unkillable from the safe crates (see the
+`script`-wrapper lesson above) — caching the answer is what makes the cell
+reachable at all. Then pin the end-to-end rows: exit code, hint **count**
+(pipe mid-continuation emits one hint per EOF read — the continuation read
+that breaks, then the next primary read, so two), and aliveness.
