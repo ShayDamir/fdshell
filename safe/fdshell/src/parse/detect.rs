@@ -25,7 +25,7 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<Pars
     }
 
     if first.eq_bytes(b"unset") {
-        return detect_keyword::detect_unset(tokens);
+        return Ok(Some(detect_keyword::unset::detect(tokens)));
     }
 
     if first.eq_bytes(b"umask") {

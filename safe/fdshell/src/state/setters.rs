@@ -60,6 +60,25 @@ impl ShellState {
         self.strings.insert(name, value);
     }
 
+    /// Remove a **shell** variable from every store that holds it: the string
+    /// table, the export attribute, and the inherited `environ` row. bash 5.3.9
+    /// (measured, task #290) takes the name away from `$name`, from `${name:-x}`
+    /// and from the child environment at once, so the `environ` half is what
+    /// makes `unset HOME` clear the fallback `substitute::resolve::var_value`
+    /// reads and `exec::environ::get_environ` exports. `IFS` also goes back to
+    /// the default split set, mirroring `set_var`'s sync.
+    ///
+    /// An unbound name is a silent no-op: bash validates no operand of `unset`
+    /// at all (`unset 1abc`, `unset ""` are rc 0 with no effect).
+    pub fn unset_var(&mut self, name: &ShortCStr) {
+        if name.eq_bytes(b"IFS") {
+            self.ifs = Self::default_ifs();
+        }
+        let _ = self.strings.remove(name);
+        let _ = self.exports.remove(name);
+        self.environ.retain(|(k, _)| k != name);
+    }
+
     /// Store the last argument of the previous command as the `_` variable
     /// (bash `$_`), skipping the update while an `eval`/`source` frame runs.
     pub fn set_last_arg(&mut self, arg: ShortCStr) {

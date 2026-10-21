@@ -35,7 +35,10 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"timeout", b"Run a command with a deadline"),
     (b"ulimit", b"Get or set resource limits"),
     (b"umask", b"Set or show file mode mask"),
-    (b"unset", b"Remove variable"),
+    (
+        b"unset",
+        b"Remove shell variables (`%name` closes an fd variable)",
+    ),
     (b"wait", b"Wait for background tasks by pid (all when none)"),
     (b"waitpid", b"Wait for a background task"),
 ];

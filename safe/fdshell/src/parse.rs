@@ -47,7 +47,7 @@ pub use cmdline::{BuiltinPrefix, CommandLine, Pipeline};
 pub use envassign::{Assign, value_mask, value_spans};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
-pub use line::ParsedLine;
+pub use line::{ParsedLine, UnsetTarget};
 pub(crate) use redirect::parse_fd;
 pub(crate) use redirect::{clobber_word, pipe_token_span, pipeline_pipe};
 pub(crate) use time_block::TimeBlock;

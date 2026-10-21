@@ -50,6 +50,13 @@ pub struct ShellState {
 }
 
 impl ShellState {
+    /// The default `IFS`: space, tab, newline (POSIX's default split set). One
+    /// owner — the seed of [`ShellState::new`] and the value `unset IFS`
+    /// restores (bash, task #290).
+    pub(crate) fn default_ifs() -> ShortCStr {
+        c" \t\n".into()
+    }
+
     pub fn new() -> Self {
         ShellState {
             fds: HashMap::new(),
@@ -71,7 +78,7 @@ impl ShellState {
             nesting: 0,
             loop_depth: 0,
             eval_depth: 0,
-            ifs: c" \t\n".into(),
+            ifs: Self::default_ifs(),
             options: crate::options::DEFAULTS,
             capture_limit: crate::cmd_subst::MAX_CAPTURED,
             hash_table: HashMap::new(),

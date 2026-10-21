@@ -9,6 +9,7 @@ mod arith_cmd;
 mod array_ops;
 mod assign_str;
 mod loop_ctl;
+mod unset;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
 pub(crate) fn run_simple(
@@ -39,16 +40,7 @@ pub(crate) fn run_simple(
             }
             finish_assignment(cell)?;
         }
-        crate::parse::ParsedLine::Unset(var) => {
-            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.fds.remove(var);
-            state.arrays.remove(var);
-            // `unset` detaches a named task only — a plain-`&` job is unnamed
-            // and stays `wait`'s to reap (task #326).
-            state.jobs.remove_named(var);
-            state.set_last_arg(var.clone());
-            state.set_last_exit(0);
-        }
+        crate::parse::ParsedLine::Unset(targets) => unset::run(targets, cell)?,
         crate::parse::ParsedLine::Umask(mask) => {
             if let Some(m) = mask {
                 sys::umask::set(*m);

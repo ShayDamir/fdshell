@@ -5,8 +5,9 @@ use error_stack::{Report, ResultExt, bail};
 use sys::fork_cell::ForkCell;
 use sys::{ScriptText, Trace};
 
-/// Run an fd-array statement (indexed read-out, empty init, append, entry unset).
-/// Returns `true` when `parsed` was an array statement.
+/// Run an fd-array statement (indexed read-out, empty init, append). Returns
+/// `true` when `parsed` was an array statement; `unset %arr[%src]` is an
+/// `unset` target of its own (task #290), not an array statement.
 pub(super) fn run(
     parsed: &ParsedLine,
     text: &ScriptText,
@@ -51,13 +52,6 @@ pub(super) fn run(
             let trace = Trace::at(text.start, src.trace.origin.clone());
             state.append_array_entry(var, fd, value, trace);
             state.clear_last_arg();
-            state.set_last_exit(0);
-            Ok(true)
-        }
-        ParsedLine::UnsetArrayEntry { var, source } => {
-            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-            state.remove_array_entry(var, source);
-            state.set_last_arg(var.clone());
             state.set_last_exit(0);
             Ok(true)
         }

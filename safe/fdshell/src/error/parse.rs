@@ -84,8 +84,6 @@ pub(crate) enum ParseError {
     ExpectedIn,
     /// expected variable name
     ExpectedVariableName,
-    /// expected variable name after 'unset'
-    ExpectedVariableNameAfterUnset,
     /// expected word list
     ExpectedWordList,
     /// malformed case block
@@ -106,8 +104,6 @@ pub(crate) enum ParseError {
     UmaskTakesAtMostOneArgument,
     /// unexpected pipe
     UnexpectedPipe,
-    /// variable must start with '%'
-    VariableMustStartWithPercent,
     /// capture syntax missing '%' before variable name
     CaptureMissingPercent,
     /// capture syntax has no variable name after '%'

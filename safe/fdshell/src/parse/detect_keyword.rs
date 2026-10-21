@@ -4,19 +4,6 @@ use crate::parse::line::ParsedLine;
 use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
 
-pub(crate) fn detect_unset(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
-    let target = tokens
-        .get(1)
-        .ok_or(ParseError::ExpectedVariableNameAfterUnset)?;
-    let Some(var) = target.0.strip_prefix(b"%") else {
-        bail!(ParseError::VariableMustStartWithPercent)
-    };
-    if let Some((arr, source)) = super::array_ref::split_element_ref(&var) {
-        return Ok(Some(ParsedLine::UnsetArrayEntry { var: arr, source }));
-    }
-    Ok(Some(ParsedLine::Unset(var)))
-}
-
 pub(crate) fn detect_umask(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let mask = match tokens.get(1) {
         Some((arg, _, _, _, _, _)) => {
@@ -94,6 +81,10 @@ pub(crate) fn detect_return(tokens: &[Token]) -> Result<Option<ParsedLine>, Repo
 fn parse_status(t: &ShortCStr) -> Result<i32, Report<ParseError>> {
     t.parse::<i32>().change_context(ParseError::InvalidInt)
 }
+
+/// `unset`'s operands live in their own module: the list is infallible, so the
+/// detector returns the statement directly (`pub(crate)` for `parse::detect`).
+pub(crate) mod unset;
 
 #[cfg(test)]
 mod tests;

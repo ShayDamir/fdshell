@@ -36,11 +36,8 @@ pub enum ParsedLine {
     AssignStr(Assign),
     /// A bare statement of several `NAME=value` words; all persist.
     AssignStrs(Vec<Assign>),
-    Unset(ShortCStr),
-    UnsetArrayEntry {
-        var: ShortCStr,
-        source: ShortCStr,
-    },
+    /// `unset name…`: every operand word, in the order it was written.
+    Unset(Vec<UnsetTarget>),
     Umask(Option<u32>),
     /// The `{ …; }` group command: the body text and the redirections written
     /// after the closing brace.
@@ -60,4 +57,18 @@ pub enum ParsedLine {
     /// `continue n`: advance `n` enclosing loops, `n >= 1`.
     Continue(u32),
     Return(Option<i32>),
+}
+
+/// One `unset` operand (task #290). The `%` prefix selects fdshell's fd
+/// namespace, as everywhere else (STYLE.md §5); a plain word is a shell
+/// variable name, the spelling bash's `unset name…` takes.
+pub enum UnsetTarget {
+    /// `%name` with the `%` stripped: the fd variable — the descriptor, an fd
+    /// array of that name, and a named background task.
+    Fd(ShortCStr),
+    /// `%arr[%src]`: one entry of the fd array `arr` — the one whose provenance
+    /// is `%src` — leaving the array in place.
+    FdArrayEntry { var: ShortCStr, source: ShortCStr },
+    /// `name`: a shell variable, taken out of every store that holds it.
+    Var(ShortCStr),
 }
