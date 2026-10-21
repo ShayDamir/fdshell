@@ -1240,16 +1240,146 @@ fn and_in_a_body_position_heredoc_region_splits_the_block_until_304() {
     assert!(err.contains("missing 'fi'"), "stderr={err:?}");
 }
 
-/// Task #274 / LESSONS "a region window and the skip derived from it are one
-/// pair" (measured divergence, pinned as fdshell's own behaviour): the line's
-/// regions are allocated for **all** of its operators, so an unterminated
-/// `<<E` in the `elif` condition leaves the line with no regions at all and the
-/// `then` arm reports its own missing delimiter. bash takes the `then` body and
-/// warns about `E`: `bodyT`, rc 0.
+/// Task #275 (measured 2026-10-21, bash 5.3.9): the line's regions are allocated
+/// **greedily, one entry per operator**, so an unterminated `<<E` in the `elif`
+/// condition claims the (empty) rest of the stream and the `then` arm keeps its
+/// own complete body: `bodyT`, rc 0. bash prints the same and additionally warns
+/// `here-document at line 3 delimited by end-of-file (wanted 'E')` — the warning
+/// is task **#364**'s.
 #[test]
-fn single_line_block_body_heredoc_of_an_incomplete_line_stream_is_empty() {
+fn single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm() {
     let (out, _err, code) = run("if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("", 1));
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0));
+}
+
+/// Task #275, the statement twins of the acceptance shape (measured 2026-10-21,
+/// bash 5.3.9 — stdout and rc identical, bash adds the end-of-file warning): the
+/// statement whose delimiter line arrived keeps its body, and the unterminated
+/// operator behind it takes what is left of the stream as its own body.
+#[test]
+fn an_unterminated_heredoc_behind_a_complete_one_keeps_the_complete_body() {
+    let (out, _err, code) = run("cat <<T; cat <<E\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+    // The rest-of-stream claim: the lines left after the complete body are the
+    // unterminated operator's **body**, never commands (`extra` prints, rc 0).
+    let (out, _err, code) = run("cat <<T; cat <<E\nbodyT\nT\nextra");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\nextra\n", 0),
+        "bash: bodyT extra, rc 0"
+    );
+    let (out, _err, code) = run("cat <<T; cat <<E\nbodyT\nT\nextra\nmore");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\nextra\nmore\n", 0),
+        "bash: bodyT extra more, rc 0"
+    );
+}
+
+/// Task #275, the condition position (measured 2026-10-21: bash prints `bodyT`
+/// and `y`, rc 0): a complete condition heredoc and a starved arm heredoc on the
+/// same line — the condition claims its region, the arm reads an empty body.
+#[test]
+fn a_complete_block_condition_heredoc_survives_an_unterminated_arm_one() {
+    let (out, _err, code) = run("if cat <<T; then echo y; cat <<E; fi\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyT\ny\n", 0),
+        "bash: bodyT y, rc 0"
+    );
+}
+
+/// Task #275, the arm-shape twins (measured 2026-10-21: `bodyT`, rc 0 in bash):
+/// a `case` clause, a `for` arm and a `while` arm with one complete and one
+/// unterminated operator on the same line.
+#[test]
+fn an_unterminated_heredoc_behind_a_complete_one_in_a_case_clause_and_a_loop_arm() {
+    let (out, _err, code) = run("case x in x) cat <<T; cat <<E;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+    let (out, _err, code) = run("for i in 1; do cat <<T; cat <<E; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+    let (out, _err, code) = run("while :; do cat <<T; cat <<E; break; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+}
+
+/// Task #275, the `<<-` form (measured 2026-10-21: `bodyT`, rc 0 in bash): the
+/// synthesized terminator line of the starved operator is tab-stripped exactly
+/// like a real one, because it is written untabbed.
+#[test]
+fn an_unterminated_dashed_heredoc_behind_a_complete_one_keeps_the_complete_arm() {
+    let (out, _err, code) = run("if true; then cat <<-T; elif cat <<-E; then echo b; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+}
+
+/// Task #275, a block with a trailing statement on its line (measured
+/// 2026-10-21: bash `bodyT`, rc 0 + warning): the tail claim consumes the rest
+/// of the stream, so the scan resumes at the text end and the trailing
+/// `cat <<E` runs with an empty body, printing nothing.
+#[test]
+fn a_tail_claim_past_a_block_leaves_the_trailing_statement_an_empty_body() {
+    let (out, _err, code) = run("if true; then cat <<T; fi; cat <<E\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+}
+
+/// Task #275's **residual**, pinned as measured: a line whose **first** `<<`
+/// operator has no delimiter line stays fdshell's parse error — the greedy
+/// allocation claims nothing when `found == 0` and the parse layer owns "this
+/// heredoc has no body at all". bash warns and runs (rc 0, its body is the
+/// remaining lines); task **#364** owns that whole end-of-file family.
+#[test]
+fn a_line_whose_first_heredoc_is_unterminated_is_still_a_parse_error() {
+    for script in [
+        "cat <<E; cat <<T\nbodyT\nT",
+        "echo a; cat <<E; echo b\nbody",
+        "cat <<E",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (
+                if script.starts_with("echo") {
+                    "a\n"
+                } else {
+                    ""
+                },
+                1
+            ),
+            "script={script:?} err={err}"
+        );
+        assert!(
+            err.contains("missing terminating delimiter line 'E'"),
+            "script={script:?} err={err}"
+        );
+    }
+}
+
+/// Task #275's **residual**, the block mirror of the acceptance shape (measured
+/// 2026-10-21): the line's first operator (`<<T`, in the `then` arm) is the
+/// unterminated one, so `found == 0` starves the complete `elif` body as well.
+/// bash runs the `elif` and prints `b` (rc 0, two warnings) — #364.
+#[test]
+fn a_block_line_whose_first_operator_is_unterminated_is_still_a_parse_error() {
+    let (out, err, code) = run("if false; then cat <<T; elif cat <<E; then echo b; fi\nbodyE\nE");
+    assert_eq!((out.as_str(), code), ("", 1), "bash: b, rc 0");
+    assert!(
+        err.contains("missing terminating delimiter line 'E'"),
+        "err={err}"
+    );
+}
+
+/// Task #275, accepted divergence (measured 2026-10-21): a multi-line block
+/// whose stream runs past the closer. The tail claim extends the extension-mode
+/// span to the end of the text, so `fi` becomes body data and the block never
+/// closes. bash consumes the same lines as body data and stops at a **syntax
+/// error (rc 2)**; fdshell reports the missing delimiter (rc 1).
+#[test]
+fn a_multi_line_block_with_a_tail_claim_past_the_closer_is_a_parse_error() {
+    let (out, err, code) = run("if true; then\ncat <<T\nT\ncat <<E\nfi");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2, syntax error");
+    assert!(
+        err.contains("missing terminating delimiter line 'E'"),
+        "err={err}"
+    );
 }
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
