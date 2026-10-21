@@ -805,25 +805,35 @@ fn dollar_at_a_region_end_is_a_literal_byte() {
     assert_eq!((out.as_str(), code), ("[$v,a]", 0), "stderr={err:?}");
 }
 
-/// Accepted divergence (task #285): the quote mask is one bit per byte, so two
-/// *adjacent* quoted regions read as one region and a bare name keeps
-/// collecting across the boundary. bash ends the name at the closing quote of
-/// the region that holds the `$`: it prints `[qb]` and `[A2]`, fdshell `[VB]`
-/// and `[]`. Pinning today's bytes gives #285 the expectations to delete.
+/// A quote region ends a bare name (task #285): the mask spells where each
+/// region starts (`MaskBit::QuotedStart`), so `$name` stops at the closing
+/// quote of the region holding the `$` — bash's rule, now fdshell's.
 #[test]
-fn adjacent_quoted_regions_keep_collecting_the_name() {
-    let (out, err, code) = run(r#"v=q; vb=VB; printf "[%s]" "$v""b""#);
-    assert_eq!((out.as_str(), code), ("[VB]", 0), "stderr={err:?}");
-    let (out, err, code) = run(r#"set -- A B; printf "[%s]" "$1""2""#);
-    assert_eq!((out.as_str(), code), ("[]", 0), "stderr={err:?}");
-    // The single-quote spelling of the same adjacency: two quoted regions,
-    // and the name crosses the boundary into `vx`.
-    let (out, err, code) = run(r#"v=q; vx=VX; printf "[%s]" "$v"'x'y"#);
-    assert_eq!((out.as_str(), code), ("[VXy]", 0), "stderr={err:?}");
-    // The quoted↔unquoted boundary *is* expressible in the mask, so it is
-    // parity: `"$v"x` is the parameter `v` plus the literal `x` in both.
+fn adjacent_quoted_regions_end_the_name() {
+    // `"$v"x`: one region, then a literal byte.
     let (out, err, code) = run(r#"v=q; vx=VX; printf "[%s]" "$v"x"#);
     assert_eq!((out.as_str(), code), ("[qx]", 0), "stderr={err:?}");
+    // `"$v""b"`: the second `"` opens a new region, so the name is `v` and `b`
+    // is a literal — not the `vb` the single-region mask used to collect.
+    let (out, err, code) = run(r#"v=q; vb=VB; printf "[%s]" "$v""b""#);
+    assert_eq!((out.as_str(), code), ("[qb]", 0), "stderr={err:?}");
+    // Two regions, no quotes on the tail: `q` + `x` + `y`.
+    let (out, err, code) = run(r#"v=q; vx=VX; printf "[%s]" "$v"'x'y"#);
+    assert_eq!((out.as_str(), code), ("[qxy]", 0), "stderr={err:?}");
+    // A positional stops the same way: `"$1""2"` is `A` plus the literal `2`,
+    // not the unset positional 12 the old mask implied.
+    let (out, err, code) = run(r#"set -- A B; printf "[%s]" "$1""2""#);
+    assert_eq!((out.as_str(), code), ("[A2]", 0), "stderr={err:?}");
+    // The acceptance rows of the report, as positional parameters.
+    let (out, err, code) = run(r#"v=q; vx=VX; set -- "$v"x; printf "[%s]\n" "$@""#);
+    assert_eq!((out.as_str(), code), ("[qx]\n", 0), "stderr={err:?}");
+    let (out, err, code) = run(r#"v=q; vx=VX; set -- "$v"'x'y; printf "[%s]\n" "$@""#);
+    assert_eq!((out.as_str(), code), ("[qxy]\n", 0), "stderr={err:?}");
+    // `$v$x` inside one region: the name is `v`, then `$x` starts a new arm.
+    let (out, err, code) = run(r#"v=q; vx=VX; x=X; set -- "$v"$x; printf "[%s]\n" "$@""#);
+    assert_eq!((out.as_str(), code), ("[qX]\n", 0), "stderr={err:?}");
+    let (out, err, code) = run(r#"set -- A B; set -- "$1""2"; printf "[%s]\n" "$@""#);
+    assert_eq!((out.as_str(), code), ("[A2]\n", 0), "stderr={err:?}");
     // The same shape with a space between the regions is two words in both.
     let (out, err, code) = run(r#"set -- A B; printf "[%s]" "$1" "2""#);
     assert_eq!((out.as_str(), code), ("[A][2]", 0), "stderr={err:?}");

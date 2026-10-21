@@ -268,6 +268,13 @@ fn quoted_expansion_glued_to_literal_text_in_an_assignment_value() {
         (r#"IFS=,; v=q; w=x"$v"b,c; printf "[%s]" "$w""#, "[xqb,c]"),
         (r#"IFS=,; v=""; w="$v"a,b; printf "[%s]" "$w""#, "[a,b]"),
         (r#"v=q; vb=VB; w="$v"bc; printf "[%s]" "$w""#, "[qbc]"),
+        // Task #285: a second quoted region ends the name, so the value is the
+        // expansion plus the following region's bytes — never the value of `vb`.
+        (r#"v=q; vb=VB; w="$v""b"; printf "[%s]" "$w""#, "[qb]"),
+        (
+            r#"IFS=,; v=q; vb=VB; w="$v""b",c; printf "[%s]" "$w""#,
+            "[qb,c]",
+        ),
     ];
     for (script, want) in cases {
         let (out, err, code) = run(script);

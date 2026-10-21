@@ -46,21 +46,24 @@ pub(crate) fn quoted_at(mask: &[MaskBit], i: usize) -> bool {
 }
 
 /// Bytes a name arm may consume from `from`: the length of the quote region
-/// that byte sits in — the run of `Quoted` after a quoted trigger, the run of
-/// `Unquoted` after an unquoted one. A name cannot cross out of the region its
+/// that byte sits in — the run of `Quoted` after a `QuotedStart`, the run of
+/// `Unquoted` after an unquoted byte. A name cannot cross out of the region its
 /// trigger byte sits in, because the tokenizer's quote regions are what end a
-/// name (bash expands `"$v"bc` as the parameter `v` plus the literal `bc`, and
-/// `"$v""b"` as `v` plus `b`: the second `"` opens a new region). A missing bit
-/// (a mask shorter than the word text) carries no information, so the run is
-/// unbounded and the collection is mask-independent.
+/// name: bash expands `"$v"bc` as the parameter `v` plus the literal `bc`, and
+/// `"$v""b"` as `v` plus `b` — the second `"` opens a **new** region, and its
+/// `QuotedStart` stops the run. A missing bit (a mask shorter than the word
+/// text) carries no information, so the run is unbounded and the collection is
+/// mask-independent.
 pub(crate) fn region_len(mask: &[MaskBit], from: usize) -> usize {
     let Some(&bit) = mask.get(from) else {
         return usize::MAX;
     };
-    let quoted = bit.quoted();
-    mask.iter()
-        .skip(from)
-        .take_while(|&b| b.quoted() == quoted)
+    // The byte that keeps the region open: any `Quoted`, or `Unquoted` itself.
+    let next = MaskBit::from_quoted(bit.quoted());
+    1 + mask
+        .iter()
+        .skip(from + 1)
+        .take_while(|&b| *b == next)
         .count()
 }
 

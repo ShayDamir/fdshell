@@ -72,6 +72,29 @@ fn region_len_measures_the_trigger_byte_region() {
 }
 
 #[test]
+fn region_len_stops_at_the_next_region_start() {
+    // The text of `"$v""b"` is `$vb` over two regions, and the second region's
+    // `QuotedStart` ends the name — bash expands it as `v` plus `b`.
+    let mask = runs(&[(true, 2), (true, 1)]);
+    assert_eq!(mask, vec![QuotedStart, Quoted, QuotedStart]);
+    assert_eq!(
+        region_len(&mask, 0),
+        2,
+        "the name gets the one byte left in the region"
+    );
+    assert_eq!(region_len(&mask, 2), 1, "the second region is its own");
+    // Symmetrically, a region start ends an unquoted name: `a"$v"` keeps `a`
+    // out of the name, and `$v` inside its own region.
+    let mask = runs(&[(false, 2), (true, 2)]);
+    assert_eq!(region_len(&mask, 0), 2);
+    assert_eq!(
+        region_len(&mask, 1),
+        1,
+        "the region start ends the unquoted run"
+    );
+}
+
+#[test]
 fn region_len_pads_a_missing_bit_as_unbounded() {
     assert_eq!(region_len(&[], 0), usize::MAX);
     assert_eq!(region_len(&[QuotedStart, Quoted], 2), usize::MAX);

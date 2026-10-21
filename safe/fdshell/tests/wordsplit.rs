@@ -787,6 +787,16 @@ fn quoted_expansion_glued_to_literal_text_keeps_every_byte() {
         // `vb` is bound and the word must still print `[qb]`, never `[VB]`.
         (r#"v=q; vb=VB; builtin printf "[%s]" "$v"b"#, "[qb]"),
         (r#"v=q; vb=VB; builtin printf "[%s]" ab"$v"cd"#, "[abqcd]"),
+        // Task #285: an *adjacent quoted region* is a name boundary too, so the
+        // second region's bytes are literal (`"$v""b"` is `q` + `b`, and
+        // `"$v"'x'y` is `q` + `x` + `y`), exactly as bash ends the name at the
+        // closing quote of the region holding the `$`.
+        (r#"v=q; vb=VB; builtin printf "[%s]" "$v""b""#, "[qb]"),
+        (r#"v=q; vx=VX; builtin printf "[%s]" "$v"'x'y"#, "[qxy]"),
+        (
+            r#"IFS=,; v=q; vb=VB; w="$v""b",c; builtin printf "[%s]" "$w""#,
+            "[qb,c]",
+        ),
     ];
     for (script, want) in cases {
         let (out, err, code) = run(script);
