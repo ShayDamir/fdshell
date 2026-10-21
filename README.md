@@ -559,10 +559,12 @@ with the caret, rc 1.
 
 The region expands in every word position the shell expands: a command name
 (word 0), an argument, an assignment value, a `for` list, a here-string word,
-and a **redirection target** (`echo hi > $(echo f)` writes the file `f`, see
-[Redirection](#redirection)). The here-document **delimiter** word is the
-exception — it is quote-removal only, so `cat <<$(echo EOF)` delimits on the
-literal `$(echo EOF)`.
+a **redirection target** (`echo hi > $(echo f)` writes the file `f`, see
+[Redirection](#redirection)), and `cd`'s operand (`d=sub; cd $d` moves the
+base, see [Word splitting and pathname
+expansion](#word-splitting-and-pathname-expansion)). The here-document
+**delimiter** word is the exception — it is quote-removal only, so
+`cat <<$(echo EOF)` delimits on the literal `$(echo EOF)`.
 
 ### Word splitting and pathname expansion
 
@@ -579,6 +581,45 @@ A quoted byte never splits and never globs. `set -f` disables pathname
 expansion; `shopt -s dotglob` lets patterns match a leading dot;
 `shopt -s nullglob` deletes a pattern with no match; `shopt -s failglob`
 makes it an error.
+
+`cd`'s operand is an ordinary word, so every rule above applies to it: the
+target is the **expansion**, not the text the user typed.
+
+```shell
+V=sub; cd $V             # sub
+cd "$(echo sub)"         # sub      (`"` never suppresses a substitution)
+cd '$(echo sub)'         # the literal name, which fails
+cd ~                     # $HOME    (a quoted `~` is a literal byte)
+cd $((1+1))              # the directory named `2`
+set -- sub; cd "$@"      # sub
+cd a b; cd sub extra     # cd: too many arguments
+cd "a b"                 # one path with a space in it
+cd s*                    # the one match of `s*`
+cd *                     # cd: too many arguments (several matches)
+```
+
+Two fdshell rules sit on top of the expansion. The `%name` form is read on the
+**raw** word, before any expansion, and quoting does not exempt it: `cd %dir`
+is the stored fd ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#is-a-file-descriptor-namespace)),
+while the pipeline's `%` arm yields the fd *number* — expanding the word would
+turn `cd %dir` into `cd 7` and lose the fd's origin. `cd \%d` folds the escape
+pair, so it is the literal name `%d`, as in bash. And an operand whose
+expansion produces **no field at all** — `cd "$@"` with no positionals,
+`cd $unset`, `cd $(true)`, `shopt -s nullglob; cd zzz*` — is the bare `cd`:
+`$HOME`. The `-` form is read on the expanded field, so `D=-; cd "$D"` returns
+to the previous directory even where a directory named `-` exists; that
+directory is reached by any other path, `cd ./-`.
+
+The accepted divergences of the same shape: two or more fields is
+`cd: too many arguments` at fdshell's rc 1 and **aborts the script** (bash
+returns 2 and the script continues, the task #179 family); `cd ""` is the open
+failure on the empty path, where bash says `cd: null directory`; a scoped
+`IFS=` prefix splits the expansion on the *scoped* `IFS` (`v=a:b; IFS=: cd $v`
+is two fields here, one name in bash — the
+`tests/cmd_subst.rs::word0_scoped_ifs_divergence` family); `cd`'s option words
+`--`, `-L`, `-P` and `-x` are operands (task #380); `$_` keeps the raw word
+(task #376); and `cd -` prints nothing, where bash prints the new directory
+(task #378).
 
 ### Command lookup table (`hash`)
 
@@ -755,7 +796,10 @@ must stay relative — the check runs on the **expanded** word, so a target
 expanding to `/etc/x` is refused as well, and so is a `hash` pin whose path
 only the expansion makes absolute (`hash fdprobe $PWD/target`). `exec`/`become` inherit the
 ban. `cd ..` remains the user's own escape hatch: the base follows the shell,
-exactly as a relative path does.
+exactly as a relative path does. `cd`'s operand is not covered by the ban, on
+the raw word or on the expanded value (`shopt -s strict; d=/tmp; cd $d` moves
+the base): the ban list names redirects, program words and `hash` pins, and
+moving the base is what `cd` is for.
 
 ## Sockets
 
