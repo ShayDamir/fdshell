@@ -3567,3 +3567,23 @@ Re-measure on `master` before calling a shape a regression of this change:
 and the file-creating `echo a>x` family is the documented no-split-at-an-operator
 word rule of `POSIX_COMPATIBILITY.md`. Pin both as pre-existing, name their
 owners, and let the block tail ship.
+
+**A glued closer inherits the operand's whole grammar, quote spans included.**
+Splitting `>f` off the closer word makes the tail word a *slice* of it: its mask
+starts at `kw.len()` and its zero-byte quote spans — a `""` pair that adds no
+byte is recorded at the index it opens at, in the **word's own** text (task
+#321) — must shift by that same `kw.len()`. `envassign::value_spans` looks alike
+and is off by one, it steps past the `=` as well. A text assertion cannot see
+the shift: the target text is driven by the mask, so an emptied, unshifted, or
+divided span list prints the same text; and the statement level cannot see it
+either, since a glued closer with a *quoted* operand is rejected at the byte
+scan (**#413**). The module's own test has to compare the whole `RedirectDef`
+with the spaced spelling's **and** name the exact span values, or the shift
+ships untested.
+
+The same module lost a `||` to the same lens: stopping the walk at a `<<`-shaped
+token needs the token test alone (`<<T`, `<<<hi`), because `parse_redirect` never
+reads a `<<` as a path redirect, so the io-number form `3<<T` stops there
+anyway. The extra raw-span `span_operator` disjunct (the group's shape test)
+never carried the rule alone — an equivalence's source, removed, not documented
+away.

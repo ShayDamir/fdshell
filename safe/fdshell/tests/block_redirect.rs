@@ -157,6 +157,48 @@ fn a_glued_closer_takes_its_redirection() {
         Some(b"a\n".to_vec()),
         "the glue ends the block, the statement after it runs"
     );
+
+    // A glued closer with a **quoted** operand is still rejected at the
+    // byte-level word/quote scan, before any block tail runs: bash files the
+    // block's output, fdshell reports the missing closer. Measured identical on
+    // `master`, so this is not a regression of the glue work — the shape is
+    // owned by task **#413**.
+    for (script, closer) in [
+        (
+            "while :; do echo a; break; done>\"f\"",
+            "'while' is missing its closing 'done'",
+        ),
+        (
+            "if :; then echo t; fi>\"f\"",
+            "'if' is missing its closing 'fi'",
+        ),
+        (
+            "case x in x) echo C;; esac>\"f\"",
+            "'case' is missing its closing 'esac'",
+        ),
+        (
+            "while :; do echo a; break; done>>\"f\"",
+            "'while' is missing its closing 'done'",
+        ),
+        (
+            "while :; do echo a; break; done>\"$(echo f)\"",
+            "'while' is missing its closing 'done'",
+        ),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            ("", Some(1)),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert!(err(&o).contains(closer), "#413: stderr={}", err(&o));
+        assert!(
+            file(&dir, "f").is_none(),
+            "#413: the block never runs, so `f` is not created: {script}"
+        );
+    }
 }
 
 /// `>>` appends to a target the block did not create, in the same statement.
@@ -420,6 +462,38 @@ fn closer_shaped_words_stay_word_data() {
         file(&dir, "f").is_none() && file(&dir, "f2").is_none(),
         "bash rejects the statement (`syntax error near unexpected token '>'`) and opens nothing"
     );
+
+    // The closer is the **last** token the closer rule matches (that is what
+    // makes the `echo done` body above a word), so in the fdshell-only event
+    // `wait` block the tail's own operand can be taken for the closer: with
+    // `done > done` the arm pattern loses its `)` and the block is rejected
+    // loudly, not mis-run. `master` rejects the same line (`expected 'done'`),
+    // so this is the boundary of the rule, not a regression.
+    let dir = Scratch::new();
+    let o = run(&dir, "wait\nreadable %rd) echo hi ;;\ndone > done");
+    assert_eq!(rc(&o), Some(1), "stdout={:?} stderr={:?}", out(&o), err(&o));
+    assert!(
+        err(&o).contains("missing ')' after arm pattern"),
+        "the tail's `done` is read as the closer: stderr={}",
+        err(&o)
+    );
+    assert!(file(&dir, "done").is_none());
+
+    // Beside it: a tail whose operand is not closer-shaped parses, the scope
+    // opens (the target is created), and only the unset `%rd` fd fails the round.
+    let dir = Scratch::new();
+    let o = run(&dir, "wait\nreadable %rd) echo hi ;;\ndone > out");
+    assert_eq!(rc(&o), Some(1), "stdout={:?} stderr={:?}", out(&o), err(&o));
+    assert!(
+        err(&o).contains("rd is not set"),
+        "the block parses; the round needs an open `%rd`: stderr={}",
+        err(&o)
+    );
+    assert_eq!(
+        file(&dir, "out"),
+        Some(b"".to_vec()),
+        "`master` rejects this line outright (`expected 'done'`); the tail now belongs to the block"
+    );
 }
 
 /// The pinned divergences, each with its owner. A plain word behind the closer
@@ -484,4 +558,36 @@ fn a_body_that_closes_the_saved_copy_fails_the_block() {
         err(&o)
     );
     assert_eq!(file(&dir, "f"), Some(b"a\n".to_vec()));
+}
+
+/// The same floor with the close **in the tail** (`done > f 6>&-`): the scope
+/// cannot restore a saved copy the script closed, so the block fails at rc 1 with
+/// the target created empty and no output — byte-identical to the group twin
+/// `{ echo g; } > f 6>&-` on `master`, which is the rule this task takes from the
+/// group. bash gives rc 0 with the block's output in `f` and `tail` printed; the
+/// owner of the floor (a script-nameable fd 6 is the saved copy) is **#184**.
+#[test]
+fn a_tail_that_closes_the_saved_copy_fails_the_block() {
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do echo a; break; done > f 6>&-; echo tail");
+    assert_eq!((out(&o), rc(&o)), ("", Some(1)), "stderr={}", err(&o));
+    assert!(
+        err(&o).contains("failed to close redirection target fd 6"),
+        "the restore names the fd it could not close: stderr={}",
+        err(&o)
+    );
+    assert_eq!(
+        file(&dir, "f"),
+        Some(b"".to_vec()),
+        "the block's output never reaches the target: the scope opened and failed"
+    );
+
+    let dir = Scratch::new();
+    let o = run(&dir, "{ echo g; } > f 6>&-; echo tail");
+    assert_eq!(
+        (out(&o), rc(&o), file(&dir, "f")),
+        ("", Some(1), Some(b"".to_vec())),
+        "the group twin behaves identically (already `master`'s behavior): stderr={}",
+        err(&o)
+    );
 }

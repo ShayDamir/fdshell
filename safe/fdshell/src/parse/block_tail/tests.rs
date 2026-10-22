@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::format;
@@ -17,7 +18,7 @@ fn run(b: &[u8], kw: &[u8]) -> Result<Vec<RedirectDef>, Report<ParseError>> {
     let at = (0..tokens.len())
         .rfind(|&i| tokens.get(i).is_some_and(|t| is_closer(t, kw)))
         .unwrap();
-    redirects(kw, tokens.get(at..).unwrap_or(&[]), b)
+    redirects(kw, tokens.get(at..).unwrap_or(&[]))
 }
 
 fn tail(b: &[u8]) -> Vec<RedirectDef> {
@@ -54,6 +55,27 @@ fn shape(redirects: &[RedirectDef]) -> Vec<(i32, RedirectDirection, Vec<u8>)> {
             (r.export_to, r.direction, target)
         })
         .collect()
+}
+
+/// The single path target of a one-redirect tail, as its full quadruple: text,
+/// quote mask, zero-byte quote spans, `quoted`. The target's word expansion
+/// reads the mask and the spans (the tilde rule, the `$(…)` regions — tasks
+/// #321/#278), so a tail test that reads only the text cannot see them.
+fn path_of(b: &[u8], kw: &[u8]) -> (Vec<u8>, Vec<MaskBit>, Vec<usize>, bool) {
+    match &run(b, kw).unwrap().first().unwrap().source {
+        RedirectSource::Path {
+            path,
+            mask,
+            spans,
+            quoted,
+        } => (
+            path.as_bytes().unwrap().to_vec(),
+            mask.clone(),
+            spans.clone(),
+            *quoted,
+        ),
+        other => panic!("expected a path target, got {other:?}"),
+    }
 }
 
 /// Every operator shape the tail reads, in source order, asserted as the exact
@@ -154,8 +176,8 @@ fn the_operand_stays_raw() {
 }
 
 /// The glued closer: `done>f` splits at the keyword, so the operator is the
-/// block's redirection. The mask and span shifts are checked through a quoted
-/// operand (`done>"f"`), whose quote span starts inside the tail.
+/// block's redirection. The mask and span shifts are pinned as exact values by
+/// [`the_glued_tail_word_shifts_its_spans_by_the_keyword`].
 #[test]
 fn glued_closer_splits_at_the_keyword() {
     assert_eq!(
@@ -177,6 +199,114 @@ fn glued_closer_splits_at_the_keyword() {
     assert_eq!(
         shape(&tail(b"while :; do :; done>\"f\"")),
         vec![(1, RedirectDirection::Write, b"f".to_vec())]
+    );
+}
+
+/// The glued closer's word **data**: the tail word's quote mask, zero-byte quote
+/// spans and `quoted` flag must come out exactly as the spaced spelling's, since
+/// the target's word expansion reads them (the tilde rule, the `$(…)` regions —
+/// tasks #321/#278). The whole [`RedirectDef`] is compared, not the target text:
+/// the text is driven by the mask alone, so an emptied or unshifted span list
+/// passes a text-only check. The statement level cannot show this — a glued
+/// closer with a **quoted** operand is rejected by the byte scan (task #413) —
+/// so this module's own tests are the only place the rule is pinned.
+#[test]
+fn the_glued_tail_word_is_the_spaced_word() {
+    for (kw, glued, spaced) in [
+        (
+            b"done".as_slice(),
+            b"while :; do :; done>a\"\"b".as_slice(),
+            b"while :; do :; done > a\"\"b".as_slice(),
+        ),
+        (
+            b"done".as_slice(),
+            b"while :; do :; done>\"\"a".as_slice(),
+            b"while :; do :; done > \"\"a".as_slice(),
+        ),
+        (
+            b"done".as_slice(),
+            b"while :; do :; done>\"a b\"".as_slice(),
+            b"while :; do :; done > \"a b\"".as_slice(),
+        ),
+        (
+            b"done".as_slice(),
+            b"while :; do :; done>a\"b\"".as_slice(),
+            b"while :; do :; done > a\"b\"".as_slice(),
+        ),
+        (
+            b"done".as_slice(),
+            b"while :; do :; done>>\"f\"".as_slice(),
+            b"while :; do :; done >> \"f\"".as_slice(),
+        ),
+        (
+            b"done".as_slice(),
+            b"while :; do :; done>f".as_slice(),
+            b"while :; do :; done > f".as_slice(),
+        ),
+        (
+            b"fi".as_slice(),
+            b"if :; then :; fi>a\"\"b".as_slice(),
+            b"if :; then :; fi > a\"\"b".as_slice(),
+        ),
+        (
+            b"esac".as_slice(),
+            b"case x in y) :;; esac>a\"\"b".as_slice(),
+            b"case x in y) :;; esac > a\"\"b".as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            run(glued, kw).unwrap(),
+            run(spaced, kw).unwrap(),
+            "{glued:?} must carry the quoting of {spaced:?}"
+        );
+    }
+}
+
+/// The **exact** shifted span list, so the equality above cannot be satisfied by
+/// a shared off-by-one. A zero-byte quote pair is recorded at the index it opens
+/// at in the **word's own** text (task #321), so glued it sits `kw.len()` bytes
+/// into the closer word and [`shift_spans`] moves it back by exactly that; the
+/// operator byte is stepped past once more by the redirect parser, which is
+/// shared by both spellings.
+#[test]
+fn the_glued_tail_word_shifts_its_spans_by_the_keyword() {
+    // The `""` between `a` and `b` is target index 1, glued (`done`, `fi`,
+    // `esac` — keyword lengths 4, 2, 4) or spaced.
+    let ab = (
+        b"ab".to_vec(),
+        vec![MaskBit::Unquoted, MaskBit::Unquoted],
+        vec![1],
+        true,
+    );
+    assert_eq!(path_of(b"while :; do :; done>a\"\"b", b"done"), ab);
+    assert_eq!(path_of(b"if :; then :; fi>a\"\"b", b"fi"), ab);
+    assert_eq!(path_of(b"case x in y) :;; esac>a\"\"b", b"esac"), ab);
+    assert_eq!(path_of(b"while :; do :; done > a\"\"b", b"done"), ab);
+    // A zero-byte pair at the very start of the target is span 0.
+    assert_eq!(
+        path_of(b"while :; do :; done>\"\"a", b"done"),
+        (b"a".to_vec(), vec![MaskBit::Unquoted], vec![0], true)
+    );
+    // A bare tail word: no spans, an all-unquoted mask, not quoted.
+    assert_eq!(
+        path_of(b"while :; do :; done>ab", b"done"),
+        (
+            b"ab".to_vec(),
+            vec![MaskBit::Unquoted, MaskBit::Unquoted],
+            Vec::new(),
+            false
+        )
+    );
+    // A region with bytes is the mask's business, not the spans': `QuotedStart`
+    // at the region's own target index, no span.
+    assert_eq!(
+        path_of(b"while :; do :; done>a\"b\"", b"done"),
+        (
+            b"ab".to_vec(),
+            vec![MaskBit::Unquoted, MaskBit::QuotedStart],
+            Vec::new(),
+            true
+        )
     );
 }
 
