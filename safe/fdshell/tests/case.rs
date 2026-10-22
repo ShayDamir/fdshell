@@ -697,6 +697,11 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
         // neither opens a group; these stay the accepted #419 shapes (bash rc 2).
         "case x in a) echo \"x(\" b) ;; esac",
         "case x in a) echo x\\() ;; esac",
+        // A quoted backslash enters the word as a pair of quoted bytes, so the
+        // `(` behind it opens its group: the arm reads as the subshell shape of
+        // #316/#419 and parses (bash rejects it, rc 2).
+        "case x in a) '\\'(x) ;; esac",
+        "case x in a) \"\\\\\"(x) ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");

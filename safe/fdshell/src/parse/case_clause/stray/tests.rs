@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-use super::opens_next_pattern;
+use super::{opens_groups, opens_next_pattern};
+use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
+use alloc::vec;
 
 /// [`opens_next_pattern`] over the tokens of the statement `line`, with `limit`
 /// as the index of the `;;` window that ends the arm region (`None`: the run up
@@ -11,6 +13,55 @@ use crate::parse::token::tokenize_statement;
 /// the spans the tokens were built from.
 fn opens(line: &[u8], limit: Option<usize>) -> bool {
     opens_next_pattern(&tokenize_statement(line).unwrap(), limit, line)
+}
+
+/// [`opens_groups`] on a word and a mask written **directly**: the mask the
+/// tokenizer produces for the real shapes is pinned through [`opens`] above, and
+/// these are the counter's own contract, byte by byte.
+fn groups(word: &sys::ShortCStr, mask: &[MaskBit]) -> usize {
+    opens_groups(word.as_bytes().unwrap(), mask)
+}
+
+/// The counter's own byte tests: the paren of a definer, a subshell and an array
+/// literal all count, the arithmetic `((` never does (at the word's edge nor
+/// mid-word), and a quoted paren is word text.
+#[test]
+fn the_word_own_parens_are_counted_over_its_bytes() {
+    let mask = |n: usize| vec![MaskBit::Unquoted; n];
+    assert_eq!(groups(&sys::ShortCStr::from(c"f("), &mask(2)), 1);
+    assert_eq!(groups(&sys::ShortCStr::from(c"(cat"), &mask(4)), 1);
+    assert_eq!(groups(&sys::ShortCStr::from(c"m=(1"), &mask(4)), 1);
+    assert_eq!(groups(&sys::ShortCStr::from(c"m=("), &mask(3)), 1);
+    assert_eq!(groups(&sys::ShortCStr::from(c"m=($@"), &mask(5)), 1);
+    // `((` is arithmetic's own pair, at the word's edge and mid-word: `m=$((1)`
+    // would hold the arm's depth above 0 and swallow the next clause's paren.
+    assert_eq!(groups(&sys::ShortCStr::from(c"((1"), &mask(3)), 0);
+    assert_eq!(groups(&sys::ShortCStr::from(c"m=$((1"), &mask(6)), 0);
+    // A quoted paren is word text.
+    let quoted = vec![MaskBit::Unquoted, MaskBit::QuotedStart, MaskBit::Quoted];
+    assert_eq!(groups(&sys::ShortCStr::from(c"x(b"), &quoted), 0);
+}
+
+/// The escape arm reads the **mask**, not just the byte. A quoted `\` is word
+/// text and consumes nothing behind it, so the `(` right behind it opens its
+/// group; an unquoted escape pair is one literal byte, so the paren it carries
+/// opens nothing. The mask is written directly because the tokenizer hands a
+/// quoted `\` over as a **pair** of quoted bytes (`'\'(x)` and `"\\"(x)` are both
+/// the word `\\(x`, mask quoted, quoted, unquoted, unquoted), where the pair's
+/// skip and the two single steps land on the same byte — no tokenized shape can
+/// show the difference, and this is the mask a **derived** word carries
+/// (`MaskBit::from_quoted`, the reading expansion output and a folded word use).
+#[test]
+fn an_escape_pair_is_read_through_the_mask() {
+    let quoted_backslash = vec![MaskBit::Quoted, MaskBit::Unquoted, MaskBit::Unquoted];
+    assert_eq!(groups(&sys::ShortCStr::from(c"\\(x"), &quoted_backslash), 1);
+    // The unquoted pair is the other half: `\` + `(` is one literal byte.
+    let unquoted = vec![MaskBit::Unquoted; 3];
+    assert_eq!(groups(&sys::ShortCStr::from(c"x\\("), &unquoted), 0);
+    // `x\\(x`: the pair is a literal backslash, so the `(` behind it is the
+    // group's own.
+    let two = vec![MaskBit::Unquoted; 5];
+    assert_eq!(groups(&sys::ShortCStr::from(c"x\\\\(x"), &two), 1);
 }
 
 /// The shape of the bug: the arm is the word `b` and the `)` is the pattern paren
@@ -138,6 +189,21 @@ fn a_quoted_or_escaped_paren_is_word_text() {
     // through the word (`echo "x(" b) ;;` is the accepted #419 shape: the
     // predecessor sits in argument position).
     assert!(!opens(b"echo \"x(\" b)", None));
+    // A quoted `(` at the arm's own start is word text too, so the `)` written
+    // behind that word is a depth-0 candidate: `case x in a) "(x") ;; esac` is
+    // bash rc 2, and a scan that counted the quoted paren as an opener would let
+    // its `)` close that group and swallow the pattern paren.
+    assert!(opens(b"\"(x\")", None));
+    // A **quoted** backslash is word text, not an escape pair, and the tokenizer
+    // hands it over as a **pair** of quoted bytes: `'\'(x)` and `"\\"(x)` are both
+    // the word `\\(x` (mask: quoted, quoted, unquoted, unquoted) plus its `)`
+    // token. Skipping the two quoted bytes one at a time lands on the same byte as
+    // one jump of two, so the `(` behind the pair opens its group either way —
+    // bash rejects the shape (rc 2) and fdshell parses it as the subshell-shaped
+    // arm of #316/#419. The pin is the counted group, and it is what the
+    // equivalence of the escape arm's mask test rests on.
+    assert!(!opens(b"'\\'(x)", None));
+    assert!(!opens(b"\"\\\\\"(x)", None));
 }
 
 /// An **escape pair** is one literal word byte, and the token's mask marks both
