@@ -31,11 +31,16 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
 /// physical line stays unfinished and every run of the flush is stamped
 /// (task #294).
 ///
-/// Runs buffered from an earlier physical line (a trailing `#` comment
-/// deferred the flush past the line's newline) are emitted body-less: a
+/// Runs buffered from an **earlier physical line** — the flush was deferred
+/// past the line's newline by a trailing `#` comment (`book::resume_past`'s
+/// `Boundary::Comment`) or by a line-opening `&` — are emitted body-less: a
 /// comment-terminated operator line's body starts after *that* line, and
 /// matching bodies across lines stays unsupported (the parser rejects the
-/// statement, as before).
+/// statement, as before). Task **#333** owns that family. The rule is *not*
+/// about a run whose own text spans several physical lines: a keyword block
+/// opened mid-run keeps its bytes inside the run (task #232) and never moves
+/// `line_start`, so the run is flushed on the line it opened on and claims
+/// that line's region stream like any single-line run (task #295).
 pub(crate) fn flush_line<'a>(
     book: &mut Book<'a>,
     line: &[u8],

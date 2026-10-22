@@ -154,9 +154,11 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   runs `<<B` as a command word (bash runs a bare redirection, rc 0) — owners
   **#303** and **#345**; the glued `cat <<A& cat <<B` keeps the tokenizer's
   word rule (`&` is an ordinary word byte, so the byte-level delimiter is `A&`)
-  and reports the missing terminator; a `#` comment behind the `&` ends the
-  physical line, so the suffix run is flushed body-less (the rule the
-  comment-terminated line has always had); a bare `<<` behind the `&` is
+   and reports the missing terminator; a `#` comment behind the `&` ends the
+   physical line, so the suffix run is flushed body-less (the rule the
+   comment-terminated line has always had, and the deferred-flush member task
+   **#333** owns); a bare `<<` behind the `&` is
+
   `invalid redirect syntax` rc 1 where bash is rc 2; a body that never arrives
   empties the **whole line's** region list (owner **#275**); a **block opened
   behind the `&`** (`cat <<A & if true; then cat <<B … fi`) prints the prefix's

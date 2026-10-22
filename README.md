@@ -395,7 +395,13 @@ operator order to the operators written on that line: the pre-block statements
 first, then the block's own operators, then the trailing statements. A
 `name() { … }` definition claims none — its body's here-docs feed the
 statements inside it: `cat <<X; f() { echo hi; }; f; cat <<B` + `bodyX`/`X`/
-`bodyB`/`B` prints `bodyX`, `hi`, `bodyB`.
+`bodyB`/`B` prints `bodyX`, `hi`, `bodyB`. A **block opened mid-run**
+(`true && while :; do cat <<T; … ; done` + body + delimiter) travels with the
+run, so the part that owns the `<<` gets its body and prints it, as bash; what
+stays a measured divergence is the multi-line construct whose region swallows
+its own closer (`true && while :; do` + newline + `cat <<T; break` + `done` +
+body + delimiter): rc 1 with the construct's unterminated-shape message, where
+bash is rc 2.
 
 The stream is read **greedily, one body per operator**, as bash reads it: each
 operator's body starts where the previous operator's delimiter line ended, and

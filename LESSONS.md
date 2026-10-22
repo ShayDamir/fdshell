@@ -2597,7 +2597,10 @@ Three rows of task #276's table were labelled fdshell-identical and are not,
 all for pre-existing reasons the table did not test: `{ cat 3<<T; }` and
 `f(){ cat 3<<T; }; f` fail with `missing terminating delimiter line` because a
 here-doc in a group/function body claims no body region (the plain `<<` form
-fails identically on master — tasks #315/#305/#295); `( cat 3<<T )` is not a
+fails identically on master — tasks #315/#305; task #295 re-measured the
+**mid-run** keyword-block row of this family and it is bash-equal since task
+#232's `43ff10e`, pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family`
+and `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a
 subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
 because a `>&N`/`<&N` source is resolved against the *parent's* fd table, never
 against a descriptor a sibling redirect of the same command opens (task #178).
@@ -3463,3 +3466,51 @@ the statement. One shape stays out of reach, and is pinned as complete: a brace
 whose next byte is not an opener boundary is a **word** (the `group/word.rs`
 rule, task #141), so `true && {` at the end of input records no span at all —
 the twin of the run-start `{` gap, an opener-word limitation, not a mid-run one.
+
+## Re-measure a bug on `master` before planning its fix — the task that pins a divergence may be the task that closes it (task #295)
+
+Task #295 was filed (from task #232's planning) with a measured divergence: a
+here-doc in the **body** of a multi-line mid-run keyword block claims no body
+region, so `true && while :; do cat <<T; break; done` + `bodyT` + `T` reports
+`here-doc: missing terminating delimiter line 'T'` rc 1 while bash prints
+`bodyT` rc 0. On `master` the exact script prints `bodyT` rc 0 in **both**
+shells: the bug does not reproduce. Its description stayed true about the
+mechanism it blamed (`segment/line.rs::flush_line` does emit a body-less run,
+`single_line == false`) and false about the shape reaching that branch.
+
+Why: `segment/block/midrun.rs::skip` keeps the block's bytes inside the run and
+never moves `book.line_start`, so the multi-line run's `off` is `>= line_start`
+— `single_line` is true, the flush takes the physical line's whole region
+stream, and the run's `<<` gets its body. The body-less branch is reached only
+by a flush **deferred past a newline** (a trailing `#`, `book::resume_past`'s
+`Boundary::Comment`, or a line-opening `&`) — owner task **#333**. The
+`rc 1 / missing terminating delimiter line` in the task's own description
+measured an intermediate state of #232's branch.
+
+**Bisect a claim like this in minutes.** The repro is a two-line script, so a
+build-and-measure loop is enough: `git worktree add /tmp/opencode/wtN <base>`
+(the repo worktree stays clean), `CARGO_TARGET_DIR=/tmp/opencode/tgtN` (the
+repo's `target/` untouched), a loop that runs
+`cargo build -p fdshell && target/debug/fdshell -c "$script"` and compares
+stdout/rc to `bash file < /dev/null`. An incremental build is ~2 s, so a binary
+search over 227 commits is a handful of builds. The answer here: **`43ff10e`
+(task #232's own commit) is the first commit where the shape is bash-equal**;
+at its parent the script is not even parsed (`expected 'done'` rc 1). The
+earlier measurement was never re-taken against the merged version.
+
+**The deliverable of a bug that no longer reproduces is pins, not a fix.** Pin
+the reported row and its family at three levels — the integration table
+(`tests/heredoc.rs::mid_run_heredoc_parity_family`, 19 bash-measured rows: the
+operator in the block's condition, two `<<` in one body, every keyword, the
+`|` stage, `<<'T'`/`<<-T`/`3<<T`/`<<<`, a `#` behind the run), the unit level
+(`segment/line/tests.rs::flush_line_a_multi_line_run_claims_its_line_stream`
+locks the flush bookkeeping that the reported bug would break), and the
+divergence family next door (`tests/cond_blocks.rs::multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`,
+rc 1 vs bash rc 2). Then correct every doc that lists the closed task as an
+owner (here: task #276's table entry, `README.md`, `POSIX_COMPATIBILITY.md`) and
+name the owner of each residual member. **Never** implement the residual
+family inside the measuring task: the `single_line == false` fix belongs to
+#333, it needs #333's open decision ("does a `#`-terminated line own a body
+stream at all?"), and it pins behaviour in `segment/bg/tests.rs` that #333
+owns. A pins-only task's biggest risk is the temptation to fix the neighbour
+rows it discovers.
