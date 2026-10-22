@@ -4,9 +4,9 @@ use super::if_block::ElifArm;
 use super::part_text::part_text;
 use super::semi::amp_semi;
 use super::semi::block_body;
+use super::semi::block_condition;
 use super::semi::body_end;
 use super::semi::condition_background;
-use super::semi::trim_condition;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
@@ -36,7 +36,10 @@ pub fn parse_elifs(
             if ends_in_plain_semi(cond, line) {
                 bail!(ParseError::MalformedIfBlock);
             }
-            let cond_trimmed = trim_condition(cond, line);
+            // An empty condition (`elif ; then`, `elif & then`, task #299) is a
+            // parse error, and the plain-`;` check above keeps its precedence:
+            // the `elif ;; then` slice stays `malformed if block`.
+            let cond_trimmed = block_condition(cond, line, ParseError::MissingCondition)?;
             let ec = verbatim(text, cond_trimmed)?;
             let cond_bodies = condition_bodies(text, cond_trimmed);
             let next = elif_pairs

@@ -130,5 +130,24 @@ pub(crate) fn block_body<'a>(
     Ok(body)
 }
 
+/// A block's **condition** tokens: [`trim_condition`] applied, `err` when
+/// nothing is left. bash requires a non-empty `list` as an `if`/`elif`/
+/// `while`/`until` condition (`if ; then …`, `elif ; then …`, `while ; do …`,
+/// `until ; do …` and the `&`/newline spellings: all rc 2, measured), and an
+/// empty condition is **true** at run time, so `while ; do …; done` is an
+/// unbounded loop. The test is on the **trimmed** slice: the raw slice between
+/// the keywords always carries POSIX's `;`, and the `&`-only slice (`if &
+/// then`) is raw-non-empty / trimmed-empty. A `for` word list and a `case`
+/// word are not conditions — `for i in; do …` iterates zero times (bash rc 0).
+pub(crate) fn block_condition<'a>(
+    tokens: &'a [Token],
+    line: &[u8],
+    err: ParseError,
+) -> Result<&'a [Token], Report<ParseError>> {
+    let cond = trim_condition(tokens, line);
+    ensure!(!cond.is_empty(), err);
+    Ok(cond)
+}
+
 #[cfg(test)]
 mod tests;

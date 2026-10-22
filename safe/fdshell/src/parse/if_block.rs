@@ -51,6 +51,9 @@ pub(crate) fn tokens_to_if(
     let cond_tokens = trim_condition(cond_slice, line);
     let cond_background = condition_background(cond_slice, line);
 
+    // The condition's emptiness rule (`if ; then`, `if & then`, task #299) lives
+    // in `span_verbatim`'s `block_condition`, so it is checked before the
+    // `then` body's `block_body` below: `if ; then; fi` says `missing condition`.
     let condition = span_verbatim(
         text,
         closed,

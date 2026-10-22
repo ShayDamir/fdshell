@@ -1,13 +1,13 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::cond_bodies::condition_bodies;
+use crate::parse::semi::verbatim;
 use crate::parse::semi::{
-    List, Term, block_body, condition_background, find_preceded_by, up_to_closing,
+    List, Term, block_body, block_condition, condition_background, find_preceded_by, up_to_closing,
 };
-use crate::parse::semi::{trim_condition, verbatim};
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, ensure};
+use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -52,12 +52,18 @@ pub(crate) fn tokens_to_loop(
     // A loop condition is a compound list, so its `do` may be preceded by the
     // plain `&` (task #354: `while : & do :; done`), and that `&` makes the
     // condition a background job, one per iteration (task #356).
+    // `find_preceded_by` only scores a keyword preceded by a `;`/`&` token and
+    // token 0 is the loop's own keyword, so `do_idx >= 2` is the minimum
+    // reachable index — a `>= 2` guard there can never fire (task #299 deleted
+    // the dead one: it let `while ; do` through, LESSONS "redundant boundary
+    // ±1"). The emptiness test is on the **trimmed** slice, below.
     let do_idx =
         find_preceded_by(closed, 1, b"do", line, Term::SemiAmp).ok_or(ParseError::ExpectedDo)?;
-    ensure!(do_idx >= 2, ParseError::ExpectedCondition);
 
     let cond_slice = closed.get(1..do_idx).ok_or(ParseError::ExpectedDo)?;
-    let cond_tokens = trim_condition(cond_slice, line);
+    // An empty condition (`while ; do`, `while & do`, `until ; do`: bash rc 2)
+    // is true at run time, so the loop would run unbounded (task #299).
+    let cond_tokens = block_condition(cond_slice, line, ParseError::ExpectedCondition)?;
     let cond_background = condition_background(cond_slice, line);
     let condition = verbatim(text, cond_tokens)?;
     let cond_bodies = condition_bodies(text, cond_tokens);

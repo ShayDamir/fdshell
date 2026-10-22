@@ -13,7 +13,8 @@ mod trim;
 pub(crate) use closing::{List, closing_keyword_index, list_closing_keyword_index, up_to_closing};
 pub(crate) use preceded::{Term, amp_semi, find_preceded_by, is_list_terminator};
 pub(crate) use trim::{
-    block_body, body_end, condition_background, trim_body, trim_condition, trim_semi,
+    block_body, block_condition, body_end, condition_background, trim_body, trim_condition,
+    trim_semi,
 };
 
 /// The joined word of `tokens` **with its mask and zero-byte span list**: the
@@ -53,9 +54,11 @@ pub(crate) fn verbatim(
     Ok(t)
 }
 
-/// The verbatim text of `tokens[from..to]` as a trimmed condition slice;
-/// `err` when the range is absent. Lives here so `parse/if_block` keeps its own
-/// budget (task #298 moved it out of the `if` builder).
+/// The verbatim text of `tokens[from..to]` as a trimmed condition slice
+/// ([`block_condition`]); `err` when the range is absent **or the trimmed
+/// condition is empty** (task #299: bash rejects an empty `if`/`elif` condition
+/// rc 2). Lives here so `parse/if_block` keeps its own budget (task #298 moved
+/// it out of the `if` builder).
 pub(crate) fn span_verbatim(
     text: &ScriptText,
     tokens: &[Token],
@@ -64,7 +67,10 @@ pub(crate) fn span_verbatim(
     line: &[u8],
     err: ParseError,
 ) -> Result<ScriptText, Report<ParseError>> {
-    verbatim(text, trim_condition(tokens.get(from..to).ok_or(err)?, line))
+    let Some(slice) = tokens.get(from..to) else {
+        return Err(err.into());
+    };
+    verbatim(text, block_condition(slice, line, err)?)
 }
 
 /// Byte range `(start, end)` covered by the first and last tokens, or `(0, 0)`.
