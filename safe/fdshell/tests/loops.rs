@@ -1324,6 +1324,11 @@ fn ampersand_terminated_loop_condition_gates_on_the_async_status() {
 /// the previous stage's arguments. Every loop keyword runs there with bash
 /// (5.3.9) parity — including the glued `|` (task #236's pair rule sets the same
 /// command position) and a multi-line stage, whose newlines are clause bytes.
+/// The plan's `echo a | until ! :; do echo b; break; done` row is **not** pinned
+/// here: `!` is unsupported at every position (a stage's `while ! :; …` and the
+/// plain `! : ; echo tail` report the unresolved command on stderr the same way),
+/// so the row's stdout parity is incidental — a failed `!` is a non-zero
+/// condition, which is what `until` wants. `!` negation is task **#96**'s.
 /// On `master` these lines printed the block's words as data
 /// (`echo a | while :; do echo w; break; done` → `while :; do echo w; break; done`).
 #[test]

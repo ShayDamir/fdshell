@@ -9,6 +9,7 @@
 
 use crate::parse::parse;
 use crate::parse::{ParsedLine, Pipeline, Stage};
+use crate::redirect::RedirectSource;
 use alloc::string::String;
 use alloc::vec;
 use sys::{Origin, Position, ScriptText};
@@ -143,4 +144,30 @@ fn a_keyword_shaped_stage_argument_stays_a_command() {
     };
     assert_eq!(cmd.command, c"echo".into());
     assert_eq!(cmd.args, vec![c"if".into()]);
+}
+
+/// The spec cursor a block stage **leaves** is where the next stage reads: the
+/// block advances it by its own operator count (its `<<` are inside its
+/// untrimmed slice), so a heredoc in a stage **behind** a block stage that
+/// carries none gets the body of **its own** operator. The stage before the
+/// block puts a non-zero cursor in play, which is what separates advancing the
+/// cursor by `0` from resetting it: a reset hands the last stage the first
+/// body (`bodyA` here, where bash's parse gives it `bodyB`).
+#[test]
+fn the_cursor_a_block_stage_leaves_feeds_the_stage_behind_it() {
+    let line = b"cat <<A | echo a | while :; do :; break; done | cat <<B\nbodyA\nA\nbodyB\nB";
+    let pipe = pipeline(line);
+    assert_eq!(pipe.stages.len(), 4);
+    assert!(matches!(pipe.stages.get(2), Some(Stage::Block(_))));
+    assert_eq!(heredoc_body(&pipe, 0), "bodyA\n");
+    assert_eq!(heredoc_body(&pipe, 3), "bodyB\n");
+}
+
+/// The body of stage `stage`'s single here-doc redirect.
+fn heredoc_body(pipe: &Pipeline, stage: usize) -> String {
+    let source = &pipe.command_at(stage).unwrap().redirects[0].source;
+    let RedirectSource::HereDoc { body, .. } = source else {
+        panic!("stage {stage} carries a here-doc redirect");
+    };
+    String::from_utf8_lossy(body.as_bytes().unwrap_or(&[])).into_owned()
 }
