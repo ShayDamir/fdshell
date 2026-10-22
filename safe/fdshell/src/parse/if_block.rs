@@ -37,7 +37,7 @@ pub(crate) fn tokens_to_if(
     // The closing `fi` is the truncated slice's last token.
     let fi_idx = closed.len() - 1;
     let redirects =
-        crate::parse::block_tail::redirects(b"fi", tokens.get(fi_idx..).unwrap_or(&[]), line)?;
+        crate::parse::block_tail::redirects(b"fi", tokens.get(fi_idx..).unwrap_or(&[]))?;
 
     // An `if`/`elif` condition is a compound list: `then` may sit behind the
     // plain `&` as behind a `;` (task #354), and that `&` is the condition's

@@ -9,7 +9,6 @@ use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::classify::parse_redirect;
 use crate::redirect::RedirectDef;
-use crate::scan::heredoc::span_operator;
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -45,21 +44,21 @@ pub(crate) fn closer_index(tokens: &[Token], kw: &[u8]) -> Option<usize> {
 /// what bash gives (`done > f > g` leaves `f` empty, `g` holds the output).
 ///
 /// The walk **stops** at the first token that is not a redirection, and at a
-/// `<<`-shaped operator (the shared raw-span shape test, so the io-number form
-/// `done 3<<T` stops as a here-doc too): a plain word behind the closer is task
-/// #405's and a here-doc/here-string on the closer is #408's, so both keep
-/// exactly the behavior their pins record.
+/// `<<`-shaped token (a bare `<<`/`<<<`; the io-number form `done 3<<T` stops
+/// one step later, in `parse_redirect`, which never reads a `<<` as a path
+/// redirect): a plain word behind the closer is task #405's and a
+/// here-doc/here-string on the closer is #408's, so both keep exactly the
+/// behavior their pins record.
 pub(crate) fn redirects(
     kw: &[u8],
     at_closer: &[Token],
-    line: &[u8],
 ) -> Result<Vec<RedirectDef>, Report<ParseError>> {
     let tail = split_close(kw, at_closer);
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
-        let (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
-        if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
+        let (t, _start, _end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
+        if t.starts_with(b"<<") {
             break;
         }
         let Some((def, extra)) = parse_redirect(&tail, i)? else {

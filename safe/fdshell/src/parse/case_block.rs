@@ -63,7 +63,7 @@ pub(crate) fn tokens_to_case(
     // empty there, exactly as bash reads it.
     let esac_idx = closed.len() - 1;
     let redirects =
-        crate::parse::block_tail::redirects(b"esac", tokens.get(esac_idx..).unwrap_or(&[]), line)?;
+        crate::parse::block_tail::redirects(b"esac", tokens.get(esac_idx..).unwrap_or(&[]))?;
 
     let (word, word_mask, word_span) = try_join_masked(trim_semi(
         closed.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,

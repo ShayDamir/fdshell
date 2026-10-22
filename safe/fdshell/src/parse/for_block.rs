@@ -71,7 +71,7 @@ pub(crate) fn tokens_to_for(
     // The closing `done` is the truncated slice's last token.
     let done_idx = closed.len() - 1;
     let redirects =
-        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]), line)?;
+        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]))?;
     ensure!(
         closed
             .last()

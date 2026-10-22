@@ -47,7 +47,7 @@ pub(crate) fn tokens_to_loop(
     // The closing `done` is the truncated slice's last token.
     let done_idx = closed.len() - 1;
     let redirects =
-        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]), line)?;
+        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]))?;
 
     // A loop condition is a compound list, so its `do` may be preceded by the
     // plain `&` (task #354: `while : & do :; done`), and that `&` makes the

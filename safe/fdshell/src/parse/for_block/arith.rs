@@ -87,7 +87,7 @@ fn tail_body(
     let closed = up_to_closing(tail, line, List::Plain, ParseError::ExpectedDone)?;
     let done_idx = closed.len() - 1;
     let redirects =
-        crate::parse::block_tail::redirects(b"done", tail.get(done_idx..).unwrap_or(&[]), line)?;
+        crate::parse::block_tail::redirects(b"done", tail.get(done_idx..).unwrap_or(&[]))?;
     ensure!(
         closed
             .last()
