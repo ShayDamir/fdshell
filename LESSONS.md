@@ -2296,8 +2296,9 @@ is bash rc 0), and the `is_empty` filter on `IfBlock::else_body` became
 unreachable once the empty `else` body is an error — a guard that can never fire
 is an equivalent-mutant source, so it was deleted, not kept "defensive".
 Sibling forms deliberately left open (measured, filed): `case x in a) esac`
-(#300), missing `;` before `done`/`fi` (#301), empty function body (#302),
-redirect-only command (#303). Pins: `parse/tests.rs` (`empty_then_body_is_err`,
+(#300, **closed** by the entry below — bash allows that arm), missing `;` before
+`done`/`fi` (#301), empty function body (#302), redirect-only command (#303).
+Pins: `parse/tests.rs` (`empty_then_body_is_err`,
 `empty_elif_body_is_err`, `empty_else_body_is_err`, `empty_do_body_is_err`,
 `for_semi_before_done_reports_before_the_empty_body`,
 `empty_condition_pins_the_body_message`, `non_empty_and_case_bodies_stay_green`)
@@ -2334,6 +2335,63 @@ condition (#415), and the arith clause's empty condition is true in bash, so
 `tests/block_conditions.rs` (every form rc 1 with its message; the loop forms
 under the bounded child — the empty condition is true, so the regression is a
 hang; the neighbouring leniencies green).
+
+## A `case` arm is a command list: empty at `esac`, and its stray `)` is the missing `;;`
+bash's `case` grammar reads an arm body as a command sequence, so two rules come
+out of that one place and the clause walk had to learn both (task #300, measured
+against bash 5.3.9):
+
+- **an arm may be empty**, closed straight at `esac`: `case x in a) esac` is rc 0,
+  and an empty **last** clause too (`case x in a) echo one;; b) esac`). This is
+  the deliberate opposite of the `then`/`elif`/`else`/`do` rule of the entry above
+  (that grammar requires a non-empty `list`, this one does not), which is why
+  `parse/semi.rs::block_body` is **not** called for a `case` arm and must not be.
+  The walk ended a pattern list by *position* (`*pos >= esac_idx`), and
+  `case x in a) esac` reaches `esac_idx` right after a **successful** `)`, so the
+  valid block was reported as `case: missing ')'`; the fix is the flag the
+  position was imitating — `ensure!(closed_paren, CaseMissingCloseParen)`, set at
+  the `)` break. The multi-line spelling had worked all along because the
+  tokenizer turns a newline into a `;` token and `pos` landed one short of
+  `esac_idx` — the asymmetry that hid the bug for as long as it hid it.
+- **the pattern paren of the next clause is a token the arm's list cannot take**:
+  `case x in a) b) ;; esac` is bash's `syntax error near unexpected token ')'`
+  (rc 2) and fdshell's `case: missing ';;' between clauses` at its rc 1. The
+  test is the shared command-position machine ("One clause rule, three scorers")
+  in `parse/case_clause/stray.rs`: the arm region — bounded by the `;;` **window**,
+  so the next clause's own pattern parens are never in scope — contains a `)`
+  whose predecessor word **sits** in `Place::Command`. Three gates carry the
+  measurements: the `((` arithmetic region (`for ((i=0;i<2;i++))` writes bare `)`
+  tokens behind its `;`, in command position, and bash takes the arm at rc 0);
+  the operator-predecessor test (the tokenizer emits every unquoted `)` as its own
+  token, so `((1))` is the tokens `((1`, `)`, `)` and its second `)` closes the
+  arithmetic command, not a pattern list); and `keyword_word`, the same quote gate
+  the keyword scorers open with, for a quoted `")"` (an escaped `\)` keeps its
+  pair in the word text, so `eq_bytes(b")")` never sees it). Two cheaper rules
+  were measured and rejected: a whole-arm `((` exemption loses
+  `case x in a) ((1)); b) ;; esac` (bash rc 2), and "any `)` in an arm is an
+  error" rejects `case x in a) (echo sub) ;; esac` (bash rc 0, and every arm of
+  task #316's shape the day subshells land).
+
+Two layer facts the fix leans on. **A heredoc body is never in the region**:
+`parse/token/statement.rs::tokenize_statement` blanks the body regions and the
+structural bytes of a terminator line, so `case x in x) cat <<T` newline `x)`
+newline `T` newline `esac` prints `x)` verbatim at rc 0. **The scan layer is a
+separate traversal**: `case x in a) echo hi;;b)esac` (a closer glued behind a
+pattern's `)`) is refused by `script/unclosed.rs`, not by the clause walk —
+fdshell rc 1 where bash is rc 0, filed as #421; the lenient brace-protection
+walk of `case_block/literal.rs` already accepted the shape and stays lenient
+(pinned there, so the two traversals of one `case` line cannot drift apart).
+Pins: `parse/case_clause/tests.rs` (the `esac`-closed clause's shape, and the
+missing-paren/empty-pattern verdicts that stayed),
+`parse/case_clause/stray/tests.rs` (every gate, called on a token region
+directly), `parse/tests.rs::case_*`, `parse/case_block/tests.rs`,
+`parse/case_block/literal/tests.rs` and `tests/case.rs` (the bash-parity table,
+the accepted leniencies — `case x in a) ; esac`, the `&` and `;&` closers, the
+closer-shaped word in an arm — and the family's left-open rows: #418, #419,
+#420, #421 and #316). **Follow-up written down now**: when `(` becomes an
+operator token (task #316), `stray.rs`'s `((` region rule *and* the
+command-position rule both read the token list, so a subshell's `(`/`)` pair
+must be added to that region scan, not to the word test.
 
 ## A definer word makes its body brace a group opener for the cond layer
 `f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list
