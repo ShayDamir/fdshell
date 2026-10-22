@@ -2,7 +2,7 @@
 //! byte just past the `;` that ends the gated AND-list.
 
 use crate::keywords::Place;
-use crate::scan::ScanState;
+use crate::scan::{ScanState, comment_end};
 use crate::segment::group::opens_at;
 
 use super::{block, body, opens_group};
@@ -16,7 +16,9 @@ use super::{block, body, opens_group};
 /// body bytes, counted by the shared [`block::word_delta`] scorer so the
 /// block's closer ends the depth), a `{ …; }` group is opaque, and heredoc
 /// bodies are skipped whole; no operator splits — only the depth-0 separator
-/// ends the gate.
+/// ends the gate. A word-start `#` comment runs to the end of its physical
+/// line, so a separator written inside it is comment text and the gate runs to
+/// that line's newline (task #296).
 pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize {
     let mut i = from;
     let mut run_start = from;
@@ -33,6 +35,16 @@ pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize
     while let Some(&b) = line.get(i) {
         if !state.in_quote && !state.in_single && state.paren_depth == 0 {
             if state.at_word_start() {
+                if b == b'#' {
+                    // The gate shares the boundary scan's comment rule: a `#`
+                    // at a word start comments out the rest of its physical
+                    // line, so no `;` written inside it ends the gate (bash
+                    // never resumes ungated inside comment text). Landing **on**
+                    // the newline that ends the comment lets the `\n` arm below
+                    // end the gate at depth 0 (task #296).
+                    i = comment_end(line, i);
+                    continue;
+                }
                 let (delta, next) = block::word_delta(line, i, block_depth, run_start, place);
                 block_depth = block_depth.saturating_add(delta).max(0);
                 place = next;

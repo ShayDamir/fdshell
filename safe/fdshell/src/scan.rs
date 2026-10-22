@@ -122,7 +122,7 @@ pub(crate) mod bg;
 pub(crate) mod heredoc;
 mod skip;
 
-pub(crate) use skip::skip_comment;
+pub(crate) use skip::{comment_end, skip_comment};
 
 #[cfg(test)]
 mod tests;

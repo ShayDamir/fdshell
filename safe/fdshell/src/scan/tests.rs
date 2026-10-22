@@ -460,3 +460,24 @@ fn set_quotes_restores_both_bits() {
         "only the span bit is set, not the double bit"
     );
 }
+
+// The `comment_end` / `skip_comment` pair's documented difference: a comment
+// that ends in a newline. `comment_end` lands **on** the newline (the
+// cond-boundary scan's region and run-reset arms are keyed on that byte,
+// task #296), `skip_comment` lands past it (the callers that resume the next
+// line's text).
+#[test]
+fn comment_end_lands_on_the_newline_skip_comment_past_it() {
+    assert_eq!(comment_end(b"abc#def\nghi", 3), 7, "the newline byte");
+    assert_eq!(skip_comment(b"abc#def\nghi", 3), 8, "past the newline");
+}
+
+// A comment with no newline at all: both helpers stop at the end of input.
+#[test]
+fn comment_end_without_a_newline_stops_at_the_end() {
+    assert_eq!(comment_end(b"abc#def", 3), 7, "line.len()");
+    assert_eq!(skip_comment(b"abc#def", 3), 7);
+    // An empty comment tail: the byte right behind the `#`.
+    assert_eq!(comment_end(b"a#\n", 1), 2);
+    assert_eq!(skip_comment(b"a#\n", 1), 3);
+}

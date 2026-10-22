@@ -9,10 +9,14 @@
 //! scanner's run rule: command position is read from the word's run, which
 //! restarts at every `;`/newline, so a block keyword written as an argument
 //! in a body (`echo if && echo x`) stays word data and a block opened by a
-//! glued cond pair's payload closes at its own closer (task #236).
+//! glued cond pair's payload closes at its own closer (task #236). A word-start
+//! `#` comments out the rest of its physical line, so an operator written in
+//! comment text — in particular behind a block's closing keyword, whose span
+//! carries the comment — is no split point: the scan skips the comment and
+//! lands on the newline that ends it (task #296).
 
 use crate::keywords::Place;
-use crate::scan::ScanState;
+use crate::scan::{ScanState, comment_end};
 use crate::segment::group::{definer_at_run, group_at_run, opens_at};
 
 mod block;
@@ -55,6 +59,19 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
             // *argument* (`echo if && echo b`) word data at top level *and*
             // inside a block (the carried `place`).
             if state.at_word_start() {
+                if b == b'#' {
+                    // A `#` at a word start comments out the rest of its
+                    // physical line: its text carries no operator, no keyword,
+                    // no group brace and no separator (bash). A block's span
+                    // carries the comment written behind its closing keyword
+                    // (`while :; do :; done # c && echo y`), so the comment must
+                    // be skipped here. Land **on** the newline that ends the
+                    // comment, never past it: the region arm above and the
+                    // run-reset arm below are keyed on that byte, and the
+                    // comment's run must reach them (task #296).
+                    i = comment_end(line, i);
+                    continue;
+                }
                 let (delta, next) = block::word_delta(line, i, block_depth, run_start, place);
                 block_depth = block_depth.saturating_add(delta).max(0);
                 place = next;
