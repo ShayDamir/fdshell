@@ -5,6 +5,7 @@
 
 use super::Token;
 use crate::keywords::{Glue, Place, after};
+use crate::mask::{MaskBit, quoted_at};
 use crate::parse::semi::glue_at;
 use crate::parse::word_quoted::keyword_word;
 
@@ -23,19 +24,25 @@ use crate::parse::word_quoted::keyword_word;
 ///   `a) echo a[b) ;;`, `a) (echo sub) ;;`) — task #419's family, left open here
 ///   so task #316's subshell-shaped arms keep parsing; a nested `case` arm's `)`
 ///   sits in [`Place::Pattern`] (behind `in`), so nested arms are untouched;
-/// - **the parens the arm opened itself** ([`opens_a_group`], counted as a
+/// - **the parens the arm opened itself** ([`opens_groups`], counted as a
 ///   depth): the tokenizer emits every unquoted `)` as its own token, so a
-///   definer's parameter list is the word `f(` plus a `)` token and a subshell
-///   the arm wrote is a `(w` word plus a `)` token. bash parses both inside the
-///   arm — `a) f() { echo y; }; f ;; esac`, `a) (cat) ;; esac`,
-///   `a) echo hi | (cat) ;; esac`, `a) g() ( : ) ;; esac`, and the definers an
-///   arm's `if`/`while`/`for`/`{ …; }` bodies write behind a `;` are bash rc 0.
-///   A `)` at depth 0 is the only candidate for a clause's pattern paren, so the
-///   rule reads the arm's own nesting, not just the neighbouring word;
+///   definer's parameter list is the word `f(` plus a `)` token, a subshell the
+///   arm wrote is a `(w` word plus a `)` token, and an array-literal assignment
+///   is the word `m=(1` plus a `)` token — the group's `(` sits **mid-word**
+///   there. bash parses all of these inside the arm — `a) f() { echo y; }; f ;;
+///   esac`, `a) (cat) ;; esac`, `a) echo hi | (cat) ;; esac`,
+///   `a) g() ( : ) ;; esac`, `a) m=(1) ;; esac`, `a) arr=("$@") ;; esac`, and
+///   the definers/array literals an arm's `if`/`while`/`for`/`{ …; }` bodies
+///   write behind a `;` are bash rc 0. A `)` at depth 0 is the only candidate
+///   for a clause's pattern paren, so the rule reads the arm's own nesting, not
+///   just the neighbouring word and not just the word's two edges;
 /// - **the `((` region**: `for ((i=0;i<2;i++))` puts bare `)` tokens behind a
 ///   `;` — in command position — and inside the region every token is
-///   arithmetic data; `((` is deliberately not an [`opens_a_group`] paren, so
-///   the region's own rule owns it and `a) ((1)); b) ;; esac` still bails;
+///   arithmetic data; `((` is deliberately **not** an [`opens_groups`] paren,
+///   wherever it sits — `m=$((1))` is a single word whose parens close inside it,
+///   so counting them would hold the arm's depth above 0 and swallow the next
+///   clause's paren (`a) m=$((1)); b) ;; esac` is bash rc 2) — and the region's
+///   own rule owns them, so `a) ((1)); b) ;; esac` still bails;
 /// - **an operator predecessor** ([`is_operator`]): `((1))` is the tokens `((1`,
 ///   `)`, `)` and its second `)` follows an operator token, not a pattern word;
 /// - [`keyword_word`]: a quoted `")"` is a word whose text is `)`, and an
@@ -49,15 +56,16 @@ pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &
     let mut place = Place::Command;
     let mut before = Place::Command;
     let mut arith = false;
-    // The parens the **arm itself opened** and has not closed yet: `f(`, `(cat`.
-    // A `)` at depth 0 is the one that can be a clause's pattern paren.
+    // The parens the **arm itself opened** and has not closed yet: `f(`, `(cat`,
+    // the array literal `m=(1`. A `)` at depth 0 is the one that can be a
+    // clause's pattern paren.
     let mut opened = 0usize;
     for (i, tok) in region
         .iter()
         .enumerate()
         .take(limit.unwrap_or(region.len()))
     {
-        let (word, _start, end, _fq, _mask, _spans) = tok;
+        let (word, _start, end, _fq, mask, _spans) = tok;
         let Ok(bytes) = word.as_bytes() else {
             continue;
         };
@@ -66,17 +74,16 @@ pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &
             arith = !paren; // the arithmetic region ends at its own closing `)`
             continue;
         }
-        if paren {
-            if let Some(rest) = opened.checked_sub(1) {
-                opened = rest; // closes the definer's `f(`, the arm's own `(` group
-            } else if is_a_clause_pattern(before, region, i) {
-                return true;
-            }
+        // A `)` at depth 0 closes nothing the arm opened, so it is the one
+        // candidate for a clause's pattern paren; any deeper `)` closes the
+        // definer's `f(`, the arm's `(cat` group, its array literal `m=(1`.
+        if paren && opened == 0 && is_a_clause_pattern(before, region, i) {
+            return true;
         }
+        opened = opened
+            .saturating_sub(usize::from(paren))
+            .saturating_add(opens_groups(bytes, mask));
         arith = bytes.starts_with(b"((");
-        if opens_a_group(bytes) {
-            opened += 1;
-        }
         // Index 0 has no predecessor token: [`glue_at`] reads `tokens[i - 1]`.
         let glue = if i == 0 {
             Glue::None
@@ -102,17 +109,51 @@ fn is_a_clause_pattern(before: Place, region: &[Token], i: usize) -> bool {
             .is_some_and(|prev| !prev.0.as_bytes().is_ok_and(is_operator))
 }
 
-/// Does this word **open** a group the arm owns, so that a later `)` closes it
-/// and is arm text? A definer's parameter list ends with the paren (`f(`, whose
-/// `)` ends `f()` and whose body is the arm's command), a subshell word opens one
-/// (`(cat`, `(echo`, a bare `(`: `a) (cat) ;; esac`, `a) g() ( : ) ;; esac`,
-/// `a) echo hi | (cat) ;; esac` are bash rc 0). The arithmetic `((` is **not**
-/// such a group — its own region rule owns those parens, and counting it here
-/// would blind the scan to the clause paren that follows (`a) ((1)); b) ;; esac`
-/// is bash rc 2). `(`/`<`/`>` are never operator tokens on their own
-/// (`parse/token/step.rs`), so here they are word bytes.
-fn opens_a_group(b: &[u8]) -> bool {
-    (b.starts_with(b"(") && !b.starts_with(b"((")) || b.ends_with(b"(")
+/// How many groups this word opens **inside the arm**, counted over the word's
+/// bytes with its quote mask, so the test sees a paren anywhere in the word and
+/// ignores a paren that is word text:
+///
+/// - a definer's parameter list ends with the paren (`f(`, whose `)` ends `f()`
+///   and whose body is the arm's command), a subshell word opens one (`(cat`,
+///   `(echo`, a bare `(`: `a) (cat) ;; esac`, `a) g() ( : ) ;; esac`,
+///   `a) echo hi | (cat) ;; esac` are bash rc 0);
+/// - an **array-literal assignment** carries the paren mid-word: the tokenizer's
+///   word is `m=(1` (mask: every byte unquoted) and the array's `)` is a token of
+///   its own, so a test on the word's two edges misses the group and the array's
+///   `)` reads as the next clause's pattern paren. `case x in a) m=(1) ;; esac`,
+///   `a) x=(1) y=2 ;;`, `a) echo hi; x=(1) ;;`, `a) arr=("$@") ;;`,
+///   `a) arr=("a") ;;`, `a) m=() ;;` are bash rc 0, and so are the array
+///   literals an arm's `if`/`while`/`{ …; }` bodies write behind a `;`;
+/// - `(` **quoted** is word text: `echo "x(" b) ;;` opens nothing (that shape is
+///   task #419's, accepted, and the mask is what keeps it there);
+/// - an **escape pair** `\X` is one literal word byte — the token's mask marks
+///   both bytes `Unquoted`, so the backslash is the only marker — and its second
+///   byte never opens a group: `a) echo x\() b) ;; esac` is bash rc 2, and the
+///   `x\(` word must not absorb the clause paren that follows it;
+/// - `((` is **not** a group opener, wherever it sits — the arithmetic region's
+///   own rule owns those parens, and counting them would blind the scan to the
+///   clause paren that follows (`a) ((1)); b) ;; esac` is bash rc 2).
+///   `(`/`<`/`>` are never operator tokens on their own
+///   (`parse/token/step.rs`), so here they are word bytes.
+fn opens_groups(b: &[u8], mask: &[MaskBit]) -> usize {
+    let mut opened = 0usize;
+    let mut i = 0;
+    while i < b.len() {
+        match b.get(i) {
+            // An escape pair is one literal word byte: skip the escaped byte too.
+            Some(&b'\\') if !quoted_at(mask, i) => i += 2,
+            // A quoted paren is word text.
+            Some(&b'(') if quoted_at(mask, i) => i += 1,
+            // `((` is the arithmetic region's own pair: that rule owns the parens.
+            Some(&b'(') if b.get(i + 1) == Some(&b'(') => i += 2,
+            Some(&b'(') => {
+                opened += 1;
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    opened
 }
 
 /// The operator words the tokenizer emits as tokens of their own.
