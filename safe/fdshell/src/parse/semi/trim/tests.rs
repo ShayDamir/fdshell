@@ -133,12 +133,50 @@ fn condition_background_reads_the_amp_and_the_semi_byte() {
     );
     assert!(
         bg(b"if & then echo x; fi", 1, 2),
-        "the single-`&` slice sets the flag; the empty condition has no part to \
-         background, so no job is recorded (owner #299)"
+        "the single-`&` slice sets the flag; the block layer rejects the shape as \
+         an empty condition (task #299), so this row pins the predicate alone"
     );
     assert!(
         !bg(b"if true then echo x; fi", 1, 2),
         "a word ends the walk"
     );
     assert!(!bg(b"if then echo x; fi", 1, 1), "the empty slice is false");
+}
+
+/// The condition's non-empty rule (task #299), on the **trimmed** slice: the
+/// raw slice between the keywords always carries POSIX's `;`, so only the
+/// trimmed slice tells the shapes apart. The `&`-only slice is raw
+/// **non**-empty / trimmed empty — that is the row that kills a raw-slice
+/// mutant — and the returned text is the trimmed one, pinning the cut.
+#[test]
+fn block_condition_rejects_a_trimmed_empty_slice() {
+    let cond = |line: &[u8], from: usize, to: usize| -> Option<String> {
+        let tokens = tokenize(line).unwrap();
+        let c = block_condition(
+            tokens.get(from..to).unwrap_or(&[]),
+            line,
+            ParseError::MissingCondition,
+        )
+        .ok()?;
+        let (s, e) = token_range(c);
+        Some(String::from_utf8_lossy(line.get(s..e).unwrap_or(b"")).into_owned())
+    };
+    // Non-empty: a word, a word plus the `&` terminator (cut), a cond-list
+    // whose **last part** is empty (not an empty condition).
+    assert_eq!(cond(b"if true; then :; fi", 1, 3), Some("true".into()));
+    assert_eq!(cond(b"if true & then :; fi", 1, 3), Some("true".into()));
+    assert_eq!(
+        cond(b"if true && & then :; fi", 1, 4),
+        Some("true &&".into())
+    );
+    // Trimmed-empty: separators only, in every spelling.
+    assert_eq!(cond(b"if then :; fi", 1, 1), None, "the empty slice");
+    assert_eq!(cond(b"if ; then :; fi", 1, 2), None);
+    assert_eq!(cond(b"if ;; then :; fi", 1, 3), None);
+    assert_eq!(
+        cond(b"if & then :; fi", 1, 2),
+        None,
+        "raw non-empty (`&`), trimmed empty"
+    );
+    assert_eq!(cond(b"if ; & then :; fi", 1, 3), None);
 }

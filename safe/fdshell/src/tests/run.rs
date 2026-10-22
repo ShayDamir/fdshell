@@ -2865,25 +2865,19 @@ fn ampersand_terminated_condition_records_a_job_per_iteration() {
 /// status the list left (measured rc 0, no job; bash rejects the shape rc 2 —
 /// the pre-existing leniency family). A mutant on the predicate's `&` arm that
 /// only flips this shape is equivalent to the flag's run-side empty-part guard
-/// (`cond/part.rs`), and this pin is the proof (task #356).
+/// (`cond/part.rs`), and this pin is the proof (task #356). The fully empty
+/// condition (`if & then`, `if ; then`) is a parse error since task #299, so it
+/// is not a row here.
 #[test]
 fn ampersand_terminated_condition_with_an_empty_last_part_records_no_job() {
-    for script in [
-        b"if true && & then builtin true; fi".as_slice(),
-        b"if & then builtin true; fi".as_slice(),
-    ] {
-        child_test(|| {
-            let cell = make_cell();
-            run_script(script, &cell).unwrap();
-            let state = borrow_state(&cell);
-            assert_eq!(
-                state.jobs.anon_len(),
-                0,
-                "{script:?}: no part to background"
-            );
-            assert!(state.last_bg_pid.is_none(), "{script:?}: $! moved");
-        });
-    }
+    let script: &[u8] = b"if true && & then builtin true; fi";
+    child_test(|| {
+        let cell = make_cell();
+        run_script(script, &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.jobs.anon_len(), 0, "no part to background");
+        assert!(state.last_bg_pid.is_none(), "$! moved");
+    });
 }
 
 /// The condition's **side effects stay in the discarded child** (task #356, the

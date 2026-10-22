@@ -120,8 +120,14 @@ fn empty_if_condition_is_a_parse_error() {
 fn empty_elif_condition_is_a_parse_error() {
     // Every arm is parsed, so an empty condition in an arm that never runs is
     // still a parse error (bash rc 2).
-    run_err("if true; then echo a; elif ; then b; fi", "missing condition");
-    run_err("if true; then echo a; elif & then b; fi", "missing condition");
+    run_err(
+        "if true; then echo a; elif ; then b; fi",
+        "missing condition",
+    );
+    run_err(
+        "if true; then echo a; elif & then b; fi",
+        "missing condition",
+    );
     // The `;;` slice keeps the older message (the plain-`;` check runs first).
     run_err("if a; then b; elif ;; then c; fi", "malformed if block");
 }
@@ -159,7 +165,10 @@ fn bash_parity_forms_stay_green() {
     let cases: [(&str, &str); 6] = [
         ("if\ntrue; then echo a; fi", "a\n"),
         ("if true; then echo a; else echo b; fi", "a\n"),
-        ("if true; then echo a; elif false; then echo b; else echo c; fi", "a\n"),
+        (
+            "if true; then echo a; elif false; then echo b; else echo c; fi",
+            "a\n",
+        ),
         ("while false; do echo a; done", ""),
         ("until true; do echo a; done", ""),
         ("if true; then if true; then echo a; fi; fi", "a\n"),
@@ -176,19 +185,16 @@ fn bash_parity_forms_stay_green() {
 /// A `for` word list and the arith clause are not conditions at all.
 #[test]
 fn the_neighbouring_leniencies_stay_green() {
-    for script in [
-        "if true && & then builtin echo a; fi",
-        "while builtin : & do builtin :; break; done",
-        "for i in; do echo a; done",
-        "for ((;;)) do builtin :; break; done",
-        "case x in esac",
-    ] {
+    let cases: [(&str, &str); 5] = [
+        ("if true && & then builtin echo a; fi", "a\n"),
+        ("while : & do :; break; done", ""),
+        // bash rc 0: an empty word list iterates zero times.
+        ("for i in; do echo a; done", ""),
+        ("for ((;;)) do :; break; done", ""),
+        ("case x in esac", ""),
+    ];
+    for (script, want) in cases {
         let (out, err, code) = run(script);
-        let want = if script.contains("echo a") { "a\n" } else { "" };
-        assert_eq!(
-            (out.as_str(), code),
-            (want, 0),
-            "`{script}` stderr: {err}"
-        );
+        assert_eq!((out.as_str(), code), (want, 0), "`{script}` stderr: {err}");
     }
 }

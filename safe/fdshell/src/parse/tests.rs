@@ -2786,11 +2786,71 @@ fn for_semi_before_done_reports_before_the_empty_body() {
 
 #[test]
 fn empty_condition_pins_the_body_message() {
-    // The empty *condition* of this form is task #299's gap; the body
-    // message is pinned here so #299 cannot silently change it.
-    body_err(b"if ; then; fi", "'then' body is empty");
+    // Task #299: the empty **condition** is its own error and is checked before
+    // the body, so this form now reports `missing condition`, not
+    // `'then' body is empty`.
+    body_err(b"if ; then; fi", "missing condition");
     // No closer at all keeps `missing 'fi'` (the heredoc pin's contract).
     body_err(b"if true; then", "missing 'fi'");
+}
+
+// --- empty block conditions (task #299) ------------------------------------
+//
+// POSIX #2.9 requires a non-empty `list` as an `if`/`elif`/`while`/`until`
+// condition; bash 5.3.9 rejects every empty form with rc 2 (measured), and an
+// empty condition is **true** at run time, so `while ; do …; done` is an
+// unbounded loop. fdshell reports rc 1 with the keyword family's own message
+// (`missing condition` for `if`/`elif`, `expected condition` for the loops).
+
+#[test]
+fn empty_if_condition_is_err() {
+    body_err(b"if ; then :; fi", "missing condition");
+    body_err(b"if ;; then :; fi", "missing condition");
+    // A newline is a `;` token and a comment is dropped by the tokenizer, so
+    // both leave an empty condition (bash rc 2 for both).
+    body_err(b"if\nthen :; fi", "missing condition");
+    body_err(b"if\n# c\nthen :; fi", "missing condition");
+    // The `&`-only slice is raw-**non**-empty and trimmed-empty: the row that
+    // pins the test to the trimmed slice (LESSONS #299).
+    body_err(b"if & then :; fi", "missing condition");
+    body_err(b"if ; & then :; fi", "missing condition");
+    body_err(b"if ; then echo x; else echo y; fi", "missing condition");
+}
+
+#[test]
+fn empty_elif_condition_is_err() {
+    body_err(b"if a; then b; elif ; then c; fi", "missing condition");
+    body_err(b"if a; then b; elif & then c; fi", "missing condition");
+    // The `;;` slice keeps the older message: the plain-`;` clause check runs
+    // first (message contract).
+    body_err(b"if a; then b; elif ;; then c; fi", "malformed if block");
+}
+
+#[test]
+fn empty_loop_condition_is_err() {
+    body_err(b"while ; do :; done", "expected condition");
+    body_err(b"while ;; do :; done", "expected condition");
+    body_err(b"while\n# c\ndo :; done", "expected condition");
+    body_err(b"while & do :; done", "expected condition");
+    body_err(b"until ; do :; done", "expected condition");
+    body_err(b"until & do :; done", "expected condition");
+}
+
+/// The shapes near the rule that bash accepts (or that fdshell's documented
+/// leniency family already pins) must stay parseable: an empty **last part**
+/// of a cond-list is not an empty condition, and a `for` word list and the
+/// arith clause are not conditions at all.
+#[test]
+fn non_empty_conditions_stay_green() {
+    assert!(parse(b"if\ntrue; then :; fi").is_ok());
+    assert!(parse(b"if true & then :; fi").is_ok());
+    assert!(parse(b"if true && & then :; fi").is_ok());
+    assert!(parse(b"while : & do :; break; done").is_ok());
+    // bash rc 0: an empty word list iterates zero times — not a divergence.
+    assert!(parse(b"for i in; do echo a; done").is_ok());
+    // README: the arith clause's empty condition is true (a different surface).
+    assert!(parse(b"for ((;;)) do :; break; done").is_ok());
+    assert!(parse(b"case x in esac").is_ok());
 }
 
 #[test]

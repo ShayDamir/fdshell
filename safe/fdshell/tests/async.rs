@@ -926,8 +926,10 @@ fn a_conditional_records_one_job_per_iteration() {
 /// * a `&` on its **own line** behind the condition is the deferral family
 ///   (owner **#313**): fdshell accepts it and, since the slice ends in the `&`,
 ///   records the job;
-/// * an **empty** last part (`if true && &`, `if &`) makes the flag inert — no
-///   part runs, no job (owner **#299** for the empty condition);
+/// * an **empty** last part of the cond-list (`if true && &`) makes the flag
+///   inert — no part runs, no job. The fully empty **condition**
+///   (`if & then`, `if ; then`) is a parse error since task #299 (bash rc 2),
+///   so it is no longer a row here;
 /// * `if true; & then` is the `; &` leniency (owner **#313**): the slice ends in
 ///   the plain `&`, so the job is recorded where bash stops with rc 2.
 #[test]
@@ -937,7 +939,6 @@ fn a_conditional_family_pins_the_measured_divergences() {
         "if for i in 1; do builtin echo y; done & then builtin echo x; fi",
         "if false && true & then builtin echo x; else builtin echo f; fi",
         "if true && & then builtin echo x; fi",
-        "if & then builtin echo x; fi",
     ] {
         let out = run(&format!("{shape}\nbuiltin echo pid=$!; wait"));
         assert_eq!(rc(&out), 0, "shape {shape:?}");
