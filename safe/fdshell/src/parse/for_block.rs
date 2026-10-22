@@ -1,3 +1,4 @@
+pub(crate) mod arith;
 mod words;
 
 use super::Token;
@@ -98,3 +99,6 @@ pub(crate) fn tokens_to_for(
         body,
     })
 }
+
+#[cfg(test)]
+mod tests;

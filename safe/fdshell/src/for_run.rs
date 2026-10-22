@@ -1,3 +1,4 @@
+pub(crate) mod arith;
 mod array_word;
 
 use crate::error::cmd::CmdError;
@@ -93,3 +94,6 @@ fn run_body(
         crate::repl::run_script(&forblock.body, cell)
     })
 }
+
+#[cfg(test)]
+mod tests;

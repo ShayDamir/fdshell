@@ -45,6 +45,8 @@ pub(crate) fn run_parsed(
             }
             Ok(None)
         }
+        // The arithmetic `for`'s control flows out exactly as the word form's.
+        ParsedLine::ArithFor(block) => crate::for_run::arith::run(block, cell),
         ParsedLine::While(whileblock) => {
             if let Some(control) = crate::loop_::run_loop(whileblock, true, cell)? {
                 return Ok(Some(control));

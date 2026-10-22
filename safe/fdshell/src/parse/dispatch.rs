@@ -38,6 +38,12 @@ pub(super) fn dispatch_keyword(
         return Ok(Some(ParsedLine::If(if_block::tokens_to_if(raw, text)?)));
     }
     if is(b"for") {
+        // The arithmetic `for ((expr;expr;expr))` is measured on raw bytes:
+        // the token layer has already split the region's `)` and read its `|`
+        // as a pipe, so the clauses are unrecoverable here.
+        if let Some(block) = for_block::arith::detect(raw, text)? {
+            return Ok(Some(ParsedLine::ArithFor(block)));
+        }
         return Ok(Some(ParsedLine::For(for_block::tokens_to_for(raw, text)?)));
     }
     if is(b"wait") && wait_block::is_block(raw, text) {

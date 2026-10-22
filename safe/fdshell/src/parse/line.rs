@@ -1,5 +1,6 @@
 use crate::parse::case_block::CaseBlock;
 use crate::parse::for_block::ForBlock;
+use crate::parse::for_block::arith::ArithForBlock;
 use crate::parse::function_block::FunctionDef;
 use crate::parse::group_block::GroupBlock;
 use crate::parse::if_block::IfBlock;
@@ -46,6 +47,10 @@ pub enum ParsedLine {
     If(IfBlock),
     Wait(WaitBlock),
     For(ForBlock),
+    /// `for ((init ; cond ; step)); do … ; done`: the arithmetic loop, whose
+    /// three clauses are the raw texts of the `(( … ))` region (`None` for a
+    /// clause written empty), evaluated like the `((expr))` command.
+    ArithFor(ArithForBlock),
     While(WhileBlock),
     Until(UntilBlock),
     Function(FunctionDef),

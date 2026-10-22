@@ -138,6 +138,10 @@ pub(crate) enum ParseError {
     InvalidHereStringFd { prefix: sys::ShortCStr },
     /// arithmetic command must be `((expr))` with no trailing words
     MalformedArithCommand,
+    /// `for ((expr;expr;expr))` needs a closing `))`
+    ArithForMissingCloseParen,
+    /// `for ((expr;expr;expr))` needs exactly two `;` separators
+    ArithForClauseCount,
     /// '{opener}' is missing its closing '{closer}'
     MissingBlockCloser {
         opener: sys::ShortCStr,
