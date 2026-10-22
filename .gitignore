@@ -10,3 +10,4 @@ PLAN.md
 /mutants.out*
 .opencode/goals
 __pycache__/
+node_modules/
