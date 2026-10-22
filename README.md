@@ -839,6 +839,14 @@ tasks #186/#190, see "Functions and groups" above). A `|` at the end of a line
 stays a hard parse error: a stage must begin on the line that opens the pipe, so
 `echo a |` + `while :; do :; done` is rejected where bash runs the loop.
 
+A `#` at the start of a word comments out the rest of its **physical** line, so
+no `&&`/`||` written inside it splits a list: the rule reaches a keyword block's
+closing keyword (`while :; do echo a; break; done # c && echo y` prints `a`
+alone, and the mid-run block `true && while :; do :; break; done # c && echo y`
+prints nothing), and the gate of a short-circuited `||` ends at the comment's
+newline — `true || if :; then :; fi # c ; echo tail` never resumes inside the
+comment and runs nothing. A `#` inside a word (`echo a#b`) is data.
+
 ### Aliases
 
 ```shell
