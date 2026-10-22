@@ -3417,3 +3417,49 @@ redirect, captures, `time`, heredoc, function definition), `tests/cond_blocks.rs
 (the seven rows that left the "body that never returns" list) and
 `segment/block/stage/tests.rs` (span ends, glue, quotes, comments, the builtin
 gate).
+
+## A construct opened mid-run is invisible to the REPL unless the scan records its closedness (task #294)
+
+`repl/complete.rs` keeps the prompt reading on a `Segment::Block { closed:
+false }`, and a construct opened **mid-run** — `true && { …`, `true && while
+:; do …`, `echo a | while :; do …`, `true && f() {` — is never a block: the
+mid-run scanners skip its span *inside the run*, so it flushes as a plain
+`Segment::Statement` and the REPL answered the first line with the parse
+error. The closedness existed in all three arms and was dropped at each of
+them; the fix carries it as one flag (`Book::midrun_open` →
+`flush_line` → `Statement::midrun_open`). Four edges the measuring cost:
+
+1. **Three arms, one flag.** `group/opener.rs::scan` (the `{ …; }` cond part),
+   `block/midrun.rs::skip` (a keyword block after `&&`/`||`) and
+   `block/stage.rs::skip` (a keyword block behind `|`) each set it; a flag set
+   by only one of them reproduces the bug for the others, so each arm gets its
+   own unit row, never one shared row. The flag is inert for `run_script`: the
+   parse layer owns the missing-closer message and its pinned rc (#232/#236),
+   the REPL owns the buffering. Do not "unify" them by bailing in `run_script`.
+2. **The end-of-input resume is what makes stamping the whole flush sound.**
+   Both span rules resume at `line.len()` when unclosed, so the flag is set
+   exactly once, at the very end of the scan, and no boundary or later flush
+   follows it. Hence `echo a; true && { echo g` stamps **both** statements (the
+   physical line as a whole is unfinished), and `bg::mark`'s `&`-flush can
+   never see the flag set. A per-run stamp would be a `Run`-level field and
+   change no observable REPL decision.
+3. **bash runs nothing of a line with a broken construct; fdshell executes the
+   buffered prefix at EOF.** `echo a; true && { echo g` prints `a` and reports
+   `group is missing a closing brace` (rc 1 in a script), where bash parses the
+   whole line first, prints its `unexpected end of file`, and exits 2 — the
+   REPL's rc-1-vs-2 family. Pin it (`tests/repl.rs::
+   statements_before_an_unclosed_midrun_run_at_eof`), never "fix" it silently.
+4. **A heredoc body is never scanned for mid-run openers** (the flush's resume
+   skips the body regions), so `cat <<T` + `true && {` + `T` stays complete:
+   the flag inherits the region skipping, and adding a body scan would break it
+   (`segment/tests.rs::a_heredoc_body_hides_a_midrun_opener_from_the_stamp`).
+   The same skipping is why the body's opener text is never a statement.
+
+Do **not** model the fact as a fourth `Segment` variant: every exhaustive
+`Segment` match in the suite enumerates all three variants (~35 arms), so a new
+variant forces an arm at each; the `Statement` field cost 7 sites, and
+`background` (task #326) is the precedent for a scan-level flag travelling on
+the statement. One shape stays out of reach, and is pinned as complete: a brace
+whose next byte is not an opener boundary is a **word** (the `group/word.rs`
+rule, task #141), so `true && {` at the end of input records no span at all —
+the twin of the run-start `{` gap, an opener-word limitation, not a mid-run one.
