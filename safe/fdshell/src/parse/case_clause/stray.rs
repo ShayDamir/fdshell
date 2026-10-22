@@ -124,12 +124,16 @@ fn is_a_clause_pattern(before: Place, region: &[Token], i: usize) -> bool {
 ///   `a) x=(1) y=2 ;;`, `a) echo hi; x=(1) ;;`, `a) arr=("$@") ;;`,
 ///   `a) arr=("a") ;;`, `a) m=() ;;` are bash rc 0, and so are the array
 ///   literals an arm's `if`/`while`/`{ …; }` bodies write behind a `;`;
-/// - `(` **quoted** is word text: `echo "x(" b) ;;` opens nothing (that shape is
-///   task #419's, accepted, and the mask is what keeps it there);
+/// - `(` **quoted** is word text: `echo "x(" b) ;;` opens nothing (task #419's
+///   accepted shape, and the mask is what keeps it there), and a quoted `(` at the
+///   arm's own start opens nothing either, so the `)` written behind that word is
+///   the pattern paren (`a) "(x") ;;` is bash rc 2);
 /// - an **escape pair** `\X` is one literal word byte — the token's mask marks
 ///   both bytes `Unquoted`, so the backslash is the only marker — and its second
 ///   byte never opens a group: `a) echo x\() b) ;; esac` is bash rc 2, and the
-///   `x\(` word must not absorb the clause paren that follows it;
+///   `x\(` word must not absorb the clause paren that follows it. Only an
+///   **unquoted** backslash consumes the byte after it: in `"\\"(x)` the `(`
+///   behind the quoted pair opens its group;
 /// - `((` is **not** a group opener, wherever it sits — the arithmetic region's
 ///   own rule owns those parens, and counting them would blind the scan to the
 ///   clause paren that follows (`a) ((1)); b) ;; esac` is bash rc 2).
@@ -138,15 +142,15 @@ fn is_a_clause_pattern(before: Place, region: &[Token], i: usize) -> bool {
 fn opens_groups(b: &[u8], mask: &[MaskBit]) -> usize {
     let mut opened = 0usize;
     let mut i = 0;
-    while i < b.len() {
-        match b.get(i) {
+    while let Some(&byte) = b.get(i) {
+        match byte {
             // An escape pair is one literal word byte: skip the escaped byte too.
-            Some(&b'\\') if !quoted_at(mask, i) => i += 2,
+            b'\\' if !quoted_at(mask, i) => i += 2,
             // A quoted paren is word text.
-            Some(&b'(') if quoted_at(mask, i) => i += 1,
+            b'(' if quoted_at(mask, i) => i += 1,
             // `((` is the arithmetic region's own pair: that rule owns the parens.
-            Some(&b'(') if b.get(i + 1) == Some(&b'(') => i += 2,
-            Some(&b'(') => {
+            b'(' if b.get(i + 1) == Some(&b'(') => i += 2,
+            b'(' => {
                 opened += 1;
                 i += 1;
             }
