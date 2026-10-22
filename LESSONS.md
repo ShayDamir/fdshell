@@ -352,7 +352,7 @@ The hook is in `parse/dispatch.rs`'s `is(b"for")` arm, not in `parse.rs`: `dispa
 
 Run side: the clauses are evaluated by `arith::eval` **in-process**, exactly as `((expr))` does, so the loop var survives the loop in the parent and dies with the fork in a stage. `continue` runs the step and re-tests the condition, `break` skips the step (`AtLevel::Stop` breaks before it), `break 2`/`return`/errexit propagate through `AtLevel::Outer` without stepping. The status is the body's last command, and `0` when the body never ran — task #164's rule, so a clause evaluation must never touch `last_status` (only `arith::eval`, no `set_last_exit`).
 
-Measured divergences (bash 5.3.9, 2026-10-22), all pinned in `safe/fdshell/tests/loops.rs`: every parse rejection is rc 1 here against bash's rc 2 (the repo-wide convention); a clause that is not valid arithmetic ends the loop with rc 1 like bash's (no body printed), and the `# c`-in-a-clause shape is **parity** — the byte scan has no comment rule inside the region, so the region stays closed and only the step's own arithmetic fails, `0` then rc 1, where bash prints `0` then its `((: i++ # c: arithmetic syntax error`. The statement-level unclosed-`for` check (`script/unclosed.rs`) fires **before** this parser for whole statements, so `for ((i=0))` and `for ((i=0;i<2;i++)) { …; }` report `'for' is missing its closing 'done'` and `ArithForMissingCloseParen` is reachable only from a fragment (a stage, a mid-run part, a unit call). Filed, measured, do not re-open blind: **#394** the `{ …; }` body (bash runs it, fdshell rc 1), **#395** the spaced step `i ++` (no side effect → the loop hangs; never test it looping), **#396** the glued `for((…))` (not a keyword word, so `do`/`done` run as commands), **#397** a `${…}` inside a clause (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the `((expr))` command and `$((…))` fail identically), and the pre-existing redirect-after-the-closer family **#298**.
+Measured divergences (bash 5.3.9, 2026-10-22), all pinned in `safe/fdshell/tests/loops.rs`: every parse rejection is rc 1 here against bash's rc 2 (the repo-wide convention); a clause that is not valid arithmetic ends the loop with rc 1 like bash's (no body printed), and the `# c`-in-a-clause shape is **parity** — the byte scan has no comment rule inside the region, so the region stays closed and only the step's own arithmetic fails, `0` then rc 1, where bash prints `0` then its `((: i++ # c: arithmetic syntax error`. The statement-level unclosed-`for` check (`script/unclosed.rs`) fires **before** this parser for whole statements, so `for ((i=0))` and `for ((i=0;i<2;i++)) { …; }` report `'for' is missing its closing 'done'` and `ArithForMissingCloseParen` is reachable only from a fragment (a stage, a mid-run part, a unit call). Filed, measured, do not re-open blind: **#394** the `{ …; }` body (bash runs it, fdshell rc 1), **#395** the spaced step `i ++` (no side effect → the loop hangs; never test it looping), **#396** the glued `for((…))` (not a keyword word, so `do`/`done` run as commands), **#397** a `${…}` inside a clause (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the `((expr))` command and `$((…))` fail identically), and the redirect-after-the-closer family **#298**, since closed by `parse/block_tail.rs`.
 
 ## `next_boundary`'s `run_start` reset is load-bearing for block text: word state, and (since #234) the region anchor
 The `;`/`\n` `run_start` reset in `cond/boundary.rs::next_boundary` is load-bearing **for block text** in two ways. (1) It clears `word_active`, so a closer written at the start of a physical line is scored (`state.at_word_start()`), and it anchors the group-opener rule (`group_at_run`: a brace opens a group only at a run start). Forgetting the reset swallows a block's trailing operator into its text. (2) Task #234 replaced the `heredoc::skip` window with a region walk anchored at the **physical line start** of the run (`cond/boundary/body.rs::regions` → `line_bodies_for_line`), which is what makes the pinned `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` split survive: block text (`if … fi`) travels whole through `run_cond_list` with its condition bodies inside the span, so a `;`-terminated `<<` in a block condition (`if cat <<X; then`) has its bodies on the block text's following lines. Before #234 that was only visible through the run window — with it, the region scan always sees the `<<` of the physical line and walks the body region: its top-level `&&` splits the part (rc 1 `missing 'fi'`, bash rc 2), while every other region byte stays opaque. Top-level statement segments are not affected by either mechanism, because their part text is a subslice of the command bytes only — the body regions travel separately as `run_cond_list`'s `bodies` (Task #79) — so `next_boundary` never sees a `;`-terminated `<<` run with a body at top level; the killing case is the block wrapper. The split pins are `block_heredoc_cond_run_and_and_in_body_splits_part` and `block_body_heredoc_delimiter_line_operator_is_region_data` in `safe/fdshell/tests/heredoc.rs`; the top-level window semantics are covered by `heredoc_after_semicolon_word_drives_boundary_skip` and `heredoc_attached_operator_before_semicolon_is_not_a_delimiter`, which the region anchor keeps green unchanged.
@@ -362,7 +362,7 @@ A `#` at a word start comments out the rest of its **physical** line, so no `&&`
 
 **Landing *on* the newline that ends the comment is the load-bearing choice**, and `scan::skip_comment` (which lands *past* it) is the wrong helper here: two arms of the scan are keyed on the `\n` byte — the heredoc **region** arm (`body::step`) and the **run-reset** arm (`run_start = i`, `place = Place::Command`, `state.word_active = false`, the entry above). A `;`-terminated operator line whose run ends in a comment (`if cat <<X; then # c`) must still reach the region arm for its bodies on the following lines: `boundary_of(b"if cat <<X; then # c\nbody && x\nX\nfi") == (26, false)` is the pin, and landing past the newline turns it into `(35, false)` — that row is the mutant-killer for this decision. Landing on the newline also keeps the comment's own run in the run-reset arm, so the operator on the **next** line still splits (`… done # c\n&& echo x` → 36).
 
-The rule is shared, deliberately: `cond/boundary/gate.rs::gate_end` (the gate of a short-circuited `||`) takes the same arm, because the gate's own `\n` arm is the gate's end — a `;` written inside the comment must never end the gate, since `run_cond_list` resuming there resumes **inside comment text** (`true || if :; then :; fi # fi ; echo tail` ran `echo tail`; bash prints nothing). And deliberately **not** shared: `cond/boundary/body.rs::operator_in_region` gets no comment rule. A here-doc **body** region is literal text — bash reads a `#` there as data, and the split inside a block-carried region is pinned (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). Neighbours filed with their own owners, all pinned with their current result in `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`: **#404** a `#` line inside a `{ …; }` body breaks the group parse, **#405** a word after the closing keyword is run where bash rejects the line (the glued `done#c` and the `fi x#y` rows), **#406** a `&&`/`||` at the start of a physical line, **#298** a redirect after the closing keyword is dropped, **#304** the region position gate.
+The rule is shared, deliberately: `cond/boundary/gate.rs::gate_end` (the gate of a short-circuited `||`) takes the same arm, because the gate's own `\n` arm is the gate's end — a `;` written inside the comment must never end the gate, since `run_cond_list` resuming there resumes **inside comment text** (`true || if :; then :; fi # fi ; echo tail` ran `echo tail`; bash prints nothing). And deliberately **not** shared: `cond/boundary/body.rs::operator_in_region` gets no comment rule. A here-doc **body** region is literal text — bash reads a `#` there as data, and the split inside a block-carried region is pinned (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). Neighbours filed with their own owners, all pinned with their current result in `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`: **#404** a `#` line inside a `{ …; }` body breaks the group parse, **#405** a word after the closing keyword is run where bash rejects the line (the glued `done#c` and the `fi x#y` rows), **#406** a `&&`/`||` at the start of a physical line, **#304** the region position gate (the redirect after the closing keyword is no longer a divergence — task #298's block tail).
 
 ## The attached-vs-bare delimiter rule is a raw-byte rule, and a pre-parse protection match must allow the line's optional leading bytes
 `<<-` (tab stripping) broke two assumptions that both keyed on the *word* the tokenizer saw, not the raw bytes. (1) `parse/heredoc::operator::attached` decided attached-vs-bare from the *unquoted* token text (`t.len() > 2 || end - start > t.len()`), which cannot see the `-` marker buried in the raw span: a bare `<<-` token read its delimiter as `-` (the marker byte) instead of taking the next word, so `<<- WORD` and `<<- -` mis-parsed. The rule must read the raw operator bytes — `scan::heredoc::op::operator_delim` now returns `(strip, delim)` and feeds **both** the byte scanner and the token parser through one `Operator`, so the two levels cannot diverge (the LESSONS.md "byte-level and token-level rule must agree" trap, made un-recreatable). (2) `brace_expand::protect::heredoc_terminator_indices` matched the terminator as the token whose start *equals* a `body_regions` end. A `<<-` terminator line is tab-indented, so its word starts *after* the tabs and the equality match failed — the "protect the terminator line" failure in reverse (the terminator was brace-expanded and the heredoc looked unterminated). The fix relaxes the match to "the first token that follows the region end across leading tabs only" (`terminator_word`); a plain `>=` is wrong, because it would protect a real statement that follows a *blank* terminator line, which must match nothing — so the gap must be tabs-only. General rules: a token-text predicate that decides raw-byte structure (attached vs. bare) must read the raw bytes, not the unquoted word; and an offset-equality match against a line start must be widened to exactly the region the structure permits — here, leading tabs only.
@@ -3419,7 +3419,7 @@ is seeded past by the *shared* span rule, so the span covers the loop while the
 parse layer keeps `time` as the stage's word 0 (rc 127, where bash rejects the
 line with rc 2). And a stage is a **fork**, so the fork's known gaps show
 through the new shape: a stage's `cd`/`wait` (**#381**), a redirection written
-after the block's closer (**#298**), and `while read` (`read`'s own divergence)
+after the block's closer (**#298**, since closed by the block tail), and `while read` (`read`'s own divergence)
 all behave as they already did for a command stage. Pin the family, not the
 headline row: `tests/loops.rs` (every loop keyword, `break`/`exit` scope, the
 builtin-`wait` gate), `tests/pipeline.rs` (a middle block stage, the stage's own
@@ -3521,3 +3521,48 @@ family inside the measuring task: the `single_line == false` fix belongs to
 stream at all?"), and it pins behaviour in `segment/bg/tests.rs` that #333
 owns. A pins-only task's biggest risk is the temptation to fix the neighbour
 rows it discovers.
+
+## A block's tail is parsed **at** its closer, by one module every builder shares (task #298)
+
+A redirection written after a keyword block's closing keyword belongs to the
+whole block (bash: `while :; do echo a; break; done > f` files the loop's
+output). It is invisible to every builder: the closer's own separator (`;`,
+newline) ends the block span, so the tail rides in the block's text and
+`semi::up_to_closing` truncates it away. The fix is not a per-builder patch:
+`parse/block_tail.rs` parses the tail **at** the closer — the closer index, the
+glue split, the operator family (`>`, `>>`, `<`, io-number, `>&N`, `>&-`) — and
+each of the six owners (`while`/`until`, `if`, `for`, arithmetic `for`, `case`,
+event-`wait`) stores a `redirects` list the executor opens with
+`redirect::Scope::run`. `{ …; }` had its own `split_close` for years; the lesson
+is that a rule shared by six parsers needs one module, not six copies.
+
+**The closer is one rule read by two scans.** The byte scan
+(`keywords::keyword_delta`, `boundary(word, len, extra)`) decides where a
+statement ends; the token scan (`block_tail::is_closer`) decides which token a
+builder truncates at and where the tail starts. `done`/`fi`/`esac` already
+accepted `&`/`|` as a boundary byte (`done&`, `done| cat` — the tokenizer splits
+those); adding `<`/`>` to the same set made the glued `done>f` a closer for the
+byte scan, and the token-side set had to gain the pair to match. The two sets
+are documented as a pair in both files. A glued closer costs the word-list
+leniency: `for x in done>f; do echo A; done > f2` used to parse, now it is a
+parse error — bash rejects the line outright, so this is parity gained.
+
+Three measurement facts that changed the design:
+
+* The scope opens **before** the block's own word list / condition runs, so a
+  failing open stops the block before anything expands (`for x in $(touch m;
+  echo a); do :; done > /nope/x` leaves no `m`); the restore at the block's end
+  also undoes an `exec > z` written in the body. Bash's ordering, pinned.
+* The closer index is the **last** match, not the first: `while :; do echo
+  done; break; done>f` has a `done`-shaped body word. Word data wins; the
+  pattern `case x in done) … esac>f` is the same rule at the arm position.
+* A chained glued redirection (`done>f>g`) opens the single file `f>g`, because
+  fdshell never splits a word at an operator byte — the documented rule of
+  `POSIX_COMPATIBILITY.md` ("Operators are recognized at word starts"), identical
+  for `echo a>f>g` on `master`. Do not fix it inside a block-tail task.
+
+Re-measure on `master` before calling a shape a regression of this change:
+`for x in done; do echo $x; done > f` was already `expected 'do'` rc 1 there
+(the `for` word list has no closer rule of its own), and the file-creating
+`echo a>x` family is the same pre-existing word rule. Pin both as pre-existing,
+name their owners, and let the block tail ship.

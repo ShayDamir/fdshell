@@ -349,6 +349,24 @@ A redirection belongs to the command it is written on and is undone when the
 command finishes — the shell's own descriptors come back. `exec >file` has no
 command to run, so its redirection stays for the rest of the script.
 
+A **keyword block** takes a redirection written after its closing keyword and
+applies it to the whole block: `while :; do echo a; break; done > f` files the
+loop's output in `f`, and so does `until … done > f`, `if … fi > f`,
+`for … done > f`, `for ((…)); do …; done > f` and `case … esac > f` — the glued
+spelling `done>f`, `fi>f`, `esac>f` included. The scope opens **before** the
+block's own word list or condition runs, so a target that fails to open stops
+the block before its first command expands anything (`for x in $(touch m; echo
+a); do :; done > /nope/x` leaves no `m`; the rc-1 abort is task #179's), and it
+is undone at the block's end, so an `exec > z` inside the body dies with the
+block. The tail follows the simple-command rules: several redirections apply in
+order and the last one on a descriptor wins (`done > f > g` leaves `f` empty and
+`g` the output), a word glued to an operator is one word — `done>f>g` opens the
+file `f>g`, fdshell never splitting a word at an operator byte, as above. What
+the tail deliberately does **not** read is a plain word behind the closer
+(`done x`, task #405), a here-doc or here-string on it (`done <<T`, `done
+<<<hi`, task #408) and the `&>` family there (`done &> f`, task #409): each
+keeps the behavior its own pins record.
+
 ### Here-documents
 
 A here-document feeds a command's stdin from the lines that follow it, up to
@@ -770,6 +788,11 @@ case "$1" in
 esac
 ```
 
+A redirection written after a block's closing keyword belongs to the **whole**
+block: `for x in a b; do echo $x; done > f` files the loop's output in `f`, the
+glued `done>f` included, and the block's own fd changes are undone when it ends
+(see "Redirection" above).
+
 `for ((init; cond; step))` is bash's arithmetic loop: the three clauses are
 evaluated exactly like an `((expr))` command — in the current shell, so the
 assignments they make survive the loop and `$i` expands in the body (and after
@@ -829,15 +852,17 @@ block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop 
 the stage's own fork with the upstream stage's output on its stdin, and
 `echo a | if :; then echo y; fi` the `if`. The block ends at its own closing
 keyword, and what is written behind it (`; echo tail`, `&& echo y`) is the next
-statement. A `name() { … }` definition in a stage dies with the fork. Three
-shapes deviate: `time` behind the `|` is the stage's command name, not a prefix
-of the block's keyword (bash rejects that line outright, rc 2); a redirection
-written after the block's closer is dropped (task #298); and a `{ …; }` written
-as a stage stays a word, so the line is a parse error where bash runs the group
-in the stage's fork (`echo a | { echo b; }` prints `b`, rc 0 — the group rule of
-tasks #186/#190, see "Functions and groups" above). A `|` at the end of a line
-stays a hard parse error: a stage must begin on the line that opens the pipe, so
-`echo a |` + `while :; do :; done` is rejected where bash runs the loop.
+statement; a redirection written there belongs to the block, so
+`echo a | while :; do echo b; break; done > f` files the stage's output (see
+"Redirection" above). A `name() { … }` definition in a stage dies with the fork.
+Two shapes deviate: `time` behind the `|` is the stage's command name, not a
+prefix of the block's keyword (bash rejects that line outright, rc 2); and a
+`{ …; }` written as a stage stays a word, so the line is a parse error where
+bash runs the group in the stage's fork (`echo a | { echo b; }` prints `b`, rc 0
+— the group rule of tasks #186/#190, see "Functions and groups" above). A `|`
+at the end of a line stays a hard parse error: a stage must begin on the line
+that opens the pipe, so `echo a |` + `while :; do :; done` is rejected where
+bash runs the loop.
 
 A `#` at the start of a word comments out the rest of its **physical** line, so
 no `&&`/`||` written inside it splits a list: the rule reaches a keyword block's

@@ -191,6 +191,14 @@ echo hi >file       # both: write `hi` to `file`
 
 Write a space (or a quote) between a word and an operator that follows it.
 
+A **keyword block's closing keyword** is the one place the glue is read the way
+bash reads it: a closer glued to a redirection operator is recognized as the
+closer, and the operator redirects the whole block — `while :; do :; done>f`,
+`if :; then :; fi>f`, `case x in x) :;; esac>f` all file the block's output in
+`f`, as bash does. The keyword side of a word start is a boundary check, not a
+word split, so nothing is split off; the *operand* side keeps the no-split rule,
+so `done>f>g` opens the single file `f>g` where bash opens `f` and then `g`.
+
 A **fully quoted** operator word is never an operator — the gate every fdshell
 redirect parser opens with, the `&>` family included: `echo '&>f'` prints `&>f`
 and opens nothing, `echo hi '&>' f` prints `hi &> f` and opens nothing, and
