@@ -3563,6 +3563,7 @@ Three measurement facts that changed the design:
 
 Re-measure on `master` before calling a shape a regression of this change:
 `for x in done; do echo $x; done > f` was already `expected 'do'` rc 1 there
-(the `for` word list has no closer rule of its own), and the file-creating
-`echo a>x` family is the same pre-existing word rule. Pin both as pre-existing,
-name their owners, and let the block tail ship.
+(task **#310** owns the closer-shaped word-list word, byte-level scans included),
+and the file-creating `echo a>x` family is the documented no-split-at-an-operator
+word rule of `POSIX_COMPATIBILITY.md`. Pin both as pre-existing, name their
+owners, and let the block tail ship.

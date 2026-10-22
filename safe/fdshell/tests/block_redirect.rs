@@ -409,6 +409,10 @@ fn closer_shaped_words_stay_word_data() {
         "the `done` pattern does not match `x`"
     );
 
+    // A closer-shaped word of the `for` word list is the word-list rule's own
+    // gap (task #310): the glued spelling is a bash syntax error, which fdshell
+    // reports as its own parse error, and the spaced spelling
+    // (`for x in done; do echo $x; done > f`) is rejected on `master` too.
     let dir = Scratch::new();
     let o = run(&dir, "for x in done>f; do echo A; done>f2");
     assert_eq!(rc(&o), Some(1), "stderr={}", err(&o));
