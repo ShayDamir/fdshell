@@ -2407,7 +2407,16 @@ against bash 5.3.9):
    marker — so `x\(` opens nothing and `case x in a) x\() ;; esac` (bash rc 2) is
    refused again. Running an array assignment is task **#422**'s word-model half
    (fdshell has no arrays, so the arm dispatches the literal's `)` as a command,
-   as it does at top level); the **parse** gate is this rule's.
+   as it does at top level); the **parse** gate is this rule's. One shape the
+   tokenizer **cannot** show: the mask test of the escape arm. A quoted backslash
+   enters the word as a *pair* of quoted bytes (`'\'(x)` and `"\\"(x)` are both the
+   word `\\(x`, mask quoted, quoted, unquoted, unquoted), and skipping that pair
+   one byte at a time lands on the same byte as one jump of two, so no tokenized
+   line distinguishes the arm from an always-true guard. The kill is a direct call
+   on the counter with a hand-written mask (`[Quoted, Unquoted, Unquoted]` — the
+   mask a **derived** word carries, `MaskBit::from_quoted`), pinned in
+   `parse/case_clause/stray/tests.rs`: a quoted `\` consumes nothing behind it, an
+   unquoted escape pair consumes its second byte.
 
 Two layer facts the fix leans on. **A heredoc body is never in the region**:
 `parse/token/statement.rs::tokenize_statement` blanks the body regions and the
