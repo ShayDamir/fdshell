@@ -2010,12 +2010,140 @@ fn quoted_dollar_at_in_a_heredoc_body_is_glued() {
 /// opens after `&&` / `||`) claims its body region through the multi-line
 /// run: `cat` prints the body, the loop continues, and a `&&` written in
 /// the body line never splits the part (measured against bash).
+///
+/// Task #295 adds the row the bug was filed with (no `echo mid` behind the
+/// `cat`) and its `||` twin: the multi-line run is flushed on its own
+/// physical line, so it is a single-line run for `flush_line` and claims the
+/// line's whole region stream. Measured green since #232's own commit
+/// `43ff10e` — at its parent the shape is not even parsed (`expected 'done'`).
 #[test]
 fn midrun_block_body_heredoc_is_region_scanned() {
     let (out, err, code) = run("true && while :; do cat <<T; echo mid; break; done\nbody\nT");
     assert_eq!((out.as_str(), code), ("body\nmid\n", 0), "stderr={err}");
+    // Task #295's exact shape, and its short-circuit twin (no output, rc 0).
+    let (out, err, code) = run("true && while :; do cat <<T; break; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err}");
+    let (out, err, code) = run("true || while :; do cat <<T; break; done\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
     let (out, err, code) = run("cat <<X && echo b\nq && r\nX");
     assert_eq!((out.as_str(), code), ("q && r\nb\n", 0), "stderr={err}");
+}
+
+/// Task #295: the whole mid-run `<<` family is bash-equal. Every row is a
+/// `(script, want_out)` pair measured against **bash 5.3.9** and
+/// `target/debug/fdshell` on `master` (stdin `/dev/null`): the block is a cond
+/// part, so its bytes stay inside the run and the run spans several physical
+/// lines, yet the flush happens on the run's own line — the run claims that
+/// line's region stream in operator order (`flush_line`, task #232's
+/// mechanism). The `&&`-tail, the operator in the block's **condition**, two
+/// `<<` in one body, the nested block, every keyword, the `|` stage (task
+/// #292), the io-number form (task #276) and a here-string all travel with the
+/// run; so does a `#` written behind the run, whose flush is on the run's own
+/// line and never deferred.
+///
+/// The members that stay divergent are named by owner, never fixed here: a
+/// **multi-line** mid-run construct whose region swallows its closer is rc 1
+/// where bash is rc 2 (pinned in `tests/cond_blocks.rs`
+/// `multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`, same
+/// family as `block_body_heredoc_delimiter_line_operator_is_region_data`), a
+/// group / function **body** here-doc claims no region (tasks **#315** /
+/// **#305**, pinned below), a delimiter line that never arrives is task
+/// **#364**, and the `#`-terminated / `&`-deferred flush is task **#333**.
+#[test]
+fn mid_run_heredoc_parity_family() {
+    for (script, want) in [
+        // The task's headline rows.
+        (
+            "true && while :; do cat <<T; break; done\nbodyT\nT",
+            "bodyT\n",
+        ),
+        (
+            "true && while :; do cat <<T; break; done && echo tail\nbodyT\nT",
+            "bodyT\ntail\n",
+        ),
+        // The operator written in the block's own condition.
+        ("true && while cat <<T; do break; done\nbodyT\nT", "bodyT\n"),
+        // Two operators in one body: the line's stream is handed out in
+        // operator order, and the second gets what is left of it.
+        (
+            "true && while :; do cat <<T; cat <<U; break; done\nbT\nbU\nT\nU",
+            "bT\nbU\n",
+        ),
+        // A here-doc mid-run with no block at all, and one after the block.
+        ("true && cat <<T; echo e\nbT\nT", "bT\ne\n"),
+        ("true && while :; do break; done && cat <<T\nbT\nT", "bT\n"),
+        // A block nested inside a mid-run block's body.
+        (
+            "true && while :; do if true; then cat <<T; fi; break; done\nbT\nT",
+            "bT\n",
+        ),
+        // Every keyword opener, and the `if` with a `&&` behind the block.
+        (
+            "true && if true; then cat <<T; fi && echo y\nbT\nT",
+            "bT\ny\n",
+        ),
+        ("true && case x in x) cat <<T;; esac\nbT\nT", "bT\n"),
+        ("true && for i in 1; do cat <<T; done\nbT\nT", "bT\n"),
+        // `until :` never enters its body, so nothing prints (rc 0).
+        ("true && until :; do cat <<T; break; done\nbT\nT", ""),
+        // The block as a pipeline stage (task #292).
+        (
+            "true | while :; do cat <<T; break; done\nbodyT\nT",
+            "bodyT\n",
+        ),
+        // The delimiter forms.
+        ("true && while :; do cat <<'T'; break; done\n$X\nT", "$X\n"),
+        (
+            "true && while :; do cat <<-T; break; done\n\tbT\n\tT",
+            "bT\n",
+        ),
+        // The io-number body goes to fd 3, so stdin prints nothing (task #276).
+        ("true && while :; do cat 3<<T; break; done\nbT\nT", ""),
+        ("true && while :; do cat <<<str; break; done", "str\n"),
+        // A `#` behind the run, and a comment line above it: the flush is on
+        // the run's own line, so nothing is deferred (unlike #333's rows).
+        (
+            "true && while :; do cat <<T; break; done # c\nbodyT\nT",
+            "bodyT\n",
+        ),
+        (
+            "# c\ntrue && while :; do cat <<T; break; done\nbodyT\nT",
+            "bodyT\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// Accepted divergences pinned with their owners: a here-doc written in a
+/// group body or in a `name() { … }` definition body claims **no** body
+/// region, so fdshell reports `here-doc: missing terminating delimiter line`
+/// (rc 1) where bash feeds the body to the command (rc 0; the io-number rows
+/// print nothing in bash, the body is fd 3's input). Measured against bash
+/// 5.3.9 on `master`; the io-number twins are task #276's table rows and fail
+/// identically. Task **#315** owns the group body, task **#305** the function
+/// definition; when they land these rows flip to bash parity and the name
+/// drops its suffix (the `closer_shaped_word_list_words_end_the_block_span_until_310`
+/// convention).
+#[test]
+fn group_and_function_body_here_docs_claim_no_region_until_315_and_305() {
+    for (script, bash) in [
+        ("f() { cat <<T; }\nbodyT\nT\nf", "bash prints bodyT, rc 0"),
+        (
+            "f() { cat 3<<T; }\nbodyT\nT\nf",
+            "bash prints nothing, rc 0",
+        ),
+        ("{ cat <<T; }\nbodyT\nT", "bash prints bodyT, rc 0"),
+        ("{ cat 3<<T; }\nbodyT\nT", "bash prints nothing, rc 0"),
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: {bash}");
+        assert!(
+            err.contains("missing terminating delimiter line 'T'"),
+            "{script}: stderr={err}"
+        );
+    }
 }
 
 // ── The io-number form: `[N]<<word` (task #276) ──────────────────────────────

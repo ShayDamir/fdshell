@@ -105,9 +105,12 @@ fn flush_line_semicolon_terminated_line() {
     assert_eq!(resume, 29);
 }
 
-/// Runs buffered from an earlier physical line (a trailing `#` comment
-/// deferred the flush) are emitted body-less: matching bodies across lines
-/// stays unsupported.
+/// Runs buffered from an **earlier physical line** — the flush was deferred
+/// past the line's newline by a trailing `#` comment (or by a line-opening
+/// `&`) — are emitted body-less: matching bodies across lines stays
+/// unsupported (owner task #333). This is *not* about a run whose own text
+/// spans lines: such a run is flushed on its line and claims its region
+/// stream, pinned by `flush_line_a_multi_line_run_claims_its_line_stream`.
 #[test]
 fn flush_line_multi_line_runs_are_body_less() {
     let line = b"cat <<EOF # c\necho x\nbody\nEOF";
@@ -116,6 +119,32 @@ fn flush_line_multi_line_runs_are_body_less() {
     let resume = flush_line(&mut book, line, 14, 20);
     check_statement(&book.segments[0], b"cat <<EOF", 0, &[]);
     assert_eq!(resume, 20);
+}
+
+/// A run whose **text** spans several physical lines is a single-line run for
+/// the flush: a keyword block opened mid-run (`true && while :; do …`, task
+/// #232) keeps the block's bytes inside the run and never moves `line_start`,
+/// so the flush on the run's own line stamps it with that line's region
+/// stream and the body heredoc of the block's body is claimed (task #295,
+/// measured bash-equal).
+#[test]
+fn flush_line_a_multi_line_run_claims_its_line_stream() {
+    // The run's text is bytes 0..39 and the line's newline is byte 40, so the
+    // line's single region is `bodyT\nT` = bytes 41..48 (the flush's resume).
+    let line = b"true && while :; do cat <<T; break; done\nbodyT\nT";
+    let mut book = book_with(vec![run(b"true && while :; do cat <<T; break; done", 0)]);
+    // `line_end` is the newline that closes `done`: the run's own line.
+    let resume = flush_line(&mut book, line, 0, 40);
+    check_statement(
+        &book.segments[0],
+        b"true && while :; do cat <<T; break; done",
+        0,
+        &[b"bodyT\nT".to_vec()],
+    );
+    assert_eq!(
+        resume, 48,
+        "the end of the delimiter line the `<<T` claimed"
+    );
 }
 
 /// A run with no operators gets no body regions, even when the line has

@@ -639,6 +639,35 @@ fn midrun_adjacent_shapes_stay_measured_divergences() {
     assert_eq!(code, 1);
 }
 
+/// Task #295: a **multi-line** mid-run construct whose body carries a here-doc
+/// stays a measured divergence. The construct's body region starts on its own
+/// lines, so it swallows the closer (`break` / `done`, `}`) and the construct
+/// reports its own unterminated shape — rc 1, where bash reports a syntax
+/// error rc 2. Same rc-1-vs-2 family as
+/// `midrun_adjacent_shapes_stay_measured_divergences` above and as
+/// `tests/heredoc.rs::block_body_heredoc_delimiter_line_operator_is_region_data`
+/// (task #234); the **single-line** mid-run twin is bash-equal and pinned in
+/// `tests/heredoc.rs::mid_run_heredoc_parity_family`. No task owns this family
+/// yet — the pins document it and README covers it in words.
+#[test]
+fn multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured() {
+    let (_out, err, code) = run("true && while :; do\ncat <<T; break\ndone\nbodyT\nT");
+    assert_eq!(code, 1, "bash rc 2: syntax error from `while'");
+    assert!(err.contains("expected 'done'"), "stderr={err}");
+    let (_out, err, code) = run("true && f() {\ncat <<T\n}\nbodyT\nT\nf");
+    assert_eq!(code, 1, "bash rc 2: syntax error from `{{'");
+    assert!(
+        err.contains("function definition is missing a closing brace"),
+        "stderr={err}"
+    );
+    let (_out, err, code) = run("true && {\ncat <<T\n}\nbodyT\nT");
+    assert_eq!(code, 1, "bash rc 2: syntax error from `{{'");
+    assert!(
+        err.contains("group is missing a closing brace"),
+        "stderr={err}"
+    );
+}
+
 /// Task #137 regression: a keyword-shaped word in an **argument** position is
 /// word data, never a block opener — the same command-position rule the group
 /// arm and the segment scanner apply. Without that gate the word scored `+1`,
