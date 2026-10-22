@@ -613,11 +613,18 @@ fn case_clauses_without_a_semi_separator_are_a_parse_error() {
         // right behind a complete `((…))` is seen.
         "case x in a) ((1)); b) ;; esac",
         // The arm's own groups close, so the clause paren that follows a function
-        // definition or a subshell is in command position again (the depth rule
-        // of `parse/case_clause/stray.rs`).
+        // definition, a subshell, or a complete array literal is in command
+        // position again (the depth rule of `parse/case_clause/stray.rs`).
         "case x in a) f() { :; }; b) ;; esac",
         "case x in a) (true); b) ;; esac",
         "case x in a) ( : ); b) ;; esac",
+        "case x in a) m=(1); b) ;; esac",
+        "case x in a) m=$((1)); b) ;; esac",
+        // The escaped `(` of `x\(` opens no group: the mask marks the escape pair
+        // unquoted, the backslash is the marker, so the `)` that follows it is the
+        // clause's pattern paren.
+        "case x in a) x\\() b) ;; esac",
+        "case x in a) x\\() ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
@@ -634,11 +641,14 @@ fn case_clauses_without_a_semi_separator_are_a_parse_error() {
 /// The parens of a group **the arm itself opened** are arm text too: a
 /// definer's parameter list (`f() { …; }`, in the arm and inside the arm's
 /// `if`/`while`/`for`/`{ …; }` bodies, behind a `;` that restarts command
-/// position) and a subshell the arm wrote (`(cat)`, `echo hi | (cat)`,
-/// `g() ( : )`, `(true) && …`). bash parses all of these inside the arm, rc 0,
-/// and fdshell must parse them — the arm's own paren nesting decides it, not the
-/// neighbouring word (`( : )` closes its subshell behind a command-position
-/// word). Only the arm that **matches** runs, so the subshell rows pin the
+/// position), a subshell the arm wrote (`(cat)`, `echo hi | (cat)`,
+/// `g() ( : )`, `(true) && …`), and an **array-literal assignment**, whose group
+/// `(` sits mid-word in the tokenizer's word (`m=(1`, so `a) m=(1) ;;` and the
+/// assignments inside the arm's bodies parse; running one is task **#422**).
+/// bash parses all of these inside the arm, rc 0, and fdshell must parse them —
+/// the arm's own paren nesting decides it, not the neighbouring word (`( : )`
+/// closes its subshell behind a command-position word) and not the word's two
+/// edges. Only the arm that **matches** runs, so the subshell rows pin the
 /// parse: fdshell has no subshell yet (task #316) and the arm whose pattern
 /// does not match never executes.
 #[test]
@@ -662,6 +672,31 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
         "case x in a) g() ( : ) ;; esac",
         "case x in a) ( : ) ;; esac",
         "case x in a) (true) && echo y ;; esac",
+        // An **array-literal assignment** opens a group too, and its `(` sits
+        // mid-word: the tokenizer's word is `m=(1` and the array's `)` is a token
+        // of its own, so only a scan over the word's whole byte range sees the
+        // group. The arm's pattern never matches, so these pin the **parse** —
+        // fdshell has no array runtime (task #422) and the literal's `)` runs as a
+        // command at top level exactly as it does here.
+        "case x in a) m=(1) ;; esac",
+        "case x in a) x=(1) y=2 ;; esac",
+        "case x in a) echo hi; x=(1) ;; esac",
+        "case x in a) m=(1 2) ;; esac",
+        "case x in a) x=(1 2) ;; esac",
+        "case x in a) m=() ;; esac",
+        "case x in a) arr=(\"a\") ;; esac",
+        "case x in a) arr=(\"$@\") ;; esac",
+        "case x in a) m=($(echo a)) ;; esac",
+        "case x in a) m=$((1)) ;; esac",
+        // The same assignment inside the arm's own block bodies and brace group.
+        "case x in a) if true; then m=(1); fi ;; esac",
+        "case x in a) while false; do m=(1); done ;; esac",
+        "case x in a) for i in 1; do m=(1); done ;; esac",
+        "case x in a) { m=(1); } ;; esac",
+        // A quoted `(` is word text and an escaped one is a literal byte, so
+        // neither opens a group; these stay the accepted #419 shapes (bash rc 2).
+        "case x in a) echo \"x(\" b) ;; esac",
+        "case x in a) echo x\\() ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
@@ -674,6 +709,12 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
     // it (bash prints `y`).
     let (out, err, code) = run("case x in x) f() { builtin echo y; }; f ;; esac");
     assert_eq!((out.as_str(), code), ("y\n", 0), "stderr={err}");
+    // The arm that **matches** runs past its array literal (bash prints `done`).
+    // fdshell has no arrays, so the literal's `)` is reported as a command on
+    // stderr — byte for byte what the same assignment does at top level, and
+    // task #422's runtime half. The pin here is the parse and the arm running.
+    let (out, err, code) = run("case x in x) m=(1); echo done ;; esac");
+    assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err}");
 }
 
 /// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted

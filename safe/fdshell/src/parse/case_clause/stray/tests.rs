@@ -85,6 +85,37 @@ fn a_paren_closing_a_group_the_arm_opened_is_not_a_pattern_paren() {
     assert!(!opens(b"g() (:)", None));
 }
 
+/// An **array-literal assignment** carries its group's `(` **mid-word**: the
+/// tokenizer's word is `m=(1` (mask: every byte `Unquoted`) and the array's `)`
+/// is a token of its own, so only a scan over the word's whole byte range sees
+/// the group the arm opened; a test on the word's two edges misses it and judges
+/// the array's `)` the next clause's pattern paren. bash parses the assignment
+/// inside the arm, rc 0 — running it is task **#422**'s word-model half, the
+/// parse gate is this rule's.
+#[test]
+fn an_array_literal_opens_a_group_the_arm_owns() {
+    assert!(!opens(b"m=(1)", None));
+    assert!(!opens(b"arr=(\"$@\")", None));
+    assert!(!opens(b"x=(1) y=2", None));
+    assert!(!opens(b"m=(1 2)", None));
+    assert!(!opens(b"m=()", None));
+    assert!(!opens(b"m=($(echo a))", None));
+    // The same assignment written inside the arm's own block bodies.
+    assert!(!opens(b"if true; then m=(1); fi", None));
+    assert!(!opens(b"{ m=(1); }", None));
+    assert!(!opens(b"while false; do m=(1); done", None));
+    // The array's `)` closes the group, so the clause paren written behind it is
+    // seen (`case x in a) m=(1); b) ;; esac` is bash rc 2).
+    assert!(opens(b"m=(1); b)", None));
+    // `((` stays arithmetic's own, mid-word included: `m=$((1))` is one word whose
+    // parens close inside it, so the arm's depth must not rise — a scan that
+    // counted them would swallow the clause paren after it (`case x in a)
+    // m=$((1)); b) ;; esac` is bash rc 2, and the bare arith assignment is rc 0).
+    assert!(!opens(b"m=$((1))", None));
+    assert!(!opens(b"m=$((m+1))", None));
+    assert!(opens(b"m=$((1)); b)", None));
+}
+
 /// The depth returns to 0 when the arm's group closes, so a clause paren behind
 /// a plain word still bails after a function definition or a subshell has ended
 /// (`case x in a) f() { :; }; b) ;; esac` and `case x in a) (true); b) ;; esac`
@@ -103,6 +134,24 @@ fn a_clause_paren_behind_a_word_after_a_closed_group_still_bails() {
 fn a_quoted_or_escaped_paren_is_word_text() {
     assert!(!opens(b"echo \")\"", None));
     assert!(!opens(b"echo \\)", None));
+    // A quoted `(` opens no group, so a clause paren behind it is still seen
+    // through the word (`echo "x(" b) ;;` is the accepted #419 shape: the
+    // predecessor sits in argument position).
+    assert!(!opens(b"echo \"x(\" b)", None));
+}
+
+/// An **escape pair** is one literal word byte, and the token's mask marks both
+/// of its bytes `Unquoted` — the backslash is the only marker. So the escaped `(`
+/// of `x\(` opens no group the arm owns, and the `)` that follows it is the
+/// clause's pattern paren: `case x in a) x\() ;; esac` is bash rc 2, and a rule
+/// reading the word's last byte alone reads `x\(` as an open `(` and swallows it.
+#[test]
+fn an_escaped_paren_opens_no_group() {
+    assert!(opens(b"x\\()", None));
+    // Behind an argument the paren is not a pattern paren for the other gate, and
+    // nothing may claim it opened a group either (`a) echo x\() ;; esac` is the
+    // accepted #419 shape, bash rc 2).
+    assert!(!opens(b"echo x\\()", None));
 }
 
 /// The bound is the `;;` **window**, so the next clause's own pattern parens are

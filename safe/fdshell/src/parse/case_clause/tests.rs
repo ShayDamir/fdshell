@@ -38,9 +38,13 @@ fn a_clause_closed_by_esac_has_an_empty_body() {
         b"case \"x\" in a) esac".as_slice(),
         b"case x in a|b) esac".as_slice(),
         b"case x in \"a\") esac".as_slice(),
-        // The multi-line spelling reaches the same walk: the tokenizer turns a
-        // newline into a `;` token, so `pos` already landed one short of `esac`.
+        // The lone `;` after the pattern's `)` is the leniency the plan's open
+        // question 2 pins as measured (bash rc 2, fdshell rc 0): the clause walk
+        // skips it as a leading `;` and the body it leaves is empty.
         b"case x in a) ; esac".as_slice(),
+        // The multi-line spelling reaches the same walk through the newline's `;`
+        // token, which is why `pos` lands one short of the `esac` index.
+        b"case x in\na)\nesac".as_slice(),
     ] {
         let clauses =
             clauses_of(line).unwrap_or_else(|e| panic!("{line:?}: {}", e.current_context()));
