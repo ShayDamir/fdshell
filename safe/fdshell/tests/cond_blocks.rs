@@ -1264,3 +1264,140 @@ fn unclosed_block_names_the_closer_it_wants() {
         assert!(err.contains(script), "{script}: stderr={err}");
     }
 }
+
+// Task #296 section: a word-start `#` comments out the rest of its **physical**
+// line, so an `&&` / `||` written inside comment text is never a cond-list split
+// point. A keyword block's span carries the closing keyword's whole run, comment
+// included, which is what used to hand the comment's operator to the cond-list
+// scan (the plain-statement twin was already inert: the segment scanner ends the
+// statement at the `#`). Every row is measured against `bash` 5.3.9; the loop
+// rows run under [`run_bounded`], because a comment that stops hiding its line
+// would put the `break` behind a gate again.
+
+/// The headline family: the comment behind a block's closing keyword (and inside
+/// a mid-run block) hides its `&&` / `||`, so the comment's tail never runs.
+#[test]
+fn a_comment_after_a_block_hides_the_cond_operators() {
+    for (script, want) in [
+        ("while :; do echo a; break; done # c && echo y", "a\n"),
+        ("if :; then echo t; fi # c && echo y", "t\n"),
+        ("for i in 1; do echo $i; done # c && echo y", "1\n"),
+        ("case x in x) echo c;; esac # c && echo y", "c\n"),
+        ("until :; do echo u; break; done # c && echo y", ""),
+        // The mid-run twins (task #232's span has the same run-end semantics).
+        (
+            "true && while :; do echo a; break; done # c && echo y",
+            "a\n",
+        ),
+        ("true && if :; then echo t; fi # c && echo y", "t\n"),
+        // The comment sits on the closer's own line of a multi-line block.
+        ("while :; do\n  echo a\n  break\ndone # c && echo x", "a\n"),
+        // A `;` behind the comment never resumes the list: `echo after` /
+        // `echo tail` are comment text too, and `set -e` sees the block's own
+        // status.
+        (
+            "while :; do echo a; break; done # c && echo y; echo after",
+            "a\n",
+        ),
+        (
+            "set -e; while :; do echo a; break; done # c && echo y; echo after",
+            "a\n",
+        ),
+        ("if :; then echo t; fi # c && echo y; echo tail", "t\n"),
+        // A closer or a brace named in the comment is comment text: it closes
+        // no block, opens no group, and its operator stays hidden.
+        ("while :; do echo a; break; done # done && echo y", "a\n"),
+        ("while :; do echo a; break; done # { && echo y", "a\n"),
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The gate scan shares the rule: a short-circuited `||` gates bash's AND-list,
+/// and a `;` written **inside** the comment never ends the gate, so
+/// `run_cond_list` never resumes ungated inside comment text (it used to run
+/// `echo y` / `echo tail` there).
+#[test]
+fn a_comment_terminates_a_short_circuit_gate() {
+    for (script, want) in [
+        ("true || while :; do :; done # c ; echo y", ""),
+        ("true || if :; then :; fi # fi ; echo tail", ""),
+        ("echo a || if :; then :; fi # done ; echo tail", "a\n"),
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: stderr={err}");
+    }
+    // The comment's own **newline** is the gate's end: the statement written on
+    // the next line runs ungated, exactly as a plain newline ends a gate.
+    let (out, err, rc) = run_bounded("true || if :; then :; fi # c\necho tail");
+    assert_eq!((out.as_str(), rc), ("tail\n", 0), "stderr={err}");
+}
+
+/// Non-regression: the comment shapes that already matched bash stay
+/// byte-identical. A plain statement ends at the `#` (the segment scanner), a
+/// `{ …; }` group ends there too, and a comment tail after a block is inert
+/// through the parse layer, which stops at a comment inside a part's text — the
+/// dependency task #296 relies on (a `;` in the comment never resumes the list).
+#[test]
+fn a_comment_tail_next_to_a_block_stays_inert() {
+    for (script, want) in [
+        ("echo a # c && echo y", "a\n"),
+        ("true && { echo g; } # c && echo y", "g\n"),
+        ("while :; do echo a; break; done # c ; echo after", "a\n"),
+        (
+            "while :; do echo a; break; done # c\necho tail",
+            "a\ntail\n",
+        ),
+        ("while :; do echo a; break; done # c | cat", "a\n"),
+        ("while :; do echo a; break; done # c & echo y", "a\n"),
+        // The word-start half of the rule: a `#` inside a word is data.
+        ("echo a x#y && echo b", "a x#y\nb\n"),
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The comment edges bash rejects and fdshell does not (yet) are pinned with
+/// their **current** result, so this fix is measured as not touching them; the
+/// owner task is named per row (the rc-1-vs-2 family, README "Accepted
+/// divergences").
+#[test]
+fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
+    // #405: a word written after the closing keyword. The glued closer `done#c`
+    // never closes, so fdshell reports the unclosed block (bash: rc 2).
+    let (out, err, rc) = run_bounded("while :; do echo a; break; done#c && echo y");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(
+        err.contains("'while' is missing its closing 'done'"),
+        "stderr={err}"
+    );
+    // #405: a quoted word behind the closer is accepted and the block runs. The
+    // comment's `&& echo y` is hidden by task #296, so only the block's own text
+    // is left; the residual divergence is the acceptance of the word.
+    let (out, err, rc) = run_bounded("while :; do echo a; break; done \"c\" # && echo y");
+    assert_eq!((out.as_str(), rc), ("a\n", 0), "stderr={err}");
+    // #405: a word glued with `#` behind `fi` is an argument, and the `&&` runs
+    // the tail (bash: rc 2 at the word).
+    let (out, err, rc) = run_bounded("if :; then echo t; fi x#y && echo y");
+    assert_eq!((out.as_str(), rc), ("t\ny\n", 0), "stderr={err}");
+    // #406: a `&&` at the start of a physical line is an operator where bash
+    // stops with rc 2.
+    let (out, err, rc) = run_bounded("echo a # c\n&& echo y");
+    assert_eq!((out.as_str(), rc), ("a\ny\n", 0), "stderr={err}");
+    // #404: a `#` line inside a `{ …; }` body breaks the group parse.
+    let (out, err, rc) = run_bounded("{ echo g # c && echo z\n} && echo w");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(err.contains("expected ';' before '}'"), "stderr={err}");
+    // #304: a redirect-carrying heredoc line behind a comment in a block body
+    // loses the `fi` (bash prints the body).
+    let (out, err, rc) = run_bounded("if :; then cat <<Q # c\nq && y\nQ\nfi");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(err.contains("missing 'fi'"), "stderr={err}");
+    // #304's twin, where fdshell runs the statement: the `X` delimiter word ends
+    // the heredoc and `X` is then run as a command, so only the body's `b` and
+    // the report's rc are machine-independent (bash: rc 2 at `fi`).
+    let (out, _, rc) = run_bounded("if cat <<X; then # c\nb\nX\nfi");
+    assert_eq!((out.strip_prefix("b\n").is_some(), rc), (true, 1));
+}

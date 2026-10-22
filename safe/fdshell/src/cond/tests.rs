@@ -402,3 +402,129 @@ fn gate_of(line: &[u8], from: usize, active: bool) -> usize {
     state.word_active = active;
     gate_end(line, from, &mut state)
 }
+
+// Task #296: a `#` at a word start comments out the rest of its physical line,
+// so an `&&` / `||` written inside comment text is never a cond-list split
+// point. The case that reaches the scan is a keyword block's span, which carries
+// the closing keyword's whole run, comment included (the plain-statement twin is
+// already inert because the segment scanner ends the statement at the comment).
+#[test]
+fn a_word_start_comment_hides_the_line_operators() {
+    // R1: the headline shape — the comment hides the `&&`, so the block is one
+    // part and the scan finds no boundary (today the `&&` inside the comment at
+    // 36 splits and `echo y` runs next to the block, which bash never does).
+    assert_eq!(
+        boundary_of(b"while :; do echo a; break; done # c && echo y"),
+        (45, false)
+    );
+    let one_part: &[&[u8]] = &[
+        b"if :; then echo t; fi # c && echo y",
+        b"for i in 1; do echo $i; done # c && echo y",
+        b"case x in x) echo c;; esac # c && echo y",
+        b"until :; do echo u; break; done # c && echo y",
+        b"time while :; do echo a; break; done # c && echo y",
+        // The multi-line block: the comment sits on the closer's own line.
+        b"while :; do\necho a\nbreak\ndone # c && echo x",
+        // A `;` behind the comment never resumes the list (`echo after` stays
+        // comment text), and the block's trailing operator is the split.
+        b"while :; do echo a; break; done # c && echo y; echo after",
+    ];
+    for line in one_part {
+        assert_eq!(boundary_of(line), (line.len(), false), "{line:?}");
+    }
+    // The mid-run twins (task #232's span has the same run-end semantics).
+    for line in [
+        b"true && while :; do echo a; break; done # c && echo y" as &[u8],
+        b"true && if :; then echo t; fi # c && echo y",
+    ] {
+        assert_eq!(
+            boundary_from(line, 7),
+            (line.len(), false),
+            "mid-run {line:?}"
+        );
+    }
+    // R2: several operators in a comment that runs to the end of input.
+    assert_eq!(
+        boundary_of(b"if :; then echo t; fi # c && echo y || echo z"),
+        (45, false)
+    );
+    // R3: the land-**on**-the-newline pin. The `;`-terminated operator line
+    // `if cat <<X; then # c` keeps its heredoc bodies on the following lines,
+    // and the block's own body region carries the split (the `&&` at 26) — the
+    // region arm is keyed on the comment's newline, so landing *past* it turns
+    // this into "no split" (35). The comment-free twin is
+    // `line_start_words_keep_the_closer_and_argument_gates` (22).
+    assert_eq!(
+        boundary_of(b"if cat <<X; then # c\nbody && x\nX\nfi"),
+        (26, false)
+    );
+    // R4: the comment's newline keeps the run reset (the task #232 bookkeeping):
+    // the operator on the **next** line still splits, at 36.
+    assert_eq!(
+        boundary_of(b"while :; do echo a; break; done # c\n&& echo x"),
+        (36, false)
+    );
+    // R5: the word-start half of the rule — a `#` inside a word is data.
+    assert_eq!(boundary_of(b"echo a x#y && echo b"), (11, false));
+    // The glued closer never closes (owner task #405): pinned as-is, one part.
+    let glued = b"while :; do echo a; break; done#c && echo y";
+    assert_eq!(boundary_of(glued), (glued.len(), false));
+    // R6: a comment naming a closer / a brace inside a block body stays inert
+    // **and** the block's own trailing operator still splits (both rows are
+    // parity today through the command-position rule; after the fix the text is
+    // skipped, so they pin the equivalence, not a change).
+    assert_eq!(
+        boundary_of(b"while :; do # done\ndone && echo x"),
+        (24, false)
+    );
+    assert_eq!(
+        boundary_of(b"while :; do\necho a # } && echo z\nbreak\ndone && echo x"),
+        (44, false)
+    );
+    // R7: a comment inside a `{ …; }` body hides its brace: the group's own
+    // trailing `&&` (15) is the split, and skipping the comment cannot change
+    // the group depth (the comment's `{` never joined a run).
+    assert_eq!(boundary_of(b"{ echo a # {\n} && echo b"), (15, false));
+    // R8: non-regression — the comment's tail text is inert, and the body-skip
+    // resume keeps the delimiter line's operator (23).
+    assert_eq!(
+        boundary_of(b"while :; do echo a; break; done # c\necho tail"),
+        (45, false)
+    );
+    assert_eq!(
+        boundary_of(b"echo p; cat <<X\nbody\nX && echo y"),
+        (23, false)
+    );
+}
+
+// Task #296: the short-circuit gate shares the comment rule. A `;` written
+// inside the comment is comment text, so the gated AND-list runs to the
+// newline that ends the comment (or to the text end) — `run_cond_list` never
+// resumes ungated *inside* comment text, which is what ran `echo tail` next to
+// a short-circuited block in bash.
+#[test]
+fn a_comment_ends_the_gate_at_its_newline() {
+    // `from` is the gate's production start: the byte just past the operator
+    // pair (`cond.rs`'s `after = i + 2`).
+    assert_eq!(
+        gate_of(b"true || if :; then :; fi # c ; echo tail", 8, false),
+        40,
+        "the comment's `;` is comment text: the gate runs to the text end"
+    );
+    assert_eq!(
+        gate_of(b"true || while :; do :; done # c ; echo y", 8, false),
+        40
+    );
+    // A closer written inside the comment never closes a block, and the gate's
+    // end is the text end.
+    assert_eq!(
+        gate_of(b"echo a || if :; then :; fi # done ; echo tail", 9, false),
+        45
+    );
+    // The comment's newline ends the gate: the statement on the next line runs
+    // ungated, exactly as a plain newline ends it.
+    assert_eq!(
+        gate_of(b"echo a || if :; then :; fi # c\necho tail", 9, false),
+        31
+    );
+}

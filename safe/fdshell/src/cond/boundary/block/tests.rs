@@ -318,3 +318,37 @@ fn glued_pair_words_score_their_payload_once() {
     assert_eq!(word_delta(l, 1, 0, 1, Place::Command), (0, Place::Command));
     assert_eq!(word_delta(l, 3, 0, 1, Place::Command), (1, Place::Command));
 }
+
+/// Task #296, the in-block half of the comment rule: a word-start `#` inside a
+/// block's text comments out the rest of its physical line, so a closer written
+/// in the comment never closes the block and the comment's own operator never
+/// splits — while the block's **trailing** operator stays the boundary. Both
+/// rows are parity today through the command-position rule of [`word_delta`]
+/// (the comment word leaves `Place::Data`, so the `fi` / `esac` behind the
+/// comment is scored at its own command position); after the fix the text is
+/// skipped instead. They pin that equivalence, so the place rule cannot be
+/// deleted on the grounds that the comment skip covers it.
+#[test]
+fn a_comment_in_a_block_body_is_inert_and_keeps_the_trailing_operator() {
+    // The comment's `fi` at 13 closes nothing; the real `fi` (23) closes the
+    // block and its `&&` (26) splits.
+    assert_eq!(
+        boundary_of(b"if :; then # fi\necho t\nfi && echo y"),
+        (26, false)
+    );
+    // The `case` word-list twin: the comment on the word-list line is inert, the
+    // arm's `;;` and the real `esac` (26) keep their depth, and the `&&` (31)
+    // splits.
+    assert_eq!(
+        boundary_of(b"case x in # c\nx) echo c;; esac && echo y"),
+        (31, false)
+    );
+    // The comment hides the closer on its own line **and** the operator written
+    // behind it, so the whole text is one part.
+    for line in [
+        b"if :; then # fi && echo y\necho t\nfi".as_slice(),
+        b"while :; do # done && echo x\n:; break\ndone".as_slice(),
+    ] {
+        assert_eq!(boundary_of(line), (line.len(), false), "{:?}", line);
+    }
+}
