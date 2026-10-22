@@ -15,9 +15,10 @@ use alloc::vec::Vec;
 use error_stack::Report;
 
 /// The bytes a closing keyword glues to and stays a closer: the redirection
-/// operator bytes (`done>f`, `esac>>out`). It is the set the byte-level closer
-/// boundary accepts in [`crate::keywords::keyword_delta`], so the token scan and
-/// the byte scan cannot drift apart.
+/// operator bytes (`done>f`, `esac>>out`). The byte-level closer boundary in
+/// [`crate::keywords::keyword_delta`] accepts these plus the `&`/`|` glue
+/// (`done&`, `done| cat`), which the tokenizer already splits into their own
+/// tokens, so only the redirection pair is the tail's own.
 const GLUE: &[u8] = b"<>";
 
 /// Whether `tok` is the block's closing keyword `kw`: the bare word, or the word

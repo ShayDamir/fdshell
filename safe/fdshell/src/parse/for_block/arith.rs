@@ -91,7 +91,7 @@ fn tail_body(
     ensure!(
         closed
             .last()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"done")),
+            .is_some_and(|tok| crate::parse::block_tail::is_closer(tok, b"done")),
         ParseError::ExpectedDone
     );
     ensure!(

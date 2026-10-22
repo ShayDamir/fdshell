@@ -28,7 +28,7 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
     let (Some(first), Some(last)) = (tokens.first(), tokens.last()) else {
         return Vec::new();
     };
-    if !first.0.eq_bytes(b"case") || !last.0.eq_bytes(b"esac") {
+    if !first.0.eq_bytes(b"case") || !crate::parse::block_tail::is_closer(last, b"esac") {
         return Vec::new();
     }
     let Some(in_idx) = (1..tokens.len()).find(|&i| word_at(tokens, i, b"in")) else {

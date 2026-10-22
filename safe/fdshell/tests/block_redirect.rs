@@ -107,6 +107,58 @@ fn every_keyword_block_takes_its_trailing_redirect() {
     }
 }
 
+/// The **glued** closer — no space between the keyword and the operator — is
+/// the same block: `done>f`, `fi>f`, `esac>f` close the block and the operator
+/// redirects it (`while … done>f` was bash's shape all along).
+#[test]
+fn a_glued_closer_takes_its_redirection() {
+    for (script, want) in [
+        ("while :; do echo a; break; done>f", "a\n"),
+        ("until false; do echo u; break; done>f", "u\n"),
+        ("if :; then echo t; fi>f", "t\n"),
+        ("for x in a; do echo $x; done>f", "a\n"),
+        ("for ((i=0;i<2;i++)); do echo $i; done>f", "0\n1\n"),
+        ("case x in x) echo C;; esac>f", "C\n"),
+        ("while :; do echo a; break; done>>f", "a\n"),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            ("", Some(0)),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert_eq!(file(&dir, "f"), Some(want.as_bytes().to_vec()), "{script}");
+    }
+    // A *chained* glued redirection (`done>f>g`) is the word-tokenizer's
+    // pre-existing gap, not the block tail's: `echo a>f>g` files nothing on
+    // master either, while bash gives `f` empty and `g` the output. fdshell
+    // files the block's output in a literal `f>g`, and the block does run.
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do echo a; break; done>f>g");
+    assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
+    assert_eq!(
+        file(&dir, "f>g"),
+        Some(b"a\n".to_vec()),
+        "the whole glued word became the target (`echo a>f>g` behaves the same)"
+    );
+    assert!(file(&dir, "f").is_none() && file(&dir, "g").is_none());
+    let dir = Scratch::new();
+    std::fs::write(dir.join("in"), b"IN\n").unwrap();
+    let o = run(&dir, "while :; do cat; break; done<in");
+    assert_eq!((out(&o), rc(&o)), ("IN\n", Some(0)), "stderr={}", err(&o));
+
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do echo a; break; done>f; echo tail");
+    assert_eq!((out(&o), rc(&o)), ("tail\n", Some(0)), "stderr={}", err(&o));
+    assert_eq!(
+        file(&dir, "f"),
+        Some(b"a\n".to_vec()),
+        "the glue ends the block, the statement after it runs"
+    );
+}
+
 /// `>>` appends to a target the block did not create, in the same statement.
 #[test]
 fn append_after_a_closer_appends_to_the_block_target() {
@@ -333,20 +385,23 @@ fn the_restore_undoes_an_exec_in_the_body() {
 }
 
 /// A closer-shaped word inside a block's own word data stays word data, with a
-/// trailing redirection on the block: the body's `echo done` and a `done`
-/// pattern are words, not the closer. (The `for x in done>f` spelling is
-/// fdshell's word-list leniency — bash rejects the line at rc 2, the family of
-/// task **#405** — what is pinned here is that the glue does not steal the
-/// word.)
+/// redirection on the block — glued closer included: the body's `echo done` and
+/// a `done` pattern are words, not the closer. In `for`'s word list the glued
+/// spelling `for x in done>f` is the shape bash rejects outright, and fdshell
+/// rejects it too (rc 1 by the house parse-error convention).
 #[test]
 fn closer_shaped_words_stay_word_data() {
     let dir = Scratch::new();
-    let o = run(&dir, "while :; do echo done; break; done > f");
+    let o = run(&dir, "while :; do echo done; break; done>f");
     assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
-    assert_eq!(file(&dir, "f"), Some(b"done\n".to_vec()));
+    assert_eq!(
+        file(&dir, "f"),
+        Some(b"done\n".to_vec()),
+        "the body's `done` is data, the glued `done>` is the closer"
+    );
 
     let dir = Scratch::new();
-    let o = run(&dir, "case x in done) echo P;; esac > f");
+    let o = run(&dir, "case x in done) echo P;; esac>f");
     assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
     assert_eq!(
         file(&dir, "f"),
@@ -355,12 +410,11 @@ fn closer_shaped_words_stay_word_data() {
     );
 
     let dir = Scratch::new();
-    let o = run(&dir, "for x in done>f; do echo A; done > f2");
-    assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
-    assert_eq!(file(&dir, "f2"), Some(b"A\n".to_vec()));
+    let o = run(&dir, "for x in done>f; do echo A; done>f2");
+    assert_eq!(rc(&o), Some(1), "stderr={}", err(&o));
     assert!(
-        file(&dir, "f").is_none(),
-        "the word-list word opens nothing"
+        file(&dir, "f").is_none() && file(&dir, "f2").is_none(),
+        "bash rejects the statement (`syntax error near unexpected token '>'`) and opens nothing"
     );
 }
 

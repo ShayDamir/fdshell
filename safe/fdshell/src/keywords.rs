@@ -24,8 +24,13 @@ use crate::segment::group::{closes, opens};
 /// Recognized: `case`, `esac`, `if`, `fi`, `for`, `wait`, `while`, `until`,
 /// `done`, `{`, `}`.
 /// Each check requires a word boundary after the keyword to avoid
-/// matching prefixes like `ifconfig` or `donec`. `wait` opens a block only
-/// when [`wait_opens_block`] holds (otherwise it is the POSIX builtin, `0`).
+/// matching prefixes like `ifconfig` or `donec`. A **closer** also accepts the
+/// redirection operator bytes (`&|<>`) as its boundary, so the glued
+/// `done>f`/`fi>f`/`esac>f` form closes the block and leaves the operator to
+/// `parse::block_tail` — the token-side twin of that set is
+/// `parse::block_tail::is_closer`, and the two scans must stay in step.
+/// `wait` opens a block only when [`wait_opens_block`] holds (otherwise it is
+/// the POSIX builtin, `0`).
 /// `{`/`}` are the group command's delimiters and use the predicates the
 /// segment scanner uses for its group opener, so the depth rule and the
 /// segment opener cannot drift.
@@ -46,13 +51,13 @@ pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option
     if word.starts_with(b"case") && boundary(word, 4, b"") {
         return Some(1);
     }
-    if word.starts_with(b"esac") && boundary(word, 4, b"&|") {
+    if word.starts_with(b"esac") && boundary(word, 4, b"&|<>") {
         return Some(-1);
     }
     if word.starts_with(b"if") && boundary(word, 2, b"") {
         return Some(1);
     }
-    if word.starts_with(b"fi") && boundary(word, 2, b"&|") {
+    if word.starts_with(b"fi") && boundary(word, 2, b"&|<>") {
         return Some(-1);
     }
     if word.starts_with(b"for") && boundary(word, 3, b"") {
@@ -64,7 +69,7 @@ pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option
     if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
         return Some(1);
     }
-    if word.starts_with(b"done") && boundary(word, 4, b"&|") {
+    if word.starts_with(b"done") && boundary(word, 4, b"&|<>") {
         return Some(-1);
     }
     if opens(word, line, word_end) {

@@ -75,7 +75,7 @@ pub(crate) fn tokens_to_for(
     ensure!(
         closed
             .last()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"done")),
+            .is_some_and(|tok| crate::parse::block_tail::is_closer(tok, b"done")),
         ParseError::ExpectedDone
     );
     // POSIX #2.9.1: the closer is preceded by a command-list terminator — `;`

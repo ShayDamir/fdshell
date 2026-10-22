@@ -94,7 +94,7 @@ fn up_to_esac<'a>(tokens: &'a [Token], line: &[u8]) -> Result<&'a [Token], Repor
     };
     ensure!(
         rest.last()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"esac")),
+            .is_some_and(|tok| crate::parse::block_tail::is_closer(tok, b"esac")),
         ParseError::CaseMissingEsac
     );
     Ok(rest)

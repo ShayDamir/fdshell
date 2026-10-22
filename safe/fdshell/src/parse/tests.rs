@@ -4508,6 +4508,13 @@ fn a_redirect_after_a_block_closer_is_the_blocks_own() {
         b"for ((i=0;i<1;i++)); do echo A; done > f".as_slice(),
         b"case x in x) echo C;; esac > f".as_slice(),
         b"wait\n readable %rd) echo hi ;;\ndone > f".as_slice(),
+        // The glued closer (no space): the same block, the same def.
+        b"while :; do echo a; break; done>f".as_slice(),
+        b"until :; do echo a; break; done>f".as_slice(),
+        b"if :; then echo a; fi>f".as_slice(),
+        b"for x in a; do echo A; done>f".as_slice(),
+        b"for ((i=0;i<1;i++)); do echo A; done>f".as_slice(),
+        b"case x in x) echo C;; esac>f".as_slice(),
     ] {
         assert_eq!(
             block_redirects(line),
@@ -4553,6 +4560,22 @@ fn the_tail_reads_the_whole_redirect_family() {
     );
     assert_eq!(
         block_redirects(b"while :; do :; done > f 2> g"),
+        vec![
+            path_def(1, RedirectDirection::Write, "f"),
+            path_def(2, RedirectDirection::Write, "g")
+        ]
+    );
+    // The same family, glued to the closer.
+    assert_eq!(
+        block_redirects(b"while :; do :; done>>f"),
+        vec![path_def(1, RedirectDirection::Append, "f")]
+    );
+    assert_eq!(
+        block_redirects(b"if :; then :; fi<g"),
+        vec![path_def(0, RedirectDirection::Read, "g")]
+    );
+    assert_eq!(
+        block_redirects(b"while :; do :; done>f 2> g"),
         vec![
             path_def(1, RedirectDirection::Write, "f"),
             path_def(2, RedirectDirection::Write, "g")
