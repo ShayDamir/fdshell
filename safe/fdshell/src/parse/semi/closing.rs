@@ -4,8 +4,8 @@
 
 mod word;
 
-pub(crate) use word::List;
-use word::{glue_at, next_word, scores_at};
+pub(crate) use word::{List, glue_at};
+use word::{next_word, scores_at};
 
 use super::Token;
 use crate::error::parse::ParseError;

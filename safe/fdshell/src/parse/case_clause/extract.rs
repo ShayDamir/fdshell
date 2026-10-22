@@ -1,8 +1,9 @@
 use super::Token;
+use super::stray;
 use crate::error::parse::ParseError;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{amp_semi, trim_body};
-use error_stack::{Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use sys::ScriptText;
 
 /// Extract one clause body starting at `body_start`, up to the `;;`
@@ -14,6 +15,10 @@ use sys::ScriptText;
 /// regions sit past `esac`, in a multi-line clause they are inside the span,
 /// where `part_text`'s extension mode returns the slice's verbatim span
 /// unchanged.
+///
+/// The arm region (up to the `;;` window that ends it) is also where a missing
+/// clause separator shows up: [`stray`] decides the shape, and this site owns
+/// the verdict (task #300).
 pub(crate) fn body(
     tokens: &[Token],
     text: &ScriptText,
@@ -26,6 +31,11 @@ pub(crate) fn body(
         .windows(2)
         .position(|w| matches!(w, [a, b] if a.0.eq_bytes(b";") && b.0.eq_bytes(b";")))
         .map(|i| body_start + i);
+    // The bound is the window's index **in the region**, so the next clause's
+    // own pattern parens (`a) echo hi;; b) ;; esac`) are never in scope.
+    if stray::opens_next_pattern(body_slice, end.map(|e| e - body_start), line) {
+        bail!(ParseError::CaseMissingSemiSemi);
+    }
     match end {
         Some(end) => {
             // A `;` glued behind a plain `&` is the statement terminator, not

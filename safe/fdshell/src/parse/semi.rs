@@ -10,7 +10,9 @@ mod closing;
 mod preceded;
 mod trim;
 
-pub(crate) use closing::{List, closing_keyword_index, list_closing_keyword_index, up_to_closing};
+pub(crate) use closing::{
+    List, closing_keyword_index, glue_at, list_closing_keyword_index, up_to_closing,
+};
 pub(crate) use preceded::{Term, amp_semi, find_preceded_by, is_list_terminator};
 pub(crate) use trim::{
     block_body, block_condition, body_end, condition_background, trim_body, trim_condition,

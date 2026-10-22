@@ -1,11 +1,12 @@
 pub(crate) mod extract;
 pub(crate) mod pattern;
+pub(crate) mod stray;
 
 use super::Token;
 use super::semi::trim_semi;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
-use error_stack::{Report, bail};
+use error_stack::{Report, bail, ensure};
 use sys::ScriptText;
 
 pub struct CaseClause {
@@ -39,6 +40,13 @@ pub fn parse_clauses(
 
 /// Collect the `|`-separated patterns of one clause, up to and including `)`.
 /// Advances `pos` past the closing paren.
+///
+/// The **paren** ends the pattern list, not the position: a clause whose `)` is
+/// the token right before `esac` is a clause with an empty body
+/// (`case x in a) esac`, bash rc 0, and the multi-line spelling reaches the same
+/// walk through the newline's `;` token), so only a pattern list that never
+/// reaches its `)` is the missing-paren shape (`case x in a esac`,
+/// `case x in echo yes;; esac`).
 fn collect_patterns(
     tokens: &[Token],
     pos: &mut usize,
@@ -46,12 +54,14 @@ fn collect_patterns(
 ) -> Result<Vec<pattern::Pattern>, Report<ParseError>> {
     let mut patterns = Vec::new();
     let mut current_pattern = Vec::new();
+    let mut closed_paren = false;
     while *pos <= esac_idx {
         let Some(token) = tokens.get(*pos) else {
             break;
         };
         if token.0.eq_bytes(b")") {
             *pos += 1;
+            closed_paren = true;
             break;
         }
         if token.0.eq_bytes(b"|") {
@@ -66,9 +76,7 @@ fn collect_patterns(
             *pos += 1;
         }
     }
-    if *pos >= esac_idx {
-        bail!(ParseError::CaseMissingCloseParen);
-    }
+    ensure!(closed_paren, ParseError::CaseMissingCloseParen);
     if current_pattern.is_empty() && patterns.is_empty() {
         bail!(ParseError::CaseEmptyPattern);
     }
@@ -77,3 +85,6 @@ fn collect_patterns(
     }
     Ok(patterns)
 }
+
+#[cfg(test)]
+mod tests;
