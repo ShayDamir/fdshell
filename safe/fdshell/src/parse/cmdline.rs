@@ -128,14 +128,6 @@ impl<'a> ExpandedStage<'a> {
         }
     }
 
-    /// The stage's keyword block, `None` for a simple command.
-    pub fn block(&self) -> Option<&'a BlockStage> {
-        match self {
-            Self::Block(block) => Some(block),
-            Self::Command(_) => None,
-        }
-    }
-
     /// The stage's capture operators (`>&%name`): empty for a keyword block,
     /// which has no capture socket — bash has no capture syntax on a compound.
     pub fn captures(&self) -> &[Capture] {

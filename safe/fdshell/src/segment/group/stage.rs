@@ -2,7 +2,7 @@
 //! word that follows a `|` is in command position, so a keyword there opens a
 //! block which is a whole stage — `echo a | while :; do echo b; break; done`.
 //! The rule is the fourth arm of the classification the run tests express
-//! ([`super::group_at_run]` carries the other three: run start, cond part
+//! ([`super::group_at_run`] carries the other three: run start, cond part
 //! mid-run, argument), and it is deliberately *not* folded into that function:
 //! its answer drives a segment flush, and a stage's text must stay inside the
 //! run so the pipeline parser can split the stages.
