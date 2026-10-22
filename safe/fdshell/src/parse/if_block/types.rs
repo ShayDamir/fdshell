@@ -1,3 +1,4 @@
+use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use sys::ScriptText;
 use sys::ShortCStr;
@@ -22,4 +23,7 @@ pub struct IfBlock {
     /// The condition was terminated by the plain `&`: it runs as a background
     /// job (`condition_background`, task #356).
     pub cond_background: bool,
+    /// The redirections written after the closing `fi` (task #298,
+    /// `parse::block_tail`); they apply to the whole `if`.
+    pub redirects: Vec<RedirectDef>,
 }

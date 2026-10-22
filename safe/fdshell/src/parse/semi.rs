@@ -53,6 +53,20 @@ pub(crate) fn verbatim(
     Ok(t)
 }
 
+/// The verbatim text of `tokens[from..to]` as a trimmed condition slice;
+/// `err` when the range is absent. Lives here so `parse/if_block` keeps its own
+/// budget (task #298 moved it out of the `if` builder).
+pub(crate) fn span_verbatim(
+    text: &ScriptText,
+    tokens: &[Token],
+    from: usize,
+    to: usize,
+    line: &[u8],
+    err: ParseError,
+) -> Result<ScriptText, Report<ParseError>> {
+    verbatim(text, trim_condition(tokens.get(from..to).ok_or(err)?, line))
+}
+
 /// Byte range `(start, end)` covered by the first and last tokens, or `(0, 0)`.
 pub(crate) fn token_range(tokens: &[Token]) -> (usize, usize) {
     match (tokens.first(), tokens.last()) {

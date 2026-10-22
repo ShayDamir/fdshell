@@ -3,6 +3,7 @@ mod array_ref;
 mod backtick;
 use alloc::vec::Vec;
 mod bg_redirect;
+pub(crate) mod block_tail;
 mod builtin;
 mod capture;
 pub(crate) mod case_block;

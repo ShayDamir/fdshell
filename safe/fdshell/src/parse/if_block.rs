@@ -11,9 +11,9 @@ use super::semi::block_body;
 use super::semi::body_end;
 use super::semi::condition_background;
 use super::semi::find_preceded_by;
+use super::semi::span_verbatim;
 use super::semi::trim_condition;
 use super::semi::up_to_closing;
-use super::semi::verbatim;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
@@ -33,17 +33,19 @@ pub(crate) fn tokens_to_if(
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `fi`: the tokens after it are body data, not block structure.
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let tokens = up_to_closing(tokens, line, List::Plain, ParseError::MissingFi)?;
+    let closed = up_to_closing(tokens, line, List::Plain, ParseError::MissingFi)?;
     // The closing `fi` is the truncated slice's last token.
-    let fi_idx = tokens.len() - 1;
+    let fi_idx = closed.len() - 1;
+    let redirects =
+        crate::parse::block_tail::redirects(b"fi", tokens.get(fi_idx..).unwrap_or(&[]), line)?;
 
     // An `if`/`elif` condition is a compound list: `then` may sit behind the
     // plain `&` as behind a `;` (task #354), and that `&` is the condition's
     // background-job flag (task #356, `condition_background`).
     let first_then =
-        find_preceded_by(tokens, 1, b"then", line, Term::SemiAmp).ok_or(ParseError::MissingThen)?;
+        find_preceded_by(closed, 1, b"then", line, Term::SemiAmp).ok_or(ParseError::MissingThen)?;
 
-    let cond_slice = tokens
+    let cond_slice = closed
         .get(1..first_then)
         .ok_or(ParseError::MissingCondition)?;
     let cond_tokens = trim_condition(cond_slice, line);
@@ -51,7 +53,7 @@ pub(crate) fn tokens_to_if(
 
     let condition = span_verbatim(
         text,
-        tokens,
+        closed,
         1,
         first_then,
         line,
@@ -61,13 +63,13 @@ pub(crate) fn tokens_to_if(
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
-    while let Some(elif_idx) = find_preceded_by(tokens, pos, b"elif", line, Term::SemiAmp) {
-        let then_idx = find_preceded_by(tokens, elif_idx, b"then", line, Term::SemiAmp)
+    while let Some(elif_idx) = find_preceded_by(closed, pos, b"elif", line, Term::SemiAmp) {
+        let then_idx = find_preceded_by(closed, elif_idx, b"then", line, Term::SemiAmp)
             .ok_or(ParseError::MissingThenAfterElif)?;
         elif_pairs.push((elif_idx, then_idx));
         pos = then_idx;
     }
-    let else_idx = find_preceded_by(tokens, pos, b"else", line, Term::SemiAmp);
+    let else_idx = find_preceded_by(closed, pos, b"else", line, Term::SemiAmp);
 
     let first_end = match elif_pairs.first() {
         Some(&(ei, _)) => ei,
@@ -77,14 +79,14 @@ pub(crate) fn tokens_to_if(
     // plain `&` stays (it backgrounds the body's last statement, task #354),
     // so does a `;` glued right behind that `&` (the body's own scan rejects
     // the split, task #355), and so does any other word the closer is glued to.
-    let raw = tokens
-        .get(first_then + 1..body_end(tokens, line, first_end))
+    let raw = closed
+        .get(first_then + 1..body_end(closed, line, first_end))
         .unwrap_or(&[]);
     let then_body = part_text(text, block_body(raw, line, ParseError::EmptyThenBody)?)?;
 
-    let elifs = super::elif::parse_elifs(tokens, &elif_pairs, else_idx, fi_idx, text)?;
+    let elifs = super::elif::parse_elifs(closed, &elif_pairs, else_idx, fi_idx, text)?;
     let else_body = else_idx
-        .map(|ei| super::elif::parse_else_body(tokens, ei, fi_idx, text))
+        .map(|ei| super::elif::parse_else_body(closed, ei, fi_idx, text))
         .transpose()?;
     Ok(IfBlock {
         condition,
@@ -93,18 +95,6 @@ pub(crate) fn tokens_to_if(
         else_body,
         cond_bodies,
         cond_background,
+        redirects,
     })
-}
-
-/// The verbatim text of `tokens[from..to]` as a trimmed condition slice;
-/// `err` when the range is absent.
-fn span_verbatim(
-    text: &ScriptText,
-    tokens: &[Token],
-    from: usize,
-    to: usize,
-    line: &[u8],
-    err: ParseError,
-) -> Result<ScriptText, Report<ParseError>> {
-    verbatim(text, trim_condition(tokens.get(from..to).ok_or(err)?, line))
 }

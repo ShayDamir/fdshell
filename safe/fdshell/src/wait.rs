@@ -20,6 +20,17 @@ pub(crate) fn run_wait(
     block: &WaitBlock,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    // The redirections written after the block's `done` apply to the whole poll
+    // round (task #298 — family consistency: bash has no `wait` block twin).
+    crate::redirect::Scope::open(&block.redirects, cell)?.run(|| run_round(block, cell))
+}
+
+/// The round proper: poll the block's fds, dispatch a forked arm child per ready
+/// descriptor (or the `after` arms on timeout), and apply keep/release.
+fn run_round(
+    block: &WaitBlock,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let mut pollset = build(block, cell).change_context(CmdError::Wait)?;
     let ready = poll_round(&mut pollset.entries, pollset.timeout).change_context(CmdError::Wait)?;
     let mut last = 0i32;

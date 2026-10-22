@@ -224,3 +224,128 @@ fn ampersand_terminated_condition_flags_the_loop_block() {
         "a body `&` belongs to the body's own scan"
     );
 }
+
+// --- the redirection written after the block's `done` (task #298) ----------
+
+use alloc::format;
+use alloc::string::{String, ToString};
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop: pids are recycled,
+/// so a dir that outlives its process is a later run's inherited dir (LESSONS,
+/// task #255). Removal is `.ok()`-tolerant: teardown never panics.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named after `tag`, as a file path inside it plus
+/// the guard — bind both (`let (a, _sa) = …`).
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell_loop_{tag}_{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.join("f").to_str().unwrap().to_string(), Scratch(dir))
+}
+
+/// What fd `n` points at: `/proc/self/fd/N` is a symlink to the open file, so
+/// the scope's save/restore is asserted at the fd level and not on a data
+/// structure a test could hand-copy (LESSONS).
+fn link(n: i32) -> PathBuf {
+    std::fs::read_link(format!("/proc/self/fd/{n}")).unwrap()
+}
+
+/// Read the redirect target and remove it.
+fn body(path: &String) -> String {
+    let text = std::fs::read_to_string(path).unwrap();
+    let _ = std::fs::remove_file(path);
+    text
+}
+
+/// The loop's own redirection: the body's output lands in the file and fd 1 is
+/// back on its original target when the loop ends.
+#[test]
+fn a_redirect_after_done_applies_to_the_loop_and_is_restored() {
+    let (a, _sa) = temp_path("apply");
+    let before = link(1);
+    let cell = make_cell();
+    let block = loop_block(&format!("while :; do echo a; break; done > {a}").into_bytes());
+    assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
+    assert_eq!(link(1), before, "fd 1 is back on its original target");
+    assert_eq!(body(&a), "a\n");
+}
+
+/// `break 2` leaves the loop with the control signal (`AtLevel::Outer`): the
+/// scope restores on that exit path too.
+#[test]
+fn the_scope_restores_on_the_outer_control_path() {
+    let (a, _sa) = temp_path("outer");
+    let before = link(1);
+    let cell = make_cell();
+    cell.borrow_mut().unwrap().loop_depth = 1;
+    let block = loop_block(&format!("while :; do break 2; done > {a}").into_bytes());
+    assert!(run_loop(&block, true, &cell).unwrap().is_some());
+    assert_eq!(link(1), before, "the restore runs on the `Outer` path");
+}
+
+/// A nesting-cap report escaping the body is the report path: the report
+/// survives and the fds are restored best-effort (`Scope::run`).
+#[test]
+fn the_scope_restores_on_the_report_path() {
+    let (a, _sa) = temp_path("report");
+    let before = link(1);
+    let cell = make_cell();
+    cell.borrow_mut().unwrap().nesting = crate::nest::MAX_NESTING;
+    let block = loop_block(&format!("while :; do echo a; break; done > {a}").into_bytes());
+    let e = run_loop(&block, true, &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::NestingTooDeep));
+    assert_eq!(
+        link(1),
+        before,
+        "the restore runs on the body's report path"
+    );
+}
+
+/// The scope opens **before** the first condition test, so a failing open
+/// aborts the loop: the condition and the body never run (bash's order).
+#[test]
+fn a_failing_open_aborts_the_loop_before_its_first_condition() {
+    let cell = make_cell();
+    let block = loop_block(b"while :; do x=1; break; done > /nope/dir/f");
+    let e = run_loop(&block, true, &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::Redirect));
+    assert!(var(&cell, "x").is_none(), "the body never ran");
+}
+
+/// An `exec > z` in the body is undone by the scope's restore, exactly as for
+/// `{ exec > z; } > f`: bash leaves both files empty and stdout intact.
+#[test]
+fn the_restore_undoes_an_exec_redirect_in_the_body() {
+    let (a, _sa) = temp_path("exec_a");
+    let (z, _sz) = temp_path("exec_z");
+    let before = link(1);
+    let cell = make_cell();
+    let block = loop_block(&format!("while :; do exec > {z}; break; done > {a}").into_bytes());
+    assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
+    assert_eq!(
+        link(1),
+        before,
+        "the body's `exec` is undone by the restore"
+    );
+    assert_eq!(body(&a), "");
+    assert_eq!(body(&z), "");
+}

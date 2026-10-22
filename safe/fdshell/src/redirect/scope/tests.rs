@@ -400,3 +400,82 @@ fn saved_copy_survives_a_later_dup2() {
     open_at(&"/dev/null".to_string(), 2);
     assert_eq!(body(&a), "x");
 }
+
+// --- `Scope::run`: the combinator the block executors and `run_group` use ----
+
+/// `run` applies the scope for the closure, returns its value, and puts the
+/// fds back on success.
+#[test]
+fn run_restores_the_fds_after_the_closure() {
+    let (a, _sa) = temp_path("run_ok");
+    let before = link(1);
+    let cell = cell();
+    let value = Scope::open(&[RedirectDef::write_path(1, cstr(&a))], &cell)
+        .unwrap()
+        .run(|| {
+            write_fd(1, b"in-scope");
+            assert_eq!(link(1), std::path::Path::new(&a), "fd 1 is redirected");
+            Ok(7u8)
+        })
+        .unwrap();
+    assert_eq!(value, 7, "the closure's value comes back");
+    assert_eq!(link(1), before, "fd 1 is back on its original target");
+    assert_eq!(body(&a), "in-scope");
+}
+
+/// The report path: the closure's report is the actionable error and survives
+/// `run` with its own context, and the fds are restored best-effort (LESSONS
+/// "the redirect scope restores in reverse apply order, on every exit path").
+#[test]
+fn run_restores_on_the_report_path_and_keeps_the_report() {
+    let (a, _sa) = temp_path("run_err");
+    let before = link(1);
+    let cell = cell();
+    let report = Scope::open(&[RedirectDef::write_path(1, cstr(&a))], &cell)
+        .unwrap()
+        .run(|| -> Result<(), Report<CmdError>> {
+            write_fd(1, b"body");
+            Err(Report::new(CmdError::NestingTooDeep))
+        })
+        .err()
+        .unwrap();
+    assert!(
+        matches!(report.current_context(), CmdError::NestingTooDeep),
+        "the closure's report is what `run` hands back"
+    );
+    assert_eq!(link(1), before, "the restore ran on the error path");
+    assert_eq!(body(&a), "body");
+}
+
+/// The reverse-restore order, through `run`: the winner of two targets to fd 1
+/// keeps the write, and the post-`run` write lands on the shell's original
+/// stdout — a forward restore would stop on the loser `a` (deleting `.rev()`
+/// in `restore` fails this pin, exactly as the `restore`-level one does).
+#[test]
+fn run_restores_in_reverse_apply_order() {
+    let (a, _sa) = temp_path("run_rev_a");
+    let (b, _sb) = temp_path("run_rev_b");
+    let before = link(1);
+    let cell = cell();
+    Scope::open(
+        &[
+            RedirectDef::write_path(1, cstr(&a)),
+            RedirectDef::write_path(1, cstr(&b)),
+        ],
+        &cell,
+    )
+    .unwrap()
+    .run(|| {
+        write_fd(1, b"x");
+        Ok(())
+    })
+    .unwrap();
+    write_fd(1, b"after");
+    assert_eq!(link(1), before, "fd 1 is restored past the loser");
+    assert_eq!(body(&b), "x", "the winner keeps the write");
+    assert_eq!(
+        body(&a),
+        "",
+        "the loser was opened and truncated, and got nothing"
+    );
+}

@@ -11,6 +11,7 @@ use crate::parse::Token;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, block_body, is_list_terminator, up_to_closing};
 use crate::parse::word_quoted::keyword_word;
+use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -23,6 +24,9 @@ pub struct ArithForBlock {
     pub cond: Option<ScriptText>,
     pub step: Option<ScriptText>,
     pub body: ScriptText,
+    /// The redirections written after the closing `done` (task #298,
+    /// `parse::block_tail`); they apply to the whole loop.
+    pub redirects: Vec<RedirectDef>,
 }
 
 /// `Some(block)` when `raw`'s `for` keyword word opens an `(( … ))` region;
@@ -41,23 +45,25 @@ pub(crate) fn detect(
         return Ok(None);
     };
     let [init, cond, step] = region::clauses(text, &region)?;
-    let body = tail_body(raw, text, line, region.end)?;
+    let (body, redirects) = tail_body(raw, text, line, region.end)?;
     Ok(Some(ArithForBlock {
         init,
         cond,
         step,
         body,
+        redirects,
     }))
 }
 
 /// The `do … done` tail that follows the region: token-level, joined to the byte
-/// scan at the region's end offset — the tokens starting at or past it.
+/// scan at the region's end offset — the tokens starting at or past it. Its
+/// closing `done` also owns the block's trailing redirections (task #298).
 fn tail_body(
     raw: &[Token],
     text: &ScriptText,
     line: &[u8],
     region_end: usize,
-) -> Result<ScriptText, Report<ParseError>> {
+) -> Result<(ScriptText, Vec<RedirectDef>), Report<ParseError>> {
     let tail: Vec<Token> = raw
         .iter()
         .skip_while(|(_, start, _, _, _, _)| *start < region_end)
@@ -80,6 +86,8 @@ fn tail_body(
     // #273), with the plain list rule: the arithmetic `for` owns no word list.
     let closed = up_to_closing(tail, line, List::Plain, ParseError::ExpectedDone)?;
     let done_idx = closed.len() - 1;
+    let redirects =
+        crate::parse::block_tail::redirects(b"done", tail.get(done_idx..).unwrap_or(&[]), line)?;
     ensure!(
         closed
             .last()
@@ -97,5 +105,5 @@ fn tail_body(
     )?;
     // Statement-relative offsets, the statement's own `ScriptText`: a body
     // heredoc's region offsets are read from this text.
-    part_text(text, body)
+    part_text(text, body).map(|body| (body, redirects))
 }

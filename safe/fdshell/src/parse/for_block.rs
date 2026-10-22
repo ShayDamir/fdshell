@@ -9,6 +9,7 @@ use crate::parse::semi::{
     List, Term, block_body, find_preceded_by, is_list_terminator, up_to_closing,
 };
 use crate::parse::word_quoted::keyword_word;
+use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -27,6 +28,10 @@ pub struct ForBlock {
     /// (see `parse::word_quoted`).
     pub words_quoted: Vec<bool>,
     pub body: ScriptText,
+    /// The redirections written after the closing `done` (task #298,
+    /// `parse::block_tail`); they apply to the whole loop and open **before**
+    /// the word list is expanded (bash's order, measured).
+    pub redirects: Vec<RedirectDef>,
 }
 
 pub(crate) fn tokens_to_for(
@@ -62,11 +67,13 @@ pub(crate) fn tokens_to_for(
     // `semi::up_to_closing`). The `in` list is walked as `List::Words`, so a
     // closer-shaped word of the word list (`for x in done; do …; done`) is a
     // word, not the closer.
-    let tokens = up_to_closing(tokens, line, List::Words, ParseError::ExpectedDone)?;
+    let closed = up_to_closing(tokens, line, List::Words, ParseError::ExpectedDone)?;
     // The closing `done` is the truncated slice's last token.
-    let done_idx = tokens.len() - 1;
+    let done_idx = closed.len() - 1;
+    let redirects =
+        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]), line)?;
     ensure!(
-        tokens
+        closed
             .last()
             .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"done")),
         ParseError::ExpectedDone
@@ -75,20 +82,20 @@ pub(crate) fn tokens_to_for(
     // (a newline tokenizes as one), or the plain `&` that backgrounds the body's
     // last statement (task #354: `for i in 1; do echo hi & done`).
     ensure!(
-        tokens.get(done_idx - 1).is_some_and(is_list_terminator),
+        closed.get(done_idx - 1).is_some_and(is_list_terminator),
         ParseError::ExpectedSemicolonBeforeDone
     );
 
     let body = part_text(
         text,
         block_body(
-            tokens.get(do_idx + 1..done_idx).unwrap_or(&[]),
+            closed.get(do_idx + 1..done_idx).unwrap_or(&[]),
             line,
             ParseError::EmptyDoBody,
         )?,
     )?;
 
-    let ws = words::collect_words(tokens, in_pos, do_idx)?;
+    let ws = words::collect_words(closed, in_pos, do_idx)?;
 
     Ok(ForBlock {
         var,
@@ -97,6 +104,7 @@ pub(crate) fn tokens_to_for(
         words_span: ws.words_span,
         words_quoted: ws.words_quoted,
         body,
+        redirects,
     })
 }
 

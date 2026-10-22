@@ -20,6 +20,18 @@ pub(crate) fn run_if(
     ifblock: &IfBlock,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    // The redirections written after `fi` belong to the whole `if` (task #298):
+    // the scope opens before the condition runs, so a failing open aborts the
+    // command, and it restores on every exit path (`Scope::run`).
+    crate::redirect::Scope::open(&ifblock.redirects, cell)?.run(|| run_if_body(ifblock, cell))
+}
+
+/// The `if` proper: the condition, the taken arm's body, the `elif` chain, and
+/// the `else` body, all in the caller's shell.
+fn run_if_body(
+    ifblock: &IfBlock,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let cond_bodies = body_bytes(&ifblock.cond_bodies);
     let control = crate::repl::run_cond_list(
         &ifblock.condition,

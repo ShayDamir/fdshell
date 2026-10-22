@@ -1417,30 +1417,26 @@ fn scratch(tag: &str) -> Scratch {
     Scratch(dir)
 }
 
-/// Task #238's out-of-scope interaction, pinned as measured: a block trailing
-/// redirect writes the **arm's** stdout, as for a heredoc-free block
-/// (`if true; then echo hi; fi > out` behaves identically on master); bash
-/// writes the here-doc body into `out` and prints nothing. The silent drop of a
-/// block's trailing redirect is the family task **#298** owns. Task #273 makes
-/// the `for` and `case` twins *join* that family: on `master` each of them was
-/// only a parse error of the untruncated closer search (`expected 'done'` /
-/// `case: missing 'esac'`), heredoc-carrying and heredoc-free alike. Pinned:
-/// `> out` and its `>>` twin for every block, plus the heredoc-free twins.
+/// Task #238's out-of-scope interaction, pinned at bash parity since task
+/// **#298** fixed the family: a redirection written after a block's closer
+/// belongs to the whole block, so the here-doc body (or the heredoc-free
+/// output) lands in `out` and **nothing** reaches stdout. Before #298 the
+/// trailing redirect was dropped silently — the body went to stdout and the
+/// target was never even opened (`if true; then echo hi; fi > out` behaved that
+/// way on master); the `for`/`case` twins were additionally the parse errors of
+/// the untruncated closer search (`expected 'done'` / `case: missing 'esac'`,
+/// heredoc-carrying and heredoc-free alike, task #273). Pinned: `> out` and its
+/// `>>` twin for every block, plus the heredoc-free twins.
 #[test]
 fn single_line_block_body_heredoc_with_block_trailing_redirect() {
     let dir = scratch("task238");
-    // Task #273 makes the `for` and `case` twins of this shape reachable (on
-    // `master` they were the parse errors of the untruncated closer search).
     for (script, want) in [
         ("if true; then cat <<T; fi > out\nbodyT\nT", "bodyT\n"),
         ("for x in a; do cat <<T; done > out\nbodyT\nT", "bodyT\n"),
         ("for x in a; do cat <<T; done >> out\nbodyT\nT", "bodyT\n"),
         ("case x in x) cat <<T;; esac > out\nbodyT\nT", "bodyT\n"),
         ("case x in x) cat <<T;; esac >> out\nbodyT\nT", "bodyT\n"),
-        // The heredoc-free twins: the `if` row is unchanged by all of this
-        // (`hi` on stdout, and no `out` on `master` either); the heredoc-free
-        // `for` and `case` rows *join* #298's family on task #273 — on `master`
-        // they were the parse errors `expected 'done'` / `case: missing 'esac'`.
+        // The heredoc-free twins.
         ("if true; then echo hi; fi > out", "hi\n"),
         ("for x in a; do echo A; done > out", "A\n"),
         ("case x in x) echo C;; esac > out", "C\n"),
@@ -1448,10 +1444,13 @@ fn single_line_block_body_heredoc_with_block_trailing_redirect() {
         let _ = std::fs::remove_file(dir.join("out"));
         let script = format!("cd {}; {}", dir.display(), script);
         let (out, err, code) = run(&script);
-        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
-        // The body went to stdout and the redirect target is never even opened.
-        // bash writes the body into `out` and prints nothing.
-        assert!(!dir.join("out").exists(), "{script}");
+        // Every byte of the block's output went into `out`, not to stdout.
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(
+            std::fs::read(dir.join("out")).unwrap(),
+            want.as_bytes(),
+            "{script}: bash writes {want:?} into `out`"
+        );
     }
 }
 

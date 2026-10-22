@@ -1614,14 +1614,19 @@ fn c_style_for_heredoc_body_repeats_per_iteration() {
 
 /// In a `{ …; }` group with a redirection on the group, the loop's output is
 /// what lands in the file (bash: 2 lines). The redirection written after the
-/// block's own `done` is the separate, pre-existing gap task **#298** documents
-/// (the word form drops it identically, so both `for` forms share it).
+/// block's own `done` is the whole block's too, since task **#298** attached it
+/// (the word form behaves identically, so both `for` forms share the rule).
 #[test]
 fn c_style_for_in_a_group_with_a_redirect() {
     let dir = scratch("cstyle-group");
     let file = dir.join("out").to_str().unwrap().to_string();
     let (out, err, rc) = run(&format!(
         "{{ for ((i=0;i<2;i++)); do echo $i; done; }} > {file}; wc -l < {file}"
+    ));
+    assert_eq!((out.as_str(), rc), ("2\n", 0), "{err}");
+    // The block's own trailing redirect: the same two lines go into the file.
+    let (out, err, rc) = run(&format!(
+        "for ((i=0;i<2;i++)); do echo $i; done > {file}; wc -l < {file}"
     ));
     assert_eq!((out.as_str(), rc), ("2\n", 0), "{err}");
 }

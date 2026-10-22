@@ -4478,3 +4478,125 @@ fn ampersand_in_a_for_word_list_is_not_a_do_terminator() {
     let line = b"for i in 1 & do :; done";
     assert!(for_block::tokens_to_for(&token::tokenize(line).unwrap(), &stext(line)).is_err());
 }
+
+// --- the redirection written after a keyword block's closer (task #298) -----
+
+/// The trailing redirections of whatever keyword block `line` parses to.
+fn block_redirects(line: &[u8]) -> Vec<RedirectDef> {
+    let parsed = parse(line).unwrap_or_else(|e| panic!("{line:?}: {e}"));
+    match parsed {
+        ParsedLine::While(b) | ParsedLine::Until(b) => b.redirects,
+        ParsedLine::If(b) => b.redirects,
+        ParsedLine::For(b) => b.redirects,
+        ParsedLine::ArithFor(b) => b.redirects,
+        ParsedLine::Case(b) => b.redirects,
+        ParsedLine::Wait(b) => b.redirects,
+        _ => panic!("not a block: {line:?}"),
+    }
+}
+
+/// The tail rule of every builder that owns a closer: the redirection written
+/// after the closing keyword is the **block's** own, in source order, exactly
+/// the def the group's tail gives for the same operator.
+#[test]
+fn a_redirect_after_a_block_closer_is_the_blocks_own() {
+    for line in [
+        b"while :; do echo a; break; done > f".as_slice(),
+        b"until :; do echo a; break; done > f".as_slice(),
+        b"if :; then echo a; fi > f".as_slice(),
+        b"for x in a; do echo A; done > f".as_slice(),
+        b"for ((i=0;i<1;i++)); do echo A; done > f".as_slice(),
+        b"case x in x) echo C;; esac > f".as_slice(),
+        b"wait\n readable %rd) echo hi ;;\ndone > f".as_slice(),
+    ] {
+        assert_eq!(
+            block_redirects(line),
+            vec![path_def(1, RedirectDirection::Write, "f")],
+            "{line:?}"
+        );
+    }
+}
+
+/// The operator family the tail reads on a closer: append, an io-number, a dup,
+/// a close, a read, and several redirections in source order.
+#[test]
+fn the_tail_reads_the_whole_redirect_family() {
+    assert_eq!(
+        block_redirects(b"while :; do :; done >> f"),
+        vec![path_def(1, RedirectDirection::Append, "f")]
+    );
+    assert_eq!(
+        block_redirects(b"while :; do :; done 3> f"),
+        vec![path_def(3, RedirectDirection::Write, "f")]
+    );
+    assert_eq!(
+        block_redirects(b"if :; then :; fi < g"),
+        vec![path_def(0, RedirectDirection::Read, "g")]
+    );
+    assert_eq!(
+        block_redirects(b"for x in a; do :; done 2>&1"),
+        vec![RedirectDef {
+            export_to: 2,
+            extra_to: None,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Dup(1),
+        }]
+    );
+    assert_eq!(
+        block_redirects(b"case x in x) :;; esac >&-"),
+        vec![RedirectDef {
+            export_to: 1,
+            extra_to: None,
+            direction: RedirectDirection::Read,
+            source: RedirectSource::Close,
+        }]
+    );
+    assert_eq!(
+        block_redirects(b"while :; do :; done > f 2> g"),
+        vec![
+            path_def(1, RedirectDirection::Write, "f"),
+            path_def(2, RedirectDirection::Write, "g")
+        ]
+    );
+}
+
+/// The leniency boundary, in every builder: the bare closer takes no
+/// redirection, a plain word behind it is task #405's (the block runs, the word
+/// stays as it is today), and a here-doc/here-string operator on the closer is
+/// #408's.
+#[test]
+fn a_word_and_a_heredoc_operator_behind_a_closer_stay_their_owners() {
+    for line in [
+        b"while :; do :; done".as_slice(),
+        b"if :; then :; fi".as_slice(),
+        b"for x in a; do :; done".as_slice(),
+        b"for ((i=0;i<1;i++)); do :; done".as_slice(),
+        b"case x in x) :;; esac".as_slice(),
+        b"while :; do :; done x".as_slice(),
+        b"if :; then :; fi x".as_slice(),
+        b"case x in x) :;; esac x".as_slice(),
+        b"while :; do cat <<T; done".as_slice(),
+        b"while :; do :; done <<T".as_slice(),
+        b"if :; then :; fi <<<hi".as_slice(),
+        b"for x in a; do :; done 3<<T".as_slice(),
+        b"case x in x) :;; esac \">\" f".as_slice(),
+    ] {
+        assert!(block_redirects(line).is_empty(), "{line:?}");
+    }
+}
+
+/// A redirect operator with no operand behind a closer is the house redirect
+/// error (bash: rc 2), not a silently dropped tail.
+#[test]
+fn an_operand_less_operator_behind_a_closer_is_the_redirect_error() {
+    for line in [
+        b"while :; do :; done >".as_slice(),
+        b"if :; then :; fi 2>".as_slice(),
+    ] {
+        assert_eq!(
+            parse(line).err().unwrap().current_context().to_string(),
+            "invalid redirect syntax",
+            "{line:?}"
+        );
+    }
+}

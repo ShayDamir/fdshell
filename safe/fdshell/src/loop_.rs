@@ -21,7 +21,12 @@ pub(crate) fn run_loop(
     invert: bool,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    in_loop(cell, || run_loop_body(block, invert, cell))
+    // The redirections written after `done` belong to the whole loop (task
+    // #298): the scope opens **before** the first condition test, so a failing
+    // open aborts the loop without running it (bash's order, measured), and it
+    // restores on every exit path (`Scope::run`, the shape of `run_group`).
+    crate::redirect::Scope::open(&block.redirects, cell)?
+        .run(|| in_loop(cell, || run_loop_body(block, invert, cell)))
 }
 
 fn run_loop_body(

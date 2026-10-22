@@ -172,3 +172,107 @@ fn ampersand_terminated_condition_flags_the_block() {
     let block = if_block(b"if (( 0 )); then :; elif true & ; then builtin true; fi");
     assert!(!block.elifs[0].cond_background);
 }
+
+// --- the redirection written after the block's `fi` (task #298) ------------
+
+use alloc::format;
+use alloc::string::{String, ToString};
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A per-test scratch dir (pid + counter), removed on drop: pids are recycled,
+/// so a dir that outlives its process is a later run's inherited dir (LESSONS,
+/// task #255). Removal is `.ok()`-tolerant: teardown never panics.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+impl Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pid + counter scratch dir named after `tag`, as a file path inside it plus
+/// the guard — bind both (`let (a, _sa) = …`).
+fn temp_path(tag: &str) -> (String, Scratch) {
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell_if_{tag}_{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    (dir.join("f").to_str().unwrap().to_string(), Scratch(dir))
+}
+
+/// What fd `n` points at: `/proc/self/fd/N` is a symlink to the open file, so
+/// the scope's save/restore is asserted at the fd level (LESSONS: a test that
+/// hand-copies the implementation pins the copy).
+fn link(n: i32) -> PathBuf {
+    std::fs::read_link(format!("/proc/self/fd/{n}")).unwrap()
+}
+
+/// Read the redirect target and remove it.
+fn body(path: &String) -> String {
+    let text = std::fs::read_to_string(path).unwrap();
+    let _ = std::fs::remove_file(path);
+    text
+}
+
+/// The `if`'s own redirection: the taken arm's output lands in the file, and
+/// fd 1 is back on its original target when the `if` ends.
+#[test]
+fn a_redirect_after_fi_applies_to_the_if_and_is_restored() {
+    let (a, _sa) = temp_path("apply");
+    let before = link(1);
+    let cell = make_cell();
+    let line = format!("if :; then echo t; fi > {a}");
+    let block = if_block(line.as_bytes());
+    assert_eq!(run_if(&block, &cell).unwrap(), None);
+    assert_eq!(link(1), before, "fd 1 is back on its original target");
+    assert_eq!(body(&a), "t\n");
+}
+
+/// The scope covers every arm: the `elif` chain and the `else` body write into
+/// the same file, and the fds are restored after the `if`.
+#[test]
+fn the_scope_covers_the_elif_and_else_arms() {
+    let (a, _sa) = temp_path("arms");
+    let before = link(1);
+    let cell = make_cell();
+    let line = format!("if false; then echo n; elif false; then echo m; else echo e; fi > {a}");
+    let block = if_block(line.as_bytes());
+    assert_eq!(run_if(&block, &cell).unwrap(), None);
+    assert_eq!(link(1), before, "fd 1 is back on its original target");
+    assert_eq!(body(&a), "e\n");
+}
+
+/// A `break` raised inside the `if` propagates to the caller (`run_if` hands
+/// the control whole): the scope restores on that path.
+#[test]
+fn the_scope_restores_when_the_control_propagates() {
+    let (a, _sa) = temp_path("control");
+    let before = link(1);
+    let cell = make_cell();
+    in_loop(&cell, 1);
+    let line = format!("if :; then break; fi > {a}");
+    let block = if_block(line.as_bytes());
+    assert!(run_if(&block, &cell).unwrap().is_some());
+    assert_eq!(link(1), before, "the restore runs on the propagating path");
+}
+
+/// The scope opens **before** the condition runs, so a failing open aborts the
+/// command: the condition and the body never run (bash's order, measured).
+#[test]
+fn a_failing_open_skips_the_condition_and_the_body() {
+    let cell = make_cell();
+    let block = if_block(b"if :; then x=1; fi > /nope/dir/f");
+    let e = run_if(&block, &cell).unwrap_err();
+    assert!(matches!(e.current_context(), CmdError::Redirect));
+    assert!(var(&cell, "x").is_none(), "the then-body never ran");
+}

@@ -8,6 +8,7 @@ use super::semi::{List, list_closing_keyword_index, trim_semi, try_join_masked};
 use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
+use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -23,6 +24,10 @@ pub struct CaseBlock {
     /// the join offsets like the mask.
     pub word_span: Vec<usize>,
     pub clauses: Vec<case_clause::CaseClause>,
+    /// The redirections written after the closing `esac` (task #298,
+    /// `parse::block_tail`); they apply to the whole `case`, and open **before**
+    /// the `case` word is expanded (bash's order, measured).
+    pub redirects: Vec<RedirectDef>,
 }
 
 pub(crate) fn tokens_to_case(
@@ -51,21 +56,27 @@ pub(crate) fn tokens_to_case(
     // list, so a closer-shaped **pattern** (`case x in done) …`) stays word
     // data. The `in` index is a prefix index, so the truncation (which cuts a
     // suffix) leaves it valid.
-    let tokens = up_to_esac(tokens, line)?;
-    // The closing `esac` is the truncated slice's last token.
-    let esac_idx = tokens.len() - 1;
+    let closed = up_to_esac(tokens, line)?;
+    // The closing `esac` is the truncated slice's last token; the tail it leaves
+    // over the block text is the block's redirection (task #298). In the lenient
+    // branch of [`up_to_esac`] the closer *is* the last token, so the tail is
+    // empty there, exactly as bash reads it.
+    let esac_idx = closed.len() - 1;
+    let redirects =
+        crate::parse::block_tail::redirects(b"esac", tokens.get(esac_idx..).unwrap_or(&[]), line)?;
 
     let (word, word_mask, word_span) = try_join_masked(trim_semi(
-        tokens.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
+        closed.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
     ));
 
-    let clauses = case_clause::parse_clauses(tokens, in_idx + 1, esac_idx, text)?;
+    let clauses = case_clause::parse_clauses(closed, in_idx + 1, esac_idx, text)?;
 
     Ok(CaseBlock {
         word,
         word_mask,
         word_span,
         clauses,
+        redirects,
     })
 }
 

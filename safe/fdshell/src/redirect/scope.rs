@@ -47,6 +47,28 @@ impl Scope {
         Ok(Self { saved })
     }
 
+    /// Run `f` with the scope open, then [`restore`] it on **every** exit path:
+    /// `?` on success (a failed restore is the actionable error), best-effort on
+    /// the report path, where the report is what the user can act on (LESSONS
+    /// "the redirect scope restores in reverse apply order, on every exit
+    /// path"). `run_group` and the keyword blocks all take this shape, so no
+    /// call site hand-copies the match.
+    pub fn run<T, F>(self, f: F) -> Result<T, Report<CmdError>>
+    where
+        F: FnOnce() -> Result<T, Report<CmdError>>,
+    {
+        match f() {
+            Ok(value) => {
+                self.restore()?;
+                Ok(value)
+            }
+            Err(report) => {
+                let _ = self.restore();
+                Err(report)
+            }
+        }
+    }
+
     /// Put the fds back in **reverse** apply order: the last redirection to a fd
     /// is its winner, so the winner's predecessor must be restored first
     /// (forward restore would leave the loser in charge).

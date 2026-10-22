@@ -15,6 +15,19 @@ pub(crate) fn run_case(
     caseblock: &CaseBlock,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    // The redirections written after `esac` belong to the whole `case` (task
+    // #298). The scope opens **before** the `case` word is expanded: bash opens
+    // the redirection first, so a failing open leaves the word's and the
+    // patterns' side effects unrun (measured).
+    crate::redirect::Scope::open(&caseblock.redirects, cell)?.run(|| run_case_body(caseblock, cell))
+}
+
+/// The `case` proper: the word, then the first matching clause's body, in the
+/// caller's shell.
+fn run_case_body(
+    caseblock: &CaseBlock,
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (word, _) = substitute_arg(
         &caseblock.word,

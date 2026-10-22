@@ -16,7 +16,12 @@ pub(crate) fn run(
     block: &ArithForBlock,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    in_loop(cell, || run_loop(block, cell))
+    // The redirections written after `done` belong to the whole loop (task
+    // #298): the scope opens **before** the init clause runs (bash's order,
+    // measured — a `$(touch m)` in a clause is not expanded when the open
+    // fails), and it restores on every exit path (`Scope::run`).
+    crate::redirect::Scope::open(&block.redirects, cell)?
+        .run(|| in_loop(cell, || run_loop(block, cell)))
 }
 
 fn run_loop(

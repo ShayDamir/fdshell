@@ -1,5 +1,6 @@
 pub(crate) mod arith;
 mod array_word;
+mod word;
 
 use crate::error::cmd::CmdError;
 use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
@@ -14,7 +15,12 @@ pub(crate) fn run_for(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    in_loop(cell, || run_for_body(forblock, text, cell))
+    // The redirections written after `done` belong to the whole loop (task
+    // #298): the scope opens **before** the word list is expanded (bash's
+    // order, measured), so a failing open leaves a `$(touch m)` word list
+    // unexpanded, and it restores on every exit path (`Scope::run`).
+    crate::redirect::Scope::open(&forblock.redirects, cell)?
+        .run(|| in_loop(cell, || run_for_body(forblock, text, cell)))
 }
 
 fn run_for_body(
@@ -36,7 +42,7 @@ fn run_for_body(
     )
     .change_context(CmdError::Resolve)?;
     for word in &words {
-        if let Some(control) = run_for_word(forblock, word, cell)? {
+        if let Some(control) = word::run_for_word(forblock, word, cell)? {
             match at_level(control) {
                 AtLevel::Stop => break,
                 // The for list's next iteration is the next word.
@@ -46,53 +52,6 @@ fn run_for_body(
         }
     }
     Ok(None)
-}
-
-/// One word of the for list: for an fd for-var, an array reference in the
-/// word list expands each entry as a dup; any other word binds as a string.
-fn run_for_word(
-    forblock: &ForBlock,
-    word: &sys::ImportedStr,
-    cell: &ForkCell<ShellState>,
-) -> Result<Option<LoopControl>, Report<CmdError>> {
-    let dups = if forblock.var.starts_with(b"%") {
-        array_word::dup_array_word(word, cell)?
-    } else {
-        None
-    };
-    match dups {
-        Some(dups) => {
-            let name = forblock
-                .var
-                .strip_prefix(b"%")
-                .unwrap_or(forblock.var.clone());
-            for fdvar in dups {
-                cell.borrow_mut()
-                    .change_context(CmdError::Never)?
-                    .set_fd_var(name.clone(), fdvar);
-                if let Some(control) = run_body(forblock, cell)? {
-                    return Ok(Some(control));
-                }
-            }
-            Ok(None)
-        }
-        None => {
-            cell.borrow_mut()
-                .change_context(CmdError::Never)?
-                .set_var(forblock.var.clone(), word.clone());
-            run_body(forblock, cell)
-        }
-    }
-}
-
-/// Run the for body under the nesting cap; `Some` on break/continue/return.
-fn run_body(
-    forblock: &ForBlock,
-    cell: &ForkCell<ShellState>,
-) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
-        crate::repl::run_script(&forblock.body, cell)
-    })
 }
 
 #[cfg(test)]

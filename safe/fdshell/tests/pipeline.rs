@@ -402,21 +402,22 @@ fn a_block_stages_own_redirect_writes_the_file() {
 }
 
 /// Task #292 reaches the trailing-redirect family of task **#298** in its
-/// pipeline-stage form: a redirect written after the block's closer is dropped —
-/// the stage's scan ends at the closer, so `> out.txt` is not the stage's
-/// redirect and the file is never created (the stage's output goes to stdout,
-/// rc 0, no diagnostic). bash writes `b` into the file. Owned by #298.
+/// pipeline-stage form: a redirection written after a block's closer belongs to
+/// the whole block, so the stage's output lands in the file and stdout stays
+/// empty — bash's answer. Before #298 the stage's scan ended at the closer,
+/// `> out.txt` was not the stage's redirect, the file was never created and the
+/// output went to stdout (rc 0, no diagnostic).
 #[test]
-fn a_redirect_after_a_block_closer_is_dropped() {
+fn a_redirect_after_a_block_closer_belongs_to_the_block_stage() {
     let dir = Scratch::new();
     let out = run(&dir, "echo a | while :; do echo b; break; done > out.txt");
     assert_eq!(
         (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
-        ("b\n", Some(0)),
+        ("", Some(0)),
         "stderr={}",
         str::from_utf8(&out.stderr).unwrap()
     );
-    assert!(!dir.join("out.txt").exists(), "bash: out.txt holds `b`");
+    assert_eq!(std::fs::read(dir.join("out.txt")).unwrap(), b"b\n");
 }
 
 /// A capture fd var works inside a block stage: the stage's write lands in the
