@@ -803,10 +803,15 @@ block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop 
 the stage's own fork with the upstream stage's output on its stdin, and
 `echo a | if :; then echo y; fi` the `if`. The block ends at its own closing
 keyword, and what is written behind it (`; echo tail`, `&& echo y`) is the next
-statement. A `name() { … }` definition in a stage dies with the fork. Two shapes
-deviate: `time` behind the `|` is the stage's command name, not a prefix of the
-block's keyword (bash rejects that line outright, rc 2), and a redirection written
-after the block's closer is dropped (task #298).
+statement. A `name() { … }` definition in a stage dies with the fork. Three
+shapes deviate: `time` behind the `|` is the stage's command name, not a prefix
+of the block's keyword (bash rejects that line outright, rc 2); a redirection
+written after the block's closer is dropped (task #298); and a `{ …; }` written
+as a stage stays a word, so the line is a parse error where bash runs the group
+in the stage's fork (`echo a | { echo b; }` prints `b`, rc 0 — the group rule of
+tasks #186/#190, see "Functions and groups" above). A `|` at the end of a line
+stays a hard parse error: a stage must begin on the line that opens the pipe, so
+`echo a |` + `while :; do :; done` is rejected where bash runs the loop.
 
 ### Aliases
 

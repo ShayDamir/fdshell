@@ -2429,7 +2429,7 @@ Task #236 (S2 round): the short-circuit gate and the glued cond pair.
   only profile difference is error-stack's source-location frames, present in
   a debug report and absent from a release one (stdout/rc are the same, so
   pins that compare stdout+rc are profile-independent). `package.nix` sets
-  **no** `opt-level` at all (`buildRustPackage` + `useNextest`; cargoHook
+   **no** `opt-level` at all (`buildRustPackage` + `useNextest`; cargoHook
    builds `--release`). The probe's "miscompile" is the *rule*: a pair payload
    behind data is deliberately `Place::Data` (`after`'s place rule scores the
    payload of a pair glued behind an argument word as an argument; task #292
