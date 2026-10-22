@@ -1396,3 +1396,37 @@ fn the_builtin_wait_behind_a_pipe_is_a_command_stage() {
         "bash runs the builtin silently: {err}"
     );
 }
+
+/// A control builtin behind the `|` is an ordinary **stage**: the fork has no
+/// `break`/`continue` to run (they are not loop keywords of a stage), so it
+/// reports the unresolved command on stderr and the statement behind the
+/// pipeline runs — the visible pair (stdout, rc 0) is bash's, only the wording of
+/// the two diagnostics differs. The stage-child gap of task **#381**.
+#[test]
+fn a_control_builtin_behind_a_pipe_is_a_command_stage() {
+    for script in ["echo a | break; echo tail", "echo a | continue; echo tail"] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("tail\n", 0), "{script}: {err}");
+        assert!(
+            err.contains("failed to resolve command path"),
+            "{script}: bash prints its own diagnostic: {err}"
+        );
+    }
+}
+
+/// A block stage's status is its loop's own last status (the `break` is the last
+/// command, rc 0 — bash parity), and a `&` on the pipeline puts the **whole**
+/// pipeline, block stage included, into the background job: the parent prints
+/// `started`, the job's stage prints `b`, `wait` collects it, bash parity.
+#[test]
+fn a_block_stage_status_and_a_trailing_ampersand_are_bash_parity() {
+    let (out, err, rc) = run("echo a | while :; do false; break; done; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("rc=0\n", 0), "{err}");
+    let (out, err, rc) =
+        run_bounded("echo a | while :; do echo b; break; done & echo started; wait; echo done");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("started\nb\ndone\n", 0),
+        "stderr={err}"
+    );
+}
