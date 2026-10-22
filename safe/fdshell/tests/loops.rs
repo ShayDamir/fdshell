@@ -1450,3 +1450,340 @@ fn a_block_stage_status_and_a_trailing_ampersand_are_bash_parity() {
         "the parent's line and the job stage's line are a race: {out}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// The arithmetic `for ((init;cond;step)) ; do … ; done` (task #293).
+//
+// Every pin below was measured against bash 5.3.9 (`bash -c`) and
+// `target/debug/fdshell -c` on 2026-10-22; the doc comment states both sides.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The three clauses in bash's order — init once, condition before each body,
+/// step after it. bash `0 1 2` rc 0, fdshell the same.
+#[test]
+fn c_style_for_runs_its_three_clauses() {
+    let (out, err, rc) = run("for ((i=0;i<3;i++)); do echo $i; done; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("0\n1\n2\nrc=0\n", 0), "{err}");
+    for spelling in [
+        "for (( i=0 ; i<3 ; i++ )) ; do echo $i; done",
+        "for ((i=0;i<3;i++)) do echo $i; done",
+        "for ((i=0;i<3;i++)); do echo $i; done",
+    ] {
+        let (out, err, rc) = run(spelling);
+        assert_eq!((out.as_str(), rc), ("0\n1\n2\n", 0), "{spelling}: {err}");
+    }
+    // A `do` glued to the region and a `do` after a newline are both accepted
+    // (bash: `0 1` and `0 1 2`).
+    let (out, err, rc) = run("for ((i=0;i<2;i++))do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+    let (out, err, rc) = run("for ((i=0;i<3;i++))\ndo echo $i\ndone");
+    assert_eq!((out.as_str(), rc), ("0\n1\n2\n", 0), "{err}");
+}
+
+/// The clause is an arithmetic expression, so every operator `arith` knows is
+/// clause data: compound assignment, pre-increment, plain assignment, a `$(…)`
+/// (whose inner `;` is not a clause cut), a parenthesised init, a shift, and an
+/// empty init with an unset variable reading 0. bash and fdshell agree on all
+/// of them (measured).
+#[test]
+fn c_style_for_clause_shapes_match_bash() {
+    for (script, want) in [
+        ("for ((i=0;i<3;i+=2)); do echo $i; done", "0\n2\n"),
+        ("for ((i=0;i<3;++i)); do echo $i; done", "0\n1\n2\n"),
+        ("for ((i=0;i<3;i=i+1)); do echo $i; done", "0\n1\n2\n"),
+        ("for ((i=0;i<$(echo 3);i++)); do echo $i; done", "0\n1\n2\n"),
+        ("for ((i=(0);i<2;i++)); do echo $i; done", "0\n1\n"),
+        ("for ((i=0;i<(1<<2);i++)); do echo $i; done", "0\n1\n2\n3\n"),
+        // An empty init leaves `i` unset, so the first body prints an empty
+        // line and the step's `i++` starts from 0 (bash's `~1~2`).
+        ("for ((1;i<3;i++)); do echo $i; done", "\n1\n2\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The comma operator lives inside one clause: bash's `for ((i=1,j=2;i<3;i++))`
+/// binds both vars and steps only `i`, so the pairs are `1 2` and `2 2` — the
+/// measured second line, not `2 3`.
+#[test]
+fn c_style_for_comma_init_binds_both_vars() {
+    let (out, err, rc) = run("for ((i=1,j=2;i<3;i++)); do echo \"$i $j\"; done");
+    assert_eq!((out.as_str(), rc), ("1 2\n2 2\n", 0), "{err}");
+}
+
+/// An empty condition is true and an empty step is a no-op, so the loop is
+/// infinite until its body breaks: bash prints `x`, and so does the empty
+/// region's spaced spelling. Both pins are bounded (a dropped `break` here is
+/// the hang this task's risk section names).
+#[test]
+fn c_style_for_empty_clauses_need_a_break() {
+    for script in [
+        "for ((;;)); do echo x; break; done",
+        "for (( ; ; )) ; do echo x; break; done",
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), ("x\n", 0), "{script}: {err}");
+    }
+    // `for ((i=0;;))` prints its own init value, `for ((;i<2;))` its body word.
+    let (out, err, rc) = run_bounded("for ((i=0;;)); do echo $i; break; done");
+    assert_eq!((out.as_str(), rc), ("0\n", 0), "{err}");
+    let (out, err, rc) = run_bounded("for ((;i<2;)); do echo a; break; done");
+    assert_eq!((out.as_str(), rc), ("a\n", 0), "{err}");
+}
+
+/// The status rules of task #164, in bash's measured triple: a body that never
+/// ran leaves 0 (after a `false`), the body's last command is the status, and a
+/// `break` leaves its own 0.
+#[test]
+fn c_style_for_status_rules_match_bash() {
+    let (out, err, rc) = run("false; for ((i=0;i<0;i++)); do :; done; echo $?");
+    assert_eq!((out.as_str(), rc), ("0\n", 0), "{err}");
+    let (out, err, rc) = run("for ((i=0;i<3;i++)); do false; done; echo $?");
+    assert_eq!((out.as_str(), rc), ("1\n", 0), "{err}");
+    let (out, err, rc) = run("for ((i=0;i<2;i++)); do echo $i; break; done; echo $?");
+    assert_eq!((out.as_str(), rc), ("0\n0\n", 0), "{err}");
+    // The loop's own status is the last thing it reported, so a statement after
+    // it is the shell's rc (`echo rc=$?` after the loop reads 0, bash parity).
+    let (out, err, rc) = run("for ((i=0;i<0;i++)); do echo body; done; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("rc=0\n", 0), "{err}");
+}
+
+/// The clauses run **in-process**, like the `((expr))` command, so the loop var
+/// is an ordinary shell variable that survives the loop (bash: `3 2 1` then
+/// `i=0`, the value the last step left behind).
+#[test]
+fn c_style_for_loop_var_survives_the_loop() {
+    let (out, err, rc) = run("for ((i=3;i>0;i--)); do echo $i; done; echo i=$i");
+    assert_eq!((out.as_str(), rc), ("3\n2\n1\ni=0\n", 0), "{err}");
+}
+
+/// Body control flow: `break` skips the step, `continue` runs it and re-tests
+/// the condition, and a nested `break 2` leaves both loops (bash's three
+/// measured shapes). Every pin can hang when the fix regresses, so all run
+/// under the 5 s bound.
+#[test]
+fn c_style_for_body_control_flow() {
+    let (out, err, rc) = run_bounded("for ((i=0;i<2;i++)); do echo a; break; done; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("a\nrc=0\n", 0), "{err}");
+    let (out, err, rc) =
+        run_bounded("for ((i=0;i<2;i++)); do continue; echo never; done; echo done");
+    assert_eq!((out.as_str(), rc), ("done\n", 0), "{err}");
+    let (out, err, rc) = run_bounded(
+        "for ((i=0;i<2;i++)); do for ((j=0;j<2;j++)); do break 2; done; done; echo rc=$?",
+    );
+    assert_eq!((out.as_str(), rc), ("rc=0\n", 0), "{err}");
+    let (out, err, rc) = run_bounded(
+        "for ((i=0;i<2;i++)); do for ((j=0;j<2;j++)); do [ \"$j\" = 1 ] && break 2; echo \"$i$j\"; done; done",
+    );
+    assert_eq!((out.as_str(), rc), ("00\n", 0), "{err}");
+}
+
+/// The arithmetic `for` is a keyword block, so it is a pipeline **stage** in
+/// both directions (task #292's block stage). bash `0 1` for each; the fork of
+/// a stage means the loop var dies with it, as bash's subshell stage does.
+#[test]
+fn c_style_for_is_a_pipeline_stage() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) do echo $i; done | cat");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+    let (out, err, rc) = run("echo a | for ((i=0;i<2;i++)); do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+}
+
+/// `&&`/`||` hand their part to this parser (task #232's mid-run span):
+/// `true && for ((…)) …` and `false || for ((…)) …` both run the loop. bash's
+/// `false || …` prints `y` twice, one per iteration — the same, measured.
+#[test]
+fn c_style_for_midrun_after_and_or() {
+    let (out, err, rc) = run("true && for ((i=0;i<2;i++)); do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+    let (out, err, rc) = run("false || for ((i=0;i<2;i++)); do echo y; done");
+    assert_eq!((out.as_str(), rc), ("y\ny\n", 0), "{err}");
+}
+
+/// A here-doc written in the body is re-read **per iteration** (bash prints the
+/// body twice), in the single-line spelling (the bodies sit past `done`, so
+/// `part_text` appends them) and in the multi-line one (the verbatim text).
+#[test]
+fn c_style_for_heredoc_body_repeats_per_iteration() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++)); do cat <<E; done\nbody\nE");
+    assert_eq!((out.as_str(), rc), ("body\nbody\n", 0), "{err}");
+    let (out, err, rc) = run("for ((i=0;i<2;i++)); do\ncat <<E\nbody\nE\ndone");
+    assert_eq!((out.as_str(), rc), ("body\nbody\n", 0), "{err}");
+}
+
+/// In a `{ …; }` group with a redirection on the group, the loop's output is
+/// what lands in the file (bash: 2 lines). The redirection written after the
+/// block's own `done` is the separate, pre-existing gap task **#298** documents
+/// (the word form drops it identically, so both `for` forms share it).
+#[test]
+fn c_style_for_in_a_group_with_a_redirect() {
+    let dir = scratch("cstyle-group");
+    let file = dir.join("out").to_str().unwrap().to_string();
+    let (out, err, rc) = run(&format!(
+        "{{ for ((i=0;i<2;i++)); do echo $i; done; }} > {file}; wc -l < {file}"
+    ));
+    assert_eq!((out.as_str(), rc), ("2\n", 0), "{err}");
+}
+
+/// Everything bash rejects, fdshell rejects too (bash rc 2, fdshell rc 1 — the
+/// repo-wide parse-error convention): a clause count that is not three, a word
+/// between `))` and `do`, a redirection there, the `;;`/`; ;` spellings, a pipe,
+/// and an empty `do` body. Nothing runs, so stdout stays empty.
+#[test]
+fn c_style_for_rejects_bash_rejects() {
+    for script in [
+        "for ((i=0))",
+        "for ((i=0;i<2))",
+        "for ((i=0;))",
+        "for ((i=0;i<2;i++;))",
+        "for (( in 1 2 ))",
+        "for ((i=0\ni<2\ni++)); do echo a; break; done",
+        "for ((i=0;i<2;i++))x; do :; done",
+        "for ((i=0;i<2;i++)) 2>/dev/null; do :; done",
+        "for ((i=0;i<2;i++)) > /dev/null; do :; done",
+        "for ((i=0;i<2;i++)) ;; do :; done",
+        "for ((i=0;i<2;i++)) ; ; do :; done",
+        "for ((i=0;i<2;i++)) | cat",
+        "for ((i=0;i<2;i++)); do; done",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
+        assert!(err.contains("parse error"), "{script}: {err}");
+    }
+}
+
+/// `<<` inside the region is the shift operator, so it claims no here-doc body:
+/// the region is opaque to the heredoc layer (the statement path detects the
+/// arithmetic `for` before `heredoc::layout` counts its specs). bash prints the
+/// body once per iteration; so does fdshell.
+#[test]
+fn c_style_for_shift_in_the_region_is_not_a_heredoc() {
+    let (out, err, rc) = run("for ((i=0;i<(1<<2);i++)); do cat <<B; done\nbody\nB");
+    assert_eq!((out.as_str(), rc), ("body\nbody\nbody\nbody\n", 0), "{err}");
+}
+
+/// The heredoc-spec asymmetry the plan predicted for the **stage** path (the
+/// stage's spec share is counted before the arithmetic `for` is detected, so a
+/// `<<` hidden in the region could desync it) measured as **bash parity**: the
+/// stage prints the body once per iteration, exactly like bash and like the
+/// statement-path pin above. Pinned as the parity it is, so a future spec-cursor
+/// change shows up here.
+#[test]
+fn c_style_for_a_stage_with_a_shift_and_a_heredoc_is_bash_parity() {
+    let (out, err, rc) = run("echo a | for ((i=0;i<(1<<2);i++)); do cat <<B; done\nbody\nB");
+    assert_eq!((out.as_str(), rc), ("body\nbody\nbody\nbody\n", 0), "{err}");
+}
+
+/// Two forms bash accepts stay open divergences, each with its own task, and
+/// both fail loudly rather than silently: the `{ …; }` body (task **#394**,
+/// fdshell: a parse error, rc 1) and the glued `for((…))` (task **#396**, not a
+/// keyword word at all, so `do`/`done` run as commands).
+#[test]
+fn c_style_for_the_glued_and_brace_body_forms_stay_divergences() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i; }");
+    assert_eq!((out.as_str(), rc), ("", 1), "task #394: {err}");
+    assert!(err.contains("parse error"), "task #394: {err}");
+    let (out, err, rc) = run("for((i=0;i<3;i++));do echo $i;done");
+    assert_eq!(out, "", "task #396: the glued word is no keyword: {out}");
+    assert_eq!(
+        rc, 1,
+        "task #396: bash rc 0, fdshell runs `do`/`done`: {err}"
+    );
+    assert!(
+        err.contains("failed to resolve command path"),
+        "task #396: {err}"
+    );
+}
+
+/// `set -u` does not stop the clauses (task **#170** owns nounset in
+/// arithmetic): the loop runs `0 1` at rc 0, bash parity, because the init
+/// clause binds the loop var before the condition reads it.
+#[test]
+fn c_style_for_ignores_set_u_like_arith() {
+    let (out, err, rc) = run("set -u; for ((i=0;i<2;i++)) do echo $i; done; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("0\n1\nrc=0\n", 0), "{err}");
+}
+
+/// A clause that is not a valid arithmetic expression stops the loop with rc 1
+/// and prints no body, as bash's does: the init's `$(false)` splices to an empty
+/// operand, and `i<` has no right operand. fdshell's message is its own
+/// (arithmetic syntax error), and the statement aborts — the `((expr))`
+/// command's rule, not bash's "report and continue".
+#[test]
+fn c_style_for_arith_clause_error_stops_the_loop_like_bash() {
+    for script in [
+        "for ((i=$(false);i<1;i++)); do echo a; done",
+        "for ((i=0;i<;i++)); do echo a; done",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 1");
+        assert!(
+            err.contains("arithmetic expression has a syntax error"),
+            "{script}: {err}"
+        );
+    }
+}
+
+/// A `#` inside a clause is data to the byte scan, so the region stays closed
+/// across the comment and the newline; the step's own arithmetic then fails
+/// exactly where bash's does — the body prints once, the step errors, rc 1
+/// (bash 5.3.9: `0` then `((: i++ # c~: arithmetic syntax error`).
+#[test]
+fn c_style_for_comment_in_a_clause_is_bash_parity() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++ # c\n)) ; do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("0\n", 1), "{err}");
+    let (out, err, rc) = run_bounded("for ((i=0;i<2;i++ # c\n)) ; do echo $i; break; done");
+    assert_eq!((out.as_str(), rc), ("0\n", 0), "{err}");
+}
+
+/// The nesting forms: a command substitution captures the loop's stdout, `time`
+/// reports it, and an `if` condition, a `case` arm and a `while` body each run
+/// it as a statement (bash's measured outputs).
+#[test]
+fn c_style_for_nesting_forms_match_bash() {
+    let (out, err, rc) = run("x=$(for ((i=0;i<2;i++)); do echo $i; done); echo \"cap=$x\"");
+    assert_eq!((out.as_str(), rc), ("cap=0\n1\n", 0), "{err}");
+    let (out, err, rc) = run("if for ((i=0;i<2;i++)); do echo $i; done; then echo ok; fi");
+    assert_eq!((out.as_str(), rc), ("0\n1\nok\n", 0), "{err}");
+    let (out, err, rc) = run("case x in x) for ((i=0;i<2;i++)); do echo $i; done;; esac");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+    let (out, err, rc) =
+        run_bounded("while false; do :; done; for ((i=0;i<2;i++)); do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+    let (out, err, rc) = run("time for ((i=0;i<2;i++)); do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+}
+
+/// A function body runs the loop and a `return` in it leaves the function with
+/// the returned status (bash: `0` then `rc=3`, the body's `echo after` never
+/// printed).
+#[test]
+fn c_style_for_in_a_function_body_returns() {
+    let (out, err, rc) =
+        run("f() { for ((i=0;i<2;i++)); do echo $i; return 3; done; echo after; }; f; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("0\nrc=3\n", 0), "{err}");
+}
+
+/// errexit stops the shell on the body's failure, as bash's does (rc 1, no
+/// output); the arithmetic `for` propagates the `Exit` control like every other
+/// loop.
+#[test]
+fn c_style_for_under_errexit_exits_the_shell() {
+    let (out, err, rc) = run("set -e; for ((i=0;i<2;i++)); do false; done; echo tail");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+}
+
+/// A `${…}` expansion inside a clause is the pre-existing arithmetic gap of task
+/// **#397** (`arith` expands only `$(…)` and `$((…))` in a clause, so a braced
+/// expansion is a syntax error on **every** arithmetic surface — the `((expr))`
+/// command and `$((…))` fail identically). bash runs the loop on `${n:-2}`.
+#[test]
+fn c_style_for_braced_expansion_in_a_clause_is_the_arith_gap() {
+    let (out, err, rc) = run("n=2; for ((i=0;i<${n:-2};i++)); do echo $i; done");
+    assert_eq!((out.as_str(), rc), ("", 1), "task #397: bash prints 0 1");
+    assert!(
+        err.contains("arithmetic expression has a syntax error"),
+        "task #397: {err}"
+    );
+}
