@@ -239,15 +239,18 @@ fn glued_brace_stays_a_command_word() {
     assert!(err.contains("\"{echo\" not found"), "{err}");
 }
 
-/// A brace in an argument position is a word: `echo {` prints the brace, and the
-/// `{` after a pipeline `|` is a command word, not a group.
+/// A brace in an argument position is a word: `echo {` prints the brace. The
+/// `{` after a pipeline `|` is a command word too, never a group opener — task
+/// #292's stage arm takes only a **keyword** block, so the brace keeps the
+/// group parse's own failure (tasks #186/#190: a group as a pipeline stage is
+/// unsupported). bash runs the group in the stage's fork (prints `b`, rc 0).
 #[test]
 fn brace_in_argument_or_pipeline_position_is_a_word() {
     let (out, err, rc) = run("echo {");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
     let (out, err, rc) = run("echo a| { echo b; }");
     assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains("\"{\" not found"), "{err}");
+    assert!(err.contains("group is missing a closing brace"), "{err}");
 }
 
 /// `{ …; } | cat` is unsupported: a pipeline stage is not a group, and the parse

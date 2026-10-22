@@ -609,16 +609,15 @@ fn event_case_wait_mid_run_keeps_its_block_span() {
     assert_eq!((out.as_str(), code), ("tail\n", 0), "stderr={err}");
 }
 
-/// Accepted divergences pinned with the task that owns them: a keyword block
-/// as a pipeline stage (argument position — Fix A must not cover it, task
-/// **#292**); an unclosed mid-run construct (rc 1 parse error, bash rc 2); a
-/// line that opens with `&&` (bash rejects it, rc 2; fdshell runs the part,
-/// documented in README, no task).
+/// Accepted divergences pinned with the task that owns them: an unclosed
+/// mid-run construct (rc 1 parse error, bash rc 2); a line that opens with
+/// `&&` (bash rejects it, rc 2; fdshell runs the part, documented in README,
+/// no task). The keyword block **as a pipeline stage** used to sit in this
+/// list (task #292): the `|` position is a command position, so that script
+/// now forks the block as a stage and matches bash — pinned with the family in
+/// `tests/pipeline.rs` (`block_stage_*`).
 #[test]
 fn midrun_adjacent_shapes_stay_measured_divergences() {
-    // #292: the `|` position is argument position — `while`/`do` stay words.
-    let (_out, _err, code) = run("echo a | while :; do echo b; break; done");
-    assert_eq!(code, 1);
     // Unclosed mid-run: parse error rc 1 (bash rc 2).
     let (_out, _err, code) = run("true && while :; do echo hi");
     assert_eq!(code, 1);
@@ -958,42 +957,26 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
 /// loop's own `break` never lands — the body runs forever. The family is the
 /// **rule**, not this list: an argument-position opener plus a mismatched
 /// closer in a loop body ⇒ the body never returns. Every row is measured with
-/// a capped child (rc 124 at [`BOUND`]) against `bash -c` (5.3.9) and
-/// `master` 75398c8; these twelve are the sample a sweep produced (the sweep
-/// finds ≥15 more shapes of the same rule), so the pin is a *sample*, not the
-/// family's extent — do not read a green run here as "the family is twelve
-/// rows". Three rows hang on `master` too, so the bullet states the class
-/// honestly, not only the rows this branch moves.
+/// a capped child (rc 124 at [`BOUND`]) against `bash -c` (5.3.9). The sweep
+/// that produced this sample finds ≥15 more shapes of the same rule, so the
+/// pin is a *sample*, not the family's extent — do not read a green run here as
+/// "the family is five rows". Task #292 moved seven rows out of this list (the
+/// keyword block behind a `|` is a pipeline stage, not word data): they are
+/// pinned next, in [`block_stage_in_a_loop_body_ends_the_loop`].
 #[test]
 fn in_block_bodies_that_never_return_run_forever() {
     let rows = [
-        // bash prints `y`, `after` rc 0; master reports a parse error rc 1.
-        "while :; do echo a|if :; then echo y; fi; break; done; echo after",
-        // bash rejects the line (rc 2); master runs it (`x`, `after` rc 0).
-        "while :; do echo a | if; fi; echo x; break; done; echo after",
-        // bash prints `y`, `after` rc 0; master prints `after` rc 0.
-        "while :; do echo a | if :; then echo y; fi; break; done; echo after",
-        // bash prints `after` rc 0; master reports a parse error rc 1.
-        "while :; do echo a|while :; do break; done; break; done; echo after",
         // The `case`/`for` list: `done` there is a pattern word, so the block
         // never closes. bash prints `in done`, `after`; hangs on master too.
         "while :; do echo in done; break; done; echo after",
         // master's own hang: a `fi` closes a `while`, the body never ends.
         "while :; do echo a; fi; echo after",
-        // The acceptance loss: bash *and* master exit 0 printing `after`;
-        // the `case` arm's opener eats the `esac`, so the loop never returns.
-        "while :; do echo a | case x in a) echo y;; esac; break; done; echo after",
         // The `case` opener in argument position, closed by `esac`.
         "while :; do echo case; esac; break; done; echo after",
         // #309's headline row: the `if`-closer closes the `while`.
         "while :; do echo if; fi; echo x; break; done; echo after",
         // The cheapest reading of the same rule: no `break`, no tail.
         "while :; do echo if; fi; echo after",
-        // The pipeline twin of #309's row 3: `done` closes the `while` early.
-        "while :; do echo a | if; echo x; done; echo after",
-        // The pinned `echo y` row with a tail command: bash prints `y`, `z`,
-        // `after` rc 0, master a parse error rc 1, this branch runs forever.
-        "while :; do echo a|if :; then echo y; fi; echo z; break; done; echo after",
     ];
     let codes = run_capped(&rows);
     for (script, code) in rows.iter().zip(codes) {
@@ -1001,6 +984,47 @@ fn in_block_bodies_that_never_return_run_forever() {
             code, 124,
             "{script}: bash terminates (rc 0/2), fdshell runs forever"
         );
+    }
+}
+
+/// Task #292 moves these rows out of the list above: the `|` position is a
+/// command position, so a keyword block behind a pipe *in a loop body* runs as
+/// a forked pipeline stage and the loop's `break` lands again. Two rows now
+/// match `bash` (5.3.9) exactly; the rest report a parse error rc 1 — the
+/// glued-`|` rows join the in-block glued-pair family (README "glued pair",
+/// bash rc 0 there), the two rows bash itself rejects (rc 2). On `master` every
+/// row of this list ran forever (rc 124 at [`BOUND`]).
+#[test]
+fn block_stage_in_a_loop_body_ends_the_loop() {
+    for (script, want) in [
+        (
+            "while :; do echo a | if :; then echo y; fi; break; done; echo after",
+            "y\nafter\n",
+        ),
+        (
+            "while :; do echo a | case x in a) echo y;; esac; break; done; echo after",
+            "after\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // The glued `|` (no space before the opener): parse error rc 1, bash rc 0.
+    for script in [
+        "while :; do echo a|if :; then echo y; fi; break; done; echo after",
+        "while :; do echo a|while :; do break; done; break; done; echo after",
+        "while :; do echo a|if :; then echo y; fi; echo z; break; done; echo after",
+    ] {
+        let (_out, _err, code) = run(script);
+        assert_eq!(code, 1, "{script}: bash rc 0");
+    }
+    // `if` with no condition, as a stage: bash rc 2, fdshell its own rc 1.
+    for script in [
+        "while :; do echo a | if; fi; echo x; break; done; echo after",
+        "while :; do echo a | if; echo x; done; echo after",
+    ] {
+        let (_out, _err, code) = run(script);
+        assert_eq!(code, 1, "{script}: bash rc 2");
     }
 }
 

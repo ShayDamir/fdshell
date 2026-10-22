@@ -348,3 +348,156 @@ fn cat_pipe_to_cat_completes() {
     );
     assert_eq!(str::from_utf8(&out.stdout).unwrap(), "yo\n");
 }
+
+/// Task #292: a keyword block written as a pipeline **stage** is a command — the
+/// word behind `|` is in command position — so it runs in the forked stage like
+/// any other stage. A block stage sits in the middle of a pipeline and forwards
+/// the pipe, and text written behind its closer is the *next statement*, not
+/// part of the block (`; echo tail`, `&& echo y`). bash 5.3.9 parity on every
+/// row; on `master` the block's words were the previous stage's arguments and
+/// the loop never ran.
+#[test]
+fn block_stage_runs_and_forwards_the_pipe() {
+    let dir = Scratch::new();
+    for (script, want) in [
+        ("echo a | while :; do cat; break; done | cat", "a\n"),
+        ("echo a | while :; do echo b; break; done | cat", "b\n"),
+        (
+            "echo a | while :; do echo b; break; done; echo tail",
+            "b\ntail\n",
+        ),
+        (
+            "echo a | while :; do echo b; break; done && echo y",
+            "b\ny\n",
+        ),
+        ("echo a | if :; then cat; fi | cat", "a\n"),
+        ("echo a | for i in 1 2; do echo $i; done | cat", "1\n2\n"),
+    ] {
+        let out = run(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, Some(0)),
+            "{script}: stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}
+
+/// A redirect written **inside** a block stage takes effect in the fork (the
+/// stage applies its own redirects), so the file is created and holds the data.
+#[test]
+fn a_block_stages_own_redirect_writes_the_file() {
+    let dir = Scratch::new();
+    let out = run(
+        &dir,
+        "echo a | while :; do echo b > out.txt; break; done; cat out.txt",
+    );
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("b\n", Some(0)),
+        "stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert_eq!(std::fs::read(dir.join("out.txt")).unwrap(), b"b\n");
+}
+
+/// Task #292 reaches the trailing-redirect family of task **#298** in its
+/// pipeline-stage form: a redirect written after the block's closer is dropped —
+/// the stage's scan ends at the closer, so `> out.txt` is not the stage's
+/// redirect and the file is never created (the stage's output goes to stdout,
+/// rc 0, no diagnostic). bash writes `b` into the file. Owned by #298.
+#[test]
+fn a_redirect_after_a_block_closer_is_dropped() {
+    let dir = Scratch::new();
+    let out = run(&dir, "echo a | while :; do echo b; break; done > out.txt");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("b\n", Some(0)),
+        "stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert!(!dir.join("out.txt").exists(), "bash: out.txt holds `b`");
+}
+
+/// A capture fd var works inside a block stage: the stage's write lands in the
+/// memfd the parent created (the fork keeps the stage's own capture pair), and
+/// the capture's size is the bytes the stage wrote.
+#[test]
+fn a_block_stage_writes_into_a_capture() {
+    let dir = Scratch::new();
+    let out = run(
+        &dir,
+        "builtin memfd %>%m; echo a | while :; do echo b >&%m; break; done; builtin statx %m",
+    );
+    let stdout = str::from_utf8(&out.stdout).unwrap().to_string();
+    assert_eq!(out.status.code(), Some(0), "stderr={:?}", out.stderr);
+    assert!(
+        stdout.contains("kind=file size=2"),
+        "the stage's `b\\n` must reach the capture: {stdout}"
+    );
+}
+
+/// A redirect naming a fd var that is **not set** fails inside the block stage,
+/// and the failure carries its own context (`StageFailed`) on top of the
+/// redirect's report: the chain names the compound command, the launch and the
+/// unset fd var, rc 1.
+#[test]
+fn a_block_stage_failure_reports_its_own_context() {
+    let dir = Scratch::new();
+    let out = run(&dir, "echo a | while :; do echo b >&%nope; break; done");
+    let err = str::from_utf8(&out.stderr).unwrap().to_string();
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains("compound command in a pipeline stage failed")
+            && err.contains("fd variable 'nope' is not set"),
+        "{err}"
+    );
+}
+
+/// `time` behind the `|` is the stage's **word 0**, not a transparent prefix of
+/// the block's keyword: the fork execs the external `time` found on the `PATH`,
+/// which cannot run `while`, so the loop body never runs and the pipeline
+/// reports a failure (the exact rc is the external `time`'s — 127 on a host with
+/// `/usr/bin/time`, 127/126 there — bash's is 2, a syntax error). The `&&` twin
+/// (`true && time while …`) runs the loop, where the prefix IS transparent —
+/// pinned in `tests/cond_blocks.rs`.
+#[test]
+fn time_behind_the_pipe_is_the_stages_word_zero() {
+    let dir = Scratch::new();
+    let out = run(&dir, "echo a | time while :; do echo b; break; done");
+    assert_eq!(
+        str::from_utf8(&out.stdout).unwrap(),
+        "",
+        "the stage's loop must not run: stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert_ne!(out.status.code(), Some(0), "bash rejects the line (rc 2)");
+}
+
+/// A here-document inside a block stage is fed to the stage's command in the
+/// fork: the body arrives (bash parity), and a function definition as a stage
+/// dies with the fork, so the name is unknown afterwards (fdshell's missing
+/// command is rc 1, bash's is 127).
+#[test]
+fn a_heredoc_and_a_function_definition_inside_a_block_stage() {
+    let dir = Scratch::new();
+    let out = run(&dir, "echo a | while :; do cat <<T; break;\nbody\nT\ndone");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("body\n", Some(0)),
+        "stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    let out = run(&dir, "echo a | f() { echo b; }; echo tail");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("tail\n", Some(0)),
+        "bash: the stage's fork defines `f`, the parent never sees it"
+    );
+    let out = run(&dir, "echo a | f() { echo b; }; f");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("", Some(1)),
+        "bash: rc 127 `f: command not found`"
+    );
+}

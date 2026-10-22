@@ -46,8 +46,9 @@ fn run_bounded(script: &str) -> (String, String, i32) {
 /// Task #236 (S2): a glued `&&`/`||` pair *keeps* the command position the
 /// pair sets, so the keyword glued behind it is scored: `x||if :; …; fi`
 /// nests the `if` block (its `;`s are clause bytes) and the statement runs
-/// like bash's. The pipeline `|` twin keeps its #292 divergence (the block
-/// splits at the `;`) — pinned here as the measured accepted divergence.
+/// like bash's. The pipeline `|` twin is scored the same way since task
+/// **#292** (the `|` sets a command position for the *next stage*), so all
+/// three glue shapes are bash parity.
 #[test]
 fn glued_pair_keeps_the_command_position_the_pair_sets() {
     // The spaced pairs: bash parity — the `&&` twin runs the `if` (prints
@@ -56,11 +57,11 @@ fn glued_pair_keeps_the_command_position_the_pair_sets() {
     assert_eq!((out.as_str(), code), ("x\ny\nafter\n", 0), "stderr={err}");
     let (out, err, code) = run_bounded("echo x||if :; then echo y; fi; echo after");
     assert_eq!((out.as_str(), code), ("x\nafter\n", 0), "stderr={err}");
-    // The pipeline `|` twin: the accepted #292 divergence, measured — the
-    // `if` behind the pipeline byte is unscored, the `;`s split the block
-    // and the statements run flat (bash prints `y`, `after`).
+    // The pipeline `|` twin, #292: the `if` behind the pipeline byte *is*
+    // scored, it opens the second stage's block (its `;`s are clause bytes)
+    // and the stage runs in the fork — bash prints `y`, `after`.
     let (out, err, code) = run_bounded("echo x|if :; then echo y; fi; echo after");
-    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err}");
+    assert_eq!((out.as_str(), code), ("y\nafter\n", 0), "stderr={err}");
 }
 
 /// Task #236 (S2): a short-circuited `||` chain gates the AND-list and the

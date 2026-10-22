@@ -1319,3 +1319,80 @@ fn ampersand_terminated_loop_condition_gates_on_the_async_status() {
         assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
     }
 }
+
+/// Task #292: a keyword block written as a pipeline **stage** is a command, not
+/// the previous stage's arguments. Every loop keyword runs there with bash
+/// (5.3.9) parity — including the glued `|` (task #236's pair rule sets the same
+/// command position) and a multi-line stage, whose newlines are clause bytes.
+/// On `master` these lines printed the block's words as data
+/// (`echo a | while :; do echo w; break; done` → `while :; do echo w; break; done`).
+#[test]
+fn keyword_block_as_a_pipeline_stage_runs_the_loop() {
+    for (script, want) in [
+        ("echo a | while :; do echo w; break; done", "w\n"),
+        ("echo a | until :; do echo u; break; done", ""),
+        ("echo a | for i in 1 2; do echo $i; done", "1\n2\n"),
+        ("echo a | if :; then echo y; else echo n; fi", "y\n"),
+        ("echo a | case x in x) echo c;; *) echo d;; esac", "c\n"),
+        ("echo a|while :; do echo g; break; done", "g\n"),
+        ("echo a | while :\n do\n echo m\n break\ndone", "m\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The stage's block is a statement **of the fork**: its `break` ends only its
+/// own loop (never the loop that encloses the pipeline), its `exit` ends only
+/// the fork (the pipeline's status reaches the parent's `$?`), and a block stage
+/// inside a loop body ends that loop normally. bash parity on every row.
+#[test]
+fn a_stage_blocks_loop_control_stays_inside_the_fork() {
+    for (script, want) in [
+        (
+            "while :; do echo a | while :; do echo in; break; done; echo outer; break; done",
+            "in\nouter\n",
+        ),
+        (
+            "for i in 1; do echo a | while :; do break; done; echo tail; done",
+            "tail\n",
+        ),
+        (
+            "while :; do echo a | while :; do echo b; break; done; echo tail; break; done",
+            "b\ntail\n",
+        ),
+        (
+            "echo a | while :; do exit 3; done; echo tail rc=$?",
+            "tail rc=3\n",
+        ),
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The stage's loop reads the pipe: the first line arrives. The row keeps
+/// fdshell's pre-existing `read` divergence (the body runs once and the stage's
+/// status is the failed `read`, so the pipeline reports rc 1 where bash reports
+/// 0) — the `read` class owns that, it is measured for the `< file` twin on
+/// `master` too, and #292 changes only the block's position.
+#[test]
+fn a_stage_block_reads_the_pipe_with_the_read_divergence() {
+    let (out, err, rc) = run("echo a | while read l; do echo r-$l; done");
+    assert_eq!((out.as_str(), rc), ("r-a\n", 1), "{err}: bash rc 0");
+}
+
+/// The POSIX builtin `wait` behind a `|` opens **no** block span (the shared
+/// scorer's gate: no pattern keyword behind the word), so it is an ordinary
+/// command stage — and the fork has no `wait` to dispatch: it reports the
+/// unresolved command on stderr while the pipeline's own status stays 0. The
+/// stage-child gap of task **#381** (the `cd` twin is pinned there).
+#[test]
+fn the_builtin_wait_behind_a_pipe_is_a_command_stage() {
+    let (out, err, rc) = run("echo a | wait; echo tail");
+    assert_eq!((out.as_str(), rc), ("tail\n", 0), "{err}");
+    assert!(
+        err.contains("failed to resolve command path"),
+        "bash runs the builtin silently: {err}"
+    );
+}
