@@ -1422,16 +1422,31 @@ fn a_control_builtin_behind_a_pipe_is_a_command_stage() {
 /// A block stage's status is its loop's own last status (the `break` is the last
 /// command, rc 0 — bash parity), and a `&` on the pipeline puts the **whole**
 /// pipeline, block stage included, into the background job: the parent prints
-/// `started`, the job's stage prints `b`, `wait` collects it, bash parity.
+/// `started`, the job's stage prints `b`, `wait` collects it, bash parity
+/// (`started\nb\ndone`, 5.3.9).
+///
+/// The `started`/`b` pair is written by **two processes** to one shared stdout,
+/// so the order they land in is a race in every shell — measured 2/40 runs of
+/// `b` first on the debug binary, and bash's own ordering comes from the same
+/// race. The pin is therefore the **set** of the two racing lines plus the
+/// `done` that `wait` puts last: the background job is reaped before it.
 #[test]
 fn a_block_stage_status_and_a_trailing_ampersand_are_bash_parity() {
     let (out, err, rc) = run("echo a | while :; do false; break; done; echo rc=$?");
     assert_eq!((out.as_str(), rc), ("rc=0\n", 0), "{err}");
     let (out, err, rc) =
         run_bounded("echo a | while :; do echo b; break; done & echo started; wait; echo done");
+    let mut lines: Vec<&str> = out.lines().collect();
+    assert_eq!((lines.len(), rc), (3, 0), "stdout={out} stderr={err}");
     assert_eq!(
-        (out.as_str(), rc),
-        ("started\nb\ndone\n", 0),
-        "stderr={err}"
+        lines.pop(),
+        Some("done"),
+        "`wait` reaps the job before `done`: {out}"
+    );
+    lines.sort_unstable();
+    assert_eq!(
+        lines,
+        ["b", "started"],
+        "the parent's line and the job stage's line are a race: {out}"
     );
 }
