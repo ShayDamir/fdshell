@@ -321,6 +321,43 @@ fn unterminated_quoted_regions_need_a_continuation() {
     }
 }
 
+/// A construct opened **mid-run** (after `&&`/`||`, behind `|`, a `name() {`
+/// written there) lives inside a plain statement, not a `Segment::Block`, so
+/// the scan's `midrun_open` stamp is the only continuation signal it has
+/// (task #294). Every arm is pinned on both sides: the unclosed shape keeps
+/// reading, its closed twin executes at once (the closed rows kill a stamp that
+/// is set unconditionally).
+#[test]
+fn midrun_construct_needs_its_closer() {
+    assert!(!is_complete(b"true && { echo g"));
+    assert!(is_complete(b"true && { echo g\n}"));
+    assert!(!is_complete(b"true && while :; do echo hi"));
+    assert!(
+        is_complete(b"true && while :; do\necho hi\nbreak\ndone"),
+        "the multi-line mid-run block is one statement"
+    );
+    assert!(!is_complete(b"echo a | while :; do echo hi"));
+    assert!(is_complete(b"echo a | while :; do :; done"));
+    assert!(!is_complete(b"true && f() {"));
+    assert!(is_complete(b"true && f() { echo hi; }"));
+    // A brace whose next byte is not an opener boundary is a **word** (the
+    // `word::opens_at` rule, task #141): at the end of input there is no such
+    // byte, so `true && {` records no mid-run span and answers at once — the
+    // same opener-word limitation a run-start `{` has (`is_complete(b"{")`),
+    // not a mid-run gap. Pinned: the parse layer owns the shape's report.
+    assert!(is_complete(b"true && {"));
+    assert!(is_complete(b"true && {echo g; }"));
+    assert!(is_complete(b"true && { echo g; } && echo y"));
+    assert!(is_complete(b"true && while :; do :; done && echo y"));
+    // Word data, the gated builtin, and quoted operators open no mid-run span.
+    assert!(is_complete(b"echo a { b"));
+    assert!(is_complete(b"true && wait; echo tail"));
+    assert!(is_complete(b"echo \"a && {\""));
+    // A heredoc body is never scanned for mid-run openers: the `true && {`
+    // line is the body's text, so the buffer is complete with its delimiter.
+    assert!(is_complete(b"cat <<T\ntrue && {\nT"));
+}
+
 /// A `'…'` span behaves like a `"…"` region for the REPL (task #141): its
 /// separators, operators and newlines are data, and a closed span on a
 /// statement that ends properly is complete.

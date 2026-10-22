@@ -11,6 +11,29 @@ fn skip_at(line: &[u8], at: usize) -> Option<usize> {
     skip(line, &mut book)
 }
 
+/// The book's mid-run flag after `skip` has taken (or refused) the word at
+/// `at`: the REPL's continuation signal, set only by an unclosed span.
+fn flag_at(line: &[u8], at: usize) -> bool {
+    let mut book = Book::new();
+    book.start = 0;
+    book.i = at;
+    skip(line, &mut book);
+    book.midrun_open
+}
+
+/// The flag for a word written after `x && ` (mid-run, `group_at_run` ==
+/// `Some(false)`).
+fn flag(line: &[u8]) -> bool {
+    flag_at(line, b"x && ".len())
+}
+
+/// `span_end`'s pair (resume, closed) for the word at `at`.
+fn span_at(line: &[u8], at: usize) -> Option<(usize, bool)> {
+    let tail = line.get(at..).unwrap_or(b"");
+    let mut quotes = Quotes::new();
+    span_end(line, tail, at, &mut quotes)
+}
+
 /// The word at `at` is mid-run (`x && <word>`), so `skip` sees `group_at_run`
 /// == `Some(false)`; returns the resume, asserting it is a strict advance.
 fn midrun(line: &[u8]) -> Option<usize> {
@@ -273,4 +296,74 @@ fn brace_words_are_never_skipped_here() {
     assert_eq!(skip_at(b"x && { echo g; }", 4), None);
     assert_eq!(skip_at(b"x && {echo a;}", 4), None);
     assert_eq!(skip_at(b"x && {} ", 4), None);
+}
+
+/// `span_end` answers the pair (resume, closed): a closed span resumes at its
+/// span end with `true`, an unclosed one resumes at the end of input with
+/// `false` — the closedness the caller records for the REPL (task #294). A
+/// word that opens no span answers `None` and records nothing.
+#[test]
+fn span_end_answers_the_resume_and_the_closedness() {
+    for (tail, resume) in [
+        (b"while :; do :; done".as_slice(), 24),
+        (b"if :; then :; fi".as_slice(), 21),
+        (b"f() { echo F; } && f".as_slice(), 20),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert_eq!(span_at(&line, 5), Some((resume, true)), "{line:?}");
+    }
+    // The comment-behind-the-closer span is closed: it ends at the comment.
+    let line = b"x && while :; do :; done # comment";
+    assert_eq!(span_at(line, 5), Some((line.len() - 1, true)));
+    for tail in [
+        b"while".as_slice(),
+        b"while :; do echo hi".as_slice(),
+        b"f() { echo unclosed".as_slice(),
+        b"while :; do echo \"unbalanced".as_slice(),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert_eq!(span_at(&line, 5), Some((line.len(), false)), "{line:?}");
+    }
+    // The gated builtin opens no span at all.
+    assert_eq!(span_at(b"x && wait; echo tail", 5), None);
+}
+
+/// The unclosed span opens the book's mid-run flag, the closed one leaves it
+/// clear, and a word that opens no span (the gated builtin, a run-start
+/// keyword, an argument-position keyword) leaves it clear too: the flag is set
+/// by this arm and never by a shape that is not a span (task #294).
+#[test]
+fn the_unclosed_span_marks_the_book_open() {
+    for tail in [
+        b"while".as_slice(),
+        b"if".as_slice(),
+        b"for".as_slice(),
+        b"case".as_slice(),
+        b"while :; do echo hi".as_slice(),
+        b"if :; then echo t".as_slice(),
+        b"f() { echo unclosed".as_slice(),
+        b"while :; do echo \"unbalanced".as_slice(),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert!(flag(&line), "{line:?}: unclosed, so the REPL reads on");
+    }
+    for tail in [
+        b"while :; do :; done".as_slice(),
+        b"if :; then :; fi".as_slice(),
+        b"case x in x) echo c;; esac".as_slice(),
+        b"f() { echo F; } && f".as_slice(),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert!(!flag(&line), "{line:?}: closed, so the line runs");
+    }
+    // Not a span at all: the builtin gate, a run-start keyword, an argument.
+    assert!(!flag(b"x && wait; echo tail"));
+    assert!(
+        !flag_at(b"while :; do echo hi", 0),
+        "the run-start arm owns it"
+    );
+    assert!(
+        !flag_at(b"echo while :; do echo hi", 5),
+        "an argument-position keyword is word data"
+    );
 }

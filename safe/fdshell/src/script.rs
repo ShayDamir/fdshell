@@ -35,6 +35,11 @@ pub(crate) fn run_script(
                 off,
                 bodies,
                 background,
+                // The mid-run flag is the REPL's continuation signal, not a
+                // bail: the parse layer produces the pinned missing-closer
+                // diagnostic and its rc (tasks #232/#236), so the script
+                // runner runs the buffer as written (task #294).
+                midrun_open: _,
             } => {
                 crate::verbose::trace(line.get(off..off + cmd.len()).unwrap_or(b""), cell);
                 let part = sub(text, off, cmd.len())?;

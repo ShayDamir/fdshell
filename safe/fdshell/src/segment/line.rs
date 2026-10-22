@@ -3,7 +3,7 @@
 
 use crate::scan::heredoc;
 use crate::segment::Segment;
-use crate::segment::book::{Book, Run};
+use crate::segment::book::Book;
 use alloc::vec::Vec;
 
 /// End of a physical line: flush its buffered runs, or defer the flush when
@@ -15,22 +15,21 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
     if deferred {
         return book.i;
     }
-    let resume = flush_line(
-        &mut book.segments,
-        line,
-        book.line_start,
-        book.i,
-        &mut book.runs,
-    );
+    let (line_start, line_end) = (book.line_start, book.i);
+    let resume = flush_line(book, line, line_start, line_end);
     book.line_start = resume;
     resume
 }
 
-/// Flush the buffered runs of the current physical line as statements,
+/// Flush the book's buffered runs of the current physical line as statements,
 /// attaching the line's heredoc body bytes (in operator order). Returns the
 /// resume index (the end of the last claimed region — the text end when a
 /// missing delimiter line claimed the rest of the stream — or the line end). A
 /// block's condition bodies are handled by the block-text parse, not here.
+/// The flush empties the book's runs, and stamps them with its mid-run flag:
+/// an unclosed mid-run construct resumes at the end of input, so the whole
+/// physical line stays unfinished and every run of the flush is stamped
+/// (task #294).
 ///
 /// Runs buffered from an earlier physical line (a trailing `#` comment
 /// deferred the flush past the line's newline) are emitted body-less: a
@@ -38,17 +37,18 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
 /// matching bodies across lines stays unsupported (the parser rejects the
 /// statement, as before).
 pub(crate) fn flush_line<'a>(
-    segments: &mut Vec<Segment<'a>>,
+    book: &mut Book<'a>,
     line: &[u8],
     line_start: usize,
     line_end: usize,
-    runs: &mut Vec<Run<'a>>,
 ) -> usize {
     // No runs to emit: the line's body regions (if any) belong to the block
     // the caller is about to scan, not to a statement — claim nothing.
+    let mut runs = core::mem::take(&mut book.runs);
     if runs.is_empty() {
         return line_end;
     }
+    let midrun_open = book.midrun_open;
     let single_line = runs.first().is_none_or(|run| run.off >= line_start);
     let (bodies, resume) = if single_line {
         heredoc::line_body_contents(line, line_start, line_end)
@@ -66,11 +66,12 @@ pub(crate) fn flush_line<'a>(
         let n = heredoc::operator_count(line, run.off, run.off + run.bytes.len());
         let run_bodies: Vec<Vec<u8>> = bodies.iter().skip(assigned).take(n).cloned().collect();
         assigned += n;
-        segments.push(Segment::Statement {
+        book.segments.push(Segment::Statement {
             cmd: run.bytes,
             off: run.off,
             bodies: run_bodies,
             background: run.background,
+            midrun_open,
         });
     }
     resume

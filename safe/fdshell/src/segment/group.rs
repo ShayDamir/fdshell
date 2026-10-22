@@ -24,8 +24,10 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let tail = line.get(run_start..).unwrap_or(b"");
     let brace = run_start + tail.iter().position(|&b| b == b'{').unwrap_or(0);
     // The opener is at a run start, so nothing precedes it on this run; the
-    // flush claims only the line's heredoc bodies scanned so far.
-    let pre_resume = line::flush_line(&mut book.segments, line, line_start, brace, &mut book.runs);
+    // flush claims only the line's heredoc bodies scanned so far. The book's
+    // mid-run flag is `false` here: an unclosed mid-run span resumes at the end
+    // of input, so no group opener follows it.
+    let pre_resume = line::flush_line(book, line, line_start, brace);
     let span_start = prefix::span_start(line, run_start, brace);
     let (segment, resume, floor) =
         group_block(line, brace, span_start, book.state.quotes(), pre_resume);
@@ -96,7 +98,9 @@ fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize) {
             // (task #326 — group backgrounding stays #188/#192's).
             Boundary::Char | Boundary::Async => {
                 i = if state.at_word_start() && opens_at(line, i) {
-                    skip_group(line, i, &mut state)
+                    // The tail of a run-start group: its nested-group closedness
+                    // is not this span's signal, so only the resume is taken.
+                    skip_group(line, i, &mut state).0
                 } else {
                     state.advance(line, i)
                 };
@@ -110,12 +114,15 @@ fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize) {
 /// or a group inside a cond run): its text is opaque, so the braces and any
 /// quote inside are counted, and the scan resumes just past its closing brace
 /// (or at the end of input if unclosed). No `;` inside the body is a separator.
-pub(super) fn skip_group(line: &[u8], i: usize, state: &mut ScanState) -> usize {
+/// The pair is (resume, closed); an unclosed group is the cond run's mid-run
+/// opener, so its caller records that for the REPL (task #294).
+pub(super) fn skip_group(line: &[u8], i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut quotes = state.quotes();
     let (close, closed) = scan_brace_block(line, i + 1, &mut quotes);
     state.set_quotes(quotes);
     state.word_active = false;
-    if closed { close + 1 } else { line.len() }
+    let resume = if closed { close + 1 } else { line.len() };
+    (resume, closed)
 }
 
 #[cfg(test)]

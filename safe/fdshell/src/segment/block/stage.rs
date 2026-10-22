@@ -27,6 +27,8 @@ use super::midrun::span_end;
 /// `book.i`: `Some(resume)` with the cursor moved past the block's span,
 /// `None` when the word opens no block (the caller advances over it as word
 /// data, and a keyword-shaped word of a plain stage splits its `;` as before).
+/// An unclosed span also opens the book's mid-run flag, the REPL's
+/// continuation signal (task #294).
 ///
 /// The span rule is [`span_end`]'s, verbatim: the span ends at the separator
 /// that closes the closing keyword's run, so the `;` after the closer ends the
@@ -39,9 +41,10 @@ pub(in crate::segment) fn skip(line: &[u8], book: &mut Book<'_>) -> Option<usize
     }
     let tail = line.get(book.i..).unwrap_or(b"");
     let mut quotes = book.state.quotes();
-    let resume = span_end(line, tail, book.i, &mut quotes)?;
+    let (resume, closed) = span_end(line, tail, book.i, &mut quotes)?;
     book.state.set_quotes(quotes);
     book.state.word_active = false;
+    book.midrun_open |= !closed;
     book.i = resume;
     Some(resume)
 }

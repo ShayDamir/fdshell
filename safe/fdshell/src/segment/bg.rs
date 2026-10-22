@@ -33,15 +33,11 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
         split.mark();
         // The `&` terminates the command list it marks: the buffered runs are
         // flushed now, so a later `&` can never target them again (bash's
-        // `echo a & echo b &` is two background jobs, not one twice).
-        let resume = flush_line(
-            &mut book.segments,
-            line,
-            book.line_start,
-            amp,
-            &mut book.runs,
-        )
-        .max(book.body_floor);
+        // `echo a & echo b &` is two background jobs, not one twice). The
+        // book's mid-run flag is never set at this flush: an unclosed mid-run
+        // span resumes at the end of input, so no `&` follows it (task #294).
+        let line_start = book.line_start;
+        let resume = flush_line(book, line, line_start, amp).max(book.body_floor);
         // The flush's resume is past every body region the physical line
         // claims, so no later flush of this line may resume below it.
         book.body_floor = resume;

@@ -173,3 +173,58 @@ fn quoted_braces_are_not_group_delimiters() {
     span(b"{ 'a; b'; }", 11, 11);
     span(b"{ echo 'a' 'b'; }", 17, 17);
 }
+
+/// `skip_group`'s pair (resume, closed) for the `{` at `i` of `line`, with a
+/// scan state that has a word in progress (the mid-run shape the opener arm
+/// hands it).
+fn skip_pair(line: &[u8], i: usize) -> (usize, bool) {
+    let mut state = ScanState::new();
+    state.word_active = true;
+    skip_group(line, i, &mut state)
+}
+
+/// The group arm answers the pair the bookkeeping needs: a closed group
+/// resumes past its closing brace with `true`, an unclosed one resumes at the
+/// end of input with `false` — the flag that makes the REPL buffer a
+/// `true && { …` line (task #294). A quote inside the body is opaque, so a `}`
+/// written in it closes nothing.
+#[test]
+fn skip_group_reports_the_resume_and_the_closedness() {
+    let closed = b"x && { echo g; }";
+    assert_eq!(skip_pair(closed, 5), (closed.len(), true));
+    let glued = b"x && { echo g;}";
+    assert_eq!(skip_pair(glued, 5), (glued.len(), true));
+    for unclosed in [
+        b"x && { echo g".as_slice(),
+        b"x && { { echo n; }",
+        b"x && { echo \"a; }\"",
+    ] {
+        assert_eq!(
+            skip_pair(unclosed, 5),
+            (unclosed.len(), false),
+            "{unclosed:?}"
+        );
+    }
+}
+
+/// The **opener** arm records the flag for the group shape: the mid-run group
+/// of a statement is stamped when it never closes, and its closed twin is not
+/// (the run-start group is a `Segment::Block` and never reaches this arm).
+#[test]
+fn the_opener_arm_stamps_an_unclosed_midrun_group() {
+    for (line, want) in [
+        (b" echo inner && { echo g".as_slice(), true),
+        (b" echo inner && { echo g; }", false),
+        (b" echo inner && { { echo n; }", true),
+    ] {
+        let segments = scan_segments(line, false);
+        assert_eq!(segments.len(), 1, "{line:?}");
+        match &segments[0] {
+            Segment::Statement { midrun_open, .. } => {
+                assert_eq!(*midrun_open, want, "{line:?}")
+            }
+            Segment::Block { .. } => panic!("{line:?} must stay one statement"),
+            Segment::AsyncInvalid => panic!("unexpected async marker"),
+        }
+    }
+}

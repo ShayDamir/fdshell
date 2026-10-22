@@ -462,28 +462,133 @@ fn glued_closer_shapes_buffer_in_the_repl() {
     }
 }
 
-/// Task #232 pinned today's REPL behavior for an **unclosed mid-run
-/// construct** (the documented gap, task #294, with the group twin that
-/// predates it): the span lives in a plain statement, so `repl/complete.rs`
-/// sees no open block and the shell reports the parse error at once — no
-/// `>` continuation buffering. Pinned for both twins.
+/// Task #294: an **unclosed mid-run construct** (a `{ …` cond part, a keyword
+/// block after `&&` or behind `|`, a `true && f() {` definition) is skipped
+/// whole inside its run, so the scan stamps its closedness on the statement
+/// and the REPL buffers the line under `> ` until the closer arrives. At EOF
+/// the buffer is executed and reports the missing closer — bash prints its
+/// `unexpected end of file` report and exits 2, fdshell reports the parse
+/// error and exits 0: the documented REPL rc-1-vs-2 family (README).
 #[test]
-fn unclosed_midrun_constructs_report_at_once() {
+fn unclosed_midrun_constructs_buffer_until_eof() {
     for (input, want) in [
         ("true && { echo g\n", "group is missing a closing brace"),
         ("true && while :; do echo hi\n", "expected 'done'"),
+        ("echo a | while :; do echo hi\n", "expected 'done'"),
+        (
+            "true && f() {\n",
+            "function definition is missing a closing brace",
+        ),
     ] {
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "stderr={err}");
         assert!(err.contains(want), "{input}: stderr={err}");
-        // Two prompts (one per read) and no `> ` continuation prompt outside
-        // them: the input never enters the continuation buffer.
+        assert_eq!(
+            err.matches(want).count(),
+            1,
+            "{input}: the diagnostic is reported once: {err}"
+        );
+        // One primary prompt per read (the shape, then the read after the
+        // EOF-executed buffer) and exactly one `> ` continuation line.
         assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+        assert_eq!(
+            out.replace(PROMPT, "").matches("> ").count(),
+            1,
+            "{input}: continuations: {out:?}"
+        );
+    }
+}
+
+/// A **closed** multi-line mid-run block is buffered and runs as **one**
+/// statement, the bash parity row of task #294: `true && while :; do` +
+/// `echo hi` + `break` + `done` prints `hi` (the `break` is inside a loop, so
+/// the lines never run apart), and the group twin prints its two lines.
+#[test]
+fn closed_midrun_construct_runs_as_one_statement() {
+    let (out, err, code) = run_repl("true && while :; do\necho hi\nbreak\ndone\nexit\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(
+        !err.contains("not inside a loop"),
+        "the lines ran apart: {err}"
+    );
+    assert!(!err.contains("parse error"), "parse error: {err}");
+    // The buffer's own output, prompts stripped: just `hi`.
+    let body = out.replace(PROMPT, "").replace("> ", "");
+    assert_eq!(body, "hi\n", "stdout: {out:?}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        3,
+        "continuations: {out:?}"
+    );
+
+    let (out, err, code) = run_repl("true && { echo g\necho h\n}\necho tail\nexit\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(!err.contains("parse error"), "parse error: {err}");
+    let body = out.replace(PROMPT, "").replace("> ", "");
+    assert_eq!(body, "g\nh\ntail\n", "stdout: {out:?}");
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        2,
+        "continuations: {out:?}"
+    );
+}
+
+/// A closed **single-line** mid-run construct never prompts: the stamp is the
+/// span's closedness, so a line whose closer is there runs at once — the
+/// continuation prompt is the unclosed shape's alone (task #294). Every loop
+/// row is bounded by a `break` (a `while :; do :; done` twin would loop
+/// forever in the REPL as it does in bash, and hang the suite).
+#[test]
+fn closed_single_line_midrun_never_prompts() {
+    for (input, want) in [
+        ("true && { echo g; }\nexit\n", "g"),
+        ("true && while :; do echo w; break; done\nexit\n", "w"),
+        // A definition writes no output of its own, so the call that follows
+        // shows the mid-run `f() { … }` did define it.
+        ("true && f() { echo F; }\nf\nexit\n", "F"),
+    ] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "stderr: {err}");
+        assert!(!err.contains("parse error"), "parse error: {err}");
+        assert!(out.contains(want), "{input}: stdout: {out:?}");
         assert!(
             !out.replace(PROMPT, "").contains("> "),
             "{input}: continuation prompt: {out:?}"
         );
     }
+    // The closed **stage** arm: its parse-plus-output oddity is #292's (the rc
+    // and the `expected 'done'` family), so only the continuation prompt is
+    // pinned here — the shape never enters the buffer, and the stage runs.
+    let (out, _, _) = run_repl("echo a | while read l; do echo \"$l\"; done\nexit\n");
+    assert!(out.contains('a'), "stdout: {out:?}");
+    assert!(
+        !out.replace(PROMPT, "").contains("> "),
+        "continuation prompt: {out:?}"
+    );
+}
+
+/// The documented divergence at EOF (README, "Interactive shell", task #294):
+/// fdshell executes the buffer it has, so the statements written **before** an
+/// unclosed mid-run construct run (`echo a` prints) and the construct then
+/// reports its missing closer — where bash parses the whole line first, runs
+/// nothing, and exits 2.
+#[test]
+fn statements_before_an_unclosed_midrun_run_at_eof() {
+    let (out, err, code) = run_repl("echo a; true && { echo g\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        1,
+        "continuations: {out:?}"
+    );
+    assert!(out.contains('a'), "the prefix statement ran: {out:?}");
+    assert!(
+        err.contains("group is missing a closing brace"),
+        "stderr={err}"
+    );
 }
 
 /// A single-line `case` whose arm ends with the plain `&` and whose `esac` has

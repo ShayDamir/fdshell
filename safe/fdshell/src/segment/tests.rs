@@ -1403,12 +1403,14 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
                 off: head_off,
                 bodies: head_bodies,
                 background: head_bg,
+                midrun_open: head_mid,
             },
             Segment::Statement {
                 cmd: tail,
                 off: tail_off,
                 bodies: tail_bodies,
                 background: tail_bg,
+                midrun_open: tail_mid,
             },
         ) => {
             assert_eq!(head, b"cat <<A");
@@ -1419,6 +1421,7 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
             assert_eq!(*tail_off, 10);
             assert_eq!(tail_bodies, &vec![b"y\nB".to_vec()], "body 1: `y` + `B`");
             assert!(!*tail_bg, "the suffix runs in the foreground");
+            assert!(!*head_mid && !*tail_mid, "both heredoc runs are closed");
         }
         _ => panic!("expected two Statement segments"),
     }
@@ -1456,16 +1459,93 @@ fn scan_substitution_region_at_a_run_start_is_a_statement() {
                 off,
                 bodies,
                 background: bg,
+                midrun_open: mid,
             } => {
                 assert_eq!(*got, cmd, "{line:?} is one statement");
                 assert_eq!(*off, 0, "{line:?}");
                 assert!(bodies.is_empty(), "{line:?}");
                 assert_eq!(*bg, background, "{line:?}");
+                assert!(!*mid, "{line:?} closes nothing mid-run");
             }
             Segment::Block { closed, .. } => {
                 panic!("{line:?} opened a block (closed {closed}), expected a statement")
             }
             Segment::AsyncInvalid => panic!("{line:?} is a valid split"),
         }
+    }
+}
+
+/// The `midrun_open` of every statement of the scan, in order.
+fn midrun_stamps(line: &[u8]) -> Vec<bool> {
+    scan_segments(line, false)
+        .iter()
+        .map(|segment| match segment {
+            Segment::Statement { midrun_open, .. } => *midrun_open,
+            Segment::Block { .. } => panic!("{line:?} must stay a statement"),
+            Segment::AsyncInvalid => panic!("{line:?} is a valid split"),
+        })
+        .collect()
+}
+
+/// Task #294: a construct opened **mid-run** whose closer never arrived is
+/// stamped on the statement the scan flushes, so `repl/complete.rs` keeps the
+/// prompt reading. Every mid-run arm is pinned on both sides — the closed twin
+/// must stay unstamped, or the REPL would buffer a finished line.
+#[test]
+fn unclosed_midrun_stamps_the_flushed_statement() {
+    for line in [
+        b"true && { echo g".as_slice(),
+        b"true && while :; do echo hi",
+        b"echo a | while :; do echo hi",
+        b"true && f() {",
+        b"true || case x in x) echo c",
+    ] {
+        assert_eq!(midrun_stamps(line), vec![true], "{line:?}");
+    }
+    for line in [
+        b"true && { echo g; }".as_slice(),
+        b"true && while :; do echo hi; break; done",
+        b"echo a | while :; do :; done",
+        b"true && f() { echo hi; }",
+        b"true || case x in x) echo c;; esac",
+    ] {
+        assert_eq!(midrun_stamps(line), vec![false], "{line:?}");
+    }
+}
+
+/// The stamp is the **flush's**, not the run's: an unclosed mid-run span
+/// resumes at the end of input, so every run of the flush is stamped — the
+/// physical line as a whole is unfinished (the shape bash refuses to run at
+/// all, and fdshell runs at EOF; README, task #294).
+#[test]
+fn every_statement_of_a_flush_with_an_unclosed_midrun_is_stamped() {
+    assert_eq!(midrun_stamps(b"echo a; true && { echo g"), vec![true, true]);
+    assert_eq!(
+        midrun_stamps(b"echo a; true && { echo g; } ; echo b"),
+        vec![false, false, false]
+    );
+}
+
+/// The stamp inherits the scanner's region skipping: a heredoc **body** is
+/// never scanned for mid-run openers, so the `true && {` line of a here-doc is
+/// the body's text and the statement carrying it stays unstamped. Scanning the
+/// body for openers would break this shape (LESSONS, task #294).
+#[test]
+fn a_heredoc_body_hides_a_midrun_opener_from_the_stamp() {
+    let segments = scan_segments(b"cat <<T\ntrue && {\nT", false);
+    assert_eq!(segments.len(), 1, "the body lines are not statements");
+    match &segments[0] {
+        Segment::Statement {
+            cmd,
+            midrun_open,
+            bodies,
+            ..
+        } => {
+            assert_eq!(*cmd, b"cat <<T");
+            assert!(!*midrun_open, "the body's opener is body text");
+            assert_eq!(bodies, &vec![b"true && {\nT".to_vec()], "the body");
+        }
+        Segment::Block { .. } => panic!("a here-doc statement"),
+        Segment::AsyncInvalid => panic!("a valid split"),
     }
 }

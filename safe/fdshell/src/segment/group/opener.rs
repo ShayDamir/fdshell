@@ -14,7 +14,14 @@ pub(crate) fn scan<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let (start, i) = (book.start, book.i);
     match super::group_at_run(line, start, i) {
         Some(true) => super::open(line, book),
-        Some(false) => book.i = super::skip_group(line, i, &mut book.state),
+        Some(false) => {
+            // A cond-part group mid-run: skip its span, and an unclosed one
+            // opens the book's mid-run flag, the REPL's continuation signal
+            // (task #294).
+            let (resume, closed) = super::skip_group(line, i, &mut book.state);
+            book.midrun_open |= !closed;
+            book.i = resume;
+        }
         None => book.i = book.state.advance(line, i),
     }
 }

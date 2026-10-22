@@ -124,3 +124,39 @@ fn time_seeds_the_span_and_stays_the_stages_word_zero() {
         assert_eq!(stage(block), Some(line(block).len()), "{block}");
     }
 }
+
+/// The book's mid-run flag after the stage arm has taken (or refused) the word
+/// behind `"echo a | "`.
+fn flag(block: &str) -> bool {
+    let mut book = Book::new();
+    book.start = 0;
+    book.i = b"echo a | ".len();
+    skip(line(block).as_bytes(), &mut book);
+    book.midrun_open
+}
+
+/// The **stage** arm records its span's closedness too: an unclosed block
+/// behind a `|` is the REPL's continuation signal, a closed one is not, and a
+/// stage word that opens no span leaves the flag clear (task #294).
+#[test]
+fn an_unclosed_stage_span_marks_the_book_open() {
+    for block in [
+        "while :; do echo hi",
+        "if :; then echo t",
+        "f() { echo unclosed",
+        "time while :; do echo hi",
+    ] {
+        assert!(flag(block), "{block}: unclosed, so the REPL reads on");
+    }
+    for block in [
+        "while :; do :; done",
+        "if :; then echo t; fi",
+        "f() { echo b; }",
+        "while :; do :; done && echo y",
+    ] {
+        assert!(!flag(block), "{block}: closed, so the line runs");
+    }
+    // Not a stage span: the gated builtin and a keyword-shaped word.
+    assert!(!flag("wait; echo tail"));
+    assert!(!flag("echo while :; do echo hi"));
+}

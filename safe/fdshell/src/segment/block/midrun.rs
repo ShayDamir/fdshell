@@ -17,7 +17,9 @@ use crate::segment::group;
 /// Skip the keyword block (`if`/`for`/`while`/`until`/`case`/`wait`) or the
 /// `name() { … }` definition that opens a cond part at the word start `book.i`:
 /// `Some(resume)` with the cursor moved past the block's span, `None` when the
-/// word opens no block (the caller advances over it as word data).
+/// word opens no block (the caller advances over it as word data). An unclosed
+/// span also opens the book's mid-run flag, the REPL's continuation signal
+/// (task #294).
 ///
 /// The caller owns the three-way command-position split ([`group::group_at_run`],
 /// the same rule `group::opener::scan` applies to a `{`): a *run-start* keyword
@@ -39,9 +41,10 @@ pub(in crate::segment) fn skip(line: &[u8], book: &mut Book<'_>) -> Option<usize
     }
     let tail = line.get(book.i..).unwrap_or(b"");
     let mut quotes = book.state.quotes();
-    let resume = span_end(line, tail, book.i, &mut quotes)?;
+    let (resume, closed) = span_end(line, tail, book.i, &mut quotes)?;
     book.state.set_quotes(quotes);
     book.state.word_active = false;
+    book.midrun_open |= !closed;
     book.i = resume;
     Some(resume)
 }
@@ -68,7 +71,16 @@ pub(in crate::segment) fn skip(line: &[u8], book: &mut Book<'_>) -> Option<usize
 /// builtin would swallow every statement after the first `;` of the run
 /// (`true && wait; echo tail`). A word the scorer rejects stays word data, so
 /// the caller advances over it and the run splits at its `;` as before.
-pub(super) fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) -> Option<usize> {
+///
+/// The pair is (resume, closed): the caller records a `false` closedness as the
+/// book's mid-run flag, which is what makes the REPL keep reading a `true &&
+/// while :; do echo hi` buffer (task #294).
+pub(super) fn span_end(
+    line: &[u8],
+    tail: &[u8],
+    i: usize,
+    quotes: &mut Quotes,
+) -> Option<(usize, bool)> {
     let prefix = time_prefix_len(tail).unwrap_or(0);
     let keyword = tail.get(prefix..).unwrap_or(b"");
     if let Some(kw_len) = opener_len(keyword)
@@ -77,16 +89,17 @@ pub(super) fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) 
         let after_kw = i + prefix + kw_len;
         let mut start = after_kw;
         let (_end, closed) = scan_block(line, after_kw, quotes, &mut start, 1);
-        return Some(if closed {
+        let resume = if closed {
             start.saturating_sub(1)
         } else {
             line.len()
-        });
+        };
+        return Some((resume, closed));
     }
     function_def_name(tail, line, i)?;
     let brace = tail.iter().position(|&b| b == b'{')?;
     let (close, closed) = scan_brace_block(line, i + brace + 1, quotes);
-    Some(if closed { close + 1 } else { line.len() })
+    Some((if closed { close + 1 } else { line.len() }, closed))
 }
 
 #[cfg(test)]

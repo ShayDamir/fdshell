@@ -23,6 +23,10 @@ pub(super) struct Run<'a> {
 /// next flush. `sep_since_run` records that a `;`-separated run was pushed
 /// since the last run push: an async `&` may not target a run the `;` already
 /// terminated (`echo a ; &` — a split-time validation input, task #326).
+/// `midrun_open` records that a mid-run span (a `{ …; }` cond part, a keyword
+/// block after `&&`/`||` or behind `|`, a `name() { … }` written there) has no
+/// closer; `flush_line` stamps it on the runs it flushes, which is how the
+/// REPL learns to keep reading (task #294).
 pub(super) struct Book<'a> {
     pub(super) i: usize,
     pub(super) start: usize,
@@ -32,6 +36,10 @@ pub(super) struct Book<'a> {
     pub(super) segments: Vec<Segment<'a>>,
     pub(super) runs: Vec<Run<'a>>,
     pub(super) sep_since_run: bool,
+    /// Set by an unclosed mid-run span and **never reset**: such a span
+    /// resumes at the end of input, so it is the last thing the scan sees and
+    /// the flush it stamps is the line's last one.
+    pub(super) midrun_open: bool,
 }
 
 impl<'a> Book<'a> {
@@ -46,6 +54,7 @@ impl<'a> Book<'a> {
             segments: Vec::new(),
             runs: Vec::new(),
             sep_since_run: false,
+            midrun_open: false,
         }
     }
 
