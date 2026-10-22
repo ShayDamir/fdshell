@@ -798,6 +798,16 @@ it into a background job (fdshell also offers the named form `cmd &>&name`,
 above). `time cmd` reports how long cmd
 took; `timeout seconds cmd` stops it after a deadline.
 
+A stage is a **command**, so the word behind a `|` starts a command and a keyword
+block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop in
+the stage's own fork with the upstream stage's output on its stdin, and
+`echo a | if :; then echo y; fi` the `if`. The block ends at its own closing
+keyword, and what is written behind it (`; echo tail`, `&& echo y`) is the next
+statement. A `name() { … }` definition in a stage dies with the fork. Two shapes
+deviate: `time` behind the `|` is the stage's command name, not a prefix of the
+block's keyword (bash rejects that line outright, rc 2), and a redirection written
+after the block's closer is dropped (task #298).
+
 ### Aliases
 
 ```shell

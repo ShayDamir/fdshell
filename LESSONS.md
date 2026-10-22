@@ -2430,12 +2430,14 @@ Task #236 (S2 round): the short-circuit gate and the glued cond pair.
   a debug report and absent from a release one (stdout/rc are the same, so
   pins that compare stdout+rc are profile-independent). `package.nix` sets
   **no** `opt-level` at all (`buildRustPackage` + `useNextest`; cargoHook
-  builds `--release`). The probe's "miscompile" is the *rule*: a pair payload
-  behind data is deliberately `Place::Data` (`after`'s pipeline arm — #292's
-  carve-out, a block written as a pipeline stage is word data), so a probe
-  expecting `Command` behind `Place::Data` asserts the divergence away and
-  fails: a test bug. Pin the place the rule sets, and never exempt a shape
-  from unit pins on a toolchain excuse.
+   builds `--release`). The probe's "miscompile" is the *rule*: a pair payload
+   behind data is deliberately `Place::Data` (`after`'s place rule scores the
+   payload of a pair glued behind an argument word as an argument; task #292
+   later moved the *pipeline* `|` twin to the command side with its stage arm,
+   which is exactly this lesson's point — the place is a rule, not a fixed
+   answer), so a probe expecting `Command` behind `Place::Data` asserts the
+   divergence away and fails: a test bug. Pin the place the rule sets, and
+   never exempt a shape from unit pins on a toolchain excuse.
 
 Task #236 (accepted divergence, class owned by task #309): the in-block
 opener/closer pairing is **type-blind** and knowingly left incomplete. Every
@@ -3362,3 +3364,45 @@ tty arm of a *syscall-time* branch is unkillable from the safe crates (see the
 reachable at all. Then pin the end-to-end rows: exit code, hint **count**
 (pipe mid-continuation emits one hint per EOF read — the continuation read
 that breaks, then the next primary read, so two), and aliveness.
+
+## A keyword block behind a `|` is a command: the command-position rule has a fourth arm, and every reader of that rule must carry it
+
+`echo a | while :; do echo b; break; done` printed the loop's text as data,
+because the classification the scan applies to every word — run start, cond part
+behind `&&`/`||`, argument — had no arm for the word behind a pipeline byte, and
+the parse model could not represent the answer anyway: `Pipeline.commands:
+Vec<CommandLine>` typed **every** stage as a command line. Task #292 added the arm
+and the type (`Stage::{Command, Block}`), and the lesson is that this is one rule
+with many readers, all of which move together: `segment/block/stage.rs` (skip the
+block's span inside the run, so the block's own `;` never splits the statement),
+`segment/group/stage.rs` (the arm's gate, asked by the cond layer too),
+`keywords/position.rs::after` (the tail behind a `|` is `Place::Command`, so the
+block's keywords nest), `cond/boundary/block.rs` (the in-block depth walk scores
+the same word), `parse/pipeline/stage.rs` (a stage parses as a block),
+`pipeline/child/block.rs` (the fork runs it through `run::run_parsed`, the
+background-job shape). A subset of those six is a half-state, not a partial fix:
+the span skipped while the parser types stages as commands cannot be represented,
+and a block stage handed to the parser while the scanner split at the block's `;`
+never arrives.
+
+The gate's byte test is `parse::pipeline_pipe` — the tokenizer's own pipe rule —
+never a byte compare, so a quoted `"|"`, an escaped `\|` and a `|` absorbed into
+`>|` / `&>|` / `%>|` stay word data, exactly as the token layer reads them (the
+standing rule that the byte- and token-level scans must agree). The `||` pair is
+not this arm's (its payload belongs to the cond arm, task #236), and a `{ …; }`
+at the stage position stays a word: the brace is the group rule's own
+(tasks #186/#190), so `echo a | { echo b; }` keeps the group parse's failure.
+
+Two consequences came from measuring, not from the design. `time` behind the `|`
+is seeded past by the *shared* span rule, so the span covers the loop while the
+parse layer keeps `time` as the stage's word 0 (rc 127, where bash rejects the
+line with rc 2). And a stage is a **fork**, so the fork's known gaps show
+through the new shape: a stage's `cd`/`wait` (**#381**), a redirection written
+after the block's closer (**#298**), and `while read` (`read`'s own divergence)
+all behave as they already did for a command stage. Pin the family, not the
+headline row: `tests/loops.rs` (every loop keyword, `break`/`exit` scope, the
+builtin-`wait` gate), `tests/pipeline.rs` (a middle block stage, the stage's own
+redirect, captures, `time`, heredoc, function definition), `tests/cond_blocks.rs`
+(the seven rows that left the "body that never returns" list) and
+`segment/block/stage/tests.rs` (span ends, glue, quotes, comments, the builtin
+gate).
