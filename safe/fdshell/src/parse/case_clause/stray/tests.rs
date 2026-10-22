@@ -52,6 +52,50 @@ fn the_arithmetic_region_and_its_operators_are_data() {
     assert!(opens(b"((1)); b)", None));
 }
 
+/// The parens of groups the **arm itself opened** are arm text, never the next
+/// clause's pattern paren: a definer's parameter list `f(` (bash parses the
+/// function definition inside the arm, rc 0), and the `)` of a subshell group
+/// the arm wrote (`(cat`, a bare `(`). The arm's own paren nesting is what
+/// distinguishes them from a clause pattern, which sits behind a plain word at
+/// depth 0.
+#[test]
+fn a_paren_closing_a_group_the_arm_opened_is_not_a_pattern_paren() {
+    // A definer's parameter list, at the arm's start and behind a `;` that
+    // restarts command position.
+    assert!(!opens(b"f() { :; }", None));
+    assert!(!opens(b"echo hi;f() { :; }; f", None));
+    // A definer inside the arm's own block bodies (the `;` behind `then`/`do`/
+    // `}` is command position, so only this gate keeps these parsing).
+    assert!(!opens(b"if true; then f() { :; }; fi", None));
+    assert!(!opens(b"while false; do f() { :; }; done", None));
+    assert!(!opens(b"for i in 1; do f() { :; }; done", None));
+    assert!(!opens(b"{ f() { :; }; }", None));
+    // A subshell group the arm opened: single word, pipeline stage, the `g() ( : )`
+    // definer whose body is a subshell, and a subshell behind `&&`.
+    assert!(!opens(b"(cat)", None));
+    assert!(!opens(b"echo hi|(cat)", None));
+    assert!(!opens(b"g() ( : )", None));
+    // The same group with its closer behind a **command-position** word (`:` is
+    // the subshell's command): the arm's own nesting protects it, so a rule that
+    // only reads the neighbouring word is not enough.
+    assert!(!opens(b"( : )", None));
+    assert!(!opens(b"(true) && echo y", None));
+    // A definer glued to its subshell body has no space between the `)` and the
+    // `(`, so the subshell's `)` follows the bare `(` word.
+    assert!(!opens(b"g() (:)", None));
+}
+
+/// The depth returns to 0 when the arm's group closes, so a clause paren behind
+/// a plain word still bails after a function definition or a subshell has ended
+/// (`case x in a) f() { :; }; b) ;; esac` and `case x in a) (true); b) ;; esac`
+/// are bash rc 2, like every other missing `;;`).
+#[test]
+fn a_clause_paren_behind_a_word_after_a_closed_group_still_bails() {
+    assert!(opens(b"f() { :; }; b)", None));
+    assert!(opens(b"(true); b)", None));
+    assert!(opens(b"g() ( : ); b)", None));
+}
+
 /// The keyword gate: a quoted `")"` is a word whose **text** is `)`, and an
 /// escaped `\)` keeps its pair in the word text, so both stay arm text
 /// (`case x in a) echo ")" ;; esac` and `a) echo \);; esac` are bash rc 0).

@@ -612,6 +612,12 @@ fn case_clauses_without_a_semi_separator_are_a_parse_error() {
         // The arithmetic region ends at its own `)`, so the clause paren written
         // right behind a complete `((…))` is seen.
         "case x in a) ((1)); b) ;; esac",
+        // The arm's own groups close, so the clause paren that follows a function
+        // definition or a subshell is in command position again (the depth rule
+        // of `parse/case_clause/stray.rs`).
+        "case x in a) f() { :; }; b) ;; esac",
+        "case x in a) (true); b) ;; esac",
+        "case x in a) ( : ); b) ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
@@ -624,6 +630,17 @@ fn case_clauses_without_a_semi_separator_are_a_parse_error() {
 /// operator, the arith `for` clause's bare `)` tokens sit inside their `((`
 /// region, and a subshell-shaped arm is task #316's (its arm never matches, so
 /// the pin is the parse, not the output).
+///
+/// The parens of a group **the arm itself opened** are arm text too: a
+/// definer's parameter list (`f() { …; }`, in the arm and inside the arm's
+/// `if`/`while`/`for`/`{ …; }` bodies, behind a `;` that restarts command
+/// position) and a subshell the arm wrote (`(cat)`, `echo hi | (cat)`,
+/// `g() ( : )`, `(true) && …`). bash parses all of these inside the arm, rc 0,
+/// and fdshell must parse them — the arm's own paren nesting decides it, not the
+/// neighbouring word (`( : )` closes its subshell behind a command-position
+/// word). Only the arm that **matches** runs, so the subshell rows pin the
+/// parse: fdshell has no subshell yet (task #316) and the arm whose pattern
+/// does not match never executes.
 #[test]
 fn a_paren_in_a_case_arm_stays_arm_text() {
     for script in [
@@ -631,6 +648,20 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
         "case x in a) echo \\);; esac",
         "case a in a) ((1)) ;; esac",
         "case x in a) (echo sub) ;; esac",
+        // A function definition is an arm command: at the arm's start, behind a
+        // `;`, and inside the arm's own block bodies and brace group.
+        "case x in a) f() { :; } ;; esac",
+        "case x in a) echo hi; f() { :; } ;; esac",
+        "case x in a) if true; then f() { :; }; fi ;; esac",
+        "case x in a) while false; do f() { :; }; done ;; esac",
+        "case x in a) for i in 1; do f() { :; }; done ;; esac",
+        "case x in a) { f() { :; }; } ;; esac",
+        // A subshell group the arm opened, and a definer whose body is one.
+        "case x in a) (cat) ;; esac",
+        "case x in a) echo hi | (cat) ;; esac",
+        "case x in a) g() ( : ) ;; esac",
+        "case x in a) ( : ) ;; esac",
+        "case x in a) (true) && echo y ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
@@ -639,13 +670,18 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
     // 0 and 1).
     let (out, err, code) = run("case x in x) for ((i=0;i<2;i++)); do echo $i; done;; esac");
     assert_eq!((out.as_str(), code), ("0\n1\n", 0), "stderr={err}");
+    // A definition made in an arm is callable there, byte for byte as bash runs
+    // it (bash prints `y`).
+    let (out, err, code) = run("case x in x) f() { builtin echo y; }; f ;; esac");
+    assert_eq!((out.as_str(), code), ("y\n", 0), "stderr={err}");
 }
 
 /// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted
 /// leniencies (a lone `;`, a trailing `&`, the `;&` closer, a closer-shaped word
-/// in the arm, the glued `;;b)esac` of task **#421**), and the rejects that stay
-/// rc 1 where bash is rc 2. `case x in a) ; esac` is the accepted leniency this
-/// task deliberately does not tighten (the plan's open question 2).
+/// in the arm, the glued `;;b)esac` of task **#421**, a `)` with no word before
+/// it — task **#419**'s family), and the rejects that stay rc 1 where bash is
+/// rc 2. `case x in a) ; esac` is the accepted leniency this task deliberately
+/// does not tighten (the plan's open question 2).
 #[test]
 fn the_semi_family_around_an_arm_stays_as_measured() {
     for script in [
@@ -654,6 +690,10 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
         "case x in a) echo hi;& esac",
         "case x in a) echo esac;; esac",
         "case x in a) ; esac",
+        // A `)` with no word before it (the arm is empty, so the paren has no
+        // predecessor) is arm text here; bash rejects it, rc 2 (task #419).
+        "case x in a) ) ;; esac",
+        "case x in a) echo y; ) ;; esac",
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 0, "{script}: {err}");
