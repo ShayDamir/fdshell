@@ -128,8 +128,8 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   (`{ … } &`, `for … done &` written as a condition) runs foreground — bash
   backgrounds the whole list/compound, owner **#352**; a `&` on its **own
   line** behind the condition is the deferral family, owner **#313**; an
-  **empty** condition (`if & then`, `while & do`) has no part to background and
-  records no job, owner **#299**; `break`/`continue`/`return` written with the
+  **empty** condition (`if & then`, `while & do`) is a parse error since task
+  **#299** (bash rc 2, rc 1 here), so it has no job to record; `break`/`continue`/`return` written with the
   `&` reach the **parent** (the loop-control keyword is not a `Cmd`), owner
   **#362**; `{ echo <<T & }` plus body hits the
    **single-line group** here-doc gap of task **#315** (the same shape without
@@ -138,8 +138,8 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
 
   `echo a & ;; echo b` **outside** a block is bash's syntax error, rc 1. Pinned
   in `safe/fdshell/tests/async.rs`, `loops.rs`, `group.rs`, `case.rs`,
-  `cond_blocks.rs`, `block_bodies.rs`, `repl.rs` and the `segment`/`parse` unit
-  tests.
+  `cond_blocks.rs`, `block_bodies.rs`, `block_conditions.rs`, `repl.rs` and the
+  `segment`/`parse` unit tests.
 - A **here-doc** travels with the statement its `&` terminates, and a second
   here-doc written **behind** the `&` on the same line is a separate statement
   with its own body: `cat <<A & cat <<B` plus the four body lines prints both

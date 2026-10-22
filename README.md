@@ -167,7 +167,9 @@ AND-list condition is the job too: `if true && false & then echo x; fi` prints
 short-circuited away (`if false && true & then echo x; fi`) records no job and
 gates on that part's status, and a **compound** condition (`{ … } &`,
 `for … done &`) runs foreground — bash backgrounds the whole list/compound
-(owner #352).
+(owner #352). The fully **empty** condition of this family (`if & then`,
+`while & do`) is a parse error since task #299 — there is no condition to
+background (see "Conditionals and loops").
 
 The POSIX `wait [pid…]` builtin reaps background tasks by pid (or every task
 when given no argument) and sets `$?` to the last reaped status; `$!` holds
@@ -792,6 +794,17 @@ A redirection written after a block's closing keyword belongs to the **whole**
 block: `for x in a b; do echo $x; done > f` files the loop's output in `f`, the
 glued `done>f` included, and the block's own fd changes are undone when it ends
 (see "Redirection" above).
+
+A block's **condition** must be a non-empty list: `if ; then echo x; fi`,
+`elif ; then`, `while ; do :; done`, `until ; do :; done` and their `&` and
+newline spellings (`if` newline `then`, `if & then`, `while & do`) are parse
+errors — bash stops with rc 2, fdshell with rc 1 and its own message
+(`missing condition` for `if`/`elif`, `expected condition` for the loops). An
+empty condition is *true* at run time, so `while ; do echo x; done` would never
+end. The rule covers conditions only: a `for` **word list** may be empty
+(`for i in; do echo x; done` iterates zero times, bash rc 0), a `case` word is
+not a condition, and an empty `for ((…))` arithmetic condition is true, as in
+bash.
 
 `for ((init; cond; step))` is bash's arithmetic loop: the three clauses are
 evaluated exactly like an `((expr))` command — in the current shell, so the

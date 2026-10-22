@@ -2295,16 +2295,45 @@ rule is scoped: `case` clause bodies stay allowed empty (`case x in a) ;; esac`
 is bash rc 0), and the `is_empty` filter on `IfBlock::else_body` became
 unreachable once the empty `else` body is an error — a guard that can never fire
 is an equivalent-mutant source, so it was deleted, not kept "defensive".
-Sibling forms deliberately left open (measured, filed): empty block
-**conditions** (#299), `case x in a) esac` (#300), missing `;` before
-`done`/`fi` (#301), empty function body (#302), redirect-only command (#303).
-Pins: `parse/tests.rs` (`empty_then_body_is_err`, `empty_elif_body_is_err`,
-`empty_else_body_is_err`, `empty_do_body_is_err`,
+Sibling forms deliberately left open (measured, filed): `case x in a) esac`
+(#300), missing `;` before `done`/`fi` (#301), empty function body (#302),
+redirect-only command (#303). Pins: `parse/tests.rs` (`empty_then_body_is_err`,
+`empty_elif_body_is_err`, `empty_else_body_is_err`, `empty_do_body_is_err`,
 `for_semi_before_done_reports_before_the_empty_body`,
 `empty_condition_pins_the_body_message`, `non_empty_and_case_bodies_stay_green`)
 and `tests/block_bodies.rs` (every form rc 1 with its message; the two
 empty-`do` hang forms under the bounded child so a regression panics, never
 hangs; the heredoc arm-body pins; the bash-parity green pins).
+
+The **condition** sibling closed the same way (task #299): bash rejects an empty
+`if`/`elif`/`while`/`until` condition (rc 2) and an empty condition is **true**
+at run time, so `while ; do echo x; done` ran forever. One helper
+`block_condition` **beside** `block_body` is called at the three condition sites
+(`semi.rs::span_verbatim` for the `if`, `elif.rs`, `while_block.rs`), each with
+the keyword family's **existing** variant — `missing condition` for `if`/`elif`,
+`expected condition` for the loops — so no variant was added and the two that
+were unreachable became live. Two rules came out of it. **Test the trimmed
+slice, never the raw one**: the raw slice between the keywords always carries
+POSIX's `;`, so a raw `is_empty` never fires, and the `&`-only slice (`if &
+then`, `while & do`) is raw-**non**-empty / trimmed empty — that is the row that
+pins the choice (and the `&` is cut by `trim_condition`, not by the rule).
+**The minimum reachable index is the bound**: `while_block.rs` carried
+`ensure!(do_idx >= 2, ExpectedCondition)`, dead code, because
+`find_preceded_by` only scores a keyword preceded by a `;`/`&` and token 0 is
+the block's own keyword, so 2 is the smallest reachable `do_idx` — a `>= 2`
+guard can never fire and `while ; do` walked straight through it (the
+"redundant boundary ±1" pattern read from the other side: a guard at the
+minimum is as dead as one past it, and deleting it is the fix, not keeping it
+"defensive"). The rule stays scoped: a `for` **word list** may be empty
+(`for i in; do …; done` iterates zero times, bash rc 0), a `case` word is not a
+condition (#415), and the arith clause's empty condition is true in bash, so
+`for ((;;))` is untouched. Pins: `parse/tests.rs`
+(`empty_if_condition_is_err`, `empty_elif_condition_is_err`,
+`empty_loop_condition_is_err`, `non_empty_conditions_stay_green`),
+`parse/semi/trim/tests.rs` (`block_condition_rejects_a_trimmed_empty_slice`) and
+`tests/block_conditions.rs` (every form rc 1 with its message; the loop forms
+under the bounded child — the empty condition is true, so the regression is a
+hang; the neighbouring leniencies green).
 
 ## A definer word makes its body brace a group opener for the cond layer
 `f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list
