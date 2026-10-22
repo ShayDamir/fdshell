@@ -91,3 +91,19 @@ fn clause_body_with_lone_semi() {
         vec![1, 3, 12]
     );
 }
+
+/// The `esac`-closed clause of task #300 (`case x in a) esac`, bash rc 0): this
+/// walk is lenient by design (a `)` searched in `pos..esac_idx`, a missing `;;`
+/// jumps to `esac_idx`), so it already covers the pattern word of a clause that
+/// has no body at all. Pinned so the lenient walk and the strict clause walk of
+/// `case_clause.rs` cannot drift apart on the shape.
+#[test]
+fn pattern_of_a_clause_closed_by_esac_is_protected() {
+    // Tokens: case {a,b} in {x,y} ) esac
+    assert_eq!(indices(b"case {a,b} in {x,y}) esac"), vec![1, 3]);
+    // The last clause of a two-clause block, closed at `esac`.
+    assert_eq!(
+        indices(b"case {a,b} in {x,y}) echo hi ;; {z,w}) esac"),
+        vec![1, 3, 9]
+    );
+}

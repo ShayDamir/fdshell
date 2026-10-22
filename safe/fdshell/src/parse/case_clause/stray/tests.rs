@@ -1,14 +1,16 @@
 #![allow(clippy::unwrap_used)]
 
 use super::opens_next_pattern;
-use crate::parse::token::tokenize;
+use crate::parse::token::tokenize_statement;
 
-/// [`opens_next_pattern`] over the tokens of `line`, with `limit` as the index of
-/// the `;;` window that ends the arm region (`None`: the run up to `esac`).
-/// `line` is the statement's own text, so the keyword gate [`super::keyword_word`]
-/// reads the spans the tokens were built from.
+/// [`opens_next_pattern`] over the tokens of the statement `line`, with `limit`
+/// as the index of the `;;` window that ends the arm region (`None`: the run up
+/// to `esac`). This is the token list the parse layer scans (`case_clause::
+/// extract::body`), heredoc bodies blanked and byte offsets preserved, and `line`
+/// is the statement's own text, so the keyword gate [`super::keyword_word`] reads
+/// the spans the tokens were built from.
 fn opens(line: &[u8], limit: Option<usize>) -> bool {
-    opens_next_pattern(&tokenize(line).unwrap(), limit, line)
+    opens_next_pattern(&tokenize_statement(line).unwrap(), limit, line)
 }
 
 /// The shape of the bug: the arm is the word `b` and the `)` is the pattern paren
@@ -78,7 +80,7 @@ fn the_limit_is_the_semi_semi_window() {
 /// (task #418 owns the shape; the clause walk must not make it worse).
 #[test]
 fn a_paren_with_no_word_before_it_is_not_a_pattern_paren() {
-    let tokens = tokenize(b"a)").unwrap();
+    let tokens = tokenize_statement(b"a)").unwrap();
     let region = tokens.get(1..).unwrap();
     assert!(!opens_next_pattern(region, None, b"a)"));
     assert!(!opens(b"case b in b)", None));
@@ -91,4 +93,13 @@ fn a_paren_behind_an_operator_token_is_not_a_pattern_paren() {
     assert!(!opens(b";;)", None));
     assert!(!opens(b"|)", None));
     assert!(!opens(b"&)", None));
+}
+
+/// A heredoc **body** is blanked by `tokenize_statement`, so it is never in the
+/// arm region: the `)` of a body line, and even a word glued to one, is body
+/// text, not a pattern paren (`case x in x) cat <<T` newline `x)` newline `T`
+/// newline `esac` prints `x)` verbatim in bash, rc 0).
+#[test]
+fn a_heredoc_body_written_in_an_arm_is_not_in_the_region() {
+    assert!(!opens(b"case x in x) cat <<T\nx)\n)\nT\nesac", None));
 }

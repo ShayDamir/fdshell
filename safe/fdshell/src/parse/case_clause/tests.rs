@@ -1,9 +1,10 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use super::CaseClause;
 use super::parse_clauses;
 use crate::error::parse::ParseError;
 use crate::parse::token::tokenize_statement;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::{Origin, Position, ScriptText, ShortCStr};
@@ -28,10 +29,6 @@ fn clauses_of(line: &[u8]) -> Result<Vec<CaseClause>, Report<ParseError>> {
     parse_clauses(&tokens, in_idx + 1, esac_idx, &stext(line))
 }
 
-fn message(err: &Report<ParseError>) -> String {
-    err.current_context().to_string()
-}
-
 /// The task's shape: a clause closed **directly** by `esac` is a clause with an
 /// empty body, exactly as the `;;`-terminated empty clause is
 /// (`parse::tests::case_empty_body_clause`). bash runs it at rc 0.
@@ -45,7 +42,8 @@ fn a_clause_closed_by_esac_has_an_empty_body() {
         // newline into a `;` token, so `pos` already landed one short of `esac`.
         b"case x in a) ; esac".as_slice(),
     ] {
-        let clauses = clauses_of(line).unwrap_or_else(|e| panic!("{line:?}: {}", message(&e)));
+        let clauses =
+            clauses_of(line).unwrap_or_else(|e| panic!("{line:?}: {}", e.current_context()));
         assert_eq!(clauses.len(), 1, "{line:?}");
         assert!(clauses[0].body.data.is_empty(), "{line:?}");
     }
@@ -66,8 +64,14 @@ fn a_pattern_list_that_never_closes_reports_the_missing_paren() {
         b"case x in a esac".as_slice(),
         b"case \"x\" in echo yes;; esac".as_slice(),
     ] {
-        let err = clauses_of(line).err().unwrap_or_else(|| panic!("{line:?} is ok"));
-        assert_eq!(message(&err), "case: missing ')'", "{line:?}");
+        let err = clauses_of(line)
+            .err()
+            .unwrap_or_else(|| panic!("{line:?} is ok"));
+        assert_eq!(
+            err.current_context().to_string(),
+            "case: missing ')'",
+            "{line:?}"
+        );
     }
 }
 
@@ -79,7 +83,13 @@ fn an_empty_pattern_reports_the_empty_pattern() {
         b"case x in |) echo yes;; esac".as_slice(),
         b"case x in ) esac".as_slice(),
     ] {
-        let err = clauses_of(line).err().unwrap_or_else(|| panic!("{line:?} is ok"));
-        assert_eq!(message(&err), "case: empty pattern", "{line:?}");
+        let err = clauses_of(line)
+            .err()
+            .unwrap_or_else(|| panic!("{line:?} is ok"));
+        assert_eq!(
+            err.current_context().to_string(),
+            "case: empty pattern",
+            "{line:?}"
+        );
     }
 }

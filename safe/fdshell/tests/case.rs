@@ -542,3 +542,144 @@ fn ampersand_in_an_arm_keeps_the_clause_rules() {
         assert!(err.contains("unexpected character"), "{script}: {err}");
     }
 }
+
+// --- a clause closed directly by `esac`, and the missing `;;` (task #300) -----
+//
+// bash reads an arm as a **command list**, so two things follow, and fdshell
+// reads them the same way. An arm may be **empty**, closed straight at `esac`
+// (`case x in a) esac`: bash rc 0) — the opposite of the `then`/`do` bodies,
+// which bash requires non-empty (task #233, `tests/block_bodies.rs`). And the
+// `)` of the next clause's pattern list is a token the arm's command list cannot
+// take, so clauses written without their `;;` are a syntax error: bash rc 2,
+// fdshell rc 1 with `case: missing ';;' between clauses` (the repo-wide rc
+// convention). Every row below is a bash 5.3.9 measurement of 2026-10-22.
+
+#[test]
+fn case_clause_closed_directly_by_esac_is_accepted() {
+    for script in [
+        "case x in a) esac",
+        "case a in a) esac",
+        "case x in a|b) esac",
+        "case x in \"a\") esac",
+        // An empty clause in the middle, and the last clause closed at `esac`.
+        "case x in a) echo one;; b) esac",
+        "case x in esac",
+        // The multi-line spelling (a newline is the tokenizer's `;` token).
+        "case x in\na)\nesac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+    }
+    // The arm that matches runs its body; the `esac`-closed arm runs nothing.
+    let (out, err, code) = run("case x in x) echo one;; b) esac");
+    assert_eq!((out.as_str(), code), ("one\n", 0), "stderr={err}");
+}
+
+/// The redirection written after an `esac` that closed an empty arm is the
+/// **block's** redirect, and it opens: bash creates the file (task #298's rule,
+/// unchanged by the clause walk).
+#[test]
+fn case_arm_closed_by_esac_takes_the_block_redirect() {
+    for (script, want) in [
+        ("case x in a) esac >{f}", ""),
+        ("case x in x) echo one;; b) esac >{f}", "one\n"),
+    ] {
+        let dir = scratch_dir();
+        let f = dir.join("arm.txt").to_str().unwrap().to_string();
+        let (out, err, code) = run_in(&dir, &script.replace("{f}", &f));
+        // The redirect takes the whole block's stdout, so the matching arm's
+        // bytes land in the file, not on stdout.
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+        assert!(dir.join("arm.txt").exists(), "{script}: bash opens it");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("arm.txt")).unwrap_or_default(),
+            want,
+            "{script}: bash writes the block's output into the file"
+        );
+    }
+}
+
+#[test]
+fn case_clauses_without_a_semi_separator_are_a_parse_error() {
+    for script in [
+        "case x in a) b) ;; esac",
+        "case x in a) b) esac",
+        "case x in a) *) esac",
+        "case x in a) x=1) ;; esac",
+        "case x in a) echo hi;; b) c) ;; esac",
+        // Behind a `;` the word is in command position again.
+        "case x in a) echo hi; b) ;; esac",
+        // The arithmetic region ends at its own `)`, so the clause paren written
+        // right behind a complete `((…))` is seen.
+        "case x in a) ((1)); b) ;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains("missing ';;'"), "{script}: {err}");
+    }
+}
+
+/// A `)` that is **not** in command position is arm text, as it always was: the
+/// quoted and escaped parens are word tokens, `((1))`'s second `)` follows an
+/// operator, the arith `for` clause's bare `)` tokens sit inside their `((`
+/// region, and a subshell-shaped arm is task #316's (its arm never matches, so
+/// the pin is the parse, not the output).
+#[test]
+fn a_paren_in_a_case_arm_stays_arm_text() {
+    for script in [
+        "case x in a) echo \")\";; esac",
+        "case x in a) echo \\);; esac",
+        "case a in a) ((1)) ;; esac",
+        "case x in a) (echo sub) ;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+    }
+    // The arith `for` row with the arm that matches runs its loop (bash prints
+    // 0 and 1).
+    let (out, err, code) = run("case x in x) for ((i=0;i<2;i++)); do echo $i; done;; esac");
+    assert_eq!((out.as_str(), code), ("0\n1\n", 0), "stderr={err}");
+}
+
+/// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted
+/// leniencies (a lone `;`, a trailing `&`, the `;&` closer, a closer-shaped word
+/// in the arm, the glued `;;b)esac` of task **#421**), and the rejects that stay
+/// rc 1 where bash is rc 2. `case x in a) ; esac` is the accepted leniency this
+/// task deliberately does not tighten (the plan's open question 2).
+#[test]
+fn the_semi_family_around_an_arm_stays_as_measured() {
+    for script in [
+        "case x in a) echo hi; esac",
+        "case x in a) echo hi & esac",
+        "case x in a) echo hi;& esac",
+        "case x in a) echo esac;; esac",
+        "case x in a) ; esac",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: {err}");
+    }
+    // The `&` row backgrounds the arm's statement: the pin is the rc only, never
+    // the job's stdout (LESSONS).
+    for script in [
+        // The last clause has no `;;`: the block span never closes (bash rc 2).
+        "case x in a) echo one;; *) echo two esac",
+        // A closer-shaped pattern with no `;;` at all (bash rc 2).
+        "case x in a) esac ;; esac",
+        // The closer glued behind a pattern's `)` is never found by the block
+        // scan (bash rc 0, task #421 owns the shape).
+        "case x in a) echo hi;;b)esac",
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: {err}");
+    }
+}
+
+/// A heredoc **body** written in an arm is body text, never clause structure:
+/// `tokenize_statement` blanks the body region, so a `)` written there (even
+/// glued to a word) is not the pattern paren of the missing `;;`. bash prints
+/// the body verbatim, rc 0.
+#[test]
+fn a_heredoc_body_in_an_arm_keeps_its_paren() {
+    let (out, err, code) = run("case x in x) cat <<T\nx)\n)\nT\nesac");
+    assert_eq!((out.as_str(), code), ("x)\n)\n", 0), "stderr={err}");
+}

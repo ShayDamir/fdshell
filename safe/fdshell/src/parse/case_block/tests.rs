@@ -103,3 +103,28 @@ fn in_word_is_a_keyword_only_when_unquoted() {
         assert!(missing_in(line), "{line:?} must report the missing `in`");
     }
 }
+
+/// A clause closed directly by `esac` is a clause with an **empty body** (task
+/// #300, bash rc 0), and the clause list keeps counting after it. The complete
+/// empty block stays zero clauses (the shape task #273 pins above).
+#[test]
+fn a_clause_closed_by_esac_is_a_clause_with_an_empty_body() {
+    let block = |line: &[u8]| {
+        let text = stext(line);
+        let tokens = tokenize_statement(line).unwrap();
+        tokens_to_case(&tokens, &text)
+            .unwrap_or_else(|e| panic!("{line:?}: {}", e.current_context()))
+    };
+    let b = block(b"case x in a) esac");
+    assert_eq!(b.clauses.len(), 1);
+    let first = b.clauses.first().unwrap();
+    assert!(first.body.data.is_empty());
+    assert!(first.patterns.first().unwrap().text.eq_bytes(b"a"));
+
+    let b = block(b"case x in a) echo one;; b) esac");
+    assert_eq!(b.clauses.len(), 2);
+    assert!(b.clauses.first().unwrap().body.data.eq_bytes(b"echo one"));
+    assert!(b.clauses.get(1).unwrap().body.data.is_empty());
+
+    assert_eq!(block(b"case x in esac").clauses.len(), 0);
+}

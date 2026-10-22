@@ -3413,6 +3413,50 @@ fn case_empty_body_clause() {
     assert!(cb.clauses[0].body.data.is_empty());
 }
 
+/// Task #300: the same empty body, written **without** the `;;` — a clause whose
+/// `)` is the token right before `esac` is a clause closed at `esac`, not a
+/// clause missing its paren (bash runs `case x in a) esac` at rc 0). The
+/// positional test that used to fire here read `pos == esac_idx` right after a
+/// successful `)` as the missing-paren shape.
+#[test]
+fn case_clause_closed_by_esac_has_an_empty_body() {
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in a) esac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 1);
+    assert_eq!(cb.clauses[0].patterns[0].text, c"a".into());
+    assert!(cb.clauses[0].body.data.is_empty());
+    // The multi-line spelling, whose newline becomes a `;` token and already
+    // landed one short of `esac` (the asymmetry the bug turned on).
+    let ParsedLine::Case(cb) = parse(b"case \"x\" in\na)\nesac").unwrap() else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses.len(), 1);
+    assert!(cb.clauses[0].body.data.is_empty());
+}
+
+/// The clause-separation sibling of task #300: the next clause's pattern paren
+/// written inside an arm is bash's `syntax error near unexpected token ')'`
+/// (rc 2) and fdshell's own message, at its rc 1.
+#[test]
+fn case_clauses_without_a_semi_report_missing_semi() {
+    for line in [
+        b"case \"x\" in a) b) ;; esac".as_slice(),
+        b"case \"x\" in a) b) esac",
+        b"case x in a) *) esac",
+        b"case x in a) echo hi; b) ;; esac",
+    ] {
+        let err = parse(line)
+            .err()
+            .unwrap_or_else(|| panic!("{line:?} is ok"));
+        assert_eq!(
+            err.current_context().to_string(),
+            "case: missing ';;' between clauses",
+            "{line:?}"
+        );
+    }
+}
+
 #[test]
 fn case_long_body_catches_skip() {
     let ParsedLine::Case(cb) =
