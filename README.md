@@ -764,6 +764,26 @@ case "$1" in
 esac
 ```
 
+`for ((init; cond; step))` is bash's arithmetic loop: the three clauses are
+evaluated exactly like an `((expr))` command — in the current shell, so the
+assignments they make survive the loop and `$i` expands in the body (and after
+it). The init runs once, the condition before every body, the step after it; a
+clause written empty is a no-op and an **empty condition is true**, so
+`for ((;;))` runs until its body `break`s out. The loop's status is the body's
+last command, and `0` when the body never ran. `do` is required: the region is
+followed by at most one `;` and the keyword `do` (`)) do`, `)) ; do`, `))`+
+newline, and the glued `))do`), and the body is the usual `do … done` block — a
+here-doc inside it is re-read once per iteration. The region is read as raw
+bytes, so `;`, `|`, `<<`, a quote and a newline inside it are data:
+`for ((i=0;i<$(echo 3);i++))` has three clauses, and the `<<` of `1<<2` claims no
+here-doc. Shapes that stay open: a `{ …; }` body where bash accepts it
+(task #394), the glued `for((i=0;i<3;i++))` with no space after `for` (task #396),
+a step spaced as `i ++` (its side effect is lost, so the loop never ends — task
+#395), and a `${…}` expansion in a clause, which is a syntax error on every
+arithmetic surface (task #397). A clause count that is not three (`for ((i=0))`,
+`for ((i=0;i<2;i++;))`) and any word between `))` and `do` (`))x`, `)) 2>/dev/null`,
+`)) ;;`) are parse errors, as they are in bash (rc 2 there, rc 1 here).
+
 `break` and `continue` accept an optional loop count (`break 2`), and are builtins
 whose own status is `0`: right after a loop that ends through one of them, `$?` is
 `0`, not the status of the last command that ran. The status of a command is `0`
