@@ -823,7 +823,15 @@ group **the arm itself opened** closes that group: a function definition
 (`case x in x) f() { echo y; }; f ;; esac` prints `y` in bash and here, rc 0,
 and the same holds for a definition behind a `;` or inside the arm's
 `if`/`while`/`for`/`{ …; }` bodies) and a subshell the arm wrote (`a) (cat) ;;`,
-`a) echo hi | (cat) ;;`, `a) g() ( : ) ;;`). Shapes that stay open: a `)`
+`a) echo hi | (cat) ;;`, `a) g() ( : ) ;;`). An **array-literal assignment**
+carries its group's `(` **mid-word** — the tokenizer's word for `m=(1)` is `m=(1`
+— so `case x in a) m=(1) ;; esac`, `a) x=(1) y=2 ;;` and `a) arr=("$@") ;;` parse
+at rc 0 as bash does; fdshell has no array runtime, so the assignment itself
+dispatches the literal's `)` as a command at run time, exactly as it does at top
+level (task #422) — the parse is the gate here. The paren test reads a word's
+bytes **with its quote mask**, so a quoted `(` (`a) echo "x(" b) ;;`) and an
+escaped one (`a) echo x\() ;;`, where the mask marks the pair unquoted and only
+the backslash says it is escaped) open no group. Shapes that stay open: a `)`
 written after an argument inside an arm (task #419), a nested `case` in an arm
 (task #418), bash's `;&`/`;;&` terminators (task #420), a subshell arm that
 **runs** (task #316), and a closer glued behind a pattern's `)`

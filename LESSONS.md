@@ -2360,17 +2360,22 @@ against bash 5.3.9):
   in `parse/case_clause/stray.rs`: the arm region — bounded by the `;;` **window**,
   so the next clause's own pattern parens are never in scope — contains a `)`
   whose predecessor word **sits** in `Place::Command` **and that closes no group
-  the arm itself opened**. Four gates carry the measurements: the **paren depth
-  the arm opened** (`opens_a_group`: a definer's parameter list is the word `f(`
-  plus a `)` token, a subshell the arm wrote is a `(w` word plus a `)` token, so
-  a `)` at depth > 0 is the arm's own and only a depth-0 `)` is a candidate —
-  `case x in a) f() { echo y; }; f ;; esac`, `a) (cat) ;;`,
-  `a) echo hi | (cat) ;;`, `a) g() ( : ) ;;` and the definers an arm's
-  `if`/`while`/`for`/`{ …; }` bodies write behind a `;` are all bash rc 0); the
-  `((` arithmetic region (`for ((i=0;i<2;i++))` writes bare `)` tokens behind its
-  `;`, in command position, and bash takes the arm at rc 0 — and `((` is
-  deliberately **not** an `opens_a_group` paren, so the region owns those parens
-  and `a) ((1)); b) ;; esac` still bails); the operator-predecessor test (the
+   the arm itself opened**. Four gates carry the measurements: the **paren depth
+   the arm opened** (`opens_groups`: a definer's parameter list is the word `f(`
+   plus a `)` token, a subshell the arm wrote is a `(w` word plus a `)` token, an
+   array-literal assignment is the word `m=(1` plus a `)` token, so a `)` at
+   depth > 0 is the arm's own and only a depth-0 `)` is a candidate —
+   `case x in a) f() { echo y; }; f ;; esac`, `a) (cat) ;;`,
+   `a) echo hi | (cat) ;;`, `a) g() ( : ) ;;`, `a) m=(1) ;;`, `a) arr=("$@") ;;`
+   and the definers/array literals an arm's `if`/`while`/`for`/`{ …; }` bodies
+   write behind a `;` are all bash rc 0); the
+   `((` arithmetic region (`for ((i=0;i<2;i++))` writes bare `)` tokens behind its
+   `;`, in command position, and bash takes the arm at rc 0 — and `((` is
+   deliberately **not** an `opens_groups` paren, at a word's edge
+   (`a) ((1)); b) ;; esac` still bails) nor mid-word (`m=$((1))` is one word whose
+   parens close inside it, so counting them would hold the depth above 0 and
+   swallow the clause paren of `a) m=$((1)); b) ;; esac`, bash rc 2); the
+   operator-predecessor test (the
   tokenizer emits every unquoted `)` as its own token, so `((1))` is the tokens
   `((1`, `)`, `)` and its second `)` closes the arithmetic command, not a pattern
   list); and `keyword_word`, the same quote gate the keyword scorers open with,
@@ -2383,10 +2388,26 @@ against bash 5.3.9):
   shape is the lesson: paren ownership is a **nesting** question, so the scan
   counts the arm's opens and closes; a byte test on one token sees the shape of
   the tokenizer, not the shape of the command. Two cheaper rules were measured
-  and rejected: a whole-arm `((` exemption loses
-  `case x in a) ((1)); b) ;; esac` (bash rc 2), and "any `)` in an arm is an
-  error" rejects `case x in a) (echo sub) ;; esac` (bash rc 0, and every arm of
-  task #316's shape the day subshells land).
+   and rejected: a whole-arm `((` exemption loses
+   `case x in a) ((1)); b) ;; esac` (bash rc 2), and "any `)` in an arm is an
+   error" rejects `case x in a) (echo sub) ;; esac` (bash rc 0, and every arm of
+   task #316's shape the day subshells land).
+   **The word's two edges are not enough either**: the first depth counter tested
+   `(` at a word's start and at its end — the shape of `(cat` and of `f(`, not the
+   shape of an **array-literal assignment**. The tokenizer's word for `m=(1)` is
+   `m=(1` (mask: every byte `Unquoted`) and the array's `)` is a token of its own,
+   so a mid-word `(` never entered the depth, the array's `)` was judged a depth-0
+   clause paren, and `case x in a) m=(1) ;; esac` — bash rc 0, idem
+   `a) x=(1) y=2 ;;`, `a) echo hi; x=(1) ;;`, `a) arr=("$@") ;;`, `a) m=() ;;`, and
+   the array literals the arm's `if`/`while`/`{ …; }` bodies write behind a `;` —
+   became `case: missing ';;' between clauses`. So the gate counts **every**
+   group-opening `(` byte of the word, and it reads the token's **quote mask** to
+   do it: a quoted `(` (`echo "x(" b) ;;`) is word text, and an **escape pair** is
+   one literal byte whose mask bit is `Unquoted` — the backslash is the only
+   marker — so `x\(` opens nothing and `case x in a) x\() ;; esac` (bash rc 2) is
+   refused again. Running an array assignment is task **#422**'s word-model half
+   (fdshell has no arrays, so the arm dispatches the literal's `)` as a command,
+   as it does at top level); the **parse** gate is this rule's.
 
 Two layer facts the fix leans on. **A heredoc body is never in the region**:
 `parse/token/statement.rs::tokenize_statement` blanks the body regions and the
@@ -2404,15 +2425,20 @@ directly), `parse/tests.rs::case_*`, `parse/case_block/tests.rs`,
 `parse/case_block/literal/tests.rs` and `tests/case.rs` (the bash-parity table,
 the arm's own definer and subshell parens — the runnable
 `case x in x) f() { echo y; }; f ;; esac` prints `y` exactly as bash does —
-the accepted leniencies — `case x in a) ; esac`, the `&` and `;&` closers, the
-closer-shaped word in an arm, a `)` with no word before it (`a) ) ;; esac`,
-#419's family) — and the family's left-open rows: #418, #419,
-#420, #421 and #316). **Follow-up written down now**: when `(` becomes an
-operator token (task #316), all three of `stray.rs`'s paren readers — the `((`
-region rule, the `opens_a_group` **depth counter** (the latter two read word
-bytes today) and the command-position rule — are scored on the token list, so a
-subshell's `(`/`)` pair becomes operators there and `(w`/`f(` stop being word
-bytes.
+the arm's array literals — the runnable `case x in x) m=(1); echo done ;; esac`
+prints `done`, its `)` dispatching as a command on stderr exactly as it does at
+top level — the accepted leniencies — `case x in a) ; esac`, the `&` and `;&`
+closers, the closer-shaped word in an arm, a `)` with no word before it
+(`a) ) ;; esac`, #419's family) — and the family's left-open rows: #418, #419,
+#420, #421, #316 and #422 (arrays have no runtime; the parse gate is separate).
+**Follow-up written down now**: when `(` becomes an operator token (task #316),
+all three of `stray.rs`'s paren readers — the `((` region rule and the
+`opens_groups` **depth counter** (those two read **word bytes** today: the region
+rule its word's leading `((`, the depth counter every unquoted, unescaped `(`
+byte of the word, mid-word ones included) and the command-position rule (it reads
+the **token list**, through the shared `Place` machine) — must be scored on the
+token list, so a subshell's `(`/`)` pair becomes operators there and
+`(w`/`f(`/`m=(1` stop being word bytes.
 
 ## A definer word makes its body brace a group opener for the cond layer
 `f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list
