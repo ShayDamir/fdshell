@@ -2359,15 +2359,31 @@ against bash 5.3.9):
   test is the shared command-position machine ("One clause rule, three scorers")
   in `parse/case_clause/stray.rs`: the arm region — bounded by the `;;` **window**,
   so the next clause's own pattern parens are never in scope — contains a `)`
-  whose predecessor word **sits** in `Place::Command`. Three gates carry the
-  measurements: the `((` arithmetic region (`for ((i=0;i<2;i++))` writes bare `)`
-  tokens behind its `;`, in command position, and bash takes the arm at rc 0);
-  the operator-predecessor test (the tokenizer emits every unquoted `)` as its own
-  token, so `((1))` is the tokens `((1`, `)`, `)` and its second `)` closes the
-  arithmetic command, not a pattern list); and `keyword_word`, the same quote gate
-  the keyword scorers open with, for a quoted `")"` (an escaped `\)` keeps its
-  pair in the word text, so `eq_bytes(b")")` never sees it). Two cheaper rules
-  were measured and rejected: a whole-arm `((` exemption loses
+  whose predecessor word **sits** in `Place::Command` **and that closes no group
+  the arm itself opened**. Four gates carry the measurements: the **paren depth
+  the arm opened** (`opens_a_group`: a definer's parameter list is the word `f(`
+  plus a `)` token, a subshell the arm wrote is a `(w` word plus a `)` token, so
+  a `)` at depth > 0 is the arm's own and only a depth-0 `)` is a candidate —
+  `case x in a) f() { echo y; }; f ;; esac`, `a) (cat) ;;`,
+  `a) echo hi | (cat) ;;`, `a) g() ( : ) ;;` and the definers an arm's
+  `if`/`while`/`for`/`{ …; }` bodies write behind a `;` are all bash rc 0); the
+  `((` arithmetic region (`for ((i=0;i<2;i++))` writes bare `)` tokens behind its
+  `;`, in command position, and bash takes the arm at rc 0 — and `((` is
+  deliberately **not** an `opens_a_group` paren, so the region owns those parens
+  and `a) ((1)); b) ;; esac` still bails); the operator-predecessor test (the
+  tokenizer emits every unquoted `)` as its own token, so `((1))` is the tokens
+  `((1`, `)`, `)` and its second `)` closes the arithmetic command, not a pattern
+  list); and `keyword_word`, the same quote gate the keyword scorers open with,
+  for a quoted `")"` (an escaped `\)` keeps its pair in the word text, so
+  `eq_bytes(b")")` never sees it). **The neighbouring word is not enough**: the
+  first version of the gate only excluded a predecessor whose bytes touch `(`,
+  which accepts `a) (cat) ;;` (predecessor `(cat`) and `a) (echo sub) ;;`
+  (predecessor `sub`, an argument) yet rejects `a) g() ( : ) ;; esac` — bash rc 0
+  — whose `)` follows `:`, a command-position word of the arm's own subshell. The
+  shape is the lesson: paren ownership is a **nesting** question, so the scan
+  counts the arm's opens and closes; a byte test on one token sees the shape of
+  the tokenizer, not the shape of the command. Two cheaper rules were measured
+  and rejected: a whole-arm `((` exemption loses
   `case x in a) ((1)); b) ;; esac` (bash rc 2), and "any `)` in an arm is an
   error" rejects `case x in a) (echo sub) ;; esac` (bash rc 0, and every arm of
   task #316's shape the day subshells land).
@@ -2386,12 +2402,17 @@ missing-paren/empty-pattern verdicts that stayed),
 `parse/case_clause/stray/tests.rs` (every gate, called on a token region
 directly), `parse/tests.rs::case_*`, `parse/case_block/tests.rs`,
 `parse/case_block/literal/tests.rs` and `tests/case.rs` (the bash-parity table,
+the arm's own definer and subshell parens — the runnable
+`case x in x) f() { echo y; }; f ;; esac` prints `y` exactly as bash does —
 the accepted leniencies — `case x in a) ; esac`, the `&` and `;&` closers, the
-closer-shaped word in an arm — and the family's left-open rows: #418, #419,
+closer-shaped word in an arm, a `)` with no word before it (`a) ) ;; esac`,
+#419's family) — and the family's left-open rows: #418, #419,
 #420, #421 and #316). **Follow-up written down now**: when `(` becomes an
-operator token (task #316), `stray.rs`'s `((` region rule *and* the
-command-position rule both read the token list, so a subshell's `(`/`)` pair
-must be added to that region scan, not to the word test.
+operator token (task #316), all three of `stray.rs`'s paren readers — the `((`
+region rule, the `opens_a_group` **depth counter** (the latter two read word
+bytes today) and the command-position rule — are scored on the token list, so a
+subshell's `(`/`)` pair becomes operators there and `(w`/`f(` stop being word
+bytes.
 
 ## A definer word makes its body brace a group opener for the cond layer
 `f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list

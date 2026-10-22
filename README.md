@@ -815,13 +815,19 @@ a clause written without it is a parse error: the next clause's pattern paren is
 a token the arm's command list cannot take, so `case x in a) b) ;; esac`,
 `case x in a) *) esac` and `case x in a) echo hi; b) ;; esac` run **nothing** at
 rc 1 with `case: missing ';;' between clauses` (bash stops at rc 2). A `)` that
-is not in command position stays arm text, as it always was: `case x in a) echo
-")" ;;`, `a) echo \);;`, `a) ((1)) ;;`, an arithmetic `for` clause inside an arm
-and a subshell-shaped arm all parse. Shapes that stay open: a `)` written after
-an argument inside an arm (task #419), a nested `case` in an arm (task #418),
-bash's `;&`/`;;&` terminators (task #420), a subshell arm that **runs** (task
-#316), and a closer glued behind a pattern's `)` (`case x in a) echo hi;;b)esac`,
-task #421). Pinned in `safe/fdshell/tests/case.rs`.
+closes nothing the arm opened, and that no word in command position precedes,
+stays arm text, as it always was — measured to parse at rc 0: a quoted `")"` and
+an escaped `\)` are word text, `a) ((1)) ;;` and an arithmetic
+`for ((i=0;i<2;i++)); do …; done` clause are arithmetic data, and the paren of a
+group **the arm itself opened** closes that group: a function definition
+(`case x in x) f() { echo y; }; f ;; esac` prints `y` in bash and here, rc 0,
+and the same holds for a definition behind a `;` or inside the arm's
+`if`/`while`/`for`/`{ …; }` bodies) and a subshell the arm wrote (`a) (cat) ;;`,
+`a) echo hi | (cat) ;;`, `a) g() ( : ) ;;`). Shapes that stay open: a `)`
+written after an argument inside an arm (task #419), a nested `case` in an arm
+(task #418), bash's `;&`/`;;&` terminators (task #420), a subshell arm that
+**runs** (task #316), and a closer glued behind a pattern's `)`
+(`case x in a) echo hi;;b)esac`, task #421). Pinned in `safe/fdshell/tests/case.rs`.
 
 `for ((init; cond; step))` is bash's arithmetic loop: the three clauses are
 evaluated exactly like an `((expr))` command — in the current shell, so the
