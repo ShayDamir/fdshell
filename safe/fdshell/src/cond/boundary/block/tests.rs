@@ -268,9 +268,10 @@ fn in_block_words_follow_the_clause_rule() {
 /// `word_delta` is therefore called on the head, the tail and the payload
 /// word behind them, and the payload must be scored exactly once: the two
 /// pair words carry no keyword of their own and only set the command position
-/// the payload word scores in. A background `&`
-/// and a pipeline `|` are single-byte runs (no pair): their tails are
-/// arguments, #292's carve-out, and the keyword behind them is unscored.
+/// the payload word scores in. A background `&` is a single-byte run (no pair)
+/// whose tail word is an argument; the pipeline `|` is one too, and task #292
+/// made its word **set command position** — the stage behind a pipe is a
+/// command, so the keyword behind it scores.
 #[test]
 fn glued_pair_words_score_their_payload_once() {
     // `a||if :` in a body: head at 1, tail byte at 2, payload word at 3.
@@ -301,11 +302,15 @@ fn glued_pair_words_score_their_payload_once() {
     let l = b"&if :".as_slice();
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Data));
     assert_eq!(word_delta(l, 1, 1, 0, Place::Data), (0, Place::Command));
-    // A pipeline `|` is a single-byte run too (#292): the byte is an
-    // argument and so is the keyword behind it.
+    // The pipeline `|` (#292): the byte word sets command position, and the
+    // `if` behind it opens its block — the in-block and the top-level halves
+    // agree (the scan's flag and the run rule answer the same question).
     let l = b"a | if :".as_slice();
-    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 4, 1, 0, Place::Data), (0, Place::Command));
+    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 4, 1, 0, Place::Command), (1, Place::Command));
+    let l = b"a | if :; then :; fi".as_slice();
+    assert_eq!(word_delta(l, 2, 0, 0, Place::Command), (0, Place::Command));
+    assert_eq!(word_delta(l, 4, 0, 0, Place::Command), (1, Place::Command));
     // The same pair at top level is judged by the run's own rule, not the
     // flag: an empty run at `run_start` is command position, so the payload
     // `if` opens its block exactly as in-block.

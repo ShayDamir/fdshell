@@ -9,8 +9,9 @@ use crate::keywords::{definer_len, time_prefix_len};
 /// before it is empty), so the group is a block; `Some(false)` starts a cond
 /// part mid-run (the run ends with `&&` / `||`), so the group's text is opaque
 /// data inside the statement; `None` is command word data — a brace in an
-/// argument position (`echo {`, `echo x{`), after `|` (a pipeline stage), or
-/// glued to a word, as in bash.
+/// argument position (`echo {`, `echo x{`), after `|` (a brace stays a word at a
+/// pipeline stage, the #186/#190 divergence; a *keyword* there is a stage,
+/// [`super::stage_at_run`]), or glued to a word, as in bash.
 ///
 /// A `time [-p]` prefix is transparent: `time { …; }` is a group statement and
 /// `x && time { …; }` a group cond part, exactly like the unprefixed forms.

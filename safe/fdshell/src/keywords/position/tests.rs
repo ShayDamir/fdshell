@@ -68,17 +68,15 @@ fn in_moves_the_place_to_pattern() {
 /// The glued cond pair is *two* word starts (task #236's S2): the byte-level
 /// scans break words at operator bytes, so a cond pair meets them twice, and
 /// a *tail word* (`|if`, `&if`) is one of those starts. The rows pinned here
-/// are the pipeline-guard and operator-form rows — behind data every
-/// operator tail is an argument (#292's carve-out: a block written as a
-/// pipeline stage), a pipeline tail keeps the `case` word list, a redirect
-/// tail (`&>` in `x&>f`) is an argument, and a word that *contains* a pair
-/// (`p||if`, no glue: the scans cut words at the operator bytes) is an
-/// argument.
+/// are the pipeline-guard and operator-form rows — behind data a *glued*
+/// operator tail is an argument, a pipeline tail keeps the `case` word list
+/// (its `|` is the pattern alternation), a redirect tail (`&>` in `x&>f`) is an
+/// argument, and a word that *contains* a pair (`p||if`, no glue: the scans cut
+/// words at the operator bytes) is an argument.
 #[test]
 fn operator_pair_halves_keep_the_place_the_pair_set() {
-    // A pipeline tail behind data is an argument (#292's carve-out row) and
-    // behind a `case` word list it keeps the list.
-    assert_eq!(after_word(b"|if", Place::Data), Place::Data);
+    // A pipeline tail behind a `case` word list keeps the list (task #292's
+    // one guard: `case x in a|while)` stays a pattern).
     assert_eq!(after_word(b"|if", Place::Pattern), Place::Data);
     // A redirect tail's payload is data.
     assert_eq!(after_word(b"&>", Place::Command), Place::Data);
@@ -185,8 +183,7 @@ fn pair_payloads_take_the_place_the_pair_sets() {
 }
 
 /// Ordinary words, closers, `for`/`case` (their lists/conditions are read by
-/// the `in` and clause rules, not by them) and the pipeline `|` (a block
-/// written as a pipeline stage stays word data, task #292) are arguments.
+/// the `in` and clause rules, not by them) are arguments.
 #[test]
 fn argument_words_move_the_place_to_data() {
     for word in [
@@ -197,7 +194,6 @@ fn argument_words_move_the_place_to_data() {
         b"esac",
         b"for",
         b"case",
-        b"|",
         b">",
         b"&>",
         b"'q'",
@@ -210,6 +206,25 @@ fn argument_words_move_the_place_to_data() {
             "{word:?} is an argument word"
         );
     }
+}
+
+/// The pipeline tail is a **command** starter (task #292): the stage behind a
+/// `|` is a command, so a keyword glued to the pipe byte scores, at top level
+/// and inside a block alike. A `||` spelled with no glue is not a tail (the
+/// cond-pair rows pin it), and a word that merely *ends* with the pipe byte is
+/// judged by its own first byte.
+#[test]
+fn the_pipeline_tail_starts_a_command() {
+    for word in [b"|".as_slice(), b"|if", b"|while", b"| until"] {
+        assert_eq!(
+            after_word(word, Place::Data),
+            Place::Command,
+            "the pipeline tail {word:?} opens a stage"
+        );
+        assert_eq!(after_word(word, Place::Command), Place::Command);
+    }
+    assert_eq!(after_word(b"||if", Place::Data), Place::Data);
+    assert_eq!(after_word(b"p|", Place::Data), Place::Data);
 }
 
 /// A word that is only a `time [-p]` prefix is a statement prefix, not a word

@@ -3,6 +3,7 @@ pub(super) mod keyword;
 mod length;
 pub(super) mod midrun;
 pub(super) mod opener;
+pub(super) mod stage;
 use crate::brace::scan_function_block;
 use crate::keywords::leading_ws;
 use crate::scan::ScanState;

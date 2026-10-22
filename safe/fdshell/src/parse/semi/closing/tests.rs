@@ -44,7 +44,8 @@ fn glue_at_names_the_split_pair_head_and_tail() {
     assert_eq!(glue_at(&t, nth(&t, b"|", 0), b"|"), Glue::Head);
     assert_eq!(glue_at(&t, nth(&t, b"|", 1), b"|"), Glue::Tail);
     assert_eq!(glue_at(&t, nth(&t, b"|", 2), b"|"), Glue::Tail);
-    // A pipeline `|` is a single-byte run: no glue (#292's carve-out).
+    // A pipeline `|` is a single-byte run: no glue (the word behind it is
+    // the stage arm's, task #292).
     let t = toks(b"echo a|if :; then :; fi");
     assert_eq!(glue_at(&t, nth(&t, b"|", 0), b"|"), Glue::None);
     // A `&` token with no equal neighbour: no glue.
@@ -92,7 +93,8 @@ fn closing_index_walks_the_block_depth() {
     // keyword. Without the payload arm the two `fi`s would close the block.
     let line = b"if :; then {&&if :; then :; fi; fi";
     assert_eq!(closing_keyword_index(&toks(line), line), None);
-    // The same pair behind an argument word stays data (#292's place rule):
+    // The same pair behind an argument word stays data (the in-block place
+    // rule, task #236):
     // the payload never nests, and the block closes at the first `fi`.
     let line = b"while :; do echo a&&if :; then :; fi; done";
     assert_eq!(closing_keyword_index(&toks(line), line), Some(11));

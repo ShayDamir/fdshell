@@ -16,6 +16,7 @@ mod fields;
 use args::{consume, leading_args};
 
 use alloc::borrow::Cow;
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -24,7 +25,7 @@ use sys::fork_cell::ForkCell;
 
 use crate::error::cmd::CmdError;
 use crate::mask::MaskBit;
-use crate::parse::{CommandLine, Pipeline};
+use crate::parse::{CommandLine, ExpandedStage, Pipeline, Stage};
 use crate::state::ShellState;
 
 pub(crate) use fields::fields;
@@ -50,16 +51,24 @@ pub(crate) fn expand<'a>(
 }
 
 /// Word 0 of every pipeline stage (a pipeline launches as a whole, so its
-/// stages are expanded here, in stage order).
-pub(crate) fn expand_pipeline(
-    pipeline: &Pipeline,
+/// stages are expanded here, in stage order). A keyword-block stage has no word
+/// 0 at all (task #292), so it is borrowed as it is: its inner commands expand
+/// in the child that runs the block.
+pub(crate) fn expand_pipeline<'a>(
+    pipeline: &'a Pipeline,
     cell: &ForkCell<ShellState>,
-) -> Result<Pipeline, Report<CmdError>> {
-    let mut commands = Vec::new();
-    for cmdline in &pipeline.commands {
-        commands.push(expand(cmdline, cell)?.into_owned());
+) -> Result<Vec<ExpandedStage<'a>>, Report<CmdError>> {
+    let mut stages = Vec::new();
+    for stage in &pipeline.stages {
+        match stage {
+            Stage::Command(cmd) => {
+                let expanded = expand(cmd, cell)?.into_owned();
+                stages.push(ExpandedStage::Command(Box::new(expanded)));
+            }
+            Stage::Block(block) => stages.push(ExpandedStage::Block(block)),
+        }
     }
-    Ok(Pipeline { commands })
+    Ok(stages)
 }
 
 /// Rebuild the command line from word 0's field list: `fields[0]` is the

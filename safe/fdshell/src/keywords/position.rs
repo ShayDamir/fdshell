@@ -38,8 +38,9 @@ pub(crate) enum Place {
 /// The pair is *two* word starts: [`is_word_break`](crate::scan::advance)
 /// breaks words at operator bytes, so `p||if` is scanned as the words `p`,
 /// `||if` (the pair's head) and `|if` (its tail), and the tokenized `p||if`
-/// carries the bare halves as separate tokens. The tail byte of a *pipeline*
-/// `|` is a single-byte run — [`Glue::None`], #292's carve-out.
+/// carries the bare halves as separate tokens. A *pipeline* `|` is a
+/// single-byte run, so its word carries [`Glue::None`] and the plain rule of
+/// [`after`] scores the stage behind it (task #292).
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(crate) enum Glue {
@@ -80,10 +81,10 @@ pub(crate) fn scores(word: &[u8], line: &[u8], word_end: usize, place: Place) ->
 /// `case`/`for` word list ([`Place::Pattern`]); a word that is only a
 /// `time [-p]` prefix is transparent, keeping the current place; everything
 /// else — an ordinary word, a closer — is an argument position, so a
-/// keyword-shaped word there scores 0. A pipeline tail behind data stays data
-/// (the accepted divergence of a block written as a pipeline stage, task
-/// #292) and an operator *form* (a redirect `&>`, whose payload is operator
-/// bytes) is an argument.
+/// keyword-shaped word there scores 0. A word that begins with a pipeline `|`
+/// starts the stage behind it (task #292: a keyword block written as a pipeline
+/// stage is a command), and an operator *form* (a redirect `&>`, whose payload
+/// is operator bytes) is an argument.
 ///
 /// `glue` marks the word's start in a cond pair ([`Glue`]): its payload is
 /// read behind the pair's operator, from the place the pair sets — the
@@ -130,6 +131,18 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
     if rest.is_empty() {
         // `time [-p]`: a statement prefix, not a word of its own.
         return place;
+    }
+    // A word that *begins* with a pipeline `|` is the tail of a pipe byte, and
+    // the stage behind a pipe is a command (task #292), exactly as the payload
+    // of a cond pair is. Inside a `case` word list the `|` is the pattern
+    // alternation (`case x in a|while)`), so the list stays a list; a `||`
+    // spelled without its glue stays the argument row it always was.
+    if rest.starts_with(b"|") && !rest.starts_with(b"||") {
+        return if matches!(place, Place::Pattern) {
+            Place::Data
+        } else {
+            Place::Command
+        };
     }
     // The `)` is usually glued to its pattern (`x)`), so the arm's first
     // word is judged by the word's *last* byte; the command keywords open a

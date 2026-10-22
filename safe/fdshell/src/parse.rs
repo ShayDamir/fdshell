@@ -43,7 +43,7 @@ pub(crate) mod while_block;
 pub(crate) mod word_quoted;
 
 pub(crate) use case_block::literal_indices;
-pub use cmdline::{BuiltinPrefix, CommandLine, Pipeline};
+pub use cmdline::{BlockStage, BuiltinPrefix, CommandLine, ExpandedStage, Pipeline, Stage};
 pub use envassign::{Assign, value_mask, value_spans};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
@@ -98,7 +98,7 @@ fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
         .iter()
         .any(|(_t, start, end, _fq, _mask, _spans)| pipe_token_span(line, *start, *end))
     {
-        return pipeline::parse_pipeline(&raw, line, &heredocs, text.start);
+        return pipeline::parse_pipeline(&raw, line, &heredocs, text.start, text);
     }
 
     Ok(ParsedLine::Cmd(command::parse_command(

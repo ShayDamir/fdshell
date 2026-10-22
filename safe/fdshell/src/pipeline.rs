@@ -6,7 +6,7 @@ use core::iter::Iterator;
 
 use crate::capture::Capture;
 use crate::error::pipeline::PipelineError;
-use crate::parse::Pipeline;
+use crate::parse::ExpandedStage;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
@@ -20,20 +20,19 @@ pub struct CaptureChannel {
 
 pub fn launch_pipeline(
     cell: &ForkCell<ShellState>,
-    pipeline: Pipeline,
+    stages: &[ExpandedStage<'_>],
     envs: &[crate::run_env::EnvAssigns],
 ) -> Result<(WaitStatus, Vec<CaptureChannel>, sys::getrusage::CpuTimes), Report<PipelineError>> {
-    let n = pipeline.commands.len();
-    let commands = pipeline.commands;
+    let n = stages.len();
 
     let pipes = core::iter::repeat_with(|| sys::pipe::pipe2(0))
         .take(n.saturating_sub(1))
         .collect::<Result<Vec<_>, _>>()
         .change_context(PipelineError::Pipe)?;
-    let mut capture_pairs = commands
+    let mut capture_pairs = stages
         .iter()
-        .map(|cmd| {
-            if cmd.captures.is_empty() {
+        .map(|stage| {
+            if stage.captures().is_empty() {
                 Ok(None)
             } else {
                 sys::net::socketpair_with_passcred().map(Some)
@@ -48,15 +47,8 @@ pub fn launch_pipeline(
             sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
             None => {
-                match child::run_child(
-                    i,
-                    &pipes,
-                    &mut capture_pairs,
-                    &children,
-                    &commands,
-                    envs,
-                    cell,
-                ) {
+                match child::run_child(i, &pipes, &mut capture_pairs, &children, stages, envs, cell)
+                {
                     Ok(code) => sys::exit(code),
                     Err(report) => {
                         let _ = writeln!(crate::io::Stderr, "{report:?}");
@@ -74,11 +66,11 @@ pub fn launch_pipeline(
         .filter_map(|i| {
             let pair = capture_pairs.get_mut(i)?;
             let (parent_end, _child_end) = pair.take()?;
-            let (ch, cmd) = (children.get(i)?, commands.get(i)?);
+            let (ch, stage) = (children.get(i)?, stages.get(i)?);
             Some(CaptureChannel {
                 capture_fd: parent_end,
                 child_pid: ch.0,
-                captures: cmd.captures.clone(),
+                captures: stage.captures().to_vec(),
             })
         })
         .collect();

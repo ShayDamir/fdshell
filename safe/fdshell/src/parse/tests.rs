@@ -656,15 +656,15 @@ fn test_heredoc_pipeline_stage_trimmed() {
     let ParsedLine::Pipeline(pl) = parse(b"cat <<EOF | wc -l\nbody\nEOF").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pl.commands.len(), 2);
+    assert_eq!(pl.stages.len(), 2);
     // Stage 2 must not see the body tokens.
-    assert_eq!(pl.commands[1].command, c"wc".into());
-    assert_eq!(pl.commands[1].args, vec![c"-l".into()]);
+    assert_eq!(pl.command_at(1).unwrap().command, c"wc".into());
+    assert_eq!(pl.command_at(1).unwrap().args, vec![c"-l".into()]);
     assert_eq!(
-        pl.commands[0].redirects,
+        pl.command_at(0).unwrap().redirects,
         vec![RedirectDef::here_doc(0, c"body\n", true)]
     );
-    assert!(pl.commands[1].redirects.is_empty());
+    assert!(pl.command_at(1).unwrap().redirects.is_empty());
 }
 
 /// The per-stage spec window advances by each stage's **count**, so a stage
@@ -678,16 +678,16 @@ fn test_heredoc_pipeline_spec_window_advances_by_operator_count() {
     else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pl.commands.len(), 2);
+    assert_eq!(pl.stages.len(), 2);
     assert_eq!(
-        pl.commands[0].redirects,
+        pl.command_at(0).unwrap().redirects,
         vec![
             RedirectDef::here_doc(0, c"aaaa\n", true),
             RedirectDef::here_doc(0, c"bb\n", true),
         ]
     );
     assert_eq!(
-        pl.commands[1].redirects,
+        pl.command_at(1).unwrap().redirects,
         vec![RedirectDef::here_doc(0, c"ccc\n", true)]
     );
 }
@@ -1093,10 +1093,10 @@ fn test_space_separated_redirect_in_pipeline_stage() {
         panic!("expected Pipeline")
     };
     assert_eq!(
-        pl.commands[0].redirects,
+        pl.command_at(0).unwrap().redirects,
         vec![path_def(1, RedirectDirection::Write, "out")]
     );
-    assert!(pl.commands[1].redirects.is_empty());
+    assert!(pl.command_at(1).unwrap().redirects.is_empty());
 }
 
 #[test]
@@ -1197,10 +1197,10 @@ fn test_clobber_bare_in_pipeline_stage() {
         panic!("expected Pipeline")
     };
     assert_eq!(
-        pl.commands[0].redirects,
+        pl.command_at(0).unwrap().redirects,
         vec![path_def(1, RedirectDirection::Clobber, "out")]
     );
-    assert!(pl.commands[1].redirects.is_empty());
+    assert!(pl.command_at(1).unwrap().redirects.is_empty());
 }
 
 // `>&|f`: `>&` is the fd-dup operator, its `&…` tail is empty so no redirect
@@ -1212,9 +1212,9 @@ fn test_amp_clobber_tail_is_a_pipeline_pipe() {
     let ParsedLine::Pipeline(pl) = parse(b"cmd 2>&|f").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert!(pl.commands[0].redirects.is_empty());
-    assert_eq!(pl.commands[0].args, vec![c"2>&".into()]);
-    assert_eq!(pl.commands[1].command, c"f".into());
+    assert!(pl.command_at(0).unwrap().redirects.is_empty());
+    assert_eq!(pl.command_at(0).unwrap().args, vec![c"2>&".into()]);
+    assert_eq!(pl.command_at(1).unwrap().command, c"f".into());
 }
 
 // The `%`-target arm is evaluated after the operator is interpreted, so every
@@ -1495,18 +1495,18 @@ fn test_bare_combined_in_pipeline_stage() {
         panic!("expected Pipeline")
     };
     assert_eq!(
-        pl.commands[0].redirects,
+        pl.command_at(0).unwrap().redirects,
         vec![combined_def(RedirectDirection::Write, "f"),]
     );
-    assert_eq!(pl.commands[0].command, c"echo".into());
+    assert_eq!(pl.command_at(0).unwrap().command, c"echo".into());
     assert_eq!(
-        pl.commands[0].args,
+        pl.command_at(0).unwrap().args,
         vec![c"hi".into()],
         "the operand must not leak into args"
     );
-    assert_eq!(pl.commands[1].command, c"cat".into());
-    assert!(pl.commands[1].redirects.is_empty());
-    assert!(pl.commands[1].args.is_empty());
+    assert_eq!(pl.command_at(1).unwrap().command, c"cat".into());
+    assert!(pl.command_at(1).unwrap().redirects.is_empty());
+    assert!(pl.command_at(1).unwrap().args.is_empty());
 }
 
 #[test]
@@ -1684,12 +1684,12 @@ fn test_fully_quoted_combined_in_pipeline_stage() {
     let ParsedLine::Pipeline(pl) = parse(b"echo '&>f' | cat").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pl.commands[0].args, vec![c"&>f".into()]);
-    assert!(pl.commands[0].redirects.is_empty());
-    assert!(pl.commands[0].pidvar.is_none());
-    assert_eq!(pl.commands[1].command, c"cat".into());
-    assert!(pl.commands[1].args.is_empty());
-    assert!(pl.commands[1].redirects.is_empty());
+    assert_eq!(pl.command_at(0).unwrap().args, vec![c"&>f".into()]);
+    assert!(pl.command_at(0).unwrap().redirects.is_empty());
+    assert!(pl.command_at(0).unwrap().pidvar.is_none());
+    assert_eq!(pl.command_at(1).unwrap().command, c"cat".into());
+    assert!(pl.command_at(1).unwrap().args.is_empty());
+    assert!(pl.command_at(1).unwrap().redirects.is_empty());
 }
 
 #[test]
@@ -1938,11 +1938,11 @@ fn test_pipeline_two_commands() {
     let ParsedLine::Pipeline(pipe) = parse(b"echo hello | wc -l").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pipe.commands.len(), 2);
-    assert_eq!(pipe.commands[0].command, c"echo".into());
-    assert_eq!(pipe.commands[0].args, vec![c"hello".into()]);
-    assert_eq!(pipe.commands[1].command, c"wc".into());
-    assert_eq!(pipe.commands[1].args, vec![c"-l".into()]);
+    assert_eq!(pipe.stages.len(), 2);
+    assert_eq!(pipe.command_at(0).unwrap().command, c"echo".into());
+    assert_eq!(pipe.command_at(0).unwrap().args, vec![c"hello".into()]);
+    assert_eq!(pipe.command_at(1).unwrap().command, c"wc".into());
+    assert_eq!(pipe.command_at(1).unwrap().args, vec![c"-l".into()]);
 }
 
 #[test]
@@ -1950,10 +1950,10 @@ fn test_pipeline_three_commands() {
     let ParsedLine::Pipeline(pipe) = parse(b"a | b | c").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pipe.commands.len(), 3);
-    assert_eq!(pipe.commands[0].command, c"a".into());
-    assert_eq!(pipe.commands[1].command, c"b".into());
-    assert_eq!(pipe.commands[2].command, c"c".into());
+    assert_eq!(pipe.stages.len(), 3);
+    assert_eq!(pipe.command_at(0).unwrap().command, c"a".into());
+    assert_eq!(pipe.command_at(1).unwrap().command, c"b".into());
+    assert_eq!(pipe.command_at(2).unwrap().command, c"c".into());
 }
 
 #[test]
@@ -1961,9 +1961,9 @@ fn test_pipeline_with_captures() {
     let ParsedLine::Pipeline(pipe) = parse(b"cmd1 %>%a | cmd2 %>%b").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pipe.commands.len(), 2);
-    assert_eq!(pipe.commands[0].captures.len(), 1);
-    assert_eq!(pipe.commands[1].captures.len(), 1);
+    assert_eq!(pipe.stages.len(), 2);
+    assert_eq!(pipe.command_at(0).unwrap().captures.len(), 1);
+    assert_eq!(pipe.command_at(1).unwrap().captures.len(), 1);
 }
 
 #[test]
@@ -1971,7 +1971,7 @@ fn test_pipeline_with_redirect() {
     let ParsedLine::Pipeline(pipe) = parse(b"cmd1 2>%log | cmd2").unwrap() else {
         panic!("expected Pipeline")
     };
-    assert_eq!(pipe.commands[0].redirects.len(), 1);
+    assert_eq!(pipe.command_at(0).unwrap().redirects.len(), 1);
 }
 
 #[test]

@@ -85,7 +85,11 @@ fn setup_shellfd(
     Ok(())
 }
 
-fn apply_redirects(redirects: &[Redirect]) -> Result<(), Report<ChildProcessError>> {
+/// Apply the child's opened redirects: the fd 0/1 pipe ends of a pipeline
+/// stage and every file redirect. The pipeline's block-stage child re-enters
+/// the interpreter with them (`pipeline/child/block.rs`), so the rule is shared
+/// with the command child.
+pub(crate) fn apply_redirects(redirects: &[Redirect]) -> Result<(), Report<ChildProcessError>> {
     for r in redirects {
         r.export()
             .change_context(ChildProcessError::RedirectFailed)?;

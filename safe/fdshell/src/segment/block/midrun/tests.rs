@@ -30,7 +30,9 @@ fn midrun(line: &[u8]) -> Option<usize> {
 /// The three-way classification of the same command-position rule the group
 /// opener uses: a run-start keyword is not this span (`block::open` owns it), a
 /// keyword after `&&` / `||` is (skip whole), and a keyword-shaped word in an
-/// argument position is word data (advance).
+/// argument position is word data (advance). The **fourth** arm — the word
+/// behind a pipeline `|` — is not midrun's: it lives in `block::stage`
+/// (task #292), so a `|` here is just an argument-position word.
 #[test]
 fn only_a_mid_run_opener_is_skipped() {
     // Run start: `Some(true)` — the separator path owns it.
@@ -42,7 +44,8 @@ fn only_a_mid_run_opener_is_skipped() {
         Some(b"x && while :; do :; done".len())
     );
     assert_eq!(midrun(b"x && if :; then :; fi"), Some(21));
-    // Argument position: `None` — word data (`|` is one too, task #292's gap).
+    // Argument position: `None` — word data; behind a `|` the stage arm takes
+    // the span instead (task #292).
     assert_eq!(skip_at(b"echo while :; do :; done", 5), None);
     assert_eq!(skip_at(b"echo a | while :; do :; done", 8), None);
 }

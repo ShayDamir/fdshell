@@ -24,8 +24,8 @@ fn pair_payload_is_the_word_behind_the_pair() {
 }
 
 /// No pair: a pipeline `|`, a single `&` (background/redirect bytes) and a
-/// plain word are all `None` — the single-byte `|` is #292's divergence and
-/// never a pair.
+/// plain word are all `None` — a single-byte `|` is never a pair (the word
+/// behind it is scored by the stage arm, task #292).
 #[test]
 fn pipeline_and_background_bytes_are_no_pair() {
     for word in [

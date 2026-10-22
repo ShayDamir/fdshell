@@ -1,6 +1,6 @@
 use crate::child;
 use crate::error::child_process::ChildProcessError;
-use crate::parse::CommandLine;
+use crate::parse::ExpandedStage;
 use crate::redirect::Redirect;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -9,6 +9,7 @@ use sys::{LocalFd, Pid};
 
 use crate::state::ShellState;
 
+mod block;
 mod close_inherited;
 
 pub fn run_child(
@@ -16,11 +17,11 @@ pub fn run_child(
     pipes: &[(LocalFd, LocalFd)],
     capture_pairs: &mut [Option<(LocalFd, LocalFd)>],
     children: &[(Pid, LocalFd)],
-    commands: &[CommandLine],
+    stages: &[ExpandedStage<'_>],
     envs: &[crate::run_env::EnvAssigns],
     cell: &ForkCell<ShellState>,
 ) -> Result<i32, Report<ChildProcessError>> {
-    let cmd_data = commands.get(i).ok_or(ChildProcessError::ExecFailed)?;
+    let stage = stages.get(i).ok_or(ChildProcessError::ExecFailed)?;
     let env = envs.get(i).cloned().ok_or(ChildProcessError::ExecFailed)?;
 
     let mut redirects: Vec<Redirect> = Vec::new();
@@ -46,15 +47,16 @@ pub fn run_child(
         }
     }
 
-    // Builtin stages never exec, so the inherited pipe ends, sibling
+    // Builtin and block stages never exec, so the inherited pipe ends, sibling
     // capture pairs and sibling pidfds would stay open for the whole
-    // builtin run; close them here (external stages shed them at exec).
+    // builtin / interpreter run; close them here (external stages shed them at
+    // exec).
     close_inherited::close_inherited(pipes, capture_pairs, children, i)?;
 
-    let opened = crate::redirect::open_redirect_files(&cmd_data.redirects, cell)
+    let opened = crate::redirect::open_redirect_files(stage.redirects(), cell)
         .change_context(ChildProcessError::RedirectFailed)?;
 
-    let file_redirects = crate::redirect::resolve_redirects(&cmd_data.redirects, &opened, cell)
+    let file_redirects = crate::redirect::resolve_redirects(stage.redirects(), &opened, cell)
         .change_context(ChildProcessError::RedirectFailed)?;
     redirects.extend(file_redirects);
 
@@ -62,5 +64,8 @@ pub fn run_child(
         .get_mut(i)
         .and_then(|p| p.take().map(|(_, ch)| ch));
 
-    child::child_main(child_sock, cell, cmd_data, &redirects, env)
+    match stage {
+        ExpandedStage::Command(cmd) => child::child_main(child_sock, cell, cmd, &redirects, env),
+        ExpandedStage::Block(block) => block::run_block(block, &redirects, cell),
+    }
 }

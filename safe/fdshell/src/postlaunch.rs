@@ -4,7 +4,7 @@ use error_stack::{Report, ResultExt};
 use crate::capture::Capture;
 use crate::error::launch::LaunchError;
 use crate::error::pipeline::PipelineError;
-use crate::parse::{CommandLine, Pipeline};
+use crate::parse::{CommandLine, ExpandedStage};
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::siginfo::WaitStatus;
@@ -60,11 +60,11 @@ pub fn finish_cmd(
 }
 
 pub fn run_pipeline(
-    pipeline: Pipeline,
+    stages: &[ExpandedStage<'_>],
     cell: &ForkCell<ShellState>,
     envs: &[crate::run_env::EnvAssigns],
 ) -> Result<WaitStatus, Report<PipelineError>> {
-    let (status, channels, times) = crate::pipeline::launch_pipeline(cell, pipeline, envs)?;
+    let (status, channels, times) = crate::pipeline::launch_pipeline(cell, stages, envs)?;
     let mut state = cell.borrow_mut().change_context(PipelineError::Pipeline)?;
     state.add_child_times(times);
     if let WaitStatus::Exited(0) = status {

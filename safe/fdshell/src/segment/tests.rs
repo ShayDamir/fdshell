@@ -1179,14 +1179,77 @@ fn midrun_keyword_block_stays_one_statement_in_the_run() {
             b"echo tail".to_vec(),
         ]
     );
-    // A keyword-shaped *argument* mid-run stays word data: the run splits at
-    // its `;` as before (the `|` stage is task #292's gap, unchanged).
+    // Task #292, the **stage** arm: a keyword block that opens right behind a
+    // `|` is skipped whole inside the run too, so the whole pipeline is one
+    // statement and the pipeline parser splits the stages.
+    for line in [
+        b"echo a | while :; do echo b; break; done".as_slice(),
+        b"echo a|while :; do echo b; break; done".as_slice(),
+        b"echo a | if :; then echo y; fi".as_slice(),
+        b"echo a | for x in 1 2; do echo $x; done".as_slice(),
+        b"echo a | until :; do echo u; break; done".as_slice(),
+        b"echo a | case x in x) echo cx;; esac".as_slice(),
+        b"echo a | f() { echo F; }".as_slice(),
+        b"echo a | while :; do\necho b\nbreak\ndone".as_slice(),
+        b"echo a | time while :; do :; break; done".as_slice(),
+        // A quote byte directly before the pipe is the pipe token's own boundary
+        // (`echo x"|"| while …`): the quoted `|` is word content, the byte after
+        // it is the pipeline pipe, and the scanner agrees with the tokenizer.
+        b"echo x\"|\"| while :; do echo b; break; done".as_slice(),
+    ] {
+        assert_eq!(statements(line), vec![line.to_vec()], "{line:?}");
+    }
+    // The closer's `;` ends the statement, and a trailing operator written
+    // before that separator stays with the run (the midrun span's rule).
     assert_eq!(
-        statements(b"echo a | while :; do echo b; break; done"),
+        statements(b"echo a | while :; do echo b; break; done; echo tail"),
         vec![
-            b"echo a | while :".to_vec(),
+            b"echo a | while :; do echo b; break; done".to_vec(),
+            b"echo tail".to_vec(),
+        ]
+    );
+    assert_eq!(
+        statements(b"echo a | while :; do echo b; break; done | cat"),
+        vec![b"echo a | while :; do echo b; break; done | cat".to_vec()]
+    );
+    assert_eq!(
+        statements(b"echo a | while :; do echo b; break; done && echo y"),
+        vec![b"echo a | while :; do echo b; break; done && echo y".to_vec()]
+    );
+    // An unclosed stage block: the span resumes at the end of input, so the
+    // statement is the whole run and the parse layer reports the missing closer.
+    assert_eq!(
+        statements(b"echo a | while :; do echo b; break"),
+        vec![b"echo a | while :; do echo b; break".to_vec()]
+    );
+    // The pipe byte's own guards, the tokenizer's rule (LESSONS: the byte-level
+    // and token-level rules must agree): a `|` absorbed into a `>`-terminated
+    // operator word and an escaped `\|` are word content, so the run splits at
+    // its `;` as a keyword-shaped argument's run does. A `||` pair is the
+    // cond-part arm's, which owns the same span (task #232).
+    for line in [
+        b"echo a>| while :; do echo b; break; done".as_slice(),
+        b"echo a%>| while :; do echo b; break; done".as_slice(),
+        b"echo a&>| while :; do echo b; break; done".as_slice(),
+        b"echo a\\| while :; do echo b; break; done".as_slice(),
+    ] {
+        assert_eq!(
+            statements(line).len(),
+            4,
+            "{line:?}: no pipeline pipe in the run, so its `;` splits it"
+        );
+    }
+    assert_eq!(
+        statements(b"echo a|| while :; do echo b; break; done"),
+        vec![b"echo a|| while :; do echo b; break; done".to_vec()],
+        "the cond-part arm owns the `||` pair's span (task #232)"
+    );
+    // A keyword-shaped *argument* of a stage stays word data: the run splits.
+    assert_eq!(
+        statements(b"echo a | echo while :; do echo b; done"),
+        vec![
+            b"echo a | echo while :".to_vec(),
             b"do echo b".to_vec(),
-            b"break".to_vec(),
             b"done".to_vec(),
         ]
     );

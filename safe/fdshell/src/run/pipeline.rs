@@ -16,10 +16,10 @@ pub(crate) fn run_pipeline(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     // Word 0 first, with the shell's own `IFS`: a stage's scoped `IFS` applies
     // in its child, after its args were split (as in the simple-command path).
-    let pipeline = crate::command_word::expand_pipeline(pipeline, cell)?;
-    let envs = crate::run_env::expand_pipeline(&pipeline, text, cell)?;
-    let status = crate::postlaunch::run_pipeline(pipeline, cell, &envs)
-        .change_context(CmdError::Pipeline)?;
+    let stages = crate::command_word::expand_pipeline(pipeline, cell)?;
+    let envs = crate::run_env::expand_pipeline(&stages, text, cell)?;
+    let status =
+        crate::postlaunch::run_pipeline(&stages, cell, &envs).change_context(CmdError::Pipeline)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.last_status = status;
     Ok(None)

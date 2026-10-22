@@ -7,7 +7,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::mask::MaskBit::{Quoted, Unquoted};
-use crate::parse::{BuiltinPrefix, CommandLine, Pipeline};
+use crate::parse::{BuiltinPrefix, CommandLine, Pipeline, Stage};
 use crate::state::ShellState;
 
 use super::expand;
@@ -309,10 +309,16 @@ fn percent_fd_names_the_command() {
 fn pipeline_stages_expand_their_word_zero() {
     let cell = cell();
     let pipeline = Pipeline {
-        commands: vec![cmdline("$(echo echo)", &["hi"]), cmdline("cat", &[])],
+        stages: vec![
+            Stage::Command(cmdline("$(echo echo)", &["hi"])),
+            Stage::Command(cmdline("cat", &[])),
+        ],
     };
     let out = super::expand_pipeline(&pipeline, &cell).unwrap();
-    let names: Vec<Vec<u8>> = out.commands.iter().map(|c| bytes(&c.command)).collect();
+    let names: Vec<Vec<u8>> = out
+        .iter()
+        .map(|s| bytes(&s.command().unwrap().command))
+        .collect();
     assert_eq!(names, [b"echo".to_vec(), b"cat".to_vec()]);
 }
 

@@ -12,7 +12,7 @@
 //! in command position only, and so does this counter (see [`word_delta`]).
 
 use crate::keywords::{Glue, Place, after, first_word_end, keyword_delta, scores};
-use crate::segment::group::group_at_run;
+use crate::segment::group::command_at_run;
 
 mod glue;
 
@@ -21,11 +21,13 @@ mod glue;
 ///
 /// One clause rule — bash recognizes a reserved word in command position
 /// *only* — carried by two halves: at top level the place is read from the
-/// word's run by the segment scanner's own rule [`group_at_run`] (its
-/// redirect, assignment and pipeline halves included); inside a block it is
-/// the scan's [`Place`] flag ([`after`]/[`scores`], task #236), because a
-/// run cannot see the clause keywords (`then`/`do`/`else`/`elif`) that
-/// restart command position mid-run. Both halves answer the same rule: a
+/// word's run by the segment scanner's own rule [`command_at_run`] (its
+/// redirect, assignment and **pipeline-stage** halves included — the stage arm
+/// is task #292, and its `{`-brace exclusion stays in
+/// `cond/boundary::opens_group`); inside a block it is the scan's [`Place`]
+/// flag ([`after`]/[`scores`], task #236), because a run cannot see the clause
+/// keywords (`then`/`do`/`else`/`elif`) that restart command position
+/// mid-run. Both halves answer the same rule: a
 /// keyword-shaped *argument* (`echo if && echo b`, `echo done`) is word
 /// data at every depth and its `&&` keeps splitting (task #137), a keyword
 /// in a clause position scores, and a *closer* in command position closes
@@ -62,17 +64,18 @@ pub(super) fn word_delta(
     // payload behind a glued pair itself, so the scan scores it exactly once
     // (task #236's S2).
     // At top level the place is the run's own answer — the segment scanner's
-    // rule [`group_at_run`], with its redirect and pipeline halves; inside a
-    // block it is the scan's [`Place`] flag, because a run cannot see the
-    // clause keywords (`then`/`do`/`else`/`elif`) that restart command
-    // position mid-run. Braces are scored by neither: the group arm of
+    // rule [`command_at_run`], with its redirect, pipeline-stage and cond-pair
+    // halves; inside a block it is the scan's [`Place`] flag, because a run
+    // cannot see the clause keywords (`then`/`do`/`else`/`elif`) that restart
+    // command position mid-run. Braces are scored by neither: the group arm of
     // `next_boundary` counts them with the same clause rule, so an argument
     // brace (`echo {`, `echo }`) stays word data (task #236).
-    let at = if block_depth == 0 {
-        group_at_run(line, run_start, i + strip).map_or(Place::Data, |_| Place::Command)
+    let top_level = if command_at_run(line, run_start, i + strip) {
+        Place::Command
     } else {
-        place
+        Place::Data
     };
+    let at = if block_depth == 0 { top_level } else { place };
     let next = after(word, line, word_end, at, glue);
     let brace = matches!(word.trim_ascii(), b"{" | b"}");
     let delta = if !brace && scores(word, line, word_end, at) {

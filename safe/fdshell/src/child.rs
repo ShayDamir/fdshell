@@ -32,6 +32,7 @@ use core::ffi::CStr;
 use sys::ShortCStr;
 
 pub(crate) use error::handle_builtin_error;
+pub(crate) use run::apply_redirects;
 pub use run::child_main;
 
 pub struct Command {

@@ -4,8 +4,9 @@
 /// The *pair payload* of a word: the keyword candidate behind a glued cond
 /// *pair* in the word's interior — `a||if` → `if` after skipping whitespace
 /// (`a && fi` → `fi`). `None` when the word carries no pair (a pipeline `|`
-/// is a single byte — the measured #292 divergence) or the payload is
-/// empty/operator-shaped. Task #236's S2: the pair opens *two* word starts
+/// is a single byte, never a pair — the word behind it is scored by the
+/// stage arm, task #292) or the payload is empty/operator-shaped. Task
+/// #236's S2: the pair opens *two* word starts
 /// for the byte-level scans (their [`Glue`] payload rule); a token- or
 /// run-layer scorer that sees the glued word whole must score the payload
 /// too, or the keyword glued behind the pair never nests (`do echo a||if :;

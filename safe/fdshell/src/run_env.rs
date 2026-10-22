@@ -7,7 +7,7 @@ mod apply;
 pub use apply::{EnvSave, apply, apply_child, restore};
 
 use crate::error::cmd::CmdError;
-use crate::parse::{Assign, CommandLine, Pipeline};
+use crate::parse::{Assign, CommandLine, ExpandedStage};
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -38,15 +38,21 @@ pub fn expand(
     Ok(out)
 }
 
-/// Expand every pipeline stage's prefix, in stage order.
+/// Expand every pipeline stage's prefix, in stage order. The list is one entry
+/// per stage — `pipeline::child::run_child` reads it by index — so a keyword
+/// block stage contributes an empty one: a keyword word has no `NAME=value`
+/// prefix in bash's grammar, and the block's own commands carry their own.
 pub fn expand_pipeline(
-    pipeline: &Pipeline,
+    stages: &[ExpandedStage<'_>],
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<EnvAssigns>, Report<CmdError>> {
     let mut out = Vec::new();
-    for cmd in &pipeline.commands {
-        out.push(expand(cmd, text, cell)?);
+    for stage in stages {
+        match stage {
+            ExpandedStage::Command(cmd) => out.push(expand(cmd, text, cell)?),
+            ExpandedStage::Block(_) => out.push(Vec::new()),
+        }
     }
     Ok(out)
 }

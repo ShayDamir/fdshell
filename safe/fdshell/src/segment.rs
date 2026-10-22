@@ -62,6 +62,10 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                     // A keyword block that opens a cond part mid-run: `skip` moved
                     // the cursor past its whole span, so its `;` never splits the
                     // run and the cond layer splits the operators.
+                } else if opener && block::stage::skip(line, &mut book).is_some() {
+                    // A keyword block that opens a pipeline stage mid-run: `skip`
+                    // moved the cursor past its whole span, so its `;` never splits
+                    // the run and the pipeline parser splits the stages.
                 } else {
                     book.i = book.state.advance(line, book.i);
                 }

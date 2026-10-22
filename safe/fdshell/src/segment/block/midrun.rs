@@ -57,6 +57,9 @@ pub(in crate::segment) fn skip(line: &[u8], book: &mut Book<'_>) -> Option<usize
 /// closing brace, carrying the quote state out of the body exactly like
 /// `skip_group`. An unclosed span ends at the end of input.
 ///
+/// The stage arm [`super::stage`] reuses this span rule verbatim: only the
+/// command-position gate in front of it differs between the two arms.
+///
 /// The keyword branch is gated on the **shared run-start scorer**
 /// [`keyword_delta`] `== Some(1)` — `opener_len` only measures the word. The
 /// scorer is what tells a block-opening `wait` from the POSIX builtin
@@ -65,7 +68,7 @@ pub(in crate::segment) fn skip(line: &[u8], book: &mut Book<'_>) -> Option<usize
 /// builtin would swallow every statement after the first `;` of the run
 /// (`true && wait; echo tail`). A word the scorer rejects stays word data, so
 /// the caller advances over it and the run splits at its `;` as before.
-fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) -> Option<usize> {
+pub(super) fn span_end(line: &[u8], tail: &[u8], i: usize, quotes: &mut Quotes) -> Option<usize> {
     let prefix = time_prefix_len(tail).unwrap_or(0);
     let keyword = tail.get(prefix..).unwrap_or(b"");
     if let Some(kw_len) = opener_len(keyword)
