@@ -4149,7 +4149,13 @@ floors its resume with the floor the line already carries, a block with trailing
 content on its line keeps its own resume (that text is commands, never a region),
 and the floor a block leaves is the deeper of the two. Put the rule where the
 cursor moves, not in the branch that computes the resume — the block and the group
-callers share it.
+callers share it. **Each caller must state its own mode, not the friendliest
+one:** the group's span ends the **statement** it opens, so a group behind a
+region-claiming block (`if :; then cat <<E; fi; { :; }; echo t`) has a statement
+after its own `;`, and passing the flag as always-true dropped that statement
+(bash prints `t`; the group caller derives the flag from its own span end and the
+physical line). The statement-level twin `cat <<E; { :; }; echo t` drops the
+statement on master too and stays **#332**'s.
 
 **In a shared module, record the arm one caller cannot reach instead of padding a
 test for it** (#311's rule): the extension arm of `claimed_bodies` never moves the
