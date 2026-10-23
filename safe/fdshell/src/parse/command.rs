@@ -1,3 +1,6 @@
+pub(crate) mod collect_tail;
+mod redirect_first;
+
 use crate::error::parse::ParseError;
 use crate::parse::BuiltinPrefix;
 use crate::parse::CommandLine;
@@ -21,6 +24,12 @@ pub fn parse_command(
     // Leading `NAME=value` words are scoped to this command (POSIX 2.9.1);
     // the keyword and builtin checks run on the first word after the prefix.
     let prefix = envassign::prefix_len(tokens);
+    // POSIX #2.9: a statement whose word 0 is a redirection and whose remaining
+    // words are all redirections is a command with an **empty** command word
+    // (`>f`, `VAR=x >f`, `>f 2>&1`); the run side runs it in-process at rc 0.
+    if redirect_first::leads(tokens, prefix, line, specs)? {
+        return redirect_first::build(tokens, prefix, line, specs, set_at);
+    }
     // `builtin NAME` dispatches as a builtin only; `command NAME` (bash:
     // bypasses user functions) dispatches as a builtin if the name is one,
     // else falls through to the external (PATH) search.

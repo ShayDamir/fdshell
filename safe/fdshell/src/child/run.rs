@@ -21,6 +21,15 @@ pub fn child_main(
     setup_shellfd(child_sock.as_ref(), cell)?;
     apply_redirects(redirects)?;
 
+    // A redirections-only stage (the empty command word of task #303): the
+    // redirections just applied **are** the command — `>f | cat` creates `f`
+    // and the stage exits 0 with `cat` reading an empty stdin. No arg
+    // substitution, no `$_` send (bash leaves `$_` alone: there is no command
+    // word) and no exec. A quoted empty word 0 (`"" | cat`, bash 127) stays on
+    // the normal path, as does an expanded-empty word 0.
+    if cmd.name.is_empty() && !cmdline.command_quoted && args.is_empty() {
+        return Ok(0);
+    }
     let resolved = substitute_args(
         args,
         &cmdline.args_mask,

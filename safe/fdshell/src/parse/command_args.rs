@@ -1,13 +1,16 @@
 use crate::error::parse::ParseError;
-use crate::parse::bg_redirect::parse_bg_redirect;
-use crate::parse::{BuiltinPrefix, CommandLine, Token, bg_redirect};
+use crate::parse::BuiltinPrefix;
+use crate::parse::CommandLine;
+use crate::parse::Token;
 use alloc::vec::Vec;
-use error_stack::{Report, bail};
+use error_stack::Report;
 use sys::{Position, ShortCStr};
 
 /// Collect the tokens after the command word into args, captures and
 /// redirects, returning the finished `CommandLine`. Tokens after the first
 /// `;` are the heredoc body region: they belong to the body, not the command.
+/// The tail loop itself is the shared one (`command::collect_tail`), run here
+/// with the command slot **closed**: word 0 is already decided.
 pub(super) fn finish_command(
     prefix: BuiltinPrefix,
     command: ShortCStr,
@@ -44,63 +47,6 @@ pub(super) fn finish_command(
         pidvar: None,
         bg_force: false,
     };
-    let mut spec_at = 0usize;
-    let mut i = args_from;
-    while let Some((t, ts, te, _fq, mask, spans)) = tokens.get(i) {
-        if t.eq_bytes(b";") {
-            break;
-        }
-        // A bare `&` token is a parse error here: the scanner consumes every
-        // statement-terminating `&` (task #326), so one reaching the parse
-        // layer is the empty-command family (`echo a && & echo b` — bash's
-        // syntax error too). A quoted or escaped `&` is an ordinary argument
-        // (`echo "&"` prints `&`, measured bash).
-        if t.eq_bytes(b"&") && *te - *ts == t.len() {
-            bail!(ParseError::UnexpectedChar { ch: b'&' });
-        }
-        let mut skip = 0usize;
-        if super::heredoc::is_operator(line, tokens, i) {
-            let spec = specs.get(spec_at).ok_or(ParseError::InvalidRedirect)?;
-            let (r, extra) = super::heredoc::parse_operator(line, tokens, i, spec)?;
-            bg_redirect::insert_redirect(&mut cmd.redirects, r);
-            spec_at += 1;
-            skip = extra;
-        } else if let Some((bg, extra)) = parse_bg_redirect(tokens, i)? {
-            // A pidvar bg redirect carries no redirects, so the loop is a
-            // no-op there; the two cases share one straight-line form.
-            for r in bg.redirects {
-                bg_redirect::insert_redirect(&mut cmd.redirects, r);
-            }
-            if let Some(p) = bg.pidvar {
-                cmd.pidvar = Some(p);
-                cmd.bg_force = bg.bg_force;
-            }
-            skip = extra;
-        } else if t.starts_with(b"%") {
-            match crate::parse::classify::parse_capture(t, set_at)? {
-                Some(c) => cmd.captures.push(c),
-                None => {
-                    cmd.args.push(t.clone());
-                    cmd.args_mask.push(mask.clone());
-                    cmd.args_span.push(spans.clone());
-                    cmd.args_quoted
-                        .push(super::word_quoted::word_quoted(t, *ts, *te));
-                }
-            }
-        } else if let Some((r, extra)) = super::here_string::parse_here_string(line, tokens, i)? {
-            bg_redirect::insert_redirect(&mut cmd.redirects, r);
-            skip = extra;
-        } else if let Some((r, extra)) = crate::parse::classify::parse_redirect(tokens, i)? {
-            bg_redirect::insert_redirect(&mut cmd.redirects, r);
-            skip = extra;
-        } else {
-            cmd.args.push(t.clone());
-            cmd.args_mask.push(mask.clone());
-            cmd.args_span.push(spans.clone());
-            cmd.args_quoted
-                .push(super::word_quoted::word_quoted(t, *ts, *te));
-        }
-        i += 1 + skip;
-    }
+    super::command::collect_tail::collect(&mut cmd, tokens, args_from, line, specs, set_at, false)?;
     Ok(cmd)
 }

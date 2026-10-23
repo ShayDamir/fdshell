@@ -22,6 +22,23 @@ pub(crate) fn run_cmd(
     // itself after arg substitution).
     let env = crate::run_env::expand(cmdline, text, cell)?;
     let save = crate::run_env::apply(&env, cell)?;
+    // POSIX #2.9: a redirections-only command (an empty command word, the
+    // shape `parse::command::redirect_first` builds) runs in the **current**
+    // shell: the scope opens and closes around nothing, the status is 0, and a
+    // `NAME=value` prefix **persists** — there is no command for it to scope
+    // to, so bash keeps `VAR=x` from `VAR=x >f` and the scoped `save` is
+    // deliberately not restored here. `command_quoted == false` is the guard
+    // that keeps a **quoted** empty word 0 (`"" >f`, bash 127) and an
+    // expanded-empty word 0 (`command_word::with_fields` sets the flag) out.
+    if is_redirect_only(cmdline) {
+        crate::redirect::Scope::open(&cmdline.redirects, cell)?.run(|| {
+            cell.borrow_mut()
+                .change_context(CmdError::Never)?
+                .set_last_exit(0);
+            Ok(())
+        })?;
+        return Ok(None);
+    }
     // Word 0 is expanded with the prefix applied, so the command name sees the
     // scoped values (`E=echo; $(echo $E) hi` runs `echo`), as bash expands it.
     // The prefix is restored before the launch: the child applies it itself,
@@ -45,6 +62,17 @@ pub(crate) fn run_cmd(
                 .change_context(CmdError::Launch)?;
     }
     Ok(None)
+}
+
+/// The redirections-only command: an empty command word (a **quoted** empty
+/// one is a command lookup — `"" >f` is bash 127), no argument word (one makes
+/// the statement `>f g`, a command with a redirection), and at least one
+/// redirection.
+fn is_redirect_only(cmdline: &crate::parse::CommandLine) -> bool {
+    cmdline.command.is_empty()
+        && !cmdline.command_quoted
+        && cmdline.args.is_empty()
+        && !cmdline.redirects.is_empty()
 }
 
 /// Run `f` with the scoped prefix applied, restoring it on both paths (the
