@@ -873,8 +873,9 @@ fn scan_function_block_resume_gap_eats_glued_byte() {
 /// A `;`-terminated heredoc statement before a function definition and a
 /// heredoc statement after it: the line's body stream is allocated in operator
 /// order, so the pre-block statement takes region 0, the definition claims
-/// **none** (its body's heredocs feed the statements inside it — the body is
-/// re-scanned), and the trailing statement takes the region left over.
+/// **its own** region (the mode rule of `segment/block/claim.rs`: here the
+/// definer's text has no operator, so it claims none), and the trailing
+/// statement takes the region left over.
 /// (Task #240: on master the trailing statement was fed the pre-block
 /// statement's region — `bodyX` plus its delimiter line as content.)
 #[test]
@@ -943,6 +944,79 @@ fn scan_heredoc_between_function_block_and_call_shares_body_stream() {
             ("B", 8, 25, true, vec![]),
             ("S", 27, 0, false, vec![b"bodyB\nB".to_vec()]),
             ("S", 36, 0, false, vec![]),
+        ],
+    );
+}
+
+/// A `;`-terminated here-doc **inside** the definer's text: the region starts
+/// past the closing brace, so the definition claims it (append mode, task #305)
+/// and the trailing call is a plain body-less statement. The span end is
+/// unchanged by the claim — the region bytes travel as `bodies`, never as span.
+#[test]
+fn scan_function_block_with_a_terminated_operator_appends_its_regions() {
+    check_shapes(
+        b"f() { cat <<E; }; f\nbody\nE",
+        &[
+            ("B", 0, 16, true, vec![b"body\nE".to_vec()]),
+            ("S", 18, 0, false, vec![]),
+        ],
+    );
+}
+
+/// The same line with an operator **before** the definition: the stream is
+/// global and per-line, so the pre-block statement owns region 0 and the
+/// definer its own region 1 (the skip is anchored at the physical line start).
+#[test]
+fn scan_pre_block_operator_shifts_the_function_claim() {
+    check_shapes(
+        b"cat <<X; f() { cat <<E; }; f\nbodyX\nX\nbodyE\nE",
+        &[
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
+            ("B", 8, 25, true, vec![b"bodyE\nE".to_vec()]),
+            ("S", 27, 0, false, vec![]),
+        ],
+    );
+}
+
+/// Two definers on one line, each with its own `;`-terminated here-doc: each
+/// claims its own region of the line's stream, in operator order, and the calls
+/// between and after them are body-less statements (task #305).
+#[test]
+fn scan_two_function_blocks_take_their_own_regions() {
+    check_shapes(
+        b"f() { cat <<E; }; f; g() { cat <<F; }; g\none\nE\ntwo\nF",
+        &[
+            ("B", 0, 16, true, vec![b"one\nE\n".to_vec()]),
+            ("S", 18, 0, false, vec![]),
+            ("B", 20, 37, true, vec![b"two\nF".to_vec()]),
+            ("S", 39, 0, false, vec![]),
+        ],
+    );
+}
+
+/// The multi-line definer stays **extension** mode: its delimiter lines are
+/// inside the span, the span carries the whole block text verbatim, and the
+/// segment carries no bodies (the green `heredoc_in_function_body` pin).
+#[test]
+fn scan_multi_line_function_body_claims_no_bodies() {
+    check_shapes(
+        b"f() { cat <<EOF\nin-func\nEOF\n}; f",
+        &[("B", 0, 29, true, vec![]), ("S", 31, 0, false, vec![])],
+    );
+}
+
+/// A keyword block written **behind** the definition on the same line must not
+/// re-scan the regions the definition claimed: the block ends the line, so the
+/// floor the line already carries outranks its own resume (`Book::rewind`,
+/// task #305). On master the trailing block reset the floor and the two body
+/// lines were emitted as statements (`body` ran as a command).
+#[test]
+fn scan_trailing_block_after_a_function_heredoc_keeps_the_line_floor() {
+    check_shapes(
+        b"f() { cat <<E; }; if :; then :; fi\nbody\nE",
+        &[
+            ("B", 0, 16, true, vec![b"body\nE".to_vec()]),
+            ("B", 17, 34, true, vec![]),
         ],
     );
 }

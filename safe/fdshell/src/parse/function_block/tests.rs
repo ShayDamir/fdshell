@@ -102,6 +102,60 @@ fn body_keeps_nested_commands() {
     assert!(def.body.data.eq_bytes(b"a=1; b=2"));
 }
 
+/// The def body is a block body, so it carries the here-doc regions its own
+/// operators claim (task #305, `parse/part_text`): the `;`-terminated operator's
+/// region sits past the closing brace, and the stored text is a self-contained
+/// heredoc the call can re-run. The trimmed slice ends at the operator's word,
+/// so the `;` of the body line does not travel.
+#[test]
+fn body_carries_the_regions_of_a_terminated_operator() {
+    let crate::parse::ParsedLine::Function(def) = parse(b"f() { cat <<E; }\nbody\nE\n") else {
+        panic!("expected Function");
+    };
+    assert_eq!(def.body.data.as_bytes().unwrap(), b"cat <<E\nbody\nE\n");
+}
+
+/// Two operators in one def body append **both** regions, in operator order —
+/// the same order the line's body stream allocates them in.
+#[test]
+fn body_of_a_two_operator_definition_keeps_both_regions_in_order() {
+    let crate::parse::ParsedLine::Function(def) =
+        parse(b"f() { cat <<E; cat <<F; }\none\nE\ntwo\nF\n")
+    else {
+        panic!("expected Function");
+    };
+    assert_eq!(
+        def.body.data.as_bytes().unwrap(),
+        b"cat <<E; cat <<F\none\nE\ntwo\nF\n"
+    );
+}
+
+/// Extension mode stays verbatim: a multi-line definition's delimiter lines are
+/// already inside the slice, so the stored body is the block text as written
+/// (the rule that kept `heredoc_in_function_body` green).
+#[test]
+fn body_stays_verbatim_for_a_multi_line_definition() {
+    let crate::parse::ParsedLine::Function(def) = parse(b"f() { cat <<EOF\nin-func\nEOF\n}") else {
+        panic!("expected Function");
+    };
+    assert_eq!(
+        def.body.data.as_bytes().unwrap(),
+        b"cat <<EOF\nin-func\nEOF"
+    );
+}
+
+/// A `}` written **inside** a body region is body data, never the closer: the
+/// tokenizer blanks the region's words (task #266), so the closer search keeps
+/// the definer's own brace. This pins that decision — the token-list walk of
+/// `semi::closing_keyword_index` would score the delimiter line's words.
+#[test]
+fn closer_shaped_body_word_stays_body_data() {
+    let crate::parse::ParsedLine::Function(def) = parse(b"f() { cat <<E; }\n}\nE\n") else {
+        panic!("expected Function");
+    };
+    assert_eq!(def.body.data.as_bytes().unwrap(), b"cat <<E\n}\nE\n");
+}
+
 #[test]
 fn no_parens_is_not_a_function() {
     assert!(!matches!(

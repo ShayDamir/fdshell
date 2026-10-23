@@ -83,10 +83,30 @@ impl<'a> Book<'a> {
     /// statement on the same line is still scanned) — with the line start the
     /// trailing runs' bookkeeping continues from and the resume floor for the
     /// physical line.
-    pub(super) fn rewind(&mut self, resume: usize, line_start: usize, floor: usize) {
-        self.i = resume;
-        self.start = resume;
+    ///
+    /// `line_ends` says whether the block's span ends the physical line. Only
+    /// then does the floor the line **already** carries outrank the resume: a
+    /// block that ends its line must land past every body region claimed on it,
+    /// including the regions claimed by a statement before it and by an earlier
+    /// block of the same line (task #305), while a block with trailing content
+    /// on its line keeps its own resume — that text is commands, never a region.
+    /// The floor a block leaves is the deeper of the two, so a block that
+    /// claims nothing never drops the claim of the block before it.
+    pub(super) fn rewind(
+        &mut self,
+        resume: usize,
+        line_start: usize,
+        floor: usize,
+        line_ends: bool,
+    ) {
+        let i = if line_ends {
+            resume.max(self.body_floor)
+        } else {
+            resume
+        };
+        self.i = i;
+        self.start = i;
         self.line_start = line_start;
-        self.body_floor = floor;
+        self.body_floor = floor.max(self.body_floor);
     }
 }

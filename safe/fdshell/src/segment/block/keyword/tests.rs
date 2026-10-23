@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
 use crate::scan::ScanState;
+use crate::scan::heredoc;
+use crate::segment::block::claim;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -131,6 +133,39 @@ fn extension_mode_keeps_the_span_and_no_bodies() {
     let got = scan_at(line, 0);
     assert_eq!(got.1, 32, "span end is the closing keyword's separator");
     assert_eq!(got.4, Vec::<Vec<u8>>::new());
+}
+
+/// The two block branches share one claim: feeding the shared
+/// [`claim::claimed_bodies`] the window and the line anchors this branch passes
+/// reproduces exactly the `(bodies, end_pos)` the branch delivers, for both
+/// modes. A direct pin, so an edit of the shared module cannot move the keyword
+/// branch (or the function branch) silently.
+#[test]
+fn the_shared_claim_is_what_the_branch_delivers() {
+    for (line, start) in [
+        // Append mode: the region of the block's own `<<T`, past its `fi`.
+        (b"if true; then cat <<T; fi\nbodyT\nT".as_slice(), 0),
+        // Extension mode: the region interleaves with the block's own lines.
+        (b"if cat <<A; then\necho y\nfi\nbodyA\nA".as_slice(), 0),
+        // A pre-block operator: the skip is bounded to the block's own line.
+        (
+            b"cat <<X; if cat <<A; then echo y; fi\nbodyX\nX\nbodyA\nA".as_slice(),
+            9,
+        ),
+    ] {
+        let line_end = heredoc::line_end_after(line, start);
+        let (_, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
+        let got = scan_at(line, start);
+        // `line_start` is the physical line's start (the call site passes
+        // `book.line_start`), which `scan_at` pins to 0.
+        let (bodies, end) =
+            claim::claimed_bodies(line, 0, start, got.1, line_end, line_resume, true);
+        assert_eq!(bodies, got.4, "{line:?}: claimed bodies");
+        assert_eq!(
+            end, got.1,
+            "{line:?}: re-claiming the span is a fixed point"
+        );
+    }
 }
 
 /// A pre-block statement on an **earlier** physical line claims nothing in the

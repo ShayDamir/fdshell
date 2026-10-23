@@ -32,7 +32,10 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let (segment, resume, floor) =
         group_block(line, brace, span_start, book.state.quotes(), pre_resume);
     book.segments.push(segment);
-    book.rewind(resume, resume, floor);
+    // The group's span ends the statement it opens, so it ends the physical
+    // line: the floor the line carries (a heredoc region claimed before the
+    // group) outranks its resume ([`Book::rewind`]).
+    book.rewind(resume, resume, floor, true);
 }
 
 /// Build the `Segment::Block` for a `{ …; }` group whose `{` is at `start` (the

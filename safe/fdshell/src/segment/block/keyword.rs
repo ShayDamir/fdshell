@@ -1,7 +1,10 @@
 //! The keyword block span (`if`/`for`/`while`/`until`/`case`/`wait`): the
-//! closing-keyword scan and the heredoc-body region bookkeeping.
+//! closing-keyword scan and the heredoc-body region bookkeeping. The
+//! append/extension claim itself is shared with the function-definition branch
+//! ([`claim::claimed_bodies`]).
 
 use super::Segment;
+use super::claim;
 use super::length::opener_len;
 use crate::comment::scan_block;
 use crate::keywords::time_prefix_len;
@@ -16,8 +19,8 @@ use alloc::vec::Vec;
 /// the block on the same line (the line end when there is none); `line_start`
 /// is the start of the physical line whose body stream the block reads.
 ///
-/// The block claims **its own** regions of that line's body stream (see
-/// [`heredoc::claimed_line_bodies`]), and the segment carries their bytes in
+/// The block claims **its own** regions of that line's body stream
+/// ([`claim::claimed_bodies`]), and the segment carries their bytes in
 /// `bodies` when they sit entirely past the block's command text (**append
 /// mode**): the span then stops at the closing keyword's separator, so a
 /// trailing statement's text is outside the block, and `script.rs` hands the
@@ -68,39 +71,25 @@ pub(super) fn keyword_block<'a>(
         // `line_resume` is the resume floor's anchor: the end of the line's
         // last body region (the line end when the bodies are missing).
         let (_, line_resume) = heredoc::line_bodies_for_line(line, start, line_end);
-        // The block's command text spans lines (a multi-line block's condition
-        // body+terminator sit before its closer), so the count is the
-        // window-blind one: those regions are heredoc structure, never the
-        // block's operators. Regions claimed by an operator written **before**
-        // this window are kept visible — a pre-block heredoc's region covers
-        // the block's own line, and blinding it would hide the closer
+        // The append/extension claim shared with the function-definition branch
+        // ([`claim::claimed_bodies`]): the block's command text spans lines (a
+        // multi-line block's condition body+terminator sit before its closer),
+        // so the count is the window-blind one, and regions claimed by an
+        // operator written **before** this window stay visible — a pre-block
+        // heredoc's region covers the block's own line, and blinding it would
+        // hide the closer
         // (`tests::skip_is_bounded_to_the_blocks_physical_line`).
-        let k = heredoc::operator_count_opaque(line, start, block_start_pos);
-        // `k == 0` claims no region: skip the whole-line region scan for it.
-        let bodies = if k == 0 {
-            Vec::new()
-        } else {
-            let (claimed, contents) =
-                heredoc::claimed_line_bodies(line, line_start, start, line_end, k);
-            if claimed.first().is_some_and(|&(s, _)| s >= end) {
-                contents
-            } else {
-                // Extension mode: forward-only — the span keeps the block text.
-                end = match claimed.last() {
-                    Some(&(_, e)) => end.max(e),
-                    None => end.max(line_resume),
-                };
-                Vec::new()
-            }
-        };
+        let (claimed, extended) =
+            claim::claimed_bodies(line, line_start, start, end, line_end, line_resume, true);
+        end = extended;
         if block_start_pos < line_end {
             // Trailing content on the same line: scan it; the line's final
             // flush must not re-enter the body regions.
-            (block_start_pos, line_resume.max(pre_resume), bodies)
+            (block_start_pos, line_resume.max(pre_resume), claimed)
         } else {
             // The block ends the line (or continues on later lines): resume
             // just past the closing keyword, never inside a body region.
-            (block_start_pos.max(line_resume).max(pre_resume), 0, bodies)
+            (block_start_pos.max(line_resume).max(pre_resume), 0, claimed)
         }
     } else {
         (end + 1, 0, Vec::new())

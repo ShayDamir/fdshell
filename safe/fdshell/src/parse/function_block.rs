@@ -1,5 +1,6 @@
 use super::Token;
-use super::semi::{block_body, verbatim};
+use super::part_text::part_text;
+use super::semi::block_body;
 use super::word_quoted::{keyword_word, word_quoted};
 use crate::error::parse::ParseError;
 use crate::keywords::{name_len, quoted_word};
@@ -81,6 +82,14 @@ pub(crate) fn tokens_to_function(
         .iter()
         .position(|tok| keyword_word(tok, line, b"{"))
         .ok_or(ParseError::Never)?;
+    // The closer is the **last** unquoted `}` word of the token list. A body
+    // region's words are blanked by the tokenizer (task #266), so a
+    // `}`/`{`/`done` line written **inside a here-doc body** is data and never
+    // closes the definition. A **terminator** line's words stay tokens by the
+    // same rule, which is why the search keeps this token-list walk: switching
+    // it to `semi::closing_keyword_index` (measured, task #305) scores a
+    // delimiter line's word and closes on it. The delimiter-word-is-a-brace
+    // family is broken on master already and is task **#432**.
     let close = tokens
         .iter()
         .rposition(|tok| keyword_word(tok, line, b"}"))
@@ -97,7 +106,14 @@ pub(crate) fn tokens_to_function(
     // is **not** empty (tasks #354/#355). The check runs after the closer
     // search and before any terminator rule — the group's order
     // (`group_block.rs`), which keeps this message stable.
-    let body = verbatim(
+    //
+    // The body's text is [`part_text`]'s, the arm-granularity rule every block
+    // arm uses (tasks #238/#273): a here-doc written on a `;`-terminated line of
+    // the body claims a region **past** the closing brace, and the appended
+    // bytes must travel with the stored body, so the text the call re-runs is a
+    // contiguous heredoc (task #305). The multi-line form is extension mode,
+    // whose regions are already inside the slice, and stays verbatim.
+    let body = part_text(
         text,
         block_body(body_tokens, line, ParseError::FunctionEmptyBody)?,
     )?;
