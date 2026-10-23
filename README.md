@@ -351,6 +351,19 @@ A redirection belongs to the command it is written on and is undone when the
 command finishes — the shell's own descriptors come back. `exec >file` has no
 command to run, so its redirection stays for the rest of the script.
 
+A statement of **redirections only** — `>f`, `>>f`, `2>f`, `<f`, `>&2`, `>&-`,
+`&>f`, `<<<x`, `>f 2>&1`, `>$(echo f)` — **is** a command (POSIX #2.9): the
+redirections are applied, the shell's descriptors come back, and the status is
+**0**. It runs in the current shell, so no process is launched and a
+`NAME=value` prefix **persists** (`VAR=x >f` leaves `VAR=x` set, as bash does) —
+there is no command for the prefix to scope to. Two side effects of that
+in-process run are accepted divergences: the prefix is also **exported** (bash
+keeps such an assignment shell-local), and a `set -x` trace prints nothing for
+the statement (bash prints a line for the command it traces). A word behind the
+redirections is the command word — `>f g` runs `g` with the redirection — and a
+quoted operator word (`'>f'`, `"&>f"`) is a command name, never a redirection;
+a statement carrying a here-doc body keeps the behavior its own pins record.
+
 A **keyword block** takes a redirection written after its closing keyword and
 applies it to the whole block: `while :; do echo a; break; done > f` files the
 loop's output in `f`, and so does `until … done > f`, `if … fi > f`,

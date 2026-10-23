@@ -151,8 +151,11 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   block/arm position (`if … fi`, `{ … }`, `f(){ … }`, `for … done`,
   `case … esac`). Measured divergences, all pinned:
   a **redirect-only** suffix behind the `&` (`cat <<A & <<B`, `echo hi <<T & <<U`)
-  runs `<<B` as a command word (bash runs a bare redirection, rc 0) — owners
-  **#303** and **#345**; the glued `cat <<A& cat <<B` keeps the tokenizer's
+  runs `<<B` as a command word (bash runs a bare redirection, rc 0) — the
+  here-doc half, owner **#345** (a statement with a here-doc body keeps the
+  operator-word behavior; the plain redirect-only statement of #303 never
+  reaches it, since its body region is what gates the parse); the glued
+  `cat <<A& cat <<B` keeps the tokenizer's
   word rule (`&` is an ordinary word byte, so the byte-level delimiter is `A&`)
    and reports the missing terminator; a `#` comment behind the `&` ends the
    physical line, so the suffix run is flushed body-less (the rule the

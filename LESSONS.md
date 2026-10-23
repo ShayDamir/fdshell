@@ -2298,7 +2298,9 @@ is an equivalent-mutant source, so it was deleted, not kept "defensive".
 Sibling forms deliberately left open (measured, filed): `case x in a) esac`
 (#300, **closed** by the entry below — bash allows that arm), missing `;` before
 `done`/`fi` (#301, **closed** by the closer-rule entry beside "One clause rule,
-three scorers" — bash's rule plus its compound exception), empty function body (#302), redirect-only command (#303).
+three scorers" — bash's rule plus its compound exception), empty function body
+(#302), redirect-only command (#303, **closed** by the entry "A statement of
+redirections **is** a command" at the end of this file).
 Pins: `parse/tests.rs` (`empty_then_body_is_err`,
 `empty_elif_body_is_err`, `empty_else_body_is_err`, `empty_do_body_is_err`,
 `for_semi_before_done_reports_before_the_empty_body`,
@@ -3864,3 +3866,68 @@ pin lived (`safe/fdshell/tests/function_keyword.rs::definer_extra_words_and_trai
 which used the empty body as a convenient no-output body). Rewrite such a row in
 place, keep the row's own point (there: the definer-word leniency), and point at
 the rule's integration home from the comment.
+
+## A statement of redirections **is** a command: gate on the loop's own predicates, and open the gate only when the line has no here-doc body (task #303)
+
+`>f` reported `failed to resolve command path: ">f"` / `">f" not found` at rc 1.
+POSIX #2.9 makes a list of redirections with no command word a **command**: the
+redirections apply, the shell's descriptors come back, the status is **0**, and
+**no fork** happens. Two surfaces, one small each. The parse gate
+(`parse/command.rs`) calls `parse/command/redirect_first.rs::leads` right after
+`envassign::prefix_len`, and `build` constructs a `CommandLine` with an **empty**
+command word; `run/cmd.rs` runs that shape in-process through
+`redirect::Scope` (the `: >f` machinery, so a failed open fails the command rc 1
+with the fds put back) and `child/run.rs` has the matching arm for forked
+pipeline stages, placed **before** the `$_` send because bash leaves `$_` alone
+when there is no command word.
+
+**The load-bearing condition is `specs.is_empty()`.** The gate fires on the raw
+word-0 token through the **same three predicates the collection loop uses, in
+the loop's order** (`parse_bg_redirect`, `parse_here_string`, `parse_redirect`),
+so it inherits every operator-quoting gate and adds no operator vocabulary — and
+it stays **off** for any statement carrying a here-doc body. That one condition
+is what keeps the pinned leading-operator family intact (`> <<EOF`, `>| <<EOF`,
+`>| x <<EOF`, the `; <<EOF` row and the async `cat <<A & <<B` pin, all still the
+operator-word report) and routes the here-doc-only statement to **#345**.
+Loosening it to "word 0 is an operator token" breaks all of them. The tail
+collector moved (`command_args` was 89 LoC, one line under the §2.2 cap) into
+`parse/command/collect_tail.rs` with one added parameter, `word0_slot`: the
+**first** plain word becomes the command word (`>f g` runs `g` with the
+redirect), every other word is an argument — a move, not a copy, so
+`finish_command`'s behavior is byte-identical.
+
+**The run-side guard is `command_quoted == false`, and it is not decoration.**
+It is the only thing that distinguishes the parser-built empty command from a
+**quoted** empty word 0 (`"" >f` — bash 127, and the redirect still applies, so
+the file is created) and from an **expanded**-empty word 0
+(`command_word::with_fields` sets `command_quoted: true`, the family **#426**
+owns). A guard on `command.is_empty()` alone turns `"" >f` into rc 0.
+
+**Persistence is a deliberate skipped restore.** `run_env::apply` is applied,
+the scope runs, and the `EnvSave` is **not** restored: bash keeps `VAR=x` from
+`VAR=x >f`, because there is no command for the prefix to scope to. The store
+split (bash keeps it a shell variable, `run_env::apply` also exports it) is the
+documented micro-divergence; a follow-up that separates the two stores owns it.
+
+**Inheriting a parser's vocabulary inherits its divergences — measure the
+inherited rows, not only the fixed ones.** `>>&x` is a path redirect in
+fdshell's loop (`>>` with the operand `&x`, the same reading `echo a >>&x` has
+always had), so the gate makes it an rc-0 redirect-only command while bash
+rejects the word outright (rc 2). Pin the inherited shape with the bash
+reference beside it. Two more measured rows that read as fixes and are
+divergences: `>f <nofile` creates **no** file here (every target is opened
+before any is applied — the all-or-nothing rule `: >f <nofile` has always had)
+where bash leaves `f` behind, and a `%tag>%name` capture word on a redirect-only
+statement is dropped (nothing is launched) at rc 0 while bash reports
+job-control noise. A `%o`-style word is not a capture operator at all, so it is
+the command word — the capture arm's `None` branch shares the plain-word arm.
+
+**A pin of the old behavior is part of the fix's blast radius.**
+`tests/herestring.rs::prefixed_here_string_at_a_run_start_is_the_command_word`
+pinned `3<<<x` as the command word; the io-number form is a redirection token,
+so the row became
+`prefixed_here_string_at_a_run_start_is_a_redirection_only_command` (rc 0, and
+`3<<<x; cat <&3` is rc 1 from the **trailing** command, which is exactly bash's
+row). Re-measure every name that mentions the old rule, and update the owner
+lists that name this task (`POSIX_COMPATIBILITY.md`, `tests/heredoc.rs`,
+`tests/redirect.rs`) in the same commit.
