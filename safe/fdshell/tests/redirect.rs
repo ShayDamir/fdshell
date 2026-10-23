@@ -2043,19 +2043,23 @@ fn a_redirect_only_statement_with_an_unopenable_target_fails() {
 
 /// A word **behind** the redirections is the command word: bash runs `g` with
 /// the redirect (rc 127 there), fdshell reports its shell-wide not-found **1**
-/// and the file is created all the same. A `%` word keeps the collection loop's
-/// own reading: the `%tag>%name` capture operator has no command to attach to
-/// and is dropped (rc 0), while `%o` is no capture operator at all, so it is
-/// the command word (bash reports job-control noise, rc 1, on both).
+/// and the file is created all the same. A keyword behind the redirections is
+/// no keyword at all (`>f for …` reaches the same lookup, and its `do`/`done`
+/// words follow it; bash rejects the shape outright, rc 2). A `%` word keeps
+/// the collection loop's own reading: the `%tag>%name` capture operator has no
+/// command to attach to and is dropped (rc 0), while `%o` is no capture
+/// operator at all, so it is the command word (bash reports job-control noise,
+/// rc 1, on both).
 #[test]
 fn a_redirect_only_statement_with_a_word_runs_that_word() {
     let dir = seeded("redirect_only_word");
     let dir = dir.to_str().unwrap();
-    let rows: [(&str, &str, &[&str]); 4] = [
+    let rows: [(&str, &str, &[&str]); 5] = [
         (">f g", "\"g\" not found", &["f"]),
         (">f /nope/x", "\"/nope/x\" not found", &["f"]),
         (">f g h", "\"g\" not found", &["f"]),
         (">f %o", "\"%o\" not found", &["f"]),
+        (">f for i in a; do :; done", "\"for\" not found", &["f"]),
     ];
     for (script, needle, want) in rows {
         clean(dir);
