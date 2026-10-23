@@ -1451,16 +1451,21 @@ fn seeded(tag: &str) -> Scratch {
     dir
 }
 
-/// Run `script` in `dir` and return its `(stdout, stderr, rc)` plus the sorted
-/// directory listing.
-fn run_ls(dir: &str, script: &str) -> (String, String, i32, Vec<String>) {
-    let (out, err, code) = run(&format!("cd {dir}; {script}"));
+/// The sorted directory listing of `dir`.
+fn listing(dir: &str) -> Vec<String> {
     let mut files: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
         .collect();
     files.sort();
-    (out, err, code, files)
+    files
+}
+
+/// Run `script` in `dir` and return its `(stdout, stderr, rc)` plus the sorted
+/// directory listing.
+fn run_ls(dir: &str, script: &str) -> (String, String, i32, Vec<String>) {
+    let (out, err, code) = run(&format!("cd {dir}; {script}"));
+    (out, err, code, listing(dir))
 }
 
 /// The names `dir` holds beyond the seeded `a1 a2 sub`: what the script created.
@@ -1474,12 +1479,7 @@ fn created(files: &[String]) -> Vec<String> {
 
 /// Drop every file the rows create, keeping the seed: rows share one dir.
 fn clean(dir: &str) {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
-        .collect();
-    names.sort();
-    for name in created(&names) {
+    for name in created(&listing(dir)) {
         std::fs::remove_file(std::path::Path::new(dir).join(name)).ok();
     }
 }
@@ -1884,6 +1884,26 @@ fn run_cwd(dir: &str, script: &str) -> (String, String, i32) {
     )
 }
 
+/// Run with the shell's fd 3 **closed from the start** (the same helper as
+/// `tests/heredoc.rs` and `tests/herestring.rs`): `sh` closes it before
+/// `exec`-ing fdshell, so the fd table the child sees is deterministic whatever
+/// the harness inherited. A pin that asserts fd 3 is *closed* in the parent
+/// needs this — cargo-mutants hands every test process its jobserver pipes as
+/// open fds ≥ 3, which would make a `>&3` dup succeed (LESSONS, task #276).
+fn run_fd3_closed(script: &str) -> (String, String, i32) {
+    let output = Command::new("sh")
+        .args(["-c", "exec 3>&-; exec \"$0\" -c \"$1\"", BIN, script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 /// The plain family: every operator shape, in every statement position, is a
 /// command that applies its redirections and exits 0 (bash rc 0 in each row).
 #[test]
@@ -1981,11 +2001,25 @@ fn a_redirect_only_statement_leaves_the_status_and_the_prefix() {
 fn a_redirect_only_statement_with_an_unopenable_target_fails() {
     let dir = seeded("redirect_only_fail");
     let dir = dir.to_str().unwrap();
-    for script in ["<nofile", ">f <nofile", "2<nofile", ">&3"] {
+    for script in ["<nofile", ">f <nofile", "2<nofile"] {
         clean(dir);
         let (out, err, code, files) = run_ls(dir, script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
         assert!(err.contains("redirection"), "{script}: stderr={err:?}");
+        assert!(created(&files).is_empty(), "{script}: created {files:?}");
+    }
+    // The `>&3` family takes its source from the **parent's** fd table, so the
+    // rows only fail when fd 3 is closed there (bash: rc 1 `3: Bad file
+    // descriptor`, nothing created). They run through `run_fd3_closed`: under a
+    // harness that inherited fd 3 — cargo-mutants hands every test process its
+    // jobserver pipes as fds ≥ 3, LESSONS task #276 — the dup would succeed and
+    // both statements would be rc 0 and silent.
+    for script in [">&3", "2>&3"] {
+        clean(dir);
+        let (out, err, code) = run_fd3_closed(&format!("cd {dir}; {script}"));
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("redirection"), "{script}: stderr={err:?}");
+        let files = listing(dir);
         assert!(created(&files).is_empty(), "{script}: created {files:?}");
     }
     clean(dir);
