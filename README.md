@@ -436,6 +436,17 @@ its own closer (`true && while :; do` + newline + `cat <<T; break` + `done` +
 body + delimiter): rc 1 with the construct's unterminated-shape message, where
 bash is rc 2.
 
+The cond-list operator written in a here-doc body region is a split point only
+where the `<<` sits in a **block's clause** (`if cat <<X; then` + `body && x` +
+`X` + `fi`: rc 1 `missing 'fi'`, where bash reports a syntax error at rc 2 — the
+accepted rc-1-vs-2 shape); a region claimed by a word of the block's
+**body** is the body's own data — `if :; then cat <<Q` + `z && y` + `Q` + `fi`
+prints `z && y` at rc 0, as bash, in every block shape: `then`/`else` arms,
+`for`/`while`/`until`, `case` arms, nested blocks, a `{ …; }` group
+(`tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data`,
+`a_body_position_heredoc_region_in_every_block_shape_prints_its_body`, and
+`a_clause_position_region_still_splits_the_block_text` for the clause rows).
+
 The stream is read **greedily, one body per operator**, as bash reads it: each
 operator's body starts where the previous operator's delimiter line ended, and
 an operator whose delimiter line never arrives takes what is left of the stream
