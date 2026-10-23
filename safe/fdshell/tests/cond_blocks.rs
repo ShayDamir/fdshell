@@ -1404,11 +1404,20 @@ fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     let (out, err, rc) = run_bounded("{ echo g # c && echo z\n} && echo w");
     assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
     assert!(err.contains("expected ';' before '}'"), "stderr={err}");
-    // #304: a redirect-carrying heredoc line behind a comment in a block body
-    // loses the `fi` (bash prints the body).
+    // #304 closed this row's **region-rule** half: a region claimed by a word of
+    // the block's body is opaque, so the `&&` in `q && y` no longer splits the
+    // block text and `missing 'fi'` is gone. What is left is the
+    // **statement-level** divergence of a `#` comment written behind a here-doc
+    // delimiter word: it reproduces with no block at all (`cat <<Q # c` + body +
+    // `Q` → rc 1, bash prints the body at rc 0), and measures identically on
+    // master and on #304 (measured 2026-10-23, bash 5.3.9) — task **#429** owns
+    // that family, #296 owns the comment-at-a-block-edge rule.
     let (out, err, rc) = run_bounded("if :; then cat <<Q # c\nq && y\nQ\nfi");
     assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
-    assert!(err.contains("missing 'fi'"), "stderr={err}");
+    assert!(
+        err.contains("missing terminating delimiter line 'Q'"),
+        "stderr={err}"
+    );
     // #304's twin, where fdshell runs the statement: the `X` delimiter word ends
     // the heredoc and `X` is then run as a command, so only the body's `b` and
     // the report's rc are machine-independent (bash: rc 2 at `fi`).
