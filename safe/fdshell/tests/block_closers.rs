@@ -234,6 +234,64 @@ fn the_rc_1_family_stays_a_parse_error() {
         "'if' is missing its closing 'fi'",
     );
     err("if true; then echo }; fi", "expected ';' before 'fi'");
+    // The POSIX builtin `wait` scores the *zero* keyword delta, so it is not a
+    // compound command's end and `done` behind it stays an argument (bash rc 2,
+    // `master` rc 1 with this same message; the `Some(0)` row of the closer
+    // arm's gate is pinned at `keywords/position/tests.rs`).
+    bounded_err(
+        "while false; do wait done",
+        "'while' is missing its closing 'done'",
+    );
+}
+
+/// The **accepted divergence** this rule opens: a nested block whose own body
+/// is unparseable, written inside a body that never runs. A block body is
+/// parsed only when it runs, so the compound-closer rule closes the outer block
+/// and the inner statement is never parsed — rc 0 here. bash parses the whole
+/// script and stops at rc 2 for every row; `master` rejected every one at rc 1
+/// with its *missing-closer* error (`'while' is missing its closing 'done'`,
+/// `'if' is missing its closing 'fi'`, and `expected 'done'` for the mid-run
+/// and stage twins), i.e. these were the false rejections this task set out to
+/// remove, and the acceptance is the rule's own side effect.
+///
+/// The two halves belong to other tasks, named on each row: the `for … do` word
+/// list is #273/#306/#310, the opener/closer pairing (a `while` closed by an
+/// `if`) is #309, the glued `||` before a `;;` is the `;;` separator rule of
+/// #423, and the *message* of a body that is never parsed is the lazy-body-parse
+/// family — parse block bodies eagerly and every row here reports its inner
+/// error, matching bash. Pinned so a later task can tell this class from a new
+/// break; a dedicated sweep (18 invalid inner statements × 8 block spellings)
+/// counts 47 such rows.
+#[test]
+fn a_never_run_body_is_never_parsed() {
+    for script in [
+        // The inner `for` list has no `;` before its `do` (standalone: rc 1
+        // `expected 'do'`) — the word-list rule of #273/#306/#310.
+        "while false; do for i in a do :; done done",
+        "if false; then for i in a do :; done fi",
+        // The inner `if`/`while` has its closer glued behind a clause keyword
+        // (standalone: rc 1 `expected ';' before 'fi'`/`'done'`), and an `if`
+        // closing a `while` is #309's type-blind pairing.
+        "while false; do if true; then fi done",
+        "while false; do while true; do done done",
+        // The inner arm body ends in a glued `||` before the `;;`, which the
+        // `;;` separator rule of #423 accepts on its own already (standalone:
+        // rc 0, bash rc 2).
+        "while false; do case x in a) echo a || ;; esac done",
+        // The same blocks read by the byte-level scans, mid-run and as a
+        // pipeline stage: the scans own the span, the body stays unparsed.
+        "true && while false; do if true; then fi done",
+        "echo a | while false; do if true; then fi done",
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!((out.as_str(), code), ("", 0), "`{script}` stderr: {err}");
+    }
+    // A body that *runs* does report the inner error, so the acceptance here is
+    // lazy body parsing and not the closer rule.
+    bounded_err(
+        "while :; do if true; then fi done",
+        "expected ';' before 'fi'",
+    );
 }
 
 /// The rule is checked **after** the condition and **before** the bodies, so a

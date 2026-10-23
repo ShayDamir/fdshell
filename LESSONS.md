@@ -2553,6 +2553,20 @@ predicate, read at the scan and at the builders, that knows both halves.
   and a `;;` token is not empty, so `if true; then echo a ;; fi` stays rc 0
   (bash rc 2) — task #423 owns that half; `tests/block_closers.rs` pins the
   split so it is visible.
+- **A body that never runs is never parsed — the rule's own side effect.** A
+  block body is parsed only when it runs, so an unparseable nested block
+  written inside a body that never runs is closed by the compound exception and
+  its inner parse error never surfaces: `while false; do for i in a do :; done
+  done` and `while false; do if true; then fi done` are rc 0 here, **bash rc 2**
+  and **`master` rc 1** with its *missing-closer* error (a sweep of 18 invalid
+  inner statements × 8 block spellings counts 47 such rows). They are the false
+  rejections this rule exists to remove, so no code fix here; the pin
+  `tests/block_closers.rs::a_never_run_body_is_never_parsed` names the owners of
+  each half (the word lists #273/#306/#310, the opener/closer pairing #309, and
+  the lazy-body-parse family for the message). The lesson for the rc-identity
+  audit of a *closer* rule: count the `(bash≠0, master≠0, new=0)` rows as their
+  own category — the parity-gain and regression categories leave this class
+  invisible, and a "0 regressions" claim then reads as more than it measured.
 - **Two heals worth naming.** `while :; do echo in done; …` hung on `master`
   (the argument-`in` set `Place::Pattern`, `done` scored there, the loop never
   closed); the closer rule turns it into rc 1, and the `cond/boundary/block/tests.rs`
