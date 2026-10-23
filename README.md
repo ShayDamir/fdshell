@@ -806,6 +806,31 @@ end. The rule covers conditions only: a `for` **word list** may be empty
 not a condition, and an empty `for ((…))` arithmetic condition is true, as in
 bash.
 
+A block's **closing keyword** needs a command-list terminator in front of it —
+POSIX #2.9's `;` (a newline is one) or the plain `&` — with the one exception
+bash makes: the terminator after a **compound command** is optional, so a body
+whose last statement is an `if`, a loop, a `case`, a group, a subshell or a
+function definition closes straight at its own keyword. `while false; do if :;
+then :; fi done`, `for i in a; do if :; then echo f; fi done`,
+`if true; then { echo a; } fi`, `if true; then f() { :; } fi` and
+`while false; do ( : ) done` (a subshell's `)` is a closer too; a subshell that
+**runs** is task #316's gap), mid-run (`true && if …; fi`) and as a pipeline
+stage (`echo a | while …; done`) alike, all run at rc 0. A block keyword written as an
+**argument** is word data and never swallows the closer, so
+`if true; then echo a else fi` and `while false; do echo a else done` are parse
+errors (bash rc 2, fdshell rc 1 with its own
+`'if' is missing its closing 'fi'`). A closer glued straight behind a clause
+keyword reports the missing `;` first — `if true; then fi` is
+`expected ';' before 'fi'`, `while true; do done` is
+`expected ';' before 'done'` (the message `for` pinned first) — while a real
+`;`/newline in front of the closer keeps the empty-body message
+(`if true; then; fi`). The rest of the family stays fdshell's own rc-1 parse
+error where bash stops at rc 2: `while :; do : done`, `if true; then b fi`,
+`for i in a; do echo done`, `if true; then echo a >f fi`, and a closer glued to
+a redirection (`while false; do { :; }>f done`). A `;;` written in a `then` body
+is the separator rule's, not this one's: `if true; then echo a ;; fi` prints `a`
+at rc 0 where bash stops at rc 2.
+
 A `case` **arm may be empty**: bash reads an arm body as a command list, and an
 empty list is a list, so an arm closed straight at `esac` is a complete clause —
 `case x in a) esac` runs at rc 0, and so does an empty **last** clause
@@ -882,6 +907,10 @@ greet world
 
 A function sees its arguments as `$1..`; a group shares the surrounding
 shell, so its assignments and `cd` survive it.
+
+A group's closing `}` obeys the closer rule of "Conditionals and loops": a
+statement the group opened must be terminated before it — `{ echo a }` is the
+parse error `expected ';' before '}'`, `{ echo a; }` runs.
 
 ### Pipelines and lists
 

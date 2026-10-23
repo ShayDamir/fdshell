@@ -2297,7 +2297,8 @@ unreachable once the empty `else` body is an error — a guard that can never fi
 is an equivalent-mutant source, so it was deleted, not kept "defensive".
 Sibling forms deliberately left open (measured, filed): `case x in a) esac`
 (#300, **closed** by the entry below — bash allows that arm), missing `;` before
-`done`/`fi` (#301), empty function body (#302), redirect-only command (#303).
+`done`/`fi` (#301, **closed** by the closer-rule entry beside "One clause rule,
+three scorers" — bash's rule plus its compound exception), empty function body (#302), redirect-only command (#303).
 Pins: `parse/tests.rs` (`empty_then_body_is_err`,
 `empty_elif_body_is_err`, `empty_else_body_is_err`, `empty_do_body_is_err`,
 `for_semi_before_done_reports_before_the_empty_body`,
@@ -2499,6 +2500,80 @@ Pins: `keywords/function/tests.rs::definer_len_*`,
 and `definer_with_cond_operators_around_it_splits_the_list`,
 `tests/group.rs::definer_body_keeps_the_nested_group_depth`.
 
+## A block's closing keyword has a rule of its own: `;` before it, except after a compound command
+POSIX #2.9 puts a command-list terminator in front of a block's closing keyword
+and bash enforces it (rc 2), while the terminator **after a compound command**
+is optional: `while :; do if :; then :; fi done`, `if true; then { echo a; } fi`,
+`while false; do case x in a) echo c ;; esac done` and
+`for i in a; do if :; then echo f; fi done` are bash rc 0 (5.3.9, measured
+2026-10-23) — and every one was rc 1 on `master`, `fdshell` answering the bare
+*missing closer*. Task #301 moved the rule from `for_block` (which pinned
+`;`-only) to every block form, and the lesson is the **shape** of the fix: one
+predicate, read at the scan and at the builders, that knows both halves.
+
+- **Scan side** (`keywords/position.rs::after`): a closer **in command
+  position** restarts command position, gated on `Place::Command` so a
+  closer-shaped *argument* (`echo fi`) leaves the place alone. `after` is read
+  by four scorers — "One clause rule, three scorers" — so the block-span scan
+  (`parse/semi/closing`), the cond-boundary counter (`cond/boundary/block`),
+  `comment/depth_delta` and `parse/case_clause/stray` gained the mid-run and
+  pipeline-stage parity **in the same commit**: a builder-side fix alone cannot
+  reach `true && while false; do if :; then echo y; fi done`, whose *span* the
+  byte scans own, and a scan-side fix alone would reject every bash-accepted
+  form (`for`'s `;`-only ensure already mis-rejected `… fi done` once the
+  closer was found).
+- **Builder side** (`parse/semi/preceded.rs::is_closer_predecessor` +
+  `ensure_before_closer`, called at the `if`/`while`/`for`/`for ((…))` sites):
+  a terminator (`;`, the newline token, the plain `&`) **or** a closer keyword.
+  `keyword_word`'s raw-span gate (task #247) keeps a quoted `"fi"` out, and the
+  glued `}>f`/`esac>f` words out — bash rejects `while false; do { :; }>f done`
+  rc 2 and the token test says no, so that row stays rc 1.
+- **The clause keywords carry the same gate** — the "One clause rule, three
+  scorers" gate read from the transition side: `if`/`while`/`until` and
+  `then`/`do`/`else`/`elif` restart command position only where they are not an
+  argument, so the `else` of `if true; then echo a else fi` is `echo`'s word and
+  the `fi` behind it stays data (bash rc 2, fdshell rc 1, its own missing-closer
+  message). The guard is `!Place::Data`, **not** `== Place::Command`: the `case`
+  word list (`Pattern`) keeps the old row, because the glued pair-payload rows
+  of `after` read the place the pair set and a list ends at its own `)`;
+  narrowing the guard to `Command` breaks those pins (measured on this task).
+  `in` stays ungated — the closer-shaped word of a `case`/`for` list is
+  #273/#306/#310's rule, not this one's.
+- **Message ownership**: the check runs **after** the condition (so
+  `if ; then; fi` keeps `missing condition`) and **before** the bodies, so a
+  closer glued straight behind a clause keyword reports the missing `;` and not
+  an empty body. Four forms moved message, none moved rc: `if true; then fi`,
+  `if a; then b; elif c; then fi`, `if a; then b; else fi`,
+  `while true; do done` — `for`'s `expected ';' before 'done'` pin was the
+  precedent. Every form with a real `;`/newline in front of the closer keeps the
+  empty-body/condition message of the entry above: those pins are the boundary,
+  and a real `;` in front of the closer is the whole difference between the two
+  rules.
+- **The `;;` rows are *not* this rule's.** #233 rejects an empty *token range*,
+  and a `;;` token is not empty, so `if true; then echo a ;; fi` stays rc 0
+  (bash rc 2) — task #423 owns that half; `tests/block_closers.rs` pins the
+  split so it is visible.
+- **Two heals worth naming.** `while :; do echo in done; …` hung on `master`
+  (the argument-`in` set `Place::Pattern`, `done` scored there, the loop never
+  closed); the closer rule turns it into rc 1, and the `cond/boundary/block/tests.rs`
+  pins that recorded the *transition* — "an `if`-shaped argument puts the
+  *next* word in command position" — flipped with it. A scorer pin of the
+  ungated shape is not a parity pin; gate the rule once and the pins that
+  imitate the old shape must follow.
+  `tests/group.rs::literal_brace_argument_in_a_block_body` moved its stdout and
+  message (rc stays 1, `expected ';' before 'fi'`): the brace gate itself is
+  untouched (a `}` behind `echo` is still data, `echo {` still prints `{`) — the
+  closer rule simply answers first, and the divergence from bash (rc 0, prints
+  `}`) is the same accepted one.
+
+Pins: `keywords/position/tests.rs` (the closer arm, the clause gate),
+`parse/semi/preceded/tests.rs` (the predecessor set, index 0, off the list),
+`parse/semi/closing/tests.rs` (the walk closes behind `fi`/`}`/`esac`/`)`),
+`parse/tests.rs` (`glued_closer_reports_the_missing_semicolon_not_an_empty_body`),
+`tests/block_closers.rs` (every row measured against bash; the loop forms under
+a bounded child, because a mis-paired closer is a hang), `tests/block_bodies.rs`,
+`tests/cond_blocks.rs`, `tests/group.rs`.
+
 ## One clause rule, three scorers: closers and openers do not share one gate
 Task #236: `while true; do echo if && echo x; break; done` was a parse error
 because the in-block half of the command-position rule was missing — every
@@ -2522,14 +2597,21 @@ block-span scan (`comment/depth_delta`), and the parse closing-keyword search
    are the pair that pins the asymmetry. A `max(0)`-clamped depth hides the
    imbalance until the split lands *inside* the block: the gate symmetry, not
    the clamp, is the invariant.
-2. **The flag transitions are applied to *every* word, scored or not.**
-   An unscored `if`-shaped argument still moves the place to Command (the
-   condition-taking-word shape); a glued `x)` (a `case` clause) moves it to
-   Command via the word's *last* byte; `in` moves it to `Pattern`; a whole
-   `time [-p]` word is transparent (keeps the place — `keyword_delta` already
-   strips the prefix for the score, so the double transparency is deliberate);
-   `#` moves it to Data, which is what makes a `# done` comment line inert
-   (#237's parity lands here, no comment rule of its own).
+2. **The flag transitions are applied to *every* word, scored or not** — and
+   they read the *same* gate as the score (task #301). A keyword-shaped
+   **argument** (`echo if`, `echo a else`) is data and keeps the next word data,
+   so it can never hand command position to a keyword behind it: an
+   unscored `if`-shaped argument moves the place to Command **only from a
+   non-argument place** (the guard is `!Place::Data` — a `case` word list keeps
+   the row, its `)` ends the list); a **closer** in command position restarts
+   command position, the `;` bash makes optional after a compound command
+   (the closer-rule entry above); a glued `x)` (a `case` clause) moves the place
+   to Command via the word's *last* byte; `in` moves it to `Pattern` (ungated —
+   the word-list rule is #273/#306/#310's); a whole `time [-p]` word is
+   transparent (keeps the place — `keyword_delta` already strips the prefix for
+   the score, so the double transparency is deliberate); `#` moves it to Data,
+   which is what makes a `# done` comment line inert (#237's parity lands here,
+   no comment rule of its own).
 3. **Braces stay ungated.** `scores` returns true for `{`/`}` in every place:
    gating them would silently fix the accepted divergence
    `tests/group.rs::literal_brace_argument_in_a_block_body` (`echo }` in a
