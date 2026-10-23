@@ -28,13 +28,62 @@ fn parses_function_name_and_body() {
     assert!(def.body.data.eq_bytes(b"echo hi"));
 }
 
+/// The block-body rule of the arms and the group covers a function-definition
+/// body too (task #302): POSIX #2.9's `function_def` nests the group's
+/// `compound_list`, and bash stops on `f() { }` with rc 2. Every spelling of a
+/// body with no command is a parse error, in both definer forms.
 #[test]
-fn parses_empty_body() {
-    let crate::parse::ParsedLine::Function(def) = parse(b"bar() { }") else {
-        panic!("expected Function");
-    };
-    assert!(def.name.eq_bytes(b"bar"));
-    assert!(def.body.data.is_empty());
+fn empty_body_is_a_parse_error() {
+    for text in [
+        &b"bar() { }"[..],
+        &b"bar() {; }"[..],
+        &b"bar() {\n}"[..],
+        &b"bar() { ;; }"[..],
+        &b"bar() { # c\n}"[..],
+        &b"function bar { }"[..],
+        &b"function bar() { }"[..],
+    ] {
+        // `ParsedLine` is not `Debug`, so map the `Ok` arm to `()` before unwrap_err.
+        assert!(
+            matches!(
+                try_parse(text).map(|_| ()).unwrap_err().current_context(),
+                ParseError::FunctionEmptyBody
+            ),
+            "{text:?} is not the empty-body error"
+        );
+    }
+}
+
+/// The non-empty guards: one command in the same shapes keeps the definition,
+/// with the body slice the shared `block_body` helper gives (the rule must not
+/// widen past the empty body).
+#[test]
+fn non_empty_bodies_stay_definitions() {
+    for (text, body) in [
+        (&b"bar() { :; }"[..], b":".as_slice()),
+        (&b"bar() { ;; :; }"[..], b":".as_slice()),
+        (&b"function bar { :; }"[..], b":".as_slice()),
+        (&b"bar() {\necho hi\n}"[..], b"echo hi".as_slice()),
+    ] {
+        let crate::parse::ParsedLine::Function(def) = parse(text) else {
+            panic!("expected a definition for {text:?}");
+        };
+        assert!(def.name.eq_bytes(b"bar"), "name of {text:?}");
+        assert!(def.body.data.eq_bytes(body), "body of {text:?}");
+    }
+}
+
+/// A body of only the plain `&` is **not** an empty body (tasks #354/#355): the
+/// definition is accepted and the body's own scan is what rejects the call, so
+/// the empty-body rule must not fire on it.
+#[test]
+fn ampersand_only_body_is_not_the_empty_body_error() {
+    for text in [&b"bar() { & }"[..], &b"bar() { & ; }"[..]] {
+        assert!(
+            matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} is a definition"
+        );
+    }
 }
 
 #[test]

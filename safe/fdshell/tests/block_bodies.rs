@@ -1,11 +1,13 @@
 #![allow(clippy::unwrap_used)]
 
-//! Empty block-arm bodies (task #233): POSIX #2.9 requires a non-empty `list`
-//! after `then`, `elif … then`, `else` and `do`; bash 5.3.9 rejects every empty
-//! form with rc 2 (measured 2026-10-12), fdshell reports its own message with
-//! rc 1 (README "Errors"). The empty-`do` forms used to **run forever**
-//! (`while true; do; done` is an unbounded no-op loop), so the two loop pins
-//! below run under a bounded child: a regression must panic, not hang.
+//! Empty block bodies (task #233, and the function-definition body of task
+//! #302): POSIX #2.9 requires a non-empty `list` after `then`, `elif … then`,
+//! `else`, `do` and inside a function definition's `{ … }`; bash 5.3.9 rejects
+//! every empty form with rc 2 (measured 2026-10-12, the function rows
+//! 2026-10-23), fdshell reports its own message with rc 1 (README "Errors").
+//! The empty-`do` forms used to **run forever** (`while true; do; done` is an
+//! unbounded no-op loop), so the two loop pins below run under a bounded
+//! child: a regression must panic, not hang.
 
 use std::process::{Command, Stdio};
 use std::str;
@@ -174,6 +176,63 @@ fn empty_group_body_stays_its_own_error() {
     run_err("{ }", "group is empty");
 }
 
+/// The same rule applied to a function-definition body (task #302, bash
+/// `f() { }` rc 2): the body is the group's `compound_list` (POSIX #2.9's
+/// `function_def`), so a body with no command is a parse error **at the
+/// definition** — the function is never defined, and the rest of the statement
+/// list is never reached (`f() { }; f` and `f() { }; echo tail` print nothing).
+#[test]
+fn empty_function_body_is_a_parse_error() {
+    // Every spelling of an empty body, in both definer forms.
+    run_err("f() { }", "function definition body is empty");
+    run_err("f() {\n}", "function definition body is empty");
+    run_err("f() {; }", "function definition body is empty");
+    run_err("f() { ;; }", "function definition body is empty");
+    // A comment is not a command: a comment-only body is empty (bash rc 2).
+    run_err("f() { # c\n}", "function definition body is empty");
+    run_err("function f { }", "function definition body is empty");
+    run_err("function f() { }", "function definition body is empty");
+    // The point of the task: no definition, so the call and the tail of the
+    // statement list are never reached (bash stops at the definition, rc 2).
+    run_err("f() { }; f", "function definition body is empty");
+    run_err("f() { }; echo tail", "function definition body is empty");
+    // Every position that carries the definition: the cond part, the group, the
+    // arm text (re-parsed at run time), the `case` arm, the pipeline stage, and
+    // `time`, whose report must not be printed either.
+    run_err("true && f() { }", "function definition body is empty");
+    run_err("f() { } && echo x", "function definition body is empty");
+    run_err("{ f() { }; }", "function definition body is empty");
+    run_err(
+        "if true; then f() { }; fi",
+        "function definition body is empty",
+    );
+    run_err(
+        "case x in x) f() { } ;; esac",
+        "function definition body is empty",
+    );
+    run_err("echo a | f() { }", "function definition body is empty");
+    // The bounded child: an empty body is a parse error, so the loop cannot
+    // spin — if this row hangs, the rule regressed.
+    let (out, err, code) = run_bounded("while :; do f() { }; break; done");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr: {err}");
+    assert!(
+        err.contains("function definition body is empty"),
+        "stderr: {err}"
+    );
+    let (out, err, code) = run("time f() { }");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr: {err}");
+    assert!(
+        err.contains("function definition body is empty") && !err.contains("real"),
+        "stderr: {err}"
+    );
+    // The def-site consequence: the body **slice** is judged at the definition,
+    // a nested definition's body is only **text**, judged when the function
+    // runs. bash parses the whole script first, so it reports rc 2 for both.
+    run_err("f() { f() { }; }; f", "function definition body is empty");
+    let (out, err, code) = run("f() { f() { }; }");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr: {err}");
+}
+
 #[test]
 fn heredoc_arm_bodies_are_not_empty() {
     // A body carrying a `<<` operator has tokens: non-empty, and its claimed
@@ -189,7 +248,7 @@ fn heredoc_arm_bodies_are_not_empty() {
 
 #[test]
 fn bash_parity_forms_stay_green() {
-    let cases: [(&str, &str); 6] = [
+    let cases: [(&str, &str); 11] = [
         ("if true; then echo a; fi", "a\n"),
         ("if false; then echo a; else echo b; fi", "b\n"),
         (
@@ -200,6 +259,15 @@ fn bash_parity_forms_stay_green() {
         ("for i in a; do echo a; done", "a\n"),
         // bash rc 0: an empty word list iterates zero times — not a divergence.
         ("for i in; do echo x; done", ""),
+        // The function-definition body (task #302): a body with a command — in
+        // any spelling — defines and runs exactly as bash does.
+        ("f() { :; }; f", ""),
+        ("f() { echo a; }; f", "a\n"),
+        ("f() {\necho hi\n}; f", "hi\n"),
+        // A brace-expanded body is non-empty, and bash's compound-command
+        // exception needs no `;` before `}` (the def-site rule is task #424's).
+        ("f() { echo {a,b}; }; f", "a b\n"),
+        ("f() { if :; then :; fi }", ""),
     ];
     for (script, want) in cases {
         let (out, err, code) = run(script);
@@ -245,4 +313,29 @@ fn ampersand_only_body_is_not_an_empty_body() {
     // `else` arm that never runs (bash rejects the shape at parse time, rc 2).
     let (out, _err, rc) = run("if true; then :; else & fi");
     assert_eq!((out.as_str(), rc), ("", 0), "bash rc 2");
+    // A function-definition body (task #302): the definition is accepted, since
+    // the body's own scan — the step that rejects the shape — runs when the
+    // function is **called**. bash parses the whole script first, so it stops
+    // at the definition with rc 2.
+    for script in ["f() { & }", "f() { & ; }", "f() { builtin true & ; }"] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 0),
+            "{script}: bash rc 2 at the def"
+        );
+        assert!(
+            !err.contains("body is empty"),
+            "{script}: the empty-body rule fired: {err}"
+        );
+    }
+    // The call is the parse error, and it is not the empty-body message.
+    for script in ["f() { & }; f", "f() { & ; }; f"] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+        assert!(
+            !err.contains("body is empty"),
+            "{script}: the empty-body rule fired: {err}"
+        );
+    }
 }

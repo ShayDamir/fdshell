@@ -185,8 +185,17 @@ fn definer_extra_words_and_trailing_run_are_dropped() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
     let (out, err, rc) = run("function f { echo hi; } f");
     assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+    // Task #302: the empty-body spelling of this row (`function f { }; f`) used
+    // to define a function whose call ran nothing (rc 0). A definition's body
+    // must be a non-empty list, so the shape is a parse error at the definition
+    // — the rule's home is `tests/block_bodies.rs`; this row keeps the pin here
+    // because the definer *word* rule is what reaches it.
     let (out, err, rc) = run("function f { }; f");
-    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(
+        err.contains("function definition body is empty"),
+        "stderr={err}"
+    );
 }
 
 /// Pathological `}{`: the byte layer claims the span, the token layer sees no `{`
