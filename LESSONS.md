@@ -362,7 +362,7 @@ A `#` at a word start comments out the rest of its **physical** line, so no `&&`
 
 **Landing *on* the newline that ends the comment is the load-bearing choice**, and `scan::skip_comment` (which lands *past* it) is the wrong helper here: two arms of the scan are keyed on the `\n` byte — the heredoc **region** arm (`body::step`) and the **run-reset** arm (`run_start = i`, `place = Place::Command`, `state.word_active = false`, the entry above). A `;`-terminated operator line whose run ends in a comment (`if cat <<X; then # c`) must still reach the region arm for its bodies on the following lines: `boundary_of(b"if cat <<X; then # c\nbody && x\nX\nfi") == (26, false)` is the pin, and landing past the newline turns it into `(35, false)` — that row is the mutant-killer for this decision. Landing on the newline also keeps the comment's own run in the run-reset arm, so the operator on the **next** line still splits (`… done # c\n&& echo x` → 36).
 
-The rule is shared, deliberately: `cond/boundary/gate.rs::gate_end` (the gate of a short-circuited `||`) takes the same arm, because the gate's own `\n` arm is the gate's end — a `;` written inside the comment must never end the gate, since `run_cond_list` resuming there resumes **inside comment text** (`true || if :; then :; fi # fi ; echo tail` ran `echo tail`; bash prints nothing). And deliberately **not** shared: `cond/boundary/body.rs::operator_in_region` gets no comment rule. A here-doc **body** region is literal text — bash reads a `#` there as data, and the split inside a block-carried region is pinned (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). Neighbours filed with their own owners, all pinned with their current result in `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`: **#404** a `#` line inside a `{ …; }` body breaks the group parse, **#405** a word after the closing keyword is run where bash rejects the line (the glued `done#c` and the `fi x#y` rows), **#406** a `&&`/`||` at the start of a physical line, **#304** the region position gate (the redirect after the closing keyword is no longer a divergence — task #298's block tail).
+The rule is shared, deliberately: `cond/boundary/gate.rs::gate_end` (the gate of a short-circuited `||`) takes the same arm, because the gate's own `\n` arm is the gate's end — a `;` written inside the comment must never end the gate, since `run_cond_list` resuming there resumes **inside comment text** (`true || if :; then :; fi # fi ; echo tail` ran `echo tail`; bash prints nothing). And deliberately **not** shared: `cond/boundary/body.rs::operator_in_region` gets no comment rule. A here-doc **body** region is literal text — bash reads a `#` there as data, and the split inside a block-carried region is pinned (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). Neighbours filed with their own owners, all pinned with their current result in `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`: **#404** a `#` line inside a `{ …; }` body breaks the group parse, **#405** a word after the closing keyword is run where bash rejects the line (the glued `done#c` and the `fi x#y` rows), **#406** a `&&`/`||` at the start of a physical line, **#304** the region position gate (**landed**: a region claimed by a word of the block's *body* is the body's own data, and the `# c` row of that family is now purely the **statement-level** divergence of a `#` written behind a delimiter word, owner **#429**; the redirect after the closing keyword is no longer a divergence — task #298's block tail).
 
 ## The attached-vs-bare delimiter rule is a raw-byte rule, and a pre-parse protection match must allow the line's optional leading bytes
 `<<-` (tab stripping) broke two assumptions that both keyed on the *word* the tokenizer saw, not the raw bytes. (1) `parse/heredoc::operator::attached` decided attached-vs-bare from the *unquoted* token text (`t.len() > 2 || end - start > t.len()`), which cannot see the `-` marker buried in the raw span: a bare `<<-` token read its delimiter as `-` (the marker byte) instead of taking the next word, so `<<- WORD` and `<<- -` mis-parsed. The rule must read the raw operator bytes — `scan::heredoc::op::operator_delim` now returns `(strip, delim)` and feeds **both** the byte scanner and the token parser through one `Operator`, so the two levels cannot diverge (the LESSONS.md "byte-level and token-level rule must agree" trap, made un-recreatable). (2) `brace_expand::protect::heredoc_terminator_indices` matched the terminator as the token whose start *equals* a `body_regions` end. A `<<-` terminator line is tab-indented, so its word starts *after* the tabs and the equality match failed — the "protect the terminator line" failure in reverse (the terminator was brace-expanded and the heredoc looked unterminated). The fix relaxes the match to "the first token that follows the region end across leading tabs only" (`terminator_word`); a plain `>=` is wrong, because it would protect a real statement that follows a *blank* terminator line, which must match nothing — so the gap must be tabs-only. General rules: a token-text predicate that decides raw-byte structure (attached vs. bare) must read the raw bytes, not the unquoted word; and an offset-equality match against a line start must be widened to exactly the region the structure permits — here, leading tabs only.
@@ -1413,15 +1413,36 @@ Two traps found while doing it:
     a block whose heredoc has no delimiter line inside its text stays a
     parse-error divergence (rc 1, bash rc 2 —
     `tests/cond_blocks.rs::and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error`).
-    The scan does **not yet discriminate the position of the `<<`**: a region
-    claimed by a word in the block's *clause* (`if cat <<X; then`) is scanned
-    exactly like one claimed by its *body* (`if :; then cat <<Q`), and for the
-    body position bash prints the body line (rc 0, as master — the gate made
-    the counter off by accident) while the region rule splits the block text
-    (rc 1 `missing 'fi'`) — a measured parity loss, pinned as the accepted
-    divergence in
-    `tests/heredoc.rs::and_in_a_body_position_heredoc_region_splits_the_block_until_304`;
-    task **#304** owns the position gate.
+     Task **#304** closed the position half: the region scan asks
+     `keywords::position` for the **place** of every word of the block's text
+     (`cond/boundary/block.rs::Modes`, fed from the same `word_delta` the block
+     counter uses) and scans a region **only when its `<<` sits in the block's
+     clause** text; a region claimed by a word of the block's **body** is the
+     body's own data. The clause row keeps splitting (rc 1, bash rc 2 — the
+     accepted clause family), the body row is bash parity again (rc 0, body
+     printed):
+     `tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
+     `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`
+     (`if`/`elif`/`else`, `for`/`while`/`until`, `case` arms, nested blocks,
+     `{ …; }`, two operators on one line, a run entered behind a `&&`), while
+     `a_clause_position_region_still_splits_the_block_text` pins the clause rows
+     that did **not** move. Two measured facts came with it. (1) The mode is
+     carried by the *innermost open block*, so a closer hands the mode back to
+     its outer block, and a block closer written **inside** a body region never
+     reaches the stack (the region is skipped whole) —
+     `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`.
+     (2) A word **ending** with `)` sets the body mode — that is
+     `keywords/position::after`'s own ungated rule, which the mode stack mirrors
+     — so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
+     stops the split and fdshell runs text bash rejects (rc 0 vs 2, measured;
+     `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
+     Separating a `case` arm's `)` from a subshell `)` needs block-kind knowledge
+     the mode stack does not have; task **#430** owns that. The `# c` row of the
+     same family (`if :; then cat <<Q # c`) is **not** a region-rule row: it
+     reproduces without any block (`cat <<Q # c` + body + `Q` → rc 1 where bash
+     prints the body), so #304 closed only its `missing 'fi'` half; the statement
+     level half stays with **#429**.
+
     Task #235 owns the twin case (a `&&` in a function-definition group body,
    where the definer word keeps the `{` off the run start) — **owned and
    closed**: the group arm counts a definer's body opener, see "A definer word
@@ -1527,7 +1548,11 @@ two, both in `cond/boundary/body.rs`, and both are the **identity** mutation of 
    only a program-level one). It is the same accepted species
    as `parse/cond_bodies.rs`'s `n + 1` → `n * 1` in "A region window and the skip
    derived from it are one pair". Its `+`→`-` twin, a real shift of the window's
-   end, is **killed** (measured: caught).
+   end, is **killed** (measured: caught). Task #304 moved that window expression
+   out of `regions` into `cond/boundary/body.rs::window`, and the same mutant
+   (measured again in #304's spot-check, `body.rs:71` `+`→`*`) is **missed** for
+   the same reason: the byte at `nl` is the run's terminating newline, and the
+   window's `to` bound only *discovers* `<<` sites, so no site starts there.
 2. `line_start_of`'s `.map(|p| p + 1)`: `+`→`*` is again the identity. A run
    taken while the review's pins were still landing listed it *caught*; that is
    the load flakiness "A mutant 'caught' by a flaky test is a false kill" warns
@@ -1543,7 +1568,37 @@ two, both in `cond/boundary/body.rs`, and both are the **identity** mutation of 
    body stops being opaque), while a window starting one byte right stops
    recognizing a `<<` that opens its line after a word break.
 
-**Rule:** the only `+ 1` mutant accepted here is the identity. A "±1 offset is
+Task #304's spot-check of the same file (cargo-mutants 27.1.0, 286 mutants: 261
+caught, 9 missed, 16 unviable) added **one** accepted equivalent to this list and
+killed the rest of the region scan's logic mutants:
+
+3. `operator_in_region`'s `while i < end`: `<`→`<=` is unkillable. A region's
+   `end` is the end of its **delimiter line**, so `line[end]` is the newline that
+   closes the region (or nothing, at the end of the text) — a byte that can never
+   be the first of an `&&` / `||` pair, so the scan answers identically. The
+   bound *is* the region's rule, so it stays; this is the "a ±1 offset is
+   equivalent when the byte it lands on can never match the needle" species.
+
+**Killed** (verified on the hand-mutated tree, 2026-10-23): the pair test's
+successor read `line.get(i + 1)` — `+`→`*` compares a byte with *itself*, so every
+*lone* `&` (a background, a `&>` redirect) and every lone `|` (a pipe stage)
+becomes an operator — and each conjunct of the scan's top-level test, where
+`&&`→`||` loosens exactly one state (a double quote, a single quote, a backtick).
+Pins: `cond/boundary/body/tests.rs::a_lone_ampersand_or_pipe_in_a_scanned_region_is_data`
+and `an_operator_inside_a_quote_or_substitution_is_data`. **Rule for this shape:**
+an operator test that reads a successor byte must be pinned at the *lone* byte —
+   passing on a real `&&` says nothing about a scan that never reads the successor.
+
+The run's residual, after those pins: the two identities of items 1 and 3, plus
+two **pre-existing** sites outside #304's code — `cond/boundary/gate.rs:65`
+(`b == b'\n'` → `!=`, the region rule consulted at every byte) and
+`scan/heredoc/ops.rs:116` (`while i < next` → `<=`, one `advance` past the
+delimiter word) — filed as task **#431** with the probes that failed to kill
+them.
+
+**Rule:** the only `+ 1` mutant accepted here is the identity.
+
+ A "±1 offset is
 equivalent" claim must name the byte the offset lands on and prove the scan
 treats it identically; for this helper the offsets *do* change the window, and
 the pins above prove it.
