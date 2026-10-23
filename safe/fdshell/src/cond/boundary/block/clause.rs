@@ -24,13 +24,22 @@ use alloc::vec::Vec;
 use super::glue::strip_at;
 
 /// Which half of the innermost open keyword block a byte sits in.
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(in crate::cond) enum Mode {
     /// The block's clause: its condition, its word list, its pattern text.
     Clause,
     /// The block's body: behind `then`/`else`/`do`, behind a `case` arm's `)`.
     Body,
+}
+
+impl Mode {
+    /// `true` for [`Mode::Body`]. The production scan's only mode comparison:
+    /// the region rule tests the mode with `matches!` and [`Modes::sync`] with
+    /// this, so `PartialEq`/`Eq` stay test-only derives.
+    fn is_body(self) -> bool {
+        matches!(self, Mode::Body)
+    }
 }
 
 /// The innermost block's mode along the scanned text, carried as the sequence
@@ -117,7 +126,7 @@ impl Modes {
             .last()
             .copied()
             .map_or(Mode::Clause, |(_, m)| m);
-        if last != mode {
+        if last.is_body() != mode.is_body() {
             self.transitions.push((at, mode));
         }
     }
