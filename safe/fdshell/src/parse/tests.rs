@@ -2746,7 +2746,6 @@ fn body_err(line: &[u8], msg: &str) {
 
 #[test]
 fn empty_then_body_is_err() {
-    body_err(b"if true; then fi", "'then' body is empty");
     body_err(b"if true; then; fi", "'then' body is empty");
     body_err(b"if true; then ; fi", "'then' body is empty");
     body_err(b"if true; then ;; fi", "'then' body is empty");
@@ -2759,23 +2758,32 @@ fn empty_then_body_is_err() {
 #[test]
 fn empty_elif_body_is_err() {
     body_err(b"if a; then b; elif c; then; fi", "'elif' body is empty");
-    // The glued-`fi` form reported `missing 'then'` before task #233.
-    body_err(b"if a; then b; elif c; then fi", "'elif' body is empty");
 }
 
 #[test]
 fn empty_else_body_is_err() {
-    body_err(b"if a; then b; else fi", "'else' body is empty");
     body_err(b"if a; then b; else; fi", "'else' body is empty");
 }
 
 #[test]
 fn empty_do_body_is_err() {
-    body_err(b"while true; do done", "'do' body is empty");
     body_err(b"while true; do; done", "'do' body is empty");
     body_err(b"while true; do\n# c\ndone", "'do' body is empty");
     body_err(b"until false; do; done", "'do' body is empty");
     body_err(b"for i in a; do; done", "'do' body is empty");
+}
+
+/// Task #301 owns the message where the closing keyword is glued straight
+/// behind a clause keyword: POSIX #2.9 wants a terminator in front of the
+/// closer, so the missing `;` is the error, not an empty body (bash: rc 2 for
+/// every row). Each row keeps a real `;`/newline in front of the closer and
+/// stays an empty-body error above.
+#[test]
+fn glued_closer_reports_the_missing_semicolon_not_an_empty_body() {
+    body_err(b"if true; then fi", "expected ';' before 'fi'");
+    body_err(b"if a; then b; elif c; then fi", "expected ';' before 'fi'");
+    body_err(b"if a; then b; else fi", "expected ';' before 'fi'");
+    body_err(b"while true; do done", "expected ';' before 'done'");
 }
 
 #[test]

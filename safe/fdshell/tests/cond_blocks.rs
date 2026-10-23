@@ -943,9 +943,9 @@ fn comment_lines_in_a_block_body_are_inert() {
 /// its words and exits 0. Bounded children: the regression measured at
 /// `cb9febb` on the first four rows was a hang, so a regression must fail with
 /// the script, not stall the suite. `while :; do echo in done; …` is *not* in
-/// this test: with `in` → `Place::Pattern` it hangs on master and here alike,
-/// and the hang is pinned with the family in
-/// [`in_block_bodies_that_never_return_run_forever`] (task #309's class).
+/// this test: with `in` → `Place::Pattern` it hung on master, and task #301's
+/// `;`-before-closer rule turned that hang into the parse error pinned by
+/// [`in_word_list_argument_before_a_closer_is_a_parse_error`].
 #[test]
 fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
     for (script, want) in [
@@ -991,13 +991,12 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
 /// pin is a *sample*, not the family's extent — do not read a green run here as
 /// "the family is five rows". Task #292 moved seven rows out of this list (the
 /// keyword block behind a `|` is a pipeline stage, not word data): they are
-/// pinned next, in [`block_stage_in_a_loop_body_ends_the_loop`].
+/// pinned next, in [`block_stage_in_a_loop_body_ends_the_loop`]. Task #301's
+/// `;`-before-closer rule moved the `echo in done` row out: it is a parse error
+/// now, pinned in [`in_word_list_argument_before_a_closer_is_a_parse_error`].
 #[test]
 fn in_block_bodies_that_never_return_run_forever() {
     let rows = [
-        // The `case`/`for` list: `done` there is a pattern word, so the block
-        // never closes. bash prints `in done`, `after`; hangs on master too.
-        "while :; do echo in done; break; done; echo after",
         // master's own hang: a `fi` closes a `while`, the body never ends.
         "while :; do echo a; fi; echo after",
         // The `case` opener in argument position, closed by `esac`.
@@ -1014,6 +1013,21 @@ fn in_block_bodies_that_never_return_run_forever() {
             "{script}: bash terminates (rc 0/2), fdshell runs forever"
         );
     }
+}
+
+/// The `in` row of the family above, healed by task #301: `in` is `echo`'s
+/// argument, `Place::Pattern` (the word-list place) is a rule the closer-shaped
+/// word list of #273/#306/#310 owns, and the `done` written behind it scores as
+/// a closer there — so the `while` closes at that `done` and the closer rule
+/// rejects it: **rc 1** `expected ';' before 'done'` where
+/// `master` ran forever (rc 124 at [`BOUND`]) and `bash -c` (5.3.9) prints
+/// `in done` / `after` with rc 0. fdshell stays a divergence from bash (rc 1
+/// vs 0), and the parity half belongs to the word-list tasks; the hang is gone.
+#[test]
+fn in_word_list_argument_before_a_closer_is_a_parse_error() {
+    let (out, err, code) = run_bounded("while :; do echo in done; break; done; echo after");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr: {err}");
+    assert!(err.contains("expected ';' before 'done'"), "stderr: {err}");
 }
 
 /// Task #292 moves these rows out of the list above: the `|` position is a

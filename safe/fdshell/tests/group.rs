@@ -356,20 +356,20 @@ fn brace_shaped_words_at_top_level_are_data() {
 }
 
 /// A literal `{` argument inside a block body prints the brace, as bash does. A
-/// literal `}` argument consumes the block's closing keyword: `if true; then
-/// echo }; fi` runs the body's `echo` and then the `fi` behind the consumed
-/// closer is a command (`"fi" not found`, rc 1) where bash prints `}` — the
-/// accepted cost of counting every brace word as the block depth. The body slice
-/// keeps the word the closer is glued to since task #354 (the plain-`&`
-/// terminator rule), so the message is back to the pre-#233 `"fi" not found`
-/// rather than `'then' body is empty`.
+/// literal `}` argument consumes the block's closing keyword: bash prints `}`
+/// with rc 0, fdshell counts every brace word as the block depth, so the `}`
+/// **is** the closer here — and the closer rule (task #301) rejects a closer
+/// glued straight behind an argument word: rc 1 `expected ';' before 'fi'`
+/// (`master` ran the body and reported `"fi" not found`, rc 1: same rc, the
+/// parse layer answers first now). The accepted cost of counting every brace
+/// word as the block depth.
 #[test]
 fn literal_brace_argument_in_a_block_body() {
     let (out, err, rc) = run("if true; then echo {; fi");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
     let (out, err, rc) = run("if true; then echo }; fi");
-    assert_eq!((out.as_str(), rc), ("\n", 1));
-    assert!(err.contains("\"fi\" not found"), "{err}");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("expected ';' before 'fi'"), "{err}");
     let (out, err, rc) = run("case x in x) echo {;; esac");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
 }

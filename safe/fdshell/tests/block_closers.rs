@@ -86,7 +86,9 @@ fn run_bounded(script: &str) -> (String, String, i32) {
             }
             let _ = child.kill();
             let _ = child.wait();
-            panic!("`{script}` did not finish in {BOUND:?} — its block's closer was mis-paired again");
+            panic!(
+                "`{script}` did not finish in {BOUND:?} — its block's closer was mis-paired again"
+            );
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -131,27 +133,18 @@ fn a_compound_closer_before_the_closer_is_accepted() {
         ("while false; do { :; } done", ""),
         ("while false; do f() { :; } done", ""),
         ("while false; do for i in a; do :; done done", ""),
-        (
-            "while false; do case x in a) echo c ;; esac done",
-            "c\n",
-        ),
+        ("while false; do case x in a) echo c ;; esac done", ""),
         ("while false; do ( : ) done", ""),
         ("while false; do while :; do break; done done", ""),
         ("for i in a; do if :; then echo f; fi done", "f\n"),
-        (
-            "for ((i=0;i<1;i++)); do if :; then echo y; fi done",
-            "y\n",
-        ),
+        ("for ((i=0;i<1;i++)); do if :; then echo y; fi done", "y\n"),
         ("if true; then if :; then :; fi fi", ""),
         ("if true; then { echo a; } fi", "a\n"),
-        ("if true; then case x in a) echo c ;; esac fi", "c\n"),
+        ("if true; then case x in a) echo c ;; esac fi", ""),
         ("if true; then for i in a; do :; done fi", ""),
         ("if true; then if :; then echo i; fi fi", "i\n"),
-        (
-            "if true; then echo a; else if :; then echo e; fi fi",
-            "a\n",
-        ),
-        ("until true; do { echo u; } done", "u\n"),
+        ("if true; then echo a; else if :; then echo e; fi fi", "a\n"),
+        ("until true; do { echo u; } done", ""),
     ] {
         ok(script, want);
     }
@@ -177,14 +170,8 @@ fn a_newline_before_the_closer_stays_accepted() {
 /// `missing 'fi'`).
 #[test]
 fn mid_run_and_stage_blocks_close_at_their_own_closer() {
-    ok(
-        "true && while false; do if :; then echo y; fi done",
-        "",
-    );
-    ok(
-        "echo a | while false; do if :; then echo y; fi done",
-        "",
-    );
+    ok("true && while false; do if :; then echo y; fi done", "");
+    ok("echo a | while false; do if :; then echo y; fi done", "");
     ok("true && if true; then { echo g; } fi", "g\n");
     ok("true && for i in a; do if :; then echo k; fi done", "k\n");
 }
@@ -200,10 +187,7 @@ fn a_closer_glued_behind_a_cond_operator_is_a_parse_error() {
         "if false; then :; else echo a && fi",
         "expected ';' before 'fi'",
     );
-    bounded_err(
-        "while false; do : && done",
-        "expected ';' before 'done'",
-    );
+    bounded_err("while false; do : && done", "expected ';' before 'done'");
     bounded_err("while false; do : | done", "expected ';' before 'done'");
 }
 
@@ -213,7 +197,10 @@ fn a_closer_glued_behind_a_cond_operator_is_a_parse_error() {
 /// found, so the block reports it missing.
 #[test]
 fn a_block_keyword_in_argument_position_never_swallows_the_closer() {
-    err("if true; then echo a else fi", "'if' is missing its closing 'fi'");
+    err(
+        "if true; then echo a else fi",
+        "'if' is missing its closing 'fi'",
+    );
     bounded_err(
         "while false; do echo a else done",
         "'while' is missing its closing 'done'",
@@ -229,14 +216,23 @@ fn a_block_keyword_in_argument_position_never_swallows_the_closer() {
 /// `master` gives the same rc for every row; the messages are its own.
 #[test]
 fn the_rc_1_family_stays_a_parse_error() {
-    bounded_err("while :; do : done", "'while' is missing its closing 'done'");
+    bounded_err(
+        "while :; do : done",
+        "'while' is missing its closing 'done'",
+    );
     err("if true; then b fi", "'if' is missing its closing 'fi'");
-    err("for i in a; do echo done", "'for' is missing its closing 'done'");
+    err(
+        "for i in a; do echo done",
+        "'for' is missing its closing 'done'",
+    );
     err(
         "while false; do { :; }>f done",
         "expected ';' before 'done'",
     );
-    err("if true; then echo a >f fi", "'if' is missing its closing 'fi'");
+    err(
+        "if true; then echo a >f fi",
+        "'if' is missing its closing 'fi'",
+    );
     err("if true; then echo }; fi", "expected ';' before 'fi'");
 }
 

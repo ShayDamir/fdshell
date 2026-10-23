@@ -99,8 +99,9 @@ fn run_err(script: &str, msg: &str) {
 
 #[test]
 fn empty_then_body_is_a_parse_error() {
-    // bash 5.3.9: rc 2 for every form (measured).
-    run_err("if true; then fi", "'then' body is empty");
+    // bash 5.3.9: rc 2 for every form (measured). The glued-closer form
+    // (`if true; then fi`) is the `;`-before-closer rule's message now
+    // (task #301), pinned in `tests/block_closers.rs`.
     run_err("if true; then; fi", "'then' body is empty");
     run_err("if true; then ; fi", "'then' body is empty");
     run_err("if true; then ;; fi", "'then' body is empty");
@@ -125,13 +126,10 @@ fn empty_then_body_is_a_parse_error() {
 #[test]
 fn empty_elif_body_is_a_parse_error() {
     run_err("if a; then b; elif c; then; fi", "'elif' body is empty");
-    // Used to report the misleading `missing 'then'`; the `then` is present.
-    run_err("if a; then b; elif c; then fi", "'elif' body is empty");
 }
 
 #[test]
 fn empty_else_body_is_a_parse_error() {
-    run_err("if a; then b; else fi", "'else' body is empty");
     run_err("if a; then b; else; fi", "'else' body is empty");
     // Used to print `a` with rc 0 (the empty body pinned as None).
     run_err("if true; then echo a; else; fi", "'else' body is empty");
@@ -144,9 +142,11 @@ fn empty_do_body_is_a_parse_error() {
     let (out, err, code) = run_bounded("while true; do; done");
     assert_eq!((out.as_str(), code), ("", 1), "stderr: {err}");
     assert!(err.contains("'do' body is empty"), "stderr: {err}");
+    // Task #301: the glued-`done` form reports the missing `;` first (the
+    // `for` message contract, now shared by every block form).
     let (out, err, code) = run_bounded("while true; do done");
     assert_eq!((out.as_str(), code), ("", 1), "stderr: {err}");
-    assert!(err.contains("'do' body is empty"), "stderr: {err}");
+    assert!(err.contains("expected ';' before 'done'"), "stderr: {err}");
 
     run_err("while true; do\n# c\ndone", "'do' body is empty");
     run_err("until false; do; done", "'do' body is empty");
