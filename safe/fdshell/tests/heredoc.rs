@@ -2635,8 +2635,9 @@ fn heredoc_leading_newline_consumes_its_body() {
 ///   byte-level delimiter is `A&` and the line's region list is empty. Owner:
 ///   the glued-pair family (the tokenizer's split set), not this task.
 /// * A redirect-only suffix (`<<B` / `<<U` with no command word): bash runs a
-///   bare redirection; fdshell runs `<<B` as a command word. Owners **#303**
-///   and **#345**.
+///   bare redirection; fdshell runs `<<B` as a command word. Owner **#345** —
+///   the statement carries a here-doc body, which is exactly the condition
+///   task #303's parse gate stays off for (the plain `>f` family is rc 0 now).
 #[test]
 fn a_heredoc_behind_an_ampersand_known_divergences() {
     // The `#`-behind-`&` row and its glued twin: the prefix job runs (its body

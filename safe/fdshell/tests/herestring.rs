@@ -408,21 +408,31 @@ fn prefixed_here_string_shapes_that_are_not_digits_are_word_data() {
     }
 }
 
-/// A prefixed operator at a run start is fdshell's **command word** (the
-/// operator rule needs a preceding token): the pinned `3<<EOF` twin. bash
-/// opens fd 3 and reports `3: Bad file descriptor`.
+/// A prefixed here-string at a run start is a **redirections-only** command
+/// (POSIX #2.9, task #303): `[N]<<<word` is one redirection token with no
+/// command word, so the statement applies the here-string to fd 3, exits 0 and
+/// puts the descriptor back — exactly bash's rows (`3<<<x` rc 0, and
+/// `3<<<x; cat <&3` rc 1 `3: Bad file descriptor`, which is the **trailing**
+/// command's report, not the here-string's). The io-number rule is the
+/// raw-byte one tasks #261/#274/#276 pin; the pre-#303 reading (the token as
+/// the command word, `"3<<<x" not found`) is superseded.
 ///
 /// Run through `run_fd3_closed`: the trailing `cat <&3` must read a
 /// deterministic fd table. An inherited readable fd 3 (cargo-mutants hands
 /// every test process its jobserver pipes as fds ≥ 3) would make `cat <&3`
 /// block forever and abort the whole mutants baseline — LESSONS (task #276).
 #[test]
-fn prefixed_here_string_at_a_run_start_is_the_command_word() {
+fn prefixed_here_string_at_a_run_start_is_a_redirection_only_command() {
+    // The statement is a command: status 0, no output (bash rc 0).
+    let (out, err, code) = run_fd3_closed("3<<<x; echo $?");
+    assert_eq!((out.as_str(), code), ("0\n", 0), "err={err}");
+    // The redirection belongs to the statement: fd 3 is closed again after it,
+    // so the next command reports the closed descriptor (bash: rc 1, `3: Bad
+    // file descriptor`).
     let (out, err, code) = run_fd3_closed("3<<<x; cat <&3");
-    assert_eq!(code, 1, "err={err}");
-    assert_eq!(out, "");
-    assert!(err.contains("\"3<<<x\" not found"), "{err}");
+    assert_eq!((out.as_str(), code), ("", 1), "err={err}");
     assert!(err.contains("fd 3 is not open"), "{err}");
+    assert!(!err.contains("not found"), "{err}");
 }
 
 /// The form composes with everything the plain here-string composes with: the

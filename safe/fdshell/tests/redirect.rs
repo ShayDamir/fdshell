@@ -1795,7 +1795,7 @@ fn the_dup_word_and_a_non_digit_prefixed_operator_stay_unexpanded() {
 }
 
 /// A quoted empty operand stays the operand gate's parse error, where bash
-/// opens `''` and fails `ENOENT` (#303/#323 own the operand shapes): the
+/// opens `''` and fails `ENOENT` (#323 owns the operand shapes): the
 /// quoted-empty word rule the target expansion adds is therefore unreachable
 /// for the bare and attached forms, and this pin keeps that true.
 #[test]
@@ -1842,4 +1842,291 @@ fn a_failing_target_expansion_keeps_its_cause() {
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("ambiguous redirect"), "stderr={err}");
     assert!(created(&files).is_empty(), "{files:?}");
+}
+// --- a redirections-only statement is a command (task #303) ------------------
+//
+// POSIX #2.9: a simple command may be **redirections only**. The redirections
+// apply (the file is created/truncated), the shell's own descriptors come back,
+// the status is **0**, and **no fork** happens. fdshell used to resolve the
+// operator token as word 0: rc 1 `failed to resolve command path: ">f"` /
+// `">f" not found`. Every row below is `bash -c` 5.3.9 and this tree's build,
+// measured 2026-10-23 in a scratch dir seeded with `a1 a2 sub` (the `seeded`
+// helper above), so the directory listing is part of the assert.
+//
+// The **no-fork** half is observable: a `NAME=value` prefix **persists**
+// (`VAR=x >f` keeps `VAR=x`, as bash, because there is no command for the prefix
+// to scope to), and the descriptor-only shapes restore the shell's own fds —
+// `tests/herestring.rs::prefixed_here_string_at_a_run_start_is_a_redirection_only_command`
+// pins the restore through a closed fd 3.
+
+/// The names `created` reports, from a literal list.
+fn names(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| (*s).to_string()).collect()
+}
+
+/// Run `script` with the process's working directory set to `dir`. `run_ls`
+/// prefixes `cd {dir}; `, and a statement terminated by `&` does not survive
+/// that prefix plus a following newline segment (the tokenizer's pre-existing
+/// quirk, which `echo a &` hits exactly the same way), so the async row below
+/// runs in the directory instead.
+fn run_cwd(dir: &str, script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .args(["-c", script])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// The plain family: every operator shape, in every statement position, is a
+/// command that applies its redirections and exits 0 (bash rc 0 in each row).
+#[test]
+fn a_redirect_only_statement_creates_its_file_and_exits_zero() {
+    let dir = seeded("redirect_only");
+    let dir = dir.to_str().unwrap();
+    let rows: [(&str, &[&str]); 21] = [
+        (">f", &["f"]),
+        ("> f", &["f"]),
+        (">>f", &["f"]),
+        (">|f", &["f"]),
+        ("2>f", &["f"]),
+        ("&>f", &["f"]),
+        ("&>>f", &["f"]),
+        (">f 2>&1", &["f"]),
+        ("> f 2>&1 3>&1", &["f"]),
+        (">f >g", &["f", "g"]),
+        (">f 2>g", &["f", "g"]),
+        (">$(echo f)", &["f"]),
+        ("{ >f; }", &["f"]),
+        ("if true; then >f; fi", &["f"]),
+        ("if false; then >f; else >g; fi", &["g"]),
+        ("for i in a; do >f; done", &["f"]),
+        ("case a in a) >f;; esac", &["f"]),
+        ("true && >f", &["f"]),
+        ("false || >f", &["f"]),
+        (">f | cat", &["f"]),
+        ("cat | >f", &["f"]),
+    ];
+    for (script, want) in rows {
+        clean(dir);
+        let (_out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (code, created(&files)),
+            (0, names(want)),
+            "{script}: stderr={err:?}"
+        );
+    }
+    // The descriptor-only shapes — a dup, a close, a here-string — need no file
+    // at all (bash rc 0, nothing created).
+    clean(dir);
+    for script in [">&2", ">&-", ">&1", "2>&1", "<<<x", "3<<<x", "0<&-"] {
+        let (_out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (code, created(&files)),
+            (0, names(&[])),
+            "{script}: stderr={err:?}"
+        );
+    }
+    // The async shape: the background job re-enters the interpreter, so the
+    // same arm runs in the forked job and the file appears (bash rc 0).
+    let dir = scratch("redirect_only_async");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_cwd(dir, ">f &\nwait");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert!(std::path::Path::new(dir).join("f").exists(), "{dir}");
+}
+
+/// The status is 0 and the statement is a full member of the lists: `$?`, the
+/// `&&` / `||` chains, the `;` segments, the scoped prefix (which **persists**,
+/// as bash keeps `VAR=x` from `VAR=x >f`), and the plain-command regression
+/// row.
+#[test]
+fn a_redirect_only_statement_leaves_the_status_and_the_prefix() {
+    let dir = seeded("redirect_only_status");
+    let dir = dir.to_str().unwrap();
+    let rows: [(&str, &str, &[&str]); 7] = [
+        (">f; echo $?", "0\n", &["f"]),
+        (">f && >g && echo both", "both\n", &["f", "g"]),
+        ("true && >f && echo ok", "ok\n", &["f"]),
+        (">f; >g; echo done", "done\n", &["f", "g"]),
+        ("echo one; >f; echo two", "one\ntwo\n", &["f"]),
+        ("VAR=x >f; echo $VAR; echo $?", "x\n0\n", &["f"]),
+        ("echo a >f", "", &["f"]),
+    ];
+    for (script, stdout, want) in rows {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (out.as_str(), code, created(&files)),
+            (stdout, 0, names(want)),
+            "{script}: stderr={err:?}"
+        );
+    }
+}
+
+/// A redirection that cannot open its target fails the statement at rc 1 with a
+/// chain naming the path, and creates nothing (bash rc 1 too, with its own
+/// `No such file or directory`). fdshell opens **every** target before applying
+/// any, so `>f <nofile` leaves no `f` where bash does — the same all-or-nothing
+/// open `: >f <nofile` has always had here. A target expanding to no word, or
+/// to two, is bash's `ambiguous redirect`; `<file` on an existing file is the
+/// success case of the same shape.
+#[test]
+fn a_redirect_only_statement_with_an_unopenable_target_fails() {
+    let dir = seeded("redirect_only_fail");
+    let dir = dir.to_str().unwrap();
+    for script in ["<nofile", ">f <nofile", "2<nofile", ">&3"] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("redirection"), "{script}: stderr={err:?}");
+        assert!(created(&files).is_empty(), "{script}: created {files:?}");
+    }
+    clean(dir);
+    for script in [">$(echo)", "> $(true)", "n='a b'; >$n"] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("ambiguous redirect"), "{script}: {err}");
+        assert!(created(&files).is_empty(), "{script}: created {files:?}");
+    }
+    let dir = scratch("redirect_only_read");
+    let dir = dir.to_str().unwrap();
+    std::fs::write(std::path::Path::new(dir).join("pre"), b"x").unwrap();
+    let (out, err, code) = run(&format!("cd {dir}; < pre; echo $?"));
+    assert_eq!((out.as_str(), code), ("0\n", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("pre")).unwrap(),
+        "x"
+    );
+}
+
+/// A word **behind** the redirections is the command word: bash runs `g` with
+/// the redirect (rc 127 there), fdshell reports its shell-wide not-found **1**
+/// and the file is created all the same. A `%` word keeps the collection loop's
+/// own reading: the `%tag>%name` capture operator has no command to attach to
+/// and is dropped (rc 0), while `%o` is no capture operator at all, so it is
+/// the command word (bash reports job-control noise, rc 1, on both).
+#[test]
+fn a_redirect_only_statement_with_a_word_runs_that_word() {
+    let dir = seeded("redirect_only_word");
+    let dir = dir.to_str().unwrap();
+    let rows: [(&str, &str, &[&str]); 4] = [
+        (">f g", "\"g\" not found", &["f"]),
+        (">f /nope/x", "\"/nope/x\" not found", &["f"]),
+        (">f g h", "\"g\" not found", &["f"]),
+        (">f %o", "\"%o\" not found", &["f"]),
+    ];
+    for (script, needle, want) in rows {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), names(want), "{script}");
+    }
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, ">f %t>%v");
+    assert_eq!(
+        (out.as_str(), code, created(&files)),
+        ("", 0, names(&["f"])),
+        "stderr={err:?}"
+    );
+}
+
+/// The guards: a **quoted** operator word stays a command word (the
+/// operator-quoting gate, task #250), a quoted empty word 0 stays a command
+/// lookup (bash 127, `f` created by the redirection that still applies), an
+/// io-number must be glued to its operator (`2 > f` is the command `2`), a bare
+/// operator with no operand stays the parse error, and every here-doc-bearing
+/// statement keeps the leading-operator behavior the #185 pins record (owners
+/// #345 and the here-doc family — bash is rc 2 on the `> <<EOF` rows, rc 0 on
+/// the last two).
+#[test]
+fn a_quoted_operator_or_heredoc_word_stays_a_command() {
+    let dir = seeded("redirect_only_guard");
+    let dir = dir.to_str().unwrap();
+    for script in ["'>f'", "'&>f'", "\"2>f\"", "\">f\"", "'>>f'", "'<<<x'"] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("failed to resolve command path"),
+            "{script}: stderr={err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+    // A quoted empty word 0 with a redirection: the lookup fails at rc 1 (bash
+    // 127) and the redirection still applies — the run-side arm is gated on
+    // `command_quoted == false`, which is what keeps this shape out of it.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "\"\" >f");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("\"\" not found"), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["f"]));
+    // The io-number must be glued: `2 > f` is the command `2` with a redirect.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "2 > f");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("\"2\" not found"), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["f"]));
+    // A bare operator with no operand is the parse error (bash rc 2).
+    for script in [">", ">>", "<", "&>", "> >"] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("invalid redirect"), "{script}: {err}");
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+    // The here-doc family keeps its owners: the operator word is reported and
+    // the body lines never run.
+    let rows: [(&str, &str); 5] = [
+        ("> <<EOF\nbody\nEOF", "\">\" not found"),
+        (">| <<EOF\nbody\nEOF", "\">|\" not found"),
+        (">| x <<EOF\nbody\nEOF", "\">|\" not found"),
+        (">x <<EOF\nbody\nEOF", "\">x\" not found"),
+        ("cat <<A & <<B\nx\nA\ny\nB", "\"<<B\" not found"),
+    ];
+    for (script, needle) in rows {
+        // `run_cwd`, not `run_ls`: the `cat <<A & <<B` row is an `&`-terminated
+        // segment followed by a newline, which the `cd {dir}; ` prefix breaks
+        // (the tokenizer quirk `run_cwd` exists for). Its stdout is the prefix
+        // job's body (`x`), which `tests/herestring.rs` pins; rc 1 is the
+        // suffix's report.
+        let (_out, err, code) = run_cwd(dir, script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+    }
+}
+
+/// `>>&x` is the collection loop's own vocabulary: `>>` with the **path**
+/// operand `&x` (fdshell never splits a word at an operator byte, so
+/// `echo a >>&x` appends to the file `&x` today). Task #303 inherits that
+/// reading at word 0, so the statement is an rc-0 redirections-only command;
+/// bash rejects the word outright (rc 2, `syntax error near unexpected token
+/// '&'`). The `>&x` twin is no redirect at all — the dup arm answers `None` for
+/// a non-numeric, non-`%` tail — so it stays the command word.
+#[test]
+fn an_ampersand_operand_follows_the_loops_own_vocabulary() {
+    let dir = seeded("redirect_only_amp");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, ">>&x");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["&x"]));
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, ">&x");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("\">&x\" not found"), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "{files:?}");
+    // The pid-var background forms are the same token family, and with no
+    // command word they launch nothing: the statement is rc 0 and the task is
+    // registered under its name (bash rejects both words outright, rc 2).
+    let (out, err, code) = run_cwd(dir, "&>&x; echo rc=$?; waitpid &x; echo wp=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\nwp=0\n", 0), "stderr={err:?}");
 }
