@@ -4096,3 +4096,77 @@ so the row became
 row). Re-measure every name that mentions the old rule, and update the owner
 lists that name this task (`POSIX_COMPATIBILITY.md`, `tests/heredoc.rs`,
 `tests/redirect.rs`) in the same commit.
+
+## A function-definition body is a block body for the region rule too: claim at the branch, re-attach at the builder (task #305)
+
+`f() { cat <<E; }; f` + body + `E` reported `here-doc: missing terminating
+delimiter line 'E'` (rc 1) where bash prints `body` at rc 0. The multi-line form
+was green, and that is exactly what made the branch look right: a multi-line
+definer's delimiter lines sit **inside** its span, while a `;`-terminated
+operator's regions start **past** the closing brace, and nothing claimed them.
+Two halves, one owner each, and neither is new:
+
+- `segment/block/claim.rs` — the append/extension claim the keyword branch
+  inlined is now one function both block branches call (`claimed_bodies`: the
+  window-blind `k`, `claimed_line_bodies`, the `first.start >= end`
+  discriminator, the forward-only extension). The definer branch's
+  `resume`/`floor` bookkeeping **already** treated those regions as claimed
+  (task #240's fix), so the claim adds only the delivery — pin the five
+  `scan_*function*` pins unchanged, plus the extension-mode pin
+  `scan_multi_line_function_body_claims_no_bodies`: that set is what proves the
+  claim never moves the scan's cursor arithmetic.
+- `parse/function_block.rs` — the stored body is built with `parse/part_text`,
+  the arm-granularity rule every block arm already uses (#238/#273): append mode
+  slices the body text and appends `\n` + the claimed bytes, extension mode stays
+  verbatim. The definer builder was the last block body using `verbatim`, and the
+  group (`parse/group_block.rs`) is next, which is task **#315**'s reuse point.
+
+**The stored body is a script, so the append is what makes the capture re-usable
+per call**: the body text `cat <<E\nbody\nE\n` re-runs on every call (a
+called-in-a-loop function prints the body every iteration) — the same fact bash
+reaches by parsing the input once. `block_body` trims the body line's `;`, so the
+stored text is `cat <<E` + the region and **not** `cat <<E;` + the region: pin the
+bytes, not the shape you expected.
+
+**Body regions are blanked, terminator lines are not — that asymmetry decides the
+closer search.** `tokenize_statement` blanks a **body** region's words (task
+#266), so a `}`/`{`/`done` line written inside a body is data and the definer's
+`rposition` brace search stays right. A **terminator** line's words stay tokens by
+the same rule, which is why the def builder must **not** move to
+`semi::closing_keyword_index`: measured, that walk closes the definition on a
+delimiter word. The delimiter-word-is-a-brace family (`f() { cat <<}; }; f`) is
+broken on master already and stays **#432**'s — it needs region-aware truncation
+shared by `parse/semi/closing` and `parse/function_block`, not a second token-list
+walk.
+
+**A claimed region is re-scannable text only for the scan that owns it.** A
+keyword block written **behind** the definition on the same line ended its line
+with `floor = 0` and a resume of its own, dropping the definer's floor, and the
+body lines came back as commands (`f() { cat <<E; }; if :; then f; fi` printed
+`body` as a command, rc 1 — measurable on master with a `cat <<E` in place of the
+definer). `Book::rewind` now takes a `line_ends` flag: a block that ends its line
+floors its resume with the floor the line already carries, a block with trailing
+content on its line keeps its own resume (that text is commands, never a region),
+and the floor a block leaves is the deeper of the two. Put the rule where the
+cursor moves, not in the branch that computes the resume — the block and the group
+callers share it.
+
+**In a shared module, record the arm one caller cannot reach instead of padding a
+test for it** (#311's rule): the extension arm of `claimed_bodies` never moves the
+**function** branch's `end`, because `scan_brace_block` skips a heredoc region
+whole and so the definer's closer is always past the region's end. The
+keyword-branch pins cover the arm; the function branch's pin asserts the mode
+(no bodies, span unchanged).
+
+**Measure the neighbours of the shape you fix — a plan's expectation column is a
+hypothesis.** Six rows the plan expected to reach parity did not, and each keeps
+its owner: the loop row's rc 1 is fdshell's `while` reporting the failing
+condition (measured on master with a plain body), a command-not-found is rc 1 here
+and 127 in bash, `{ cat <<E; }` and the nested `f() { { cat <<E; }; }` are
+**#315**'s, `f() { …; }; f | cat` is **#182**'s, the starved first operator
+(`f() { cat <<E; }; f` + body, no delimiter line) is **#429**'s, and a def-prefix
+redirection (`f() <<E { cat <<G; }`) flips from rc 1 to printing the def body at
+rc 0 where bash rejects the syntax at rc 2 — task **#433**, filed by this one
+(**#180** is the accepted *trailing* form, `f(){ …; } > a`). Pin each as a
+measured divergence with the bash value beside it; the def-prefix row in
+particular reads as a fix and is a widening.
