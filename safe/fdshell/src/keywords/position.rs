@@ -9,12 +9,17 @@
 //! (`cond/boundary/block`, `comment/depth_delta`, `parse/semi/closing`).
 //! A glued cond pair is *two* word starts — its head and its tail byte — and
 //! a word can begin at either, so a word carries a [`Glue`] telling the
-//! transition where it starts.
+//! transition where it starts. The payload's keyword rows live in
+//! [`clause`], the one keyword set shared with the cond-boundary scan's
+//! clause/body mode stack, so the two rules cannot drift apart.
 
 use crate::keywords::{keyword_delta, time_prefix_len};
 use crate::segment::group::{closes, opens};
 
+mod clause;
 mod glue;
+
+pub(crate) use clause::{body_keyword, clause_keyword, list_keyword};
 
 /// Where the word written next sits, as far as the keyword scorers can tell.
 /// The state transitions are [`after`]; the gate is [`scores`].
@@ -171,12 +176,11 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
     let clause = !matches!(place, Place::Data);
     match rest.first() {
         Some(b'i') if clause && rest == b"if" => Place::Command,
-        Some(b'i') if rest == b"in" => Place::Pattern,
+        Some(b'i') if list_keyword(rest) => Place::Pattern,
         Some(b'w') if clause && rest == b"while" => Place::Command,
         Some(b'u') if clause && rest == b"until" => Place::Command,
-        Some(b't') if clause && rest == b"then" => Place::Command,
-        Some(b'e') if clause && (rest == b"else" || rest == b"elif") => Place::Command,
-        Some(b'd') if clause && rest == b"do" => Place::Command,
+        // `then`/`else`/`do`/`elif`, one keyword set with the mode stack.
+        _ if clause && (body_keyword(rest) || clause_keyword(rest)) => Place::Command,
         _ if rest.ends_with(b")") => Place::Command,
         _ => Place::Data,
     }

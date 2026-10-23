@@ -5,7 +5,10 @@ use crate::keywords::Place;
 use crate::scan::{ScanState, comment_end};
 use crate::segment::group::opens_at;
 
-use super::{block, body, opens_group};
+use super::{
+    block::{self, Modes},
+    body, opens_group,
+};
 
 /// The byte just past the separator that ends the gated AND-list starting at
 /// `from` (or `line.len()`): bash gates the *AND-list* a `;` ends, not the
@@ -25,6 +28,10 @@ pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize
     let mut group_depth: i32 = 0;
     let mut block_depth: i32 = 0;
     let mut place = Place::Command;
+    // The region rule's clause/body mode, fed by this scan's own word walk: the
+    // gate never splits, so its answer is `Skip` either way, and the mode keeps
+    // the shared `body::step` call honest (task #304).
+    let mut modes = Modes::new();
     // The gated list starts right behind the operator pair, at a fresh command
     // word: the boundary scan's word state must not swallow it (task #236).
     state.word_active = false;
@@ -46,6 +53,7 @@ pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize
                     continue;
                 }
                 let (delta, next) = block::word_delta(line, i, block_depth, run_start, place);
+                modes.scan(line, i, place, delta);
                 block_depth = block_depth.saturating_add(delta).max(0);
                 place = next;
             }
@@ -55,7 +63,8 @@ pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize
                 group_depth = group_depth.saturating_sub(1).max(0);
             }
             if b == b'\n'
-                && let Some(body::Step::Skip(resume)) = body::step(line, run_start, i, block_depth)
+                && let Some(body::Step::Skip(resume)) =
+                    body::step(line, run_start, i, block_depth, &modes)
             {
                 // Heredoc bodies are opaque data: the gate scan never splits
                 // inside one, it resumes at the last delimiter's newline.

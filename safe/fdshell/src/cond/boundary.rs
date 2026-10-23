@@ -13,7 +13,10 @@
 //! `#` comments out the rest of its physical line, so an operator written in
 //! comment text — in particular behind a block's closing keyword, whose span
 //! carries the comment — is no split point: the scan skips the comment and
-//! lands on the newline that ends it (task #296).
+//! lands on the newline that ends it (task #296). A heredoc **body region** a
+//! block's text carries is scanned for an operator only where the `<<` that
+//! claimed it sits in the block's *clause* text; a region claimed by a word of
+//! the block's body is the body's own data ([`block::Modes`], task #304).
 
 use crate::keywords::Place;
 use crate::scan::{ScanState, comment_end};
@@ -22,6 +25,8 @@ use crate::segment::group::{definer_at_run, group_at_run, opens_at};
 mod block;
 mod body;
 pub(super) mod gate;
+
+use block::Modes;
 
 /// Scan from `i` to the next unquoted `&&` / `||` (or end of line). Heredoc
 /// command lines are skipped whole along with their bodies. A `{ …; }` group
@@ -35,14 +40,19 @@ pub(super) mod gate;
 /// segment scanner require. A block that carries heredoc bodies in its own
 /// text (a block condition's bodies travel inside the span) keeps the block
 /// rule, and its **body** regions are walked region by region: skipped whole
-/// in a statement's text, scanned for an operator inside a block's text
-/// ([`body::step`]). Returns the operator's first byte (or
+/// in a statement's text, and inside a block's text scanned for an operator
+/// only where the `<<` that claimed the region sits in the block's **clause**
+/// ([`body::step`], [`block::Modes`]). Returns the operator's first byte (or
 /// `line.len()`) and whether it is `||`.
 pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) -> (usize, bool) {
     let mut run_start = i;
     let mut group_depth: i32 = 0;
     let mut block_depth: i32 = 0;
     let mut place = Place::Command;
+    // Which half of an open block the scan sits in, recorded on the way: the
+    // region rule of `body::step` splits only the regions whose `<<` sits in a
+    // block's clause (task #304).
+    let mut modes = Modes::new();
     while let Some(&b) = line.get(i) {
         if !state.in_quote && !state.in_single && state.paren_depth == 0 {
             if group_depth == 0
@@ -73,6 +83,11 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                     continue;
                 }
                 let (delta, next) = block::word_delta(line, i, block_depth, run_start, place);
+                // The same word, read for its clause/body position: the word's
+                // own `place` (before the transition) is the gate `after` uses,
+                // and the `delta` is handed in, so no keyword is scored twice
+                // (task #304).
+                modes.scan(line, i, place, delta);
                 block_depth = block_depth.saturating_add(delta).max(0);
                 place = next;
             }
@@ -90,7 +105,7 @@ pub(crate) fn next_boundary(line: &[u8], mut i: usize, state: &mut ScanState) ->
                 group_depth = group_depth.saturating_sub(1).max(0);
             }
             if b == b'\n'
-                && let Some(step) = body::step(line, run_start, i, block_depth)
+                && let Some(step) = body::step(line, run_start, i, block_depth, &modes)
             {
                 match step {
                     // The block's own body region carries the operator: it is

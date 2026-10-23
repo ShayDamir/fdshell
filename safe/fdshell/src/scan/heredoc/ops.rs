@@ -57,6 +57,14 @@ pub(crate) fn operator_count(line: &[u8], from: usize, to: usize) -> usize {
     sites(line, from, to).len()
 }
 
+/// The byte index of every `<<` of the run `line[from..to]`, in operator order
+/// — the same sites [`operator_delims`] walks, so the list is index-aligned
+/// with the line's body regions (one region per operator, `full.rs`). The
+/// window is the region layer's own window, never a wider one.
+pub(crate) fn operator_sites(line: &[u8], from: usize, to: usize) -> Vec<usize> {
+    sites(line, from, to).into_iter().map(|s| s.op).collect()
+}
+
 /// Every `<<` site of the run `line[from..to]`, in order. The walk gates are
 /// the token layer's rules (see [`operator_delims`]' doc); `delimiter_span` is
 /// used only to step past the operator's word, and on `None` (a bare `<<` with

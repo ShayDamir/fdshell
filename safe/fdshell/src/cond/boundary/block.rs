@@ -10,11 +10,21 @@
 //! group already has its own opacity counter in `cond/boundary.rs`. A word is
 //! scored only where a command word may sit — bash recognizes a block keyword
 //! in command position only, and so does this counter (see [`word_delta`]).
+//!
+//! The depth answers *whether* a word is inside a block, never *which half* of
+//! it: the clause keywords (`then`/`do`/`else`/`elif`, a `case` arm's `)`) score
+//! `0`, so the depth is `1` for a heredoc written in a block's clause and for
+//! one written in its body alike. The second question is the [`Modes`] stack's,
+//! fed by the same word walk and built on the clause rule of
+//! `keywords/position::after` — its twin ([`clause`]).
 
 use crate::keywords::{Glue, Place, after, first_word_end, keyword_delta, scores};
 use crate::segment::group::command_at_run;
 
+mod clause;
 mod glue;
+
+pub(in crate::cond) use clause::{Mode, Modes};
 
 /// The block-depth delta of the word that starts at `i`, and what that word
 /// does to the scan's command-position flag.

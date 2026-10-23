@@ -3,7 +3,7 @@
 //! encodes (opener vs closer, `case` list vs argument, brace carve-out,
 //! `time [-p]` transparency).
 
-use super::{Glue, Place, after, scores};
+use super::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, scores};
 use crate::keywords::first_word_end;
 
 /// `after` on the whole word: `word_end` sits just past it, outside a cond
@@ -83,6 +83,50 @@ fn glued_case_clause_close_moves_the_place_to_command() {
 fn in_moves_the_place_to_pattern() {
     assert_eq!(after_word(b"in", Place::Command), Place::Pattern);
     assert_eq!(after_word(b"in", Place::Data), Place::Pattern);
+}
+
+/// The keyword rows `after` reads are **one set** with the cond-boundary scan's
+/// clause/body mode stack (`cond/boundary/block/clause`): each predicate answers
+/// exactly the words of its own arm, and every other word — including a `time`
+/// prefix and a glued payload — answers none of them.
+#[test]
+fn the_clause_keyword_set_is_one_set_with_after() {
+    for word in [b"then".as_slice(), b"else", b"do"] {
+        assert!(body_keyword(word), "{word:?} opens a body");
+        assert!(!clause_keyword(word), "{word:?} opens no clause");
+        assert!(!list_keyword(word), "{word:?} opens no word list");
+        assert_eq!(
+            after_word(word, Place::Command),
+            Place::Command,
+            "`after` reads {word:?} through the same row"
+        );
+    }
+    assert!(clause_keyword(b"elif"), "`elif` opens a clause");
+    assert!(!body_keyword(b"elif"), "`elif` opens no body");
+    assert_eq!(after_word(b"elif", Place::Command), Place::Command);
+    assert!(list_keyword(b"in"), "`in` opens a word list");
+    assert!(!body_keyword(b"in"), "`in` opens no body");
+    assert_eq!(after_word(b"in", Place::Command), Place::Pattern);
+    // None of the three reads anything else: the openers and closers are
+    // `keyword_delta`'s rows, and a word that merely *starts* like a keyword
+    // stays out of the set.
+    for word in [
+        b"if".as_slice(),
+        b"while",
+        b"until",
+        b"fi",
+        b"done",
+        b"esac",
+        b"x)",
+        b"thenx",
+        b"int",
+        b"elifx",
+        b"time then",
+    ] {
+        assert!(!body_keyword(word), "{word:?} is no body keyword");
+        assert!(!clause_keyword(word), "{word:?} is no clause keyword");
+        assert!(!list_keyword(word), "{word:?} is no word-list keyword");
+    }
 }
 
 /// The glued cond pair is *two* word starts (task #236's S2): the byte-level
