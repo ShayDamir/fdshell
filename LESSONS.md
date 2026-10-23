@@ -3826,3 +3826,41 @@ reads a `<<` as a path redirect, so the io-number form `3<<T` stops there
 anyway. The extra raw-span `span_operator` disjunct (the group's shape test)
 never carried the rule alone — an equivalence's source, removed, not documented
 away.
+
+## A function-definition body **is** a block body: add a body rule at the call site, never re-derive the trim (task #302)
+
+`f() { }` defined a function at rc 0 where bash stops at rc 2. The predicate the
+fix needed already had one owner: `parse/semi/trim.rs::block_body` trims the
+bracketing `;`s (`trim_body`, with the `&`/`& ;` carve-out of #354/#355) and
+`ensure!`s the slice non-empty with a caller-chosen variant; every block arm
+calls it, and the group (`parse/group_block.rs`) writes the same predicate as an
+inline `ensure!`. So the whole fix is `block_body(body_tokens, line,
+ParseError::FunctionEmptyBody)` in `function_block.rs::tokens_to_function` — both
+definer forms (`name() {`, `function name [()] {`) and the pipeline-stage path go
+through it. Copying the group's inline `ensure!` would have been a second copy of
+the same rule, and LESSONS records the drift a duplicated predicate causes.
+
+**The def site is the only body whose slice is judged at definition time while
+its text is judged at call time.** The statement layer stores the body as
+`ScriptText`, so a definition written *inside* a body is text: `f() { & }` and
+`f() { f() { }; }` define at rc 0 and their **calls** are the parse errors
+(`f() { & }; f` is the `&` split's message, not the empty body;
+`f() { f() { }; }; f` is the empty body), where bash parses the whole input and
+rejects the definition outright, rc 2. Pin the pair (`def`, `def; call`) in both
+`tests/block_bodies.rs` and `POSIX_COMPATIBILITY.md`, and keep the `&`-family
+rows asserting `!err.contains("body is empty")` — that is what stops a future
+`trim_body` change from silently swallowing them.
+
+**Check order is a message contract.** The group's order is closer search →
+empty-body → terminator rule, and the def follows it, so `f() { }` reports
+`function definition body is empty` today and keeps that message when **#424**
+inserts `ensure_before_closer` after it. A rule inserted between the closer
+search and the empty check flips pins the moment its neighbour lands.
+
+**Grep for the script shape, not the message, when looking for pins of the old
+behaviour.** `grep -rn '() *{ *}'` finds `f() { }` and misses
+`function f { }; f`, which is exactly where the repo's other accepted-empty-body
+pin lived (`safe/fdshell/tests/function_keyword.rs::definer_extra_words_and_trailing_run_are_dropped`,
+which used the empty body as a convenient no-output body). Rewrite such a row in
+place, keep the row's own point (there: the definer-word leniency), and point at
+the rule's integration home from the comment.

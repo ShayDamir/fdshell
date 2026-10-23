@@ -324,6 +324,12 @@ rc 2. The same rule decides a **multi-line** quoted definer: when the body of
 brace becomes a group statement and its body runs — fdshell prints `hi` with
 rc 1, while bash reports `'f'`: not a valid identifier and prints nothing.
 Written on one line the body never runs, so those forms agree on stdout.
+The same rule decides a **nested** definition: a definition's own body **slice**
+is judged when the statement is parsed, while a definition written *inside*
+another body is only text, judged when that function runs — so
+`f() { & }` and `f() { f() { }; }` define at rc 0, and only their calls report
+the parse error (`function definition body is empty` for the second), where bash
+rejects the definition itself with rc 2 and prints nothing.
 
 ## `-c` mode keeps its own `$0`
 

@@ -912,6 +912,18 @@ A group's closing `}` obeys the closer rule of "Conditionals and loops": a
 statement the group opened must be terminated before it — `{ echo a }` is the
 parse error `expected ';' before '}'`, `{ echo a; }` runs.
 
+A function's body obeys the block-body rule, the same one the arms and the
+group follow: it must be a non-empty list, so `f() { }`, `f() {; }`,
+`f() { ;; }`, the comment-only `f() { # c` + `}` and the multi-line `f() {` +
+`}` are parse errors — `function definition body is empty`, rc 1 where bash is
+rc 2 — and the definition is never made, so `f() { }; f` and `f() { }; echo
+tail` run nothing; the `function f { … }` spelling follows the same rule. A
+body of only the plain `&` is **not** an empty body, and a definition's body
+**text** is judged when the function runs, so `f() { & }` defines at rc 0 and
+its call is the parse error (bash rejects the definition outright, rc 2 — the
+statement-by-statement parse rule,
+[POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#quoted-keywords-are-command-words-quoted-control-keywords-are-not)).
+
 ### Pipelines and lists
 
 `cmd1 | cmd2` connects cmd1's stdout to cmd2's stdin. `;` separates
