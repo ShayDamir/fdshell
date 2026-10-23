@@ -2270,26 +2270,26 @@ fn mid_run_heredoc_parity_family() {
     }
 }
 
-/// Accepted divergences pinned with their owners: a here-doc written in a
-/// group body or in a `name() { … }` definition body claims **no** body
-/// region, so fdshell reports `here-doc: missing terminating delimiter line`
-/// (rc 1) where bash feeds the body to the command (rc 0; the io-number rows
-/// print nothing in bash, the body is fd 3's input). Measured against bash
-/// 5.3.9 on `master`; the io-number twins are task #276's table rows and fail
-/// identically. Task **#315** owns the group body, task **#305** the function
-/// definition; when they land these rows flip to bash parity and the name
-/// drops its suffix (the `closer_shaped_word_list_words_end_the_block_span_until_310`
-/// convention).
+/// Accepted divergence pinned with its owner: a here-doc written in a `{ …; }`
+/// **group** body claims no body region, so fdshell reports `here-doc: missing
+/// terminating delimiter line` (rc 1) where bash feeds the body to the command
+/// (rc 0; the io-number row prints nothing in bash, the body is fd 3's input).
+/// Measured against bash 5.3.9 on `master`. Task **#315** owns the group body;
+/// the nested row is the same gap one branch in — the definer claims its body
+/// text (task #305), the group inside it claims nothing. When #315 lands these
+/// rows flip to bash parity and the name drops its suffix (the
+/// `closer_shaped_word_list_words_end_the_block_span_until_310` convention).
+/// The function-definition twins of the first two rows flipped with task
+/// **#305**: see `heredoc_of_a_terminated_function_body_line_prints_on_every_call`.
 #[test]
-fn group_and_function_body_here_docs_claim_no_region_until_315_and_305() {
+fn group_body_here_docs_claim_no_region_until_315() {
     for (script, bash) in [
-        ("f() { cat <<T; }\nbodyT\nT\nf", "bash prints bodyT, rc 0"),
-        (
-            "f() { cat 3<<T; }\nbodyT\nT\nf",
-            "bash prints nothing, rc 0",
-        ),
         ("{ cat <<T; }\nbodyT\nT", "bash prints bodyT, rc 0"),
         ("{ cat 3<<T; }\nbodyT\nT", "bash prints nothing, rc 0"),
+        (
+            "f() { { cat <<T; }; }; f\nbodyT\nT",
+            "bash prints bodyT, rc 0 (the group is the def body)",
+        ),
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: {bash}");
@@ -2298,6 +2298,289 @@ fn group_and_function_body_here_docs_claim_no_region_until_315_and_305() {
             "{script}: stderr={err}"
         );
     }
+}
+
+// ── A `;`-terminated here-doc in a function-definition body (task #305) ──────
+// The definer's own operators claim their regions of the line's body stream
+// (`segment/block/claim.rs`, append mode) and the stored body carries them
+// (`parse/part_text`), so the definition parses and every **call** prints the
+// captured content — bash reaches the same by parsing the input once. Every
+// expectation below was measured against bash 5.3.9 (`bash -c`) and
+// `target/debug/fdshell`; rows named "divergence" reference their owner.
+
+/// The definer-body here-doc prints on the first call and on every later one,
+/// and the definition may end the line it is written on (the call on a later
+/// line sees the same capture).
+#[test]
+fn heredoc_of_a_terminated_function_body_line_prints_on_every_call() {
+    for (script, want) in [
+        ("f() { cat <<E; }; f\nbody\nE", "body\n"),
+        ("f() { cat <<E; }; f; f\nbody\nE", "body\nbody\n"),
+        ("f() { cat <<E; }; f; f; f\nbody\nE", "body\nbody\nbody\n"),
+        ("f() { cat <<E; }\nbody\nE\nf", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The here-doc does not swallow the rest of the def body, the trailing runs of
+/// the defining line, or the status of the call.
+#[test]
+fn heredoc_of_a_terminated_function_body_line_keeps_the_rest_of_the_body() {
+    for (script, want) in [
+        ("f() { cat <<E; echo z; }; f\nbody\nE", "body\nz\n"),
+        (
+            "f() { cat <<E; }; f; echo tail\nbody\nE\necho after",
+            "body\ntail\nafter\n",
+        ),
+        ("f() { cat <<E; }; f; echo rc=$?\nbody\nE", "body\nrc=0\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The `&&` twin: the definer's `{` is a group opener for the cond layer (task
+/// #354), so the body's `&&` never splits the definition, and the chain runs on
+/// every call.
+#[test]
+fn and_twin_of_a_terminated_function_body_heredoc_runs_the_chain() {
+    for (script, want) in [
+        ("f() { cat <<E && echo b; }; f\nbody\nE", "body\nb\n"),
+        (
+            "f() { cat <<E && echo b; }; f; f\nbody\nE",
+            "body\nb\nbody\nb\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// Two operators in one def body take their regions in **operator order**, and
+/// two definers on one line share the line's stream the same way. The
+/// multi-line form of the `function` keyword stays verbatim (extension mode).
+#[test]
+fn two_terminated_function_body_heredocs_take_their_regions_in_operator_order() {
+    for (script, want) in [
+        ("f() { cat <<E; cat <<F; }; f\none\nE\ntwo\nF", "one\ntwo\n"),
+        (
+            "f() { cat <<E; }; f; g() { cat <<F; }; g\none\nE\ntwo\nF",
+            "one\ntwo\n",
+        ),
+        ("function f { cat <<EOF\nhi\nEOF\n}; f", "hi\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The definer's own region sits in the **same** line stream as a pre-block and
+/// a trailing statement's regions: each operator takes its own region, in the
+/// global order (the family task #240 pins at the scan level).
+#[test]
+fn function_body_heredoc_shares_the_line_stream_with_its_neighbours() {
+    for (script, want) in [
+        (
+            "cat <<X; f() { cat <<E; }; f\nbodyX\nX\nbodyE\nE",
+            "bodyX\nbodyE\n",
+        ),
+        (
+            "f() { cat <<E; }; cat <<G; f\nbodyE\nE\nbodyG\nG",
+            "bodyG\nbodyE\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// A region's **lines are data**, never commands: `b && y`, a closer-shaped
+/// `}`, a keyword word, an opener, a `;`, a definer, a blank line, and an empty
+/// body (the first line is the delimiter) all print verbatim. The body region's
+/// words are blanked by the tokenizer (task #266), so none of them reaches the
+/// parser as a word.
+#[test]
+fn region_lines_of_a_function_body_heredoc_are_data() {
+    for (script, want) in [
+        ("f() { cat <<E; }; f\nb && y\nE", "b && y\n"),
+        ("f() { cat <<E; }; f\n}\nE", "}\n"),
+        ("f() { cat <<E; }; f\ndone\nE", "done\n"),
+        ("f() { cat <<E; }; f\n{\nE", "{\n"),
+        ("f() { cat <<E; }; f\n;\nE", ";\n"),
+        ("f() { cat <<E; }; f\ng() { h; }\nE", "g() { h; }\n"),
+        ("f() { cat <<E; }; f\n\nE", "\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // An empty body: the delimiter line is the first line, so nothing prints and
+    // the **next** line runs as a command. bash: rc 127, `E: command not found`;
+    // fdshell reports a command-not-found as rc 1 (measured on master for a bare
+    // `E`), so the row pins the output and the empty body, not bash's code.
+    let (out, _err, code) = run("f() { cat <<E; }; f\nE\nE");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "empty body: bash prints nothing, rc 127"
+    );
+}
+
+/// A definition written inside a keyword-block arm, a `case` clause, or behind
+/// a statement on the same line: the arm text is rebuilt with its regions
+/// (`parse/part_text` runs at the arm granularity too), the definition lands in
+/// the shell, and the call outside the block prints the body. A trailing block
+/// on the defining line must not re-scan the definition's regions (the line's
+/// floor, pinned at the scan level by
+/// `segment/tests.rs::scan_trailing_block_after_a_function_heredoc_keeps_the_line_floor`).
+#[test]
+fn function_body_heredoc_defined_inside_a_block_arm_prints_at_the_call() {
+    for (script, want) in [
+        ("if :; then f() { cat <<E; }; fi\nbody\nE\nf", "body\n"),
+        ("case x in x) f() { cat <<E; };; esac\nbody\nE\nf", "body\n"),
+        (
+            "while :; do f() { cat <<E; }; break; done\nbody\nE\nf",
+            "body\n",
+        ),
+        ("f() { cat <<E; }; case x in x) f;; esac\nbody\nE", "body\n"),
+        ("f() { cat <<E; }; if :; then f; fi\nbody\nE", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// A definition nested in a definition: the inner def body is text at definition
+/// time, so its own region rides along to the call (task #302's def-site rule).
+#[test]
+fn nested_function_definitions_capture_their_body_heredoc() {
+    let (out, err, code) = run("f() { g() { cat <<E; }; g; }; f\nbody\nE");
+    assert_eq!((out.as_str(), code), ("body\n", 0), "stderr={err}");
+}
+
+/// The delimiter forms ride along unchanged: quoted, space-bearing, `<<-`, and
+/// the `function` keyword definer.
+#[test]
+fn function_body_heredoc_delimiter_forms() {
+    for (script, want) in [
+        ("f() { cat <<'E'; }; f\n$HOME\nE", "$HOME\n"),
+        ("f() { cat <<\"a b\"; }; f\nbody\na b", "body\n"),
+        ("f() { cat <<-E; }; f\n\tbody\n\tE", "body\n"),
+        ("function f { cat <<E; }; f\nbody\nE", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The io-number form (task #276) in a def body: the region feeds fd 3, so
+/// stdout stays empty — bash's row exactly.
+#[test]
+fn numbered_heredoc_in_a_function_body_feeds_the_descriptor() {
+    let (out, err, code) = run("f() { cat 3<<T; }; f\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+}
+
+/// Calls in a loop, behind a redirect, in a pipeline inside the body, and an
+/// empty body: every call re-runs the **captured** text.
+#[test]
+fn function_body_heredoc_calls_in_a_loop_and_with_redirects() {
+    for (script, want) in [
+        ("f() { cat <<E; }; f > /dev/null; f\nbody\nE", "body\n"),
+        ("f() { cat <<E | wc -l; }; f\na\nb\nE", "2\n"),
+        ("f() { cat <<E; }; f\nE\necho tail", "tail\n"),
+        ("f() { cat <<E; }; f\nbody\nE\necho tail", "body\ntail\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// Measured divergences that stay with their owners:
+///
+/// * the loop row: fdshell's `while` reports the **failing condition's** status
+///   (rc 1) where bash reports the last body command's (rc 0) — measured on
+///   master with a plain loop body, so it is the loop-status rule, not this
+///   task's; the here-doc itself prints `body` twice.
+/// * the incomplete stream: the line's **first** operator's delimiter line never
+///   arrives, so the allocation claims nothing (task **#429**'s family) and
+///   fdshell rejects the definition where bash prints the body with its
+///   end-of-file warning.
+/// * the unclosed definer keeps its missing-closer message (task #277's
+///   contract), and the group body row stays with **#315**.
+#[test]
+fn function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence() {
+    let (out, _err, code) =
+        run("f() { cat <<E; }; i=0; while [ $i != 2 ]; do f; i=$((i+1)); done\nbody\nE");
+    assert_eq!(
+        (out.as_str(), code),
+        ("body\nbody\n", 1),
+        "bash prints the same twice at rc 0"
+    );
+    for (script, want) in [
+        (
+            "f() { cat <<E; }; f\nbody",
+            "missing terminating delimiter line 'E'",
+        ),
+        ("f() { cat <<E;", "is missing its closing '}'"),
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: bash prints the body at rc 0");
+        assert!(err.contains(want), "{script}: stderr={err}");
+    }
+}
+
+/// The shapes the definer claim does **not** reach, pinned with their owners so
+/// the next reader does not half-fix them:
+///
+/// * a delimiter word shaped like a brace (`f() { cat <<}; }; f`): bash prints
+///   the body rc 0 (with its end-of-file warning), fdshell rejects the line —
+///   the closer search of task **#432**.
+/// * a function in a pipeline stage (`f | cat`): the stage's process has no
+///   function table (task **#182**).
+/// * a def-prefix redirection (`f() <<E { … }`): bash rejects the syntax rc 2;
+///   fdshell parses it as a definer and the def body's own region prints
+///   (task **#433**, filed by this one — #180 is the accepted trailing form).
+#[test]
+fn function_body_heredoc_shapes_that_stay_divergent() {
+    let (out, _err, code) = run("f() { cat <<}; }; f\nx");
+    assert_eq!((out.as_str(), code), ("", 1), "bash prints `x` at rc 0");
+    let (out, _err, code) = run("f() { cat <<E; }; f | cat\nbody\nE");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 0),
+        "bash prints body at rc 0 (task #182)"
+    );
+    let (out, _err, code) = run("f() <<E { cat <<G; }\nbodyE\nE\nbodyG\nG\nf");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyG\n", 0),
+        "bash rejects the def-prefix redirection at rc 2 (task #433)"
+    );
+}
+
+/// A script file whose last delimiter line has **no trailing newline**: the
+/// region bytes are byte-exact (`scan/heredoc/full.rs::region_bytes`), so the
+/// body is captured and printed exactly as with `-c`.
+#[test]
+fn function_body_heredoc_at_end_of_input_without_a_trailing_newline() {
+    let path = std::env::temp_dir().join(format!("fdshell-it-heredoc-305-{}", std::process::id()));
+    std::fs::write(&path, "f() { cat <<E; }; f\nbody\nE").unwrap();
+    let output = Command::new(BIN)
+        .arg(&path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_file(&path);
+    let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
+    let stderr = str::from_utf8(&output.stderr).unwrap().to_string();
+    assert_eq!(
+        (stdout.as_str(), output.status.code().unwrap_or(-1)),
+        ("body\n", 0),
+        "stderr={stderr}"
+    );
 }
 
 // ── The io-number form: `[N]<<word` (task #276) ──────────────────────────────
