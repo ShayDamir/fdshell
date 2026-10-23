@@ -1,4 +1,5 @@
 use crate::brace::scan_brace_block;
+use crate::scan::heredoc;
 use crate::scan::{Boundary, Quotes, ScanState, boundary, skip_comment};
 use crate::segment::book::Book;
 use crate::segment::line;
@@ -32,10 +33,15 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let (segment, resume, floor) =
         group_block(line, brace, span_start, book.state.quotes(), pre_resume);
     book.segments.push(segment);
-    // The group's span ends the statement it opens, so it ends the physical
-    // line: the floor the line carries (a heredoc region claimed before the
-    // group) outranks its resume ([`Book::rewind`]).
-    book.rewind(resume, resume, floor, true);
+    // The group's span ends the **statement** it opens, so it ends the physical
+    // line only when the statement does: a group whose statement stops at a `;`
+    // mid-line has trailing commands after it, and its own resume is right
+    // there. When the span does end the line, the floor the line already carries
+    // (a heredoc region claimed by a block before the group) outranks the
+    // resume, so the scan never lands inside that region ([`Book::rewind`],
+    // task #305).
+    let line_ends = resume >= heredoc::line_end_after(line, brace);
+    book.rewind(resume, resume, floor, line_ends);
 }
 
 /// Build the `Segment::Block` for a `{ …; }` group whose `{` is at `start` (the
