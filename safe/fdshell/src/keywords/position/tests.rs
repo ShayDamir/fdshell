@@ -179,6 +179,26 @@ fn pair_payloads_take_the_place_the_pair_sets() {
         after_word_glue(b"||||", Place::Command, Glue::Head),
         Place::Data
     );
+    // A payload that is only a pipeline `|` is an **operator run**, so the pair
+    // behind it is data from every place, command position included: the arm's
+    // data half alone does not cover this shape, and the fall-through behind it
+    // is #292's stage rule, which would hand command position to the keyword
+    // written there (`true &&| if …`).
+    for (word, glue) in [
+        (b"&&|".as_slice(), Glue::Head),
+        (b"&|".as_slice(), Glue::Tail),
+    ] {
+        assert_eq!(
+            after_word_glue(word, Place::Command, glue),
+            Place::Data,
+            "the pipeline payload {word:?} never starts a command"
+        );
+        assert_eq!(
+            after_word_glue(word, Place::Pattern, glue),
+            Place::Data,
+            "…and it does not end a word list either"
+        );
+    }
     // A payload that only *looks* like an opener is an argument: each arm's
     // guard is the whole payload, not its first letter.
     assert_eq!(
@@ -262,6 +282,13 @@ fn a_closer_in_command_position_restarts_command_position() {
     // own `)`/`esac` rules end it, so a closer there leaves data (the list rows
     // above and in [`closers_score_in_command_and_pattern_positions`]).
     assert_eq!(after_word(b"fi", Place::Pattern), Place::Data);
+    // The arm's gate is a **negative** delta, not a non-positive one: the POSIX
+    // builtin `wait` scores `Some(0)` (`keywords::keyword_delta` returns the
+    // event-case opener's flag), and a zero is not a compound command's end.
+    // End-to-end: `while false; do wait done` is rc 1 `'while' is missing its
+    // closing 'done'` (`tests/block_closers.rs`), not `expected ';'`.
+    assert_eq!(after_word(b"wait", Place::Command), Place::Data);
+    assert_eq!(after_word(b"wait", Place::Pattern), Place::Data);
 }
 
 /// The pipeline tail is a **command** starter (task #292): the stage behind a
