@@ -6,7 +6,7 @@ use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{
-    List, Term, block_body, find_preceded_by, is_list_terminator, up_to_closing,
+    List, Term, block_body, ensure_before_closer, find_preceded_by, up_to_closing,
 };
 use crate::parse::word_quoted::keyword_word;
 use crate::redirect::RedirectDef;
@@ -80,11 +80,15 @@ pub(crate) fn tokens_to_for(
     );
     // POSIX #2.9.1: the closer is preceded by a command-list terminator — `;`
     // (a newline tokenizes as one), or the plain `&` that backgrounds the body's
-    // last statement (task #354: `for i in 1; do echo hi & done`).
-    ensure!(
-        closed.get(done_idx - 1).is_some_and(is_list_terminator),
-        ParseError::ExpectedSemicolonBeforeDone
-    );
+    // last statement (task #354: `for i in 1; do echo hi & done`) — **or** by the
+    // closer of the compound command the body ends with (task #301:
+    // `for i in a; do if :; then echo f; fi done`).
+    ensure_before_closer(
+        closed,
+        line,
+        done_idx,
+        ParseError::ExpectedSemicolonBeforeDone,
+    )?;
 
     let body = part_text(
         text,

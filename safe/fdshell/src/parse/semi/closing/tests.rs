@@ -152,3 +152,37 @@ fn word_lists_are_walked_as_words() {
         }
     }
 }
+
+/// Task #301's scan-side arm: a closer in command position restarts command
+/// position, so the walk reaches depth 0 at the block's **own** closer written
+/// right behind a compound command's closer — bash makes the `;` after a
+/// compound command optional. Each row is rc 0 in bash 5.3.9 (measured);
+/// `master` found no closer at all, because the closer behind a closer sat in
+/// argument position. The end-to-end rows are `tests/block_closers.rs`.
+#[test]
+fn a_compound_closer_restarts_command_position_in_the_walk() {
+    for line in [
+        b"while :; do if :; then :; fi done".as_slice(),
+        b"if :; then { :; } fi".as_slice(),
+        b"if :; then ( : ) fi".as_slice(),
+        b"for i in a; do if :; then :; fi done".as_slice(),
+        b"while :; do case x in a) : ;; esac done".as_slice(),
+        b"if :; then while :; do break; done fi".as_slice(),
+    ] {
+        let t = toks(line);
+        assert_eq!(
+            closing_keyword_index(&t, line),
+            Some(t.len() - 1),
+            "the walk ends at the block's own closer: {line:?}"
+        );
+    }
+    // Behind an argument word the closer-shaped word stays data, so the walk
+    // never returns to depth 0 (`echo fi done` runs the body, the block stays
+    // open — the rc-1 family of `tests/block_closers.rs`).
+    let line = b"while :; do echo fi done";
+    assert_eq!(closing_keyword_index(&toks(line), line), None);
+    // A clause keyword in argument position does not restart command position
+    // either: the `fi` behind the argument-`else` stays data (task #301).
+    let line = b"if :; then echo a else fi";
+    assert_eq!(closing_keyword_index(&toks(line), line), None);
+}

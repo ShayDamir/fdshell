@@ -23,8 +23,10 @@ mod glue;
 pub(crate) enum Place {
     /// A command may start here: the run's start, behind a cond operator,
     /// after `then`/`do`/`else`/`elif`, after a condition-taking opener, a
-    /// group opener or a `case` clause's `)`. Only here does a block keyword
-    /// score.
+    /// group opener, a `case` clause's `)` or a **closer** in command position
+    /// (bash's grammar makes the `;` after a compound command optional, so
+    /// `while :; do if :; then :; fi done` is one command list). Only here does
+    /// a block keyword score.
     Command,
     /// A `case` word list (`case x in …`). Its patterns are words, so no
     /// opener scores there, and `esac` is the list's terminator, so a closer
@@ -76,15 +78,20 @@ pub(crate) fn scores(word: &[u8], line: &[u8], word_end: usize, place: Place) ->
 
 /// The place of the word written after `word`: separators, cond operators, a
 /// subshell `(`, a group opener and a `case` clause's glued `)` start a
-/// command; `if`/`while`/`until` (their conditions), `then`/`else`/`elif`/`do`
-/// (their bodies) put the word behind them in command position; `in` opens a
-/// `case`/`for` word list ([`Place::Pattern`]); a word that is only a
+/// command; a **closer** in command position ends the compound command it
+/// closes and restarts command position (bash's grammar makes the `;` after a
+/// compound command optional — the builder-side twin is
+/// `parse/semi/preceded.rs::is_closer_predecessor`, task
+/// #301); `if`/`while`/`until` (their conditions) and `then`/`else`/`elif`/`do`
+/// (their bodies) put the word behind them in command position **only when they
+/// are not an argument** (`echo a else fi` keeps `fi` an argument); `in` opens
+/// a `case`/`for` word list ([`Place::Pattern`]); a word that is only a
 /// `time [-p]` prefix is transparent, keeping the current place; everything
-/// else — an ordinary word, a closer — is an argument position, so a
-/// keyword-shaped word there scores 0. A word that begins with a pipeline `|`
-/// starts the stage behind it (task #292: a keyword block written as a pipeline
-/// stage is a command), and an operator *form* (a redirect `&>`, whose payload
-/// is operator bytes) is an argument.
+/// else — an ordinary word, a closer-shaped argument — is an argument position,
+/// so a keyword-shaped word there scores 0. A word that begins with a pipeline
+/// `|` starts the stage behind it (task #292: a keyword block written as a
+/// pipeline stage is a command), and an operator *form* (a redirect `&>`, whose
+/// payload is operator bytes) is an argument.
 ///
 /// `glue` marks the word's start in a cond pair ([`Glue`]): its payload is
 /// read behind the pair's operator, from the place the pair sets — the
@@ -108,6 +115,16 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
             return Place::Command;
         }
         if opens(word, line, word_end) {
+            return Place::Command;
+        }
+        // A closer in command position ends the compound command it closes, and
+        // bash's grammar makes the `;` after a compound command optional, so the
+        // word behind it is a command again (`while :; do if :; then :; fi done`,
+        // `if :; then { :; } fi`). The gate is [`scores`]' own: a closer-shaped
+        // *argument* (`echo fi`) leaves the place alone.
+        if matches!(place, Place::Command)
+            && keyword_delta(w, line, word_end).is_some_and(|d| d < 0)
+        {
             return Place::Command;
         }
     }
@@ -147,14 +164,19 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
     // The `)` is usually glued to its pattern (`x)`), so the arm's first
     // word is judged by the word's *last* byte; the command keywords open a
     // command, `in` opens a word list, every other payload is an argument.
+    // A clause keyword opens a command **only** where it is not an argument:
+    // `echo a else fi` writes `else` as `echo`'s word, so it must not put `fi`
+    // in command position and swallow the closer (task #236's rule, read from
+    // the transition side).
+    let clause = !matches!(place, Place::Data);
     match rest.first() {
-        Some(b'i') if rest == b"if" => Place::Command,
+        Some(b'i') if clause && rest == b"if" => Place::Command,
         Some(b'i') if rest == b"in" => Place::Pattern,
-        Some(b'w') if rest == b"while" => Place::Command,
-        Some(b'u') if rest == b"until" => Place::Command,
-        Some(b't') if rest == b"then" => Place::Command,
-        Some(b'e') if rest == b"else" || rest == b"elif" => Place::Command,
-        Some(b'd') if rest == b"do" => Place::Command,
+        Some(b'w') if clause && rest == b"while" => Place::Command,
+        Some(b'u') if clause && rest == b"until" => Place::Command,
+        Some(b't') if clause && rest == b"then" => Place::Command,
+        Some(b'e') if clause && (rest == b"else" || rest == b"elif") => Place::Command,
+        Some(b'd') if clause && rest == b"do" => Place::Command,
         _ if rest.ends_with(b")") => Place::Command,
         _ => Place::Data,
     }

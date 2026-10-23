@@ -23,29 +23,49 @@ fn scores_word(word: &[u8], place: Place) -> bool {
 
 #[test]
 fn command_starters_move_the_place_to_command() {
-    for word in [
-        b"".as_slice(),
-        b";",
-        b"&&",
-        b"||",
-        b"&",
-        b"(",
-        b")",
-        b"if",
-        b"while",
-        b"until",
-        b"then",
-        b"else",
-        b"elif",
-        b"do",
-        b"{ ",
-    ] {
+    for word in [b"".as_slice(), b";", b"&&", b"||", b"&", b"(", b")", b"{ "] {
         assert_eq!(
             after_word(word, Place::Data),
             Place::Command,
             "the word behind {word:?} starts a command"
         );
         assert_eq!(after_word(word, Place::Pattern), Place::Command);
+    }
+}
+
+/// The clause keywords (`if`/`while`/`until` and `then`/`do`/`else`/`elif`)
+/// restart command position **only where they are not an argument** (task
+/// #301): `echo a else fi` writes `else` as `echo`'s word, and from there `fi`
+/// must stay an argument too — the closer-shaped word that follows an argument
+/// keyword is word data (bash rc 2 for that form, measured). A `case` word list
+/// (`Place::Pattern`) keeps the old row: the list's `)` ends it, and its glued
+/// pair words are pinned in [`pair_payloads_take_the_place_the_pair_sets`].
+#[test]
+fn clause_keywords_restart_command_position_only_from_command_place() {
+    for word in [
+        b"if".as_slice(),
+        b"while",
+        b"until",
+        b"then",
+        b"else",
+        b"elif",
+        b"do",
+    ] {
+        assert_eq!(
+            after_word(word, Place::Command),
+            Place::Command,
+            "{word:?} in command position opens a command"
+        );
+        assert_eq!(
+            after_word(word, Place::Pattern),
+            Place::Command,
+            "{word:?} ends the word list it sits in"
+        );
+        assert_eq!(
+            after_word(word, Place::Data),
+            Place::Data,
+            "{word:?} as an argument keeps the argument place"
+        );
     }
 }
 
@@ -182,16 +202,15 @@ fn pair_payloads_take_the_place_the_pair_sets() {
     );
 }
 
-/// Ordinary words, closers, `for`/`case` (their lists/conditions are read by
-/// the `in` and clause rules, not by them) are arguments.
+/// Ordinary words, `for`/`case` (their lists/conditions are read by the `in`
+/// and clause rules, not by them) are arguments. The closers are *not* in this
+/// list: [`a_closer_in_command_position_restarts_command_position`] pins their
+/// own row.
 #[test]
 fn argument_words_move_the_place_to_data() {
     for word in [
         b"echo".as_slice(),
         b"x",
-        b"fi",
-        b"done",
-        b"esac",
         b"for",
         b"case",
         b">",
@@ -206,6 +225,43 @@ fn argument_words_move_the_place_to_data() {
             "{word:?} is an argument word"
         );
     }
+}
+
+/// A **closer** in command position ends the compound command it closes, and
+/// bash's grammar makes the `;` after a compound command optional, so the word
+/// behind it starts a command again (task #301:
+/// `while :; do if :; then :; fi done`, `if :; then { echo a; } fi` are rc 0 in
+/// bash). Behind data the closer-shaped word is an argument and leaves the place
+/// alone (`echo fi`), and a quoted `"fi"` word is data at both places
+/// (task #247's gate, inside `keyword_delta` itself).
+#[test]
+fn a_closer_in_command_position_restarts_command_position() {
+    for word in [b"fi".as_slice(), b"done", b"esac", b"}"] {
+        assert_eq!(
+            after_word(word, Place::Command),
+            Place::Command,
+            "the closer {word:?} restarts command position"
+        );
+        assert_eq!(
+            after_word(word, Place::Data),
+            Place::Data,
+            "the closer-shaped word {word:?} as an argument stays data"
+        );
+    }
+    // The subshell's `)` is a separator token, so it starts a command from
+    // every place already ([`command_starters_move_the_place_to_command`]).
+    // A glued closer (`}>f`, `fi>f`) is a closer in `keyword_delta` too, so it
+    // restarts command position; the builder-side predicate does **not** accept
+    // it as a closer predecessor (`parse/semi/preceded/tests.rs`).
+    assert_eq!(after_word(b"}>f", Place::Command), Place::Command);
+    assert_eq!(after_word(b"esac>f", Place::Command), Place::Command);
+    // A quoted closer is a word: `echo "fi"` leaves the place alone.
+    assert_eq!(after_word(b"\"fi\"", Place::Command), Place::Data);
+    assert_eq!(after_word(b"\"fi\"", Place::Data), Place::Data);
+    // A `case` word list is not the compound command the rule reads: the list's
+    // own `)`/`esac` rules end it, so a closer there leaves data (the list rows
+    // above and in [`closers_score_in_command_and_pattern_positions`]).
+    assert_eq!(after_word(b"fi", Place::Pattern), Place::Data);
 }
 
 /// The pipeline tail is a **command** starter (task #292): the stage behind a

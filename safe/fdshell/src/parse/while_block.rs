@@ -3,7 +3,8 @@ use crate::error::parse::ParseError;
 use crate::parse::cond_bodies::condition_bodies;
 use crate::parse::semi::verbatim;
 use crate::parse::semi::{
-    List, Term, block_body, block_condition, condition_background, find_preceded_by, up_to_closing,
+    List, Term, block_body, block_condition, condition_background, ensure_before_closer,
+    find_preceded_by, up_to_closing,
 };
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
@@ -67,6 +68,18 @@ pub(crate) fn tokens_to_loop(
     let cond_background = condition_background(cond_slice, line);
     let condition = verbatim(text, cond_tokens)?;
     let cond_bodies = condition_bodies(text, cond_tokens);
+
+    // POSIX #2.9: the closing `done` stands behind a command-list terminator, or
+    // behind the closer of a compound command that is the body's last statement
+    // (`while false; do if :; then :; fi done`, task #301). Checked **after**
+    // the condition, so `while ; do done` keeps `expected condition`, and
+    // **before** the body, so `while true; do done` reports the missing `;`.
+    ensure_before_closer(
+        closed,
+        line,
+        done_idx,
+        ParseError::ExpectedSemicolonBeforeDone,
+    )?;
 
     let body = crate::parse::part_text::part_text(
         text,

@@ -212,23 +212,22 @@ fn command_position_keywords_still_open_the_block() {
 #[test]
 fn in_block_words_follow_the_clause_rule() {
     // `do echo if &&`: the `if` behind `echo` is an argument → the body's
-    // `&&` stays a boundary. The transition is applied even to the unscored
-    // word: an `if`-shaped argument puts the *next* word in command position
-    // (the machine's shape; a condition-taking word reads its condition
-    // there).
+    // `&&` stays a boundary. The gate is the *transition*'s rule too (task
+    // #301): an `if`-shaped argument is data and keeps the next word data, so
+    // it can never hand command position to a keyword behind it.
     let l = b"do echo if &&";
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
     assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 8, 1, 0, Place::Data), (0, Place::Command));
+    assert_eq!(word_delta(l, 8, 1, 0, Place::Data), (0, Place::Data));
     // `do if :`: a nested block in a clause position scores.
     let l = b"do if :";
     assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
-    // `then echo while`: the `while` behind `echo` is data (the transition to
-    // command position is the same as for the unscored `if` above).
+    // `then echo while`: the `while` behind `echo` is data, and stays data for
+    // the word behind it (the same gated transition as the `if` above).
     let l = b"then echo while";
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
     assert_eq!(word_delta(l, 5, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 10, 1, 0, Place::Data), (0, Place::Command));
+    assert_eq!(word_delta(l, 10, 1, 0, Place::Data), (0, Place::Data));
     // `echo done &&`: the argument-`done` is data, never a closer.
     let l = b"echo done &&";
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Data));
@@ -286,8 +285,10 @@ fn glued_pair_words_score_their_payload_once() {
     assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
     // Behind data the same three words carry no keyword: the in-block glued
     // divergence (`echo a&&if`), measured in `tests/glued_pair.rs`. The
-    // machine's transition is unchanged — an `if`-shaped argument puts the
-    // *next* word in command position (see [`in_block_words_follow_the_clause_rule`]).
+    // machine's transition follows the same gate (task #301): behind data an
+    // `if`-shaped payload keeps the next word data, so a keyword written as an
+    // argument never reaches command position (see
+    // [`in_block_words_follow_the_clause_rule`]).
     let l = b"a||if :".as_slice();
     for i in [1, 2] {
         assert_eq!(
@@ -296,12 +297,12 @@ fn glued_pair_words_score_their_payload_once() {
             "the pair word at {i} is data behind data"
         );
     }
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Data), (0, Place::Command));
+    assert_eq!(word_delta(l, 3, 1, 0, Place::Data), (0, Place::Data));
     // A background `&` is a single-byte run: its tail word `&if` is an
     // argument, and the `if` behind it is scored in the place that leaves.
     let l = b"&if :".as_slice();
     assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 1, 1, 0, Place::Data), (0, Place::Command));
+    assert_eq!(word_delta(l, 1, 1, 0, Place::Data), (0, Place::Data));
     // The pipeline `|` (#292): the byte word sets command position, and the
     // `if` behind it opens its block — the in-block and the top-level halves
     // agree (the scan's flag and the run rule answer the same question).

@@ -62,6 +62,8 @@ pub(crate) enum ParseError {
     GroupHereDocNotSupported,
     /// expected ';' before 'done'
     ExpectedSemicolonBeforeDone,
+    /// expected ';' before 'fi'
+    ExpectedSemicolonBeforeFi,
     /// 'then' body is empty
     EmptyThenBody,
     /// 'elif' body is empty

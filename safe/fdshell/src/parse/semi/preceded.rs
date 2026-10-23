@@ -3,10 +3,15 @@
 //! `then`/`elif`/`else` and the `while`/`until` `do`, and the plain `&` is one
 //! of them (task #354: `if true & then :; fi` is valid), while a `for` word
 //! list takes no list terminator at all (`for i in 1 & do` is bash's syntax
-//! error) — hence [`Term`].
+//! error) — hence [`Term`]. The same "what may precede" question is asked about
+//! a block's **closing keyword** by [`is_closer_predecessor`] /
+//! [`ensure_before_closer`] (task #301), whose answer adds the closer of a
+//! compound command to the terminator set.
 
 use super::Token;
+use crate::error::parse::ParseError;
 use crate::parse::word_quoted::keyword_word;
+use error_stack::{Report, ensure};
 
 /// The set of words that may precede a block clause keyword.
 #[derive(Clone, Copy)]
@@ -22,6 +27,45 @@ pub(crate) enum Term {
 /// the plain `&` that ends the statement it backgrounds (task #354).
 pub(crate) fn is_list_terminator(tok: &Token) -> bool {
     tok.0.eq_bytes(b";") || tok.0.eq_bytes(b"&")
+}
+
+/// The closing keyword of every block form, as a possible **predecessor** of
+/// another block's closer (see [`is_closer_predecessor`]).
+const CLOSERS: [&[u8]; 5] = [b"fi", b"done", b"esac", b"}", b")"];
+
+/// The token that may stand in front of a block's closing keyword: POSIX #2.9's
+/// command-list terminator ([`is_list_terminator`] — the `;` a newline tokenizes
+/// as, and the plain `&`), **or** the closer of the compound command that is the
+/// body's last statement: bash's grammar makes the `;` after a compound command
+/// optional, so `while :; do if :; then :; fi done` and
+/// `if true; then { echo a; } fi` run (rc 0, measured; the
+/// [`after`](crate::keywords::after) state machine's closer arm is the scan-side
+/// twin, task #301).
+///
+/// The keyword test is [`keyword_word`]'s raw-span gate (task #247): a quoted
+/// `"fi"` word is not a predecessor, and neither is a closer glued to a
+/// redirection (`}>f`, `esac>f`) — bash rejects
+/// `while false; do { :; }>f done` rc 2 (measured) and this keeps it a parse
+/// error. `false` when `idx` is off the list.
+pub(crate) fn is_closer_predecessor(tokens: &[Token], line: &[u8], idx: usize) -> bool {
+    tokens.get(idx).is_some_and(|tok| {
+        is_list_terminator(tok) || CLOSERS.iter().any(|kw| keyword_word(tok, line, kw))
+    })
+}
+
+/// The `;`-before-closer rule at one block builder: `err` when the closing
+/// keyword at `closer_idx` — an index the closing-keyword walk hands back, so
+/// never `0` — has no token [`is_closer_predecessor`] accepts in front of it.
+/// `for` pinned the rule first (task #233); task #301 is the rule for
+/// `if`/`while`/`until` too, with the predecessor set bash accepts.
+pub(crate) fn ensure_before_closer(
+    tokens: &[Token],
+    line: &[u8],
+    closer_idx: usize,
+    err: ParseError,
+) -> Result<(), Report<ParseError>> {
+    ensure!(is_closer_predecessor(tokens, line, closer_idx - 1), err);
+    Ok(())
 }
 
 /// The `;` **token** at `idx` of `tokens` is glued right behind a plain `&`

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 use crate::parse::token::tokenize;
+use alloc::string::ToString;
 
 /// `find_preceded_by` reads `needle` through the keyword gate (`keyword_word`,
 /// task #247): a quoted `then`/`done` is a command word, so the block finds no
@@ -115,4 +116,96 @@ fn amp_semi_is_the_real_semi_byte_behind_the_amp() {
         b"for i in 1; do echo a & ; done",
         tokens.len()
     ));
+}
+
+/// The `;`-before-closer predicate (task #301): a real `;` byte and the
+/// newline token are the terminator, the plain `&` is one too (task #354), and
+/// the closer of a compound command is a legal predecessor — bash makes the `;`
+/// after a compound command optional. A glued cond pair (`&&`), a pipeline `|`,
+/// an ordinary word, a **glued** closer (`}>f`, `esac>f`: bash rejects
+/// `while false; do { :; }>f done` rc 2, measured) and a quoted `"fi"` word are
+/// not.
+#[test]
+fn a_closer_predecessor_is_a_terminator_or_a_closer() {
+    // `line` ends at the block's closer; the probe is the token in front of it.
+    let before_closer = |line: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        is_closer_predecessor(&tokens, line, tokens.len() - 2)
+    };
+    assert!(before_closer(b"while :; do :; done"), "the `;` byte");
+    assert!(
+        before_closer(b"while :; do :\ndone"),
+        "the newline tokenizes as a `;`"
+    );
+    assert!(
+        before_closer(b"for i in 1; do echo a & done"),
+        "the plain `&`"
+    );
+    for line in [
+        b"while false; do if :; then :; fi done".as_slice(),
+        b"if true; then { echo a; } fi".as_slice(),
+        b"while false; do case x in a) echo c ;; esac done".as_slice(),
+        b"if true; then ( echo a ) fi".as_slice(),
+        b"if true; then while :; do break; done fi".as_slice(),
+    ] {
+        assert!(
+            before_closer(line),
+            "a compound command's closer precedes: {line:?}"
+        );
+    }
+    for line in [
+        b"if true; then echo a && fi".as_slice(),
+        b"if true; then echo a || fi".as_slice(),
+        b"while false; do : | done".as_slice(),
+        b"while false; do echo a done".as_slice(),
+        b"if true; then b fi".as_slice(),
+        b"while false; do { :; }>f done".as_slice(),
+        b"while false; do case x in a) ;; esac>f done".as_slice(),
+        b"if true; then \"fi\" fi".as_slice(),
+        b"if true; then 'done' fi".as_slice(),
+    ] {
+        assert!(
+            !before_closer(line),
+            "no terminator and no closer in front of: {line:?}"
+        );
+    }
+    // Index 0 is the block's own opener, never a predecessor; off the list is
+    // `false`.
+    let line = b"if true; then fi";
+    let tokens = tokenize(line).unwrap();
+    assert!(!is_closer_predecessor(&tokens, line, 0));
+    assert!(!is_closer_predecessor(&tokens, line, tokens.len()));
+}
+
+/// [`ensure_before_closer`] reports `err` exactly when the predicate is false,
+/// and passes a form whose closer stands behind a compound command's closer
+/// (the rule `for` pinned first, task #301 extends it to every block form).
+#[test]
+fn ensure_before_closer_reports_the_predicate_failure() {
+    let check = |line: &'static [u8]| {
+        let tokens = tokenize(line).unwrap();
+        ensure_before_closer(
+            &tokens,
+            line,
+            tokens.len() - 1,
+            ParseError::ExpectedSemicolonBeforeFi,
+        )
+    };
+    assert!(check(b"if true; then :; fi").is_ok());
+    assert!(check(b"if true; then { echo a; } fi").is_ok());
+    for line in [
+        b"if true; then fi".as_slice(),
+        // The glued cond pair is one `&&` token, not the plain `&` (task #358's
+        // flipped rows land on this rule; bash rc 2, measured).
+        b"if true; then echo a && fi".as_slice(),
+        b"if true; then echo a else fi".as_slice(),
+        b"if true; then echo a >f fi".as_slice(),
+    ] {
+        let err = check(line).err();
+        assert_eq!(
+            err.map(|r| r.current_context().to_string()).as_deref(),
+            Some("expected ';' before 'fi'"),
+            "{line:?} must report the missing `;`"
+        );
+    }
 }

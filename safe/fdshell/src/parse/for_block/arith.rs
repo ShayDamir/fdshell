@@ -9,7 +9,7 @@ mod region;
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::parse::part_text::part_text;
-use crate::parse::semi::{List, block_body, is_list_terminator, up_to_closing};
+use crate::parse::semi::{List, block_body, ensure_before_closer, up_to_closing};
 use crate::parse::word_quoted::keyword_word;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
@@ -94,10 +94,14 @@ fn tail_body(
             .is_some_and(|tok| crate::parse::block_tail::is_closer(tok, b"done")),
         ParseError::ExpectedDone
     );
-    ensure!(
-        closed.get(done_idx - 1).is_some_and(is_list_terminator),
-        ParseError::ExpectedSemicolonBeforeDone
-    );
+    // POSIX #2.9.1, the word `for`'s rule (task #301): a terminator, or the
+    // closer of the compound command the body ends with.
+    ensure_before_closer(
+        closed,
+        line,
+        done_idx,
+        ParseError::ExpectedSemicolonBeforeDone,
+    )?;
     let body = block_body(
         closed.get(1..done_idx).unwrap_or(&[]),
         line,

@@ -10,6 +10,7 @@ use super::semi::Term;
 use super::semi::block_body;
 use super::semi::body_end;
 use super::semi::condition_background;
+use super::semi::ensure_before_closer;
 use super::semi::find_preceded_by;
 use super::semi::span_verbatim;
 use super::semi::trim_condition;
@@ -63,6 +64,14 @@ pub(crate) fn tokens_to_if(
         ParseError::MissingCondition,
     )?;
     let cond_bodies = condition_bodies(text, cond_tokens);
+
+    // POSIX #2.9: the closing `fi` stands behind a command-list terminator, or
+    // behind the closer of a compound command that is the body's last statement
+    // (`if true; then { echo a; } fi`, task #301). It is checked **after** the
+    // condition, so `if ; then; fi` keeps `missing condition`, and **before**
+    // the bodies, so a closer glued straight behind `then`/`elif`/`else`
+    // (`if true; then fi`) reports the missing `;`, not an empty body.
+    ensure_before_closer(closed, line, fi_idx, ParseError::ExpectedSemicolonBeforeFi)?;
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
