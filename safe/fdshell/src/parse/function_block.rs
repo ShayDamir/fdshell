@@ -1,5 +1,5 @@
 use super::Token;
-use super::semi::{trim_body, verbatim};
+use super::semi::{block_body, verbatim};
 use super::word_quoted::{keyword_word, word_quoted};
 use crate::error::parse::ParseError;
 use crate::keywords::{name_len, quoted_word};
@@ -88,7 +88,19 @@ pub(crate) fn tokens_to_function(
     let body_tokens = tokens
         .get(open + 1..close)
         .ok_or(ParseError::FunctionMissingCloseBrace)?;
-    let body = verbatim(text, trim_body(body_tokens, line))?;
+    // The body is a **block body** (POSIX #2.9's `function_def` nests the
+    // group's `compound_list` between the braces): it must be a non-empty
+    // list, so bash stops on `f() { }` with rc 2 and fdshell reports
+    // [`ParseError::FunctionEmptyBody`] (rc 1, README "Errors"). The emptiness
+    // test is [`block_body`]'s, shared with every block arm and the group's
+    // own `ensure!`; a body of only the plain `&` keeps its `& ;` glue and so
+    // is **not** empty (tasks #354/#355). The check runs after the closer
+    // search and before any terminator rule — the group's order
+    // (`group_block.rs`), which keeps this message stable.
+    let body = verbatim(
+        text,
+        block_body(body_tokens, line, ParseError::FunctionEmptyBody)?,
+    )?;
     Ok(FunctionDef { name, body })
 }
 

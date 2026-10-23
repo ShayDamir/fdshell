@@ -119,7 +119,11 @@ fn is_newline_semi(tok: Option<&Token>, line: &[u8]) -> bool {
 /// A block arm's body tokens: `tokens` with the `;`s bracketing it trimmed
 /// ([`trim_body`]), `err` when nothing is left — bash rejects an empty body
 /// (`if x; then; fi`, `while x; do; done`, `for i in a; do; done`: all rc 2,
-/// and an empty `do` body makes the loop unbounded at run time).
+/// and an empty `do` body makes the loop unbounded at run time). The
+/// **function-definition** body (`f() { … }`, task #302) is the same grammar
+/// slot — POSIX #2.9's `function_def` nests the group's `compound_list` — so it
+/// calls this helper with its own variant; the group's own check
+/// (`parse/group_block.rs`) is the same predicate written inline.
 pub(crate) fn block_body<'a>(
     tokens: &'a [Token],
     line: &[u8],

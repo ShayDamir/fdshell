@@ -50,6 +50,8 @@ pub(crate) enum ParseError {
     FunctionEmptyName,
     /// function definition is missing a closing brace
     FunctionMissingCloseBrace,
+    /// function definition body is empty
+    FunctionEmptyBody,
     /// group is missing a closing brace
     GroupMissingCloseBrace,
     /// group is empty
