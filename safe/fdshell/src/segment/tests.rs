@@ -1021,6 +1021,33 @@ fn scan_trailing_block_after_a_function_heredoc_keeps_the_line_floor() {
     );
 }
 
+/// A `{ …; }` group written **behind** a block that claimed a region of the
+/// line, with a statement after the group's own `;`: the group's span ends its
+/// **statement**, not the physical line, so it keeps its own resume and the
+/// trailing statement is scanned; the floor the line carries
+/// (`Book::rewind`'s `line_ends`, task #305) still keeps the line's final flush
+/// out of the region. With the group's span taken as line-ending the trailing
+/// statement fell into the region and was dropped.
+#[test]
+fn scan_group_behind_a_block_heredoc_keeps_its_own_resume() {
+    check_shapes(
+        b"f() { cat <<E; }; { :; }; echo t\nbody\nE",
+        &[
+            ("B", 0, 16, true, vec![b"body\nE".to_vec()]),
+            ("B", 18, 24, true, vec![]),
+            ("S", 26, 0, false, vec![]),
+        ],
+    );
+    check_shapes(
+        b"if :; then cat <<E; fi; { :; }; echo t\nbody\nE",
+        &[
+            ("B", 0, 22, true, vec![b"body\nE".to_vec()]),
+            ("B", 24, 30, true, vec![]),
+            ("S", 32, 0, false, vec![]),
+        ],
+    );
+}
+
 /// The `(kind, off-or-start, end_pos, closed, bodies)` face of every segment a
 /// line produces, in scan order (`off` for statements, unused fields zeroed).
 type Shape = (&'static str, usize, usize, bool, Vec<Vec<u8>>);

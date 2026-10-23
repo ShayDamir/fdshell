@@ -2459,6 +2459,43 @@ fn nested_function_definitions_capture_their_body_heredoc() {
     assert_eq!((out.as_str(), code), ("body\n", 0), "stderr={err}");
 }
 
+/// A `{ …; }` group written **behind** a block whose here-doc region the line
+/// carries, with a statement after the group's own `;`: the group's span ends
+/// its **statement**, not the physical line, so it keeps its own resume and the
+/// trailing statement runs (`Book::rewind`'s `line_ends` rule, task #305). The
+/// group body's own claim stays **#315**'s, and the pre-block-statement twin
+/// below is **#332**'s: fdshell drops the statement after the group there
+/// exactly as it does on master.
+#[test]
+fn heredoc_block_then_group_then_statement_on_one_line() {
+    for (script, want) in [
+        (
+            "if :; then cat <<E; fi; { :; }; echo t\nbody\nE",
+            "body\nt\n",
+        ),
+        ("f() { cat <<E; }; { :; }; echo t\nbody\nE", "t\n"),
+        (
+            "if :; then cat <<E; fi; { :; } && echo t\nbody\nE",
+            "body\nt\n",
+        ),
+        ("if :; then cat <<E; fi; { :; }\nbody\nE", "body\n"),
+        (
+            "{ :; }; if :; then cat <<E; fi; echo t\nbody\nE",
+            "body\nt\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // The #332 row: the group's line-start rewind drops the trailing statement.
+    let (out, _err, code) = run("cat <<E; { :; }; echo t\nbody\nE");
+    assert_eq!(
+        (out.as_str(), code),
+        ("body\n", 0),
+        "bash prints body and t at rc 0 (task #332)"
+    );
+}
+
 /// The delimiter forms ride along unchanged: quoted, space-bearing, `<<-`, and
 /// the `function` keyword definer.
 #[test]
