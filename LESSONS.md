@@ -1413,35 +1413,35 @@ Two traps found while doing it:
     a block whose heredoc has no delimiter line inside its text stays a
     parse-error divergence (rc 1, bash rc 2 —
     `tests/cond_blocks.rs::and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error`).
-     Task **#304** closed the position half: the region scan asks
-     `keywords::position` for the **place** of every word of the block's text
-     (`cond/boundary/block.rs::Modes`, fed from the same `word_delta` the block
-     counter uses) and scans a region **only when its `<<` sits in the block's
-     clause** text; a region claimed by a word of the block's **body** is the
-     body's own data. The clause row keeps splitting (rc 1, bash rc 2 — the
-     accepted clause family), the body row is bash parity again (rc 0, body
-     printed):
-     `tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
-     `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`
-     (`if`/`elif`/`else`, `for`/`while`/`until`, `case` arms, nested blocks,
-     `{ …; }`, two operators on one line, a run entered behind a `&&`), while
-     `a_clause_position_region_still_splits_the_block_text` pins the clause rows
-     that did **not** move. Two measured facts came with it. (1) The mode is
-     carried by the *innermost open block*, so a closer hands the mode back to
-     its outer block, and a block closer written **inside** a body region never
-     reaches the stack (the region is skipped whole) —
-     `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`.
-     (2) A word **ending** with `)` sets the body mode — that is
-     `keywords/position::after`'s own ungated rule, which the mode stack mirrors
-     — so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
-     stops the split and fdshell runs text bash rejects (rc 0 vs 2, measured;
-     `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
-     Separating a `case` arm's `)` from a subshell `)` needs block-kind knowledge
-     the mode stack does not have; task **#430** owns that. The `# c` row of the
-     same family (`if :; then cat <<Q # c`) is **not** a region-rule row: it
-     reproduces without any block (`cat <<Q # c` + body + `Q` → rc 1 where bash
-     prints the body), so #304 closed only its `missing 'fi'` half; the statement
-     level half stays with **#429**.
+    Task **#304** closed the position half: the region scan asks
+    `keywords::position` for the **place** of every word of the block's text
+    (`cond/boundary/block.rs::Modes`, fed from the same `word_delta` the block
+    counter uses) and scans a region **only when its `<<` sits in the block's
+    clause** text; a region claimed by a word of the block's **body** is the
+    body's own data. The clause row keeps splitting (rc 1, bash rc 2 — the
+    accepted clause family), the body row is bash parity again (rc 0, body
+    printed):
+    `tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
+    `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`
+    (`if`/`elif`/`else`, `for`/`while`/`until`, `case` arms, nested blocks,
+    `{ …; }`, two operators on one line, a run entered behind a `&&`), while
+    `a_clause_position_region_still_splits_the_block_text` pins the clause rows
+    that did **not** move. Two measured facts came with it. (1) The mode is
+    carried by the *innermost open block*, so a closer hands the mode back to
+    its outer block, and a block closer written **inside** a body region never
+    reaches the stack (the region is skipped whole) —
+    `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`.
+    (2) A word **ending** with `)` sets the body mode — that is
+    `keywords/position::after`'s own ungated rule, which the mode stack mirrors
+    — so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
+    stops the split and fdshell runs text bash rejects (rc 0 vs 2, measured;
+    `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
+    Separating a `case` arm's `)` from a subshell `)` needs block-kind knowledge
+    the mode stack does not have; task **#430** owns that. The `# c` row of the
+    same family (`if :; then cat <<Q # c`) is **not** a region-rule row: it
+    reproduces without any block (`cat <<Q # c` + body + `Q` → rc 1 where bash
+    prints the body), so #304 closed only its `missing 'fi'` half; the statement
+    level half stays with **#429**.
 
     Task #235 owns the twin case (a `&&` in a function-definition group body,
    where the definer word keeps the `{` off the run start) — **owned and
@@ -1479,6 +1479,106 @@ Two traps found while doing it:
    and the rest of the task's section there, plus
    `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`
    (#237's parity, gained through #236's shared rule).
+
+## A heredoc's place inside a keyword block — clause vs body — decides whether its body region is a cond-list split point
+
+Task #304's gate on the region rule. A heredoc **body region** carried by a run
+inside a keyword block is scanned for a top-level `&&` / `||` **only where the
+`<<` that claimed it sits in the block's clause** (its condition, word list or
+`case` arm pattern); a region claimed by a word of the block's **body** is the
+body's own data, opaque, exactly as the same line outside any heredoc.
+
+**`block_depth` cannot answer the question, so the rule needs the clause
+keywords.** `then` / `else` / `do` score `0` in `cond/boundary/block.rs::word_delta`
+(they are clause keywords, not block openers), so the depth is `1` both in
+`if cat <<X; then` — where the `<<` is in the condition and the split ends where
+bash also rejects the text — and in `if :; then cat <<X` — where the `<<` is in
+the body and bash prints the body. The discriminator is the same clause rule
+`keywords/position::after` runs (`then`/`else`/`do` and a `case` arm's `)` open a
+body, `elif` and `in` open a clause), read by the cond scan as a mode
+(`cond/boundary/block/clause.rs`), and the keyword set is shared with `after`
+through `keywords/position/clause.rs`, pinned as one set by
+`keywords/position/tests.rs::the_clause_keyword_set_is_one_set_with_after`.
+
+**Feed the mode from the walk that already exists** — the
+deleted-`line_start_of` lesson ("a copy per call site is where it starts to
+drift"), applied here. The mode stack takes the `(delta, place)` pair the
+cond-boundary scan already computes at every word start, so it inherits that
+walk's heredoc-region, comment and quote skips and its command-position rule.
+A second walk over `line[..site]` inside `body.rs` would duplicate all of them
+and would re-walk region bytes, where a body line's `fi` / `done` must stay
+inert (`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`).
+Its twin, region → site alignment, is the one-region-per-operator allocation
+invariant: `step` zips the regions with `scan::heredoc::operator_sites` over the
+**same window**, never a wider one.
+
+**The fallback is the conservative side.** `Modes::mode_at` answers `Mode::Clause`
+for a site the walk never recorded (a run whose window starts past the opener, a
+synthetic unit-test text — the tripwire pin is the `cat <<A <<B` row of
+`cond/boundary/body/tests.rs::block_regions_split_on_their_earliest_operator`):
+an unknown site stays scanned, so the gate can only *lose* a split relative to
+#304's behaviour, never invent one. Failing toward opacity is the pre-#304 parity
+loss, i.e. the known gap, not a new divergence.
+
+**Braces push nothing.** A `{ …; }` group is counted by `cond/boundary.rs`'s
+`group_depth`, never by `block_depth`, so a group written in a block's **clause**
+keeps the clause mode (`if { cat <<Q; } then` stays in the rc-1-vs-bash-2 family)
+and a group in its **body** keeps the body mode (`if :; then { cat <<Q` gains
+parity). A `)`-ending word is the one row that does **not** discriminate cleanly:
+it is `after`'s own ungated rule, so a subshell `)` in a clause also opens a body
+— see `keywords/position` / task **#430**.
+
+**Measured rc identity** — bash 5.3.9(1)-release, `master` 1adbef0, and the
+`task304` tree, each `fdshell -c`, 2026-10-23. `/` separates physical lines. The
+`fdshell` column is #304; every row's stdout is byte-identical to bash's. Pins:
+`tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
+`a_body_position_heredoc_region_in_every_block_shape_prints_its_body`.
+
+| shape | bash | master | fdshell (task #304) |
+| --- | --- | --- | --- |
+| `if :; then cat <<Q` / `z && y` / `Q` / `fi` | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `if :; then cat <<'Q'` / `z && y` / `Q` / `fi && echo tail` | 0 `z && y`, `tail` | 1 `missing 'fi'` | 0 `z && y`, `tail` |
+| `if :; then cat <<'Q'` / `z \|\| y` / `Q` / `fi && echo tail` | 0 `z \|\| y`, `tail` | 1 `missing 'fi'` | 0 `z \|\| y`, `tail` |
+| `case q in q) cat <<'Q'` / `z && y` / `Q` / `;;` / `esac` | 0 `z && y` | 1 `case: missing 'esac'` | 0 `z && y` |
+| `while :; do cat <<Q` / `z && y` / `Q` / `break` / `done && echo tail` | 0 `z && y`, `tail` | 1 `expected 'done'` | 0 `z && y`, `tail` |
+| `for x in a; do cat <<Q` / `z && y` / `Q` / `done` | 0 `z && y` | 1 `expected 'done'` | 0 `z && y` |
+| `until :; do cat <<Q` / `z && y` / `Q` / `break` / `done` | 0, the body never runs | 1 `expected 'done'` | 0, no output |
+| `if :; then :; else cat <<Q` / `z && y` / `Q` / `fi` | 0, the arm never runs | 1 `missing 'fi'` | 0, no output |
+| `if :; then if :; then cat <<Q` / `z && y` / `Q` / `fi` / `fi` | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `if :; then { cat <<Q` / `z && y` / `Q` / `} fi` | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `{ if :; then cat <<Q` / `z && y` / `Q` / `fi` / `}` | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `if :; then cat <<Q; cat <<R` / `z && y` / `Q` / `u && v` / `R` / `fi` | 0 both bodies | 1 `missing 'fi'` | 0 both bodies |
+| `if :; then cat <<Q` / `z && y` / `Q` / `fi` / `echo after` | 0 `z && y`, `after` | 1 `missing 'fi'` | 0 `z && y`, `after` |
+| `if :; then cat <<Q` / `z && y` / `Q` / `fi` / `echo tail && echo tail2` | 0 all three | 1 `missing 'fi'` | 0 all three |
+| `true && if :; then cat <<Q` / `z && y` / `Q` / `fi` | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `false \|\| if :; then cat <<Q` / `z && y` / `Q` / `fi` (the gate's own path) | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `echo pre && if :; then cat <<Q` / `z && y` / `Q` / `fi` | 0 `pre`, `z && y` | 1 after printing `pre` | 0 `pre`, `z && y` |
+| `if :; then` / `cat <<Q` / `z && y` / `Q` / `echo a && echo b` / `fi` | 0 `z && y`, `a`, `b` | 1 `missing 'fi'` | 0 `z && y`, `a`, `b` |
+| `if :; then cat <<-Q` / `z && y` / `Q` / `fi` (the `<<-` twin) | 0 `z && y` | 1 `missing 'fi'` | 0 `z && y` |
+| `while :; do` / `if :; then cat <<Q` / `z && y` / `Q` / `fi` / `break` / `done` | 0 `z && y` | 1 `expected 'done'` | 0 `z && y` |
+| `case q in` / `q)` / `if :; then cat <<Q` / `z && y` / `Q` / `fi` / `;;` / `esac` | 0 `z && y` | 1 `case: missing 'esac'` | 0 `z && y` |
+
+Four rows are sweep rows, measured the same way and **not pinned**: `true && if`
+(its pinned twin is the `echo pre &&` row), `echo tail && echo tail2`, the
+`false ||` gate path and the `<<-` twin. The **unbounded** `while :; do cat <<Q`
+/ `z && y` / `Q` / `done && echo tail` twin loops forever on bash and on #304
+alike (measured rc 124 under a timeout) where `master` reports `expected 'done'`
+rc 1; the infinite loop is not pinnable in this suite, so the pinned shape is the
+bounded one (`break` in the body, rc 0).
+
+**Rows that must not move** are the accepted clause family — the `<<` in a
+condition, an `elif` condition, a group in a condition, two operators in a
+condition, a nested block's condition — all bash **rc 2**, master **rc 1**,
+fdshell **rc 1** (`tests/heredoc.rs::a_clause_position_region_still_splits_the_block_text`).
+Unchanged as a pair: `f() { cat <<Q` / `z && y` / `Q` / `}` / `f` is rc 0 on bash,
+master and fdshell alike (a definition group is no block, so no mode).
+
+**Two classes the sweep names, per "rc-identity audit".** `(bash≠0, master≠0,
+fdshell=0)`: `if (cat) && cat <<X; then` and `if :; then echo a); cat <<X` — the
+ungated `)` row, pinned and owned by **#430**. And the `# c` row
+`if :; then cat <<Q # c` did **not** gain parity (bash 0 prints `q && y`, master
+and fdshell rc 1 `missing terminating delimiter line 'Q'`): its blockless twin
+`cat <<Q # c` measures identically, so the family stays with **#429**.
 
 ## A cond-list heredoc arm's `b == b'\n'` guard is a mutation survivor with no mid-run pin
 
@@ -1569,8 +1669,9 @@ two, both in `cond/boundary/body.rs`, and both are the **identity** mutation of 
    recognizing a `<<` that opens its line after a word break.
 
 Task #304's spot-check of the same file (cargo-mutants 27.1.0, 286 mutants: 261
-caught, 9 missed, 16 unviable) added **one** accepted equivalent to this list and
-killed the rest of the region scan's logic mutants:
+caught, 9 missed, 16 unviable — the **pre-pin** run, taken before the two killer
+tests listed under "Killed" below landed) added **one** accepted equivalent to
+this list and killed the rest of the region scan's logic mutants:
 
 3. `operator_in_region`'s `while i < end`: `<`→`<=` is unkillable. A region's
    `end` is the end of its **delimiter line**, so `line[end]` is the newline that
@@ -1589,6 +1690,17 @@ and `an_operator_inside_a_quote_or_substitution_is_data`. **Rule for this shape:
 an operator test that reads a successor byte must be pinned at the *lone* byte —
    passing on a real `&&` says nothing about a scan that never reads the successor.
 
+The **post-pin** counts, so the arithmetic closes (each run fresh, no
+`--iterate`): #304's two new modules — `cond/boundary/block/clause.rs` and
+`keywords/position/clause.rs` — 27 mutants: 25 caught, 2 unviable, **0 missed**;
+the touched pre-existing modules — `cond/boundary.rs`, `cond/boundary/block.rs`,
+`cond/boundary/gate.rs`, `keywords.rs`, `keywords/position.rs`, `scan/heredoc.rs`,
+`scan/heredoc/ops.rs` — 248 mutants: 233 caught, 13 unviable, **2 missed**, both
+pre-existing sites (the two named below); `cond/boundary/body.rs` keeps its **2**
+missed, the accepted identities of items 1 and 3. Residual **4** = those 2
+identities + the 2 pre-existing sites, i.e. the pre-pin 9 minus the 5 the killer
+tests took.
+
 The run's residual, after those pins: the two identities of items 1 and 3, plus
 two **pre-existing** sites outside #304's code — `cond/boundary/gate.rs:65`
 (`b == b'\n'` → `!=`, the region rule consulted at every byte) and
@@ -1596,9 +1708,7 @@ two **pre-existing** sites outside #304's code — `cond/boundary/gate.rs:65`
 delimiter word) — filed as task **#431** with the probes that failed to kill
 them.
 
-**Rule:** the only `+ 1` mutant accepted here is the identity.
-
- A "±1 offset is
+**Rule:** the only `+ 1` mutant accepted here is the identity. A "±1 offset is
 equivalent" claim must name the byte the offset lands on and prove the scan
 treats it identically; for this helper the offsets *do* change the window, and
 the pins above prove it.
