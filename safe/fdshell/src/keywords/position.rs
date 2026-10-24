@@ -9,7 +9,10 @@
 //! (`cond/boundary/block`, `comment/depth_delta`, `parse/semi/closing`).
 //! A glued cond pair is *two* word starts — its head and its tail byte — and
 //! a word can begin at either, so a word carries a [`Glue`] telling the
-//! transition where it starts. The payload's keyword rows live in
+//! transition where it starts. The two flags are [`place`]; the payload
+//! preprocessing they feed — the glue bytes, the `time [-p]` prefix, the rows a
+//! payload's shape decides — is [`payload`], which hands the surviving word to
+//! the rows of [`after`]. The payload's keyword rows live in
 //! [`clause`], the one keyword set shared with the cond-boundary scan's
 //! clause/body mode stack, so the two rules cannot drift apart. The two
 //! **word-list** kinds are two places: a `case` list is [`Place::Pattern`],
@@ -21,63 +24,18 @@
 //! ends. Two orthogonal gates: [`after`] takes the innermost open block as `top`.
 
 use crate::keywords::Closer;
-use crate::keywords::time_prefix_len;
 use crate::segment::group::opens;
 
 mod clause;
 mod glue;
 mod list;
+mod payload;
+mod place;
 mod score;
 
 pub(crate) use clause::{body_keyword, clause_keyword, list_keyword, list_opener};
+pub(crate) use place::{Glue, Place};
 pub(crate) use score::{closer_matches, scores};
-
-/// Where the word written next sits, as far as the keyword scorers can tell.
-/// The state transitions are [`after`]; the gate is [`scores`].
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(crate) enum Place {
-    /// A command may start here: the run's start, behind a cond operator,
-    /// after `then`/`do`/`else`/`elif`, after a condition-taking opener, a
-    /// group opener, a `case` clause's `)` or a **closer** in command position
-    /// (bash's grammar makes the `;` after a compound command optional, so
-    /// `while :; do if :; then :; fi done` is one command list). Only here does
-    /// a block keyword score.
-    Command,
-    /// A `case` word list (`case x in …`). Its patterns are words, so no
-    /// opener scores there, and `esac` is the list's terminator, so a closer
-    /// does (`case x in esac` is a complete `case`).
-    Pattern,
-    /// A `for` word list (`for i in …`, task #306). Its terminator is `do`, a
-    /// non-closer, so the list has **no** command position at all: no keyword
-    /// scores here — not a closer-shaped word (`for i in done`), not an opener,
-    /// not a brace word (`for i in { 1 2`, `for i in }`). The place is sticky;
-    /// [`list::step`] leaves it only at a separator (which ends the list) or at
-    /// the `do` that opens the body.
-    Words,
-    /// An argument position: every word here is data.
-    Data,
-}
-
-/// Where a word starts inside a glued `&&`/`||` cond pair (task #236's S2).
-/// The pair is *two* word starts: [`is_word_break`](crate::scan::advance)
-/// breaks words at operator bytes, so `p||if` is scanned as the words `p`,
-/// `||if` (the pair's head) and `|if` (its tail), and the tokenized `p||if`
-/// carries the bare halves as separate tokens. A *pipeline* `|` is a
-/// single-byte run, so its word carries [`Glue::None`] and the plain rule of
-/// [`after`] scores the stage behind it (task #292).
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(crate) enum Glue {
-    /// Outside a cond pair.
-    None,
-    /// At the pair's first byte: the payload after the pair is in command
-    /// position.
-    Head,
-    /// At a later byte of the pair: the word continues the pair's command
-    /// position (bare tail: transparent, see [`after`]).
-    Tail,
-}
 
 /// The place of the word written after `word`: separators, cond operators, a
 /// subshell `(`, a group opener and a `case` clause's glued `)` start a
@@ -132,7 +90,6 @@ pub(crate) fn after(
         Glue::Head => Place::Command,
         Glue::Tail => place,
     };
-    let n = glue::strip(glue);
     if matches!(glue, Glue::None) {
         if matches!(w, b"" | b";" | b"&&" | b"||" | b"&" | b"(" | b")") || w.ends_with(b")") {
             return Place::Command;
@@ -152,38 +109,12 @@ pub(crate) fn after(
             return Place::Command;
         }
     }
-    let rest = w.get(n..).unwrap_or(b"").trim_ascii();
-    if rest.is_empty() {
-        return open;
-    }
-    // The glue pair's payload rows: behind data the pair's own word is an
-    // argument (#292's carve-out: a block written as a pipeline stage), and an
-    // operator run never starts a command. The payload has its operator bytes
-    // stripped, so it reads the place the pair set.
-    if matches!(glue, Glue::Head | Glue::Tail)
-        && (matches!(place, Place::Data) || rest.starts_with(b"|"))
-    {
-        return Place::Data;
-    }
-    let rest = time_prefix_len(rest)
-        .and_then(|p| rest.get(p..))
-        .unwrap_or(rest)
-        .trim_ascii();
-    if rest.is_empty() {
-        // `time [-p]`: a statement prefix, not a word of its own.
-        return place;
-    }
-    // A word that *begins* with a pipeline `|` is the tail of a pipe byte, and
-    // the stage behind a pipe is a command (task #292), exactly as the payload
-    // of a cond pair is. Inside a `case` word list the `|` is the pattern
-    // alternation (`case x in a|while)`), so the list stays a list; a `||`
-    // spelled without its glue stays the argument row it always was.
-    if rest.starts_with(b"|") && !rest.starts_with(b"||") {
-        return if matches!(place, Place::Pattern) {
-            Place::Data
-        } else {
-            Place::Command
-        };
+    // The payload pass — the glue bytes, the `time [-p]` prefix, and the rows
+    // a payload's shape decides on its own — is [`payload`]; the keyword rows
+    // below judge the word it leaves behind.
+    let (decided, rest) = payload::payload(w, place, glue, open);
+    if let Some(next) = decided {
+        return next;
     }
     // The `)` is usually glued to its pattern (`x)`), so the arm's first
     // word is judged by the word's *last* byte; the command keywords open a

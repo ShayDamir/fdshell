@@ -2538,22 +2538,23 @@ Task #236 (S2 round): the short-circuit gate and the glued cond pair.
   parity today, so do not "fix" one side blind): a short-circuited `||` ends
   its gate at the `;` (`gate_end`), the `&&`-failure path keeps skipping to
   the next `||` (`parts::skip_to_or`).
-- **A cond pair opens two word starts; the payload is a word.** The
-  byte-level scans carry this as `Glue` (head/tail strip in
-  `keywords/position.rs::after`); the token- and run-layer scorers see the
-  glued word whole (`a||if` is ONE token) and must score the payload behind
-  the pair themselves — `keywords::pair_payload` + payload arms in
-  `parse/semi/closing.rs` and `comment/depth_delta.rs`. Do not put the pair
-  rule inside `keyword_delta` itself: `keyword_delta` is also the *run-open*
-  test (`segment.rs`, `midrun::skip`), and scoring a payload there makes
-  `echo a && if …` open a block from the whole run — the midrun cond-part
-  semantics collapse (spaced rows failed en masse). The run-open test is
-  leading-word-only by design.
-- **There is no profile split on these shapes — do not invent one.** A
-  round-3 probe claimed a "rustc codegen anomaly": that at `opt-level = 0`
-  the payload/glue arms of `keywords/position.rs` miscompile, so the dev and
-  test binaries disagree with the release build on glued cond pairs and unit
-  pins of glued forms are "unpinable". Measured on 19 glued shapes
+ - **A cond pair opens two word starts; the payload is a word.** The
+   byte-level scans carry this as `Glue` (head/tail strip applied by
+   `keywords/position/payload.rs`, task #439); the token- and run-layer scorers see the
+   glued word whole (`a||if` is ONE token) and must score the payload behind
+   the pair themselves — `keywords::pair_payload` + payload arms in
+   `parse/semi/closing.rs` and `comment/depth_delta.rs`. Do not put the pair
+   rule inside `keyword_delta` itself: `keyword_delta` is also the *run-open*
+   test (`segment.rs`, `midrun::skip`), and scoring a payload there makes
+   `echo a && if …` open a block from the whole run — the midrun cond-part
+   semantics collapse (spaced rows failed en masse). The run-open test is
+   leading-word-only by design.
+ - **There is no profile split on these shapes — do not invent one.** A
+   round-3 probe claimed a "rustc codegen anomaly": that at `opt-level = 0`
+   the payload/glue arms of `keywords/position` (now `payload.rs`) miscompile, so the dev and
+   test binaries disagree with the release build on glued cond pairs and unit
+   pins of glued forms are "unpinable". Measured on 19 glued shapes
+
   (`echo x&&if …`, `echo x||if …`, `echo x|if …`, `while … echo a&&if …`,
   the glued closers, the in-block clause rows): `target/debug/fdshell` and
   `target/release/fdshell` print **identical stdout with identical rc**; the
@@ -2693,7 +2694,7 @@ claim, never a shorter spelling of it.
 
 ## A guard whose true arm returns what the code below it returns is a mutant source — delete it (task #236)
 
-In `keywords/position.rs::after` two rules answered `Place::Data` for exactly the inputs the plain `_ => Place::Data` fall-through answers, so no input could tell them apart and every mutant in them survived the whole suite:
+In `keywords/position.rs::after` (the payload rules now live in `keywords/position/payload.rs`, task #439) two rules answered `Place::Data` for exactly the inputs the plain `_ => Place::Data` fall-through answers, so no input could tell them apart and every mutant in them survived the whole suite:
 
 - the `Glue::None` flag `pipeline = glue::tail(w).is_some()`, feeding `pipeline && (place == Data || rest.starts_with("|")) → Data`: a `|`-leading word's first byte matches no keyword arm, a `&`-leading word's too, and a word ending in `)` returned `Command` two arms earlier — so the fall-through says `Data` for all of them. Its `glue::tail -> Option<&[u8]> with None` and its guard's `||`→`&&` mutants were unkillable.
 - the all-operator payload arm `rest.iter().all(|&b| b == b'&' || b == b'|') → Data`: an all-operator payload reaches no keyword arm, so it lands on `Data` without the arm. Its `||`→`&&` mutant was unkillable.
@@ -3508,8 +3509,9 @@ and the type (`Stage::{Command, Block}`), and the lesson is that this is one rul
 with many readers, all of which move together: `segment/block/stage.rs` (skip the
 block's span inside the run, so the block's own `;` never splits the statement),
 `segment/group/stage.rs` (the arm's gate, asked by the cond layer too),
-`keywords/position.rs::after` (the tail behind a `|` is `Place::Command`, so the
-block's keywords nest), `cond/boundary/block.rs` (the in-block depth walk scores
+`keywords/position/payload.rs` (the tail behind a `|` is `Place::Command`, so the
+block's keywords nest; the rule moved out of `position.rs::after` on task #439),
+`cond/boundary/block.rs` (the in-block depth walk scores
 the same word), `parse/pipeline/stage.rs` (a stage parses as a block),
 `pipeline/child/block.rs` (the fork runs it through `run::run_parsed`, the
 background-job shape). A subset of those six is a half-state, not a partial fix:
