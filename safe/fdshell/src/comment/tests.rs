@@ -666,8 +666,8 @@ fn a_seeded_word_list_span_reaches_the_real_closer() {
 /// closed; with the second (`!quotes.single`), as soon as the backtick scope is
 /// closed. Each makes the space a split, and the quoted fragment is skipped
 /// **without** moving `place` (`word_step` is the only thing that moves it), so the
-/// closer behind the split is scored at the run's seed [`Place::Command`]: the sum
-/// is `-1` where these rows are `0`.
+/// closer behind the split is scored at the run's seed [`Place::Command`]: measured
+/// `-1` on all three rows under each of the two mutants, where they are `0`.
 #[test]
 fn a_quoted_run_start_keeps_a_later_word_out_of_the_score() {
     let mid_span = Quotes {
@@ -707,9 +707,12 @@ fn a_quoted_run_start_keeps_a_later_word_out_of_the_score() {
 /// enters or exits the backtick scope (row 2 measured `0`) — in both, no split ever
 /// happens and the run is one quoted fragment.
 ///
-/// Row 3 documents the asymmetry the `depth_delta` doc states, and kills nothing:
-/// a `'…'` span never closes here, because `bare` is false while the span is open
-/// and its closing `'` is gated by `bare`, so the run stays quoted and scores `0`.
+/// Row 3 documents the asymmetry the `depth_delta` doc states: a `'…'` span never
+/// closes here, because `bare` is false while the span is open and its closing `'`
+/// is gated by `bare`, so the run stays quoted and scores `0`. It is a contrast
+/// row, not a toggle kill — the measured `-1` it takes under the two `bare`
+/// conjunctions is the same split that [`a_quoted_run_start_keeps_a_later_word_out_of_the_score`]
+/// rows pin.
 #[test]
 fn a_quoted_run_exits_its_scope_at_the_closer_byte() {
     let mid_span = Quotes {
