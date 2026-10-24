@@ -830,6 +830,18 @@ end. The rule covers conditions only: a `for` **word list** may be empty
 not a condition, and an empty `for ((…))` arithmetic condition is true, as in
 bash.
 
+A `for` **word list** is read as **words**: no keyword scores inside it, so
+`for i in done`, `for i in esac`, `for i in { 1 2` and `for i in }` are ordinary
+words and the block runs from its own `do` to its own `done` —
+`for i in done; do echo "$i"; done` prints `done`, at rc 0 as in bash. A `case`
+**pattern list** is the opposite place: `esac` **terminates** it, so
+`case x in esac` is a complete `case`, while `case done in done) echo p;; esac`
+is fdshell's parse error (task #310). A list word glued to an operator is word
+data here, so `for x in done>f; do echo A; done>f2` files `A` in `f2` and
+`for i in a && b; do echo hi; break; done` iterates — both at rc 0 where bash
+stops at rc 2 (accepted divergences). A missing `in` stays fdshell's own rc 1:
+`for i 1 2` is `expected 'in'`, bash rc 2.
+
 A block's **closing keyword** needs a command-list terminator in front of it —
 POSIX #2.9's `;` (a newline is one) or the plain `&` — with the one exception
 bash makes: the terminator after a **compound command** is optional, so a body
