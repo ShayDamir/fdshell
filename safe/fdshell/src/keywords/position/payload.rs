@@ -20,12 +20,7 @@ use super::{Glue, Place, glue};
 /// keyword rows of [`super::after`] judge — so `None` means "fall through to
 /// the rows", with `rest` already stripped of the glue bytes and the `time`
 /// prefix.
-pub(super) fn payload(
-    w: &[u8],
-    place: Place,
-    glue: Glue,
-    open: Place,
-) -> (Option<Place>, &[u8]) {
+pub(super) fn payload(w: &[u8], place: Place, glue: Glue, open: Place) -> (Option<Place>, &[u8]) {
     let n = glue::strip(glue);
     let rest = w.get(n..).unwrap_or(b"").trim_ascii();
     if rest.is_empty() {

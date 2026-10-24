@@ -1,4 +1,5 @@
 pub(crate) mod arith;
+mod head;
 mod words;
 
 use super::Token;
@@ -9,7 +10,6 @@ use crate::parse::part_text::part_text;
 use crate::parse::semi::{
     List, Term, block_body, ensure_before_closer, find_preceded_by, up_to_closing,
 };
-use crate::parse::word_quoted::keyword_word;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
@@ -39,24 +39,10 @@ pub(crate) fn tokens_to_for(
     tokens: &[Token],
     text: &ScriptText,
 ) -> Result<ForBlock, Report<ParseError>> {
-    ensure!(
-        tokens
-            .first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"for")),
-        ParseError::ExpectedFor
-    );
-    let var = tokens
-        .get(1)
-        .ok_or(ParseError::ExpectedVariableName)?
-        .0
-        .clone();
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let in_pos = tokens
-        .iter()
-        .skip(2)
-        .position(|tok| keyword_word(tok, line, b"in"))
-        .ok_or(ParseError::ExpectedIn)?
-        + 2;
+    // The `for` keyword, its variable name and the `in` that opens the word
+    // list are the head, and their three errors are the head's contract.
+    let (var, in_pos) = head::head(tokens, line)?;
 
     // The `for` word list takes no list terminator (`for i in 1 & do` is bash's
     // syntax error), so its `do` is searched with `;` alone.
