@@ -214,6 +214,11 @@ fn a_block_keyword_in_argument_position_never_swallows_the_closer() {
 /// cannot move it silently: a closer written behind an argument word, and a
 /// closer glued to a redirection (its own word, so no closer predecessor).
 /// `master` gives the same rc for every row; the messages are its own.
+///
+/// Task #309 moved the literal-brace row out of this family: a `}` is the
+/// closer of a **brace** block, so in an `if` body it is a word, the body runs
+/// to its end and the row is bash parity (rc 0, prints `}`) — pinned by
+/// `tests/group.rs::literal_brace_argument_in_a_block_body`.
 #[test]
 fn the_rc_1_family_stays_a_parse_error() {
     bounded_err(
@@ -233,7 +238,6 @@ fn the_rc_1_family_stays_a_parse_error() {
         "if true; then echo a >f fi",
         "'if' is missing its closing 'fi'",
     );
-    err("if true; then echo }; fi", "expected ';' before 'fi'");
     // The POSIX builtin `wait` scores the *zero* keyword delta, so it is not a
     // compound command's end and `done` behind it stays an argument (bash rc 2,
     // `master` rc 1 with this same message; the `Some(0)` row of the closer

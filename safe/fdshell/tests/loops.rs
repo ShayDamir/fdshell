@@ -1898,14 +1898,22 @@ fn for_list_words_including_keyword_shaped_ones_are_plain_words() {
 /// closer — `master` said `expected 'do'` for both, because its span scan had
 /// already ended the block at the list word.
 ///
-/// The last three rows are the **seed boundary**: the block scan is seeded with
-/// a word list for a `for` opener *only*. An `if`/`while` condition's
-/// closer-shaped word is an argument (bash: rc 2), and `case`'s **pattern** list
-/// keeps `esac` as its terminator, so all three keep their own missing-clause /
-/// missing-closer report (the `case` row is task **#310**'s). They are also the
-/// `kw_len == FOR_LEN` mutants' pins: seeding every opener would run these
-/// three rows, and seeding none would break
+/// The last four rows are the **seed boundary**: the block scan is seeded with
+/// a word list for a `for` opener *only*. A `for`/`while` condition's
+/// closer-shaped word is an argument, so the pair keeps its own missing-`then` /
+/// missing-`do` report. They are also the `kw_len == FOR_LEN` mutants' pins:
+/// seeding every opener would run these rows, and seeding none would break
 /// [`for_list_words_including_keyword_shaped_ones_are_plain_words`].
+///
+/// Task #309's pairing moved two rows out of this list. `for i in esac; …`
+/// stays (an `esac` closes no `for`, so the span never closes: rc 1 names the
+/// missing `done`), and `if done; then …` leaves: the `if`'s span now reaches
+/// its `fi`, so the condition word runs and fails to resolve — pinned as the
+/// rc-0 divergence row below, where bash is rc 2 (`done` is a *reserved word*
+/// in bash's condition grammar). `case done in esac` (the third
+/// closer-shaped list) is at parity now — the pairing closes the block at the
+/// real `esac`, part of task **#310** landing for free — and is pinned in
+/// `tests/heredoc.rs::closer_shaped_case_word_list_words_reach_the_real_closer`.
 #[test]
 fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only() {
     for (script, want) in [
@@ -1921,12 +1929,17 @@ fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only(
             "for i in done; do echo x",
             "'for' is missing its closing 'done'",
         ),
-        ("if done; then echo T; fi", "missing 'then'"),
         ("while done; do echo W; break; done", "expected 'do'"),
-        ("case done in esac", "case: missing 'esac'"),
     ] {
         let (_out, err, rc) = run_bounded(script);
         assert_eq!(rc, 1, "{script}: stderr={err}");
         assert!(err.contains(want), "{script}: stderr={err}");
     }
+    // The `if` row's post-#309 half: with the `if`'s span reaching `fi`, the
+    // closer-shaped condition word is an ordinary command, so the condition
+    // fails, the body is skipped and the `if` exits 0 with the resolve error on
+    // stderr (bash is rc 2, the rc-1-vs-2 reserved-word family).
+    let (out, err, code) = run_bounded("if done; then echo T; fi");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert!(err.contains("failed to resolve command path"), "{err}");
 }

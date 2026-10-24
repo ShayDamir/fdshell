@@ -1972,23 +1972,26 @@ fn closer_shaped_for_word_list_words_reach_the_real_closer() {
     assert_eq!((out.as_str(), code), ("body\n", 0), "stderr={err}");
 }
 
-/// Task #273's third measured divergence, now the **`case`** half only, pinned
-/// as fdshell's own behaviour (identical on `master`): the **span** scan ends a
-/// block's text at a closer-shaped word of the `case` **pattern** list, so
-/// `done)` never becomes a clause pattern and a lone `done` list never reaches
-/// its `esac` — rc 1, where bash runs every row (a pattern list is a word list
-/// there too). Task **#310** owns the `case` seed of the span rule (the `for`
-/// half landed with #306, see
-/// [`closer_shaped_for_word_list_words_reach_the_real_closer`]); when #310 lands
-/// these rows flip to bash parity and the name drops its `310` suffix.
+/// The **`case`** twin of
+/// [`closer_shaped_for_word_list_words_reach_the_real_closer`], at bash parity
+/// since task **#309**: the span scan is seeded with the block's own closer, so
+/// a `done` of the `case` **pattern** list mismatches the `case`'s `esac` and is
+/// word data — the block reaches its real `esac`, `done)` is a clause pattern and
+/// bash's rc 0 follows (it was rc 1 on `master`, the third divergence of task
+/// #273). The same rule lands in the **token** walk of `case_block` (the seed
+/// `Closer::Esac`), so the token side agrees.
+///
+/// Task **#310** owns what is left of the span rule: a closer-shaped word of the
+/// `for`/`case` list read at the **byte** level (`esac` behind a `for`, the
+/// `case` list's `esac` in a nested span). The pair is pinned there.
 #[test]
-fn closer_shaped_word_list_words_end_the_block_span_until_310() {
-    let (_out, _err, code) = run("case done in done) echo p;; esac");
-    assert_eq!(code, 1, "bash prints p, rc 0");
-    let (_out, _err, code) = run("case done in done) cat <<T;; esac\nbodyT\nT");
-    assert_eq!(code, 1, "bash prints bodyT, rc 0");
-    let (_out, _err, code) = run("case done in esac");
-    assert_eq!(code, 1, "bash runs it, rc 0");
+fn closer_shaped_case_word_list_words_reach_the_real_closer() {
+    let (out, err, code) = run("case done in done) echo p;; esac");
+    assert_eq!((out.as_str(), code), ("p\n", 0), "stderr={err}");
+    let (out, err, code) = run("case done in done) cat <<T;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "stderr={err}");
+    let (out, err, code) = run("case done in esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
 }
 
 /// Bash applies no brace expansion to a `case` clause pattern, and fdshell
@@ -2005,16 +2008,21 @@ fn case_clause_pattern_of_a_body_heredoc_is_protected_from_brace_expansion() {
     assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
 }
 
-/// Task #273's second measured divergence, pinned as fdshell's own behaviour:
-/// a clause body terminated by `; done` closes on that word-shaped closer shape
-/// and the block reports its own missing `esac` (rc 1) where bash reports a
-/// syntax error (rc 2) — the rc-1-vs-2 family of
-/// `midrun_adjacent_shapes_stay_measured_divergences`, same on master.
+/// Task #273's second measured divergence, reshaped by task **#309**'s pairing:
+/// a `; done` inside a clause body is a word (an `if`/`while` closer, not a
+/// `case`'s), so it no longer ends the block — the clause keeps its region, its
+/// body heredoc prints, and the clause's own statement then runs `done`, which
+/// is no command: rc 1 with the resolve error, where bash is rc 2 (the rc-1-vs-2
+/// family of `midrun_adjacent_shapes_stay_measured_divergences`). `master` read
+/// the `done` as the block's closer and reported `missing 'esac'`, rc 1.
 #[test]
-fn case_body_heredoc_of_a_clause_terminated_by_done_reports_missing_esac() {
-    let (_out, err, code) = run("case x in x) cat <<T; done;; esac\nbodyT\nT");
-    assert_eq!(code, 1, "bash rc 2");
-    assert!(err.contains("missing 'esac'"), "stderr={err:?}");
+fn case_body_heredoc_of_a_clause_terminated_by_done_runs_the_body() {
+    let (out, err, code) = run("case x in x) cat <<T; done;; esac\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 1), "stderr={err:?}");
+    assert!(
+        err.contains("failed to resolve command path"),
+        "stderr={err:?}"
+    );
 }
 
 // --- the body's escape pairs and line continuations (task #269) -------------

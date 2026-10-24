@@ -86,24 +86,24 @@ fn short_circuit_gate_skips_the_gated_list_and_resumes_behind_it() {
     let (out, err, code) =
         run_bounded("while :; do echo a || if :; then :; fi; break; done; echo after");
     assert_eq!((out.as_str(), code), ("a\nafter\n", 0), "stderr={err}");
-    // Its glued twins: the *in-block* glued pair is the measured accepted
-    // divergence — the parse layer's token walk keeps the glued `if` in the
-    // operand word's shadow, the block span breaks and the statement dies
-    // with a parse error (rc 1, master parity; bash runs it, printing
-    // `a`, `after`).
-    let (out, err, code) =
-        run_bounded("while :; do echo a&&if :; then :; fi; break; done; echo after");
-    assert_eq!(
-        (out.as_str(), code),
-        ("a\n", 1),
-        "stderr={err}: master parity"
-    );
-    // Task #309's pairing heals the `||` twin: the glued `if`'s own `fi` closes
-    // the `if`, so the block span survives and the loop's `break` lands —
-    // **bash parity** (bash 5.3.9 prints `a`, `after`, rc 0).
-    let (out, err, code) =
-        run_bounded("while :; do echo a||if :; then :; fi; break; done; echo after");
-    assert_eq!((out.as_str(), code), ("a\nafter\n", 0), "stderr={err}");
+    // Its glued twins, healed by task #309's pairing: the glued `if` is scored
+    // at the pair's command position and its **own** `fi` closes *the if* (the
+    // pairing is by kind, so the enclosing loop's `done` is untouched), the
+    // block span survives, the loop's `break` lands and `echo after` runs —
+    // **bash parity** for both operators (bash 5.3.9 prints `a`, `after`, rc 0).
+    // On `master` the type-blind depth closed the *loop* at the `if`'s `fi`: the
+    // `&&` twin died as a parse error (rc 1) and the `||` twin ran forever.
+    for script in [
+        "while :; do echo a&&if :; then :; fi; break; done; echo after",
+        "while :; do echo a||if :; then :; fi; break; done; echo after",
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("a\nafter\n", 0),
+            "{script}: stderr={err}"
+        );
+    }
     // A `{ …; }` group is opaque to the gate and its `;` ends it: fdshell
     // prints `a` (the `&&` tail runs after the gate) — master parity, an
     // accepted divergence (bash prints only `a`; measured).
