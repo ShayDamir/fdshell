@@ -228,11 +228,15 @@ Plain `cargo clippy -- -D warnings` does not lint `#[cfg(test)]` code, so a `sus
 ## `readlinkat` empty path on a non-link fd is ENOENT, not EINVAL
 The path form of `readlinkat` fails with `EINVAL` on a non-symlink, but the fd form (empty path behind an open handle) fails with `ENOENT` — so `readlink %fd` on a regular file exits 2, not 22. Don't assume both forms share an errno; assert each against real kernel behavior (C repro: `open("f", O_RDWR); readlinkat(fd, "", buf)` → ENOENT).
 
-## Tests in one binary share the process: pid-only temp paths collide
-nextest runs each test binary in its own process, but tests *within* a binary run on parallel threads sharing one pid — a scratch dir named `fdshell-foo-{pid}` is shared by every test in that binary, so one test's `Drop` can remove another test's dir mid-run (nondeterministic ENOENTs). Name per-test scratch with pid + an atomic counter (see `scratch()` in `unsafe/sys/tests/statx.rs`).
-
 ## pid + counter is collision-free only if the dir dies with its process
-A scratch dir named `fdshell-foo-{pid}-{counter}` is unique among **live** processes, so a dir that *outlives* its process is itself the collision: pids get recycled, and a later suite run inherits the earlier run's dir with that run's files in it. Measured: 1 failure in 48 concurrent full-suite runs — `glob::tests::star_matches_sorted_and_excludes_dots` listed 7 entries where 6 are pinned; the 7th (`ax`) had been written by `escaped_star_word_is_not_a_pattern` into the leaked counter-0 dir of an earlier process (task #255). Corollary: an end-of-test `std::fs::remove_dir_all` is not cleanup — a failing test is exactly the test that leaks, and so is a nextest slow-timeout kill. Rule: every scratch dir gets a drop guard (`struct Scratch(PathBuf)` + `impl Drop`, the shape of `safe/fdshell/tests/verity.rs`), bound to a **named** binding (`let (dir, _scratch) = scratch();` — a bare `let _ = …` drops at once and deletes the dir mid-test); keep the pid + counter name itself, parallel threads share the pid (entry above). Reproduce pid recycling deterministically: `unshare -pf --map-root-user env TMPDIR=$T <test-binary> <test-name>` runs the process as pid **1** on every run, so two such runs in one `$TMPDIR` reproduce the inheritance in two commands (measured: run 1 left `fdshell-glob-1-0`, run 2 saw `ax`). The same rule holds at *file* level: a pid-named temp **file** (`fdshell_foo_{pid}.txt` in `/tmp` directly) inherits exactly like a dir — the sweep that guarded all of them (task #342) measured 542 leaked items from one full-suite run on a clean `$TMPDIR`, and a pid-1 rerun of the same binary in one `$TMPDIR` reused the previous run's dir names (residue 16 → 22). A *fixed* name (no pid at all, e.g. `fdshell-task238`) is stronger still: it is shared by every concurrent suite run, and no end-of-test teardown ever runs on a panic. Corollary: put pid-named files *inside* a guarded pid+counter dir — the dir's `Drop` then owns the files' lifetime, and per-file `remove_file` teardowns disappear with it.
+
+nextest runs each test binary in its own process, but tests *within* a binary run on parallel threads sharing one pid — a scratch dir named `fdshell-foo-{pid}` is shared by every test in that binary, so one test's `Drop` can remove another test's dir mid-run (nondeterministic ENOENTs). Name per-test scratch with pid + an atomic counter (`scratch()` in `unsafe/sys/tests/statx.rs`).
+
+That name is unique among **live** processes only, so a dir that *outlives* its process is itself the collision: pids get recycled and a later suite run inherits the earlier run's dir with that run's files in it (the shape: `glob::tests::star_matches_sorted_and_excludes_dots` listed 7 entries where 6 are pinned, the 7th written by `escaped_star_word_is_not_a_pattern` into the leaked counter-0 dir of an earlier process). Corollary: an end-of-test `std::fs::remove_dir_all` is not cleanup — a failing test is exactly the test that leaks, and so is a nextest slow-timeout kill. **Rule:** every scratch dir gets a drop guard (`struct Scratch(PathBuf)` + `impl Drop`, the shape of `safe/fdshell/tests/verity.rs`), bound to a **named** binding (`let (dir, _scratch) = scratch();` — a bare `let _ = …` drops at once and deletes the dir mid-test); keep the pid + counter name itself, because parallel threads share the pid.
+
+The same rule holds at *file* level: a pid-named temp **file** (`fdshell_foo_{pid}.txt` in `/tmp` directly) inherits exactly like a dir — one full-suite run on a clean `$TMPDIR` leaked 542 such items (task #342's sweep). A *fixed* name (no pid at all, e.g. `fdshell-task238`) is weaker still: it is shared by every concurrent suite run, and no end-of-test teardown ever runs on a panic. Corollary: put pid-named files *inside* a guarded pid+counter dir — the dir's `Drop` then owns the files' lifetime, and per-file `remove_file` teardowns disappear with it.
+
+**Reproduce pid recycling deterministically** (the durable trick, no load loop needed): `unshare -pf --map-root-user env TMPDIR=$T <test-binary> <test-name>` runs the process as pid **1** on every run, so two such runs in one `$TMPDIR` reproduce the inheritance in two commands.
 
 ## An over-counting `remaining` feeding a capped `copy_file_range` total is equivalent
 `remaining` reports bytes left in `fd` for `copy_file_range %in %out` with no `COUNT`, and its only caller sets `require_exact` from `cfg.count.is_some()` — so when `remaining` runs, `require_exact` is `false` and its value becomes the `total` passed to `copy_file_range(in_fd, out_fd, total)` in `copy_bytes`. `copy_file_range` caps the copy at the bytes actually available in `in_fd` (`end - start`) and the space left in `out_fd`; a regular destination grows freely, so the in-side is the only limiter. The mutant `end - start -> end + start` can only *over*-count (the offset is ≥ 0, so `end + start >= end - start`), and the over-count is capped away — the copied byte count, the only observable result, is identical. It's unkillable by construction: an over-count feeds a capped copy. Don't add a seeking test to catch it; report a size to a `copy_file_range` total that the copy will clamp, and the entry is an accepted equivalent mutant.
@@ -1094,35 +1098,16 @@ each field sits 440–4750× above the floor, so the sum's `> 0` is both
 attribution-independent and floor-independent.
 
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
-`connect_listen_accept_in_one_script_inet` failed once in the `nix flake check`
-sandbox and passed on re-run, and was filed as timing-sensitive (task #239). The
-script has no inter-process timing dependency at all — `listen`, `connect`,
-`accept` run in one process and `connect` returns once the peer is queued in the
-listener's backlog. The real name collision is in the port the test *picks*:
-`10000 + pid % 20000 + offset`. (a) nextest runs test binaries as separate
-processes in one network namespace, so two binaries with adjacent pids `P`, `P+1`
-and offsets `a`, `a−1` name the **same port**; the second `bind` exits 98
-(`EADDRINUSE`) and the test's `code == 0` fails. (b) The range overlaps the
-kernel's ephemeral source-port range (20000–60999): a loopback `connect` picks
-its source port there, and source == destination fails `connect` (99/22). (c) The
-actively closed connection leaves the port in `TIME_WAIT` ~60 s and the
-`bind`/`listen` builtins set no socket options, so a port reused by a run that
-happens to share a pid binds 98. Every signature is pid-dependent, so every one
-of them "passes on re-run" — read that signature as *shared-name luck* before
-calling anything timing-sensitive. Rule: name test ports uniquely **per call
-site** (the same sequence counter the abstract socket names use), keep the band
-**below** the ephemeral range, and step the pid so adjacent pids do not land on
-the same port. "Let the kernel pick the port" is not available to a *shell*
-test — the child binds a kernel-assigned port it cannot report back through
-the script, so the e2e harness must name the port (`inet_port` + the bounded
-98/99 retry in `safe/fdshell/tests/sockets.rs`); the in-process half is
-closed by task #254, which adds the `sys::net::getsockname` wrapper so a test
-that binds in its own process reads the port back and names nothing. A retry
-may re-attempt such a test (bounded, only the port-busy errnos 98/99, fresh
-port each attempt) but may never widen its tolerance — a retry that swallows
-other statuses converts a real failure into a pass. The product-side half (a
-real server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR`) is not a
-test artifact and is tracked separately (task #331).
+
+`connect_listen_accept_in_one_script_inet` failed once in the `nix flake check` sandbox and passed on re-run, and was filed as timing-sensitive (task #239). The script has no inter-process timing dependency at all — `listen`, `connect`, `accept` run in one process and `connect` returns once the peer is queued in the listener's backlog. The real collision is in the port the test *picks*: `10000 + pid % 20000 + offset`. (a) nextest runs test binaries as separate processes in one network namespace, so two binaries with adjacent pids `P`, `P+1` and offsets `a`, `a−1` name the **same port**; the second `bind` exits 98 (`EADDRINUSE`) and the test's `code == 0` fails. (b) The range overlaps the kernel's ephemeral source-port range (20000–60999): a loopback `connect` picks its source port there, and source == destination fails `connect` (99/22). (c) The actively closed connection leaves the port in `TIME_WAIT` ~60 s and the `bind`/`listen` builtins set no socket options, so a port reused by a run that happens to share a pid binds 98. Every signature is pid-dependent, so every one of them "passes on re-run" — read that signature as **shared-name luck** before calling anything timing-sensitive. The same luck hides the bug under a load loop: a pre-change harness of 16 concurrent copies × 12 iterations, and 48 full-suite runs, measured **0** listen failures on the host while the observed rate was 1-in-48, so "reproduction failed to fire" is compatible with the bug.
+
+**The rule has two halves, and they are not interchangeable.** A *shell (e2e)* test cannot let the kernel pick the port: the child binds a kernel-assigned port it cannot report back through the script. So name the port uniquely **per call site** (the same sequence counter the abstract socket names use), keep the band **below** the ephemeral range, step the pid so adjacent pids do not land on the same port, and retry only the port-busy errnos 98/99 with a fresh port on each attempt (`inet_port` and the bounded retry in `safe/fdshell/tests/sockets.rs`). A retry may re-attempt such a test but may never widen its tolerance — no sleeps, no `let _ =` on a client connect; a retry that swallows other statuses converts a real failure into a pass.
+
+*In-process* tests must not name a port at all: no naming scheme beats not naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free *at assignment time*, so concurrent suite runs cannot collide, and the assignee never re-binds a port that is `TIME_WAIT` for itself — and `sys::net::getsockname` reads the port back off the socket the test captured (its pins in `unsafe/sys/tests/sockets.rs`; the test shape is `listen_handler_addr_alias_sends_listening_socket`, which derived `30000 + pid % 10000` and failed once in 48 full-suite runs under `cargo mutants -j4`). Reading back works exactly when the socket is in the test's own fd table (the unit tests receive it via `recv_fd`); where it is not, the e2e band+retry scheme above stays right. Pin the read-back for exactness, not just non-zero: a live `TcpStream::connect` to the reported port kills the `from_be`→`from_le` byte-order mutant (both AF_INET listen tests and the sys pin fail on the swapped read-back; cargo-mutants does not generate byte-order mutants, so apply it by hand).
+
+The product-side half is not a test artifact: a real server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR` (tracked separately, task #331).
+
+Three `ok_or(SyscallError::Never)?` arms in `net/getsockname.rs` are unreachable *by construction*: the `min(sun_path.len())` clamp makes `get(..n)` always `Some`; `first().is_some_and(…)` implies non-empty, so `get(1..)` is always `Some`; `position(…).unwrap_or(len) ≤ len`, so `get(..end)` is always `Some`. Their 0 coverage hits are the proof, not a gap: STYLE §4.10 sanctions the `Never` + `?` shape, so a later "coverage fix" must not delete these guards.
 
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
@@ -1751,59 +1736,17 @@ output are mutually exclusive.
 
 ## e2e tests that assert `rc == errno` must *retry* the load-dependent errnos, never skip them
 
-Task #159: the **unmutated baseline** of `cargo mutants -j4` aborted on
-`verity::double_enable_is_eexist`, and the immediate re-run was green. The mechanism is
-the exit-code channel itself: `handle_builtin_error` returns `Ok(e.errno())` for a syscall
-failure, so a kernel/fd transient reaches the test *as the exit code*, and the suite pins
-exit codes (`17` EEXIST, `61` ENODATA, `1`, `42`). Under `cargo mutants -j4` (hundreds of
-concurrent test processes doing kernel work) the work `FS_IOC_ENABLE_VERITY` does is
-exactly the work that fails transiently: Merkle-tree build + fs transaction (kernel
-allocations, btrfs metadata reservations → `ENOMEM`/`ENOSPC`/`EIO`/`EBUSY`), `openat2`
-racing the system-wide fd table (`ENFILE`), fork/exec of the tiny child under memory
-pressure (`EAGAIN`), a concurrently rebuilt target binary (`ETXTBSY`).
+The shape that reveals the class: the **unmutated baseline** of `cargo mutants -j4` aborts on a `rc == errno` pin (`verity::double_enable_is_eexist`) and the immediate re-run is green. The mechanism is the exit-code channel itself: `handle_builtin_error` returns `Ok(e.errno())` for a syscall failure, so a kernel/fd transient reaches the test *as the exit code*, and the suite pins exit codes (`17` EEXIST, `61` ENODATA, `1`, `42`). Under `cargo mutants -j4` — hundreds of concurrent test processes doing kernel work — the work `FS_IOC_ENABLE_VERITY` does is exactly the work that fails transiently: Merkle-tree build + fs transaction (kernel allocations, btrfs metadata reservations → `ENOMEM`/`ENOSPC`/`EIO`/`EBUSY`), `openat2` racing the system-wide fd table (`ENFILE`), fork/exec of the tiny child under memory pressure (`EAGAIN`), a concurrently rebuilt target binary (`ETXTBSY`).
 
 Rules:
 
-- Classify the transient set **in the shared helper** and retry it with a bounded budget
-  (`tests/verity.rs`: `TRANSIENT` + `run`'s 9 attempts, 8 × 10 ms sleeps), never *skip* it.
-  A skip that swallows transient errnos hides the pressure, and per "A mutant 'caught' by a
-  flaky test is a false kill" it corrupts the gate's accounting.
-- Keep the graceful-skip set exact: only `ENOTTY`/`EOPNOTSUPP` (fs lacks fs-verity)
-  skip. A transient is retried, a non-transient rc is a hard failure. No pinned rc
-  (17, 61, 1, 42, …) is in the transient set, so no pin can be masked by a retry.
-- Absorb spawn failures as well: `Command::output()` reports fork `EAGAIN`/`ETXTBSY` as
-  an `io::Error`, never as an rc, so a `.output().unwrap()` in a helper is itself a flake.
-- Retrying a *failed* enable is safe for exactly this set: the kernel sets the verity
-  flag only in its final success step, so a transient failure leaves the file non-verity
-  and the repeat re-runs the identical first-enable path — which is why `EEXIST` must
-  stay out of the set (a half-enabled file must stay visible).
-- Give `--enable` a script **of its own**, never a composite `--enable; <query>`: `;` is a
-  sequence, not a stop (the script's rc is the *last* command's rc), so a composite hides a
-  step-level transient. Measured with a step-level injector: a transient at the enable step
-  leaves the file non-verity, the query step then prints `enabled=no` and the composite
-  reports rc 0, so `run`'s retry re-runs the whole script against an inode the first attempt
-  already enabled (`--enable` → `EEXIST`, and `;` swallows that too). The hard failure
-  names no errno at all — `stage 1 stdout="enabled=no"`. One idempotent step per `run()`:
-  enable-only, then query-only (`verify_then_exec` stage 1; the `enable_and_query_*` and
-  `dump_*` tests were already shaped that way, which is why only stage 1 was exposed).
-- Name the errno in the helper's output (`transient rc …, retrying`,
-  `enable failed: rc=… stderr=…`) and hand the last output back to the assertion when the
-  budget is exhausted: a real gate failure then identifies the errno, and the set grows
-  by one constant.
-- **Verify with fault injection, not with load.** A wrapper at the suite's
-  `CARGO_BIN_EXE_fdshell` path that fails 1-of-N invocations with a chosen rc (and an
-  interpreter symlink deleted/recreated for the spawn-failure class) reproduces the whole
-  class deterministically: injected `EAGAIN`/`ENFILE`/`ENOSPC` → suite green with visible
-  retries, injected `EINVAL` (22) → suite fails hard, injected `ENOTTY` on the
-  **enable-bearing** invocations → graceful skip. An *invocation-level* injector cannot
-  show the skip as "suite green": forced on every invocation it also breaks the tests that
-  never enable (`query_non_verity`, `error_paths`, `dump_non_verity`, `dump_error_paths`),
-  which legitimately fail — a verity-less host is a *step*-level fault (the ioctl), not an
-  invocation-level one. A step-level injector is the only way to prove the composite-script
-  rule above: run the real enable, then exit with a transient rc.
-  A load loop alone is worth less: it is rare enough to hide behind other
-  flaky tests (measured: 48 loaded suite runs, the verity suite never failed, two *other*
-   tests did).
+- Classify the transient set **in the shared helper** and retry it with a bounded budget (`tests/verity.rs`: `TRANSIENT` + `run`'s 9 attempts, 8 × 10 ms sleeps), never *skip* it. A skip that swallows transient errnos hides the pressure, and it corrupts the gate's accounting: a mutant "caught" by a test that retries past its failure is a false kill (the flaky-test entry).
+- Keep the graceful-skip set exact: only `ENOTTY`/`EOPNOTSUPP` (fs lacks fs-verity) skip. A transient is retried, a non-transient rc is a hard failure. No pinned rc (17, 61, 1, 42, …) is in the transient set, so no pin can be masked by a retry.
+- Absorb spawn failures as well: `Command::output()` reports fork `EAGAIN`/`ETXTBSY` as an `io::Error`, never as an rc, so a `.output().unwrap()` in a helper is itself a flake.
+- Retrying a *failed* enable is safe for exactly this set: the kernel sets the verity flag only in its final success step, so a transient failure leaves the file non-verity and the repeat re-runs the identical first-enable path — which is why `EEXIST` must stay out of the set (a half-enabled file must stay visible).
+- Give `--enable` a script **of its own**, never a composite `--enable; <query>`: `;` is a sequence, not a stop (the script's rc is the *last* command's rc), so a composite hides a step-level transient — a transient at the enable step leaves the file non-verity, the query step prints `enabled=no`, the composite reports rc 0, and `run`'s retry then re-runs the whole script against an inode the first attempt already enabled (`--enable` → `EEXIST`, and `;` swallows that too), so the hard failure names no errno at all (`stage 1 stdout="enabled=no"`). One idempotent step per `run()`: enable-only, then query-only (`verify_then_exec` stage 1).
+- Name the errno in the helper's output (`transient rc …, retrying`, `enable failed: rc=… stderr=…`) and hand the last output back to the assertion when the budget is exhausted: a real gate failure then identifies the errno, and the set grows by one constant.
+- **Verify with fault injection, not with load.** A wrapper at the suite's `CARGO_BIN_EXE_fdshell` path that fails 1-of-N invocations with a chosen rc (and an interpreter symlink deleted/recreated for the spawn-failure class) reproduces the whole class deterministically: injected `EAGAIN`/`ENFILE`/`ENOSPC` → suite green with visible retries; injected `EINVAL` (22) → suite fails hard; injected `ENOTTY` on the **enable-bearing** invocations → graceful skip. An *invocation-level* injector cannot show that skip as "suite green": forced on every invocation it also breaks the tests that never enable (`query_non_verity`, `error_paths`, `dump_non_verity`, `dump_error_paths`), which legitimately fail — a verity-less host is a *step*-level fault (the ioctl), not an invocation-level one. A step-level injector (run the real enable, then exit with a transient rc) is the only way to prove the composite-script rule. A load loop alone is worth less: it is rare enough to hide behind other flaky tests.
 
 ## A positional parameter is a parameter, not a variable name
 `${1}` used to be the variable named `1` because only the bare `$` path had a digit scanner, so every braced arm (plain, pattern, colon) read `strings`/`environ` and a positional expanded to empty — and under `set -u` it bailed `1: unbound variable` for a parameter that *is* set. The fix is one `positional_value` shared by both paths, reached from the braced side through the same lookup that owns the nounset rule (the existing "unset-parameter rule is one rule shared by all four arms"), so the four families agree by construction. Two corollaries: the **write** arm must refuse exactly the same names (`:=` cannot store a positional — the write would be unobservable, because the read path now prefers the positional), and the rule reaches the operator families only if the lookup, not the arm, does the resolving. Discriminating measurements matter: bash's `${1#a}` → `[]` is the coincidence fdshell already produced (pattern `a` strips the whole value `a`, and the unset name `1` expanded to the same empty string), while `${1#c}` → `a` is the row that distinguishes the parameter from the unset name (LESSONS: "verify bash's real output before pinning a test").
@@ -3170,44 +3113,6 @@ that share one open by **identity** (never path equality: `> f 2> f` stays two
 opens, pinned byte-for-byte above), so the fd-2 half lands in the fd-2 key
 region. Sorting the whole def by its max target is **not** a valid shortcut:
 it moves fd 1's half out of fd 1's slot and breaks `cmd &> a > b`.
-
-## A test that binds in its own process names no port: bind 0 and read it back
-`listen_handler_addr_alias_sends_listening_socket` derived its TCP port as
-`30000 + pid % 10000` and failed once in 48 full-suite runs under
-`cargo mutants -j4` — four concurrent runs of the same suite; two processes
-landed on the same port, `bind` returned 98, and the test's `unwrap` panicked
-with `syscall failed` (task #254, found by task #159's load harness). This is
-the shared-name class of the entry above, and the fix there ("name ports
-uniquely per call site") is the *wrong* tool in-process: no naming scheme
-beats not naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free
-*at assignment time*, so concurrent suite runs cannot collide, and the
-assignee never re-binds a port that is `TIME_WAIT` for itself — and
-`sys::net::getsockname` (added here, with its pins in
-`unsafe/sys/tests/sockets.rs`) reads the port back off the socket the test
-captured.
-Reading back works exactly when the socket is in the test's own fd table (the
-unit tests receive it via `recv_fd`); where it is not — a shell child binding
-`--port 0` — the port cannot be reported through the script, and the e2e
-band+retry scheme of task #239 stays right. Two rules for the fix itself: do
-not widen tolerance (no sleeps, no retries, no `let _ =` on the client
-connect; the port-busy retry stays at the shell layer, per #239), and pin the
-read-back for exactness, not just non-zero: a live `TcpStream::connect` to the
-reported port kills the `from_be`→`from_le` byte-order mutant (measured:
-both AF_INET listen tests and the sys pin fail on the swapped read-back;
-cargo-mutants does not generate byte-order mutants, so apply it by hand).
-The plan's pre-change reproduction harness (16 concurrent copies of the two
-tests × 12 iterations, and 48 full-suite runs) measured 0 listen failures on
-this host — the observed 1-in-48 rate means "reproduction failed to fire" is
-compatible with the bug; a pid-derived port's silence is luck, not proof.
-(That same pre-change 48-run suite had 1 failure in the verity family —
-pre-existing, unrelated to this rule, tracked as task #340.)
-Three `ok_or(SyscallError::Never)?` arms in `net/getsockname.rs` are
-unreachable *by construction*: the `min(sun_path.len())` clamp makes
-`get(..n)` always `Some`; `first().is_some_and(…)` implies non-empty, so
-`get(1..)` is always `Some`; `position(…).unwrap_or(len) ≤ len`, so
-`get(..end)` is always `Some`. Their 0 coverage hits are the proof, not a
-gap: STYLE §4.10 sanctions the `Never` + `?` shape, so a later "coverage
-fix" must not delete these guards.
 
 ## Cargo's incremental cache served a stale MIR body for edited predicates — `[profile.dev] incremental = false` is the fix
 While executing task #326 the `fdshell` lib repeatedly compiled the **previous** body of a small predicate (`scan::bg::is_bg`) while picking up its freshly edited callees: probe tests printed values that no source version of the function could produce, and `cargo clean -p fdshell` did not reliably help. The symptom class: a rebuilt binary behaves like an older revision, `touch`+rebuild changes nothing, and only a *semantic* edit (negate the predicate, add a `+2` to an index) proves which body is in the artifact. The fix is `incremental = false` in the workspace `[profile.dev]` (the crates are small, the rebuild is ~4 s). Discipline it demands of every agent here: **verify behavior empirically, not compilation success** — a `cargo build` that prints `Finished` in ~0.01 s with no `Compiling` line relinked nothing, so the binary you are measuring is the old one; after editing a lib, measure the acceptance shape on the binary and, when a measurement contradicts the source, force the rebuild (`touch` the edited file, check a `Compiling` line appears) before believing the measurement.
