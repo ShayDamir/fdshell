@@ -653,3 +653,165 @@ fn a_seeded_word_list_span_reaches_the_real_closer() {
     );
     assert_eq!((two_runs.end, two_runs.start), (16, 16));
 }
+
+/// Each caller state keeps a word written **behind** the open scope out of the
+/// score too: `bare` is false for the whole run, so the space is no split and the
+/// one fragment stays `frag_quoted`, which the split test skips (no `word_step`).
+/// This is [`run_starting_quoted_never_scores_a_keyword`] extended to a run with a
+/// word after the scope — that pin's one-word run never reaches a split and is
+/// therefore blind to `bare`.
+///
+/// Kills both `&&` of `bare`'s conjunction (`&&`→`||`, measured per mutant): with
+/// the first (`!quotes.double`), a word is bare as soon as the double quote is
+/// closed; with the second (`!quotes.single`), as soon as the backtick scope is
+/// closed. Each makes the space a split, and the quoted fragment is skipped
+/// **without** moving `place` (`word_step` is the only thing that moves it), so the
+/// closer behind the split is scored at the run's seed [`Place::Command`]: the sum
+/// is `-1` where these rows are `0`.
+#[test]
+fn a_quoted_run_start_keeps_a_later_word_out_of_the_score() {
+    let mid_span = Quotes {
+        double: false,
+        single: true,
+    };
+    let mid_double = Quotes {
+        double: true,
+        single: false,
+    };
+    let mid_backtick = Quotes::new();
+    let in_span: &[u8] = b"'a' fi";
+    let in_double: &[u8] = b"\"a\" fi";
+    let in_backtick_scope: &[u8] = b"`a` fi";
+    for (raw, quotes, in_backtick, what) in [
+        (in_span, mid_span, false, "mid-span"),
+        (in_double, mid_double, false, "mid-\""),
+        (in_backtick_scope, mid_backtick, true, "mid-backtick"),
+    ] {
+        assert_eq!(
+            depth_delta::depth_delta(raw, raw, 0, quotes, in_backtick, Place::Command),
+            0,
+            "{what}: a word behind a run that starts quoted is data, never a closer"
+        );
+    }
+}
+
+/// A run whose **first** byte is its scope's closing byte exits the scope: the `"`
+/// arm is not gated by `bare`, and the backtick arm is entered from
+/// `bare != in_backtick`. The scope ends, the space behind it splits, and the
+/// closer scores `-1` at the run's seed [`Place::Command`] — the split skips the
+/// quoted fragment without moving `place`.
+///
+/// Kills the two state-freezing mutants: deleting the `!` of
+/// `quotes.double = !quotes.double` leaves the double quote at the caller's value
+/// (row 1 measured `0`), and `bare != in_backtick` → `bare == in_backtick` never
+/// enters or exits the backtick scope (row 2 measured `0`) — in both, no split ever
+/// happens and the run is one quoted fragment.
+///
+/// Row 3 documents the asymmetry the `depth_delta` doc states, and kills nothing:
+/// a `'…'` span never closes here, because `bare` is false while the span is open
+/// and its closing `'` is gated by `bare`, so the run stays quoted and scores `0`.
+#[test]
+fn a_quoted_run_exits_its_scope_at_the_closer_byte() {
+    let mid_span = Quotes {
+        double: false,
+        single: true,
+    };
+    let mid_double = Quotes {
+        double: true,
+        single: false,
+    };
+    let mid_backtick = Quotes::new();
+    let double_closer: &[u8] = b"\" fi";
+    let backtick_closer: &[u8] = b"` fi";
+    let span_closer: &[u8] = b"' fi";
+    for (raw, quotes, in_backtick, want, what) in [
+        (
+            double_closer,
+            mid_double,
+            false,
+            -1,
+            "the `\"` closes the caller's double quote",
+        ),
+        (
+            backtick_closer,
+            mid_backtick,
+            true,
+            -1,
+            "the backtick closes the caller's scope",
+        ),
+        (
+            span_closer,
+            mid_span,
+            false,
+            0,
+            "a `'…'` span never closes, so its run stays quoted",
+        ),
+    ] {
+        assert_eq!(
+            depth_delta::depth_delta(raw, raw, 0, quotes, in_backtick, Place::Command),
+            want,
+            "{what}"
+        );
+    }
+}
+
+/// A `'…'` span opened **inside** a run swallows every closer behind it (the
+/// `depth_delta` doc: this scan never closes a span, since `bare` is false while it
+/// is open). Both rows start unquoted, so a split is possible in principle — the
+/// toggle is what prevents it. This is
+/// [`span_opened_in_a_run_keeps_the_closer_from_scoring`]'s pair: there the closer
+/// sits behind a command word (argument position, `0` under both builds), here it
+/// sits in command position, so the span is the only thing keeping it out.
+///
+/// Kills the dropped `!` of `quotes.single = !quotes.single` (the `'` toggle
+/// becomes the identity, so a span never opens): every space splits, each fragment
+/// before a split carries a quote byte and is skipped with `place` left at the seed,
+/// and the closer behind it scores — measured `-1` on both rows where these are
+/// `0`. The same rows measure `-1` under the two `bare`-conjunction mutants.
+#[test]
+fn a_span_opened_in_a_run_swallows_the_closer_behind_it() {
+    let opened: &[u8] = b"'a' fi";
+    let around_closer: &[u8] = b"'a fi' done";
+    for (raw, what) in [
+        (opened, "a span opened and left open swallows the closer"),
+        (
+            around_closer,
+            "the span around a closer swallows the word behind it",
+        ),
+    ] {
+        assert_eq!(
+            depth_delta::depth_delta(raw, raw, 0, Quotes::new(), false, Place::Command),
+            0,
+            "{what}"
+        );
+    }
+}
+
+/// A `(` glued to a word is **word data, not a substitution**: only `$(` raises the
+/// substitution depth, so the paren rides in the fragment and `keyword_delta`'s
+/// boundary test rejects the keyword-shaped word (`fi(`, `if(`) — the run scores
+/// `0`.
+///
+/// Kills the substitution arm's second `&&` (`&&`→`||`), which degrades the test to
+/// "any byte glued to a `(`": the arm then fires on `i(` / `f(`, raises `depth` and,
+/// with `step = 2`, eats the `(` out of the fragment, leaving the bare keyword to
+/// score at the run's seed — measured `-1` for `fi(` and `+1` for `if(`. The last
+/// row is the control, not a kill: a real `$(` is taken identically in both builds
+/// (`0` either way) and its fragment `$(fi` is no keyword, so it documents the arm.
+#[test]
+fn a_glued_open_paren_is_word_data_not_a_substitution() {
+    let glued_closer: &[u8] = b"fi(";
+    let glued_opener: &[u8] = b"if(";
+    let substitution: &[u8] = b"$(fi";
+    for (raw, what) in [
+        (glued_closer, "a closer glued to a `(` is no closer"),
+        (glued_opener, "an opener glued to a `(` is no opener"),
+        (substitution, "a real substitution's fragment is no keyword"),
+    ] {
+        assert_eq!(
+            depth_delta::depth_delta(raw, raw, 0, Quotes::new(), false, Place::Command),
+            0,
+            "{what}"
+        );
+    }
+}
