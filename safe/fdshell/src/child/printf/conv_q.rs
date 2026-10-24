@@ -1,9 +1,13 @@
 //! `%q`: shell-quoting of an argument — the shortest form that re-reads as the
-//! same word: unquoted, backslash-escaped, or the `$'…'` form.
+//! same word: unquoted, backslash-escaped, or the `$'…'` form. The UTF-8 unit
+//! the rules are written over is decoded in `decode`.
 
+mod decode;
 mod dollar;
 
 use alloc::vec::Vec;
+pub(super) use decode::Unit;
+use decode::decode;
 
 /// Shell-quote `bytes` (already precision-truncated) for re-use as one word.
 pub(super) fn render(bytes: &[u8]) -> Vec<u8> {
@@ -18,13 +22,6 @@ pub(super) fn render(bytes: &[u8]) -> Vec<u8> {
     }
 }
 
-/// One decoded unit: a valid UTF-8 character, or a single invalid byte.
-#[derive(Clone, Copy)]
-pub(super) enum Unit {
-    Char(char),
-    Byte(u8),
-}
-
 /// The quoting form chosen for the whole argument.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(test, derive(Debug))]
@@ -32,33 +29,6 @@ enum Style {
     Unquoted,
     Escaped,
     Dollar,
-}
-
-fn decode(bytes: &[u8]) -> Vec<Unit> {
-    let mut units = Vec::new();
-    let mut i = 0;
-    while let Some(&b) = bytes.get(i) {
-        let mut decoded = false;
-        for len in 1..=4usize {
-            if let Some(s) = bytes
-                .get(i..i + len)
-                .and_then(|slice| core::str::from_utf8(slice).ok())
-            {
-                let mut it = s.chars();
-                if let (Some(c), None) = (it.next(), it.next()) {
-                    units.push(Unit::Char(c));
-                    i += len;
-                    decoded = true;
-                    break;
-                }
-            }
-        }
-        if !decoded {
-            units.push(Unit::Byte(b));
-            i += 1;
-        }
-    }
-    units
 }
 
 /// The strongest form any unit requires: a control byte, DEL, or invalid UTF-8
