@@ -122,13 +122,16 @@ fn opener_len_agrees_with_the_scored_keyword() {
             "{word:?}: the seed and the score must agree"
         );
     }
-    // `wait`: length 4 for both forms; `+1` only for the event-case form.
+    // `wait`: length 4 for both forms; `+1` only for the event-case form, and
+    // the POSIX builtin is **no keyword at all** (task #309: the recognition
+    // table has no `0` row — the old table's `Some(0)` reads the same at every
+    // consumer, including this arm's `== Some(1)` gate).
     assert_eq!(opener_len(b"wait"), Some(4));
     assert_eq!(opener_len(b"wait $!"), Some(4));
     let block = b"wait\n readable %rd) x ;;\ndone";
     assert_eq!(keyword_delta(b"wait", block, 4), Some(1));
-    assert_eq!(keyword_delta(b"wait", b"wait", 4), Some(0));
-    assert_eq!(keyword_delta(b"wait", b"wait $!", 4), Some(0));
+    assert_eq!(keyword_delta(b"wait", b"wait", 4), None);
+    assert_eq!(keyword_delta(b"wait", b"wait $!", 4), None);
     // The mid-run span follows the score: the event-case form skips, the
     // builtin form is word data (`None`).
     let event = [b"x && "[..].to_vec(), block[..].to_vec()].concat();

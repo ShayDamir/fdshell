@@ -49,12 +49,18 @@ fn wait_opens_block_lookahead_edges() {
     assert!(!wait_opens_block(b"wait\n'readable'", 4));
 }
 
-/// `keyword_delta` for `wait` is `Some(1)` (block) or `Some(0)` (builtin).
+/// `keyword_delta` for `wait` is `Some(1)` for the event-case block and `None`
+/// for the POSIX builtin (task #309): the recognition table [`keyword_kind`]
+/// answers *which keyword is this*, and the builtin is **no keyword** at all.
+/// The pre-#309 table scored it `Some(0)`; every consumer reads the two the
+/// same (`scores`' `_` arm, `.unwrap_or(0)`, `is_some_and(|d| d < 0)`,
+/// `segment::block::midrun`'s `== Some(1)` gate), which is why this is the only
+/// pin the projection moves.
 #[test]
 fn keyword_delta_wait_block_vs_builtin() {
     assert_eq!(keyword_delta(b"wait", b"wait\n readable", 4), Some(1));
-    assert_eq!(keyword_delta(b"wait", b"wait 123", 4), Some(0));
-    assert_eq!(keyword_delta(b"wait", b"wait", 4), Some(0));
+    assert_eq!(keyword_delta(b"wait", b"wait 123", 4), None);
+    assert_eq!(keyword_delta(b"wait", b"wait", 4), None);
 }
 
 /// `first_word_end` stops at the first whitespace/`;`.
