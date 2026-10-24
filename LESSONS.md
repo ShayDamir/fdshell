@@ -648,7 +648,14 @@ The plan's grep over `tests/` found the three integration tests that printed lit
 Task #106 moved the `${}`/`${!}` guard ahead of `split_operator` and still left a nameless message: the scan of `${%x}` returns the empty name (a pattern operator at index 0), so `param_value` bailed `UnboundVariable { var: "" }` → `: unbound variable`, which names nothing (STYLE §4.7) and broke master's `%x: unbound variable`. Rule: a scan that *produces* a name is a new source of degenerate input — guard an empty scan name before the dispatch and resolve the whole braced content as the parameter name, so every nounset message prints a name. Pin the scan result (`scan(c"#x")` is a scan fact, not an expansion) **and** the expansion (`set -u; printf "[%s]" "${%x#y}"` rc 1, nounset-off rc 0 empty).
 
 ## Verify bash's real output before pinning a test, not the task text
-Task #106's description claimed `${v#a*c}` → `bcabc` and `${v##a*c}` → `bc`; bash 5.3.9 gives `abc` and the empty string. The plan's measured table had one more wrong row (`${!ind%bc}` → `abcab` is really `abca`; its `${v+x#y}→[x#y]` row was correct). Shortest/longest anchored matching is a rule you can compute by hand, so check every claimed example against `bash -c` on this machine before writing the assertion, and pin the measured value. Task #176 added two more instances: its description's `${!v+z}` row described the **bare** `+` (not a colon operator at all — #257's family, and master's output is rc 1 `v+z: invalid indirect expansion`, not `[]` rc 0), and its pin `v=undef; ${!v:-z}` → rc 1 was the **target-unbound** case, which bash answers `z` rc 0 (the rc-1 case is the *name* being unbound: `${!undef:-z}`). A row that mixes up a name with its target reads plausibly and is still wrong.
+
+Three faces of *measure, don't quote*.
+
+- **A task description's example output is a claim, not a measurement.** Task #106's description claimed `${v#a*c}` → `bcabc` and `${v##a*c}` → `bc`; bash 5.3.9 gives `abc` and the empty string, and the plan's "measured" table had one more wrong row (`${!ind%bc}` → `abcab` is really `abca`). Task #176's description had two more: its `${!v+z}` row described the **bare** `+` (not a colon operator at all — #257's family, and master's output is rc 1 `v+z: invalid indirect expansion`, not `[]` rc 0), and its pin `v=undef; ${!v:-z}` → rc 1 was the **target-unbound** case, which bash answers `z` rc 0 (the rc-1 case is the *name* being unbound: `${!undef:-z}`). Rule: check every claimed example against `bash -c` on this machine before writing the assertion, and pin the measured value. Shortest/longest anchored matching is computable by hand; a row that mixes up a name with its target reads plausibly and is still wrong.
+- **Measure the plan's bash table on the rows it labels "fdshell-identical".** Three such rows of task #276's table are not, all for pre-existing reasons the table did not test: `{ cat 3<<T; }` and `f(){ cat 3<<T; }; f` fail with `missing terminating delimiter line` because a here-doc in a group/function body claims no body region (the plain `<<` form fails identically on master — tasks #315/#305, and the **mid-run** keyword-block row of this family is bash-equal, pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open` because a `>&N`/`<&N` source is resolved against the *parent's* fd table, never against a descriptor a sibling redirect of the same command opens (task #178). Recording the measured behaviour as pins and naming the owning task is the deliverable; inventing a bash-parity assertion for a gap this task does not own is not. The same table defect reappeared on task #312 (`N<<<word`): its acceptance row `cat 3<<<str <&3` (bash prints `str`) is #178's gap, unchanged by the here-string fix — the pins are `fd 3 is not open` in `prefixed_here_string_sibling_dup_cannot_see_the_descriptor`, and the content rows use `exec 3<<<x; cat <&3`, which *is* observable (the descriptor is in the shell's table by the time the next command runs).
+- **Re-measure a bug on `master` before planning its fix: the task that pins a divergence may be the task that closes it** (task #295). It was filed, from task #232's planning, with a measured divergence — a here-doc in the **body** of a multi-line mid-run keyword block claims no body region, so `true && while :; do cat <<T; break; done` + `bodyT` + `T` reports `here-doc: missing terminating delimiter line 'T'` rc 1 while bash prints `bodyT` rc 0 — and on `master` the exact script prints `bodyT` rc 0 in **both** shells. The description stayed true about the mechanism it blamed (`segment/line.rs::flush_line` does emit a body-less run, `single_line == false`) and false about the shape reaching that branch: `segment/block/midrun.rs::skip` keeps the block's bytes inside the run and never moves `book.line_start`, so the multi-line run's `off` is `>= line_start`, `single_line` is true, the flush takes the physical line's whole region stream, and the run's `<<` gets its body. The body-less branch is reached only by a flush **deferred past a newline** (a trailing `#`, `book::resume_past`'s `Boundary::Comment`, or a line-opening `&`) — owner task #333. The rc 1 in the description measured an intermediate state of #232's branch.
+  - **Bisect such a claim in minutes.** The repro is a two-line script, so a build-and-measure loop is enough: `git worktree add /tmp/opencode/wtN <base>` (the repo worktree stays clean), `CARGO_TARGET_DIR=/tmp/opencode/tgtN` (the repo's `target/` untouched), a loop that runs `cargo build -p fdshell && target/debug/fdshell -c "$script"` and compares stdout/rc to `bash file < /dev/null`. An incremental build is ~2 s, so a binary search over 227 commits is a handful of builds. The answer here: **`43ff10e` (task #232's own commit) is the first commit where the shape is bash-equal**; at its parent the script is not even parsed (`expected 'done'` rc 1). The earlier measurement was simply never re-taken against the merged version.
+  - **The deliverable of a bug that no longer reproduces is pins, not a fix.** Pin the reported row and its family at three levels — the integration table (`tests/heredoc.rs::mid_run_heredoc_parity_family`, 19 bash-measured rows: the operator in the block's condition, two `<<` in one body, every keyword, the `|` stage, `<<'T'`/`<<-T`/`3<<T`/`<<<`, a `#` behind the run), the unit level (`segment/line/tests.rs::flush_line_a_multi_line_run_claims_its_line_stream` locks the flush bookkeeping that the reported bug would break), and the divergence family next door (`tests/cond_blocks.rs::multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`, rc 1 vs bash rc 2). Then correct every doc that lists the closed task as an owner (task #276's table entry, `README.md`, `POSIX_COMPATIBILITY.md`) and name the owner of each residual member. **Never** implement the residual family inside the measuring task: the `single_line == false` fix belongs to #333, it needs #333's open decision ("does a `#`-terminated line own a body stream at all?"), and it pins behaviour in `segment/bg/tests.rs` that #333 owns. A pins-only task's biggest risk is the temptation to fix the neighbour rows it discovers.
 
 ## Word patterns have no `FNM_PERIOD` rule
 `${d#*c}` on `d=.abc` strips the whole value, while the pathname glob with `dotglob` off refuses the leading dot. A word pattern is not a pathname: pass `dotglob = true` into `match_component` from `substitute/param_op/pattern.rs` and pin the leading-dot case, or the shared matcher's glob rule leaks into the expansion.
@@ -1020,82 +1027,14 @@ to `0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` wit
 an in-process body). Asserting `user == 0.00` around a fork is a timing coin flip.
 
 ## A CPU-burn timing test measures nothing in a release build
-`monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop,
-`core::hint::black_box`) passed every local debug run and failed under
-`nix flake check`, where the crate is built in release: LLVM computes the loop's
-result directly and the burn costs ~0 ms, so the clock test asserted a 5 ms
-elapsed time for work that never ran. Rule: measure elapsed time against a syscall
-that blocks (`libc::nanosleep`), which cannot be folded away, and bound it on both
-sides (at least 10 ms slept, far less than the clock reads). The same fold hits
-`utime` assertions: `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burns
-`n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so release
-builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox and
-`nix flake check --build-all` fails the suite intermittently (task #208). A burn
-must be un-foldable to be assertable: keep the accumulator inside the loop under
-`black_box`, and never assert a positive CPU count for folded-away work. Fixed by
-task #171: `burn_cpu()` in `unsafe/sys/tests/getrusage.rs` feeds the accumulator
-through `black_box` on every iteration (self burn and forked-child burn), which
-costs ~18 ms of real user time in the sandbox's release build — `utime ≈ 18_000 µs`,
-four orders of magnitude above the `> 0` assertion.
 
-The same assertion failed again in the sandbox (task #194): a `nix log` of the
-fdshell `.drv` shows `CpuTimes { utime: 0, stime: 3124 }`, so
-`assert!(t.utime > 0)` failed and the next run passed. Rule: how a process's CPU
-time splits between `ru_utime` and `ru_stime` is the **kernel's accounting
-choice**, which no test controls, so a positive-`utime` assertion is a scheduler
-coin flip — self (`self_usage`) and reaped-child (`wait_pidfd_rusage`) CPU-time
-assertions are on `utime + stime`. Keep the burn loop: it is what makes the
-reported numbers real. Read a `> 0` sum as "the report is non-degenerate", never
-as "the burn ran"; that claim belongs to the un-foldability rule above, never to
-the sum.
+`monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop, `core::hint::black_box`) passed every local debug run and failed under `nix flake check`, where the crate is built in release: LLVM computes the loop's result directly and the burn costs ~0 ms, so the clock test asserted a 5 ms elapsed time for work that never ran. **Rule:** measure elapsed time against a syscall that blocks (`libc::nanosleep`), which cannot be folded away, and bound it on both sides (at least 10 ms slept, far less than the clock reads). The same fold hits `utime` assertions: `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burned `n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so release builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox and `nix flake check --build-all` fails the suite intermittently. A burn must be un-foldable to be assertable: keep the accumulator inside the loop under `black_box` (task #171's `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self burn and forked-child burn), and never assert a positive CPU count for folded-away work. The two signatures, measured in the sandbox's release profile: an un-folded burn costs ~10–18 ms of real user time (`utime ≈ 18_000 µs`, four orders above a `> 0` assertion); the same loop with `black_box` moved back after the loop costs ~0 ms, leaving `{ utime: 0, stime: ~3000 }` — ~3 ms of process-startup system time, which is the *folded* signature, not a measured attribution flip.
 
-Diagnostic (task #194, same sandbox, un-foldable burn in place):
-`CpuTimes { utime: 346_962, stime: 990 }` — the burn is effective in the nix
-release profile, and ~347 ms lands in `utime`. So the `utime: 0` of the failing
-report was not a measured attribution flip: that run predates the task #171 burn
-fix (task #97 ran 2026-10-10, #171 landed 2026-10-13) and its 3124 µs is the
-folded signature recorded above (`{ utime: 0, stime: 2888 }`, ~3 ms of
-process-startup system time). Attribution stays unassertable all the same: the
-sum is the attribution-independent claim, and it is what both assertions make.
+**How a process's CPU splits between `ru_utime` and `ru_stime` is the kernel's accounting choice, which no test controls**, so a positive-`utime` assertion is a scheduler coin flip (it bit `self_usage` and `wait_pidfd_rusage` in the sandbox, with `CpuTimes { utime: 0, stime: 3124 }`). Self and reaped-child CPU-time assertions are on `utime + stime`. Keep the burn loop — it is what makes the reported numbers real — but read a `> 0` sum as "the report is non-degenerate", never as "the burn ran"; that claim belongs to the un-foldability rule above, never to the sum.
 
-Repeatability measured (task #208, 2026-10-13, `master` @ `286abdb`): the
-fold-proof burns are repeatably green, and the barrier's effect is measurable. Five
-**fresh** sandbox executions of the check derivation — `nix build
-.#checks.x86_64-linux.default --rebuild` re-runs the whole check phase, where a
-plain `nix flake check` repeat is a store hit that runs nothing — each passed
-4529/4529 tests with zero `FAIL` lines, both named tests among them
-(`self_usage_succeeds` 17–21 ms, `wait_pidfd_rusage_reports_child_times` 18–21 ms,
-against 3–4 ms for the non-burning `from_rusage` test in the same binary); plus one
-fresh `nix build .#coverage --rebuild` (4532/4532 tests — its exit 1 is the
-coverage report's embedded timestamps tripping nix's output-determinism check, not a
-test failure), 130 targeted `cargo nextest run --release -p sys --test getrusage`
-runs, 10 debug runs and 5 full release sweeps (4529/4529 each). Timed directly in
-the release profile, one un-folded burn costs ~10 ms of user CPU and the same loop
-with `black_box` moved back *after* the loop ~0 ms — the burn is real in release,
-which is the only thing a `utime + stime > 0` assertion needs from it.
+The same coin flip reaches the `times` builtin's **children** fields (task #267): `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait` burned CPU in a backgrounded child, `wait`ed for it, and asserted the *children user time* field `> 0.00`. `times` prints `child_utime` and `child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`, fed by `add_child_times` from each reap's `waitid` rusage), so a reaped child's CPU attributed wholly to system zeroes the asserted field while the child plainly ran. Fixed the same way: assert the printed sum (user + system), keep the burn loop, read `> 0` as "non-degenerate". The centisecond print floor is the rule this adds: `centis` truncates the two fields **independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not the truncation of the total and its floor sits on a *single* field — one field prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both* fields are, i.e. only when the whole child CPU is under 200 µs. **Rule:** measure a `times`-style burn against that print floor, never against the printed unit's nominal resolution (the printed unit is the centisecond = 10 ms; the resolution is a hundredth of it). Measured in release (10 runs), the test's 5000-iteration shell loop puts the children line at `47.43`–`50.75` user + `4.38`–`5.60` system centiseconds — each field 440–4750× above the floor, so the sum's `> 0` is both attribution-independent and floor-independent.
 
-The same coin flip reaches the `times` builtin's **children** fields (task
-#267): `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
-burned CPU in a backgrounded child, `wait`ed for it, and asserted the *children
-user time* field is `> 0.00`. `times` prints `child_utime` and `child_stime` as
-two separate fields (`safe/fdshell/src/intercept/times.rs`, fed by
-`add_child_times` from each reap's `waitid` rusage), so a reaped child's CPU
-attributed wholly to system zeroes the asserted field while the child plainly
-ran — the #194 scheduler coin flip, relocated. Fixed the same way: the test
-asserts the printed sum (user + system), keeps the burn loop, and reads `> 0` as
-"the report is non-degenerate", never as "the burn ran". The centisecond print
-floor is new information for this entry: `centis` truncates the two fields
-**independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not
-the truncation of the total and its floor sits on a *single* field — one field
-prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both*
-fields are, i.e. only when the whole child CPU is under 200 µs. Rule: measure a
-`times`-style burn against that print floor, never against the printed unit's
-nominal resolution (the printed unit is the centisecond = 10 ms; the resolution
-is a hundredth of it). Measured in release on the development host (10 runs),
-the test's 5000-iteration shell loop puts the children line at `47.43`–`50.75`
-user + `4.38`–`5.60` system (centiseconds: ~475–505 ms user, ~44–56 ms system) —
-each field sits 440–4750× above the floor, so the sum's `> 0` is both
-attribution-independent and floor-independent.
+Two harness facts for repeat measurement: a plain `nix flake check` repeat is a store hit that runs nothing, so re-run the check phase with `nix build .#checks.x86_64-linux.default --rebuild`; and `nix build .#coverage --rebuild` exits 1 on the coverage report's embedded timestamps tripping nix's output-determinism check, which is not a test failure.
 
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
 
@@ -2862,28 +2801,6 @@ prints nothing). `cat 3<<T 1>&3` and the unit test
 `numbered_here_doc_source_sits_above_the_export_targets` pin the same rule.
 Any new source-allocating redirect arm must take the same minimum.
 
-## Measure the plan's bash table on the shapes it claims are "fdshell-identical" (task #276)
-
-Three rows of task #276's table were labelled fdshell-identical and are not,
-all for pre-existing reasons the table did not test: `{ cat 3<<T; }` and
-`f(){ cat 3<<T; }; f` fail with `missing terminating delimiter line` because a
-here-doc in a group/function body claims no body region (the plain `<<` form
-fails identically on master — tasks #315/#305; task #295 re-measured the
-**mid-run** keyword-block row of this family and it is bash-equal since task
-#232's `43ff10e`, pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family`
-and `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a
-subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
-because a `>&N`/`<&N` source is resolved against the *parent's* fd table, never
-against a descriptor a sibling redirect of the same command opens (task #178).
-Recording the measured behaviour as pins and naming the owning task is the
-deliverable; inventing a bash-parity assertion for a gap this task does not own
-is not. The same table defect reappeared on task #312 (`N<<<word`): its
-acceptance row `cat 3<<<str <&3` (bash prints `str`) is #178's gap, unchanged by
-the here-string fix — the pins are `fd 3 is not open` in
-`prefixed_here_string_sibling_dup_cannot_see_the_descriptor`, and the content
-rows use `exec 3<<<x; cat <&3`, which *is* observable (the descriptor is in the
-shell's table by the time the next command runs).
-
 ## `operator_delims`' bound, backward-scan and comment-skip mutants are equivalent — scanner invariants close every probe (task #276)
 
 Task #276's mutation runs on the touched files missed, consistently, four
@@ -3699,54 +3616,6 @@ the statement. One shape stays out of reach, and is pinned as complete: a brace
 whose next byte is not an opener boundary is a **word** (the `group/word.rs`
 rule, task #141), so `true && {` at the end of input records no span at all —
 the twin of the run-start `{` gap, an opener-word limitation, not a mid-run one.
-
-## Re-measure a bug on `master` before planning its fix — the task that pins a divergence may be the task that closes it (task #295)
-
-Task #295 was filed (from task #232's planning) with a measured divergence: a
-here-doc in the **body** of a multi-line mid-run keyword block claims no body
-region, so `true && while :; do cat <<T; break; done` + `bodyT` + `T` reports
-`here-doc: missing terminating delimiter line 'T'` rc 1 while bash prints
-`bodyT` rc 0. On `master` the exact script prints `bodyT` rc 0 in **both**
-shells: the bug does not reproduce. Its description stayed true about the
-mechanism it blamed (`segment/line.rs::flush_line` does emit a body-less run,
-`single_line == false`) and false about the shape reaching that branch.
-
-Why: `segment/block/midrun.rs::skip` keeps the block's bytes inside the run and
-never moves `book.line_start`, so the multi-line run's `off` is `>= line_start`
-— `single_line` is true, the flush takes the physical line's whole region
-stream, and the run's `<<` gets its body. The body-less branch is reached only
-by a flush **deferred past a newline** (a trailing `#`, `book::resume_past`'s
-`Boundary::Comment`, or a line-opening `&`) — owner task **#333**. The
-`rc 1 / missing terminating delimiter line` in the task's own description
-measured an intermediate state of #232's branch.
-
-**Bisect a claim like this in minutes.** The repro is a two-line script, so a
-build-and-measure loop is enough: `git worktree add /tmp/opencode/wtN <base>`
-(the repo worktree stays clean), `CARGO_TARGET_DIR=/tmp/opencode/tgtN` (the
-repo's `target/` untouched), a loop that runs
-`cargo build -p fdshell && target/debug/fdshell -c "$script"` and compares
-stdout/rc to `bash file < /dev/null`. An incremental build is ~2 s, so a binary
-search over 227 commits is a handful of builds. The answer here: **`43ff10e`
-(task #232's own commit) is the first commit where the shape is bash-equal**;
-at its parent the script is not even parsed (`expected 'done'` rc 1). The
-earlier measurement was never re-taken against the merged version.
-
-**The deliverable of a bug that no longer reproduces is pins, not a fix.** Pin
-the reported row and its family at three levels — the integration table
-(`tests/heredoc.rs::mid_run_heredoc_parity_family`, 19 bash-measured rows: the
-operator in the block's condition, two `<<` in one body, every keyword, the
-`|` stage, `<<'T'`/`<<-T`/`3<<T`/`<<<`, a `#` behind the run), the unit level
-(`segment/line/tests.rs::flush_line_a_multi_line_run_claims_its_line_stream`
-locks the flush bookkeeping that the reported bug would break), and the
-divergence family next door (`tests/cond_blocks.rs::multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`,
-rc 1 vs bash rc 2). Then correct every doc that lists the closed task as an
-owner (here: task #276's table entry, `README.md`, `POSIX_COMPATIBILITY.md`) and
-name the owner of each residual member. **Never** implement the residual
-family inside the measuring task: the `single_line == false` fix belongs to
-#333, it needs #333's open decision ("does a `#`-terminated line own a body
-stream at all?"), and it pins behaviour in `segment/bg/tests.rs` that #333
-owns. A pins-only task's biggest risk is the temptation to fix the neighbour
-rows it discovers.
 
 ## A block's tail is parsed **at** its closer, by one module every builder shares (task #298)
 
