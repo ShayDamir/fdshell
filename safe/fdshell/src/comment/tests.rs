@@ -968,3 +968,55 @@ fn a_span_pairs_its_closers_by_kind() {
     // separator byte behind it), never one past a foreign closer.
     assert_eq!(ends, [38, 34, 29, 30, 34]);
 }
+
+/// The run's sum as `comment.rs::scan_block` takes it: the run is the whole
+/// input, the caller's quote state is empty, the run starts at a command word.
+fn delta(raw: &[u8]) -> i32 {
+    depth_delta::depth_delta(
+        raw,
+        raw,
+        0,
+        Quotes::new(),
+        false,
+        Place::Command,
+        &mut Pairing::new(),
+    )
+}
+
+/// The substitution-depth arms of `depth_delta` decide which spaces split the
+/// run, and a split is what puts a word in command position, so every arm is
+/// pinned on its own: the three mutations of that pair of counters
+/// (`$(`-detection, the nested `(`, and the bare-`$` guard) are each invisible
+/// to the other two, and all three leave the run scorable through a split.
+///
+/// The shared shape is a `$( … )` fragment followed by a keyword: a substitution
+/// fragment is no command word, so the word behind it is still in command
+/// position and scores (unlike the word behind a command word, which the
+/// argument-position rule already pins).
+#[test]
+fn substitution_depth_gates_which_spaces_split_the_run() {
+    // `$( … )` opens the depth at the `$(` pair, so the spaces inside the
+    // substitution are data and the `if` written behind it is the run's next
+    // word in command position: +1.
+    assert_eq!(
+        delta(b"$( a ) if"),
+        1,
+        "the substitution's own spaces never split, and its word keeps command position"
+    );
+    // A nested `(` inside the substitution raises the depth one more, so the
+    // first `)` closes the *nested* level: the substitution is still open at the
+    // end of the run and the `if` is its data.
+    assert_eq!(
+        delta(b"$( ( ) if"),
+        0,
+        "the nested paren is closed by the first `)`, the substitution stays open"
+    );
+    // A bare `$x` opens no depth (its next byte is no `(`), so it is an ordinary
+    // command word: the pair behind it is scored in the argument position the
+    // word established, not in command position.
+    assert_eq!(
+        delta(b"$( a ) $x b&&if"),
+        0,
+        "a bare `$` is a word, so the glued payload behind it is an argument"
+    );
+}
