@@ -1,5 +1,25 @@
 # Lessons Learned
 
+## Conventions for writing entries (read first)
+
+- An entry = the rule + *why the mechanism works* + its pins (test names, files,
+  accepted-equivalent records). The *why* is not narrative — it is the half that
+  earns the entry its keep.
+- Newest entries last. A rule that is the same mechanism at another granularity
+  **extends the existing entry**; it does not add a section.
+- Per-task process history (measurement counts, review-round labels, mutant-run
+  tallies, who-fixed-what) belongs in git history. Keep the reusable
+  reproduction trick; drop the chronology.
+- Keep an entry under ~40 lines; merge first, then trim.
+- Cross-references cite the target heading as an exact prefix, in the form
+  `LESSONS:` + a quoted heading prefix. Update every quotation in the same
+  commit that renames a heading.
+- Accepted-equivalent-mutant entries are a **registry** the `mutants` skill
+  reads: condense them, never drop site + mutation + reason + pin.
+- Trimming is the standing chore. Deleted text is recovered with
+  `git log --follow -p LESSONS.md`; there is no archive file on purpose (an
+  archive is read by nobody and re-creates the bloat).
+
 ## Recursive glob_match caused stack overflow on long inputs
 `match_glob` used two recursive calls — star backtracking loop + literal-character match path. 10K literal chars = 10K frames. Converted to iterative star-backtracking (DFA-style with `star_pi`/`star_si` pointers). When a function recurses linearly on input length, prefer iterative with explicit backtrack state.
 
