@@ -1,9 +1,10 @@
-//! Float conversion rendering (`f F e E`) and the helpers shared with `g`.
+//! Float conversion rendering (`f F e E`); the `%e` helpers are in `fmt_exp`.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::fmt_field::pad;
+use super::fmt_exp::exponent;
+use super::fmt_field::{pad, split_sign};
 use super::spec::Fmt;
 
 /// Render a `f`/`F`/`e`/`E` conversion (the value is already parsed) into
@@ -24,7 +25,7 @@ pub(super) fn render(v: f64, fmt: &Fmt, out: &mut Vec<u8>) {
     }
     let core = match fmt.conv {
         b'f' | b'F' => fixed(v, fmt),
-        b'e' | b'E' => exponent(v, fmt, upper),
+        b'e' | b'E' => exponent(v, fmt.precision.unwrap_or(6), upper),
         // The dispatcher only calls this for these conversions.
         _ => String::new(),
     };
@@ -48,14 +49,6 @@ fn fixed(v: f64, fmt: &Fmt) -> String {
         s.push('.');
     }
     s
-}
-
-/// `d.dddde±dd`: format the magnitude in Rust's `%e` form, then normalise the
-/// exponent to the signed, at-least-two-digit glibc style; `%E` upper-cases.
-fn exponent(v: f64, fmt: &Fmt, upper: bool) -> String {
-    let prec = fmt.precision.unwrap_or(6);
-    let s = norm_e(&alloc::format!("{:.prec$e}", v.abs()));
-    if upper { s.to_uppercase() } else { s }
 }
 
 /// The `inf`/`nan` rendering (case follows the conversion letter); a negative
@@ -83,33 +76,5 @@ pub(super) fn sign_prefix(v: f64, fmt: &Fmt) -> &'static str {
         " "
     } else {
         ""
-    }
-}
-
-/// Split a leading `-` off a rendered word into `(sign, rest)`.
-fn split_sign(word: &str) -> (&[u8], &[u8]) {
-    let b = word.as_bytes();
-    match b.split_first() {
-        Some((c, rest)) if *c == b'-' => (core::slice::from_ref(c), rest),
-        _ => (&[], b),
-    }
-}
-
-/// Split a Rust `%e` string into its mantissa and base-10 exponent.
-pub(super) fn split_e(s: &str) -> Option<(&str, i32)> {
-    let e_pos = s.find('e')?;
-    let mantissa = s.get(..e_pos)?;
-    let e: i32 = s.get(e_pos + 1..)?.parse().ok()?;
-    Some((mantissa, e))
-}
-
-/// Reformat a Rust `%e` string to the glibc style (signed, ≥2-digit exponent).
-pub(super) fn norm_e(s: &str) -> String {
-    match split_e(s) {
-        Some((mantissa, e)) => {
-            let sign = if e < 0 { "-" } else { "+" };
-            alloc::format!("{mantissa}e{sign}{:02}", e.abs())
-        }
-        None => String::from(s),
     }
 }

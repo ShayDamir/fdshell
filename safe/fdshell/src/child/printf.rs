@@ -93,6 +93,7 @@ mod conv;
 mod conv_q;
 mod conv_str;
 mod escapes;
+mod fmt_exp;
 mod fmt_field;
 mod fmt_float;
 mod fmt_g;

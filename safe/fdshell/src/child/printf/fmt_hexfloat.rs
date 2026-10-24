@@ -7,7 +7,7 @@
 
 use alloc::vec::Vec;
 
-use super::fmt_field::pad;
+use super::fmt_field::{pad, split_sign};
 use super::fmt_float::{nonfinite, sign_prefix};
 use super::fmt_hexfloat_prec::{apply_precision, format_mantissa};
 use super::spec::Fmt;
@@ -74,13 +74,4 @@ fn mantissa(v: f64) -> (u8, u64, i32) {
     let h = (m >> 60) as u8;
     let frac60 = m & 0x0FFF_FFFF_FFFF_FFFF;
     (h, frac60, e + b as i32 - 4)
-}
-
-/// Split a leading `-` off a rendered word into `(sign, rest)`.
-fn split_sign(word: &str) -> (&[u8], &[u8]) {
-    let b = word.as_bytes();
-    match b.split_first() {
-        Some((c, rest)) if *c == b'-' => (core::slice::from_ref(c), rest),
-        _ => (&[], b),
-    }
 }

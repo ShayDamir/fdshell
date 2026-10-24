@@ -1,4 +1,4 @@
-//! Shared field padding for the `printf` formatters.
+//! Shared field padding and sign split for the `printf` formatters.
 
 use alloc::vec::Vec;
 
@@ -40,5 +40,14 @@ pub(super) fn pad(
         }
         out.extend_from_slice(prefix);
         out.extend_from_slice(core);
+    }
+}
+
+/// Split a leading `-` off a rendered word into `(sign, rest)`.
+pub(super) fn split_sign(word: &str) -> (&[u8], &[u8]) {
+    let b = word.as_bytes();
+    match b.split_first() {
+        Some((c, rest)) if *c == b'-' => (core::slice::from_ref(c), rest),
+        _ => (&[], b),
     }
 }

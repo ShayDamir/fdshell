@@ -3,15 +3,16 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::fmt_field::pad;
-use super::fmt_float::{nonfinite, norm_e, sign_prefix, split_e};
+use super::fmt_exp::{exponent, split_e};
+use super::fmt_field::{pad, split_sign};
+use super::fmt_float::{nonfinite, sign_prefix};
 use super::spec::Fmt;
 
 /// Render a `g`/`G` conversion (the value is already parsed) into `out`.
 pub(super) fn render(v: f64, fmt: &Fmt, out: &mut Vec<u8>) {
     let upper = fmt.conv == b'G';
     if let Some(word) = nonfinite(v, upper) {
-        let (prefix, core) = split_leading(&word);
+        let (prefix, core) = split_sign(&word);
         pad(
             fmt.left,
             fmt.zero,
@@ -32,7 +33,7 @@ pub(super) fn render(v: f64, fmt: &Fmt, out: &mut Vec<u8>) {
         let prec = ((p as i64) - 1 - e as i64) as usize;
         fixed_with(v, prec)
     } else {
-        exponent_with(v, p - 1, upper)
+        exponent(v, p - 1, upper)
     };
     let body = if fmt.alt { body } else { strip_trailing(&body) };
     let prefix = sign_prefix(v, fmt);
@@ -48,11 +49,6 @@ pub(super) fn render(v: f64, fmt: &Fmt, out: &mut Vec<u8>) {
 
 fn fixed_with(v: f64, prec: usize) -> String {
     alloc::format!("{:.prec$}", v.abs())
-}
-
-fn exponent_with(v: f64, prec: usize, upper: bool) -> String {
-    let s = norm_e(&alloc::format!("{:.prec$e}", v.abs()));
-    if upper { s.to_uppercase() } else { s }
 }
 
 /// The base-10 exponent of `v` (the `E` in `d.ddd × 10^E`), from a full-
@@ -88,13 +84,4 @@ fn strip_trailing(s: &str) -> String {
         out.extend_from_slice(exp);
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-/// Split a leading `-` off a rendered word into `(sign, rest)`.
-fn split_leading(word: &str) -> (&[u8], &[u8]) {
-    let b = word.as_bytes();
-    match b.split_first() {
-        Some((c, rest)) if *c == b'-' => (core::slice::from_ref(c), rest),
-        _ => (&[], b),
-    }
 }
