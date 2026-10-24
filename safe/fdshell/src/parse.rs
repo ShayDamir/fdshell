@@ -35,6 +35,7 @@ mod quotes;
 mod redirect;
 mod redirect_op;
 mod semi;
+mod stmt;
 pub(crate) mod time_block;
 pub(crate) mod token;
 mod token_pipe;
@@ -71,40 +72,8 @@ use sys::ShortCStr;
 pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<MaskBit>, Vec<usize>);
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
-    inner_parse(text)
-}
-
-fn inner_parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    if let Some(parsed) = arith_cmd::detect(text, line)? {
-        return Ok(parsed);
-    }
-    let raw = token::tokenize_statement(line)?;
-
-    if let Some(pl) = detect::detect(&raw)? {
-        return Ok(pl);
-    }
-
-    if let Some(pl) = dispatch::dispatch_keyword(&raw, text)? {
-        return Ok(pl);
-    }
-
-    if let Some(pl) = time_block::detect(&raw, text)? {
-        return Ok(pl);
-    }
-
-    let heredocs = heredoc::layout(line, &raw)?;
-
-    if raw
-        .iter()
-        .any(|(_t, start, end, _fq, _mask, _spans)| pipe_token_span(line, *start, *end))
-    {
-        return pipeline::parse_pipeline(&raw, line, &heredocs, text.start, text);
-    }
-
-    Ok(ParsedLine::Cmd(command::parse_command(
-        &raw, line, &heredocs, text.start,
-    )?))
+    stmt::parse_statement(text, line)
 }
 
 #[cfg(test)]
