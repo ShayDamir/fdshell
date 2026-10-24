@@ -1,5 +1,5 @@
 ---
-description: "Subagent that reviews a fdshell task after the Executor: fetches the relevant attachments, verifies the code against the plan, runs the fdshell QA checklist (STYLE.md/LESSONS.md compliance, unsafe discipline, mutation coverage), flags findings and deviations, and attaches the review as review.md."
+description: "Subagent that reviews a fdshell task after the Executor: fetches the relevant attachments, verifies the code against the plan, runs the fdshell QA checklist (STYLE.md/LESSONS.md compliance, unsafe discipline, new-code coverage), flags findings and deviations, and attaches the review as review.md."
 mode: subagent
 #model: opencode/big-pickle
 permission:
@@ -64,11 +64,14 @@ access to inspect the change; you never edit inside the repository.
 5. **Run the fdshell QA checklist** on every modified/new `.rs` file under
    `safe/` or `unsafe/` (this is the project's QA standard):
 
-   ### 5a. File length and test layout (§2)
-    - Source files ≤90 code lines (excl. tests), measured by
-      `python3 tools/complexity.py` (authoritative for all agents — it wraps
-      `tokei` per STYLE.md §2.7; never `wc -l`/awk). Flag 80–90 zone entries
-      as a task (the `Refactoring` epic). Measure after `cargo fmt`.
+    ### 5a. File length and test layout (§2)
+     - Source files ≤90 code lines (excl. tests), measured by
+       `python3 tools/complexity.py` (authoritative for all agents — it wraps
+       `tokei` per STYLE.md §2.7; never `wc -l`/awk). A non-test file **over
+       90** LoC touched by this change is a §2.2 violation: flag it. Do **not**
+       flag 80–90 band files as follow-up work — that band is the standing
+       complexity Chore's work list (STYLE.md §2.3), not a finding on this task.
+       Measure after `cargo fmt`.
    - Tests must live in a separate `<module>/tests.rs` file, declared at the
      end of the source file as `#[cfg(test)] mod tests;` — flag inline
      `#[cfg(test)] mod tests { ... }` blocks (§2.8).
@@ -156,16 +159,14 @@ access to inspect the change; you never edit inside the repository.
    - Read [`LESSONS.md`](../../LESSONS.md). Flag deviations from documented
      lessons as regression risks.
 
-   ### 5l. Mutation coverage
-   - For every changed **non-test** `.rs` file under `safe/fdshell/src/`,
-     `safe/builtins/src/`, or `unsafe/sys/src/`, run `cargo mutants -j4
-     --test-tool nextest -f <file> --iterate` and confirm the file is absent
-     from `mutants.out/missed.txt`. Any missed mutant is a review failure:
-     the fix is a test that kills it, or a refactor that removes the
-     equivalence (use the `mutants` skill,
-     `.opencode/skills/mutants/SKILL.md`). Applies to all three crates.
-   - New code: 100% line, 90% region coverage. Suggest tests to fill gaps
-     (`nix build .#coverage` → `result/coverage-report.txt`).
+    ### 5l. Coverage
+    - New code: 100% line, 90% region coverage. Suggest tests to fill gaps
+      (`nix build .#coverage` → `result/coverage-report.txt`).
+    - Mutation testing is **not** a per-task gate. Do not run `cargo mutants`
+      during a review: a full mutation sweep is too slow to gate every task. It
+      runs in the dedicated mutation **Chore** task via the `mutants` skill
+      (`.opencode/skills/mutants/SKILL.md`). Reviewing a task never blocks on
+      missed mutants.
 
 6. **Flag findings and deviations.** For each deviation from the plan: state
    it precisely (what the plan said, what was done), assess its **merit** (a

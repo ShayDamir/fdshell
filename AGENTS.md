@@ -65,7 +65,7 @@ reviewer,judge}.md`; this file documents only what every agent must agree on.
 | `In progress` (Investigation)       | Investigator (re-work) | `Review` (session summary attached) |
 | `In progress`                       | Executor            | `Review` (session summary attached) |
 | `Review` (no review yet)            | Reviewer            | stays `Review` (review attached)  |
-| `Review` (review attached)          | Judge               | `Done` (branch rebased + ff-merged) or `In progress` (verdict) |
+| `Review` (review attached)          | Judge               | `Done` (branch rebased + ff-merged; a `Chore` re-spawns in `Backlog`) or `In progress` (verdict) |
 | `Todo`/`Planning` blocked on unmet prereqs | (skip until prereqs advance) | — |
 | `Blocked` / `Backlog`               | nobody — waiting on user / unscheduled | — |
 | `Done` / `Archived`                 | nobody — finished    | —                                   |
@@ -109,6 +109,29 @@ Investigation tasks produce **no code** — they produce **Epics**:
 5. The epics stay in `Backlog` until the **user** moves them to `Todo`, where
    the Epic Planner splits them using the epic's `investigation.md` as scope.
 
+### Chore workflow
+
+`Chore` is a regular task type — same plan, branch, verification and review
+rules as a Story/Task/Bug, dispatched through the standard
+Planner → Executor → Reviewer → Judge pipeline. Its single difference is
+**self-respawn**: when the Judge moves a Chore to `Done` it immediately
+recreates a fresh Chore with the **same title and description** and leaves it in
+`Backlog` (never `Todo`); the user promotes that replacement to `Todo` whenever
+the next run is wanted, so the chore is a recurring loop that never ends on its
+own.
+
+Chores are where the **expensive, non-gating quality work** lives, because it
+is impractical to run on every task:
+
+- the **mutation sweep** (`cargo mutants` + the `mutants` skill) — retired from
+  the per-task Reviewer gate; it runs only inside a Chore;
+- the **80–90 LoC complexity refactor** (the `complexity` skill /
+  `tools/complexity.py`) — files in that band are no longer flagged as
+  follow-up work on other tasks (STYLE.md §2.3); they are a Chore's work list.
+
+The **>90 LoC** hard limit and the `nix flake check` gates are unchanged — a
+Chore is not the only place complexity is enforced.
+
 ### Handoff contract
 
 - The Orchestrator hands a subagent a task by **project + task number** —
@@ -116,10 +139,11 @@ Investigation tasks produce **no code** — they produce **Epics**:
 - Each subagent resolves the task itself with `yask_get_task(project, number)`
   and reads only the attachments relevant to its role (`yask_last_attachment`,
   pulling older ones only when needed).
-- Subagents never touch anything outside their own task, with two exceptions:
-  creating a new task for out-of-scope work (below), and the **Judge**
-  archiving tasks that the task under review's attachments flag as superseded
-  (each with a `verdict.md` explaining why; see `judge.md`).
+- Subagents never touch anything outside their own task, with three exceptions:
+  creating a new task for out-of-scope work (below), the **Judge** archiving
+  tasks that the task under review's attachments flag as superseded (each with
+  a `verdict.md` explaining why; see `judge.md`), and the **Judge** spawning
+  the replacement Chore when it moves a Chore to `Done` (see Chore workflow).
 
 ### Attachment conventions
 

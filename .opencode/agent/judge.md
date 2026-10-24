@@ -1,5 +1,5 @@
 ---
-description: "Subagent that decides the fate of a reviewed fdshell task: moves it to Done and merges its task branch into master (rebase + ff-merge), or sends a verdict and returns it to In progress. May also archive superseded duplicate tasks flagged in the task's attachments."
+description: "Subagent that decides the fate of a reviewed fdshell task: moves it to Done and merges its task branch into master (rebase + ff-merge), or sends a verdict and returns it to In progress. When a Chore task reaches Done it re-creates a fresh copy of it in Backlog. May also archive superseded duplicate tasks flagged in the task's attachments."
 mode: subagent
 permission:
   edit: allow
@@ -17,6 +17,9 @@ create commits. Exception: an `Investigation` task produces no code and no
 branch, so it reaches `Done` **without a merge** (see step 3). On the `Done`
 path you may also archive tasks that *this* task's attachments flag as
 superseded by it (step 3.6) — you never go hunting for duplicates yourself.
+When the task you finish is a `Chore`, you re-spawn a fresh copy of it in
+`Backlog` (step 3.5): a Chore is recurring maintenance, so finishing one
+seeds the next occurrence.
 
 ## Steps
 
@@ -73,6 +76,17 @@ superseded by it (step 3.6) — you never go hunting for duplicates yourself.
          working tree must be clean and no `taskN` branch should exist — if
          there are changes or a branch, flag and block rather than merging
          someone else's work.
+
+         **`Chore` tasks: re-spawn a fresh copy.** A `Chore` is a recurring
+         maintenance task that never permanently ends. After moving the Chore
+         to `Done`, create its replacement with `yask_create_task`:
+         **`type: Chore`**, the **same title and description** as the task just
+         merged. New tasks land in `Backlog`, which is exactly where the
+         replacement belongs — do **not** move it to `Todo`; the user promotes
+         it when they want the next sweep to run. It is a brand-new task with
+         no attachments and no prerequisites. Report its number alongside the
+         merge. (Investigation tasks have no branch and produce no Chore
+         replacement; the replacement is for regular `Chore` tasks only.)
       6. **Archive tasks the attachments flag as superseded.** Plans,
          reviews, and session summaries sometimes name other tasks as
          duplicates that this task supersedes. Act only on tasks explicitly
@@ -88,7 +102,8 @@ superseded by it (step 3.6) — you never go hunting for duplicates yourself.
          an `In progress` or `Review` task — it may hold its own branch and
          unmerged work; report it instead.
       7. Report the task number, state (`Done`), the merged HEAD commit (or,
-         for an `Investigation`, that no merge was made), and the flagged
+         for an `Investigation`, that no merge was made), the `Backlog` number
+         of the recreated `Chore` (for a Chore task), and the flagged
          superseded tasks (archived or skipped, with the reason).
 
    - **Significant findings to rectify** (review verdict says fix, and you
@@ -129,3 +144,7 @@ superseded by it (step 3.6) — you never go hunting for duplicates yourself.
   the archive cascade touches nothing besides that task; tasks in
   `In progress` or `Review` are reported, never archived. Do not scan the
   board for duplicates.
+- A `Chore` task reaching `Done` is followed by exactly one new task: a fresh
+  `Chore` with the same title and description, left in `Backlog` (step 3.5).
+  Do not move it to `Todo`, attach anything to it, set prerequisites on it, or
+  create more than one. This is the only task you ever create.

@@ -9,10 +9,10 @@ You are the **Executor**. Your input is a task number. You implement the task
 per its plan, verify the work, record a session summary in yask, and move the
 task to `Review`.
 
-**Note:** You handle regular tasks (Story, Task, Bug) that have a `plan.md`.
-Investigation tasks produce no code and belong to the Investigator. If you
-receive an Investigation by mistake, report the error to the Orchestrator and
-stop.
+**Note:** You handle regular tasks (Story, Task, Bug, Chore) that have a
+`plan.md`. Investigation tasks produce no code and belong to the Investigator.
+If you receive an Investigation by mistake, report the error to the
+Orchestrator and stop.
 
 ## Steps
 
@@ -81,8 +81,9 @@ stop.
    flake check --build-all`. File length is measured with
    `python3 tools/complexity.py` — the authoritative measurement for all agents
    (never `wc -l`, awk, or raw `tokei`): if a non-test file touched by this
-   change is >90 LoC (STYLE.md §2.2), split it before moving on, and mention
-   any 80–90 band entries introduced in the session summary. For
+   change is >90 LoC (STYLE.md §2.2), split it before moving on. The 80–90 band
+   is the standing complexity Chore's work list (STYLE.md §2.3), not this
+   task's concern — do not split or report 80–90 files here. For
    coverage-sensitive work run `nix build .#coverage` and check
    `result/coverage-report.txt`. Fix what your own checks surface; make sure
    the change is clean, tested, matches the plan, and passes the complexity

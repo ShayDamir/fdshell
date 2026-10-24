@@ -4,7 +4,7 @@
 STYLE.md section 2.2 limits non-test Rust source files to at most 90 lines of
 code, counted by `tokei`. This tool reports:
 
-  * files in the 80-90 LoC band  -> flagged for future refactoring (2.3);
+  * files in the 80-90 LoC band  -> the standing complexity Chore's work list (2.3);
   * files with more than 90 LoC  -> must be refactored now (2.2 violation).
 
 Run with `--check` to fail (exit code 1) when any non-test Rust file exceeds 90
@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MIN_FLAG = 80  # 80-90 LoC: flag for future refactoring (STYLE.md 2.3)
+MIN_FLAG = 80  # 80-90 LoC: complexity Chore work list (STYLE.md 2.3)
 MAX_OK = 90  # >90 LoC: hard limit (STYLE.md 2.2)
 
 TEST_BASENAMES = {"tests.rs"}  # module unit tests (STYLE.md 2.8)
@@ -116,7 +116,7 @@ def print_report(root: Path, counts: dict[str, int], flagged, over) -> None:
     print(f"FD complexity (tokei LoC) on {root}")
     print(f"Scanned {len(counts)} non-test Rust file(s).")
     print()
-    print(f"Files {MIN_FLAG}-{MAX_OK} LoC (flag for future refactoring, STYLE.md 2.3):")
+    print(f"Files {MIN_FLAG}-{MAX_OK} LoC (complexity Chore work list, STYLE.md 2.3):")
     if flagged:
         for code, path in flagged:
             print(f"  {code:>4}  {path}")

@@ -5,6 +5,12 @@ description: Kill all mutants in this repo with cargo mutants. Runs the full mut
 
 # Mutation testing loop
 
+Run this as a **Chore** task, not as a gate on an ordinary task: a full sweep
+is too slow to gate every task, so mutation testing lives only inside a Chore
+(AGENTS.md "Chore workflow"). The Chore flows through the normal pipeline; when
+the Judge moves it to `Done` it re-spawns a fresh copy in `Backlog`, so the
+sweep recurs without anyone re-creating it.
+
 ## Commands
 
 ```

@@ -8,6 +8,11 @@ description: Strategy for code complexity control (mostly visible as LOC count).
 Use `tools/complexity.py`. It will run tokei over all non-test Rust files and will output
 2 lists: files in `80-90` range and files with more than 90 LOC.
 
+The `>90` list is a hard STYLE.md §2.2 violation and blocks the task that
+touches it. The `80-90` list is the standing **complexity Chore**'s work list
+(STYLE.md §2.3): the Chore task works its way down that list (highest LoC
+first), refactoring each file below 80. Other tasks do not flag 80-90 files.
+
 ## Why?
 
 Main points:

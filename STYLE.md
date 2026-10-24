@@ -11,9 +11,9 @@
 
 2.1 Code must be readable and should not contain complex conditions/decisions packed into one line.
 2.2 Each source file except tests must not contain more than 90 lines of code (counted by `tokei`).
-2.3 Files with 80-90 lines of code must be flagged for future refactoring.
+2.3 Files in the 80-90 lines-of-code band are tracked by `tools/complexity.py` as the standing complexity **Chore**'s work list; they are not flagged as follow-up work on an unrelated task.
 2.4 If code requires more than 4 levels of logical depth (not counting impl block), it must be flagged for future refactoring.
-2.5 Code flagged for refactoring is recorder as a task for refactoring in yask fdshell project..
+2.5 Recurring refactoring work (the 80-90 band, dense-code cleanups) is organized as a `Chore` task in the yask fdshell project, not recorded as a per-task follow-up flag. A Chore's `Done` re-spawns the next occurrence (see AGENTS.md Chore workflow).
 2.6 Refactoring includes extracting complex logic into helper functions, extracting types/functions/impl blocks into separate files.
 2.7 `tokei` metric is authoritative, `wc -l` includes comments, empty lines etc etc.
 2.8 Unit tests must live in a separate file in a directory named after the module file (`foo.rs` → `foo/tests.rs`), declared at the end of the source file as `#[cfg(test)] mod tests;`. Inline `#[cfg(test)] mod tests { ... }` blocks are forbidden — they bloat the source file and defeat the §2.2 line limit.
