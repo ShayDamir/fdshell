@@ -1,7 +1,7 @@
 //! Block-depth deltas of the keywords in a word run.
 
 use crate::bytes::SQUOTE;
-use crate::keywords::{Glue, Place, after, keyword_delta, pair_payload, scores};
+use crate::keywords::{Glue, Pairing, Place, after, pair_payload, scores};
 use crate::scan::Quotes;
 use alloc::vec::Vec;
 
@@ -12,10 +12,20 @@ use alloc::vec::Vec;
 /// `elif`, a condition-taking opener, a group opener or a `case` clause's `)`
 /// can open or close a nested block. A brace word stays ungated, the accepted
 /// divergence `tests/group.rs::literal_brace_argument_in_a_block_body` pins.
-fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i32 {
+///
+/// The score is [`Pairing::apply`]'s (task #309): an opener pushes its own kind,
+/// a closer pops only the block it belongs to, and a closer of another kind
+/// scores `0` — the sum is the run's depth delta, its kind pairing is what the
+/// scan of a block span needs.
+fn word_step(
+    frag: &[u8],
+    line: &[u8],
+    word_end: usize,
+    place: &mut Place,
+    pairing: &mut Pairing,
+) -> i32 {
     let delta = scores(frag, line, word_end, *place)
-        .then(|| keyword_delta(frag, line, word_end))
-        .flatten()
+        .then(|| pairing.apply(frag, line, word_end))
         .unwrap_or(0);
     // The glued-pair payload (task #236's S2): a fragment carrying a cond
     // pair (`echo a&&if` is one whitespace unit) scores the keyword behind
@@ -26,7 +36,7 @@ fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i3
     // the only offset into `line` that is true for it.
     let payload_delta = pair_payload(frag).map_or(0, |payload| {
         if scores(payload, line, word_end, *place) {
-            keyword_delta(payload, line, word_end).unwrap_or(0)
+            pairing.apply(payload, line, word_end)
         } else {
             0
         }
@@ -67,6 +77,13 @@ fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i3
 /// [`Place::Words`] — a closer-shaped list word (`for i in done`) must not drop
 /// the depth. A `for` list never crosses a separator, so the seed is read once,
 /// by the run the scan begins in.
+///
+/// `pairing` is the caller's open blocks, carried across the runs of one scan
+/// (task #309): the returned **sum** is the depth arithmetic the caller used to
+/// keep as an integer, while the pairing is what decides *which* closer closes
+/// *which* block. A caller that only reads the sum (a depth counter clamped at
+/// `0`) keeps its arithmetic; a block-span scan reads the pairing, because the
+/// sum of a mismatched closer is `0` and the block stays open.
 pub(crate) fn depth_delta(
     line: &[u8],
     raw: &[u8],
@@ -74,6 +91,7 @@ pub(crate) fn depth_delta(
     quotes: Quotes,
     in_backtick: bool,
     seed: Place,
+    pairing: &mut Pairing,
 ) -> i32 {
     let mut sum = 0;
     let mut frag = Vec::new();
@@ -112,7 +130,7 @@ pub(crate) fn depth_delta(
             // A split only exists outside quotes and substitutions, so the
             // next word always starts unquoted.
             if !frag_quoted {
-                sum += word_step(&frag, line, base + i, &mut place);
+                sum += word_step(&frag, line, base + i, &mut place, pairing);
             }
             frag.clear();
             frag_quoted = false;
@@ -123,7 +141,7 @@ pub(crate) fn depth_delta(
         i += step;
     }
     if !frag_quoted {
-        sum += word_step(&frag, line, base + raw.len(), &mut place);
+        sum += word_step(&frag, line, base + raw.len(), &mut place, pairing);
     }
     sum
 }

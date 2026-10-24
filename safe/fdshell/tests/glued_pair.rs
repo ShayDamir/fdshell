@@ -98,9 +98,12 @@ fn short_circuit_gate_skips_the_gated_list_and_resumes_behind_it() {
         ("a\n", 1),
         "stderr={err}: master parity"
     );
+    // Task #309's pairing heals the `||` twin: the glued `if`'s own `fi` closes
+    // the `if`, so the block span survives and the loop's `break` lands —
+    // **bash parity** (bash 5.3.9 prints `a`, `after`, rc 0).
     let (out, err, code) =
         run_bounded("while :; do echo a||if :; then :; fi; break; done; echo after");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}: master parity");
+    assert_eq!((out.as_str(), code), ("a\nafter\n", 0), "stderr={err}");
     // A `{ …; }` group is opaque to the gate and its `;` ends it: fdshell
     // prints `a` (the `&&` tail runs after the gate) — master parity, an
     // accepted divergence (bash prints only `a`; measured).

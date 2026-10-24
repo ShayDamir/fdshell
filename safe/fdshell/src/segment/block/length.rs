@@ -3,7 +3,7 @@
 //! ([`super::midrun::skip`]'s span start), so the two spans of the same keyword
 //! are seeded at the same byte.
 
-use crate::keywords::Place;
+use crate::keywords::{Closer, Keyword, Place, keyword_kind};
 
 /// The length of the block-opening keyword at the start of `word`:
 /// `case`/`wait` (4), `if` (2), `for` (3), `while`/`until` (5), when the keyword
@@ -53,5 +53,26 @@ pub(super) fn list_seed(kw_len: usize) -> Place {
         Place::Words
     } else {
         Place::Command
+    }
+}
+
+/// The [`Closer`] a block span scan is seeded with for the opener word
+/// `keyword` (task #309): the opener's own kind, read from the one recognition
+/// table [`keyword_kind`], so a `while` span pairs with `done` and an `if` span
+/// with `fi` and neither closes at a closer of the other kind. For a word the
+/// scorer does not read — the glued `for((…))` form (task #396), which
+/// [`opener_len`] measures while the scorer rejects it — the closer follows the
+/// opener [`opener_len`] measured: `case` → `esac`, `if` → `fi`,
+/// `for`/`while`/`until`/`wait` → `done`.
+pub(super) fn opener_closer(keyword: &[u8], line: &[u8], word_end: usize) -> Closer {
+    if let Some(Keyword::Opens(closer)) = keyword_kind(keyword, line, word_end) {
+        return closer;
+    }
+    if keyword.starts_with(b"case") {
+        Closer::Esac
+    } else if keyword.starts_with(b"if") {
+        Closer::Fi
+    } else {
+        Closer::Done
     }
 }

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
+use crate::keywords::{Closer, Pairing};
 
 struct R {
     end: usize,
@@ -8,10 +9,19 @@ struct R {
     start: usize,
 }
 
+/// [`scan_open`] with the `if` seed every `if … fi` text below scans.
 fn scan(line: &[u8], start: usize) -> R {
+    scan_open(line, start, Closer::Fi)
+}
+
+/// [`scan_block`] seeded with the closer `open`, from a command position: the
+/// seed is the closer of the block whose text is scanned (task #309), so a
+/// closer of another kind written in that text is word data and never ends the
+/// span.
+fn scan_open(line: &[u8], start: usize, open: Closer) -> R {
     let mut quotes = Quotes::new();
     let mut s = start;
-    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, 1, Place::Command);
+    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, open, Place::Command);
     R {
         end,
         closed,
@@ -297,7 +307,7 @@ fn excess_closers_saturate_depth() {
 // block opener (`echo "a for b"` used to leave the block open).
 #[test]
 fn quoted_keyword_does_not_open_nested_block() {
-    let r = scan(b"echo \"a for b\"; done", 0);
+    let r = scan_open(b"echo \"a for b\"; done", 0, Closer::Done);
     assert!(
         r.closed,
         "for inside double quotes must not count as an opener"
@@ -308,7 +318,7 @@ fn quoted_keyword_does_not_open_nested_block() {
 // The same for backtick spans.
 #[test]
 fn backtick_keyword_does_not_open_nested_block() {
-    let r = scan(b"echo `a for b`; done", 0);
+    let r = scan_open(b"echo `a for b`; done", 0, Closer::Done);
     assert!(r.closed, "for inside backticks must not count as an opener");
 }
 
@@ -317,7 +327,7 @@ fn backtick_keyword_does_not_open_nested_block() {
 #[test]
 fn quoted_keyword_in_wait_arm_does_not_block_closer() {
     let line = b"wait\n  after 1) echo \"idle for a second\" ;;\ndone";
-    let r = scan(line, 4);
+    let r = scan_open(line, 4, Closer::Done);
     assert!(
         r.closed,
         "for inside double quotes must not count as an opener"
@@ -332,7 +342,7 @@ fn quoted_keyword_in_wait_arm_does_not_block_closer() {
 // unexpected token 'done'` — the unclosed-construct rc-1-vs-2 class).
 #[test]
 fn unquoted_keyword_in_an_argument_is_data_the_block_closes() {
-    let r = scan(b"echo \"a\" for b; done", 0);
+    let r = scan_open(b"echo \"a\" for b; done", 0, Closer::Done);
     assert!(
         r.closed,
         "the argument-position `for` must not open a nested block"
@@ -350,7 +360,7 @@ fn run_starting_mid_quote_ignores_closer() {
         single: false,
     };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"\"fi", 1, &mut quotes, &mut s, 1, Place::Command);
+    let (_end, closed) = scan_block(b"\"fi", 1, &mut quotes, &mut s, Closer::Fi, Place::Command);
     assert!(!closed, "fi inside an open quote must not close the block");
     assert!(quotes.double, "the quote must stay open");
 }
@@ -392,12 +402,20 @@ fn plain_paren_does_not_suppress_the_command_position_rule() {
 }
 
 // A `)` back at depth 0 restores splits, so a closer after a substitution in
-// the same run counts.
+// the same run is *scored* again — and task #309 decides what it closes: the
+// scan is seeded with the `if`'s own `fi`, so the `done` is a word and the span
+// reaches the real `fi` (the type-blind depth ended the `if` at the `done`,
+// end 19). Measured against `bash -c` 5.3.9, `if x=$(a for) done; then y; fi`
+// reads `done` as a word too (`done: command not found`, rc 0) — the same
+// pairing; the statement's own rc stays the `missing 'then'` divergence.
 #[test]
 fn closer_after_dollar_paren_in_same_run_counts() {
     let r = scan(b"if x=$(a for) done; then y; fi", 2);
-    assert!(r.closed, "done after the substitution must close the block");
-    assert_eq!(r.end, 19);
+    assert!(
+        r.closed,
+        "the span closes at its own `fi`, not at the `done`"
+    );
+    assert_eq!(r.end, 31, "the mismatched `done` never ends the `if` span");
 }
 
 // Same split rule for a top-level `(` followed by space and a keyword.
@@ -465,7 +483,7 @@ fn indented_wait_mid_run_opens_nested_block() {
 #[test]
 fn posix_wait_in_body_does_not_open_nested_block() {
     let line = b"wait\n  readable %rd) wait 123 ;;\ndone";
-    let r = scan(line, 4);
+    let r = scan_open(line, 4, Closer::Done);
     assert!(
         r.closed,
         "a same-line pid after wait must not open a nested block"
@@ -494,7 +512,7 @@ fn run_starting_mid_span_ignores_closer() {
         single: true,
     };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"'fi", 1, &mut quotes, &mut s, 1, Place::Command);
+    let (_end, closed) = scan_block(b"'fi", 1, &mut quotes, &mut s, Closer::Fi, Place::Command);
     assert!(!closed, "fi inside an open span must not close the block");
     assert!(quotes.single, "the span must stay open");
 }
@@ -524,7 +542,15 @@ fn run_starting_quoted_never_scores_a_keyword() {
         (mid_backtick, true, "mid-backtick"),
     ] {
         assert_eq!(
-            depth_delta::depth_delta(b"fi", b"fi", 0, quotes, in_backtick, Place::Command,),
+            depth_delta::depth_delta(
+                b"fi",
+                b"fi",
+                0,
+                quotes,
+                in_backtick,
+                Place::Command,
+                &mut Pairing::new(),
+            ),
             0,
             "{what}: a closer written in a run that starts quoted is data"
         );
@@ -550,21 +576,45 @@ fn run_starting_quoted_never_scores_a_keyword() {
 fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
     let line = b"echo 'q' done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
+        depth_delta::depth_delta(
+            line,
+            line,
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut Pairing::new(),
+        ),
         0,
         "the span swallows the rest of the run, so `done` never scores"
     );
     // Without the span the same run scores 0 too, for the *position* reason.
     let line = b"echo q done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
+        depth_delta::depth_delta(
+            line,
+            line,
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut Pairing::new(),
+        ),
         0,
         "the `done` behind a command word is an argument"
     );
     // A run that *starts* at the closer (command position) still scores it.
     let line = b"done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
+        depth_delta::depth_delta(
+            line,
+            line,
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut Pairing::new(),
+        ),
         -1,
         "a closer at the run start is in command position"
     );
@@ -581,14 +631,30 @@ fn pair_payload_rides_the_run_sum() {
     // `a&&if` itself is no keyword, and the block's own words net back to 1.
     let line = b"a&&if :; then :; fi";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
+        depth_delta::depth_delta(
+            line,
+            line,
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut Pairing::new(),
+        ),
         1,
         "the payload behind the pair scores once, at the run's current place"
     );
     // A payload that closes carries the closing sign.
     let line = b"a&&done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
+        depth_delta::depth_delta(
+            line,
+            line,
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut Pairing::new(),
+        ),
         -1,
         "a glued closer behind the pair closes the block"
     );
@@ -597,17 +663,26 @@ fn pair_payload_rides_the_run_sum() {
     // `after` hands to the next fragment.
     let line = b"echo a&&if :; then :; fi";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
+        depth_delta::depth_delta(
+            line,
+            line,
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut Pairing::new(),
+        ),
         0,
         "a payload behind a command word is an argument"
     );
 }
 
-/// [`scan_seed`]: [`scan_block`] with an explicit seed [`Place`].
+/// [`scan_seed`]: [`scan_block`] with an explicit seed [`Place`], on a `for`
+/// block whose closer is `done` (task #306's pins).
 fn scan_seed(line: &[u8], start: usize, seed: Place) -> R {
     let mut quotes = Quotes::new();
     let mut s = start;
-    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, 1, seed);
+    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, Closer::Done, seed);
     R {
         end,
         closed,

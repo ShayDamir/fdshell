@@ -1909,7 +1909,13 @@ fn for_list_words_including_keyword_shaped_ones_are_plain_words() {
 #[test]
 fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only() {
     for (script, want) in [
-        ("for i in esac; do echo x; break; esac", "expected 'done'"),
+        // #309's pairing: the trailing `esac` closes no `for`, so the span
+        // never closes and the statement layer names the missing `done` (the
+        // same rc-1 unclosed-construct family, bash rc 2).
+        (
+            "for i in esac; do echo x; break; esac",
+            "'for' is missing its closing 'done'",
+        ),
         ("for i in done", "'for' is missing its closing 'done'"),
         (
             "for i in done; do echo x",

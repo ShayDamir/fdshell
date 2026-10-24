@@ -1,11 +1,7 @@
-/// Check that `word` ends at a token boundary at position `len`.
-fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
-    word.get(len)
-        .is_none_or(|&b| b.is_ascii_whitespace() || b == b';' || extra.contains(&b))
-}
-
 mod function;
+mod kind;
 mod pair;
+mod pairing;
 mod position;
 mod quoted;
 mod wait;
@@ -13,72 +9,30 @@ mod wait;
 pub(crate) use quoted::quoted_word;
 
 pub(crate) use function::{definer_len, function_def_name, leading_ws, name_len};
+pub(crate) use kind::{Closer, Keyword, keyword_kind};
 pub(crate) use pair::pair_payload;
+pub(crate) use pairing::Pairing;
 pub(crate) use position::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, scores};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
-use crate::segment::group::{closes, opens};
-
-/// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers.
+/// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers —
+/// the **sign** projection of the recognition table [`keyword_kind`], which
+/// carries the *kind* half of the pairing (task #309): `case`, `esac`, `if`,
+/// `fi`, `for`, `wait`, `while`, `until`, `done`, `{`, `}`. The boundary rule,
+/// the closer's `&|<>` set, the `wait` disambiguation, the quote gate and the
+/// `time [-p]` strip are [`keyword_kind`]'s; a scorer that needs the kind reads
+/// that table directly, and [`Pairing`] is the state that pairs the kinds.
 ///
-/// Recognized: `case`, `esac`, `if`, `fi`, `for`, `wait`, `while`, `until`,
-/// `done`, `{`, `}`.
-/// Each check requires a word boundary after the keyword to avoid
-/// matching prefixes like `ifconfig` or `donec`. A **closer** also accepts the
-/// redirection operator bytes (`&|<>`) as its boundary, so the glued
-/// `done>f`/`fi>f`/`esac>f` form closes the block and leaves the operator to
-/// `parse::block_tail` — the token-side twin of that set is
-/// `parse::block_tail::is_closer`, and the two scans must stay in step.
-/// `wait` opens a block only when [`wait_opens_block`] holds (otherwise it is
-/// the POSIX builtin, `0`).
-/// `{`/`}` are the group command's delimiters and use the predicates the
-/// segment scanner uses for its group opener, so the depth rule and the
-/// segment opener cannot drift.
-/// A word that contains quote bytes scores `None`: a quoted keyword word is
-/// data ([`quoted_word`]), as bash requires — the same rule the segment
-/// scanner's `frag_quoted` test applies to a word run.
-/// A `time [-p]` word is a *prefix*, not a keyword of its own: it opens no
-/// block, so it never enters the depth table. A block keyword behind it
-/// (`time while … done`) is scored on the rest of the word, which keeps the
-/// whole statement one segment for the `time` parse hook.
+/// The one behavior the projection cannot express: the POSIX builtin `wait` is
+/// **no keyword** here (`None`), where the old table scored it `Some(0)`. Every
+/// consumer reads the two identically — `scores`' `_` arm, `.unwrap_or(0)`,
+/// `is_some_and(|d| d < 0)`, `midrun::span_end`'s `== Some(1)` gate — and
+/// `keywords/tests.rs::keyword_delta_wait_block_vs_builtin` pins it.
 pub(super) fn keyword_delta(word: &[u8], line: &[u8], word_end: usize) -> Option<i32> {
-    if quoted_word(line, word_end) {
-        return None;
-    }
-    if let Some(p) = time_prefix_len(word) {
-        return keyword_delta(word.get(p..).unwrap_or(b""), line, word_end);
-    }
-    if word.starts_with(b"case") && boundary(word, 4, b"") {
-        return Some(1);
-    }
-    if word.starts_with(b"esac") && boundary(word, 4, b"&|<>") {
-        return Some(-1);
-    }
-    if word.starts_with(b"if") && boundary(word, 2, b"") {
-        return Some(1);
-    }
-    if word.starts_with(b"fi") && boundary(word, 2, b"&|<>") {
-        return Some(-1);
-    }
-    if word.starts_with(b"for") && boundary(word, 3, b"") {
-        return Some(1);
-    }
-    if word.starts_with(b"wait") && boundary(word, 4, b"") {
-        return Some(i32::from(wait_opens_block(line, word_end)));
-    }
-    if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
-        return Some(1);
-    }
-    if word.starts_with(b"done") && boundary(word, 4, b"&|<>") {
-        return Some(-1);
-    }
-    if opens(word, line, word_end) {
-        return Some(1);
-    }
-    if closes(word) {
-        return Some(-1);
-    }
-    None
+    keyword_kind(word, line, word_end).map(|k| match k {
+        Keyword::Opens(_) => 1,
+        Keyword::Closes(_) => -1,
+    })
 }
 
 /// Length of the whole `time [-p]` prefix run at the start of `word` (`time

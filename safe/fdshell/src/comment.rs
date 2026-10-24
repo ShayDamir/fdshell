@@ -1,11 +1,17 @@
 mod depth_delta;
 
-use crate::keywords::Place;
+use crate::keywords::{Closer, Pairing, Place};
 use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
-/// Scan forward from `i` looking for the matching closing keyword (depth == 0).
-/// Updates `quotes` and `start` as side effects.
+/// Scan forward from `i` looking for the matching closing keyword (the scan's
+/// pairing empties). Updates `quotes` and `start` as side effects.
 /// Returns `(end_position, block_was_closed)`.
+///
+/// `open` is the closer the scanned text's **own** block requires (task #309):
+/// the scan starts inside the block, so its opener word is never read, and the
+/// pairing it seeds pops only a closer of that kind — a `while` span survives a
+/// `fi` written in its body, an `if` span survives a `done`, and a mismatched
+/// closer is word data (see [`Pairing`]).
 ///
 /// `seed` is the [`Place`] of the scanned text's first word: a command
 /// position, or the block's own word list — a `for` block is scanned from just
@@ -18,13 +24,15 @@ pub(crate) fn scan_block(
     mut i: usize,
     quotes: &mut Quotes,
     start: &mut usize,
-    mut depth: u32,
+    open: Closer,
     mut seed: Place,
 ) -> (usize, bool) {
     let mut state = quotes.scan_state();
     let mut run_quotes = state.quotes();
     let mut run_backtick = state.in_backtick;
-    while i <= line.len() && depth > 0 {
+    let mut pairing = Pairing::new();
+    pairing.open(open);
+    while i <= line.len() && pairing.is_open() {
         let kind = boundary(line, i, &state);
         if kind == Boundary::Char {
             i = state.advance(line, i);
@@ -39,14 +47,17 @@ pub(crate) fn scan_block(
             .count();
         let raw = raw_untrimmed.trim_ascii();
         let base = *start + lead;
-        depth = depth.saturating_add_signed(depth_delta::depth_delta(
+        // The run's keywords pair with the open blocks (its sum is what used to
+        // be the loop's `depth`; the pairing carries it now).
+        depth_delta::depth_delta(
             line,
             raw,
             base,
             run_quotes,
             run_backtick,
             seed,
-        ));
+            &mut pairing,
+        );
         // The seed belongs to the run the scan began in only: every later run
         // starts a command word.
         seed = Place::Command;
@@ -65,7 +76,7 @@ pub(crate) fn scan_block(
         run_backtick = state.in_backtick;
     }
     *quotes = state.quotes();
-    (i, depth == 0)
+    (i, !pairing.is_open())
 }
 
 #[cfg(test)]

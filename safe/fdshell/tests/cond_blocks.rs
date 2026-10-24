@@ -996,15 +996,17 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
 /// now, pinned in [`in_word_list_argument_before_a_closer_is_a_parse_error`].
 #[test]
 fn in_block_bodies_that_never_return_run_forever() {
+    // Task #309 step 2 (the span scan pairs by kind): the two rows with **no
+    // closer of the block's own kind left** are parse errors now —
+    // `while :; do echo a; fi; echo after` and `while :; do echo if; fi; echo
+    // after` report `'while' is missing its closing 'done'` (rc 1, bash rc 2).
+    // They are pinned in the parse-error test below; the rows here are the
+    // shapes whose loop body still swallows the `break`.
     let rows = [
-        // master's own hang: a `fi` closes a `while`, the body never ends.
-        "while :; do echo a; fi; echo after",
         // The `case` opener in argument position, closed by `esac`.
         "while :; do echo case; esac; break; done; echo after",
         // #309's headline row: the `if`-closer closes the `while`.
         "while :; do echo if; fi; echo x; break; done; echo after",
-        // The cheapest reading of the same rule: no `break`, no tail.
-        "while :; do echo if; fi; echo after",
     ];
     let codes = run_capped(&rows);
     for (script, code) in rows.iter().zip(codes) {
@@ -1032,11 +1034,13 @@ fn in_word_list_argument_before_a_closer_is_a_parse_error() {
 
 /// Task #292 moves these rows out of the list above: the `|` position is a
 /// command position, so a keyword block behind a pipe *in a loop body* runs as
-/// a forked pipeline stage and the loop's `break` lands again. Two rows now
-/// match `bash` (5.3.9) exactly; the rest report a parse error rc 1 — the
-/// glued-`|` rows join the in-block glued-pair family (README "glued pair",
-/// bash rc 0 there), the two rows bash itself rejects (rc 2). On `master` every
-/// row of this list ran forever (rc 124 at [`BOUND`]).
+/// a forked pipeline stage and the loop's `break` lands again. Task #309 adds
+/// the second half — an `if` block written behind a **glued** `|` closes at its
+/// own `fi`, not at the enclosing loop's, so the two glued-`if` rows below now
+/// match bash exactly (they were the rc-1 "glued pair" divergence, README).
+/// The `while`-stage row keeps its rc 1 (bash rc 0): the glued pair's own
+/// family; the two condition-less `if` rows are shapes bash itself rejects
+/// (rc 2). On `master` every row of this list ran forever (rc 124 at [`BOUND`]).
 #[test]
 fn block_stage_in_a_loop_body_ends_the_loop() {
     for (script, want) in [
@@ -1048,19 +1052,25 @@ fn block_stage_in_a_loop_body_ends_the_loop() {
             "while :; do echo a | case x in a) echo y;; esac; break; done; echo after",
             "after\n",
         ),
+        // The glued `|` twins (#309's pairing): the `if`'s `fi` closes the
+        // `if`, the loop's `break` lands, and the tail runs — bash's output.
+        (
+            "while :; do echo a|if :; then echo y; fi; break; done; echo after",
+            "y\nafter\n",
+        ),
+        (
+            "while :; do echo a|if :; then echo y; fi; echo z; break; done; echo after",
+            "y\nz\nafter\n",
+        ),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
     }
-    // The glued `|` (no space before the opener): parse error rc 1, bash rc 0.
-    for script in [
-        "while :; do echo a|if :; then echo y; fi; break; done; echo after",
-        "while :; do echo a|while :; do break; done; break; done; echo after",
-        "while :; do echo a|if :; then echo y; fi; echo z; break; done; echo after",
-    ] {
-        let (_out, _err, code) = run(script);
-        assert_eq!(code, 1, "{script}: bash rc 0");
-    }
+    // The glued `|` with a `while` stage: parse error rc 1, bash rc 0 (the
+    // glued-pair family, unchanged by #309's pairing).
+    let script = "while :; do echo a|while :; do break; done; break; done; echo after";
+    let (_out, _err, code) = run(script);
+    assert_eq!(code, 1, "{script}: bash rc 0");
     // `if` with no condition, as a stage: bash rc 2, fdshell its own rc 1.
     for script in [
         "while :; do echo a | if; fi; echo x; break; done; echo after",

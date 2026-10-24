@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
-use crate::keywords::Place;
+use crate::keywords::{Closer, Place};
 use crate::scan::Quotes;
 use alloc::vec;
 
@@ -402,13 +402,12 @@ fn scan_block_detects_fi_after_comment_outside_quotes() {
     // Mutant MISSED 4: delete ! in scan_block line 31 affects quote toggling
     let mut quotes = Quotes::new();
     let mut start = 2usize; // start after "if"
-    let depth = 1u32;
     let (_end, closed) = super::super::comment::scan_block(
         b"if \"hello\" # comment\nfi",
         2,
         &mut quotes,
         &mut start,
-        depth,
+        Closer::Fi,
         Place::Command,
     );
     assert!(closed); // fi IS detected after comment, block should be closed
@@ -463,13 +462,12 @@ fn scan_statement_semicolon_inside_dollar_paren_with_newline() {
 fn scan_block_semicolon_inside_dollar_paren() {
     let mut quotes = Quotes::new();
     let mut start = 3usize;
-    let depth = 1u32;
     let (end, closed) = super::super::comment::scan_block(
         b"if $(a; b); then x; fi",
         3,
         &mut quotes,
         &mut start,
-        depth,
+        Closer::Fi,
         Place::Command,
     );
     assert!(closed);
@@ -491,13 +489,12 @@ fn scan_statement_plain_paren_inside_dollar_paren() {
 fn scan_block_plain_paren_inside_dollar_paren() {
     let mut quotes = Quotes::new();
     let mut start = 3usize;
-    let depth = 1u32;
     let (end, closed) = super::super::comment::scan_block(
         b"if $(a (b; c) d); then x; fi",
         3,
         &mut quotes,
         &mut start,
-        depth,
+        Closer::Fi,
         Place::Command,
     );
     assert!(closed);
