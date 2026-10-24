@@ -1,16 +1,25 @@
 mod depth_delta;
 
+use crate::keywords::Place;
 use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
 /// Scan forward from `i` looking for the matching closing keyword (depth == 0).
 /// Updates `quotes` and `start` as side effects.
 /// Returns `(end_position, block_was_closed)`.
+///
+/// `seed` is the [`Place`] of the scanned text's first word: a command
+/// position, or the block's own word list — a `for` block is scanned from just
+/// past its `for`, so its list has no opener word for the scorer to read and
+/// the caller seeds it with [`Place::Words`] (task #306,
+/// [`depth_delta`'s seed][depth_delta::depth_delta]). Only the run the scan
+/// begins in reads the seed: a word list never crosses a separator.
 pub(crate) fn scan_block(
     line: &[u8],
     mut i: usize,
     quotes: &mut Quotes,
     start: &mut usize,
     mut depth: u32,
+    mut seed: Place,
 ) -> (usize, bool) {
     let mut state = quotes.scan_state();
     let mut run_quotes = state.quotes();
@@ -36,7 +45,11 @@ pub(crate) fn scan_block(
             base,
             run_quotes,
             run_backtick,
+            seed,
         ));
+        // The seed belongs to the run the scan began in only: every later run
+        // starts a command word.
+        seed = Place::Command;
         if kind == Boundary::Comment {
             i = skip_comment(line, i);
             *start = i;

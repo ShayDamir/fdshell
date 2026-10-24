@@ -20,3 +20,13 @@ pub(crate) fn clause_keyword(w: &[u8]) -> bool {
 pub(crate) fn list_keyword(w: &[u8]) -> bool {
     w == b"in"
 }
+
+/// Does `w` open a block that **owns a word list** — `for`? Its list is the
+/// [`super::list`] rule's [`super::Place::Words`] place, which the scan seeds
+/// from the opener (a block's own list, whose word lies before the scan) and
+/// reaches through this row (a nested block's list). The arithmetic
+/// `for ((…))` reaches [`super::after`] as the one word `for((…))`, so it never
+/// matches: its region stays raw bytes.
+pub(crate) fn list_opener(w: &[u8]) -> bool {
+    w == b"for"
+}

@@ -6,7 +6,7 @@
 //! separator, and the cond layer splits the operators with its block-opacity
 //! rule (`cond/boundary/block.rs`).
 
-use super::length::opener_len;
+use super::length::{list_seed, opener_len};
 use crate::brace::scan_brace_block;
 use crate::comment::scan_block;
 use crate::keywords::{function_def_name, keyword_delta, time_prefix_len};
@@ -88,7 +88,9 @@ pub(super) fn span_end(
     {
         let after_kw = i + prefix + kw_len;
         let mut start = after_kw;
-        let (_end, closed) = scan_block(line, after_kw, quotes, &mut start, 1);
+        // The same word-list seed [`super::keyword::keyword_block`] gives the
+        // run-start span, so a `for` list word never ends this span either.
+        let (_end, closed) = scan_block(line, after_kw, quotes, &mut start, 1, list_seed(kw_len));
         let resume = if closed {
             start.saturating_sub(1)
         } else {

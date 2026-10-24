@@ -5,7 +5,7 @@
 
 use super::Segment;
 use super::claim;
-use super::length::opener_len;
+use super::length::{list_seed, opener_len};
 use crate::comment::scan_block;
 use crate::keywords::time_prefix_len;
 use crate::scan::ScanState;
@@ -57,7 +57,17 @@ pub(super) fn keyword_block<'a>(
     let after_kw = start + leading_ws + prefix + kw_len;
     let mut quotes = state.quotes();
     let mut block_start_pos = after_kw;
-    let (_end_pos, closed) = scan_block(line, after_kw, &mut quotes, &mut block_start_pos, 1);
+    // The block's own **word list** seeds the scan: the scan starts past the
+    // opener, so `for`'s list has no word for the scorer to read and its
+    // closer-shaped word would end the span ([`list_seed`], task #306).
+    let (_end_pos, closed) = scan_block(
+        line,
+        after_kw,
+        &mut quotes,
+        &mut block_start_pos,
+        1,
+        list_seed(kw_len),
+    );
     // The span's exclusive end: the closing keyword's separator (`;`/`\n`)
     // at `block_start_pos - 1` is excluded, or the line end when the closing
     // keyword is the last thing on the input (no separator to step past).

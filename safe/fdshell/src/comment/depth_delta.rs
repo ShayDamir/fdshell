@@ -59,12 +59,21 @@ fn word_step(frag: &[u8], line: &[u8], word_end: usize, place: &mut Place) -> i3
 /// `line` and `base` (the run's offset in `line`) let a `wait` at the run's
 /// end look ahead across the newline for its pattern keyword, matching the
 /// segment scanner's disambiguation.
+///
+/// `seed` is the place the run's **first** word sits in. Every run starts at a
+/// command position, with one exception (task #306): the first run of a `for`
+/// block's span is the block's own word list, whose opener lies *before* the
+/// scan starts, so [`crate::segment::block`] seeds it with
+/// [`Place::Words`] — a closer-shaped list word (`for i in done`) must not drop
+/// the depth. A `for` list never crosses a separator, so the seed is read once,
+/// by the run the scan begins in.
 pub(crate) fn depth_delta(
     line: &[u8],
     raw: &[u8],
     base: usize,
     quotes: Quotes,
     in_backtick: bool,
+    seed: Place,
 ) -> i32 {
     let mut sum = 0;
     let mut frag = Vec::new();
@@ -76,9 +85,10 @@ pub(crate) fn depth_delta(
     // quoted word is one fragment and can never be a bare keyword).
     let mut frag_quoted = quotes.double || quotes.single || in_backtick;
     let mut i = 0usize;
-    // A run always starts at a command position: `scan_block` breaks runs at
-    // `;`/newline/comment/heredoc, and each break starts a new command word.
-    let mut place = Place::Command;
+    // The run starts where the caller seeds it: a command position, or a `for`
+    // block's own word list ([`depth_delta`'s `seed`]). `scan_block` breaks runs
+    // at `;`/newline/comment/heredoc, and each break starts a new command word.
+    let mut place = seed;
     while let Some(&b) = raw.get(i) {
         let bare = !quotes.double && !quotes.single && !in_backtick;
         let mut step = 1usize;

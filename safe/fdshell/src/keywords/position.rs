@@ -11,15 +11,21 @@
 //! a word can begin at either, so a word carries a [`Glue`] telling the
 //! transition where it starts. The payload's keyword rows live in
 //! [`clause`], the one keyword set shared with the cond-boundary scan's
-//! clause/body mode stack, so the two rules cannot drift apart.
+//! clause/body mode stack, so the two rules cannot drift apart. The two
+//! **word-list** kinds are two places: a `case` list is [`Place::Pattern`],
+//! a `for` list is [`Place::Words`], whose rule and gate live in [`list`]
+//! (task #306).
 
 use crate::keywords::{keyword_delta, time_prefix_len};
-use crate::segment::group::{closes, opens};
+use crate::segment::group::opens;
 
 mod clause;
 mod glue;
+mod list;
+mod score;
 
-pub(crate) use clause::{body_keyword, clause_keyword, list_keyword};
+pub(crate) use clause::{body_keyword, clause_keyword, list_keyword, list_opener};
+pub(crate) use score::scores;
 
 /// Where the word written next sits, as far as the keyword scorers can tell.
 /// The state transitions are [`after`]; the gate is [`scores`].
@@ -37,6 +43,13 @@ pub(crate) enum Place {
     /// opener scores there, and `esac` is the list's terminator, so a closer
     /// does (`case x in esac` is a complete `case`).
     Pattern,
+    /// A `for` word list (`for i in …`, task #306). Its terminator is `do`, a
+    /// non-closer, so the list has **no** command position at all: no keyword
+    /// scores here — not a closer-shaped word (`for i in done`), not an opener,
+    /// not a brace word (`for i in { 1 2`, `for i in }`). The place is sticky;
+    /// [`list::step`] leaves it only at a separator (which ends the list) or at
+    /// the `do` that opens the body.
+    Words,
     /// An argument position: every word here is data.
     Data,
 }
@@ -61,26 +74,6 @@ pub(crate) enum Glue {
     Tail,
 }
 
-/// May the keyword word be scored at `place`? An opener scores in command
-/// position only; a closer in command position *or* at a `case` list — bash
-/// requires a separator before a closing keyword (`done echo x` is a syntax
-/// error), so a closer in argument position is word data.
-///
-/// A brace word is never gated: a literal `{`/`}` argument eating the block's
-/// closer is the accepted divergence
-/// `tests/group.rs::literal_brace_argument_in_a_block_body` pins; its
-/// clause-position rule belongs to tasks #189/#193.
-pub(crate) fn scores(word: &[u8], line: &[u8], word_end: usize, place: Place) -> bool {
-    if opens(word, line, word_end) || closes(word) {
-        return true;
-    }
-    match keyword_delta(word, line, word_end) {
-        Some(delta) if delta > 0 => matches!(place, Place::Command),
-        Some(delta) if delta < 0 => matches!(place, Place::Command | Place::Pattern),
-        _ => false,
-    }
-}
-
 /// The place of the word written after `word`: separators, cond operators, a
 /// subshell `(`, a group opener and a `case` clause's glued `)` start a
 /// command; a **closer** in command position ends the compound command it
@@ -90,8 +83,9 @@ pub(crate) fn scores(word: &[u8], line: &[u8], word_end: usize, place: Place) ->
 /// #301); `if`/`while`/`until` (their conditions) and `then`/`else`/`elif`/`do`
 /// (their bodies) put the word behind them in command position **only when they
 /// are not an argument** (`echo a else fi` keeps `fi` an argument); `in` opens
-/// a `case`/`for` word list ([`Place::Pattern`]); a word that is only a
-/// `time [-p]` prefix is transparent, keeping the current place; everything
+/// a `case` word list ([`Place::Pattern`]) and a `for` in command position
+/// opens its own **word list** ([`Place::Words`], task #306); a word that is
+/// only a `time [-p]` prefix is transparent, keeping the current place; everything
 /// else — an ordinary word, a closer-shaped argument — is an argument position,
 /// so a keyword-shaped word there scores 0. A word that begins with a pipeline
 /// `|` starts the stage behind it (task #292: a keyword block written as a
@@ -106,6 +100,12 @@ pub(crate) fn scores(word: &[u8], line: &[u8], word_end: usize, place: Place) ->
 /// place the pair set.
 pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glue: Glue) -> Place {
     let w = word.trim_ascii();
+    // A word of a `for` list keeps the list: only its separator or its `do`
+    // leaves it ([`list::step`], task #306) — the scan must reach the block's
+    // real closer, and a closer-shaped list word never closes the block.
+    if matches!(place, Place::Words) {
+        return list::step(w, glue);
+    }
     // The place a *bare* glue (no payload) leaves: the head pair opens a
     // command, the tail byte is transparent, and a pipeline tail is a
     // separator whose place rule is #292's.
@@ -177,6 +177,11 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
     match rest.first() {
         Some(b'i') if clause && rest == b"if" => Place::Command,
         Some(b'i') if list_keyword(rest) => Place::Pattern,
+        // A `for` in command position opens a **word list**: the words behind it
+        // — its name, its `in`, its words — are list data ([`Place::Words`],
+        // task #306). In a `case` pattern list `for` is a pattern word, so this
+        // row is command-position-only and the `case` list keeps its own rule.
+        Some(b'f') if matches!(place, Place::Command) && list_opener(rest) => Place::Words,
         Some(b'w') if clause && rest == b"while" => Place::Command,
         Some(b'u') if clause && rest == b"until" => Place::Command,
         // `then`/`else`/`do`/`elif`, one keyword set with the mode stack.
