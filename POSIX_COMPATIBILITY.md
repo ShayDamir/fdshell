@@ -202,6 +202,19 @@ closer, and the operator redirects the whole block — `while :; do :; done>f`,
 word split, so nothing is split off; the *operand* side keeps the no-split rule,
 so `done>f>g` opens the single file `f>g` where bash opens `f` and then `g`.
 
+A **closing keyword closes its own kind of block** (task #309): `fi` an `if`,
+`done` a `while`/`until`/`for`, `esac` a `case`, `}` a group. POSIX #2.9.1's
+grammar keeps those words reserved, so a `fi` written inside a `while` body is a
+syntax error there (rc 2). fdshell reads a **mismatched** closer as an ordinary
+**command word**, so the body keeps the statement written behind it and runs:
+`while :; do echo if; fi; echo x; break; done; echo after` prints `if`, `x` and
+`after` and exits 0, reporting the stray closer as
+`failed to resolve command path: "fi"` (rc 127 inside the body). Where the
+mismatch consumes the block's only closer the line is fdshell's own parse error
+— `while :; do echo a; fi; echo after` is
+`'while' is missing its closing 'done'` (rc 1, POSIX rc 2). Write the closer
+that matches the block; never put a foreign closing keyword in a body.
+
 A **fully quoted** operator word is never an operator — the gate every fdshell
 redirect parser opens with, the `&>` family included: `echo '&>f'` prints `&>f`
 and opens nothing, `echo hi '&>' f` prints `hi &> f` and opens nothing, and

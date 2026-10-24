@@ -2776,7 +2776,8 @@ now one shared state machine (`keywords/position.rs`) consumed verbatim by
 the three scorers that walk block text: the cond-boundary block counter
 (`cond/boundary.rs` + `cond/boundary/block.rs` carry a `Place` flag), the
 block-span scan (`comment/depth_delta`), and the parse closing-keyword search
-(`parse/semi/closing.rs`). The sharp edges, all measured against bash:
+(`parse/semi/closing.rs`) — task #309 made it **four** scorers and **two**
+gates (point 4 below). The sharp edges, all measured against bash:
 
 1. **The gate is *place*-based, and the closer's gate is wider than the
    opener's.** Openers score in `Command` only; closers score in
@@ -2810,6 +2811,31 @@ block-span scan (`comment/depth_delta`), and the parse closing-keyword search
    body eats the closer, rc 1, bash rc 0) and rewrite its pin — the brace
    half belongs to #189/#193. The asymmetry (`echo done` is data, `echo }`
    is not) is stated in the README divergence list.
+4. **Task #309 added a *second* gate: the closer's *kind*, and a fourth scorer.**
+   The depth each scorer kept as an `i32` is now a typed stack of the open
+   blocks (`keywords::Closer`, `keywords::Pairing`), every scorer **seeds** it
+   with the closer of the block it enters, and a closer that mismatches the
+   innermost block scores `0` *and* leaves the place at `Data` (it is word data).
+   `after`'s closer row became a *pairing* row — it fires only for the innermost
+   block's own closer — so the decision lives in one predicate
+   (`keywords/position/score.rs::closer_matches`) and no scorer copies it. The
+   fourth scorer is `parse/case_clause/stray.rs`: a `case` arm's stray-paren walk
+   owns no block stack, so it passes `None` and keeps the pre-#309 row (arm-level
+   pairing is the case builder's). Sharp edges, all measured:
+   (a) gating that place row turns a mismatched closer into an **argument**, so a
+   closer written *behind* it stops scoring — `while :; do echo if; fi done`
+   never closes its `while` (the unclosed report), which is the point, not a
+   regression; (b) the `open: None` behavior of the same row (top level, the gate
+   start, the stray walk) is the pinned stray-closer **clamp**
+   (`cond/tests.rs::line_start_words_keep_the_closer_and_argument_gates`) — do not
+   "fix" it; (c) **the stacks are per-scorer by construction**: the block-span
+   scan pairs braces (`{ echo if; }` in a loop body — `}` pops `Brace`, `done`
+   pops the loop), the cond-boundary scan never pushes `Brace` because its group
+   arm's `group_depth` owns braces; (d) seeding the scan with the block's own
+   closer is what makes a `done` of a `case` **pattern** list a list word — part
+   of #310's word-list rule lands for free at *both* granularities (LESSONS "a
+   rule fixed at one granularity is a divergence at the other"), while the
+   `esac`-shaped list word stays the list gate's own job.
 
 The gate moves *accepted* forms into the unclosed-construct class, and there
 the run-level message is the bare unmatched-keyword EINVAL: `while true; do
@@ -2874,8 +2900,9 @@ Task #236 (S2 round): the short-circuit gate and the glued cond pair.
    divergence away and fails: a test bug. Pin the place the rule sets, and
    never exempt a shape from unit pins on a toolchain excuse.
 
-Task #236 (accepted divergence, class owned by task #309): the in-block
-opener/closer pairing is **type-blind** and knowingly left incomplete. Every
+Task #236 (accepted divergence, class **closed by task #309**, see the end of
+this entry): the in-block opener/closer pairing **was type-blind** and knowingly
+left incomplete. Every
 in-block scorer pairs an opener with *any* closer — `word_delta`/`depth_delta`
 /`closing_keyword_index` count a single `block_depth` (the `Place` flag says
 *where* a word sits, never *which* block it belongs to), so a `while` body's
@@ -2894,15 +2921,35 @@ runs forever —
 `… echo a|while :; do break; done; break; done …`, and master's own
 `while :; do echo a; fi; echo after`. **These rows are a sample of a sweep,
 never the family's extent** — the next section is the reporting rule. #236
-fixes the *argument-position* half of the rule (keyword-shaped words are
-data); the type-aware pairing is #309's job, so a #309 fix must be read
-together with the rows pinned in
-`tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever` and the
-README's "body that never returns" bullet — do not "fix" one row and leave the
-family. The same type-blindness is what `Place::Pattern` pays for `case x in
-esac` (the list's terminator is a closer, so a `done` in a `case`/`for` *list*
-is a pattern word, not a closer: the `echo in done` row, which hangs on
-`master` too).
+fixed the *argument-position* half of the rule (keyword-shaped words are
+data).
+
+**Task #309 closed the class** (the typed pairing of point 4 above): a closer of
+a foreign kind written in a body is word data, so the body keeps its tail. The
+samples above now run at rc 0 printing their body and reporting the stray closer
+as an unresolvable command (`failed to resolve command path: "fi"`, rc 127
+inside the body) where bash refuses the line at rc 2; with no closer of the
+block's own kind left the line is the "unclosed mid-run construct" report
+(`'while' is missing its closing 'done'`, rc 1, bash rc 2). Two shapes stay
+divergent **by rule**, and both are pinned: a body whose **own** closer ends it
+above the `break` runs forever (the block does end at the body's closer), which
+is **bash parity** on the rows whose line has no second closer
+(`while :; do echo while; done; echo after` hangs in bash too) and the
+acceptance divergence on the rows that keep one (bash rc 2, fdshell runs
+forever). Pins:
+`tests/cond_blocks.rs::mismatched_closers_in_a_loop_body_are_word_data`,
+`a_mismatched_closer_that_leaves_no_closer_is_a_parse_error`,
+`a_closer_shaped_case_pattern_list_word_is_a_word`,
+`a_loop_body_that_never_returns_is_bash_parity` (the hang **is** the parity: a
+change that terminates these rows is a regression) and
+`a_loop_body_that_never_returns_where_bash_refuses_the_line`; the README's
+"Conditionals and loops" pairing paragraph carries the disclosure. Do not "fix"
+one row and leave the family. The same type-blindness is what `Place::Pattern`
+pays for `case x in esac` (the list's terminator is a closer, so a `done` in a
+`case`/`for` *list* is a pattern word, not a closer): #309's seed carries the
+`case`-**pattern**-list half of it for free (`case x in done) echo p;; esac`
+reaches its real `esac`, rc 0 = bash parity), the `echo in done` row has been
+rc 1 since #301, and #310 owns the rest of the list rule.
 
 ## Disclose a divergence family by rule, pin a sample — never a list as the extent (task #236)
 
@@ -2915,9 +2962,45 @@ is a lower bound, so no report from this repo may present a row list as the
 family's extent. The rule: **disclose the family by *rule*, pin a *sample*
 under a bounded child, and say in the disclosure that the sample is not the
 extent.** The README bullet, the LESSONS entry above and the pin's doc comment
-in `tests/cond_blocks.rs::in_block_bodies_that_never_return_run_forever` each
-state it, and a green run on the pinned rows therefore never means "the family
-is N rows".
+in `tests/cond_blocks.rs::a_loop_body_that_never_returns_is_bash_parity` (the
+test this class's pin became) each state it, and a green run on the pinned rows
+therefore never means "the family is N rows".
+
+Task #309 re-measured the same class after the typed pairing and the rule-shaped
+disclosure is what made the re-measurement cheap: the sweep is 57 rows, the
+pinned samples are ~45, and **neither count is the extent**. The post-fix family
+is three-shaped, and the disclosure says so: (i) the body runs and the stray
+closer is reported as a command (rc 0 with a 127 inside the body, bash rc 2);
+(ii) no closer of the block's own kind is left, so the line is the
+unclosed-construct report (rc 1, bash rc 2); (iii) the body's **own** closer ends
+the block above its `break` ⇒ a hang, which is bash **parity** on some rows and
+the acceptance divergence on others. Every row that can end at 124 runs under a
+bounded child (`run_capped` where 124 is the expectation, `run_bounded` where it
+is a failure): a pinned hang must be able to fail *with the script*, never stall
+the suite, and a hang pin whose expectation flips is a disclosure, not a
+test-failure to be patched.
+
+## A hand-written score derived from a recognition table moves its `Some(0)` to `None` — audit `is_some` consumers first (task #309)
+
+`keyword_delta` answered **three**-valued: `Some(±1)` for a block keyword, `Some(0)`
+for the POSIX builtin `wait` (recognized, scores nothing), `None` for a word that is
+no keyword. Task #309 put the recognition in one table (`keywords/kind.rs`,
+`keyword_kind → Opens(Closer) | Closes(Closer)`) and made the score a *projection* of
+it, which cannot express `Some(0)`: the builtin `wait` becomes `None`. Every
+production consumer reads the two identically — `keywords::position::scores`'s `_`
+arm, the `.unwrap_or(0)` sums, the `is_some_and(|d| d < 0)` closer test,
+`segment::block::midrun`'s `== Some(1)` gate — so the projection moved exactly one
+pin (`keywords/tests.rs::keyword_delta_wait_block_vs_builtin`). Two rules came out of
+it. (1) When a hand-written scorer becomes a derivation, **the three-valued answers
+of the old version are the surface to audit**, not the ±1 ones: a consumer asking
+`is_some()`/`is_none()` reads the collapse as a behavior change, and the cheap audit
+is to grep for `is_some`/`unwrap_or`/`== Some(` at the call sites before shipping the
+derivation. (2) Keep the derivation **one line** (`Opens → 1`, `Closes → -1`) — the
+moment the projection grows an arm it is a second table again, and the whole point of
+`keyword_kind` is that the block *kind* and the *score* cannot drift apart. The same
+derivation fixed a report message for free: `script/unclosed.rs::closer` now reads
+the opener's `Opens(…)` answer, so an unclosed event-`wait` block names `'done'`
+where the hand-written list said `'}'` (pinned in `script/tests.rs::OPENERS`).
 
 ## An interactive-shell probe measures the shell that actually starts (task #236)
 

@@ -867,6 +867,28 @@ a redirection (`while false; do { :; }>f done`). A `;;` written in a `then` body
 is the separator rule's, not this one's: `if true; then echo a ;; fi` prints `a`
 at rc 0 where bash stops at rc 2.
 
+A closing keyword closes **its own kind of block**: `fi` an `if`, `done` a
+`while`/`until`/`for`, `esac` a `case`, `}` a group. A closer of a **foreign**
+kind written in a body is an ordinary **command word** — it scores nothing and
+does not end the block, so the body keeps the statement written behind it:
+`while :; do echo if; fi; echo x; break; done; echo after` prints `if`, `x` and
+`after` and exits 0, reporting the stray closer as
+`failed to resolve command path: "fi"`, where bash refuses the whole line at
+rc 2 (`fi` is a reserved word in its grammar, never a command) — the accepted
+acceptance divergence of the stray-closer family. The pairing is also why a
+`done` of a `case` **pattern** list stays a list word:
+`while :; do case x in done) echo p;; esac; break; done; echo after` runs at
+rc 0, as bash does. When no closer of the block's **own** kind is left, the line
+is the "unclosed mid-run construct" report of "Errors":
+`while :; do echo a; fi; echo after` is
+`'while' is missing its closing 'done'` (rc 1, bash rc 2). A body whose **own**
+closer ends it above the `break` runs **forever**, and bash hangs on those
+shapes too (`while :; do echo while; done; echo after`); where such a line keeps
+a second closer of the block's kind, bash escapes at rc 2 and fdshell runs
+forever — the same acceptance divergence. Pinned in
+`safe/fdshell/tests/cond_blocks.rs`; those rows are a **sample of the rule**,
+not its extent.
+
 A `case` **arm may be empty**: bash reads an arm body as a command list, and an
 empty list is a list, so an arm closed straight at `esac` is a complete clause —
 `case x in a) esac` runs at rc 0, and so does an empty **last** clause
