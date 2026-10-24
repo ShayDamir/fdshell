@@ -3,6 +3,7 @@ mod words;
 
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::keywords::Closer;
 use crate::mask::MaskBit;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{
@@ -66,8 +67,10 @@ pub(crate) fn tokens_to_for(
     // `done`: the tokens past it are body data, not block structure (task #273,
     // `semi::up_to_closing`). The `in` list is walked as `List::Words`, so a
     // closer-shaped word of the word list (`for x in done; do …; done`) is a
-    // word, not the closer.
-    let closed = up_to_closing(tokens, line, List::Words, ParseError::ExpectedDone)?;
+    // word, not the closer; the walk is seeded with `Closer::Done`, the closer a
+    // `for` requires, so a `fi`/`esac` written in the body is a word too (#309).
+    let expected_done = ParseError::ExpectedDone;
+    let closed = up_to_closing(tokens, line, Closer::Done, List::Words, expected_done)?;
     // The closing `done` is the truncated slice's last token.
     let done_idx = closed.len() - 1;
     let redirects =

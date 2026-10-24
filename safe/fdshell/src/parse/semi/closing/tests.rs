@@ -8,7 +8,7 @@
 
 use super::closing_keyword_index;
 use super::word::{glue_at, is_op};
-use crate::keywords::Glue;
+use crate::keywords::{Closer, Glue};
 use crate::parse::Token;
 use crate::parse::token::tokenize_statement;
 use alloc::vec::Vec;
@@ -94,10 +94,13 @@ fn closing_index_walks_the_block_depth() {
     let line = b"if :; then {&&if :; then :; fi; fi";
     assert_eq!(closing_keyword_index(&toks(line), line), None);
     // The same pair behind an argument word stays data (the in-block place
-    // rule, task #236):
-    // the payload never nests, and the block closes at the first `fi`.
+    // rule, task #236): the payload never nests. Task #309's pairing decides
+    // what the walk then closes: the seeded `while` wants `done`, so the
+    // mismatched `fi` (token 11) is a word and the walk stops at the block's
+    // own `done` (token 13) — the body keeps its tail (the end-to-end twin is
+    // `tests/glued_pair.rs`, bash rc 0).
     let line = b"while :; do echo a&&if :; then :; fi; done";
-    assert_eq!(closing_keyword_index(&toks(line), line), Some(11));
+    assert_eq!(closing_keyword_index(&toks(line), line), Some(13));
     // The pair payload can be the *closer* itself: the group-opener word
     // `{&&fi` scores +1 as the opener and its payload `fi` closes the block,
     // so the scan stops at the pair word's own token, not at a later word.
@@ -113,15 +116,24 @@ fn closing_index_walks_the_block_depth() {
 /// scores, and only when no pattern `)` follows it (`case x in esac` is a
 /// complete block, `case x in esac) …` is a clause). A `for` list scores
 /// nothing: it is closed by `do`.
+///
+/// The `plain` column is the walk **without** the list gate (the mutation the
+/// [`List`] argument defends). Task #309's pairing covers two of these rows by
+/// itself: the walk is seeded with the block's own closer, so a `done`/`fi`
+/// written in a `case` list mismatches the `case`'s `esac` and the walk reaches
+/// the real `esac` (token 9) — bash's read of `case x in done) …` (rc 0), part
+/// of task **#310**'s list rule landing for free. The `esac`-shaped list word is
+/// where the list gate stays the only defense: an `esac` matches, so the plain
+/// walk still closes there.
 #[test]
 fn word_lists_are_walked_as_words() {
     let cases = [
         (
             b"case x in done) echo p;; esac".as_slice(),
-            Some(3),
+            Some(9),
             Some(9),
         ),
-        (b"case x in fi) echo p;; esac".as_slice(), Some(3), Some(9)),
+        (b"case x in fi) echo p;; esac".as_slice(), Some(9), Some(9)),
         (b"case x in esac".as_slice(), Some(3), Some(3)),
         (
             b"case x in esac) echo p;; esac".as_slice(),
@@ -131,21 +143,25 @@ fn word_lists_are_walked_as_words() {
         (
             b"for x in done; do echo x; done".as_slice(),
             Some(3),
-            Some(9),
+            // The `case` walk on a `for` text (seeded with `esac`, the shape
+            // `case_block` calls it with) finds **no** closer: the pairing
+            // answers a `for`'s `done` is not an `esac` (task #309), where the
+            // type-blind arithmetic ended the walk at the loop's own `done`.
+            None,
         ),
-        (b"for x in a; do echo x; done".as_slice(), Some(9), Some(9)),
+        (b"for x in a; do echo x; done".as_slice(), Some(9), None),
     ];
     for (line, plain, case) in cases {
         let t = toks(line);
         assert_eq!(closing_keyword_index(&t, line), plain, "{line:?}");
         assert_eq!(
-            super::list_closing_keyword_index(&t, line, super::List::Case),
+            super::list_closing_keyword_index(&t, line, Closer::Esac, super::List::Case),
             case,
             "{line:?}"
         );
         if line.starts_with(b"for") {
             assert_eq!(
-                super::list_closing_keyword_index(&t, line, super::List::Words),
+                super::list_closing_keyword_index(&t, line, Closer::Done, super::List::Words,),
                 Some(9),
                 "{line:?}"
             );
@@ -199,4 +215,43 @@ fn a_compound_closer_restarts_command_position_in_the_walk() {
     // either: the `fi` behind the argument-`else` stays data (task #301).
     let line = b"if :; then echo a else fi";
     assert_eq!(closing_keyword_index(&toks(line), line), None);
+}
+
+/// Task #309's **seed**: the walk carries the closer of the block token 0 opens,
+/// so a closer of a foreign kind written in the body is a word and the walk
+/// reaches the block's own closer — and a block with no closer of its own kind
+/// yields **no** closing keyword at all, so the builder answers with its own
+/// missing-closer message instead of truncating the body at the foreign word.
+#[test]
+fn the_walk_is_seeded_with_the_closer_of_its_own_block() {
+    let lines = [
+        // Seeded `Done` (a `while`): the body's `fi` is a word, the walk stops
+        // at the loop's own `done` (token 12).
+        b"while :; do echo a; fi; echo b; done".as_slice(),
+        // Seeded `Fi` (an `if`): the body's `done` and `esac` are words, the
+        // walk stops at the `fi` (token 11).
+        b"if :; then echo a; done; esac; fi".as_slice(),
+        // No closer of the block's own kind left: **no** closing keyword, so the
+        // builder reports its own missing closer (the rc-1 rows of
+        // `tests/cond_blocks.rs::a_mismatched_closer_that_leaves_no_closer_is_a_parse_error`).
+        b"while :; do echo a; fi; echo b".as_slice(),
+        // The pair behind an **argument** word never nests (the place rule of
+        // task #236), so the pairing never sees the inner loop and the walk
+        // stops at its `done` (token 11) — the accepted divergence
+        // `tests/cond_blocks.rs::block_stage_in_a_loop_body_ends_the_loop` pins
+        // as rc 1 (bash runs the stage, rc 0).
+        b"while :; do echo a&&while :; do break; done; done".as_slice(),
+    ];
+    let found = lines.map(|line| closing_keyword_index(&toks(line), line));
+    assert_eq!(found, [Some(12), Some(11), None, Some(11)]);
+    // A `case` block seeded with `esac` (what [`case_block`] passes) still
+    // terminates on a complete `case` with an empty clause list: the seed
+    // matches its own closer, so the pairing pops it — `case x in done)`
+    // (a `done` of a pattern list) is pinned one test above.
+    let line = b"case x in esac";
+    assert_eq!(
+        super::list_closing_keyword_index(&toks(line), line, Closer::Esac, super::List::Case),
+        Some(3),
+        "{line:?}"
+    );
 }

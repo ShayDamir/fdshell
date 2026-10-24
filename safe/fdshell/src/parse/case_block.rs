@@ -7,6 +7,7 @@ use super::case_clause;
 use super::semi::{List, list_closing_keyword_index, trim_semi, try_join_masked};
 use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
+use crate::keywords::Closer;
 use crate::mask::MaskBit;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
@@ -88,7 +89,7 @@ pub(crate) fn tokens_to_case(
 /// (`parse::tests::case_last_clause_no_semi_semi`), so an unclosed walk keeps
 /// the whole list, and its last token must still be `esac`.
 fn up_to_esac<'a>(tokens: &'a [Token], line: &[u8]) -> Result<&'a [Token], Report<ParseError>> {
-    let rest = match list_closing_keyword_index(tokens, line, List::Case) {
+    let rest = match list_closing_keyword_index(tokens, line, Closer::Esac, List::Case) {
         Some(idx) => tokens.get(..=idx).ok_or(ParseError::CaseMissingEsac)?,
         None => tokens,
     };

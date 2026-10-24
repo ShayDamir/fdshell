@@ -5,20 +5,20 @@
 //! so the outer list must never split a block text in half: `while [ 1 ]`
 //! reaches the parser without its `do`/`done`.
 //!
-//! The scan is a depth counter fed by the shared keyword scorer, the same
-//! rule `comment::depth_delta` uses to find a block's span; the `{ …; }`
-//! group already has its own opacity counter in `cond/boundary.rs`. A word is
-//! scored only where a command word may sit — bash recognizes a block keyword
-//! in command position only, and so does this counter (see [`word_delta`]).
+//! The scan is a **pairing** of open blocks fed by the shared keyword scorer,
+//! the same rule `comment/depth_delta` uses to find a block's span; the
+//! `{ …; }` group already has its own opacity counter in `cond/boundary.rs`. A
+//! word is scored only where a command word may sit — bash recognizes a block
+//! keyword in command position only, and so does this scorer (see [`word_delta`]).
 //!
-//! The depth answers *whether* a word is inside a block, never *which half* of
-//! it: the clause keywords (`then`/`do`/`else`/`elif`, a `case` arm's `)`) score
-//! `0`, so the depth is `1` for a heredoc written in a block's clause and for
-//! one written in its body alike. The second question is the [`Modes`] stack's,
-//! fed by the same word walk and built on the clause rule of
+//! The open blocks answer *whether* a word is inside a block, never *which
+//! half* of it: the clause keywords (`then`/`do`/`else`/`elif`, a `case` arm's
+//! `)`) score `0`, so the answer is `true` for a heredoc written in a block's
+//! clause and for one written in its body alike. The second question is the
+//! [`Modes`] stack's, fed by the same word walk and built on the clause rule of
 //! `keywords/position::after` — its twin ([`clause`]).
 
-use crate::keywords::{Glue, Place, after, first_word_end, keyword_delta, scores};
+use crate::keywords::{Glue, Pairing, Place, after, first_word_end, scores};
 use crate::segment::group::command_at_run;
 
 mod clause;
@@ -26,7 +26,7 @@ mod glue;
 
 pub(in crate::cond) use clause::{Mode, Modes};
 
-/// The block-depth delta of the word that starts at `i`, and what that word
+/// The block-pairing delta of the word that starts at `i`, and what that word
 /// does to the scan's command-position flag.
 ///
 /// One clause rule — bash recognizes a reserved word in command position
@@ -44,14 +44,18 @@ pub(in crate::cond) use clause::{Mode, Modes};
 /// the block — including the block a glued cond pair's payload opened
 /// (`a||if :; then :; fi`): the pair word's *payload* is scored at its own
 /// bytes, and its closer must close, or the `fi` swallows the rest of the
-/// line (task #236's S2). Braces are scored by neither: the group arm of
+/// line (task #236's S2). The score is [`Pairing::apply`]'s (task #309): the
+/// closer pops only the block of **its own kind**, so a `fi` written in a
+/// `while` body scores `0` and keeps the `&&` of the text behind it splittable.
+/// Braces are scored by neither: the group arm of
 /// `next_boundary` counts them with the same clause rule, so an argument
 /// brace (`echo {`, `echo }`) stays word data and `echo { && echo b` keeps
-/// splitting.
+/// splitting — and this scan's [`Pairing`] stack therefore never holds a
+/// `Closer::Brace`.
 pub(super) fn word_delta(
     line: &[u8],
     i: usize,
-    block_depth: i32,
+    pairing: &mut Pairing,
     run_start: usize,
     place: Place,
 ) -> (i32, Place) {
@@ -70,9 +74,9 @@ pub(super) fn word_delta(
         1 => Glue::Tail,
         _ => Glue::Head,
     };
-    // Scoring uses the *word*: [`keyword_delta`]'s pair-tail rule reads the
-    // payload behind a glued pair itself, so the scan scores it exactly once
-    // (task #236's S2).
+    // Scoring uses the *word*: [`Pairing::apply`] reads the word's own kind, and
+    // the byte-level scan meets the payload word of a glued pair at its own
+    // start, so the pair is scored exactly once (task #236's S2).
     // At top level the place is the run's own answer — the segment scanner's
     // rule [`command_at_run`], with its redirect, pipeline-stage and cond-pair
     // halves; inside a block it is the scan's [`Place`] flag, because a run
@@ -85,11 +89,14 @@ pub(super) fn word_delta(
     } else {
         Place::Data
     };
-    let at = if block_depth == 0 { top_level } else { place };
-    let next = after(word, line, word_end, at, glue);
+    let at = if pairing.is_open() { place } else { top_level };
+    // The closer row of [`after`] is gated by the pairing's innermost block,
+    // read **before** the word is applied: a closer pairs with the block it
+    // closes, not with the one left behind it (task #309).
+    let next = after(word, line, word_end, at, glue, pairing.top());
     let brace = matches!(word.trim_ascii(), b"{" | b"}");
     let delta = if !brace && scores(word, line, word_end, at) {
-        keyword_delta(word, line, word_end).unwrap_or(0)
+        pairing.apply(word, line, word_end)
     } else {
         0
     };

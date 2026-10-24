@@ -763,7 +763,15 @@ fn a_quoted_run_start_keeps_a_later_word_out_of_the_score() {
         (in_backtick_scope, mid_backtick, true, "mid-backtick"),
     ] {
         assert_eq!(
-            depth_delta::depth_delta(raw, raw, 0, quotes, in_backtick, Place::Command),
+            depth_delta::depth_delta(
+                raw,
+                raw,
+                0,
+                quotes,
+                in_backtick,
+                Place::Command,
+                &mut Pairing::new(),
+            ),
             0,
             "{what}: a word behind a run that starts quoted is data, never a closer"
         );
@@ -826,7 +834,15 @@ fn a_quoted_run_exits_its_scope_at_the_closer_byte() {
         ),
     ] {
         assert_eq!(
-            depth_delta::depth_delta(raw, raw, 0, quotes, in_backtick, Place::Command),
+            depth_delta::depth_delta(
+                raw,
+                raw,
+                0,
+                quotes,
+                in_backtick,
+                Place::Command,
+                &mut Pairing::new(),
+            ),
             want,
             "{what}"
         );
@@ -858,7 +874,15 @@ fn a_span_opened_in_a_run_swallows_the_closer_behind_it() {
         ),
     ] {
         assert_eq!(
-            depth_delta::depth_delta(raw, raw, 0, Quotes::new(), false, Place::Command),
+            depth_delta::depth_delta(
+                raw,
+                raw,
+                0,
+                Quotes::new(),
+                false,
+                Place::Command,
+                &mut Pairing::new(),
+            ),
             0,
             "{what}"
         );
@@ -887,9 +911,60 @@ fn a_glued_open_paren_is_word_data_not_a_substitution() {
         (substitution, "a real substitution's fragment is no keyword"),
     ] {
         assert_eq!(
-            depth_delta::depth_delta(raw, raw, 0, Quotes::new(), false, Place::Command),
+            depth_delta::depth_delta(
+                raw,
+                raw,
+                0,
+                Quotes::new(),
+                false,
+                Place::Command,
+                &mut Pairing::new(),
+            ),
             0,
             "{what}"
         );
     }
+}
+
+/// Task #309's seed at the **span** scan: the scan carries the closer of the
+/// block whose text it walks, so a closer of another kind written in that text
+/// is word data and the span reaches the block's **own** closer. Nested kinds
+/// pair innermost-first, a `{ …; }` group nests inside a loop (its `}` pops the
+/// group, never the loop), and a `done` of a `case` pattern list mismatches the
+/// `case`'s `esac`.
+#[test]
+fn a_span_pairs_its_closers_by_kind() {
+    let lines = [
+        // A `while` body: the `fi` is a word, the span ends at the loop's `done`.
+        (
+            b"while :; do echo if; fi; echo x; done; echo after".as_slice(),
+            12,
+            Closer::Done,
+        ),
+        // An `if` body: `done` and `esac` are words, the `fi` ends the span.
+        (
+            b"if :; then echo a; done; esac; fi; echo after".as_slice(),
+            4,
+            Closer::Fi,
+        ),
+        // A group inside a loop body: the `}` pops the group, the `done` the loop.
+        (b"while :; do { echo a; } done".as_slice(), 12, Closer::Done),
+        // A `case` block: a `done` of a pattern list mismatches, `esac` ends it.
+        (b"case x in done) echo p;; esac".as_slice(), 9, Closer::Esac),
+        // The `if` inside a `while` body: the `fi` pops the `if`, the span runs
+        // on to the loop's `done`.
+        (
+            b"while :; do if :; then :; fi done".as_slice(),
+            12,
+            Closer::Done,
+        ),
+    ];
+    let ends = lines.map(|(line, at, open)| {
+        let r = scan_open(line, at, open);
+        assert!(r.closed, "{line:?} must close");
+        r.end
+    });
+    // Each `end` is one past the block's own closer (the closer plus the
+    // separator byte behind it), never one past a foreign closer.
+    assert_eq!(ends, [38, 34, 29, 30, 34]);
 }

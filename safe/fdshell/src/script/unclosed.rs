@@ -11,7 +11,7 @@ use error_stack::Report;
 
 use crate::error::cmd::CmdError;
 use crate::error::parse::{ParseError, ParsePosition};
-use crate::keywords::{leading_ws, time_prefix_len};
+use crate::keywords::{Closer, Keyword, keyword_kind, leading_ws, time_prefix_len};
 use sys::ShortCStr;
 
 /// The report an unclosed block returns: [`parse_error`]'s message names the
@@ -35,7 +35,7 @@ pub(super) fn parse_error(line: &[u8], start: usize) -> Report<ParseError> {
     };
     Report::new(ParseError::MissingBlockCloser {
         opener,
-        closer: ShortCStr::from(closer(word)),
+        closer: ShortCStr::from(closer(word, line, pos.saturating_add(word.len()))),
     })
     .attach_opaque(ParsePosition {
         pos,
@@ -61,14 +61,19 @@ fn opener_words(rest: &[u8]) -> (usize, &[u8]) {
     (off, word.get(..end).unwrap_or(b""))
 }
 
-/// The keyword that closes a block opened by the word `word`. A `{` group, a
-/// `function` keyword definition, a `name()` definition and an event-`wait`
-/// block all want `}`.
-fn closer(word: &[u8]) -> &'static CStr {
-    match word {
-        b"if" => c"fi",
-        b"for" | b"while" | b"until" => c"done",
-        b"case" => c"esac",
+/// The keyword that closes a block opened by the word `word`, read from the
+/// **one** recognition table (task #309): [`keyword_kind`]'s `Opens(closer)`
+/// answer is the block's kind, so the opener→closer name cannot drift from the
+/// pairing the scans use. The `}` arm is the group opener and the definition
+/// forms (`f() {`, `function f`), which the table answers with
+/// [`Closer::Brace`]/no keyword. The event-`wait` block is the row this moves:
+/// it wants `done`, and the table knows it (`wait_opens_block` gates the row),
+/// where the hand-written table said `'}'`.
+fn closer(word: &[u8], line: &[u8], word_end: usize) -> &'static CStr {
+    match keyword_kind(word, line, word_end) {
+        Some(Keyword::Opens(Closer::Fi)) => c"fi",
+        Some(Keyword::Opens(Closer::Done)) => c"done",
+        Some(Keyword::Opens(Closer::Esac)) => c"esac",
         _ => c"}",
     }
 }

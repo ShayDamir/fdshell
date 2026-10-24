@@ -25,6 +25,11 @@ const OPENERS: &[(&[u8], &[u8], &[u8])] = &[
     // A word the definer gate accepts and no closer keyword follows: the
     // name-validity rule is task #166's, so `$(` stays a definer word here.
     (b"$(", b"$(", b"}"),
+    // The event-`wait` block (task #309): the closer comes from the recognition
+    // table, so the row is `done` — the block is a `while`-shaped loop over
+    // event patterns, not a group. The hand-written table said `'}'`. bash
+    // refuses the same line at rc 2.
+    (b"wait\n readable %rd) x", b"wait", b"done"),
 ];
 
 /// The opener/closer pair the report names, for every block form.

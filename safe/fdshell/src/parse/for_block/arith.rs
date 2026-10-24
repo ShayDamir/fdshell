@@ -7,6 +7,7 @@
 mod region;
 
 use crate::error::parse::ParseError;
+use crate::keywords::Closer;
 use crate::parse::Token;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, block_body, ensure_before_closer, up_to_closing};
@@ -84,7 +85,10 @@ fn tail_body(
     // The body's heredoc bodies sit past `done` in a single-line block, so the
     // tail is truncated at its closing keyword before anything is read (task
     // #273), with the plain list rule: the arithmetic `for` owns no word list.
-    let closed = up_to_closing(tail, line, List::Plain, ParseError::ExpectedDone)?;
+    // The walk is seeded with `Closer::Done` (task #309), so a `fi`/`esac`
+    // written in the body is a word and the tail rules below answer.
+    let expected_done = ParseError::ExpectedDone;
+    let closed = up_to_closing(tail, line, Closer::Done, List::Plain, expected_done)?;
     let done_idx = closed.len() - 1;
     let redirects =
         crate::parse::block_tail::redirects(b"done", tail.get(done_idx..).unwrap_or(&[]))?;

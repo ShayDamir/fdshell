@@ -91,7 +91,11 @@ pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &
             glue_at(region, i, bytes)
         };
         before = place;
-        place = after(bytes, line, *end, place, glue);
+        // No block stack here: this walk reads a `case` arm's stray-pattern
+        // parens, and the arm-level opener/closer pairing is the `case`
+        // builder's (it walks with `Closer::Esac`), so the closer row of
+        // [`after`] is asked with `None` — the top-level behavior (task #309).
+        place = after(bytes, line, *end, place, glue, None);
     }
     false
 }

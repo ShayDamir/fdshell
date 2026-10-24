@@ -7,8 +7,19 @@
 
 use crate::cond::boundary::block::word_delta;
 use crate::cond::boundary::next_boundary;
-use crate::keywords::Place;
+use crate::keywords::{Closer, Pairing, Place};
 use crate::scan::ScanState;
+
+/// The pairing of a scan sitting **inside** an open block — the `1` of the old
+/// depth argument, now typed (task #309): seeded with the closer *that* block
+/// requires, so a closer of its own kind pops it and a closer of another kind
+/// written in the body is a word that scores `0`. A fresh pairing per call,
+/// because the scorer *mutates* it: each pin reads one word.
+fn in_block(closer: Closer) -> Pairing {
+    let mut pairing = Pairing::new();
+    pairing.open(closer);
+    pairing
+}
 
 /// `next_boundary` from the start of `line`; `line.len()` means "no split —
 /// the text is one cond-list part".
@@ -218,69 +229,240 @@ fn in_block_words_follow_the_clause_rule() {
     // #301): an `if`-shaped argument is data and keeps the next word data, so
     // it can never hand command position to a keyword behind it.
     let l = b"do echo if &&";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 8, 1, 0, Place::Data), (0, Place::Data));
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Data)
+    );
+    assert_eq!(
+        word_delta(l, 8, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Data)
+    );
     // `do if :`: a nested block in a clause position scores.
     let l = b"do if :";
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Command)
+    );
     // `then echo while`: the `while` behind `echo` is data, and stays data for
     // the word behind it (the same gated transition as the `if` above).
     let l = b"then echo while";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 5, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 10, 1, 0, Place::Data), (0, Place::Data));
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 5, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Data)
+    );
+    assert_eq!(
+        word_delta(l, 10, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Data)
+    );
     // `echo done &&`: the argument-`done` is data, never a closer.
     let l = b"echo done &&";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (0, Place::Data));
-    // `in esac`: a closer scores in the `case` list (`case x in esac`).
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Data)
+    );
+    assert_eq!(
+        word_delta(l, 5, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Data)
+    );
+    // `in esac`: a closer scores in the `case` list (`case x in esac`). The
+    // scan sits inside a `case` block, so its pairing is seeded with the
+    // `case`'s own closer `esac` (task #309) — that is what pops here.
     let l = b"in esac";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Pattern));
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Pattern), (-1, Place::Data));
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Esac), 0, Place::Command),
+        (0, Place::Pattern)
+    );
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Esac), 0, Place::Pattern),
+        (-1, Place::Data)
+    );
     // `in if)`: the glued form is a pattern word, not an opener.
     let l = b"in if)";
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Pattern), (0, Place::Command));
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Pattern),
+        (0, Place::Command)
+    );
     // A `for` **word list** (task #306): the opener scores and puts every word
     // behind it at [`Place::Words`], where nothing scores — not the
     // closer-shaped `done`, not the `in` (which opens the `case` list's
     // [`Place::Pattern`] one row above, the asymmetry of the two list kinds),
     // not a brace word. The place is sticky; only the list's `do` leaves it.
     let l = b"for i in done; do";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (1, Place::Words));
-    assert_eq!(word_delta(l, 4, 1, 0, Place::Words), (0, Place::Words));
-    assert_eq!(word_delta(l, 6, 1, 0, Place::Words), (0, Place::Words));
     assert_eq!(
-        word_delta(l, 9, 1, 0, Place::Words),
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Words)
+    );
+    assert_eq!(
+        word_delta(l, 4, &mut in_block(Closer::Done), 0, Place::Words),
+        (0, Place::Words)
+    );
+    assert_eq!(
+        word_delta(l, 6, &mut in_block(Closer::Done), 0, Place::Words),
+        (0, Place::Words)
+    );
+    assert_eq!(
+        word_delta(l, 9, &mut in_block(Closer::Done), 0, Place::Words),
         (0, Place::Words),
         "a closer-shaped word of the list is word data"
     );
-    assert_eq!(word_delta(l, 15, 1, 0, Place::Words), (0, Place::Command));
+    assert_eq!(
+        word_delta(l, 15, &mut in_block(Closer::Done), 0, Place::Words),
+        (0, Place::Command)
+    );
     // The brace rule is unchanged by the list: this scan scores braces at
     // **no** place (the group arm counts them), and the list place keeps the
     // place sticky.
     let l = b"for i in {";
-    assert_eq!(word_delta(l, 9, 1, 0, Place::Words), (0, Place::Words));
+    assert_eq!(
+        word_delta(l, 9, &mut in_block(Closer::Done), 0, Place::Words),
+        (0, Place::Words)
+    );
     // `x) echo`: the glued clause `)` starts the arm body in command position.
     let l = b"x) echo";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Data), (0, Place::Command));
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Command)
+    );
     // `in time if`: the `time` prefix is transparent (keeps the list's place),
     // and the `if` behind it is a pattern-list word, so it scores 0.
     let l = b"in time if";
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Pattern), (0, Place::Pattern));
-    assert_eq!(word_delta(l, 8, 1, 0, Place::Pattern), (0, Place::Command));
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Pattern),
+        (0, Place::Pattern)
+    );
+    assert_eq!(
+        word_delta(l, 8, &mut in_block(Closer::Done), 0, Place::Pattern),
+        (0, Place::Command)
+    );
     // Braces score 0 at every place (the group arm counts them); the
     // transition keeps the master behavior: an argument brace keeps data, a
     // command-position opener opens a command, and the keyword behind it
     // scores in-block nesting as before.
     let l = b"echo }";
-    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (0, Place::Data));
+    assert_eq!(
+        word_delta(l, 5, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Data)
+    );
     let l = b"echo { if";
-    assert_eq!(word_delta(l, 5, 1, 0, Place::Data), (0, Place::Command));
-    assert_eq!(word_delta(l, 7, 1, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 5, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 7, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Command)
+    );
     let l = b"{ if";
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 2, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Command)
+    );
+}
+
+/// Task #309: the pairing is by **kind**, not by depth. A closer pops only the
+/// block of its own kind, so in a loop body (seeded `Closer::Done`) a `fi` and
+/// an `esac` score `0` and the block stays open; in a `case` block (seeded
+/// `Esac`) the loop closers are the words. With **nothing** open (top level) a
+/// closer has no block to mismatch, so it keeps the pinned stray-closer score
+/// (`-1`, popped by no stack) and the place transition of a real closer. Braces
+/// score `0` at every place in this scan (its group arm owns them), so its
+/// stack never holds a `Closer::Brace`.
+#[test]
+fn a_closer_pops_only_its_own_kind_of_block() {
+    // A loop body: `do fi` / `do esac` are words, `do done` closes; an opener
+    // pushes its kind (and `case` hands its word list to the next word, so the
+    // place rows stay `after`'s own).
+    for (line, at, want, place) in [
+        (b"do fi".as_slice(), 3, 0, Place::Data),
+        (b"do esac".as_slice(), 3, 0, Place::Data),
+        (b"do done".as_slice(), 3, -1, Place::Command),
+        (b"do if".as_slice(), 3, 1, Place::Command),
+        (b"do case".as_slice(), 3, 1, Place::Data),
+    ] {
+        assert_eq!(
+            word_delta(line, at, &mut in_block(Closer::Done), 0, Place::Command),
+            (want, place),
+            "{line:?}"
+        );
+    }
+    // A `case` block: `esac` pops, the loop closers and `fi` are words — and a
+    // word is an *argument*, so the place they hand to the next word is
+    // `Data`: task #309's closer row is a **pairing** row (step 5), and gating
+    // it is what keeps a closer written behind a mismatched one unscored.
+    for (line, at, want, place) in [
+        (b"do esac".as_slice(), 3, -1, Place::Command),
+        (b"do done".as_slice(), 3, 0, Place::Data),
+        (b"do fi".as_slice(), 3, 0, Place::Data),
+    ] {
+        assert_eq!(
+            word_delta(line, at, &mut in_block(Closer::Esac), 0, Place::Command),
+            (want, place),
+            "{line:?}"
+        );
+    }
+    // An `if` block: `fi` pops, `done` and `esac` are words (and data).
+    for (line, at, want, place) in [
+        (b"then fi".as_slice(), 5, -1, Place::Command),
+        (b"then done".as_slice(), 5, 0, Place::Data),
+        (b"then esac".as_slice(), 5, 0, Place::Data),
+    ] {
+        assert_eq!(
+            word_delta(line, at, &mut in_block(Closer::Fi), 0, Place::Command),
+            (want, place),
+            "{line:?}"
+        );
+    }
+    // The top level: nothing open, so a closer of any kind keeps the score the
+    // callers clamp at 0 (the stray-closer clamp, pinned in `cond/tests.rs`).
+    for line in [b"fi".as_slice(), b"done".as_slice(), b"esac".as_slice()] {
+        assert_eq!(
+            word_delta(line, 0, &mut Pairing::new(), 0, Place::Command),
+            (-1, Place::Command),
+            "{line:?}"
+        );
+    }
+    // A brace word is scored by neither gate here: the group arm of
+    // `next_boundary` owns it, so this scan's stack never sees a `Brace` —
+    // `}` against an open `while` pairs with nothing and scores `0`.
+    for (line, at) in [(b"do {".as_slice(), 3), (b"do }".as_slice(), 3)] {
+        assert_eq!(
+            word_delta(line, at, &mut in_block(Closer::Done), 0, Place::Command),
+            (0, Place::Data),
+            "{line:?}"
+        );
+    }
+}
+
+/// The scan-level half of the same rule: a `while` body's `fi` leaves the block
+/// **open**, so an operator written behind it stays the block's own cond-list
+/// operator and the outer split lands on the `&&` past the block's *own*
+/// `done`. With a type-blind depth the `fi` closed the loop and the split was
+/// found at the body's `&&` (index 23) — the row that makes the pairing
+/// mutation visible at this granularity, where a word-level pin cannot see it.
+#[test]
+fn a_mismatched_closer_keeps_the_block_open_for_the_scan() {
+    let line = b"while :; do echo a; fi && echo b; done && echo c";
+    assert_eq!(boundary_of(line.as_slice()), (39, false));
+    // The top-level twin: with nothing open the stray `fi` keeps the split it
+    // always had, so the `&&` behind it is the boundary (index 11).
+    assert_eq!(boundary_of(b"echo a; fi && echo b"), (11, false));
+    // A `case` list is the same rule at the other kind: the loop's `done` in a
+    // pattern list never ends the `case`, so its `&&` stays clause data and the
+    // split is the one behind `esac`.
+    let line = b"case x in done) echo p;; esac && echo c";
+    assert_eq!(boundary_of(line.as_slice()), (30, false));
 }
 
 /// Task #236's S2: a glued cond pair is *two* word starts for the byte scan
@@ -297,14 +479,32 @@ fn in_block_words_follow_the_clause_rule() {
 fn glued_pair_words_score_their_payload_once() {
     // `a||if :` in a body: head at 1, tail byte at 2, payload word at 3.
     let l = b"a||if :".as_slice();
-    assert_eq!(word_delta(l, 1, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 1, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 2, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Command)
+    );
     // The `&&` spelling, and the tail byte `&if`.
     let l = b"a&&if :".as_slice();
-    assert_eq!(word_delta(l, 1, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 1, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 2, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Command)
+    );
     // Behind data the same three words carry no keyword: the in-block glued
     // divergence (`echo a&&if`), measured in `tests/glued_pair.rs`. The
     // machine's transition follows the same gate (task #301): behind data an
@@ -314,32 +514,59 @@ fn glued_pair_words_score_their_payload_once() {
     let l = b"a||if :".as_slice();
     for i in [1, 2] {
         assert_eq!(
-            word_delta(l, i, 1, 0, Place::Data),
+            word_delta(l, i, &mut in_block(Closer::Done), 0, Place::Data),
             (0, Place::Data),
             "the pair word at {i} is data behind data"
         );
     }
-    assert_eq!(word_delta(l, 3, 1, 0, Place::Data), (0, Place::Data));
+    assert_eq!(
+        word_delta(l, 3, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Data)
+    );
     // A background `&` is a single-byte run: its tail word `&if` is an
     // argument, and the `if` behind it is scored in the place that leaves.
     let l = b"&if :".as_slice();
-    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (0, Place::Data));
-    assert_eq!(word_delta(l, 1, 1, 0, Place::Data), (0, Place::Data));
+    assert_eq!(
+        word_delta(l, 0, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Data)
+    );
+    assert_eq!(
+        word_delta(l, 1, &mut in_block(Closer::Done), 0, Place::Data),
+        (0, Place::Data)
+    );
     // The pipeline `|` (#292): the byte word sets command position, and the
     // `if` behind it opens its block — the in-block and the top-level halves
     // agree (the scan's flag and the run rule answer the same question).
     let l = b"a | if :".as_slice();
-    assert_eq!(word_delta(l, 2, 1, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 4, 1, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 2, &mut in_block(Closer::Done), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 4, &mut in_block(Closer::Done), 0, Place::Command),
+        (1, Place::Command)
+    );
     let l = b"a | if :; then :; fi".as_slice();
-    assert_eq!(word_delta(l, 2, 0, 0, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 4, 0, 0, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 2, &mut Pairing::new(), 0, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 4, &mut Pairing::new(), 0, Place::Command),
+        (1, Place::Command)
+    );
     // The same pair at top level is judged by the run's own rule, not the
     // flag: an empty run at `run_start` is command position, so the payload
     // `if` opens its block exactly as in-block.
     let l = b"a||if :; then :; fi".as_slice();
-    assert_eq!(word_delta(l, 1, 0, 1, Place::Command), (0, Place::Command));
-    assert_eq!(word_delta(l, 3, 0, 1, Place::Command), (1, Place::Command));
+    assert_eq!(
+        word_delta(l, 1, &mut Pairing::new(), 1, Place::Command),
+        (0, Place::Command)
+    );
+    assert_eq!(
+        word_delta(l, 3, &mut Pairing::new(), 1, Place::Command),
+        (1, Place::Command)
+    );
 }
 
 /// Task #296, the in-block half of the comment rule: a word-start `#` inside a

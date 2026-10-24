@@ -3,6 +3,7 @@
 //! because it mirrors that traversal.
 
 use super::Token;
+use crate::keywords::Closer;
 use crate::parse::semi::{List, list_closing_keyword_index};
 use alloc::vec::Vec;
 
@@ -19,7 +20,7 @@ use alloc::vec::Vec;
 /// (`case x in done) …`) stay word data here too, exactly as `tokens_to_case`
 /// reads them.
 pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
-    let Some(esac_idx) = list_closing_keyword_index(tokens, line, List::Case) else {
+    let Some(esac_idx) = list_closing_keyword_index(tokens, line, Closer::Esac, List::Case) else {
         return Vec::new();
     };
     let Some(tokens) = tokens.get(..=esac_idx) else {

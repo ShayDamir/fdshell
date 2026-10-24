@@ -16,6 +16,7 @@ use super::semi::span_verbatim;
 use super::semi::trim_condition;
 use super::semi::up_to_closing;
 use crate::error::parse::ParseError;
+use crate::keywords::Closer;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
@@ -34,7 +35,7 @@ pub(crate) fn tokens_to_if(
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `fi`: the tokens after it are body data, not block structure.
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let closed = up_to_closing(tokens, line, List::Plain, ParseError::MissingFi)?;
+    let closed = up_to_closing(tokens, line, Closer::Fi, List::Plain, ParseError::MissingFi)?;
     // The closing `fi` is the truncated slice's last token.
     let fi_idx = closed.len() - 1;
     let redirects =

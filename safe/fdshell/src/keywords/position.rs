@@ -15,8 +15,13 @@
 //! **word-list** kinds are two places: a `case` list is [`Place::Pattern`],
 //! a `for` list is [`Place::Words`], whose rule and gate live in [`list`]
 //! (task #306).
+//!
+//! The place rule answers *where* a word sits; the **pairing** of the open
+//! blocks (`crate::keywords::Pairing`, task #309) answers *which* block a closer
+//! ends. Two orthogonal gates: [`after`] takes the innermost open block as `top`.
 
-use crate::keywords::{keyword_delta, time_prefix_len};
+use crate::keywords::Closer;
+use crate::keywords::time_prefix_len;
 use crate::segment::group::opens;
 
 mod clause;
@@ -25,7 +30,7 @@ mod list;
 mod score;
 
 pub(crate) use clause::{body_keyword, clause_keyword, list_keyword, list_opener};
-pub(crate) use score::scores;
+pub(crate) use score::{closer_matches, scores};
 
 /// Where the word written next sits, as far as the keyword scorers can tell.
 /// The state transitions are [`after`]; the gate is [`scores`].
@@ -98,7 +103,20 @@ pub(crate) enum Glue {
 /// compound operand's closer close the enclosing block, task #236's S2), and
 /// the bare tail byte (the tokenized `p||if`) is transparent, keeping the
 /// place the pair set.
-pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glue: Glue) -> Place {
+///
+/// `top` is the closer the **innermost open block** requires
+/// ([`crate::keywords::Pairing::top`], task #309): the closer row above is a
+/// *pairing* row, so only that block's own closer restarts command position. A
+/// caller with no block stack (the top level, `gate_end`'s start, a `case` arm's
+/// stray-pattern walk) passes `None` and keeps the row as it always fired.
+pub(crate) fn after(
+    word: &[u8],
+    line: &[u8],
+    word_end: usize,
+    place: Place,
+    glue: Glue,
+    top: Option<Closer>,
+) -> Place {
     let w = word.trim_ascii();
     // A word of a `for` list keeps the list: only its separator or its `do`
     // leaves it ([`list::step`], task #306) — the scan must reach the block's
@@ -126,10 +144,11 @@ pub(crate) fn after(word: &[u8], line: &[u8], word_end: usize, place: Place, glu
         // bash's grammar makes the `;` after a compound command optional, so the
         // word behind it is a command again (`while :; do if :; then :; fi done`,
         // `if :; then { :; } fi`). The gate is [`scores`]' own: a closer-shaped
-        // *argument* (`echo fi`) leaves the place alone.
-        if matches!(place, Place::Command)
-            && keyword_delta(w, line, word_end).is_some_and(|d| d < 0)
-        {
+        // *argument* (`echo fi`) leaves the place alone. Task #309 adds the
+        // **kind** half ([`closer_matches`]): the closer must be the one `top`
+        // requires, so a `fi` in a `while` body is an ordinary word and the
+        // closer written behind it is an argument that scores nothing.
+        if matches!(place, Place::Command) && closer_matches(w, line, word_end, top) {
             return Place::Command;
         }
     }

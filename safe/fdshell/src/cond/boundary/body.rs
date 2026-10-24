@@ -27,7 +27,8 @@ pub(super) enum Step {
 
 /// The cond boundary's whole heredoc rule, in one place: take the body regions
 /// of the run that ends at the newline `nl` and walk them. Inside a keyword
-/// block (`block_depth > 0`) each region is scanned for its earliest top-level
+/// block (the `in_block` half of its pairing, task #309) each region is scanned
+/// for its earliest top-level
 /// `&&` / `||` — the pinned clause-`&&` split
 /// (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`) —
 /// **only where its `<<` sits in the block's clause**: a region claimed by a
@@ -39,7 +40,7 @@ pub(super) fn step(
     line: &[u8],
     run_start: usize,
     nl: usize,
-    block_depth: i32,
+    in_block: bool,
     modes: &Modes,
 ) -> Option<Step> {
     // The regions of the run's **physical line** and their `<<` sites, both
@@ -50,7 +51,7 @@ pub(super) fn step(
     if regions.is_empty() {
         return None;
     }
-    if block_depth > 0 {
+    if in_block {
         for (&(start, end), site) in regions.iter().zip(operator_sites(line, from, to)) {
             if let Some((at, is_or)) = scanned_operator(line, (start, end), site, modes) {
                 return Some(Step::Split(at, is_or));

@@ -227,8 +227,12 @@ fn the_tail_rules_are_the_word_forms() {
         parse_err(b"for ((i=0;i<2;i++)); do; done"),
         "'do' body is empty"
     );
-    // A block closer that is not `done` (`}`, `fi`) is the `-1` delta that ends
-    // the closing-keyword walk, so the tail check is what rejects it.
+    // A block closer that is not `done` (`}`, `fi`) is a **word** to the
+    // closing-keyword walk: the walk is seeded with the `for`'s own `done` (the
+    // pairing of task #309), a foreign closer mismatches, no closing keyword is
+    // found at all, and the builder's own tail rule answers. Same message as the
+    // type-blind walk gave (which stopped at the `-1` delta); the mechanism is
+    // now the pairing, so this row is the walk's **no-closer** arm.
     for line in [
         b"for ((i=0;i<2;i++)); do echo a; }".as_slice(),
         b"for ((i=0;i<2;i++)); do echo a; fi".as_slice(),

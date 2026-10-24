@@ -3024,19 +3024,25 @@ fn for_heredoc_body_without_done_reports_expected_done() {
     assert_eq!(err.current_context().to_string(), "expected 'done'");
 }
 
-/// The `case` twins: no closer at all, and a `done` (an argument-position
-/// word in bash's grammar is not a closer; here the depth walk stops at the
-/// first depth-0 keyword and the closer check then rejects it). bash reports
-/// a syntax error rc 2 for the `done` shape; the message fdshell gives is
-/// pinned as measured, not copied from bash.
+/// The `case` twins: no closer at all, and a `done` written in a clause body.
+/// The first keeps `case: missing 'esac'`. The second is a **successful parse**
+/// since task #309: the closing-keyword walk is seeded with the `case`'s own
+/// closer, so a `done` (a loop closer) mismatches, stays word data, and the
+/// block reaches its real `esac` — the clause body keeps the `done` as its last
+/// word. Running it is the command-not-found half (`done` is no command), rc 1
+/// with the resolve error, pinned end-to-end by
+/// `tests/heredoc.rs::case_body_heredoc_of_a_clause_terminated_by_done_runs_the_body`;
+/// bash rejects the line rc 2 (the rc-1-vs-2 family). `master` stopped the walk
+/// at the `done` and reported `missing 'esac'`.
 #[test]
 fn case_heredoc_body_without_esac_reports_missing_esac() {
     let err = parse(b"case x in x) cat <<T; ;;").err().unwrap();
     assert_eq!(err.current_context().to_string(), "case: missing 'esac'");
-    let err = parse(b"case x in x) cat <<T; done;; esac\nbodyT\nT")
-        .err()
-        .unwrap();
-    assert_eq!(err.current_context().to_string(), "case: missing 'esac'");
+    let ParsedLine::Case(cb) = parse(b"case x in x) cat <<T; done;; esac\nbodyT\nT").unwrap()
+    else {
+        panic!("expected Case")
+    };
+    assert_eq!(cb.clauses[0].body.data, c"cat <<T; done\nbodyT\nT".into());
 }
 
 /// Task #236: `if a; then b fi` has no `;` before `fi` (task #301 owns the

@@ -6,7 +6,7 @@
 
 use super::list;
 use super::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, list_opener, scores};
-use crate::keywords::first_word_end;
+use crate::keywords::{Closer, first_word_end};
 
 /// `after` on the whole word: `word_end` sits just past it, outside a cond
 /// pair. `glue` marks the word's start in a pair (see [`super::after`]).
@@ -15,7 +15,14 @@ fn after_word(word: &[u8], place: Place) -> Place {
 }
 
 fn after_word_glue(word: &[u8], place: Place, glue: Glue) -> Place {
-    after(word, word, word.len(), place, glue)
+    after(word, word, word.len(), place, glue, None)
+}
+
+/// `after` inside a block whose innermost open block requires `top` (task
+/// #309): the closer row is a **pairing** row, so only the closer of `top`
+/// restarts command position.
+fn after_in(word: &[u8], place: Place, top: Closer) -> Place {
+    after(word, word, word.len(), place, Glue::None, Some(top))
 }
 
 /// `scores` on the whole word.
@@ -527,7 +534,7 @@ fn keyword_behind_a_time_prefix_keeps_the_place() {
     let line = b"time if";
     let word_end = first_word_end(line, 0);
     assert_eq!(
-        after(line, line, word_end, Place::Pattern, Glue::None),
+        after(line, line, word_end, Place::Pattern, Glue::None, None),
         Place::Command
     );
     assert!(scores(b"time if", b"time if", 7, Place::Command));
@@ -643,5 +650,86 @@ fn builtin_wait_never_scores_and_event_case_only_in_command() {
     assert!(
         !scores(event, event, 4, Place::Words),
         "the event-case `wait` in a `for` list is a list word"
+    );
+}
+
+/// Task #309: the closer row of [`after`] is a **pairing** row. Its `top`
+/// argument is the closer the innermost open block requires
+/// ([`crate::keywords::Pairing::top`]): only that closer restarts command
+/// position, a closer of a foreign kind is an ordinary word and leaves the place
+/// at `Data` — and a closer written behind it is an argument that scores
+/// nothing. `None` (no block stack: the top level, the gate scan's start, a
+/// `case` arm's stray-pattern walk) keeps the row exactly as it fired before.
+#[test]
+fn a_closer_restarts_command_position_only_for_its_own_block() {
+    // Each closer opens a command **only** for the block it closes.
+    for (word, top) in [
+        (b"fi".as_slice(), Closer::Fi),
+        (b"done", Closer::Done),
+        (b"esac", Closer::Esac),
+        (b"}", Closer::Brace),
+    ] {
+        assert_eq!(
+            after_in(word, Place::Command, top),
+            Place::Command,
+            "{word:?} closes its own block"
+        );
+    }
+    // A closer of another kind is a word: the place stays where the word put it.
+    for (word, top) in [
+        (b"fi".as_slice(), Closer::Done),
+        (b"fi", Closer::Esac),
+        (b"fi", Closer::Brace),
+        (b"done", Closer::Fi),
+        (b"done", Closer::Esac),
+        (b"esac", Closer::Fi),
+        (b"esac", Closer::Done),
+        (b"}", Closer::Done),
+    ] {
+        assert_eq!(
+            after_in(word, Place::Command, top),
+            Place::Data,
+            "{word:?} is a word inside a {top:?} block"
+        );
+    }
+    // The **place** gate comes first and is unchanged: an argument-position
+    // closer leaves the place alone even for the block it closes (task #236).
+    assert_eq!(after_in(b"fi", Place::Data, Closer::Fi), Place::Data);
+    // A pattern list: the closer row is command-position-only, so the `case`
+    // list's `esac` leaves the place as it always did (its *score* is gated by
+    // [`scores`], not here).
+    assert_eq!(after_in(b"esac", Place::Pattern, Closer::Esac), Place::Data);
+    // A glued closer (`fi>f`, the `&|<>` boundary set) is the same closer.
+    assert_eq!(
+        after_in(b"fi>f", Place::Command, Closer::Fi),
+        Place::Command
+    );
+    assert_eq!(after_in(b"fi>f", Place::Command, Closer::Done), Place::Data);
+    // `None`: the pinned top-level clamp — every closer fires, as before.
+    for word in [b"fi".as_slice(), b"done", b"esac", b"}"] {
+        assert_eq!(
+            after_word(word, Place::Command),
+            Place::Command,
+            "{word:?} at the top level"
+        );
+    }
+    // An **opener** ignores the pairing: the word behind `if` sits in command
+    // position inside any open block.
+    assert_eq!(
+        after_in(b"if", Place::Command, Closer::Done),
+        Place::Command
+    );
+    // A `for` list keeps its own place rule: the pairing never reaches it (the
+    // list's step leaves the place at `Words`/`do`, task #306).
+    assert_eq!(
+        after(
+            b"for",
+            b"for",
+            3,
+            Place::Command,
+            Glue::None,
+            Some(Closer::Fi)
+        ),
+        Place::Words
     );
 }

@@ -1,5 +1,6 @@
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::keywords::Closer;
 use crate::parse::cond_bodies::condition_bodies;
 use crate::parse::semi::verbatim;
 use crate::parse::semi::{
@@ -44,7 +45,13 @@ pub(crate) fn tokens_to_loop(
     // A condition-position heredoc's bodies sit in the block text after the
     // closing `done`: the tokens after it are body data, not block structure.
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let closed = up_to_closing(tokens, line, List::Plain, ParseError::ExpectedDone)?;
+    let closed = up_to_closing(
+        tokens,
+        line,
+        Closer::Done,
+        List::Plain,
+        ParseError::ExpectedDone,
+    )?;
     // The closing `done` is the truncated slice's last token.
     let done_idx = closed.len() - 1;
     let redirects =

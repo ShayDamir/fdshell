@@ -9,13 +9,19 @@ use word::{next_word, scores_at};
 
 use super::Token;
 use crate::error::parse::ParseError;
-use crate::keywords::{Place, after, keyword_delta, pair_payload, scores};
+use crate::keywords::{Closer, Keyword, Pairing, Place, after, keyword_kind, pair_payload, scores};
 use error_stack::{Report, bail};
 
-/// The index of the block's closing keyword: the token at which the block
-/// depth (starting at 1 for the opening keyword) first returns to 0. Tokens
+/// The index of the block's closing keyword: the token at which the block's
+/// pairing (seeded with `open`, the closer the block requires) first empties.
+/// Tokens
 /// after it are heredoc body data (a condition-position heredoc's bodies sit
 /// in the block text after the closing keyword), not block structure.
+///
+/// `open` is the **kind** half (task #309): the walk seeds its pairing with the
+/// closer this block requires, so a closer of another kind written in the body
+/// is a word and the walk reaches the block's real closer (`while …; fi` never
+/// ends a `while` body, `case x in done) …` never ends a `case`).
 ///
 /// The scan carries bash's command-position rule over the token list
 /// ([`after`]/[`scores`], task #236): a block keyword written as an argument
@@ -24,22 +30,43 @@ use error_stack::{Report, bail};
 /// scorer of this rule leaves a literal `{`/`}` argument to the accepted
 /// divergence `tests/group.rs::literal_brace_argument_in_a_block_body` pins.
 pub(crate) fn closing_keyword_index(tokens: &[Token], line: &[u8]) -> Option<usize> {
-    closing_index(tokens, line, List::Plain)
+    let open = opened_closer(tokens, line);
+    closing_index(tokens, line, open, List::Plain)
+}
+
+/// The closer the block starting at token 0 requires (task #309): the opener
+/// word's own kind, read from the one recognition table. A token list that
+/// opens with no block keyword (the group's `{`, whose `Opens(Brace)` this
+/// reads, and the arith tail a caller seeds by hand) pairs with `}`.
+fn opened_closer(tokens: &[Token], line: &[u8]) -> Closer {
+    tokens
+        .first()
+        .and_then(|(t, _, end, _, _, _)| {
+            t.as_bytes()
+                .ok()
+                .and_then(|word| keyword_kind(word, line, *end))
+        })
+        .map_or(Closer::Brace, |k| match k {
+            Keyword::Opens(closer) | Keyword::Closes(closer) => closer,
+        })
 }
 
 /// [`closing_keyword_index`] for a block that owns a word list, with the list
 /// read as bash reads it ([`List`]): the `case` clause patterns and the `for`
 /// words are word data, so their closer-shaped words never close the block.
+/// `open` is that block's own closer (task #309).
 pub(crate) fn list_closing_keyword_index(
     tokens: &[Token],
     line: &[u8],
+    open: Closer,
     list: List,
 ) -> Option<usize> {
-    closing_index(tokens, line, list)
+    closing_index(tokens, line, open, list)
 }
 
-fn closing_index(tokens: &[Token], line: &[u8], list: List) -> Option<usize> {
-    let mut depth: i32 = 1;
+fn closing_index(tokens: &[Token], line: &[u8], open: Closer, list: List) -> Option<usize> {
+    let mut pairing = Pairing::new();
+    pairing.open(open);
     let mut place = Place::Command;
     for (i, (t, _, end, _, _, _)) in tokens.iter().enumerate().skip(1) {
         // Defensive: the tokens were built from `line`, so their bytes are
@@ -53,7 +80,10 @@ fn closing_index(tokens: &[Token], line: &[u8], list: List) -> Option<usize> {
         // byte-level scan computes from the line's bytes (task #236's S2).
         let glue = glue_at(tokens, i, word);
         let scored = scores_at(word, line, *end, place, list, next_word(tokens, i));
-        place = after(word, line, *end, place, glue);
+        // The gate reads the pairing **before** this word is applied: the
+        // closer's kind must match the block it closes, not the one the word
+        // itself leaves open behind it (task #309).
+        place = after(word, line, *end, place, glue, pairing.top());
         // A glued cond pair *inside* a token (`a||if` is one token) hides its
         // payload from the token walk: score the payload at the place the pair
         // sets, the same payload rule the byte scans apply via [`Glue`] (task
@@ -62,34 +92,36 @@ fn closing_index(tokens: &[Token], line: &[u8], list: List) -> Option<usize> {
         if let Some(payload) = pair_payload(word)
             && scores(payload, line, *end, place)
         {
-            depth += keyword_delta(payload, line, *end).unwrap_or(0);
-            if depth == 0 {
+            pairing.apply(payload, line, *end);
+            if !pairing.is_open() {
                 return Some(i);
             }
         }
-        let Some(delta) = scored.then(|| keyword_delta(word, line, *end)).flatten() else {
-            continue;
-        };
-        depth += delta;
-        if depth == 0 {
-            return Some(i);
+        if scored {
+            pairing.apply(word, line, *end);
+            if !pairing.is_open() {
+                return Some(i);
+            }
         }
     }
     None
 }
 
 /// The block's tokens up to and including its closing keyword; `err` when the
-/// walk never returns to depth 0. In a single-line block the heredoc bodies sit
-/// in the block text **after** the closer, so the tokens past it are body data,
-/// not block structure: every block builder truncates with this one rule, and
-/// the word-list rule of a builder that owns a list goes in with it.
+/// walk never empties its pairing. `open` is the closer this block requires
+/// (task #309), so the walk bails out with the builder's own message instead of
+/// ending at a closer of another kind. In a single-line block the heredoc bodies
+/// sit in the block text **after** the closer, so the tokens past it are body
+/// data, not block structure: every block builder truncates with this one rule,
+/// and the word-list rule of a builder that owns a list goes in with it.
 pub(crate) fn up_to_closing<'a>(
     tokens: &'a [Token],
     line: &[u8],
+    open: Closer,
     list: List,
     err: ParseError,
 ) -> Result<&'a [Token], Report<ParseError>> {
-    let Some(idx) = closing_index(tokens, line, list) else {
+    let Some(idx) = closing_index(tokens, line, open, list) else {
         bail!(err);
     };
     Ok(tokens.get(..=idx).ok_or(err)?)

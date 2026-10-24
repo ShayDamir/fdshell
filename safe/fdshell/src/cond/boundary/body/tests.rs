@@ -36,16 +36,16 @@ fn regions_of(line: &[u8], run_start: usize, nl: usize) -> (Vec<(usize, usize)>,
 }
 
 /// The region step of the run ending at `line`'s first newline, taken from
-/// index 0 with `block_depth` and an **empty** mode stack: every site is
+/// index 0 with the `in_block` flag and an **empty** mode stack: every site is
 /// unrecorded, so the scan answers with the [`Mode::Clause`] fallback.
-fn step_of(line: &[u8], block_depth: i32) -> Option<Step> {
-    step_of_modes(line, block_depth, &Modes::new())
+fn step_of(line: &[u8], in_block: bool) -> Option<Step> {
+    step_of_modes(line, in_block, &Modes::new())
 }
 
 /// The same step with a mode stack fed by `modes`.
-fn step_of_modes(line: &[u8], block_depth: i32, modes: &Modes) -> Option<Step> {
+fn step_of_modes(line: &[u8], in_block: bool, modes: &Modes) -> Option<Step> {
     let nl = line.iter().position(|&b| b == b'\n').unwrap_or(0);
-    step(line, 0, nl, block_depth, modes)
+    step(line, 0, nl, in_block, modes)
 }
 
 /// A mode stack fed with the words a scan scores, in order: each entry is the
@@ -85,7 +85,7 @@ fn semicolon_terminated_operator_line_finds_its_regions() {
     // The conservative fallback: the run's own site (15) was never recorded,
     // so the region is scanned and its `&&` (26) splits.
     assert_eq!(
-        step(&line[..], 13, 20, 1, &Modes::new()),
+        step(&line[..], 13, 20, true, &Modes::new()),
         Some(Step::Split(26, false)),
         "an unrecorded site keeps the region scanned"
     );
@@ -93,7 +93,7 @@ fn semicolon_terminated_operator_line_finds_its_regions() {
     // body, so the region is skipped whole and the scan resumes at 32.
     let body = modes_of(&line[..], &[IF, (6, Place::Command, 0)]);
     assert_eq!(
-        step(&line[..], 13, 20, 1, &body),
+        step(&line[..], 13, 20, true, &body),
         Some(Step::Skip(32)),
         "the body-position region is opaque"
     );
@@ -103,7 +103,7 @@ fn semicolon_terminated_operator_line_finds_its_regions() {
     let clause_text = b"if cat <<X; then\nbody && x\nX\nfi";
     let clause = modes_of(&clause_text[..], &[IF, (12, Place::Command, 0)]);
     assert_eq!(
-        step_of_modes(&clause_text[..], 1, &clause),
+        step_of_modes(&clause_text[..], true, &clause),
         Some(Step::Split(22, false)),
         "the clause-position region is scanned"
     );
@@ -133,7 +133,7 @@ fn statement_regions_are_skipped_whole() {
     // The step in statement context skips every region, landing on the last
     // delimiter line's newline (24).
     assert_eq!(
-        step_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", 0),
+        step_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", false),
         Some(Step::Skip(24)),
         "both regions skipped"
     );
@@ -157,7 +157,7 @@ fn block_regions_split_on_their_earliest_operator() {
     // closes the block and the tail after it splits (26).
     let line = b"if :; then cat <<Q\nz\nQ\nfi && echo tail";
     assert_eq!(
-        step_of(&line[..], 1),
+        step_of(&line[..], true),
         Some(Step::Skip(22)),
         "the region carries no operator"
     );
@@ -167,7 +167,7 @@ fn block_regions_split_on_their_earliest_operator() {
     // unrecorded and the conservative `Clause` fallback scans it — the
     // tripwire of the one-region-per-operator site/region alignment.
     assert_eq!(
-        step_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", 1),
+        step_of(b"cat <<A <<B\nq\nA\nb && c\nB\n", true),
         Some(Step::Split(18, false)),
         "the second body's `&&` (18)"
     );
@@ -175,21 +175,21 @@ fn block_regions_split_on_their_earliest_operator() {
     let clause = b"if cat <<A <<B; then\nq\nA\nb && c\nB\nfi";
     let scanned = modes_of(&clause[..], &[IF, (16, Place::Command, 0)]);
     assert_eq!(
-        step_of_modes(&clause[..], 1, &scanned),
+        step_of_modes(&clause[..], true, &scanned),
         Some(Step::Split(27, false)),
         "both clause regions are scanned, the second carries the `&&` (27)"
     );
     let body = b"if :; then cat <<A <<B\nq\nA\nb && c\nB\nfi";
     let opaque = modes_of(&body[..], &[IF, (6, Place::Command, 0)]);
     assert_eq!(
-        step_of_modes(&body[..], 1, &opaque),
+        step_of_modes(&body[..], true, &opaque),
         Some(Step::Skip(35)),
         "both body regions are skipped"
     );
     // A region that ends at the text end is claimed in block context, and an
     // unrecorded site keeps the pre-#304 scan: the body's `&&` (26) splits.
     assert_eq!(
-        step_of(b"if :; then cat <<X ;\nbody && x\nX\nfi", 1),
+        step_of(b"if :; then cat <<X ;\nbody && x\nX\nfi", true),
         Some(Step::Split(26, false)),
         "the conservative fallback of an unrecorded site"
     );
@@ -350,19 +350,19 @@ fn a_lone_ampersand_or_pipe_in_a_scanned_region_is_data() {
     // lone `&` (10) is met by the scan: the region is opaque, the scan resumes
     // on the delimiter line's newline (15).
     assert_eq!(
-        step_of(b"cat <<A\nq & r\nA\n", 1),
+        step_of(b"cat <<A\nq & r\nA\n", true),
         Some(Step::Skip(15)),
         "a lone `&` is not an operator"
     );
     // The lone `|` twin (a pipe stage written in a body line).
     assert_eq!(
-        step_of(b"cat <<A\nq | r\nA\n", 1),
+        step_of(b"cat <<A\nq | r\nA\n", true),
         Some(Step::Skip(15)),
         "a lone `|` is not an operator"
     );
     // The `&&` pair twin, same text: the pair is the split (18).
     assert_eq!(
-        step_of(b"cat <<A\nq && r\nA\n", 1),
+        step_of(b"cat <<A\nq && r\nA\n", true),
         Some(Step::Split(10, false)),
         "the pair is the region's operator"
     );
@@ -387,7 +387,7 @@ fn an_operator_inside_a_quote_or_substitution_is_data() {
     ] {
         let text = alloc::format!("cat <<A\n{body}\nA\n");
         assert_eq!(
-            step_of(text.as_bytes(), 1),
+            step_of(text.as_bytes(), true),
             Some(Step::Skip(text.len() - 1)),
             "the operator inside {body:?} is region data"
         );

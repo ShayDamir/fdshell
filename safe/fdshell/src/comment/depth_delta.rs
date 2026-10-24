@@ -24,9 +24,15 @@ fn word_step(
     place: &mut Place,
     pairing: &mut Pairing,
 ) -> i32 {
-    let delta = scores(frag, line, word_end, *place)
-        .then(|| pairing.apply(frag, line, word_end))
-        .unwrap_or(0);
+    // The closer row of [`after`] is gated by the pairing's innermost block,
+    // read **before** this word is applied: a closer pairs with the block it
+    // closes (task #309).
+    let top = pairing.top();
+    let delta = if scores(frag, line, word_end, *place) {
+        pairing.apply(frag, line, word_end)
+    } else {
+        0
+    };
     // The glued-pair payload (task #236's S2): a fragment carrying a cond
     // pair (`echo a&&if` is one whitespace unit) scores the keyword behind
     // the pair at the fragment's place — `echo a&&if` stays data (argument),
@@ -44,7 +50,7 @@ fn word_step(
     // The fragment is the run's *whitespace* unit: a glued pair is one
     // fragment, never a bare tail byte, so the fragment is never in a pair
     // ([`Glue::None`]).
-    *place = after(frag, line, word_end, *place, Glue::None);
+    *place = after(frag, line, word_end, *place, Glue::None, top);
     delta + payload_delta
 }
 
