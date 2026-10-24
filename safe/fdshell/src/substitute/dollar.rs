@@ -1,4 +1,5 @@
 mod at_star;
+mod name;
 
 use core::fmt::Write;
 use error_stack::{Report, ResultExt};
@@ -18,19 +19,6 @@ pub(crate) struct Region<'a> {
     pub mask: &'a [MaskBit],
     pub start: usize,
     pub limit: usize,
-}
-
-/// The region cap both name-shaped arms of the `$` arm obey: when the trigger
-/// byte's quote region ends at the `$`, no reference can start, so the arm
-/// consumes nothing and the `$` is a literal byte (`"$"v` is `$v`, `$"1"` is
-/// `$1` — the `$'…'`/`$"…"` reading, README accepted divergence). `true` means
-/// the literal byte is written and the arm is done.
-fn region_ends_at_dollar(limit: usize, out: &mut ShortCStr) -> bool {
-    if limit == 0 {
-        out.push(c"$");
-        return true;
-    }
-    false
 }
 
 pub(crate) fn dollar_subst(
@@ -63,41 +51,12 @@ pub(crate) fn dollar_subst(
         }
         // `$@`/`$*` inside a larger word: the arm lives in `dollar/at_star.rs`.
         Some(b'@') | Some(b'*') => at_star::expand(peek, cell, out, quoted, origin)?,
-        Some(c @ b'0'..=b'9') => {
-            // `$0` is the program name; `$1, $2, ... $N` are the positionals.
-            // The digit run is capped at the trigger byte's quote region
-            // exactly as a name is, so a region that ends at the `$` leaves no
-            // digit: the `$` is literal and the digits reach the loop as
-            // literal bytes — the `$"…"` family (`$"1"` is `$1`, bash `1`;
-            // `"$"12` is `$12`, bash parity).
-            if region_ends_at_dollar(limit, out) {
-                return Ok(());
-            }
-            peek.next();
-            let state = super::borrow_state(cell)?;
-            super::resolve::resolve_positional_index(c, peek, &state, out, limit)?;
-        }
+        // The two region-capped arms — `$<digit…>` and `$<name>` — live in
+        // `dollar/name.rs`: the region cap is checked there **before** the
+        // trigger byte is consumed, so the borrow of the state stays below it.
+        Some(c @ b'0'..=b'9') => name::positional(c, peek, cell, out, limit)?,
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
-            // A name never crosses out of its trigger byte's quote region
-            // (`"$v"bc` is the parameter `v` plus the literal `bc`), so a
-            // region that ends at the `$` leaves no name and the `$` is
-            // literal — the same rule `$'…'` and `$"…"` already follow.
-            if region_ends_at_dollar(limit, out) {
-                return Ok(());
-            }
-            let name_scs = super::percent::collect_name(peek, limit)?;
-            let state = super::borrow_state(cell)?;
-            if name_scs.eq_bytes(b"_") {
-                // `$_`: the `_` variable set by the shell after each command.
-                // Empty when unset, like every other parameter; `$_` is not
-                // nounset-checked (accepted divergence: bash never reports `_`
-                // unbound in `-c` mode, because `set -u` itself binds it).
-                if let Some(val) = state.var_value(&name_scs) {
-                    out.push(val);
-                }
-            } else {
-                state.resolve_var_name(&name_scs, out)?;
-            }
+            name::variable(peek, cell, out, limit)?
         }
         Some(b'?') => {
             peek.next();

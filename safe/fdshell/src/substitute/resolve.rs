@@ -49,7 +49,7 @@ impl ShellState {
 /// quote region, exactly as a variable name is capped (`"$1"2` is `$1` plus
 /// the literal `2`). `limit >= 1` here: the caller owns the `limit == 0`
 /// reading (a region that ends at the `$` expands nothing and leaves the `$`
-/// literal, `dollar::region_ends_at_dollar`), so `first_digit` is always
+/// literal, `dollar::name::region_ends_at_dollar`), so `first_digit` is always
 /// inside the region.
 pub(super) fn resolve_positional_index(
     first_digit: u8,

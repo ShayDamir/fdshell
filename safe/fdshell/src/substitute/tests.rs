@@ -3548,7 +3548,7 @@ fn dollar_at_region_end_is_literal() {
 #[test]
 fn positional_at_region_end_is_literal_and_consumes_nothing() {
     // `"$"12`: the byte after `$` starts a new region, so the digit arm obeys
-    // the name arm's cap (`region_ends_at_dollar`) — no digit is consumed, the
+    // the name arm's cap (`dollar/name.rs::region_ends_at_dollar`) — no digit is consumed, the
     // `$` is literal and the digits reach the loop as literal bytes: `$12`,
     // where bash's locale translation prints `12` (the `$"…"` family, README
     // accepted divergence). The positionals are bound, so the pin measures the

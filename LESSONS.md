@@ -1866,7 +1866,7 @@ sibling rule above, which is what makes that index trustworthy).
   that diverges). A pin typed from a plan table, not measured, pins a
   prediction.
 ## `dollar_subst`'s digit arm is load-bearing: a name arm that also accepts digits is not its equivalent
-`cargo mutants` deletes `substitute/dollar.rs`'s `Some(c @ b'0'..=b'9')` arm and the whole
+`cargo mutants` deletes `substitute/dollar/name.rs`'s `Some(c @ b'0'..=b'9')` arm (the arm moved out of `substitute/dollar.rs` on task #439) and the whole
 suite passes, and the arm looks redundant: the generic name arm below accepts digits
 (`is_ascii_alphanumeric`) and the shared lookup routes a **pure digit run** to the positional
 (`param_value` → `direct_value` → `is_param_name` → `positional_value`, `resolve/param_name.rs`),
