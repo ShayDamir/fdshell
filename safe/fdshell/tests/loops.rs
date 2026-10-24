@@ -1792,3 +1792,135 @@ fn c_style_for_braced_expansion_in_a_clause_is_the_arith_gap() {
         "task #397: {err}"
     );
 }
+
+/// Task **#306**: a `for` **word list** is read as words, so a keyword-shaped
+/// word of it never ends the block's span. The reported form is the first row:
+/// `for i in done; do echo x; break; done; echo after` prints `x`/`after` at
+/// rc 0, where `master` answered `expected 'do'` (rc 1) — the span scan scored
+/// the list's `done` as the block's closer, so the block text stopped before
+/// its own `do`. Every expectation below is bash 5.3.9's own output, measured
+/// on this machine: the closer-shaped list words (`done`, `fi`, `esac`), the
+/// opener-shaped ones (`then`, `do`), the brace words (`for i in { 1 2` is the
+/// three words `{`, `1`, `2`; a lone `}` is a word), the nested shapes (a `for`
+/// inside a `while`/`if`/`for`/`case` body, a pipeline stage, a cond part — the
+/// enclosing block's list is a list too), the block tails (`&& echo y`, `| cat`,
+/// a trailing comment, `&`), the newline spelling, the multi-line block, a
+/// function body, and the redirect written on the closing keyword.
+///
+/// Every row runs under [`run_bounded`]: a closer rule that stops scoring can
+/// leave a loop body unterminated, so a regression must surface as that helper's
+/// diagnostic panic and never as a bare timeout. The `case` **pattern** list is
+/// the opposite place (`esac` terminates it, so `case x in esac` is a complete
+/// `case`), and its closer-shaped-word rows stay task **#310**'s — see
+/// `tests/heredoc.rs::closer_shaped_word_list_words_end_the_block_span_until_310`.
+#[test]
+fn for_list_words_including_keyword_shaped_ones_are_plain_words() {
+    for (script, want) in [
+        (
+            "for i in done; do echo x; break; done; echo after",
+            "x\nafter\n",
+        ),
+        ("for i in done; do echo \"$i\"; done", "done\n"),
+        ("for i in fi; do echo \"$i\"; done", "fi\n"),
+        ("for i in esac; do echo \"$i\"; done", "esac\n"),
+        ("for i in done done; do echo \"$i\"; break; done", "done\n"),
+        ("for i in a done b; do echo \"$i\"; done", "a\ndone\nb\n"),
+        ("for i in then; do echo \"$i\"; done", "then\n"),
+        ("for i in do; do echo \"$i\"; break; done", "do\n"),
+        (
+            "while :; do for i in done; do echo \"$i\"; break; done; break; done",
+            "done\n",
+        ),
+        (
+            "if :; then for i in fi; do echo \"$i\"; break; done; fi",
+            "fi\n",
+        ),
+        (
+            "for i in done; do for j in done; do echo \"$j\"; break; done; break; done",
+            "done\n",
+        ),
+        (
+            "case x in x) for i in done; do echo \"$i\"; break; done ;; esac",
+            "done\n",
+        ),
+        (
+            "echo a | for i in done; do echo \"$i\"; break; done",
+            "done\n",
+        ),
+        (
+            "true && for i in done; do echo \"$i\"; break; done",
+            "done\n",
+        ),
+        ("for i in done\n do echo \"$i\"; done", "done\n"),
+        ("for i in done\ndo echo \"$i\"\ndone", "done\n"),
+        ("for i in { 1 2; do echo \"$i\"; done", "{\n1\n2\n"),
+        (
+            "for i in }; do echo x; break; done; echo after",
+            "x\nafter\n",
+        ),
+        ("for i in done; do echo x; break; done && echo y", "x\ny\n"),
+        ("for i in done; do echo x; break; done | cat", "x\n"),
+        ("for i in done; do echo x; break; done # c && echo y", "x\n"),
+        ("for i in done; do echo x; break; done &", "x\n"),
+        (
+            "for i in done; do echo a; break; done && for j in fi; do echo b; break; done",
+            "a\nb\n",
+        ),
+        ("f() { for i in done; do echo \"$i\"; done }; f", "done\n"),
+        (
+            "until :; do for i in done; do echo \"$i\"; break; done; break; done",
+            "",
+        ),
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: stderr={err}");
+    }
+    // The block's redirect sits on the closing keyword, and the file carries the
+    // list word the loop iterated (the `{ …; } > f` twin lives in
+    // `tests/block_redirect.rs`).
+    let dir = scratch("forlist");
+    let (out, err, rc) = run_bounded(&format!(
+        "for i in done; do echo \"$i\"; done > {}/ff",
+        dir.display()
+    ));
+    assert_eq!((out.as_str(), rc), ("", 0), "stderr={err}");
+    assert_eq!(
+        std::fs::read(dir.join("ff")).unwrap(),
+        b"done\n".to_vec(),
+        "the list word is the loop's only iteration"
+    );
+}
+
+/// The same shapes keep their **own messages** where bash stops at rc 2 (the
+/// rc-1-vs-2 family README pins, task #294's unclosed-construct bullet): the
+/// `esac` that closes a `for` is not a closer, so the block reports
+/// `expected 'done'`, and an unclosed `for i in done` reports its missing
+/// closer — `master` said `expected 'do'` for both, because its span scan had
+/// already ended the block at the list word.
+///
+/// The last three rows are the **seed boundary**: the block scan is seeded with
+/// a word list for a `for` opener *only*. An `if`/`while` condition's
+/// closer-shaped word is an argument (bash: rc 2), and `case`'s **pattern** list
+/// keeps `esac` as its terminator, so all three keep their own missing-clause /
+/// missing-closer report (the `case` row is task **#310**'s). They are also the
+/// `kw_len == FOR_LEN` mutants' pins: seeding every opener would run these
+/// three rows, and seeding none would break
+/// [`for_list_words_including_keyword_shaped_ones_are_plain_words`].
+#[test]
+fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only() {
+    for (script, want) in [
+        ("for i in esac; do echo x; break; esac", "expected 'done'"),
+        ("for i in done", "'for' is missing its closing 'done'"),
+        (
+            "for i in done; do echo x",
+            "'for' is missing its closing 'done'",
+        ),
+        ("if done; then echo T; fi", "missing 'then'"),
+        ("while done; do echo W; break; done", "expected 'do'"),
+        ("case done in esac", "case: missing 'esac'"),
+    ] {
+        let (_out, err, rc) = run_bounded(script);
+        assert_eq!(rc, 1, "{script}: stderr={err}");
+        assert!(err.contains(want), "{script}: stderr={err}");
+    }
+}

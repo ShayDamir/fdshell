@@ -11,7 +11,7 @@ struct R {
 fn scan(line: &[u8], start: usize) -> R {
     let mut quotes = Quotes::new();
     let mut s = start;
-    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, 1);
+    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, 1, Place::Command);
     R {
         end,
         closed,
@@ -350,7 +350,7 @@ fn run_starting_mid_quote_ignores_closer() {
         single: false,
     };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"\"fi", 1, &mut quotes, &mut s, 1);
+    let (_end, closed) = scan_block(b"\"fi", 1, &mut quotes, &mut s, 1, Place::Command);
     assert!(!closed, "fi inside an open quote must not close the block");
     assert!(quotes.double, "the quote must stay open");
 }
@@ -494,7 +494,7 @@ fn run_starting_mid_span_ignores_closer() {
         single: true,
     };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"'fi", 1, &mut quotes, &mut s, 1);
+    let (_end, closed) = scan_block(b"'fi", 1, &mut quotes, &mut s, 1, Place::Command);
     assert!(!closed, "fi inside an open span must not close the block");
     assert!(quotes.single, "the span must stay open");
 }
@@ -524,7 +524,7 @@ fn run_starting_quoted_never_scores_a_keyword() {
         (mid_backtick, true, "mid-backtick"),
     ] {
         assert_eq!(
-            depth_delta::depth_delta(b"fi", b"fi", 0, quotes, in_backtick),
+            depth_delta::depth_delta(b"fi", b"fi", 0, quotes, in_backtick, Place::Command,),
             0,
             "{what}: a closer written in a run that starts quoted is data"
         );
@@ -550,21 +550,21 @@ fn run_starting_quoted_never_scores_a_keyword() {
 fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
     let line = b"echo 'q' done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
         0,
         "the span swallows the rest of the run, so `done` never scores"
     );
     // Without the span the same run scores 0 too, for the *position* reason.
     let line = b"echo q done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
         0,
         "the `done` behind a command word is an argument"
     );
     // A run that *starts* at the closer (command position) still scores it.
     let line = b"done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
         -1,
         "a closer at the run start is in command position"
     );
@@ -581,14 +581,14 @@ fn pair_payload_rides_the_run_sum() {
     // `a&&if` itself is no keyword, and the block's own words net back to 1.
     let line = b"a&&if :; then :; fi";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
         1,
         "the payload behind the pair scores once, at the run's current place"
     );
     // A payload that closes carries the closing sign.
     let line = b"a&&done";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
         -1,
         "a glued closer behind the pair closes the block"
     );
@@ -597,8 +597,59 @@ fn pair_payload_rides_the_run_sum() {
     // `after` hands to the next fragment.
     let line = b"echo a&&if :; then :; fi";
     assert_eq!(
-        depth_delta::depth_delta(line, line, 0, Quotes::new(), false),
+        depth_delta::depth_delta(line, line, 0, Quotes::new(), false, Place::Command),
         0,
         "a payload behind a command word is an argument"
     );
+}
+
+/// [`scan_seed`]: [`scan_block`] with an explicit seed [`Place`].
+fn scan_seed(line: &[u8], start: usize, seed: Place) -> R {
+    let mut quotes = Quotes::new();
+    let mut s = start;
+    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, 1, seed);
+    R {
+        end,
+        closed,
+        quote: quotes.double,
+        start: s,
+    }
+}
+
+/// The block scan's **word-list seed** (task #306): a `for` block's span scan
+/// starts just past the opener, so the block's own word list has no opener word
+/// for the scorer and the caller seeds the scan with [`Place::Words`]. The
+/// closer-shaped list word (`for i in done`) then no longer ends the span — the
+/// scan reaches the block's real `done` (end/start `26`, the end of input). The
+/// same text with a command seed is the pre-#306 scan: the list word's
+/// separator ends the span (end/start `14`).
+///
+/// And the seed is read by **the run the scan begins in** only: a word list
+/// never crosses a separator, so the closer-shaped word of a later run scores
+/// and closes the block (last row).
+#[test]
+fn a_seeded_word_list_span_reaches_the_real_closer() {
+    let line = b"for i in done; do :; done";
+    let seeded = scan_seed(line, 3, Place::Words);
+    assert!(seeded.closed, "the block closes on its own `done`");
+    assert_eq!(
+        (seeded.end, seeded.start),
+        (26, 26),
+        "the span covers the whole statement, not the list word's run"
+    );
+    let unseeded = scan_seed(line, 3, Place::Command);
+    assert!(unseeded.closed, "the list word *is* a closer here");
+    assert_eq!(
+        (unseeded.end, unseeded.start),
+        (14, 14),
+        "the list word's separator ends the span (the pre-#306 scan)"
+    );
+    // First-run-only: the seed belongs to the list; every later run starts a
+    // command word, so the second run's `done` scores and closes the block.
+    let two_runs = scan_seed(b"i in done; done", 0, Place::Words);
+    assert!(
+        two_runs.closed,
+        "the seed reached the run after the separator"
+    );
+    assert_eq!((two_runs.end, two_runs.start), (16, 16));
 }

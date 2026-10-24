@@ -428,9 +428,13 @@ fn the_restore_undoes_an_exec_in_the_body() {
 
 /// A closer-shaped word inside a block's own word data stays word data, with a
 /// redirection on the block — glued closer included: the body's `echo done` and
-/// a `done` pattern are words, not the closer. In `for`'s word list the glued
-/// spelling `for x in done>f` is the shape bash rejects outright, and fdshell
-/// rejects it too (rc 1 by the house parse-error convention).
+/// a `done` pattern are words, not the closer. The `for` **word list** is word
+/// data too (task #306), and a list word **glued to an operator** (`done>f`,
+/// `done|cat`, `done&&true`) is word data here: bash rejects those spellings
+/// outright (rc 2), fdshell runs the statement — the accepted divergence family
+/// `tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`
+/// (`for i in a && b`) already belongs to, and the rows below are its measured
+/// values, not bash's.
 #[test]
 fn closer_shaped_words_stay_word_data() {
     let dir = Scratch::new();
@@ -451,17 +455,52 @@ fn closer_shaped_words_stay_word_data() {
         "the `done` pattern does not match `x`"
     );
 
-    // A closer-shaped word of the `for` word list is the word-list rule's own
-    // gap (task #310): the glued spelling is a bash syntax error, which fdshell
-    // reports as its own parse error, and the spaced spelling
-    // (`for x in done; do echo $x; done > f`) is rejected on `master` too.
+    // The `for` list's glued `done>f` is a list word: the block span reaches the
+    // real `done`, the list word's `>` opens nothing, and the closer's own
+    // redirect files the body (bash stops at rc 2 and opens nothing).
     let dir = Scratch::new();
     let o = run(&dir, "for x in done>f; do echo A; done>f2");
-    assert_eq!(rc(&o), Some(1), "stderr={}", err(&o));
+    assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
     assert!(
-        file(&dir, "f").is_none() && file(&dir, "f2").is_none(),
-        "bash rejects the statement (`syntax error near unexpected token '>'`) and opens nothing"
+        file(&dir, "f").is_none(),
+        "the list word's `>f` is word data: nothing is opened"
     );
+    assert_eq!(
+        file(&dir, "f2"),
+        Some(b"A\n".to_vec()),
+        "`master` rejected the whole statement (`expected 'do'`, rc 1)"
+    );
+
+    // The family, each row measured against bash 5.3.9: every glued shape runs
+    // (rc 0, `A`) where bash stops at rc 2, and the operator-shaped list words
+    // (`>f`, `2>/dev/null`, `done2>f`, `<f`) are the pre-existing rows of the
+    // same family — unchanged by task #306, listed so the family is one place.
+    // The spaced spelling is bash parity: the closer's redirect files the list
+    // word the loop iterated.
+    for (script, want, want_f) in [
+        ("for x in done>f; do echo A; done", "A\n", None),
+        ("for x in done|cat; do echo A; break; done", "A\n", None),
+        ("for x in done&&true; do echo A; break; done", "A\n", None),
+        ("for x in >f; do echo A; break; done", "A\n", None),
+        ("for x in 2>/dev/null; do echo A; break; done", "A\n", None),
+        ("for x in done2>f; do echo A; break; done", "A\n", None),
+        ("for x in <f; do echo A; break; done", "A\n", None),
+        (
+            "for x in done; do echo A; break; done > f",
+            "",
+            Some(b"A\n".to_vec()),
+        ),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            (want, Some(0)),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert_eq!(file(&dir, "f"), want_f, "{script}");
+    }
 
     // The closer is the **last** token the closer rule matches (that is what
     // makes the `echo done` body above a word), so in the fdshell-only event

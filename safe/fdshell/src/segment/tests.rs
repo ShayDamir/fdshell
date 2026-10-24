@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
+use crate::keywords::Place;
 use crate::scan::Quotes;
 use alloc::vec;
 
@@ -408,6 +409,7 @@ fn scan_block_detects_fi_after_comment_outside_quotes() {
         &mut quotes,
         &mut start,
         depth,
+        Place::Command,
     );
     assert!(closed); // fi IS detected after comment, block should be closed
     assert!(!quotes.double); // should end with quote state = false
@@ -468,6 +470,7 @@ fn scan_block_semicolon_inside_dollar_paren() {
         &mut quotes,
         &mut start,
         depth,
+        Place::Command,
     );
     assert!(closed);
     assert_eq!(end, 23);
@@ -495,6 +498,7 @@ fn scan_block_plain_paren_inside_dollar_paren() {
         &mut quotes,
         &mut start,
         depth,
+        Place::Command,
     );
     assert!(closed);
     assert_eq!(end, 29);
@@ -1648,5 +1652,42 @@ fn a_heredoc_body_hides_a_midrun_opener_from_the_stamp() {
         }
         Segment::Block { .. } => panic!("a here-doc statement"),
         Segment::AsyncInvalid => panic!("a valid split"),
+    }
+}
+
+/// The **word-list seed** of the run-start block span (task #306): a
+/// closer-shaped word of a block's own `for` list is word data, so the span
+/// covers the whole statement and the scan resumes past the block's real
+/// `done`. `master` ended the span at the list word (`closed: true` at the
+/// `;` after `done`), which is what made the statement unparseable. Unclosed,
+/// the same seed leaves the block open (`closed: false`) — the REPL buffers the
+/// line. The mid-run cond-part and pipeline-stage twins are pinned in
+/// [`super::midrun`]'s tests.
+#[test]
+fn scan_for_block_with_a_closer_shaped_list_word() {
+    let line = b"for i in done; do echo x; done";
+    let segments = scan_segments(line, false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block {
+            block_start,
+            end_pos,
+            closed,
+            bodies: _,
+        } => {
+            assert_eq!(*block_start, 0);
+            assert_eq!(*end_pos, 30, "the whole statement is the span");
+            assert!(*closed);
+        }
+        Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
+    }
+    // Unclosed: the list word does not close the block, so the block stays open.
+    let segments = scan_segments(b"for i in done", false);
+    assert_eq!(segments.len(), 1);
+    match &segments[0] {
+        Segment::Block { closed, .. } => assert!(!*closed, "the REPL's continuation signal"),
+        Segment::Statement { .. } => panic!("expected Block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }

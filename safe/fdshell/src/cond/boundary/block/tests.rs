@@ -205,7 +205,9 @@ fn command_position_keywords_still_open_the_block() {
 /// in command position, a closer behind a command word (`echo done`) is
 /// data, a glued `case` clause `)` starts the arm body in command position,
 /// and a `case` list scores a closer (`esac`) but no opener (`if)` is a
-/// pattern word, killing "closers and openers share one gate"). Braces are
+/// pattern word, killing "closers and openers share one gate"). A `for` word
+/// list is the third place ([`Place::Words`], task #306): its opener scores,
+/// and nothing behind it does. Braces are
 /// scored by neither gate — the group arm counts them with the same clause
 /// rule — so an argument brace (`echo {`, `echo }`) stays word data and
 /// `echo { && echo b` keeps splitting (task #236).
@@ -239,6 +241,26 @@ fn in_block_words_follow_the_clause_rule() {
     // `in if)`: the glued form is a pattern word, not an opener.
     let l = b"in if)";
     assert_eq!(word_delta(l, 3, 1, 0, Place::Pattern), (0, Place::Command));
+    // A `for` **word list** (task #306): the opener scores and puts every word
+    // behind it at [`Place::Words`], where nothing scores — not the
+    // closer-shaped `done`, not the `in` (which opens the `case` list's
+    // [`Place::Pattern`] one row above, the asymmetry of the two list kinds),
+    // not a brace word. The place is sticky; only the list's `do` leaves it.
+    let l = b"for i in done; do";
+    assert_eq!(word_delta(l, 0, 1, 0, Place::Command), (1, Place::Words));
+    assert_eq!(word_delta(l, 4, 1, 0, Place::Words), (0, Place::Words));
+    assert_eq!(word_delta(l, 6, 1, 0, Place::Words), (0, Place::Words));
+    assert_eq!(
+        word_delta(l, 9, 1, 0, Place::Words),
+        (0, Place::Words),
+        "a closer-shaped word of the list is word data"
+    );
+    assert_eq!(word_delta(l, 15, 1, 0, Place::Words), (0, Place::Command));
+    // The brace rule is unchanged by the list: this scan scores braces at
+    // **no** place (the group arm counts them), and the list place keeps the
+    // place sticky.
+    let l = b"for i in {";
+    assert_eq!(word_delta(l, 9, 1, 0, Place::Words), (0, Place::Words));
     // `x) echo`: the glued clause `)` starts the arm body in command position.
     let l = b"x) echo";
     assert_eq!(word_delta(l, 0, 1, 0, Place::Data), (0, Place::Command));

@@ -462,6 +462,45 @@ fn glued_closer_shapes_buffer_in_the_repl() {
     }
 }
 
+/// Task **#306**: an unclosed `for i in done` is an **unclosed block**, not a
+/// parse error on the first line. The list's closer-shaped word no longer ends
+/// the block span, so the line is incomplete and the REPL buffers it under `> `
+/// (task #294's buffering rule) until the closer arrives, and the completed
+/// statement runs. `master` answered the first line with `expected 'do'` and
+/// then ran `do` and `done` as commands of their own (the two
+/// `failed to resolve command path` reports). At EOF the buffer is executed and
+/// reports its missing closer — bash prints its `unexpected end of file` report
+/// and exits 2, fdshell reports the parse error and exits 0 (the documented
+/// REPL rc-1-vs-2 family, README).
+#[test]
+fn for_with_a_closer_shaped_list_word_buffers_until_the_closer() {
+    let (out, err, code) = run_repl("for i in done\ndo echo \"$i\"; done\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert!(
+        out.contains("> "),
+        "the first line was dispatched, not buffered: {out:?}"
+    );
+    assert_eq!(
+        out.replace(PROMPT, "").replace("> ", ""),
+        "done\n",
+        "the loop iterates over the list word: {out:?}"
+    );
+    assert!(!err.contains("parse error"), "parse error: {err:?}");
+    // EOF mid-buffer: the buffer is executed and reports the missing closer.
+    let (out, err, code) = run_repl("for i in done\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert!(
+        out.replace(PROMPT, "").contains("> "),
+        "no continuation prompt: {out:?}"
+    );
+    assert!(
+        err.contains("'for' is missing its closing 'done'"),
+        "the buffer was not executed as an unclosed block: {err:?}"
+    );
+}
+
 /// Task #294: an **unclosed mid-run construct** (a `{ …` cond part, a keyword
 /// block after `&&` or behind `|`, a `true && f() {` definition) is skipped
 /// whole inside its run, so the scan stamps its closedness on the statement

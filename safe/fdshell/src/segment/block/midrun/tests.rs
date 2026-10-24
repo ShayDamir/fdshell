@@ -367,3 +367,35 @@ fn the_unclosed_span_marks_the_book_open() {
         "an argument-position keyword is word data"
     );
 }
+
+/// The mid-run span takes the **same word-list seed** the run-start span is
+/// seeded with (task #306, [`list_seed`]): a closer-shaped word of the `for`
+/// list is word data, so the span is the whole block. `master` ended the span
+/// at the list word, which left the run split in front of the block's own `do`.
+///
+/// The seed is `for`-only: an unclosed `for i in done` opens the book's mid-run
+/// flag (the REPL's continuation signal), while a `while` whose *condition*
+/// word is closer-shaped keeps the old span end — that word is an argument, and
+/// the row is the seed's boundary as well as a mutant pin.
+#[test]
+fn a_for_list_word_never_ends_the_mid_run_span() {
+    for tail in [
+        b"for i in done; do :; done".as_slice(),
+        b"for i in done; do echo $i; break; done".as_slice(),
+    ] {
+        let line = [b"x && "[..].to_vec(), tail[..].to_vec()].concat();
+        assert_eq!(
+            midrun(&line),
+            Some(line.len()),
+            "{line:?}: the whole run is one span"
+        );
+    }
+    // The stage arm (`block::stage`) reuses this span verbatim (task #292), so
+    // the pair is the block's own: closed, resuming at its last `done`.
+    let line = b"for i in done; do :; done";
+    assert_eq!(span_at(line, 0), Some((line.len(), true)));
+    // The seed's boundary: `for` opens the flag when unclosed, `while` does not.
+    assert!(flag(b"x && for i in done"));
+    assert!(!flag(b"x && while done; do :; done"));
+    assert!(!flag(b"x && case done in done) :;; esac"));
+}

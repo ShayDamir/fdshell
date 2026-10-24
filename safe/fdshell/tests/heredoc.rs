@@ -1958,21 +1958,37 @@ fn closer_shaped_pattern_words_of_for_and_case_do_not_close_the_block() {
     assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err:?}");
 }
 
-/// Task #273's third measured divergence, pinned as fdshell's own behaviour
-/// (identical on `master`): the **span** scan ends a block's text at a
-/// closer-shaped word of its word list, so `done` never becomes a `for` word and
-/// `done)` never becomes a clause pattern — rc 1, where bash runs both
-/// (word lists are word lists). Task **#310** owns the span-level rule; when it
-/// lands these rows flip to bash parity and the name drops its `310` suffix.
+/// Task #306 landed the **`for`** half of the span rule this pin used to carry:
+/// a closer-shaped word of a `for` **word list** is word data, so the block's
+/// span reaches its real `done` and the loop iterates over the word (bash's
+/// answer, rc 0). The here-doc twin pins the same shape with a body region: the
+/// list's `done` is a word, the clause keeps its region and the body prints.
+/// `master` rejected both with `expected 'do'`, rc 1.
+#[test]
+fn closer_shaped_for_word_list_words_reach_the_real_closer() {
+    let (out, err, code) = run("for x in done; do echo \"$x\"; done");
+    assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err}");
+    let (out, err, code) = run("for x in done; do cat <<T; echo body; done\nT\n");
+    assert_eq!((out.as_str(), code), ("body\n", 0), "stderr={err}");
+}
+
+/// Task #273's third measured divergence, now the **`case`** half only, pinned
+/// as fdshell's own behaviour (identical on `master`): the **span** scan ends a
+/// block's text at a closer-shaped word of the `case` **pattern** list, so
+/// `done)` never becomes a clause pattern and a lone `done` list never reaches
+/// its `esac` — rc 1, where bash runs every row (a pattern list is a word list
+/// there too). Task **#310** owns the `case` seed of the span rule (the `for`
+/// half landed with #306, see
+/// [`closer_shaped_for_word_list_words_reach_the_real_closer`]); when #310 lands
+/// these rows flip to bash parity and the name drops its `310` suffix.
 #[test]
 fn closer_shaped_word_list_words_end_the_block_span_until_310() {
-    let (_out, err, code) = run("for x in done; do echo \"$x\"; done");
-    assert_eq!(code, 1, "bash prints done, rc 0");
-    assert!(err.contains("expected 'do'"), "stderr={err:?}");
     let (_out, _err, code) = run("case done in done) echo p;; esac");
     assert_eq!(code, 1, "bash prints p, rc 0");
     let (_out, _err, code) = run("case done in done) cat <<T;; esac\nbodyT\nT");
     assert_eq!(code, 1, "bash prints bodyT, rc 0");
+    let (_out, _err, code) = run("case done in esac");
+    assert_eq!(code, 1, "bash runs it, rc 0");
 }
 
 /// Bash applies no brace expansion to a `case` clause pattern, and fdshell

@@ -151,6 +151,20 @@ fn word_lists_are_walked_as_words() {
             );
         }
     }
+    // The nested half (task #306): a `for` in **command position** puts the
+    // words behind it at [`Place::Words`], and the gate of [`scores`] gates the
+    // list's words out — so the inner list's closer-shaped `done` is a word and
+    // the walk closes the **enclosing** block at its own `done` (token 14). The
+    // top-level rows above read the builder-side [`List`] rule; this row is the
+    // place rule, and it needs no [`List`] argument at all.
+    let line = b"while :; do for i in done; do :; done; done";
+    let t = toks(line);
+    assert_eq!(
+        closing_keyword_index(&t, line),
+        Some(14),
+        "{line:?}: {}",
+        t.len()
+    );
 }
 
 /// Task #301's scan-side arm: a closer in command position restarts command

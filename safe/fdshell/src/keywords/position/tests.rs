@@ -1,9 +1,11 @@
 //! Unit pins for the shared command-position rule: every [`Place`] transition
-//! of [`after`], every gate arm of [`scores`], and the asymmetries the rule
-//! encodes (opener vs closer, `case` list vs argument, brace carve-out,
-//! `time [-p]` transparency).
+//! of [`after`], every gate arm of [`scores`] (the two word-list places of
+//! [`list`] included), and the asymmetries the rule encodes (opener vs closer,
+//! `case` list vs `for` list vs argument, brace carve-out, `time [-p]`
+//! transparency).
 
-use super::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, scores};
+use super::list;
+use super::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, list_opener, scores};
 use crate::keywords::first_word_end;
 
 /// `after` on the whole word: `word_end` sits just past it, outside a cond
@@ -85,6 +87,142 @@ fn in_moves_the_place_to_pattern() {
     assert_eq!(after_word(b"in", Place::Data), Place::Pattern);
 }
 
+/// A `for` in **command position** opens its own **word list**
+/// ([`Place::Words`], task #306): the opener, not `in`, is the word that tells
+/// the two list kinds apart. The row is command-position-only — in a `case`
+/// pattern list `for` is a pattern word, behind data it is an argument — and it
+/// reads the whole word, so a quoted `"for"`, a `forx`-shaped word and the
+/// arithmetic `for ((…))` (which reaches the row as one glued word) stay out.
+#[test]
+fn a_for_in_command_position_opens_a_word_list() {
+    assert_eq!(
+        after_word(b"for", Place::Command),
+        Place::Words,
+        "`for` in command position opens a word list"
+    );
+    assert_eq!(
+        after_word(b"for", Place::Pattern),
+        Place::Data,
+        "`for` in a `case` pattern list is a pattern word"
+    );
+    assert_eq!(
+        after_word(b"for", Place::Data),
+        Place::Data,
+        "`for` as an argument is data"
+    );
+    assert_eq!(
+        after_word(b"\"for\"", Place::Command),
+        Place::Data,
+        "a quoted `for` is a word"
+    );
+    assert_eq!(
+        after_word(b"foreish", Place::Command),
+        Place::Data,
+        "`foreish` is no keyword"
+    );
+    // The arithmetic `for ((…))` reaches the row as the one glued word
+    // `for((…))`, so it opens no list place; the word's own trailing `)` is the
+    // `case`-clause-`)` row of [`glued_case_clause_close_moves_the_place_to_command`],
+    // which it keeps.
+    assert_eq!(
+        after_word(b"for((i=0;i<2;i++))", Place::Command),
+        Place::Command,
+        "the arithmetic `for ((…))` opens no list place"
+    );
+}
+
+/// The list place is **sticky**: every keyword-shaped word of a `for` list
+/// keeps it, and only the separator that ends the list (the `;`/newline of its
+/// run, the `&&`/`||` of the accepted divergence, a substitution's paren) or
+/// the `do` that opens the body leaves it (task #306). One assertion per arm of
+/// [`list::step`], so each arm is a killable mutant.
+#[test]
+fn a_for_list_keeps_its_place_for_every_word() {
+    for word in [
+        b"done".as_slice(),
+        b"fi",
+        b"esac",
+        b"then",
+        b"else",
+        b"echo",
+        b"{ ",
+        b"}",
+        b"in",
+        b"a&&b",
+    ] {
+        assert_eq!(
+            after_word(word, Place::Words),
+            Place::Words,
+            "the list word {word:?} keeps the list"
+        );
+    }
+    for word in [b"do".as_slice(), b";", b"&&", b"||", b"&", b"(", b")", b""] {
+        assert_eq!(
+            after_word(word, Place::Words),
+            Place::Command,
+            "{word:?} leaves the list"
+        );
+    }
+    // A cond pair's head/tail word is no arm: the accepted `for i in a && b`
+    // divergence rides the sticky place, and a `do` glued behind a pair is a
+    // pair payload, judged by the pair's rule, not by the list's.
+    for glue in [Glue::Head, Glue::Tail] {
+        assert_eq!(
+            after_word_glue(b"&&", Place::Words, glue),
+            Place::Words,
+            "a glued pair keeps the list ({glue:?})"
+        );
+        assert_eq!(
+            after_word_glue(b"do", Place::Words, glue),
+            Place::Words,
+            "a glued `do` is no list terminator ({glue:?})"
+        );
+    }
+}
+
+/// The gate at a `for` word list scores **nothing**: no opener, no closer, no
+/// brace word, not the event-case `wait` (bash runs `for i in done`,
+/// `for i in esac`, `for i in { 1 2` and `for i in }` as words — task #306).
+/// The gate is the *place*, which is why the `case` list keeps its opposite
+/// rule (`case x in esac` is a complete `case`) and why the list gate runs
+/// before the brace carve-out of [`brace_words_are_ungated`].
+#[test]
+fn nothing_scores_at_a_for_word_list() {
+    for word in [
+        b"for".as_slice(),
+        b"if",
+        b"while",
+        b"done",
+        b"fi",
+        b"esac",
+        b"{ ",
+        b"}",
+        b"wait",
+    ] {
+        assert!(
+            !scores_word(word, Place::Words),
+            "the list word {word:?} never scores"
+        );
+    }
+    // The place, not the word: the event-case `wait` (a pattern keyword behind
+    // it) opens a block in command position and is word data in a list.
+    let event = b"wait\n readable %rd)";
+    assert!(scores(event, event, 4, Place::Command));
+    assert!(!scores(event, event, 4, Place::Words));
+    // The two list places are the asymmetry: the same closer scores at the
+    // `case` list, never at a `for` list.
+    assert!(scores_word(b"esac", Place::Pattern));
+    assert!(!scores_word(b"esac", Place::Words));
+    // [`list::scores`] gates the list place and nothing else.
+    assert!(!list::scores(Place::Words));
+    for place in [Place::Command, Place::Pattern, Place::Data] {
+        assert!(
+            list::scores(place),
+            "{place:?} is not gated by the list rule"
+        );
+    }
+}
+
 /// The keyword rows `after` reads are **one set** with the cond-boundary scan's
 /// clause/body mode stack (`cond/boundary/block/clause`): each predicate answers
 /// exactly the words of its own arm, and every other word — including a `time`
@@ -95,6 +233,7 @@ fn the_clause_keyword_set_is_one_set_with_after() {
         assert!(body_keyword(word), "{word:?} opens a body");
         assert!(!clause_keyword(word), "{word:?} opens no clause");
         assert!(!list_keyword(word), "{word:?} opens no word list");
+        assert!(!list_opener(word), "{word:?} opens no list-owning block");
         assert_eq!(
             after_word(word, Place::Command),
             Place::Command,
@@ -107,7 +246,14 @@ fn the_clause_keyword_set_is_one_set_with_after() {
     assert!(list_keyword(b"in"), "`in` opens a word list");
     assert!(!body_keyword(b"in"), "`in` opens no body");
     assert_eq!(after_word(b"in", Place::Command), Place::Pattern);
-    // None of the three reads anything else: the openers and closers are
+    assert!(list_opener(b"for"), "`for` owns a word list");
+    assert!(!list_keyword(b"for"), "`for` is no list keyword");
+    assert_eq!(
+        after_word(b"for", Place::Command),
+        Place::Words,
+        "`after` reads `for` through the same row"
+    );
+    // None of the four reads anything else: the openers and closers are
     // `keyword_delta`'s rows, and a word that merely *starts* like a keyword
     // stays out of the set.
     for word in [
@@ -122,10 +268,13 @@ fn the_clause_keyword_set_is_one_set_with_after() {
         b"int",
         b"elifx",
         b"time then",
+        b"forx",
+        b"for((i=0;i<2;i++))",
     ] {
         assert!(!body_keyword(word), "{word:?} is no body keyword");
         assert!(!clause_keyword(word), "{word:?} is no clause keyword");
         assert!(!list_keyword(word), "{word:?} is no word-list keyword");
+        assert!(!list_opener(word), "{word:?} opens no list-owning block");
     }
 }
 
@@ -266,16 +415,18 @@ fn pair_payloads_take_the_place_the_pair_sets() {
     );
 }
 
-/// Ordinary words, `for`/`case` (their lists/conditions are read by the `in`
-/// and clause rules, not by them) are arguments. The closers are *not* in this
-/// list: [`a_closer_in_command_position_restarts_command_position`] pins their
-/// own row.
+/// Ordinary words, `case` (its lists/conditions are read by the `in` and
+/// clause rules, not by it) are arguments. `for` is **not** in this list: in
+/// command position it owns a word list, pinned by
+/// [`a_for_in_command_position_opens_a_word_list`]. The closers are *not* in
+/// this list either:
+/// [`a_closer_in_command_position_restarts_command_position`] pins their own
+/// row.
 #[test]
 fn argument_words_move_the_place_to_data() {
     for word in [
         b"echo".as_slice(),
         b"x",
-        b"for",
         b"case",
         b">",
         b"&>",
@@ -392,6 +543,10 @@ fn openers_score_in_command_position_only() {
             "{word:?} in a pattern list is a pattern word"
         );
         assert!(
+            !scores_word(word, Place::Words),
+            "{word:?} in a `for` list is a list word"
+        );
+        assert!(
             !scores_word(word, Place::Data),
             "{word:?} in an argument is data"
         );
@@ -404,6 +559,8 @@ fn openers_score_in_command_position_only() {
 /// word is the pattern-list divergence) — but never in an argument: bash
 /// requires a separator before a closing keyword, so the opener gate
 /// (Command only) and the closer gate (Command | Pattern) are not one gate.
+/// A `for` list gates the closer outright, the opposite list kind
+/// ([`nothing_scores_at_a_for_word_list`]).
 #[test]
 fn closers_score_in_command_and_pattern_positions() {
     for word in [b"fi".as_slice(), b"done", b"esac"] {
@@ -435,6 +592,11 @@ fn brace_words_are_ungated() {
             "a literal closer scores at {place:?}"
         );
     }
+    // The `for` **list** gates braces (task #306): bash reads `for i in { 1 2`
+    // and `for i in }` as words. The list gate runs first, so this body
+    // divergence stops at the list's edge.
+    assert!(!scores(b"{ ", b"{ ", 1, Place::Words));
+    assert!(!scores(b"}", b"}", 1, Place::Words));
 }
 
 #[test]
@@ -464,7 +626,7 @@ fn non_keyword_words_never_score() {
 fn builtin_wait_never_scores_and_event_case_only_in_command() {
     let builtin = b"wait 123";
     let event = b"wait\n readable %rd)";
-    for place in [Place::Command, Place::Pattern, Place::Data] {
+    for place in [Place::Command, Place::Pattern, Place::Words, Place::Data] {
         assert!(
             !scores(builtin, builtin, 8, place),
             "the builtin is data at {place:?}"
@@ -477,5 +639,9 @@ fn builtin_wait_never_scores_and_event_case_only_in_command() {
     assert!(
         !scores(event, event, 4, Place::Data),
         "the event-case `wait` in an argument is data"
+    );
+    assert!(
+        !scores(event, event, 4, Place::Words),
+        "the event-case `wait` in a `for` list is a list word"
     );
 }
