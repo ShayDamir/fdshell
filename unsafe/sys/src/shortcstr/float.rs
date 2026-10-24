@@ -5,11 +5,18 @@
 //! `inf`/`infinity`/`nan([payload])` in any case. Stops at the first
 //! invalid byte; the caller compares `consumed` with the length to detect
 //! trailing junk.
+//!
+//! The pieces: the whitespace/sign prologue in `sign`, the `inf`/`nan` words in
+//! `inf_nan`, the decimal body in `dec`, the hex-float body in `hex`.
 
 mod dec;
 mod hex;
+mod inf_nan;
+mod sign;
 
 use crate::shortcstr::ShortCStr;
+use inf_nan::inf_nan;
+use sign::{parse_sign, skip_space};
 
 /// Outcome of [`ShortCStr::parse_float`].
 ///
@@ -36,18 +43,7 @@ impl ShortCStr {
             Ok(b) => b,
             Err(_) => return FloatParse::none(),
         };
-        let mut i = skip_space(bytes);
-        let neg = match bytes.get(i) {
-            Some(b'-') => {
-                i += 1;
-                true
-            }
-            Some(b'+') => {
-                i += 1;
-                false
-            }
-            _ => false,
-        };
+        let (i, neg) = parse_sign(bytes, skip_space(bytes));
         let rest = bytes.get(i..).unwrap_or(&[]);
         let (value, consumed, range) = parse_body(rest);
         if consumed == 0 {
@@ -86,36 +82,4 @@ fn parse_body(rest: &[u8]) -> (f64, usize, bool) {
         return hex::parse_hex(rest);
     }
     dec::parse_decimal(rest)
-}
-
-/// `inf`/`infinity` and `nan([payload])`, any case; `None` otherwise.
-pub(super) fn inf_nan(rest: &[u8]) -> Option<(f64, usize)> {
-    let ci = |s: &[u8], t: &[u8]| {
-        s.len() >= t.len() && s.get(..t.len()).is_some_and(|p| p.eq_ignore_ascii_case(t))
-    };
-    if ci(rest, b"inf") {
-        // "inf" (3) or "infinity" (8): the extra 5 bytes are present or not.
-        let n = 3 + usize::from(ci(rest, b"infinity")) * 5;
-        return Some((f64::INFINITY, n));
-    }
-    if ci(rest, b"nan") {
-        let n = rest
-            .get(3..)
-            .filter(|s| s.first() == Some(&b'('))
-            .and_then(|s| s.iter().position(|&c| c == b')').map(|close| 4 + close))
-            .unwrap_or(3);
-        return Some((f64::NAN, n));
-    }
-    None
-}
-
-pub(super) fn skip_space(bytes: &[u8]) -> usize {
-    let mut i = 0;
-    while let Some(&c) = bytes.get(i) {
-        if !matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
-            break;
-        }
-        i += 1;
-    }
-    i
 }
