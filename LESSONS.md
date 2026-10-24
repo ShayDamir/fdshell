@@ -3881,10 +3881,18 @@ done>f2`) is word data, so fdshell runs at rc 0 what bash rejects at rc 2 — me
 beside `tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`; rejecting them instead
 would have kept every parity row broken.
 
-**Two mechanics notes.** Budget the 90 LoC of a shared machine **before** writing rows into it: with
+**Mechanics notes.** Budget the 90 LoC of a shared machine **before** writing rows into it: with
 the new rows `keywords/position.rs` measured 95, so the plan moved the gate to
 `keywords/position/score.rs` (importers unchanged) — run `python3 tools/complexity.py` on the
-draft, not after the commit. And in a byte-level pin, index the word's **first byte**:
+draft, not after the commit. When a split moves an item into a child module, **spell its reach**:
+`pub(super)` in the new file is `pub(in <parent>)`, one level narrower than the same token in the
+parent, so the tokenizer `State` that moved to `parse/token/state.rs` (task #439) had to be spelled
+`pub(in crate::parse)` — its `impl State` blocks live in the `crate::parse` *siblings* of
+`parse/token.rs` — and `parse/token.rs` then re-exports it (`pub(super) use state::State;`) so every
+importer path, `parse/token/*` and `parse/*` alike, stays unchanged. Rust rejects the re-export of
+the narrower item (`E0365`), which is the check that catches the mistake; a plan that assumes
+"`pub(super)` means the same thing in the child" does not compile. And in a byte-level pin, index
+the word's **first byte**:
 `keywords::first_word_end` breaks at whitespace **and** `;`, so an index landing on the separator
 scores the **empty** word, which every place machine maps to a command start — an assertion that
 passes for that reason kills no mutant (this task's own `for i in done; do` rows had two).
