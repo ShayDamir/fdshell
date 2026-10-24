@@ -4176,3 +4176,56 @@ rc 0 where bash rejects the syntax at rc 2 — task **#433**, filed by this one
 (**#180** is the accepted *trailing* form, `f(){ …; } > a`). Pin each as a
 measured divergence with the bash value beside it; the def-prefix row in
 particular reads as a fix and is a widening.
+
+## A word-list rule lives at **two granularities**: the builder's `List`, and the byte scans' place **plus seed** (task #306)
+
+`for i in done; do echo x; break; done; echo after` was `expected 'do'` (rc 1) where bash prints
+`x` / `after` (rc 0). The rule — *no keyword scores in a `for` word list* — already existed at the
+token/builder level (`parse/semi/closing::List::Words`, task **#273**), and #273's own lesson said
+so: "the byte-level scans (`segment/`, `scan/`) do not know the list rule yet". They run **first**,
+so the builder never saw the text: `segment/block/keyword.rs` seeds `comment::scan_block` just past
+the `for`, the first run ` i in done` maps `in` to `Place::Pattern` (where a closer **does** score,
+as `case x in esac` needs), `done` scores `-1`, and the span ends at the list word. The same place
+machine drives `cond/boundary/block::word_delta` (the run split) and `parse/semi/closing` (a nested
+list word closes an **enclosing** block). **A rule fixed at one granularity is a divergence at the
+other**; put it in the shared place machine, not in one scan.
+
+**The list kind is the opener's fact, never `in`'s.** `in` is shared by the `case` pattern list
+(`esac` terminates it) and the `for` word list (nothing scores), and it cannot see which block it
+belongs to — so re-gating `in` is impossible. The row is `for` in **command** position →
+`Place::Words`, one of four places of the machine, and the place is **sticky**: only a separator
+word (`;`, `&&`, `||`, `&`, a paren) or the list's own `do` leaves it. `Command`-only matters: a
+`for` in a `case` list stays a pattern word, and the arith `for ((…))` reaches the row as the
+single glued word `for((…))` and never matches.
+
+**The block's own list needs a seed; a nested one needs the row — measure both halves.** The scan
+starts *after* the opener, so no opener word is in the scanned text: `segment/block/keyword.rs` and
+`segment/block/midrun.rs` seed `Place::Words` for a `for` opener, using the `FOR_LEN` the opener
+scan already measured (derived from `b"for".len()`, no second keyword table). Seeding alone left the
+nested rows broken (`while :; do for i in done; …`), the row alone left the top-level rows broken.
+The seed is read by the **first run only** — a word list never crosses a separator, so the block's
+body runs start at command position again. That boundary is also the blast-radius bound:
+`if done; then echo T; fi` and `while done; do echo W; break; done` keep their messages, which is
+exactly the pair that kills the `kw_len == FOR_LEN` `!=` mutant (it would seed every block as a
+list).
+
+**Gate the list on places, not on words, and keep the two lists asymmetric on purpose:** at
+`Place::Words` nothing scores — no opener, no closer, **no brace** (bash reads `for i in { 1 2` and
+`for i in }` as words). The brace gate is list-only; the accepted body divergence of
+`tests/group.rs::literal_brace_argument_in_a_block_body` stays ungated. `Place::Pattern` keeps
+scoring `esac`, so `case x in esac` stays a complete `case` and the `case` seed stays **#310**'s.
+Write the pins that *name* the divergence (`…_until_310`,
+`tests/block_redirect.rs::closer_shaped_words_stay_word_data`) so they **flip**: they flipped, and
+that is how the parity rows were recognised as real. The family grows accepted-divergent in the
+same direction: a closer-shaped list word glued to an operator (`for x in done>f; do echo A;
+done>f2`) is word data, so fdshell runs at rc 0 what bash rejects at rc 2 — measured and pinned
+beside `tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`; rejecting them instead
+would have kept every parity row broken.
+
+**Two mechanics notes.** Budget the 90 LoC of a shared machine **before** writing rows into it: with
+the new rows `keywords/position.rs` measured 95, so the plan moved the gate to
+`keywords/position/score.rs` (importers unchanged) — run `python3 tools/complexity.py` on the
+draft, not after the commit. And in a byte-level pin, index the word's **first byte**:
+`keywords::first_word_end` breaks at whitespace **and** `;`, so an index landing on the separator
+scores the **empty** word, which every place machine maps to a command start — an assertion that
+passes for that reason kills no mutant (this task's own `for i in done; do` rows had two).
