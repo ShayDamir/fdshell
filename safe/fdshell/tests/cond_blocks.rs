@@ -1247,8 +1247,8 @@ fn a_loop_body_that_never_returns_is_bash_parity() {
 /// no such command), so the *cause* of the divergence is the acceptance of that
 /// stray closer, not the pairing: the same acceptance
 /// `tests/block_closers.rs::the_rc_1_family_stays_a_parse_error` pins at rc 1
-/// for the shapes that do terminate. Filed as a task of the acceptance family
-/// (see the session summary of task #309). Capped children: rc 124 is the
+/// for the shapes that do terminate. Filed as task **#436** (the acceptance
+/// family, whose rule task **#405** owns). Capped children: rc 124 is the
 /// measured outcome, and a row that starts terminating is a change to disclose.
 #[test]
 fn a_loop_body_that_never_returns_where_bash_refuses_the_line() {
