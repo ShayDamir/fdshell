@@ -61,35 +61,10 @@ impl ShellState {
         c" \t\n".into()
     }
 
+    /// The fresh shell. Every field's seed is spelled out once, in
+    /// [`ctor::build`].
     pub fn new() -> Self {
-        ShellState {
-            fds: HashMap::new(),
-            arrays: HashMap::new(),
-            jobs: Jobs::new(),
-            strings: HashMap::new(),
-            exports: HashMap::new(),
-            positional: VecDeque::new(),
-            program_name: ImportedStr::shell(ShortCStr::from(c"fdshell")),
-            frames: Vec::new(),
-            last_status: WaitStatus::Exited(0),
-            shell_pid: sys::env::getpid(),
-            last_bg_pid: None,
-            child_utime: 0,
-            child_stime: 0,
-            env_filter: EnvFilter::new(),
-            shell_sock: None,
-            environ: sys::env::environ_snapshot(),
-            nesting: 0,
-            loop_depth: 0,
-            eval_depth: 0,
-            ifs: Self::default_ifs(),
-            options: crate::options::DEFAULTS,
-            interactive: false,
-            capture_limit: crate::cmd_subst::MAX_CAPTURED,
-            hash_table: HashMap::new(),
-            aliases: HashMap::new(),
-            functions: HashMap::new(),
-        }
+        ctor::build()
     }
 }
 
@@ -100,6 +75,7 @@ impl Default for ShellState {
 }
 
 mod arrays;
+mod ctor;
 mod cwd;
 pub(crate) mod fds;
 pub(crate) mod frames;
