@@ -1944,15 +1944,169 @@ The 3 missed mutants are accepted, all of them the repo's two known equivalent s
 ## A value substituted with an empty mask folds quoted escape pairs as unquoted
 The three assignment surfaces — `run_env::expand_one` (a scoped `NAME=value` prefix), `run_dispatch/assign_str.rs::set` (a bare `NAME=value` statement) and `intercept/local.rs::expand_value` (`local NAME=value`) — all called `substitute_arg(value, &[], …)`. An empty mask means every byte takes the POSIX 2.2.1 (unquoted) arm, so a `\<char>` pair written **inside double quotes** — which POSIX 2.2.2 keeps, dropping the backslash only for `\$`, `\\`, `` \` `` and `\<newline>` — folded as an unquoted escape: `x="a\ b"; printf "[%s]\n" "$x"` printed `[a b]` where bash prints `[a\ b]`, and the same folding reached a child verbatim (`x="a\ b" env` showed `x=a b` vs bash's `x=a\ b`) and a stored pattern (`${x#"["a]}` stripped the quoted `[`). All three now take the value word's **own** mask: `CommandLine::env_assigns` is `Vec<Assign>` (name, raw value, mask) and `ParsedLine::AssignStr(Assign)`/`AssignStrs(Vec<Assign>)` carry it to the bare statement; `local` slices its own word's `args_mask`. The slice offset `name.len() + 1` exists in exactly one function, `parse::envassign::value_mask`, so the three consumers cannot drift (LESSONS: slice the word, its mask and its quoted flags with the same offset); it rests on the tokenizer's 1:1 invariant (`cur.push_byte` ⇔ `mask.push`, pinned as a test in `parse/tests.rs::test_token_mask_is_parallel_to_the_word` — not as a `debug_assert!`, because nextest runs debug binaries) and pads short masks as unquoted, the same padding `substitute/arg.rs` applies. Two shapes carry the pins: `"\$b"` (the escape pair *is* the value's first byte, so a shifted slice misreads it) and the two-word pair `x="a\ b" y=b\ c cmd`, whose masks differ (`[true;4]` vs `[false;4]`) — the LESSONS rule that a same-quoting pair cannot tell an off-by-one from an off-by-two. The mask changes **folding only**: the value is stored whole (`substitute_arg` never splits and never globs — splitting lives in `substitute/words.rs::substitute_args`, which no assignment path uses), so `x="a b"` keeps its space, `x="a *"` stays a literal star, and the `&[]` → mask change cannot introduce a split; the *use* of the value still splits on IFS (`x="a\ b"` used unquoted splits into `a\` and `b`, as bash). The single-quote encoding is mask-independent (its `\$`/`\\` fold identically under both arms — `x='a\ b'` prints `[a\ b]` with and without the mask, pinned in `tests/env_assign.rs::single_quoted_value_is_mask_independent`), so task #141's claim that it needs nothing from #217 stands. The same `&[]` literal survived in `redirect/herestring.rs`, `redirect/heredoc.rs` and `case_exec.rs` (here-string word, here-doc body, `case` word) until task #269 threaded those masks too; `export` never substitutes at all (task #214).
 ## No substitution surface takes an empty mask: the mask travels with the text
-`substitute_arg(text, mask, …)` decides the *folding* of escape pairs from the mask alone, so a mask shorter than the text pads as unquoted and an empty mask makes the whole text take the POSIX 2.2.1 arm — the shape that made task #217's assignments fold `\<char>` written inside double quotes. The three siblings #217 left behind (here-string word `redirect/herestring.rs`, here-doc body `redirect/heredoc.rs`, `case` word `case_exec.rs`) now carry their masks too, and the review check is one command: `grep -rn "substitute_arg.*&\[\]" safe/ --include=*.rs | grep -v tests` must print nothing (unit tests of the substitution itself legitimately pass `&[]`). Four shapes of "the real mask" and the rule each one taught:
+`substitute_arg(text, mask, …)` decides the *folding* of escape pairs from the
+mask alone, so a mask shorter than the text pads as unquoted and an empty mask
+makes the whole text take the POSIX 2.2.1 arm — the shape that folded
+`\<char>` written inside double quotes in an assignment (task #217). Its
+siblings (here-string word `redirect/herestring.rs`, here-doc body
+`redirect/heredoc.rs`, `case` word `case_exec.rs`) carry their masks too, and
+the review check is one command:
+`grep -rn "substitute_arg.*&\[\]" safe/ --include=*.rs | grep -v tests` must
+print nothing (unit tests of the substitution itself legitimately pass `&[]`).
+Four shapes of "the real mask":
 
-- **A mask sliced from a token has exactly one owner of its offset.** The here-string offset lives in `parse::here_string::word_mask` and is `prefix + 3`: `prefix` is the io-number digit count `string_span` reports, 0 for `<<<word` and 1 for `3<<<word` (task #312 — the unshifted offset 3 makes `3<<<x` read the word as `<x`, and `3<<< T` as attached on `< T`). The assignment offset `name.len() + 1` lives in `parse::envassign::value_mask`; the attached form slices, the bare form clones the next token's mask verbatim. The attached/bare length test has one owner too (`has_attached_word`, `len > prefix + 3`), because two consumers read it: the parse and the brace-protection consumer `word_indices` — a shift in one and not the other is a protection/parse divergence, so both are pinned on the same spellings (`io_number_prefix_shifts_the_attached_test`, `here_string_word_protected`, `parse_here_string_prefixed_bare_form_takes_the_next_word`). Pins: `cat <<<"a\ b"` (all-quoted 4 bytes) and the two-word pair `cat <<<"a\ b" b\ c`, whose masks *differ* (`[true;4]` vs `[false;4]`) — the LESSONS rule that a same-quoting pair cannot tell an off-by-one from an off-by-two; the prefixed pair `cat 3<<<"a\ b" b\ c` pins the shifted version of exactly that rule (`parse_here_string_prefixed_word_mask_is_shifted_by_the_prefix`). `<<<""` keeps the empty mask, which `substitute::fully_quoted` reads as quoted (an empty quoted word is one word): do not "improve" it to `vec![false; 0]`; `word_quoted`'s span-length rule is prefix-independent, so `3<<<""` is the same shape for free.
-- **A body is a quoted context, not a token.** POSIX 2.2 "the here-document is equivalent to double-quoting" means the mask is `vec![true; body.len()]`, derived at the substitution site (no parse-layer mask exists for a body), and the body's `\<newline>` continuations must be removed in the *parse* layer (`parse/heredoc/strip.rs`), because the quoted arm of `arg.rs` keeps `\<newline>` and the mask flag would have to ripple through every caller. That pass must pair backslashes left-to-right exactly as the substitution's quoted arm pairs them, and only these three shapes say so: `a\`+newline is the continuation (`ab`), `a\\`+newline is a pair plus a body newline (two lines), `a\\\`+newline is a pair plus a continuation (`a\b`) — bash agrees on all three, and a strip that scans for a bare `\`+newline folds the second shape into the first.
-- **A quoted context expands the tilde it should not.** With an all-true body mask, `substitute/tilde.rs`'s `~` arm pushed `$HOME` for a body `~` and for `<<<"~"`, where bash prints `~` (POSIX expands tildes *before* quote removal). The gate must stay in `tilde.rs`: `substitute/arg.rs` is at 88 tokei LoC and cannot host an inline predicate. It is **not** the mask's first bit alone (task #281, POSIX #2.6.1): `leads` rejects a word whose tilde-prefix — the bytes from `~` through the first `/` **inclusive**, the whole word when it has no `/` — carries **any** quoted byte, the `~`'s own bit (#269) included, so `prefix_quoted` scans `0..=end` with `arg.rs`'s short-mask padding. The bound is measured, not inferred: bash 5.3.9 prints `~/*` for `~"/*"`, `~/*/sub` for `~"/*"/sub`, `~/x` for `~"/x"` and for `~'/'x` — the terminating `/`'s own bit *is* in the prefix — while `~ro"ot"/x` is `~root/x` and `~/"x"`, `~root/"x"` keep expanding, because their quote sits **after** the `/`. Two consequences for pins: a mask-alignment test may not use a quoted `/` in the prefix (`~/a` with `[true,false,false]`, and the same shape unquoted at bit 0 as `[false,true,false]`, is a literal-tilde row — it tests the gate, not the alignment; the alignment shape is `~/a` with `[false,false,true]`, i.e. `~/"a"`, pinning the `/` bit `false` **and** the byte after it `true`), and every "the gate is the first bit only" comment is wrong — the gate is the whole prefix. What the widened rule can change is bounded by the missing `~user` lookup, and which parts of the scan are killable because of it: see "A tilde-prefix scan is killable at the slash, equivalent at the word end".
-- **A quote pair that contributes no bytes is invisible to the mask (task #321).** The mask is one bit per *word-text* byte, so `""` and `''` own no bit and `prefix_quoted`'s short-mask padding reads them as unquoted: `~""`, `~''`, `~""/x` and `~''/x` expanded where bash 5.3.9 keeps them literal (POSIX #2.6.1 counts the pair as a quoted character in the prefix). The mask cannot be bent to carry it — parallelism is pinned by `parse/tests.rs::test_token_mask_is_parallel_to_the_word`, and marking the *following* byte's bit would claim the `/` of `~""/x` is quoted (IFS/glob semantics). The fact is recorded where it exists: the tokenizer's quote state machine keeps a per-word `spans: Vec<usize>` of the word-text indices at which a pair closed **contributing nothing** (`~""/x` → text `~/x`, mask all-false, spans `[1]`; a trailing pair records the word's length, `a~""` → `[2]`), and the list travels with every mask into the gate, which stays in `tilde.rs`. Five consequences: (1) every structure with an `args_mask`/`command_mask`/`Assign.mask` carries the parallel `spans`, and every substitution surface takes them (`substitute_args` takes `args_span`) — a surface without spans is the exact bug family #217/#269 warns about; (2) the assignment slicing shares `value_mask`'s single `name.len()+1` offset (`envassign::value_spans`), never a whole-token "word had quotes" flag, which is false for `x=~""`; (3) synthesized masks pass `&[]` — a here-doc/herestring **body**'s quote chars are data, not shell quotes; (4) spans are input-side only, never an output mask nor a split/glob input; (5) the span scan is inclusive of index 0: bash keeps `""~/x` literal, so quotes *before* the `~` suppress too. `~$''/x` stays a documented divergence — fdshell has no `$'…'` (task #156); measure it, pin it as the divergence, do not fold it into this rule. **The lists must be walked by a test:** a span slice/join whose closures no data reaches is a free mutant (mutation QA found 7 on task #321's first round), so the three offset owners are pinned on raw lists — `parse::semi::tests` (the join shift: `~/a b""` joins to `[4]`, `case ~"" x""` to `[1, 2]`), `here_string::tests::word_spans_slice_at_the_operator_offset` (`prefix + 3`), `parse::tests::test_env_assign_value_spans_slice_at_the_equals` (`name.len()+1`; a 1-char name cannot tell `i - off` from `i / off`, `abc=~/x""` can) — plus the bash-measured surfaces `cat <<<""~/x`, `cat <<<~/x""` and the long-name assignment rows.
-- **The tilde gate is mask-driven; the `HOME` lookup is state-driven (task #282).** The gate (#269 + #281) reads only the mask, and `expand` must read `HOME` through exactly one lookup: `ShellState::var_value(c"HOME")` — the shell's `strings` first, the inherited `environ` snapshot as the documented fallback — the same `resolve.rs` lookup `$HOME` and `crate::arith` use. `sys::env::getenv(c"HOME")` was the **live process** environment, so a shell assignment moved `$HOME` and not `~` (`HOME=/tmp/H; echo ~/x` printed the inherited home, POSIX #2.6.1 says the shell variable drives `~`), and the two sources could only drift. One fact, one lookup: a second `HOME` source in the arm is the "a second table for one fact" pattern. Measured in bash 5.3.9, and pinned: `HOME=/tmp/H` drives `~`, `~/x`, `~/"x"`, `export HOME; ~`, `for w in ~/x`, `cat <<<~/x`, `case /tmp/H/x in ~/x)`, `local HOME=/tmp/H; ~` (the shadow lives in `strings`, so it follows for free) and an assignment value `x=~/x` — the threading is one argument, `cell`, at the single call site `arg.rs:41`, and every surface inherits through `substitute_arg`. Keep the timing of the scoped **prefix** form (`HOME=/h/o/m/e printf %s ~` → the inherited HOME): tilde expansion runs before the prefix is applied, and fdshell's child substitutes its args before applying it, so it already agrees — do not "improve" it, and `HOME=/h/o/m/e printf %s "$HOME"` is the row that shows the two share one timing. Two accepted divergences, pinned as measured, not "fixed": `HOME` set in neither table gives nothing (`env -u HOME; printf %s ~` → bash's login directory `/home/damir`, fdshell `[]`, no password database), while `HOME=""` is **bash agreement** and POSIX's unset-or-empty fallback is not what bash does — `HOME=; printf %s ~/x` is `/x`, so never align that row with POSIX. `nounset` must never fire on `~`: `var_value` is not the `param_value` path, so `set -u; printf %s ~` is `[]` with rc 0. The trace wording is a known gap: a leading-`~` for-list word is reported as `Origin::EnvVar(HOME)` → "environment variable HOME" (`run_origin.rs`, `child/explain.rs`), imprecise for a state-driven `HOME`; renaming a `sys::Origin` variant touches `unsafe/sys` and is out of the task's scope. `cd` with no argument read `sys::env::getenv(c"HOME")` (`cd.rs`) — **task #287 closed that half**: `cd_home(state)` resolves `HOME` through the same `var_value`, so the shell-assignment, `export`, scoped-`HOME=/tmp/H cd` prefix and `local HOME=/tmp/H` rows that move `~` move the bare `cd` (the threading is one argument, `state`, at the single `CdTarget::Home` arm, exactly the tilde's shape). Three rows of that family are pinned as measured, not aligned: an **empty** `HOME` is a value, so the bare `cd` takes the empty path and fails the open at rc 1 (`HOME=; cd` — bash 5.3.9 leaves the directory alone at rc 0, the `cd ""` family, and fdshell's report aborts the script, the task #179 family); `HOME` in **neither** table is `$HOME not set` at rc 1, and bash's `cd` answers `cd: HOME not set` at that same rc — the login-directory fallback is `~`'s, not `cd`'s, so that row is agreement, not the `~` divergence; and `unset HOME` **cannot probe the fallback** here, because fdshell's `unset` is fd-only (`variable must start with '%'`), so the environ fallback row is pinned by an inherited-only `HOME` (and by clearing `state.environ` in the unit rows), never by an unassignment. The `Origin::EnvVar(HOME)` provenance of the moved CWD is kept as-is, so the same explain wording now sometimes names a shell variable — the same known gap as above, owned by the variant rename.
-- **A joined word needs its mask joined by the same loop.** `case WORD in` joins several token words with an inserted space, so the mask join must insert a `false` bit in the *same* loop (`semi::try_join_masked`, whose `.0` **is** the word at every call site) — two loops means two space rules that drift. A text-only `try_join` wrapper over it was deleted as dead code (no callers, 0 coverage hits, and its only mutant was unkillable because the function was unreachable). The pin pair is `case "a\ b" in` (mask `[true;4]`) vs `case a\ b in` (mask `[false;4]`: the escape pair stays in the token text, so the word is 4 bytes `a`,`\`,` `,`b` and folds to `a b`, exactly bash's word).
-- **Measuring is not optional.** The planning table's fdshell column is inferred from the `&[]` literal and was wrong in three rows: `cat <<<a\ b` already printed `a b` (the escaped space keeps the word whole — no divergence), body `\\\$(echo hi)` already printed the text `\$(echo hi)` (the pair protects the `$(`), and `case ~ in "$HOME")` never matched (fdshell substitutes no patterns, so a `$name` pattern is literal — task #280, with the quoted-escape pattern rows `case "a\ b" in "a\ b")` and `case "a\b" in "a\b")`, which the word fix turns into *new* divergences, and which #269 must not "fix" by keeping an empty mask).
+- **A mask sliced from a token has exactly one owner of its offset.** The
+here-string offset lives in `parse::here_string::word_mask` and is
+`prefix + 3`: `prefix` is the io-number digit count `string_span` reports, 0
+for `<<<word`, 1 for `3<<<word`; the unshifted offset 3 reads `3<<<x` as `<x`
+and `3<<< T` as attached on `< T` (task #312). The assignment offset
+`name.len() + 1` lives in `parse::envassign::value_mask`; the attached form
+slices, the bare form clones the next token's mask verbatim. The attached/bare
+length test has one owner too (`has_attached_word`, `len > prefix + 3`),
+because two consumers read it, the parse and the brace-protection
+`word_indices`: a shift in one and not the other is a protection/parse
+divergence, so both are pinned on the same spellings
+(`io_number_prefix_shifts_the_attached_test`, `here_string_word_protected`,
+`parse_here_string_prefixed_bare_form_takes_the_next_word`). Pins:
+`cat <<<"a\ b"` (all-quoted 4 bytes) and the two-word pair
+`cat <<<"a\ b" b\ c`, whose masks *differ* (`[true;4]` vs `[false;4]`) — a
+same-quoting pair cannot tell an off-by-one from an off-by-two; the prefixed
+pair `cat 3<<<"a\ b" b\ c` pins the shifted version of that rule
+(`parse_here_string_prefixed_word_mask_is_shifted_by_the_prefix`). `<<<""`
+keeps the empty mask, which `substitute::fully_quoted` reads as quoted (an
+empty quoted word is one word): do not "improve" it to `vec![false; 0]`;
+`word_quoted`'s span-length rule is prefix-independent, so `3<<<""` is the
+same shape for free.
+- **A body is a quoted context, not a token.** POSIX 2.2
+"the here-document is equivalent to double-quoting" means the mask is
+`vec![true; body.len()]`, derived at the substitution site (no parse-layer
+mask exists for a body), and the body's `\<newline>` continuations must be
+removed in the *parse* layer (`parse/heredoc/strip.rs`), because the quoted
+arm of `arg.rs` keeps `\<newline>` and the mask flag would have to ripple
+through every caller. That pass must pair backslashes left-to-right exactly as
+the substitution's quoted arm pairs them, and only these three shapes prove
+it: `a\`+newline is the continuation (`ab`), `a\\`+newline is a pair plus a
+body newline (two lines), `a\\\`+newline is a pair plus a continuation (`a\b`)
+— bash agrees on all three, and a strip that scans for a bare `\`+newline
+folds the second shape into the first.
+- **A quoted context expands the tilde it should not.** With an all-true body
+mask, `substitute/tilde.rs`'s `~` arm pushed `$HOME` for a body `~` and for
+`<<<"~"`, where bash prints `~` (POSIX expands tildes *before* quote removal).
+The gate must stay in `tilde.rs`: `substitute/arg.rs` is at 88 tokei LoC and
+cannot host an inline predicate. It is **not** the mask's first bit alone
+(task #281, POSIX #2.6.1): `leads` rejects a word whose tilde-prefix — the
+bytes from `~` through the first `/` **inclusive**, the whole word when it has
+no `/` — carries **any** quoted byte, the `~`'s own bit (#269) included, so
+`prefix_quoted` scans `0..=end` with `arg.rs`'s short-mask padding. The bound
+is measured, not inferred: bash 5.3.9 prints `~/*` for `~"/*"`, `~/*/sub` for
+`~"/*"/sub`, `~/x` for `~"/x"` and for `~'/'x` — the terminating `/`'s own bit
+*is* in the prefix — while `~ro"ot"/x` is `~root/x` and `~/"x"`, `~root/"x"`
+keep expanding, because their quote sits **after** the `/`. Two consequences
+for pins: a mask-alignment test may not use a quoted `/` in the prefix — `~/a`
+with `[true,false,false]`, and the same shape unquoted at bit 0 as
+`[false,true,false]`, is a literal-tilde row that tests the gate, not the
+alignment; the alignment shape is `~/a` with `[false,false,true]` (`~/"a"`),
+pinning the `/` bit `false` **and** the byte after it `true`. Every
+"the gate is the first bit only" comment is wrong: the gate is the whole
+prefix. The missing `~user` lookup bounds what the widened rule can change,
+and with it which parts of the scan are killable: see
+"A tilde-prefix scan is killable at the slash, equivalent at the word end".
+- **A quote pair that contributes no bytes is invisible to the mask (task
+#321).** The mask is one bit per *word-text* byte, so `""` and `''` own no bit
+and `prefix_quoted`'s short-mask padding reads them as unquoted: `~""`, `~''`,
+`~""/x` and `~''/x` expanded where bash 5.3.9 keeps them literal (POSIX #2.6.1
+counts the pair as a quoted character in the prefix). The mask cannot be bent
+to carry it — parallelism is pinned by
+`parse/tests.rs::test_token_mask_is_parallel_to_the_word`, and marking the
+*following* byte's bit would claim the `/` of `~""/x` is quoted (IFS/glob
+semantics). The fact is recorded where it exists: the tokenizer's quote state
+machine keeps a per-word `spans: Vec<usize>` of the word-text indices at which
+a pair closed **contributing nothing** (`~""/x` → text `~/x`, mask all-false,
+spans `[1]`; a trailing pair records the word's length, `a~""` → `[2]`), and
+the list travels with every mask into the gate, which stays in `tilde.rs`.
+Five consequences: (1) every structure with an
+`args_mask`/`command_mask`/`Assign.mask` carries the parallel `spans` and
+every substitution surface takes them (`substitute_args` takes `args_span`) —
+a surface without spans is #217/#269's bug family; (2) the assignment slicing
+shares `value_mask`'s single `name.len()+1` offset (`envassign::value_spans`),
+never a whole-token "word had quotes" flag, which is false for `x=~""`; (3)
+synthesized masks pass `&[]` — a here-doc/herestring **body**'s quote chars
+are data, not shell quotes; (4) spans are input-side only, never an output
+mask nor a split/glob input; (5) the span scan is inclusive of index 0: bash
+keeps `""~/x` literal, so quotes *before* the `~` suppress too. `~$''/x` stays
+a documented divergence — fdshell has no `$'…'` (task #156): measure it, pin
+it, do not fold it into this rule. **The lists must be walked by a test:** a
+span slice/join whose closures no data reaches is a free mutant, so the three
+offset owners are pinned on raw lists — `parse::semi::tests` (the join shift:
+`~/a b""` joins to `[4]`, `case ~"" x""` to `[1, 2]`),
+`here_string::tests::word_spans_slice_at_the_operator_offset` (`prefix + 3`),
+`parse::tests::test_env_assign_value_spans_slice_at_the_equals`
+(`name.len()+1`; a 1-char name cannot tell `i - off` from `i / off`,
+`abc=~/x""` can) — plus the bash-measured surfaces `cat <<<""~/x`,
+`cat <<<~/x""` and the long-name assignment rows.
+- **The tilde gate is mask-driven; the `HOME` lookup is state-driven (task
+#282).** The gate (#269 + #281) reads only the mask, and `expand` must read
+`HOME` through exactly one lookup: `ShellState::var_value(c"HOME")` — the
+shell's `strings` first, the inherited `environ` snapshot as the documented
+fallback — the same `resolve.rs` lookup `$HOME` and `crate::arith` use.
+`sys::env::getenv(c"HOME")` reads the **live process** environment, so a shell
+assignment moved `$HOME` and not `~` (`HOME=/tmp/H; echo ~/x` printed the
+inherited home; POSIX #2.6.1 says the shell variable drives `~`). One fact,
+one lookup: a second `HOME` source in the arm is the
+"a second table for one fact" pattern. Measured in bash 5.3.9, pinned:
+`HOME=/tmp/H` drives `~`, `~/x`, `~/"x"`, `export HOME; ~`, `for w in ~/x`,
+`cat <<<~/x`, `case /tmp/H/x in ~/x)`, `local HOME=/tmp/H; ~` (the shadow
+lives in `strings`, so it follows for free) and an assignment value `x=~/x` —
+the threading is one argument, `cell`, at the single call site `arg.rs:41`,
+and every surface inherits through `substitute_arg`. Keep the timing of the
+scoped **prefix** form (`HOME=/h/o/m/e printf %s ~` → the inherited HOME):
+tilde expansion runs before the prefix is applied, and fdshell's child
+substitutes its args first, so it agrees — do not "improve" it;
+`HOME=/h/o/m/e printf %s "$HOME"` shows the two share one timing. Two accepted
+divergences, pinned as measured: `HOME` in neither table gives nothing
+(`env -u HOME; printf %s ~` → bash's login directory, fdshell `[]`, no
+password database), while `HOME=""` is **bash agreement** — POSIX's
+unset-or-empty fallback is not what bash does: `HOME=; printf %s ~/x` is `/x`,
+never align that row with POSIX. `nounset` must never fire on `~`: `var_value`
+is not the `param_value` path, so `set -u; printf %s ~` is `[]` with rc 0. The
+trace wording is a known gap: a leading-`~` for-list word is reported as
+`Origin::EnvVar(HOME)` → "environment variable HOME" (`run_origin.rs`,
+`child/explain.rs`), imprecise for a state-driven `HOME`; renaming a
+`sys::Origin` variant touches `unsafe/sys`, so it is a separate change. `cd`
+with no argument resolves `HOME` through the same `var_value`
+(`cd.rs::cd_home(state)`, task #287), so the shell-assignment, `export`,
+scoped-`HOME=/tmp/H cd` prefix and `local HOME=/tmp/H` rows that move `~` move
+the bare `cd` (the threading is one argument, `state`, at the single
+`CdTarget::Home` arm, exactly the tilde's shape). Three rows of that family
+stay measured, not aligned: an **empty** `HOME` is a value, so the bare `cd`
+takes the empty path and fails the open at rc 1 (`HOME=; cd` — bash 5.3.9
+leaves the directory alone at rc 0, the `cd ""` family, and fdshell's report
+aborts the script, the task #179 family); `HOME` in **neither** table is
+`$HOME not set` at rc 1, where bash's `cd` answers `cd: HOME not set` at that
+same rc — the login-directory fallback is `~`'s, not `cd`'s, so that row is
+agreement; and `unset HOME` **cannot probe the fallback** here, fdshell's
+`unset` being fd-only (`variable must start with '%'`), so the environ
+fallback row is pinned by an inherited-only `HOME` (and by clearing
+`state.environ` in the unit rows), never by an unassignment. The
+`Origin::EnvVar(HOME)` provenance of the moved CWD stays as-is, so the explain
+wording carries that same known gap.
+- **A joined word needs its mask joined by the same loop.** `case WORD in`
+joins several token words with an inserted space, so the mask join must insert
+a `false` bit in the *same* loop (`semi::try_join_masked`, whose `.0` **is**
+the word at every call site) — two loops means two space rules that drift. A
+text-only `try_join` wrapper over it is dead code: unreachable, so its only
+mutant is unkillable. The pin pair is `case "a\ b" in` (mask `[true;4]`) vs
+`case a\ b in` (mask `[false;4]`: the escape pair stays in the token text, so
+the word is 4 bytes `a`,`\`,` `,`b` and folds to `a b`, exactly bash's word).
+- **Measuring is not optional.** A planning table's fdshell column inferred
+from the `&[]` literal is guesswork; three rows were wrong: `cat <<<a\ b`
+already printed `a b` (the escaped space keeps the word whole — no
+divergence), body `\\\$(echo hi)` already printed the text `\$(echo hi)` (the
+pair protects the `$(`), and `case ~ in "$HOME")` never matched (fdshell
+substitutes no patterns, so a `$name` pattern is literal — task #280, with the
+quoted-escape pattern rows `case "a\ b" in "a\ b")` and
+`case "a\b" in "a\b")`, which the word fix turns into *new* divergences, and
+which #269 must not "fix" with an empty mask).
 
 ## The quoted-empty rule must not fire on a fully quoted whole-word `$@`: bash's `"$@"` *is* the positional word list
 `set --; set -- "$@"; echo $#` printed `1` where bash prints `0`, and `for w in "$@"` iterated once where bash iterates zero times. `substitute_args`' tail rule ("the raw span contained quotes and zero fields came out ⇒ push one empty word", task #76) fired on `"$@"` with an empty positional deque, because the word contains quotes. bash has no such word: a fully quoted whole-word `$@` *is* the positional word list, so an empty deque is no word at all. The fix is a `continue` after the push loop in the `$@`/`$*` branch of `substitute/words.rs`, keyed on `fully_quoted(mask) && !is_star`.
