@@ -666,7 +666,7 @@ the sweep's count is not the truth for this file.
 2. `quoted` is *any* POSIX quote operator in the word, in any position: a `"`/`'` marker byte (`<<a'b'c` is literal exactly like `<<'abc'`) **or a folded unquoted `\X` pair** — POSIX XCU 2.3 counts `\` a quote operator, so `<<E\OF`, `<<\E\O\F` and `<<\$HOME` make the body literal just like `<<"EOF"` (task #263, which re-pins `parse/heredoc/tests.rs::layout_escaped_delimiter_folds` to `expand == false`). The flag is decided in `fold_impl`'s escape arm, on the pair the pass consumed, **never** by a second scan of the raw word: `raw.contains(&b'\\')` is a byte-identical private copy of the quoting rule (the drift trap this file names for tasks #323 and #247) *and* it cannot tell a `\` inside a `'…'` span from an escape pair (POSIX §2.2.3: a single-quoted span has no escape pair). A trailing lone `\` escapes nothing, so it is no pair and quotes nothing (`E\` → `quoted == false`, pinned in `scan/heredoc/op/tests.rs`). A quoted body is also verbatim w.r.t. `\<newline>`: `parse/heredoc.rs` gates `strip_continuations` on the same flag, so flipping it changes the body's **bytes** as well as its expansion — measure both.
 3. The byte-level word span must consume **both** quote kinds: `lines.rs::word_span` consumed a `'…'` span whole (added by #141) and a "…" span byte-by-byte, so `<<'a <<b'` and `<<"a <<b"` cut the word at the quoted space and counted the inner `<<b` as a **second** operator — the "byte-level and token-level rules must agree" trap in its pure form. A word rule written at the byte level is only valid for both quote kinds.
 
-Residual (measured, filed as task #266): the delimiter word may now **contain** a `<<` (`<<'a <<b'` is one word whose delimiter is `a <<b`), and the heredoc **terminator line is statement text** — `tokenize_statement` blanks only the body regions, so a terminator line's own `<<b` counts as an operator at both levels (the global per-line body allocation shifts: `here-doc: missing terminating delimiter line 'b'`) and an unbalanced quote byte on it raises `unmatched quote` (`<<a\"b` + body + `a"b`; master fails on that shape identically, so it is pre-existing).
+Standing rule, measured today against bash 5.3.9 (this entry shipped it as an open residual, owned by the now-superseded task #266): the delimiter word **may contain** a `<<`, and the heredoc **terminator line is not command bytes** — the pre-parse passes blank the terminator line's structure bytes, so its own `<<` is heredoc data (the per-line body allocation stays aligned with the token count: `operator_count_opaque` counts 2 where the plain `operator_count` sees 3 on `cat <<'a <<b' <<EOF` + two bodies + `a <<b` + `EOF`), an unbalanced quote byte on it never reaches the tokenizer's quote check, and its `|` never splits a pipeline. Both shapes print their body at rc 0, bash parity: `cat <<'a <<b'` + body + `a <<b`, and `cat <<a\"b` + body + `a"b` (the escaped-quote delimiter of rule 1). Pins: `tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` (quote, trailing-statement, pipeline and block twins), `a_terminator_line_with_an_unbalanced_quote_is_data`, `scan/heredoc/tests.rs::terminator_spans_of_an_unbalanced_quote_delimiter_line`, `scan/heredoc/opaque/tests.rs::a_window_spanning_a_body_and_its_terminator_blinds_the_terminator_chevron`. The mechanism is the entry LESSONS: "A heredoc terminator line is structure, not command bytes"; the body-line half of the class is #311's, pinned by `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`.
 
 Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines.rs::word_span`/`delimiter_span`, which step one byte at a time. Owner: task #349 (measured, no prerequisite relation to #263; the flag flip leaves every one of those rows rc 1, unchanged).
 
@@ -717,12 +717,88 @@ Task #106 moved the `${}`/`${!}` guard ahead of `split_operator` and still left 
 
 Three faces of *measure, don't quote*.
 
-- **A task description's example output is a claim, not a measurement.** Task #106's description claimed `${v#a*c}` → `bcabc` and `${v##a*c}` → `bc`; bash 5.3.9 gives `abc` and the empty string, and the plan's "measured" table had one more wrong row (`${!ind%bc}` → `abcab` is really `abca`). Task #176's description had two more: its `${!v+z}` row described the **bare** `+` (not a colon operator at all — #257's family, and master's output is rc 1 `v+z: invalid indirect expansion`, not `[]` rc 0), and its pin `v=undef; ${!v:-z}` → rc 1 was the **target-unbound** case, which bash answers `z` rc 0 (the rc-1 case is the *name* being unbound: `${!undef:-z}`). Rule: check every claimed example against `bash -c` on this machine before writing the assertion, and pin the measured value. Shortest/longest anchored matching is computable by hand; a row that mixes up a name with its target reads plausibly and is still wrong.
-- **Measure the plan's bash table on the rows it labels "fdshell-identical".** Three such rows of task #276's table are not, all for pre-existing reasons the table did not test: `{ cat 3<<T; }` and `f(){ cat 3<<T; }; f` fail with `missing terminating delimiter line` because a here-doc in a group/function body claims no body region (the plain `<<` form fails identically on master — tasks #315/#305, and the **mid-run** keyword-block row of this family is bash-equal, pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open` because a `>&N`/`<&N` source is resolved against the *parent's* fd table, never against a descriptor a sibling redirect of the same command opens (task #178). Recording the measured behaviour as pins and naming the owning task is the deliverable; inventing a bash-parity assertion for a gap this task does not own is not. The same table defect reappeared on task #312 (`N<<<word`): its acceptance row `cat 3<<<str <&3` (bash prints `str`) is #178's gap, unchanged by the here-string fix — the pins are `fd 3 is not open` in `prefixed_here_string_sibling_dup_cannot_see_the_descriptor`, and the content rows use `exec 3<<<x; cat <&3`, which *is* observable (the descriptor is in the shell's table by the time the next command runs).
-- **Re-measure a bug on `master` before planning its fix: the task that pins a divergence may be the task that closes it** (task #295). It was filed, from task #232's planning, with a measured divergence — a here-doc in the **body** of a multi-line mid-run keyword block claims no body region, so `true && while :; do cat <<T; break; done` + `bodyT` + `T` reports `here-doc: missing terminating delimiter line 'T'` rc 1 while bash prints `bodyT` rc 0 — and on `master` the exact script prints `bodyT` rc 0 in **both** shells. The description stayed true about the mechanism it blamed (`segment/line.rs::flush_line` does emit a body-less run, `single_line == false`) and false about the shape reaching that branch: `segment/block/midrun.rs::skip` keeps the block's bytes inside the run and never moves `book.line_start`, so the multi-line run's `off` is `>= line_start`, `single_line` is true, the flush takes the physical line's whole region stream, and the run's `<<` gets its body. The body-less branch is reached only by a flush **deferred past a newline** (a trailing `#`, `book::resume_past`'s `Boundary::Comment`, or a line-opening `&`) — owner task #333. The rc 1 in the description measured an intermediate state of #232's branch.
-  - **Bisect such a claim in minutes.** The repro is a two-line script, so a build-and-measure loop is enough: `git worktree add /tmp/opencode/wtN <base>` (the repo worktree stays clean), `CARGO_TARGET_DIR=/tmp/opencode/tgtN` (the repo's `target/` untouched), a loop that runs `cargo build -p fdshell && target/debug/fdshell -c "$script"` and compares stdout/rc to `bash file < /dev/null`. An incremental build is ~2 s, so a binary search over 227 commits is a handful of builds. The answer here: **`43ff10e` (task #232's own commit) is the first commit where the shape is bash-equal**; at its parent the script is not even parsed (`expected 'done'` rc 1). The earlier measurement was simply never re-taken against the merged version.
-  - **The deliverable of a bug that no longer reproduces is pins, not a fix.** Pin the reported row and its family at three levels — the integration table (`tests/heredoc.rs::mid_run_heredoc_parity_family`, 19 bash-measured rows: the operator in the block's condition, two `<<` in one body, every keyword, the `|` stage, `<<'T'`/`<<-T`/`3<<T`/`<<<`, a `#` behind the run), the unit level (`segment/line/tests.rs::flush_line_a_multi_line_run_claims_its_line_stream` locks the flush bookkeeping that the reported bug would break), and the divergence family next door (`tests/cond_blocks.rs::multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`, rc 1 vs bash rc 2). Then correct every doc that lists the closed task as an owner (task #276's table entry, `README.md`, `POSIX_COMPATIBILITY.md`) and name the owner of each residual member. **Never** implement the residual family inside the measuring task: the `single_line == false` fix belongs to #333, it needs #333's open decision ("does a `#`-terminated line own a body stream at all?"), and it pins behaviour in `segment/bg/tests.rs` that #333 owns. A pins-only task's biggest risk is the temptation to fix the neighbour rows it discovers.
-
+- **A task description's example output is a claim, not a measurement.** Task
+  #106's description claimed `${v#a*c}` → `bcabc` and `${v##a*c}` → `bc`; bash
+  5.3.9 gives `abc` and the empty string, and the plan's "measured" table had one
+  more wrong row (`${!ind%bc}` → `abcab` is really `abca`). Task #176's
+  description had two more: its `${!v+z}` row described the **bare** `+` (not a
+  colon operator at all — #257's family, and master's output is rc 1
+  `v+z: invalid indirect expansion`, not `[]` rc 0), and its pin
+  `v=undef; ${!v:-z}` → rc 1 was the **target-unbound** case, which bash answers
+  `z` rc 0 (the rc-1 case is the *name* being unbound: `${!undef:-z}`). Rule:
+  check every claimed example against `bash -c` on this machine before writing
+  the assertion, and pin the measured value. Shortest/longest anchored matching
+  is computable by hand; a row that mixes up a name with its target reads
+  plausibly and is still wrong.
+- **Measure the plan's bash table on the rows it labels "fdshell-identical".**
+  Three such rows of task #276's table are not, all for pre-existing reasons the
+  table did not test: `{ cat 3<<T; }` and `f(){ cat 3<<T; }; f` fail with
+  `missing terminating delimiter line` because a here-doc in a group/function
+  body claims no body region. The **group** half still fails on the plain `<<`
+  form (`{ cat <<T; }` + body + `T` → rc 1 where bash prints the body at rc 0,
+  measured 2026-10-25) — owner task #315. The **function-definition** half is
+  closed: `f(){ cat <<T; }; f` prints its body and `f(){ cat 3<<T; }; f` prints
+  nothing, both rc 0 = bash, pinned by `tests/heredoc.rs::heredoc_in_function_body`
+  and the terminated-function-body family
+  (`heredoc_of_a_terminated_function_body_line_prints_on_every_call` and its
+  siblings). The **mid-run** keyword-block row of this family is bash-equal,
+  pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and
+  `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a
+  subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
+  because a `>&N`/`<&N` source is resolved against the *parent's* fd table, never
+  against a descriptor a sibling redirect of the same command opens (task #178).
+  Recording the measured behaviour as pins and naming the owning task is the
+  deliverable; inventing a bash-parity assertion for a gap this task does not own
+  is not. The same table defect reappeared on task #312 (`N<<<word`): its
+  acceptance row `cat 3<<<str <&3` (bash prints `str`) is #178's gap, unchanged
+  by the here-string fix — the pins are `fd 3 is not open` in
+  `prefixed_here_string_sibling_dup_cannot_see_the_descriptor`, and the content
+  rows use `exec 3<<<x; cat <&3`, which *is* observable (the descriptor is in the
+  shell's table by the time the next command runs).
+- **Re-measure a bug on `master` before planning its fix: the task that pins a
+  divergence may be the task that closes it** (task #295). A filed divergence
+  ("a here-doc in the **body** of a multi-line mid-run keyword block claims no
+  body region, so `true && while :; do cat <<T; break; done` + `bodyT` + `T`
+  reports `here-doc: missing terminating delimiter line 'T'` rc 1 while bash
+  prints `bodyT` rc 0") turned out to print `bodyT` rc 0 in **both** shells on
+  `master`. The description stayed true about the mechanism it blamed
+  (`segment/line.rs::flush_line` does emit a body-less run, `single_line ==
+  false`) and false about the shape reaching that branch:
+  `segment/block/midrun.rs::skip` keeps the block's bytes inside the run and
+  never moves `book.line_start`, so the multi-line run's `off` is `>=
+  line_start`, `single_line` is true, the flush takes the physical line's whole
+  region stream, and the run's `<<` gets its body. The body-less branch is
+  reached only by a flush **deferred past a newline** (a trailing `#`,
+  `book::resume_past`'s `Boundary::Comment`, or a line-opening `&`) — owner task
+  #333. A report measured on an intermediate state of a task branch reads as a
+  divergence on `master`.
+  - **Bisect such a claim in minutes.** The repro is a two-line script, so a
+    build-and-measure loop is enough: `git worktree add /tmp/opencode/wtN <base>`
+    (the repo worktree stays clean), `CARGO_TARGET_DIR=/tmp/opencode/tgtN` (the
+    repo's `target/` untouched), a loop that runs
+    `cargo build -p fdshell && target/debug/fdshell -c "$script"` and compares
+    stdout/rc to `bash file < /dev/null`. An incremental build is ~2 s, so a
+    binary search over a couple of hundred commits is a handful of builds — and
+    the answer is usually the feature task's own commit, with the reported shape
+    unparseable at its parent. The earlier measurement was simply never re-taken
+    against the merged version.
+  - **The deliverable of a bug that no longer reproduces is pins, not a fix.**
+    Pin the reported row and its family at three levels — the integration table
+    (`tests/heredoc.rs::mid_run_heredoc_parity_family`, 19 bash-measured rows:
+    the operator in the block's condition, two `<<` in one body, every keyword,
+    the `|` stage, `<<'T'`/`<<-T`/`3<<T`/`<<<`, a `#` behind the run), the unit
+    level (`segment/line/tests.rs::flush_line_a_multi_line_run_claims_its_line_stream`
+    locks the flush bookkeeping that the reported bug would break), and the
+    divergence family next door
+    (`tests/cond_blocks.rs::multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`,
+    rc 1 vs bash rc 2). Then correct every doc that lists the closed task as an
+    owner (the plan table entry, `README.md`, `POSIX_COMPATIBILITY.md`) and name
+    the owner of each residual member. **Never** implement the residual family
+    inside the measuring task: the `single_line == false` fix belongs to #333, it
+    needs #333's open decision ("does a `#`-terminated line own a body stream at
+    all?"), and it pins behaviour in `segment/bg/tests.rs` that #333 owns. A
+    pins-only task's biggest risk is the temptation to fix the neighbour rows it
+    discovers.
 ## Word patterns have no `FNM_PERIOD` rule
 `${d#*c}` on `d=.abc` strips the whole value, while the pathname glob with `dotglob` off refuses the leading dot. A word pattern is not a pathname: pass `dotglob = true` into `match_component` from `substitute/param_op/pattern.rs` and pin the leading-dot case, or the shared matcher's glob rule leaks into the expansion.
 
