@@ -1665,15 +1665,90 @@ the direction with a lower bound on a sleeping statement (`time -p sleep 1` →
 `real >= 1.00`), not with a layout-only assertion.
 
 ## A CPU-burn timing test measures nothing in a release build
-`monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop, `core::hint::black_box`) passed every local debug run and failed under `nix flake check`, where the crate is built in release: LLVM computes the loop's result directly and the burn costs ~0 ms, so the clock test asserted a 5 ms elapsed time for work that never ran. **Rule:** measure elapsed time against a syscall that blocks (`libc::nanosleep`), which cannot be folded away, and bound it on both sides (at least 10 ms slept, far less than the clock reads). The same fold hits `utime` assertions: `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burned `n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so release builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox and `nix flake check --build-all` fails the suite intermittently. A burn must be un-foldable to be assertable: keep the accumulator inside the loop under `black_box` (task #171's `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self burn and forked-child burn), and never assert a positive CPU count for folded-away work. The two signatures, measured in the sandbox's release profile: an un-folded burn costs ~10–18 ms of real user time (`utime ≈ 18_000 µs`, four orders above a `> 0` assertion); the same loop with `black_box` moved back after the loop costs ~0 ms, leaving `{ utime: 0, stime: ~3000 }` — ~3 ms of process-startup system time, which is the *folded* signature, not a measured attribution flip.
-- **How a process's CPU splits between `ru_utime` and `ru_stime` is the kernel's accounting choice, which no test controls**, so a positive-`utime` assertion is a scheduler coin flip (it bit `self_usage` and `wait_pidfd_rusage` in the sandbox, with `CpuTimes { utime: 0, stime: 3124 }`). Self and reaped-child CPU-time assertions are on `utime + stime`. Keep the burn loop — it is what makes the reported numbers real — but read a `> 0` sum as "the report is non-degenerate", never as "the burn ran"; that claim belongs to the un-foldability rule above, never to the sum.
+`monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop,
+`core::hint::black_box`) passed every local debug run and failed under
+`nix flake check`, where the crate is built in release: LLVM computes the
+loop's result directly and the burn costs ~0 ms, so the clock test asserted a
+5 ms elapsed time for work that never ran. **Rule:** measure elapsed time
+against a syscall that blocks (`libc::nanosleep`), which cannot be folded
+away, and bound it on both sides (at least 10 ms slept, far less than the
+clock reads). The same fold hits `utime` assertions:
+`unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burned
+`n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so
+release builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox
+and `nix flake check --build-all` fails the suite intermittently. A burn must
+be un-foldable to be assertable: keep the accumulator inside the loop under
+`black_box` (task #171's `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self
+burn and forked-child burn), and never assert a positive CPU count for
+folded-away work. The two signatures, measured in the sandbox's release
+profile: an un-folded burn costs ~10–18 ms of real user time
+(`utime ≈ 18_000 µs`, four orders above a `> 0` assertion); the same loop with
+`black_box` moved back after the loop costs ~0 ms, leaving
+`{ utime: 0, stime: ~3000 }` — ~3 ms of process-startup system time, which is
+the *folded* signature, not a measured attribution flip.
+- **How a process's CPU splits between `ru_utime` and `ru_stime` is the
+kernel's accounting choice, which no test controls**, so a positive-`utime`
+assertion is a scheduler coin flip (it bit `self_usage` and
+`wait_pidfd_rusage` in the sandbox, with
+`CpuTimes { utime: 0, stime: 3124 }`). Self and reaped-child CPU-time
+assertions are on `utime + stime`. Keep the burn loop — it is what makes the
+reported numbers real — but read a `> 0` sum as
+"the report is non-degenerate", never as "the burn ran"; that claim belongs to
+the un-foldability rule above, never to the sum.
 - **The same coin flip reaches the `times` builtin's *children* fields (task
-#267):** `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
-burned CPU in a backgrounded child, `wait`ed for it, and asserted the *children user time* field `> 0.00`. `times` prints `child_utime` and `child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`, fed by `add_child_times` from each reap's `waitid` rusage), so a reaped child's CPU attributed wholly to system zeroes the asserted field while the child plainly ran. Fixed the same way: assert the printed sum (user + system), keep the burn loop, read `> 0` as "non-degenerate". The centisecond print floor is the rule this adds: `centis` truncates the two fields **independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not the truncation of the total and its floor sits on a
-*single* field — one field prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both* fields are, i.e. only when the whole child CPU is under 200 µs. **Rule:** measure a `times`-style burn against that print floor, never against the printed unit's nominal resolution (the printed unit is the centisecond = 10 ms; the resolution is a hundredth of it). Measured 10 runs per profile, the test's shell loop at **500** iterations puts the children line at `5.65`–`7.19` user + `0.73`–`1.36` system centiseconds in debug and `3.73`–`4.24` user + `0.28`–`0.50` system in release — worst field `0.28` = 2800 µs, 28× above the per-field floor, so the sum's `> 0` is both attribution-independent and floor-independent (100 and 250 iterations clear the floor too — `0.05`/`0.13` worst field in release — and were rejected for margin, not for failure).
-- **A burn test's wall time is its CPU ÷ its share of the machine, so an over-sized burn is a nextest `slow-timeout` kill under mutation load, and one timed-out test is a *false* kill of every mutant in that copy's sweep** (the entry "A mutant caught by a flaky test is a false kill"). The `times` children burn's 5000-iteration form (~0.65 s of child CPU) took **25.8–26.4 s** of wall in 8 concurrent full-suite runs — the `cargo mutants -j8` profile, 32 cores — against the 10 s period. **Rule:** size the burn to the assertion's floor and measure both margins — floor (worst observed field vs the print floor) and timeout (wall time under the load profile vs the kill). 500 iterations: 0.16–0.20 s for the script, 0.33–3.99 s for the test, so the kill is widened for that one test only (`[[profile.default.overrides]]` + `slow-timeout = { period = "10s", terminate-after = 4 }`), never by lengthening the global 10 s period: that period is the suite's self-bound (`safe/fdshell/tests/loops.rs::run_bounded` bounds its child at 5 s *because* the kill sits at 10 s), and widening it delays every hang regression. Verify a per-test override fires — set the period to `1ms` and watch exactly the named test die; a filter matching nothing is a comment, not a fix.
-- **A CPU-time delta measured around a forked child is the fork's CPU.** `time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`: the fork/exec of the child (PATH walk, arg substitution) is the shell's own CPU and is inside the measurement window. So a test may pin `user`/`sys` to `0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` with an in-process body); asserting `user == 0.00` around a fork is a timing coin flip.
-- **Two harness facts for repeat measurement:** a plain `nix flake check` repeat is a store hit that runs nothing, so re-run the check phase with `nix build .#checks.x86_64-linux.default --rebuild`; and `nix build .#coverage --rebuild` exits 1 on the coverage report's embedded timestamps tripping nix's output-determinism check, which is not a test failure.
+#267):**
+`safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
+burned CPU in a backgrounded child, `wait`ed for it, and asserted the
+*children user time* field `> 0.00`. `times` prints `child_utime` and
+`child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`,
+fed by `add_child_times` from each reap's `waitid` rusage), so a reaped
+child's CPU attributed wholly to system zeroes the asserted field while the
+child plainly ran. Fixed the same way: assert the printed sum (user + system),
+keep the burn loop, read `> 0` as "non-degenerate". The centisecond print
+floor is the rule this adds: `centis` truncates the two fields
+**independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not
+the truncation of the total and its floor sits on a *single* field — one field
+prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both*
+fields are, i.e. only when the whole child CPU is under 200 µs. **Rule:**
+measure a `times`-style burn against that print floor, never against the
+printed unit's nominal resolution (the printed unit is the centisecond = 10
+ms; the resolution is a hundredth of it). At **500** iterations the children
+line is `5.65`–`7.19` user + `0.73`–`1.36` system centiseconds in debug and
+`3.73`–`4.24` + `0.28`–`0.50` in release — worst field `0.28` = 2800 µs, 28×
+above the per-field floor, so the sum's `> 0` is attribution- and
+floor-independent; 100 and 250 iterations clear the floor (`0.05`/`0.13` worst
+field in release) and were rejected for margin, not for failure.
+- **A burn test's wall time is its CPU ÷ its share of the machine, so an
+over-sized burn is a nextest `slow-timeout` kill under mutation load, and one
+timed-out test is a *false* kill of every mutant in that copy's sweep** (the
+entry "A mutant caught by a flaky test is a false kill"). The `times` children
+burn's 5000-iteration form (~0.65 s of child CPU) took **25.8–26.4 s** of wall
+in 8 concurrent full-suite runs — the `cargo mutants -j8` profile, 32 cores —
+against the 10 s period. **Rule:** size the burn to the assertion's floor and
+measure both margins — floor (worst observed field vs the print floor) and
+timeout (wall time under the load profile vs the kill). 500 iterations:
+0.16–0.20 s for the script, 0.33–3.99 s for the test, so the kill is widened
+for that one test only (`[[profile.default.overrides]]` +
+`slow-timeout = { period = "10s", terminate-after = 4 }`), never by
+lengthening the global 10 s period: that period is the suite's self-bound
+(`safe/fdshell/tests/loops.rs::run_bounded` bounds its child at 5 s *because*
+the kill sits at 10 s), and widening it delays every hang regression. Verify a
+per-test override fires — set the period to `1ms` and watch exactly the named
+test die; a filter matching nothing is a comment, not a fix.
+- **A CPU-time delta measured around a forked child is the fork's CPU.**
+`time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`:
+the fork/exec of the child (PATH walk, arg substitution) is the shell's own
+CPU and is inside the measurement window. So a test may pin `user`/`sys` to
+`0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` with
+an in-process body); asserting `user == 0.00` around a fork is a timing coin
+flip.
+- **Two harness facts for repeat measurement:** a plain `nix flake check`
+repeat is a store hit that runs nothing, so re-run the check phase with
+`nix build .#checks.x86_64-linux.default --rebuild`; and
+`nix build .#coverage --rebuild` exits 1 on the coverage report's embedded
+timestamps tripping nix's output-determinism check, which is not a test
+failure.
+
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
 `connect_listen_accept_in_one_script_inet` failed once in the
 `nix flake check` sandbox and passed on re-run, and was filed as
@@ -1692,15 +1767,43 @@ builtins set no socket options, so a port reused by a run that happens to
 share a pid binds 98. Every signature is pid-dependent, so every one of them
 "passes on re-run" — read that signature as **shared-name luck** before
 calling anything timing-sensitive. The same luck hides the bug under a load
-loop: a pre-change harness of 16 concurrent copies × 12 iterations, and 48
-full-suite runs, measured **0** listen failures on the host while the observed
-rate was 1-in-48, so "reproduction failed to fire" is compatible with the bug
-— size the loop to the observed rate before concluding absence.
-**The rule has two halves, and they are not interchangeable.** A *shell (e2e)* test cannot let the kernel pick the port: the child binds a kernel-assigned port it cannot report back through the script. So name the port uniquely **per call site** (the same sequence counter the abstract socket names use), keep the band **below** the ephemeral range, step the pid so adjacent pids do not land on the same port, and retry only the port-busy errnos 98/99 with a fresh port on each attempt (`inet_port` and the bounded retry in `safe/fdshell/tests/sockets.rs`). A retry may re-attempt such a test but may never widen its tolerance — no sleeps, no `let _ =` on a client connect; a retry that swallows other statuses converts a real failure into a pass.
-*In-process* tests must not name a port at all: no naming scheme beats not naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free *at assignment time*, so concurrent suite runs cannot collide, and the assignee never re-binds a port that is `TIME_WAIT` for itself — and `sys::net::getsockname` reads the port back off the socket the test captured (its pins in `unsafe/sys/tests/sockets.rs`; the test shape is `listen_handler_addr_alias_sends_listening_socket`, which derived `30000 + pid % 10000` and failed once in 48 full-suite runs under `cargo mutants -j4`). Reading back works exactly when the socket is in the test's own fd table (the unit tests receive it via `recv_fd`); where it is not, the e2e band+retry scheme above stays right. Pin the read-back for exactness, not just non-zero: a live `TcpStream::connect` to the reported port kills the `from_be`→`from_le` byte-order mutant (both AF_INET listen tests and the sys pin fail on the swapped read-back; cargo-mutants does not generate byte-order mutants, so apply it by hand).
-The product-side half is not a test artifact: a real server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR` (tracked as task #331).
-Three `ok_or(SyscallError::Never)?` arms in `net/getsockname.rs` are unreachable
-*by construction*: the `min(sun_path.len())` clamp makes `get(..n)` always `Some`; `first().is_some_and(…)` implies non-empty, so `get(1..)` is always `Some`; `position(…).unwrap_or(len) ≤ len`, so `get(..end)` is always `Some`. Their 0 coverage hits are the proof, not a gap: STYLE §4.10 sanctions the `Never` + `?` shape, so a later "coverage fix" must not delete these guards.
+loop: 16 concurrent copies × 12 iterations, and 48 full-suite runs, measured
+**0** listen failures on the host while the observed rate was 1-in-48, so
+"reproduction failed to fire" is compatible with the bug — size the loop to
+the observed rate before concluding absence. **The rule has two halves, and
+they are not interchangeable.** A *shell (e2e)* test cannot let the kernel
+pick the port: the child binds a kernel-assigned port it cannot report back
+through the script. So name the port uniquely **per call site** (the same
+sequence counter the abstract socket names use), keep the band **below** the
+ephemeral range, step the pid so adjacent pids do not land on the same port,
+and retry only the port-busy errnos 98/99 with a fresh port on each attempt
+(`inet_port` and the bounded retry in `safe/fdshell/tests/sockets.rs`). A
+retry may re-attempt such a test but may never widen its tolerance — no
+sleeps, no `let _ =` on a client connect; a retry that swallows other statuses
+converts a real failure into a pass. *In-process* tests must not name a port
+at all: no naming scheme beats not naming. `bind(127.0.0.1:0)` gets a
+kernel-assigned free port — free *at assignment time*, so concurrent suite
+runs cannot collide, and the assignee never re-binds a port that is
+`TIME_WAIT` for itself — and `sys::net::getsockname` reads the port back off
+the socket the test captured (its pins in `unsafe/sys/tests/sockets.rs`; the
+test shape is `listen_handler_addr_alias_sends_listening_socket`, which
+derived `30000 + pid % 10000` and failed once in 48 full-suite runs under
+`cargo mutants -j4`). Reading back works exactly when the socket is in the
+test's own fd table (the unit tests receive it via `recv_fd`); where it is
+not, the e2e band+retry scheme above stays right. Pin the read-back for
+exactness, not just non-zero: a live `TcpStream::connect` to the reported port
+kills the `from_be`→`from_le` byte-order mutant (both AF_INET listen tests and
+the sys pin fail on the swapped read-back; cargo-mutants does not generate
+byte-order mutants, so apply it by hand). The product-side half is not a test
+artifact: a real server rebinding its own `TIME_WAIT` port needs
+`SO_REUSEADDR` (tracked as task #331). Three `ok_or(SyscallError::Never)?`
+arms in `net/getsockname.rs` are unreachable *by construction*: the
+`min(sun_path.len())` clamp makes `get(..n)` always `Some`;
+`first().is_some_and(…)` implies non-empty, so `get(1..)` is always `Some`;
+`position(…).unwrap_or(len) ≤ len`, so `get(..end)` is always `Some`. Their 0
+coverage hits are the proof, not a gap: STYLE §4.10 sanctions the `Never` +
+`?` shape, so a later "coverage fix" must not delete these guards.
+
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
 report prints *before* them") carried `.`. `.` is the `source` alias: it runs the script
@@ -1732,11 +1835,37 @@ commit**, or the integration suite fails for a wording change.
 
 
 ## Rust std ignores SIGPIPE, so *both* process hand-off boundaries must clear it for the child
-`fdshell` is a Rust std process, and std installs `SIG_IGN` for `SIGPIPE` at startup; `clone3` inherits the disposition **and** the signal mask. A stage that wrote to a pipe with no readers therefore got `EPIPE`, and the error path printed `cmd: write error: Broken pipe` and exited non-zero, where bash kills the stage silently and the stage reports 141. Restoring the disposition is only **half** the fix: `signalfd %v PIPE` blocks SIGPIPE in the mask as well (measured: `signalfd %p PIPE; seq 1000000 | echo got` was still noisy with only `sigaction`), so `sys::signal::reset_sigpipe` does `sigaction(SIGPIPE, SIG_DFL)` **and** `sigprocmask(SIG_UNBLOCK, {SIGPIPE})`.
+`fdshell` is a Rust std process, and std installs `SIG_IGN` for `SIGPIPE` at
+startup; `clone3` inherits the disposition **and** the signal mask. A stage
+that wrote to a pipe with no readers therefore got `EPIPE`: the error path
+printed `cmd: write error: Broken pipe` and exited non-zero, where bash kills
+the stage silently and the stage reports 141. Restoring the disposition is
+only **half** the fix: `signalfd %v PIPE` blocks SIGPIPE in the mask as well
+(measured: `signalfd %p PIPE; seq 1000000 | echo got` was still noisy with
+only `sigaction`), so `sys::signal::reset_sigpipe` does
+`sigaction(SIGPIPE, SIG_DFL)` **and** `sigprocmask(SIG_UNBLOCK, {SIGPIPE})`.
 
-Rule: the reset lives at the two boundaries where fdshell hands off to another program — the fork wrapper `fork_pidfd_cell` (the single choke point of all four shell fork sites: pipeline, launch, `$(…)`, `wait` arm) and the parent-side image replacement in `replacer/external` (which runs **in the shell process**, so `exec seq 1000000` with a closed stdout is signaled by SIGPIPE, as in bash). Per-site resets in `child_main`/`launch`/`cmd_subst`/`wait/arm` are four call sites to remember forever, one of them easy to miss; the plain test-only `fork_pidfd` deliberately stays untouched. The shell process keeps its own ignore on purpose (the REPL must survive a closed stdout; `bash -c` has `SigIgn=0` — an accepted divergence, in the README). Pin std's install in a test (`sigpipe_disposition() == SIG_IGN` in the parent): a toolchain that stops installing it must fail loudly, not silently un-fix the bug.
+Rule: the reset lives at the two boundaries where fdshell hands off to another
+program — the fork wrapper `fork_pidfd_cell` (the single choke point of all
+four shell fork sites: pipeline, launch, `$(…)`, `wait` arm) and the
+parent-side image replacement in `replacer/external` (which runs **in the
+shell process**, so `exec seq 1000000` with a closed stdout is signaled by
+SIGPIPE, as in bash). Per-site resets in
+`child_main`/`launch`/`cmd_subst`/`wait/arm` are four call sites to remember
+forever, one easy to miss; the plain test-only `fork_pidfd` deliberately stays
+untouched. The shell process keeps its own ignore on purpose (the REPL must
+survive a closed stdout; `bash -c` has `SigIgn=0` — an accepted divergence, in
+the README). Pin std's install in a test (`sigpipe_disposition() == SIG_IGN`
+in the parent): a toolchain that stops installing it must fail loudly, not
+silently un-fix the bug.
 
-Test corollary: a deterministic broken-pipe test must make the writer emit **more than the pipe capacity** (64 KiB default, so ≥128 KiB here), otherwise the writer finishes before the reader closes and every assertion is a coin flip — the reported `echo hi | echo got` was noisy in 14 of 40 runs. A 50-run loop of the racy shape is a *detector*, not a flaky assertion: post-fix every interleaving is silent (the stage either writes cleanly or dies of the signal), so it fails on the broken build and cannot flake on the fixed one.
+Test corollary: a deterministic broken-pipe test must make the writer emit
+**more than the pipe capacity** (64 KiB default, so ≥128 KiB here), otherwise
+the writer finishes before the reader closes and every assertion is a coin
+flip — the reported `echo hi | echo got` was noisy in 14 of 40 runs. A 50-run
+loop of the racy shape is a *detector*, not a flaky assertion: post-fix every
+interleaving is silent (the stage either writes cleanly or dies of the
+signal), so it fails on the broken build and cannot flake on the fixed one.
 
 ## A quoted region is a unit for *every* byte scanner, not just the tokenizer
 `"$(echo "a; b")"` failed in two independent layers. The tokenizer's quoted
@@ -2371,17 +2500,66 @@ output are mutually exclusive.
 
 ## e2e tests that assert `rc == errno` must *retry* the load-dependent errnos, never skip them
 
-The shape that reveals the class: the **unmutated baseline** of `cargo mutants -j4` aborts on a `rc == errno` pin (`verity::double_enable_is_eexist`) and the immediate re-run is green. The mechanism is the exit-code channel itself: `handle_builtin_error` returns `Ok(e.errno())` for a syscall failure, so a kernel/fd transient reaches the test *as the exit code*, and the suite pins exit codes (`17` EEXIST, `61` ENODATA, `1`, `42`). Under `cargo mutants -j4` — hundreds of concurrent test processes doing kernel work — the work `FS_IOC_ENABLE_VERITY` does is exactly the work that fails transiently: Merkle-tree build + fs transaction (kernel allocations, btrfs metadata reservations → `ENOMEM`/`ENOSPC`/`EIO`/`EBUSY`), `openat2` racing the system-wide fd table (`ENFILE`), fork/exec of the tiny child under memory pressure (`EAGAIN`), a concurrently rebuilt target binary (`ETXTBSY`).
+The shape that reveals the class: the **unmutated baseline** of
+`cargo mutants -j4` aborts on a `rc == errno` pin
+(`verity::double_enable_is_eexist`), and the immediate re-run is green. The
+mechanism is the exit-code channel itself: `handle_builtin_error` returns
+`Ok(e.errno())` for a syscall failure, so a kernel/fd transient reaches the
+test *as the exit code*, and the suite pins exit codes (`17` EEXIST, `61`
+ENODATA, `1`, `42`). Under `cargo mutants -j4` — hundreds of concurrent test
+processes doing kernel work — the work `FS_IOC_ENABLE_VERITY` does is exactly
+the work that fails transiently: Merkle-tree build + fs transaction (kernel
+allocations, btrfs metadata reservations → `ENOMEM`/`ENOSPC`/`EIO`/`EBUSY`),
+`openat2` racing the system-wide fd table (`ENFILE`), fork/exec of the tiny
+child under memory pressure (`EAGAIN`), a concurrently rebuilt target binary
+(`ETXTBSY`).
 
 Rules:
 
-- Classify the transient set **in the shared helper** and retry it with a bounded budget (`tests/verity.rs`: `TRANSIENT` + `run`'s 9 attempts, 8 × 10 ms sleeps), never *skip* it. A skip that swallows transient errnos hides the pressure, and it corrupts the gate's accounting: a mutant "caught" by a test that retries past its failure is a false kill (the flaky-test entry).
-- Keep the graceful-skip set exact: only `ENOTTY`/`EOPNOTSUPP` (fs lacks fs-verity) skip. A transient is retried, a non-transient rc is a hard failure. No pinned rc (17, 61, 1, 42, …) is in the transient set, so no pin can be masked by a retry.
-- Absorb spawn failures as well: `Command::output()` reports fork `EAGAIN`/`ETXTBSY` as an `io::Error`, never as an rc, so a `.output().unwrap()` in a helper is itself a flake.
-- Retrying a *failed* enable is safe for exactly this set: the kernel sets the verity flag only in its final success step, so a transient failure leaves the file non-verity and the repeat re-runs the identical first-enable path — which is why `EEXIST` must stay out of the set (a half-enabled file must stay visible).
-- Give `--enable` a script **of its own**, never a composite `--enable; <query>`: `;` is a sequence, not a stop (the script's rc is the *last* command's rc), so a composite hides a step-level transient — a transient at the enable step leaves the file non-verity, the query step prints `enabled=no`, the composite reports rc 0, and `run`'s retry then re-runs the whole script against an inode the first attempt already enabled (`--enable` → `EEXIST`, and `;` swallows that too), so the hard failure names no errno at all (`stage 1 stdout="enabled=no"`). One idempotent step per `run()`: enable-only, then query-only (`verify_then_exec` stage 1).
-- Name the errno in the helper's output (`transient rc …, retrying`, `enable failed: rc=… stderr=…`) and hand the last output back to the assertion when the budget is exhausted: a real gate failure then identifies the errno, and the set grows by one constant.
-- **Verify with fault injection, not with load.** A wrapper at the suite's `CARGO_BIN_EXE_fdshell` path that fails 1-of-N invocations with a chosen rc (and an interpreter symlink deleted/recreated for the spawn-failure class) reproduces the whole class deterministically: injected `EAGAIN`/`ENFILE`/`ENOSPC` → suite green with visible retries; injected `EINVAL` (22) → suite fails hard; injected `ENOTTY` on the **enable-bearing** invocations → graceful skip. An *invocation-level* injector cannot show that skip as "suite green": forced on every invocation it also breaks the tests that never enable (`query_non_verity`, `error_paths`, `dump_non_verity`, `dump_error_paths`), which legitimately fail — a verity-less host is a *step*-level fault (the ioctl), not an invocation-level one. A step-level injector (run the real enable, then exit with a transient rc) is the only way to prove the composite-script rule. A load loop alone is worth less: it is rare enough to hide behind other flaky tests.
+- Classify the transient set **in the shared helper** and retry it with a
+bounded budget (`tests/verity.rs`: `TRANSIENT` + `run`'s 9 attempts, 8 × 10 ms
+sleeps), never *skip* it. A skip that swallows transient errnos hides the
+pressure, and it corrupts the gate's accounting: a mutant "caught" by a test
+that retries past its failure is a false kill (the flaky-test entry).
+- Keep the graceful-skip set exact: only `ENOTTY`/`EOPNOTSUPP` (fs lacks
+fs-verity) skip. A transient is retried, a non-transient rc is a hard failure.
+No pinned rc (17, 61, 1, 42, …) is in the transient set, so no pin can be
+masked by a retry.
+- Absorb spawn failures as well: `Command::output()` reports fork
+`EAGAIN`/`ETXTBSY` as an `io::Error`, never as an rc, so a
+`.output().unwrap()` in a helper is itself a flake.
+- Retrying a *failed* enable is safe for exactly this set: the kernel sets the
+verity flag only in its final success step, so a transient failure leaves the
+file non-verity and the repeat re-runs the identical first-enable path — which
+is why `EEXIST` must stay out of the set (a half-enabled file must stay
+visible).
+- Give `--enable` a script **of its own**, never a composite
+`--enable; <query>`: `;` is a sequence, not a stop (the script's rc is the
+*last* command's rc), so a composite hides a step-level transient — a
+transient at the enable step leaves the file non-verity, the query step prints
+`enabled=no`, the composite reports rc 0, and `run`'s retry then re-runs the
+whole script against an inode the first attempt already enabled (`--enable` →
+`EEXIST`, and `;` swallows that too), so the hard failure names no errno at
+all (`stage 1 stdout="enabled=no"`). One idempotent step per `run()`:
+enable-only, then query-only (`verify_then_exec` stage 1).
+- Name the errno in the helper's output (`transient rc …, retrying`,
+`enable failed: rc=… stderr=…`) and hand the last output back to the assertion
+when the budget is exhausted: a real gate failure then identifies the errno,
+and the set grows by one constant.
+- **Verify with fault injection, not with load.** A wrapper at the suite's
+`CARGO_BIN_EXE_fdshell` path that fails 1-of-N invocations with a chosen rc
+(and an interpreter symlink deleted/recreated for the spawn-failure class)
+reproduces the whole class deterministically: injected
+`EAGAIN`/`ENFILE`/`ENOSPC` → suite green with visible retries; injected
+`EINVAL` (22) → suite fails hard; injected `ENOTTY` on the **enable-bearing**
+invocations → graceful skip. An *invocation-level* injector cannot show that
+skip as "suite green": forced on every invocation it also breaks the tests
+that never enable (`query_non_verity`, `error_paths`, `dump_non_verity`,
+`dump_error_paths`), which legitimately fail — a verity-less host is a
+*step*-level fault (the ioctl), not an invocation-level one. A step-level
+injector (run the real enable, then exit with a transient rc) is the only way
+to prove the composite-script rule. A load loop alone is worth less: it is
+rare enough to hide behind other flaky tests.
 
 ## A positional parameter is a parameter, not a variable name
 `${1}` used to be the variable named `1` because only the bare `$` path had a digit scanner, so every braced arm (plain, pattern, colon) read `strings`/`environ` and a positional expanded to empty — and under `set -u` it bailed `1: unbound variable` for a parameter that *is* set. The fix is one `positional_value` shared by both paths, reached from the braced side through the same lookup that owns the nounset rule (the existing "unset-parameter rule is one rule shared by all four arms"), so the four families agree by construction. Two corollaries: the **write** arm must refuse exactly the same names (`:=` cannot store a positional — the write would be unobservable, because the read path now prefers the positional), and the rule reaches the operator families only if the lookup, not the arm, does the resolving. Discriminating measurements matter: bash's `${1#a}` → `[]` is the coincidence fdshell already produced (pattern `a` strips the whole value `a`, and the unset name `1` expanded to the same empty string), while `${1#c}` → `a` is the row that distinguishes the parameter from the unset name (LESSONS: "verify bash's real output before pinning a test").
