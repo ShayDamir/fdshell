@@ -1,6 +1,6 @@
 //! The mid-run keyword block: a block that opens a cond part after `&&` / `||`
 //! is skipped **whole inside the run**, the rule
-//! `segment/group.rs::skip_group` records for a `{ …; }` cond part ("A group
+//! `segment/group/span.rs::skip_group` records for a `{ …; }` cond part ("A group
 //! after `&&` is a cond part: skip its span, never flush the run before it").
 //! The run keeps the block's bytes, none of the block's own `;` is a top-level
 //! separator, and the cond layer splits the operators with its block-opacity

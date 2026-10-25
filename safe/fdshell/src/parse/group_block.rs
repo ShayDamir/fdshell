@@ -1,7 +1,10 @@
 use super::Token;
+use super::cond_bodies::claimed_regions;
+use super::part_text::part_text;
+use super::semi::block_body;
 use super::semi::closing_keyword_index;
 use super::semi::is_list_terminator;
-use super::semi::verbatim;
+use super::semi::token_range;
 use super::value_spans;
 use crate::error::parse::ParseError;
 use crate::redirect::RedirectDef;
@@ -34,10 +37,9 @@ pub(crate) fn tokens_to_group(
     let line = text.as_bytes().change_context(ParseError::Never)?;
     let close = closing_keyword_index(tokens, line).ok_or(ParseError::GroupMissingCloseBrace)?;
     let body_tokens = tokens.get(1..close).ok_or(ParseError::Never)?;
-    let has_word = body_tokens
-        .iter()
-        .any(|(t, _, _, _, _, _)| !t.eq_bytes(b";"));
-    ensure!(has_word, ParseError::GroupEmpty);
+    // POSIX #1.2's `compound_list` must be non-empty, and the emptiness test is
+    // [`block_body`]'s, shared with every block arm (the task #305 template).
+    let trimmed = block_body(body_tokens, line, ParseError::GroupEmpty)?;
     // POSIX #1.2: `}` must be preceded by a command-list terminator. The
     // tokenizer emits a `;` token for a newline, so `{ echo a` newline `}` is
     // accepted, and the plain `&` backgrounds the body's last statement
@@ -48,11 +50,25 @@ pub(crate) fn tokens_to_group(
         before_close.is_some_and(is_list_terminator),
         ParseError::ExpectedSemicolonBeforeCloseBrace
     );
-    // The required terminator stays inside the body span: a `<<` operator's body
-    // lines sit between it and the operator, so trimming the trailing side would
-    // cut them out of the body text (the block-text-carries-its-bodies rule).
-    let body = verbatim(text, body_tokens)?;
-    let redirects = tail::redirects(&split_close(tokens, close), line)?;
+    // The **extension** discriminator, at arm granularity (the pair
+    // `parse/part_text` applies): a region that starts **inside** the group's own
+    // text is part of the body slice's bytes, and the slice's last token is what
+    // makes the verbatim slice cover it — trimming the bracketing `;` there would
+    // cut the region out of the body text. Every other mode (no operator at all,
+    // or **append**, where `part_text` re-attaches the region bytes behind the
+    // slice) takes the trimmed slice, the `semi::trim_body` rule task #305 pins
+    // for the definer body.
+    let regions = claimed_regions(text, body_tokens);
+    let extension = regions
+        .first()
+        .is_some_and(|&(start, _)| start < token_range(body_tokens).1);
+    let body = part_text(text, if extension { body_tokens } else { trimmed })?;
+    // A body region's words are blanked by the tokenizer (task #266) and a
+    // terminator line's words are not, so an appended region leaves heredoc
+    // **structure** in the tail; `tail::command_tail` cuts it off, and the tail
+    // analysis sees only what the group's own text wrote after `}`.
+    let tail_tokens = tail::command_tail(&split_close(tokens, close), &regions, !extension);
+    let redirects = tail::redirects(&tail_tokens, line)?;
     Ok(GroupBlock { body, redirects })
 }
 

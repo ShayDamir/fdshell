@@ -1,5 +1,5 @@
 use super::Segment;
-mod claim;
+pub(super) mod claim;
 pub(super) mod keyword;
 mod length;
 pub(super) mod midrun;

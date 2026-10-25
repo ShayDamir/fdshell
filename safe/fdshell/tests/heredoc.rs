@@ -2294,33 +2294,155 @@ fn mid_run_heredoc_parity_family() {
     }
 }
 
-/// Accepted divergence pinned with its owner: a here-doc written in a `{ …; }`
-/// **group** body claims no body region, so fdshell reports `here-doc: missing
-/// terminating delimiter line` (rc 1) where bash feeds the body to the command
-/// (rc 0; the io-number row prints nothing in bash, the body is fd 3's input).
-/// Measured against bash 5.3.9 on `master`. Task **#315** owns the group body;
-/// the nested row is the same gap one branch in — the definer claims its body
-/// text (task #305), the group inside it claims nothing. When #315 lands these
-/// rows flip to bash parity and the name drops its suffix (the
-/// `closer_shaped_word_list_words_end_the_block_span_until_310` convention).
-/// The function-definition twins of the first two rows flipped with task
-/// **#305**: see `heredoc_of_a_terminated_function_body_line_prints_on_every_call`.
+// ── A `;`-terminated here-doc in a single-line `{ …; }` group body (task #315) ─
+// The group branch claims the regions of the `<<` operators written in its own
+// body text (`segment/block/claim.rs`, append mode) and the group builder
+// re-attaches them to the stored body (`parse/part_text`), so the group parses
+// and its body command receives the capture — the definer branch's rule
+// (task #305) at the third block branch. Every expectation below was measured
+// against bash 5.3.9 (`bash -c`) and `target/debug/fdshell`; rows named
+// "divergence" reference their owner.
+
+/// The headline: the group body's here-doc prints, the delimiter lines are
+/// heredoc structure (never commands), the io-number form feeds fd 3 instead of
+/// stdin, and a group that is a def body reaches the capture at the call.
 #[test]
-fn group_body_here_docs_claim_no_region_until_315() {
-    for (script, bash) in [
-        ("{ cat <<T; }\nbodyT\nT", "bash prints bodyT, rc 0"),
-        ("{ cat 3<<T; }\nbodyT\nT", "bash prints nothing, rc 0"),
+fn heredoc_in_a_single_line_group_body_prints_its_region() {
+    for (script, want) in [
+        ("{ cat <<T; }\nbodyT\nT", "bodyT\n"),
+        ("{ cat 3<<T; }\nbodyT\nT", ""),
+        ("f() { { cat <<T; }; }; f\nbodyT\nT", "bodyT\n"),
+        ("{ cat <<T; }\nbodyT\nT\necho tail", "bodyT\ntail\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// A region's **lines are data**, and the delimiter word is a command only after
+/// the region consumed its body: `}`, a keyword word, an opener, a `;`, a
+/// cond-operator line all print verbatim. The body region's words are blanked by
+/// the tokenizer (task #266), so none of them reaches the parser as a word.
+#[test]
+fn region_lines_of_a_group_body_heredoc_are_data() {
+    for (script, want) in [
+        ("{ cat <<T; }\n}\nT", "}\n"),
+        ("{ cat <<T; }\ndone\nT", "done\n"),
+        ("{ cat <<T; }\n{\nT", "{\n"),
+        ("{ cat <<T; }\n;\nT", ";\n"),
+        ("{ cat <<T; }\nb && y\nT", "b && y\n"),
+        ("{ cat <<T; }\nf() { h; }\nT", "f() { h; }\n"),
+        ("{ cat <<T; }\n\nT", "\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+    // An empty body: the delimiter line is the first line, so nothing prints and
+    // the **next** line runs as a command. bash: rc 127, `T: command not found`;
+    // fdshell reports a command-not-found as rc 1 (the #305 twin's rule), so the
+    // row pins the empty output and the empty body, not bash's code.
+    let (out, _err, code) = run("{ cat <<T; }\nT\nT");
+    assert_eq!((out.as_str(), code), ("", 1), "bash prints nothing, rc 127");
+}
+
+/// The delimiter forms ride along unchanged: quoted, space-bearing, `<<-`, and
+/// the chevron-shaped delimiter of task #266.
+#[test]
+fn group_body_heredoc_delimiter_forms() {
+    for (script, want) in [
+        ("{ cat <<'T'; }\n$HOME\nT", "$HOME\n"),
+        ("{ cat <<\"a b\"; }\nbody\na b", "body\n"),
+        ("{ cat <<'a b'; }\nbody\na b", "body\n"),
+        ("{ cat <<-T; }\n\tbody\n\tT", "body\n"),
+        ("{ cat <<'a <<b'; }\nbody\na <<b", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The here-doc does not swallow the statements around the group, and every
+/// operator of the line takes **its own** region of the line's stream in
+/// operator order (`parse/cond_bodies.rs`'s skip, the rule task #240 pins at the
+/// scan level). The mid-run group (`true && { … }`) is a cond part, so it rides
+/// the run's bodies through the same cond/parse chain.
+#[test]
+fn group_body_heredoc_keeps_the_operators_around_the_group() {
+    for (script, want) in [
+        ("{ cat <<T; }; echo t\nbody\nT", "body\nt\n"),
+        ("{ cat <<T; }; cat <<U\nbT\nT\nbU\nU", "bT\nbU\n"),
+        ("cat <<T; { cat <<U; }\nbT\nT\nbU\nU", "bT\nbU\n"),
+        ("{ cat <<T; }; { cat <<U; }\nbT\nT\nbU\nU", "bT\nbU\n"),
+        ("{ cat <<T; } && echo b\nbody\nT", "body\nb\n"),
+        ("{ cat <<T; } || echo b\nbody\nT", "body\n"),
+        ("{ cat <<T && echo b; }\nbody\nT", "body\nb\n"),
+        ("true && { cat <<T; }\nbodyT\nT", "bodyT\n"),
+        ("{ :; } && { cat <<T; }\nbody\nT", "body\n"),
+        ("{ cat <<T; } && { cat <<U; }\nbT\nT\nbU\nU", "bT\nbU\n"),
+        ("{ cat <<T; } > /dev/null && echo t\nbody\nT", "t\n"),
+        ("{ cat <<T; }\nbody\nT\necho tail", "body\ntail\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The statement-level twin of the #332 row: a here-doc statement **before** the
+/// group on the same line, and a statement after the group's own `;`. The group's
+/// span ends its statement, and the line's stream is already fully claimed by the
+/// time the scan reaches the group, so the trailing statement is dropped —
+/// fdshell prints the two bodies where bash prints them **and** `t` (task
+/// **#332**, the same drop `heredoc_block_then_group_then_statement_on_one_line`
+/// pins for a group with no heredoc of its own).
+#[test]
+fn group_body_heredoc_behind_a_statement_drops_the_trailing_statement() {
+    let (out, _err, code) = run("cat <<X; { cat <<T; }; echo t\nbodyX\nX\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("bodyX\nbodyT\n", 0),
+        "bash prints bodyX, bodyT and t at rc 0 (task #332)"
+    );
+}
+
+/// Measured divergences of the group-body shape that stay with their owners:
+///
+/// * the **tail** `{ …; } <<EOF` (the group's own here-doc): bash feeds the body
+///   to the group, fdshell keeps its `here-doc on a group is not supported`
+///   message (tasks **#187**/**#191**). The claim never reaches the tail: the tail
+///   operator's region is not part of the group's body text.
+/// * the **EOF-starved** stream: the region's delimiter line never arrives, so
+///   the line's allocation claims nothing (task **#429**'s family) and fdshell
+///   rejects the group where bash prints the body with its end-of-file warning.
+/// * the delimiter word shaped like a brace (`{ cat <<}; }`): the closer search
+///   of task **#432** — bash prints `x` rc 0 with its EOF warning, fdshell
+///   reports the missing delimiter for the `}` word.
+/// * the **multi-line** group with a `;`-terminated inner heredoc: bash rejects
+///   the syntax at rc 2, fdshell runs the first body line and reports the missing
+///   delimiter at rc 1 (the rc-1-vs-2 family).
+/// * the group as a pipeline stage: `} | cat` is unsupported (tasks
+///   **#186**/**#190**, pinned as `unexpected pipe` by
+///   `tests/group.rs::pipeline_stage_group_is_a_parse_error`).
+#[test]
+fn group_body_heredoc_divergences_keep_their_owners() {
+    for (script, want) in [
         (
-            "f() { { cat <<T; }; }; f\nbodyT\nT",
-            "bash prints bodyT, rc 0 (the group is the def body)",
+            "{ cat <<T; } <<EOF\nbody\nT\nEOF",
+            "here-doc on a group is not supported",
         ),
+        (
+            "{ cat <<T; }\nbody",
+            "missing terminating delimiter line 'T'",
+        ),
+        ("{ cat <<}; }\nx", "missing terminating delimiter line '}'"),
+        (
+            "{ echo a\ncat <<T;\n}\nbody\nT",
+            "missing terminating delimiter line 'T'",
+        ),
+        ("{ cat <<T; } | cat\nbody\nT", "unexpected pipe"),
     ] {
         let (_out, err, code) = run(script);
-        assert_eq!(code, 1, "{script}: {bash}");
-        assert!(
-            err.contains("missing terminating delimiter line 'T'"),
-            "{script}: stderr={err}"
-        );
+        assert_eq!(code, 1, "{script}: stderr={err}");
+        assert!(err.contains(want), "{script}: stderr={err}");
     }
 }
 
@@ -2487,9 +2609,10 @@ fn nested_function_definitions_capture_their_body_heredoc() {
 /// carries, with a statement after the group's own `;`: the group's span ends
 /// its **statement**, not the physical line, so it keeps its own resume and the
 /// trailing statement runs (`Book::rewind`'s `line_ends` rule, task #305). The
-/// group body's own claim stays **#315**'s, and the pre-block-statement twin
-/// below is **#332**'s: fdshell drops the statement after the group there
-/// exactly as it does on master.
+/// group's **own** body claim landed with task **#315**
+/// (`heredoc_in_a_single_line_group_body_prints_its_region`); the
+/// pre-block-statement twin below is **#332**'s: fdshell drops the statement
+/// after the group there exactly as it does on master.
 #[test]
 fn heredoc_block_then_group_then_statement_on_one_line() {
     for (script, want) in [
@@ -2921,16 +3044,6 @@ fn numbered_heredoc_known_divergences() {
     assert_eq!(code, 1);
     assert_eq!(out, "");
     assert!(err.contains("fd 3 is not open"), "{err}");
-
-    // A here-doc in a single-line group body claims no body region (task #315);
-    // the plain form fails identically.
-    let (out, err, code) = run("{ cat 3<<T; }\nbody\nT");
-    assert_eq!(code, 1);
-    assert_eq!(out, "");
-    assert!(
-        err.contains("missing terminating delimiter line 'T'"),
-        "{err}"
-    );
 
     // `( … )` is not a subshell: `(` reaches the command lookup (task #316).
     let (out, err, code) = run("( cat 3<<T )\nbody\nT");
@@ -3416,29 +3529,23 @@ fn two_operators_of_which_one_is_a_chevron_delimiter_claim_their_bodies() {
     }
 }
 
-/// A multi-line group body, a function body, and a command substitution: the
-/// terminator line sits inside the span, and the statement behind the group's
-/// closer is separate. The **single-line** group stays diverging (task **#315**:
-/// a here-doc in a `{ …; }` body claims no body region), pinned below.
+/// A multi-line group body, a function body, a command substitution, and a
+/// **single-line** group: in every one of them the terminator line is heredoc
+/// structure, not a statement. The single-line group's row is task **#315**'s
+/// flip — the group body claims its region (append mode), so the body command
+/// prints and the delimiter line `a <<b` never reaches the parser as an operator.
 #[test]
 fn a_terminator_line_in_a_group_a_function_and_a_substitution_is_data() {
     for (script, want) in [
         ("{ cat <<'a <<b'\nbody\na <<b\n}\n", "body\n"),
         ("f(){ cat <<'a <<b'\nbody\na <<b\n}\nf\n", "body\n"),
         ("echo $(cat <<'a <<b'\nbody\na <<b\n)\n", "body\n"),
+        ("{ cat <<'a <<b'; }\nbody\na <<b", "body\n"),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((code, out.as_str()), (0, want), "stderr={err:?}");
         assert_eq!(err, "");
     }
-    // The single-line group: #315's shape, unchanged by this rule (the group
-    // claims no region, so the body lines are statements and rc is 1).
-    let (out, err, code) = run("{ cat <<'a <<b'; }\nbody\na <<b");
-    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
-    assert!(
-        err.contains("missing terminating delimiter line 'a <<b'"),
-        "stderr={err}"
-    );
     // `( … )` is not a subshell: #316.
     let (out, err, code) = run("( cat <<'a <<b' )\nbody\na <<b");
     assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");

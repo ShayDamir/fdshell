@@ -131,10 +131,13 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   **empty** condition (`if & then`, `while & do`) is a parse error since task
   **#299** (bash rc 2, rc 1 here), so it has no job to record; `break`/`continue`/`return` written with the
   `&` reach the **parent** (the loop-control keyword is not a `Cmd`), owner
-  **#362**; `{ echo <<T & }` plus body hits the
-   **single-line group** here-doc gap of task **#315** (the same shape without
-   the `&`, `{ cat <<T; }`, reports it identically; the multi-line group body is
-   fine). The rule does not loosen the statement-level guard:
+  **#362**; `{ cat <<T & }` plus body prints the body at rc 0 and
+   `{ echo <<T & }` plus body prints nothing at rc 0 — the `&` job of a
+   single-line group body rides the region the group claims, at parity since
+   task **#315** closed the group body's gap (the `cat` row pinned in
+   `tests/async.rs::a_heredoc_behind_an_ampersand_inside_a_single_line_group_body`;
+   `echo`'s empty line lands in the job's stdout, so it is measured, not pinned).
+   The rule does not loosen the statement-level guard:
 
   `echo a & ;; echo b` **outside** a block is bash's syntax error, rc 1. Pinned
   in `safe/fdshell/tests/async.rs`, `loops.rs`, `group.rs`, `case.rs`,

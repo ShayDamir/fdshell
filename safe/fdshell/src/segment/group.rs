@@ -1,6 +1,7 @@
 use crate::brace::scan_brace_block;
+use crate::scan::Quotes;
 use crate::scan::heredoc;
-use crate::scan::{Boundary, Quotes, ScanState, boundary, skip_comment};
+use crate::segment::block::claim;
 use crate::segment::book::Book;
 use crate::segment::line;
 use alloc::vec::Vec;
@@ -9,9 +10,11 @@ use super::Segment;
 
 pub(super) mod opener;
 mod prefix;
+mod span;
 mod stage;
 mod word;
 pub(crate) use prefix::{definer_at_run, group_at_run};
+pub(super) use span::{skip_group, statement_end};
 pub(crate) use stage::{command_at_run, stage_at_run};
 pub(crate) use word::{closes, opens, opens_at};
 
@@ -30,8 +33,14 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     // of input, so no group opener follows it.
     let pre_resume = line::flush_line(book, line, line_start, brace);
     let span_start = prefix::span_start(line, run_start, brace);
-    let (segment, resume, floor) =
-        group_block(line, brace, span_start, book.state.quotes(), pre_resume);
+    let (segment, resume, floor) = group_block(
+        line,
+        brace,
+        span_start,
+        book.state.quotes(),
+        pre_resume,
+        line_start,
+    );
     book.segments.push(segment);
     // The group's span ends the **statement** it opens, so it ends the physical
     // line only when the statement does: a group whose statement stops at a `;`
@@ -40,8 +49,19 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     // (a heredoc region claimed by a block before the group) outranks the
     // resume, so the scan never lands inside that region ([`Book::rewind`],
     // task #305).
-    let line_ends = resume >= heredoc::line_end_after(line, brace);
-    book.rewind(resume, resume, floor, line_ends);
+    let line_end = heredoc::line_end_after(line, brace);
+    // Trailing content shares the group's physical line, so its runs' bookkeeping
+    // — and the global body stream — continues from the **line's** start: the
+    // trailing flush's `assigned` count then skips the regions the group's own
+    // operators claimed (`{ cat <<T; }; cat <<U` gives the `cat <<U` run region
+    // 1, not the group's region 0). The keyword/definer branches do the same
+    // ([`super::block::open_block`], tasks #240/#305).
+    let new_start = if resume < line_end {
+        line_start
+    } else {
+        resume
+    };
+    book.rewind(resume, new_start, floor, resume >= line_end);
 }
 
 /// Build the `Segment::Block` for a `{ …; }` group whose `{` is at `start` (the
@@ -55,83 +75,75 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
 /// Returns the segment, the scan resume index, and the resume floor for the
 /// rest of the physical line (past which no flush may resume).
 /// `pre_resume` is the end of the body regions of a statement that precedes
-/// the group on the same line (the line end when there is none).
+/// the group on the same line (the line end when there is none); `line_start`
+/// is the start of the physical line whose body stream the group reads.
+///
+/// The group claims **its own** regions of that stream and the resume/floor
+/// follow the keyword branch's rule (`segment/block/keyword.rs::keyword_block`),
+/// exactly like the definer branch (task #305): a `;`-terminated operator in
+/// the group's **body** text
+/// (`{ cat <<T; }`) claims regions written past the closing brace, and they
+/// travel as the segment's `bodies` to `run_cond_list` (task #234), so the
+/// group body's `<<` reaches the parse layer.
+/// The **extension** arm of [`claim::claimed_bodies`] is reachable here only by
+/// a multi-line group whose first physical line carries the operator
+/// (`{ cat <<T;\ncat <<U;\n}`): its regions are interleaved with the group's
+/// own lines, the span keeps the whole group text and carries no bodies. A
+/// **closed single-line** group's regions always start at/after its closing
+/// separator, and a multi-line group whose opener line has no operator claims
+/// nothing at all, so the arm never moves `end_pos` for those two shapes — the
+/// mode is asserted by the pins in `group/tests.rs`, not padded (task #311's
+/// rule).
 fn group_block<'a>(
     line: &'a [u8],
     start: usize,
     block_start: usize,
     quotes: Quotes,
     pre_resume: usize,
+    line_start: usize,
 ) -> (Segment<'a>, usize, usize) {
     let mut quotes = quotes;
     let (close, closed) = scan_brace_block(line, start + 1, &mut quotes);
     // The group never closes: the span is the rest of the input, and the REPL
     // keeps reading continuation lines.
     let open_end = line.len().min(close + 1);
-    let (end, resume, floor) = if closed {
+    let (end, resume, floor, bodies) = if closed {
         let (sep, r) = statement_end(line, close + 1, quotes);
-        (sep, r.max(pre_resume), r)
+        let line_end = heredoc::line_end_after(line, start);
+        // `line_resume` is the end of the line's last body region (the line end
+        // when the bodies are missing) — the same anchor the keyword branch uses.
+        let (_, line_resume) = heredoc::line_bodies_for_line(line, line_start, line_end);
+        let (bodies, end) = claim::claimed_bodies(
+            line,
+            line_start,
+            block_start,
+            sep,
+            line_end,
+            line_resume,
+            true,
+        );
+        let (resume, floor) = if r < line_end {
+            // Trailing content on the group's line: scan it; the line's final
+            // flush must not re-enter any body region claimed on this line.
+            (r.max(pre_resume), line_resume.max(pre_resume))
+        } else {
+            // The group ends its physical line: resume past every region.
+            (r.max(line_resume).max(pre_resume), 0)
+        };
+        (end, resume, floor, bodies)
     } else {
-        (open_end, open_end + 1, 0)
+        (open_end, open_end + 1, 0, Vec::new())
     };
     (
         Segment::Block {
             block_start,
             end_pos: end,
             closed,
-            // A group's own heredocs are a separate limitation (task #226):
-            // the group's span is carried verbatim, with no body regions.
-            bodies: Vec::new(),
+            bodies,
         },
         resume,
         floor,
     )
-}
-
-/// The end of the statement the group opens: the next separator (`;`, newline,
-/// end of input) or `#` comment at or after `i`. A comment ends the statement
-/// at its own byte and the scan resumes past the comment, so the comment's
-/// words are never run and the next line stays outside the group's span.
-/// A second `{ …; }` group in the same statement (after `&&` / `||`) is opaque:
-/// its text is skipped whole, so the span ends past its closing brace and the
-/// `cond` scan splits the statement into one part per group.
-fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize) {
-    let mut state = quotes.scan_state();
-    while line.get(i).is_some() {
-        match boundary(line, i, &state) {
-            Boundary::Separator => return (i, i + 1),
-            Boundary::Comment => return (i, skip_comment(line, i)),
-            // A group swallows a trailing `&` as word data (word_active is set
-            // by the scan), exactly like a `Char`: the group's text carries the
-            // `&` to the parse layer, which keeps its pinned group `&` error
-            // (task #326 — group backgrounding stays #188/#192's).
-            Boundary::Char | Boundary::Async => {
-                i = if state.at_word_start() && opens_at(line, i) {
-                    // The tail of a run-start group: its nested-group closedness
-                    // is not this span's signal, so only the resume is taken.
-                    skip_group(line, i, &mut state).0
-                } else {
-                    state.advance(line, i)
-                };
-            }
-        }
-    }
-    (line.len(), line.len())
-}
-
-/// Skip the whole `{ …; }` group at `i` (a nested group in the same statement,
-/// or a group inside a cond run): its text is opaque, so the braces and any
-/// quote inside are counted, and the scan resumes just past its closing brace
-/// (or at the end of input if unclosed). No `;` inside the body is a separator.
-/// The pair is (resume, closed); an unclosed group is the cond run's mid-run
-/// opener, so its caller records that for the REPL (task #294).
-pub(super) fn skip_group(line: &[u8], i: usize, state: &mut ScanState) -> (usize, bool) {
-    let mut quotes = state.quotes();
-    let (close, closed) = scan_brace_block(line, i + 1, &mut quotes);
-    state.set_quotes(quotes);
-    state.word_active = false;
-    let resume = if closed { close + 1 } else { line.len() };
-    (resume, closed)
 }
 
 #[cfg(test)]

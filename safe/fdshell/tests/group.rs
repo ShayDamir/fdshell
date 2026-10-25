@@ -184,6 +184,37 @@ fn here_doc_inside_the_group_body() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
 }
 
+/// A here-doc in a **single-line** group body claims its region (task #315): the
+/// body command reads it, and a redirect written after `}` still scopes the
+/// group — the region bytes the builder appends are heredoc structure, never a
+/// tail word, so the tail analysis keeps `> file` (and the glued `}>file`, task
+/// #354). bash writes the body to the file in both spellings, rc 0.
+#[test]
+fn single_line_group_body_heredoc_keeps_the_trailing_redirect() {
+    for tail in [" > ", ">", "  > "] {
+        let (path, _scratch) = temp_path("heredoc");
+        let script = format!("{{ cat <<T; }}{tail}{path}\nbody\nT");
+        let (out, err, rc) = run(&script);
+        assert_eq!((out.as_str(), rc), ("", 0), "{script}: stderr={err}");
+        assert_eq!(body(&path), "body\n", "{script}: stderr={err}");
+    }
+}
+
+/// The `time [-p]` prefix is part of the group's span, so the claim window carries
+/// the body's `<<`; a group behind `&&` is an opaque cond part, so its own run
+/// takes the region (task #315). bash prints the body in both rows, rc 0 (its
+/// `time` report goes to stderr).
+#[test]
+fn time_and_chain_part_of_a_group_body_heredoc() {
+    for script in [
+        "time { cat <<T; }\nbody\nT",
+        "{ :; } && { cat <<T; }\nbody\nT",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("body\n", 0), "{script}: stderr={err}");
+    }
+}
+
 /// `eval` parses the group from the evaluated text, so the group is recognized
 /// in the eval'd statement, not run as a command named `{`.
 #[test]

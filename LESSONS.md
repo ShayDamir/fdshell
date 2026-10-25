@@ -409,7 +409,7 @@ Measured divergences (bash 5.3.9, 2026-10-22), all pinned in `safe/fdshell/tests
 The `;`/`\n` `run_start` reset in `cond/boundary.rs::next_boundary` is load-bearing **for block text** in two ways. (1) It clears `word_active`, so a closer written at the start of a physical line is scored (`state.at_word_start()`), and it anchors the group-opener rule (`group_at_run`: a brace opens a group only at a run start). Forgetting the reset swallows a block's trailing operator into its text. (2) Task #234 replaced the `heredoc::skip` window with a region walk anchored at the **physical line start** of the run (`cond/boundary/body.rs::regions` → `line_bodies_for_line`), which is what makes the pinned `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` split survive: block text (`if … fi`) travels whole through `run_cond_list` with its condition bodies inside the span, so a `;`-terminated `<<` in a block condition (`if cat <<X; then`) has its bodies on the block text's following lines. Before #234 that was only visible through the run window — with it, the region scan always sees the `<<` of the physical line and walks the body region: its top-level `&&` splits the part (rc 1 `missing 'fi'`, bash rc 2), while every other region byte stays opaque. Top-level statement segments are not affected by either mechanism, because their part text is a subslice of the command bytes only — the body regions travel separately as `run_cond_list`'s `bodies` (Task #79) — so `next_boundary` never sees a `;`-terminated `<<` run with a body at top level; the killing case is the block wrapper. The split pins are `block_heredoc_cond_run_and_and_in_body_splits_part` and `block_body_heredoc_delimiter_line_operator_is_region_data` in `safe/fdshell/tests/heredoc.rs`; the top-level window semantics are covered by `heredoc_after_semicolon_word_drives_boundary_skip` and `heredoc_attached_operator_before_semicolon_is_not_a_delimiter`, which the region anchor keeps green unchanged.
 
 ## A word-start `#` ends at its newline: the cond scan must land *on* it, not past it
-A `#` at a word start comments out the rest of its **physical** line, so no `&&`/`||` written in comment text may split a cond list (bash). The cond-list boundary scan (`cond/boundary.rs::next_boundary`) is a byte walk with no token layer under it, so the rule had to be added there: at a word start (`state.at_word_start()`, the same gate the block scorer uses — a `#` inside a word (`done#c`, `x#y`) stays data, and a `#` in a quote / backtick / `$( … )` region is covered by the existing bare-guard) skip the comment with `scan::comment_end`. Only the **keyword-block** paths showed the defect: the segment scanner ends a *plain statement* at the `#` (`segment/group.rs::statement_end`'s `Boundary::Comment` arm) and a `{ …; }` group ends there too, so their text never reaches `run_cond_list` with a comment tail; a keyword block's span (and task #232's mid-run span) carries the closing keyword's whole run, **comment included**, because `scan_block`'s runs break only at `;`/`\n`/end-of-input (trap 1 of "A keyword block is opaque to the cond-list split"). Fixing the split is enough because the **parse layer stops at a comment inside a part's text**: `… done # c ; echo after` was already parity, so once the operator stops splitting, the comment's tail text is inert — pinned (R4/`a_comment_tail_next_to_a_block_stays_inert`) so the day the parse layer changes, the pin names #296.
+A `#` at a word start comments out the rest of its **physical** line, so no `&&`/`||` written in comment text may split a cond list (bash). The cond-list boundary scan (`cond/boundary.rs::next_boundary`) is a byte walk with no token layer under it, so the rule had to be added there: at a word start (`state.at_word_start()`, the same gate the block scorer uses — a `#` inside a word (`done#c`, `x#y`) stays data, and a `#` in a quote / backtick / `$( … )` region is covered by the existing bare-guard) skip the comment with `scan::comment_end`. Only the **keyword-block** paths showed the defect: the segment scanner ends a *plain statement* at the `#` (`segment/group/span.rs::statement_end`'s `Boundary::Comment` arm) and a `{ …; }` group ends there too, so their text never reaches `run_cond_list` with a comment tail; a keyword block's span (and task #232's mid-run span) carries the closing keyword's whole run, **comment included**, because `scan_block`'s runs break only at `;`/`\n`/end-of-input (trap 1 of "A keyword block is opaque to the cond-list split"). Fixing the split is enough because the **parse layer stops at a comment inside a part's text**: `… done # c ; echo after` was already parity, so once the operator stops splitting, the comment's tail text is inert — pinned (R4/`a_comment_tail_next_to_a_block_stays_inert`) so the day the parse layer changes, the pin names #296.
 
 **Landing *on* the newline that ends the comment is the load-bearing choice**, and `scan::skip_comment` (which lands *past* it) is the wrong helper here: two arms of the scan are keyed on the `\n` byte — the heredoc **region** arm (`body::step`) and the **run-reset** arm (`run_start = i`, `place = Place::Command`, `state.word_active = false`, the entry above). A `;`-terminated operator line whose run ends in a comment (`if cat <<X; then # c`) must still reach the region arm for its bodies on the following lines: `boundary_of(b"if cat <<X; then # c\nbody && x\nX\nfi") == (26, false)` is the pin, and landing past the newline turns it into `(35, false)` — that row is the mutant-killer for this decision. Landing on the newline also keeps the comment's own run in the run-reset arm, so the operator on the **next** line still splits (`… done # c\n&& echo x` → 36).
 
@@ -756,14 +756,16 @@ Three faces of *measure, don't quote*.
   **shape**, so write the shape beside the number: this file cites the same
   shape strings for two opposite outcomes. **Terminated** (script form — the
   `<<` line, the body lines, then the delimiter line): the **group** rows
-  diverge, because a here-doc in a **group** body claims no body region —
-  `{ cat <<T; }` + body + `T` reports
+  diverged, because a here-doc in a **group** body claimed no body region —
+  `{ cat <<T; }` + body + `T` reported
   `here-doc: missing terminating delimiter line 'T'` rc 1 where bash prints
-  the body at rc 0, and `{ cat 3<<T; }` + body + `T` reports the same rc 1
-  where bash prints nothing at rc 0 (a numbered here-doc feeds fd 3, not
-  `cat`'s stdin). Owner task **#315**, pinned with its nested-group twin by
-  `tests/heredoc.rs::group_body_here_docs_claim_no_region_until_315`. The
-  **function-definition** form is at parity, closed by task **#305**:
+  the body at rc 0, and `{ cat 3<<T; }` + body + `T` the same rc 1 where bash
+  prints nothing at rc 0 (a numbered here-doc feeds fd 3, not `cat`'s stdin).
+  Task **#315** closed the gap on 2026-10-25 — the group branch claims its own
+  regions like the other two block branches — and the rows are pinned at bash
+  parity, with the nested-group def body, by
+  `tests/heredoc.rs::heredoc_in_a_single_line_group_body_prints_its_region`.
+  The **function-definition** form is at parity, closed by task **#305**:
   `f(){ cat <<T; }; f` + body + `T` prints the body rc 0 and
   `f(){ cat 3<<T; }; f` + body + `T` prints nothing rc 0, measured 2026-10-25,
   pinned by `tests/heredoc.rs::heredoc_in_function_body` and
@@ -774,8 +776,8 @@ Three faces of *measure, don't quote*.
   statement-level missing-delimiter family, owner task **#429**, whose line
   with #315 is drawn in the entry
   LESSONS: "A function-definition body is a block body for the region rule too"
-  (the starved first operator is **#429**'s, the group's unclaimed region is
-  **#315**'s). The **mid-run** keyword-block row of this family is bash-equal,
+  (the starved first operator is **#429**'s; the group's unclaimed region was
+  **#315**'s and is closed). The **mid-run** keyword-block row of this family is bash-equal,
   pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and
   `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a
   subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
@@ -3083,8 +3085,10 @@ bash's PS2 for these shapes, and EOF always breaks the loop and executes the buf
 (`eof_mid_heredoc_executes_buffer`), so over-prompting cannot hang. Uniformity is
 free: every `Segment::Block` gets the arm — all six keyword arm sites, groups, and
 function bodies; groups **buffer** at the prompt now (`{ cat <<T; }` reads its body
-lines) and then report the missing delimiter on execution, the script-layer group
-gap task #315 owns — the REPL buffers, the parse layer stays #315's. The elif-at-EOF
+lines) and runs the buffer with the body attached — `{ cat <<T; }` + `{a,b}` + `T`
+prints `{a,b}` at the prompt, pinned in the parity family
+`tests/repl.rs::single_line_block_heredoc_spans_lines` (task #315 closed the
+script-layer group gap, so the prompt and the parse layer agree). The elif-at-EOF
 row is the same rule as `cond_bodies_of_an_incomplete_line_stream_are_empty` seen
 from the prompt: an incomplete body stream yields regions, the buffer executes and
 fails parse at EOF (rc 0; bash warns and prints the body). `repl/trailing.rs` needs
@@ -3939,8 +3943,9 @@ Two halves, one owner each, and neither is new:
 - `parse/function_block.rs` — the stored body is built with `parse/part_text`,
   the arm-granularity rule every block arm already uses (#238/#273): append mode
   slices the body text and appends `\n` + the claimed bytes, extension mode stays
-  verbatim. The definer builder was the last block body using `verbatim`, and the
-  group (`parse/group_block.rs`) is next, which is task **#315**'s reuse point.
+  verbatim. The definer builder was the last block body using `verbatim`; task
+  **#315** landed the same rule on the group (`parse/group_block.rs`), the third
+  block branch, with `segment/block/claim.rs` as its reuse point.
 
 **The stored body is a script, so the append is what makes the capture re-usable
 per call**: the body text `cat <<E\nbody\nE\n` re-runs on every call (a
@@ -3959,6 +3964,19 @@ delimiter word. The delimiter-word-is-a-brace family (`f() { cat <<}; }; f`) is
 broken on master already and stays **#432**'s — it needs region-aware truncation
 shared by `parse/semi/closing` and `parse/function_block`, not a second token-list
 walk.
+
+**The group adds one consumer the definer never had: its tail.** `parse/group_block.rs`
+parses the words written **after** `}`, so the appended region's heredoc structure lands
+right where the tail analysis looks: a **body** region's words are blanked and a
+**terminator** line's words stay (#266's asymmetry), so the delimiter word and the
+newlines around the region are tokens and `tail::redirects` bails `GroupTrailingWord`
+on them. The cut is the newline the append inserts **before** the first claimed region —
+every token at/after it is heredoc structure, and every pinned tail message
+(`GroupHereDocNotSupported`, `UnexpectedPipe`, the `&`, `} > out`) survives because its
+word starts **before** that newline. The `block_body` terminator trim follows the same
+discriminator: trim only when the mode is **not** extension, because in extension mode
+the slice's **last token** is what makes `verbatim` cover the region, and trimming the
+bracketing `;` truncates the body text at the operator.
 
 **A claimed region is re-scannable text only for the scan that owns it.** A
 keyword block written **behind** the definition on the same line ended its line
@@ -3989,8 +4007,8 @@ keyword-branch pins cover the arm; the function branch's pin asserts the mode
 hypothesis.** Six rows the plan expected to reach parity did not, and each keeps
 its owner: the loop row's rc 1 is fdshell's `while` reporting the failing
 condition (measured on master with a plain body), a command-not-found is rc 1 here
-and 127 in bash, `{ cat <<E; }` and the nested `f() { { cat <<E; }; }` are
-**#315**'s, `f() { …; }; f | cat` is **#182**'s, the starved first operator
+and 127 in bash, `{ cat <<E; }` and the nested `f() { { cat <<E; }; }` were
+**#315**'s (both closed 2026-10-25), `f() { …; }; f | cat` is **#182**'s, the starved first operator
 (`f() { cat <<E; }; f` + body, no delimiter line) is **#429**'s, and a def-prefix
 redirection (`f() <<E { cat <<G; }`) flips from rc 1 to printing the def body at
 rc 0 where bash rejects the syntax at rc 2 — task **#433**, filed by this one

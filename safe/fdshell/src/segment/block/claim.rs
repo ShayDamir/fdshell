@@ -1,6 +1,7 @@
 //! The regions a block's own command text claims from its physical line's body
-//! stream, shared by the two block branches (the keyword block and the function
-//! definition): one append/extension rule, so the two branches can never drift.
+//! stream, shared by the three block branches (the keyword block, the function
+//! definition, the `{ …; }` group): one append/extension rule, so the branches
+//! can never drift.
 
 use crate::scan::heredoc;
 use alloc::vec::Vec;
@@ -30,7 +31,7 @@ use alloc::vec::Vec;
 /// stream are one pair with the window (LESSONS). `line_resume` is the end of
 /// the line's last body region (the line end when the bodies are missing), the
 /// fallback the extension mode uses when the window claims no region.
-pub(super) fn claimed_bodies(
+pub(crate) fn claimed_bodies(
     line: &[u8],
     line_start: usize,
     start: usize,

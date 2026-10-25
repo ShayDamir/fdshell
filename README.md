@@ -426,9 +426,13 @@ is a separate statement.
 A physical line owns **one** body stream, and its regions are handed out in
 operator order to the operators written on that line: the pre-block statements
 first, then the block's own operators, then the trailing statements. A
-`name() { … }` definition claims none — its body's here-docs feed the
+multi-line `name() { … }` definition claims none — its body's here-docs feed the
 statements inside it: `cat <<X; f() { echo hi; }; f; cat <<B` + `bodyX`/`X`/
-`bodyB`/`B` prints `bodyX`, `hi`, `bodyB`. A **block opened mid-run**
+`bodyB`/`B` prints `bodyX`, `hi`, `bodyB`. A `;`-terminated operator written in
+a single-line **block**, definer or `{ …; }` group body claims its own region of
+that stream and the body text carries it: `f() { cat <<T; }; f` + `body` + `T`
+and `{ cat <<T; }` + `body` + `T` both print `body`, and the region lines are
+data, never commands. A **block opened mid-run**
 (`true && while :; do cat <<T; … ; done` + body + delimiter) travels with the
 run, so the part that owns the `<<` gets its body and prints it, as bash; what
 stays a measured divergence is the multi-line construct whose region swallows
@@ -1030,10 +1034,10 @@ unbalanced quote, a dangling `&&`/`||`, or a here-document whose body has not
 arrived — continues under the `> ` prompt until it closes. A here-document's
 body lines are read as continuation lines, **including inside a closed
 single-line keyword block**: `for x in a; do cat <<T; done` + `{a,b}` + `T`
-buffers the two body lines and prints `{a,b}`, like bash. A group-body
-here-document at the prompt (`{ cat <<T; }`) buffers its body lines the same
-way but fails parse with the missing delimiter; the group form is not yet
-supported in script mode either.
+buffers the two body lines and prints `{a,b}`, like bash. A group body's
+here-document (`{ cat <<T; }`) buffers its body lines the same way and the
+buffer runs with the body attached, printing `{a,b}` — the prompt trail and the
+output are byte-ident to the keyword-block rows.
 
 A construct opened **mid-run** — `true && { …`, `true && while :; do …`,
 `echo a | while :; do …`, `true && f() {` — is incomplete the same way and

@@ -177,7 +177,10 @@ fn heredoc_spans_lines() {
 /// byte-for-byte behind its own prompts. `master` answered the first line as
 /// complete: `here-doc: missing terminating delimiter line 'T'` plus
 /// `"a" not found` + `"T" not found` as the body lines ran as statements.
-/// The top-level twin stays pinned by [`heredoc_spans_lines`].
+/// The top-level twin stays pinned by [`heredoc_spans_lines`]. The `{ …; }`
+/// group row joined the family with task **#315** (the group body claims its
+/// region, the same rule as every block branch); its prompt shape is identical
+/// to the keyword rows.
 #[test]
 fn single_line_block_heredoc_spans_lines() {
     for row in [
@@ -187,6 +190,7 @@ fn single_line_block_heredoc_spans_lines() {
         "until false; do cat <<T; break; done",
         "case x in x) cat <<T;; esac",
         "if false; then :; else cat <<T; fi",
+        "{ cat <<T; }",
     ] {
         let (out, err, code) = run_repl(&format!("{row}\n{{a,b}}\nT\nexit\n"));
         assert_eq!(code, 0, "{row}: stderr={err}");
@@ -198,27 +202,17 @@ fn single_line_block_heredoc_spans_lines() {
     }
 }
 
-/// Task #322, pinned divergences of the same fix at the prompt.
+/// Task #322, pinned divergence of the same fix at the prompt.
 ///
-/// (1) The group twin `{ cat <<T; }`: the new completeness arm buffers the
-/// body lines (the `> ` ×2), and executing the buffer reports the missing
-/// `T` delimiter — the script-mode group-body gap task **#315** owns; bash
-/// prints `{a,b}` rc 0. The shell survives to `exit` (rc 0).
-/// (2) The `elif` row at EOF: the `E` delimiter never arrives, the buffer
-/// executes and reports `missing terminating delimiter line 'E'`, stdout is
-/// prompts only, rc 0 — the incomplete-body-stream rule pinned in script
-/// mode by `tests/heredoc.rs::cond_bodies_of_an_incomplete_line_stream_are_empty`;
-/// bash 5.3.9 prints `{a,b}\nT` with an EOF-delimiter warning, rc 0.
+/// The `elif` row at EOF: the `E` delimiter never arrives, the buffer executes
+/// and reports `missing terminating delimiter line 'E'`, stdout is prompts only,
+/// rc 0 — the incomplete-body-stream rule pinned in script mode by
+/// `tests/heredoc.rs::cond_bodies_of_an_incomplete_line_stream_are_empty`; bash
+/// 5.3.9 prints `{a,b}\nT` with an EOF-delimiter warning, rc 0. The group twin
+/// `{ cat <<T; }` flipped to bash parity with task **#315** and is pinned in the
+/// family above.
 #[test]
 fn closed_block_heredoc_prompt_divergences() {
-    let (out, err, code) = run_repl("{ cat <<T; }\n{a,b}\nT\nexit\n");
-    assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out, "fdshell> > > fdshell> ", "stdout: {out:?}");
-    assert!(
-        err.contains("missing terminating delimiter line 'T'"),
-        "stderr={err}"
-    );
-
     // EOF (no `exit`): the third `> ` consumes EOF, the buffer executes.
     let (out, err, code) = run_repl("if false; then :; elif true; then cat <<E; fi\n{a,b}\nT\n");
     assert_eq!(code, 0, "stderr={err}");

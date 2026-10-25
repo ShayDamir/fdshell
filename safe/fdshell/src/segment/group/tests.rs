@@ -1,14 +1,18 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
-use crate::scan::Quotes;
+use crate::scan::{Quotes, ScanState};
 use crate::segment::scan_segments;
 
 /// The group span claims the whole statement it opens: the `{` to the next
 /// separator, comment, or end of input, so trailing redirections and the
 /// `&&`/`||`/`|` operators belong to the group. `start` is 0 (a group at the
-/// start of the line), `pre_resume` is 0.
-fn span(line: &[u8], end: usize, resume: usize) {
-    let (segment, got_resume, floor) = group_block(line, 0, 0, Quotes::new(), 0);
+/// start of the line), `pre_resume` and `line_start` are 0. The floor follows
+/// the keyword branch's rule: with trailing content on the physical line it is
+/// the end of the line's last body region (the line end when the line has no
+/// `<<` operator), and `0` when the group ends the line (`Book::rewind`'s
+/// deeper-of-two keeps the floor a block before it left).
+fn span(line: &[u8], end: usize, resume: usize, floor: usize) {
+    let (segment, got_resume, got_floor) = group_block(line, 0, 0, Quotes::new(), 0, 0);
     match segment {
         Segment::Block {
             block_start,
@@ -24,27 +28,27 @@ fn span(line: &[u8], end: usize, resume: usize) {
         Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
     assert_eq!(got_resume, resume, "resume of {line:?}");
-    assert_eq!(floor, resume, "floor of {line:?}");
+    assert_eq!(got_floor, floor, "floor of {line:?}");
 }
 
 #[test]
 fn group_span_covers_the_statement_after_the_closing_brace() {
-    span(b"{ echo a; }", 11, 11);
-    span(b"{ echo a; } > out; echo b", 17, 18);
-    span(b"{ echo a; } && echo b", 21, 21);
-    span(b"{ echo a; } ; echo b", 12, 13);
-    span(b"{ echo a; }>out3", 16, 16);
-    span(b"{ echo a; } # note", 12, 18);
-    span(b"{ { echo n; }; }", 16, 16);
+    span(b"{ echo a; }", 11, 11, 0);
+    span(b"{ echo a; } > out; echo b", 17, 18, 25);
+    span(b"{ echo a; } && echo b", 21, 21, 0);
+    span(b"{ echo a; } ; echo b", 12, 13, 20);
+    span(b"{ echo a; }>out3", 16, 16, 0);
+    span(b"{ echo a; } # note", 12, 18, 0);
+    span(b"{ { echo n; }; }", 16, 16, 0);
     // A nested group that never closes is opaque: the span runs to end of input.
-    span(b"{ echo a; } && { echo b", 23, 23);
+    span(b"{ echo a; } && { echo b", 23, 23, 0);
 }
 
 /// A group that never closes keeps the REPL reading continuation lines: the
 /// span runs to the end of the input and reports `closed = false`.
 #[test]
 fn unclosed_group_is_open() {
-    let (segment, resume, _) = group_block(b"{ echo a", 0, 0, Quotes::new(), 0);
+    let (segment, resume, _) = group_block(b"{ echo a", 0, 0, Quotes::new(), 0, 0);
     match segment {
         Segment::Block {
             block_start,
@@ -62,13 +66,15 @@ fn unclosed_group_is_open() {
 }
 
 /// A statement that precedes the group on the same line owns its own body
-/// regions: the group's resume starts at its own statement end, and the floor
-/// keeps the trailing flush from re-entering the here-doc body. `start` is the
-/// group's `{` byte (19), `pre_resume` the here-doc statement's end (17).
+/// regions: the group's resume starts at its own statement end, and the group
+/// ends its physical line, so the floor is `0` and `Book::rewind`'s
+/// deeper-of-two keeps the floor the line already carries (task #305). `start`
+/// is the group's `{` byte (19), `pre_resume` the here-doc statement's end (17),
+/// `line_start` the start of the group's own physical line.
 #[test]
 fn group_resume_never_reopens_the_group_body() {
     let line = b"cat <<EOF\nhi\nEOF\n; { echo a; } > out";
-    let (segment, resume, floor) = group_block(line, 19, 19, Quotes::new(), 17);
+    let (segment, resume, floor) = group_block(line, 19, 19, Quotes::new(), 17, 19);
     match segment {
         Segment::Block {
             block_start,
@@ -84,7 +90,76 @@ fn group_resume_never_reopens_the_group_body() {
         Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
     assert_eq!(resume, line.len());
-    assert_eq!(floor, line.len());
+    assert_eq!(floor, 0);
+}
+
+/// The group's own operators claim regions of its physical line's body stream
+/// (task #315, the definer branch's rule): in **append** mode the region bytes
+/// travel as the segment's `bodies`, the span end stays at the group's
+/// separator, and the resume/floor follow the keyword branch's rule — the
+/// trailing branch floors at the end of the line's last region, the line-end
+/// branch at `0`.
+fn claim(line: &[u8], end: usize, resume: usize, floor: usize, bodies: &[&[u8]]) {
+    let (segment, got_resume, got_floor) = group_block(line, 0, 0, Quotes::new(), 0, 0);
+    match segment {
+        Segment::Block {
+            end_pos,
+            closed,
+            bodies: got,
+            ..
+        } => {
+            assert!(closed, "{line:?} must be a closed group");
+            assert_eq!(end_pos, end, "span end of {line:?}");
+            let want: Vec<Vec<u8>> = bodies.iter().map(|b| b.to_vec()).collect();
+            assert_eq!(got, want, "bodies of {line:?}");
+        }
+        Segment::Statement { .. } => panic!("{line:?} must be a block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
+    }
+    assert_eq!(got_resume, resume, "resume of {line:?}");
+    assert_eq!(got_floor, floor, "floor of {line:?}");
+}
+
+#[test]
+fn a_heredoc_in_the_group_body_claims_its_region() {
+    // The group ends its physical line: the resume is pushed past the region.
+    claim(b"{ cat <<T; }\nbody\nT", 12, 19, 0, &[b"body\nT"]);
+    // The io-number form claims the same region (the descriptor is the parse
+    // layer's fact, not the scan's).
+    claim(b"{ cat 3<<T; }\nbody\nT", 13, 20, 0, &[b"body\nT"]);
+    // Two operators of the group's body, in operator order.
+    claim(
+        b"{ cat <<T; cat <<U; }\nbT\nT\nbU\nU",
+        21,
+        31,
+        0,
+        &[b"bT\nT\n", b"bU\nU"],
+    );
+    // Trailing content on the group's line: the group keeps its own resume (that
+    // text is commands) and the line's final flush floors past the region.
+    claim(b"{ cat <<T; }; echo t\nbody\nT", 12, 13, 27, &[b"body\nT"]);
+    // The trailing operator takes its **own** region: the group's claim does not
+    // move the line's global stream, only the group's part of it.
+    claim(
+        b"{ cat <<T; }; cat <<U\nbT\nT\nbU\nU",
+        12,
+        13,
+        31,
+        &[b"bT\nT\n"],
+    );
+}
+
+/// The arm of [`claim::claimed_bodies`] one shape cannot reach is recorded, not
+/// padded (task #311's rule): a **multi-line** group whose opener line carries
+/// no `<<` operator claims nothing at all (the stream is that line's, and the
+/// operator is on a later line of the body), so the span is unchanged and no
+/// bodies travel — the group's text keeps covering its own lines.
+#[test]
+fn a_multi_line_group_claims_no_bodies() {
+    claim(b"{ echo a\ncat <<T;\n}\nbody\nT", 19, 20, 0, &[]);
+    // A multi-line group whose delimiter line sits inside the span keeps the
+    // verbatim span too (`tests/group.rs::here_doc_inside_the_group_body`).
+    claim(b"{ cat <<EOF\nhi\nEOF\n; }", 22, 22, 0, &[]);
 }
 
 /// The byte just after a group's closing brace is inside the span: a body that
@@ -92,9 +167,9 @@ fn group_resume_never_reopens_the_group_body() {
 /// statement-end scan starts *past* the brace, never at the body's `;`.
 #[test]
 fn span_ends_past_the_closing_brace() {
-    span(b"{ echo a;}", 10, 10);
-    span(b"{ echo a; }", 11, 11);
-    span(b"{ echo a; } ; echo b", 12, 13);
+    span(b"{ echo a;}", 10, 10, 0);
+    span(b"{ echo a; }", 11, 11, 0);
+    span(b"{ echo a; } ; echo b", 12, 13, 20);
 }
 
 /// A second group in the same statement is opaque: the span resumes just past
@@ -103,11 +178,11 @@ fn span_ends_past_the_closing_brace() {
 #[test]
 fn nested_group_span_resumes_past_its_closing_brace() {
     // The second group closes at 25; `>f` runs to the `;` at 28.
-    span(b"{ echo a; } && { echo b; }>f; echo c", 28, 29);
+    span(b"{ echo a; } && { echo b; }>f; echo c", 28, 29, 36);
     // With no separator after the second group, the span runs to end of input.
-    span(b"{ echo a; } && { echo b; } && echo c", 36, 36);
+    span(b"{ echo a; } && { echo b; } && echo c", 36, 36, 0);
     // The tail is a comment: the span ends at the `#` and resumes past the comment.
-    span(b"{ echo a; } && { echo b; } # note", 27, 33);
+    span(b"{ echo a; } && { echo b; } # note", 27, 33, 0);
 }
 
 /// A group opener after `&&` is not a segment-level block: the cond layer splits
@@ -135,7 +210,7 @@ fn group_after_and_stays_a_cond_part_not_a_block() {
 /// so the span ends at the `;` — not at the brace's closing `}`.
 #[test]
 fn word_active_brace_in_the_tail_is_not_a_group() {
-    span(b"{ echo a; } && a{ b; }", 19, 20);
+    span(b"{ echo a; } && a{ b; }", 19, 20, 22);
 }
 
 /// A comment glued to a closing brace ends the statement at the `#`: the scan
@@ -143,8 +218,8 @@ fn word_active_brace_in_the_tail_is_not_a_group() {
 /// not comment data glued to a word.
 #[test]
 fn glued_comment_after_the_closing_brace_ends_the_statement() {
-    span(b"{ echo a; }# note", 11, 17);
-    span(b"{ echo a; } && { echo b; }#x", 26, 28);
+    span(b"{ echo a; }# note", 11, 17, 0);
+    span(b"{ echo a; } && { echo b; }#x", 26, 28, 0);
 }
 
 /// A `'…'` span masks its bytes (task #141): a `{`/`}` written inside a span is
@@ -170,8 +245,8 @@ fn quoted_braces_are_not_group_delimiters() {
         );
     }
     // A group whose body words are spans: the span's `;` is data.
-    span(b"{ 'a; b'; }", 11, 11);
-    span(b"{ echo 'a' 'b'; }", 17, 17);
+    span(b"{ 'a; b'; }", 11, 11, 0);
+    span(b"{ echo 'a' 'b'; }", 17, 17, 0);
 }
 
 /// `skip_group`'s pair (resume, closed) for the `{` at `i` of `line`, with a

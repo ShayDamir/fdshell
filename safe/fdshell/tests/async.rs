@@ -791,6 +791,23 @@ fn a_heredoc_behind_an_ampersand_inside_a_block_prints_both_bodies() {
     }
 }
 
+/// The **single-line group** twin of the same shape: a `&`-terminated here-doc in
+/// a `{ …; }` body is a job of the group body, and its region rides with the job
+/// (task **#315** closed the group body's region gap, so the group parses at all).
+/// `cat` reads the region in the job and prints it, rc 0, exactly as bash.
+#[test]
+fn a_heredoc_behind_an_ampersand_inside_a_single_line_group_body() {
+    let shape = "{ cat <<T & }\nbody\nT";
+    let out = run(shape);
+    assert_eq!(rc(&out), 0, "shape {shape:?}");
+    assert_eq!(
+        lines(&out),
+        vec!["body".to_string()],
+        "shape {shape:?}: stdout={}",
+        str::from_utf8(&out.stdout).unwrap_or_default()
+    );
+}
+
 // ─── Task #356: a `&`-terminated block **condition** is a background job ───
 //
 // POSIX 2.9/2.14 read a block condition as a compound list, whose terminators
