@@ -95,7 +95,15 @@ fn min_digits(digits: &mut String, value: u64, fmt: &Fmt) {
     };
     if value == 0 && p == 0 {
         digits.clear();
-    } else if digits.len() < p {
-        digits.insert_str(0, &"0".repeat(p - digits.len()));
+    } else {
+        // The padding amount is a value, not a boundary: `digits.len() < p`
+        // mutates to `<= p`, and the extra equality case pads
+        // `"0".repeat(0)` — unobservable. `saturating_sub` makes the equality
+        // case `fill == 0`, and the `!= 0` test plus the exact padding pins
+        // kill the `saturating_sub` and `fill` mutants.
+        let fill = p.saturating_sub(digits.len());
+        if fill != 0 {
+            digits.insert_str(0, &"0".repeat(fill));
+        }
     }
 }

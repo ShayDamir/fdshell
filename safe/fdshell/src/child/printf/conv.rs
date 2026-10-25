@@ -78,8 +78,12 @@ fn resolve_field(
                 } else {
                     (Some(v as usize), false)
                 }
-            } else if v < 0 {
-                // A negative `*` width left-justifies at `|width|`.
+            } else if v.is_negative() {
+                // A negative `*` width left-justifies at `|width|`. The
+                // predicate has no `v == 0` boundary to hide behind: `v < 0`
+                // mutates to `v <= 0` (unobservable at 0, where `pad` fills
+                // nothing), `is_negative` mutates only to a value that the
+                // two-sided `%*d` pins kill.
                 (Some(v.unsigned_abs() as usize), true)
             } else {
                 (Some(v as usize), false)

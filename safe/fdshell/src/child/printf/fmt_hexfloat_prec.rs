@@ -38,7 +38,10 @@ fn round_frac(frac60: u64, h: u8, exp2: i32, p: usize) -> (u8, u64, i32) {
     let shift = 60 - 4 * p;
     let unit = 1u128 << shift;
     let half = unit >> 1;
-    let c = (h as u128) << 60 | frac60 as u128;
+    // The nibble and the fraction occupy disjoint ranges, so the sum is the
+    // same value as `|` — and a sum has killable mutants (`+`→`-`/`*`/`/`
+    // move the significand), which `|` on disjoint bits does not.
+    let c = ((h as u128) << 60) + frac60 as u128;
     let rem = c & (unit - 1);
     let mut kept = c & !(unit - 1);
     // A tie rounds so the last kept digit is even.

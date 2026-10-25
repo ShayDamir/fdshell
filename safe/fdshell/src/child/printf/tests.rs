@@ -488,6 +488,14 @@ fn negative_star_width_left_justifies() {
     assert_eq!(rendered("%*s", &["-5", "hi"]), "hi   ");
     assert_eq!(rendered("%*c", &["-3", "ab"]), "a  ");
     assert_eq!(rendered("%*.2f", &["-8", "3.14159"]), "3.14    ");
+    // The negative-`*`-width branch is a predicate (`v.is_negative()`), so both
+    // sides of the sign are pinned: a positive width right-justifies, a `0`
+    // width pads nothing (where a `v <= 0` boundary test would have hidden),
+    // and a negative one left-justifies at `|width|`.
+    assert_eq!(rendered("%*d", &["5", "42"]), "   42");
+    assert_eq!(rendered("%*s", &["5", "hi"]), "   hi");
+    assert_eq!(rendered("%*d", &["0", "42"]), "42");
+    assert_eq!(rendered("%*s", &["0", "hi"]), "hi");
 }
 
 #[test]
@@ -516,6 +524,14 @@ fn int_precision_zero_is_empty() {
     assert_eq!(rendered("%.0d", &["5"]), "5");
     assert_eq!(rendered("%.5d", &["42"]), "00042");
     assert_eq!(rendered("%.3o", &["8"]), "010");
+    // The padding amount is a *delta* (`precision - digits`), so the
+    // `precision == digits` row pads nothing and every neighbour row is an
+    // exact string: both sides of that boundary are pinned here.
+    assert_eq!(rendered("%.2d", &["42"]), "42");
+    assert_eq!(rendered("%.1d", &["42"]), "42");
+    assert_eq!(rendered("%.3d", &["42"]), "042");
+    assert_eq!(rendered("%.2x", &["15"]), "0f");
+    assert_eq!(rendered("%.3o", &["0"]), "000");
 }
 
 #[test]

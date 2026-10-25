@@ -67,7 +67,10 @@ fn mantissa(v: f64) -> (u8, u64, i32) {
     let (s, b, e) = if expb == 0 {
         (frac, 64 - frac.leading_zeros(), -1074)
     } else {
-        ((1u64 << 52) | frac, 53, expb - 1075)
+        // `|` on these disjoint ranges is an unkillable mutant source; the sum
+        // is the same value and its `+`→`-`/`*`/`/` mutants move the
+        // significand, so the exact `%a` pins kill them.
+        ((1u64 << 52) + frac, 53, expb - 1075)
     };
     // Left-justify `s` so its top nibble lands in bits 60..63 (value in [8,16)).
     let m = s << (64 - b);
