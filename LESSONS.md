@@ -608,46 +608,63 @@ Task #284 makes `cd`'s operand expand: `cd $V`, `cd "$@"`, `cd ~`, `cd "$(echo s
 ## Four mutants of `scan/heredoc/ops.rs` are equivalent, and one neighbour of `lines.rs` is (accepted, do not chase)
 
 The `<<` operator scan walks the run with `advance`-driven bounds, and four of
-its mutants are unobservable. Recorded so future mutant runs do not re-flag them.
+its mutants are unobservable. Recorded so future mutant runs do not re-flag them
+(the heading's count is that 2026-10 record: item 1's outer twin and item 3 are
+**killed** in today's tree, see below).
 Verify with a **focused**
-`cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs --iterate` run: this file's
+`cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs -f safe/fdshell/src/scan/heredoc/ops/pipe.rs --iterate`
+run (add `-f safe/fdshell/src/scan/heredoc/lines.rs` for item 4): this file's
 build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores
 them as *caught* (the per-mutant timeout expires before the mutant is tested) —
-the sweep's count is not the truth for this file.
+the sweep's count is not the truth for this file. **The file list is part of the
+record:** the walker was split, so `-f …/ops.rs` alone generates no item-2 mutant
+at all, and a gate whose list omits the file holding a site reports a clean sweep,
+not a truthful one (task #318). The focused run's own figures, 32 cores,
+`-j8 --copy-target true -t 400 --minimum-test-timeout 300`: 76 mutants in the
+two `ops` files — **67 caught, 2 missed, 7 unviable, `mutants.out/timeout.txt`
+empty**. The 2 misses are item 1's word walk and item 2, and nothing else in the
+list is recorded-equivalent. A suite that times out under the sweep's own load
+reports *caught* for all 76, which is why killing the load-flaky tests comes
+before chasing any of this.
 
-1. `ops.rs` `while i < to` → `i <= to`, and `while i < next` → `i <= next` — the
+1. `ops.rs::sites`'s word walk `while i < next` → `i <= next` — the
    extra iteration processes one word-break byte (`\n`, `;`, `|`, space, or EOF)
-   that `advance` classifies identically, so `seen_token`/`word_start` and the
-   operator list are unchanged: at `i == to` the read is
-   `line.get(i) == None`, no token byte, so the flag cannot change. Coordinates
-   drift as the file gains helpers and doc comments, so re-derive them from the
-   loop rather than trusting line numbers. The `sites` list is `pub(crate)` and is
-   reused **unchanged** for the window-blind count in `scan/heredoc/opaque.rs`,
-   precisely so this record stays valid: a recorded-equivalent mutant on a
-   rewritten body is a **new** finding the next sweep must re-prove, and the gate
-   is the focused run reporting **only recorded equivalents** as misses.
-2. `ops.rs` `while k > 0` → `k >= 0` (the `precedes_pipe` walk back to the `|`) —
-   the extra step reads `line.get(0)` after `k` has been decremented to 0. Under
+   that `advance` classifies identically, and the loop body is **only**
+   `i = state.advance(line, i)`, so no flag is touched and the operator list is
+   unchanged — applying it by hand leaves 5841/5841 green (twice, task #318). Its
+   outer twin `while i < to` → `i <= to` is **killed**, not equivalent
+   (re-proved by hand, 2026-10-25): at `i == to` the read is `line.get(to)` of the
+   **whole** line — `None` only when the window ends the line — and a token byte
+   there (`\n` is one, task #261) sets `seen_token`, which is exactly what
+   `ops/tests.rs::window_end_is_exclusive` pins. Coordinates drift as the file
+   gains helpers and doc comments, so re-derive them from the loop rather than
+   trusting line numbers. The `sites` list is `pub(crate)` and is reused
+   **unchanged** for the window-blind count in `scan/heredoc/opaque.rs`, precisely
+   so this record stays valid: a recorded-equivalent mutant on a rewritten body is
+   a **new** finding the next sweep must re-prove, and the gate is the focused run
+   reporting **only recorded equivalents** as misses.
+2. `ops/pipe.rs::precedes_pipe`'s `while k > 0` → `k >= 0` (the walk back to the
+   `|`; this is the `mod pipe` submodule the walker declares, where the site moved
+   to) — the extra step reads `line.get(0)` after `k` has been decremented to 0. Under
    the `seen_token` guard a word-start `<<` can never be preceded only by spaces
    (all bytes before it would have to be whitespace, which makes `seen_token`
    false), so the loop always returns from the body before `k` reaches 0 and the
    extra step is unreachable.
-3. `ops.rs` `i = i + p + 1` → `i + p * 1` (the comment skip lands on the comment's
-   `\n` instead of just past it) is **equivalent**: `p` is the offset of the first
-   `\n` from `i`, so the landing byte is always that `\n`, and the loop's next
-   iteration can only fall through to `state.advance(line, i)` (the `#` arm needs
-   `#`, the `<<` arm needs `<`), which consumes the `\n` as one word-break byte
-   and clears `word_active` — the state the comment arm already had, since
-   `!state.word_active` gates it. So `seen_token`, `word_start` and the operator
-   list are identical, at the run start as everywhere else. The claim that
-   `comment_at_run_start_skips_its_text` kills it did not match the tree: the
-   focused, timeout-safe run reports it MISSED, applying the mutation by hand
-   leaves the whole suite green, and a comment+heredoc probe (comment at the run
-   start, before `<<`, inside a run, the `<<'Q'` forms, comment + pipeline) shows
-   no stdout/stderr/rc difference. **Rule:** for an "unobservable because the byte
-   lands on a word break" claim, check that the loop's only fall-through is
-   `advance` for that byte — and prove it by applying the mutation and running the
-   suite, not by reasoning about one position.
+ 3. `ops.rs`'s comment-skip arm `i = i + p + 1` → `i + p * 1` (the comment skip
+    lands **on** the comment's `\n` instead of just past it) was recorded
+    equivalent; it is **killed** now — task #318 re-proved it by hand: applying the
+    mutation fails `ops/tests.rs::newline_is_a_token_byte_space_and_tab_are_not`
+    (`# x\n<<EOF` counts **1** operator where the clean walker counts **0**) plus
+    `parse::heredoc::tests::operator_count_leading_newline_agree` and
+    `…leading_operator_forms_agree`. The old argument stopped at "`advance`
+    consumes the `\n` as one word-break byte" and skipped the flag:
+    `ops/pipe.rs::is_token_byte` calls `\n` a token byte (task #261), so landing on
+    it sets `seen_token` and turns the next `<<` into an operator. **Rule:** an
+    equivalence argument must cover every variable the extra iteration can reach —
+    a flag is as load-bearing as the index — and a recorded equivalent on a
+    rewritten body is a **new** finding: 4950/4950 green in the 2026-10 record,
+    three failures on 2026-10-25, both honest, both only visible by applying the
+    mutation and running the whole suite.
 4. `scan/heredoc/lines.rs` has **three** loop-bound mutants of this class, each
    proven equivalent by applying it and running the whole suite green:
    `word_span`'s `while k < to` — the extra step reads `line.get(k)` past `to`,
@@ -1203,7 +1220,8 @@ the direction with a lower bound on a sleeping statement (`time -p sleep 1` →
 - **The same coin flip reaches the `times` builtin's *children* fields (task
 #267):** `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
 burned CPU in a backgrounded child, `wait`ed for it, and asserted the *children user time* field `> 0.00`. `times` prints `child_utime` and `child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`, fed by `add_child_times` from each reap's `waitid` rusage), so a reaped child's CPU attributed wholly to system zeroes the asserted field while the child plainly ran. Fixed the same way: assert the printed sum (user + system), keep the burn loop, read `> 0` as "non-degenerate". The centisecond print floor is the rule this adds: `centis` truncates the two fields **independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not the truncation of the total and its floor sits on a
-*single* field — one field prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both* fields are, i.e. only when the whole child CPU is under 200 µs. **Rule:** measure a `times`-style burn against that print floor, never against the printed unit's nominal resolution (the printed unit is the centisecond = 10 ms; the resolution is a hundredth of it). Measured in release (10 runs), the test's 5000-iteration shell loop puts the children line at `47.43`–`50.75` user + `4.38`–`5.60` system centiseconds — each field 440–4750× above the floor, so the sum's `> 0` is both attribution-independent and floor-independent.
+*single* field — one field prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both* fields are, i.e. only when the whole child CPU is under 200 µs. **Rule:** measure a `times`-style burn against that print floor, never against the printed unit's nominal resolution (the printed unit is the centisecond = 10 ms; the resolution is a hundredth of it). Measured 10 runs per profile, the test's shell loop at **500** iterations puts the children line at `5.65`–`7.19` user + `0.73`–`1.36` system centiseconds in debug and `3.73`–`4.24` user + `0.28`–`0.50` system in release — worst field `0.28` = 2800 µs, 28× above the per-field floor, so the sum's `> 0` is both attribution-independent and floor-independent (100 and 250 iterations clear the floor too — `0.05`/`0.13` worst field in release — and were rejected for margin, not for failure).
+- **A burn test's wall time is its CPU ÷ its share of the machine, so an over-sized burn is a nextest `slow-timeout` kill under mutation load, and one timed-out test is a *false* kill of every mutant in that copy's sweep** (the entry "A mutant caught by a flaky test is a false kill"). The `times` children burn's 5000-iteration form (~0.65 s of child CPU) took **25.8–26.4 s** of wall in 8 concurrent full-suite runs — the `cargo mutants -j8` profile, 32 cores — against the 10 s period. **Rule:** size the burn to the assertion's floor and measure both margins — floor (worst observed field vs the print floor) and timeout (wall time under the load profile vs the kill). 500 iterations: 0.16–0.20 s for the script, 0.33–3.99 s for the test, so the kill is widened for that one test only (`[[profile.default.overrides]]` + `slow-timeout = { period = "10s", terminate-after = 4 }`), never by lengthening the global 10 s period: that period is the suite's self-bound (`safe/fdshell/tests/loops.rs::run_bounded` bounds its child at 5 s *because* the kill sits at 10 s), and widening it delays every hang regression. Verify a per-test override fires — set the period to `1ms` and watch exactly the named test die; a filter matching nothing is a comment, not a fix.
 - **A CPU-time delta measured around a forked child is the fork's CPU.** `time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`: the fork/exec of the child (PATH walk, arg substitution) is the shell's own CPU and is inside the measurement window. So a test may pin `user`/`sys` to `0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` with an in-process body); asserting `user == 0.00` around a fork is a timing coin flip.
 - **Two harness facts for repeat measurement:** a plain `nix flake check` repeat is a store hit that runs nothing, so re-run the check phase with `nix build .#checks.x86_64-linux.default --rebuild`; and `nix build .#coverage --rebuild` exits 1 on the coverage report's embedded timestamps tripping nix's output-determinism check, which is not a test failure.
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
