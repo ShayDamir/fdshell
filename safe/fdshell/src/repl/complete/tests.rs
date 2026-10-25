@@ -226,7 +226,39 @@ fn trailing_semicolon_is_complete() {
 
 #[test]
 fn quoted_cond_list_operator_is_complete() {
+    // No "is the scan state bare" gate guards the trailing-operator check: a
+    // `&&`/`||` inside a quote, a single-quoted span, a backtick, or a `$( )`
+    // is answered by the scope itself — a balanced one leaves its
+    // non-whitespace closer in the tail (complete), an unbalanced one is caught
+    // by the open-scope checks (continuation). Both sides of every scope are
+    // pinned here, plus the whitespace tail that makes a top-level `&&` open.
     assert!(is_complete(b"echo \"a && b\""));
+    assert!(is_complete(b"echo 'a && b'"));
+    assert!(is_complete(b"echo `a && b`"));
+    assert!(is_complete(b"echo $(true && true)"));
+    assert!(is_complete(b"x && $(true)"));
+    assert!(!is_complete(b"x && $(true"));
+    assert!(!is_complete(b"echo 'a && b"));
+    assert!(!is_complete(b"echo `a && b"));
+    assert!(!is_complete(b"echo a && "));
+    assert!(!is_complete(b"echo a &&"));
+    // A lone `&`/`|` is the async/pipeline operator byte only at the top level
+    // (there the scan stamps it `Async`); inside a quote, a single-quoted span,
+    // a backtick, or a balanced `$( )` it is an ordinary word byte, so
+    // `top_level_op`'s 2-char match must not read the byte after it as its
+    // partner. These rows are the killers of `top_level_op`'s
+    // "guard → true" and `i + 1`→`i * 1` mutants: read as a 2-char operator,
+    // the lone `&` swallows the closing `"`/`'`/backtick/`)`, the tail becomes
+    // whitespace, and the line opens a continuation that the unmutated build
+    // answers at once.
+    assert!(is_complete(b"echo \"a &\""));
+    assert!(is_complete(b"echo 'a &'"));
+    assert!(is_complete(b"echo `a &`"));
+    assert!(is_complete(b"echo $(a &)"));
+    assert!(is_complete(b"echo \"a |\""));
+    assert!(is_complete(b"echo 'a |'"));
+    assert!(is_complete(b"echo `a |`"));
+    assert!(is_complete(b"echo $(a |)"));
 }
 
 #[test]

@@ -4,6 +4,7 @@ use super::{MAX_WORDS, SeqKind, SeqSpec};
 use crate::error::parse::ParseError;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use error_stack::Report;
 
 impl SeqSpec {
@@ -15,7 +16,14 @@ impl SeqSpec {
         if incr == 0 {
             incr = 1;
         }
-        if (self.start < self.end) == (incr < 0) {
+        // Both sides as predicates, not boundary comparisons: `start < end`
+        // mutates to `<=` (unobservable at the equality, where the sequence is
+        // a single element) and `incr < 0` to `<= 0` (`incr` is normalized
+        // above, so it is never 0). `cmp(..) == Less` and `is_negative()`
+        // mutate only to values that flip the direction, which the
+        // ascending/descending pins kill.
+        let forward = self.start.cmp(&self.end) == Ordering::Less;
+        if forward == incr.is_negative() {
             incr = incr.checked_neg()?;
         }
         Some(incr)

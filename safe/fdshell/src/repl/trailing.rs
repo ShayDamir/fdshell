@@ -13,9 +13,13 @@ pub(super) fn trailing_open(line: &[u8]) -> bool {
     while i <= line.len() {
         let kind = boundary(line, i, &state);
         if kind == Boundary::Char {
-            if is_bare(&state)
-                && let Some(len) = top_level_op(line, i)
-            {
+            // No "is the state bare" gate: an in-quote / in-span / in-backtick
+            // / in-`$( )` `&&`-`||` is never the *last* top-level operator with
+            // a whitespace tail (a balanced scope leaves its non-whitespace
+            // closer in the tail, an unbalanced one is caught by the check
+            // below), so the gate had no observable effect and every mutant of
+            // it was equivalent.
+            if let Some(len) = top_level_op(line, i) {
                 last_op = Some((i, len));
                 for _ in 0..len {
                     i = state.advance(line, i);
@@ -46,12 +50,6 @@ pub(super) fn trailing_open(line: &[u8]) -> bool {
         return true;
     }
     matches!(last_op, Some((pos, len)) if tail_is_whitespace(line, pos + len))
-}
-
-/// `true` when the state is at the top level (no open quote, single-quoted span,
-/// backtick, or `$( )`/`(( ))` substitution).
-fn is_bare(state: &ScanState) -> bool {
-    !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0
 }
 
 /// The length of the top-level cond-list operator at `i`: `&&` (2) or `||`

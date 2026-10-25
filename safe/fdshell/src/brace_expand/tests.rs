@@ -337,6 +337,42 @@ fn mkseq_generates_elements() {
 }
 
 #[test]
+fn mkseq_direction_is_a_predicate_pair() {
+    // `effective_incr` reads the direction and the sign as predicates
+    // (`start.cmp(&end) == Less`, `incr.is_negative()`), so every
+    // direction/step combination is a distinct value and is pinned: descending,
+    // ascending with a step whose sign is normalized to the direction (bash
+    // agrees), a single element at `start == end` (where a boundary comparison
+    // mutating `<`→`<=` had nothing to show), and the end-to-end form.
+    assert_eq!(
+        strings(seq(5, 1, 1).mkseq().unwrap().unwrap()),
+        ["5", "4", "3", "2", "1"]
+    );
+    assert_eq!(
+        strings(seq(5, 1, -1).mkseq().unwrap().unwrap()),
+        ["5", "4", "3", "2", "1"]
+    );
+    assert_eq!(
+        strings(seq(1, 5, -1).mkseq().unwrap().unwrap()),
+        ["1", "2", "3", "4", "5"]
+    );
+    assert_eq!(
+        strings(seq(1, 5, -2).mkseq().unwrap().unwrap()),
+        ["1", "3", "5"]
+    );
+    assert_eq!(
+        strings(seq(5, 1, -2).mkseq().unwrap().unwrap()),
+        ["5", "3", "1"]
+    );
+    assert_eq!(strings(seq(3, 3, 1).mkseq().unwrap().unwrap()), ["3"]);
+    assert_eq!(strings(seq(3, 3, -1).mkseq().unwrap().unwrap()), ["3"]);
+    assert_eq!(expand_line("{5..1}"), b"5 4 3 2 1".to_vec());
+    assert_eq!(expand_line("{1..5..-1}"), b"1 2 3 4 5".to_vec());
+    assert_eq!(expand_line("{5..1..2}"), b"5 3 1".to_vec());
+    assert_eq!(expand_line("{3..3}"), b"3".to_vec());
+}
+
+#[test]
 fn mkseq_zero_padding_with_signs() {
     let mut spec = seq(-1, 1, 1);
     spec.kind = SeqKind::ZInt;
