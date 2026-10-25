@@ -730,18 +730,33 @@ Three faces of *measure, don't quote*.
   the assertion, and pin the measured value. Shortest/longest anchored matching
   is computable by hand; a row that mixes up a name with its target reads
   plausibly and is still wrong.
-- **Measure the plan's bash table on the rows it labels "fdshell-identical".**
-  Three such rows of task #276's table are not, all for pre-existing reasons the
-  table did not test: `{ cat 3<<T; }` and `f(){ cat 3<<T; }; f` fail with
-  `missing terminating delimiter line` because a here-doc in a group/function
-  body claims no body region. The **group** half still fails on the plain `<<`
-  form (`{ cat <<T; }` + body + `T` → rc 1 where bash prints the body at rc 0,
-  measured 2026-10-25) — owner task #315. The **function-definition** half is
-  closed: `f(){ cat <<T; }; f` prints its body and `f(){ cat 3<<T; }; f` prints
-  nothing, both rc 0 = bash, pinned by `tests/heredoc.rs::heredoc_in_function_body`
-  and the terminated-function-body family
-  (`heredoc_of_a_terminated_function_body_line_prints_on_every_call` and its
-  siblings). The **mid-run** keyword-block row of this family is bash-equal,
+- **Measure the plan's bash table on the rows it labels "fdshell-identical».**
+  Three rows of task #276's table are not — `{ cat 3<<T; }`,
+  `f(){ cat 3<<T; }; f` and the group's plain-`<<` row — all for pre-existing
+  reasons the table did not test. Each row's outcome is a property of its
+  **shape**, so write the shape beside the number: this file cites the same
+  shape strings for two opposite outcomes. **Terminated** (script form — the
+  `<<` line, the body lines, then the delimiter line): the **group** rows
+  diverge, because a here-doc in a **group** body claims no body region —
+  `{ cat <<T; }` + body + `T` reports
+  `here-doc: missing terminating delimiter line 'T'` rc 1 where bash prints
+  the body at rc 0, and `{ cat 3<<T; }` + body + `T` reports the same rc 1
+  where bash prints nothing at rc 0 (a numbered here-doc feeds fd 3, not
+  `cat`'s stdin). Owner task **#315**, pinned with its nested-group twin by
+  `tests/heredoc.rs::group_body_here_docs_claim_no_region_until_315`. The
+  **function-definition** form is at parity, closed by task **#305**:
+  `f(){ cat <<T; }; f` + body + `T` prints the body rc 0 and
+  `f(){ cat 3<<T; }; f` + body + `T` prints nothing rc 0, measured 2026-10-25,
+  pinned by `tests/heredoc.rs::heredoc_in_function_body` and
+  `heredoc_of_a_terminated_function_body_line_prints_on_every_call`.
+  **EOF-starved** (one `-c` line, no delimiter line): all four shapes — both
+  group and both function forms — report `missing terminating delimiter line`
+  rc 1 where bash warns `delimited by end-of-file` and exits 0: the
+  statement-level missing-delimiter family, owner task **#429**, whose line
+  with #315 is drawn in the entry
+  LESSONS: "A function-definition body is a block body for the region rule too"
+  (the starved first operator is **#429**'s, the group's unclaimed region is
+  **#315**'s). The **mid-run** keyword-block row of this family is bash-equal,
   pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and
   `midrun_block_body_heredoc_is_region_scanned`); `( cat 3<<T )` is not a
   subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
