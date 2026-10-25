@@ -5,6 +5,11 @@ description: Kill all mutants in this repo with cargo mutants. Runs the full mut
 
 # Mutation testing loop
 
+Before accepting any mutant as equivalent, consult
+[`CATCHING_MUTANTS.md`](../../../CATCHING_MUTANTS.md) — the growing list of
+recipes for catching missed mutants. Extend it whenever a new probe shape
+works or a recorded equivalence is disproved.
+
 Run this as a **Chore** task, not as a gate on an ordinary task: a full sweep
 is too slow to gate every task, so mutation testing lives only inside a Chore
 (AGENTS.md "Chore workflow"). The Chore flows through the normal pipeline; when
@@ -45,14 +50,16 @@ Repeat until `missed.txt` contains only unkillable (equivalent) mutants:
      code (unkillable). Remove the source of the equivalence rather than
      accepting it. Record a new lesson in `LESSONS.md` (see existing entries
      on equivalent mutants there).
+   Apply the recipes in `CATCHING_MUTANTS.md` first; add a new rule there when
+   a probe shape proves useful.
 
 3. **Verify** the file is clean:
    `cargo mutants -j4 --test-tool nextest -f <file> --iterate`
    and confirm the file no longer appears in `mutants.out/missed.txt`.
 
 4. **Finish the file.** When the file is fully caught:
-    - `git add` new and changed files (source + tests + LESSONS.md) on the
-      task branch `taskN` (so nix builds see them)
+    - `git add` new and changed files (source + tests + `LESSONS.md` +
+      `CATCHING_MUTANTS.md`) on the task branch `taskN` (so nix builds see them)
     - Run the **reviewer** subagent's QA checklist (`.opencode/agent/reviewer.md`
       §5) over the changed files and fix what it flags
     - Commit the work on `taskN` (AGENTS.md: per-task branches) — the Judge
@@ -66,6 +73,7 @@ Repeat until `missed.txt` contains only unkillable (equivalent) mutants:
 
 Stop the loop when every remaining entry in `mutants.out/missed.txt` is an
 equivalent mutant — document each in `LESSONS.md` with why it is unkillable,
-`git add` and commit those docs and the changed sources on the task branch
-`taskN` (the Judge merges the branch via the workflow when the task reaches
-`Done`), and report the final residual list.
+and put any new catching recipe in `CATCHING_MUTANTS.md`, `git add` and commit
+those docs and the changed sources on the task branch `taskN` (the Judge merges
+the branch via the workflow when the task reaches `Done`), and report the final
+residual list.
