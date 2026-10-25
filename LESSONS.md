@@ -666,7 +666,26 @@ the sweep's count is not the truth for this file.
 2. `quoted` is *any* POSIX quote operator in the word, in any position: a `"`/`'` marker byte (`<<a'b'c` is literal exactly like `<<'abc'`) **or a folded unquoted `\X` pair** — POSIX XCU 2.3 counts `\` a quote operator, so `<<E\OF`, `<<\E\O\F` and `<<\$HOME` make the body literal just like `<<"EOF"` (task #263, which re-pins `parse/heredoc/tests.rs::layout_escaped_delimiter_folds` to `expand == false`). The flag is decided in `fold_impl`'s escape arm, on the pair the pass consumed, **never** by a second scan of the raw word: `raw.contains(&b'\\')` is a byte-identical private copy of the quoting rule (the drift trap this file names for tasks #323 and #247) *and* it cannot tell a `\` inside a `'…'` span from an escape pair (POSIX §2.2.3: a single-quoted span has no escape pair). A trailing lone `\` escapes nothing, so it is no pair and quotes nothing (`E\` → `quoted == false`, pinned in `scan/heredoc/op/tests.rs`). A quoted body is also verbatim w.r.t. `\<newline>`: `parse/heredoc.rs` gates `strip_continuations` on the same flag, so flipping it changes the body's **bytes** as well as its expansion — measure both.
 3. The byte-level word span must consume **both** quote kinds: `lines.rs::word_span` consumed a `'…'` span whole (added by #141) and a "…" span byte-by-byte, so `<<'a <<b'` and `<<"a <<b"` cut the word at the quoted space and counted the inner `<<b` as a **second** operator — the "byte-level and token-level rules must agree" trap in its pure form. A word rule written at the byte level is only valid for both quote kinds.
 
-Standing rule, measured today against bash 5.3.9 (this entry shipped it as an open residual, owned by the now-superseded task #266): the delimiter word **may contain** a `<<`, and the heredoc **terminator line is not command bytes** — the pre-parse passes blank the terminator line's structure bytes, so its own `<<` is heredoc data (the per-line body allocation stays aligned with the token count: `operator_count_opaque` counts 2 where the plain `operator_count` sees 3 on `cat <<'a <<b' <<EOF` + two bodies + `a <<b` + `EOF`), an unbalanced quote byte on it never reaches the tokenizer's quote check, and its `|` never splits a pipeline. Both shapes print their body at rc 0, bash parity: `cat <<'a <<b'` + body + `a <<b`, and `cat <<a\"b` + body + `a"b` (the escaped-quote delimiter of rule 1). Pins: `tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` (quote, trailing-statement, pipeline and block twins), `a_terminator_line_with_an_unbalanced_quote_is_data`, `scan/heredoc/tests.rs::terminator_spans_of_an_unbalanced_quote_delimiter_line`, `scan/heredoc/opaque/tests.rs::a_window_spanning_a_body_and_its_terminator_blinds_the_terminator_chevron`. The mechanism is the entry LESSONS: "A heredoc terminator line is structure, not command bytes"; the body-line half of the class is #311's, pinned by `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`.
+Standing rule, measured today against bash 5.3.9 (this entry shipped it as an
+open residual, owned by the now-superseded task #266): the delimiter word
+**may contain** a `<<`, and the heredoc **terminator line is not command
+bytes** — the pre-parse passes blank the terminator line's structure bytes, so
+its own `<<` is heredoc data (the per-line body allocation stays aligned with
+the token count: `operator_count_opaque` counts 2 where the plain
+`operator_count` sees 3 on `cat <<'a <<b' <<EOF` + two bodies + `a <<b` +
+`EOF`), an unbalanced quote byte on it never reaches the tokenizer's quote
+check, and its `|` never splits a pipeline. Both shapes print their body at rc
+0, bash parity: `cat <<'a <<b'` + body + `a <<b`, and `cat <<a\"b` + body +
+`a"b` (the escaped-quote delimiter of rule 1). Pins:
+`tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` (quote,
+trailing-statement, pipeline and block twins),
+`a_terminator_line_with_an_unbalanced_quote_is_data`,
+`scan/heredoc/tests.rs::terminator_spans_of_an_unbalanced_quote_delimiter_line`,
+`scan/heredoc/opaque/tests.rs::a_window_spanning_a_body_and_its_terminator_blinds_the_terminator_chevron`.
+The mechanism is the entry
+LESSONS: "A heredoc terminator line is structure, not command bytes"; the
+body-line half of the class is #311's, pinned by
+`tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`.
 
 Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines.rs::word_span`/`delimiter_span`, which step one byte at a time. Owner: task #349 (measured, no prerequisite relation to #263; the flag flip leaves every one of those rows rc 1, unchanged).
 
@@ -1186,7 +1205,27 @@ burned CPU in a backgrounded child, `wait`ed for it, and asserted the *children 
 - **A CPU-time delta measured around a forked child is the fork's CPU.** `time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`: the fork/exec of the child (PATH walk, arg substitution) is the shell's own CPU and is inside the measurement window. So a test may pin `user`/`sys` to `0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` with an in-process body); asserting `user == 0.00` around a fork is a timing coin flip.
 - **Two harness facts for repeat measurement:** a plain `nix flake check` repeat is a store hit that runs nothing, so re-run the check phase with `nix build .#checks.x86_64-linux.default --rebuild`; and `nix build .#coverage --rebuild` exits 1 on the coverage report's embedded timestamps tripping nix's output-determinism check, which is not a test failure.
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
-`connect_listen_accept_in_one_script_inet` failed once in the `nix flake check` sandbox and passed on re-run, and was filed as timing-sensitive (task #239). The script has no inter-process timing dependency at all — `listen`, `connect`, `accept` run in one process and `connect` returns once the peer is queued in the listener's backlog. The real collision is in the port the test *picks*: `10000 + pid % 20000 + offset`. (a) nextest runs test binaries as separate processes in one network namespace, so two binaries with adjacent pids `P`, `P+1` and offsets `a`, `a−1` name the **same port**; the second `bind` exits 98 (`EADDRINUSE`) and the test's `code == 0` fails. (b) The range overlaps the kernel's ephemeral source-port range (20000–60999): a loopback `connect` picks its source port there, and source == destination fails `connect` (99/22). (c) The actively closed connection leaves the port in `TIME_WAIT` ~60 s and the `bind`/`listen` builtins set no socket options, so a port reused by a run that happens to share a pid binds 98. Every signature is pid-dependent, so every one of them "passes on re-run" — read that signature as **shared-name luck** before calling anything timing-sensitive. The same luck hides the bug under a load loop: a pre-change harness of 16 concurrent copies × 12 iterations, and 48 full-suite runs, measured **0** listen failures on the host while the observed rate was 1-in-48, so "reproduction failed to fire" is compatible with the bug — size the loop to the observed rate before concluding absence.
+`connect_listen_accept_in_one_script_inet` failed once in the
+`nix flake check` sandbox and passed on re-run, and was filed as
+timing-sensitive (task #239). The script has no inter-process timing
+dependency at all — `listen`, `connect`, `accept` run in one process and
+`connect` returns once the peer is queued in the listener's backlog. The real
+collision is in the port the test *picks*: `10000 + pid % 20000 + offset`. (a)
+nextest runs test binaries as separate processes in one network namespace, so
+two binaries with adjacent pids `P`, `P+1` and offsets `a`, `a−1` name the
+**same port**; the second `bind` exits 98 (`EADDRINUSE`) and the test's
+`code == 0` fails. (b) The range overlaps the kernel's ephemeral source-port
+range (20000–60999): a loopback `connect` picks its source port there, and
+source == destination fails `connect` (99/22). (c) The actively closed
+connection leaves the port in `TIME_WAIT` ~60 s and the `bind`/`listen`
+builtins set no socket options, so a port reused by a run that happens to
+share a pid binds 98. Every signature is pid-dependent, so every one of them
+"passes on re-run" — read that signature as **shared-name luck** before
+calling anything timing-sensitive. The same luck hides the bug under a load
+loop: a pre-change harness of 16 concurrent copies × 12 iterations, and 48
+full-suite runs, measured **0** listen failures on the host while the observed
+rate was 1-in-48, so "reproduction failed to fire" is compatible with the bug
+— size the loop to the observed rate before concluding absence.
 **The rule has two halves, and they are not interchangeable.** A *shell (e2e)* test cannot let the kernel pick the port: the child binds a kernel-assigned port it cannot report back through the script. So name the port uniquely **per call site** (the same sequence counter the abstract socket names use), keep the band **below** the ephemeral range, step the pid so adjacent pids do not land on the same port, and retry only the port-busy errnos 98/99 with a fresh port on each attempt (`inet_port` and the bounded retry in `safe/fdshell/tests/sockets.rs`). A retry may re-attempt such a test but may never widen its tolerance — no sleeps, no `let _ =` on a client connect; a retry that swallows other statuses converts a real failure into a pass.
 *In-process* tests must not name a port at all: no naming scheme beats not naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free *at assignment time*, so concurrent suite runs cannot collide, and the assignee never re-binds a port that is `TIME_WAIT` for itself — and `sys::net::getsockname` reads the port back off the socket the test captured (its pins in `unsafe/sys/tests/sockets.rs`; the test shape is `listen_handler_addr_alias_sends_listening_socket`, which derived `30000 + pid % 10000` and failed once in 48 full-suite runs under `cargo mutants -j4`). Reading back works exactly when the socket is in the test's own fd table (the unit tests receive it via `recv_fd`); where it is not, the e2e band+retry scheme above stays right. Pin the read-back for exactness, not just non-zero: a live `TcpStream::connect` to the reported port kills the `from_be`→`from_le` byte-order mutant (both AF_INET listen tests and the sys pin fail on the swapped read-back; cargo-mutants does not generate byte-order mutants, so apply it by hand).
 The product-side half is not a test artifact: a real server rebinding its own `TIME_WAIT` port needs `SO_REUSEADDR` (tracked as task #331).
@@ -2637,8 +2676,9 @@ block-span scan (`comment/depth_delta`), the parse closing-keyword search
    the loop), the cond-boundary scan never pushes `Brace` because its group arm's
    `group_depth` owns braces. Seeding with the block's own closer makes a `done`
    of a `case` **pattern** list a list word, so the word-list rule lands for free
-   at *both* granularities (LESSONS: "A word-list rule lives at **two
-   granularities**"); the `esac`-shaped list word stays the list gate's own job.
+      at *both* granularities
+   (LESSONS: "A word-list rule lives at **two granularities**"); the
+   `esac`-shaped list word stays the list gate's own job.
 5. **The gate moves *accepted* forms into the unclosed-construct class**, where
    the run-level message is the bare unmatched-keyword EINVAL: `while true; do
    echo x done`, `if a; then b fi`, `if test fi`, `case … *) echo no esac` report
