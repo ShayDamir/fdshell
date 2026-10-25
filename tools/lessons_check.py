@@ -99,7 +99,9 @@ def quoted_ref(text: str, start: int) -> tuple[int, str]:
     return gap + 1, tail[gap + 1 : close]
 
 
-def citations(text: str, titles: list[str], skip: tuple[int, int]) -> tuple[list[Citation], list[Citation]]:
+def citations(
+    text: str, titles: list[str], skip: tuple[int, int]
+) -> tuple[list[Citation], list[Citation]]:
     """Split citations into (quoted, informal); `ok` says a heading matches."""
     prefixes = [norm(t) for t in titles]
     quoted: list[Citation] = []
@@ -208,7 +210,8 @@ def sections(text: str) -> list[tuple[int, str]]:
     exactly one heading line.
     """
     lines = text.splitlines(keepends=True)
-    marks = [(i, SECTION_RE.match(ln).group(1)) for i, ln in enumerate(lines) if SECTION_RE.match(ln)]
+    pairs = [(i, SECTION_RE.match(ln)) for i, ln in enumerate(lines)]
+    marks = [(i, m.group(1)) for i, m in pairs if m]
     sized = []
     for pos, (start, title) in enumerate(marks):
         end = marks[pos + 1][0] if pos + 1 < len(marks) else len(lines)
@@ -216,9 +219,10 @@ def sections(text: str) -> list[tuple[int, str]]:
     return sized
 
 
-def print_report(lessons: Path, titles: list[str], quoted: list[Citation], informal: list[Citation],
-                 dangling: list[tuple[int, str]], unresolved_paths: list[tuple[int, str]],
-                 missing_idents: list[tuple[int, str]], all_sections: list[tuple[int, str]], budget: int) -> None:
+def print_report(
+    lessons: Path, titles: list[str], quoted: list[Citation], informal: list[Citation],
+    dangling, unresolved_paths, missing_idents, all_sections, budget: int
+) -> None:
     """Print the developer-facing report; `--check` adds one stderr summary."""
     print(f"LESSONS.md health on {lessons}")
     print(f"{len(titles)} heading(s), {lessons.stat().st_size} byte(s).")

@@ -15,7 +15,7 @@ yask's task board; the fdshell project in yask holds all tracked work.
 Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_unsafe_blocks`, `map_err_ignore`, `result_unit_err`, `unused_io_amount`. Allow: `dead_code`, `clippy::todo`.
 
 ## Commands
-`cargo build`; `cargo fmt`; `cargo clippy -- -D warnings`; `python3 tools/complexity.py` (line-budget report; `--check` exits 1 if any non-test Rust file is >90 tokei LoC — enforced by the nix flake check); `nix build` (→ `result/bin/fdshell`); `nix flake check --build-all` (fmt + clippy + complexity + nextest). Version from `safe/fdshell/Cargo.toml`; `git add` nix files first. `package.nix` params: `doFmt`, `doClippy`, `doTests`, `doCoverage`, `doComplexity`.
+`cargo build`; `cargo fmt`; `cargo clippy -- -D warnings`; `python3 tools/complexity.py` (line-budget report; `--check` exits 1 if any non-test Rust file is >90 tokei LoC — enforced by the nix flake check); `python3 tools/lessons_check.py` (LESSONS.md health report: `LESSONS: "<heading prefix>"` citations and `*.rs` references; `--check` exits 1 on a dangling citation or an unresolved path — enforced by the nix flake check); `nix build` (→ `result/bin/fdshell`); `nix flake check --build-all` (fmt + clippy + complexity + lessons + nextest). Version from `safe/fdshell/Cargo.toml`; `git add` nix files first. `package.nix` params: `doFmt`, `doClippy`, `doTests`, `doCoverage`, `doComplexity`, `doLessons`.
 
 Environment quirks:
 

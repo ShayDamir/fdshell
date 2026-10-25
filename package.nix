@@ -9,6 +9,7 @@
   cargo-nextest,
   doClippy ? false,
   doComplexity ? false,
+  doLessons ? false,
   doTests ? false,
   doFmt ? false,
   doCoverage ? false,
@@ -32,6 +33,7 @@
     nativeBuildInputs =
       lib.optionals doClippy [clippy]
       ++ lib.optionals doComplexity [pkgs.python3 pkgs.tokei]
+      ++ lib.optionals doLessons [pkgs.python3]
       ++ lib.optionals doFmt [rustfmt]
       # prlimit: nextest wrapper script (.config/nextest.toml) caps test VA
       ++ lib.optionals (doTests || doCoverage) [pkgs.util-linux]
@@ -46,6 +48,10 @@
       + lib.optionalString doComplexity ''
         # Line budget gate: no non-test Rust file over 90 tokei LoC (STYLE.md 2.2)
         python3 tools/complexity.py --check
+      ''
+      + lib.optionalString doLessons ''
+        # LESSONS.md health gate: citations and `*.rs` references must resolve
+        python3 tools/lessons_check.py --check
       '';
   };
 in

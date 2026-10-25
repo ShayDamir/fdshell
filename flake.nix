@@ -43,6 +43,7 @@
         doFmt = true;
         doClippy = true;
         doComplexity = true;
+        doLessons = true;
         doTests = true;
       };
     });
