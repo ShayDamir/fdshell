@@ -674,7 +674,14 @@ before chasing any of this.
    not a space/tab, so the extra bound is never entered; `first_unquoted_newline`'s
    `while i < line.len()` — at `i == line.len()` the newline test fails and
    `advance` returns `i + 1` with the local state left unread (the function returns
-   `None` either way).
+   `None` either way). Re-confirmed on 2026-10-25 (task #318): the focused
+   `-f …/lines.rs` run (62 mutants: 53 caught, 3 missed, 6 unviable) reports exactly
+   these three as MISSED with an empty `timeout.txt`, and applying
+   each by hand leaves 5841/5841 green. Item 1's lesson sharpens the *why*: a `to`
+   bound is safe here because each body **tests its own condition** at the extra
+   index (`matches!(…)`, `!= Some(&q)`) and `word_span` clamps with `.min(to)` — not
+   because `line.get(to)` is `None`, since a window's `to` is a real byte of the
+   physical line.
 ## A delimiter word is a word: quote removal strips every quote byte, not one surrounding pair
 
 `<<a'b'c` must delimit `abc`, as bash does (task #207). The delimiter text is built from **raw line bytes**, so it is the one word the shell does not take from the tokenizer — and it had its own private quoting rules: `Operator::new` folded escape pairs with `bytes/fold.rs::fold` (which keeps the quote bytes) and then `scan/heredoc/lines.rs::delimiter_word` stripped **one surrounding pair**, so `<<'x'y'z'`, `<<ab'c'`, `<<""Q"x"`, `<<a"b c"d` kept quote bytes, their terminator lines never matched, and the delimiter's quoting never reached the body's expand/literal flag. All three rules are now decided in `Operator::new` (shared by the byte scanner and the token parser, so the two levels cannot diverge):
