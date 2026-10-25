@@ -26,11 +26,10 @@ pub(crate) fn lex_number(
         return Ok(j);
     }
     if body.get(i) == Some(&b'0') {
-        let (value, j) = read_digits(body, i + 1, 8);
-        if digit_outside_base(body, j, 8) {
-            // `08` — a digit that is not octal: "value too great for base".
-            bail!(ResolveError::ArithSyntax);
-        }
+        // Octal: the scan is seeded at the leading `0` — it contributes value 0
+        // in base 8 and advances the run by exactly one, so no `+ 1` offset is
+        // needed (an offset there is a mutant source, not a rule).
+        let (value, j) = read_digits(body, i, 8);
         toks.push(Tok::Num(value));
         return Ok(j);
     }
@@ -57,10 +56,10 @@ fn lex_radix(
     };
     let (value, j) = read_digits(body, h + 1, radix);
     ensure!(j > h + 1, ResolveError::ArithSyntax);
-    if digit_outside_base(body, j, radix) {
-        // `2#102` — a digit that is not in the base.
-        bail!(ResolveError::ArithSyntax);
-    }
+    // A digit outside the base (`2#102`) ends the run, so it lexes as its own
+    // number token and the parser's trailing-input bail rejects the pair —
+    // the same `ArithSyntax` a local "value too great for base" guard
+    // reported, from the rule that already owns the check.
     toks.push(Tok::Num(value));
     Ok(j)
 }
@@ -83,14 +82,6 @@ fn read_digits(body: &[u8], i: usize, radix: u32) -> (i64, usize) {
         j += 1;
     }
     (value, j)
-}
-
-/// `true` when the byte at `j` is a decimal digit outside `radix`
-/// (e.g. `8` right after an octal run) — the "value too great for base" guard.
-fn digit_outside_base(body: &[u8], j: usize, radix: u32) -> bool {
-    body.get(j)
-        .and_then(|&c| digit_value(c, 10))
-        .is_some_and(|d| d >= radix)
 }
 
 fn digit_value(c: u8, radix: u32) -> Option<u32> {

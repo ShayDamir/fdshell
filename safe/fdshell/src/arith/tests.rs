@@ -91,6 +91,25 @@ fn arith_pow_negative_exponent_is_zero() {
 }
 
 #[test]
+fn arith_pow_exponent_walk() {
+    // The exponentiation-by-squaring walk, both sides of every exponent bit:
+    // `e == 0` (the loop never runs), odd and even `e`, a multi-bit `e`, a
+    // negative `e`, and the wrapping rows (`wrapping_mul`, no overflow panic
+    // in any profile: `2^64` is `0` mod 2^64).
+    assert_eq!(eval(&cell(), "2**0"), 1);
+    assert_eq!(eval(&cell(), "3**0"), 1);
+    assert_eq!(eval(&cell(), "2**1"), 2);
+    assert_eq!(eval(&cell(), "5**2"), 25);
+    assert_eq!(eval(&cell(), "3**3"), 27);
+    assert_eq!(eval(&cell(), "2**10"), 1024);
+    assert_eq!(eval(&cell(), "-2**3"), -8);
+    assert_eq!(eval(&cell(), "2**-1"), 0);
+    assert_eq!(eval(&cell(), "0**0"), 1);
+    assert_eq!(eval(&cell(), "2**64"), 0);
+    assert_eq!(eval(&cell(), "3**42"), -1261475310744950487);
+}
+
+#[test]
 fn arith_unary_binds_tighter_than_pow() {
     // bash: -2**2 = (-2)**2 = 4, not -(2**2) = -4.
     assert_eq!(eval(&cell(), "-2**2"), 4);
@@ -271,18 +290,26 @@ fn arith_hex() {
 fn arith_octal() {
     assert_eq!(eval(&cell(), "010"), 8);
     assert_eq!(eval(&cell(), "0"), 0);
+    // The octal scan is seeded at the leading `0` (it contributes value 0 in
+    // base 8 and advances the run by one), so every row is the same value the
+    // offset form produced.
+    assert_eq!(eval(&cell(), "00"), 0);
+    assert_eq!(eval(&cell(), "007"), 7);
+    assert_eq!(eval(&cell(), "0777"), 511);
+    assert_eq!(eval(&cell(), "010+1"), 9);
 }
 
 #[test]
 fn arith_octal_digit_outside_base_is_error() {
-    assert!(matches!(
-        eval_err(&cell(), "08").current_context(),
-        ResolveError::ArithSyntax
-    ));
-    assert!(matches!(
-        eval_err(&cell(), "0109").current_context(),
-        ResolveError::ArithSyntax
-    ));
+    // The out-of-base digit ends the octal run and lexes as its own number
+    // token; the parser's trailing-input rule reports the syntax error.
+    for body in ["08", "09", "0109", "08+1", "0109*2", "08-0"] {
+        let err = eval_err(&cell(), body);
+        assert!(
+            matches!(err.current_context(), ResolveError::ArithSyntax),
+            "{body:?} should be a syntax error, got {err:?}"
+        );
+    }
 }
 
 #[test]
@@ -315,6 +342,9 @@ fn arith_radix_errors() {
     for body in [
         "0#1", "1#0", "1#5", "65#z", "100#10", "16#", "2#2", "5#ff", "16#g", "16#1g", "16# ff",
         "2#102", "08#1", "02#1", "00#1", "016#ff",
+        // Digits outside the base end the run and lex as their own number
+        // token, so the parser's trailing-input rule reports these.
+        "2#18", "2#19", "3#18", "3#19", "8#18", "8#19", "9#19", "2#102+1", "9#19*2",
     ] {
         let err = eval_err(&cell(), body);
         assert!(

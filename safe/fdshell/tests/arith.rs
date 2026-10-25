@@ -266,6 +266,32 @@ fn arith_malformed_expression_fails_command() {
     assert!(!output.status.success());
 }
 
+/// A digit outside its base (the octal `08`, the radix `2#102`) is rejected by
+/// the parser's trailing-input rule: the out-of-base digit ends the digit run
+/// and lexes as its own number token. The contract at this surface is the
+/// message and the exit status (the source-location line names the rejecting
+/// rule, and it is not part of the promise).
+#[test]
+fn arith_digit_outside_base_reports_the_syntax_error_and_fails_the_command() {
+    for script in [
+        "echo $((08))",
+        "echo $((09))",
+        "echo $((0109))",
+        "echo $((0109+1))",
+        "echo $((2#102))",
+        "echo $((2#18))",
+        "echo $((9#19))",
+    ] {
+        let out = run(script);
+        let stderr = str::from_utf8(&out.stderr).unwrap();
+        assert!(
+            stderr.contains("arithmetic expression has a syntax error"),
+            "{script:?} stderr={stderr}"
+        );
+        assert_eq!(out.status.code(), Some(1), "{script:?} stderr={stderr}");
+    }
+}
+
 // --- `++`/`--` and the comma operator ---
 
 /// Post-fix `x++` yields the old value and writes the new one back; the side
