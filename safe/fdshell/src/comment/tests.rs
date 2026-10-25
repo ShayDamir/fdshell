@@ -983,21 +983,30 @@ fn delta(raw: &[u8]) -> i32 {
     )
 }
 
-/// The substitution-depth arms of `depth_delta` decide which spaces split the
-/// run, and a split is what puts a word in command position, so every arm is
-/// pinned on its own: the three mutations of that pair of counters
-/// (`$(`-detection, the nested `(`, and the bare-`$` guard) are each invisible
-/// to the other two, and all three leave the run scorable through a split.
+/// The two substitution-depth guards of `depth_delta` decide which spaces split
+/// the run, and a split is what puts a word in command position, so each of
+/// their four mutants is pinned on its own: `depth_delta.rs:126`'s
+/// `$(`-detection (the `i + 1` offset and the `== Some(&b'(')`) and `:129`'s
+/// nested paren (the `b == b'('` and the `depth > 0`). A mutant of one guard is
+/// invisible to the other, and all four leave the run scorable through a split.
 ///
 /// The shared shape is a `$( … )` fragment followed by a keyword: a substitution
-/// fragment is no command word, so the word behind it is still in command
-/// position and scores (unlike the word behind a command word, which the
-/// argument-position rule already pins).
+/// fragment ends with `)`, which restarts command position, so the word behind
+/// it scores (unlike the word behind a command word, which the
+/// argument-position rule already pins). The rows and the mutants they kill,
+/// with the values measured on the clean tree: row 0 `+1` kills the nested
+/// paren's `==`→`!=`, row 1 `0` kills the nested paren's `depth > 0`→`depth < 0`
+/// and both `$(`-detection mutants, row 2 `0` kills the `$(`-detection
+/// `==`→`!=` a second way.
 #[test]
 fn substitution_depth_gates_which_spaces_split_the_run() {
     // `$( … )` opens the depth at the `$(` pair, so the spaces inside the
     // substitution are data and the `if` written behind it is the run's next
-    // word in command position: +1.
+    // word in command position: +1. The nested paren's `b == b'('` →
+    // `b != b'('` fails here: every byte inside raises the depth, the run never
+    // splits, and the `if` scores nothing. The `$(`-detection mutants do NOT
+    // show here: they degrade the run to the `$(`, `a` and `)` fragments, and
+    // the `)` restarts command position, so the row keeps its clean +1.
     assert_eq!(
         delta(b"$( a ) if"),
         1,
@@ -1005,7 +1014,11 @@ fn substitution_depth_gates_which_spaces_split_the_run() {
     );
     // A nested `(` inside the substitution raises the depth one more, so the
     // first `)` closes the *nested* level: the substitution is still open at the
-    // end of the run and the `if` is its data.
+    // end of the run and the `if` is its data. Three mutants turn this row into
+    // +1: the nested arm's `depth > 0` (the arm never fires, so the first `)`
+    // closes the substitution) and the `$(` guard's two mutants — the offset
+    // `i + 1` → `i * 1` and the `== Some(&b'(')` (no substitution opens, every
+    // space splits, and the `(`/`)` fragments restart command position).
     assert_eq!(
         delta(b"$( ( ) if"),
         0,
@@ -1013,7 +1026,9 @@ fn substitution_depth_gates_which_spaces_split_the_run() {
     );
     // A bare `$x` opens no depth (its next byte is no `(`), so it is an ordinary
     // command word: the pair behind it is scored in the argument position the
-    // word established, not in command position.
+    // word established, not in command position. Inverting the guard's `==`
+    // opens a depth on the bare `$`, so the run never splits and the glued
+    // payload is scored at the substitution's command position: +1.
     assert_eq!(
         delta(b"$( a ) $x b&&if"),
         0,
