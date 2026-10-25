@@ -285,15 +285,83 @@ In the glob matcher's dot rule, the `[` arm blocks a dot-leading name when the p
 
 ## A heredoc body is an opaque span — every multi-line byte scanner must skip it
 
-A heredoc body (`cmd <<EOF … EOF`) can contain any bytes, including `;`, `&&`, `|`, `#`, quotes, `<<`, and keyword-shaped lines (`fi`, `done`, `}`, `;;`). Every layer that scans multi-line bytes must jump from the heredoc command line past its last delimiter line, or the body corrupts statement splitting (`segment.rs`), cond-list splitting (`cond.rs::next_boundary`), block keyword depth (`comment.rs::scan_block`), and brace depth (`brace.rs::scan_brace_block`) — four call sites, all fed by the one shared helper `scan::heredoc::skip`/`skip_region`. A body's bytes never fold into the caller's quote/substitution state — a body legitimately carries unbalanced `'`, `"`, backticks and `$( … )`. The same helper feeds the tokenizer: `token::tokenize_statement` blanks the `body_regions` spans in a copy before tokenizing, so an *unbalanced* quote in the body cannot raise `UnbalancedQuote` (the body tokens are discarded anyway — `finish_command` breaks at the first `;` token, pipeline stages trim at `;` — but the tokenizer must not *fail* on them).
+A heredoc body (`cmd <<EOF … EOF`) can contain any bytes, including `;`, `&&`,
+`|`, `#`, quotes, `<<`, and keyword-shaped lines (`fi`, `done`, `}`, `;;`).
+Every layer that scans multi-line bytes must jump from the heredoc command
+line past its last delimiter line, or the body corrupts statement splitting
+(`segment.rs`), cond-list splitting (`cond.rs::next_boundary`), block keyword
+depth (`comment.rs::scan_block`), and brace depth
+(`brace.rs::scan_brace_block`) — four call sites, all fed by the one shared
+helper `scan::heredoc::skip`/`skip_region`. A body's bytes never fold into the
+caller's quote/substitution state — a body legitimately carries unbalanced
+`'`, `"`, backticks and `$( … )`. The same helper feeds the tokenizer:
+`token::tokenize_statement` blanks the `body_regions` spans in a copy before
+tokenizing, so an *unbalanced* quote in the body cannot raise
+`UnbalancedQuote` (the body tokens are discarded anyway — `finish_command`
+breaks at the first `;` token, pipeline stages trim at `;` — but the tokenizer
+must not *fail* on them).
 
-**One whole-text scan decides what every pre-parse/tokenize pass may see.** `scan::heredoc::regions.rs` (`body_regions`) is the single place that defines "opaque body", so widening it fixes every consumer at once and forbids a second definition of the term. It answers at two granularities, and both must carry the same rule: the segment layer's `scan::heredoc::line_bodies_for_line` (regions, not only the span) and the whole-text `body_regions` that the pre-parse passes and the tokenizer consume. A `;`-terminated command line claims its body from its **physical line's** end (`regions.rs::semi_terminated_regions`), one region per `<<` the line writes in global per-line operator order: a single-line keyword block's arm ends its command line at `;`, so a newline-gated scan finds no region, the body bytes tokenize as ordinary words, and in append mode the body travels *inside* the arm text that `brace_expand`, `alias_expand` and the tokenizer rewrite (`for x in a; do cat <<T; done` + `{a,b}` + `T` printed ` a b` where bash prints `{a,b}`). A rule fixed at one granularity is a divergence at the other (LESSONS: "A word-list rule lives at **two granularities**" is that lesson at the word-list layer), which is why `body_regions`' consumers (`tokenize_statement`, `brace_expand/protect`) inherit the rule rather than re-implementing it. A `;`-terminated run with no `<<`, a comment-terminated line and a missing delimiter line keep the "no region" outcome, so `missing terminating delimiter line` stays the parse layer's error.
+**One whole-text scan decides what every pre-parse/tokenize pass may see.**
+`scan::heredoc::regions.rs` (`body_regions`) is the single place that defines
+"opaque body", so widening it fixes every consumer at once and forbids a
+second definition of the term. It answers at two granularities, and both must
+carry the same rule: the segment layer's `scan::heredoc::line_bodies_for_line`
+(regions, not only the span) and the whole-text `body_regions` that the
+pre-parse passes and the tokenizer consume. A `;`-terminated command line
+claims its body from its **physical line's** end
+(`regions.rs::semi_terminated_regions`), one region per `<<` the line writes
+in global per-line operator order: a single-line keyword block's arm ends its
+command line at `;`, so a newline-gated scan finds no region, the body bytes
+tokenize as ordinary words, and in append mode the body travels *inside* the
+arm text that `brace_expand`, `alias_expand` and the tokenizer rewrite
+(`for x in a; do cat <<T; done` + `{a,b}` + `T` → the measured ` a b` against
+bash's `{a,b}`). A rule fixed at one granularity is a divergence at the other
+(LESSONS: "A word-list rule lives at **two granularities**" is that lesson at
+the word-list layer), which is why `body_regions`' consumers
+(`tokenize_statement`, `brace_expand/protect`) inherit the rule rather than
+re-implementing it. A `;`-terminated run with no `<<`, a comment-terminated
+line and a missing delimiter line keep the "no region" outcome, so
+`missing terminating delimiter line` stays the parse layer's error.
 
-The granularity split matters at the cond layer, which must know the **regions**: a run window that ends on a `;`-terminated operator line (`if cat <<X; then`) has its bodies on the following lines, which `skip`'s window rule cannot see. A statement's regions are skipped whole (they never travel inside its text), while a keyword block's own regions are walked and scanned for a top-level `&&`/`||` in a **fresh** `ScanState` (`cond/boundary/body.rs`), because a block's bodies travel inside its text and the pinned body-operator split (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`) is a region-internal split. One physical-line anchor: `scan::heredoc::line_start` — every window+skip pair keys on it, and a second copy of it is where a window drifts (three copies existed before they were collapsed).
+The granularity split matters at the cond layer, which must know the
+**regions**: a run window that ends on a `;`-terminated operator line
+(`if cat <<X; then`) has its bodies on the following lines, which `skip`'s
+window rule cannot see. A statement's regions are skipped whole (they never
+travel inside its text), while a keyword block's own regions are walked and
+scanned for a top-level `&&`/`||` in a **fresh** `ScanState`
+(`cond/boundary/body.rs`), because a block's bodies travel inside its text and
+the pinned body-operator split
+(`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`) is a
+region-internal split. One physical-line anchor: `scan::heredoc::line_start` —
+every window+skip pair keys on it, and a second copy of it is where a window
+drifts.
 
-The byte-level operator rule (`scan/heredoc::operator_delims`: word-break before `<<`, not `<<<`, not after `|`, bare form takes the next word) and the token-level rule (`parse/heredoc::operator.rs::is_operator`) must agree — if they diverge, the scanned spans and the spec allocation per command/pipeline stage silently diverge. Opacity runs **both** ways in a region: its operators split only in block context, and its keyword-shaped *and* comment lines never reach the block counter, so a `# done` / `# esac` inside a heredoc body region is inert and the block closes on its real closer (`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`, bash parity); the same comment in the block's **own** body line is inert too, because the words behind `#` are argument position, so `# done` never drops the counter (`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`).
+The byte-level operator rule (`scan/heredoc::operator_delims`: word-break
+before `<<`, not `<<<`, not after `|`, bare form takes the next word) and the
+token-level rule (`parse/heredoc::operator.rs::is_operator`) must agree — if
+they diverge, the scanned spans and the spec allocation per command/pipeline
+stage silently diverge. Opacity runs **both** ways in a region: its operators
+split only in block context, and its keyword-shaped *and* comment lines never
+reach the block counter, so a `# done` / `# esac` inside a heredoc body region
+is inert and the block closes on its real closer
+(`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`,
+bash parity); the same comment in the block's **own** body line is inert too,
+because the words behind `#` are argument position, so `# done` never drops
+the counter
+(`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`).
 
-Two measurements worth repeating. (1) A rule that makes one shape opaque makes its **neighbours** bash parity in the same commit — measure and pin them, do not report them as scope creep (at task #311 the brace delimiter `if true; then cat <<{a,b}; fi`, an unbalanced `'` in a body, and the `<<'Q'`-with-unbalanced-body rows all flipped from rc 1 to parity; the **terminator**-line rows `cat <<'a <<b'`, `cat <<a\"b` stayed rc 1, and are the terminator entry's own scope). (2) A whole-text scan feeds the parse tokenizer, so the token list of any text with a `;`-terminated `<<` loses the body's words: verify that consumers truncating at the closing keyword (`semi::closing::up_to_closing`) *drop* those tokens rather than reinterpret them, and run the full suite — the body-shaped `fi`/`done`/`esac`/`;;` rows are exactly the pins that catch a mis-truncation.
+Two measurements worth repeating. (1) A rule that makes one shape opaque makes
+its **neighbours** bash parity in the same commit — measure and pin them, do
+not report them as scope creep (at task #311 the brace delimiter
+`if true; then cat <<{a,b}; fi`, an unbalanced `'` in a body and the
+`<<'Q'`-with-unbalanced-body rows flipped to parity, while the
+**terminator**-line rows `cat <<'a <<b'`, `cat <<a\"b` stayed rc 1 — the
+terminator entry's own scope). (2) A whole-text scan feeds the parse
+tokenizer, so the token list of any text with a `;`-terminated `<<` loses the
+body's words: verify that consumers truncating at the closing keyword
+(`semi::closing::up_to_closing`) *drop* those tokens rather than reinterpret
+them, and run the full suite — the body-shaped `fi`/`done`/`esac`/`;;` rows
+are exactly the pins that catch a mis-truncation.
 
 ## The brace gobbler's `btype` overwrite: comma outranks `..` by construction
 The gobbler's top-level comma branch sets `btype = Comma` unconditionally, while the `..` branch sets `btype = Seq` only when `btype` is still `None`. So a group is a sequence only if it contains *no* top-level unquoted comma, and `valid_seqterm` is consulted only for such comma-free groups. `{1..2,3..4}` is a comma group whose elements (`1..2`, `3..4`) are plain literal words — bash's `expand_amble` never re-tries sequence expansion on an element, so the output is `1..2 3..4`, not `1 2 3 4`. A refactor that makes the two branches symmetric (first separator wins, or `..` allowed to overwrite a comma) silently changes that output; pin it with a test.
@@ -395,15 +463,77 @@ Every branch that ends a word must advance the tokenizer's `start` position in a
 The `((expr))` arithmetic command cannot be a token-level keyword: the tokenizer splits `)` into a separator token and `|` into a pipe token, so `((1+2))` reaches dispatch as the word `((1+2` and `((x|y))` as a two-stage pipeline — no token rule can recover the expression. It must be detected in `parse::inner_parse` on the *trimmed raw statement bytes* before `tokenize_statement` (a leading `((` + trailing `))` ⇒ the keyword; a leading `((` without a close ⇒ a clean parse error). The second half of the trap is the cond-list splitter (`cond::next_boundary`), which cut on `&&`/`||` *before* any parse and ignored paren depth, so `((a||b))` was sliced into `((a` and `b))`. The `ScanState` already tracked `$( … )` depth; extending `advance` to consume a top-level `((` pair (raising the same `paren_depth`) and gating `next_boundary` on `paren_depth == 0` fixes the keyword **and** two pre-existing breakages (`$((a||b))` and `$(cmd && cmd)` both failed to parse). The same depth counter is what `scan::heredoc::operator_delims` already gates on, so `<<` inside `((1<<2))` is no longer misread as a here-doc operator. A single bare `(` still opens no depth, so ordinary word/paren splitting (`echo (a) && echo b`) is unchanged.
 
 ## The arithmetic `for` is a second raw-byte keyword: the token layer cannot see `(( … ))`, and its clause split is the byte scan's
-`for ((i=0;i<3;i++))` reaches `dispatch_keyword` as the words `for`, `((i=0`, `;`, `i<3`, `;`, `i++`, `)`, `)`, `;`, `do` — the tokenizer splits every `)` into a separator token and reads a `|` as a pipe, so no token rule recovers the three clauses (the same reason the entry above gives for `((expr))`). `parse/for_block/arith/region.rs` therefore measures the region on the statement's raw bytes with `ScanState::advance`, the existing opaque-region rule: consume the `((` pair, walk until the depth returns, require the byte there to be the pair's second `)`. The clause cut reuses `scan::boundary`'s separator predicate plus the `;`-byte test, because the separator is a `;` **or** a newline and bash cuts clauses on `;` only: `for ((i=0;\ni<2;\ni++))` is the loop, `for ((i=0\ni<2\ni++))` is its `syntax error: arithmetic expression required`. Exactly three clauses, each optional (empty cond = true, empty init/step = no-op), and the shapes bash rejects (`((i=0))`, `((i=0;))`, `((i=0;i<2;i++;))`) stay parse errors — a region that runs forever is the hang this shape invites.
+`for ((i=0;i<3;i++))` reaches `dispatch_keyword` as the words `for`, `((i=0`,
+`;`, `i<3`, `;`, `i++`, `)`, `)`, `;`, `do` — the tokenizer splits every `)`
+into a separator token and reads a `|` as a pipe, so no token rule recovers
+the three clauses (the same reason the entry above gives for `((expr))`).
+`parse/for_block/arith/region.rs` therefore measures the region on the
+statement's raw bytes with `ScanState::advance`, the existing opaque-region
+rule: consume the `((` pair, walk until the depth returns, require the byte
+there to be the pair's second `)`. The clause cut reuses `scan::boundary`'s
+separator predicate plus the `;`-byte test, because the separator is a `;`
+**or** a newline and bash cuts clauses on `;` only: `for ((i=0;\ni<2;\ni++))`
+is the loop, `for ((i=0\ni<2\ni++))` is its
+`syntax error: arithmetic expression required`. Exactly three clauses, each
+optional (empty cond = true, empty init/step = no-op), and the shapes bash
+rejects (`((i=0))`, `((i=0;))`, `((i=0;i<2;i++;))`) stay parse errors — a
+region that runs forever is the hang this shape invites.
 
-The `do … done` tail **is** token-level, and the two layers join by byte offset: take the tokens starting at or past the region's end, drop at most one leading `;` token, require `keyword_word(…, b"do")`. Two offset details are load-bearing. (1) The region end is the byte after **both** closing parens, not after the first: the tokenizer emits a `;` token *for the closing-paren byte*, so ending after the first paren would leave `)) ; do` with two leading `;` tokens (and reject bash's accepted spelling), while ending after both excludes the paren token by its start offset and makes `))do` (glued), `)) do`, `)) ; do` and `))`+newline all one rule. `)) ;; do` and `)) ; ; do` keep two `;` and are rejected, as bash's rc 2 pair does. (2) The body text is built with `part_text(text, body_tokens)` on the **statement's** `ScriptText` and statement-relative token offsets (the word form's rule); re-tokenizing a tail slice would shift every heredoc region offset.
+The `do … done` tail **is** token-level, and the two layers join by byte
+offset: take the tokens starting at or past the region's end, drop at most one
+leading `;` token, require `keyword_word(…, b"do")`. Two offset details are
+load-bearing. (1) The region end is the byte after **both** closing parens,
+not after the first: the tokenizer emits a `;` token *for the closing-paren
+byte*, so ending after the first paren would leave `)) ; do` with two leading
+`;` tokens (and reject bash's accepted spelling), while ending after both
+excludes the paren token by its start offset and makes `))do` (glued),
+`)) do`, `)) ; do` and `))`+newline all one rule. `)) ;; do` and `)) ; ; do`
+keep two `;` and are rejected, as bash's rc 2 pair does. (2) The body text is
+built with `part_text(text, body_tokens)` on the **statement's** `ScriptText`
+and statement-relative token offsets (the word form's rule); re-tokenizing a
+tail slice would shift every heredoc region offset.
 
-The hook is in `parse/dispatch.rs`'s `is(b"for")` arm, not in `parse.rs`: `dispatch_keyword` is the single entry both the statement path and the pipeline-**stage** path (`parse/pipeline/stage.rs`) share, and `parse.rs` sits at 89 LoC (STYLE 2.3 band) and never sees a stage. In the statement path the detect runs *before* `heredoc::layout` counts the specs, so a `<<` shaped byte inside the region (`i<(1<<2)`) claims no heredoc; the stage path counts them first, and that predicted spec-share desync measured as **bash parity** (`echo a | for ((i=0;i<(1<<2);i++)); do cat <<B; done` prints the body once per iteration in both, pinned as `c_style_for_a_stage_with_a_shift_and_a_heredoc_is_bash_parity`) — the pair of the `(( … <<` count rule recorded above, and pinned so a future spec-cursor change shows up.
+The hook is in `parse/dispatch.rs`'s `is(b"for")` arm, not in `parse.rs`:
+`dispatch_keyword` is the single entry both the statement path and the
+pipeline-**stage** path (`parse/pipeline/stage.rs`) share, and `parse.rs` sits
+at 89 LoC (STYLE 2.3 band) and never sees a stage. In the statement path the
+detect runs *before* `heredoc::layout` counts the specs, so a `<<` shaped byte
+inside the region (`i<(1<<2)`) claims no heredoc; the stage path counts them
+first, and that predicted spec-share desync measured as **bash parity**
+(`echo a | for ((i=0;i<(1<<2);i++)); do cat <<B; done` prints the body once
+per iteration in both, pinned as
+`c_style_for_a_stage_with_a_shift_and_a_heredoc_is_bash_parity`) — the pair of
+the `(( … <<` count rule recorded above, and pinned so a future spec-cursor
+change shows up.
 
-Run side: the clauses are evaluated by `arith::eval` **in-process**, exactly as `((expr))` does, so the loop var survives the loop in the parent and dies with the fork in a stage. `continue` runs the step and re-tests the condition, `break` skips the step (`AtLevel::Stop` breaks before it), `break 2`/`return`/errexit propagate through `AtLevel::Outer` without stepping. The status is the body's last command, and `0` when the body never ran — task #164's rule, so a clause evaluation must never touch `last_status` (only `arith::eval`, no `set_last_exit`).
+Run side: the clauses are evaluated by `arith::eval` **in-process**, exactly
+as `((expr))` does, so the loop var survives the loop in the parent and dies
+with the fork in a stage. `continue` runs the step and re-tests the condition,
+`break` skips the step (`AtLevel::Stop` breaks before it),
+`break 2`/`return`/errexit propagate through `AtLevel::Outer` without
+stepping. The status is the body's last command, and `0` when the body never
+ran — task #164's rule, so a clause evaluation must never touch `last_status`
+(only `arith::eval`, no `set_last_exit`).
 
-Measured divergences (bash 5.3.9, 2026-10-22), all pinned in `safe/fdshell/tests/loops.rs`: every parse rejection is rc 1 here against bash's rc 2 (the repo-wide convention); a clause that is not valid arithmetic ends the loop with rc 1 like bash's (no body printed), and the `# c`-in-a-clause shape is **parity** — the byte scan has no comment rule inside the region, so the region stays closed and only the step's own arithmetic fails, `0` then rc 1, where bash prints `0` then its `((: i++ # c: arithmetic syntax error`. The statement-level unclosed-`for` check (`script/unclosed.rs`) fires **before** this parser for whole statements, so `for ((i=0))` and `for ((i=0;i<2;i++)) { …; }` report `'for' is missing its closing 'done'` and `ArithForMissingCloseParen` is reachable only from a fragment (a stage, a mid-run part, a unit call). Filed, measured, do not re-open blind: **#394** the `{ …; }` body (bash runs it, fdshell rc 1), **#395** the spaced step `i ++` (no side effect → the loop hangs; never test it looping), **#396** the glued `for((…))` (not a keyword word, so `do`/`done` run as commands), **#397** a `${…}` inside a clause (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the `((expr))` command and `$((…))` fail identically), and the redirect-after-the-closer family **#298**, since closed by `parse/block_tail.rs`.
+Measured divergences (bash 5.3.9), all pinned in
+`safe/fdshell/tests/loops.rs`: every parse rejection is rc 1 here against
+bash's rc 2 (the repo-wide convention); a clause that is not valid arithmetic
+ends the loop with rc 1 like bash's (no body printed), and the
+`# c`-in-a-clause shape is **parity** — the byte scan has no comment rule
+inside the region, so the region stays closed and only the step's own
+arithmetic fails, `0` then rc 1, where bash prints `0` then its
+`((: i++ # c: arithmetic syntax error`. The statement-level unclosed-`for`
+check (`script/unclosed.rs`) fires **before** this parser for whole
+statements, so `for ((i=0))` and `for ((i=0;i<2;i++)) { …; }` report
+`'for' is missing its closing 'done'` and `ArithForMissingCloseParen` is
+reachable only from a fragment (a stage, a mid-run part, a unit call). Filed,
+measured, do not re-open blind: **#394** the `{ …; }` body (bash runs it,
+fdshell rc 1), **#395** the spaced step `i ++` (no side effect → the loop
+hangs; never test it looping), **#396** the glued `for((…))` (not a keyword
+word, so `do`/`done` run as commands), **#397** a `${…}` inside a clause
+(`arith/expand.rs` splices only `$(…)`/`$((…))`, so the `((expr))` command and
+`$((…))` fail identically), and the redirect-after-the-closer family **#298**,
+since closed by `parse/block_tail.rs`.
 
 ## `next_boundary`'s `run_start` reset is load-bearing for block text: word state, and (since #234) the region anchor
 The `;`/`\n` `run_start` reset in `cond/boundary.rs::next_boundary` is load-bearing **for block text** in two ways. (1) It clears `word_active`, so a closer written at the start of a physical line is scored (`state.at_word_start()`), and it anchors the group-opener rule (`group_at_run`: a brace opens a group only at a run start). Forgetting the reset swallows a block's trailing operator into its text. (2) Task #234 replaced the `heredoc::skip` window with a region walk anchored at the **physical line start** of the run (`cond/boundary/body.rs::regions` → `line_bodies_for_line`), which is what makes the pinned `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` split survive: block text (`if … fi`) travels whole through `run_cond_list` with its condition bodies inside the span, so a `;`-terminated `<<` in a block condition (`if cat <<X; then`) has its bodies on the block text's following lines. Before #234 that was only visible through the run window — with it, the region scan always sees the `<<` of the physical line and walks the body region: its top-level `&&` splits the part (rc 1 `missing 'fi'`, bash rc 2), while every other region byte stays opaque. Top-level statement segments are not affected by either mechanism, because their part text is a subslice of the command bytes only — the body regions travel separately as `run_cond_list`'s `bodies` (Task #79) — so `next_boundary` never sees a `;`-terminated `<<` run with a body at top level; the killing case is the block wrapper. The split pins are `block_heredoc_cond_run_and_and_in_body_splits_part` and `block_body_heredoc_delimiter_line_operator_is_region_data` in `safe/fdshell/tests/heredoc.rs`; the top-level window semantics are covered by `heredoc_after_semicolon_word_drives_boundary_skip` and `heredoc_attached_operator_before_semicolon_is_not_a_delimiter`, which the region anchor keeps green unchanged.
@@ -467,7 +597,79 @@ Consequences measured against bash 5.3.9, all pinned: an arm's rebuilt text is s
 
 ## Task #273 completes the arm-granularity rule for `for`/`case`, and the closer search must know the block's word list
 
-Task #238 left the two word-list blocks out, and they are not a mechanical copy. (1) The truncation cannot be measured in bytes: the builders receive the **reconstructed** text (`cond/part.rs::reconstruct` = the part's bytes + `\n` + its bodies), so a body's tokens sit in a text that has no marker for the split point — "the last token ending inside the block's own text" is undefined there, and a `for` whose bodies are appended has `done` *before* them, not at its end. The only measure that identifies the closer in that text is the depth walk of `closing_keyword_index`, so `semi::up_to_closing` is now the shared truncation of all four builders (`if`/`while` keep it plain, `for` and `case` pass a list rule). (2) The walk must read a **word list the way bash reads it**: in `Place::Pattern` a `case` pattern and a `for` word are word data, so `case x in done) cat <<T;; esac` + body + `T` and `case x in fi) …` are bash parity (rc 0) while plain `scores` closed the block at the pattern word; `List::Case` scores only `esac`, and only when no pattern `)` follows it (`case x in esac` is a complete block, `case x in esac) …` is a clause), `List::Words` scores nothing (a `for` list is closed by `do`, a non-closer). `case`'s own leniency stays: a last clause body that is not `;;`-terminated puts its `esac` in argument position, where no closer scores (bash rejects it, `parse::tests::case_last_clause_no_semi_semi` pins the accept), so `case_block::up_to_esac` falls back to the whole list and requires its last token to be `esac` — the master invariant. (3) A closer-shaped word is word data for **every** consumer of the clause region: `case_block::literal_indices` (bash applies no brace expansion to a `case` word list, `brace_expand/protect.rs`) now walks with `List::Case` too, so `case '{a,b}' in {a,b}) cat <<T;; esac` matches and prints `hit` (the pattern of a body-carrying clause used to be brace-expanded out of the match). Consequences measured against bash 5.3.9, all pinned in `tests/heredoc.rs`/`tests/cond_blocks.rs`: multi-arm `case` bodies run in arm order, a `for` body's two here-docs run per iteration (`for x in a b` prints the second body twice, like bash), the body's `&&`/`||` is the block's own cond list for `for`/`case` exactly as for `if`/`while` (the #234 rule, #273's parity rows), blocks nested in a body close in order, body keywords (`done`/`esac`/`;;`) stay body text, and quoted/`-` delimiters and pipeline/`&&`/`||` tails behave. Five divergences were measured-and-pinned, not "fixed"; task **#311** has since fixed the first and the last (its rule sits at the other granularity — the entry above), the **terminator-line** half is closed, and the other two stay: a `<<'Q'` delimiter whose body line carries an unbalanced `'` reported `unmatched quote` (rc 1, bash prints the body) — the **body-line** half of #266's opacity class, flipped to bash parity by #311 and re-pinned as `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`; the **terminator-line** half is closed at bash parity too (task **#266**, closer commit `3249ddf`: `cat <<'a <<b'` + body + `a <<b` and `cat <<a\"b` + body + `a"b` each print the body, rc 0 = bash, measured 2026-10-25), pinned by `tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` and `tests/heredoc.rs::a_terminator_line_with_an_unbalanced_quote_is_data`; the mechanism and the whole pin family are the entry LESSONS: "A delimiter word is a word: quote removal strips every quote byte"; `case x in x) cat <<T; done;; esac` reports `case: missing 'esac'` (rc 1) where bash reports a syntax error (rc 2), the rc-1-vs-2 family; and a closer-shaped word that must **match** (`for x in done; do echo "$x"; done`, `case done in done) echo p;; esac`) still ends the block *span* at the word-list word, rc 1, where bash runs both — the byte-level scans (`segment/`, `scan/`) do not know the list rule yet, task **#310** owns it; and a **brace word written in an arm body** is brace-expanded (` a b` where bash prints `{a,b}`), because in append mode the arm's text is rebuilt from the regions its own operators claim, so the body bytes travel *inside* that text and the pre-parse `brace_expand::expand` pass rewrites them: `for x in a; do cat <<T; done` + `{a,b}` + `T`, the `case` clause twin and the `if`/`elif`/`else`/`while` arm sites — the four safe-arm sites already printed ` a b` on `master` (the shape #238 built), `for`/`case` join them on #273 because `master` rejected their shape with a parse error. Task **#311** fixed it (body bytes now stay out of the pre-parse text passes at both granularities) and re-pinned the rows as bash parity: `tests/heredoc.rs::single_line_block_body_heredoc_of_a_brace_word_body_is_verbatim`. The top-level statement path keeps the regions out of the line it brace-rewrites, which is why `tests/brace_expand.rs::heredoc_body_is_verbatim` prints `{a,b}`, and the body's `$`-expansion neighbours (`$X`, `$( … )`, a literal `a,b`) stay in bash parity at the very same arm sites: bash's body expansion is `$`-expansion only, never brace expansion. Rule: a closer search is only correct together with the list kind of the block it walks, and every scan that ends a block's text — token-level **and** byte-level — has to carry the same rule; a rule fixed at one granularity, as #238 learned of its append/extension predicate, is a divergence at the other.
+The two word-list blocks task #238 left out are not a mechanical copy. (1) The
+truncation cannot be measured in bytes: the builders receive the
+**reconstructed** text (`cond/part.rs::reconstruct` = the part's bytes + `\n`
++ its bodies), so a body's tokens sit in a text that has no marker for the
+split point — "the last token ending inside the block's own text" is undefined
+there, and a `for` whose bodies are appended has `done` *before* them, not at
+its end. The only measure that identifies the closer in that text is the depth
+walk of `closing_keyword_index`, so `semi::up_to_closing` is now the shared
+truncation of all four builders (`if`/`while` keep it plain, `for` and `case`
+pass a list rule). (2) The walk must read a **word list the way bash reads
+it**: in `Place::Pattern` a `case` pattern and a `for` word are word data, so
+`case x in done) cat <<T;; esac` + body + `T` and `case x in fi) …` are bash
+parity (rc 0) while plain `scores` closed the block at the pattern word;
+`List::Case` scores only `esac`, and only when no pattern `)` follows it
+(`case x in esac` is a complete block, `case x in esac) …` is a clause),
+`List::Words` scores nothing (a `for` list is closed by `do`, a non-closer).
+`case`'s own leniency stays: a last clause body that is not `;;`-terminated
+puts its `esac` in argument position, where no closer scores (bash rejects it,
+`parse::tests::case_last_clause_no_semi_semi` pins the accept), so
+`case_block::up_to_esac` falls back to the whole list and requires its last
+token to be `esac` — the master invariant. (3) A closer-shaped word is word
+data for **every** consumer of the clause region:
+`case_block::literal_indices` (bash applies no brace expansion to a `case`
+word list, `brace_expand/protect.rs`) now walks with `List::Case` too, so
+`case '{a,b}' in {a,b}) cat <<T;; esac` matches and prints `hit` (the pattern
+of a body-carrying clause used to be brace-expanded out of the match).
+Consequences measured against bash 5.3.9, all pinned in
+`tests/heredoc.rs`/`tests/cond_blocks.rs`: multi-arm `case` bodies run in arm
+order, a `for` body's two here-docs run per iteration (`for x in a b` prints
+the second body twice, like bash), the body's `&&`/`||` is the block's own
+cond list for `for`/`case` exactly as for `if`/`while` (the #234 rule, #273's
+parity rows), blocks nested in a body close in order, body keywords
+(`done`/`esac`/`;;`) stay body text, and quoted/`-` delimiters and
+pipeline/`&&`/`||` tails behave. Five divergences were measured-and-pinned,
+not "fixed"; task **#311** has since fixed the first and the last (its rule
+sits at the other granularity — the entry above), the **terminator-line** half
+is closed, and the other two stay: a `<<'Q'` delimiter whose body line carries
+an unbalanced `'` reported `unmatched quote` (rc 1, bash prints the body) —
+the **body-line** half of #266's opacity class, flipped to bash parity by #311
+and re-pinned as
+`tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`;
+the **terminator-line** half is closed at bash parity too (task **#266**,
+closer commit `3249ddf`: `cat <<'a <<b'` + body + `a <<b` and `cat <<a\"b` +
+body + `a"b` each print the body, rc 0 = bash), pinned by
+`tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` and
+`tests/heredoc.rs::a_terminator_line_with_an_unbalanced_quote_is_data`; the
+mechanism and the whole pin family are the entry
+LESSONS: "A delimiter word is a word: quote removal strips every quote byte";
+`case x in x) cat <<T; done;; esac` reports `case: missing 'esac'` (rc 1)
+where bash reports a syntax error (rc 2), the rc-1-vs-2 family; and a
+closer-shaped word that must **match** (`for x in done; do echo "$x"; done`,
+`case done in done) echo p;; esac`) still ends the block *span* at the
+word-list word, rc 1, where bash runs both — the byte-level scans (`segment/`,
+`scan/`) do not know the list rule yet, task **#310** owns it; and a **brace
+word written in an arm body** is brace-expanded (` a b` where bash prints
+`{a,b}`), because in append mode the arm's text is rebuilt from the regions
+its own operators claim, so the body bytes travel *inside* that text and the
+pre-parse `brace_expand::expand` pass rewrites them:
+`for x in a; do cat <<T; done` + `{a,b}` + `T`, the `case` clause twin and the
+`if`/`elif`/`else`/`while` arm sites — the four safe-arm sites printed ` a b`
+(the shape #238 built) and `for`/`case` joined them on #273. Task **#311**
+fixed the family (body bytes stay out of the pre-parse text passes at both
+granularities) and re-pinned the rows at bash parity:
+`tests/heredoc.rs::single_line_block_body_heredoc_of_a_brace_word_body_is_verbatim`.
+The top-level statement path keeps the regions out of the line it
+brace-rewrites, which is why `tests/brace_expand.rs::heredoc_body_is_verbatim`
+prints `{a,b}`, and the body's `$`-expansion neighbours (`$X`, `$( … )`, a
+literal `a,b`) stay in bash parity at the very same arm sites: bash's body
+expansion is `$`-expansion only, never brace expansion. Rule: a closer search
+is only correct together with the list kind of the block it walks, and every
+scan that ends a block's text — token-level **and** byte-level — has to carry
+the same rule; a rule fixed at one granularity, as #238 learned of its
+append/extension predicate, is a divergence at the other.
 
 ## Capping the shared line buffer caps the whole multi-line accumulation — and a capped reader must read in chunks
 `repl/line.rs::read_line` appends stdin to the REPL's line buffer. Capping it is a single pre-append check (`buf.len() + take.len() > limit` → bail, same off-by-one convention as `cli::load_script`: exactly `limit` bytes allowed, the next byte fails). Because `repl/run.rs` appends the continuation lines of one logical input to the **same** `buf` in its `while !is_complete` loop, capping inside the read helper bounds the *cumulative* multi-line construct too: an attacker cannot accumulate N×cap bytes through an unterminated `if`/heredoc; the worst case is `cap + 1` (the one `buf.push(b'\n')` in `read_continuation` past the cap before the next `read_line` bails). Same bomb class as the unbounded script loaders (#29) and the unbounded command-substitution capture: every byte-accumulating path gets a `limit` parameter and a pre-append check, with the constant passed in by the caller (no hardcoded constants in the helper). Read stdin in **4 KiB chunks with a persistent position** (`LineReader`, owned by `run`, shared by all `read_line` calls): a chunk can end mid-line, and bytes after a `\n` belong to the *next* line — a pipe has no pushback, so byte-at-a-time was the only stateless option, and it costs one syscall per byte (~5 s for a 64 MiB line on a fast host; past nextest's 10 s slow-timeout in the nix sandbox, where the suite must stay green). Testing a capped reader end-to-end: write exactly `cap + 1` bytes in 4 KiB chunks — no 64 MiB allocation in the test process (nextest caps each test binary's VA at 128 MB), and since the child consumes every byte before bailing, the final write can never hit EPIPE after the child exits. The exact-boundary test (a line of exactly `cap` must be accepted) cannot use a command line: **the child inherits the test's 128 MB VA rlimit**, so a 64 MiB line can never finish in the child (line buffer + script copy alone fill the cap — it SIGABRTs in `to_vec`), and a "command not found" report for a 64 MiB name would be 134 MB of stderr. Use a `cap`-byte **comment line** (a no-op once accepted) and assert only the *absence* of the size-limit error — under a `>=`/`==` mutant the child bails on the cap-th byte with the error and the test fails.
@@ -501,11 +703,66 @@ Bash's errexit rule keys on *which command failed* (only the command following t
 `bash -c 'set -u; echo $x'` exits **127** on bash 5.3 (the `-c` path reports the never-executed command as not-found), while the same two lines in a script file exit **1**. fdshell's `-c` mode reports the child's substitution failure and exits **1** (the script-mode status) — the plan pinned 1 after probing; do not "fix" the integration tests toward 127 to match the `-c` quirk.
 
 ## A bare redirect operator token takes the next token as its operand; "bare" is a suffix test, not an emptiness test
-`cmd > file`, `cmd < file`, `cmd N> file`, `cmd N< file`, `cmd N>> file`, `cmd N<> file` parse as redirections: a token whose suffix from the first `>`/`<` byte is exactly `>`, `>>`, `<`, or `<>` (with an optional all-digit fd prefix) consumes the next token as its path operand (`parse/redirect/bare.rs`), mirroring the bare `<<` delimiter (`scan::heredoc::op::operator_at`, `extra = 1`) and the bare `<<<` here-string (`parse::here_string.rs`, `extra = 1`). The operand guard (no empty/`;`/`|`/`<`/`>`/`&`/`%`-leading word) is the same rule as the bare `<<` delimiter (`invalid_delimiter`) and the bare `<<<` guard — keep the three in lockstep. The `after_op.is_empty()` test does **not** identify the bare form: `>>` and `<>` have a one-byte (`>`) `after_op`, which the attached path's `redirect_op` rejects as `InvalidRedirect` — that is exactly why `cmd >> file` used to be a parse error while `cmd >file` worked. Test bare-ness on the operator *suffix*; the emptiness branch in the attached path is dead logic once the bare branch exists (deleted — a mutant source). A non-numeric prefix (`a> file`) is two arguments, never a redirect.
+`cmd > file`, `cmd < file`, `cmd N> file`, `cmd N< file`, `cmd N>> file`,
+`cmd N<> file` parse as redirections: a token whose suffix from the first
+`>`/`<` byte is exactly `>`, `>>`, `<`, or `<>` (with an optional all-digit fd
+prefix) consumes the next token as its path operand
+(`parse/redirect/bare.rs`), mirroring the bare `<<` delimiter
+(`scan::heredoc::op::operator_at`, `extra = 1`) and the bare `<<<` here-string
+(`parse::here_string.rs`, `extra = 1`). The operand guard (no
+empty/`;`/`|`/`<`/`>`/`&`/`%`-leading word) is the same rule as the bare `<<`
+delimiter (`invalid_delimiter`) and the bare `<<<` guard — keep the three in
+lockstep. The `after_op.is_empty()` test does **not** identify the bare form:
+`>>` and `<>` have a one-byte (`>`) `after_op`, which the attached path's
+`redirect_op` rejects as `InvalidRedirect` — that is exactly why `cmd >> file`
+used to be a parse error while `cmd >file` worked. Test bare-ness on the
+operator *suffix*; the emptiness branch in the attached path is dead logic
+once the bare branch exists (deleted — a mutant source). A non-numeric prefix
+(`a> file`) is two arguments, never a redirect.
 
-Task #145 brought the `&>` / `&>>` family into the same rule. Their bare form *is* an emptiness test (`parse/bg_redirect.rs` strips the `&>` prefix first, so `&>` → empty suffix → bare, `&>>` → empty suffix after the `>` → bare append), and `parse/bg_redirect/bare.rs` emits the fd 1 + fd 2 pair with the operand's own quote mask. Two things made the `>` family's version of the bug possible and are worth remembering: a bare-operand site must **consume** its operand (`skip = extra` in `finish_command`), and an operand left in place re-enters the token loop as an argument — that is exactly `cmd &> file` opening `""` and passing `file` to the command. The operand guard is now literally one function, `scan::heredoc::op::invalid_delimiter`, imported by `parse/heredoc/operator.rs`, `parse/redirect/bare.rs` and `parse/bg_redirect/bare.rs`: "keep the guards in lockstep" is structural, not a copy — a byte-identical private duplicate is what drifts (and is a mutant source). One divergence inside the family is deliberate: the bare `>` maps a `/dev/fd/N` operand to a `RedirectDef::dup`, while `&>` keeps it a plain path source, because the attached `&>/dev/fd/N` form has always opened the magic path (the kernel's dup is the same effect) and in-family agreement beats cross-family agreement.
+The `&>` / `&>>` family follows the same rule (task #145). Their bare form
+*is* an emptiness test (`parse/bg_redirect.rs` strips the `&>` prefix first,
+so `&>` → empty suffix → bare, `&>>` → empty suffix after the `>` → bare
+append), and `parse/bg_redirect/bare.rs` emits the fd 1 + fd 2 pair with the
+operand's own quote mask. Two requirements: a bare-operand site must
+**consume** its operand (`skip = extra` in `finish_command`), and an operand
+left in place re-enters the token loop as an argument — that is exactly
+`cmd &> file` opening `""` and passing `file` to the command. The operand
+guard is literally one function, `scan::heredoc::op::invalid_delimiter`,
+imported by `parse/heredoc/operator.rs`, `parse/redirect/bare.rs` and
+`parse/bg_redirect/bare.rs`: "keep the guards in lockstep" is structural, not
+a copy — a byte-identical private duplicate is what drifts (and is a mutant
+source). One divergence inside the family is deliberate: the bare `>` maps a
+`/dev/fd/N` operand to a `RedirectDef::dup`, while `&>` keeps it a plain path
+source, because the attached `&>/dev/fd/N` form has always opened the magic
+path (the kernel's dup is the same effect) and in-family agreement beats
+cross-family agreement.
 
-Task #323 proved the drift real: `parse/here_string.rs` carried exactly such a private duplicate (`is_bare_operand`) and the guard's operator-byte arm read the post-quote-removal **word text**, so `cat > "&f"` — a plain word in bash — was a syntax error in all four bare families. The arm is now mask-gated: `op::operator_word(word, mask)` fires only when the leading `<`/`>`/`&`/`%` byte is unquoted (`mask.first().copied().unwrap_or(false)`, the house idiom — a missing bit pads to unquoted, degrading to the text rule); `here_string` calls the shared predicate and its duplicate is deleted, making the four-site lockstep one function again. The byte-level twin is the gate in `lines::delimiter_span` on the **raw span's** first byte: `"…"` starts a quoted word, so the two levels agree on `cat << "<x"` (1 + accepted) and on the unquoted `cat << <x` (the byte scan's `None` arm, the parse's syntax error) — the "byte-level and token-level counts must agree" framing, pinned by `scan/heredoc/ops/tests.rs::bare_quoted_operator_delimiter_counts_one_at_both_levels` and the rows in `parse/heredoc/tests.rs`. Two rules are NOT substitutes for the mask gate: `parse::word_quoted` (span longer than text) accepts `&"f"`, where bash is a syntax error (measured rc 2); and the token's zero-byte `spans` list is deliberately not consulted — a `""` pair at index 0 does not quote the byte after it (`> ""&f` stays the guard's rejection, bash rc 127 via a different route). A `\X`-escaped operand needs no arm: the word text starts with `\`, so no operator arm fires. The `%`-arm divergence (`cat > %v` / `<<< %v` fdshell rc 1 where bash creates/prints the literal `%v`) is measured, pinned as-is, and owned by the `%`-namespace design, not by quoting: dropping the arm would make the spaced form silently create a file named `%v` — a user decision, flagged for the Judge (task #323's plan §9-A; the attached-form twins are #329, the `<< ""` empty arm is #330).
+The drift is real: `parse/here_string.rs` carried exactly such a private
+duplicate (`is_bare_operand`) whose operator-byte arm read the
+post-quote-removal **word text**, so `cat > "&f"` — a plain word in bash — was
+a syntax error in all four bare families (task #323). The arm is mask-gated:
+`op::operator_word(word, mask)` fires only when the leading `<`/`>`/`&`/`%`
+byte is unquoted (`mask.first().copied().unwrap_or(false)`, the house idiom —
+a missing bit pads to unquoted, degrading to the text rule); `here_string`
+calls the shared predicate and its duplicate is deleted, making the four-site
+lockstep one function again. The byte-level twin is the gate in
+`lines::delimiter_span` on the **raw span's** first byte: `"…"` starts a
+quoted word, so the two levels agree on `cat << "<x"` (1 + accepted) and on
+the unquoted `cat << <x` (the byte scan's `None` arm, the parse's syntax
+error) — the "byte-level and token-level counts must agree" framing, pinned by
+`scan/heredoc/ops/tests.rs::bare_quoted_operator_delimiter_counts_one_at_both_levels`
+and the rows in `parse/heredoc/tests.rs`. Two rules are NOT substitutes for
+the mask gate: `parse::word_quoted` (span longer than text) accepts `&"f"`,
+where bash is a syntax error (measured rc 2); and the token's zero-byte
+`spans` list is deliberately not consulted — a `""` pair at index 0 does not
+quote the byte after it (`> ""&f` stays the guard's rejection, bash rc 127 via
+a different route). A `\X`-escaped operand needs no arm: the word text starts
+with `\`, so no operator arm fires. The `%`-arm divergence (`cat > %v` /
+`<<< %v` fdshell rc 1 where bash creates/prints the literal `%v`) is measured,
+pinned as-is, and owned by the `%`-namespace design, not by quoting: dropping
+the arm would make the spaced form silently create a file named `%v` — a user
+decision (the attached-form twins are #329, the `<< ""` empty arm is #330).
 
 ## A keyword that doubles as a builtin needs the *same* disambiguation at every byte-scanning layer, and the rule must key on what the scanner can actually see
 `wait` is both the event-case block keyword and (POSIX #6.7) the `wait [pid…]` builtin. The disambiguation must agree at all three layers that see `wait` bytes, or the REPL (which reuses the byte scanners for completeness) diverges from the parser: `segment.rs` (block vs statement segment), `comment/depth_delta.rs` (block depth while hunting for `done` — it only sees its own run, so `line`+`base` are threaded in to look across run ends), and the token parser (`parse/wait_block::is_block`, which gets the `text` to detect the newline and honors the quoted flag). The rule: a `wait` opens a block iff the next word — skipping whitespace (incl. newlines) and whole-line comments — is **on a subsequent line**, or is a **same-line** pattern keyword (`readable`/`writable`/`finished`/`after`); a same-line pid/`$!`/name, a `;` (statement separator), a quoted word, or EOF is the builtin. Two tempting rules fail: a *pattern-keyword-only* rule misclassifies `wait\ndone` / `wait\n sleeping` (existing block tests) as the builtin and `wait $!` as a block (the byte scanner sees the literal `$!`, not the expanded pid — a pid test fails for the same reason); a *not-a-pid* rule misclassifies `wait; echo hi` as a block (the `;` is a statement separator, not a block arm). The newline is the reliable signal that the arms are coming.
@@ -547,13 +804,87 @@ The `+`→`-` neighbours (a bound-*minus*-one limit stops the loop at the max va
 `read/line.rs` had `end_eof()` (mark end of input) whose only body was `self.esc = false` — resetting the pending-backslash flag after the last byte. `esc` is private and read only inside `feed()`, and no path feeds a byte after `end_eof()` (`read_line_from_fd` breaks on the empty read; `read_line` then only reads `buf` and `end()`), so the reset is unobservable by any test: the `end_eof()` → `()` mutant is equivalent. The fix removes the equivalence source — `end_eof()` and its call site are gone (the empty-read arm is a bare `break`); EOF is already expressed as `!done` → `LineEnd::Eof` via `Line::end()`. A trailing `\` at EOF is dropped by construction (the backslash is consumed into `esc` and no byte follows to store it), not by the reset. Rule: a state reset that runs after the last observable input, on a field no later code reads, is dead weight — delete it rather than test around it (task #112 re-work, review finding F1).
 
 ## POSIX #4.1 escapes: the pair must be skipped by every byte-level scanner, and folded at every word surface
-Task #109 implements "outside quotes `\X` removes the backslash and `X` loses its meaning". The pair stays in the token text (mask `false`) so byte offsets and the token-text syntax gates (`if`, `)`, `<<`, `#`, keyword prefixes) keep working, and the backslash is dropped where the word's text is turned into what a lookup sees: at substitution, and at every word surface that never goes through substitution. Consequences recorded as rules:
+POSIX #4.1's
+"outside quotes `\X` removes the backslash and `X` loses its meaning" (task
+#109). The pair stays in the token text (mask `false`) so byte offsets and the
+token-text syntax gates (`if`, `)`, `<<`, `#`, keyword prefixes) keep working,
+and the backslash is dropped where the word's text is turned into what a
+lookup sees: at substitution, and at every word surface that never goes
+through substitution. Consequences recorded as rules:
 
-1. Every byte-level scanner that classifies bytes must consume the pair together, or it diverges from the tokenizer: `scan/advance.rs` (a `\<newline>` would end the line, an escaped `"` would toggle the quote state, an escaped `;` would break the word), `paren_scan.rs` (an escaped `)` closes `$( … )`), `brace_expand/gobbler.rs` (an escaped `{` opens a group). The rule is unconditional (inside double quotes too) — the quoting rule is applied by the tokenizer/substitution, not by the scanner.
-2. A pair jump must clamp to the slice end: `advance` returns `(i + 2).min(line.len())`. The unclamped jump lands past EOF, so the caller's end-of-line boundary never fires and the final word is dropped (`printf "[%s]" a\` printed nothing).
-3. Fold the escape pairs **in the same pass as** the quote removal, and never after it. The heredoc delimiter rule lives in `scan/heredoc/op.rs::Operator::new` → `bytes/fold.rs::fold_quotes` (one pass over the raw word: quote tracking folds every unquoted `\X` pair and drops every `"`/`'` **marker** byte), so the byte scanner and the token parser share one decision. The first attempt folded inside `matches`, which broke the quoted form: `<<"E\OF"` must delimit the literal `E\OF`, and folding after the quotes are gone cannot tell that the pair was quoted. Task #207 generalised the same reason to the quotes: stripping first cannot tell an escaped quote from a marker (`<<a\"b` delimits the literal `a"b`, and the folded pair **quotes** the word, so the body is literal — task #263), so the fold and the strip share one state machine. `Operator` lost its lifetime (`delim: Vec<u8>`, `Clone`) for the same reason.
-4. `printf %s\n` is not a newline emitter: POSIX #4.1 folds `\n` to `n`, so bash prints `n` and fdshell now agrees. Integration tests that used `printf %s\n` to print one line per argument were pinning the old fdshell deviation; they now use the quoted `printf "%s\n"` form, which is what bash needs for the same result.
-5. **The escape pair must be folded at every word surface, not only at substitution.** bash folds the pair in *every* word at tokenization, so any surface that consumes raw word text and never substitutes it sees the folded text: `e\cho hi` runs `echo`, `echo hi > a\*b` writes `a*b`, `for x in a\ b` binds one word, `exec e\cho hi` replaces the shell with `echo`, `timeout 1 e\cho hi` runs `echo`, `hash a\*` finds the `PATH` file `a*`. The tool is `bytes::fold::fold_mask(bytes, mask)` / `fold_word(word, mask)` — the raw `fold` cannot be used on word text, because the tokenizer strips the `"` bytes from it, so the quote state must come from the word's mask. Surfaces folded (each folds the word *and* its aligned mask): `command_word::expand` (word 0 — task #268 moved the command word from a fold surface to a **substitution** surface, so its pairs fold inside `substitute::substitute_args`; the one expanded word feeds the command-name glob, `exec::resolve_path`, builtin/`command`/`builtin`-keyword dispatch, `intercept` dispatch, the function lookup, `set --`, `prehash`, xtrace and `argv[0]`; see the section below), `redirect/open/target.rs::literal` (the redirect target — task #278 moved it from a fold surface to a **substitution** surface as well, so a target with an expansion trigger folds its pairs inside `substitute::word_fields` and `fold_word` survives as the no-trigger fast path; `> a\*b` and `> a\*b$(true)` must yield the same bytes), `replacer/external.rs` + `replacer.rs` (the `exec`/`become` command word and the `builtin` keyword's name, whose words 0 `command_word::fields` splits and globs), and `intercept/hash_cmd.rs` (`hash`'s name words, its pin path and the `hash -r`/`-d` name lists — task #279 moved them from a fold surface to a **substitution** surface as well, so the pairs fold inside `substitute::substitute_args` and `fold_word` is gone from that module; the table key is the *expanded* name, the text word 0's expansion yields for `a\*`, so `prehash` and `hash a\*` still share the key `a*` — see the section "A parent-side intercept's words are a substitution surface"). Surfaces deliberately NOT folded: the arith lexers (`$((1\+2))` stays a syntax error, as in bash) and a backtick command-substitution body (its bytes are command text, never a word surface — task #216 now expands the body through the argument pipeline, but the body itself reaches the child verbatim) — fold only the surfaces that consume word text, and never before a check that keys on the raw bytes. The for-list itself stopped being a fold surface in task #131: it delegates its words to `substitute/arg.rs`, which folds the pair in its own `\\` arms, so `for x in a\ b` binds one word through the substitution pipeline (`tests/backslash.rs::for_list_words_fold_escape_pairs`). A folded word must carry mask `true` on the escaped byte, otherwise the folded `*` becomes a pattern again. The fold's `ShortCStrError` is a NUL-free invariant, so it chains onto the domain's `Never` variant (never `ExecFailed`). Pin every surface with a bash-parity test (see `tests/backslash.rs`); the accepted divergences of the same design are the alias name lookup, the `builtin`/`command`/`if` keyword recognition, and the identifier grammar — all three run on the raw token text, so an escaped keyword word is a command name (`b\uiltin echo hi` looks up `builtin`, rc 1, where bash prints `hi`), pinned by `alias_name_keeps_the_escape_pair` and `keyword_recognition_runs_on_the_raw_token`.
+1. Every byte-level scanner that classifies bytes must consume the pair
+together, or it diverges from the tokenizer: `scan/advance.rs` (a `\<newline>`
+would end the line, an escaped `"` would toggle the quote state, an escaped
+`;` would break the word), `paren_scan.rs` (an escaped `)` closes `$( … )`),
+`brace_expand/gobbler.rs` (an escaped `{` opens a group). The rule is
+unconditional (inside double quotes too) — the quoting rule is applied by the
+tokenizer/substitution, not by the scanner.
+2. A pair jump must clamp to the slice end: `advance` returns
+`(i + 2).min(line.len())`. The unclamped jump lands past EOF, so the caller's
+end-of-line boundary never fires and the final word is dropped
+(`printf "[%s]" a\` printed nothing).
+3. Fold the escape pairs **in the same pass as** the quote removal, and never
+after it. The heredoc delimiter rule lives in
+`scan/heredoc/op.rs::Operator::new` → `bytes/fold.rs::fold_quotes` (one pass
+over the raw word: quote tracking folds every unquoted `\X` pair and drops
+every `"`/`'` **marker** byte), so the byte scanner and the token parser share
+one decision. Folding inside `matches` breaks the quoted form: `<<"E\OF"` must
+delimit the literal `E\OF`, and folding after the quotes are gone cannot tell
+that the pair was quoted. The same reason covers the quotes (tasks #207,
+#263): stripping first cannot tell an escaped quote from a marker (`<<a\"b`
+delimits the literal `a"b`, and the folded pair **quotes** the word, so the
+body is literal), so the fold and the strip share one state machine.
+`Operator` lost its lifetime (`delim: Vec<u8>`, `Clone`) for the same reason.
+4. `printf %s\n` is not a newline emitter: POSIX #4.1 folds `\n` to `n`, so
+bash prints `n` and fdshell agrees. A test that prints one line per argument
+must use the quoted `printf "%s\n"` form; `printf %s\n` pins the old fdshell
+deviation.
+5. **The escape pair must be folded at every word surface, not only at
+substitution.** bash folds the pair in *every* word at tokenization, so any
+surface that consumes raw word text and never substitutes it sees the folded
+text: `e\cho hi` runs `echo`, `echo hi > a\*b` writes `a*b`, `for x in a\ b`
+binds one word, `exec e\cho hi` replaces the shell with `echo`,
+`timeout 1 e\cho hi` runs `echo`, `hash a\*` finds the `PATH` file `a*`. The
+tool is `bytes::fold::fold_mask(bytes, mask)` / `fold_word(word, mask)` — the
+raw `fold` cannot be used on word text, because the tokenizer strips the `"`
+bytes from it, so the quote state must come from the word's mask. Surfaces
+folded (each folds the word *and* its aligned mask): `command_word::expand`
+(word 0 is a **substitution** surface since task #268, so its pairs fold
+inside `substitute::substitute_args`; the one expanded word feeds the
+command-name glob, `exec::resolve_path`, builtin/`command`/`builtin`-keyword
+dispatch, `intercept` dispatch, the function lookup, `set --`, `prehash`,
+xtrace and `argv[0]`; see the section below),
+`redirect/open/target.rs::literal` (the redirect target is a **substitution**
+surface too, task #278: a target with an expansion trigger folds inside
+`substitute::word_fields`, `fold_word` being the no-trigger fast path;
+`> a\*b` and `> a\*b$(true)` must yield the same bytes),
+`replacer/external.rs` + `replacer.rs` (the `exec`/`become` command word and
+the `builtin` keyword's name, whose words 0 `command_word::fields` splits and
+globs), and `intercept/hash_cmd.rs` (`hash`'s name words, its pin path and the
+`hash -r`/`-d` name lists, moved to a **substitution** surface by task #279,
+so the pairs fold inside `substitute::substitute_args` and `fold_word` is gone
+from that module; the table key is the *expanded* name, the text word 0's
+expansion yields for `a\*`, so `prehash` and `hash a\*` still share the key
+`a*` — see the section "A parent-side intercept's words are a substitution
+surface"). Surfaces deliberately NOT folded: the arith lexers (`$((1\+2))`
+stays a syntax error, as in bash) and a backtick command-substitution body
+(its bytes are command text, never a word surface — task #216 expands the body
+through the argument pipeline, yet the body reaches the child verbatim) — fold
+only the surfaces that consume word text, and never before a check that keys
+on the raw bytes. The for-list is not a fold surface (task #131): it delegates
+its words to `substitute/arg.rs`, which folds the pair in its own `\\` arms,
+so `for x in a\ b` binds one word through the substitution pipeline
+(`tests/backslash.rs::for_list_words_fold_escape_pairs`). A folded word must
+carry mask `true` on the escaped byte, otherwise the folded `*` becomes a
+pattern again. The fold's `ShortCStrError` is a NUL-free invariant, so it
+chains onto the domain's `Never` variant (never `ExecFailed`). Pin every
+surface with a bash-parity test (see `tests/backslash.rs`); the accepted
+divergences of the same design are the alias name lookup, the
+`builtin`/`command`/`if` keyword recognition, and the identifier grammar — all
+three run on the raw token text, so an escaped keyword word is a command name
+(`b\uiltin echo hi` looks up `builtin`, rc 1, where bash prints `hi`), pinned
+by `alias_name_keeps_the_escape_pair` and
+`keyword_recognition_runs_on_the_raw_token`.
 
 ## Word 0 is a substitution surface: expand it once, in the parent, and gate on raw text
 Task #268 makes the command-name position expand like an argument: `$(echo echo) hi` runs `echo hi`, and the same for backticks, `$(( … ))`, `$name`, `%fd`/`%CWD` and a leading `~`. The design rules, each one a trap:
@@ -569,28 +900,137 @@ Task #268 makes the command-name position expand like an argument: `$(echo echo)
 
 
 ## The redirect target is a substitution surface: expand to fields, glob with the redirect's own policy
-Task #278 makes the target of `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` expand like a word: `echo hi > $(echo f)` writes `f` (it used to create a file literally named `$(echo f)`). The surface is `redirect/open/target.rs::resolve` → `redirect/open/target/expand.rs`, and the pipeline is `substitute::word_fields` → per field: strict ban → `glob::matches(…, base)` → `one_name` (`word_fields` is the **pre-glob** half of `substitute_args`, extracted so the two surfaces share the expansion and keep their own glob policy). Each rule below is a bash 5.3.9 measurement:
+The target of `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` expands like a word (task
+#278): `echo hi > $(echo f)` writes `f`, not a file literally named
+`$(echo f)`. The surface is `redirect/open/target.rs::resolve` →
+`redirect/open/target/expand.rs`, and the pipeline is
+`substitute::word_fields` → per field: strict ban → `glob::matches(…, base)` →
+`one_name` (`word_fields` is the **pre-glob** half of `substitute_args`,
+extracted so the two surfaces share the expansion and keep their own glob
+policy). Each rule below is a bash 5.3.9 measurement:
 
-1. **The quote mask is never the gate.** bash's `"` does not suppress command substitution, so `> "$(echo f)"` writes `f`; only `'` suppresses (`> '$(echo f)'` creates the name `$(echo f)`). A gate of the shape "trigger byte && `!mask`" keeps the bash-parity case literal — word 0's trap, same shape. `substitute::target_trigger` reads bytes only; the no-trigger word keeps the pre-#278 fold-and-glob path, so `> a\*b` and `> a\*b$(true)` print the same bytes.
-2. **The rule counts *fields*, not words.** 0 fields (`> $(true)`, `n=; > $n`, `> $@` with no positionals) and >1 fields (`n="a b"; > $n`, `> $(echo a; echo b)`, `> $(echo \*)` re-globbed to two matches, a two-match `> a*`) are bash's `ambiguous redirect` with **nothing** created; `> $(echo "f g")` splits into two fields and is ambiguous, while `> "$(echo 'f g')"` is one field naming `f g`. `target::one_name` is the single owner, shared by both paths, and reports the word **as written**.
-3. **`substitute_args` is the wrong surface for a target.** It globs CWD-rooted and honours `nullglob`/`failglob`; a target must glob at the strict `%CWD` base (`glob::matches(…, base)`) and keep the literal pattern word on 0 matches (`> zzz*` creates `zzz*`, and `set -f` passes the pattern through). Sharing only the pre-glob half keeps the two surfaces from dragging each other's shopt policy; `nullglob`/`failglob` on a redirect word stay the accepted divergence (task #369).
-4. **The strict absolute ban runs on the *expanded* field, before the walk.** Banning `> /etc/x` on the word alone leaves `: > $(echo /etc/x)` resolving at the filesystem root under `shopt -s strict` — exactly the hole strict mode exists to close. Measure it against README "Strict mode", never against bash: bash has no base to compare with.
-5. **Keep `%` out of the target's trigger gate** — the deliberate deviation from word 0's gate. bash expands no `%` form in a redirection word, and fdshell's fd targets are decided at **parse** time (the attached `>%var` is a variable source, `/dev/fd/N` and `>&N` are dup forms), so a `%` byte inside a target word is file-name data: `> a%b` creates `a%b`, `> a%CWD/x` is ENOENT on that name. A word carrying *another* trigger still reaches the `%name` arm, so `> a%log$(echo x)` expands `log`; accepted, owned by task #371. The `>&N` duplicate word is not expanded at all (`>&$(echo 1)`, task #370).
-6. **The here-doc *delimiter* word is not a substitution surface; do not "unify" the neighbours.** `cat <<$(echo EOF)` delimits on the literal `$(echo EOF)` in bash, and the `<<<` word right beside it already expands (`cat <<< $(echo hi)` → `hi`). Folding the delimiter into the target pipeline would break a delimiter bash matches; the delimiter's own surface stays `bytes::fold::fold_quotes` (quote removal only, see the POSIX #4.1 entry).
-7. **The target opens where the command is opened.** `redirect/open` runs in the parent for a simple command and inside the forked stage child for a pipeline stage, so a `$( … )` in a stage's target forks a **grandchild** (the shape argument substitution already has in the child). The `%fd` cache is created per open call, the IFS is cloned out of the `ForkCell` before the glob re-borrows it, and every borrow stays block-scoped (see "Never hold a ForkCell borrow across a recursive call that re-borrows").
-8. **Pin the rc divergence, never "fix" it in passing.** A failed redirection aborts fdshell's script where bash skips only the command (task #179): `echo hi > $(true); echo after` prints nothing at rc 1. The pins encode fdshell's behaviour and name #179, so a later rc change is a visible edit.
-9. **One accepted equivalent mutant in `parse/redirect/attached.rs` (do not chase).** `50:63` `quoted_bytes(mask, op_pos + 1, op_pos + 2)` → `op_pos * 1` (the `&` of the dup arm, on a line task #278 only moved): line 26's gate has already returned for a quoted operator byte, so the range can only start at an **unquoted** `>`, and widening it to `op_pos..op_pos + 2` cannot answer differently — the whole suite is green under the mutation. Recorded with the equivalent-mutant entries above so a future `cargo mutants` sweep does not re-flag it.
+1. **The quote mask is never the gate.** bash's `"` does not suppress command
+substitution, so `> "$(echo f)"` writes `f`; only `'` suppresses
+(`> '$(echo f)'` creates the name `$(echo f)`). A gate of the shape "trigger
+byte && `!mask`" keeps the bash-parity case literal — word 0's trap, same
+shape. `substitute::target_trigger` reads bytes only; the no-trigger word
+keeps the pre-#278 fold-and-glob path, so `> a\*b` and `> a\*b$(true)` print
+the same bytes.
+2. **The rule counts *fields*, not words.** 0 fields (`> $(true)`, `n=; > $n`,
+`> $@` with no positionals) and >1 fields (`n="a b"; > $n`,
+`> $(echo a; echo b)`, `> $(echo \*)` re-globbed to two matches, a two-match
+`> a*`) are bash's `ambiguous redirect` with **nothing** created;
+`> $(echo "f g")` splits into two fields and is ambiguous, while
+`> "$(echo 'f g')"` is one field naming `f g`. `target::one_name` is the
+single owner, shared by both paths, and reports the word **as written**.
+3. **`substitute_args` is the wrong surface for a target.** It globs
+CWD-rooted and honours `nullglob`/`failglob`; a target must glob at the strict
+`%CWD` base (`glob::matches(…, base)`) and keep the literal pattern word on 0
+matches (`> zzz*` creates `zzz*`, and `set -f` passes the pattern through).
+Sharing only the pre-glob half keeps the two surfaces from dragging each
+other's shopt policy; `nullglob`/`failglob` on a redirect word stay the
+accepted divergence (task #369).
+4. **The strict absolute ban runs on the *expanded* field, before the walk.**
+Banning `> /etc/x` on the word alone leaves `: > $(echo /etc/x)` resolving at
+the filesystem root under `shopt -s strict` — exactly the hole strict mode
+exists to close. Measure it against README "Strict mode", never against bash:
+bash has no base to compare with.
+5. **Keep `%` out of the target's trigger gate** — the deliberate deviation
+from word 0's gate. bash expands no `%` form in a redirection word, and
+fdshell's fd targets are decided at **parse** time (the attached `>%var` is a
+variable source, `/dev/fd/N` and `>&N` are dup forms), so a `%` byte inside a
+target word is file-name data: `> a%b` creates `a%b`, `> a%CWD/x` is ENOENT on
+that name. A word carrying *another* trigger still reaches the `%name` arm, so
+`> a%log$(echo x)` expands `log`; accepted, owned by task #371. The `>&N`
+duplicate word is not expanded at all (`>&$(echo 1)`, task #370).
+6. **The here-doc *delimiter* word is not a substitution surface; do not
+"unify" the neighbours.** `cat <<$(echo EOF)` delimits on the literal
+`$(echo EOF)` in bash, and the `<<<` word right beside it already expands
+(`cat <<< $(echo hi)` → `hi`). Folding the delimiter into the target pipeline
+would break a delimiter bash matches; the delimiter's own surface stays
+`bytes::fold::fold_quotes` (quote removal only, see the POSIX #4.1 entry).
+7. **The target opens where the command is opened.** `redirect/open` runs in
+the parent for a simple command and inside the forked stage child for a
+pipeline stage, so a `$( … )` in a stage's target forks a **grandchild** (the
+shape argument substitution already has in the child). The `%fd` cache is
+created per open call, the IFS is cloned out of the `ForkCell` before the glob
+re-borrows it, and every borrow stays block-scoped (see
+"Never hold a ForkCell borrow across a recursive call that re-borrows").
+8. **Pin the rc divergence, never "fix" it in passing.** A failed redirection
+aborts fdshell's script where bash skips only the command (task #179):
+`echo hi > $(true); echo after` prints nothing at rc 1. The pins encode
+fdshell's behaviour and name #179, so a later rc change is a visible edit.
+9. **One accepted equivalent mutant in `parse/redirect/attached.rs` (do not
+chase).** `50:63` `quoted_bytes(mask, op_pos + 1, op_pos + 2)` → `op_pos * 1`
+(the `&` of the dup arm): line 26's gate has already returned for a quoted
+operator byte, so the range can only start at an **unquoted** `>`, and
+widening it to `op_pos..op_pos + 2` cannot answer differently — the whole
+suite is green under the mutation. Recorded with the equivalent-mutant entries
+above so a future `cargo mutants` sweep does not re-flag it.
 
 ## A parent-side intercept's words are a substitution surface: expand before borrowing the state
-Task #279 makes `hash`'s words expand: `hash $(echo ls)` hashes the name `ls` (it used to store and query the literal name `$(echo ls)`), `hash -d $(echo ls)` deletes it, `hash *` names the matches. The surface is `intercept/hash_cmd.rs::run_hash` → `substitute::substitute_args` (the argument pipeline: the same call `source` and `set --` make, and the one-word shape of `command_word::fields`), and the option word is then parsed on the **expanded** fields. Each rule is a bash 5.3.9 measurement:
+`hash`'s words expand (task #279): `hash $(echo ls)` hashes the name `ls`, not
+the literal `$(echo ls)`, `hash -d $(echo ls)` deletes it, `hash *` names the
+matches. The surface is `intercept/hash_cmd.rs::run_hash` →
+`substitute::substitute_args` (the argument pipeline: the same call `source`
+and `set --` make, and the one-word shape of `command_word::fields`), and the
+option word is then parsed on the **expanded** fields. Each rule is a bash
+5.3.9 measurement:
 
-1. **Expand before `cell.borrow_mut()`, never inside it.** `substitute_args` re-borrows the `ForkCell` (IFS, `dotglob`, `%fd`, and a `$( … )` forks), while `hash`'s whole body used to open with `let mut state = cell.borrow_mut()` on the line right after the trace. Holding that borrow across the expansion is the "Never hold a ForkCell borrow across a recursive call that re-borrows" panic, and the conflict would surface as whatever domain error the borrow's fallback carries. The shape is `source`'s and `set --`'s: expand, then borrow, then dispatch on the fields.
-2. **The table key must be the same text `prehash` stores for word 0.** The table is keyed by what word 0's expansion produced (`launch.rs::prehash` stores the *expanded* command word since task #268), so `hash`'s name words must go through the same pipeline — fold, substitute, split, glob — or the two key shapes drift. `hash a\*` with a `PATH` file `a*` is the pin (key `a*`, and the folded `*` is mask-protected so no glob runs, pinned in a directory full of `aa`/`ab` matches): the fold did not stop being a rule, it moved surfaces into `substitute/arg.rs`.
-3. **Options are parsed on the expanded fields.** `hash $(echo -r)` clears the table and `hash $(echo -d) ls` is the delete form, because bash parses options after expansion. The flag test is `eq_bytes` on the **field** (`words.first()`), never on `cmdline.args`, and `-d`/`-r` take the *rest* of the fields as their (expanded) name list.
-4. **bash's `hash` is not fdshell's `hash`: pin the extensions, do not "align" them by accident.** Measured: `hash -r NAME…` **ignores** the names (and `-r nosuch` reports `not found` while clearing the table), `hash NAME PATH` hashes **each name** (`hash a b c` reports `a` and `c`, hashes `b`), `hash NAME` on a resolved name prints **nothing**, the listing is a `hits`/`command` table with `hash -l` as the re-input form and an empty table prints `hash: hash table empty`, a name with a `/` (`hash ~/bin`) is accepted silently and stores nothing, and `-l`/`-t`/`-p`/`--`/unknown-option are a whole option surface. fdshell's `hash NAME PATH` pin, `hash -r NAME…` removal, printed resolved path, `name<TAB>path` listing, `not found` for a slash name and `hash: bad usage …` for 3+ fields (and for a bare `hash -d`, where bash has a getopt diagnostic) are extensions — every one is pinned and owned by task #375, which owns that option/list surface. `-d` was in scope here only because the task's matrix names it: it is the plain delete (present → removed rc 0, missing → `hash: NAME: not found` rc 1).
-5. **0 fields is the bare listing, not an empty name.** `hash $(true)`, `hash $@` with no positionals, an unset `$zz` and `shopt -s nullglob; hash zzz*` all expand to zero words and therefore list the table, rc 0. A 3+ field line is fdshell's usage error, and both the usage error and a `failglob` miss **abort the run** where bash skips only the command (the accepted task #179 family) — pin the rc and the missing `echo after`.
-6. **A unit pin of a substitution surface must pass real masks.** An empty `args_mask` entry reads as *fully quoted*, so `hash a\*` and `hash *` both stay literal, `hash $n` never splits, and the row passes for the wrong reason (LESSONS "No substitution surface takes an empty mask"). Build `vec![false; w.len()]` per word and, for the quoted rows, `vec![true; w.len()]`. The pair that legitimately keeps empty masks is the pin that proves an empty mask **is** a quoted word.
-7. **Integrate the glob rows in a scratch CWD.** `hash *` is a real filesystem query; the row's fixture is this file's `Scratch` guard (pid + counter, removed on drop, LESSONS #255/#342) with `run_in(bin_dir, cwd, script)`, never the checkout's directory — otherwise the suite's result depends on the repository's file names.
+1. **Expand before `cell.borrow_mut()`, never inside it.** `substitute_args`
+re-borrows the `ForkCell` (IFS, `dotglob`, `%fd`, and a `$( … )` forks), while
+`hash`'s whole body used to open with `let mut state = cell.borrow_mut()` on
+the line right after the trace. Holding that borrow across the expansion is
+the "Never hold a ForkCell borrow across a recursive call that re-borrows"
+panic, and the conflict would surface as whatever domain error the borrow's
+fallback carries. The shape is `source`'s and `set --`'s: expand, then borrow,
+then dispatch on the fields.
+2. **The table key must be the same text `prehash` stores for word 0.** The
+table is keyed by what word 0's expansion produced (`launch.rs::prehash`
+stores the *expanded* command word since task #268), so `hash`'s name words
+must go through the same pipeline — fold, substitute, split, glob — or the two
+key shapes drift. `hash a\*` with a `PATH` file `a*` is the pin (key `a*`, and
+the folded `*` is mask-protected so no glob runs, pinned in a directory full
+of `aa`/`ab` matches): the fold did not stop being a rule, it moved surfaces
+into `substitute/arg.rs`.
+3. **Options are parsed on the expanded fields.** `hash $(echo -r)` clears the
+table and `hash $(echo -d) ls` is the delete form, because bash parses options
+after expansion. The flag test is `eq_bytes` on the **field**
+(`words.first()`), never on `cmdline.args`, and `-d`/`-r` take the *rest* of
+the fields as their (expanded) name list.
+4. **bash's `hash` is not fdshell's `hash`: pin the extensions, do not "align"
+them by accident.** Measured: `hash -r NAME…` **ignores** the names (and
+`-r nosuch` reports `not found` while clearing the table), `hash NAME PATH`
+hashes **each name** (`hash a b c` reports `a` and `c`, hashes `b`),
+`hash NAME` on a resolved name prints **nothing**, the listing is a
+`hits`/`command` table with `hash -l` as the re-input form and an empty table
+prints `hash: hash table empty`, a name with a `/` (`hash ~/bin`) is accepted
+silently and stores nothing, and `-l`/`-t`/`-p`/`--`/unknown-option are a
+whole option surface. fdshell's `hash NAME PATH` pin, `hash -r NAME…` removal,
+printed resolved path, `name<TAB>path` listing, `not found` for a slash name
+and `hash: bad usage …` for 3+ fields (and for a bare `hash -d`, where bash
+has a getopt diagnostic) are extensions — every one is pinned and owned by
+task #375, which owns that option/list surface. `-d` is the plain delete
+(present → removed rc 0, missing → `hash: NAME: not found` rc 1).
+5. **0 fields is the bare listing, not an empty name.** `hash $(true)`,
+`hash $@` with no positionals, an unset `$zz` and
+`shopt -s nullglob; hash zzz*` all expand to zero words and therefore list the
+table, rc 0. A 3+ field line is fdshell's usage error, and both the usage
+error and a `failglob` miss **abort the run** where bash skips only the
+command (the accepted task #179 family) — pin the rc and the missing
+`echo after`.
+6. **A unit pin of a substitution surface must pass real masks.** An empty
+`args_mask` entry reads as *fully quoted*, so `hash a\*` and `hash *` both
+stay literal, `hash $n` never splits, and the row passes for the wrong reason
+(LESSONS "No substitution surface takes an empty mask"). Build
+`vec![false; w.len()]` per word and, for the quoted rows,
+`vec![true; w.len()]`. The pair that legitimately keeps empty masks is the pin
+that proves an empty mask **is** a quoted word.
+7. **Integrate the glob rows in a scratch CWD.** `hash *` is a real filesystem
+query; the row's fixture is this file's `Scratch` guard (pid + counter,
+removed on drop, LESSONS #255/#342) with `run_in(bin_dir, cwd, script)`, never
+the checkout's directory — otherwise the suite's result depends on the
+repository's file names.
 
 ## An intercept's operand is a substitution surface, and the raw word decides the fdshell-only forms (task #284)
 Task #284 makes `cd`'s operand expand: `cd $V`, `cd "$@"`, `cd ~`, `cd "$(echo sub)"`, `cd $((1+1))` and `cd s*` move the base to the directory the **expansion** names, where master opened the literal text of every one of them. The surface is `intercept/cd.rs::run_cd` → `substitute::substitute_args`, and the decision is handed to `crate::cd::cd` as a `CdTarget`, which keeps no word rule of its own. Each rule below is a bash 5.3.9 measurement in a scratch directory holding `sub/`, `aa`, `ab`, `a b/`, `2/` and a directory literally named `-`:
@@ -1595,17 +2035,75 @@ the depth fires at the keyword behind it.
    (the comment parity, gained through the shared rule).
 ## A heredoc's place inside a keyword block — clause vs body — decides whether its body region is a cond-list split point
 
-The gate on the region rule (task #304). A heredoc **body region** carried by a run inside a keyword block is scanned for a top-level `&&` / `||` **only where the `<<` that claimed it sits in the block's clause** (its condition, word list or `case` arm pattern); a region claimed by a word of the block's **body** is the body's own data, opaque, exactly as the same line outside any heredoc.
+The gate on the region rule (task #304). A heredoc **body region** carried by
+a run inside a keyword block is scanned for a top-level `&&` / `||` **only
+where the `<<` that claimed it sits in the block's clause** (its condition,
+word list or `case` arm pattern); a region claimed by a word of the block's
+**body** is the body's own data, opaque, exactly as the same line outside any
+heredoc.
 
-**`block_depth` cannot answer the question, so the rule needs the clause keywords.** `then` / `else` / `do` score `0` in `cond/boundary/block.rs::word_delta` (they are clause keywords, not block openers), so the depth is `1` both in `if cat <<X; then` — where the `<<` is in the condition and the split ends where bash also rejects the text — and in `if :; then cat <<X` — where the `<<` is in the body and bash prints the body. The discriminator is the same clause rule `keywords/position::after` runs (`then`/`else`/`do` and a `case` arm's `)` open a body, `elif` and `in` open a clause), read by the cond scan as a mode (`cond/boundary/block/clause.rs`), and the keyword set is shared with `after` through `keywords/position/clause.rs`, pinned as one set by `keywords/position/tests.rs::the_clause_keyword_set_is_one_set_with_after`.
+**`block_depth` cannot answer the question, so the rule needs the clause
+keywords.** `then` / `else` / `do` score `0` in
+`cond/boundary/block.rs::word_delta` (they are clause keywords, not block
+openers), so the depth is `1` both in `if cat <<X; then` — where the `<<` is
+in the condition and the split ends where bash also rejects the text — and in
+`if :; then cat <<X` — where the `<<` is in the body and bash prints the body.
+The discriminator is the same clause rule `keywords/position::after` runs
+(`then`/`else`/`do` and a `case` arm's `)` open a body, `elif` and `in` open a
+clause), read by the cond scan as a mode (`cond/boundary/block/clause.rs`),
+and the keyword set is shared with `after` through
+`keywords/position/clause.rs`, pinned as one set by
+`keywords/position/tests.rs::the_clause_keyword_set_is_one_set_with_after`.
 
-**Feed the mode from the walk that already exists** — a copy per call site is where it starts to drift. The mode stack takes the `(delta, place)` pair the cond-boundary scan already computes at every word start, so it inherits that walk's heredoc-region, comment and quote skips and its command-position rule. A second walk over `line[..site]` inside `body.rs` would duplicate all of them and would re-walk region bytes, where a body line's `fi` / `done` must stay inert (`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`). Its twin, region → site alignment, is the one-region-per-operator allocation invariant: `step` zips the regions with `scan::heredoc::operator_sites` over the **same window**, never a wider one.
+**Feed the mode from the walk that already exists** — a copy per call site is
+where it starts to drift. The mode stack takes the `(delta, place)` pair the
+cond-boundary scan already computes at every word start, so it inherits that
+walk's heredoc-region, comment and quote skips and its command-position rule.
+A second walk over `line[..site]` inside `body.rs` would duplicate all of them
+and would re-walk region bytes, where a body line's `fi` / `done` must stay
+inert
+(`tests/heredoc.rs::comment_block_closer_in_a_heredoc_body_region_is_inert`).
+Its twin, region → site alignment, is the one-region-per-operator allocation
+invariant: `step` zips the regions with `scan::heredoc::operator_sites` over
+the **same window**, never a wider one.
 
-**The fallback is the conservative side.** `Modes::mode_at` answers `Mode::Clause` for a site the walk never recorded (a run whose window starts past the opener, a synthetic unit-test text — the tripwire pin is the `cat <<A <<B` row of `cond/boundary/body/tests.rs::block_regions_split_on_their_earliest_operator`): an unknown site stays scanned, so the gate can only *lose* a split relative to the pre-gate behaviour, never invent one. Failing toward opacity is the known parity gap, not a new divergence.
+**The fallback is the conservative side.** `Modes::mode_at` answers
+`Mode::Clause` for a site the walk never recorded (a run whose window starts
+past the opener, a synthetic unit-test text — the tripwire pin is the
+`cat <<A <<B` row of
+`cond/boundary/body/tests.rs::block_regions_split_on_their_earliest_operator`):
+an unknown site stays scanned, so the gate can only *lose* a split relative to
+the pre-gate behaviour, never invent one. Failing toward opacity is the known
+parity gap, not a new divergence.
 
-**Braces push nothing.** A `{ …; }` group is counted by `cond/boundary.rs`'s `group_depth`, never by `block_depth`, so a group written in a block's **clause** keeps the clause mode (`if { cat <<Q; } then` stays in the rc-1-vs-bash-2 family) and a group in its **body** keeps the body mode (`if :; then { cat <<Q` gains parity). A `)`-ending word is the one row that does **not** discriminate cleanly: it is `after`'s own ungated rule, so a subshell `)` in a clause also opens a body — `keywords/position`, task #430.
+**Braces push nothing.** A `{ …; }` group is counted by `cond/boundary.rs`'s
+`group_depth`, never by `block_depth`, so a group written in a block's
+**clause** keeps the clause mode (`if { cat <<Q; } then` stays in the
+rc-1-vs-bash-2 family) and a group in its **body** keeps the body mode
+(`if :; then { cat <<Q` gains parity). A `)`-ending word is the one row that
+does **not** discriminate cleanly: it is `after`'s own ungated rule, so a
+subshell `)` in a clause also opens a body — `keywords/position`, task #430.
 
-**Parity is carried by pins, not by a table.** Every body-position shape (keyword block, nested block, group in a body, `case` arm, loop body, `else` arm, `&&`/`||` prefix, a statement after the closer, the `<<-` twin, multi-operator line) prints its body at rc 0, byte-identical to bash 5.3.9: pinned by `tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`. **Rows that must not move** are the accepted clause family — the `<<` in a condition, an `elif` condition, a group in a condition, two operators in a condition, a nested block's condition — all bash **rc 2**, fdshell **rc 1** (`tests/heredoc.rs::a_clause_position_region_still_splits_the_block_text`). Unchanged as a pair: `f() { cat <<Q` / `z && y` / `Q` / `}` / `f` is rc 0 on bash and fdshell alike (a definition group is no block, so no mode). The **unbounded** `while :; do cat <<Q` / `z && y` / `Q` / `done && echo tail` twin loops forever on bash and on fdshell alike (rc 124 under a timeout): not pinnable in this suite, so the pinned shape is the bounded one (`break` in the body, rc 0). Two sweep classes are owned elsewhere: `(bash≠0, master≠0, fdshell=0)` for `if (cat) && cat <<X; then` and `if :; then echo a); cat <<X` (the ungated `)` row, task #430), and the comment-terminated delimiter row `if :; then cat <<Q # c` / `cat <<Q # c` (bash 0, fdshell rc 1 `missing terminating delimiter line 'Q'`, task #429).
+**Parity is carried by pins, not by a table.** Every body-position shape
+(keyword block, nested block, group in a body, `case` arm, loop body, `else`
+arm, `&&`/`||` prefix, a statement after the closer, the `<<-` twin,
+multi-operator line) prints its body at rc 0, byte-identical to bash 5.3.9:
+pinned by
+`tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
+`a_body_position_heredoc_region_in_every_block_shape_prints_its_body`. **Rows
+that must not move** are the accepted clause family — the `<<` in a condition,
+an `elif` condition, a group in a condition, two operators in a condition, a
+nested block's condition — all bash **rc 2**, fdshell **rc 1**
+(`tests/heredoc.rs::a_clause_position_region_still_splits_the_block_text`).
+Unchanged as a pair: `f() { cat <<Q` / `z && y` / `Q` / `}` / `f` is rc 0 on
+bash and fdshell alike (a definition group is no block, so no mode). The
+**unbounded** `while :; do cat <<Q` / `z && y` / `Q` / `done && echo tail`
+twin loops forever on bash and on fdshell alike (rc 124 under a timeout): not
+pinnable in this suite, so the pinned shape is the bounded one (`break` in the
+body, rc 0). Two families are owned elsewhere: the ungated `)` rows
+`if (cat) && cat <<X; then` and `if :; then echo a); cat <<X` (task #430), and
+the comment-terminated delimiter row `if :; then cat <<Q # c` / `cat <<Q # c`
+(bash rc 0, fdshell rc 1 `missing terminating delimiter line 'Q'`, task #429).
 
 ## A cond-list heredoc arm's `b == b'\n'` guard: a missing mid-run pin, then a dead-code equivalence, then a kill
 
@@ -2533,15 +3031,16 @@ and `tests/set_opts.rs::short_noclobber_flag_blocks_overwrite`.
 
 ## A keyword block after `&&` is a cond part: the group rule applies verbatim
 The segment scanner's run-start scorer (`first_word_end` + `keyword_delta` on
-the run's first word) is **not a command-position scorer**. `true && while :;
-do echo hi; break; done` scored the run `true && while [ … ]` only at its
-first word `true`, so the block was not recognised, the block's own `;`
-split the run, and `while [ 1 ]` reached `tokens_to_loop` without its
-`do`/`done` (`expected 'done'` rc 1). The rule already existed — LESSONS "A
-group after `&&` is a cond part: skip its span, never flush the run before
-it" — and applies verbatim to keyword blocks and `name() { … }` definitions:
-the three-way classification `segment/group.rs::group_at_run` (run start →
-the block path owns it; cond part mid-run → **skip the span whole inside the
+the run's first word) is **not a command-position scorer**.
+`true && while :; do echo hi; break; done` scored the run
+`true && while [ … ]` only at its first word `true`, so the block was not
+recognised, the block's own `;` split the run, and `while [ 1 ]` reached
+`tokens_to_loop` without its `do`/`done` (`expected 'done'` rc 1). The rule
+already existed — LESSONS
+"A group after `&&` is a cond part: skip its span, never flush the run before it"
+— and applies verbatim to keyword blocks and `name() { … }` definitions: the
+three-way classification `segment/group.rs::group_at_run` (run start → the
+block path owns it; cond part mid-run → **skip the span whole inside the
 run**; argument position → word data) must be applied by the segment scanner
 (`segment/block/midrun.rs`, the twin of `skip_group`), by the cond layer
 (`cond/boundary/block.rs::word_delta`), and by the block executors — three
@@ -2550,54 +3049,53 @@ layers, one rule; pin the tri-state classification per layer.
 Four edges the twin rule carries:
 
 1. **The span end is the closer's run *separator*, not the run end.**
-   `comment::scan_block`'s run end swallows the `;` written after the closer
-   (`true && while … done; echo tail` loses `echo tail`: the whole rest of
-   the line joins the block statement and the tokenizer stops at the first
-   `;`). Resume at the byte `scan_block`'s `start` minus one — the
-   `;`/`\n`/EOF closing the closer's run — so the statement ends at the
-   closer's separator and everything between the closer and that separator
-   (`done && echo y`) stays in the run for `cond` to re-split (measured:
-   `hi` `tail`; `hi` `y`).
-2. **The `time [-p]` prefix must be stripped by the mid-run scorer too**
-   (see "A statement-prefix keyword must be transparent in *every*
-   first-word scorer"): `group_at_run` strips it on both sides of the run,
-   `opener_len` measures the keyword behind it, and the scan seed adds
-   `time_prefix_len`. Pin the three spellings mid-run (`&& time while`,
-   `&& time -p while`, `&& time time -p while`) and pin the `{` twin
-   (`&& time { …; }`) to the group arm, not to `midrun`.
+`comment::scan_block`'s run end swallows the `;` written after the closer
+(`true && while … done; echo tail` loses `echo tail`: the whole rest of the
+line joins the block statement and the tokenizer stops at the first `;`).
+Resume at the byte `scan_block`'s `start` minus one — the `;`/`\n`/EOF closing
+the closer's run — so the statement ends at the closer's separator and
+everything between the closer and that separator (`done && echo y`) stays in
+the run for `cond` to re-split (measured: `hi` `tail`; `hi` `y`).
+2. **The `time [-p]` prefix must be stripped by the mid-run scorer too** (see
+"A statement-prefix keyword must be transparent in *every* first-word scorer"):
+`group_at_run` strips it on both sides of the run, `opener_len` measures the
+keyword behind it, and the scan seed adds `time_prefix_len`. Pin the three
+spellings mid-run (`&& time while`, `&& time -p while`,
+`&& time time -p while`) and pin the `{` twin (`&& time { …; }`) to the group
+arm, not to `midrun`.
 3. **Sharing the length rule needs the boundary check.** The extracted
-   `opener_len` (seed of the keyword scan, shared by `keyword_block` and
-   `midrun::skip`) must reject glued keyword prefixes (`whileish`, `iffy`)
-   with the same boundary rule `keyword_delta` scores with, and answer
-   `None` for the group brace (`segment/group.rs` owns `{ …; }`). A measured
-   length on a `starts_with` prefix seeds the scan inside the word, and the
-   scan then swallows the rest of the run.
+`opener_len` (seed of the keyword scan, shared by `keyword_block` and
+`midrun::skip`) must reject glued keyword prefixes (`whileish`, `iffy`) with
+the same boundary rule `keyword_delta` scores with, and answer `None` for the
+group brace (`segment/group.rs` owns `{ …; }`). A measured length on a
+`starts_with` prefix seeds the scan inside the word, and the scan then
+swallows the rest of the run.
 
 4. **The mid-run scorer must *call* `keyword_delta`, not parallel it.** The
-   span's gate is the shared run-start scorer, not the length: `opener_len`
-   measures a word, only the scorer says whether that word opens a block.
-   `wait` is the proof — `opener_len` answers `Some(4)` for the POSIX builtin
-   too, and a span over it swallows the whole rest of the run **harmfully**:
-   the cond layer re-splits `&&`/`||` only, never a `;`, so
-   `true && wait; echo tail` printed nothing with rc 0 and no diagnostic, and
-   `while :; do true && wait; echo tail; break; done` hung, because the
-   swallowed text held the `break` (bodies are re-scanned, so mid-run applies
-   inside them). Take the keyword branch only on `keyword_delta == Some(1)`
-   (`span_end`): the event-case `wait` (pattern keyword behind it) keeps its
-   span, a `wait` that opens no block stays **word data** and the run splits
-   at its `;` exactly as before the mid-run rule existed. The same gate is
-   what keeps a `name()` word with no `{` body word data — the run-start path
-   requires `scan_function_block` to match, so the mid-run path requires the
-   brace body to exist. Pins: `segment/block/midrun/tests.rs::the_scored_gate_keeps_the_builtin_wait_word_data`,
-   `tests/cond_blocks.rs::builtin_wait_mid_run_stays_word_data` and
-   `event_case_wait_mid_run_keeps_its_block_span`,
-   `tests/loops.rs::mid_run_builtin_wait_keeps_the_loop_body` (bounded: a
-   regression must panic with the script, never hang the suite),
-   `tests/wait.rs::builtin_wait_after_a_cond_operator_stays_the_builtin`.
+span's gate is the shared run-start scorer, not the length: `opener_len`
+measures a word, only the scorer says whether that word opens a block. `wait`
+is the proof — `opener_len` answers `Some(4)` for the POSIX builtin too, and a
+span over it swallows the whole rest of the run **harmfully**: the cond layer
+re-splits `&&`/`||` only, never a `;`, so `true && wait; echo tail` printed
+nothing with rc 0 and no diagnostic, and
+`while :; do true && wait; echo tail; break; done` hung, because the swallowed
+text held the `break` (bodies are re-scanned, so mid-run applies inside them).
+Take the keyword branch only on `keyword_delta == Some(1)` (`span_end`): the
+event-case `wait` (pattern keyword behind it) keeps its span, a `wait` that
+opens no block stays **word data** and the run splits at its `;` as it did
+before the mid-run rule. The same gate is what keeps a `name()` word with no
+`{` body word data — the run-start path requires `scan_function_block` to
+match, so the mid-run path requires the brace body to exist. Pins:
+`segment/block/midrun/tests.rs::the_scored_gate_keeps_the_builtin_wait_word_data`,
+`tests/cond_blocks.rs::builtin_wait_mid_run_stays_word_data` and
+`event_case_wait_mid_run_keeps_its_block_span`,
+`tests/loops.rs::mid_run_builtin_wait_keeps_the_loop_body` (bounded: a
+regression must panic with the script, never hang the suite),
+`tests/wait.rs::builtin_wait_after_a_cond_operator_stays_the_builtin`.
 
-Pins: `segment/block/midrun/tests.rs` (tri-state, openers, agreement,
-the scored gate, `time`, function definitions, unclosed → resume = end of
-input, quotes, comment, brace words),
+Pins: `segment/block/midrun/tests.rs` (tri-state, openers, agreement, the
+scored gate, `time`, function definitions, unclosed → resume = end of input,
+quotes, comment, brace words),
 `segment/tests.rs::midrun_keyword_block_stays_one_statement_in_the_run`,
 `tests/cond_blocks.rs::operator_adjacent_to_a_block_makes_the_block_a_cond_part`
 and its siblings.
@@ -2626,70 +3124,71 @@ on any `<<`-carrying text, so that arm's clear is not observable through
 is pinned there as well; the arm's mutation follow-up is task #248's).
 
 ## An empty block arm body is a parser rule, not a syntax nit
-bash requires a non-empty `list` after `then`, after `elif … then`, after `else`
-and after `do` (`if x; then; fi`, `while x; do; done`, `for i in a; do; done`:
-bash 5.3.9 rc 2, measured). fdshell accepted all of them, and an empty `do`
-body is not a cosmetic defect: `while true; do; done` is an **unbounded loop**
-the moment the body is empty — the condition stays true and the no-op body
-returns, and nothing at run time bounds it (it hung to the 3 s measurement
-timeout). Grammar rules of the form "the grammar requires a non-empty list"
-therefore live in the parser, never in the executors: one helper
-(`parse/semi.rs::block_body` beside `trim_semi`) is called at the five arm-body
-sites (`if_block.rs`, `elif.rs`, `while_block.rs`, `for_block.rs`) with one
-plain `ParseError` variant per keyword so the message names the arm to fill in.
-The tokenizer drops comments, so a comment-only body is an empty range and is
-rejected — exactly bash's rule (a comment is not a command). Two boundaries are
-load-bearing, cf. "Redundant boundary ±1 produces equivalent mutants": the
-`first_end - 1` in `tokens_to_if` is what makes the glued form `if a; then b fi`
-an empty `then` body, and `while_block.rs`/`for_block.rs` must **not** gain such
-a `-1` (`done_idx` is the closer's own index and `trim_semi` eats the `;`). The
-rule is scoped: `case` clause bodies stay allowed empty (`case x in a) ;; esac`
-is bash rc 0), and the `is_empty` filter on `IfBlock::else_body` became
-unreachable once the empty `else` body is an error — a guard that can never fire
-is an equivalent-mutant source, so it was deleted, not kept "defensive".
+bash requires a non-empty `list` after `then`, after `elif … then`, after
+`else` and after `do` (`if x; then; fi`, `while x; do; done`,
+`for i in a; do; done`: bash 5.3.9 rc 2, measured). An empty `do` body is not
+a cosmetic defect: `while true; do; done` is an **unbounded loop** the moment
+the body is empty — the condition stays true and the no-op body returns, and
+nothing at run time bounds it (it hung to the 3 s measurement timeout).
+Grammar rules of the form "the grammar requires a non-empty list" therefore
+live in the parser, never in the executors: one helper
+(`parse/semi.rs::block_body` beside `trim_semi`) is called at the five
+arm-body sites (`if_block.rs`, `elif.rs`, `while_block.rs`, `for_block.rs`)
+with one plain `ParseError` variant per keyword so the message names the arm
+to fill in. The tokenizer drops comments, so a comment-only body is an empty
+range and is rejected — exactly bash's rule (a comment is not a command). Two
+boundaries are load-bearing, cf.
+"Redundant boundary ±1 produces equivalent mutants": the `first_end - 1` in
+`tokens_to_if` is what makes the glued form `if a; then b fi` an empty `then`
+body, and `while_block.rs`/`for_block.rs` must **not** gain such a `-1`
+(`done_idx` is the closer's own index and `trim_semi` eats the `;`). The rule
+is scoped: `case` clause bodies stay allowed empty (`case x in a) ;; esac` is
+bash rc 0), and the `is_empty` filter on `IfBlock::else_body` became
+unreachable once the empty `else` body is an error — a guard that can never
+fire is an equivalent-mutant source, so it was deleted, not kept "defensive".
 Sibling forms deliberately left open (measured, filed): `case x in a) esac`
-(#300, **closed** by the entry below — bash allows that arm), missing `;` before
-`done`/`fi` (#301, **closed** by the closer-rule entry beside "One clause rule,
-three scorers" — bash's rule plus its compound exception), empty function body
-(#302), redirect-only command (#303, **closed** by the entry "A statement of
-redirections **is** a command" at the end of this file).
-Pins: `parse/tests.rs` (`empty_then_body_is_err`,
-`empty_elif_body_is_err`, `empty_else_body_is_err`, `empty_do_body_is_err`,
-`for_semi_before_done_reports_before_the_empty_body`,
-`empty_condition_pins_the_body_message`, `non_empty_and_case_bodies_stay_green`)
-and `tests/block_bodies.rs` (every form rc 1 with its message; the two
-empty-`do` hang forms under the bounded child so a regression panics, never
-hangs; the heredoc arm-body pins; the bash-parity green pins).
+(#300, **closed** by the entry below — bash allows that arm), missing `;`
+before `done`/`fi` (#301, **closed** by the closer-rule entry beside
+"One clause rule, three scorers" — bash's rule plus its compound exception),
+empty function body (#302), redirect-only command (#303, **closed** by the
+entry "A statement of redirections **is** a command"). Pins: `parse/tests.rs`
+(`empty_then_body_is_err`, `empty_elif_body_is_err`, `empty_else_body_is_err`,
+`empty_do_body_is_err`, `for_semi_before_done_reports_before_the_empty_body`,
+`empty_condition_pins_the_body_message`,
+`non_empty_and_case_bodies_stay_green`) and `tests/block_bodies.rs` (every
+form rc 1 with its message; the two empty-`do` hang forms under the bounded
+child so a regression panics, never hangs; the heredoc arm-body pins; the
+bash-parity green pins).
 
-The **condition** sibling closed the same way (task #299): bash rejects an empty
-`if`/`elif`/`while`/`until` condition (rc 2) and an empty condition is **true**
-at run time, so `while ; do echo x; done` ran forever. One helper
-`block_condition` **beside** `block_body` is called at the three condition sites
-(`semi.rs::span_verbatim` for the `if`, `elif.rs`, `while_block.rs`), each with
-the keyword family's **existing** variant — `missing condition` for `if`/`elif`,
-`expected condition` for the loops — so no variant was added and the two that
-were unreachable became live. Two rules came out of it. **Test the trimmed
-slice, never the raw one**: the raw slice between the keywords always carries
-POSIX's `;`, so a raw `is_empty` never fires, and the `&`-only slice (`if &
-then`, `while & do`) is raw-**non**-empty / trimmed empty — that is the row that
-pins the choice (and the `&` is cut by `trim_condition`, not by the rule).
-**The minimum reachable index is the bound**: `while_block.rs` carried
-`ensure!(do_idx >= 2, ExpectedCondition)`, dead code, because
+The **condition** sibling closed the same way (task #299): bash rejects an
+empty `if`/`elif`/`while`/`until` condition (rc 2) and an empty condition is
+**true** at run time, so `while ; do echo x; done` ran forever. One helper
+`block_condition` **beside** `block_body` is called at the three condition
+sites (`semi.rs::span_verbatim` for the `if`, `elif.rs`, `while_block.rs`),
+each with the keyword family's **existing** variant — `missing condition` for
+`if`/`elif`, `expected condition` for the loops — so no variant was added and
+the two that were unreachable became live. Two rules came out of it. **Test
+the trimmed slice, never the raw one**: the raw slice between the keywords
+always carries POSIX's `;`, so a raw `is_empty` never fires, and the `&`-only
+slice (`if & then`, `while & do`) is raw-**non**-empty / trimmed empty — that
+is the row that pins the choice (and the `&` is cut by `trim_condition`, not
+by the rule). **The minimum reachable index is the bound**: `while_block.rs`
+carried `ensure!(do_idx >= 2, ExpectedCondition)`, dead code, because
 `find_preceded_by` only scores a keyword preceded by a `;`/`&` and token 0 is
 the block's own keyword, so 2 is the smallest reachable `do_idx` — a `>= 2`
 guard can never fire and `while ; do` walked straight through it (the
 "redundant boundary ±1" pattern read from the other side: a guard at the
 minimum is as dead as one past it, and deleting it is the fix, not keeping it
 "defensive"). The rule stays scoped: a `for` **word list** may be empty
-(`for i in; do …; done` iterates zero times, bash rc 0), a `case` word is not a
-condition (#415), and the arith clause's empty condition is true in bash, so
+(`for i in; do …; done` iterates zero times, bash rc 0), a `case` word is not
+a condition (#415), and the arith clause's empty condition is true in bash, so
 `for ((;;))` is untouched. Pins: `parse/tests.rs`
 (`empty_if_condition_is_err`, `empty_elif_condition_is_err`,
 `empty_loop_condition_is_err`, `non_empty_conditions_stay_green`),
-`parse/semi/trim/tests.rs` (`block_condition_rejects_a_trimmed_empty_slice`) and
-`tests/block_conditions.rs` (every form rc 1 with its message; the loop forms
-under the bounded child — the empty condition is true, so the regression is a
-hang; the neighbouring leniencies green).
+`parse/semi/trim/tests.rs` (`block_condition_rejects_a_trimmed_empty_slice`)
+and `tests/block_conditions.rs` (every form rc 1 with its message; the loop
+forms under the bounded child — the empty condition is true, so the regression
+is a hang; the neighbouring leniencies green).
 
 ## A `case` arm is a command list: empty at `esac`, and its stray `)` is the missing `;;`
 
@@ -3406,35 +3905,35 @@ closer closes the block's text, never its bodies, so every completeness check th
 knows a block is closed must also ask `unterminated` about the block's own runs.
 
 ## The `&>` family is one operator, so one open, so one description shared by fd 1 and fd 2 (task #251)
-`cmd &> f` is bash's `> f 2>&1`: one `open()`, `dup2`'d onto fd 1 **and** fd 2,
-so the two streams share one offset and append to each other. fdshell emitted
-**two** `RedirectDef`s with the same `Path` source (fd 1 and fd 2), and
-`open_redirect_files` opens one fd per `Path` source — two descriptions at
+`cmd &> f` is bash's `> f 2>&1`: one `open()`, `dup2`'d onto fd 1 **and** fd
+2, so the two streams share one offset and append to each other. fdshell
+emitted **two** `RedirectDef`s with the same `Path` source (fd 1 and fd 2),
+and `open_redirect_files` opens one fd per `Path` source — two descriptions at
 independent offsets, fd 2's open truncating at 0 and overwriting fd 1's bytes
-(`echo hi; echo e >&2` wrote `e\n\n`, bash writes `hi\ne\n`). The second face of
-the same double open is `noclobber` on a **fresh** target: fd 1's exclusive
-create makes the path exist, fd 2's second exclusive open hits its own file and
-reports `Noclobber`, so `set -o noclobber; cmd &> fresh` failed where bash
-succeeds (`noclobber_creates_fresh_combined_target`).
-Rule: the sharing is keyed on the **operator**, never on the path. A path-keyed
-share in `resolve_redirects` would fix `&>` and silently break `> f 2> f`, whose
-two operators mean two opens; that shape is pinned byte-for-byte (`e\n\n`, in
+(`echo hi; echo e >&2` wrote `e\n\n`, bash writes `hi\ne\n`). The second face
+of the same double open is `noclobber` on a **fresh** target: fd 1's exclusive
+create makes the path exist, fd 2's second exclusive open hits its own file
+and reports `Noclobber`, so `set -o noclobber; cmd &> fresh` failed where bash
+succeeds (`noclobber_creates_fresh_combined_target`). Rule: the sharing is
+keyed on the **operator**, never on the path. A path-keyed share in
+`resolve_redirects` would fix `&>` and silently break `> f 2> f`, whose two
+operators mean two opens; that shape is pinned byte-for-byte (`e\n\n`, in
 `redirect/resolve/tests.rs::two_path_defs_keep_two_independent_opens` and
-`tests/redirect.rs::separate_write_and_stderr_redirects_keep_two_opens`)
-so the sharing cannot be generalized to paths.
-Data model: `RedirectDef::combined` carries fd 1 in `export_to` and fd 2 in the
-new `extra_to`, and `max_target` folds **both** — `extra_to` is a *target*, and
-a source clone landing on it makes the `dup2` a no-op whose drop closes the
-target (the "redirect source fds above the highest target" rule above).
-fd 2 is fed by a **second clone of the same source fd** (`F_DUPFD_CLOEXEC`
-shares the description, `dup2` shares it too), *not* by emitting
-`RedirectDef::dup(2, 1)`: every consumer resolves all defs before exporting any
-of them, so a resolve-time dup of fd 1 captures the **pre-redirect** fd 1 —
-exactly the apply-order divergence task #337 owns. Building `&>` on that form
-would make a correct open depend on an unresolved design decision; the clone
-form has no apply-order dependence at all.
-Pin layers, one per observable (a missing pair, a second open, a wrong order):
-parse shape (`combined_def`, one def with `extra_to: Some(2)`), open count
+`tests/redirect.rs::separate_write_and_stderr_redirects_keep_two_opens`) so
+the sharing cannot be generalized to paths. Data model:
+`RedirectDef::combined` carries fd 1 in `export_to` and fd 2 in the new
+`extra_to`, and `max_target` folds **both** — `extra_to` is a *target*, and a
+source clone landing on it makes the `dup2` a no-op whose drop closes the
+target (the "redirect source fds above the highest target" rule above). fd 2
+is fed by a **second clone of the same source fd** (`F_DUPFD_CLOEXEC` shares
+the description, `dup2` shares it too), *not* by emitting
+`RedirectDef::dup(2, 1)`: every consumer resolves all defs before exporting
+any of them, so a resolve-time dup of fd 1 captures the **pre-redirect** fd 1
+— exactly the apply-order divergence task #337 owns. Building `&>` on that
+form would make a correct open depend on an unresolved design decision; the
+clone form has no apply-order dependence at all. Pin layers, one per
+observable (a missing pair, a second open, a wrong order): parse shape
+(`combined_def`, one def with `extra_to: Some(2)`), open count
 (`combined_def_opens_the_path_once`: exactly one fd, fd ≥ 3), resolve shape
 (`combined_path_def_resolves_to_a_pair_from_one_open`: two `Redirect`s, fd 1
 then fd 2, distinct fds ≥ 3, one consumed source, file bytes `hi\ne\n`), the
@@ -3444,25 +3943,24 @@ the integration bytes (`combined_redirect_shares_one_file_description`,
 `/dev/fd/N` operand, `combined_redirect_noclobber_blocks_existing_file` and
 `combined_redirect_noclobber_creates_fresh_file`). The `Option<i32>` arms are
 mutant-prone (`extra_to: Some(2)`→`None`, `pair_of -> Ok(None)`, the pair's
-clone losing its `min_fd`, the pair pushed before its fd-1 twin); every one of
-them was measured by mutating the source and running the suite. The fd-≥-3
-assertions alone do **not** kill the `min_fd` mutants — with fds 0–2 open in the
-test process `try_clone_above(2)` already returns ≥ 3 — so the pin that folds
-`extra_to` into `min_fd` is `combined_def_target_folds_into_the_source_minimum`,
-which closes fd 2 first: the hole is what makes a source landing on the fd-2
-target observable (its `Drop` closes the target, and the fd-2 write fails).
-Cost the plan miscounted (measured on this branch, 3/3 runs, against bash
-5.3.9 and master `b68878c`): `extra_to` is a *target*, so it must participate
-in `insert_redirect`'s fd-sorted table (the `partition_point` entry above —
+clone losing its `min_fd`, the pair pushed before its fd-1 twin). The fd-≥-3
+assertions alone do **not** kill the `min_fd` mutants — with fds 0–2 open in
+the test process `try_clone_above(2)` already returns ≥ 3 — so the pin that
+folds `extra_to` into `min_fd` is
+`combined_def_target_folds_into_the_source_minimum`, which closes fd 2 first:
+the hole is what makes a source landing on the fd-2 target observable (its
+`Drop` closes the target, and the fd-2 write fails). Measured cost of the def
+shape (bash 5.3.9): `extra_to` is a *target*, so it must participate in
+`insert_redirect`'s fd-sorted table (the `partition_point` entry above —
 "the last entry for a fd wins"), and the current def shape does **not** put it
 there: the fd-2 half is applied in **fd 1's slot**, i.e. before every def that
-targets fd 2. A `2>&-` / `2>&1` written *after* `&>` therefore wins fd 2, where
-bash applies `&>` later and reopens it. `f(){ echo e >&2; }; f 2>&- &> f` →
-rc 1, `f` created empty, fatal `launch failed → redirect file open failed →
-fd 2 is not open` (bash rc 0 with `e\n`, master rc 0 with `e\n`);
-`f 2>&- &>> f` → rc 1, `f` = `hi\n` (bash `hi\ne\n`); `f 2>&1 &> f` →
+targets fd 2. A `2>&-` / `2>&1` written *after* `&>` therefore wins fd 2,
+where bash applies `&>` later and reopens it.
+`f(){ echo e >&2; }; f 2>&- &> f` → rc 1, `f` created empty, fatal
+`launch failed → redirect file open failed → fd 2 is not open` (bash rc 0 with
+`e\n`); `f 2>&- &>> f` → rc 1, `f` = `hi\n` (bash `hi\ne\n`); `f 2>&1 &> f` →
 `f` = `hi\n` and `e\n` on the terminal, fd 2 being the **pre-redirect** fd 1
-(master `e\n\n`, bash `hi\ne\n`). Recorded as measured pins:
+(bash `hi\ne\n`). Recorded as measured pins:
 `tests/redirect.rs::combined_redirect_after_close_stderr_fails`,
 `combined_append_after_close_stderr_fails` and
 `combined_redirect_after_dup_stderr_to_stdout_keeps_pre_redirect_fd1`; task
@@ -4230,158 +4728,172 @@ lists that name this task (`POSIX_COMPATIBILITY.md`, `tests/heredoc.rs`,
 
 ## A function-definition body is a block body for the region rule too: claim at the branch, re-attach at the builder (task #305)
 
-`f() { cat <<E; }; f` + body + `E` reported `here-doc: missing terminating
-delimiter line 'E'` (rc 1) where bash prints `body` at rc 0. The multi-line form
-was green, and that is exactly what made the branch look right: a multi-line
-definer's delimiter lines sit **inside** its span, while a `;`-terminated
-operator's regions start **past** the closing brace, and nothing claimed them.
-Two halves, one owner each, and neither is new:
+`f() { cat <<E; }; f` + body + `E` reports
+`here-doc: missing terminating delimiter line 'E'` (rc 1) where bash prints
+`body` at rc 0. The multi-line form was green — its delimiter lines sit
+**inside** its span — while a `;`-terminated operator's regions start **past**
+the closing brace, and nothing claimed them. Two halves, one owner each, and
+neither is new:
 
 - `segment/block/claim.rs` — the append/extension claim the keyword branch
-  inlined is now one function both block branches call (`claimed_bodies`: the
-  window-blind `k`, `claimed_line_bodies`, the `first.start >= end`
-  discriminator, the forward-only extension). The definer branch's
-  `resume`/`floor` bookkeeping **already** treated those regions as claimed
-  (task #240's fix), so the claim adds only the delivery — pin the five
-  `scan_*function*` pins unchanged, plus the extension-mode pin
-  `scan_multi_line_function_body_claims_no_bodies`: that set is what proves the
-  claim never moves the scan's cursor arithmetic.
+inlined is now one function both block branches call (`claimed_bodies`: the
+window-blind `k`, `claimed_line_bodies`, the `first.start >= end`
+discriminator, the forward-only extension). The definer branch's
+`resume`/`floor` bookkeeping **already** treated those regions as claimed
+(task #240's fix), so the claim adds only the delivery — pin the five
+`scan_*function*` pins unchanged, plus the extension-mode pin
+`scan_multi_line_function_body_claims_no_bodies`: that set is what proves the
+claim never moves the scan's cursor arithmetic.
 - `parse/function_block.rs` — the stored body is built with `parse/part_text`,
-  the arm-granularity rule every block arm already uses (#238/#273): append mode
-  slices the body text and appends `\n` + the claimed bytes, extension mode stays
-  verbatim. The definer builder was the last block body using `verbatim`; task
-  **#315** landed the same rule on the group (`parse/group_block.rs`), the third
-  block branch, with `segment/block/claim.rs` as its reuse point.
+the arm-granularity rule every block arm already uses (#238/#273): append mode
+slices the body text and appends `\n` + the claimed bytes, extension mode
+stays verbatim. The definer builder was the last block body using `verbatim`;
+the group (`parse/group_block.rs`) is the third block branch and carries the
+same rule, with `segment/block/claim.rs` as its reuse point (task #315).
 
-**The stored body is a script, so the append is what makes the capture re-usable
-per call**: the body text `cat <<E\nbody\nE\n` re-runs on every call (a
-called-in-a-loop function prints the body every iteration) — the same fact bash
-reaches by parsing the input once. `block_body` trims the body line's `;`, so the
-stored text is `cat <<E` + the region and **not** `cat <<E;` + the region: pin the
-bytes, not the shape you expected.
+**The stored body is a script, so the append is what makes the capture
+re-usable per call**: the body text `cat <<E\nbody\nE\n` re-runs on every call
+(a called-in-a-loop function prints the body every iteration) — the same fact
+bash reaches by parsing the input once. `block_body` trims the body line's
+`;`, so the stored text is `cat <<E` + the region and **not** `cat <<E;` + the
+region: pin the bytes, not the shape you expected.
 
-**Body regions are blanked, terminator lines are not — that asymmetry decides the
-closer search.** `tokenize_statement` blanks a **body** region's words (task
-#266), so a `}`/`{`/`done` line written inside a body is data and the definer's
-`rposition` brace search stays right. A **terminator** line's words stay tokens by
-the same rule, which is why the def builder must **not** move to
-`semi::closing_keyword_index`: measured, that walk closes the definition on a
-delimiter word. The delimiter-word-is-a-brace family (`f() { cat <<}; }; f`) is
-broken on master already and stays **#432**'s — it needs region-aware truncation
-shared by `parse/semi/closing` and `parse/function_block`, not a second token-list
-walk.
+**Body regions are blanked, terminator lines are not — that asymmetry decides
+the closer search.** `tokenize_statement` blanks a **body** region's words
+(task #266), so a `}`/`{`/`done` line written inside a body is data and the
+definer's `rposition` brace search stays right. A **terminator** line's words
+stay tokens by the same rule, which is why the def builder must **not** move
+to `semi::closing_keyword_index`: measured, that walk closes the definition on
+a delimiter word. The delimiter-word-is-a-brace family (`f() { cat <<}; }; f`)
+is broken on master already and stays **#432**'s — it needs region-aware
+truncation shared by `parse/semi/closing` and `parse/function_block`, not a
+second token-list walk.
 
-**The group adds one consumer the definer never had: its tail.** `parse/group_block.rs`
-parses the words written **after** `}`, so the appended region's heredoc structure lands
-right where the tail analysis looks: a **body** region's words are blanked and a
-**terminator** line's words stay (#266's asymmetry), so the delimiter word and the
-newlines around the region are tokens and `tail::redirects` bails `GroupTrailingWord`
-on them. The cut is the newline the append inserts **before** the first claimed region —
-every token at/after it is heredoc structure, and every pinned tail message
-(`GroupHereDocNotSupported`, `UnexpectedPipe`, the `&`, `} > out`) survives because its
-word starts **before** that newline. The `block_body` terminator trim follows the same
-discriminator: trim only when the mode is **not** extension, because in extension mode
-the slice's **last token** is what makes `verbatim` cover the region, and trimming the
-bracketing `;` truncates the body text at the operator.
+**The group adds one consumer the definer never had: its tail.**
+`parse/group_block.rs` parses the words written **after** `}`, so the appended
+region's heredoc structure lands right where the tail analysis looks: a
+**body** region's words are blanked and a **terminator** line's words stay
+(#266's asymmetry), so the delimiter word and the newlines around the region
+are tokens and `tail::redirects` bails `GroupTrailingWord` on them. The cut is
+the newline the append inserts **before** the first claimed region — every
+token at/after it is heredoc structure, and every pinned tail message
+(`GroupHereDocNotSupported`, `UnexpectedPipe`, the `&`, `} > out`) survives
+because its word starts **before** that newline. The `block_body` terminator
+trim follows the same discriminator: trim only when the mode is **not**
+extension, because in extension mode the slice's **last token** is what makes
+`verbatim` cover the region, and trimming the bracketing `;` truncates the
+body text at the operator.
 
 **A claimed region is re-scannable text only for the scan that owns it.** A
-keyword block written **behind** the definition on the same line ended its line
-with `floor = 0` and a resume of its own, dropping the definer's floor, and the
-body lines came back as commands (`f() { cat <<E; }; if :; then f; fi` printed
-`body` as a command, rc 1 — measurable on master with a `cat <<E` in place of the
-definer). `Book::rewind` now takes a `line_ends` flag: a block that ends its line
-floors its resume with the floor the line already carries, a block with trailing
-content on its line keeps its own resume (that text is commands, never a region),
-and the floor a block leaves is the deeper of the two. Put the rule where the
-cursor moves, not in the branch that computes the resume — the block and the group
-callers share it. **Each caller must state its own mode, not the friendliest
-one:** the group's span ends the **statement** it opens, so a group behind a
-region-claiming block (`if :; then cat <<E; fi; { :; }; echo t`) has a statement
-after its own `;`, and passing the flag as always-true dropped that statement
-(bash prints `t`; the group caller derives the flag from its own span end and the
-physical line). The statement-level twin `cat <<E; { :; }; echo t` drops the
-statement on master too and stays **#332**'s.
+keyword block written **behind** the definition on the same line ended its
+line with `floor = 0` and a resume of its own, dropping the definer's floor,
+and the body lines came back as commands (`f() { cat <<E; }; if :; then f; fi`
+printed `body` as a command, rc 1). `Book::rewind` now takes a `line_ends`
+flag: a block that ends its line floors its resume with the floor the line
+already carries, a block with trailing content on its line keeps its own
+resume (that text is commands, never a region), and the floor a block leaves
+is the deeper of the two. Put the rule where the cursor moves, not in the
+branch that computes the resume — the block and the group callers share it.
+**Each caller must state its own mode, not the friendliest one:** the group's
+span ends the **statement** it opens, so a group behind a region-claiming
+block (`if :; then cat <<E; fi; { :; }; echo t`) has a statement after its own
+`;`, and passing the flag as always-true dropped that statement (bash prints
+`t`; the group caller derives the flag from its own span end and the physical
+line). The statement-level twin `cat <<E; { :; }; echo t` drops the statement
+and stays **#332**'s.
 
-**In a shared module, record the arm one caller cannot reach instead of padding a
-test for it** (#311's rule): the extension arm of `claimed_bodies` never moves the
-**function** branch's `end`, because `scan_brace_block` skips a heredoc region
-whole and so the definer's closer is always past the region's end. The
-keyword-branch pins cover the arm; the function branch's pin asserts the mode
-(no bodies, span unchanged).
+**In a shared module, record the arm one caller cannot reach instead of
+padding a test for it** (#311's rule): the extension arm of `claimed_bodies`
+never moves the **function** branch's `end`, because `scan_brace_block` skips
+a heredoc region whole and so the definer's closer is always past the region's
+end. The keyword-branch pins cover the arm; the function branch's pin asserts
+the mode (no bodies, span unchanged).
 
-**Measure the neighbours of the shape you fix — a plan's expectation column is a
-hypothesis.** Six rows the plan expected to reach parity did not, and each keeps
-its owner: the loop row's rc 1 is fdshell's `while` reporting the failing
-condition (measured on master with a plain body), a command-not-found is rc 1 here
-and 127 in bash, `{ cat <<E; }` and the nested `f() { { cat <<E; }; }` were
-**#315**'s (both closed 2026-10-25), `f() { …; }; f | cat` is **#182**'s, the starved first operator
-(`f() { cat <<E; }; f` + body, no delimiter line) is **#429**'s, and a def-prefix
-redirection (`f() <<E { cat <<G; }`) flips from rc 1 to printing the def body at
-rc 0 where bash rejects the syntax at rc 2 — task **#433**, filed by this one
-(**#180** is the accepted *trailing* form, `f(){ …; } > a`). Pin each as a
-measured divergence with the bash value beside it; the def-prefix row in
-particular reads as a fix and is a widening.
+**Measure the neighbours of the shape you fix — a plan's expectation column is
+a hypothesis.** Six rows a plan expected to reach parity did not, and each
+keeps its owner: the loop row's rc 1 is fdshell's `while` reporting the
+failing condition, a command-not-found is rc 1 here and 127 in bash,
+`{ cat <<E; }` and the nested `f() { { cat <<E; }; }` were **#315**'s (both
+closed 2026-10-25), `f() { …; }; f | cat` is **#182**'s, the starved first
+operator (`f() { cat <<E; }; f` + body, no delimiter line) is **#429**'s, and
+a def-prefix redirection (`f() <<E { cat <<G; }`) prints the def body at rc 0
+where bash rejects the syntax at rc 2 — task **#433** (**#180** is the
+accepted *trailing* form, `f(){ …; } > a`). Pin each as a measured divergence
+with the bash value beside it; the def-prefix row in particular reads as a fix
+and is a widening.
 
 ## A word-list rule lives at **two granularities**: the builder's `List`, and the byte scans' place **plus seed** (task #306)
 
-`for i in done; do echo x; break; done; echo after` was `expected 'do'` (rc 1) where bash prints
-`x` / `after` (rc 0). The rule — *no keyword scores in a `for` word list* — already existed at the
-token/builder level (`parse/semi/closing::List::Words`, task **#273**), and #273's own lesson said
-so: "the byte-level scans (`segment/`, `scan/`) do not know the list rule yet". They run **first**,
-so the builder never saw the text: `segment/block/keyword.rs` seeds `comment::scan_block` just past
-the `for`, the first run ` i in done` maps `in` to `Place::Pattern` (where a closer **does** score,
-as `case x in esac` needs), `done` scores `-1`, and the span ends at the list word. The same place
-machine drives `cond/boundary/block::word_delta` (the run split) and `parse/semi/closing` (a nested
-list word closes an **enclosing** block). **A rule fixed at one granularity is a divergence at the
-other**; put it in the shared place machine, not in one scan.
+`for i in done; do echo x; break; done; echo after` was `expected 'do'` (rc 1)
+where bash prints `x` / `after` (rc 0). The rule — *no keyword scores in a
+`for` word list* — already existed at the token/builder level
+(`parse/semi/closing::List::Words`, task **#273**); the byte-level scans run
+**first**, so the builder never saw the text: `segment/block/keyword.rs` seeds
+`comment::scan_block` just past the `for`, the first run ` i in done` maps
+`in` to `Place::Pattern` (where a closer **does** score, as `case x in esac`
+needs), `done` scores `-1`, and the span ends at the list word. The same place
+machine drives `cond/boundary/block::word_delta` (the run split) and
+`parse/semi/closing` (a nested list word closes an **enclosing** block). **A
+rule fixed at one granularity is a divergence at the other**; put it in the
+shared place machine, not in one scan.
 
-**The list kind is the opener's fact, never `in`'s.** `in` is shared by the `case` pattern list
-(`esac` terminates it) and the `for` word list (nothing scores), and it cannot see which block it
-belongs to — so re-gating `in` is impossible. The row is `for` in **command** position →
-`Place::Words`, one of four places of the machine, and the place is **sticky**: only a separator
-word (`;`, `&&`, `||`, `&`, a paren) or the list's own `do` leaves it. `Command`-only matters: a
-`for` in a `case` list stays a pattern word, and the arith `for ((…))` reaches the row as the
-single glued word `for((…))` and never matches.
+**The list kind is the opener's fact, never `in`'s.** `in` is shared by the
+`case` pattern list (`esac` terminates it) and the `for` word list (nothing
+scores), and it cannot see which block it belongs to — so re-gating `in` is
+impossible. The row is `for` in **command** position → `Place::Words`, one of
+four places of the machine, and the place is **sticky**: only a separator word
+(`;`, `&&`, `||`, `&`, a paren) or the list's own `do` leaves it.
+`Command`-only matters: a `for` in a `case` list stays a pattern word, and the
+arith `for ((…))` reaches the row as the single glued word `for((…))` and
+never matches.
 
-**The block's own list needs a seed; a nested one needs the row — measure both halves.** The scan
-starts *after* the opener, so no opener word is in the scanned text: `segment/block/keyword.rs` and
-`segment/block/midrun.rs` seed `Place::Words` for a `for` opener, using the `FOR_LEN` the opener
-scan already measured (derived from `b"for".len()`, no second keyword table). Seeding alone left the
-nested rows broken (`while :; do for i in done; …`), the row alone left the top-level rows broken.
-The seed is read by the **first run only** — a word list never crosses a separator, so the block's
-body runs start at command position again. That boundary is also the blast-radius bound:
-`if done; then echo T; fi` and `while done; do echo W; break; done` keep their messages, which is
-exactly the pair that kills the `kw_len == FOR_LEN` `!=` mutant (it would seed every block as a
-list).
+**The block's own list needs a seed; a nested one needs the row — measure both
+halves.** The scan starts *after* the opener, so no opener word is in the
+scanned text: `segment/block/keyword.rs` and `segment/block/midrun.rs` seed
+`Place::Words` for a `for` opener, using the `FOR_LEN` the opener scan already
+measured (derived from `b"for".len()`, no second keyword table). Seeding alone
+left the nested rows broken (`while :; do for i in done; …`), the row alone
+left the top-level rows broken. The seed is read by the **first run only** — a
+word list never crosses a separator, so the block's body runs start at command
+position again. That boundary is also the blast-radius bound:
+`if done; then echo T; fi` and `while done; do echo W; break; done` keep their
+messages, which is exactly the pair that kills the `kw_len == FOR_LEN` `!=`
+mutant (it would seed every block as a list).
 
-**Gate the list on places, not on words, and keep the two lists asymmetric on purpose:** at
-`Place::Words` nothing scores — no opener, no closer, **no brace** (bash reads `for i in { 1 2` and
-`for i in }` as words). The brace gate is list-only; the accepted body divergence of
-`tests/group.rs::literal_brace_argument_in_a_block_body` stays ungated. `Place::Pattern` keeps
-scoring `esac`, so `case x in esac` stays a complete `case` and the `case` seed stays **#310**'s.
-Write the pins that *name* the divergence (`…_until_310`,
-`tests/block_redirect.rs::closer_shaped_words_stay_word_data`) so they **flip**: they flipped, and
-that is how the parity rows were recognised as real. The family grows accepted-divergent in the
-same direction: a closer-shaped list word glued to an operator (`for x in done>f; do echo A;
-done>f2`) is word data, so fdshell runs at rc 0 what bash rejects at rc 2 — measured and pinned
-beside `tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`; rejecting them instead
-would have kept every parity row broken.
+**Gate the list on places, not on words, and keep the two lists asymmetric on
+purpose:** at `Place::Words` nothing scores — no opener, no closer, **no
+brace** (bash reads `for i in { 1 2` and `for i in }` as words). The brace
+gate is list-only; the accepted body divergence of
+`tests/group.rs::literal_brace_argument_in_a_block_body` stays ungated.
+`Place::Pattern` keeps scoring `esac`, so `case x in esac` stays a complete
+`case` and the `case` seed stays **#310**'s. Write the pins that *name* the
+divergence (`…_until_310`,
+`tests/block_redirect.rs::closer_shaped_words_stay_word_data`) so they
+**flip**: the flip is how the parity rows were recognised as real. The family
+grows accepted-divergent in the same direction: a closer-shaped list word
+glued to an operator (`for x in done>f; do echo A; done>f2`) is word data, so
+fdshell runs at rc 0 what bash rejects at rc 2 — measured and pinned beside
+`tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`; rejecting
+them instead would have kept every parity row broken.
 
-**Mechanics notes.** Budget the 90 LoC of a shared machine **before** writing rows into it: with
-the new rows `keywords/position.rs` measured 95, so the plan moved the gate to
-`keywords/position/score.rs` (importers unchanged) — run `python3 tools/complexity.py` on the
-draft, not after the commit. When a split moves an item into a child module, **spell its reach**:
-`pub(super)` in the new file is `pub(in <parent>)`, one level narrower than the same token in the
-parent, so the tokenizer `State` that moved to `parse/token/state.rs` (task #439) had to be spelled
-`pub(in crate::parse)` — its `impl State` blocks live in the `crate::parse` *siblings* of
-`parse/token.rs` — and `parse/token.rs` then re-exports it (`pub(super) use state::State;`) so every
-importer path, `parse/token/*` and `parse/*` alike, stays unchanged. Rust rejects the re-export of
-the narrower item (`E0365`), which is the check that catches the mistake; a plan that assumes
-"`pub(super)` means the same thing in the child" does not compile. And in a byte-level pin, index
-the word's **first byte**:
-`keywords::first_word_end` breaks at whitespace **and** `;`, so an index landing on the separator
-scores the **empty** word, which every place machine maps to a command start — an assertion that
-passes for that reason kills no mutant (this task's own `for i in done; do` rows had two).
+**Mechanics notes.** Budget the 90 LoC of a shared machine **before** writing
+rows into it: with the new rows `keywords/position.rs` measured 95, so the
+gate moved to `keywords/position/score.rs` (importers unchanged) — run
+`python3 tools/complexity.py` on the draft, not after the commit. When a split
+moves an item into a child module, **spell its reach**: `pub(super)` in the
+new file is `pub(in <parent>)`, one level narrower than the same token in the
+parent, so the tokenizer `State` that moved to `parse/token/state.rs` (task
+#439) had to be spelled `pub(in crate::parse)` — its `impl State` blocks live
+in the `crate::parse` *siblings* of `parse/token.rs` — and `parse/token.rs`
+then re-exports it (`pub(super) use state::State;`) so every importer path,
+`parse/token/*` and `parse/*` alike, stays unchanged. Rust rejects the
+re-export of the narrower item (`E0365`), which is the check that catches the
+mistake; a plan that assumes "`pub(super)` means the same thing in the child"
+does not compile. And in a byte-level pin, index the word's **first byte**:
+`keywords::first_word_end` breaks at whitespace **and** `;`, so an index
+landing on the separator scores the **empty** word, which every place machine
+maps to a command start — an assertion that passes for that reason kills no
+mutant (this task's own `for i in done; do` rows had two).
 
 ## A tool that skips every `target/` directory mis-resolves source references (task #441)
 
