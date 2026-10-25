@@ -3,6 +3,19 @@ experimental = ["wrapper-scripts"]
 [profile.default]
 slow-timeout = { period = "10s", terminate-after = 1 }
 
+# The `times` children-CPU burn's wall time is its CPU divided by its share of
+# the machine, and one slow-timeout kill of ANY test is a false kill of every
+# mutant in the copy (LESSONS: "A mutant caught by a flaky test is a false
+# kill"). Keep the 10 s "slow" period — the suite bounds itself by it
+# (`safe/fdshell/tests/loops.rs::run_bounded` bounds its child at 5 s because
+# the kill sits at 10 s; `safe/fdshell/tests/ignoreeof.rs` and
+# `safe/fdshell/src/repl/line.rs` size against it) — and widen only the kill
+# (10 s -> 40 s), for this one test: 8 concurrent suite runs (the
+# `cargo mutants -j8` profile, 32 cores) measured it at 0.33-3.99 s.
+[[profile.default.overrides]]
+filter = 'test(times_children_total_time_increases_after_wait)'
+slow-timeout = { period = "10s", terminate-after = 4 }
+
 # Cap each test binary at 128MB of virtual address space (RLIMIT_AS).
 # Allocation failures abort the test cleanly instead of tripping the host
 # OOM killer, which filters out infinite-allocation mutants (e.g. in semi.rs).

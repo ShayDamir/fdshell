@@ -50,11 +50,25 @@ fn times_value_lines_are_centiseconds() {
 /// After burning CPU in a backgrounded child and `wait`ing on it, the children's
 /// *total* CPU time (user + system) is > 0.00. Which of the two fields a reaped
 /// child's CPU lands in is the kernel's accounting choice, so the assertion is
-/// on the sum, never on user alone (LESSONS.md: "A CPU-burn timing test measures
+/// on the sum, never on user alone (LESSONS: "A CPU-burn timing test measures
 /// nothing in a release build").
+///
+/// The loop bound is sized by two floors, not by the assertion (any non-zero sum
+/// passes it): the `centis` print floor — one field prints `0.00` below 100 µs,
+/// the printed sum only below ~200 µs — and the nextest `slow-timeout` margin,
+/// since a `slow-timeout` kill under a loaded `cargo mutants` sweep is a *false*
+/// kill of every mutant in the copy (LESSONS: "A mutant caught by a flaky test
+/// is a false kill"; the load figures are in the #267 bullet of "A CPU-burn timing
+/// test measures nothing in a release build"). 500 iterations, 10 runs per
+/// profile, children line in centiseconds: debug `5.65`–`7.19` user +
+/// `0.73`–`1.36` system, release `3.73`–`4.24` user + `0.28`–`0.50` system —
+/// worst field `0.28` = 2800 µs, 28× the per-field print floor. The
+/// 5000-iteration burn this replaces needed 25.8–26.4 s of wall in 8 concurrent
+/// suite runs and so died at the 10 s period; `.config/nextest.toml` widens this
+/// test's kill, never the period.
 #[test]
 fn times_children_total_time_increases_after_wait() {
-    let out = run("n=0; while [ $n -lt 5000 ]; do n=$((n+1)); done &>&j; wait $!; times");
+    let out = run("n=0; while [ $n -lt 500 ]; do n=$((n+1)); done &>&j; wait $!; times");
     let stdout = str::from_utf8(&out.stdout).unwrap();
     // The children value line is the last numeric line: `<user>\t<sys>` in
     // centiseconds. Both fields are read so the assertion below is on their sum:
