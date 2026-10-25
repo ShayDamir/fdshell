@@ -607,13 +607,57 @@ Task #284 makes `cd`'s operand expand: `cd $V`, `cd "$@"`, `cd ~`, `cd "$(echo s
 
 ## Four mutants of `scan/heredoc/ops.rs` are equivalent, and one neighbour of `lines.rs` is (accepted, do not chase)
 
-The `<<` operator scan walks the run with `advance`-driven bounds, and four of its mutants are unobservable. Recorded so future mutant runs do not re-flag them. Verify them with a **focused** `cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs --iterate` run: this file's build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores them as *caught* (the per-mutant timeout expires before the mutant is tested) — the sweep's count is not the truth for this file.
+The `<<` operator scan walks the run with `advance`-driven bounds, and four of
+its mutants are unobservable. Recorded so future mutant runs do not re-flag them.
+Verify with a **focused**
+`cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs --iterate` run: this file's
+build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores
+them as *caught* (the per-mutant timeout expires before the mutant is tested) —
+the sweep's count is not the truth for this file.
 
-1. `ops.rs` `while i < to` → `i <= to`, and `while i < next` → `i <= next` — the extra iteration processes one word-break byte (`\n`, `;`, `|`, space, or EOF) that `advance` classifies identically, so `seen_token`/`word_start` and the operator list are unchanged: at `i == to` the read is `line.get(i) == None`, no token byte, so the flag cannot change. Recorded coordinates drift as the file gains helpers and doc comments, so re-derive them from the loop rather than trusting the line numbers. Task #266's focused run reported the `while i < next` arm as its **only** miss — the recorded equivalent, not a new finding (that commit widened `sites` to `pub(crate)` and reused it **unchanged** for the window-blind count in `scan/heredoc/opaque.rs`, precisely so this record stays valid: a recorded-equivalent mutant on a rewritten body is a new finding the next sweep must re-prove, and the gate is the focused run reporting **only recorded equivalents** as misses).
-2. `ops.rs` `while k > 0` → `k >= 0` (the `precedes_pipe` walk back to the `|`) — the extra step reads `line.get(0)` after `k` has been decremented to 0. Under the `seen_token` guard a word-start `<<` can never be preceded only by spaces (all bytes before it would have to be whitespace, which makes `seen_token` false), so the loop always returns from the body before `k` reaches 0 and the extra step is unreachable.
-3. `ops.rs` `i = i + p + 1` → `i + p * 1` (the comment skip lands on the comment's `\n` instead of just past it) is **equivalent**: `p` is the offset of the first `\n` from `i`, so the landing byte is always that `\n`, and the loop's next iteration can only fall through to `state.advance(line, i)` (the `#` arm needs `#`, the `<<` arm needs `<`), which consumes the `\n` as one word-break byte and clears `word_active` — the state the comment arm already had, since `!state.word_active` gates it. So `seen_token`, `word_start` and the operator list are identical, at the run start as everywhere else. An earlier version of this entry claimed the mutant was killable by `comment_at_run_start_skips_its_text`; that claim did not match the tree — the focused, timeout-safe run reports it MISSED, applying the mutation by hand leaves the whole suite green, and a 17-case comment+heredoc probe (comment at the run start, before `<<`, inside a run, the `<<'Q'` forms, comment + pipeline) shows no stdout/stderr/rc difference. **Rule:** for an "unobservable because the byte lands on a word break" claim, check that the loop's only fall-through is `advance` for that byte — and prove it by applying the mutation and running the suite, not by reasoning about one position.
-4. `scan/heredoc/lines.rs` has **three** loop-bound mutants of this class, each proven equivalent by applying it and running the whole suite green: `word_span`'s `while k < to` — the extra step reads `line.get(k)` past `to`, which is `None`, and `k.saturating_add(1).min(to)` clamps to `to`, so a span that runs to the run end ends at the same index; `delimiter_span`'s whitespace skip — at `j == to` the body condition reads `line.get(to) == None`, which is not a space/tab, so the extra bound is never entered; `first_unquoted_newline`'s `while i < line.len()` — at `i == line.len()` the newline test fails and `advance` returns `i + 1` with the local state left unread (the function returns `None` either way).
-
+1. `ops.rs` `while i < to` → `i <= to`, and `while i < next` → `i <= next` — the
+   extra iteration processes one word-break byte (`\n`, `;`, `|`, space, or EOF)
+   that `advance` classifies identically, so `seen_token`/`word_start` and the
+   operator list are unchanged: at `i == to` the read is
+   `line.get(i) == None`, no token byte, so the flag cannot change. Coordinates
+   drift as the file gains helpers and doc comments, so re-derive them from the
+   loop rather than trusting line numbers. The `sites` list is `pub(crate)` and is
+   reused **unchanged** for the window-blind count in `scan/heredoc/opaque.rs`,
+   precisely so this record stays valid: a recorded-equivalent mutant on a
+   rewritten body is a **new** finding the next sweep must re-prove, and the gate
+   is the focused run reporting **only recorded equivalents** as misses.
+2. `ops.rs` `while k > 0` → `k >= 0` (the `precedes_pipe` walk back to the `|`) —
+   the extra step reads `line.get(0)` after `k` has been decremented to 0. Under
+   the `seen_token` guard a word-start `<<` can never be preceded only by spaces
+   (all bytes before it would have to be whitespace, which makes `seen_token`
+   false), so the loop always returns from the body before `k` reaches 0 and the
+   extra step is unreachable.
+3. `ops.rs` `i = i + p + 1` → `i + p * 1` (the comment skip lands on the comment's
+   `\n` instead of just past it) is **equivalent**: `p` is the offset of the first
+   `\n` from `i`, so the landing byte is always that `\n`, and the loop's next
+   iteration can only fall through to `state.advance(line, i)` (the `#` arm needs
+   `#`, the `<<` arm needs `<`), which consumes the `\n` as one word-break byte
+   and clears `word_active` — the state the comment arm already had, since
+   `!state.word_active` gates it. So `seen_token`, `word_start` and the operator
+   list are identical, at the run start as everywhere else. The claim that
+   `comment_at_run_start_skips_its_text` kills it did not match the tree: the
+   focused, timeout-safe run reports it MISSED, applying the mutation by hand
+   leaves the whole suite green, and a comment+heredoc probe (comment at the run
+   start, before `<<`, inside a run, the `<<'Q'` forms, comment + pipeline) shows
+   no stdout/stderr/rc difference. **Rule:** for an "unobservable because the byte
+   lands on a word break" claim, check that the loop's only fall-through is
+   `advance` for that byte — and prove it by applying the mutation and running the
+   suite, not by reasoning about one position.
+4. `scan/heredoc/lines.rs` has **three** loop-bound mutants of this class, each
+   proven equivalent by applying it and running the whole suite green:
+   `word_span`'s `while k < to` — the extra step reads `line.get(k)` past `to`,
+   which is `None`, and `k.saturating_add(1).min(to)` clamps to `to`, so a span
+   that runs to the run end ends at the same index; `delimiter_span`'s whitespace
+   skip — at `j == to` the body condition reads `line.get(to) == None`, which is
+   not a space/tab, so the extra bound is never entered; `first_unquoted_newline`'s
+   `while i < line.len()` — at `i == line.len()` the newline test fails and
+   `advance` returns `i + 1` with the local state left unread (the function returns
+   `None` either way).
 ## A delimiter word is a word: quote removal strips every quote byte, not one surrounding pair
 
 `<<a'b'c` must delimit `abc`, as bash does (task #207). The delimiter text is built from **raw line bytes**, so it is the one word the shell does not take from the tokenizer — and it had its own private quoting rules: `Operator::new` folded escape pairs with `bytes/fold.rs::fold` (which keeps the quote bytes) and then `scan/heredoc/lines.rs::delimiter_word` stripped **one surrounding pair**, so `<<'x'y'z'`, `<<ab'c'`, `<<""Q"x"`, `<<a"b c"d` kept quote bytes, their terminator lines never matched, and the delimiter's quoting never reached the body's expand/literal flag. All three rules are now decided in `Operator::new` (shared by the byte scanner and the token parser, so the two levels cannot diverge):
@@ -1428,20 +1472,74 @@ The gate on the region rule (task #304). A heredoc **body region** carried by a 
 
 ## Only the identity `+ 1` mutants survive in the cond-boundary region rule
 
-The survivors in `cond/boundary/body.rs` are the **identity** mutation of a `+ 1` term:
+The survivors in `cond/boundary/body.rs` are the **identity** mutation of a
+`+ 1` term:
 
-1. `line_bodies_for_line(line, anchor, nl + 1)` — the `+`→`*` mutant is `nl * 1`, the identity, and no input **the program can produce** distinguishes it: the difference needs an unterminated quote in the delimiter word (e.g. `cat <<'a b` + `a b`, where the raw window end decides the match — `nl` finds the raw delimiter `a b`, `nl + 1` matches `a b\n` and never a delimiter line), and the parse layer rejects the unmatched quote before the cond layer ever sees such a text; so this is a program-level equivalence, not a helper-level invariant. Same accepted species as `parse/cond_bodies.rs`'s `n + 1` → `n * 1` in LESSONS: "A region window and the skip derived from it are one pair". Its `+`→`-` twin, a real shift of the window's end, is **killed** (measured). Task #304 moved the window expression out of `regions` into `cond/boundary/body.rs::window`; the mutant stays missed there for the same reason: the byte at `nl` is the run's terminating newline, and the window's `to` bound only *discovers* `<<` sites, so no site starts there.
-2. `line_start_of`'s `.map(|p| p + 1)` — `+`→`*` is again the identity. A run taken while the review's pins were still landing listed it *caught*: that is the load flakiness the entry "A mutant caught by a flaky test is a false kill" warns about (measured quietly twice on the mutated tree, the whole suite passes), so it is accepted-equivalent, not killed. Its `+`→`-` twin **is** killed, by `cond/boundary/body/tests.rs::region_window_is_the_runs_own_physical_line`: at `p == 0` the mutation computes `0 - 1` in `usize` — a debug panic, and in release `line.get(0..usize::MAX)` is `None`, so the anchor collapses to `0` and the window widens. The same test kills the helper's literal mutants `→ 0` and `→ 1`: the anchor is the run's **own physical line**, and widening it to the text start drags an earlier line's unterminated heredoc into the region list (the helper's missing-delimiter path empties the list, so the body stops being opaque), while a window starting one byte right stops recognizing a `<<` that opens its line after a word break.
-3. `operator_in_region`'s `while i < end` — `<`→`<=` is unkillable: a region's `end` is the end of its **delimiter line**, so `line[end]` is the newline that closes the region (or nothing, at the end of the text) — a byte that can never be the first of an `&&` / `||` pair, so the scan answers identically. The bound *is* the region's rule, so it stays; this is the "a ±1 offset is equivalent when the byte it lands on can never match the needle" species.
+1. `line_bodies_for_line(line, anchor, nl + 1)` — the `+`→`*` mutant is `nl * 1`,
+   the identity, and no input **the program can produce** distinguishes it: the
+   difference needs an unterminated quote in the delimiter word (e.g. `cat <<'a b`
+   + `a b`, where the raw window end decides the match — `nl` finds the raw
+   delimiter `a b`, `nl + 1` matches `a b\n` and never a delimiter line), and the
+   parse layer rejects the unmatched quote before the cond layer ever sees such a
+   text; so this is a program-level equivalence, not a helper-level invariant.
+   Same accepted species as `parse/cond_bodies.rs`'s `n + 1` → `n * 1`
+   (LESSONS: "A region window and the skip derived from it are one pair"). Its `+`→`-` twin,
+   a real shift of the window's end, is **killed** (measured). The mutant sits in
+   `cond/boundary/body.rs::window` after the window expression moved out of
+   `regions`, and stays missed there for the same reason: the byte at `nl` is the
+   run's terminating newline, and the window's `to` bound only *discovers* `<<`
+   sites, so no site starts there.
+2. `line_start_of`'s `.map(|p| p + 1)` — `+`→`*` is again the identity. A loaded
+   mutation run listed it *caught*: that is the flakiness the entry "A mutant
+   caught by a flaky test is a false kill" warns about (measured quietly twice on
+   the mutated tree, the whole suite passes), so it is accepted-equivalent, not
+   killed. Its `+`→`-` twin **is** killed, by
+   `cond/boundary/body/tests.rs::region_window_is_the_runs_own_physical_line`: at
+   `p == 0` the mutation computes `0 - 1` in `usize` — a debug panic, and in
+   release `line.get(0..usize::MAX)` is `None`, so the anchor collapses to `0` and
+   the window widens. The same test kills the helper's literal mutants `→ 0` and
+   `→ 1`: the anchor is the run's **own physical line**, and widening it to the
+   text start drags an earlier line's unterminated heredoc into the region list
+   (the helper's missing-delimiter path empties the list, so the body stops being
+   opaque), while a window starting one byte right stops recognizing a `<<` that
+   opens its line after a word break.
+3. `operator_in_region`'s `while i < end` — `<`→`<=` is unkillable: a region's
+   `end` is the end of its **delimiter line**, so `line[end]` is the newline that
+   closes the region (or nothing, at the end of the text) — a byte that can never
+   be the first of an `&&` / `||` pair, so the scan answers identically. The bound
+   *is* the region's rule, so it stays; this is the "a ±1 offset is equivalent
+   when the byte it lands on can never match the needle" species.
 
-**Killed** (verified on the hand-mutated tree): the pair test's successor read `line.get(i + 1)` — `+`→`*` compares a byte with *itself*, so every *lone* `&` (a background, a `&>` redirect) and every lone `|` (a pipe stage) becomes an operator — and each conjunct of the scan's top-level test, where `&&`→`||` loosens exactly one state (a double quote, a single quote, a backtick). Pins: `cond/boundary/body/tests.rs::a_lone_ampersand_or_pipe_in_a_scanned_region_is_data` and `an_operator_inside_a_quote_or_substitution_is_data`. **Rule for this shape:** an operator test that reads a successor byte must be pinned at the *lone* byte — passing on a real `&&` says nothing about a scan that never reads the successor.
+**Killed** (verified on the hand-mutated tree): the pair test's successor read
+`line.get(i + 1)` — `+`→`*` compares a byte with *itself*, so every *lone* `&` (a
+background, a `&>` redirect) and every lone `|` (a pipe stage) becomes an
+operator — and each conjunct of the scan's top-level test, where `&&`→`||`
+loosens exactly one state (a double quote, a single quote, a backtick). Pins:
+`cond/boundary/body/tests.rs::a_lone_ampersand_or_pipe_in_a_scanned_region_is_data`
+and `an_operator_inside_a_quote_or_substitution_is_data`. **Rule for this shape:**
+an operator test that reads a successor byte must be pinned at the *lone* byte —
+passing on a real `&&` says nothing about a scan that never reads the successor.
 
-A sweep residual that outlives the new pins is usually pre-existing code, not the new module: the sites left outside the touched files were `cond/boundary/gate.rs` (`b == b'\n'` → `!=`, the region rule consulted at every byte) and `scan/heredoc/ops.rs` (`while i < next` → `<=`, one `advance` past the delimiter word) — filed as task #431 with the probes that failed to kill them.
+A sweep residual that outlives the new pins is usually pre-existing code, not the
+new module: the sites left outside the touched files were
+`cond/boundary/gate.rs` (`b == b'\n'` → `!=`, the region rule consulted at every
+byte) and `scan/heredoc/ops.rs` (`while i < next` → `<=`, one `advance` past the
+delimiter word) — tracked as task #431 with the probes that failed to kill them.
 
-**Rule:** the only `+ 1` mutant accepted here is the identity. A "±1 offset is equivalent" claim must name the byte the offset lands on and prove the scan treats it identically; for this helper the offsets *do* change the window, and the pins above prove it.
+**Rule:** the only `+ 1` mutant accepted here is the identity. A "±1 offset is
+equivalent" claim must name the byte the offset lands on and prove the scan treats
+it identically; for this helper the offsets *do* change the window, and the pins
+above prove it.
 
-The review's third finding was not an equivalence but dead code: the old `regions()` ended with `.filter(|&(start, _)| start < line.len())` and a doc claim that the filter keeps a statement's bodies fully opaque. It never drops anything — `body_regions_full` returns `Err` before it can push a region whose start is `line.len()` (its `pos = end + 1` reaching the text end makes `next_delimiter` fail), so that filter's `<`→`<=` mutant was unkillable by construction, and statement opacity is the shared helper's own `body_start >= line.len()` guard in `scan/heredoc/line.rs`. Deleting the filter deleted the mutant (the species of LESSONS: "Re-deriving an already-set flag is dead code with equivalent mutants").
-
+Not an equivalence but dead code: the old `regions()` ended with
+`.filter(|&(start, _)| start < line.len())` and a doc claim that the filter keeps
+a statement's bodies fully opaque. It never drops anything — `body_regions_full`
+returns `Err` before it can push a region whose start is `line.len()` (its
+`pos = end + 1` reaching the text end makes `next_delimiter` fail), so that
+filter's `<`→`<=` mutant was unkillable by construction, and statement opacity is
+the shared helper's own `body_start >= line.len()` guard in
+`scan/heredoc/line.rs`. Deleting the filter deleted the mutant (the species of
+LESSONS: "Re-deriving an already-set flag is dead code with equivalent mutants").
 ## A region window and the skip derived from it are one pair — only on the success path
 
 `parse/cond_bodies.rs` anchors both halves of a condition's body extraction at
