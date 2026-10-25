@@ -17,7 +17,11 @@ short. Add a rule whenever a probe kills a mutant or disproves an
 3. **Hit both sides of every comparison.** For `<`/`<=`, `>`/`>=`, `==`/`!=`,
    and `+`/`-`/`*`, test the equality/boundary case and the adjacent case. If
    equality makes the work a no-op (zero width, zero repeat), also pin a
-   nonzero neighbour.
+   nonzero neighbour. When the equality case *is* the no-op, no test can kill
+   it: rewrite the comparison as a predicate (`is_negative()`,
+   `cmp(..) == Ordering::Less`) or an explicit delta tested `!= 0`, so the
+   surviving mutants must force a value, then pin both sides of that
+   predicate.
 4. **Kill the value where it is observable.** Follow the mutated value to its
    consumer (error text, byte count, output byte) instead of testing the
    computation site.
@@ -34,7 +38,10 @@ short. Add a rule whenever a probe kills a mutant or disproves an
 8. **Truth-table booleans and bit operations.** For `&&`/`||`/`!`, test each
    operand combination. For `|`/`^`/`&`, check bit overlap: use `+` for
    disjoint non-zero flags, drop zero flags (`O_RDONLY`), and compare tuples
-   for compound guards so `&&`→`||` becomes killable.
+   for compound guards so `&&`→`||` becomes killable. The same trap sits on
+   disjoint *value ranges* — a masked fraction under a shifted nibble — so sum
+   those with `+` too, where `+`→`-`/`*` moves the value and an exact-output
+   pin kills it.
 9. **Pin exact state, lists, and cursors.** End-to-end output hides
    index/cursor differences; assert exact token lists, window ends, and cursor
    values. The class-skip bug in rule 1 passed the whole suite because no pin
@@ -45,7 +52,11 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     rejecting rule and re-check when it changes.
 11. **Delete duplicate rules.** If two rules compute the same advancement or
     clamp, keep one. If a callee already enforces a guard, or a flag is
-    re-derived, remove the duplicate and pin the fall-through.
+    re-derived, remove the duplicate and pin the fall-through. The duplicate
+    may live in a *later* stage: a lexer guard that bails on what the parser's
+    trailing-input rule also rejects is a duplicate, and deleting it moves
+    only the `╰╴at …` source-location line — rule 5 says that is not a
+    behavioral difference, so pin the surviving message and exit status.
 12. **Clamps hide signs.** A `max(0)` on the closer does not make the opener's
     `+=`→`-=` equivalent; exercise nested opens, then a closer, then a
     boundary.
@@ -57,3 +68,9 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     test. Re-derive every accepted/killed claim by hand or at `-j1`; a flaky
     timeout is a false kill. After a split, include every file in the focused
     run.
+15. **Delete a dead gate at the call site.** A guard whose every mutant is
+    equivalent encodes no rule. Deleting just the callee leaves the caller's
+    `&&` and its call site; removing the caller's conjunct deletes the
+    callee's whole mutant family at once. Pin the scope the gate claimed to
+    check, balanced *and* unbalanced, so the answer stays where it was ever
+    observable.
