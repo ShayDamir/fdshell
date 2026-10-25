@@ -1394,7 +1394,7 @@ accepted divergence of task #216), so get a newline from several commands:
 
 ## A command-substitution form belongs in the argument pipeline, not in a per-surface arm
 Task #216 added backtick expansion. The tempting shortcut was a per-surface arm
-in the `for … in` list (`expand/backtick.rs`, which recognized a whole-word
+in the `for … in` list (`substitute/backtick.rs`, which recognized a whole-word
 `` ` … ` `` and ran it) — it existed only because `substitute/arg.rs` had no
 backtick arm. That arm diverged: its fields skipped pathname expansion
 (task #220), so `for w in` a `` `echo "*"` `` word never globbed while the
@@ -3008,8 +3008,8 @@ with four consequences:
    `f`. The loop must therefore substitute *inside* the match loop, not once per
    clause — an "optimisation" that expands a clause's whole pattern list up front
    changes a side effect. (Both rows print what bash prints; the plan's table had
-   the second row's bash column as `m`, measured here as empty — LESSONS:
-   "Measure the plan's bash table".)
+   the second row's bash column as `m`, measured here as empty —
+   LESSONS: "Verify bash's real output".)
 
 `Pattern { text, mask }` (new `parse/case_clause/pattern.rs`) is joined by
 `semi::try_join_masked`, the same loop #269 made the mask's only owner, so the
@@ -4058,3 +4058,13 @@ the word's **first byte**:
 `keywords::first_word_end` breaks at whitespace **and** `;`, so an index landing on the separator
 scores the **empty** word, which every place machine maps to a command start — an assertion that
 passes for that reason kills no mutant (this task's own `for i in done; do` rows had two).
+
+## A tool that skips every `target/` directory mis-resolves source references (task #441)
+
+`safe/fdshell/src/redirect/open/target/` is a real source package (STYLE §2.9), and `.gitignore`
+re-includes it because the unanchored `target` rule hides it — an ignored file is silently dropped from the
+nix build (AGENTS.md). A tree walker that skips **every** directory named `target`, the usual cargo-build
+filter, reports `redirect/open/target/expand.rs` as missing, and any gate built on that walk then fails a
+correct document. Rule: prune the build directory only at the repository root, never a nested one. Pin:
+`tools/lessons_check.py` walks `root` and prunes exactly `root/target` and `.git`, so its own nested-`target`
+reference resolves.
