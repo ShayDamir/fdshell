@@ -1445,105 +1445,96 @@ The review's third finding was not an equivalence but dead code: the old `region
 ## A region window and the skip derived from it are one pair — only on the success path
 
 `parse/cond_bodies.rs` anchors both halves of a condition's body extraction at
-`line_start_of(line, cond_start)`: the **window** `operator_delims` scans for
-the line's operators (their regions are laid out contiguously after the
-condition line's newline, in operator order) and the **skip** `operator_count`
-computes for the operators that claimed the head of that stream. Prepending `k`
-operators to the window prepends `k` regions and raises the skip by exactly `k`,
-so the slice `regions[skip .. skip + ops.len()]` is identical for every anchor.
-The pair-shift is therefore invariant **on the success path**. Of the two
-`cond_bodies.rs:77:75` mutants (the `line_start_of` anchor, at line 63 before
-task #238 extracted `claimed_regions`), `n + 1` → `n * 1` is **strictly
-equivalent** (`* 1` is the identity; measured twice on the quiet suite under it,
-all 4606 tests green, leading-newline pin included; a `-j4` mutation run reports
-it *caught*, which is load flakiness — re-measure quietly) — the file's only
-accepted missed mutant; the newline byte is never
-part of an operator, so on a line whose head is not `<<` the anchor shift
-counts the same operators. `n + 1` → `n - 1` is that same equivalence only for
-`n ≥ 1`: at `n = 0` it computes `0 - 1` in `usize` — a debug panic (release
-wraps to `usize::MAX`), emptying the window — and is **killed**, not accepted,
-by `condition_bodies_of_a_text_starting_with_a_newline`. A blanket "a window
-starting before, at, or after the newline counts the same operators" is an
-over-claim: it is exactly the species this entry's own rule below forbids.
+`line_start_of(line, cond_start)`: the **window** `operator_delims` scans for the
+line's operators (their regions are laid out contiguously after the condition
+line's newline, in operator order) and the **skip** `operator_count` computes for
+the operators that claimed the head of that stream. Prepending `k` operators to
+the window prepends `k` regions and raises the skip by exactly `k`, so the slice
+`regions[skip .. skip + ops.len()]` is identical for every anchor: the pair-shift
+is invariant **on the success path**.
 
-**The missing-delimiter path is not anchor-invariant.** Since task #275
-`body_regions_full` (`scan/heredoc/full.rs`) is no longer a `Result`: allocation
-is **one entry per operator**, and the *only* path that empties the region list
-is `found == 0` — the **first** operator of the window's line having no
-delimiter line (the operators behind a missing one keep their regions). The
-anchor's observable half is therefore narrower than it was and unchanged in
-kind: widening the window to an earlier line makes *that* line's unterminated
-heredoc the window's first operator, so the list is empty again and the
-condition keeps nothing. The `line_start_of` **literal** mutants `→ 0` and
-`→ 1` are therefore still *not* equivalent:
-`parse/cond_bodies/tests.rs::condition_bodies_window_is_bounded_to_the_conditions_line`
-(complete condition line, unterminated `<<` on an earlier line) kills both. `→ 1`
-is inert only when the computed anchor is 0, i.e. only for a condition that
-starts its line. The `b == b'\n'` → `b != b'\n'` mutant in the same function
-(`cond_bodies.rs:77:55`) is likewise **not** equivalent: it is killed by
-`condition_bodies_of_an_incomplete_line_stream_are_empty` (the `found == 0`
-fallback) and `condition_bodies_skip_the_regions_claimed_before_them`
-(`condition_bodies_skip_is_exact_when_a_tail_region_is_present` pins the same
-`skip` with a tail region in the list, so the pair stays exact on the new
-path).
+- **The accepted/missed mutants of the anchor** (`cond_bodies.rs:77:75`).
+  `n + 1` → `n * 1` is **strictly equivalent** (`* 1` is the identity, and the
+  newline byte is never part of an operator, so on a line whose head is not `<<`
+  the anchor shift counts the same operators) — the file's only accepted missed
+  mutant. `n + 1` → `n - 1` is that same equivalence only for `n ≥ 1`: at `n = 0`
+  it computes `0 - 1` in `usize` — a debug panic (release wraps to `usize::MAX`),
+  emptying the window — and is **killed**, not accepted, by
+  `condition_bodies_of_a_text_starting_with_a_newline`. The `line_start_of`
+  **literal** mutants `→ 0` and `→ 1` are **not** equivalent:
+  `parse/cond_bodies/tests.rs::condition_bodies_window_is_bounded_to_the_conditions_line`
+  (complete condition line, unterminated `<<` on an earlier line) kills both, and
+  `→ 1` is inert only when the computed anchor is 0, i.e. only for a condition
+  that starts its line. The `b == b'\n'` → `b != b'\n'` mutant in the same
+  function (`cond_bodies.rs:77:55`) is likewise **not** equivalent: killed by
+  `condition_bodies_of_an_incomplete_line_stream_are_empty` (the `found == 0`
+  fallback) and `condition_bodies_skip_the_regions_claimed_before_them`
+  (`condition_bodies_skip_is_exact_when_a_tail_region_is_present` pins the same
+  `skip` with a tail region in the list, so the pair stays exact).
+  `condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition` pins the
+  non-trivial anchor (operator mid-line in a multi-line condition, the shape bash
+  rejects with a syntax error) and the exact region it claims (`cat <<A; echo x` +
+  `Z`, bytes 18..36).
+- **The missing-delimiter path is not anchor-invariant.** `body_regions_full`
+  (`scan/heredoc/full.rs`) is no longer a `Result`: allocation is **one entry per
+  operator**, and the *only* path that empties the region list is `found == 0` —
+  the **first** operator of the window's line having no delimiter line (the
+  operators behind a missing one keep their regions). Widening the window to an
+  earlier line makes *that* line's unterminated heredoc the window's first
+  operator, so the list is empty again and the condition keeps nothing: the
+  anchor's observable half is narrower than the pair rule suggests and unchanged
+  in kind.
+- **Scope an equivalence claim to the path it argues about** — a shift that is
+  invisible once the regions are consumed is visible on the path that refuses to
+  consume them. A blanket "a window starting before, at, or after the newline
+  counts the same operators" is exactly the over-claim this entry forbids. And
+  never record a mutant as unkillable from a loaded run: measure it quietly (no
+  parallel load, the suite twice) first — a `-j4` mutation run reports the
+  equivalent anchor mutant *caught*, which is load flakiness — and write down
+  which tests kill the ones that are killed.
 
-`condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition` pins the
-non-trivial anchor (operator mid-line in a multi-line condition, the shape bash
-rejects with a syntax error) and the exact region it claims (`cat <<A; echo x` +
-`Z`, bytes 18..36); the suite is green under every pair-shift, which is the
-success path's equivalence record.
-
-**Rule:** scope an equivalence claim to the path it argues about — a shift that
-is invisible once the regions are consumed is visible on the path that refuses
-to consume them. And never record a mutant as unkillable from a loaded run:
-measure it quietly (no parallel load, suite twice) first, and write down which
-tests kill the ones that are killed.
-
-## A region is a byte range; a region whose structure line is missing must carry it, synthesized
-
-Allocation hands out **byte ranges**, every consumer rebuilds a **command line**
-from bytes (`cond/part.rs::reconstruct` = `cmd + "\n" + bodies`, and
-`parse/part_text.rs` for an arm body). A region
-`(body_start, delimiter_line_end)` stands for a complete heredoc only because
-its last line *is* the delimiter line, so a region whose delimiter line never
-arrived is an unterminated heredoc and the parse layer rejects it
+**A region is a byte range; a region whose structure line is missing must carry
+it, synthesized.** Allocation hands out **byte ranges**, and every consumer
+rebuilds a **command line** from bytes (`cond/part.rs::reconstruct` =
+`cmd + "\n" + bodies`, and `parse/part_text.rs` for an arm body). A region
+`(body_start, delimiter_line_end)` stands for a complete heredoc only because its
+last line *is* the delimiter line, so a region whose delimiter line never arrived
+is an unterminated heredoc and the parse layer rejects it
 (`here-doc: missing terminating delimiter line`) — the mechanism by which one
-unterminated `<<` starved every other operator of its line (task #275).
+unterminated `<<` starved every other operator of its line.
 
 * Synthesize at the **region→bytes boundary** (`scan/heredoc/full.rs::contents`),
   never in the inner consumer. The outer synthesis makes the inner allocation
-  **find** the delimiter line, so `found` covers it and `contents` copies the
-  bytes verbatim: no double-append. A `<<-` operator's synthesized line is
-  written untabbed (the comparison strips tabs), an empty delimiter's is a real
-  blank line (a zero-byte final line never matches).
+  **find** the delimiter line, so `found` covers it and `contents` copies the bytes
+  verbatim: no double-append. A `<<-` operator's synthesized line is written
+  untabbed (the comparison strips tabs), an empty delimiter's is a real blank line
+  (a zero-byte final line never matches).
 * A region's bytes are **whole lines**, except the last region's. The bodies are
   **concatenated** into one text and a `-c` script may end mid-line, leaving its
-  last delimiter line unterminated: an unclosed region glues the next body's
-  first byte onto its delimiter line (`…\nT` + `E\n` = `TE\n`, which terminates
-  nothing — the arm then re-parses its own `<<T` bodyless, the shape that hid
-  the fix). So close every region that is followed by another one, and every
-  synthesized region (its delimiter line needs a line start of its own); leave
-  the last region byte-exact, which is what the exact-bytes pins
-  (`condition_bodies_extracted_from_block_text`) keep green.
-* `found == 0` **keeps the parse layer's error**: the allocator does not own
-  "this heredoc has no body at all". bash's end-of-file warning-and-run is a
-  separate diagnostic (task #364), and the
+  last delimiter line unterminated: an unclosed region glues the next body's first
+  byte onto its delimiter line (`…\nT` + `E\n` = `TE\n`, which terminates nothing —
+  the arm then re-parses its own `<<T` bodyless). So close every region that is
+  followed by another one, and every synthesized region (its delimiter line needs a
+  line start of its own); leave the last region byte-exact, which is what the
+  exact-bytes pins (`condition_bodies_extracted_from_block_text`) keep green.
+* `found == 0` **keeps the parse layer's error**: the allocator does not own "this
+  heredoc has no body at all". bash's end-of-file warning-and-run is a separate
+  diagnostic (task #364), and the
   `condition_bodies_of_an_incomplete_line_stream_are_empty` /
   `a_heredoc_behind_an_ampersand_reports_a_missing_body` families pin the split.
 * **One entry per operator** is what keeps the pair rule above alive: the
   rest-of-stream claim and the empty regions behind it are entries of their own,
   so the window's `skip`/`take` arithmetic stays exact in
   `segment/line.rs::flush_line`, `segment/block/keyword.rs` and
-  `parse/cond_bodies.rs`. The tail claim's `resume` is the **text end**: the
-  bytes it claims are body data, so the scan must not resume inside them
+  `parse/cond_bodies.rs`. The tail claim's `resume` is the **text end**: the bytes
+  it claims are body data, so the scan must not resume inside them
   (`cat <<T; cat <<E` + `bodyT`/`T`/`extra` prints `extra` — it is a body, not a
   command).
 * An extension-mode span grows with the tail claim (`keyword_block`'s
-  `end = end.max(e)`), so a closing keyword written in the swallowed lines
-  becomes body data: `if true; then`/`cat <<T`/`T`/`cat <<E`/`fi` never closes.
-  bash consumes the same lines as body data and stops at a syntax error (rc 2),
-  fdshell at the missing-delimiter error (rc 1) — pinned as the accepted
-  divergence
+  `end = end.max(e)`), so a closing keyword written in the swallowed lines becomes
+  body data: `if true; then`/`cat <<T`/`T`/`cat <<E`/`fi` never closes. bash
+  consumes the same lines as body data and stops at a syntax error (rc 2), fdshell
+  at the missing-delimiter error (rc 1) — pinned as the accepted divergence
   `tests/heredoc.rs::a_multi_line_block_with_a_tail_claim_past_the_closer_is_a_parse_error`.
 
 Pins: `scan/heredoc/full/tests.rs::contents_synthesizes_the_missing_delimiter_line`,
@@ -1553,7 +1544,6 @@ property, re-allocating the rebuilt command line),
 `scan/heredoc/line/tests.rs::line_bodies_of_a_partial_stream_keep_the_complete_regions`,
 `tests/heredoc.rs::single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm`,
 and the residual rows in `a_line_whose_first_heredoc_is_unterminated_is_still_a_parse_error`.
-
 ## A catch-all short-flag parser must be the last arm of the builtin that owns it
 
 `set` claims several flag-shaped words before its short-flag word is treated as
@@ -2821,8 +2811,37 @@ a literal byte) where bash is a syntax error — a parse-layer divergence of the
 `tests/case.rs::multi_token_case_pattern_is_accepted`, not a POSIX list entry.
 
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)
-`semi_terminated_regions` opens with `line.get(semi) != Some(&b';') || operator_count(line, run_start, semi) == 0` and closes with `if ops.is_empty() { return None }`. Two accepted-equivalent mutant species live there. (1) The `||`→`&&` of the opening guard is **unkillable**: flipping it only changes *which* `;` of a physical line performs the whole-line claim, never *what* is claimed, because the anchor is the line's start and `body_start` is the line's own newline — so a plain `;`-terminated run reaches exactly the regions the run carrying the `<<` reaches (`cat <<T; echo hi` + body + `T` and `echo a; cat <<T; echo hi` + body + `T` produce the same single region, one byte-offset apart), and a newline-terminated run with an operator keeps taking `skip_region`'s path with `semi_terminated_regions` answering `None` under both spellings (`line.get(nl) != Some(&b';')` is true, and under `&&` the proceed path lands on the same missing-delimiter `None`). The individual guards *are* killed (`==`→`!=` on `operator_count`, the `Some(&b';')` pattern), so the pair's `||` is the only residual. (2) The `ops.is_empty()` guard has no reachable false branch at all: `operator_count(line, run_start, semi)` scans a sub-window `[run_start, semi)` with the *stricter* preceding-token rule (`seen_token` starts false at `run_start`), while `operator_delims(line, start, body_start)` scans the whole physical line from `line_start` with `seen_token` already raised by the runs before the `;` — a line-start scan is a superset, so a non-empty run always yields a non-empty `ops` (the coverage report shows the guard's `return None` at zero hits). The guard stays because it is what keeps an empty `ops` from jumping `i` to `body_start` and skipping the line's runs behind the `;` — delete it and the subset invariant becomes load-bearing silently. Rule: prove the invariant in the comment where the guard sits, record the residual here, and let the killers of the reachable guards stay the suite's business.
 
+`semi_terminated_regions` opens with
+`line.get(semi) != Some(&b';') || operator_count(line, run_start, semi) == 0` and
+closes with `if ops.is_empty() { return None }`. Two accepted-equivalent mutant
+species live there.
+
+- The `||`→`&&` of the opening guard is **unkillable**: flipping it only changes
+  *which* `;` of a physical line performs the whole-line claim, never *what* is
+  claimed — the anchor is the line's start and `body_start` is the line's own
+  newline, so a plain `;`-terminated run reaches exactly the regions the run
+  carrying the `<<` reaches (`cat <<T; echo hi` + body + `T` and
+  `echo a; cat <<T; echo hi` + body + `T` produce the same single region, one
+  byte-offset apart), and a newline-terminated run with an operator keeps taking
+  `skip_region`'s path with `semi_terminated_regions` answering `None` under both
+  spellings (`line.get(nl) != Some(&b';')` is true, and under `&&` the proceed
+  path lands on the same missing-delimiter `None`). The individual guards *are*
+  killed (`==`→`!=` on `operator_count`, the `Some(&b';')` pattern), so the pair's
+  `||` is the only residual.
+- The `ops.is_empty()` guard has **no reachable false branch**:
+  `operator_count(line, run_start, semi)` scans the sub-window `[run_start, semi)`
+  with the *stricter* preceding-token rule (`seen_token` starts false at
+  `run_start`), while `operator_delims(line, start, body_start)` scans the whole
+  physical line from `line_start` with `seen_token` already raised by the runs
+  before the `;` — a line-start scan is a superset, so a non-empty run always
+  yields a non-empty `ops` (the coverage report shows the guard's `return None` at
+  zero hits). The guard stays because it is what keeps an empty `ops` from jumping
+  `i` to `body_start` and skipping the line's runs behind the `;` — delete it and
+  the subset invariant becomes load-bearing silently.
+
+Rule: prove the invariant in the comment where the guard sits, record the residual
+here, and let the killers of the reachable guards stay the suite's business.
 ## "Closed" is the block text's completeness, not its body stream's — the REPL check applies the unterminated rule to closed blocks too (task #322)
 `repl/complete.rs::blocks_or_heredoc_open` decided "keep reading" from open blocks
 (`Segment::Block { closed: false }`) and unterminated **statement** runs only, so a
