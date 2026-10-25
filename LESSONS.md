@@ -1303,6 +1303,7 @@ harness `PATH` set to relative entries, and use helper *binaries*
 coreutils dependency, deterministic exit codes.
 
 ## A keyword block is opaque to the cond-list split — and `scan_block`'s end is a *run* end, not the closer's end
+
 `&&` / `||` inside a `while`/`until`/`if` condition, a loop body, an `if` body, a
 `case` arm or a `wait` arm is the block's *own* cond list: the block executors
 run a condition through `run_cond_list` (with `exempt`) and parse bodies inside
@@ -1313,116 +1314,94 @@ block_depth == 0`, exactly the rule it already had for a `{ …; }` group. The
 counter's brace rule is layered the same way: inside a block (`block_depth > 0`)
 `{`/`}` score `keyword_delta`'s ±1 (the rule `comment::depth_delta` uses to find
 the span, so a literal `}` argument eats the closer there — the accepted
-divergence in `tests/group.rs::literal_brace_argument_in_a_block_body`), and at
-top level a group opener scores 0 because the group arm applies the segment
-scanner's clause-position rule (`group_at_run`), keeping `echo { && echo b` a
-split. A `time [-p]` prefix needs no special case: `keyword_delta` already
-strips it, so the depth fires at the keyword behind it.
+divergence `tests/group.rs::literal_brace_argument_in_a_block_body`), and at top
+level a group opener scores 0 because the group arm applies the segment scanner's
+clause-position rule (`group_at_run`), keeping `echo { && echo b` a split. A
+`time [-p]` prefix needs no special case: `keyword_delta` already strips it, so
+the depth fires at the keyword behind it.
 
-Two traps found while doing it:
-
-1. **`comment::scan_block` returns the closing keyword's *separator*, not its
-   word end.** Its runs break only at `;`/`\n`/end-of-input — spaces are not run
-   boundaries — so a "jump over the block" built on it swallows everything
-   written after the closer on that run: `while true; do a; done && echo b` jumps
-   to the end of the line, the trailing `&&` disappears, and `echo b` runs
-   unconditionally (and `run_one` gets `… done && echo b` as one part, a parse
-   error). A depth counter over the words `next_boundary` already walks has no
-   such boundary, so the scan resumes exactly where the block ends.
-   Task #232 turned the boundary into the rule: the *segment* scanner's
-   mid-run span (`segment/block/midrun.rs`) **relies** on the run-end
-   semantics — the run keeps everything the closer's run carries (so
-   `done && echo y` rides inside the statement and `cond` re-splits it),
-   and it resumes at the separator closing that run, not past it, so a `;`
-   after the closer still ends the statement (see the new LESSONS entry
-   "A keyword block after `&&` is a cond part").
-2. **The opacity rule must be region-aware, not gated on a heredoc-free text.**
-   A block's condition bodies travel *inside* its span (`segment/block/keyword.rs`
+1. **`comment::scan_block` returns the closing keyword's *separator*, not its word
+   end.** Its runs break only at `;`/`\n`/end-of-input — spaces are not run
+   boundaries — so a "jump over the block" built on it swallows everything written
+   after the closer on that run: `while true; do a; done && echo b` jumps to the
+   end of the line, the trailing `&&` disappears, `echo b` runs unconditionally,
+   and `run_one` gets `… done && echo b` as one part (a parse error). A depth
+   counter over the words `next_boundary` already walks has no such boundary, so
+   the scan resumes exactly where the block ends. The **segment** scanner's
+   mid-run span (`segment/block/midrun.rs`) **relies** on the run-end semantics:
+   the run keeps everything the closer's run carries (so `done && echo y` rides
+   inside the statement and `cond` re-splits it), and it resumes at the separator
+   closing that run, not past it, so a `;` after the closer still ends the
+   statement (LESSONS: "A keyword block after `&&` is a cond part").
+2. **The opacity rule must be region-aware, not gated on a heredoc-free text.** A
+   block's condition bodies travel *inside* its span (`segment/block/keyword.rs`
    extends `end_pos` past them), so making that text opaque also hides the `&&`
    written in a *body* line, which must stay a split point:
-   `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` pins
-   the split (rc 1 `missing 'fi'`, bash rc 2) and is the alarm. #137's answer was
-   the blunt gate `heredoc::operator_count(line, i, line.len()) == 0`, which left
-   *every* `&&`/`||` of a heredoc-carrying block broken — the gap task **#234**
-   owns. #234 replaced the gate with the region rule: the block counter is
+   `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` (rc 1
+   `missing 'fi'`, bash rc 2) is the alarm. A blunt gate (the block is opaque only
+   when `heredoc::operator_count(line, i, line.len()) == 0`) leaves *every*
+   `&&`/`||` of a heredoc-carrying block broken. The rule: the block counter is
    **always** active, and the heredoc **body regions** of the run are walked
    region by region — skipped whole in a statement's text, scanned for their
-    earliest top-level `&&`/`||` in a block's text (`cond/boundary/body.rs`).
-   Only regions the text actually carries take part: a statement's regions start
-   past its command bytes and drop out, so its bodies stay fully opaque. The
-   alarm's body-`&&` split survives unchanged and the block's *command* bytes
-   stop splitting
-    (`tests/cond_blocks.rs::and_in_a_block_that_carries_a_heredoc_runs_the_block`);
-    a block whose heredoc has no delimiter line inside its text stays a
-    parse-error divergence (rc 1, bash rc 2 —
-    `tests/cond_blocks.rs::and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error`).
-    Task **#304** closed the position half: the region scan asks
-    `keywords::position` for the **place** of every word of the block's text
-    (`cond/boundary/block.rs::Modes`, fed from the same `word_delta` the block
-    counter uses) and scans a region **only when its `<<` sits in the block's
-    clause** text; a region claimed by a word of the block's **body** is the
-    body's own data. The clause row keeps splitting (rc 1, bash rc 2 — the
-    accepted clause family), the body row is bash parity again (rc 0, body
-    printed):
-    `tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
-    `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`
-    (`if`/`elif`/`else`, `for`/`while`/`until`, `case` arms, nested blocks,
-    `{ …; }`, two operators on one line, a run entered behind a `&&`), while
-    `a_clause_position_region_still_splits_the_block_text` pins the clause rows
-    that did **not** move. Two measured facts came with it. (1) The mode is
-    carried by the *innermost open block*, so a closer hands the mode back to
-    its outer block, and a block closer written **inside** a body region never
-    reaches the stack (the region is skipped whole) —
-    `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`.
-    (2) A word **ending** with `)` sets the body mode — that is
-    `keywords/position::after`'s own ungated rule, which the mode stack mirrors
-    — so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
-    stops the split and fdshell runs text bash rejects (rc 0 vs 2, measured;
-    `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
-    Separating a `case` arm's `)` from a subshell `)` needs block-kind knowledge
-    the mode stack does not have; task **#430** owns that. The `# c` row of the
-    same family (`if :; then cat <<Q # c`) is **not** a region-rule row: it
-    reproduces without any block (`cat <<Q # c` + body + `Q` → rc 1 where bash
-    prints the body), so #304 closed only its `missing 'fi'` half; the statement
-    level half stays with **#429**.
-
-    Task #235 owns the twin case (a `&&` in a function-definition group body,
-   where the definer word keeps the `{` off the run start) — **owned and
-   closed**: the group arm counts a definer's body opener, see "A definer word
-   makes its body brace a group opener for the cond layer" below; #236 the
-   argument-position keywords inside a body, #237 the comment lines inside a body.
+   earliest top-level `&&`/`||` in a block's text (`cond/boundary/body.rs`). Only
+   regions the text actually carries take part: a statement's regions start past
+   its command bytes and drop out, so its bodies stay fully opaque. The alarm's
+   body-`&&` split survives unchanged and the block's *command* bytes stop
+   splitting
+   (`tests/cond_blocks.rs::and_in_a_block_that_carries_a_heredoc_runs_the_block`);
+   a block whose heredoc has no delimiter line inside its text stays a
+   parse-error divergence (rc 1, bash rc 2 —
+   `tests/cond_blocks.rs::and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error`).
+   The *position* half: the region scan asks `keywords::position` for the **place**
+   of every word of the block's text (`cond/boundary/block.rs::Modes`, fed from
+   the same `word_delta` the block counter uses) and scans a region **only when
+   its `<<` sits in the block's clause** text; a region claimed by a word of the
+   block's **body** is the body's own data. The clause row keeps splitting (rc 1,
+   bash rc 2 — the accepted clause family), the body row is bash parity again (rc
+   0, body printed):
+   `tests/heredoc.rs::and_in_a_body_position_heredoc_region_is_body_data` and
+   `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`
+   (`if`/`elif`/`else`, `for`/`while`/`until`, `case` arms, nested blocks,
+   `{ …; }`, two operators on one line, a run entered behind a `&&`), while
+   `a_clause_position_region_still_splits_the_block_text` pins the clause rows
+   that did **not** move. Two facts come with it: (1) the mode is carried by the
+   *innermost open block*, so a closer hands the mode back to its outer block, and
+   a block closer written **inside** a body region never reaches the stack (the
+   region is skipped whole) —
+   `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`;
+   (2) a word **ending** with `)` sets the body mode — that is
+   `keywords/position::after`'s own ungated rule, which the mode stack mirrors —
+   so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
+   stops the split and fdshell runs text bash rejects (rc 0 vs 2,
+   `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
+   Separating a `case` arm's `)` from a subshell `)` needs block-kind knowledge the
+   mode stack does not have, tracked as task #430. The `# c` row of the same family
+   (`if :; then cat <<Q # c`) is **not** a region-rule row: it reproduces without
+   any block (`cat <<Q # c` + body + `Q` → rc 1 where bash prints the body), so
+   only its `missing 'fi'` half is closed; the statement-level half is tracked as
+   task #429. The twin case — a `&&` in a function-definition group body, where
+   the definer word keeps the `{` off the run start — is closed: the group arm
+   counts a definer's body opener, see "A definer word makes its body brace a
+   group opener for the cond layer".
 3. **A keyword scorer must ask *command position*, not word start.**
    `keywords::keyword_delta` scores `if`/`while`/`for`/`case`/`until` as `+1`
-   wherever the word sits, and a word start is not a command position: the
-   first `#137` round scored `echo if && echo b` as a block, so the part lost
-   its `&&` and printed one argument `if && echo b`;
-   `echo x > if && echo b` wrote `x && echo b` into the file named `if` and
-   never ran `echo b` (data corruption). Every other layer already knows the
-   rule — bash, the segment scanner, and the group arm of this very scan
+   wherever the word sits, and a word start is not a command position: scoring
+   `echo if && echo b` as a block loses the part's `&&` and prints one argument
+   `if && echo b`; `echo x > if && echo b` wrote `x && echo b` into the file named
+   `if` and never ran `echo b` — data corruption. Every other layer already knows
+   the rule — bash, the segment scanner, and this scan's own group arm
    (`group_at_run`: the run is empty, or it ends with `&&` / `||`, a `time [-p]`
    prefix transparent) — so the keyword arm must call it too, with `run_start`
-   passed in. #137 gated the *top level* only, leaving the in-block half as the
-   gap tasks #236 (argument-position keywords *inside* a block body) and #237
-   (comment lines inside a body: `# done` drops the counter and re-opens the
-   split) — **#236 closed both**: the rule is now a shared state machine
-   (`keywords/position.rs`: `Place` + `scores` + `after`) that every scorer of
-   block text consumes verbatim — the cond-boundary counter (with a `Place`
-   flag it carries over words, restarts at separators and cond operators, and
-   seeds Command at a run start), the block-span scan (`comment/depth_delta`,
-   whose runs start at command position by construction), and the parse layer's
-   closing-keyword search (`parse/semi/closing`). The in-block gate is
-   `scores`: openers score in `Place::Command` only, closers in
-   `Command | Pattern` (a `case` list's `esac` is its terminator —
-   `case x in esac` — and a glued `x)` puts the arm's first word in command
-   position; `in` opens the list, `time [-p]` is transparent, `#` behind a run
-   start makes its words data, so `# done` is inert). Pins:
+   passed in. Gating the *top level* only leaves the in-block half as the gap
+   (argument-position keywords inside a block body, comment lines inside a body:
+   `# done` drops the counter and re-opens the split). The shared state machine
+   (`keywords/position.rs`: `Place` + `scores` + `after`) and its gates are the
+   "One clause rule, three scorers" entry; pins of the *split* shapes are
    `cond/boundary/block/tests.rs::keyword_shaped_argument_words_keep_the_split`
    and `in_block_words_follow_the_clause_rule`, `keywords/position/tests.rs`,
-   `tests/cond_blocks.rs::keyword_words_in_argument_position_split_the_body_operators`
-   and the rest of the task's section there, plus
-   `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`
-   (#237's parity, gained through #236's shared rule).
-
+   `tests/cond_blocks.rs::keyword_words_in_argument_position_split_the_body_operators`,
+   and `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`
+   (the comment parity, gained through the shared rule).
 ## A heredoc's place inside a keyword block — clause vs body — decides whether its body region is a cond-list split point
 
 The gate on the region rule (task #304). A heredoc **body region** carried by a run inside a keyword block is scanned for a top-level `&&` / `||` **only where the `<<` that claimed it sits in the block's clause** (its condition, word list or `case` arm pattern); a region claimed by a word of the block's **body** is the body's own data, opaque, exactly as the same line outside any heredoc.
@@ -2203,86 +2182,82 @@ under the bounded child — the empty condition is true, so the regression is a
 hang; the neighbouring leniencies green).
 
 ## A `case` arm is a command list: empty at `esac`, and its stray `)` is the missing `;;`
-bash's `case` grammar reads an arm body as a command sequence, so two rules come
-out of that one place and the clause walk had to learn both (task #300, measured
-against bash 5.3.9):
 
-- **an arm may be empty**, closed straight at `esac`: `case x in a) esac` is rc 0,
-  and an empty **last** clause too (`case x in a) echo one;; b) esac`). This is
-  the deliberate opposite of the `then`/`elif`/`else`/`do` rule of the entry above
-  (that grammar requires a non-empty `list`, this one does not), which is why
+bash's `case` grammar reads an arm body as a command sequence, so two rules come
+out of that one place and the clause walk must know both (measured against bash
+5.3.9):
+
+- **An arm may be empty**, closed straight at `esac`: `case x in a) esac` is rc 0,
+  and an empty **last** clause too (`case x in a) echo one;; b) esac`). This is the
+  deliberate opposite of the `then`/`elif`/`else`/`do` rule of the entry above (that
+  grammar requires a non-empty `list`, this one does not), which is why
   `parse/semi.rs::block_body` is **not** called for a `case` arm and must not be.
-  The walk ended a pattern list by *position* (`*pos >= esac_idx`), and
-  `case x in a) esac` reaches `esac_idx` right after a **successful** `)`, so the
-  valid block was reported as `case: missing ')'`; the fix is the flag the
-  position was imitating — `ensure!(closed_paren, CaseMissingCloseParen)`, set at
-  the `)` break. The multi-line spelling had worked all along because the
-  tokenizer turns a newline into a `;` token and `pos` landed one short of
-  `esac_idx` — the asymmetry that hid the bug for as long as it hid it.
-- **the pattern paren of the next clause is a token the arm's list cannot take**:
+  A walk that ends a pattern list *by position* (`*pos >= esac_idx`) reports
+  `case x in a) esac` — which reaches `esac_idx` right after a **successful** `)` —
+  as `case: missing ')'`. The fix is the flag the position was imitating:
+  `ensure!(closed_paren, CaseMissingCloseParen)`, set at the `)` break. The
+  multi-line spelling works under the position test because the tokenizer turns a
+  newline into a `;` token and `pos` lands one short of `esac_idx` — a position
+  test hides a shape a flag test catches.
+- **The pattern paren of the next clause is a token the arm's list cannot take**:
   `case x in a) b) ;; esac` is bash's `syntax error near unexpected token ')'`
-  (rc 2) and fdshell's `case: missing ';;' between clauses` at its rc 1. The
-  test is the shared command-position machine ("One clause rule, three scorers")
-  in `parse/case_clause/stray.rs`: the arm region — bounded by the `;;` **window**,
-  so the next clause's own pattern parens are never in scope — contains a `)`
-  whose predecessor word **sits** in `Place::Command` **and that closes no group
-   the arm itself opened**. Four gates carry the measurements: the **paren depth
-   the arm opened** (`opens_groups`: a definer's parameter list is the word `f(`
-   plus a `)` token, a subshell the arm wrote is a `(w` word plus a `)` token, an
-   array-literal assignment is the word `m=(1` plus a `)` token, so a `)` at
-   depth > 0 is the arm's own and only a depth-0 `)` is a candidate —
-   `case x in a) f() { echo y; }; f ;; esac`, `a) (cat) ;;`,
-   `a) echo hi | (cat) ;;`, `a) g() ( : ) ;;`, `a) m=(1) ;;`, `a) arr=("$@") ;;`
-   and the definers/array literals an arm's `if`/`while`/`for`/`{ …; }` bodies
-   write behind a `;` are all bash rc 0); the
-   `((` arithmetic region (`for ((i=0;i<2;i++))` writes bare `)` tokens behind its
-   `;`, in command position, and bash takes the arm at rc 0 — and `((` is
-   deliberately **not** an `opens_groups` paren, at a word's edge
-   (`a) ((1)); b) ;; esac` still bails) nor mid-word (`m=$((1))` is one word whose
-   parens close inside it, so counting them would hold the depth above 0 and
-   swallow the clause paren of `a) m=$((1)); b) ;; esac`, bash rc 2); the
-   operator-predecessor test (the
+  (rc 2) and fdshell's `case: missing ';;' between clauses` at its rc 1. The test
+  is the shared command-position machine ("One clause rule, three scorers") in
+  `parse/case_clause/stray.rs`: the arm region — bounded by the `;;` **window**, so
+  the next clause's own pattern parens are never in scope — contains a `)` whose
+  predecessor word **sits** in `Place::Command` **and that closes no group the arm
+  itself opened**. Four gates carry the measurements:
+  (1) the **paren depth the arm opened** (`opens_groups`): a definer's parameter
+  list is the word `f(` plus a `)` token, a subshell is a `(w` word plus a `)`
+  token, an array-literal assignment is `m=(1` plus a `)` token, so a `)` at
+  depth > 0 is the arm's own and only a depth-0 `)` is a candidate —
+  `case x in a) f() { echo y; }; f ;; esac`, `a) (cat) ;;`, `a) echo hi | (cat) ;;`,
+  `a) g() ( : ) ;;`, `a) m=(1) ;;`, `a) arr=("$@") ;;` and the definers/array
+  literals an arm's `if`/`while`/`for`/`{ …; }` bodies write behind a `;` are all
+  bash rc 0; (2) the `((` arithmetic region
+  (`for ((i=0;i<2;i++))` writes bare `)` tokens behind its `;`, in command
+  position, and bash takes the arm at rc 0) — `((` is deliberately **not** an
+  `opens_groups` paren at a word's edge (`a) ((1)); b) ;; esac` still bails) nor
+  mid-word (`m=$((1))` is one word whose parens close inside it, so counting them
+  would hold the depth above 0 and swallow the clause paren of
+  `a) m=$((1)); b) ;; esac`, bash rc 2); (3) the operator-predecessor test (the
   tokenizer emits every unquoted `)` as its own token, so `((1))` is the tokens
   `((1`, `)`, `)` and its second `)` closes the arithmetic command, not a pattern
-  list); and `keyword_word`, the same quote gate the keyword scorers open with,
-  for a quoted `")"` (an escaped `\)` keeps its pair in the word text, so
-  `eq_bytes(b")")` never sees it). **The neighbouring word is not enough**: the
-  first version of the gate only excluded a predecessor whose bytes touch `(`,
-  which accepts `a) (cat) ;;` (predecessor `(cat`) and `a) (echo sub) ;;`
-  (predecessor `sub`, an argument) yet rejects `a) g() ( : ) ;; esac` — bash rc 0
-  — whose `)` follows `:`, a command-position word of the arm's own subshell. The
-  shape is the lesson: paren ownership is a **nesting** question, so the scan
-  counts the arm's opens and closes; a byte test on one token sees the shape of
-  the tokenizer, not the shape of the command. Two cheaper rules were measured
-   and rejected: a whole-arm `((` exemption loses
-   `case x in a) ((1)); b) ;; esac` (bash rc 2), and "any `)` in an arm is an
-   error" rejects `case x in a) (echo sub) ;; esac` (bash rc 0, and every arm of
-   task #316's shape the day subshells land).
-   **The word's two edges are not enough either**: the first depth counter tested
-   `(` at a word's start and at its end — the shape of `(cat` and of `f(`, not the
-   shape of an **array-literal assignment**. The tokenizer's word for `m=(1)` is
-   `m=(1` (mask: every byte `Unquoted`) and the array's `)` is a token of its own,
-   so a mid-word `(` never entered the depth, the array's `)` was judged a depth-0
-   clause paren, and `case x in a) m=(1) ;; esac` — bash rc 0, idem
-   `a) x=(1) y=2 ;;`, `a) echo hi; x=(1) ;;`, `a) arr=("$@") ;;`, `a) m=() ;;`, and
-   the array literals the arm's `if`/`while`/`{ …; }` bodies write behind a `;` —
-   became `case: missing ';;' between clauses`. So the gate counts **every**
-   group-opening `(` byte of the word, and it reads the token's **quote mask** to
-   do it: a quoted `(` (`echo "x(" b) ;;`) is word text, and an **escape pair** is
-   one literal byte whose mask bit is `Unquoted` — the backslash is the only
-   marker — so `x\(` opens nothing and `case x in a) x\() ;; esac` (bash rc 2) is
-   refused again. Running an array assignment is task **#422**'s word-model half
-   (fdshell has no arrays, so the arm dispatches the literal's `)` as a command,
-   as it does at top level); the **parse** gate is this rule's. One shape the
-   tokenizer **cannot** show: the mask test of the escape arm. A quoted backslash
-   enters the word as a *pair* of quoted bytes (`'\'(x)` and `"\\"(x)` are both the
-   word `\\(x`, mask quoted, quoted, unquoted, unquoted), and skipping that pair
-   one byte at a time lands on the same byte as one jump of two, so no tokenized
-   line distinguishes the arm from an always-true guard. The kill is a direct call
-   on the counter with a hand-written mask (`[Quoted, Unquoted, Unquoted]` — the
-   mask a **derived** word carries, `MaskBit::from_quoted`), pinned in
-   `parse/case_clause/stray/tests.rs`: a quoted `\` consumes nothing behind it, an
-   unquoted escape pair consumes its second byte.
+  list); (4) `keyword_word`, the same quote gate the keyword scorers open with, for
+  a quoted `")"` (an escaped `\)` keeps its pair in the word text, so
+  `eq_bytes(b")")` never sees it).
+  **The neighbouring word is not enough:** a gate that only excludes a predecessor
+  whose bytes touch `(` accepts `a) (cat) ;;` (predecessor `(cat`) and
+  `a) (echo sub) ;;` (predecessor `sub`, an argument) yet rejects `a) g() ( : ) ;;
+  esac` (bash rc 0) whose `)` follows `:`, a command-position word of the arm's own
+  subshell. Paren ownership is a **nesting** question, so the scan counts the arm's
+  opens and closes; a byte test on one token sees the shape of the tokenizer, not
+  the shape of the command. Two cheaper rules were measured and rejected: a
+  whole-arm `((` exemption loses `case x in a) ((1)); b) ;; esac` (bash rc 2), and
+  "any `)` in an arm is an error" rejects `case x in a) (echo sub) ;; esac` (bash
+  rc 0). **The word's two edges are not enough either:** counting `(` at a word's
+  start and end covers `(cat` and `f(` but not an **array-literal assignment** —
+  the tokenizer's word for `m=(1)` is `m=(1` (mask: every byte `Unquoted`) and the
+  array's `)` is a token of its own, so a mid-word `(` never entered the depth and
+  `case x in a) m=(1) ;; esac` (bash rc 0, idem `a) x=(1) y=2 ;;`, `a) echo hi;
+  x=(1) ;;`, `a) arr=("$@") ;;`, `a) m=() ;;`, and the array literals behind a `;`
+  in the arm's bodies) became `case: missing ';;' between clauses`. So the gate
+  counts **every** group-opening `(` byte of the word and reads the token's **quote
+  mask** to do it: a quoted `(` (`echo "x(" b) ;;`) is word text, and an **escape
+  pair** is one literal byte whose mask bit is `Unquoted` — the backslash is the
+  only marker — so `x\(` opens nothing and `case x in a) x\() ;; esac` (bash rc 2)
+  is refused. Running an array assignment is task **#422**'s word-model half
+  (fdshell has no arrays, so the arm dispatches the literal's `)` as a command, as
+  at top level); the **parse** gate is this rule's. One shape the tokenizer
+  **cannot** show: the mask test of the escape arm. A quoted backslash enters the
+  word as a *pair* of quoted bytes (`'\'(x)` and `"\\"(x)` are both the word
+  `\\(x`, mask quoted, quoted, unquoted, unquoted), and skipping that pair one byte
+  at a time lands on the same byte as one jump of two, so no tokenized line
+  distinguishes the arm from an always-true guard. The kill is a direct call on the
+  counter with a hand-written mask (`[Quoted, Unquoted, Unquoted]` — the mask a
+  **derived** word carries, `MaskBit::from_quoted`), pinned in
+  `parse/case_clause/stray/tests.rs`: a quoted `\` consumes nothing behind it, an
+  unquoted escape pair consumes its second byte.
 
 Two layer facts the fix leans on. **A heredoc body is never in the region**:
 `parse/token/statement.rs::tokenize_statement` blanks the body regions and the
@@ -2290,31 +2265,27 @@ structural bytes of a terminator line, so `case x in x) cat <<T` newline `x)`
 newline `T` newline `esac` prints `x)` verbatim at rc 0. **The scan layer is a
 separate traversal**: `case x in a) echo hi;;b)esac` (a closer glued behind a
 pattern's `)`) is refused by `script/unclosed.rs`, not by the clause walk —
-fdshell rc 1 where bash is rc 0, filed as #421; the lenient brace-protection
-walk of `case_block/literal.rs` already accepted the shape and stays lenient
-(pinned there, so the two traversals of one `case` line cannot drift apart).
-Pins: `parse/case_clause/tests.rs` (the `esac`-closed clause's shape, and the
-missing-paren/empty-pattern verdicts that stayed),
+fdshell rc 1 where bash is rc 0, tracked as task #421; the lenient
+brace-protection walk of `case_block/literal.rs` already accepted the shape and
+stays lenient (pinned there, so the two traversals of one `case` line cannot
+drift apart). Pins: `parse/case_clause/tests.rs` (the `esac`-closed clause's
+shape, and the missing-paren/empty-pattern verdicts that stayed),
 `parse/case_clause/stray/tests.rs` (every gate, called on a token region
 directly), `parse/tests.rs::case_*`, `parse/case_block/tests.rs`,
-`parse/case_block/literal/tests.rs` and `tests/case.rs` (the bash-parity table,
-the arm's own definer and subshell parens — the runnable
-`case x in x) f() { echo y; }; f ;; esac` prints `y` exactly as bash does —
-the arm's array literals — the runnable `case x in x) m=(1); echo done ;; esac`
-prints `done`, its `)` dispatching as a command on stderr exactly as it does at
-top level — the accepted leniencies — `case x in a) ; esac`, the `&` and `;&`
-closers, the closer-shaped word in an arm, a `)` with no word before it
-(`a) ) ;; esac`, #419's family) — and the family's left-open rows: #418, #419,
-#420, #421, #316 and #422 (arrays have no runtime; the parse gate is separate).
-**Follow-up written down now**: when `(` becomes an operator token (task #316),
-all three of `stray.rs`'s paren readers — the `((` region rule and the
-`opens_groups` **depth counter** (those two read **word bytes** today: the region
-rule its word's leading `((`, the depth counter every unquoted, unescaped `(`
-byte of the word, mid-word ones included) and the command-position rule (it reads
-the **token list**, through the shared `Place` machine) — must be scored on the
-token list, so a subshell's `(`/`)` pair becomes operators there and
-`(w`/`f(`/`m=(1` stop being word bytes.
-
+`parse/case_block/literal/tests.rs` and `tests/case.rs` (the bash-parity table;
+the runnable `case x in x) f() { echo y; }; f ;; esac` prints `y` exactly as bash
+does; the runnable `case x in x) m=(1); echo done ;; esac` prints `done`, its `)`
+dispatching as a command on stderr exactly as at top level; the accepted
+leniencies — `case x in a) ; esac`, the `&` and `;&` closers, the closer-shaped
+word in an arm, a `)` with no word before it (`a) ) ;; esac`); the open rows of
+the family are tasks #418, #419, #420, #421, #316, #422. **Follow-up:** when `(`
+becomes an operator token (task #316), all three of `stray.rs`'s paren readers —
+the `((` region rule and the `opens_groups` **depth counter** (those two read
+**word bytes** today: the region rule its word's leading `((`, the depth counter
+every unquoted, unescaped `(` byte of the word, mid-word ones included) and the
+command-position rule (it reads the **token list**, through the shared `Place`
+machine) — must be scored on the token list, so a subshell's `(`/`)` pair becomes
+operators there and `(w`/`f(`/`m=(1` stop being word bytes.
 ## A definer word makes its body brace a group opener for the cond layer
 `f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list
 group counter (`cond/boundary.rs`) judged the brace by the *run* rule alone:
@@ -2366,84 +2337,76 @@ and `definer_with_cond_operators_around_it_splits_the_list`,
 `tests/group.rs::definer_body_keeps_the_nested_group_depth`.
 
 ## A block's closing keyword has a rule of its own: `;` before it, except after a compound command
+
 POSIX #2.9 puts a command-list terminator in front of a block's closing keyword
-and bash enforces it (rc 2), while the terminator **after a compound command**
-is optional: `while :; do if :; then :; fi done`, `if true; then { echo a; } fi`,
-`while false; do case x in a) echo c ;; esac done` and
-`for i in a; do if :; then echo f; fi done` are bash rc 0 (5.3.9, measured
-2026-10-23) — and every one was rc 1 on `master`, `fdshell` answering the bare
-*missing closer*. Task #301 moved the rule from `for_block` (which pinned
-`;`-only) to every block form, and the lesson is the **shape** of the fix: one
+and bash enforces it (rc 2), while the terminator **after a compound command** is
+optional: `while :; do if :; then :; fi done`, `if true; then { echo a; } fi`,
+`while false; do case x in a) echo c ;; esac done`,
+`for i in a; do if :; then echo f; fi done` are bash rc 0 (5.3.9) and every one
+was an rc 1 *missing closer* in fdshell. The fix's **shape** is the lesson: one
 predicate, read at the scan and at the builders, that knows both halves.
 
-- **Scan side** (`keywords/position.rs::after`): a closer **in command
-  position** restarts command position, gated on `Place::Command` so a
-  closer-shaped *argument* (`echo fi`) leaves the place alone. `after` is read
-  by four scorers — "One clause rule, three scorers" — so the block-span scan
+- **Scan side** (`keywords/position.rs::after`): a closer **in command position**
+  restarts command position, gated on `Place::Command` so a closer-shaped
+  *argument* (`echo fi`) leaves the place alone. `after` is read by four scorers
+  ("One clause rule, three scorers"), so the block-span scan
   (`parse/semi/closing`), the cond-boundary counter (`cond/boundary/block`),
   `comment/depth_delta` and `parse/case_clause/stray` gained the mid-run and
   pipeline-stage parity **in the same commit**: a builder-side fix alone cannot
   reach `true && while false; do if :; then echo y; fi done`, whose *span* the
-  byte scans own, and a scan-side fix alone would reject every bash-accepted
-  form (`for`'s `;`-only ensure already mis-rejected `… fi done` once the
-  closer was found).
+  byte scans own, and a scan-side fix alone rejects every bash-accepted form
+  (`for`'s `;`-only ensure already mis-rejected `… fi done` once the closer was
+  found).
 - **Builder side** (`parse/semi/preceded.rs::is_closer_predecessor` +
-  `ensure_before_closer`, called at the `if`/`while`/`for`/`for ((…))` sites):
-  a terminator (`;`, the newline token, the plain `&`) **or** a closer keyword.
-  `keyword_word`'s raw-span gate (task #247) keeps a quoted `"fi"` out, and the
-  glued `}>f`/`esac>f` words out — bash rejects `while false; do { :; }>f done`
-  rc 2 and the token test says no, so that row stays rc 1.
-- **The clause keywords carry the same gate** — the "One clause rule, three
-  scorers" gate read from the transition side: `if`/`while`/`until` and
-  `then`/`do`/`else`/`elif` restart command position only where they are not an
-  argument, so the `else` of `if true; then echo a else fi` is `echo`'s word and
-  the `fi` behind it stays data (bash rc 2, fdshell rc 1, its own missing-closer
-  message). The guard is `!Place::Data`, **not** `== Place::Command`: the `case`
-  word list (`Pattern`) keeps the old row, because the glued pair-payload rows
-  of `after` read the place the pair set and a list ends at its own `)`;
-  narrowing the guard to `Command` breaks those pins (measured on this task).
-  `in` stays ungated — the closer-shaped word of a `case`/`for` list is
-  #273/#306/#310's rule, not this one's.
+  `ensure_before_closer`, called at the `if`/`while`/`for`/`for ((…))` sites): a
+  terminator (`;`, the newline token, the plain `&`) **or** a closer keyword.
+  `keyword_word`'s raw-span gate keeps a quoted `"fi"` out, and the glued
+  `}>f`/`esac>f` words out — bash rejects `while false; do { :; }>f done` rc 2 and
+  the token test says no, so that row stays rc 1.
+- **The clause keywords carry the same gate**, read from the transition side:
+  `if`/`while`/`until` and `then`/`do`/`else`/`elif` restart command position only
+  where they are not an argument, so the `else` of `if true; then echo a else fi`
+  is `echo`'s word and the `fi` behind it stays data (bash rc 2, fdshell rc 1, its
+  own missing-closer message). The guard is `!Place::Data`, **not**
+  `== Place::Command`: the `case` word list (`Pattern`) keeps the old row, because
+  the glued pair-payload rows of `after` read the place the pair set and a list
+  ends at its own `)`; narrowing the guard to `Command` breaks those pins. `in`
+  stays ungated — the closer-shaped word of a `case`/`for` list is the word-list
+  rule's, not this one's.
 - **Message ownership**: the check runs **after** the condition (so
   `if ; then; fi` keeps `missing condition`) and **before** the bodies, so a
-  closer glued straight behind a clause keyword reports the missing `;` and not
-  an empty body. Four forms moved message, none moved rc: `if true; then fi`,
-  `if a; then b; elif c; then fi`, `if a; then b; else fi`,
-  `while true; do done` — `for`'s `expected ';' before 'done'` pin was the
-  precedent. Every form with a real `;`/newline in front of the closer keeps the
-  empty-body/condition message of the entry above: those pins are the boundary,
-  and a real `;` in front of the closer is the whole difference between the two
-  rules.
-- **The `;;` rows are *not* this rule's.** #233 rejects an empty *token range*,
-  and a `;;` token is not empty, so `if true; then echo a ;; fi` stays rc 0
-  (bash rc 2) — task #423 owns that half; `tests/block_closers.rs` pins the
-  split so it is visible.
-- **A body that never runs is never parsed — the rule's own side effect.** A
-  block body is parsed only when it runs, so an unparseable nested block
-  written inside a body that never runs is closed by the compound exception and
-  its inner parse error never surfaces: `while false; do for i in a do :; done
-  done` and `while false; do if true; then fi done` are rc 0 here, **bash rc 2**
-  and **`master` rc 1** with its *missing-closer* error (a sweep of 18 invalid
-  inner statements × 8 block spellings counts 47 such rows). They are the false
-  rejections this rule exists to remove, so no code fix here; the pin
-  `tests/block_closers.rs::a_never_run_body_is_never_parsed` names the owners of
-  each half (the word lists #273/#306/#310, the opener/closer pairing #309, and
-  the lazy-body-parse family for the message). The lesson for the rc-identity
-  audit of a *closer* rule: count the `(bash≠0, master≠0, new=0)` rows as their
-  own category — the parity-gain and regression categories leave this class
-  invisible, and a "0 regressions" claim then reads as more than it measured.
-- **Two heals worth naming.** `while :; do echo in done; …` hung on `master`
-  (the argument-`in` set `Place::Pattern`, `done` scored there, the loop never
-  closed); the closer rule turns it into rc 1, and the `cond/boundary/block/tests.rs`
-  pins that recorded the *transition* — "an `if`-shaped argument puts the
-  *next* word in command position" — flipped with it. A scorer pin of the
-  ungated shape is not a parity pin; gate the rule once and the pins that
-  imitate the old shape must follow.
+  closer glued straight behind a clause keyword reports the missing `;` and not an
+  empty body. Four forms moved message, none moved rc: `if true; then fi`,
+  `if a; then b; elif c; then fi`, `if a; then b; else fi`, `while true; do done`
+  — `for`'s `expected ';' before 'done'` pin was the precedent. Every form with a
+  real `;`/newline in front of the closer keeps the empty-body/condition message:
+  a real `;` is the whole difference between the two rules.
+- **The `;;` rows are *not* this rule's.** An empty *token range* is rejected and
+  a `;;` token is not empty, so `if true; then echo a ;; fi` stays rc 0 (bash rc
+  2); `tests/block_closers.rs` pins the split so it is visible.
+- **A body that never runs is never parsed — the rule's own side effect.** A block
+  body is parsed only when it runs, so an unparseable nested block inside a body
+  that never runs is closed by the compound exception and its inner parse error
+  never surfaces: `while false; do for i in a do :; done done` and
+  `while false; do if true; then fi done` are rc 0 here, **bash rc 2**. They are
+  exactly the false rejections this rule exists to remove, so no code fix here;
+  the pin `tests/block_closers.rs::a_never_run_body_is_never_parsed` names the
+  owners of each half (the word lists, the opener/closer pairing, and the
+  lazy-body-parse family for the message). Lesson for the rc-identity audit of a
+  *closer* rule: count the `(bash≠0, old≠0, new=0)` rows as their own category —
+  the parity-gain and regression categories leave this class invisible, and a "0
+  regressions" claim then reads as more than it measured.
+- **A gate change moves the pins that imitate the old shape.** The
+  `cond/boundary/block/tests.rs` pins recording the *transition* — "an
+  `if`-shaped argument puts the *next* word in command position" — flipped with
+  the closer gate (`while :; do echo in done; …` went from a hang to rc 1). A
+  scorer pin of the ungated shape is not a parity pin: gate the rule once and the
+  pins imitating the old shape must follow.
   `tests/group.rs::literal_brace_argument_in_a_block_body` moved its stdout and
-  message (rc stays 1, `expected ';' before 'fi'`): the brace gate itself is
-  untouched (a `}` behind `echo` is still data, `echo {` still prints `{`) — the
-  closer rule simply answers first, and the divergence from bash (rc 0, prints
-  `}`) is the same accepted one.
+  message (rc stays 1, `expected ';' before 'fi'`) with the brace gate untouched
+  (a `}` behind `echo` is still data, `echo {` still prints `{`) — the closer rule
+  simply answers first, and the divergence from bash (rc 0, prints `}`) is the
+  same accepted one.
 
 Pins: `keywords/position/tests.rs` (the closer arm, the clause gate),
 `parse/semi/preceded/tests.rs` (the predecessor set, index 0, off the list),
@@ -2452,193 +2415,141 @@ Pins: `keywords/position/tests.rs` (the closer arm, the clause gate),
 `tests/block_closers.rs` (every row measured against bash; the loop forms under
 a bounded child, because a mis-paired closer is a hang), `tests/block_bodies.rs`,
 `tests/cond_blocks.rs`, `tests/group.rs`.
-
 ## One clause rule, three scorers: closers and openers do not share one gate
-Task #236: `while true; do echo if && echo x; break; done` was a parse error
-because the in-block half of the command-position rule was missing — every
-keyword-shaped word inside a block scored `keyword_delta`'s value, so an
-*argument* (`echo if`, `echo done`) opened/dropped the depth and the body's
-`&&` never split (or the block's span closed at the argument). The rule is
-now one shared state machine (`keywords/position.rs`) consumed verbatim by
-the three scorers that walk block text: the cond-boundary block counter
-(`cond/boundary.rs` + `cond/boundary/block.rs` carry a `Place` flag), the
-block-span scan (`comment/depth_delta`), and the parse closing-keyword search
-(`parse/semi/closing.rs`) — task #309 made it **four** scorers and **two**
-gates (point 4 below). The sharp edges, all measured against bash:
 
-1. **The gate is *place*-based, and the closer's gate is wider than the
-   opener's.** Openers score in `Command` only; closers score in
-   `Command | Pattern` — the `Pattern` place (after `in`) is a `case` word
-   list, whose `esac` is the list's terminator (`case x in esac` is complete;
-   `case x in if) …` is a pattern, not a block). "Closers and openers share
-   one gate" is the mutation: it kills `case x in esac` (the closer stops
-   scoring in the list) — `tests/cond_blocks.rs::case_list_position_scores_closers_not_openers`
-   and `keywords/position/tests.rs::closers_score_in_command_and_pattern_positions`
-   are the pair that pins the asymmetry. A `max(0)`-clamped depth hides the
-   imbalance until the split lands *inside* the block: the gate symmetry, not
-   the clamp, is the invariant.
-2. **The flag transitions are applied to *every* word, scored or not** — and
-   they read the *same* gate as the score (task #301). A keyword-shaped
-   **argument** (`echo if`, `echo a else`) is data and keeps the next word data,
-   so it can never hand command position to a keyword behind it: an
-   unscored `if`-shaped argument moves the place to Command **only from a
-   non-argument place** (the guard is `!Place::Data` — a `case` word list keeps
-   the row, its `)` ends the list); a **closer** in command position restarts
-   command position, the `;` bash makes optional after a compound command
-   (the closer-rule entry above); a glued `x)` (a `case` clause) moves the place
-   to Command via the word's *last* byte; `in` moves it to `Pattern` (ungated —
-   the word-list rule is #273/#306/#310's); a whole `time [-p]` word is
-   transparent (keeps the place — `keyword_delta` already strips the prefix for
-   the score, so the double transparency is deliberate); `#` moves it to Data,
-   which is what makes a `# done` comment line inert (#237's parity lands here,
-   no comment rule of its own).
-3. **Braces stay ungated.** `scores` returns true for `{`/`}` in every place:
-   gating them would silently fix the accepted divergence
-   `tests/group.rs::literal_brace_argument_in_a_block_body` (`echo }` in a
-   body eats the closer, rc 1, bash rc 0) and rewrite its pin — the brace
-   half belongs to #189/#193. The asymmetry (`echo done` is data, `echo }`
-   is not) is stated in the README divergence list.
-4. **Task #309 added a *second* gate: the closer's *kind*, and a fourth scorer.**
-   The depth each scorer kept as an `i32` is now a typed stack of the open
-   blocks (`keywords::Closer`, `keywords::Pairing`), every scorer **seeds** it
-   with the closer of the block it enters, and a closer that mismatches the
-   innermost block scores `0` *and* leaves the place at `Data` (it is word data).
-   `after`'s closer row became a *pairing* row — it fires only for the innermost
-   block's own closer — so the decision lives in one predicate
-   (`keywords/position/score.rs::closer_matches`) and no scorer copies it. The
-   fourth scorer is `parse/case_clause/stray.rs`: a `case` arm's stray-paren walk
-   owns no block stack, so it passes `None` and keeps the pre-#309 row (arm-level
-   pairing is the case builder's). Sharp edges, all measured:
-   (a) gating that place row turns a mismatched closer into an **argument**, so a
-   closer written *behind* it stops scoring — `while :; do echo if; fi done`
-   never closes its `while` (the unclosed report), which is the point, not a
-   regression; (b) the `open: None` behavior of the same row (top level, the gate
-   start, the stray walk) is the pinned stray-closer **clamp**
-   (`cond/tests.rs::line_start_words_keep_the_closer_and_argument_gates`) — do not
-   "fix" it; (c) **the stacks are per-scorer by construction**: the block-span
-   scan pairs braces (`{ echo if; }` in a loop body — `}` pops `Brace`, `done`
-   pops the loop), the cond-boundary scan never pushes `Brace` because its group
-   arm's `group_depth` owns braces; (d) seeding the scan with the block's own
-   closer is what makes a `done` of a `case` **pattern** list a list word — part
-   of #310's word-list rule lands for free at *both* granularities (LESSONS: "A
-   word-list rule lives at **two granularities**"), while the
-   `esac`-shaped list word stays the list gate's own job.
+One shared state machine (`keywords/position.rs`) is consumed verbatim by every
+scorer that walks block text: the cond-boundary block counter
+(`cond/boundary.rs` + `cond/boundary/block.rs`, which carry a `Place` flag), the
+block-span scan (`comment/depth_delta`), the parse closing-keyword search
+(`parse/semi/closing.rs`), and the `case` arm's stray-paren walk
+(`parse/case_clause/stray.rs`). Two gates: the word's *place* and the closer's
+*kind*. All measured against bash.
 
-The gate moves *accepted* forms into the unclosed-construct class, and there
-the run-level message is the bare unmatched-keyword EINVAL: `while true; do
-echo x done`, `if a; then b fi`, `if test fi` and `case … *) echo no esac`
-report `parse error` rc 1 (bash rc 2), where master accepted two of them
-(`if test fi` reported `missing 'then'`, the glued-`fi`/glued-`done` forms
-ran). The detailed frames (`expected 'done'`, `missing 'fi'`) survive at the
-parse layer and are pinned in `parse::tests`; the README's "unclosed mid-run
-construct" bullet (#294) carries the framing. Do not add new error variants
-for the degraded run-level text. Pins: `cond/boundary/block/tests.rs::in_block_words_follow_the_clause_rule`,
-`keywords/position/tests.rs`, `tests/cond_blocks.rs` (the task #236 section,
-the `echo done` row bounded like `tests/loops.rs`),
-`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`.
-
-Task #236 (S2 round): the short-circuit gate and the glued cond pair.
-- **The gate's scope is the statement.** A short-circuited `||` chain gates
-  bash's *AND-list*, and the first `;` at group/block depth 0 ends it; the
-  scan must resume *ungated* behind that `;` (`cond/boundary/gate.rs::gate_end`).
-  Two traps cost a hang each: (1) the gate scan inherits the boundary scan's
-  word state, so `state.word_active` must be reset at the gate start or the
-  gated list's first word is swallowed; (2) the gate's block depth must
-  *close* — score with the full `word_delta` (the run resets `;`/newline
-  restart the run at *every* `;`, inside blocks included), so a block the
-  gated text opens ends at its own closer and the `;` behind it ends the
-  gate. Scoring closers at top level is exactly what `group_at_run` cannot
-  see (its answer is "no group"), and a block opened by a glued pair's
-  payload that never closes swallows the rest of the line: the S2 hang.
-  The two short-circuit scopes are **deliberately asymmetric** (measured at
-  parity today, so do not "fix" one side blind): a short-circuited `||` ends
-  its gate at the `;` (`gate_end`), the `&&`-failure path keeps skipping to
-  the next `||` (`parts::skip_to_or`).
- - **A cond pair opens two word starts; the payload is a word.** The
-   byte-level scans carry this as `Glue` (head/tail strip applied by
-   `keywords/position/payload.rs`, task #439); the token- and run-layer scorers see the
-   glued word whole (`a||if` is ONE token) and must score the payload behind
-   the pair themselves — `keywords::pair_payload` + payload arms in
-   `parse/semi/closing.rs` and `comment/depth_delta.rs`. Do not put the pair
-   rule inside `keyword_delta` itself: `keyword_delta` is also the *run-open*
+1. **The gate is place-based, and the closer's gate is wider than the opener's.**
+   Openers score in `Command` only; closers score in `Command | Pattern` — the
+   `Pattern` place (after `in`) is a `case` word list, whose `esac` is the list's
+   terminator (`case x in esac` is complete; `case x in if) …` is a pattern, not
+   a block). "Closers and openers share one gate" is the mutation: it kills
+   `case x in esac`. Pins
+   `tests/cond_blocks.rs::case_list_position_scores_closers_not_openers` +
+   `keywords/position/tests.rs::closers_score_in_command_and_pattern_positions`.
+   A `max(0)`-clamped depth hides the imbalance until the split lands *inside*
+   the block: the gate symmetry, not the clamp, is the invariant.
+2. **The flag transitions apply to *every* word, scored or not, and read the same
+   gate as the score.** A keyword-shaped argument (`echo if`) is data and keeps
+   the next word data, so it can never hand command position to a keyword behind
+   it: an unscored `if`-shaped argument moves the place to Command **only from a
+   non-argument place** (guard `!Place::Data`; a `case` word list keeps the row,
+   its `)` ends the list). Other transitions: a **closer** in command position
+   restarts command position (the `;` bash makes optional after a compound
+   command — see the closing-keyword entry); a glued `x)` moves the place to
+   Command via the word's *last* byte; `in` moves it to `Pattern` (ungated — the
+   word-list rule's); a whole `time [-p]` word is transparent (keeps the place —
+   `keyword_delta` already strips the prefix for the score, so the double
+   transparency is deliberate); `#` moves it to Data, which is what makes a
+   `# done` comment line inert (no comment rule of its own).
+3. **Braces stay ungated:** `scores` is true for `{`/`}` in every place. Gating
+   them would silently fix the accepted divergence
+   `tests/group.rs::literal_brace_argument_in_a_block_body` (`echo }` in a body
+   eats the closer, rc 1, bash rc 0) and rewrite its pin. The asymmetry (`echo
+   done` is data, `echo }` is not) is in the README divergence list.
+4. **The closer's kind is the second gate.** The `i32` depth each scorer kept is
+   now a typed stack of the open blocks (`keywords::Closer`,
+   `keywords::Pairing`); every scorer **seeds** it with the closer of the block
+   it enters, and a closer mismatching the innermost block scores `0` *and*
+   leaves the place at `Data`, so a closer written *behind* it stops scoring —
+   `while :; do echo if; fi done` never closes its `while` (the unclosed report),
+   which is the point, not a regression. `after`'s closer row is a *pairing* row
+   firing only for the innermost block's own closer, so the decision lives in one
+   predicate (`keywords/position/score.rs::closer_matches`) and no scorer copies
+   it. The stray-paren walk owns no block stack, so it passes `None` and keeps
+   the unpaired row (arm-level pairing is the case builder's); the same
+   `open: None` behaviour is the pinned stray-closer **clamp**
+   (`cond/tests.rs::line_start_words_keep_the_closer_and_argument_gates`) — do
+   not "fix" it. **Stacks are per-scorer by construction**: the block-span scan
+   pairs braces (`{ echo if; }` in a loop body — `}` pops `Brace`, `done` pops
+   the loop), the cond-boundary scan never pushes `Brace` because its group arm's
+   `group_depth` owns braces. Seeding with the block's own closer makes a `done`
+   of a `case` **pattern** list a list word, so the word-list rule lands for free
+   at *both* granularities (LESSONS: "A word-list rule lives at **two
+   granularities**"); the `esac`-shaped list word stays the list gate's own job.
+5. **The gate moves *accepted* forms into the unclosed-construct class**, where
+   the run-level message is the bare unmatched-keyword EINVAL: `while true; do
+   echo x done`, `if a; then b fi`, `if test fi`, `case … *) echo no esac` report
+   `parse error` rc 1 (bash rc 2). The detailed frames (`expected 'done'`,
+   `missing 'fi'`) survive at the parse layer, pinned in `parse::tests`; the
+   README's "unclosed mid-run construct" bullet carries the framing. Add no new
+   error variants for the degraded run-level text.
+6. **The short-circuit gate's scope is the statement.** A short-circuited `||`
+   chain gates bash's *AND-list*, and the first `;` at group/block depth 0 ends
+   it; the scan must resume *ungated* behind that `;`
+   (`cond/boundary/gate.rs::gate_end`). Two traps, each a hang: the gate scan
+   inherits the boundary scan's word state, so `state.word_active` must be reset
+   at the gate start; the gate's block depth must *close* — score with the full
+   `word_delta` (the `;`/newline restarts the run at *every* `;`, inside blocks
+   included) — so a block the gated text opens ends at its own closer and the `;`
+   behind it ends the gate. A block opened by a glued pair's payload that never
+   closes swallows the rest of the line. The two short-circuit scopes are
+   **deliberately asymmetric** (parity today — do not "fix" one side): a
+   short-circuited `||` ends its gate at the `;` (`gate_end`), the `&&`-failure
+   path keeps skipping to the next `||` (`parts::skip_to_or`).
+7. **A cond pair opens two word starts; the payload is a word.** The byte scans
+   carry this as `Glue` (head/tail strip in `keywords/position/payload.rs`); the
+   token- and run-layer scorers see the glued word whole (`a||if` is ONE token)
+   and must score the payload behind the pair themselves — `keywords::pair_payload`
+   + payload arms in `parse/semi/closing.rs` and `comment/depth_delta.rs`. Never
+   put the pair rule inside `keyword_delta` itself: it is also the *run-open*
    test (`segment.rs`, `midrun::skip`), and scoring a payload there makes
-   `echo a && if …` open a block from the whole run — the midrun cond-part
-   semantics collapse (spaced rows failed en masse). The run-open test is
-   leading-word-only by design.
- - **There is no profile split on these shapes — do not invent one.** A
-   round-3 probe claimed a "rustc codegen anomaly": that at `opt-level = 0`
-   the payload/glue arms of `keywords/position` (now `payload.rs`) miscompile, so the dev and
-   test binaries disagree with the release build on glued cond pairs and unit
-   pins of glued forms are "unpinable". Measured on 19 glued shapes
-
-  (`echo x&&if …`, `echo x||if …`, `echo x|if …`, `while … echo a&&if …`,
-  the glued closers, the in-block clause rows): `target/debug/fdshell` and
-  `target/release/fdshell` print **identical stdout with identical rc**; the
-  payload/glue arms pass as plain unit pins in the `cfg(test)` build. The
-  only profile difference is error-stack's source-location frames, present in
-  a debug report and absent from a release one (stdout/rc are the same, so
-  pins that compare stdout+rc are profile-independent). `package.nix` sets
-   **no** `opt-level` at all (`buildRustPackage` + `useNextest`; cargoHook
-   builds `--release`). The probe's "miscompile" is the *rule*: a pair payload
+   `echo a && if …` open a block from the whole run, collapsing the midrun
+   cond-part semantics. The run-open test is leading-word-only by design.
+8. **There is no profile split on these shapes — do not invent one.** A probe
+   claimed a "rustc codegen anomaly" at `opt-level = 0` in the payload/glue arms
+   of `keywords/position/payload.rs`, so the dev and release binaries disagree on
+   glued cond pairs and glued forms are "unpinable" in unit tests. Measured on
+   glued shapes (`echo x&&if …`, `echo x||if …`, glued closers, in-block clause
+   rows): `target/debug/fdshell` and `target/release/fdshell` print **identical
+   stdout with identical rc**, and the payload/glue arms pass as plain
+   `cfg(test)` unit pins. The only profile difference is error-stack's
+   source-location frames (present in a debug report, absent from a release one),
+   so stdout+rc pins are profile-independent; `package.nix` sets **no**
+   `opt-level` at all. The probe's "miscompile" *is* the rule: a pair payload
    behind data is deliberately `Place::Data` (`after`'s place rule scores the
-   payload of a pair glued behind an argument word as an argument; task #292
-   later moved the *pipeline* `|` twin to the command side with its stage arm,
-   which is exactly this lesson's point — the place is a rule, not a fixed
-   answer), so a probe expecting `Command` behind `Place::Data` asserts the
-   divergence away and fails: a test bug. Pin the place the rule sets, and
-   never exempt a shape from unit pins on a toolchain excuse.
+   payload of a pair glued behind an argument word as an argument; the pipeline
+   `|` twin sits on the command side with its stage arm — the place is a rule,
+   not a fixed answer), so a probe expecting `Command` behind `Place::Data`
+   asserts the divergence away and fails: a test bug. Pin the place the rule
+   sets; never exempt a shape from unit pins on a toolchain excuse.
+9. **A closer of a foreign kind written in a body is word data, so the body keeps
+   its tail** — point 4's typed pairing, which closed the type-blind pairing
+   class where one `block_depth` let any closer close any block (worst row
+   `while :; do echo a | case x in a) echo y;; esac; break; done; echo after`
+   ran forever, rc 124, where bash exits 0 printing `after`). Such rows run at
+   rc 0 printing their body and report the stray closer as an unresolvable
+   command (`failed to resolve command path: "fi"`, rc 127 in the body) where
+   bash refuses the line at rc 2; with no closer of the block's own kind left the
+   line is the "unclosed mid-run construct" report. Two shapes stay divergent
+   **by rule**, both pinned: a body whose **own** closer ends it above the
+   `break` runs forever — **bash parity** where the line has no second closer
+   (`while :; do echo while; done; echo after` hangs in bash too), acceptance
+   divergence where it keeps one (bash rc 2, fdshell hangs). Pins
+   `tests/cond_blocks.rs::mismatched_closers_in_a_loop_body_are_word_data`,
+   `a_mismatched_closer_that_leaves_no_closer_is_a_parse_error`,
+   `a_closer_shaped_case_pattern_list_word_is_a_word`,
+   `a_loop_body_that_never_returns_is_bash_parity` (the hang **is** the parity:
+   terminating these rows is a regression),
+   `a_loop_body_that_never_returns_where_bash_refuses_the_line`; the README's
+   "Conditionals and loops" pairing paragraph carries the disclosure. Disclose
+   the family by rule and pin a sample — the sample is never the extent (a
+   sweep's count is a lower bound). `Place::Pattern` pays the same type-blindness
+   for `case x in esac`: a `done` in a `case`/`for` *list* is a pattern word, not
+   a closer, and the seed carries the `case`-**pattern**-list half for free
+   (`case x in done) echo p;; esac` reaches its real `esac`, rc 0 = bash parity);
+   the rest of the list rule is the word-list entry's.
 
-Task #236 (accepted divergence, class **closed by task #309**, see the end of
-this entry): the in-block opener/closer pairing **was type-blind** and knowingly
-left incomplete. Every
-in-block scorer pairs an opener with *any* closer — `word_delta`/`depth_delta`
-/`closing_keyword_index` count a single `block_depth` (the `Place` flag says
-*where* a word sits, never *which* block it belongs to), so a `while` body's
-`if`-closer (`fi`) closes the `while`, a `done` closes an `if`, and the loop's
-own `break` lands in a level that no longer exists. bash pairs them per
-construct type. Consequence, stated as the rule it is (not as a row list):
-**an argument-position opener plus a mismatched closer in a loop body ⇒ the
-body never returns** (rc 124). Measured samples of it:
-`while :; do echo a | case x in a) echo y;; esac; break; done; echo after` —
-the worst row, bash *and* `master` exit 0 printing `after` and this branch
-runs forever —
-`while :; do echo if; fi; echo x; break; done; echo after`,
-`… echo case; esac; break; done …`, `… echo if; fi; echo after`,
-`… echo a|if :; then echo y; fi; echo z; break; done …`,
-`… echo a|if :; then echo y; fi; break; done …`,
-`… echo a|while :; do break; done; break; done …`, and master's own
-`while :; do echo a; fi; echo after`. **These rows are a sample of a sweep,
-never the family's extent** — the next section is the reporting rule. #236
-fixed the *argument-position* half of the rule (keyword-shaped words are
-data).
-
-**Task #309 closed the class** (the typed pairing of point 4 above): a closer of
-a foreign kind written in a body is word data, so the body keeps its tail. The
-samples above now run at rc 0 printing their body and reporting the stray closer
-as an unresolvable command (`failed to resolve command path: "fi"`, rc 127
-inside the body) where bash refuses the line at rc 2; with no closer of the
-block's own kind left the line is the "unclosed mid-run construct" report
-(`'while' is missing its closing 'done'`, rc 1, bash rc 2). Two shapes stay
-divergent **by rule**, and both are pinned: a body whose **own** closer ends it
-above the `break` runs forever (the block does end at the body's closer), which
-is **bash parity** on the rows whose line has no second closer
-(`while :; do echo while; done; echo after` hangs in bash too) and the
-acceptance divergence on the rows that keep one (bash rc 2, fdshell runs
-forever). Pins:
-`tests/cond_blocks.rs::mismatched_closers_in_a_loop_body_are_word_data`,
-`a_mismatched_closer_that_leaves_no_closer_is_a_parse_error`,
-`a_closer_shaped_case_pattern_list_word_is_a_word`,
-`a_loop_body_that_never_returns_is_bash_parity` (the hang **is** the parity: a
-change that terminates these rows is a regression) and
-`a_loop_body_that_never_returns_where_bash_refuses_the_line`; the README's
-"Conditionals and loops" pairing paragraph carries the disclosure. Do not "fix"
-one row and leave the family. The same type-blindness is what `Place::Pattern`
-pays for `case x in esac` (the list's terminator is a closer, so a `done` in a
-`case`/`for` *list* is a pattern word, not a closer): #309's seed carries the
-`case`-**pattern**-list half of it for free (`case x in done) echo p;; esac`
-reaches its real `esac`, rc 0 = bash parity), the `echo in done` row has been
-rc 1 since #301, and #310 owns the rest of the list rule.
-
+Pins: `cond/boundary/block/tests.rs::in_block_words_follow_the_clause_rule`,
+`keywords/position/tests.rs`, `tests/cond_blocks.rs` (the in-block section, the
+`echo done` row bounded like `tests/loops.rs`),
+`tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`.
 ## Disclose a divergence family by rule, pin a sample — never a list as the extent (task #236)
 
 Task #236's "body that never returns" class is a *rule* (an argument-position
