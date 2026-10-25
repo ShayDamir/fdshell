@@ -3,10 +3,12 @@ mod backtick;
 mod brace;
 mod dollar;
 mod fields;
+mod join;
 mod mask;
 mod origin;
 mod param_op;
 mod paren;
+pub(crate) mod pattern;
 mod percent;
 mod positional;
 pub(crate) mod resolve;
@@ -18,6 +20,7 @@ mod words;
 pub use words::substitute_args;
 
 pub(crate) use fields::word_fields;
+pub(crate) use join::Join;
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -40,7 +43,8 @@ pub(crate) fn substitute_arg(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<MaskBit>), Report<ResolveError>> {
-    let (out, out_mask, _origin) = arg::substitute_arg_marked(arg, mask, spans, cache, cell)?;
+    let (out, out_mask, _origin) =
+        arg::substitute_arg_marked(arg, mask, spans, Join::Args, cache, cell)?;
     Ok((out, out_mask))
 }
 

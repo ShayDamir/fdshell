@@ -71,12 +71,12 @@ pub(super) fn positional_join<'a>(
     join(positional, Some(sep))
 }
 
-fn first_ifs_byte(ifs: &ShortCStr) -> Result<Option<u8>, Report<ResolveError>> {
+pub(super) fn first_ifs_byte(ifs: &ShortCStr) -> Result<Option<u8>, Report<ResolveError>> {
     let bytes = ifs.as_bytes().change_context(ResolveError::RefNotFound)?;
     Ok(bytes.first().copied())
 }
 
-fn join<'a>(
+pub(super) fn join<'a>(
     positional: impl IntoIterator<Item = &'a ImportedStr>,
     sep: Option<u8>,
 ) -> Result<ShortCStr, Report<ResolveError>> {

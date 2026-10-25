@@ -15,6 +15,7 @@ use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
 
+use super::Join;
 use super::arg::substitute_arg_marked;
 use super::borrow_state;
 use super::positional::expand_positional_word;
@@ -43,7 +44,8 @@ pub(crate) fn word_fields(
     if word.eq_bytes(b"$@") || word.eq_bytes(b"$*") {
         return positional_fields(word.eq_bytes(b"$*"), fq, quoted, cell);
     }
-    let (text, text_mask, origin) = substitute_arg_marked(word, mask, spans, cache, cell)?;
+    let (text, text_mask, origin) =
+        substitute_arg_marked(word, mask, spans, Join::Args, cache, cell)?;
     // A fully quoted word is exactly one word — kept even when the expansion
     // is empty (`"${Y:+a}"` → one empty argument).
     let mut fields = if fq && text.is_empty() {

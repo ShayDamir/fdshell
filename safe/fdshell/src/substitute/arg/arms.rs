@@ -10,6 +10,7 @@ use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
+use crate::substitute::Join;
 use crate::substitute::dollar::{self, Region};
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
@@ -30,16 +31,18 @@ pub(super) fn percent(
 
 /// The `$` arm (the `$(` arm is handled separately in the loop). `region`
 /// carries the mask, the word index of the byte after `$`, and the name cap
-/// of the trigger's quote region; `quoted` is the trigger byte's mask bit,
-/// the quote bit the `$@` arm gives its positionals; `origin` records the
-/// arm's positional boundaries.
+/// of the trigger byte's quote region; `quoted` is the trigger byte's mask
+/// bit, the quote bit the `$@` arm gives its positionals; `join` is the
+/// surface's `$@`/`$*` join mode; `origin` records the arm's positional
+/// boundaries.
 pub(super) fn dollar(
     peek: &mut Counting<'_>,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     region: Region<'_>,
     quoted: bool,
+    join: Join,
     origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
-    dollar::dollar_subst(peek, cell, out, region, quoted, origin)
+    dollar::dollar_subst(peek, cell, out, region, quoted, join, origin)
 }

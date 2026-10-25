@@ -395,14 +395,180 @@ fn quoted_dollar_at_in_a_case_word_is_glued() {
     assert_eq!(out, "glued\n", "bash prints spaced");
 }
 
-/// Accepted divergence (task #319): a `case` pattern is **one** word, so a
-/// quoted `$@` in the pattern is fdshell's join where bash makes one pattern per
-/// positional word.
+/// A `case` pattern is **one word**: bash expands it and keeps only its first
+/// expanded word (`execute_case_command`, `es->word->word`), so a quoted `$@`
+/// in a pattern is the **first positional** — not one pattern per positional
+/// word, which is what task #319's description claimed and bash 5.3.9 measures
+/// false (`set -- a b; case b in "$@")` prints nothing).
 #[test]
 fn dollar_at_in_a_case_pattern_is_one_word() {
     let (out, err, code) = run("set -- a b; case a in \"$@\") echo m;; esac");
-    assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "", "bash matches its `a` pattern (m)");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- a b; case b in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+}
+
+/// The first word of the expansion, so the positional list is never a joined
+/// pattern either: `set -- "a b" c` makes the pattern `a b`, which matches
+/// neither its own join `a b c` nor the bare `a`.
+#[test]
+fn dollar_at_in_a_case_pattern_is_neither_the_join_nor_a_later_positional() {
+    let (out, err, code) = run("set -- \"a b\" c; case \"a b c\" in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- \"a b\" c; case a in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- \"a b\" c; case \"a b\" in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- \"a b\" c; case c in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+}
+
+/// An empty `IFS` emits no word boundary, so nothing is dropped: the quoted
+/// `$@` **space-joins** and the join is the pattern (measured `IFS=;` rows).
+#[test]
+fn an_empty_ifs_space_joins_a_quoted_dollar_at_pattern() {
+    let (out, err, code) = run("IFS=; set -- a b; case \"a b\" in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=; set -- a b; case a in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // The glue survives on both sides, because there is no cut at all.
+    let (out, err, code) =
+        run("IFS=; set -- \"a b\" c; case \"xa b cy\" in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// An **unquoted** `$@` in a pattern space-joins whatever the `IFS` is: with
+/// `IFS=,` the pattern of `p$@q` over `a b` is `pa bq`, and the `IFS` byte
+/// never appears in it.
+#[test]
+fn an_unquoted_dollar_at_pattern_space_joins_whatever_the_ifs_is() {
+    let (out, err, code) = run("IFS=,; set -- a b; case \"pa bq\" in p$@q) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=,; set -- a b; case \"pa,bq\" in p$@q) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=,; set -- a b; case \"ab\" in p$@) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    // Unquoted, the positional's glob chars stay live (the mask rule of #280).
+    let (out, err, code) = run("set -- 'a*b'; case aXb in $@) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// `$*` (quoted or not) is one word joined with the **first `IFS` byte**, and
+/// an empty `IFS` **concatenates** it — the one row where the pattern surface
+/// must not reuse the word path's space-when-empty separator.
+#[test]
+fn dollar_star_in_a_case_pattern_joins_with_the_first_ifs_byte() {
+    let (out, err, code) = run("IFS=,; set -- a b; case \"a,b\" in $*) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=,; set -- a b; case \"a,b\" in \"$*\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=; set -- a b; case ab in $*) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=; set -- a b; case \"a b\" in \"$*\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+}
+
+/// No positionals is the **empty** pattern (`"$@"` is the word list, and an
+/// empty list contributes no word), while glue around it survives.
+#[test]
+fn a_dollar_at_pattern_with_no_positionals_is_the_empty_pattern() {
+    let (out, err, code) = run("set --; case \"\" in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set --; case x in \"$@\") echo m;; *) echo star;; esac");
+    assert_eq!((out.as_str(), code), ("star\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set --; case xy in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// Each `|` element expands on its own, and inside one element the quoted `$@`
+/// is still only its first positional.
+#[test]
+fn each_dollar_at_pattern_element_keeps_the_first_positional() {
+    let (out, err, code) = run("set -- a b; case a in z|\"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- a b; case b in z|\"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- a b; case a in \"$@\"|z) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// The cut keeps the piece the glue belongs to: with `IFS=,` over `a b c` the
+/// pattern `x"$@"y` is `xa` — the positional touching the leading `x` — and
+/// `cy` (a later positional with the trailing `y`) never matches.
+#[test]
+fn a_glued_dollar_at_pattern_keeps_only_the_first_piece() {
+    let (out, err, code) = run("IFS=,; set -- \"a b\" c; case \"xa b\" in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=,; set -- \"a b\" c; case cy in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=,; set -- a b c; case \"xa\" in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// An empty positional still carries its boundary, so the kept piece is the
+/// text up to it (`set -- a ""` → `xa`, `set -- "" b` → `x`).
+#[test]
+fn an_empty_positional_cuts_a_glued_dollar_at_pattern() {
+    let (out, err, code) = run("set -- a \"\"; case xa in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- \"\" b; case x in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("IFS=,; set -- a \"\" b; case xa in x\"$@\"y) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// The trigger's quote bit is the pattern's quoting signal (task #280) through
+/// the `$@` arm: a quoted `$@` keeps an expanded `*` **literal**, an unquoted
+/// one lets it glob.
+#[test]
+fn a_dollar_at_pattern_keeps_its_glob_chars_by_the_trigger_quote_bit() {
+    let (out, err, code) = run("set -- 'a*b'; case \"a*b\" in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- 'a*b'; case aXb in \"$@\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    let (out, err, code) = run("set -- 'a*b'; case aXb in $@) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err:?}");
+}
+
+/// Accepted divergence, pinned (task #319): `IFS=; set -- a ""` and the pattern
+/// `x"$@"y`. bash's pattern text carries its quoted-null marker (0x7f) between
+/// the pieces — `xa \177y` — which no word reaches, so bash matches **nothing**
+/// here; fdshell space-joins (`xa y`) and matches.
+#[test]
+fn an_empty_positional_with_an_empty_ifs_diverges_in_a_pattern() {
+    let (out, err, code) = run("IFS=; set -- a \"\"; case \"xa y\" in x\"$@\"y) echo m;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("m\n", 0),
+        "stderr={err:?}, bash matches nothing"
+    );
+}
+
+/// Accepted divergence, pinned (task #319, the task #177 D1 join): the braced
+/// `${@}` keeps fdshell's first-`IFS`-byte join in a pattern, where bash
+/// space-joins. The braced form is out of this task's scope.
+#[test]
+fn a_braced_dollar_at_pattern_keeps_the_first_ifs_byte_join() {
+    let (out, err, code) = run("IFS=,; set -- a b; case \"a b\" in \"${@}\") echo m;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 0),
+        "stderr={err:?}, bash matches (m)"
+    );
+    let (out, err, code) = run("IFS=,; set -- a b; case \"a,b\" in \"${@}\") echo m;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("m\n", 0),
+        "stderr={err:?}, bash matches nothing"
+    );
+    // The default `IFS` shows the same D1 shape: bash's `"${@}"` is the **first
+    // positional** there too, while fdshell joins with the space.
+    let (out, err, code) = run("set -- a b; case a in \"${@}\") echo m;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 0),
+        "stderr={err:?}, bash matches (m)"
+    );
 }
 
 /// Accepted divergence, parse layer: fdshell joins a multi-token pattern with a

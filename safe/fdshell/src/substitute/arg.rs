@@ -10,6 +10,7 @@ use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use super::Join;
 use super::dollar::Region;
 use super::mask::{Counting, push_byte, realign};
 use super::origin::Origin;
@@ -27,13 +28,15 @@ use crate::state::ShellState;
 /// positional starts a new word; the tilde arm records nothing — bash never
 /// splits the expanded `$HOME` (task #222). `spans` is the word's list of
 /// zero-byte quote-span indices (task #321), input-side only: it feeds the
-/// tilde gate and never affects the output mask.
+/// tilde gate and never affects the output mask. `join` is the `$@`/`$*` arm's
+/// join mode — the caller's surface, not a flag read off the state (task #319).
 ///
 /// Invariant: at the top of each loop iteration `idx == peek.consumed()`.
 pub(super) fn substitute_arg_marked(
     arg: &ShortCStr,
     mask: &[MaskBit],
     spans: &[usize],
+    join: Join,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<MaskBit>, Origin), Report<ResolveError>> {
@@ -101,6 +104,7 @@ pub(super) fn substitute_arg_marked(
                         limit,
                     },
                     quoted,
+                    join,
                     &mut origin,
                 )?;
                 realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);

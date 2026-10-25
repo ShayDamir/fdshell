@@ -1,5 +1,6 @@
 use crate::glob::match_component;
 use crate::loop_control::LoopControl;
+use crate::substitute::pattern::word as pattern_word;
 use crate::substitute::substitute_arg;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
@@ -42,13 +43,18 @@ fn run_case_body(
     // POSIX 2.9.4.3 expands a pattern word (tilde, parameter and command
     // substitution, quote removal) **with the pattern's own mask**, and bash
     // expands it lazily: pattern by pattern, stopping at the first match, so
-    // `case a in a|$(touch f))` never runs the substitution. `substitute_arg`
-    // never splits and never globs, and the mask it returns is bash's
-    // pattern-quoting signal — an expansion's bytes inherit the trigger's bit,
+    // `case a in a|$(touch f))` never runs the substitution. The pattern is a
+    // single **word**: bash keeps only the first expanded word of it
+    // (`execute_case_command`, `es->word->word`), splits it on nothing and
+    // globs it never, so `substitute/pattern.rs::word` cuts the expanded text
+    // only on the `$@` word boundaries and keeps the first piece — a quoted
+    // `"$@"` in a pattern is the **first positional**, not a pattern per
+    // positional (task #319). The mask the expansion returns is bash's
+    // pattern-quoting signal: an expansion's bytes inherit the trigger's bit,
     // so `"$p"` keeps an expanded `?` literal and `$p` lets it glob.
     for clause in &caseblock.clauses {
         for pattern in &clause.patterns {
-            let (pat, pat_mask) = substitute_arg(
+            let (pat, pat_mask) = pattern_word(
                 &pattern.text,
                 &pattern.mask,
                 &pattern.spans,

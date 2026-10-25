@@ -11,6 +11,7 @@ use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::state::ShellState;
+use crate::substitute::Join;
 use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
@@ -41,7 +42,7 @@ fn expand(word: &ShortCStr, mask: &[MaskBit]) -> (ShortCStr, Vec<MaskBit>, bool)
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (text, out_mask, origin) =
-        substitute_arg_marked(word, mask, &[], &mut cache, &cell).unwrap();
+        substitute_arg_marked(word, mask, &[], Join::Args, &mut cache, &cell).unwrap();
     (text, out_mask, !origin.is_empty())
 }
 
@@ -50,7 +51,7 @@ fn fields(word: &ShortCStr, mask: &[MaskBit]) -> Vec<ShortCStr> {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (text, out_mask, origin) =
-        substitute_arg_marked(word, mask, &[], &mut cache, &cell).unwrap();
+        substitute_arg_marked(word, mask, &[], Join::Args, &mut cache, &cell).unwrap();
     assert!(
         !origin.is_empty(),
         "the backtick arm must produce splittable bytes"

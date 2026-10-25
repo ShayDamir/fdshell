@@ -13,6 +13,7 @@ use crate::mask::MaskBit;
 use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::state::{FdVar, ShellState};
 
+use super::Join;
 use super::arg::substitute_arg_marked;
 use super::fields::word_fields;
 use super::mask::Counting;
@@ -249,7 +250,8 @@ fn expand_marked_cached(
     mask: &[MaskBit],
     spans: &[usize],
 ) -> (ShortCStr, Vec<MaskBit>, bool) {
-    let (text, out_mask, origin) = substitute_arg_marked(word, mask, spans, cache, cell).unwrap();
+    let (text, out_mask, origin) =
+        substitute_arg_marked(word, mask, spans, Join::Args, cache, cell).unwrap();
     (text, out_mask, !origin.is_empty())
 }
 
@@ -3591,7 +3593,7 @@ fn expand_origin(
     mask: &[MaskBit],
 ) -> (ShortCStr, Vec<MaskBit>, Origin) {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    substitute_arg_marked(word, mask, &[], &mut cache, cell).unwrap()
+    substitute_arg_marked(word, mask, &[], Join::Args, &mut cache, cell).unwrap()
 }
 
 fn splittable_all(origin: &Origin, len: usize) -> Vec<bool> {
@@ -3652,6 +3654,7 @@ fn percent_arm_records_its_fd_number() {
         &ShortCStr::from(c"x%v,y"),
         &[Unquoted; 5],
         &[],
+        Join::Args,
         &mut cache,
         &cell,
     )

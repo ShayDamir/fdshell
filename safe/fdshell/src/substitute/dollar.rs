@@ -10,6 +10,7 @@ use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use super::Join;
 use super::origin::Origin;
 
 /// The `$` arm's quote-region context: the output mask, the word index of the
@@ -27,6 +28,7 @@ pub(crate) fn dollar_subst(
     out: &mut ShortCStr,
     region: Region<'_>,
     quoted: bool,
+    join: Join,
     origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
     let Region { mask, start, limit } = region;
@@ -50,7 +52,7 @@ pub(crate) fn dollar_subst(
             core::write!(out, "{}", state.positional.len()).change_context(ResolveError::Never)?;
         }
         // `$@`/`$*` inside a larger word: the arm lives in `dollar/at_star.rs`.
-        Some(b'@') | Some(b'*') => at_star::expand(peek, cell, out, quoted, origin)?,
+        Some(b'@') | Some(b'*') => at_star::expand(peek, cell, out, quoted, join, origin)?,
         // The two region-capped arms — `$<digit…>` and `$<name>` — live in
         // `dollar/name.rs`: the region cap is checked there **before** the
         // trigger byte is consumed, so the borrow of the state stays below it.
