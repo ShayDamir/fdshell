@@ -2176,6 +2176,22 @@ and the separator-free text is what makes the *splitting* path bash-accurate —
 separator there breaks `x"$@"y` → `[xa b][cy]`. Today the non-splitting surfaces inherit the
 separator-free text (bash's non-word join is a space, so `v="$@"` stores `a bc` where bash stores
 `a b c`); task #288 owns that join.
+**A `case` pattern adds a third shape, and it is a *word* rule (task #319).** bash expands a
+pattern word and keeps only its **first expanded word** (`execute_case_command`, `es->word->word`),
+never one pattern per positional — `set -- a b; case a in "$@")` matches, `case b in "$@")` prints
+nothing — so the arm's adjacent-push + boundaries is right *because* `substitute/pattern.rs` cuts
+on the boundaries and takes the first piece. The rows that must drop nothing emit **no** boundary:
+an empty `IFS` space-joins a quoted `"$@"` (`IFS=; set -- a b; case "a b" in "$@")`), an unquoted
+`$@` space-joins whatever the `IFS` is (`IFS=,; set -- a b; case "pa bq" in p$@q)`), and `$*`
+joins with the first `IFS` byte while an empty `IFS` **concatenates** it (`IFS=; set -- a b; case
+ab in $*)`) — the pattern surface must not share the word path's space-when-empty byte. "Join only
+where a splitter consumes the text" survives: the pattern's cut is a boundary cut, never an `IFS`
+split. Two divergences are pinned, not fixed: `IFS=; set -- a ""` in the pattern `x"$@"y` is
+**unmatchable in bash** — its quoted-null byte (0x7f) leaks into the pattern text — where fdshell
+space-joins to `xa y` (`tests/case.rs::an_empty_positional_with_an_empty_ifs_diverges_in_a_pattern`);
+braced `${@}` keeps fdshell's first-`IFS`-byte join (task #177's D1) where bash space-joins an
+unquoted `${@}` and takes the first positional in a quoted `"${@}"`
+(`tests/case.rs::a_braced_dollar_at_pattern_keeps_the_first_ifs_byte_join`).
 Record spans for the splitter, never guess from `expanded`; measure every shape in bash before
 pinning — the earlier "bash cuts here" pins for literal `IFS` bytes after an expansion
 (`x$(true):y` → `[x:y]`, not `[x][y]`) were master-behavior pins, not bash facts.
@@ -3045,7 +3061,10 @@ byte. `envfilter::glob::glob_match` keeps its `*`-only semantics and its
 signature: its callers are env filters, which carry no mask.
 
 Gaps this task leaves measured, not fixed: a `case` pattern is **one** word, so
-`set -- a b; case a in "$@")` matches in bash and not here — task **#319**;
+`set -- a b; case a in "$@")` matches in bash and not here — task **#319**
+closed it, and with it the task text's "one pattern **per** positional word"
+reading: bash keeps the **first expanded word** (`es->word->word`), so
+`case b in "$@")` prints nothing (LESSONS: "`$@` has two join rules");
 bracket negation `[^…]` is unknown to `glob/match/bracket.rs` (only `!`), so
 `case ab in a[^c])` matches in bash and not here — task **#320**; and fdshell
 joins a multi-token pattern (`case "a b" in a b)` matches, the inserted space is

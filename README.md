@@ -671,6 +671,17 @@ expansion; `shopt -s dotglob` lets patterns match a leading dot;
 `shopt -s nullglob` deletes a pattern with no match; `shopt -s failglob`
 makes it an error.
 
+A `case` **pattern** gets neither treatment: it is one word, never split on the
+`IFS` and never globbed, and only its **first expanded word** is the pattern —
+so a quoted `"$@"` in a pattern is the **first positional** (bash keeps
+`es->word->word`), an unquoted `$@` space-joins, and `"$*"` joins with the
+first `IFS` byte (concatenating when the `IFS` is empty). Two measured
+divergences are pinned: with an empty `IFS` and an empty positional
+(`IFS=; set -- a ""`) bash's pattern text carries its quoted-null byte (0x7f)
+and matches nothing, where fdshell space-joins; and a braced `${@}` keeps
+fdshell's first-`IFS`-byte join, where bash space-joins an unquoted `${@}` and
+takes the first positional in a quoted `"${@}"`.
+
 `cd`'s operand is an ordinary word, so every rule above applies to it: the
 target is the **expansion**, not the text the user typed.
 
