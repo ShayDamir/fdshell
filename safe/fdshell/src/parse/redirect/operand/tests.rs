@@ -149,16 +149,22 @@ fn the_operand_slice_is_the_operand_the_parser_derives() {
     }
 }
 
-/// The arms with no operand of their own: the pidvar forms, a word that is not
-/// a redirect at all (glued operator, non-digit prefix, quoted operator byte),
-/// the here-doc/here-string words, an operator with nothing after it, and a
-/// word after a `;` separator — a statement's token list ends at the separator,
-/// so a bare operator at a segment end never pairs with the next word.
+/// The arms with no operand of their own: the pidvar forms, the **bare** `&>` /
+/// `&>>` operator token (its operand is the next token, never itself), a word
+/// that is not a redirect at all (glued operator, non-digit prefix, quoted
+/// operator byte), the here-doc/here-string words, an operator with nothing
+/// after it, and a word after a `;` separator — a statement's token list ends
+/// at the separator, so a bare operator at a segment end never pairs with the
+/// next word.
 #[test]
 fn an_operandless_word_has_no_operand_offset() {
     for (line, i) in [
         ("echo x &>&p", 2),
         ("echo x &>|&p", 2),
+        ("echo x &> f", 2),
+        ("echo x &>> f", 2),
+        ("echo x \"&>\"{a,b}", 2),
+        ("echo x '&>>'{a,b}", 2),
         ("echo x>{a,b}", 1),
         ("exec {a,b}>f", 1),
         ("cat 2'>'f", 1),
