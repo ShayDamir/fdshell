@@ -1,8 +1,10 @@
 mod attached;
 mod bare;
 mod clobber;
+mod operand;
 pub(crate) mod path_word;
 pub(crate) use clobber::{clobber_word, pipe_token_span, pipeline_pipe};
+pub(crate) use operand::operand_offset;
 
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
