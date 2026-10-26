@@ -34,13 +34,26 @@ pub(crate) fn parse_fd(prefix: &ShortCStr, dir: u8) -> Option<i32> {
 /// for a stripped quote byte — LESSONS `pos`/`cur`); a slice past its end
 /// pads to *unquoted*, the house idiom (`scan::heredoc::op::operator_word`,
 /// `substitute/tilde.rs::prefix_quoted`). The operand-side twin of this rule
-/// is `operator_word`; no site re-derives either.
+/// is `operator_word`, the target-side twin is `fd_var_operand`; no site
+/// re-derives any of them.
 pub(crate) fn quoted_bytes(mask: &[MaskBit], from: usize, to: usize) -> bool {
     mask.get(from..to)
         .unwrap_or(&[])
         .iter()
         .copied()
         .any(MaskBit::quoted)
+}
+
+/// The fd-variable **target** rule: a `%` at the operand's start names a
+/// descriptor only while that byte is **unquoted** (POSIX #4.1 removes quotes
+/// after tokenization, so `>"%v"` is the file `%v`, bash parity — task #329).
+/// `mask` is the token's quote mask and `at` the index of the operand's first
+/// byte in it — the same `path_offset` `path_word::suffix` slices at, never a
+/// re-derivation (LESSONS: slice the word, its mask and its spans with the
+/// same offset). A missing bit pads to *unquoted* (`quoted_bytes`, the house
+/// idiom), so a short mask degrades to today's text rule.
+pub(crate) fn fd_var_operand(operand: &ShortCStr, mask: &[MaskBit], at: usize) -> bool {
+    operand.starts_with(b"%") && !quoted_bytes(mask, at, at + 1)
 }
 
 /// The descriptor a redirect *token* selects: `parse_fd`'s digit rule plus

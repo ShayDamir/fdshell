@@ -15,6 +15,9 @@ use sys::ShortCStr;
 /// `>`/`<` is its last byte is bare and is handled before this. A **quoted**
 /// first operator byte ends the operator (POSIX XCU 2.9.1 reads only
 /// unquoted bytes): the token is an ordinary argument, as bash prints it.
+/// The `%var` fd-variable target obeys the same rule on its own `%` byte
+/// (`redirect::fd_var_operand`): a quoted `%` is an ordinary file-name word
+/// (task #329).
 pub(super) fn attached(t: &Token) -> Result<Option<RedirectDef>, Report<ParseError>> {
     let (s, _start, _end, _fq, mask, _spans) = t;
     let bytes = s.as_bytes().change_context(ParseError::Never)?;
@@ -71,10 +74,19 @@ fn parse_path_redirect(
     let Some(export_to) = super::token_fd(prefix, mask, dir) else {
         return Ok(None);
     };
-    if rest.starts_with(b"%") {
+    // The path is the token suffix after the operator, with its mask and its
+    // zero-byte quote spans sliced at the same offset (`path_word`, one owner
+    // of that offset with the here-string word, LESSONS). `path_offset` is
+    // exactly the index one past the operator's last byte — the gate's `to`
+    // bound, and the mask index of the operand's first byte (the `%` arm).
+    let path_offset = op_pos + 1 + (after_op_len - rest.len());
+    if super::fd_var_operand(&rest, mask, path_offset) {
         let name = rest.get(1..).ok_or(ParseError::InvalidRedirect)?;
         // The direction is inert for a var source (resolve clones the table fd),
         // so the operator's direction is kept here only to carry `>|` through.
+        // The name is the whole token tail (`>%v"w"` names `vw`): the parse-time
+        // reading, pinned by the unit tests (the word path's region-capped
+        // `collect_name` is a different surface).
         return Ok(Some(RedirectDef {
             export_to,
             extra_to: None,
@@ -85,12 +97,8 @@ fn parse_path_redirect(
     if let Some(n) = fd_path_target(&rest) {
         return Ok(Some(RedirectDef::dup(export_to, n)));
     }
-    // The path is the token suffix after the operator, with its mask and its
-    // zero-byte quote spans sliced at the same offset (`path_word`, one owner
-    // of that offset with the here-string word, LESSONS). `path_offset` is
-    // exactly the index one past the operator's last byte — the gate's `to`
-    // bound.
-    let path_offset = op_pos + 1 + (after_op_len - rest.len());
+    // A quoted `%` target fell through the mask gate above and lands here:
+    // the plain file word (`>"%v"` is the file `%v`, bash parity, #329).
     Ok(Some(RedirectDef {
         export_to,
         extra_to: None,

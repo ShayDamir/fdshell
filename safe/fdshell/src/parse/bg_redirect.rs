@@ -20,7 +20,9 @@ pub struct BgRedirectResult {
 /// consumes (1 for the bare `&>` / `&>>`, which takes the next token as its
 /// path operand, 0 for every attached form). The quoting gate covers every
 /// arm — a fully quoted word, and any word with a quote byte in the
-/// operator, is a plain argument (task #250's `fq` rule generalized).
+/// operator, is a plain argument (task #250's `fq` rule generalized). The
+/// `%var` target arm reads the mask bit of its own `%` byte
+/// (`redirect::fd_var_operand`): a quoted `%` is the file-name word (#329).
 pub fn parse_bg_redirect(
     tokens: &[Token],
     i: usize,
@@ -63,14 +65,17 @@ pub fn parse_bg_redirect(
     if path.is_empty() {
         return bare::parse(tokens, i, direction).map(|bg| Some((bg, 1)));
     }
-    let source = if path.starts_with(b"%") {
+    // `path_offset` is the gate's `op_end` for these arms: the index one
+    // past the operator's last byte, the mask index of the operand's first
+    // byte, and the offset `path_word::suffix` slices at (one owner, LESSONS).
+    let path_offset = 2 + (rest_len - path.len());
+    let source = if crate::parse::redirect::fd_var_operand(&path, mask, path_offset) {
         RedirectSource::Var(path.get(1..).ok_or(ParseError::Never)?)
     } else {
         // The path is the token suffix after `&>` (and `>`), with its mask and
-        // its zero-byte quote spans sliced at the same offset (`path_word`).
-        // `path_offset` is the gate's `op_end` for these arms: the index one
-        // past the operator's last byte.
-        let path_offset = 2 + (rest_len - path.len());
+        // its zero-byte quote spans sliced at the same offset (`path_word`):
+        // a **quoted** `%` is an ordinary file-name word (`&>"%v"` is the file
+        // `%v`, bash parity, task #329).
         crate::parse::redirect::path_word::suffix(token, path_offset)?
     };
     // One operator, one open: the single def carries fd 1 as `export_to` and
@@ -110,3 +115,6 @@ pub fn insert_redirect(redirects: &mut Vec<RedirectDef>, r: RedirectDef) {
     let at = redirects.partition_point(|x| x.export_to <= r.export_to);
     redirects.insert(at, r);
 }
+
+#[cfg(test)]
+mod tests;

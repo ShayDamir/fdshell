@@ -7,6 +7,7 @@
 
 #![allow(clippy::unwrap_used)]
 use super::attached;
+use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
 use crate::redirect::{RedirectDef, RedirectSource};
 
@@ -91,5 +92,99 @@ fn quoted_dup_ampersand_falls_through_to_the_path() {
     match def.source {
         RedirectSource::Path { path, .. } => assert_eq!(path.as_bytes().unwrap(), b"&1"),
         ref s => panic!("quoted `&` must open the path, got {s:?}"),
+    }
+}
+
+/// The attached `%var` target is the same quoting rule on the **operand's**
+/// first byte (task #329, POSIX #4.1): the fd-variable arm fires only while
+/// the `%` is **unquoted**; a quoted `%` falls through to the plain file word
+/// that bash opens. The mask asserts pin the **offset** the gate consults —
+/// the `path_offset` `path_word::suffix` slices at — so an off-by-one gate
+/// cannot pass: `>%v"w"` keeps the unquoted `%` (a gate reading the byte
+/// *after* it sees the quoted `w` and wrongly yields a path), and `>"%v"x`
+/// reads the quoted `%` (a gate reading the operator byte, index 0, wrongly
+/// yields a var). The `>&%v` dup arm stays **mask-blind**: bash gives
+/// `ambiguous redirect` rc 1 quoted *and* unquoted, so no file-name escape
+/// exists there (§the task's measurement; pinned in `tests/redirect.rs`).
+#[test]
+fn quoted_percent_target_is_a_path_not_an_fd_variable() {
+    for line in [
+        b"cat >\"%v\"".as_slice(),
+        b"cat >'%v'",
+        b"cat >|\"%v\"",
+        b"cat >>\"%v\"",
+        b"cat <\"%v\"",
+        b"cat 3>\"%v\"",
+    ] {
+        let def = attached_of(line).unwrap_or_else(|| panic!("line={line:?} must parse"));
+        match &def.source {
+            RedirectSource::Path { path, mask, .. } => {
+                assert_eq!(path.as_bytes().unwrap(), b"%v", "line={line:?}");
+                assert_eq!(mask.len(), 2, "line={line:?}: the mask rides the word");
+                assert!(
+                    mask.first().copied().is_some_and(MaskBit::quoted),
+                    "line={line:?}: the `%` bit must be quoted"
+                );
+            }
+            s => panic!("line={line:?} must be a path, got {s:?}"),
+        }
+    }
+    // A `\%` needs no arm: the token text starts with `\`, so the text rule
+    // never sees a `%` at the operand's start (fold strips the escape later).
+    let def = attached_of(b"cat >\\%v").unwrap();
+    match &def.source {
+        RedirectSource::Path { path, mask, .. } => {
+            assert_eq!(
+                path.as_bytes().unwrap(),
+                b"\\%v",
+                "the text keeps the escape"
+            );
+            assert_eq!(mask.len(), 3, "line: the mask rides the word");
+        }
+        s => panic!("`>\\%v` must be a path, got {s:?}"),
+    }
+    // The unquoted arms keep today's parse-time reading, name = whole tail.
+    for (line, name) in [
+        (b"cat >%x".as_slice(), b"x".as_slice()),
+        (b"cat 3>%x".as_slice(), b"x".as_slice()),
+        (b"cat >|%x".as_slice(), b"x".as_slice()),
+        (b"cat 3<%x".as_slice(), b"x".as_slice()),
+        (b"cat >%v\"w\"".as_slice(), b"vw".as_slice()),
+    ] {
+        let def = attached_of(line).unwrap_or_else(|| panic!("line={line:?} must parse"));
+        match &def.source {
+            RedirectSource::Var(got) => {
+                assert_eq!(got.as_bytes().unwrap(), name, "line={line:?}")
+            }
+            s => panic!("line={line:?} must be a var, got {s:?}"),
+        }
+    }
+    // The off-by-one killer, other direction: the `%` at the operand index is
+    // quoted, so the word is a path even though a later byte is unquoted.
+    let def = attached_of(b"cat >\"%v\"x").unwrap();
+    match &def.source {
+        RedirectSource::Path { path, mask, .. } => {
+            assert_eq!(path.as_bytes().unwrap(), b"%vx");
+            assert!(
+                mask.first().copied().is_some_and(MaskBit::quoted),
+                "the gate reads the operand byte, not the operator byte"
+            );
+        }
+        s => panic!("`>\"%v\"x` must be a path, got {s:?}"),
+    }
+    // The `>>` arm rejects the *unquoted* var target; the quoted one appends.
+    let tokens = tokenize_statement(b"cat >>%x").unwrap();
+    assert!(
+        attached(tokens.get(1).unwrap()).is_err(),
+        "`>>%x` stays the parse error it is"
+    );
+    // The dup arm stays mask-blind (bash: `ambiguous redirect` for both).
+    for line in [b"cat 2>&\"%v\"".as_slice(), b"cat 2>&%v"] {
+        let def = attached_of(line).unwrap();
+        assert_eq!(def.export_to, 2, "line={line:?}");
+        match &def.source {
+            RedirectSource::Var(name) => assert_eq!(name.as_bytes().unwrap(), b"v"),
+            s => panic!("line={line:?}: the dup arm stays mask-blind, got {s:?}"),
+        }
     }
 }

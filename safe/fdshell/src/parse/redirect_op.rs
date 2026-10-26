@@ -1,8 +1,8 @@
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
-use crate::parse::redirect::quoted_bytes;
+use crate::parse::redirect::{fd_var_operand, quoted_bytes};
 use crate::redirect::RedirectDirection;
-use error_stack::{Report, ensure};
+use error_stack::{Report, bail, ensure};
 use sys::ShortCStr;
 
 /// Interpret the operator byte `dir` with the text after it: `>|` clobbers
@@ -26,10 +26,14 @@ pub(super) fn redirect_op(
         Ok((r, RedirectDirection::Clobber))
     } else if !quoted_next && dir == b'>' && after_op.starts_with(b">") {
         let r = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
-        ensure!(
-            !(r.is_empty() || r.starts_with(b"%")),
-            ParseError::InvalidRedirect
-        );
+        // An empty tail is the bare `>>` arm, and `>>%var` is the append-to-fd
+        // form this operator does not have. The `%` is that form's trigger only
+        // while **unquoted**: the operand's first byte is `after_op[1]`, i.e.
+        // index `1` of `after_mask`, so `>>"%v"` appends to the file `%v`
+        // (bash parity, task #329).
+        if r.is_empty() || fd_var_operand(&r, after_mask, 1) {
+            bail!(ParseError::InvalidRedirect);
+        }
         Ok((r, RedirectDirection::Append))
     } else if !quoted_next && dir == b'<' && after_op.starts_with(b">") {
         let r = after_op.get(1..).ok_or(ParseError::InvalidRedirect)?;
@@ -41,3 +45,6 @@ pub(super) fn redirect_op(
         Ok((after_op, RedirectDirection::Write))
     }
 }
+
+#[cfg(test)]
+mod tests;
