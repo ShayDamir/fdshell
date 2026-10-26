@@ -58,8 +58,13 @@ short. Add a rule whenever a probe kills a mutant or disproves an
 11. **Delete duplicate rules.** If two rules compute the same advancement or
     clamp, keep one. If a callee already enforces a guard, or a flag is
     re-derived, remove the duplicate and pin the fall-through. The duplicate
-    may live in a *later* stage: a lexer guard that bails on what the parser's
-    trailing-input rule also rejects is a duplicate, and deleting it moves
+    may be a **rebinding** of a value the code above already established —
+    `let esac_idx = tokens.len() - 1;` written after `tokens.get(..=esac_idx)`
+    truncated the slice states the same number twice and hands `mutants` a
+    fresh offset to move; delete the binding and use the original name. The
+    duplicate may live in a *later* stage: a lexer guard that bails on what
+    the parser's trailing-input rule also rejects is a duplicate, and deleting
+    it moves
     only the `╰╴at …` source-location line — rule 5 says that is not a
     behavioral difference, so pin the surviving message and exit status. A
     test repeated in **every arm** of a `match` is the same duplicate: hoist
@@ -108,3 +113,14 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     deterministic livelock (killed by nextest's `slow-timeout`; attribute it to
     the pins that time out — 14 `glob::` rows here), an index shift becomes an
     exact-index kill (`pi - 1` underflows, and the star pins fail).
+18. **Delete a bound the searches already enforce.** A loop bound whose range
+    only re-probes tokens that cannot match the needle is a shield: it carries
+    `<`→`<=` (and `+`/`-`) mutants no test can see, while the body's own
+    searches already stop the walk. Write the loop as `loop` plus the
+    searches' `break`, and keep the searches' ranges — a range carries no
+    operators. Prefer that to a slice rewrite: `get(a..)` with an
+    `unwrap_or_default`/`unwrap_or` fallback re-creates the equivalence,
+    because `replace … with None` **is** the fallback. Measured on
+    `parse/case_block/literal.rs`: the bound and rule 11's rebinding both kept
+    the suite green, deleting them deleted both families, and the step base
+    shared with the output range is killed by the exact-index pins (rule 9).

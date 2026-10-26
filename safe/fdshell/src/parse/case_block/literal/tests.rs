@@ -22,9 +22,9 @@ fn non_case_lines_are_empty() {
 /// rejected by the **truncation gate**: `list_closing_keyword_index` answers
 /// `None` for this line, so the guard's `esac` test is never reached and the
 /// guard's `||`→`&&` mutant is an accepted equivalent (LESSONS:
-/// "`literal_indices`' bound/step mutants are equivalent"). Task #273 read this
-/// row as the pin of that `||`; it stays as the pin of the truncation gate's
-/// rejection.
+/// "`literal_indices`' clause step and pair-search window are equivalent").
+/// Task #273 read this row as the pin of that `||`; it stays as the pin of the
+/// truncation gate's rejection.
 #[test]
 fn case_line_closed_by_a_non_esac_closer_is_empty() {
     assert_eq!(indices(b"case {a,b} in {x,y}) echo a; done"), Vec::new());

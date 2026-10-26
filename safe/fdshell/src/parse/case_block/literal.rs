@@ -35,10 +35,17 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
     let Some(in_idx) = (1..tokens.len()).find(|&i| word_at(tokens, i, b"in")) else {
         return Vec::new();
     };
-    let esac_idx = tokens.len() - 1;
-    let mut out: Vec<usize> = (1..in_idx).collect();
-    let mut pos = in_idx + 1;
-    while pos < esac_idx {
+    // The clause walk starts one word behind `in`, and the pattern words are
+    // everything before it: one base for both, so a mutant of the step drops a
+    // pattern word from the output **and** moves the walk.
+    let base = in_idx + 1;
+    let mut out: Vec<usize> = (1..base - 1).collect();
+    let mut pos = base;
+    // No loop bound: the searches below carry the ranges (`pos..esac_idx`), and
+    // once `pos` reaches the `esac` index neither finds anything, so the walk
+    // ends by the `break` — a bound of its own is a duplicate that only re-probes
+    // the closer, which no needle can match.
+    loop {
         if word_at(tokens, pos, b";") {
             pos += 1;
             continue;
