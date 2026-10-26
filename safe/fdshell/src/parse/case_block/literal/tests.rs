@@ -17,11 +17,14 @@ fn non_case_lines_are_empty() {
     assert_eq!(indices(b"case {a,b} w in"), Vec::new());
 }
 
-/// The truncation's closer may be a closer-shaped **word-list** word (`done`
-/// in command position after the `;`): the walk stops there, and the guard's
-/// `esac` requirement is what rejects the line. The `||` of that guard is
-/// load-bearing — with `&&` the guard short-circuits on the `case` word and
-/// the walk's indices are returned for a line that is not a case block at all.
+/// A `case` line whose word list closes on a non-`esac` closer (`done` in
+/// command position after the `;`) is rejected. Measured (task #327) it is
+/// rejected by the **truncation gate**: `list_closing_keyword_index` answers
+/// `None` for this line, so the guard's `esac` test is never reached and the
+/// guard's `||`→`&&` mutant is an accepted equivalent (LESSONS:
+/// "`literal_indices`' bound/step mutants are equivalent"). Task #273 read this
+/// row as the pin of that `||`; it stays as the pin of the truncation gate's
+/// rejection.
 #[test]
 fn case_line_closed_by_a_non_esac_closer_is_empty() {
     assert_eq!(indices(b"case {a,b} in {x,y}) echo a; done"), Vec::new());
