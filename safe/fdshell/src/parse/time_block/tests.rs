@@ -227,7 +227,13 @@ fn inner_span_ends_at_the_last_token() {
 /// A quoted block keyword scores a block delta on its quote-folded word, so only
 /// the XCU 2.4 "none of the characters is quoted" test keeps its statement on
 /// the token span: the block span would reach the trailing whitespace its tokens
-/// do not cover.
+/// do not cover. This row is **not** the detector of `inner_text`'s
+/// `!word_quoted(…)` conjunct (the `delete !` mutant): a word quoted in the span
+/// sense always carries a quote byte in its raw run, and `keyword_delta` opens
+/// with that very gate (`keywords::quoted_word`), so the second conjunct is
+/// `false` under both builds — measured, the whole package suite is green under
+/// the mutation. The block rows of
+/// [`block_opener_inner_span_owns_the_bytes_behind_the_last_token`] are the kill.
 #[test]
 fn quoted_block_keyword_inner_takes_the_token_span() {
     let block = detect_line(b"time \"while\" false; do :; done  ").unwrap();
@@ -237,4 +243,63 @@ fn quoted_block_keyword_inner_takes_the_token_span() {
     assert_eq!(inner(&block), b"\"if\" true; then :; fi");
     // A quoted word that is no keyword at all is a plain command.
     assert_eq!(inner(&detect_line(b"time \"ls\"  ").unwrap()), b"\"ls\"");
+}
+
+/// The escape twin of the row above: a backslash-escaped opener is a command
+/// word, and it is not even a `word_quoted` word — the tokenizer keeps the
+/// backslash in the token's **text**, so its span and its text are the same
+/// length. Documentation pin of that agreement, not a kill pin: `keyword_kind`
+/// is handed `\if`, which starts with no keyword, so the delta conjunct decides
+/// on its own and the `!` of `word_quoted(…)` never answers for these rows.
+#[test]
+fn escaped_block_keyword_inner_takes_the_token_span() {
+    for (line, want) in [
+        (
+            b"time \\{ echo a; }  ".as_slice(),
+            b"\\{ echo a; }".as_slice(),
+        ),
+        (
+            b"time \\if true; then :; fi  ".as_slice(),
+            b"\\if true; then :; fi".as_slice(),
+        ),
+        (
+            b"time \\while false; do :; done  ".as_slice(),
+            b"\\while false; do :; done".as_slice(),
+        ),
+    ] {
+        let block = detect_line(line).unwrap();
+        assert_eq!(inner(&block), want, "{line:?}");
+        // The escaped word is a command word, not a block: one `Cmd`, no block.
+        assert!(
+            matches!(block.inner.as_deref(), Some(ParsedLine::Cmd(_))),
+            "{line:?}"
+        );
+    }
+}
+
+/// A block opener's timed text is the **segment** text behind the `time`
+/// prefix, so it owns the bytes its tokens do not cover: the trailing whitespace
+/// here, a here-doc body behind `done` in
+/// `tests/time.rs::heredoc_body_of_a_timed_block_statement_stays_inside`.
+///
+/// These are the rows that measure `inner_text`'s `!word_quoted(…)` conjunct
+/// (the `delete !` mutant, missed by the task #321 sweep): the gate
+/// `keyword_delta` opens with answers `false` for an **unquoted** opener, so the
+/// `!` is what routes an unquoted block to the segment span. Without it the
+/// quoted rows above stay on the token span (their delta conjunct is already
+/// `false`) and every block shrinks to the token range, dropping these trailing
+/// bytes — the mutation fails all four rows by hand in ~6 s.
+#[test]
+fn block_opener_inner_span_owns_the_bytes_behind_the_last_token() {
+    for tail in [
+        b"while false; do echo x; done  ".as_slice(),
+        b"if true; then :; fi  ".as_slice(),
+        b"case x in x) echo X;; esac  ".as_slice(),
+        b"{ echo a; }  ".as_slice(),
+    ] {
+        let mut full = b"time ".to_vec();
+        full.extend_from_slice(tail);
+        let block = detect_line(&full).unwrap();
+        assert_eq!(inner(&block), tail, "{full:?}");
+    }
 }

@@ -267,6 +267,21 @@ fn heredoc_in_timed_statement_keeps_its_body() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+/// The timed text of a **block** statement is the whole segment behind the
+/// prefix, so a here-doc body written behind the closing keyword — the
+/// single-line spelling, where the body sits past `done` — travels inside it and
+/// `cat` gets its body, exactly as bash's `time` does (one report, rc 0).
+/// Parity pin of the spelling; the exact span the block text takes is pinned at
+/// unit level by
+/// `parse::time_block::tests::block_opener_inner_span_owns_the_bytes_behind_the_last_token`.
+#[test]
+fn heredoc_body_of_a_timed_block_statement_stays_inside() {
+    let out = run("time for i in 1; do cat <<EOF; done\nhello\nEOF");
+    assert!(stdout(&out).contains("hello"), "stdout={}", stdout(&out));
+    assert_eq!(fields(&stderr(&out)).len(), 3, "stderr={}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
 /// Quoting any character of `time` makes it the utility, not the reserved word
 /// (XCU 2.4): the host's `/usr/bin/time` runs it.
 #[test]
