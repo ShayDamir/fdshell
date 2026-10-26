@@ -93,13 +93,19 @@ fn inner_text(
         return Ok(None);
     };
     let line = text.as_bytes().change_context(ParseError::Never)?;
+    // `keyword_delta` is a sign projection with no `0` row, so the rule is the
+    // predicate `is_positive` and not a `> 0` comparison: a comparison exposes
+    // a `>=`/`==`/`<` family that accepts exactly the same values. A `0` arm in
+    // the scorer would make such a comparison live again;
+    // `keywords/tests.rs::keyword_delta_wait_block_vs_builtin` is the row that
+    // notices the change.
     if !word_quoted(word, *start, *end)
         && keyword_delta(
             word.as_bytes().change_context(ParseError::Never)?,
             line,
             *end,
         )
-        .is_some_and(|d| d > 0)
+        .is_some_and(i32::is_positive)
     {
         return Ok(text.subslice(*start, text.data.len().saturating_sub(*start)));
     }

@@ -74,3 +74,11 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     callee's whole mutant family at once. Pin the scope the gate claimed to
     check, balanced *and* unbalanced, so the answer stays where it was ever
     observable.
+16. **Name the predicate.** A comparison against a value the scorer can never
+    return carries a family no test can kill: `d > 0` over a sign projection
+    with no `0` row mutates to `>=`/`==`/`<` and every mutant accepts the same
+    set. Write `d.is_positive()`: an argument-less predicate method exposes no
+    operator, so the family is absent from `--list` (measured on
+    `parse/time_block.rs::inner_text`, the `keyword_delta` sign projection).
+    Keep the sentence naming the invariant that makes the comparison a
+    no-op-equivalent, plus the pin that notices if the invariant dies.
