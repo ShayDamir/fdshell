@@ -25,6 +25,18 @@ to names and expands them in words, arguments and redirection targets:
   `%>%arr[N]` are the tagged and array forms.
 - `>|%var` and `&>%var` redirect to the descriptor, where POSIX would treat
   `%var` as a file name.
+- The fd-variable **target** is the byte right after the operator, and only
+  while it is **unquoted**: quoting the `%` makes the target the POSIX
+  file-name word — `> "%v"`, `> '%v'`, `>| "%v"`, `>> "%v"` and `&> "%v"`
+  create/open the file `%v`, exactly as bash (task #329). The **word**
+  layer is the twin where quoting is *not* an escape: a **bound** `%name`
+  expands inside quotes (`echo "%name"` prints the fd number, bash prints
+  `%name`), `\%` is the only escape, and gating that arm on the mask too is
+  task #252's open decision.
+- The dup word `>&%var` is deliberately **mask-blind**: bash answers
+  `ambiguous redirect` rc 1 for `>&%v` and `>&"%v"` alike — a `>&word`
+  operand is never a file name — so no quoting rule applies to it and
+  fdshell keeps the fd lookup in both spellings.
 - `%CWD` and `%?` are special names of the same namespace.
 
 A portable script is affected only while an fd variable is bound, but then a
@@ -251,7 +263,11 @@ its `&` unquoted and stays a syntax error in both shells. The one
 intentional exception is the `%`-namespace arm: the *spaced* fd-variable
 form is never a plain file operand (`> %v` is fdshell's syntax error where
 POSIX creates a file named `%v`) — the fd-variable targets are the attached
-`>%var` and `&>%var` forms of the section above.
+`>%var` and `&>%var` forms of the section above. The attached forms follow
+the same rule on the **operand's own first byte**: a quoted `%` is ordinary
+file-name data (`> "%v"`, `>| "%v"`, `>> "%v"`, `&> "%v"` open the file
+`%v`, bash parity, task #329), only the unquoted `%` is the fd lookup, and
+the `>&%var` dup word is the mask-blind arm above.
 
 The operand word's **brace expansion** follows POSIX XCU 2.7 `worddef` and is
 bash parity (task #324): an operand expanding to a number of **non-empty**

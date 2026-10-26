@@ -792,6 +792,10 @@ with `\`, so no operator arm fires. The `%`-arm divergence (`cat > %v` /
 pinned as-is, and owned by the `%`-namespace design, not by quoting: dropping
 the arm would make the spaced form silently create a file named `%v` — a user
 decision (the attached-form twins are #329, the `<< ""` empty arm is #330).
+#329 landed its twin as a mask rule on the **operand's own byte** (one
+predicate, `parse/redirect.rs::fd_var_operand` — see
+"An attached `%var` target is a mask-gated rule"), keeping the spaced arm
+exactly as pinned.
 
 ## A keyword that doubles as a builtin needs the *same* disambiguation at every byte-scanning layer, and the rule must key on what the scanner can actually see
 `wait` is both the event-case block keyword and (POSIX #6.7) the `wait [pid…]` builtin. The disambiguation must agree at all three layers that see `wait` bytes, or the REPL (which reuses the byte scanners for completeness) diverges from the parser: `segment.rs` (block vs statement segment), `comment/depth_delta.rs` (block depth while hunting for `done` — it only sees its own run, so `line`+`base` are threaded in to look across run ends), and the token parser (`parse/wait_block::is_block`, which gets the `text` to detect the newline and honors the quoted flag). The rule: a `wait` opens a block iff the next word — skipping whitespace (incl. newlines) and whole-line comments — is **on a subsequent line**, or is a **same-line** pattern keyword (`readable`/`writable`/`finished`/`after`); a same-line pid/`$!`/name, a `;` (statement separator), a quoted word, or EOF is the builtin. Two tempting rules fail: a *pattern-keyword-only* rule misclassifies `wait\ndone` / `wait\n sleeping` (existing block tests) as the builtin and `wait $!` as a block (the byte scanner sees the literal `$!`, not the expanded pid — a pid test fails for the same reason); a *not-a-pid* rule misclassifies `wait; echo hi` as a block (the `;` is a statement separator, not a block arm). The newline is the reliable signal that the arms are coming.
@@ -5243,3 +5247,67 @@ Pins: `memfd.rs::reopen_read_only_hands_back_a_fresh_fd_at_offset_zero`,
 `heredoc_write_dupe_refuses_writes`. Accepted equivalent in advance: the
 `SyscallError::Never` arm of the path formatting is unconstructible by design (a
 decimal fd number carries no NUL byte), so it has no killable mutant.
+
+## An attached `%var` target is a mask-gated rule: the parse layer, the operator gate and the bare-operand guard state one quoting rule
+
+POSIX #4.1 removes quotes after tokenization, so the attached fd-variable
+target — the `%` right after the operator — names a descriptor only while
+that byte is **unquoted** (task #329; `>"%v"` is the file `%v` in bash). The
+rule has three call sites and gets ONE predicate,
+`parse/redirect.rs::fd_var_operand(operand, mask, at)`:
+`parse/redirect/attached.rs` (the `%` arm, below the hoisted `path_offset`),
+`parse/bg_redirect.rs` (the `&>`/`&>>` source decision, `path_offset ==
+op_end`), and `parse/redirect_op.rs` (the `>>` reject, where the operand's
+first byte is index `1` of `after_mask`, i.e. `after_op[1]`). A byte-identical
+private duplicate at any site is the drift #323 names (LESSONS: "A bare
+redirect operator token takes the next token as its operand") and an
+equivalent-mutant source. The mask index `at` **is** `path_offset`, the same
+offset `path_word::suffix` slices the word, its mask and its spans with
+(LESSONS: "Slice the word vector, its quote mask"). The off-by-one killers
+pin both directions: `>%v"w"` → `Var("vw")` (a gate reading the byte *after*
+the `%` sees the quoted `w` and wrongly yields a path) and `>"%v"x` → `Path`
+with a quoted first mask bit (a gate reading the operator byte at index 0
+wrongly yields a var). A missing mask bit pads to *unquoted* (the house
+idiom, shared with `quoted_bytes` and `scan::heredoc::op::operator_word`),
+so a short mask degrades to today's text rule — pinned, and no site may flip
+it to pad-to-quoted.
+
+The fix needs no word-path change and must not get one "for symmetry": a
+quoted `%v` lands as a `RedirectSource::Path` word, and the target's
+expansion gate `substitute::target_trigger` **excludes `%`**, so even a
+bound `%v` is no more expanded in a target than bash expands it —
+`tests/redirect.rs::a_bound_fd_variable_does_not_capture_a_quoted_target`
+pins the parity; removing that gate creates `a<fd>`-shaped names and re-opens
+#371's leak. The **word** layer is the deliberate twin where quoting is NOT
+an escape (a bound `%name` expands inside quotes; task #252 owns gating it):
+one rule per layer, stated once, in POSIX_COMPATIBILITY "`%` is a file
+descriptor namespace".
+
+The measured asymmetry: the **dup** arm `>&%var` (`parse/fd_dup.rs`) stays
+mask-blind. bash answers `ambiguous redirect` rc 1 for `>&%v` **and**
+`>&"%v"` — a `>&word` operand is never a file name — so quoting offers no
+file-word escape, and gating the arm would turn today's rc-parity row into
+fdshell printing the word at rc 0. Non-arms, pinned so nobody re-litigates
+them: `\%` needs no rule (the token text starts with `\`, the text rule
+never fires); `> ""%v` stays fdshell's parse error where bash creates `%v`
+(an empty quoted region contributes no bytes and no mask bit, as #323's
+`> ""&f`); `> %`/`>%` (empty name) stays `fd variable ''' is not set''`
+where bash creates `%`; `>>%v` keeps its `InvalidRedirect` arm (bash appends
+to the file `%v`) while `>>"%v"` became the append — same predicate, and its
+empty-tail half stays quote-blind.
+
+Pins: `parse/redirect/attached/tests.rs::quoted_percent_target_is_a_path_not_an_fd_variable`
+(the pairs, the mask-offset asserts, the mask-blind dup rows),
+`parse/redirect_op/tests.rs::append_rejects_the_fd_var_target_only_while_unquoted`
+and `the_other_operator_tails_are_unchanged`,
+`parse/bg_redirect/tests.rs::quoted_percent_target_is_the_combined_path_word`
+and `the_unquoted_var_and_pidvar_arms_are_unchanged`, and the filesystem rows
+`tests/redirect.rs::attached_quoted_percent_target_creates_the_plain_file`,
+`quoted_clobber_target_carries_the_noclobber_rule`,
+`quoted_combined_target_takes_stdout_and_stderr`,
+`quoted_read_target_opens_the_plain_file`,
+`unquoted_percent_targets_stay_fd_variable_lookups`,
+`the_dup_percent_target_stays_mask_blind`,
+`a_bound_fd_variable_does_not_capture_a_quoted_target`,
+`the_empty_pair_and_the_bare_percent_stay_documented_divergences` — each at
+the **filesystem**, per the #264 entry.

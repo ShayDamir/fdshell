@@ -52,6 +52,14 @@ operations.
 - `%?` is the descriptor that became ready, inside a `wait` arm.
 - A `%name` that is not bound stays literal text (`%nosuchfd` is
   `%nosuchfd`). A literal percent sign is written `\%`.
+- Quoting is the escape at the **redirect-target** layer: the `%` right
+  after the operator names the descriptor only while **unquoted**, so
+  `> "%name"` (and `'%name'`, `>| "%name"`, `>> "%name"`, `&> "%name"`)
+  opens the **file** named `%name`, as bash does. At the **word** layer
+  quoting is *not* an escape: a bound `%name` expands inside quotes too
+  (`echo "%name"` prints the number), and `\%` is the escape there —
+  task #252 owns that decision
+  ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#is-a-file-descriptor-namespace)).
 
 ### Passing file descriptors to a subprocess
 
@@ -302,6 +310,11 @@ byte is quoted — `echo hi > "&f"` opens `&f`, as bash does — and a syntax
 error when it is not (`> &f`); the spaced `%var` operand stays a syntax
 error, the fd-variable targets being the attached `>%var` / `&>%var` forms
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
+The attached fd-variable target obeys the same quoting rule on its **own `%`
+byte**: the `%` names a descriptor only while unquoted, so `> "%log"`,
+`> '%log'`, `>| "%log"`, `>> "%log"` and `&> "%log"` create/append the
+**file** `%log` as bash does, while `>&%var` — a dup, never a file operand
+in bash — keeps its fd lookup quoted and unquoted alike.
 
 The target of a `>`-family operator is a **word**: `$( … )`, `` ` … ` ``,
 `$(( … ))`, `$name`, `${name…}`, `$@`/`$*` and a leading `~` expand in it, the
