@@ -6,7 +6,6 @@ use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::LocalFd;
 use sys::ShortCStr;
-use sys::fcntl::SEEK_SET;
 use sys::fork_cell::ForkCell;
 
 use crate::mask::MaskBit;
@@ -22,7 +21,10 @@ fn quoted_context(len: usize) -> Vec<MaskBit> {
     vec![MaskBit::Quoted; len]
 }
 
-/// Back the here-doc body with a seeked-to-zero memfd as the new stdin.
+/// Back the here-doc body with a memfd re-opened `O_RDONLY` (a fresh open file
+/// description, offset 0) as the new stdin, so the descriptor this redirect
+/// opens is read-only and a `>&N` write to it is refused `EBADF`, as bash's
+/// here-document source is.
 /// Unlike a here-string, no newline is appended: the body bytes are exactly
 /// the lines between the command line and the delimiter line.
 pub fn here_doc(
@@ -44,7 +46,9 @@ pub fn here_doc(
     let bytes = data.as_bytes().change_context(OpenRedirectError::Never)?;
     fd.write_all(bytes)
         .change_context(OpenRedirectError::HereDocCreate)?;
-    fd.lseek(0, SEEK_SET)
-        .change_context(OpenRedirectError::HereDocCreate)?;
-    Ok(fd)
+    // The re-open carries the export mode: a fresh, read-only description at
+    // offset 0, so the memfd needs no `lseek` and the writable fd dies here
+    // (task #325).
+    fd.reopen_read_only()
+        .change_context(OpenRedirectError::HereDocCreate)
 }

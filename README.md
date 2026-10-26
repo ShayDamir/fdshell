@@ -465,7 +465,10 @@ delimiter line: `cat <<E` + `body` reports
 
 A number in front of the operator puts the body on that descriptor instead of
 stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
-`exec 3<<EOF` keeps it there for the rest of the script. The number must be
+`exec 3<<EOF` keeps it there for the rest of the script. The descriptor it opens
+is **read-only**, as bash's here-document source is: `exec 3<<EOF` + body +
+`echo hi >&3` reports `echo: write error: Bad file descriptor` and leaves the
+body intact (`cat <&3` still prints it). The number must be
 its own unquoted digit word, as in `3>file` — `cat "3"<<EOF` and `cat \3<<EOF`
 are the single argument `3<<EOF`, its quotes taken as ordinary word quoting and
 its `<<` as plain word text, not a here-document
@@ -487,7 +490,9 @@ A quoted word that begins with `<`, `>`, `&` or `%` is that word:
 A number in front of the operator puts the word on that descriptor instead of
 stdin, under the here-doc's raw-byte number rule: `cat 3<<<text` makes `text\n`
 fd 3's input and leaves stdin alone, and `exec 3<<<text` keeps it there for the
-rest of the script (`exec 3<<<text; cat <&3` prints `text`). The number must be
+rest of the script (`exec 3<<<text; cat <&3` prints `text`). The descriptor it
+opens is **read-only**, as the here-document's is: `echo hi >&3` after it
+reports `echo: write error: Bad file descriptor` and the body survives. The number must be
 its own unquoted digit word, as in `3>file` — `cat "3"<<<x`, `cat 3"<<<"x` and
 `cat \3<<<x` are the single argument `3<<<x`, its quotes taken as ordinary word
 quoting and its `<<<` as plain word text, not a here-string

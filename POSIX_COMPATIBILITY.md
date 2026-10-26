@@ -310,6 +310,18 @@ rule as `N>file`, on raw bytes, and that gives three differences from bash:
   here-document (and prints nothing) and reports `3: Bad file descriptor` for
   the here-string.
 
+The descriptor these operators open is **read-only**, as bash's
+here-document/here-string source is: a `N>file`-style write to it is refused
+`EBADF` and the body survives, so `exec 3<<<x; echo hi >&3; cat <&3` prints `x`
+and reports `echo: write error: Bad file descriptor` (rc 0, and the failed
+command's own status is 1). fdshell's report has no `bash: line 1: ` prefix —
+that prefix is bash's, on every shell-reported write error. The machinery stays
+divergent where it shows through: bash 5.3.9 backs the body with a **pipe**
+opened read-only (so it is not seekable), fdshell with a memfd re-opened
+`O_RDONLY` through `/proc/self/fd/N` (offset 0, seekable). Owning task: **#459**
+(`> /dev/fd/N` onto such a descriptor: bash opens the *path* — a FIFO — and its
+write succeeds, fdshell maps the path to a dup and refuses the write).
+
 The `<<<` form's remaining differences from bash:
 
 - `cat 3<<<<<x` is the here-string `<<x` on fd 3 (the pinned `cat <<<<<x`

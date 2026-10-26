@@ -55,8 +55,9 @@ fn resolve_one(
                 // The body memfd is cloned above every target like every other
                 // source: created on its own target it would make `dup2` a no-op
                 // and its `Drop` would close that target (LESSONS). The clone
-                // shares the memfd's open file description, so the rewound body
-                // survives the original's drop.
+                // shares the **read-only** open file description the arm
+                // re-opened, and the writable memfd is already closed inside the
+                // arm, so the body survives the original's drop (task #325).
                 local: super::herestring::here_string(word, mask, spans, cache, cell)?
                     .try_clone_above(min_fd)
                     .change_context(OpenRedirectError::HereStringCreate)?,

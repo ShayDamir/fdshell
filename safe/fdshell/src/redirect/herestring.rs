@@ -5,15 +5,16 @@ use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::LocalFd;
 use sys::ShortCStr;
-use sys::fcntl::SEEK_SET;
 use sys::fork_cell::ForkCell;
 
 use crate::mask::MaskBit;
 use crate::state::ShellState;
 
-/// Expand the word **with its own quote mask** and back it with a
-/// seeked-to-zero memfd as the new stdin. The appended newline is payload,
-/// not a word byte, so it takes no mask bit.
+/// Expand the word **with its own quote mask** and back it with a memfd
+/// re-opened `O_RDONLY` (a fresh open file description, offset 0) as the new
+/// stdin, so the descriptor this redirect opens is read-only and a `>&N` write
+/// to it is refused `EBADF`, as bash's here-string source is. The appended
+/// newline is payload, not a word byte, so it takes no mask bit.
 pub fn here_string(
     word: &ShortCStr,
     mask: &[MaskBit],
@@ -29,7 +30,9 @@ pub fn here_string(
     payload.push(b'\n');
     fd.write_all(&payload)
         .change_context(OpenRedirectError::HereStringCreate)?;
-    fd.lseek(0, SEEK_SET)
-        .change_context(OpenRedirectError::HereStringCreate)?;
-    Ok(fd)
+    // The re-open carries the export mode: a fresh, read-only description at
+    // offset 0, so the memfd needs no `lseek` and the writable fd dies here
+    // (task #325).
+    fd.reopen_read_only()
+        .change_context(OpenRedirectError::HereStringCreate)
 }

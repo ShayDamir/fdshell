@@ -3052,6 +3052,40 @@ fn numbered_heredoc_known_divergences() {
     assert!(err.contains("\"(\" not found"), "{err}");
 }
 
+/// Task #325: the descriptor a here-document opens is **read-only**, as bash's
+/// here-document source is. Its body is a memfd (read/write), so fdshell used to
+/// hand the command a writable descriptor and `echo hi >&3` wrote `hi\n` over
+/// the body at offset 0, leaving the shared offset at EOF: `cat <&3` printed
+/// nothing, silently. Measured against bash 5.3.9 (stdin `/dev/null`, fd 3
+/// closed in the start state): the body survives, the write is refused, and the
+/// report is `echo: write error: Bad file descriptor` — bash prefixes it with
+/// `bash: line N: ` (the documented divergence). The here-string twin is
+/// `tests/herestring.rs::here_string_source_refuses_writes_and_keeps_the_body`
+/// and the unit twin is
+/// `redirect/resolve/tests.rs::here_doc_source_refuses_writes`.
+#[test]
+fn heredoc_source_refuses_writes_and_keeps_the_body() {
+    let (out, err, code) = run_fd3_closed("exec 3<<T\nhi\nT\necho hi >&3; cat <&3");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+    assert!(
+        err.contains("echo: write error: Bad file descriptor"),
+        "{err}"
+    );
+}
+
+/// The mode belongs to the open file description, not to the descriptor, so a
+/// `<&N` dup of a here-document source refuses writes exactly as its source
+/// does (`exec 4<&3` then `echo hi >&4`, bash-measured: `hi` + the write error).
+#[test]
+fn heredoc_write_dupe_refuses_writes() {
+    let (out, err, code) = run_fd3_closed("exec 3<<T\nhi\nT\nexec 4<&3\necho hi >&4; cat <&4");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err}");
+    assert!(
+        err.contains("echo: write error: Bad file descriptor"),
+        "{err}"
+    );
+}
+
 // --- Task #261: the byte/token `<<`-count residuals of task #185. Four shape
 // classes were left diverging by the `seen_word` → `seen_token` fix: an escaped
 // or quoted `|` before the operator, an `((`-leading run, an invalid/missing

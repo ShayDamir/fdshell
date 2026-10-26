@@ -549,3 +549,57 @@ fn prefixed_here_string_expansion_failure_is_reported() {
     assert_ne!(code, 0);
     assert!(err.contains("here-string"), "stderr={err}");
 }
+
+// --- the source descriptor is read-only (task #325) -------------------------
+//
+// A here-string body is backed by a memfd, which is read/write, so fdshell used
+// to hand the command a *writable* descriptor: `echo hi >&3` overwrote the body
+// at offset 0 and left the shared offset at EOF, so `cat <&3` printed nothing —
+// silent data loss. bash opens its source read-only, so the write is refused
+// `EBADF` and the body survives. Every row below is measured against bash 5.3.9
+// (`bash -c`, stdin `/dev/null`, fd 3 closed in the start state); bash's report
+// carries its `bash: line N: ` prefix, fdshell's does not (the documented
+// divergence).
+
+/// `exec 3<<<x; echo hi >&3; cat <&3`: bash prints `x` with
+/// `echo: write error: Bad file descriptor` on stderr and rc 0. fdshell
+/// pre-#325 printed **nothing**. The unit twin is
+/// `redirect/resolve/tests.rs::here_string_source_refuses_writes`.
+#[test]
+fn here_string_source_refuses_writes_and_keeps_the_body() {
+    let (out, err, code) = run_fd3_closed("exec 3<<<x; echo hi >&3; cat <&3");
+    assert_eq!((out.as_str(), code), ("x\n", 0), "stderr={err}");
+    assert!(
+        err.contains("echo: write error: Bad file descriptor"),
+        "stderr={err}"
+    );
+}
+
+/// The refused write is a failed command, so it sets the status: bash prints
+/// `rc=1` then `x`, rc 0 overall.
+#[test]
+fn here_string_write_failure_sets_the_status() {
+    let (out, err, code) = run_fd3_closed("exec 3<<<x; echo hi >&3; echo rc=$?; cat <&3");
+    assert_eq!((out.as_str(), code), ("rc=1\nx\n", 0), "stderr={err}");
+    assert!(
+        err.contains("echo: write error: Bad file descriptor"),
+        "stderr={err}"
+    );
+}
+
+/// The read side is untouched by the fix: the body's offset is **shared** by the
+/// descriptor and its `<&N` dupes, so the second read is EOF (bash prints `x`
+/// once). Same for a `0` target, where the failed `>&0` write leaves `cat`
+/// reading the here-string body.
+#[test]
+fn here_string_offset_survives_a_refused_write() {
+    let (out, err, code) = run_fd3_closed("exec 3<<<x; cat <&3; cat <&3");
+    assert_eq!((out.as_str(), code), ("x\n", 0), "stderr={err}");
+    assert_eq!(err, "", "stderr={err}");
+    let (out, err, code) = run("exec 0<<<x; echo hi >&0; cat");
+    assert_eq!((out.as_str(), code), ("x\n", 0), "stderr={err}");
+    assert!(
+        err.contains("echo: write error: Bad file descriptor"),
+        "stderr={err}"
+    );
+}

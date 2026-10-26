@@ -116,6 +116,7 @@ impl LocalFd {
     }
 }
 
+mod reopen;
 mod rw;
 mod wait_pidfd;
 

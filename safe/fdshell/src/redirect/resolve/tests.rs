@@ -362,6 +362,53 @@ fn numbered_here_doc_source_sits_above_the_export_targets() {
     assert_eq!(buf.get(..n).unwrap(), b"body\n");
 }
 
+/// Task #325: the descriptor a here-string opens is **read-only**, exactly as
+/// bash's here-string source is, so a write through it is refused `EBADF` and
+/// the body survives. This is the pin that kills "the write silently succeeded"
+/// (fdshell pre-#325 wrote over the body and left the shared offset at EOF, so
+/// `cat <&3` printed nothing); the integration twin is
+/// `tests/herestring.rs::here_string_source_refuses_writes_and_keeps_the_body`.
+#[test]
+fn here_string_source_refuses_writes() {
+    let c = cell();
+    let redirects = vec![RedirectDef::here_string(
+        0,
+        c"x",
+        vec![Unquoted; 1],
+        Vec::new(),
+    )];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let src = dup_of(resolved.first().unwrap());
+    let err = src.write_all(b"hi\n").unwrap_err();
+    assert!(
+        matches!(err, sys::SyscallError::EBADF(_)),
+        "a write to a here-string source is refused: {err}"
+    );
+    let mut buf = [0u8; 16];
+    let n = src.read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"x\n", "the body survives");
+}
+
+/// The here-doc twin (the `<<T` family of task #276): the same read-only source,
+/// the same `EBADF`, the body verbatim (`here_doc_writes_body_verbatim_without_newline`
+/// is the shape). Integration twin:
+/// `tests/heredoc.rs::heredoc_source_refuses_writes_and_keeps_the_body`.
+#[test]
+fn here_doc_source_refuses_writes() {
+    let c = cell();
+    let redirects = vec![RedirectDef::here_doc(0, c"ab\n", true)];
+    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let src = dup_of(resolved.first().unwrap());
+    let err = src.write_all(b"zz\n").unwrap_err();
+    assert!(
+        matches!(err, sys::SyscallError::EBADF(_)),
+        "a write to a here-doc source is refused: {err}"
+    );
+    let mut buf = [0u8; 16];
+    let n = src.read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"ab\n", "the body survives");
+}
+
 /// The unprefixed form keeps its fd-0 target, and its source is a descriptor
 /// above it (the same rule the `N<<word` form relies on).
 #[test]

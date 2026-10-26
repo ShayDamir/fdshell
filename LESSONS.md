@@ -5174,3 +5174,55 @@ twins `tests/glob.rs::bracket_expressions_match`,
 `tests/case.rs::case_pattern_globs_like_a_bash_pattern` — its `[^c]`
 divergence pin is now a match — and
 `tests/pattern.rs::bracket_ranges_negation_and_classes`.
+
+## A redirect source's access mode must be enforced by a fresh open file description at export (task #325)
+
+`dup`/`dup2`/`fcntl(F_DUPFD)` copy a descriptor **inside** one open file
+description, and the access mode is a property of the description, so no clone
+in the redirect path can make a read/write source refuse writes. fdshell's
+here-doc/here-string body is a memfd (memfds are always RW), so the descriptor
+the redirect opened was writable: `exec 3<<<x; echo hi >&3; cat <&3` wrote
+`hi\n` over the body at offset 0 and left the shared offset at EOF, so the read
+back printed nothing — silent data loss in the shell's own fd table, where bash
+opens its source read-only and reports `echo: write error: Bad file descriptor`
+with the body intact. The rule: the arm that **creates** a source fd picks the
+mode with a new open file description, before the clone/export.
+`LocalFd::reopen_read_only` (`unsafe/sys/src/localfd/reopen.rs`) re-opens
+`/proc/self/fd/N` with `O_RDONLY` through `openat2::open`; measured on Linux
+7.3.0:
+
+- the re-open is a fresh description, so its offset starts at 0 independently of
+  the source fd's offset — which is why both redirect arms dropped their now
+  unobservable `lseek(0, SEEK_SET)` (LESSONS: "Re-deriving an already-set flag is dead code with equivalent mutants");
+- `write` on the re-open fails `EBADF` (bash's diagnostic) and so does `write`
+  on a `dup` of it: the mode travels with the description, which is what makes
+  `exec 4<&3` share fd 3's refusal;
+- `/proc` reopening does **not** restrict the mode by itself — `O_WRONLY` on the
+  same memfd succeeds — so the caller must ask for the mode it exports with, and
+  the wrapper takes no mode parameter at all;
+- `F_SEAL_WRITE` is **not** the mechanism: sealed writes fail `EPERM`, so the
+  report stops matching bash ("Operation not permitted" versus "Bad file
+  descriptor"), and `MFD_ALLOW_SEALING` would be an open flag whose only
+  consumer is a seal.
+
+`O_RDONLY` goes in alone, never inside a `|` expression, so the flag
+expression carries no unkillable operator
+(LESSONS: "An `O_RDONLY` (== 0) flag is inert and makes a `|` flag expression unkillable").
+The source still takes the minimum of every export target — the re-open changes
+only the mode, and the `try_clone_above` clone is still what `dup2`s onto the
+target (LESSONS: "A heredoc source must be allocated above every export target, the target included").
+Cost, accepted: `/proc` becomes a runtime dependency of here-docs and
+here-strings, and each one holds one extra fd for the length of the redirect
+(the writable memfd dies at the return).
+
+Pins: `memfd.rs::reopen_read_only_hands_back_a_fresh_fd_at_offset_zero`,
+`reopen_read_only_refuses_writes` (the errno, the dup, the surviving body),
+`redirect/resolve/tests.rs::here_string_source_refuses_writes` and
+`here_doc_source_refuses_writes`, and the integration rows
+`tests/herestring.rs::here_string_source_refuses_writes_and_keeps_the_body`,
+`here_string_write_failure_sets_the_status`,
+`here_string_offset_survives_a_refused_write`,
+`tests/heredoc.rs::heredoc_source_refuses_writes_and_keeps_the_body`,
+`heredoc_write_dupe_refuses_writes`. Accepted equivalent in advance: the
+`SyscallError::Never` arm of the path formatting is unconstructible by design (a
+decimal fd number carries no NUL byte), so it has no killable mutant.
