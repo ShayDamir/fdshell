@@ -106,19 +106,25 @@ fn flush_line_semicolon_terminated_line() {
 }
 
 /// Runs buffered from an **earlier physical line** — the flush was deferred
-/// past the line's newline by a trailing `#` comment (or by a line-opening
-/// `&`) — are emitted body-less: matching bodies across lines stays
-/// unsupported (owner task #333). This is *not* about a run whose own text
-/// spans lines: such a run is flushed on its line and claims its region
-/// stream, pinned by `flush_line_a_multi_line_run_claims_its_line_stream`.
+/// past the line's newline by a line-opening `&` (`bg::async_ahead`) — are
+/// emitted body-less: the run's own line is unidentifiable once `line_start`
+/// has moved, so this arm is the total-function defense that keeps an earlier
+/// line's run from indexing *this* line's region list. A trailing `#` comment
+/// no longer reaches here: `super::end_comment` flushes a comment-terminated
+/// line's runs **on** it, with that line's regions (task #333). This is *not*
+/// about a run whose own text spans lines: such a run is flushed on its line
+/// and claims its region stream, pinned by
+/// `flush_line_a_multi_line_run_claims_its_line_stream`.
 #[test]
 fn flush_line_multi_line_runs_are_body_less() {
-    let line = b"cat <<EOF # c\necho x\nbody\nEOF";
-    // The run was buffered on physical line 0 but flushed at line 1's end.
+    // Physical line 0 (`cat <<EOF`, bytes 0..9) is followed by a line-opening
+    // `&` (byte 10), so line 0's flush is deferred and its run is emitted at
+    // line 1's end (`line_start` 10, `line_end` 18).
+    let line = b"cat <<EOF\n& echo x\nbody\nEOF";
     let mut book = book_with(vec![run(b"cat <<EOF", 0)]);
-    let resume = flush_line(&mut book, line, 14, 20);
+    let resume = flush_line(&mut book, line, 10, 18);
     check_statement(&book.segments[0], b"cat <<EOF", 0, &[]);
-    assert_eq!(resume, 20);
+    assert_eq!(resume, 18);
 }
 
 /// A run whose **text** spans several physical lines is a single-line run for

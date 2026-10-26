@@ -1,8 +1,9 @@
 //! Flush the buffered runs of a physical line as statement segments,
 //! attaching the line's heredoc body bytes (in operator order).
 
-use crate::scan::heredoc;
+use crate::scan::{self, heredoc};
 use crate::segment::Segment;
+use crate::segment::bg;
 use crate::segment::book::Book;
 use alloc::vec::Vec;
 
@@ -21,6 +22,34 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
     resume
 }
 
+/// A `#` comment **ends the physical line**, so the line keeps the end-of-line
+/// bookkeeping a newline gets: its buffered runs are flushed with **that
+/// line's** body regions — bash reads a here-document body after the *logical*
+/// line, comment included, so a `#`-terminated line owns a body stream — and
+/// the cursor lands past every region the line claimed, never inside one. The
+/// deferral a next-line-opening `&` needs is the newline arm's rule too.
+pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
+    // The flush window ends at the comment's own newline, so the comment's
+    // bytes are never read as operators.
+    let nl = scan::comment_end(line, book.i);
+    let deferred = line.get(nl) == Some(&b'\n') && bg::async_ahead(line, nl);
+    book.i = nl;
+    // `skip_comment` is the newline's successor: the next physical line's
+    // start, the address of a line that claims no region at all.
+    let next_line = scan::skip_comment(line, nl);
+    let resume = end_line(book, line, deferred)
+        .max(next_line)
+        .max(book.body_floor);
+    book.i = resume;
+    book.start = resume;
+    // The regions this line claimed are gone for every later flush: its runs are
+    // emitted, and its body lines are data.
+    book.line_start = resume;
+    book.body_floor = resume;
+    // A comment closes the `;` chapter: the flushed runs stay plain-`&` targets.
+    book.sep_since_run = false;
+}
+
 /// Flush the book's buffered runs of the current physical line as statements,
 /// attaching the line's heredoc body bytes (in operator order). Returns the
 /// resume index (the end of the last claimed region — the text end when a
@@ -32,15 +61,18 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
 /// (task #294).
 ///
 /// Runs buffered from an **earlier physical line** — the flush was deferred
-/// past the line's newline by a trailing `#` comment (`book::resume_past`'s
-/// `Boundary::Comment`) or by a line-opening `&` — are emitted body-less: a
-/// comment-terminated operator line's body starts after *that* line, and
-/// matching bodies across lines stays unsupported (the parser rejects the
-/// statement, as before). Task **#333** owns that family. The rule is *not*
-/// about a run whose own text spans several physical lines: a keyword block
-/// opened mid-run keeps its bytes inside the run (task #232) and never moves
-/// `line_start`, so the run is flushed on the line it opened on and claims
-/// that line's region stream like any single-line run (task #295).
+/// past the line's newline by a line-opening `&` (`bg::async_ahead`) — are
+/// emitted body-less: a run of an earlier line must never index *this* line's
+/// region list, and the run's own line is unidentifiable once `line_start` has
+/// moved, so the `single_line` arm below is the total-function defense. A
+/// trailing `#` comment no longer reaches here: [`end_comment`] ends the
+/// physical line and flushes its runs **on** it, because a `#`-terminated line
+/// owns its body stream (task #333 — bash reads the body after the logical
+/// line, comment included). The rule is *not* about a run whose own text spans
+/// several physical lines: a keyword block opened mid-run keeps its bytes
+/// inside the run (task #232) and never moves `line_start`, so the run is
+/// flushed on the line it opened on and claims that line's region stream like
+/// any single-line run (task #295).
 pub(crate) fn flush_line<'a>(
     book: &mut Book<'a>,
     line: &[u8],

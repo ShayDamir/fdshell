@@ -379,25 +379,26 @@ fn an_ampersand_that_ends_the_line_keeps_the_region_jump() {
     );
 }
 
-/// The suffix runs behind a `&` whose line **cannot** carry them keep the
-/// shape the same shapes without a `&` already had (the pinned divergences,
-/// `tests/heredoc.rs`): a `#` comment behind the `&` ends the physical line
-/// for the suffix, so its run is flushed body-less; a glued `&` is a word byte
-/// of the delimiter (`token_word_end`), so the line's region list is empty.
+/// The suffix runs behind a `&` whose line **cannot** carry them keep the shape
+/// the same shapes without a `&` already had (the pinned divergences,
+/// `tests/heredoc.rs`): a glued `&` is a word byte of the delimiter
+/// (`token_word_end`), so the line's region list is empty and the suffix is
+/// flushed body-less. A `#` comment behind the `&` no longer starves the suffix:
+/// task **#333** gave a `#`-terminated line the newline's whole end-of-line
+/// bookkeeping, so the suffix is flushed **on its own line** and claims the
+/// region its own operator owns.
 #[test]
-fn a_suffix_the_line_cannot_carry_is_flushed_body_less() {
-    // `cat <<A & cat <<B # note`: the comment ends the physical line, so the
-    // suffix's run trails it and is emitted body-less (the rule
-    // `segment/line/tests.rs::flush_line_multi_line_runs_are_body_less` pins);
-    // the parse layer bails on `cat <<B` (measured rc 1, bash rc 0).
+fn a_glued_suffix_is_flushed_body_less_while_a_comment_suffix_carries_its_body() {
+    // `cat <<A & cat <<B # note`: the comment ends the physical line and the
+    // suffix is flushed there, indexing the line's region stream by its
+    // operator's global position (`cat <<B` follows one operator written before
+    // the `&`, so it takes region 1). The parse layer accepts the pair: measured
+    // rc 0, bash prints both bodies.
     assert_eq!(
         statements(b"cat <<A & cat <<B # note\nx\nA\ny\nB"),
         alloc::vec![
             (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
-            (b"cat <<B".as_slice(), alloc::vec![], false),
-            (b"x".as_slice(), alloc::vec![], false),
-            (b"y".as_slice(), alloc::vec![], false),
-            (b"B".as_slice(), alloc::vec![], false),
+            (b"cat <<B".as_slice(), alloc::vec![b"y\nB".to_vec()], false),
         ],
     );
     // Glued `<<A&`: the byte-level delimiter is `A&`, unreadable as `A`, so the

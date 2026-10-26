@@ -1423,30 +1423,24 @@ fn a_wait_block_arm_heredoc_region_is_a_body_region() {
     assert!(err.contains("s is not set"), "stderr={err}");
 }
 
-/// Task #304, the `# c` twin of the body-position pin, re-pinned as measured:
-/// the region-rule half is closed (no `missing 'fi'` any more — the body-position
-/// region is opaque), and what is left is the **statement-level** divergence of a
-/// `#` comment written behind a here-doc delimiter word, which reproduces with no
-/// block at all. bash prints the body at rc 0; master and here are rc 1
-/// (`here-doc: missing terminating delimiter line`). Task **#429** owns that
-/// family; the same row is pinned in
-/// `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`.
+/// Task #304, the `# c` twin of the body-position pin. Its **region-rule** half
+/// (a region claimed by a word of the block's body is opaque) is pinned above;
+/// its **statement-level** half — a `#` comment written behind a here-doc
+/// delimiter word, which reproduces with no block at all — reached parity in
+/// task **#333** and is pinned by
+/// `a_comment_terminated_line_owns_its_body_stream` (`cat <<Q # c` + body +
+/// `Q` prints `q && y` at rc 0, the block twin likewise); the starved-stream
+/// twins of the same shape keep their owners in
+/// `a_comment_terminated_line_starved_and_deferred_rows_keep_their_owners`.
+/// Measured 2026-10-26 against bash 5.3.9 and `target/debug/fdshell`.
 #[test]
-fn a_comment_behind_a_heredoc_line_is_the_statement_level_divergence() {
-    let (_out, err, code) = run("if :; then cat <<Q # c\nq && y\nQ\nfi");
-    assert_eq!(code, 1, "bash rc 0 prints 'q && y'");
-    assert!(
-        err.contains("missing terminating delimiter line 'Q'"),
-        "stderr={err}"
-    );
-    // The statement twin, with no block at all: the same rc and report on master
-    // and here, so the block is not what breaks this shape.
-    let (_out, err, code) = run("cat <<Q # c\nq && y\nQ");
-    assert_eq!(code, 1, "bash rc 0 prints 'q && y'");
-    assert!(
-        err.contains("missing terminating delimiter line 'Q'"),
-        "stderr={err}"
-    );
+fn a_comment_behind_a_heredoc_line_is_the_statement_level_parity() {
+    let (out, err, code) = run("if :; then cat <<Q # c\nq && y\nQ\nfi");
+    assert_eq!((out.as_str(), code), ("q && y\n", 0), "stderr={err}");
+    // The statement twin, with no block at all: the comment's newline is where
+    // the body starts, so `q && y` is region data.
+    let (out, err, code) = run("cat <<Q # c\nq && y\nQ");
+    assert_eq!((out.as_str(), code), ("q && y\n", 0), "stderr={err}");
 }
 
 /// Task #275 (measured 2026-10-21, bash 5.3.9): the line's regions are allocated
@@ -2280,7 +2274,9 @@ fn midrun_block_body_heredoc_is_region_scanned() {
 /// family as `block_body_heredoc_delimiter_line_operator_is_region_data`), a
 /// group / function **body** here-doc claims no region (tasks **#315** /
 /// **#305**, pinned below), a delimiter line that never arrives is task
-/// **#364**, and the `#`-terminated / `&`-deferred flush is task **#333**.
+/// **#364**, and the `&`-deferred flush is task **#468** (the `#`-terminated
+/// twin reached parity in task **#333**, pinned by
+/// `a_comment_terminated_line_owns_its_body_stream`).
 #[test]
 fn mid_run_heredoc_parity_family() {
     for (script, want) in [
@@ -2333,7 +2329,8 @@ fn mid_run_heredoc_parity_family() {
         ("true && while :; do cat 3<<T; break; done\nbT\nT", ""),
         ("true && while :; do cat <<<str; break; done", "str\n"),
         // A `#` behind the run, and a comment line above it: the flush is on
-        // the run's own line, so nothing is deferred (unlike #333's rows).
+        // the run's own line, so nothing is deferred (the `&`-deferred twin is
+        // #468's).
         (
             "true && while :; do cat <<T; break; done # c\nbodyT\nT",
             "bodyT\n",
@@ -2515,19 +2512,18 @@ fn group_body_heredoc_behind_a_statement_keeps_the_trailing_statement() {
 /// * the group as a pipeline stage: `} | cat` is unsupported (tasks
 ///   **#186**/**#190**, pinned as `unexpected pipe` by
 ///   `tests/group.rs::pipeline_stage_group_is_a_parse_error`).
-/// * the **`#`-terminated trailing statement** of the group's line (task
-///   **#333**, the `#`-comment-terminated / `&`-deferred flush family of
-///   `segment/line.rs`, whose definer twin is `cat <<X; f() { echo hi; }; # note`):
-///   the shape was invisible while the trailing statement was dropped (master:
-///   rc 0, the statement silently gone), and task **#332**'s fix makes it run, so
-///   the family shows. `cat <<X; { echo a; }; cat <<B # note` reports the missing
-///   delimiter line where bash prints `bodyX`, `a`, `bodyB` at rc 0, and
-///   `cat <<X; { echo a; }; echo t # note` runs the pre-block body line as a
-///   command (`"bodyX" not found`) where bash prints `bodyX`, `a`, `t` at rc 0.
 /// * the **subshell** behind the group (task **#316**, no `( … )` parse
 ///   production): master stayed rc 0 because its trailing statement was dropped
 ///   and `(` was never reached; once #332 makes it run, fdshell reports
 ///   `"(" not found` at rc 1 where bash prints `bodyX`, `a`, `bodyB` at rc 0.
+///
+/// The **`#`-terminated trailing statement** of the group's line, which this
+/// test's earlier revision pinned as **#333**'s, is parity now: a `#` ends the
+/// physical line, so the line's runs are flushed **on** it with its own body
+/// regions. `cat <<X; { echo a; }; cat <<B # note` prints `bodyX`, `a`, `bodyB`
+/// and `cat <<X; { echo a; }; echo t # note` prints `bodyX`, `a`, `t`, both at
+/// rc 0 as bash does; both are pinned in
+/// `a_comment_terminated_line_owns_its_body_stream`.
 #[test]
 fn group_body_heredoc_divergences_keep_their_owners() {
     for (script, want) in [
@@ -2545,11 +2541,6 @@ fn group_body_heredoc_divergences_keep_their_owners() {
             "missing terminating delimiter line 'T'",
         ),
         ("{ cat <<T; } | cat\nbody\nT", "unexpected pipe"),
-        (
-            "cat <<X; { echo a; }; cat <<B # note\nbodyX\nX\nbodyB\nB",
-            "missing terminating delimiter line 'B'",
-        ),
-        ("cat <<X; { echo a; }; echo t # note\nbodyX\nX", "not found"),
         (
             "cat <<X; { echo a; }; ( cat <<B )\nbodyX\nX\nbodyB\nB",
             "\"(\" not found",
@@ -3380,12 +3371,10 @@ fn heredoc_leading_newline_consumes_its_body() {
 /// disagree on, pinned **as measured** (never silently accepted) with the owner
 /// named. Every row was measured against `bash -c` on 2026-10-20.
 ///
-/// * A `#` comment behind the `&`: the comment ends the physical line
-///   (`Book::resume_past`), so the run behind the `&` trails its own line and
-///   is flushed body-less — the rule
-///   `segment/line/tests.rs::flush_line_multi_line_runs_are_body_less` pins,
-///   and the twin `cat <<A # note` (no `&`) has always reported the same way.
-///   fdshell rc 1, bash rc 0 with both bodies.
+/// * A `#` comment behind the `&` is **parity** now (task **#333**: a `#` ends
+///   the physical line, so the run behind the `&` is flushed on it and claims
+///   its own region) — pinned by
+///   `a_comment_behind_an_ampersand_lets_the_suffix_carry_its_body`.
 /// * Glued `<<A&`: `&` is a **word byte** for the tokenizer
 ///   (`scan::heredoc::lines::token_word_end` says so explicitly), so the
 ///   byte-level delimiter is `A&` and the line's region list is empty. Owner:
@@ -3396,19 +3385,15 @@ fn heredoc_leading_newline_consumes_its_body() {
 ///   task #303's parse gate stays off for (the plain `>f` family is rc 0 now).
 #[test]
 fn a_heredoc_behind_an_ampersand_known_divergences() {
-    // The `#`-behind-`&` row and its glued twin: the prefix job runs (its body
+    // The glued twin of the `#`-behind-`&` row: the prefix job runs (its body
     // prints), the suffix is the parse error.
-    for (script, delim) in [
-        ("cat <<A & cat <<B # note\nx\nA\ny\nB", "B"),
-        ("cat <<A& cat <<B\nx\nA\ny\nB", "B"),
-    ] {
-        let (out, err, code) = run(script);
-        assert_eq!(code, 1, "script {script:?}: out={out}");
-        assert!(
-            err.contains(&format!("missing terminating delimiter line '{delim}'")),
-            "script {script:?}: stderr={err}"
-        );
-    }
+    let (script, delim) = ("cat <<A& cat <<B\nx\nA\ny\nB", "B");
+    let (out, err, code) = run(script);
+    assert_eq!(code, 1, "script {script:?}: out={out}");
+    assert!(
+        err.contains(&format!("missing terminating delimiter line '{delim}'")),
+        "script {script:?}: stderr={err}"
+    );
     // The redirect-only suffix: the prefix's body prints, the suffix is a
     // command lookup (bash: rc 0, no complaint).
     for (script, word) in [
@@ -3779,4 +3764,153 @@ fn substitution_delimiter_word_is_literal() {
     // A quoted delimiter keeps its body literal, region bytes included.
     let (out, err, code) = run("cat <<'$(echo EOF)'\nbody\n$(echo EOF)\n");
     assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+}
+
+// ── A `#`-terminated line owns its body stream (task #333) ───────────────────
+// A `#` comment **ends the physical line**, exactly like its newline does: the
+// line's buffered runs are flushed on it, with **that line's** here-document
+// regions, and the scan resumes past every region the line claimed (never
+// inside one). bash reads a here-document body after the **logical** line,
+// comment included, so a `#`-terminated operator line owns a body stream —
+// `cat <<X # note` + body + `X` feeds the body to `cat` and the comment's own
+// newline is where the body starts.
+//
+// Every expectation below was measured against **bash 5.3.9** (`bash -c`) and
+// `target/debug/fdshell`. On `master` the same rows split into two failures: the
+// body lines came back as commands (`"bodyX" not found`), or the flush was
+// deferred to a later line and the statement was emitted body-less
+// (`here-doc: missing terminating delimiter line`).
+
+/// The parity family: a `#`-terminated line flushes its own runs with its own
+/// regions, so the region lines stay data and every run of the line keeps its
+/// place. The definer twin is the task's headline; the group, keyword-block,
+/// `case` arm, cond, pipeline and mid-run twins are the same rule at the other
+/// branch that opens a block on the line; the trailing-comment rows with no
+/// operator on their line are the flush's own half.
+#[test]
+fn a_comment_terminated_line_owns_its_body_stream() {
+    for (script, want) in [
+        // The task's headline: the definer's `;`-terminated line, comment last.
+        ("cat <<X; f() { echo hi; }; # note\nbodyX\nX", "bodyX\n"),
+        (
+            "cat <<X; f() { echo hi; }; f # note\nbodyX\nX",
+            "bodyX\nhi\n",
+        ),
+        // The comment's newline is where the body starts, so the next line's
+        // command is body data (bash prints `echo after` from the body).
+        (
+            "cat <<X # note\necho after\nbodyX\nX",
+            "echo after\nbodyX\n",
+        ),
+        // A comment line with no operator: its runs are its own commands, and
+        // the **next** line claims its own region.
+        ("echo a # note\ncat <<B\nbodyB\nB", "a\nbodyB\n"),
+        // Trailing runs of a line that carries a block: every operator of the
+        // line takes its own region of the line's stream (task #332's rule),
+        // and the comment closes the line.
+        (
+            "cat <<X; { echo a; }; cat <<B # note\nbodyX\nX\nbodyB\nB",
+            "bodyX\na\nbodyB\n",
+        ),
+        (
+            "cat <<X; { echo a; }; echo t # note\nbodyX\nX",
+            "bodyX\na\nt\n",
+        ),
+        ("cat <<X; echo t # note\nbodyX\nX", "bodyX\nt\n"),
+        // Two operators on one comment-terminated line: operator order.
+        (
+            "cat <<X; cat <<Y # note\nbodyX\nX\nbodyY\nY",
+            "bodyX\nbodyY\n",
+        ),
+        ("cat <<A # c\nbodyA\nA\ncat <<B\nbodyB\nB", "bodyA\nbodyB\n"),
+        // The comment runs to the newline: `; echo after` is comment data, so
+        // the line's single operator is `<<X`.
+        ("cat <<X # note; echo after\nbodyX\nX", "bodyX\n"),
+        // A comment line that opens the input, and the keyword-block twins.
+        ("# note\ncat <<B\nbodyB\nB", "bodyB\n"),
+        (
+            "cat <<X; if true; then echo y; fi # note\nbodyX\nX",
+            "bodyX\ny\n",
+        ),
+        ("cat <<X && echo b # note\nbodyX\nX", "bodyX\nb\n"),
+        ("true && cat <<X # note\nbodyX\nX", "bodyX\n"),
+        ("cat <<X | cat # note\nbodyX\nX", "bodyX\n"),
+        // A `#`-terminated here-doc line **inside** a block body: the block's
+        // own scan sees the same line-end rule.
+        ("if true; then\ncat <<X # c\nbody\nX\nfi", "body\n"),
+        ("{\ncat <<X # c\nbody\nX\n}", "body\n"),
+        ("while :; do\ncat <<X # c\nbody\nX\nbreak\ndone", "body\n"),
+        ("case x in\nx)\ncat <<X # c\nbody\nX\n;;\nesac", "body\n"),
+        // A block whose own line ends in a comment, and the statement below it.
+        ("f() { echo hi; } # note\necho after", "after\n"),
+        ("if true; then echo y; fi # note\necho after", "y\nafter\n"),
+        // A `#` **inside** a region is body data, never a comment.
+        ("cat <<X\nbody # note\nX", "body # note\n"),
+        // The rows task #304 pinned as the statement-level divergence of a `#`
+        // behind a here-doc delimiter word (owners #429 / #333): parity now.
+        ("cat <<Q # c\nq && y\nQ", "q && y\n"),
+        ("if :; then cat <<Q # c\nq && y\nQ\nfi", "q && y\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// The plain-`&` twin of the same shape: the comment behind the `&` ends the
+/// physical line, and the suffix run behind the `&` is flushed **on** that line,
+/// so it claims the region its own operator owns (region 1 of the line's
+/// stream). The prefix is a background job, so the pair's output has no order
+/// (the `tests/async.rs` convention).
+#[test]
+fn a_comment_behind_an_ampersand_lets_the_suffix_carry_its_body() {
+    let (out, err, code) = run("cat <<A & cat <<B # note\nx\nA\ny\nB");
+    assert_eq!(code, 0, "out={out} stderr={err}");
+    let mut lines: Vec<&str> = out.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["x", "y"], "stdout={out}");
+}
+
+/// The members of the family that stay divergent, pinned **as measured** with
+/// their owner named (never silently accepted):
+///
+/// * the **starved** stream — the region's delimiter line never arrives, so the
+///   line's allocation claims nothing (the all-or-nothing rule of task **#275**,
+///   the EOF family of **#429** / **#364**): fdshell reports the missing
+///   delimiter at rc 1 where bash prints the body with its end-of-file warning.
+/// * a line-opening `&` **below** a comment-terminated here-doc line: the flush
+///   is deferred into the region and the region's tail runs as a command, the
+///   `segment/bg.rs::mark` family of task **#468**.
+/// * `echo a # note` + a line-opening `&`: the accepted line-deferral family
+///   (bash's rc 2 syntax error, fdshell runs both).
+#[test]
+fn a_comment_terminated_line_starved_and_deferred_rows_keep_their_owners() {
+    // #275 / #429: the delimiter line never arrives (bash prints `body`, rc 0).
+    for script in ["cat <<X # note\nbody", "cat <<X # note"] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (1, ""),
+            "script {script:?}: out={out}"
+        );
+        assert!(
+            err.contains("missing terminating delimiter line 'X'"),
+            "script {script:?}: stderr={err}"
+        );
+    }
+    // #468: the `&` line is swallowed by the region, whose tail then runs as a
+    // command. bash prints `& echo b` and `body` at rc 0.
+    let (out, err, code) = run("cat <<X # note\n& echo b\nbody\nX");
+    assert_eq!((code, out.as_str()), (1, ""), "out={out}");
+    assert!(
+        err.contains("missing terminating delimiter line 'X'"),
+        "stderr={err}"
+    );
+    // The accepted line-deferral family: bash stops at the line-opening `&`
+    // with rc 2, fdshell runs both statements. The `& echo b` is a background
+    // job, so its output has no order (the `tests/async.rs` convention).
+    let (out, _err, code) = run("echo a # note\n& echo b");
+    assert_eq!(code, 0, "stdout={out}");
+    let mut lines: Vec<&str> = out.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["a", "b"], "stdout={out}");
 }

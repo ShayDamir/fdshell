@@ -1618,6 +1618,9 @@ fn a_comment_terminates_a_short_circuit_gate() {
 /// `{ …; }` group ends there too, and a comment tail after a block is inert
 /// through the parse layer, which stops at a comment inside a part's text — the
 /// dependency task #296 relies on (a `;` in the comment never resumes the list).
+/// The last row is the shape task **#333** moved from divergence to parity: a
+/// `#`-terminated line keeps the newline's end-of-line bookkeeping, so the
+/// here-doc owns its region and the `&&` written in that region is data.
 #[test]
 fn a_comment_tail_next_to_a_block_stays_inert() {
     for (script, want) in [
@@ -1632,6 +1635,9 @@ fn a_comment_tail_next_to_a_block_stays_inert() {
         ("while :; do echo a; break; done # c & echo y", "a\n"),
         // The word-start half of the rule: a `#` inside a word is data.
         ("echo a x#y && echo b", "a x#y\nb\n"),
+        // Task #333: the comment ends the line, so the region starts at the
+        // comment's own newline and its `&&` is body data, never a split point.
+        ("if :; then cat <<Q # c\nq && y\nQ\nfi", "q && y\n"),
     ] {
         let (out, err, rc) = run_bounded(script);
         assert_eq!((out.as_str(), rc), (want, 0), "{script}: stderr={err}");
@@ -1669,20 +1675,11 @@ fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     let (out, err, rc) = run_bounded("{ echo g # c && echo z\n} && echo w");
     assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
     assert!(err.contains("expected ';' before '}'"), "stderr={err}");
-    // #304 closed this row's **region-rule** half: a region claimed by a word of
-    // the block's body is opaque, so the `&&` in `q && y` no longer splits the
-    // block text and `missing 'fi'` is gone. What is left is the
-    // **statement-level** divergence of a `#` comment written behind a here-doc
-    // delimiter word: it reproduces with no block at all (`cat <<Q # c` + body +
-    // `Q` → rc 1, bash prints the body at rc 0), and measures identically on
-    // master and on #304 (measured 2026-10-23, bash 5.3.9) — task **#429** owns
-    // that family, #296 owns the comment-at-a-block-edge rule.
-    let (out, err, rc) = run_bounded("if :; then cat <<Q # c\nq && y\nQ\nfi");
-    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
-    assert!(
-        err.contains("missing terminating delimiter line 'Q'"),
-        "stderr={err}"
-    );
+    // #304 closed this row's **region-rule** half (a region claimed by a word of
+    // the block's body is opaque, so the `&&` in `q && y` never splits the block
+    // text); the **statement-level** half — a `#` behind a here-doc delimiter
+    // word — reached parity in task **#333** and is pinned in
+    // `a_comment_tail_next_to_a_block_stays_inert`.
     // #304's twin, where fdshell runs the statement: the `X` delimiter word ends
     // the heredoc and `X` is then run as a command, so only the body's `b` and
     // the report's rc are machine-independent (bash: rc 2 at `fi`).

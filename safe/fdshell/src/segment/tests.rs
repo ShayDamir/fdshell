@@ -1726,3 +1726,85 @@ fn scan_for_block_with_a_closer_shaped_list_word() {
         Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
+
+/// The `(cmd, bodies)` face of every segment a line produces: a statement's
+/// command bytes with the body regions it claims (in operator order), a block's
+/// span text with the regions attached to the block, the async marker `A`.
+fn face(line: &[u8]) -> Vec<(Vec<u8>, Vec<Vec<u8>>)> {
+    scan_segments(line, false)
+        .iter()
+        .map(|segment| match segment {
+            Segment::Statement { cmd, bodies, .. } => (cmd.to_vec(), bodies.clone()),
+            Segment::Block {
+                block_start,
+                end_pos,
+                bodies,
+                ..
+            } => (
+                line.get(*block_start..*end_pos).unwrap_or(b"").to_vec(),
+                bodies.clone(),
+            ),
+            Segment::AsyncInvalid => (b"A".to_vec(), Vec::new()),
+        })
+        .collect()
+}
+
+/// Task **#333**: a `#` **ends the physical line**, so the line keeps the
+/// end-of-line bookkeeping a newline gets — its buffered runs are flushed with
+/// **its own** body regions, and the cursor lands past every region the line
+/// claimed, never inside one. At the scan level that is the whole fix: the
+/// region lines are data, and a line that claims a region leaves no run behind
+/// for a later line's flush.
+#[test]
+fn a_comment_terminated_line_flushes_its_runs_and_jumps_its_regions() {
+    // The task's headline shape: the here-doc takes the region, the definer is a
+    // block, and nothing of the region lines is a statement.
+    assert_eq!(
+        face(b"cat <<X; f() { echo hi; }; # c\nbody\nX"),
+        vec![
+            (b"cat <<X".to_vec(), vec![b"body\nX".to_vec()]),
+            (b" f() { echo hi; }".to_vec(), Vec::new()),
+        ],
+    );
+    // A `#`-terminated operator line owns its region: one statement, its body,
+    // no `body` / `X` statements.
+    assert_eq!(
+        face(b"cat <<X # c\nbody\nX"),
+        vec![(b"cat <<X".to_vec(), vec![b"body\nX".to_vec()])],
+    );
+    // A comment line that claims nothing: its own runs are flushed on its own
+    // line (body-less, no operator), and the next line claims its own region.
+    assert_eq!(
+        face(b"echo a # c\ncat <<B\nbodyB\nB"),
+        vec![
+            (b"echo a".to_vec(), Vec::new()),
+            (b"cat <<B".to_vec(), vec![b"bodyB\nB".to_vec()]),
+        ],
+    );
+    // Two runs of one comment-terminated line: the line's one region goes to the
+    // operator that owns it (operator order), the other run stays body-less.
+    assert_eq!(
+        face(b"cat <<X; echo t # c\nbody\nX"),
+        vec![
+            (b"cat <<X".to_vec(), vec![b"body\nX".to_vec()]),
+            (b"echo t".to_vec(), Vec::new()),
+        ],
+    );
+    // The scan resumes at the end of the claimed region, and `line_start`
+    // travels with it: the text below the region is the next statement.
+    assert_eq!(
+        face(b"cat <<X # c\nbody\nX\necho tail"),
+        vec![
+            (b"cat <<X".to_vec(), vec![b"body\nX\n".to_vec()]),
+            (b"echo tail".to_vec(), Vec::new()),
+        ],
+    );
+    // A comment at the very end of input (no newline, no body line): the cursor
+    // never parks on a byte it has already consumed, so the scan terminates, and
+    // the starved stream claims nothing at all (the all-or-nothing line rule,
+    // owner **#275**; the parse layer reports the missing delimiter).
+    assert_eq!(
+        face(b"cat <<X # c"),
+        vec![(b"cat <<X".to_vec(), Vec::new())],
+    );
+}

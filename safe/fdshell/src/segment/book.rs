@@ -58,18 +58,16 @@ impl<'a> Book<'a> {
         }
     }
 
-    /// Resume the cursor past the separator at `sep`: a `#` comment ends the
-    /// physical line (the runs' line bookkeeping restarts at its end and the
-    /// `;` chapter closes, so the runs stay a plain-`&` target), any other
-    /// separator starts the next run just past it. A flush that resumed
-    /// further on (a heredoc body region, a block's line floor) wins, and
-    /// never adds a second byte on top of it.
+    /// Resume the cursor past the separator at `sep`: a `#` **ends the physical
+    /// line**, so it takes the line's whole end-of-line bookkeeping (flush of
+    /// its runs with its own body regions, the jump past every region the line
+    /// claimed) in [`crate::segment::line::end_comment`] — it is not a skip.
+    /// Any other separator starts the next run just past it. A flush that
+    /// resumed further on (a heredoc body region, a block's line floor) wins,
+    /// and never adds a second byte on top of it.
     pub(super) fn resume_past(&mut self, sep: usize, kind: Boundary, deferred: bool, line: &[u8]) {
         if kind == Boundary::Comment {
-            self.i = crate::scan::skip_comment(line, self.i);
-            self.start = self.i;
-            self.line_start = self.i;
-            self.sep_since_run = false;
+            crate::segment::line::end_comment(self, line);
             return;
         }
         if kind == Boundary::Separator {

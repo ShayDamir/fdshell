@@ -173,9 +173,11 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   `cat <<A& cat <<B` keeps the tokenizer's
   word rule (`&` is an ordinary word byte, so the byte-level delimiter is `A&`)
    and reports the missing terminator; a `#` comment behind the `&` ends the
-   physical line, so the suffix run is flushed body-less (the rule the
-   comment-terminated line has always had, and the deferred-flush member task
-   **#333** owns); a bare `<<` behind the `&` is
+   physical line, and a `#`-terminated line keeps the newline's whole
+   end-of-line bookkeeping (task **#333** closed the body-less member of that
+   family), so the suffix is flushed on its own line and claims the region its
+   own operator owns: `cat <<A & cat <<B # note` plus the four body lines prints
+   both bodies at rc 0 in both shells. A bare `<<` behind the `&` is
 
   `invalid redirect syntax` rc 1 where bash is rc 2; a body that never arrives
   empties the **whole line's** region list (owner **#275**); a **block opened
