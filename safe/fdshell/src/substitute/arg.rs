@@ -1,7 +1,15 @@
 //! Single-argument substitution — handles ~, %, $(), `` ` … ` ``, $((…)), and $.
+//!
+//! The loop's whole state is [`Ex`] (in `arg/state.rs`), and every arm of the
+//! loop is an `impl Ex` block in `arg/arms.rs`: the arm owns its bookkeeping
+//! (the mask realign, the `idx` re-sync, the `origin` record), so the loop body
+//! here is one call per byte.
 
 mod arms;
 mod escape;
+mod state;
+
+pub(super) use state::Ex;
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -11,13 +19,10 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use super::Join;
-use super::dollar::Region;
-use super::mask::{Counting, push_byte, realign};
+use super::mask::Counting;
 use super::origin::Origin;
 use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
-use crate::mask::quoted_at;
-use crate::mask::region_len;
 use crate::state::ShellState;
 
 /// Substitute one word, returning the expanded text, a parallel quote mask
@@ -41,77 +46,29 @@ pub(super) fn substitute_arg_marked(
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<MaskBit>, Origin), Report<ResolveError>> {
     let bytes = arg.as_bytes().change_context(ResolveError::RefNotFound)?;
-    let mut out = ShortCStr::new();
-    let mut out_mask = Vec::new();
-    let mut origin = Origin::new();
-    let mut peek = Counting::new(bytes.iter().copied());
-    let mut idx = 0usize;
+    let mut ex = Ex {
+        peek: Counting::new(bytes.iter().copied()),
+        idx: 0,
+        out: ShortCStr::new(),
+        out_mask: Vec::new(),
+        origin: Origin::new(),
+        cell,
+        cache,
+        mask,
+        join,
+    };
     if super::tilde::leads(bytes, mask, spans) {
-        super::tilde::expand(&mut peek, &mut idx, mask, cell, &mut out, &mut out_mask)?;
+        super::tilde::expand(
+            &mut ex.peek,
+            &mut ex.idx,
+            mask,
+            cell,
+            &mut ex.out,
+            &mut ex.out_mask,
+        )?;
     }
-    while let Some(b) = peek.next() {
-        let quoted = quoted_at(mask, idx);
-        // A name arm (`$name`, `%name`, `$N`) reads at most the quote region of
-        // its own trigger byte: `idx` is that byte's word index here, before
-        // the arm's peek-ahead moves it.
-        let limit = region_len(mask, idx).saturating_sub(1);
-        idx += 1;
-        match b {
-            b'\\' if !quoted => escape::unquoted(&mut peek, &mut idx, &mut out, &mut out_mask)?,
-            b'\\' => escape::quoted(&mut peek, &mut idx, &mut out, &mut out_mask, quoted)?,
-            // `%name` fd substitution. The arm consumes the trigger byte and
-            // at most the name; a following `%` or non-name byte is literal,
-            // so `%%` reaches argv intact — the `printf` builtin owns `%%`
-            // (task #155). `realign` keeps the mask 1:1 for the literal `%`.
-            b'%' => {
-                let before = out.len();
-                arms::percent(&mut peek, cache, cell, &mut out, limit)?;
-                realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);
-                origin.record(before, out.len());
-            }
-            b'$' if peek.peek() == Some(&b'(') => {
-                let before = out.len();
-                peek.next();
-                super::subst_paren::handle_dollar_paren(
-                    &mut peek,
-                    cell,
-                    &mut out,
-                    &mut out_mask,
-                    quoted,
-                )?;
-                idx = peek.consumed();
-                origin.record(before, out.len());
-            }
-            // `` ` … ` `` runs the same capture machinery as `$( … )`; the
-            // trigger byte's mask bit protects the output from splitting.
-            b'`' => {
-                let before = out.len();
-                super::backtick::handle(&mut peek, cell, &mut out, &mut out_mask, quoted)?;
-                idx = peek.consumed();
-                origin.record(before, out.len());
-            }
-            b'$' => {
-                let before = out.len();
-                // `idx` is the word index of the byte after `$` — the `{` of a
-                // `${…}` arm; `realign` re-syncs it to the consumed count.
-                arms::dollar(
-                    &mut peek,
-                    cell,
-                    &mut out,
-                    Region {
-                        mask,
-                        start: idx,
-                        limit,
-                    },
-                    quoted,
-                    join,
-                    &mut origin,
-                )?;
-                realign(&mut idx, &peek, &mut out_mask, before, &out, quoted);
-                origin.record(before, out.len());
-            }
-            _ => push_byte(&mut out, &mut out_mask, b, quoted)?,
-        }
+    while let Some(b) = ex.peek.next() {
+        ex.dispatch(b)?;
     }
-    Ok((out, out_mask, origin))
+    Ok((ex.out, ex.out_mask, ex.origin))
 }
