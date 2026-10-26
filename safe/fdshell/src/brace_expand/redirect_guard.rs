@@ -8,8 +8,8 @@
 
 use super::word::expand_word;
 use crate::error::cmd::CmdError;
-use crate::parse::operand_offset;
 use crate::parse::Token;
+use crate::parse::operand_offset;
 use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 

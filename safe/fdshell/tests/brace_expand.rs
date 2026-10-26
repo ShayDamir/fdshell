@@ -432,6 +432,34 @@ fn heredoc_dash_brace_delimiter_is_verbatim() {
     assert_eq!(out, "BODY\n");
 }
 
+/// The protected words and the guarded word, side by side (task #324): a brace
+/// in a here-string word, a heredoc operator word, its terminator line and its
+/// body stays literal, while the same brace in a path or dup **operand** is
+/// bash's `ambiguous redirect` (POSIX XCU 2.7 `worddef`, rc 1, nothing opened).
+#[test]
+fn a_protected_word_stays_literal_while_a_redirect_operand_bails() {
+    // The here-string word, plain and on an io-number.
+    let (out, err, code) = run("cat <<< {a,b}");
+    assert_eq!((out.as_str(), code), ("{a,b}\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("exec 3<<<{a,b}; cat <&3");
+    assert_eq!((out.as_str(), code), ("{a,b}\n", 0), "stderr={err:?}");
+    // The heredoc operator word, its terminator line, and the body.
+    let (out, err, code) = run("cat <<{a,b}\nBODY\n{a,b}");
+    assert_eq!((out.as_str(), code), ("BODY\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("cat <<EOF\n{a,b}\nEOF");
+    assert_eq!((out.as_str(), code), ("{a,b}\n", 0), "stderr={err:?}");
+    let (out, err, code) = run("cat <<-EOF\n\t{a,b}\n\tEOF");
+    assert_eq!((out.as_str(), code), ("{a,b}\n", 0), "stderr={err:?}");
+    // The same brace, in a path operand and in a dup operand: the `worddef`
+    // bail, with the operand named as written.
+    let (out, err, code) = run("cat >{a,b}");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect: {a,b}"), "stderr={err:?}");
+    let (out, err, code) = run("exec 3<<<x 4<<<y; cat <&{3,4}");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect: {3,4}"), "stderr={err:?}");
+}
+
 // --- word cap (documented deviation) ---------------------------------------
 
 #[test]

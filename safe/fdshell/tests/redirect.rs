@@ -361,23 +361,26 @@ fn noclobber_duplicate_write_first_target_blocks() {
 }
 
 #[test]
-fn brace_expanded_target_is_last_wins() {
-    // fdshell brace-expands a redirect target, so `>{a,b}` is two redirects to
-    // fd 1 and the last wins. bash reports `ambiguous redirect` (rc 1) because
-    // it does not expand a redirect target - a documented divergence.
+fn brace_expanded_target_is_ambiguous() {
+    // bash refuses a redirect **operand** that expands to more than one word
+    // (POSIX XCU 2.7 `worddef`), and fdshell's brace expansion runs before the
+    // parse, so the rule fires before anything is opened: rc 1, and *neither*
+    // target is created (measured 2026-10-26, bash 5.3.9).
     let (p1, p2, _sp) = two_paths("brace_dup");
     let _ = std::fs::remove_file(&p1);
     let _ = std::fs::remove_file(&p2);
     let (out, err, code) = run(&format!("echo hi >{{{p1},{p2}}}"));
-    let first = std::fs::read_to_string(&p1).unwrap();
-    let second = std::fs::read_to_string(&p2).unwrap();
-    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect"), "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert!(
-        first.is_empty(),
-        "first target is created empty, got {first:?}"
+        !std::path::Path::new(&p1).exists(),
+        "{p1} must not be created"
     );
-    assert_eq!(second, "hi\n");
+    assert!(
+        !std::path::Path::new(&p2).exists(),
+        "{p2} must not be created"
+    );
 }
 
 #[test]
@@ -1571,6 +1574,162 @@ fn target_expanding_to_zero_or_several_fields_is_ambiguous() {
     }
 }
 
+/// Every brace spelling in a redirect operand (task #324): bash's `worddef`
+/// rule refuses it, rc 1, and **nothing** is opened — not the operand's own
+/// targets, not a second redirect on the same command (`>{a,b} 2>z` leaves `z`
+/// absent, because fdshell's guard runs on the pre-parse text, before the
+/// parse). The message names the operand **as written**, quotes included, which
+/// is what bash prints. Every row is `bash -c` 5.3.9, measured 2026-10-26.
+#[test]
+fn brace_expanded_redirect_operand_is_ambiguous() {
+    let dir = seeded("brace_operand");
+    let dir = dir.to_str().unwrap();
+    for (script, operand) in [
+        // the path arms, every operator, with and without an io-number prefix
+        ("echo hi >{a,b}", "{a,b}"),
+        ("echo hi > {a,b}", "{a,b}"),
+        ("echo hi >>{a,b}", "{a,b}"),
+        ("echo hi <{a,b}", "{a,b}"),
+        ("echo hi <> {a,b}", "{a,b}"),
+        ("echo hi >|{a,b}", "{a,b}"),
+        ("echo hi 2>{a,b}", "{a,b}"),
+        ("echo hi 2> {a,b}", "{a,b}"),
+        ("exec 3<{a,b}", "{a,b}"),
+        ("exec >{a,b}", "{a,b}"),
+        // braces glued to the group stay one operand word, braces in a
+        // substitution-bearing group count too
+        ("echo hi >x{a,b}", "x{a,b}"),
+        ("echo hi >{a,b}x", "{a,b}x"),
+        ("echo hi >{a,b}c{d,e}", "{a,b}c{d,e}"),
+        ("echo hi >{a,b}\"c\"", "{a,b}\"c\""),
+        ("echo hi >'a'b{c,d}", "'a'b{c,d}"),
+        ("echo hi >{a,$n}", "{a,$n}"),
+        ("n=q; echo hi >{a,$n}", "{a,$n}"),
+        // the sequence form, and a group whose words carry glob bytes
+        ("echo hi >{a..b}", "{a..b}"),
+        ("echo hi >{1..3}", "{1..3}"),
+        ("echo hi >{a,b*}", "{a,b*}"),
+        ("echo hi >{a,b,c}", "{a,b,c}"),
+        // a second redirect on the command is not reached either
+        ("echo hi >{a,b} 2>z", "{a,b}"),
+        ("echo hi >{a,b} <&0", "{a,b}"),
+        // the `%var` arms, the dup arms and the `/dev/fd` path arm
+        ("echo hi >%{a,b}", "%{a,b}"),
+        ("echo hi 3>%{a,b}", "%{a,b}"),
+        ("cat >&%{a,b}", "%{a,b}"),
+        ("cat <&%{a,b}", "%{a,b}"),
+        ("cat <&{3,4}", "{3,4}"),
+        ("cat >&{3,4}", "{3,4}"),
+        ("cat 2>&{3,4}", "{3,4}"),
+        ("cat <&{3..5}", "{3..5}"),
+        ("cat <&{3,-}", "{3,-}"),
+        ("cat <&{3,{4,5}}", "{3,{4,5}}"),
+        ("cat <&{3,4}x", "{3,4}x"),
+        ("exec 3<<<x 4<<<y; cat <&{3,4}", "{3,4}"),
+        ("exec 3<<<x 4<<<y; exec 4<&{3,5}", "{3,5}"),
+        ("echo hi > /dev/fd/{3,4}", "/dev/fd/{3,4}"),
+        // the `&>` family, attached and bare
+        ("echo hi &>{a,b}", "{a,b}"),
+        ("echo hi &> {a,b}", "{a,b}"),
+        ("echo hi &>>{a,b}", "{a,b}"),
+        // zero non-empty words are ambiguous too
+        ("echo hi >{,}", "{,}"),
+        ("echo hi >{,,}", "{,,}"),
+        // the guard wins over the parse error, and bash is a syntax error here
+        // (fdshell's parse-error rc is 1, POSIX_COMPATIBILITY's rc-2 convention)
+        ("cat > >{a,b}", "{a,b}"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains(&format!("ambiguous redirect: {operand}")),
+            "{script}: stderr={err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: opened {files:?}");
+    }
+}
+
+/// The operand rows bash accepts, and the three shapes whose behaviour is
+/// **kept** as a documented divergence (task #324): the attached
+/// one-non-empty-word form, the brace words in an io-number prefix, and the
+/// `<&word` / `>&word` operands that need a real expansion (task #370 owns
+/// them, and the brace guard must not claim them — a word with no brace group
+/// never reaches the rule).
+#[test]
+fn brace_expanded_redirect_operand_parity_rows() {
+    let dir = seeded("brace_parity");
+    let dir = dir.to_str().unwrap();
+    // One expanded word is a normal target: bash opens it, fdshell opens it.
+    for (script, want) in [
+        ("echo hi >{a}", "{a}"),
+        ("echo hi >x{a}y", "x{a}y"),
+        ("echo hi >{a..a}", "a"),
+        ("echo hi >'{a,b}'", "{a,b}"),
+        ("echo hi >\"{a,b}\"", "{a,b}"),
+        ("echo hi >{a\\,b}", "{a,b}"),
+        ("echo hi >{ 1 , 2 }", "{"),
+        ("echo hi > {,zz}", "zz"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), vec![want.to_string()], "{script}");
+    }
+    // The attached `{,zz}`: bash counts the **non-empty** words of the operand
+    // and opens `zz`; fdshell's textual rewrite yields `> >zz`, so the token is
+    // a syntax error (rc parity, the only surviving rc-level divergence here).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo hi >{,zz}");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "bash opens `zz`: {files:?}");
+    // Braces in the io-number **prefix** expand to several redirect words
+    // (POSIX_COMPATIBILITY "Operators are recognized at word starts"): bash
+    // runs `cat 3` and `cat 4` (rc 1), fdshell runs `cat` with fds 3 and 4 on
+    // `f` (rc 0). The operand rule must not reach the prefix.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "cat {3,4}>f");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 0),
+        "cat {{3,4}}>f: stderr={err:?}"
+    );
+    assert_eq!(created(&files), vec!["f".to_string()], "cat {{3,4}}>f");
+    // A `<&word` operand that needs dollar/quote expansion is not a redirect
+    // word for fdshell at all: it degrades to an argument (#370). The brace
+    // guard leaves these rows alone.
+    for script in ["cat <&abc", "cat <&\"{3,4}\"", "cat <&$n"] {
+        clean(dir);
+        let (_out, err, code, files) = run_ls(dir, &format!("n=1; {script}"));
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(
+            !err.contains("ambiguous redirect"),
+            "{script}: the guard must not claim this operand: {err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+    // One non-empty word keeps the fd arm: bash reports `Bad file descriptor`,
+    // fdshell its own fd message (rc parity).
+    clean(dir);
+    let (_out, err, code, files) = run_ls(dir, "cat <&{,3}");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("is not open"), "stderr={err:?}");
+    assert!(created(&files).is_empty());
+    // The `&>&name` pidvar arm carries no redirect operand, so a brace there is
+    // an ordinary word (bash rejects the form outright: rc 2).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo x &>&{a,b}");
+    assert_eq!((out.as_str(), code), ("x\n", 0), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "bash: rc 2 syntax error");
+    // `&>|` is no redirect either: fdshell keeps its parse error.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo x &>|{a,b}");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "bash: rc 2 syntax error");
+}
+
 /// The rc of a failed redirection stays fdshell's, not bash's: the script
 /// aborts (`echo after` never runs), where bash skips only the command. Task
 /// #179 owns the difference, so this is the pin that keeps it visible.
@@ -1580,6 +1739,17 @@ fn ambiguous_redirect_aborts_the_script_and_names_179() {
     let dir = dir.to_str().unwrap();
     let (out, err, code, files) = run_ls(dir, "echo hi > $(true); echo after");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        !out.contains("after"),
+        "bash prints `after` and skips only the command (#179)"
+    );
+    assert!(created(&files).is_empty());
+    // The brace form is the same frame (task #324): the guard fires on the
+    // pre-parse text, so the script aborts and no target of the operand is
+    // created either.
+    let (out, err, code, files) = run_ls(dir, "echo hi >{a,b}; echo after");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect: {a,b}"), "stderr={err:?}");
     assert!(
         !out.contains("after"),
         "bash prints `after` and skips only the command (#179)"

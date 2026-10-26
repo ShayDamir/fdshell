@@ -1,9 +1,11 @@
 //! The token positions bash keeps literal during brace expansion: the
 //! assignment word, case words and patterns, here-string words, and heredoc
 //! delimiters (both the operator word and the terminating delimiter line).
-//! Redirect words are *not* protected: bash brace-expands them (`> {a,b}` is
-//! an "ambiguous redirect" in bash, where a brace-expanded target here becomes
-//! several redirects to one fd and the last one wins).
+//! Redirect words are *not* protected: bash brace-expands them too, and an
+//! operand that expands to a number of **non-empty** words other than one is
+//! its `ambiguous redirect` (POSIX XCU 2.7 `worddef`, rc 1, nothing opened) —
+//! the rule `brace_expand/redirect_guard.rs` applies to the operand region,
+//! while a one-word operand (`>{a}`, `>'{a,b}'`) is expanded and opened.
 
 use crate::parse::{Token, delimiter_token_indices, literal_indices, word_indices};
 use crate::scan::heredoc::body_regions;

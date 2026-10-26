@@ -134,8 +134,5 @@ fn one_word_and_the_operandless_words_pass() {
 fn the_bail_is_one_frame() {
     let err = guard_line("cat >{a,b}", 1).unwrap_err();
     let frames = format!("{err:?}");
-    assert!(
-        frames.contains("ambiguous redirect: {a,b}"),
-        "{frames}"
-    );
+    assert!(frames.contains("ambiguous redirect: {a,b}"), "{frames}");
 }

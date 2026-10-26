@@ -157,6 +157,8 @@ pub enum CmdError {
     RecvmsgFdCountMismatch,
     /// recvmsg: payload contains NUL bytes
     RecvmsgPayloadNul,
+    /// ambiguous redirect: {name}
+    AmbiguousRedirect { name: sys::ShortCStr },
 }
 
 impl core::error::Error for CmdError {}

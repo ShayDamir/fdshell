@@ -253,6 +253,26 @@ form is never a plain file operand (`> %v` is fdshell's syntax error where
 POSIX creates a file named `%v`) — the fd-variable targets are the attached
 `>%var` and `&>%var` forms of the section above.
 
+The operand word's **brace expansion** follows POSIX XCU 2.7 `worddef` and is
+bash parity (task #324): an operand expanding to a number of **non-empty**
+words other than one is `ambiguous redirect` (rc 1), the command runs nothing
+and opens nothing. fdshell brace-expands before the parse, and the guard runs
+on the operand region of the pre-parse text, so the whole command is refused
+before any target is opened — `>{a,b} 2>z` creates no `z`, as bash. The matrix
+is `>{a,b}`, `> {a,b}`, `>>{a,b}`, `<{a,b}`, `<> {a,b}`, `>|{a,b}`, `2>{a,b}`,
+`exec 3<{a,b}`, `>{a,b}x`, `>x{a,b}`, `>{a,b}c{d,e}`, `>{1..3}`, `>{a,b*}`,
+`&>{a,b}`, `&>>{a,b}`, `>%{a,b}`, `>&%{a,b}`, `<&{3,4}`, `<&{3..5}` and the
+zero-word `>{,}` / `>{,,}`; `>{a}`, `>x{a}y`, `>{a..a}`, `>'{a,b}'` and
+`>{ 1 , 2 }` keep their one word. Three measured residuals, all rc parity: the
+*attached* one-non-empty-word form `>{,zz}` is fdshell's `invalid redirect
+syntax`, where bash counts the non-empty word and opens `zz` (fdshell's textual
+rewrite yields `> >zz`); braces in an io-number **prefix** produce several
+redirect words (`cat {3,4}>f` runs one `cat` with fds 3 and 4 on `f`, bash runs
+`cat 3` and `cat 4`), the word rule above; and the operand offset is a
+quote-stripped token offset, so with quoted io-number digits the message names
+the operand together with its operator byte (`cat "2">{a,b}` reports
+`>{a,b}`, bash `{a,b}`).
+
 ## Here-document and here-string descriptor numbers
 
 `[N]<<word` delivers the body to descriptor `N` (`cat 3<<EOF` writes the body

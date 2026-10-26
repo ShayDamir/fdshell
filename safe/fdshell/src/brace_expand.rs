@@ -2,16 +2,19 @@
 //! every brace group with its expanded words, matching bash. The expansion
 //! runs on raw token spans (quotes included); the output is re-tokenized by
 //! the normal parse, so empty expanded words drop out like any other
-//! unquoted empty word. See the README ("Brace expansion") for the
-//! documented deviations.
+//! unquoted empty word. A redirect **operand** is bash's `worddef` subject
+//! (POSIX XCU 2.7): an operand region expanding to a number of non-empty words
+//! other than one bails `ambiguous redirect` (`redirect_guard`), before the
+//! parse and so before anything is opened. See the README ("Brace expansion")
+//! for the documented deviations.
 
 mod gobbler;
 mod protect;
+mod redirect_guard;
 mod seq;
 mod word;
 
 use crate::error::cmd::CmdError;
-use crate::error::parse::ParseError;
 use crate::parse::{Token, token::tokenize_statement};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -29,25 +32,31 @@ pub(crate) fn expand(text: &ScriptText) -> Result<ScriptText, Report<CmdError>> 
         return Ok(text.clone());
     }
     let tokens = tokenize_statement(line).change_context(CmdError::Parse)?;
-    let data = rebuild(line, &tokens).change_context(CmdError::Parse)?;
+    let data = rebuild(line, &tokens)?;
     Ok(ScriptText::new(data, text.start, text.origin.clone()))
 }
 
 /// Rebuild the line byte-exact except for the expanded words.
-fn rebuild(line: &[u8], tokens: &[Token]) -> Result<ShortCStr, Report<ParseError>> {
+fn rebuild(line: &[u8], tokens: &[Token]) -> Result<ShortCStr, Report<CmdError>> {
     let protected = protect::protected(line, tokens);
     let mut out: Vec<u8> = Vec::with_capacity(line.len());
     let mut pos = 0usize;
     for (i, (_t, start, end, _fq, _mask, _spans)) in tokens.iter().enumerate() {
         let Some(span) = line.get(*start..*end) else {
-            return Err(Report::new(ParseError::Never));
+            return Err(Report::new(CmdError::Never));
         };
         if let Some(gap) = line.get(pos..*start) {
             out.extend_from_slice(gap);
         }
         if protected.contains(&i) || !span.contains(&b'{') {
             out.extend_from_slice(span);
-        } else if let Some(words) = word::expand_word(span)? {
+        } else if let Some(words) = word::expand_word(span).change_context(CmdError::Parse)? {
+            // A redirect word is bash's `worddef` subject: an operand that
+            // expands to a number of non-empty words other than one is
+            // `ambiguous redirect`, decided here so the command opens nothing.
+            if words.len() > 1 {
+                redirect_guard::guard(tokens, i, span)?;
+            }
             append_words(words, &mut out);
         } else {
             // A `{` with no valid group: the word is unchanged.
@@ -60,7 +69,7 @@ fn rebuild(line: &[u8], tokens: &[Token]) -> Result<ShortCStr, Report<ParseError
     }
     // `out` is built from the NUL-free input line plus spaces, so a NUL here
     // is a logic error, not a user-input error.
-    ShortCStr::from_vec(out).change_context(ParseError::Never)
+    ShortCStr::from_vec(out).change_context(CmdError::Never)
 }
 
 /// Append one token's expanded words to `out`, joined by single spaces.

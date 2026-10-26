@@ -790,6 +790,21 @@ echo img{01..03}.png      # img01.png img02.png img03.png
 
 Quoted braces are literal.
 
+A redirection **operand** is the one word bash counts (POSIX XCU 2.7 `worddef`):
+a brace group there that expands to more than one word — or to none — is
+`ambiguous redirect` (rc 1); the command runs nothing and opens nothing, as
+bash. The count is of **non-empty** words and the operand's own quotes are
+kept, so `> {a,b}`, `>>{a,b}`, `<{a,b}`, `> x{a,b}`, `>{1..3}`, `&>{a,b}`,
+`2> {a,b}`, `<&{3,4}`, `>%{a,b}` and the zero-word `>{,}` all bail, while
+`>{a}`, `>{a..a}`, `>{ 1 , 2 }` and `>'{a,b}'` open their one word.
+
+The residuals of the pre-parse rewrite stay (see "Operators are recognized at
+word starts" in [POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md)): braces in an
+io-number **prefix** still produce several redirect words, so `{3,4}>f` runs one
+`cat` with fds 3 and 4 on `f` where bash runs `cat 3` and `cat 4`; the attached
+one-non-empty-word form `>{,zz}` is a parse error where bash opens `zz`; and a
+failed redirection aborts the **script**, where bash skips only the command.
+
 ### Arithmetic
 
 `$((expr))` evaluates a C-style integer expression and substitutes the
