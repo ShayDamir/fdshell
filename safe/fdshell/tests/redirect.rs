@@ -2381,3 +2381,229 @@ fn an_ampersand_operand_follows_the_loops_own_vocabulary() {
     let (out, err, code) = run_cwd(dir, "&>&x; echo rc=$?; waitpid &x; echo wp=$?");
     assert_eq!((out.as_str(), code), ("rc=0\nwp=0\n", 0), "stderr={err:?}");
 }
+
+// --- the attached `%var` target is mask-gated (task #329) -------------------
+//
+// The attached forms (`>%v`, `>|%v`, `>>%v`, `<%v`, the `&>` family) decide
+// the fd-variable target from the operand's first byte **unquoted**: POSIX
+// #4.1 removes quotes after tokenization, so bash opens/creates the file
+// `%v` for `>"%v"` and every other quoted shape, while the unquoted `>%v`
+// stays fdshell's fd lookup (POSIX_COMPATIBILITY "Operators are recognized
+// at word starts"). The dup arm `>&%v` is the deliberate asymmetry: bash
+// answers `ambiguous redirect` rc 1 **quoted and unquoted alike**, so the
+// mask gate is not applied there. Every value below is `bash -c` 5.3.9 and
+// this tree's build, measured 2026-10-26 (one scratch dir per shell).
+
+/// The bytes of `dir`/`name` as a string.
+fn body(dir: &str, name: &str) -> String {
+    std::fs::read_to_string(std::path::Path::new(dir).join(name)).unwrap()
+}
+
+/// Every attached quoted write shape creates the file `%v` with exactly
+/// bash's body — the write, append, clobber, the io-number form, the `\%`
+/// twin (already parity: the text rule never sees a `%` at the start), and
+/// the spaced form #323 fixed, kept as the in-family regression row.
+#[test]
+fn attached_quoted_percent_target_creates_the_plain_file() {
+    let dir = scratch("att_pct_write");
+    let dir = dir.to_str().unwrap();
+    for script in [
+        "echo x >\"%v\"",
+        "echo x >'%v'",
+        "echo x >\\%v",
+        "echo x >|\"%v\"",
+        "echo x > \"%v\"",
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), names(&["%v"]), "{script}");
+        assert_eq!(body(dir, "%v"), "x\n", "{script}");
+    }
+    // The append form twice into one file (bash appends; fdshell used to
+    // reject every `>>`-attached `%` operand as invalid syntax).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo a >>\"%v\"; echo b >>\"%v\"");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    assert_eq!(body(dir, "%v"), "a\nb\n");
+    // `exec 3>"%v"` rehomes fd 3 onto the file; `>&3` writes through it.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "exec 3>\"%v\"; echo x >&3");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    assert_eq!(body(dir, "%v"), "x\n");
+}
+
+/// The noclobber rule rides the direction, not the quote: `> "%v"` refuses an
+/// existing `%v` (bash rc 1, body kept) and `>| "%v"` bypasses the refusal
+/// (bash rc 0, truncates) — the quoted target reaches both because the fix
+/// makes it a plain path word.
+#[test]
+fn quoted_clobber_target_carries_the_noclobber_rule() {
+    let dir = scratch("att_pct_clobber");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) =
+        run_ls(dir, "printf old >\"%v\"; set -o noclobber; echo x >|\"%v\"");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    assert_eq!(body(dir, "%v"), "x\n");
+    clean(dir);
+    let (out, err, code, files) =
+        run_ls(dir, "printf old >\"%v\"; set -o noclobber; echo x >\"%v\"");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("noclobber"),
+        "bash: cannot overwrite existing file; stderr={err:?}"
+    );
+    assert_eq!(created(&files), names(&["%v"]));
+    assert_eq!(
+        body(dir, "%v"),
+        "old",
+        "the existing body is kept, as bash keeps it"
+    );
+}
+
+/// `&>"%v"` is the combined redirect onto the file `%v`: fd 1 and fd 2 share
+/// the one open (bash interleaves `o` before `e`; both orders are one file),
+/// and the spaced `&> "%v"` is the bare form #323 fixed, kept as a row.
+#[test]
+fn quoted_combined_target_takes_stdout_and_stderr() {
+    let dir = scratch("att_pct_bg");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "f(){ echo o; echo e >&2; }; f &>\"%v\"");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    let got = body(dir, "%v");
+    assert!(
+        got == "o\ne\n" || got == "e\no\n",
+        "one file holds both streams: {got:?}"
+    );
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "f(){ echo o; echo e >&2; }; f &>> '%v'");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    let got = body(dir, "%v");
+    assert!(
+        got == "o\ne\n" || got == "e\no\n",
+        "one file holds both streams: {got:?}"
+    );
+}
+
+/// `cat <"%v"` opens the file: a seeded `%v` prints its body (bash rc 0), a
+/// missing one is rc 1 (bash: `No such file or directory`).
+#[test]
+fn quoted_read_target_opens_the_plain_file() {
+    let dir = scratch("att_pct_read");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    std::fs::write(std::path::Path::new(dir).join("%v"), b"data\n").unwrap();
+    let (out, err, code, files) = run_ls(dir, "cat <\"%v\"");
+    assert_eq!((out.as_str(), code), ("data\n", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "cat <\"%v\"");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("failed to open redirection path"),
+        "bash names the file (`%v: No such file or directory`); stderr={err:?}"
+    );
+    assert!(created(&files).is_empty(), "{files:?}");
+}
+
+/// The unquoted fd-variable rows, pinned **exactly as today**
+/// (POSIX_COMPATIBILITY "Operators are recognized at word starts"): the
+/// lookup runs, `%v` is unbound, rc 1, no file is created.
+#[test]
+fn unquoted_percent_targets_stay_fd_variable_lookups() {
+    let dir = scratch("att_pct_var");
+    let dir = dir.to_str().unwrap();
+    for script in ["echo x >%v", "echo x >|%v", "cat &>%v", "cat <%v"] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("fd variable 'v' is not set"),
+            "{script}: stderr={err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+    // `>>%v` keeps the parse-error arm of `redirect_op` (bash appends to the
+    // file `%v`, rc 0 — the append-to-fd form fdshell has no operator for).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo x >>%v");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("invalid redirect"), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "{files:?}");
+}
+
+/// The dup arm `>&%v` stays **mask-blind** (measured 2026-10-26): bash gives
+/// `ambiguous redirect` rc 1 quoted *and* unquoted, because `>&word`'s
+/// operand is never a file name — quoting offers no file-word escape. Gating
+/// this arm would print the word at rc 0, breaking the rc parity; the fd
+/// lookup's rc 1 is the parity we keep (message differs, file never created).
+#[test]
+fn the_dup_percent_target_stays_mask_blind() {
+    let dir = scratch("att_pct_dup");
+    let dir = dir.to_str().unwrap();
+    for script in ["echo a 2>&%v", "echo a 2>&\"%v\""] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("fd variable 'v' is not set"),
+            "{script}: bash: ambiguous redirect; stderr={err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+}
+
+/// A **bound** fd variable does not capture the quoted target: the target
+/// word's expansion is gated by `substitute::target_trigger`, which excludes
+/// `%`, so `>"%v"` reaches the opener as literal file-name data (the same
+/// gate `> a%log` pins in `percent_bytes_in_a_target_stay_file_name_data`).
+/// bash, with no fd layer at all, creates the file `%v` (rc 0) — parity.
+#[test]
+fn a_bound_fd_variable_does_not_capture_a_quoted_target() {
+    let dir = scratch("att_pct_bound");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) = run_ls(
+        dir,
+        "builtin openat2 --flags O_RDONLY /dev/null %>%v; echo x >\"%v\"",
+    );
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["%v"]));
+    assert_eq!(body(dir, "%v"), "x\n");
+}
+
+/// The two shapes that stay documented divergences, pinned as-is with the
+/// owner named: `> ""%v` (bash creates `%v`, rc 0; fdshell parse error rc 1 —
+/// the empty quoted pair contributes no mask bit, LESSONS "An empty quoted
+/// region contributes no bytes", the same reading as #323's `> ""&f`) and
+/// `> %`/`>%` (bash creates `%`; fdshell looks the empty name up, rc 1).
+#[test]
+fn the_empty_pair_and_the_bare_percent_stay_documented_divergences() {
+    let dir = scratch("att_pct_edges");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo x > \"\"%v");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash: rc 0, creates `%v`; stderr={err:?}"
+    );
+    assert!(err.contains("invalid redirect"), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "{files:?}");
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "echo x >%");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash: rc 0, creates `%`; stderr={err:?}"
+    );
+    assert!(err.contains("fd variable '' is not set"), "stderr={err:?}");
+    assert!(created(&files).is_empty(), "{files:?}");
+}
