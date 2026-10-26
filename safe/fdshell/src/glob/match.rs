@@ -49,8 +49,13 @@ pub(crate) fn match_component(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob
             } else {
                 match pc {
                     b'*' => {
-                        star = Some((pi + 1, ni));
-                        Some((pi + 1, ni))
+                        // The resume point is **one** value: the record and the
+                        // forward step must be the same byte, so a mutant of it
+                        // cannot hide in the sibling copy (it then re-reads the
+                        // star forever, which the suite sees as a hang).
+                        let resume = (pi + 1, ni);
+                        star = Some(resume);
+                        Some(resume)
                     }
                     b'?' => name.get(ni).is_some().then(|| (pi + 1, ni + 1)),
                     b'\\' => match pat.get(pi + 1) {
@@ -74,10 +79,14 @@ pub(crate) fn match_component(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob
                 ni = n;
             }
             // A failed step (or an exhausted pattern) backtracks one name
-            // byte to the last star, which then eats it. Both sides must
-            // have room: a star past its end and a fully consumed name
+            // byte to the last star, which then eats it. The star's own
+            // position needs no test: it is recorded with `sn = ni`, forward
+            // steps only raise `ni`, and an extension sets `ni = sn + 1` = the
+            // new `sn`, so `ni >= sn` and the name test below is the whole
+            // rule (a second `sn` bound is a duplicate whose mutants are
+            // unkillable). A star past its end and a fully consumed name
             // decide the verdict below without re-exploring.
-            (None, Some((sp, sn))) if sn < name.len() && ni < name.len() => {
+            (None, Some((sp, sn))) if ni < name.len() => {
                 star = Some((sp, sn + 1));
                 pi = sp;
                 ni = sn + 1;

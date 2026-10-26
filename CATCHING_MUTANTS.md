@@ -18,10 +18,15 @@ short. Add a rule whenever a probe kills a mutant or disproves an
    and `+`/`-`/`*`, test the equality/boundary case and the adjacent case. If
    equality makes the work a no-op (zero width, zero repeat), also pin a
    nonzero neighbour. When the equality case *is* the no-op, no test can kill
-   it: rewrite the comparison as a predicate (`is_negative()`,
-   `cmp(..) == Ordering::Less`) or an explicit delta tested `!= 0`, so the
-   surviving mutants must force a value, then pin both sides of that
-   predicate.
+    it: rewrite the comparison as a predicate (`is_negative()`,
+    `cmp(..) == Ordering::Less`) or an explicit delta tested `!= 0`, so the
+    surviving mutants must force a value, then pin both sides of that
+    predicate. When a guard **conjunct** is implied by an invariant of the
+    surrounding state, delete the conjunct instead: the surviving comparison
+    carries the whole rule, so its mutants become killable (the glob
+    backtrack guard's `sn < name.len()` was implied by `ni >= sn`; after the
+    deletion its `<`→`<=` twin fails the star-backtracking pins).
+
 4. **Kill the value where it is observable.** Follow the mutated value to its
    consumer (error text, byte count, output byte) instead of testing the
    computation site.
@@ -82,3 +87,12 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     `parse/time_block.rs::inner_text`, the `keyword_delta` sign projection).
     Keep the sentence naming the invariant that makes the comparison a
     no-op-equivalent, plus the pin that notices if the invariant dies.
+17. **Share the duplicated value with the load-bearing site.** A mutant
+    survives because a sibling recomputes the same expression and converges:
+    the star's resume `(pi + 1, ni)` was recorded *and* stepped forward, so
+    mutating the record only re-read the star, and the forward step rebuilt the
+    state. Compute the value once into a local and use it at both sites, so the
+    mutation hits the live consumer too: forward-progress loss becomes a
+    deterministic livelock (killed by nextest's `slow-timeout`; attribute it to
+    the pins that time out — 14 `glob::` rows here), an index shift becomes an
+    exact-index kill (`pi - 1` underflows, and the star pins fail).
