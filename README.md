@@ -801,9 +801,14 @@ kept, so `> {a,b}`, `>>{a,b}`, `<{a,b}`, `> x{a,b}`, `>{1..3}`, `&>{a,b}`,
 The residuals of the pre-parse rewrite stay (see "Operators are recognized at
 word starts" in [POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md)): braces in an
 io-number **prefix** still produce several redirect words, so `{3,4}>f` runs one
-`cat` with fds 3 and 4 on `f` where bash runs `cat 3` and `cat 4`; the attached
-one-non-empty-word form `>{,zz}` is a parse error where bash opens `zz`; and a
-failed redirection aborts the **script**, where bash skips only the command.
+`cat` with fds 3 and 4 on `f` where bash runs `cat 3` and `cat 4`; a **quoted**
+io-number prefix escapes the rule, so `cat "2">{a,b}` opens `a` **and** `b`
+(rc 0) where bash reports `ambiguous redirect` (rc 1); a redirect that
+**precedes** the ambiguous one is left unopened, where bash opens it
+(`echo x >out >{a,b}` creates no `out`); the attached one-non-empty-word form
+`>{,zz}` is a parse error where bash opens `zz`; and a failed redirection aborts
+the **script**, where bash skips only the command (the async form
+`echo x >{a,b} &` is rc 1 in fdshell, where bash's own status is 0).
 
 ### Arithmetic
 

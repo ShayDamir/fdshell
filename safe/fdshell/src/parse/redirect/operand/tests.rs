@@ -65,10 +65,15 @@ fn parsed_operand(tokens: &[Token], op: usize) -> Option<String> {
 /// token-text offset (the tokenizer strips quotes), so a span that carries
 /// quote bytes *before* the operand is sliced a little early. A quoted
 /// here-doc/here-string word is the parser's operandless arm, and a quoted
-/// operand brace needs no shift to be seen as quoted; only the quoted
-/// io-number digits shift, and that row is pinned as the documented divergence:
-/// the bail itself is bash's, while the message names the operand together with
-/// the operator byte and the prefix's closing quote (bash names `{a,b}`).
+/// operand brace needs no shift to be seen as quoted; only the quoted io-number
+/// digits shift, and that shifts **where the rule lands** (measured 2026-10-26,
+/// pinned by `tests/redirect.rs::brace_expanded_redirect_operand_parity_rows`):
+/// the row's region starts at the prefix's **closing** quote, so a path arm's
+/// region (`">{a,b}`) opens a quote, the brace reads as quoted, the region is
+/// **one** word and the guard passes — `cat "2">{a,b}` keeps the last-wins
+/// rewrite (rc 0, both words opened) where bash is rc 1; a dup arm's region
+/// (`>&{a,b}`) carries no quote byte, so `echo x "2">&{a,b}` does bail and the
+/// message names the operand **with** its operator byte, bash naming `{a,b}`.
 #[test]
 fn operand_offset_is_the_operand_region_of_the_token() {
     for (line, i, want) in [

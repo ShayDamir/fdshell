@@ -258,20 +258,30 @@ bash parity (task #324): an operand expanding to a number of **non-empty**
 words other than one is `ambiguous redirect` (rc 1), the command runs nothing
 and opens nothing. fdshell brace-expands before the parse, and the guard runs
 on the operand region of the pre-parse text, so the whole command is refused
-before any target is opened — `>{a,b} 2>z` creates no `z`, as bash. The matrix
-is `>{a,b}`, `> {a,b}`, `>>{a,b}`, `<{a,b}`, `<> {a,b}`, `>|{a,b}`, `2>{a,b}`,
-`exec 3<{a,b}`, `>{a,b}x`, `>x{a,b}`, `>{a,b}c{d,e}`, `>{1..3}`, `>{a,b*}`,
-`&>{a,b}`, `&>>{a,b}`, `>%{a,b}`, `>&%{a,b}`, `<&{3,4}`, `<&{3..5}` and the
-zero-word `>{,}` / `>{,,}`; `>{a}`, `>x{a}y`, `>{a..a}`, `>'{a,b}'` and
-`>{ 1 , 2 }` keep their one word. Three measured residuals, all rc parity: the
-*attached* one-non-empty-word form `>{,zz}` is fdshell's `invalid redirect
-syntax`, where bash counts the non-empty word and opens `zz` (fdshell's textual
-rewrite yields `> >zz`); braces in an io-number **prefix** produce several
-redirect words (`cat {3,4}>f` runs one `cat` with fds 3 and 4 on `f`, bash runs
-`cat 3` and `cat 4`), the word rule above; and the operand offset is a
-quote-stripped token offset, so with quoted io-number digits the message names
-the operand together with its operator byte (`cat "2">{a,b}` reports
-`>{a,b}`, bash `{a,b}`).
+before any target is opened — `>{a,b} 2>z` creates no `z`, as bash, and a
+redirect that **precedes** the ambiguous one is left unopened too:
+`echo x >out >{a,b}` creates no `out`, where bash opens it before failing on
+`{a,b}` (rc 1 in both shells). The matrix is `>{a,b}`, `> {a,b}`, `>>{a,b}`,
+`<{a,b}`, `<> {a,b}`, `>|{a,b}`, `2>{a,b}`, `exec 3<{a,b}`, `>{a,b}x`,
+`>x{a,b}`, `>{a,b}c{d,e}`, `>{1..3}`, `>{a,b*}`, `&>{a,b}`, `&>>{a,b}`,
+`>%{a,b}`, `>&%{a,b}`, `<&{3,4}`, `<&{3..5}` and the zero-word `>{,}` /
+`>{,,}`; `>{a}`, `>x{a}y`, `>{a..a}`, `>'{a,b}'` and `>{ 1 , 2 }` keep their
+one word. Four measured residuals, each pinned: the *attached*
+one-non-empty-word form `>{,zz}` is fdshell's `invalid redirect syntax`, where
+bash counts the non-empty word and opens `zz` (fdshell's textual rewrite yields
+`> >zz`), and braces in an io-number **prefix** produce several redirect words
+(`cat {3,4}>f` runs one `cat` with fds 3 and 4 on `f`, rc 0, bash runs `cat 3`
+and `cat 4`, rc 1), the word rule above. A **quoted** io-number prefix escapes
+the rule on a path arm — an rc divergence: the operand offset is a
+quote-stripped token offset, so the region starts at the prefix's **closing**
+quote, the dangling `"` opens a quote, the brace counts as quoted and the
+region yields one word, so `cat "2">{a,b}` and `cat '2'>{a,b}` keep the
+last-wins rewrite (rc 0, **both** `a` and `b` created) where bash is rc 1 and
+opens nothing; on a dup arm the closing quote falls *before* the region, so
+`echo x "2">&{a,b}` does bail, rc 1 as bash, and the message names the operand
+together with its operator byte (`>&{a,b}`, bash `{a,b}`). The async form
+`echo x >{a,b} &` is refused in the parent (rc 1) where bash prints the
+diagnostic in the child and its own status is 0 — the task #179 family.
 
 ## Here-document and here-string descriptor numbers
 
