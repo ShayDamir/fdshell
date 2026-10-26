@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use super::token::State;
 use crate::error::parse::ParseError;
 use error_stack::Report;
@@ -23,14 +21,7 @@ impl State {
             Ok(false)
         } else {
             self.emit(self.pos - 1);
-            self.tokens.push((
-                c"|".into(),
-                self.pos - 1,
-                self.pos,
-                false,
-                Vec::new(),
-                Vec::new(),
-            ));
+            self.push_separator(c"|");
             Ok(true)
         }
     }

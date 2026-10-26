@@ -1,3 +1,5 @@
+mod sep;
+
 use alloc::vec::Vec;
 
 use super::super::comment::skip_comment;
@@ -15,23 +17,7 @@ impl State {
         bytes: &mut core::iter::Peekable<impl Iterator<Item = u8>>,
     ) -> Result<(), Report<ParseError>> {
         match b {
-            b' ' | b'\t' | b';' | b'\n' | b')' => {
-                let needs_sep = b == b';' || b == b'\n' || b == b')';
-                let sep = if b == b')' { c")" } else { c";" };
-                self.emit(self.pos - 1);
-                self.word_reset();
-                self.start = self.pos;
-                if needs_sep {
-                    self.tokens.push((
-                        sep.into(),
-                        self.pos - 1,
-                        self.pos,
-                        false,
-                        Vec::new(),
-                        Vec::new(),
-                    ));
-                }
-            }
+            b' ' | b'\t' | b';' | b'\n' | b')' => self.separator(b),
             b'|' => {
                 if self.pipe_token()? {
                     self.word_reset();

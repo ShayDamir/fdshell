@@ -14,6 +14,7 @@ use super::Token;
 use crate::error::parse::{ParseError, report_unbalanced_quote};
 use crate::mask::MaskBit;
 use alloc::vec::Vec;
+use core::ffi::CStr;
 use error_stack::Report;
 use sys::ShortCStr;
 
@@ -70,6 +71,20 @@ impl State {
             start: 0,
             pos: 0,
         }
+    }
+
+    /// Push a one-byte separator token: `;` (a `;` byte or a newline), `)` and
+    /// `|` all have the same shape — the token text, the byte range it occupies,
+    /// no quote region and no zero-byte span.
+    pub(in crate::parse) fn push_separator(&mut self, sep: &'static CStr) {
+        self.tokens.push((
+            sep.into(),
+            self.pos - 1,
+            self.pos,
+            false,
+            Vec::new(),
+            Vec::new(),
+        ));
     }
 
     /// End of line: an open quote is an error; otherwise flush the tail.
