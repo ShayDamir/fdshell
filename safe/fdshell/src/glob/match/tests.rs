@@ -87,6 +87,42 @@ fn bracket_negation() {
     assert!(!m(b"[!a]", b"a"));
     assert!(m(b"[!a-z]1", b"21"));
     assert!(!m(b"[!a-z]1", b"a1"));
+    // bash accepts `^` in the same slot as `!` (POSIX defines only `!`).
+    assert!(m(b"[^a]", b"b"));
+    assert!(!m(b"[^a]", b"a"));
+    assert!(m(b"[^a-z]1", b"21"));
+    assert!(!m(b"[^a-z]1", b"a1"));
+}
+
+/// bash's `^` marker counts only in the marker's slot: the quote mask gates
+/// it, so a quoted `^`, an escaped `\^` and a mid-bracket `^` are plain
+/// members, and `[^]` is simply an unclosed bracket.
+#[test]
+fn bracket_caret_negation_is_mask_aware() {
+    // A quoted `^` (bit 1 set, the `[` stays unquoted) is a literal member:
+    // no negation, so `b` stays outside the class.
+    let mask = [Unquoted, Quoted, Unquoted, Unquoted];
+    assert!(m_masked(b"[^a]", &mask, b"^"));
+    assert!(m_masked(b"[^a]", &mask, b"a"));
+    assert!(!m_masked(b"[^a]", &mask, b"b"));
+    // A token-text escape pair: `\^` is an escaped member, not a marker.
+    assert!(m(b"[\\^a]", b"^"));
+    assert!(m(b"[\\^a]", b"a"));
+    assert!(!m(b"[\\^a]", b"b"));
+    // `^` is a marker only right after `[`; mid-bracket it is a member.
+    assert!(m(b"[a^]", b"^"));
+    assert!(!m(b"[a^]", b"b"));
+    // Negation plus a `^` member.
+    assert!(m(b"[^^]", b"b"));
+    assert!(!m(b"[^^]", b"^"));
+    // `[^]` is unclosed (the `]` is the first member): the `[` is literal.
+    assert!(m(b"[^]", b"[^]"));
+    assert!(!m(b"[^]", b"b"));
+    // A leading negated bracket keeps the pathname dot rule; under dotglob
+    // (word patterns) it takes the dot only when it can match it.
+    assert!(!m(b"[^x]b", b".b"));
+    assert!(m_dot(b"[^x]b", b".b"));
+    assert!(!m_dot(b"[^.x]b", b".b"));
 }
 
 #[test]
@@ -108,6 +144,9 @@ fn bracket_leading_close_is_literal() {
     assert!(!m(b"[]a]", b"b"));
     assert!(m(b"[!]x]", b"!"));
     assert!(!m(b"[!]x]", b"x"));
+    // Same rule behind a `^` marker: the first `]` is a member.
+    assert!(m(b"[^]x]", b"!"));
+    assert!(!m(b"[^]x]", b"x"));
 }
 
 #[test]
@@ -121,6 +160,7 @@ fn bracket_invalid_range_matches_nothing_in_its_span() {
     assert!(!m(b"[z-ax]", b"m"));
     // Negation of an empty class matches everything.
     assert!(m(b"[!z-a]", b"m"));
+    assert!(m(b"[^z-a]", b"m"));
 }
 
 #[test]
@@ -383,6 +423,15 @@ fn has_unquoted_pattern_table() {
     assert!(!super::has_unquoted_pattern(
         b"a*b",
         &[Unquoted, Quoted, Unquoted]
+    ));
+    // A leading `^` is a marker, so `[^a]` is a valid bracket; `[^]` is not
+    // (`]` is its first member, so the expression is unclosed and the `[`
+    // is a literal byte). A quoted marker leaves a valid bracket too.
+    assert!(super::has_unquoted_pattern(b"[^a]", &[]));
+    assert!(!super::has_unquoted_pattern(b"[^]", &[]));
+    assert!(super::has_unquoted_pattern(
+        b"[^a]",
+        &[Unquoted, Quoted, Unquoted, Unquoted]
     ));
 }
 

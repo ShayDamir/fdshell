@@ -1,5 +1,5 @@
-//! Bracket-expression span: where a `[...]` ends, and the per-byte quote test
-//! the span and membership scans share.
+//! Bracket-expression span: where a `[...]` ends, and the prologue and the
+//! per-byte quote test the span and membership scans share.
 
 use crate::mask::{MaskBit, quoted_at};
 
@@ -9,13 +9,23 @@ pub(in crate::glob) fn quoted(mask: &[MaskBit], i: usize) -> bool {
     quoted_at(mask, i)
 }
 
+/// The bracket prologue the span and membership scans share: the index of the
+/// expression's first member byte, and whether the expression is negated. bash
+/// accepts an unquoted `!` **or** `^` right after `[`; POSIX XCU 2.13.2 defines
+/// only `!`, so the `^` arm is bash parity, not a divergence (LESSONS.md). A
+/// quoted marker is a literal member, so the quote mask gates the test.
+pub(in crate::glob) fn negation(bytes: &[u8], mask: &[MaskBit], at_open: usize) -> (usize, bool) {
+    let i = at_open + 1;
+    if matches!(bytes.get(i), Some(&b'!' | b'^')) && !quoted(mask, i) {
+        return (i + 1, true);
+    }
+    (i, false)
+}
+
 /// End (one past the closing `]`) of the bracket expression opened by the
 /// unquoted `[` at `at_open`, or `None` when the expression is unclosed.
 pub(in crate::glob) fn span(bytes: &[u8], mask: &[MaskBit], at_open: usize) -> Option<usize> {
-    let mut i = at_open + 1;
-    if bytes.get(i) == Some(&b'!') && !quoted(mask, i) {
-        i += 1;
-    }
+    let (mut i, _) = negation(bytes, mask, at_open);
     if bytes.get(i) == Some(&b']') {
         i += 1;
     }
