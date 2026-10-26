@@ -471,7 +471,12 @@ fn io_number_prefixed_operators_carry_their_fd() {
 /// operator with the quote-removed word as its delimiter (the token level
 /// counts the same 1 and accepts it —
 /// `parse/heredoc/tests.rs::operator_count_byte_and_token_levels_agree` and
-/// `layout_bare_quoted_operator_delimiter_is_a_delimiter`). An unquoted
+/// `layout_bare_quoted_operator_delimiter_is_a_delimiter`). The quoted **empty**
+/// pair (`cat << ""`) is the same rule read at each level (task #330): the byte
+/// gate asks "is the raw word empty?", and `""` is not; the token gate asks
+/// "is the empty text a quoted span?", and `""` is
+/// (`parse::word_quoted::word_quoted`) — one operator with an empty delimiter
+/// at both levels. An unquoted
 /// operator-shaped delimiter is the `None` arm: a bare `<<` with a rejected
 /// delimiter word yields no operator scan at all, matching the token level's
 /// syntax error
@@ -484,6 +489,14 @@ fn bare_quoted_operator_delimiter_counts_one_at_both_levels() {
         (b"cat << \"&x\"", 1, Some(b"&x")),
         (b"cat << \"%x\"", 1, Some(b"%x")),
         (b"cat <<- \"<x\"", 1, Some(b"<x")),
+        // The quoted **empty** pair (task #330): the raw span `""` is not
+        // empty and does not start with an operator byte, so the byte level
+        // always counted it — the level the token layer used to disagree with.
+        // Its delimiter is the empty word, and the token layer now accepts it
+        // (`parse/heredoc/tests.rs::layout_bare_quoted_empty_delimiter_is_a_delimiter`).
+        (b"cat << \"\"", 1, Some(b"".as_slice())),
+        (b"cat <<- \"\"", 1, Some(b"")),
+        (b"cat << ''", 1, Some(b"")),
     ] {
         let ops = operator_delims(line, 0, line.len()).unwrap();
         assert_eq!(ops.len(), want, "line={:?}", line);

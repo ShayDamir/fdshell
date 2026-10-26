@@ -325,6 +325,49 @@ fn layout_bare_quoted_operator_delimiter_is_a_delimiter() {
     }
 }
 
+/// Task #330: the same guard on a **quoted empty** operand does not fire
+/// either — POSIX #2.3 removes quotes after tokenization, so `""` / `''` *is*
+/// a word: the **empty** delimiter, terminated by the blank line (a tabs-only
+/// line in the `<<-` form, which untabs to empty). The token text is empty and
+/// the mask has no bit for a zero-byte quoted region, so the raw-span test
+/// (`parse::word_quoted`) is what separates the quoted pair from the missing
+/// operand the empty arm rejects. Each bare form yields one operator with an
+/// empty, quoted delimiter, the `<<-` marker carried, the io-number honoured,
+/// and a literal body ending at the empty line.
+#[test]
+fn layout_bare_quoted_empty_delimiter_is_a_delimiter() {
+    for (line, strip, fd) in [
+        (b"cat << \"\"".as_slice(), false, 0i32),
+        (b"cat << ''", false, 0),
+        (b"cat <<- \"\"", true, 0),
+        (b"cat 3<< \"\"", false, 3),
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        let (op, extra) = operator_at(line, &tokens, 1).unwrap();
+        assert_eq!(op.delim.as_slice(), b"", "line={:?}", line);
+        assert!(op.quoted, "a quoted empty pair quotes the body");
+        assert_eq!(op.strip, strip, "line={:?}", line);
+        assert_eq!(op.fd, fd, "line={:?}", line);
+        assert_eq!(extra, 1, "the bare form consumes the delimiter word");
+    }
+    for (line, body) in [
+        (b"cat << \"\"\nbody\n\n".as_slice(), b"body\n".as_slice()),
+        (b"cat << ''\nbody\n\n", b"body\n"),
+        (b"cat <<- \"\"\n\tbody\n\t\n", b"body\n"),
+        (b"cat << \"\"\n\n", b""),
+    ] {
+        let s = specs(line);
+        assert_eq!(s.len(), 1, "line={:?}", line);
+        assert_eq!(
+            s[0].body,
+            ShortCStr::from_vec(body.to_vec()).unwrap(),
+            "line={:?}",
+            line
+        );
+        assert!(!s[0].expand, "a quoted delimiter never expands");
+    }
+}
+
 #[test]
 fn operator_count_skips_command_word() {
     // index 0 is the command word even when it looks like an operator.
@@ -531,7 +574,11 @@ fn operator_count_leading_operator_forms_agree() {
 /// The byte-level and token-level counts agree on the quote-removed delimiter
 /// words, including the words that contain a `<<` (row 9 of the task's table:
 /// the byte scan must consume a `"…"` span whole like the `'…'` span, or it
-/// counts a phantom second operator) (task #207, LESSONS).
+/// counts a phantom second operator) (task #207, LESSONS). The **bare quoted
+/// empty pair** (task #330) is the count twin of the empty-arm fix: the byte
+/// scan always counted it (its raw span is non-empty), and the token layer
+/// used to bail on it — the counts now agree, so the region allocation the
+/// byte level claims is the one the parser fills.
 #[test]
 fn operator_count_quoted_delimiter_forms_agree() {
     for (line, want) in [
@@ -542,6 +589,11 @@ fn operator_count_quoted_delimiter_forms_agree() {
         (b"cat <<- a'b'c", 1),
         (b"cat <<a\"b\"c", 1),
         (b"cat <<\"\"Q\"x\"", 1),
+        (b"cat << \"\"", 1),
+        (b"cat <<- \"\"", 1),
+        (b"cat << ''", 1),
+        (b"cat 3<< \"\"", 1),
+        (b"cat << \"\" && cat << \"\"", 2),
         (b"cat <<\"a b\"", 1),
         (b"cat <<a\"b c\"d", 1),
         (b"cat <<a\\\"b", 1),

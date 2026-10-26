@@ -723,70 +723,71 @@ Bash's errexit rule keys on *which command failed* (only the command following t
 `bash -c 'set -u; echo $x'` exits **127** on bash 5.3 (the `-c` path reports the never-executed command as not-found), while the same two lines in a script file exit **1**. fdshell's `-c` mode reports the child's substitution failure and exits **1** (the script-mode status) — the plan pinned 1 after probing; do not "fix" the integration tests toward 127 to match the `-c` quirk.
 
 ## A bare redirect operator token takes the next token as its operand; "bare" is a suffix test, not an emptiness test
-`cmd > file`, `cmd < file`, `cmd N> file`, `cmd N< file`, `cmd N>> file`,
-`cmd N<> file` parse as redirections: a token whose suffix from the first
-`>`/`<` byte is exactly `>`, `>>`, `<`, or `<>` (with an optional all-digit fd
-prefix) consumes the next token as its path operand
-(`parse/redirect/bare.rs`), mirroring the bare `<<` delimiter
-(`scan::heredoc::op::operator_at`, `extra = 1`) and the bare `<<<` here-string
-(`parse::here_string.rs`, `extra = 1`). The operand guard (no
-empty/`;`/`|`/`<`/`>`/`&`/`%`-leading word) is the same rule as the bare `<<`
-delimiter (`invalid_delimiter`) and the bare `<<<` guard — keep the three in
-lockstep. The `after_op.is_empty()` test does **not** identify the bare form:
-`>>` and `<>` have a one-byte (`>`) `after_op`, which the attached path's
-`redirect_op` rejects as `InvalidRedirect` — that is exactly why `cmd >> file`
-used to be a parse error while `cmd >file` worked. Test bare-ness on the
-operator *suffix*; the emptiness branch in the attached path is dead logic
-once the bare branch exists (deleted — a mutant source). A non-numeric prefix
-(`a> file`) is two arguments, never a redirect.
+A token whose suffix from the first `>`/`<` byte is exactly `>`, `>>`, `<`,
+`<>` (an optional all-digit fd prefix precedes it) consumes the **next** token
+as its path operand (`parse/redirect/bare.rs`), mirroring the bare `<<`
+delimiter (`parse/heredoc/operator.rs::operator_at`, `extra = 1`) and the bare
+`<<<` (`parse/here_string.rs`). Test bare-ness on the operator *suffix*: `>>`
+and `<>` have a one-byte (`>`) `after_op`, which the attached path's
+`redirect_op` rejects as `InvalidRedirect` — that is why `cmd >> file` was a
+parse error while `cmd >file` worked, and the attached path's emptiness branch
+is dead logic once the bare branch exists (deleted — a mutant source). A
+non-numeric prefix (`a> file`) is two arguments, never a redirect. A
+bare-operand site must **consume** its operand (`skip = extra` in
+`finish_command`): left in place it re-enters the token loop as an argument —
+`cmd &> file` opening `""` and passing `file` to the command. (The `&>` family
+is bare *by* an emptiness test, and is one operator with one open: see "The
+`&>` family is one operator".)
 
-The `&>` / `&>>` family follows the same rule (task #145). Their bare form
-*is* an emptiness test (`parse/bg_redirect.rs` strips the `&>` prefix first,
-so `&>` → empty suffix → bare, `&>>` → empty suffix after the `>` → bare
-append), and `parse/bg_redirect/bare.rs` emits the fd 1 + fd 2 pair with the
-operand's own quote mask. Two requirements: a bare-operand site must
-**consume** its operand (`skip = extra` in `finish_command`), and an operand
-left in place re-enters the token loop as an argument — that is exactly
-`cmd &> file` opening `""` and passing `file` to the command. The operand
-guard is literally one function, `scan::heredoc::op::invalid_delimiter`,
-imported by `parse/heredoc/operator.rs`, `parse/redirect/bare.rs` and
-`parse/bg_redirect/bare.rs`: "keep the guards in lockstep" is structural, not
-a copy — a byte-identical private duplicate is what drifts (and is a mutant
-source). One divergence inside the family is deliberate: the bare `>` maps a
-`/dev/fd/N` operand to a `RedirectDef::dup`, while `&>` keeps it a plain path
-source, because the attached `&>/dev/fd/N` form has always opened the magic
-path (the kernel's dup is the same effect) and in-family agreement beats
-cross-family agreement.
+The operand guard is literally **one function**,
+`scan/heredoc::op::invalid_delimiter`, imported by `parse/heredoc/operator.rs`,
+`parse/redirect/bare.rs` and `parse/bg_redirect/bare.rs`: lockstep is
+structural, not a copy — a byte-identical private duplicate is what drifts, and
+it did: `parse/here_string.rs`'s `is_bare_operand` read the post-quote-removal
+**word text**, so `cat > "&f"` — a plain word in bash — was a syntax error in
+all four bare families (task #323). One divergence inside the family is
+deliberate: the bare `>` maps a `/dev/fd/N` operand to a `RedirectDef::dup`,
+`&>` keeps it a plain path source, because the attached `&>/dev/fd/N` form has
+always opened the magic path (the kernel's dup is the same effect).
 
-The drift is real: `parse/here_string.rs` carried exactly such a private
-duplicate (`is_bare_operand`) whose operator-byte arm read the
-post-quote-removal **word text**, so `cat > "&f"` — a plain word in bash — was
-a syntax error in all four bare families (task #323). The arm is mask-gated:
+**The operator-byte arm reads the mask; the empty arm reads the raw span.**
 `op::operator_word(word, mask)` fires only when the leading `<`/`>`/`&`/`%`
-byte is unquoted (`mask.first().copied().unwrap_or(false)`, the house idiom —
-a missing bit pads to unquoted, degrading to the text rule); `here_string`
-calls the shared predicate and its duplicate is deleted, making the four-site
-lockstep one function again. The byte-level twin is the gate in
-`lines::delimiter_span` on the **raw span's** first byte: `"…"` starts a
-quoted word, so the two levels agree on `cat << "<x"` (1 + accepted) and on
-the unquoted `cat << <x` (the byte scan's `None` arm, the parse's syntax
-error) — the "byte-level and token-level counts must agree" framing, pinned by
-`scan/heredoc/ops/tests.rs::bare_quoted_operator_delimiter_counts_one_at_both_levels`
-and the rows in `parse/heredoc/tests.rs`. Two rules are NOT substitutes for
-the mask gate: `parse::word_quoted` (span longer than text) accepts `&"f"`,
-where bash is a syntax error (measured rc 2); and the token's zero-byte
-`spans` list is deliberately not consulted — a `""` pair at index 0 does not
-quote the byte after it (`> ""&f` stays the guard's rejection, bash rc 127 via
-a different route). A `\X`-escaped operand needs no arm: the word text starts
-with `\`, so no operator arm fires. The `%`-arm divergence (`cat > %v` /
-`<<< %v` fdshell rc 1 where bash creates/prints the literal `%v`) is measured,
-pinned as-is, and owned by the `%`-namespace design, not by quoting: dropping
-the arm would make the spaced form silently create a file named `%v` — a user
-decision (the attached-form twins are #329, the `<< ""` empty arm is #330).
-#329 landed its twin as a mask rule on the **operand's own byte** (one
-predicate, `parse/redirect.rs::fd_var_operand` — see
-"An attached `%var` target is a mask-gated rule"), keeping the spaced arm
-exactly as pinned.
+byte is unquoted (a missing bit pads to unquoted, the house idiom,
+`substitute/tilde.rs::prefix_quoted`): POSIX #4.1 removes quotes after
+tokenization, so `"&f"` is a plain word. Its byte-level twin is
+`lines::delimiter_span`'s gate on the **raw span's** first byte, so the levels
+agree on `cat << "<x"` (1, accepted) and on the unquoted `cat << <x` (the
+scan's `None` arm, the parse's syntax error) — the "byte-level and token-level
+counts must agree" framing. The empty arm took one more gate (task #330): an
+empty text is undecidable in the mask, a zero-byte quoted region having no bit
+(see LESSONS: "An empty quoted region contributes no bytes, so the per-byte mask cannot say"), so `parse/word_quoted.rs`'s
+span test is the only signal separating the quoted empty pair `""` / `''` — the
+word a here-document delimits **on** (`<< ""`, `<< ''`, `<<- ""`, `3<< ""` +
+body + a blank line print the body, rc 0) — from the missing operand
+(`cat <<`, `cat << ;`). The split is **family-specific**: the path families
+pass the flag as `false`, because bash parses `> ""` and fails at the **open**
+(rc 1, `bash: : No such file`) — the rc already agrees, only the message
+differs, and the parse keeps the pin's "no file created" assertion. The byte
+level needs no twin: `delimiter_span` rejects an empty **raw** word, and `""`
+is not empty. Two rules are NOT substitutes for the mask gate: `word_quoted`
+accepts `&"f"` (bash is a syntax error, measured rc 2), and the token's
+zero-byte `spans` list is deliberately not consulted — a `""` pair at index 0
+does not quote the byte after it (`> ""&f` stays the rejection). The `%`-arm
+divergence (`cat > %v`: fdshell rc 1 where bash creates the literal `%v`) is
+owned by the `%`-namespace design, not by quoting (its attached twins, #329,
+are the mask rule `parse/redirect.rs::fd_var_operand` — see "An attached `%var` target is a mask-gated rule").
+
+Pins: `scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`
+(one row per arm byte, and both directions of the span flag — for an empty text
+the flag is the *only* discriminator, so those rows are the kill rows),
+`layout_bare_quoted_operator_delimiter_is_a_delimiter` and
+`layout_bare_quoted_empty_delimiter_is_a_delimiter` (`parse/heredoc/tests.rs`),
+`bare_quoted_operator_delimiter_counts_one_at_both_levels`
+(`scan/heredoc/ops/tests.rs`),
+`safe/fdshell/tests/heredoc.rs::a_bare_quoted_empty_delimiter_delimits_on_the_empty_line`,
+and the stays-errors family
+`safe/fdshell/tests/redirect.rs::unquoted_operator_operands_stay_syntax_errors`
+(the `> ""` family split, whose comment records the decision).
 
 ## A keyword that doubles as a builtin needs the *same* disambiguation at every byte-scanning layer, and the rule must key on what the scanner can actually see
 `wait` is both the event-case block keyword and (POSIX #6.7) the `wait [pid…]` builtin. The disambiguation must agree at all three layers that see `wait` bytes, or the REPL (which reuses the byte scanners for completeness) diverges from the parser: `segment.rs` (block vs statement segment), `comment/depth_delta.rs` (block depth while hunting for `done` — it only sees its own run, so `line`+`base` are threaded in to look across run ends), and the token parser (`parse/wait_block::is_block`, which gets the `text` to detect the newline and honors the quoted flag). The rule: a `wait` opens a block iff the next word — skipping whitespace (incl. newlines) and whole-line comments — is **on a subsequent line**, or is a **same-line** pattern keyword (`readable`/`writable`/`finished`/`after`); a same-line pid/`$!`/name, a `;` (statement separator), a quoted word, or EOF is the builtin. Two tempting rules fail: a *pattern-keyword-only* rule misclassifies `wait\ndone` / `wait\n sleeping` (existing block tests) as the builtin and `wait $!` as a block (the byte scanner sees the literal `$!`, not the expanded pid — a pid test fails for the same reason); a *not-a-pid* rule misclassifies `wait; echo hi` as a block (the `;` is a statement separator, not a block arm). The newline is the reliable signal that the arms are coming.

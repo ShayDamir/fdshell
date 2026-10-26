@@ -1067,8 +1067,12 @@ fn unquoted_operator_operands_stay_syntax_errors() {
     // `<<< %v` is fdshell's deliberate `%`-namespace guard arm (POSIX_COMPATIBILITY:
     // the spaced `%var` operand is rejected so it never silently creates a file
     // named `%v`; where bash creates it, rc 0). The quoted empty operand
-    // `> ""` stays the guard's `is_empty` arm — owning task #330, bash's
-    // `bash: : No such file` is also rc 1.
+    // `> ""` stays the guard's empty arm by the **family split** of task #330:
+    // the path families pass the guard's raw-span flag as `false`, so the
+    // quoted pair that delimits a here-document (`<< ""`, task #330) is not a
+    // path operand here. bash parses `> ""` and fails at the open
+    // (`bash: : No such file`, rc 1); fdshell's rc 1 is the parse — the rc
+    // agrees, only the message differs.
     for script in [
         "cat > &f",
         "cat > &\"f\"",

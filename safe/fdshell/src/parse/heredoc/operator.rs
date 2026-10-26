@@ -4,6 +4,7 @@
 use super::super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::pipe_token_span;
+use crate::parse::word_quoted::word_quoted;
 use crate::scan::heredoc::{
     Operator, attached, invalid_delimiter, io_fd, operator_delim, span_operator,
 };
@@ -103,13 +104,17 @@ pub(super) fn operator_at(
         return Ok((Operator::new(delim, strip, fd), 0));
     }
     // Bare `<<` (or `<<-` with a separate word): the next token is the
-    // delimiter word; the marker is inherited, so `<<- -` strips tabs.
+    // delimiter word; the marker is inherited, so `<<- -` strips tabs. The
+    // guard's empty arm is gated on the **raw span**: a quoted empty pair
+    // (`<< ""`, `<< ''`) is the word that delimits on the empty line, an
+    // empty span is the missing operand.
     let Some(next) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    if invalid_delimiter(&next.0, &next.4) {
+    let (word, start, end, _fq, mask, _spans) = next;
+    if invalid_delimiter(word, mask, word_quoted(word, *start, *end)) {
         bail!(ParseError::InvalidRedirect);
     }
-    let raw = line.get(next.1..next.2).ok_or(ParseError::Never)?;
+    let raw = line.get(*start..*end).ok_or(ParseError::Never)?;
     Ok((Operator::new(raw, strip, fd), 1))
 }

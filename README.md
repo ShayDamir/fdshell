@@ -310,6 +310,11 @@ byte is quoted — `echo hi > "&f"` opens `&f`, as bash does — and a syntax
 error when it is not (`> &f`); the spaced `%var` operand stays a syntax
 error, the fd-variable targets being the attached `>%var` / `&>%var` forms
 ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
+The **empty** operand stays a syntax error as well (`> ""`, `> ''`, `&> ""`):
+bash parses it and fails at the open (`bash: : No such file`, rc 1), and
+fdshell's rc 1 is the parse — the rc agrees, the message differs. A quoted
+empty pair is a delimiter only for the here-document family
+([Here-documents](#here-documents)).
 The attached fd-variable target obeys the same quoting rule on its **own `%`
 byte**: the `%` names a descriptor only while unquoted, so `> "%log"`,
 `> '%log'`, `>| "%log"`, `>> "%log"` and `&> "%log"` create/append the
@@ -418,7 +423,12 @@ tabs from the body and the delimiter. A here-document is usually attached to
 `cat`, `read` or another command that reads stdin. A bare delimiter word
 that begins with `<`, `>`, `&` or `%` is a delimiter when that byte is
 quoted (`cat << "<x"` + body + `<x` prints the body, as bash); unquoted it
-is a syntax error.
+is a syntax error. An **empty quoted** delimiter is a delimiter too — the
+quote-removed word is the **empty** one, so the body ends at the **empty
+line**: attached `<<""` / `<<''` and the bare `<< ""`, `<< ''`, `<<- ""`,
+`3<< ""` all take the following lines as a literal body, and `cat << ""` +
+`body` + a blank line prints `body` (rc 0, as bash). In the `<<-` form a
+tabs-only line is such an empty line, so it terminates the body.
 
 A body line is **data**, at every here-document site: quoting, word
 splitting, globbing, brace expansion, block keywords and every other pre-parse

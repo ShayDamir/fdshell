@@ -66,8 +66,10 @@ pub(super) fn parse_bare(
     // The operand must be a plain word: the shared bare-operand guard
     // (`scan::heredoc::op::invalid_delimiter`, mask-gated on the operand's
     // own quote mask), also used by the bare `<<` delimiter and the bare
-    // `&>` / `&>>` form.
-    if invalid_delimiter(word, omask) {
+    // `&>` / `&>>` form. The raw-span flag is `false`: the path family keeps
+    // the text-only empty arm (bash parses `> ""` and fails at the open,
+    // fdshell's rc 1 is the parse).
+    if invalid_delimiter(word, omask, false) {
         bail!(ParseError::InvalidRedirect);
     }
     if let Some(n) = super::super::fd_path::fd_path_target(word) {

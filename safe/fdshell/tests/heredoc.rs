@@ -456,6 +456,60 @@ fn heredoc_empty_quoted_delimiter_eof_is_error() {
     assert!(err.contains("terminating"), "stderr={err:?}");
 }
 
+/// The **bare** quoted empty pair is the same delimiter as the attached
+/// `<<""` above: POSIX #2.3 removes quotes after tokenization, so `""` / `''`
+/// *is* a word and its quote-removed text is the **empty** delimiter a body
+/// terminates on (task #330; the byte scan already counted these lines, the
+/// token parser rejected them). Every row measured against bash 5.3.9
+/// (`bash -c`), stdout and stderr captured separately. The EOF row is the
+/// divergence `heredoc_empty_quoted_delimiter_eof_is_error` pins for the
+/// attached form (bash warns at rc 0, fdshell reports the missing delimiter
+/// line at rc 1); the last three rows are the empty-operand **errors** that
+/// must stay — `cat <<` has no operand at all (bash rc 2, fdshell rc 1), and
+/// the `>` family's `> ""` is pinned by
+/// `safe/fdshell/tests/redirect.rs::unquoted_operator_operands_stay_syntax_errors`.
+#[test]
+fn a_bare_quoted_empty_delimiter_delimits_on_the_empty_line() {
+    for (script, want) in [
+        ("cat << \"\"\nbody\n\n", "body\n"),
+        ("cat << ''\nbody\n\n", "body\n"),
+        ("wc -c << \"\"\nbody\n\n", "5\n"),
+        // `<<-` untabs body and terminator, so a tabs-only line is the empty
+        // delimiter line; spaces are never stripped.
+        ("cat <<- \"\"\n\tbody\n\t\n", "body\n"),
+        ("cat <<- \"\"\n body\n\n", " body\n"),
+        ("cat << \"\"\n\necho AFTER", "AFTER\n"),
+        ("cat << \"\"\nbody\n\necho AFTER", "body\nAFTER\n"),
+        ("cat << \"\" && cat << \"\"\nb1\n\nb2\n\n", "b1\nb2\n"),
+        ("if true; then cat << \"\"; fi\nbody\n\n", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, want),
+            "script={script:?} err={err:?}"
+        );
+    }
+    // The io-number form writes the body to fd 3 and leaves stdin alone (bash
+    // rc 0); fd 3 starts closed, since the harness may hold it (LESSONS).
+    let (out, err, code) = run_fd3_closed("cat 3<< \"\"\nbody\n\n");
+    assert_eq!((code, out.as_str()), (0, ""), "stderr={err:?}");
+    let (out, err, code) = run_fd3_closed("exec 3<< \"\"\nbody\n\ncat <&3");
+    assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+    // No blank line after the body: no delimiter line, so the explicit
+    // `missing terminating delimiter line ''` (bash warns and exits 0).
+    let (_out, err, code) = run("wc -c << \"\"\nbody");
+    assert_ne!(code, 0);
+    assert!(err.contains("terminating"), "stderr={err:?}");
+    // A missing operand, and a separator standing in for one, stay the parse
+    // error: the empty arm only yields to a *quoted* span.
+    for script in ["cat <<", "cat <<-", "cat << ;"] {
+        let (out, err, code) = run(script);
+        assert_eq!((code, out.as_str()), (1, ""), "script={script:?}");
+        assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
+    }
+}
+
 #[test]
 fn heredoc_attached_after_substitution_fails_explicitly() {
     // A `$( )`-closing `)` does not break the word, so `$(true)<<EOF` is one

@@ -23,7 +23,9 @@ pub(super) fn parse(
         bail!(ParseError::InvalidRedirect);
     };
     let (word, _s, _e, _fq, omask, _spans) = operand;
-    if invalid_delimiter(word, omask) {
+    // `false`: the `&>` path family keeps the guard's text-only empty arm,
+    // as the bare `>` family does (bash's `&> ""` fails at the open, rc 1).
+    if invalid_delimiter(word, omask, false) {
         bail!(ParseError::InvalidRedirect);
     }
     // A `/dev/fd/N` operand stays a path source: the attached `&>/dev/fd/N`
