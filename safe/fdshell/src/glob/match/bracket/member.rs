@@ -2,9 +2,14 @@
 //! the `Members` scanner, one member per loop turn.
 //!
 //! The loop keeps the invariant `c == bytes[i - 1]`: `c` is the current
-//! member's first byte and `i` the byte right after it (LESSONS.md `#405` —
-//! the accepted-equivalent mutants of this scan are keyed to that state, so
-//! the arms' order and cursor advances must stay exactly as they are).
+//! member's first byte and `i` the byte right after it (LESSONS: "A dense
+//! scanner split into a `&mut self` newtype must keep every arm's order and
+//! cursor advance"), so the arms' order and cursor advances must stay exactly
+//! as they are. The class arm's `close + 1` is load-bearing at the membership
+//! surface: resuming at `close` re-reads the byte after the class as a range
+//! start, and
+//! `glob/match/tests.rs::class_then_range_keeps_the_cursor_one_past_the_class`
+//! is the row that fails.
 
 mod arm;
 

@@ -367,6 +367,21 @@ fn class_as_last_member_stops_at_the_closing_bracket() {
 }
 
 #[test]
+fn class_then_range_keeps_the_cursor_one_past_the_class() {
+    // The class arm resumes the member scan with `c = bytes[close]` and
+    // `i = close + 1`, keeping the loop's `c == bytes[i - 1]` invariant.
+    // Resuming at `close` re-reads the byte after the class as a member whose
+    // dash follows it, so a class followed by a range turns that byte into a
+    // range **start**: `-z` would become `45..=122` and accept `5`, where the
+    // real member list is the class, a literal `-` and a literal `z`.
+    assert!(m(b"[[:alpha:]-z]", b"a")); // the class
+    assert!(m(b"[[:alpha:]-z]", b"m")); // the class
+    assert!(m(b"[[:alpha:]-z]", b"-")); // literal member
+    assert!(m(b"[[:alpha:]-z]", b"z")); // literal member
+    assert!(!m(b"[[:alpha:]-z]", b"5")); // not a range
+}
+
+#[test]
 fn a_non_class_bracket_does_not_open_a_class_span() {
     // A `[` that is not a class start (no `:` after it) must not let the
     // span walker jump to a later `:]`: the bracket closes at the first
