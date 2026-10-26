@@ -3,6 +3,9 @@ mod fdref;
 mod gate;
 mod pattern;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use gate::is_block;
 
 use super::Token;

@@ -12,6 +12,16 @@ use sys::ScriptText;
 /// The next arm at `pos`: skip `;`s, then one `(pattern) body` up to
 /// `done_idx`. Returns the arm and the position just past its body, or `None`
 /// when only `;`s remain before `done`.
+///
+/// The skip loop needs no `done_idx` bound: `tokens[done_idx]` is the `done`
+/// keyword (`block_tail::closer_index`, bare `done` or the redirection-glued
+/// `done>f`), so it never matches the `;` needle and the walk stops by itself — a
+/// bound there is a redundant ±1 (LESSONS: "Redundant boundary ±1 produces
+/// equivalent mutants"). `pos ≤ done_idx` always (the caller starts at 1,
+/// `extract::body` resumes at the `;;` pair's end, at most `done_idx`, or at
+/// `done_idx`), so the bail below is the whole "only `;`s remain" contract; its
+/// `>=` is load-bearing — with `>` a `;`-only tail is searched for a `)` and bails
+/// `WaitMissingCloseParen` (pinned in `wait_block/tests.rs`).
 pub(super) fn next_arm(
     tokens: &[Token],
     text: &ScriptText,
@@ -19,10 +29,9 @@ pub(super) fn next_arm(
     done_idx: usize,
 ) -> Result<Option<(WaitArm, usize)>, Report<ParseError>> {
     let mut pos = pos;
-    while pos < done_idx
-        && tokens
-            .get(pos)
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+    while tokens
+        .get(pos)
+        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
     {
         pos += 1;
     }
