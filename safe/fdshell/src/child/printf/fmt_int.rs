@@ -1,5 +1,7 @@
 //! Integer conversion rendering (`d i` signed, `u o x X` unsigned).
 
+mod radix;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -9,37 +11,30 @@ use super::spec::Fmt;
 /// Render a signed integer conversion (`d`/`i`, the value already parsed).
 pub(super) fn render_signed(value: i64, fmt: &Fmt, out: &mut Vec<u8>) {
     let (sign, digits) = signed(value, fmt);
-    let zero = fmt.zero && fmt.precision.is_none();
-    pad(
-        fmt.left,
-        zero,
-        fmt.width.unwrap_or(0),
-        sign.as_bytes(),
-        digits.as_bytes(),
-        out,
-    );
+    padded(sign.as_bytes(), digits.as_bytes(), fmt, out);
 }
 
 /// Render an unsigned integer conversion (`u`/`o`/`x`/`X`, the value parsed as
-/// a full `u64`).
+/// a full `u64`). The decimal digits are this file's, the radix ones are
+/// `fmt_int/radix.rs`.
 pub(super) fn render_unsigned(value: u64, fmt: &Fmt, out: &mut Vec<u8>) {
     let digits = match fmt.conv {
         b'u' => unsigned(value, fmt),
-        b'o' => octal(value, fmt),
-        b'x' => hex(value, false, fmt),
-        b'X' => hex(value, true, fmt),
+        b'o' => radix::octal(value, fmt),
+        b'x' => radix::hex(value, false, fmt),
+        b'X' => radix::hex(value, true, fmt),
         // The dispatcher only calls this for unsigned conversions.
         _ => String::new(),
     };
+    padded(b"", digits.as_bytes(), fmt, out);
+}
+
+/// Pad the rendered field to the specifier: the two renderers share the rule
+/// that the `0` flag only pads when no precision was given, and an unset width
+/// is 0.
+fn padded(sign: &[u8], digits: &[u8], fmt: &Fmt, out: &mut Vec<u8>) {
     let zero = fmt.zero && fmt.precision.is_none();
-    pad(
-        fmt.left,
-        zero,
-        fmt.width.unwrap_or(0),
-        b"",
-        digits.as_bytes(),
-        out,
-    );
+    pad(fmt.left, zero, fmt.width.unwrap_or(0), sign, digits, out);
 }
 
 /// The sign string and the precision-applied magnitude digits.
@@ -65,31 +60,11 @@ fn unsigned(value: u64, fmt: &Fmt) -> String {
     digits
 }
 
-fn octal(value: u64, fmt: &Fmt) -> String {
-    let mut digits = alloc::format!("{value:o}");
-    if fmt.alt && value != 0 {
-        digits.insert(0, '0');
-    }
-    min_digits(&mut digits, value, fmt);
-    digits
-}
-
-fn hex(value: u64, upper: bool, fmt: &Fmt) -> String {
-    let mut digits = if upper {
-        alloc::format!("{value:X}")
-    } else {
-        alloc::format!("{value:x}")
-    };
-    min_digits(&mut digits, value, fmt);
-    if fmt.alt && value != 0 {
-        digits.insert_str(0, if upper { "0X" } else { "0x" });
-    }
-    digits
-}
-
 /// Apply the precision as a minimum digit count (zero-padded on the left).
-/// A zero value with an explicit precision of `0` renders no digits.
-fn min_digits(digits: &mut String, value: u64, fmt: &Fmt) {
+/// A zero value with an explicit precision of `0` renders no digits. Owned by
+/// the decimal renderers and shared with the radix ones (`fmt_int/radix.rs`),
+/// so the precision rule has exactly one owner.
+pub(super) fn min_digits(digits: &mut String, value: u64, fmt: &Fmt) {
     let Some(p) = fmt.precision else {
         return;
     };
