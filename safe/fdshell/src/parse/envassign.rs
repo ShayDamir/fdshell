@@ -59,25 +59,31 @@ pub(crate) fn has_command_word(tokens: &[Token]) -> bool {
 }
 
 /// The number of leading `NAME=value` words before the command word.
+///
+/// The walk is bounded by the statement itself — the first `;`, or the end of
+/// the tokens — so the bound is computed once, here, and the last word of the
+/// statement is never a prefix word: it has no word behind it to become the
+/// command. The bound is the only place that rule lives; a per-word "is the
+/// next word `;`" lookahead is the same rule written twice, and its offset
+/// mutants are unkillable (LESSONS: "The scoped-prefix parse bounds are
+/// load-bearing").
 pub(crate) fn prefix_len(tokens: &[Token]) -> usize {
+    let stmt_end = tokens
+        .iter()
+        .take_while(|(t, _, _, _, _, _)| !t.eq_bytes(b";"))
+        .count();
     let mut i = 0usize;
-    while assign_at(tokens, i).is_some() {
+    while i + 1 < stmt_end && assign_word(tokens, i).is_some() {
         i += 1;
     }
     i
 }
 
-/// The `NAME=value` word at `i`, if it is a leading assignment with a
-/// command word that can still follow.
-fn assign_at(tokens: &[Token], i: usize) -> Option<Assign> {
+/// The `NAME=value` word at `i`: `None` past the slice end or for a word that
+/// is no assignment. The caller's statement bound is what keeps a `;` and the
+/// statement's last word out of the prefix.
+fn assign_word(tokens: &[Token], i: usize) -> Option<Assign> {
     let (t, _, _, _, mask, spans) = tokens.get(i)?;
-    if t.eq_bytes(b";") {
-        return None;
-    }
-    let next = tokens.get(i + 1)?;
-    if next.0.eq_bytes(b";") {
-        return None;
-    }
     assign_of(t, mask, spans)
 }
 

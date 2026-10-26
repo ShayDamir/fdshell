@@ -4384,21 +4384,21 @@ fn test_token_mask_is_parallel_to_the_word() {
     }
 }
 
-/// The `;` guard of `envassign::assign_at` is the function's own rule, so it is
-/// pinned at unit level: `prefix_len` stops at the `;` and counts no assignment
-/// word at all. (A `tokens.get(i + 1)` → `tokens.get(i * 1)` mutant reads the
-/// current word as the "next" one, the guard becomes dead and the `;` is
-/// counted: this returns 1.)
+/// `;` ends the statement, so a statement that is only a `;` has no prefix word
+/// at all: `prefix_len`'s bound is the first `;`. (A widened bound — `i + 1` →
+/// `i * 1`, `<` → `<=` — counts the word in front of the `;`: this returns 1.)
 #[test]
 fn test_env_assign_prefix_len_stops_at_the_semicolon() {
     let tokens = [word_token(b"A=1", 0), word_token(b";", 4)];
     assert_eq!(envassign::prefix_len(&tokens), 0);
 }
 
-/// `prefix_len` never counts the last word of a run: a trailing assignment word
+/// The last word of a statement is never a prefix word: a trailing assignment
 /// has no command word to attach to, so the prefix stops one word short. (The
-/// same `i + 1` → `i * 1` mutant re-reads the current word as its own successor
-/// and counts it: this returns 2.)
+/// same widened bound — `i + 1` → `i * 1`, `<` → `<=` — counts it: this returns
+/// 2; `i + 1` → `i - 1` underflows at `i = 0`, and `take_while` → `skip_while`
+/// or a deleted `!` collapses the bound to 0, so every row that expects a
+/// non-zero prefix fails.)
 #[test]
 fn test_env_assign_prefix_len_never_counts_the_last_word() {
     let tokens = [word_token(b"A=1", 0), word_token(b"B=2", 4)];
