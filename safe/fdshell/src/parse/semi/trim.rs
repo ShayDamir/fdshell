@@ -2,12 +2,25 @@
 //! and which it **keeps**. The plain `&` terminator stays in the body so the
 //! body's own scan makes the background job (task #354), and the `;` glued
 //! right behind that `&` stays too, so the body's own scan rejects the split
-//! (task #355, bash's rc-2 family).
+//! (task #355, bash's rc-2 family). The two non-empty validators live in
+//! `trim/block.rs`, the `&`-terminator flag in `trim/background.rs`.
 
 use super::Token;
 use super::preceded::amp_semi;
-use crate::error::parse::ParseError;
-use error_stack::{Report, ensure};
+
+mod background;
+mod block;
+
+pub(crate) use background::condition_background;
+pub(crate) use block::{block_body, block_condition};
+
+/// The `;` **token**: the tokenizer emits one for a `;` byte, a newline and `)`
+/// alike, so this is the token test, never a byte test ([`amp_semi`] adds the
+/// byte). One owner of the six-field destructuring every walk of a token slice
+/// needs.
+fn is_semi(tok: &Token) -> bool {
+    tok.0.eq_bytes(b";")
+}
 
 /// The exclusive end of a body slice written **before** the closer at
 /// `closer_idx`: POSIX's `;` there is dropped (the body text ends at its last
@@ -18,9 +31,7 @@ use error_stack::{Report, ensure};
 /// `if_block` applies today.
 pub(crate) fn body_end(tokens: &[Token], line: &[u8], closer_idx: usize) -> usize {
     let before = closer_idx.saturating_sub(1);
-    let glued = tokens
-        .get(before)
-        .is_some_and(|(t, _, _, _, _, _)| !t.eq_bytes(b";"));
+    let glued = tokens.get(before).is_some_and(|t| !is_semi(t));
     if glued || amp_semi(tokens, line, before) {
         closer_idx
     } else {
@@ -36,16 +47,9 @@ pub(crate) fn body_end(tokens: &[Token], line: &[u8], closer_idx: usize) -> usiz
 /// token for a newline too, and a body ending `&` newline is the
 /// bash-accepted `&`-terminated body (`for i in 1; do echo a &\ndone`).
 pub(crate) fn trim_body<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token] {
-    let start = tokens
-        .iter()
-        .take_while(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
-        .count();
+    let start = tokens.iter().take_while(|t| is_semi(t)).count();
     let mut end = tokens.len();
-    while end > 0
-        && tokens
-            .get(end - 1)
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
-    {
+    while end > 0 && tokens.get(end - 1).is_some_and(is_semi) {
         if amp_semi(tokens, line, end - 1) {
             break;
         }
@@ -59,15 +63,8 @@ pub(crate) fn trim_body<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token] {
 /// is statement text, and a word list is not (task #355; `for i in 1 & ; do`
 /// pins the divergence).
 pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
-    let start = tokens
-        .iter()
-        .take_while(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
-        .count();
-    let end = tokens
-        .iter()
-        .rev()
-        .take_while(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
-        .count();
+    let start = tokens.iter().take_while(|t| is_semi(t)).count();
+    let end = tokens.iter().rev().take_while(|t| is_semi(t)).count();
     let end = tokens.len().saturating_sub(end);
     tokens.get(start..end).unwrap_or(&[])
 }
@@ -87,70 +84,6 @@ pub(crate) fn trim_condition<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token
     );
     let end = body.len().saturating_sub(amp);
     body.get(..end).unwrap_or(&[])
-}
-
-/// Whether a condition slice ends in the plain `&` that terminates the compound
-/// list (task #356): [`trim_condition`] **cuts** that `&` from the condition
-/// text — the condition runs as its own command list, whose parse layer rejects
-/// a bare `&` — so the returned flag is the fact's single owner, handed to
-/// `run_cond_list`'s existing `background` argument by `if_exec`/`loop_`.
-/// Trailing `;` **tokens** whose byte is a newline (or `)`) step back: bash
-/// reads `if true &` newline `then` exactly like `if true & then` (measured). A
-/// `;` **byte** stops the walk — that slice is the condition's own parse error
-/// and must stay one (task #355). The byte test is [`amp_semi`]'s: the
-/// tokenizer emits a `;` token for a `;` byte, a newline and `)` alike.
-pub(crate) fn condition_background(tokens: &[Token], line: &[u8]) -> bool {
-    let mut end = tokens.len();
-    while end > 0 && is_newline_semi(tokens.get(end - 1), line) {
-        end -= 1;
-    }
-    tokens
-        .get(end.saturating_sub(1))
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"&"))
-}
-
-/// The `;` **token** points at a newline (or `)`) byte, so it is a newline in
-/// disguise, never the `;` that ends a condition (`false` for a word and for a
-/// `;` byte, [`amp_semi`]'s pair arm).
-fn is_newline_semi(tok: Option<&Token>, line: &[u8]) -> bool {
-    tok.is_some_and(|(t, start, _, _, _, _)| t.eq_bytes(b";") && line.get(*start) != Some(&b';'))
-}
-
-/// A block arm's body tokens: `tokens` with the `;`s bracketing it trimmed
-/// ([`trim_body`]), `err` when nothing is left — bash rejects an empty body
-/// (`if x; then; fi`, `while x; do; done`, `for i in a; do; done`: all rc 2,
-/// and an empty `do` body makes the loop unbounded at run time). The
-/// **function-definition** body (`f() { … }`, task #302) is the same grammar
-/// slot — POSIX #2.9's `function_def` nests the group's `compound_list` — so it
-/// calls this helper with its own variant; the group's own check
-/// (`parse/group_block.rs`) is the same predicate written inline.
-pub(crate) fn block_body<'a>(
-    tokens: &'a [Token],
-    line: &[u8],
-    err: ParseError,
-) -> Result<&'a [Token], Report<ParseError>> {
-    let body = trim_body(tokens, line);
-    ensure!(!body.is_empty(), err);
-    Ok(body)
-}
-
-/// A block's **condition** tokens: [`trim_condition`] applied, `err` when
-/// nothing is left. bash requires a non-empty `list` as an `if`/`elif`/
-/// `while`/`until` condition (`if ; then …`, `elif ; then …`, `while ; do …`,
-/// `until ; do …` and the `&`/newline spellings: all rc 2, measured), and an
-/// empty condition is **true** at run time, so `while ; do …; done` is an
-/// unbounded loop. The test is on the **trimmed** slice: the raw slice between
-/// the keywords always carries POSIX's `;`, and the `&`-only slice (`if &
-/// then`) is raw-non-empty / trimmed-empty. A `for` word list and a `case`
-/// word are not conditions — `for i in; do …` iterates zero times (bash rc 0).
-pub(crate) fn block_condition<'a>(
-    tokens: &'a [Token],
-    line: &[u8],
-    err: ParseError,
-) -> Result<&'a [Token], Report<ParseError>> {
-    let cond = trim_condition(tokens, line);
-    ensure!(!cond.is_empty(), err);
-    Ok(cond)
 }
 
 #[cfg(test)]

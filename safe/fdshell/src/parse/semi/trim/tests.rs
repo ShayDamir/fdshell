@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::error::parse::ParseError;
 use crate::parse::semi::token_range;
 use crate::parse::token::tokenize;
 use alloc::string::String;
