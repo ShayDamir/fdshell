@@ -1759,6 +1759,30 @@ fn dollar_multi_digit_index_in_text() {
 }
 
 #[test]
+fn percent_fallback_rows_at_the_end_of_the_text_are_literal() {
+    // The folded arm's fallback: a `%` that opens no name pushes the literal
+    // `%` and consumes nothing, **at the end of the word** as inside it. These
+    // rows are the pins of the byte class the deleted arm-guard used to state
+    // — a non-name byte after `%` reaches `collect_name`, stops it at the
+    // empty name, and the empty name is bound by no path.
+    let cell = dummy_cell();
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let expand = |arg: &'static core::ffi::CStr, cache: &mut HashMap<ShortCStr, ExportedFd>| {
+        substitute_arg(&ShortCStr::from(arg), &[], &[], cache, &cell)
+            .unwrap()
+            .0
+            .as_bytes()
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(expand(c"%", &mut cache), b"%");
+    assert_eq!(expand(c"a%", &mut cache), b"a%");
+    assert_eq!(expand(c"%-", &mut cache), b"%-");
+    assert_eq!(expand(c"%-b", &mut cache), b"%-b");
+    assert_eq!(expand(c"a%-", &mut cache), b"a%-");
+}
+
+#[test]
 fn percent_double_percent_stays_literal() {
     // Task #155: the shell has no `%%` escape — both bytes reach argv so the
     // `printf` builtin can interpret its own `%%` (bash prints `a%b` here).

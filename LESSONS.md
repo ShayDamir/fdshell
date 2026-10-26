@@ -3094,19 +3094,7 @@ fail — `tests/positional.rs::positional_digit_run_ends_at_a_name_byte` (the `"
 same with and without the arm). The rule to keep: **an arm-guard probe must put the name byte
 inside the region** — a literal glued outside it (`"$1"2`) is the reading both arms produce, so it
 measures nothing.
-## `%name`'s guard is an accepted equivalent mutant: `collect_name` self-guards the name bytes
-`substitute/percent.rs`'s arm guard `Some(c) if c.is_ascii_alphanumeric() || c == b'_'` mutates to
-`true` and survives, because the guard is enforced a second time inside `collect_name`'s own loop:
-a non-name byte after `%` yields the empty name, `write_fd(&"")` is false because **no path binds
-an fd to the empty name** (the binding callers are `cd`, `state/setters`, `wait/arm/reap`,
-`run_dispatch{,/array_ops}`, `capture/commit`, `intercept/recvmsg` — whose slot names start with
-`%` — `intercept/signalfd_cmd`, `for_run`), and the arm then pushes `%` plus the empty name having
-consumed nothing — byte-for-byte the `_ => out.push(c"%")` fallback. Probed on task #223 with the
-guard mutated over 12 shapes (`%`, `%%`, `a%%b`, `%-b`, `%)`, `"%a"b`, `%$v`, `v=q; %$v`, `%?`,
-`"%%"b`, `%a%%b`, `"%v"%w`): **zero** differences, so no test can distinguish the arms. Accepted
-equivalent mutant, the same species as the disjoint-flag `|` entries: record it, do not test
-around it. The comment in `percent_subst` states the empty-name invariant the fallback leans on —
-if a future surface ever binds an empty name, that fallback stops being equivalent.
+
 ## `$@` has two join rules, selected by the trigger byte's quote bit
 Task #222's provenance splitting replaced the `expanded` flag, and the natural model — push each
 positional adjacent, let a word-boundary mark split every one of them — is **wrong for the

@@ -42,21 +42,29 @@ pub(crate) fn percent_subst(
     limit: usize,
 ) -> Result<(), Report<ResolveError>> {
     match peek.peek().copied() {
-        // `%?` is the `wait` arm's matched fd; a name in the fd namespace.
+        // `%?` is the `wait` arm's matched fd.
         Some(b'?') => wait_fd_subst(peek, cache, state, out)?,
-        // A name in the fd namespace. The fallback below is also the
-        // `limit == 0` path (the region ends at the `%`): `collect_name`
-        // returns the empty name, `write_fd` cannot find it because no path
-        // ever binds an fd to the empty name, and the arm pushes a literal
-        // `%` having consumed nothing — byte-for-byte the `_` arm.
-        Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
+        // Every other byte: `collect_name` **is** the name-byte rule (its loop
+        // stops at the first non-name byte), so this one arm is both the name
+        // arm and the fallback. A byte that opens no name yields the empty
+        // name, and `write_fd` cannot find it because **no path binds an fd to
+        // the empty name** (the binding callers are `cd`, `state/setters`,
+        // `wait/arm/reap`, `run_dispatch{,/array_ops}`, `capture/commit`,
+        // `intercept/recvmsg` — whose slot names start with `%` —
+        // `intercept/signalfd_cmd`, `for_run`); the arm then pushes a literal
+        // `%` plus the empty name having consumed nothing — byte-for-byte the
+        // old `_` arm, and this is also the `limit == 0` path (the region ends
+        // at the `%`). A guard here restating `collect_name`'s own test is a
+        // duplicate rule, so it is deleted: its `with true`/`with false`/
+        // `||`→`&&`/`==`→`!=` family was accepted-equivalent (task #223 probed
+        // 12 shapes, zero differences; task #455 removed the site).
+        _ => {
             let name_scs = collect_name(peek, limit)?;
             if !write_fd(&name_scs, cache, state, out)? {
                 out.push(c"%");
                 out.push(&name_scs);
             }
         }
-        _ => out.push(c"%"),
     }
     Ok(())
 }

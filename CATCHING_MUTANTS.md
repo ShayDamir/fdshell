@@ -85,7 +85,12 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     `&&` and its call site; removing the caller's conjunct deletes the
     callee's whole mutant family at once. Pin the scope the gate claimed to
     check, balanced *and* unbalanced, so the answer stays where it was ever
-    observable.
+    observable. The gate may be a **match-arm guard** that restates the
+    callee's own loop test: fold the arm into the catch-all so the callee's
+    single test carries the rule (its mutants then die on the name rows), and
+    pin the fallback the fold inherits, including the byte at the **end of the
+    text** (`a%`, `%-`, `%`) — the mid-word rows hide a byte that is consumed
+    instead of pushed.
 16. **Name the predicate.** A comparison against a value the scorer can never
     return carries a family no test can kill: `d > 0` over a sign projection
     with no `0` row mutates to `>=`/`==`/`<` and every mutant accepts the same
