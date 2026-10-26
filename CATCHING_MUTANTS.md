@@ -61,7 +61,14 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     may live in a *later* stage: a lexer guard that bails on what the parser's
     trailing-input rule also rejects is a duplicate, and deleting it moves
     only the `╰╴at …` source-location line — rule 5 says that is not a
-    behavioral difference, so pin the surviving message and exit status.
+    behavioral difference, so pin the surviving message and exit status. A
+    test repeated in **every arm** of a `match` is the same duplicate: hoist
+    it into the early return so each arm states only its own rule, and the
+    per-arm `&&` site (with its `&&`→`||` family) disappears; the hoisted
+    gate's mutants die on the arms' existing rows. Check the residue: an arm
+    whose one remaining test can only *block* a byte class the matcher
+    rejects anyway is observable in one direction — take it `with true`, watch
+    the suite stay green, and record that mutant (rule 6).
 12. **Clamps hide signs.** A `max(0)` on the closer does not make the opener's
     `+=`→`-=` equivalent; exercise nested opens, then a closer, then a
     boundary.

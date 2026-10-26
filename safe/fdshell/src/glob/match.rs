@@ -101,13 +101,17 @@ pub(crate) fn match_component(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob
 /// A name starting with `.` needs a literal first pattern byte: a leading
 /// unquoted `*`, `?`, or valid `[...]` cannot consume it — unless `dotglob`
 /// is set, in which case those pattern bytes may eat the leading `.`.
+///
+/// The quote test is the same for every pattern byte, so it joins the early
+/// return: one gate, and each arm states only its own rule (a per-arm
+/// `&& !quoted` copy is a duplicate whose `&&`→`||` mutant is unkillable).
 fn dot_blocked(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob: bool) -> bool {
-    if name.first() != Some(&b'.') || dotglob {
+    if name.first() != Some(&b'.') || dotglob || bracket::quoted(mask, 0) {
         return false;
     }
     match pat.first().copied() {
-        Some(b'*' | b'?') => !bracket::quoted(mask, 0),
-        Some(b'[') => !bracket::quoted(mask, 0) && bracket::span(pat, mask, 0).is_some(),
+        Some(b'*' | b'?') => true,
+        Some(b'[') => bracket::span(pat, mask, 0).is_some(),
         _ => false,
     }
 }
