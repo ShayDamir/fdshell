@@ -190,9 +190,15 @@ fn bracket_ranges_negation_and_classes() {
                 "${v#[a-c]bc}",
                 "${v#[[:alpha:]]bc}",
                 "${v#[abc]}",
+                "${v#[^b]*}",
+                "${v#[^a-c]bc}",
+                "${v#[^^]*}",
+                "${v#[^]}",
+                "${v#[\"^\"]b}",
+                "${v#[a^]*}",
             ]
         ),
-        "[bcabc][bcabc][bcabc][abc][abc][bcabc]"
+        "[bcabc][bcabc][bcabc][abc][abc][bcabc][bcabc][abcabc][bcabc][abcabc][abcabc][bcabc]"
     );
 }
 

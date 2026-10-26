@@ -669,7 +669,8 @@ for f in *.txt; do …; done
 A quoted byte never splits and never globs. `set -f` disables pathname
 expansion; `shopt -s dotglob` lets patterns match a leading dot;
 `shopt -s nullglob` deletes a pattern with no match; `shopt -s failglob`
-makes it an error.
+makes it an error. `[!…]` and `[^…]` negate a bracket expression (bash accepts
+both markers; POSIX defines only `!`).
 
 A `case` **pattern** gets neither treatment: it is one word, never split on the
 `IFS` and never globbed, and only its **first expanded word** is the pattern —

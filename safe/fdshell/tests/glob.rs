@@ -88,6 +88,22 @@ fn bracket_expressions_match() {
     let (out, _err, code) = run(&dir, "echo [a-z]1");
     assert_eq!(code, 0);
     assert_eq!(out, "a1 b1\n");
+    // bash negates with an unquoted `^` in the very slot POSIX gives to `!`.
+    let (out, _err, code) = run(&dir, "echo [^a]1");
+    assert_eq!(code, 0);
+    assert_eq!(out, "b1\n");
+    // The dot rule is unchanged behind a `^` marker: `.hidden` stays out.
+    let (out, _err, code) = run(&dir, "echo [^a]*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "b1 file sub x\n");
+    // The `]` right after the marker is a member: `[^]f]*` is a negated
+    // `{']', 'f'}`, and `[^]` alone is unclosed, so the `[` is literal.
+    let (out, _err, code) = run(&dir, "echo [^]f]*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a1 a2 b1 sub x\n");
+    let (out, _err, code) = run(&dir, "echo [^]*");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[^]*\n");
 }
 
 #[test]

@@ -260,8 +260,8 @@ fn case_pattern_escape_pairs_are_decided_by_the_mask() {
 }
 
 /// `?` and `[...]` are pattern characters now (fdshell matched with a `*`-only
-/// matcher), with the bracket family's `!` negation, classes, ranges, and the
-/// FNM-style literal fallback of an unclosed `[`.
+/// matcher), with the bracket family's `!`/`^` negation, classes, ranges, and
+/// the FNM-style literal fallback of an unclosed `[`.
 #[test]
 fn case_pattern_globs_like_a_bash_pattern() {
     let (out, _err, code) = run("case aXx in a?x) echo m;; esac");
@@ -288,10 +288,40 @@ fn case_pattern_globs_like_a_bash_pattern() {
     assert_eq!((out.as_str(), code), ("", 0));
     let (out, _err, code) = run("case \"a[b\" in a[b) echo m;; esac");
     assert_eq!((out.as_str(), code), ("m\n", 0));
-    // `[^…]` negation is the shared matcher's gap (task #320): fdshell reads
-    // `^` as a member, so the row stays divergent.
+    // Negation takes **two** markers: bash accepts an unquoted `^` in the very
+    // slot POSIX reserves for `!` (LESSONS: "Bracket negation takes bash's `^`
+    // beside POSIX's `!`"), so both spellings match and neither is a divergence.
     let (out, _err, code) = run("case ab in a[^c]) echo m;; esac");
-    assert_eq!((out.as_str(), code), ("", 0), "bash matches (m)");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "bash matches (m)");
+    let (out, _err, code) = run("case ab in a[^]c]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case 1 in [^]c]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case ad in a[^a-c]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case ab in a[^a-c]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0));
+    let (out, _err, code) = run("case a1 in a[^[:alpha:]]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case ab in a[^[:alpha:]]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0));
+    // The marker's slot is the only place `^` negates: a mid-bracket `^`, an
+    // escaped `\^` and a quoted `^` are literal members (mask-gated).
+    let (out, _err, code) = run("case ab in a[b^]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case a^ in a[\\^]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case a^ in a[\"^\"]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("case ab in a[\"^\"c]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0));
+    let (out, _err, code) = run("case ab in a[\\^c]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0));
+    let (out, _err, code) = run("case ab in a[^^]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    // `[^]` is unclosed (the `]` is the first member): the `[` is literal.
+    let (out, _err, code) = run("case ab in a[^]) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0));
 }
 
 /// A `case` pattern is a **word** pattern, not a pathname: no `FNM_PERIOD` rule,
@@ -329,6 +359,12 @@ fn case_pattern_words_are_expanded_lazily() {
     assert_eq!((out.as_str(), code), ("", 0));
     let (out, _err, code) = run("p=\"a?x\"; case \"a?x\" in \"$p\") echo m;; esac");
     assert_eq!((out.as_str(), code), ("m\n", 0));
+    // The pattern's mask gates the `^` marker too: an unquoted expansion keeps
+    // it live, a quoted one makes it a literal member.
+    let (out, _err, code) = run("p=\"a[^c]\"; case ab in $p) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("m\n", 0));
+    let (out, _err, code) = run("p=\"a[^c]\"; case ab in \"$p\") echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 0));
     // A leading `~` is expanded in a pattern, quoted `~` is literal.
     let (out, _err, code) = run("case \"$HOME\" in ~) echo m;; esac");
     assert_eq!((out.as_str(), code), ("m\n", 0));

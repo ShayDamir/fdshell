@@ -4009,8 +4009,9 @@ Gaps this task leaves measured, not fixed: a `case` pattern is **one** word, so
 closed it, and with it the task text's "one pattern **per** positional word"
 reading: bash keeps the **first expanded word** (`es->word->word`), so
 `case b in "$@")` prints nothing (LESSONS: "`$@` has two join rules");
-bracket negation `[^…]` is unknown to `glob/match/bracket.rs` (only `!`), so
-`case ab in a[^c])` matches in bash and not here — task **#320**; and fdshell
+bracket negation `[^…]` was unknown to `glob/match/bracket.rs` (only `!`), so
+`case ab in a[^c])` matched in bash and not here — task **#320** closed it
+(LESSONS: "Bracket negation takes bash's `^` beside POSIX's `!`"); and fdshell
 joins a multi-token pattern (`case "a b" in a b)` matches, the inserted space is
 a literal byte) where bash is a syntax error — a parse-layer divergence of the
 "Operators are recognized at word starts" family, pinned as
@@ -5131,3 +5132,43 @@ and the parser's trailing-input rule bails) moves only the `╰╴at …`
 source-location line — the message and the exit status are unchanged, so pin
 that pair at the user surface
 (`arith_digit_outside_base_reports_the_syntax_error_and_fails_the_command`).
+
+## Bracket negation takes bash's `^` beside POSIX's `!`, so the span and the membership scan share one prologue (task #320)
+
+POSIX XCU 2.13.2 defines **only** `!` as the first byte of a bracket
+expression; bash's matcher accepts `^` in the same slot, for pathname globs
+**and** word patterns (`a[^c]` ≡ `a[!c]`, `case ab in a[^c])` matches). The
+`^` arm is bash parity, not a divergence to "fix" back to POSIX. Its
+neighbours, measured against bash 5.3.9: the leading-`]`-as-member rule
+applies behind either marker, so `a[^]c]` is a negated `{']', 'c'}`; `^` is a
+marker only in that slot, so `a[b^]`, `a[\^]` and `a["^"]` take it as a
+literal member — the quote **mask** gates the test, which is why an escaped
+or quoted `^` never negates; `[^^]` is negation plus a `^` member; `[^]` is
+**unclosed** (its first member is the `]`), so the `[` becomes a literal byte
+and `[^]` leaves the pattern-trigger set: `echo [^]*` prints `[^]*`,
+`${v#[^]}` strips nothing, `case ab in a[^])` matches nothing. A leading
+`[^…]` keeps the pathname dot rule (`echo [^a]*` never takes `.hidden`),
+while word patterns keep ignoring `FNM_PERIOD` (`case .b in [^x]b)` matches).
+
+The mechanical part: the prologue exists **once**, as
+`glob/match/bracket/span.rs::negation` — bytes, mask, `[` index in; first
+member index and negation out — and both scans call it, `span` there and
+`glob/match/bracket/member.rs::scan`. Two copies of the marker test drift the
+moment one side gains a marker, exactly as the class rule says (LESSONS:
+"A POSIX `[[:class:]]` inside a bracket carries its own `]`, so the class
+must be recognized before the span is closed"): a bracket's span validity is
+its membership's precondition, so a marker known to one scan and not the
+other makes `[^]c]` and `[^]` disagree about the same bytes. Only the
+prologue moved; the membership loop's arms and cursor advances stayed
+verbatim, per LESSONS: "A dense scanner split into a `&mut self` newtype must
+keep every arm's order and cursor advance" — its accepted-equivalent mutants
+are keyed to that loop state, not to the prologue.
+
+Pins: `glob/match/tests.rs::bracket_caret_negation_is_mask_aware` (masked
+marker, escape pair, mid-bracket `^`, `[^^]`, unclosed `[^]`, dot rule),
+`bracket_negation`, `bracket_leading_close_is_literal`,
+`has_unquoted_pattern_table` (the trigger-set consequence); integration
+twins `tests/glob.rs::bracket_expressions_match`,
+`tests/case.rs::case_pattern_globs_like_a_bash_pattern` — its `[^c]`
+divergence pin is now a match — and
+`tests/pattern.rs::bracket_ranges_negation_and_classes`.
