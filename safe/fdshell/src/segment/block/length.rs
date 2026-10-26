@@ -16,6 +16,14 @@ use crate::keywords::{Closer, Keyword, Place, keyword_kind};
 /// keyword, a quoted keyword word, and a keyword prefix like `whileish` — the
 /// word behind a `time [-p]` prefix run is scored on the stripped text, the
 /// same rule [`crate::keywords::keyword_delta`] applies.
+///
+/// The `case`/`wait` arm keeps the shared `4` behind a `||` (two arms with the
+/// same body trip `clippy::if_same_then_else`, and a production `#[allow]` is
+/// forbidden). The `||`→`&&` mutant is **not** an accepted equivalent here: it
+/// answers `None` for every opener, and
+/// `segment/block/midrun/tests.rs::opener_len_agrees_with_the_scored_keyword`
+/// asserts each opener word's exact length, so it fails the suite (measured,
+/// task #455).
 pub(super) fn opener_len(word: &[u8]) -> Option<usize> {
     let len = if word.starts_with(b"case") || word.starts_with(b"wait") {
         4
