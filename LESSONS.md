@@ -1574,7 +1574,8 @@ behavior: the `==`→`!=` mutant is unkillable. It is **pre-existing on `master`
 
 ## An unclosed brace scan ends at the line length, so `min(len, close + 1)` and `min(len, close)` agree
 `scan_brace_block` reports `close = line.len()` when the group never closes, so
-in `group_block` the `close + 1`→`close * 1` mutant gives the same `open_end`
+in `segment/group/block.rs::group_block` the `close + 1`→`close * 1` mutant gives
+the same `open_end`
 (`line.len().min(len)` = `line.len()`), and the suite passes under it: an accepted
 equivalent mutant. The `+1` is still required for the closed case (the `+1`→`-1`
 mutant is killed by `segment/group/tests.rs::span_ends_past_the_closing_brace`),

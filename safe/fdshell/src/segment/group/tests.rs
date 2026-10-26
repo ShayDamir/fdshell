@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 use super::*;
 use crate::scan::{Quotes, ScanState};
+use crate::segment::Segment;
 use crate::segment::scan_segments;
+use alloc::vec::Vec;
 
 /// The group span claims the whole statement it opens: the `{` to the next
 /// separator, comment, or end of input, so trailing redirections and the
