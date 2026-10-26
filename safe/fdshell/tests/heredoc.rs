@@ -2420,6 +2420,13 @@ fn group_body_heredoc_delimiter_forms() {
 /// operator order (`parse/cond_bodies.rs`'s skip, the rule task #240 pins at the
 /// scan level). The mid-run group (`true && { … }`) is a cond part, so it rides
 /// the run's bodies through the same cond/parse chain.
+///
+/// The last eight rows are the shape task **#332** fixed: a here-doc statement
+/// **before** the group, and a statement (or a second group, or a keyword block)
+/// after the group's own `;` on the same physical line. Each operator takes its
+/// own region of the line's stream, the group keeps its own resume, so the
+/// trailing text runs (the `> /dev/null` row shows the redirect swallowing
+/// `echo a`, exactly as bash does).
 #[test]
 fn group_body_heredoc_keeps_the_operators_around_the_group() {
     for (script, want) in [
@@ -2435,25 +2442,57 @@ fn group_body_heredoc_keeps_the_operators_around_the_group() {
         ("{ cat <<T; } && { cat <<U; }\nbT\nT\nbU\nU", "bT\nbU\n"),
         ("{ cat <<T; } > /dev/null && echo t\nbody\nT", "t\n"),
         ("{ cat <<T; }\nbody\nT\necho tail", "body\ntail\n"),
+        (
+            "cat <<X; { echo a; }; cat <<B\nbodyX\nX\nbodyB\nB",
+            "bodyX\na\nbodyB\n",
+        ),
+        (
+            "cat <<X; { echo a; }; cat <<B; echo t\nbodyX\nX\nbodyB\nB",
+            "bodyX\na\nbodyB\nt\n",
+        ),
+        (
+            "cat <<X; { echo a; }; { echo b; }; cat <<B\nbodyX\nX\nbodyB\nB",
+            "bodyX\na\nb\nbodyB\n",
+        ),
+        (
+            "cat <<X; { cat <<T; }; cat <<U\nbodyX\nX\nbodyT\nT\nbodyU\nU",
+            "bodyX\nbodyT\nbodyU\n",
+        ),
+        (
+            "cat <<X; { echo a; }; if :; then cat <<B; fi\nbodyX\nX\nbodyB\nB",
+            "bodyX\na\nbodyB\n",
+        ),
+        (
+            "cat <<X; { echo a; } > /dev/null; echo t\nbodyX\nX",
+            "bodyX\nt\n",
+        ),
+        (
+            "cat <<X; time { echo a; }; cat <<B\nbodyX\nX\nbodyB\nB",
+            "bodyX\na\nbodyB\n",
+        ),
+        (
+            "cat <<X; { echo a; }; cat <<-B\nbodyX\nX\n\tbodyB\n\tB",
+            "bodyX\na\nbodyB\n",
+        ),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
     }
 }
 
-/// The statement-level twin of the #332 row: a here-doc statement **before** the
-/// group on the same line, and a statement after the group's own `;`. The group's
-/// span ends its statement, and the line's stream is already fully claimed by the
-/// time the scan reaches the group, so the trailing statement is dropped —
-/// fdshell prints the two bodies where bash prints them **and** `t` (task
-/// **#332**, the same drop `heredoc_block_then_group_then_statement_on_one_line`
-/// pins for a group with no heredoc of its own).
+/// The statement-level twin of the group-body shape: a here-doc statement
+/// **before** the group on the same line, and a statement after the group's own
+/// `;`. The group's span ends its statement, and the line's body stream is
+/// allocated in operator order, so every operator takes its own region and the
+/// trailing statement runs. Master dropped it (the group's resume was floored
+/// with the pre-block region end, landing the scan inside the region); task
+/// **#332** fixed it — the bash value `bodyX`, `bodyT`, `t` rc 0, measured.
 #[test]
-fn group_body_heredoc_behind_a_statement_drops_the_trailing_statement() {
+fn group_body_heredoc_behind_a_statement_keeps_the_trailing_statement() {
     let (out, _err, code) = run("cat <<X; { cat <<T; }; echo t\nbodyX\nX\nbodyT\nT");
     assert_eq!(
         (out.as_str(), code),
-        ("bodyX\nbodyT\n", 0),
+        ("bodyX\nbodyT\nt\n", 0),
         "bash prints bodyX, bodyT and t at rc 0 (task #332)"
     );
 }
@@ -2476,6 +2515,19 @@ fn group_body_heredoc_behind_a_statement_drops_the_trailing_statement() {
 /// * the group as a pipeline stage: `} | cat` is unsupported (tasks
 ///   **#186**/**#190**, pinned as `unexpected pipe` by
 ///   `tests/group.rs::pipeline_stage_group_is_a_parse_error`).
+/// * the **`#`-terminated trailing statement** of the group's line (task
+///   **#333**, the `#`-comment-terminated / `&`-deferred flush family of
+///   `segment/line.rs`, whose definer twin is `cat <<X; f() { echo hi; }; # note`):
+///   the shape was invisible while the trailing statement was dropped (master:
+///   rc 0, the statement silently gone), and task **#332**'s fix makes it run, so
+///   the family shows. `cat <<X; { echo a; }; cat <<B # note` reports the missing
+///   delimiter line where bash prints `bodyX`, `a`, `bodyB` at rc 0, and
+///   `cat <<X; { echo a; }; echo t # note` runs the pre-block body line as a
+///   command (`"bodyX" not found`) where bash prints `bodyX`, `a`, `t` at rc 0.
+/// * the **subshell** behind the group (task **#316**, no `( … )` parse
+///   production): master stayed rc 0 because its trailing statement was dropped
+///   and `(` was never reached; once #332 makes it run, fdshell reports
+///   `"(" not found` at rc 1 where bash prints `bodyX`, `a`, `bodyB` at rc 0.
 #[test]
 fn group_body_heredoc_divergences_keep_their_owners() {
     for (script, want) in [
@@ -2493,6 +2545,15 @@ fn group_body_heredoc_divergences_keep_their_owners() {
             "missing terminating delimiter line 'T'",
         ),
         ("{ cat <<T; } | cat\nbody\nT", "unexpected pipe"),
+        (
+            "cat <<X; { echo a; }; cat <<B # note\nbodyX\nX\nbodyB\nB",
+            "missing terminating delimiter line 'B'",
+        ),
+        ("cat <<X; { echo a; }; echo t # note\nbodyX\nX", "not found"),
+        (
+            "cat <<X; { echo a; }; ( cat <<B )\nbodyX\nX\nbodyB\nB",
+            "\"(\" not found",
+        ),
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: stderr={err}");
@@ -2665,8 +2726,9 @@ fn nested_function_definitions_capture_their_body_heredoc() {
 /// trailing statement runs (`Book::rewind`'s `line_ends` rule, task #305). The
 /// group's **own** body claim landed with task **#315**
 /// (`heredoc_in_a_single_line_group_body_prints_its_region`); the
-/// pre-block-statement twin below is **#332**'s: fdshell drops the statement
-/// after the group there exactly as it does on master.
+/// pre-block-statement row below (`cat <<E; { :; }; echo t`) is the drop task
+/// **#332** closed — master printed `body` alone, because the group's resume was
+/// floored with the pre-block region end and the scan landed inside the region.
 #[test]
 fn heredoc_block_then_group_then_statement_on_one_line() {
     for (script, want) in [
@@ -2684,17 +2746,11 @@ fn heredoc_block_then_group_then_statement_on_one_line() {
             "{ :; }; if :; then cat <<E; fi; echo t\nbody\nE",
             "body\nt\n",
         ),
+        ("cat <<E; { :; }; echo t\nbody\nE", "body\nt\n"),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
     }
-    // The #332 row: the group's line-start rewind drops the trailing statement.
-    let (out, _err, code) = run("cat <<E; { :; }; echo t\nbody\nE");
-    assert_eq!(
-        (out.as_str(), code),
-        ("body\n", 0),
-        "bash prints body and t at rc 0 (task #332)"
-    );
 }
 
 /// The delimiter forms ride along unchanged: quoted, space-bearing, `<<-`, and

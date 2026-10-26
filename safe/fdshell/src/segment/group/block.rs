@@ -31,6 +31,11 @@ use alloc::vec::Vec;
 /// (`{ cat <<T; }`) claims regions written past the closing brace, and they
 /// travel as the segment's `bodies` to `run_cond_list` (task #234), so the
 /// group body's `<<` reaches the parse layer.
+/// A group whose statement has **trailing content** on its physical line keeps
+/// its own statement end as the resume (that text is commands, never a region);
+/// `pre_resume` is a region end, i.e. at/past the physical line's end, so it
+/// floors the floor only — flooring the *resume* with it jumps over the
+/// trailing commands and re-opens the region (task #332).
 /// The **extension** arm of [`claim::claimed_bodies`] is reachable here only by
 /// a multi-line group whose first physical line carries the operator
 /// (`{ cat <<T;\ncat <<U;\n}`): its regions are interleaved with the group's
@@ -69,9 +74,15 @@ pub(super) fn group_block<'a>(
             true,
         );
         let (resume, floor) = if r < line_end {
-            // Trailing content on the group's line: scan it; the line's final
-            // flush must not re-enter any body region claimed on this line.
-            (r.max(pre_resume), line_resume.max(pre_resume))
+            // Trailing content on the group's line: the resume is the group's
+            // **own** statement end — that text is commands, never a region.
+            // `pre_resume` is a region end, hence at/past the physical line's
+            // end, so flooring the *resume* with it jumps over the trailing
+            // commands and re-opens the region (task #332, and the keyword
+            // branch's rule, `segment/block/keyword.rs`). The line's final flush
+            // must not re-enter any body region claimed on this line, so
+            // `pre_resume` belongs to the floor only.
+            (r, line_resume.max(pre_resume))
         } else {
             // The group ends its physical line: resume past every region.
             (r.max(line_resume).max(pre_resume), 0)

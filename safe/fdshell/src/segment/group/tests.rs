@@ -95,6 +95,25 @@ fn group_resume_never_reopens_the_group_body() {
     assert_eq!(floor, 0);
 }
 
+/// The trailing-content arm of the resume rule with a **non-zero** `pre_resume`
+/// (task #332, the keyword branch's rule): a here-doc statement before the group
+/// owns the line's first region, whose end sits *past* the physical line. The
+/// group's resume is its own statement end — the text after its `;` is commands,
+/// never a region — and the pre-block region lands in the **floor** only.
+/// Flooring the resume with `pre_resume` (master) jumped over the trailing
+/// statement and re-opened the region.
+///
+/// Offsets of `cat <<X; { :; }; echo t\nbodyX\nX`: the `{` sits at 9, the group's
+/// statement end (the scan resume) is 16 and `echo t` starts at 17, the physical
+/// line ends at 24 and its single region `24..31` ends at 31.
+#[test]
+fn a_group_with_trailing_content_keeps_its_own_resume_behind_a_pre_block_region() {
+    let line = b"cat <<X; { :; }; echo t\nbodyX\nX";
+    let (_segment, resume, floor) = group_block(line, 9, 9, Quotes::new(), 31, 0);
+    assert_eq!(resume, 16, "the resume is the group's own statement end");
+    assert_eq!(floor, 31, "the pre-block region lands in the floor");
+}
+
 /// The group's own operators claim regions of its physical line's body stream
 /// (task #315, the definer branch's rule): in **append** mode the region bytes
 /// travel as the segment's `bodies`, the span end stays at the group's

@@ -202,6 +202,26 @@ fn single_line_block_heredoc_spans_lines() {
     }
 }
 
+/// Task **#332**: a here-doc statement **before** a `{ …; }` group and a
+/// statement after the group's own `;`. The line carries two body regions, so the
+/// prompt reads four `> ` continuations — bash's continuation count on the same
+/// stdin — and the buffer runs as `bodyX`, `a`, `bodyB` at rc 0.
+///
+/// `master` stopped after two `> ` reads (the line looked complete with region 0
+/// consumed) and then reported the body lines of region 1 as missing commands,
+/// `"bodyX" not found` … ; with the group's resume fixed the trailing statement
+/// is scanned where its own region lives. Measured byte-for-byte.
+#[test]
+fn pre_block_heredoc_behind_a_group_spans_both_regions() {
+    let (out, err, code) = run_repl("cat <<X; { echo a; }; cat <<B\nbodyX\nX\nbodyB\nB\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(
+        out, "fdshell> > > > > bodyX\na\nbodyB\nfdshell> ",
+        "stdout: {out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err}");
+}
+
 /// Task #322, pinned divergence of the same fix at the prompt.
 ///
 /// The `elif` row at EOF: the `E` delimiter never arrives, the buffer executes

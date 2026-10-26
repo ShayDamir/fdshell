@@ -1049,6 +1049,44 @@ fn scan_group_behind_a_block_heredoc_keeps_its_own_resume() {
     );
 }
 
+/// A `;`-terminated here-doc statement **before** a `{ …; }` group and a
+/// statement after the group's own `;`: the line's body stream is allocated in
+/// operator order, so the pre-block statement takes region 0 and the trailing
+/// statement the region left over (the rule task #240 pins for a function
+/// definition). The group keeps its **own** resume at its statement end, and the
+/// pre-block region floors only the line's final flush (task #332). On master the
+/// resume was floored with the pre-block region end, so the trailing statement
+/// landed inside the region and was dropped.
+#[test]
+fn scan_pre_block_group_and_trailing_share_one_body_stream() {
+    check_shapes(
+        b"cat <<X; { echo a; }; cat <<B\nbodyX\nX\nbodyB\nB",
+        &[
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
+            ("B", 9, 20, true, vec![]),
+            ("S", 22, 0, false, vec![b"bodyB\nB".to_vec()]),
+        ],
+    );
+    check_shapes(
+        b"cat <<E; { :; }; echo t\nbody\nE",
+        &[
+            ("S", 0, 0, false, vec![b"body\nE".to_vec()]),
+            ("B", 9, 15, true, vec![]),
+            ("S", 17, 0, false, vec![]),
+        ],
+    );
+    // The recursion of the rule: a second group, then a here-doc statement.
+    check_shapes(
+        b"cat <<X; { echo a; }; { echo b; }; cat <<B\nbodyX\nX\nbodyB\nB",
+        &[
+            ("S", 0, 0, false, vec![b"bodyX\nX\n".to_vec()]),
+            ("B", 9, 20, true, vec![]),
+            ("B", 22, 33, true, vec![]),
+            ("S", 35, 0, false, vec![b"bodyB\nB".to_vec()]),
+        ],
+    );
+}
+
 /// The `(kind, off-or-start, end_pos, closed, bodies)` face of every segment a
 /// line produces, in scan order (`off` for statements, unused fields zeroed).
 type Shape = (&'static str, usize, usize, bool, Vec<Vec<u8>>);
