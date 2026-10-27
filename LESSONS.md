@@ -431,8 +431,8 @@ A syscall's *path argument* is capped at `PATH_MAX` (4096), but a *result* path 
 ## `Vec::with_capacity(n)` + `resize(n, 0)` trips `slow_vector_initialization`
 The two-pass zero-fill is denied by the repo's `clippy -- -D warnings`; the one-pass form is `let mut v = vec![0u8; n];`. In `no_std` crates use the path form `alloc::vec![0u8; n]` (the crate's `extern crate alloc;` makes the macro path work without a `use`).
 
-## Retrying `getcwd` on a non-too-small errno converges: the too-small-guard mutants are equivalent
-In `env/getcwd.rs`, four mutants treat a non-too-small errno (e.g. `ENOENT` on a deleted CWD) as "grow and retry": the initial arm's `buffer_too_small(e)` guard → `true`, the loop arm's guard → `true`, `buffer_too_small` → `true`, and its first `==` → `!=`. Each merely adds `getcwd` attempts in unchanged process state, and a `getcwd` retry in unchanged state fails with the same errno — the returned error is byte-identical, only the syscall count differs. No test can kill them; accepted equivalent mutants. The deleted-CWD tests (`unsafe/sys/tests/env.rs`, `safe/fdshell/tests/pwd.rs`) pin the observable outcome (errno 2, silent exit), so a future change that alters the *outcome* rather than the syscall count still fails them.
+## Retrying on a foreign errno converges only while the loop's last answer is that errno
+In `env/getcwd.rs` the buffer grew in two arms (a stack first attempt, then a doubling loop) and the loop's terminal answer was `err` — the **last errno it saw**. Four mutants then treated a non-too-small errno (e.g. `ENOENT` on a deleted CWD) as "grow and retry": the initial arm's `buffer_too_small(e)` guard → `true`, the loop arm's guard → `true`, `buffer_too_small` → `true`, and its first `==` → `!=`. Each merely added `getcwd` attempts in unchanged process state, where a retry fails with the same errno — the returned error was byte-identical and only the syscall count differed, so all four were recorded as accepted equivalents. All four are killed (task #466): past `MAX_GETCWD_SIZE` the answer is `SyscallError::E2BIG("getcwd")` — no buffer we will allocate fits, so it is the loop's own terminal condition, not the last errno — and the initial stack attempt and the growth loop are **one** loop with **one** `buffer_too_small` guard (`from_stack = heap.is_empty()` keeps the common path allocation-free, growth is `heap.len().max(INITIAL_GETCWD_SIZE).saturating_mul(2)`, so the size counter duplicated from the buffer is gone), which leaves every guard mutant changing the *answer* rather than the count: `getcwd_deleted_cwd_fails_enoent` goes red on `buffer_too_small → true` and on the guard's second `==` → `!=` (2 becomes 27), `getcwd_over_cap_returns_error` asserts `E2BIG` and goes red on the guard → `false`, on its first `==` → `!=` and on `||` → `&&`, and `getcwd_returns_deep_path_over_4k` / `getcwd_returns_deep_path_under_cap` pin the cap's three directions. A focused `cargo mutants` run of the file reports 0 missed (13 caught, 3 unviable). The deleted-CWD tests (`unsafe/sys/tests/env.rs`, `safe/fdshell/tests/pwd.rs`) still pin the observable outcome (errno 2, silent exit). User-visible: a CWD whose path needs more than `MAX_GETCWD_SIZE` (1 MiB) now fails 27 (`E2BIG`) where it failed 34 (`ERANGE`). **Rule:** a retry loop that returns the last errno it saw makes *every* too-small-guard mutant equivalent at once; name the terminal condition as its own error and merge duplicated attempt arms into one guarded loop (CATCHING_MUTANTS rule 21).
 
 ## `_IOW*` over a uapi struct with a trailing flexible array member must be sized to the header, not a fixed `digest[N]` field
 The uapi `struct fsverity_digest` ends in a flexible array member (`__u8 digest[]`), so `sizeof(struct fsverity_digest)` is only the 4-byte `{__u16 algorithm, __u16 size}` header. `libc::_IOWR::<T>('f', 134)` encodes `size_of::<T>()` into the ioctl command number, so `T` must be that 4-byte header. A struct with a fixed `digest: [u8; 64]` field is 68 bytes and yields a *different* command number → the kernel sees an unknown request and the ioctl fails `ENOTTY` (25) with zero diagnostic value. Fixed by a 4-byte `FsverityDigestHead` + `assert!(size_of::<FsverityDigestHead>() == 4)` in `unsafe/sys/src/fsverity.rs`, which encodes the trap as a compile-time check; the runtime buffer is the 68-byte header+digest. General rule: when wrapping a `_IOW*` ioctl whose uapi struct has a trailing flexible array member, the type passed to `_IOW*` is the fixed prefix (header), and the buffer you hand to the kernel may be larger than that header.
@@ -461,8 +461,8 @@ An AF_UNIX abstract address is `{sa_family, [sa_data: u8; 108]}`, and `sa_data` 
 ## A FIFO opened `O_RDWR` is a non-blocking self-pipe; create builtins default `--mode` to the umask-masked convention
 `open(fifo, O_RDWR)` succeeds with no peer end (verified: C probe — write+read on the same handle round-trips), which is why `mkfifoat` reopens its just-created FIFO with a single `O_RDWR` flag (one bidirectional handle; two separate blocking ends would need non-blocking tricks). The `--mode` rule for the same builtin family: every create builtin ends with a reopen of the object it just made, and the kernel stores the requested mode as `mode & ~umask`, so the default must be the coreutils value — `0777` for `mkdirat` (a directory needs the owner `x` bit for path lookups through the exported fd: `0666 & ~022 = 0644` is a directory you cannot create files in by path) and `0666` for `mkfifoat` and `openat2 --flags O_CREAT`. The builtin must **not** pre-mask the mode: the kernel applies the umask, and the builtin only reads it (`sys::umask::get()`) to *predict* the stored value. A mode whose masked value lacks the bits the builtin's own reopen needs (`r|x` for `mkdirat`, `r|w` for `mkfifoat`) is rejected in parse by `builtins::mode::require_reopenable`: predicting the kernel's `EACCES` (13) beats relaying it, because the relayed version runs after the object is on disk with no fd captured, and a bare errno reads like a permission problem — the guard names `--mode` and `umask` and creates nothing. Pin modes in e2e tests by putting `umask 0o022` as the first command of the script (the shell applies it with `umask(2)`, forked builtins inherit it, and `sys::umask::set` keeps the cache in sync); builtins unit tests run with the cache uninitialized (`get() == 0`, so effective == requested) and assert pure bit boundaries. Never call `sys::umask::set()` in a unit test: its `debug_assert_eq!` fires when the cache was never initialized (nextest runs debug profiles) and it changes the umask for every test running concurrently in the same binary.
 
-## Over-reserving the cmsg control buffer is an accepted equivalent (net sendmsg/recvmsg)
-In `unsafe/sys/src/net/cmsg.rs`, the `+`→`*` mutants of `cred_space()` (line 14, both `+`s) and of `MAX_CTRL` (line 18) over-reserve the recv control buffer (e.g. `MAX_CTRL` 320 → 11200). `recvmsg` hands the kernel the *needed* size as `msg_controllen` (computed from `max_fds`, not from `MAX_CTRL`), and the kernel only ever writes as much control data as the message actually carries, so a larger stack buffer is harmless — no test can observe over-allocation; accepted equivalents, recorded rather than chased. The `+`→`-` mutants of the same expressions are different animals: `cred_space` `-` (→16) truncates the cred cmsg in a combined fd+cred receive and is killed by `test_recvmsg_creds_with_fd`; but `MAX_CTRL` `-` (→240 < the 280 a 64-fd rights cmsg needs) is a **silent stack overflow, verified unkillable**: the wrapper still tells the kernel `msg_controllen = 280`, so the kernel writes 280 bytes into the 240-byte array. Stable rustc enables no stack protector, the 40 overflow bytes land inside the wrapper's own frame, and — because the kernel writes the *real* fd values there and the cmsg walker reads exactly those bytes back — every assertion in `test_recvmsg_max_fds` (and the full 409-test sys suite) passes under the mutant, confirmed by cargo-mutants. The test still earns its place: it pins the max-size path against size-math regressions. A sentinel canary after the buffer would turn the overflow into an observable error, but the overflow exists only under the mutant (unmutated `MAX_CTRL` is always at least the `msg_controllen` the wrapper passes), so the residual is documented instead of paying for a canary on every `recvmsg`.
+## A cmsg control buffer sized by arithmetic has an unobservable over-reserving mutant and a silent stack-overflow twin (net sendmsg/recvmsg)
+In `unsafe/sys/src/net/cmsg.rs` the two sizes were arithmetic: `cred_space()` was `(size_of::<cmsghdr>() + size_of::<ucred>() + 7) & !7` and `MAX_CTRL` a sum of two spaces. Their `+`→`*` mutants over-reserve the recv control buffer (e.g. `MAX_CTRL` 320 → 11200), and `recvmsg` hands the kernel the *needed* size as `msg_controllen` (computed from `max_fds`, not from `MAX_CTRL`) while the kernel writes only as much control data as the message actually carries, so over-allocation is invisible — those four `+` mutants were recorded as accepted equivalents, not chased. The `+`→`-` twins are different animals: `cred_space` `-` (→16) truncates the cred cmsg in a combined fd+cred receive and is killed by `test_recvmsg_creds_with_fd`; `MAX_CTRL` `-` (→240 < the 280 a 64-fd rights cmsg needs) is a **silent stack overflow, verified unkillable** — the wrapper still passes `msg_controllen = 280`, stable rustc enables no stack protector, the 40 overflow bytes land inside the wrapper's own frame, and because the kernel writes the *real* fd values there the cmsg walker reads exactly those bytes back, so every assertion of `test_recvmsg_max_fds` and the whole 409-test sys suite passes under the mutant. Both families are gone (task #466) without paying for a sentinel canary on every `recvmsg`: the sizes are now `size_of` over `#[repr(C)]` layout types (`CredCmsg` = 32, `CtrlLayout` = 304 — the same numbers the arithmetic produced, with no operator left to mutate), and the safety direction is a compile-time fact (three asserts: `size_of::<CredCmsg>() == 32`, `MAX_CTRL == 304`, and `MAX_CTRL >= rights_space(MAX_FDS) + cred_space()`), so a layout that shrinks is a compile error with a name on it instead of a 40-byte overflow into the wrapper's frame. `test_recvmsg_max_fds` still earns its place pinning the max-size path against size-math regressions. **Rule:** for a buffer whose size the kernel is *told* and must *fit*, arithmetic is a mutant family whose dangerous direction no test can see; make the size a type and assert the fit (CATCHING_MUTANTS rule 20).
 
 ## Slice the word vector, its quote mask, and its quoted-flag vector with the same offset
 `CommandLine` keeps `args`, `args_mask` and `args_quoted` as parallel, equal-length vectors: `args[i]` is described by `args_mask[i]` (per-byte quote mask) and `args_quoted[i]` (the word's raw span contained quotes). Any dispatcher that drops leading words — the binary in `exec`/`become`, the `builtin` keyword, the `set`/`--` flag, the `timeout` keyword — must slice **all three** by the same offset. `replacer/external.rs` passed `args.get(1..)` against the *full* `args_mask`, so every argument carried its predecessor's mask and `exec printf "[%s] " x "a b"` word-split both the quoted format and the quoted argument. The defect is silent for single-word commands, which is why it survived. A missed third slice is just as silent — it disables the quoted-empty-word fix (task #76) for one path with no error. Correct sites to copy from: `replacer.rs` (`.get(2..)` on all three), `intercept/set_positional.rs` (`.get(1..)` on all three), `intercept/timeout_cmd/parse.rs` (`.get(2..)` on all three). Rule for the regression test: pin the *offset*, not just the symptom — use words with **different** quoting (one fully quoted, one not), otherwise an off-by-one and an off-by-two slice are indistinguishable.
@@ -808,13 +808,13 @@ bash's `%a`/`%A` convert the decimal argument to a **long double** (80-bit on x8
 ## bash `strtol`/`strtod` print the parsed prefix on trailing junk, not 0
 A numeric conversion with junk after the parsed prefix (`42x`, `1.5x`, `0x1g`) is an **error** (exit status 1, diagnostic to stderr), but the value printed is the **parsed prefix**, not 0: `printf '%d' 42x` → `42`, `printf '%f' 1.5x` → `1.500000`. Only a *nothing-parsed* argument (`abc`) falls back to 0. fdshell mirrors this in all three numeric parsers: `next_int`/`next_uint` return the `IntParse::Trailing(v)` / `UintParse::Trailing(v)` value, and `next_float` returns `p.value` (the prefix) when `p.consumed < a.len()`. The re-work initially left `next_float` at `0.0` on trailing junk even though the integer conversions had already been fixed to print the prefix — an internal inconsistency and a divergence from bash; the float path now prints the prefix too. Pinned by `integer_stops_at_the_first_invalid_byte` (ints) and `float_trailing_garbage_is_an_error` (floats).
 
-## The base-0 accumulator `limit` `+1`/`*1` and `value > limit`/`>= limit` are accepted equivalent mutants
-The overflow *classification* in the base-0 integer parsers is computed by `clamp`, not by the accumulation loop's `limit`; the loop's `limit` only decides *when* to stop reading digits, and the `end` index it leaves behind is consulted **only** for the non-overflow `Exact`/`Trailing` split. So any mutant that moves the break point by one digit is unobservable — it still overflows to the same `clamp`ed bound with `overflow == true` (where `end` is ignored) or, for a non-overflow value, never reaches the limit at all. Recorded so future `cargo mutants` runs do not re-flag them:
+## The base-0 accumulation cap is observable on the negative side: name it from data, do not spell it `+ 1`
+The base-0 integer parsers spelled the accumulation bound `(i64::MAX as u128) + 1` / `(u64::MAX as u128) + 1` and broke out of the loop on `value > limit`. The record here declared the `+`→`*` mutant (whose bound *is* the representable bound, one lower) and the `value > limit`→`>= limit` twin equivalent: the overflow *classification* is computed by `clamp`, not by the loop, and the `end` index the loop leaves behind is consulted **only** for the non-overflow `Exact`/`Trailing` split, so a break point shifted by one digit looked unobservable. That argument holds only for the **positive** sign. At a negative bound, a cap one lower (or a `>=` break) stops on the 19-digit `2^63` prefix, `clamp` then reads `value == 2^63` as representable, and the answer flips from `Overflow(i64::MIN)` to `Trailing(i64::MIN)` — the same printed number, so only the variant shows it — and the same flip sits at `u64::MAX` once the cap **is** the representable bound. Killed (task #466):
 
-1. `shortcstr/int.rs:59` / `shortcstr/int/uint.rs:55` — `limit = (i64::MAX as u128) + 1` / `(u64::MAX as u128) + 1` mutated `+`→`*` (= the bound itself). The break shifts by one digit, but the overflow result is identical (`clamp` returns the same saturated bound, `overflow == true`, `end` unconsulted).
-2. `shortcstr/int.rs:69` / `shortcstr/int/uint.rs:65` — `value > limit` mutated to `value >= limit`. Same reasoning: the break shifts, the classification does not.
+1. `shortcstr/int.rs` / `shortcstr/int/uint.rs` — both sites now read one `const MAGNITUDE_CAP: u128` (`i64::MIN.unsigned_abs() as u128` / `u64::MAX as u128`), shared by the loop's break and `clamp`'s comparison. A method call and a cast generate no mutant, so the `+`→`*` family has no site to land on; the cap is stated once, so the loop and the classifier cannot drift.
+2. `shortcstr/int.rs` / `shortcstr/int/uint.rs` — `value > MAGNITUDE_CAP` mutated to `>=` is killed by the new pins: `base0_int_overflow_at_min_magnitude_plus_a_digit` (`-92233720368547758089` → `IntParse::Overflow(i64::MIN)`) and `base0_uint_overflow_at_max_magnitude_plus_a_digit` (`184467440737095516159` → `UintParse::Overflow(u64::MAX)`) assert the **variant**, and the hand-applied `>=` twin turns the int row red on `Trailing(i64::MIN)`.
 
-The `+`→`-` neighbours (a bound-*minus*-one limit stops the loop at the max value and reclassifies an overflow as `Trailing`) **are** killable and are pinned by `base0_int_overflow_at_max_prefix` / `base0_uint_overflow_at_max_prefix`.
+The `+`→`-` neighbours (a bound-*minus*-one limit stops the loop at the max value and reclassifies an overflow as `Trailing`) stay killed by `base0_int_overflow_at_max_prefix` / `base0_uint_overflow_at_max_prefix`. **Rule:** "the loop's `end` is unconsulted" is a claim about one sign — pin the boundary value's variant on both sides, and derive the cap from the type's own bound (CATCHING_MUTANTS rule 22).
 
 ## Two near-duplicate read loops diverge silently: one lost its `eof` flag
 `read` had two byte-accumulation loops doing the same job — a byte-at-a-time stdin loop in `io.rs` and a 4 KiB-chunked fd loop in `read_from_fd.rs` — and they had drifted: the stdin loop never set the `eof` out-parameter, so `read x < /dev/null` returned status 0 + an empty variable while the identical `read -u 0 x` returned status 1. The divergence was invisible to every test because the suite only exercised newline-terminated stdin, where `eof` is never consulted. Rule: when two loops accumulate the same line with the same termination rules, factor the state machine into one shared accumulator (here `read/line.rs::Line`, driven by both paths through `read_line_from_fd`) so the two sources cannot drift again; keep the source-specific fd handling in the caller. A status out-parameter that only one of two parallel paths sets is a latent divergence — give the shared state a single `end()` that both paths populate.
@@ -979,13 +979,20 @@ re-borrows it, and every borrow stays block-scoped (see
 aborts fdshell's script where bash skips only the command (task #179):
 `echo hi > $(true); echo after` prints nothing at rc 1. The pins encode
 fdshell's behaviour and name #179, so a later rc change is a visible edit.
-9. **One accepted equivalent mutant in `parse/redirect/attached.rs` (do not
-chase).** `50:63` `quoted_bytes(mask, op_pos + 1, op_pos + 2)` → `op_pos * 1`
-(the `&` of the dup arm): line 26's gate has already returned for a quoted
-operator byte, so the range can only start at an **unquoted** `>`, and
-widening it to `op_pos..op_pos + 2` cannot answer differently — the whole
-suite is green under the mutation. Recorded with the equivalent-mutant entries
-above so a future `cargo mutants` sweep does not re-flag it.
+9. **Its one accepted-equivalent mutant is now killed, by narrowing the
+   accessor.** The dup arm's gate in `parse/redirect/attached.rs` read the `&`
+   bit through the 2-byte window `quoted_bytes(mask, op_pos + 1, op_pos + 2)`,
+   whose `op_pos + 1`→`op_pos * 1` mutant only widens a range whose first byte
+   the operator gate above has already proven unquoted — green suite, recorded
+   as "do not chase". The same bit is now the one-byte
+   `mask::quoted_at(mask, op_pos + 1)`, so that mutation answers *unquoted*,
+   the dup arm fires on `2> "&" 1`, and
+   `attached::tests::quoted_dup_ampersand_falls_through_to_the_path`,
+   `redirect::tests::quoted_continuation_byte_makes_the_operand_a_path` and
+   `quoted_dup_ampersand_after_a_multi_digit_io_number_is_a_path` go red (the
+   `+`→`-` twin dies on index underflow in `parse::block_tail`). Rule: a range
+   accessor that is provably equivalent on a one-byte range is a round-trip
+   through a wider interface — call the accessor that takes one byte.
 
 ## A parent-side intercept's words are a substitution surface: expand before borrowing the state
 `hash`'s words expand (task #279): `hash $(echo ls)` hashes the name `ls`, not
@@ -2265,30 +2272,41 @@ the comment-terminated delimiter row `if :; then cat <<Q # c` / `cat <<Q # c`
 
 **Rules:** before recording a mutant as equivalent, prove the branch is reachable at all; and when a survivor is a *pin gap*, write down the shape that would pin it — the survivor then dies with the pin. Two accepted equivalents surfaced by the same run stay in the registry: `segment/block/keyword.rs`'s resume `end + 1` (`+`→`-`, `+`→`*`) — the resume lands on the separator closing an unclosed block's run, where the scanner's separator arm and the run parser's EOF flush produce the same segment text, so no output distinguishes them (the ±1-offset species).
 
-## Only the identity `+ 1` mutants survive in the cond-boundary region rule
+## The cond-boundary region rule: its surviving mutant is the region `end`, not the window's `+ 1`
 
-The survivors in `cond/boundary/body.rs` are the **identity** mutation of a
-`+ 1` term:
+The `+ 1` terms here were the **identity** mutations (`+`→`*`) of a window
+bound, recorded as unobservable; both are now killed at the helper's own
+granularity:
 
 1. `line_bodies_for_line(line, anchor, nl + 1)` — the `+`→`*` mutant is `nl * 1`,
-   the identity, and no input **the program can produce** distinguishes it: the
-   difference needs an unterminated quote in the delimiter word (e.g. `cat <<'a b`
-   + `a b`, where the raw window end decides the match — `nl` finds the raw
-   delimiter `a b`, `nl + 1` matches `a b\n` and never a delimiter line), and the
-   parse layer rejects the unmatched quote before the cond layer ever sees such a
-   text; so this is a program-level equivalence, not a helper-level invariant.
-   Same accepted species as `parse/cond_bodies.rs`'s `n + 1` → `n * 1`
-   (LESSONS: "A region window and the skip derived from it are one pair"). Its `+`→`-` twin,
-   a real shift of the window's end, is **killed** (measured). The mutant sits in
-   `cond/boundary/body.rs::window` after the window expression moved out of
-   `regions`, and stays missed there for the same reason: the byte at `nl` is the
-   run's terminating newline, and the window's `to` bound only *discovers* `<<`
-   sites, so no site starts there.
-2. `line_start_of`'s `.map(|p| p + 1)` — `+`→`*` is again the identity. A loaded
-   mutation run listed it *caught*: that is the flakiness the entry "A mutant
-   caught by a flaky test is a false kill" warns about (measured quietly twice on
-   the mutated tree, the whole suite passes), so it is accepted-equivalent, not
-   killed. Its `+`→`-` twin **is** killed, by
+   the identity, and the old record's argument was that no input **the program
+   can produce** distinguishes it: the difference needs an unterminated quote in
+   the delimiter word (e.g. `cat <<'a b` + `a b`, where the raw window end
+   decides the match — `nl` finds the raw delimiter `a b`, `nl + 1` matches
+   `a b\n` and never a delimiter line), and the parse layer rejects the unmatched
+   quote before the cond layer ever sees such a text. That is a statement about
+   the **program**, and the helper is unit-tested with exactly the text the
+   rejection forbids: `cond/boundary/body/tests.rs::window_end_is_one_past_the_runs_newline`
+   calls the window directly and asserts the triple — at `to == nl` the quote
+   region stops at the window edge, the delimiter reads `a b`, the next line
+   matches it and the run owns a region `(11, 14)` to skip; one past the newline
+   the quote swallows the newline byte, the delimiter is `a b\n`, no line matches
+   and the run carries no region. Same accepted species as
+   `parse/cond_bodies.rs`'s `n + 1` → `n * 1`
+   (LESSONS: "A region window and the skip derived from it are one pair") — that
+   file has no `n + 1` site left, so the pair lives only here now. The `+`→`-`
+   twin, a real shift of the window's end, stays **killed** (measured).
+2. `scan/heredoc/line_start`'s `.map(|n| n + 1)` — `+`→`*` is again the identity,
+   answering with the newline's own index. A loaded mutation run listed it
+   *caught*: that is the flakiness the entry "A mutant caught by a flaky test is a false kill" warns about (measured quietly twice on
+   the mutated tree, the whole suite passes), so it was accepted-equivalent, not
+   killed. It is now killed by
+   `scan/heredoc/opaque/tests.rs::a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron`:
+   the region filter in `scan/heredoc/opaque` compares this anchor with the
+   window's `from`, so a window that starts exactly on the line whose operator
+   claimed the region drops out of the filter under the mutant — the terminator
+   line's own `<<` is counted, and the opaque count collapses to the plain count
+   (1 vs 2 on the pinned text). The `+`→`-` twin stays killed, by
    `cond/boundary/body/tests.rs::region_window_is_the_runs_own_physical_line`: at
    `p == 0` the mutation computes `0 - 1` in `usize` — a debug panic, and in
    release `line.get(0..usize::MAX)` is `None`, so the anchor collapses to `0` and
@@ -2320,11 +2338,17 @@ new module: the sites left outside the touched files were
 `cond/boundary/gate.rs` (`b == b'\n'` → `!=`, the region rule consulted at every
 byte) and `scan/heredoc/ops.rs` (`while i < next` → `<=`, one `advance` past the
 delimiter word) — tracked as task #431 with the probes that failed to kill them.
+Hand-reprobing the gate mutant on the current tree (task #466) leaves all 5 076
+`fdshell` tests green, so the residual stands; an *earlier* reading of the same
+probe reported 27 failures, which were files an aborted mutated run had leaked
+into the crate root (a tracked `safe/fdshell/0` flips `test -f 0`), not a kill —
+see CATCHING_MUTANTS rule 23.
 
-**Rule:** the only `+ 1` mutant accepted here is the identity. A "±1 offset is
-equivalent" claim must name the byte the offset lands on and prove the scan treats
-it identically; for this helper the offsets *do* change the window, and the pins
-above prove it.
+**Rule:** a `+ 1` identity is never accepted on a program-level reachability
+argument: pin the helper with the very text the program rejects (CATCHING_MUTANTS
+rule 19). A "±1 offset is equivalent" claim must name the byte the offset lands
+on and prove the scan treats it identically; that is item 3, and it is the only
+survivor of this rule now.
 
 Not an equivalence but dead code: the old `regions()` ended with
 `.filter(|&(start, _)| start < line.len())` and a doc claim that the filter keeps
@@ -3828,7 +3852,7 @@ Both sources are now **deleted**, not tested around: `glue.rs` keeps only `strip
 
 ## A region arm keyed on the newline is immune to its `!=` twin (task #236)
 
-`cond/boundary/gate.rs::gate_end`'s heredoc-region arm reads `b == b'\n' && let Some(body::Step::Skip(resume)) = body::step(line, run_start, i, block_depth)`. The `==`->`!=` mutant survives the whole suite *and* a 30-shape differential sweep of the gate run through the binary (single- and multi-line: a short-circuit `||` before a block, a nested `{ ...; }` group, a glued pair, quoted `;`s, one- and two-operator heredocs, a `<<-` body, a subshell, a pipeline, a `case`/`for`/`while` list) - every shape is byte- and status-identical to the unmutated build. The reason is the region helper's contract: `body::step` reports regions only for a run whose body and delimiter lines are complete, and its `Skip(resume)` *is* the newline terminating the last delimiter line. At a non-newline byte where the regions are already complete, the jump lands on that same newline - the byte the unmutated scan reaches one step later - so the depth-0 separator the gate returns is the same. The `==` states "a run ends at a newline" for the reader; it is not a branch with two behaviors. Recorded so a future `cargo mutants` run does not re-flag it; the arm's behavior stays pinned by the region rows of `cond/tests.rs::gate_end_skips_the_gated_and_list_to_its_separator` (which pass under the mutant).
+`cond/boundary/gate.rs::gate_end`'s heredoc-region arm reads `b == b'\n' && let Some(body::Step::Skip(resume)) = body::step(line, run_start, i, block_depth)`. The `==`->`!=` mutant survives the whole suite *and* a 30-shape differential sweep of the gate run through the binary (single- and multi-line: a short-circuit `||` before a block, a nested `{ ...; }` group, a glued pair, quoted `;`s, one- and two-operator heredocs, a `<<-` body, a subshell, a pipeline, a `case`/`for`/`while` list) - every shape is byte- and status-identical to the unmutated build. The reason is the region helper's contract: `body::step` reports regions only for a run whose body and delimiter lines are complete, and its `Skip(resume)` *is* the newline terminating the last delimiter line. At a non-newline byte where the regions are already complete, the jump lands on that same newline - the byte the unmutated scan reaches one step later - so the depth-0 separator the gate returns is the same. The `==` states "a run ends at a newline" for the reader; it is not a branch with two behaviors. Recorded so a future `cargo mutants` run does not re-flag it; the arm's behavior stays pinned by the region rows of `cond/tests.rs::gate_end_skips_the_gated_and_list_to_its_separator` (which pass under the mutant). Re-probed by hand on the current tree (task #466): the mutation leaves all 5 076 `fdshell` tests green, so the entry stands — a probe that reported 27 failures here was measured with files an aborted mutated run had leaked into the crate root, which is a pollution artifact, not a kill (CATCHING_MUTANTS rule 23).
 
 ## `getdents64` entry order is a filesystem property, not a kernel guarantee
 

@@ -124,3 +124,54 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     `parse/case_block/literal.rs`: the bound and rule 11's rebinding both kept
     the suite green, deleting them deleted both families, and the step base
     shared with the output range is killed by the exact-index pins (rule 9).
+19. **Program-level unreachability does not bind a helper-level call.** Rule 10's
+    "equivalent because the input is rejected upstream" is a claim about the
+    *program*; a unit test feeds the helper exactly the text the rejection
+    forbids. Pin the helper's own answer there and the identity dies:
+    `cond/boundary/body`'s window end `nl + 1` → `nl * 1` (recorded equivalent
+    because an unterminated-quote delimiter word never reaches the cond layer)
+    fails a direct `window` row that asserts the exact `(from, to)`, region list
+    and resume — at `to == nl` the quote region stops at the window edge and the
+    delimiter reads `a b` (a match), one past it the quote swallows the newline
+    byte and nothing matches. Same for `scan/heredoc/line_start`'s `map(|n| n +
+    1)`: the identity answers with the newline's own index, and
+    `scan/heredoc/opaque`'s region filter compares that anchor with the window's
+    start, so under the mutant the terminator line's own `<<` is counted and the
+    opaque count collapses to the plain count.
+20. **Make a size constant a type.** A size computed by arithmetic
+    (`header + payload + pad`) is a `+`→`*` family that over-reserves
+    *invisibly* — the kernel is told the *needed* length and writes only what the
+    message carries — and its `+`→`-` twin under-reserves, so the kernel writes
+    past the array: because the walker reads back exactly the bytes the kernel
+    wrote there, every assertion passes. That is an unkillable stack overflow,
+    measured on `net/cmsg.rs` (`MAX_CTRL` 304 → 240 against a 280-byte cmsg).
+    Write the layout as a `#[repr(C)]` struct, take `size_of`, and pin the safety
+    direction where the compiler can check it:
+    `const _: () = assert!(MAX_CTRL >= rights_space(MAX_FDS) + cred_space());`.
+    The mutation family disappears with the operators, and a layout that shrinks
+    becomes a compile error with a name on it.
+21. **Give the loop's terminal answer its own error.** When a retry loop returns
+    the last errno it saw, every guard mutant that swallows one errno and retries
+    in unchanged process state returns a byte-identical answer — only the syscall
+    count differs — so the whole guard family is equivalent *at once*. Name the
+    terminal condition (`SyscallError::E2BIG("getcwd")` past the allocation cap)
+    and merge duplicated attempt arms into one loop with one guard, so each guard
+    mutant changes the answer: four recorded equivalents in `env/getcwd.rs` died
+    together that way (the deleted-CWD row goes red on the guard → `true` and on
+    `==`→`!=`, the over-cap row on the guard → `false` and on `||`→`&&`).
+22. **Operators need a site.** A cast and a method call generate no mutants, so
+    derive a bound through them (`i64::MIN.unsigned_abs() as u128`,
+    `u64::MAX as u128`) and share one `const` with every consumer of the number
+    (rule 13) — the loop's break and the classifier's comparison then cannot
+    drift. Do not launder a rule-bearing comparison into a method to silence a
+    family (rule 16): a bound that must be exact belongs in a `const` with an
+    assert (rule 20), and the boundary value's *variant* gets its own row.
+23. **Clean the crate root before trusting a mutation probe, and never stage it.**
+    An aborted (mutated) test run leaks hundreds of files into the crate root,
+    which is the unit tests' CWD, and a leaked file named `0` flips
+    `child::test::tests::file_tests_on_fd_vars` (`test -f 0`). A probe measured on
+    that tree reports a "kill" that is pollution — one gate mutant was recorded as
+    killed on 27 such failures and re-probed green on a clean tree. `git clean
+    -fd` before measuring, and stage explicit paths: `git add -A` commits the
+    leak, and the committed `safe/fdshell/0` then breaks the *clean* suite at
+    every run.
