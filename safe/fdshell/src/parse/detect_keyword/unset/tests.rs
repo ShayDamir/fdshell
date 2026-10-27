@@ -126,3 +126,28 @@ fn a_glued_word_is_not_the_keyword() {
         vec![(b'v', c"unsetx".into()), (b'v', c"v".into())]
     );
 }
+
+/// The quote bytes of the keyword word are **transparent** (task #335): the
+/// detector reads the words after it as the tokenizer wrote them — quotes
+/// removed — so a quoted `unset` yields exactly the unquoted row's operand
+/// list. The site is deliberately ungated on POSIX §2.9.1: an `unset` *builtin*
+/// would receive the **expanded** words, and `unset %f` would arrive as the
+/// fd's number, closing nothing (POSIX_COMPATIBILITY.md, "Quoted keywords are
+/// command words, quoted control keywords are not").
+#[test]
+fn the_quote_bytes_of_the_keyword_are_transparent() {
+    assert_eq!(shape(&targets(b"'unset' %f")), vec![(b'f', c"f".into())]);
+    assert_eq!(shape(&targets(b"'unset' zz")), vec![(b'v', c"zz".into())]);
+    assert_eq!(
+        shape(&targets(b"u\"nset\" v %f")),
+        vec![(b'v', c"v".into()), (b'f', c"f".into())]
+    );
+    assert!(targets(b"'unset'").is_empty());
+    // The text rule again: `un"set"` is the keyword word, and an operand quoted
+    // as a whole is one name, quotes and all.
+    assert_eq!(shape(&targets(b"un\"set\" v")), vec![(b'v', c"v".into())]);
+    assert_eq!(
+        shape(&targets(b"'unset' \"v w\"")),
+        vec![(b'v', c"v w".into())]
+    );
+}

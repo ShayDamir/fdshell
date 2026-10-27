@@ -2013,6 +2013,22 @@ fn test_umask_numeric() {
     assert_eq!(mask, Some(0o077));
 }
 
+/// The quote bytes of the `umask` keyword word are transparent (task #335): the
+/// detector reads the word's **text**, so every spelling is the `umask 022`
+/// row's `ParsedLine`. The site is ungated on purpose — fdshell has no `umask`
+/// builtin, so gating it would trade the mask for `umask: not found`
+/// (POSIX_COMPATIBILITY.md, "Quoted keywords are command words, quoted control
+/// keywords are not").
+#[test]
+fn test_umask_quoted_keyword_word_is_transparent() {
+    for line in [&b"'umask' 022"[..], b"u\"mask\" 022", b"umask 022"] {
+        let ParsedLine::Umask(mask) = parse(line).unwrap() else {
+            panic!("expected Umask for {line:?}")
+        };
+        assert_eq!(mask, Some(0o022));
+    }
+}
+
 #[test]
 fn test_umask_zero() {
     let ParsedLine::Umask(mask) = parse(b"umask 0o000").unwrap() else {

@@ -96,3 +96,29 @@ fn count_stays_a_separate_token_in_a_loop_body() {
     ));
     assert_eq!(inner.len(), 2, "break 2 must tokenize as 2 tokens");
 }
+
+/// The quote bytes of a control keyword are **not** gated here (task #335): the
+/// detector matches the word's **text**, so every quoted spelling yields the
+/// same `ParsedLine` as the unquoted row. `parse::word_quoted::keyword_word` is
+/// deliberately not called at these sites — fdshell has no `break`/`continue`/
+/// `return` builtin, so gating them would trade bash's builtin run for
+/// `break: not found` (POSIX_COMPATIBILITY.md, "Quoted keywords are command
+/// words, quoted control keywords are not"). The gated twin, where a `time`/`wait`
+/// builtin *does* exist, is `keywords/tests.rs`'s
+/// `keyword_delta_wait_block_vs_builtin`.
+#[test]
+fn the_quote_bytes_of_a_control_keyword_are_transparent() {
+    assert_eq!(count_of(b"'break' 2"), 2);
+    assert_eq!(count_of(b"b\"reak\" 2"), 2);
+    assert_eq!(count_of(b"''break 2"), 2);
+    assert_eq!(count_of(b"'continue' 2"), 2);
+    let quoted_return = tokenize_statement(b"'return' 3").unwrap();
+    assert!(matches!(
+        detect_return(&quoted_return).unwrap(),
+        Some(ParsedLine::Return(Some(3)))
+    ));
+    // The text is the keyword, and the count is a separate word as ever: a
+    // spelling whose text is not the name reaches no keyword at all.
+    assert!(control(b"br\"ek\" 2").unwrap().is_none());
+    assert_eq!(count_of(b"break 2"), 2);
+}

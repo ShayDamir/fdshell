@@ -412,6 +412,256 @@ fn quoted_block_openers_are_command_words() {
     }
 }
 
+// The five control keywords `break`, `continue`, `return`, `umask`, `unset`
+// (task #335). fdshell implements them as **parse keywords** and has no builtin
+// of any of those names, so the POSIX §2.9.1 gate that turns the block openers
+// above into command words is deliberately *not* applied to them: the keyword
+// recognizer reads the word's **text**, whose quote bytes are already gone. The
+// decision and its mechanism are in `POSIX_COMPATIBILITY.md`, section "Quoted
+// keywords are command words, quoted control keywords are not".
+//
+// Every row of the table was measured 2026-10-27 with `bash` 5.3.9 and
+// `target/debug/fdshell -c` built from this branch (base `cf566dbc`):
+//
+// ```text
+// 'break' 1, "break" 1, b"reak" 1, ''break 1  bash warns rc 0 | fdshell `'break' is not inside a loop` rc 1
+// break 1 (the unquoted twin)                 identical to every quoted spelling, in both shells
+// 'continue' 1                                bash warns rc 0 | fdshell `'continue' is not inside a loop` rc 1
+// 'return' 3                                  bash rc 2       | fdshell `'return' is not inside a function` rc 1
+// f() { 'return' 3; echo x; }; f; echo rc=$?  rc=3, rc 0 in both
+// for i in 1 2; do 'break'; echo after; done  no output, rc 0 in both
+// umask 000; 'umask' 022; umask               `0022`, rc 0 in both (fdshell prints no trailing newline, #472)
+// umask 000; 'umask'                          `0000` in both, rc 0
+// umask 000; 'umask' -p, 'umask' 022 extra    bash rc 0 (`umask 0000` / extras ignored) | fdshell rc 1 parse error, #472
+// zz=1; 'unset' zz; echo "[${zz:-set}]"       `[set]`, rc 0 in both
+// builtin openat2 … %>%f; 'unset' %f          fdshell rc 1 on the next use: the fd is closed
+// 'builtin' echo hi, 'command' echo hi        `hi`, rc 0 in both
+// command break, builtin break, command umask, builtin umask   bash runs its builtin rc 0 | fdshell rc 1
+// echo a | 'break'                            bash warns rc 0 | fdshell `"break" not found` rc 1
+// ```
+
+/// The quote bytes of a control keyword are **transparent**: every spelling
+/// reaches the same keyword as the unquoted row and answers with the same
+/// report at the same rc (the unquoted twin `break 2; echo end` is pinned by
+/// `tests/loops.rs::break_2_outside_loop_aborts_rc1`). The rc and the message
+/// differ from bash (`break: only meaningful in a … loop`, rc 0; `return`, rc 2)
+/// exactly as the *keyword's* accepted semantics does — quoting changes nothing
+/// (the `break_2_outside_loop_aborts_rc1` family in `tests/loops.rs`, task #99
+/// rule 7).
+#[test]
+fn the_quote_bytes_of_a_control_keyword_are_transparent() {
+    for script in [
+        "'break' 1",
+        "\"break\" 1",
+        "b\"reak\" 1",
+        "''break 1",
+        "break 1",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("'break' is not inside a loop"),
+            "{script}: stderr={err:?}"
+        );
+    }
+    let (_out, err, code) = run("'continue' 1");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("'continue' is not inside a loop"),
+        "stderr={err:?}"
+    );
+    // `return` outside a function: the keyword's rc 1, bash's rc 2. The same
+    // accepted keyword-semantics family as the rows above, pinned so a change
+    // to it (a keyword task, not a quoting one) shows up here.
+    let (_out, err, code) = run("'return' 3");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("'return' is not inside a function"),
+        "stderr={err:?}"
+    );
+    // The word's **text** is the keyword, so a spelling whose text is not the
+    // name is a plain command word in both shells (bash `brek: command not
+    // found`, rc 127; fdshell's command-not-found rc is 1).
+    let (_out, err, code) = run("br\"ek\" 1");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("brek"), "stderr={err:?}");
+    assert!(
+        !err.contains("not inside a loop"),
+        "the word `brek` claims no keyword: stderr={err:?}"
+    );
+}
+
+/// bash: no output, rc 0. fdshell prints the same **because** the quoted word
+/// *is* the keyword: gating the site on §2.9.1 sends it to the command lookup
+/// (`break: not found`, rc 1) and the loop runs on, printing `after` twice.
+/// The row is the fence that keeps that gate off these five sites.
+#[test]
+fn a_quoted_break_and_continue_still_control_the_loop() {
+    for script in [
+        "for i in 1 2; do 'break'; echo after; done",
+        "for i in 1 2; do 'continue'; echo after; done",
+        "for i in 1 2; do b\"reak\"; echo after; done",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+    }
+    // Inside a body the text rule is unchanged: `br"ek"` is the word `brek`, a
+    // command word, and both shells print `after` twice (rc 0 — the loop's last
+    // command is the `echo`).
+    let (out, err, code) = run("for i in 1 2; do br\"ek\"; echo after; done");
+    assert_eq!(
+        (out.as_str(), code),
+        ("after\nafter\n", 0),
+        "stderr={err:?}"
+    );
+    assert!(err.contains("brek"), "stderr={err:?}");
+}
+
+/// bash: `rc=3`, rc 0 — the quoted word returns from the function, so the `echo
+/// x` after it never runs. fdshell matches, spelling by spelling.
+#[test]
+fn a_quoted_return_returns_from_the_function() {
+    for script in [
+        "f() { 'return' 3; echo x; }; f; echo rc=$?",
+        "f() { \"return\" 3; echo x; }; f; echo rc=$?",
+        "f() { ''return 3; echo x; }; f; echo rc=$?",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("rc=3\n", 0),
+            "{script}: stderr={err:?}"
+        );
+    }
+}
+
+/// The quoted word **is** the command: the mask is applied and read back, exactly
+/// as the unquoted row does. The leading `umask 000` pins the harness's own mask
+/// away from the assertion, so the rows do not depend on the environment.
+#[test]
+fn a_quoted_umask_applies_the_mask() {
+    // Accepted divergence, owner **task #472** (quote-independent, and the
+    // unquoted twin prints the same): fdshell writes the four octal digits with
+    // **no trailing newline** (`run_dispatch.rs` formats `{:04o}` and writes it
+    // bare), where bash writes `0022\n`. The digits are the point of these rows —
+    // that the quoted word applied and printed the mask at rc 0, as bash does.
+    for (script, want) in [
+        ("umask 000; 'umask' 022; umask", "0022"),
+        ("umask 000; u\"mask\" 022; umask", "0022"),
+        ("umask 000; 'umask'", "0000"),
+        ("umask 000; umask 022; umask", "0022"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // Accepted divergence, owner **task #472** (the `umask` operand surface —
+    // quote-independent, the unquoted twin answers the same): bash prints
+    // `umask 0000` for `-p` and ignores a second operand, fdshell rejects both.
+    for script in [
+        "umask 000; 'umask' -p",
+        "umask 000; umask -p",
+        "umask 000; 'umask' 022 extra",
+    ] {
+        let (out, _err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}");
+    }
+}
+
+/// bash: `[set]`, rc 0 — `zz` is gone, so the `:-` default word prints (the
+/// single-`-` operator is owner **task #257**). The fd half is the row a builtin
+/// cannot do: `%f` reaches the keyword as a **name** (the raw token word), so
+/// `'unset' %f` closes the descriptor, and the next use reports the fd variable
+/// as unset — the `tests/unset.rs::the_fd_namespace_stays_the_fd_namespace`
+/// shape.
+#[test]
+fn a_quoted_unset_removes_a_variable_and_closes_an_fd() {
+    for script in [
+        "zz=1; 'unset' zz; builtin echo \"[${zz:-set}]\"",
+        "zz=1; u\"nset\" zz; builtin echo \"[${zz:-set}]\"",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("[set]\n", 0),
+            "{script}: stderr={err:?}"
+        );
+    }
+    let (out, err, code) =
+        run("builtin openat2 --flags O_RDONLY /dev/null %>%f; 'unset' %f; builtin statx %f");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("fd variable"), "stderr={err:?}");
+    // Why a builtin named `unset` would break this: a command **argument** is an
+    // expansion surface, so with `%f` bound its argument is the fd's *number*
+    // (measured `8`). A builtin would receive `unset 8` and close nothing, while
+    // the keyword's raw token word keeps `%f` a name.
+    let (out, err, code) = run("builtin openat2 --flags O_RDONLY /dev/null %>%f; builtin echo %f");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(
+        out.trim().parse::<i32>().is_ok(),
+        "stdout={out:?}: the fd number, not the name"
+    );
+}
+
+/// The `builtin`/`command` prefix words are read from the token text
+/// (`parse/command.rs`), so the quote bytes reach nothing: `hi`, rc 0, in both
+/// shells. Gating this site would trade a real `echo` for `builtin: not found`.
+#[test]
+fn the_prefix_words_stay_ungated() {
+    for script in [
+        "'builtin' echo hi",
+        "'command' echo hi",
+        "b\"uiltin\" echo hi",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("hi\n", 0),
+            "{script}: stderr={err:?}"
+        );
+    }
+}
+
+/// The accepted cost of the decision, pinned as measured so the fix sees it.
+/// bash reaches its builtin through the prefix (`break` warns at rc 0, `umask`
+/// prints the mask); fdshell answers the command lookup — `command NAME` is
+/// `"NAME" not found`, `builtin NAME` is `"NAME" is not a shell builtin`, rc 1.
+/// Owner: **task #473** (the fix must reach the keyword's parse path, not an
+/// argv-taking builtin — see the `unset %f` row above).
+#[test]
+fn the_five_names_have_no_builtins_pinned() {
+    for (script, needle) in [
+        ("command break", "\"break\" not found"),
+        ("command continue", "\"continue\" not found"),
+        ("command return", "\"return\" not found"),
+        ("command unset", "\"unset\" not found"),
+        ("command umask 022", "\"umask\" not found"),
+        ("builtin break", "\"break\" is not a shell builtin"),
+        ("builtin continue", "\"continue\" is not a shell builtin"),
+        ("builtin return", "\"return\" is not a shell builtin"),
+        ("builtin unset", "\"unset\" is not a shell builtin"),
+        ("builtin umask", "\"umask\" is not a shell builtin"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+    }
+    // The pipeline-stage half (owner **task #381**): a stage runs in a forked
+    // child, so a control signal raised there has no loop to reach and the
+    // visible `not found` is the honest failure (bash warns at rc 0).
+    for (script, needle) in [
+        ("echo a | 'break'", "\"break\" not found"),
+        ("echo a | 'continue'", "\"continue\" not found"),
+        ("echo a | 'return'", "\"return\" not found"),
+        ("echo a | 'unset'", "\"unset\" not found"),
+        ("echo a | 'umask'", "\"umask\" not found"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+    }
+}
+
 /// bash (`shopt -s expand_aliases`, `alias q="echo a'b'"` then `q`) prints
 /// `ab`: the alias body is spliced, then its span loses its quotes.
 #[test]
