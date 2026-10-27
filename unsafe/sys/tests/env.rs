@@ -161,7 +161,13 @@ fn getcwd_returns_deep_path_under_cap() {
 }
 
 /// A CWD past the 1 MiB retry cap (4097 levels of 255-char names, ~1.05 MB)
-/// fails with the last too-small error instead of allocating forever.
+/// fails with `E2BIG`: **no buffer we will allocate fits**. The exact errno is
+/// the load-bearing part of the pin — the loop's answer used to be "the last
+/// too-small errno", which made every guard mutant converge on a byte-identical
+/// `ERANGE`. `buffer_too_small` mutated to `true` swallows a foreign errno and
+/// grows to the cap (`getcwd_deleted_cwd_fails_enoent` is the twin that sees
+/// it); mutated to `false`, or with its first `==` → `!=`, growth stops at the
+/// first attempt and the raw `ERANGE` is reported here.
 #[test]
 fn getcwd_over_cap_returns_error() {
     const LEVELS: usize = 4097;
@@ -172,9 +178,5 @@ fn getcwd_over_cap_returns_error() {
         Err(e) => e,
     };
     assert_eq!(err.syscall(), "getcwd");
-    let errno = err.errno();
-    assert!(
-        errno == libc::ERANGE || errno == libc::ENAMETOOLONG,
-        "errno {errno}"
-    );
+    assert_eq!(err.errno(), libc::E2BIG);
 }
