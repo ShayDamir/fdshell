@@ -53,10 +53,16 @@ impl ShortCStr {
     }
 }
 
+/// The largest magnitude `i64` carries: `2^63`, the magnitude of `i64::MIN`.
+/// Spelled from data (a method call plus a cast, no `+ 1`): the `+` of
+/// `(i64::MAX as u128) + 1` mutated to `*` is the bound **itself**, a cap one
+/// lower that stops the digit loop one digit early and reclassifies an
+/// overflow as `Trailing` — and no operator means no mutant to chase.
+const MAGNITUDE_CAP: u128 = i64::MIN.unsigned_abs() as u128;
+
 /// Accumulate the digit run starting at `start`: the value, the digit count,
 /// and the index just past the last digit.
 fn accumulate(rest: &[u8], start: usize, radix: u32) -> (u128, usize, usize) {
-    let limit = (i64::MAX as u128) + 1;
     let mut value: u128 = 0;
     let mut digits = 0;
     let mut end = start;
@@ -66,8 +72,10 @@ fn accumulate(rest: &[u8], start: usize, radix: u32) -> (u128, usize, usize) {
                 value = value * radix as u128 + d as u128;
                 digits += 1;
                 end += 1;
-                if value > limit {
-                    // Any longer input overflows `i64` anyway.
+                if value > MAGNITUDE_CAP {
+                    // Any longer input overflows `i64` at either sign, and the
+                    // `end` past a digit is consulted only for the non-overflow
+                    // `Exact`/`Trailing` split, so stopping here is sound.
                     break;
                 }
             }
@@ -80,10 +88,9 @@ fn accumulate(rest: &[u8], start: usize, radix: u32) -> (u128, usize, usize) {
 /// Clamp the unsigned magnitude to `i64`, honouring the sign.
 fn clamp(neg: bool, value: u128) -> (i64, bool) {
     if neg {
-        let limit = (i64::MAX as u128) + 1;
-        if value > limit {
+        if value > MAGNITUDE_CAP {
             (i64::MIN, true)
-        } else if value == limit {
+        } else if value == MAGNITUDE_CAP {
             (i64::MIN, false)
         } else {
             // `value` is < 2^63 here, so the cast is exact.

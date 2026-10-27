@@ -47,12 +47,15 @@ impl ShortCStr {
     }
 }
 
+/// The largest magnitude `u64` carries: `2^64 - 1`. Spelled from data (a cast,
+/// no `+ 1`), so the digit loop's cap **is** the representable bound and the
+/// `+`→`*` mutant of `(u64::MAX as u128) + 1` — a cap one lower, which stops
+/// the loop one digit early — has no site to land on.
+const MAGNITUDE_CAP: u128 = u64::MAX as u128;
+
 /// Accumulate the digit run: the unsigned magnitude, the digit count, and the
 /// index just past the last digit.
 fn accumulate(rest: &[u8], start: usize, radix: u32) -> (u128, usize, usize) {
-    // The limit is `2^64` (one past `u64::MAX`): magnitudes up to it are
-    // decidable, anything longer overflows `u64` regardless of the sign.
-    let limit = (u64::MAX as u128) + 1;
     let mut value: u128 = 0;
     let mut digits = 0;
     let mut end = start;
@@ -62,8 +65,10 @@ fn accumulate(rest: &[u8], start: usize, radix: u32) -> (u128, usize, usize) {
                 value = value * radix as u128 + d as u128;
                 digits += 1;
                 end += 1;
-                if value > limit {
-                    // Any longer input overflows `u64` anyway.
+                if value > MAGNITUDE_CAP {
+                    // Past `u64::MAX` the answer is `Overflow` at every length,
+                    // and `end` is consulted only for the non-overflow
+                    // `Exact`/`Trailing` split, so stopping here is sound.
                     break;
                 }
             }
@@ -76,11 +81,11 @@ fn accumulate(rest: &[u8], start: usize, radix: u32) -> (u128, usize, usize) {
 /// Map the magnitude to `u64`: saturate past `u64::MAX`, otherwise apply the
 /// sign as a two's-complement wrap.
 fn clamp(neg: bool, value: u128) -> (u64, bool) {
-    if value > u64::MAX as u128 {
+    if value > MAGNITUDE_CAP {
         (u64::MAX, true)
     } else if neg {
-        // `value` is ≤ `2^64`, so the negation fits `i128`; the `as u64`
-        // is the two's-complement wrap (e.g. `1` → `u64::MAX`).
+        // `value` is ≤ `u64::MAX` here, so the negation fits `i128`; the
+        // `as u64` is the two's-complement wrap (e.g. `1` → `u64::MAX`).
         ((-(value as i128)) as u128 as u64, false)
     } else {
         (value as u64, false)

@@ -1585,11 +1585,26 @@ fn base0_int_overflow() {
 fn base0_int_overflow_at_max_prefix() {
     use sys::IntParse::*;
     // `i64::MAX` followed by one more digit overflows (not `Trailing`): the
-    // `i64::MAX + 1` accumulation limit is what makes the 19-digit prefix a
-    // full overflow rather than a stop at `i64::MAX`.
+    // `2^63` accumulation cap is what makes the 19-digit prefix a full
+    // overflow rather than a stop at `i64::MAX`.
     assert_eq!(
         ics(b"92233720368547758071").parse_base0_int(),
         Overflow(i64::MAX)
+    );
+}
+
+#[test]
+fn base0_int_overflow_at_min_magnitude_plus_a_digit() {
+    use sys::IntParse::*;
+    // `i64::MIN`'s magnitude (`2^63`) followed by one more digit is
+    // `Overflow`, not `Trailing`: the digit loop stops only once the magnitude
+    // is **past** `2^63`. A cap one lower, or a `>=` break, stops on the
+    // 19-digit prefix, where `clamp` reads `value == 2^63` as representable
+    // and answers `Trailing(i64::MIN)` — a variant the printed number cannot
+    // show, so the pin is on the `IntParse` state itself (CATCHING_MUTANTS 2).
+    assert_eq!(
+        ics(b"-92233720368547758089").parse_base0_int(),
+        Overflow(i64::MIN)
     );
 }
 
@@ -1653,10 +1668,23 @@ fn base0_uint_overflow() {
 fn base0_uint_overflow_at_max_prefix() {
     use sys::UintParse::*;
     // `u64::MAX` followed by one more digit overflows (not `Trailing`): the
-    // `2^64` accumulation limit is what makes the 20-digit prefix a full
-    // overflow rather than a stop at `u64::MAX`.
+    // accumulation cap is the representable bound itself and the loop's break
+    // is a strict `>`, so the 20-digit prefix is not a stop.
     assert_eq!(
         ics(b"184467440737095516151").parse_base0_uint(),
+        Overflow(u64::MAX)
+    );
+}
+
+#[test]
+fn base0_uint_overflow_at_max_magnitude_plus_a_digit() {
+    use sys::UintParse::*;
+    // A `>=` break (or a cap one below `u64::MAX`) stops the digit loop **on**
+    // the 20-digit `u64::MAX` prefix; `clamp` then sees no overflow and the
+    // answer is `Trailing(u64::MAX)`, numerically identical to the clean
+    // `Overflow(u64::MAX)`. Only the variant tells them apart.
+    assert_eq!(
+        ics(b"184467440737095516159").parse_base0_uint(),
         Overflow(u64::MAX)
     );
 }
