@@ -481,13 +481,9 @@ fn window_end_is_one_past_the_runs_newline() {
         "the unterminated quote swallows the newline, so the delimiter never matches"
     );
     assert_eq!(
-        step_of(&line[..], true),
+        step_of(line, true),
         None,
         "no regions: the caller's plain `\\n` arm applies"
     );
-    assert_eq!(
-        step_of(&line[..], false),
-        None,
-        "the same in statement context"
-    );
+    assert_eq!(step_of(line, false), None, "the same in statement context");
 }
