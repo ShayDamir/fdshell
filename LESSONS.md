@@ -3961,66 +3961,77 @@ create that state in the child itself, never rely on the harness (the
 precedent for the inherited-fd class is "`/proc` fd-table assertions must
 exclude the harness's own pipe targets").
 
-## A `case` pattern is a word: fold it, expand it, and match it with its own mask (task #280)
+## A `case` pattern is a word: fold it, expand it, and match it with its own mask (tasks #280, #334)
 
 `case_exec` matched the clause patterns with `envfilter::glob::glob_match`, the
-`*`-only matcher that takes no mask and folds every `\X` pair. The parse layer
-had nothing to give it: `CaseClause::patterns` was `Vec<ShortCStr>`, the joined
-token text with the quote bytes already stripped. Closing the gap is one rule
-with four consequences:
+`*`-only matcher that takes no mask and folds every `\X` pair, while
+`CaseClause::patterns` was the joined token text, quote bytes stripped. One
+rule, five consequences:
 
-1. **A pattern must be folded before the matcher reads it, and only
-   `substitute_arg`'s quoted arm does that.** `match_component` reads a *masked*
+1. **A pattern is folded before the matcher reads it, and only
+   `substitute_arg`'s quoted arm folds it.** `match_component` reads a *masked*
    `\` as a literal backslash, and the single-quote encoding
-   (LESSONS: "A single-quoted literal is stored") puts `\$`, `\\`, `` \` `` in the text of every `'…'` span — so a pattern taken
-   straight from the token text stops matching its own span: `'a$b'` requires a
-   literal backslash in the word. `glob_match`'s built-in `\X` fold was hiding
-   this: pass the masked text to `match_component` without folding and the
-   single-quote rows break. `substitute_arg(text, mask, …)` is the fold **and**
-   the expansion in one call; `bytes::fold::fold_word` is the fold alone (the
-   fallback if a substitution surface ever needs one).
+   (LESSONS: "A single-quoted literal is stored") puts `\$`, `\\`, `` \` `` in
+   every `'…'` span, so a pattern taken straight from token text stops matching
+   its own span (`'a$b'` demands a literal backslash in the word) —
+   `glob_match`'s built-in `\X` fold hid that. `substitute_arg(text, mask, …)`
+   is fold **and** expansion in one call.
 2. **The mask it returns is the pattern-quoting signal for the expansion.**
-   Expansion bytes inherit their trigger's bit (LESSONS: "Command-substitution output takes its split protection"), which
-   is exactly bash's `"$p"`/`$p` pattern pair: `p='a?x'` with `case aXx in $p)`
-   matches, with `"$p")` it does not. A pattern that is *not* expanded cannot
-   express that pair at all, which is why the plan chose "expand" over
-   "mask-only-fold": a folded-but-never-expanded pattern is a half-state, and
-   half-states of this surface kept coming back as follow-up tasks (#246 and #280,
-   both closed).
-3. **A word pattern is not a pathname.** `dotglob = true` (the existing
-   "Word patterns have no `FNM_PERIOD` rule" entry, cited by
+   Expansion bytes inherit their trigger's bit (LESSONS:
+   "Command-substitution output takes its split protection"), which is bash's
+   `"$p"`/`$p` pair: `p='a?x'` with `case aXx in $p)` matches, with `"$p")` it
+   does not. A folded-but-never-expanded pattern cannot express that pair.
+3. **A word pattern is not a pathname.** `dotglob = true` (LESSONS: "Word
+   patterns have no `FNM_PERIOD` rule", cited by
    `substitute/param_op/pattern.rs`), `set -f` does not touch it (measured:
    `set -f; case abc in a*)` matches in bash), and a pattern word is never
    IFS-split (`v="x y"; case y in $v)` matches nothing in bash). Pass
    `match_component(pat, mask, name, true)`; nothing in `options` belongs in
    `case_exec`.
-4. **bash expands patterns lazily, one pattern at a time, stopping at the first
-   match.** Measured: `case a in z) echo x;; a|$(touch f)) echo m;; esac` prints
-   `m` and creates **no** `f`; `case q in z|$(touch f)|a) echo m;; esac` creates
-   `f`. The loop must therefore substitute *inside* the match loop, not once per
-   clause — an "optimisation" that expands a clause's whole pattern list up front
-   changes a side effect. (Both rows print what bash prints; the plan's table had
-   the second row's bash column as `m`, measured here as empty —
-   LESSONS: "Verify bash's real output".)
+4. **bash expands patterns lazily, one at a time, stopping at the first
+   match.** `case a in z) echo x;; a|$(touch f)) echo m;; esac` prints `m` and
+   creates **no** `f`; `case q in z|$(touch f)|a) echo m;; esac` creates `f`.
+   The substitution sits *inside* the match loop; hoisting it per clause changes
+   a side effect.
+5. **A clause may open with the optional `(` of POSIX 2.9.4.3's
+   `( pattern-list )`, and bash strips exactly that byte** (#334):
+   `parse/case_clause.rs` asks `pattern::take_open_paren` about the clause's
+   **first** token, and the byte goes only when mask bit 0 is `Unquoted` **and**
+   `ShortCStr::strip_prefix(b"(")` matches — the two signals
+   `stray::opens_groups` reads for a paren, and the mask (never `fully_quoted`)
+   is the discriminator: `"("a*`, `'('a*` and the escape pair `\(a*` keep the
+   byte as text (bash agrees), a `(` behind a `|` is never reached, `((a*))`
+   keeps its inner `(`. Byte 0, bit 0 and the span indices
+   (`saturating_sub(1)`) move together, because the token is handed to
+   `try_join_masked`, the mask's only owner. POSIX's spaced `( pattern )` makes
+   the `(` a **whole token**, so the token goes: the join gains no leading
+   space, and `case x in ()` keeps the `case: empty pattern` verdict (rc 1)
+   instead of matching the empty word
+   (`the_leading_open_paren_is_taken_off_the_clause_s_first_pattern`). The span
+   decrement is pinned by `case_pattern_span_survives_the_stripped_paren`:
+   `HOME=/tmp/H; case /tmp/H/x in (~""/x)` prints `n` in bash; without it the
+   pattern expands to `/tmp/H/x` and prints `m`. Accepted-equivalent mutants of
+   that site: `start + 1` → `*start` (a pattern token reaches no raw-span
+   reader — the arm's text starts at the `)`, and `alias_expand`/
+   `brace_expand::rebuild` run on the untouched list) and `*fully_quoted` →
+   `false` (an unquoted leading byte is never fully quoted); keep both, they
+   hold the span-covers-text invariant (`word_quoted`'s `end - start`).
 
-`Pattern { text, mask }` (new `parse/case_clause/pattern.rs`) is joined by
-`semi::try_join_masked`, the same loop #269 made the mask's only owner, so the
-inserted inter-token space carries a `false` bit and never becomes a pattern
-byte. `envfilter::glob::glob_match` keeps its `*`-only semantics and its
-signature: its callers are env filters, which carry no mask.
+`Pattern { text, mask, spans }` (`parse/case_clause/pattern.rs`) is joined by
+`semi::try_join_masked`, #269's single owner of the mask's offsets, so the
+inserted inter-token space carries an unquoted bit and #321's spans ride along.
 
-Gaps this task leaves measured, not fixed: a `case` pattern is **one** word, so
-`set -- a b; case a in "$@")` matches in bash and not here — task **#319**
-closed it, and with it the task text's "one pattern **per** positional word"
-reading: bash keeps the **first expanded word** (`es->word->word`), so
-`case b in "$@")` prints nothing (LESSONS: "`$@` has two join rules");
-bracket negation `[^…]` was unknown to `glob/match/bracket.rs` (only `!`), so
-`case ab in a[^c])` matched in bash and not here — task **#320** closed it
-(LESSONS: "Bracket negation takes bash's `^` beside POSIX's `!`"); and fdshell
-joins a multi-token pattern (`case "a b" in a b)` matches, the inserted space is
-a literal byte) where bash is a syntax error — a parse-layer divergence of the
-"Operators are recognized at word starts" family, pinned as
-`tests/case.rs::multi_token_case_pattern_is_accepted`, not a POSIX list entry.
+Left measured, not fixed: a `case` pattern is **one** word (**#319**, LESSONS:
+"`$@` has two join rules"), bracket negation `[^…]` (**#320**, LESSONS:
+"Bracket negation takes bash's `^` beside POSIX's `!`"), and the multi-token
+pattern fdshell joins (`case "a b" in a b)` matches, the inserted space is a
+literal byte) where bash is a syntax error — the "Operators are recognized at
+word starts" leniency family, pinned as `multi_token_case_pattern_is_accepted`
+beside `case_pattern_leading_paren_shapes_bash_rejects_are_accepted`, which
+pins the strip's rc-2 shapes with their owners: **#419** (a `(`/bare `)` in the
+arm's command position), **#421** (a closer glued behind the pattern's `)`),
+**#469** (a `(` glued behind `in`), **#470** (a `(` in the `case` **word**); the
+`(a*)"b"` row rides on fdshell's own not-found rc 1 where bash is 127.
 
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)
 

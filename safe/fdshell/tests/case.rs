@@ -82,8 +82,11 @@ fn run_in(dir: &Path, script: &str) -> (String, String, i32) {
 // word travels with its own per-byte mask and is substituted with it, so `?`
 // and `[...]` glob, a quoted pattern byte is literal, and an expansion's glob
 // characters are quoted by the quotes around its trigger (`"$p"`/`$p`). The
-// pattern rows are pinned in the task #280 section below. fdshell has no
-// optional `(` before a pattern.
+// pattern rows are pinned in the task #280 section below. A clause's pattern
+// list may open with the optional `(` of POSIX 2.9.4.3 (`( pattern-list )`) and
+// bash 5.3.9 strips it; fdshell takes that byte off the clause's **first**
+// pattern too, keyed on the byte being unquoted (task #334, section at the end
+// of this file).
 
 #[test]
 fn case_word_quoted_escape_pair_keeps_the_backslash() {
@@ -970,4 +973,170 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
 fn a_heredoc_body_in_an_arm_keeps_its_paren() {
     let (out, err, code) = run("case x in x) cat <<T\nx)\n)\nT\nesac");
     assert_eq!((out.as_str(), code), ("x)\n)\n", 0), "stderr={err}");
+}
+
+// --- the optional leading `(` of a pattern list (task #334) -----------------
+//
+// POSIX 2.9.4.3 spells a clause `( pattern-list )` and bash 5.3.9 accepts the
+// `(` and strips it, so `case abc in (a*)` matches. fdshell takes the byte off
+// the **first** pattern token of the clause (`case_clause::collect_patterns` →
+// `pattern::take_open_paren`), keyed on the byte being **unquoted** — the mask
+// bit, the same discriminator `stray::opens_groups` reads. One byte, one token,
+// first pattern only: a quoted `"(a*` / `'('a*` and an escaped `\(a*` keep the
+// byte as pattern text, the `(` behind a `|` stays text, `((a*))` keeps its
+// inner `(`, and the spaced `( pattern )` spelling drops a whole token so the
+// join gains no leading space. Every row is measured against bash 5.3.9.
+
+/// The strip and the shapes that ride on it: the spaced POSIX spelling, the
+/// glued `)`, `|` lists, a multi-clause walk (every clause opens its own list),
+/// the `$v` / `~` / `[…]` / `?` pattern sides, and the multi-line clause.
+#[test]
+fn case_pattern_leading_open_paren_is_stripped() {
+    for (script, want) in [
+        (r"case abc in (a*) echo m;; esac", "m\n"),
+        (r"case abc in (abc) echo m;; *) echo n;; esac", "m\n"),
+        (r"case abc in ( a* ) echo m;; esac", "m\n"),
+        (r"case abc in (  a*  ) echo m;; *) echo n;; esac", "m\n"),
+        (r"case abc in ( a*|z*) echo m;; *) echo n;; esac", "m\n"),
+        (r"case abc in (z|a*) echo m;; *) echo n;; esac", "m\n"),
+        (r"case abc in (x) echo m;; (a*) echo n;; esac", "n\n"),
+        (
+            r"case abc in (a*) echo m;; (b*) echo n;; *) echo p;; esac",
+            "m\n",
+        ),
+        (r"case abc in (a*) echo m;; b) echo n;; esac", "m\n"),
+        // The multi-line clause, with the `(` opening the clause's own line.
+        ("case abc in\n(a*)\necho m\n;;\nesac", "m\n"),
+        (r"case abc in (a*)echo m;; esac", "m\n"),
+        (r"case abc in (a*) echo m; esac", "m\n"),
+        (r"case abc in (a*) esac", ""),
+        (r"v=a; case abc in ($v*) echo m;; *) echo n;; esac", "m\n"),
+        (r"case abc in ([a-c]*) echo m;; *) echo n;; esac", "m\n"),
+        (r"case abc in (ab?) echo m;; *) echo n;; esac", "m\n"),
+        // The `|` list of the stripped clause: patterns `a` and `b`.
+        (r"case abc in (a | b) echo m;; *) echo n;; esac", "n\n"),
+        (r"case abc in (a|b) echo m;; esac", ""),
+        // `~` expands on both sides of the clause (task #282), so the word and
+        // the stripped pattern meet.
+        (
+            r"HOME=/tmp/H; case /tmp/H/x in (~/x) echo m;; *) echo n;; esac",
+            "m\n",
+        ),
+        (
+            r"HOME=/tmp/H; case ~/x in (~/x) echo m;; *) echo n;; esac",
+            "m\n",
+        ),
+        // The arm is untouched by the strip: the `(` is on the pattern side.
+        (r#"case abc in (a*) echo "m(";; esac"#, "m(\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The mask bit is what keeps a `(` in the pattern: a double-quoted, a
+/// single-quoted and an escaped one are pattern text, so the clause never
+/// matches (bash prints `n` for every row — parity, and the regression this
+/// task must not cause).
+#[test]
+fn case_pattern_leading_paren_stays_text_when_quoted_or_escaped() {
+    for script in [
+        r#"case abc in "("a*) echo m;; *) echo n;; esac"#,
+        r"case abc in '('a*) echo m;; *) echo n;; esac",
+        // The escape pair stays in the token text (both bytes unquoted), so the
+        // text test excludes it, as bash does.
+        r"case abc in \(a*) echo m;; *) echo n;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("n\n", 0), "{script}: {err}");
+    }
+}
+
+/// Accepted divergences of the "fdshell parses what bash rejects with rc 2"
+/// family (`multi_token_case_pattern_is_accepted`): every row is pinned **as
+/// measured**, with the task that owns the shape named. Do not "fix" them here.
+#[test]
+fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
+    // The `(` is the whole token, so taking it off leaves the clause with no
+    // pattern at all: fdshell's own empty-pattern verdict (the token drop), not a
+    // pattern that matches the empty word. bash rejects the shape with rc 2.
+    for script in [
+        r"case abc in () echo m;; *) echo n;; esac",
+        r"case abc in ( ) echo m;; *) echo n;; esac",
+        r"case abc in (|) echo m;; *) echo n;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains("case: empty pattern"), "{script}: {err}");
+    }
+    for (script, want) in [
+        // One byte, first pattern only: the inner `(` of `((a*))` and the `(`
+        // behind a `|` stay pattern text, so nothing matches.
+        (r"case abc in ((a*)) echo m;; *) echo n;; esac", "n\n"),
+        (r"case abc in z|(a) echo m;; *) echo n;; esac", "n\n"),
+        // The multi-token join family: the joined pattern carries the space.
+        (r"case abc in (a *) echo m;; *) echo n;; esac", "n\n"),
+        (r#"case abc in "(" *a*) echo m;; *) echo n;; esac"#, "n\n"),
+        // A newline ends the pattern list for fdshell, and the arm's `b` runs as
+        // a command that the pattern never reaches.
+        ("case abc in (a*\nb) echo m;; *) echo n;; esac", "n\n"),
+        // A second `)` behind the pattern's own is arm text; the pattern `a` does
+        // not match `abc`, so the `*)` arm answers.
+        (r"case abc in (a)) echo m;; *) echo n;; esac", "n\n"),
+        // An empty quote pair contributes no byte, so the unquoted `(` is at index
+        // 0 of the text and the strip applies (the raw-span test would not).
+        (r#"case abc in ""(a*) echo m;; *) echo n;; esac"#, "m\n"),
+        // The leading-`;` leniency (task #300) and the strip compose.
+        (r"case abc in ; (a*) echo m;; *) echo n;; esac", "m\n"),
+        // A `(` in the arm's command position is arm text — task **#419**.
+        (r"case abc in (a*) echo (x);; *) echo n;; esac", "(x )\n"),
+        // A `(` in the `case` **word** is that word's own shape — task **#470**:
+        // the word stays `(abc)`, so the stripped pattern `a*` misses it.
+        (r"case (abc) in (a*) echo m;; *) echo n;; esac", "n\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+    // An arm that **starts** with a `)` runs that paren as a command (task
+    // **#419**'s family, bash rc 2): the stripped pattern `a*` matches, so the
+    // arm is the `) echo m` written behind it.
+    let (out, err, code) = run(r"case abc in (a*) ) echo m;; *) echo n;; esac");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    assert!(err.contains("\")\" not found"), "stderr={err}");
+    // The strip makes the pattern match, so the arm's `"b"` is the command: bash
+    // says rc 127, fdshell reports the same missing command at its own rc 1 (a
+    // divergence of the not-found path, not of the pattern).
+    let (out, err, code) = run(r#"case abc in (a*)"b" echo m;; esac"#);
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    assert!(err.contains("\"b\" not found"), "stderr={err}");
+    // The closer glued behind a pattern's `)` is invisible to the block scan —
+    // task **#421** (bash rc 0).
+    let (out, err, code) = run(r"case abc in (a*)esac");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    assert!(err.contains("missing its closing 'esac'"), "stderr={err}");
+    // A `(` glued right behind the `in` keyword is the keyword-boundary shape —
+    // task **#469**, unchanged by this task.
+    let (out, err, code) = run(r"case abc in(a*) echo m;; esac");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    assert!(err.contains("missing 'in'"), "stderr={err}");
+}
+
+/// The zero-byte quote spans of task #321 ride **on** the stripped byte: the
+/// empty pair of `(~""/x)` must land at index 1 of the stripped text `~/x`, so
+/// the tilde gate keeps `~` literal and the pattern misses `/tmp/H/x` (bash
+/// prints `n`). Without the span decrement the pattern expands to `/tmp/H/x`
+/// and prints `m` — that is the mutation this pin kills.
+#[test]
+fn case_pattern_span_survives_the_stripped_paren() {
+    for script in [
+        // The control: the same pattern with no `(` to strip.
+        r#"HOME=/tmp/H; case /tmp/H/x in ~""/x) echo m;; *) echo n;; esac"#,
+        r#"HOME=/tmp/H; case /tmp/H/x in (~""/x) echo m;; *) echo n;; esac"#,
+        // The pair written in front of the `(` saturates at index 0, which is
+        // still a quoted prefix of the tilde.
+        r#"HOME=/tmp/H; case /tmp/H/x in (""~/x) echo m;; *) echo n;; esac"#,
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("n\n", 0), "{script}: {err}");
+    }
 }

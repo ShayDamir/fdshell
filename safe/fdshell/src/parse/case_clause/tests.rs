@@ -3,8 +3,10 @@
 use super::CaseClause;
 use super::parse_clauses;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
 use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::{Origin, Position, ScriptText, ShortCStr};
@@ -81,11 +83,17 @@ fn a_pattern_list_that_never_closes_reports_the_missing_paren() {
 
 /// The empty-pattern checks keep their places, in front of the paren verdict for
 /// the `)` that opens the list: `case x in ) esac` has a paren, and no pattern.
+/// The three leading-`(` rows are the same verdict through the **token drop** of
+/// task #334: the `(` is POSIX's standalone token, so taking it off leaves the
+/// clause with no pattern at all — not a pattern that matches the empty word.
 #[test]
 fn an_empty_pattern_reports_the_empty_pattern() {
     for line in [
         b"case x in |) echo yes;; esac".as_slice(),
         b"case x in ) esac".as_slice(),
+        b"case x in () echo yes;; esac".as_slice(),
+        b"case x in ( ) echo yes;; esac".as_slice(),
+        b"case x in (|) echo yes;; esac".as_slice(),
     ] {
         let err = clauses_of(line)
             .err()
@@ -96,4 +104,106 @@ fn an_empty_pattern_reports_the_empty_pattern() {
             "{line:?}"
         );
     }
+}
+
+/// Task #334: bash strips POSIX 2.9.4.3's optional leading `(` of a pattern
+/// list, so the clause's first pattern text starts **behind** it. POSIX's
+/// spaced `( pattern )` spelling is the case where the `(` is a whole token of
+/// its own: it goes away, so [`try_join_masked`] inserts no leading space and
+/// the text is exactly the pattern.
+#[test]
+fn the_leading_open_paren_is_taken_off_the_clause_s_first_pattern() {
+    for line in [
+        b"case x in (a*) esac".as_slice(),
+        b"case x in ( a* ) esac".as_slice(),
+        b"case x in (  a*  ) esac".as_slice(),
+        b"case x in (a*) echo one;; esac".as_slice(),
+    ] {
+        let clauses =
+            clauses_of(line).unwrap_or_else(|e| panic!("{line:?}: {}", e.current_context()));
+        assert_eq!(clauses.len(), 1, "{line:?}");
+        assert_eq!(clauses[0].patterns.len(), 1, "{line:?}");
+        assert_eq!(
+            clauses[0].patterns[0].text,
+            ShortCStr::from(c"a*"),
+            "{line:?}"
+        );
+    }
+}
+
+/// One token, one byte, the **first** pattern of the clause only: the `|` split
+/// keeps a `(` written behind the separator as pattern text, `((a*))` keeps its
+/// inner `(`, and a `(`-prefixed pattern list reaches both arms of a multi-clause
+/// walk.
+#[test]
+fn only_the_first_byte_of_the_first_pattern_is_taken() {
+    let clauses = clauses_of(b"case x in ( a*|z*) esac").unwrap();
+    let texts: Vec<ShortCStr> = clauses[0].patterns.iter().map(|p| p.text.clone()).collect();
+    assert_eq!(texts, [ShortCStr::from(c"a*"), ShortCStr::from(c"z*")]);
+    let clauses = clauses_of(b"case x in z|(a) echo one;; esac").unwrap();
+    let texts: Vec<ShortCStr> = clauses[0].patterns.iter().map(|p| p.text.clone()).collect();
+    assert_eq!(texts, [ShortCStr::from(c"z"), ShortCStr::from(c"(a")]);
+    let clauses = clauses_of(b"case x in ((a*)) echo one;; esac").unwrap();
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"(a*"));
+    // Every clause of the walk is a clause: each opens its own pattern list.
+    let clauses = clauses_of(b"case x in (x) echo one;; (a*) echo two;; esac").unwrap();
+    let texts: Vec<ShortCStr> = clauses.iter().map(|c| c.patterns[0].text.clone()).collect();
+    assert_eq!(texts, [ShortCStr::from(c"x"), ShortCStr::from(c"a*")]);
+}
+
+/// The mask is the discriminator: a quoted `(` keeps its bit, so `"(a*` and
+/// `'('a*` keep the byte as pattern text; an escaped `\(` keeps **both** bytes of
+/// the pair in the text (the mask marks them unquoted), so the text test excludes
+/// it. Every mask stays parallel to its text.
+#[test]
+fn a_quoted_or_escaped_open_paren_stays_pattern_text() {
+    for (line, want) in [
+        (
+            b"case x in \"(\"a*) echo one;; esac".as_slice(),
+            MaskBit::QuotedStart,
+        ),
+        (
+            b"case x in '('a*) echo one;; esac".as_slice(),
+            MaskBit::QuotedStart,
+        ),
+    ] {
+        let clauses = clauses_of(line).unwrap();
+        let pattern = &clauses[0].patterns[0];
+        assert_eq!(pattern.text, ShortCStr::from(c"(a*"), "{line:?}");
+        assert_eq!(pattern.mask.first(), Some(&want), "{line:?}");
+        assert_eq!(pattern.mask.len(), pattern.text.len(), "{line:?}");
+    }
+    // The escape pair stays in the text, both bits unquoted.
+    let clauses = clauses_of(b"case x in \\(a*) echo one;; esac").unwrap();
+    let pattern = &clauses[0].patterns[0];
+    assert_eq!(pattern.text, ShortCStr::from(c"\\(a*"));
+    assert_eq!(pattern.mask.first(), Some(&MaskBit::Unquoted));
+    assert_eq!(pattern.mask.len(), 4);
+}
+
+/// The text, the mask and the **zero-byte quote spans** (#321) move together
+/// with the stripped byte: byte 0, bit 0, and every span index steps back one —
+/// a pair written in front of the `(` saturates at 0, which is what keeps the
+/// tilde gate seeing `~""/x` as a quoted prefix.
+#[test]
+fn the_mask_and_the_spans_stay_parallel_across_the_stripped_paren() {
+    // The empty pair contributes no byte: text `(a*`, spans `[0]` before the
+    // strip, `a*` with spans `[0]` after it (saturating).
+    let clauses = clauses_of(b"case x in \"\"(a*) echo one;; esac").unwrap();
+    let pattern = &clauses[0].patterns[0];
+    assert_eq!(pattern.text, ShortCStr::from(c"a*"));
+    assert_eq!(pattern.mask.len(), pattern.text.len());
+    assert_eq!(pattern.spans, vec![0]);
+    // The pair sits behind the `(`: the span index follows the text.
+    let clauses = clauses_of(b"case x in (~\"\"/x) echo one;; esac").unwrap();
+    let pattern = &clauses[0].patterns[0];
+    assert_eq!(pattern.text, ShortCStr::from(c"~/x"));
+    assert_eq!(pattern.mask.len(), pattern.text.len());
+    assert_eq!(pattern.spans, vec![1]);
+    // The same pattern with no `(` to strip is the control: same text, same span.
+    let clauses = clauses_of(b"case x in ~\"\"/x) echo one;; esac").unwrap();
+    let control = &clauses[0].patterns[0];
+    assert_eq!(control.text, pattern.text);
+    assert_eq!(control.spans, pattern.spans);
+    assert_eq!(control.mask, pattern.mask);
 }

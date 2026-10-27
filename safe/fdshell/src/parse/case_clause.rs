@@ -41,6 +41,10 @@ pub fn parse_clauses(
 /// Collect the `|`-separated patterns of one clause, up to and including `)`.
 /// Advances `pos` past the closing paren.
 ///
+/// The clause's first token goes through [`pattern::take_open_paren`] first, so
+/// the pattern list starts behind bash's optional leading `(` (POSIX 2.9.4.3's
+/// `( pattern-list )`, task #334).
+///
 /// The **paren** ends the pattern list, not the position: a clause whose `)` is
 /// the token right before `esac` is a clause with an empty body
 /// (`case x in a) esac`, bash rc 0, and the multi-line spelling reaches the same
@@ -55,6 +59,12 @@ fn collect_patterns(
     let mut patterns = Vec::new();
     let mut current_pattern = Vec::new();
     let mut closed_paren = false;
+    // One token, one byte, the clause's **first** token only: `((a*))` keeps its
+    // second `(`, and a `(` written behind a `|` (`z|(a)`) is pattern text.
+    if let Some(opened) = tokens.get(*pos).and_then(pattern::take_open_paren) {
+        current_pattern.extend(opened);
+        *pos += 1;
+    }
     while *pos <= esac_idx {
         let Some(token) = tokens.get(*pos) else {
             break;
