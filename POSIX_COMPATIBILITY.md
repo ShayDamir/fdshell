@@ -379,18 +379,47 @@ span carries a quote byte is data, so `'if' x`, `"while" x`, `i"f" x`, `""case
 x`, `if true; ''then echo a; fi` and `f'oo'() { :; }` are command words and
 syntax errors exactly as bash makes them.
 
-The one accepted divergence is the family of keywords fdshell implements
-without a builtin of that name: bash runs `'break' 1`, `'continue' 1`,
-`'return' 3`, `'umask' 022` and `'unset' zz` as its **builtins** (the quoted
-word is looked up, and the builtin answers), where fdshell keeps the keyword
-and answers with its own message (`'break' is not inside a loop`, rc 1).
-`'unset' zz` is the row where the two coincide **by accident**: the quoted word
-is still the keyword here, and since task #290 every word after `unset` is an
-operand — a plain name is a shell variable, no operand is a parse error — so
-fdshell removes `zz` at rc 0 exactly as the builtin does. Gating those
-words on §2.9.1 would trade a real builtin run for `break: not found`, so
-fdshell gates only the block layer and leaves these keywords quoted-blind
-(task #335 owns the decision, together with the builtins it needs).
+The one accepted divergence is the family of five keywords fdshell implements
+with **no builtin of that name**: bash runs `'break' 1`, `'continue' 1`,
+`'return' 3`, `'umask' 022` and `'unset' zz` as its **builtins** (the quoted word
+is looked up, the builtin answers), where fdshell keeps the keyword. Those five
+words stay quoted-blind **permanently**, and the quoted spelling is fully
+transparent — it reaches the same keyword as the unquoted row and answers with
+the same report at the same rc. Measured against bash 5.3.9 and pinned in
+`safe/fdshell/tests/quotes.rs`: `'break' 1`, `"break" 1`, `b"reak" 1`, `''break
+1` all report `'break' is not inside a loop` at rc 1, byte for byte the `break 1`
+row (bash warns and exits 0 — that rc and message are the keyword's own accepted
+outside-loop semantics, the family
+`safe/fdshell/tests/loops.rs::break_2_outside_loop_aborts_rc1` pins, not a
+quoting effect);
+`for i in 1 2; do 'break'; echo after; done` prints **nothing** at rc 0 *because*
+the quoted word is the keyword; `'umask' 022` sets the mask, `'unset' zz` removes
+the variable, `'return' 3` returns from a function. The word's **text** is the
+keyword, so a spelling whose text is not the name is a plain command word in
+both shells (`br"ek"` is `brek`).
+
+A builtin cannot take this work over, and that is why the sites stay ungated. A
+command **argument** is an expansion surface, so a builtin's argv receives an
+`%name` operand as the fd's *number* (with `%f` bound, `echo %f` prints `8`;
+see "`%` is a file descriptor namespace") — `unset %name`, a documented feature,
+would close nothing, while the keyword reads the raw token word and that is
+precisely why it is a keyword. `break`/`continue`/`return` are in-process control
+signals (`safe/fdshell/src/loop_control.rs`), and a pipeline stage runs in a
+forked child, so a builtin raising one ends the child silently and controls
+nothing. A quoted-only gate would leave **two implementations of one rule**, so
+the quoted and unquoted spellings of one command answer differently — `'break' 1`
+rc 0 from the builtin, `break 1` rc 1 from the keyword — and quoting must not
+change what a command means.
+
+The cost of the decision is accepted and pinned
+(`tests/quotes.rs::the_five_names_have_no_builtins_pinned`): the
+`command`/`builtin` prefix cannot reach a parse-level shell command, so
+`command umask` is `"umask" not found` and `builtin break` is `"break" is not a
+shell builtin`, rc 1, where bash runs its builtin at rc 0 (owning task **#473**);
+`umask -p` and a second operand are parse errors here where bash accepts them,
+and the bare `umask` prints its four digits with no trailing newline (**#472**,
+quote-independent); `echo a | 'break'` is rc 1 where bash warns at rc 0 (**#381**,
+builtins intercepted in a pipeline stage).
 
 A second divergence is mechanical: fdshell parses a script **statement by
 statement**, where bash parses the whole input before running any of it, so a

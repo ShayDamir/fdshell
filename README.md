@@ -225,6 +225,14 @@ Builtins live in the shell process, not on `PATH`: invoke them as
 its builtin before searching `PATH`.) `help` lists every builtin, the shell
 commands and the socket family.
 
+`umask`, `unset` and the loop-control words `break`/`continue`/`return` are
+**parse-level shell commands, not builtins**: the `builtin`/`command` prefix does
+not reach them (`builtin umask` → `"umask" is not a shell builtin`,
+`command umask` → `"umask" not found`, rc 1), and a quoted spelling is
+transparent — `'umask' 022`, `'unset' %f`, `'break'` behave exactly like the
+unquoted words. See `POSIX_COMPATIBILITY.md`, "Quoted keywords are command words,
+quoted control keywords are not".
+
 | Command | Description |
 |---|---|
 | `openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] [--path] path` | Open or create a file via `openat2`. Returns one fd. |
