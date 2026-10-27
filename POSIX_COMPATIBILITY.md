@@ -439,6 +439,45 @@ another body is only text, judged when that function runs — so
 the parse error (`function definition body is empty` for the second), where bash
 rejects the definition itself with rc 2 and prints nothing.
 
+## Quoted separators are word data
+
+POSIX §2.9.1 recognizes a separator (`;`, `&&`, `||`, `|`, `&`, `(`, `)`) as
+syntax, and §2.3 removes quotes only **after** tokenization: a word whose raw
+span carries a quote byte is a **word**, so `echo a ";" b` prints `a ; b` and the
+quoted `;` splits nothing. fdshell applies that at every separator site of the
+parse — the statement split, a block's body slice, the terminator in front of a
+clause keyword, the closing-keyword walk, the pipeline's `|`, the background `&`,
+the `case` clause's `|` / `)` / `;;`, a `wait` arm's pattern head, a definer's
+`)`, the scoped-assignment prefix bound, and the here-document's delimiter word.
+
+The gate is the token's **raw span**, one owner:
+`safe/fdshell/src/parse/word_quoted.rs::span_word` (text **and** span). Not the
+per-byte mask — `"";` is an empty word token **plus** a real `;`, and a zero-byte
+quoted region has no mask bit to say so — and not `keywords::quoted::quoted_word`,
+whose scan-back for the word's start breaks on the separator byte itself, so it is
+sound only for a keyword word, which ends in a letter (LESSONS: "A separator-shaped
+word needs the span gate"). The span form is also the only gate the sites that own
+no `line` can compute. **Escape spellings need no gate at all**: `\;`, `\|`, `\)`
+keep the pair in the token's *text* (`parse/token/escape.rs`), so no separator text
+exists there to gate, and both shells read them as the literal byte.
+
+The two scanners stay in lockstep, each in its own representation: the byte-level
+scans read the **raw** bytes, where a quoted word's text is `";"` / `"|"` and no
+separator row can fire (`parse::redirect::clobber::pipe::pipe_token_span` is this
+rule for the `|`), and the token-level place machine reads the same fact through
+`keywords::position::separator_data` / `word_place`, which leave a separator-shaped
+word the place an ordinary word leaves — an argument, and a `for` word list that
+**stays** a list (`for i in ";" do …` is one iteration over `;`).
+
+The pinned divergences are the owners' own, not this rule's: the bare path
+redirect of a quoted separator word (`echo x > ";"` — bash writes the file `;` at
+rc 0, fdshell answers `invalid redirect syntax`, task **#475**); a `)` behind an
+**argument** is arm text here, where bash rejects the clause with rc 2 (task
+**#419**'s family, e.g. `case x in a) echo a ";" b) ;; esac`); and the
+command-not-found **status** of a quoted separator run as a command (`X=1 ";"`) is
+fdshell's rc 1 where bash answers 127, the shell-wide convention of STYLE §4 — the
+name on stderr is the fact.
+
 ## `-c` mode keeps its own `$0`
 
 POSIX: `sh -c 'echo $0' name` prints `name`. fdshell sets `$0` to the
