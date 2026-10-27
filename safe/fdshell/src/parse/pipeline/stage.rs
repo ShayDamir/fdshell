@@ -10,6 +10,7 @@ use crate::parse::command::parse_command;
 use crate::parse::dispatch::dispatch_keyword;
 use crate::parse::heredoc::{HeredocBody, operator_count};
 use crate::parse::semi::verbatim;
+use crate::parse::word_quoted::span_word;
 use crate::parse::{BlockStage, ParsedLine, Stage};
 use error_stack::Report;
 use sys::{Position, ScriptText};
@@ -78,11 +79,13 @@ fn command_stage(
 }
 
 /// Drop the tokens after the first `;`: heredoc body words are not
-/// command tokens.
+/// command tokens. The `;` is [`span_word`]'s, so a quoted `";"` is a word of
+/// the stage and cuts nothing (task #336) — the stage keeps the here-doc
+/// operator written behind it.
 fn trim_at_semi(tokens: &[Token]) -> &[Token] {
     let end = tokens
         .iter()
-        .position(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+        .position(|tok| span_word(tok, b";"))
         .unwrap_or(tokens.len());
     tokens.get(..end).unwrap_or(tokens)
 }

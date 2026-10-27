@@ -10,7 +10,7 @@
 
 use super::Token;
 use crate::error::parse::ParseError;
-use crate::parse::word_quoted::keyword_word;
+use crate::parse::word_quoted::{keyword_word, span_word};
 use error_stack::{Report, ensure};
 
 /// The set of words that may precede a block clause keyword.
@@ -24,9 +24,12 @@ pub(crate) enum Term {
 }
 
 /// A command-list terminator: POSIX's `;` (a newline is tokenized as one) or
-/// the plain `&` that ends the statement it backgrounds (task #354).
+/// the plain `&` that ends the statement it backgrounds (task #354). Both
+/// through [`span_word`], so a quoted `";"` / `"&"` word terminates nothing
+/// (task #336) — the rule `group_block.rs` (the `;` before `}`) and
+/// [`is_closer_predecessor`] read.
 pub(crate) fn is_list_terminator(tok: &Token) -> bool {
-    tok.0.eq_bytes(b";") || tok.0.eq_bytes(b"&")
+    span_word(tok, b";") || span_word(tok, b"&")
 }
 
 /// The closing keyword of every block form, as a possible **predecessor** of
@@ -75,25 +78,25 @@ pub(crate) fn ensure_before_closer(
 /// and bash's semantics distinguish them — `do echo a & ; done` is a syntax
 /// error, `do echo a &\ndone` is valid (task #355). A newline token is never
 /// glue; `false` at index 0, on any word behind a non-`&`, and off the end.
+/// Both words of the pair go through [`span_word`], so a quoted `";"` glued
+/// behind a quoted `"&"` is word data and no glue (task #336).
 pub(crate) fn amp_semi(tokens: &[Token], line: &[u8], idx: usize) -> bool {
-    let Some((t, start, _, _, _, _)) = tokens.get(idx) else {
+    let Some(tok @ (_t, start, _, _, _, _)) = tokens.get(idx) else {
         return false;
     };
-    if !t.eq_bytes(b";") || line.get(*start) != Some(&b';') {
+    if !span_word(tok, b";") || line.get(*start) != Some(&b';') {
         return false;
     }
     let Some(prev) = idx.checked_sub(1) else {
         return false;
     };
-    tokens
-        .get(prev)
-        .is_some_and(|(p, _, _, _, _, _)| p.eq_bytes(b"&"))
+    tokens.get(prev).is_some_and(|p| span_word(p, b"&"))
 }
 
 /// The terminator set of one [`Term`] test.
 fn precedes(tok: &Token, term: Term) -> bool {
     match term {
-        Term::Semi => tok.0.eq_bytes(b";"),
+        Term::Semi => span_word(tok, b";"),
         Term::SemiAmp => is_list_terminator(tok),
     }
 }

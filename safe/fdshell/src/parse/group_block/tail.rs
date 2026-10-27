@@ -5,6 +5,7 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::classify::parse_redirect;
+use crate::parse::word_quoted::span_word;
 use crate::redirect::RedirectDef;
 use crate::scan::heredoc::span_operator;
 use alloc::vec::Vec;
@@ -48,7 +49,7 @@ pub(super) fn redirects(
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
-        let (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
+        let tok @ (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
         if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
             bail!(ParseError::GroupHereDocNotSupported);
         }
@@ -57,7 +58,9 @@ pub(super) fn redirects(
             i += extra + 1;
             continue;
         }
-        if t.eq_bytes(b"|") {
+        // The whole-word `|` test is [`span_word`]'s, so a quoted `"|"` falls
+        // through to the trailing-word row it belongs to (task #336).
+        if span_word(tok, b"|") {
             bail!(ParseError::UnexpectedPipe);
         }
         if t.starts_with(b"&") {

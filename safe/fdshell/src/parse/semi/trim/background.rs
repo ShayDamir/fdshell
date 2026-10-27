@@ -3,6 +3,7 @@
 //! slicing rules in `trim.rs`.
 
 use super::Token;
+use crate::parse::word_quoted::span_word;
 
 /// Whether a condition slice ends in the plain `&` that terminates the compound
 /// list (task #356): `trim_condition` **cuts** that `&` from the condition
@@ -21,12 +22,14 @@ pub(crate) fn condition_background(tokens: &[Token], line: &[u8]) -> bool {
     }
     tokens
         .get(end.saturating_sub(1))
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"&"))
+        .is_some_and(|tok| span_word(tok, b"&"))
 }
 
 /// The `;` **token** points at a newline (or `)`) byte, so it is a newline in
 /// disguise, never the `;` that ends a condition (`false` for a word and for a
-/// `;` byte, `amp_semi`'s pair arm).
+/// `;` byte, `amp_semi`'s pair arm). The [`span_word`] gate comes first: a
+/// quoted `";"` word's byte is `"`, so the byte arm alone read **word data as a
+/// newline** and let the flag walk over it (task #336).
 fn is_newline_semi(tok: Option<&Token>, line: &[u8]) -> bool {
-    tok.is_some_and(|(t, start, _, _, _, _)| t.eq_bytes(b";") && line.get(*start) != Some(&b';'))
+    tok.is_some_and(|t| span_word(t, b";") && line.get(t.1) != Some(&b';'))
 }

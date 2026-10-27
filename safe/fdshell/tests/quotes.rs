@@ -1151,3 +1151,104 @@ fn adjacent_quoted_regions_end_the_name() {
     let (out, err, code) = run(r#"set -- A B; printf "[%s]" "$1" "2""#);
     assert_eq!((out.as_str(), code), ("[A][2]", 0), "stderr={err:?}");
 }
+
+/// Task #336 (POSIX §2.9.1, §2.3): a **quote-protected separator word** is word
+/// data. `";"`, `';'`, `" ; "`, `"|"`, `"&"`, `"&&"`, `"||"` carry the separator
+/// as their *text*, so they split no statement, open no pipeline, background
+/// nothing and start no command — the recognition gate is the token's **raw
+/// span** (`parse::word_quoted::span_word`), because the mask has no bit for the
+/// empty pair (`"";` is the empty word **plus** a real `;`) and
+/// `keywords::quoted::quoted_word`'s scan-back breaks on the separator byte
+/// itself (LESSONS: "A separator-shaped word needs the span gate").
+///
+/// Every expectation is bash 5.3.9's, recorded for the same `-c` script. Where
+/// only the **status** differs it is the shell-wide command-not-found code (bash
+/// 127, fdshell 1, STYLE §4): the *name* on stderr is the fact.
+#[test]
+fn a_quoted_separator_word_is_word_data() {
+    for (script, want) in [
+        // The separator word is an argument: `echo` prints it.
+        ("echo a \";\" b", "a ; b\n"),
+        ("echo a ';' b", "a ; b\n"),
+        ("echo a \";\"", "a ;\n"),
+        ("echo a \" ; \" b", "a  ;  b\n"),
+        ("echo a\";\"b", "a;b\n"),
+        ("echo a \";\" b \";\" c", "a ; b ; c\n"),
+        // The escape spelling needs no gate at all: `\;` keeps its pair in the
+        // word text, so no separator text exists to gate.
+        (r#"echo a \; b"#, "a ; b\n"),
+        // The other separators, in every spelling.
+        ("echo a \"&&\" b", "a && b\n"),
+        ("echo \"||\" x", "|| x\n"),
+        ("echo a \"|\" cat", "a | cat\n"),
+        ("echo a \"&&\" cat", "a && cat\n"),
+        // A **real** separator behind a quoted word is still a separator: the
+        // pipeline runs, the quoted word rides along as an argument.
+        ("echo a \";\" | cat", "a ;\n"),
+        ("echo a \"&\"; echo done", "a &\ndone\n"),
+        ("echo a \"|\"; echo done", "a |\ndone\n"),
+        // The word reaches a function and a builtin as data.
+        ("f() { echo \"$1\"; }; f \";\"", ";\n"),
+        ("printf \"%s\\n\" \";\"", ";\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // The quoted word becomes the **command** to run: bash's `;: command not
+    // found` (127) is fdshell's `";" not found` (1), and the statement's rest
+    // runs. The scoped-assignment prefix attaches to that command word, so
+    // `X=1 ";"` is no assignment-only statement.
+    for (script, name) in [("X=1 \";\"", "\";\""), ("{ :; \"&&\"; }", "\"&&\"")] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(name), "stderr={err:?}");
+    }
+    // `"";` is the empty word **plus** a real `;`: the mask has no bit for the
+    // empty pair, so only the raw span tells the two apart, and the split is the
+    // separator's.
+    let (out, err, code) = run("echo a \"\"; b");
+    assert_eq!((out.as_str(), code), ("a \n", 1), "stderr={err:?}");
+    assert!(err.contains("\"b\" not found"), "stderr={err:?}");
+    // The unquoted twins split the statement, as they always did.
+    let (out, err, code) = run("echo a ; echo b");
+    assert_eq!((out.as_str(), code), ("a\nb\n", 0), "stderr={err:?}");
+}
+
+/// A quoted separator inside a **block** body: the body slice trims no quoted
+/// `;`, no clause keyword is preceded by it, and the closer behind a data word
+/// stays a word — so the block's own shape decides, as in bash (5.3.9, recorded).
+/// The rc-2 syntax errors land on fdshell's parse error at rc 1 (agree in kind,
+/// STYLE §4).
+#[test]
+fn a_quoted_semicolon_does_not_split_a_block() {
+    for (script, want) in [
+        // The quoted `;` is an argument, so the closer written behind it is an
+        // argument too, and the **real** `;` is what closes the body.
+        ("if :; then echo a \";\" fi; fi", "a ; fi\n"),
+        ("if :; then echo a \";\" ; fi", "a ;\n"),
+        ("while :; do echo b \";\" ; break; done", "b ;\n"),
+        ("while :; do echo \";\" ; break; done", ";\n"),
+        ("for x in \";\" ; do echo \"[$x]\"; done", "[;]\n"),
+        ("{ echo a \";\" ; }", "a ;\n"),
+        ("if :; then echo a \"&&\" ; fi", "a &&\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // Without a closing terminator the block never ends: bash's `syntax error:
+    // unexpected end of file` (2) is fdshell's missing-closer parse error (1).
+    for (script, needle) in [
+        (
+            "if :; then echo x; \"&&\" fi",
+            "'if' is missing its closing 'fi'",
+        ),
+        ("{ echo a \";\" }", "expected ';' before '}'"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "stderr={err:?}");
+    }
+    // The unquoted twins close the blocks.
+    let (out, err, code) = run("{ echo a ; }");
+    assert_eq!((out.as_str(), code), ("a\n", 0), "stderr={err:?}");
+}

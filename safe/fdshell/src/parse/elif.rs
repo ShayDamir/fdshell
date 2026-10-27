@@ -9,6 +9,7 @@ use super::semi::body_end;
 use super::semi::condition_background;
 use super::semi::verbatim;
 use crate::error::parse::ParseError;
+use crate::parse::word_quoted::span_word;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
 use sys::ScriptText;
@@ -82,15 +83,13 @@ pub fn parse_else_body(
 
 /// The slice's last token is a `;` **not** glued behind a plain `&`: a body
 /// that ends in POSIX's bare `;` before a clause keyword is the malformed
-/// arm; the `& ;` shape is not (its body text carries the split the body's
+/// arm; the `;` is [`span_word`]'s, so a quoted `";"` is the body's own last
+/// word and leaves the arm intact (task #336). the `& ;` shape is not (its body text carries the split the body's
 /// own scan reports, task #355 — the arm must reach that scan, reporting
 /// `unexpected character '&'` like every other block, STYLE §4.7).
 fn ends_in_plain_semi(slice: &[Token], line: &[u8]) -> bool {
     let Some(last) = slice.len().checked_sub(1) else {
         return false;
     };
-    slice
-        .last()
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
-        && !amp_semi(slice, line, last)
+    slice.last().is_some_and(|tok| span_word(tok, b";")) && !amp_semi(slice, line, last)
 }

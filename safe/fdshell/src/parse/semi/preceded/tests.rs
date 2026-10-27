@@ -209,3 +209,77 @@ fn ensure_before_closer_reports_the_predicate_failure() {
         );
     }
 }
+
+/// Every separator word of the terminator set is read through [`span_word`]
+/// (task #336): a quoted `";"` / `"&"` word is **word data**, so it terminates
+/// no compound list, precedes no clause keyword, is no `& ;` glue and is no
+/// legal closer predecessor. Each row is paired with its unquoted twin, so a
+/// predicate that drops the span gate is dead.
+#[test]
+fn a_quoted_terminator_word_terminates_no_list() {
+    let find = |line: &[u8], term: Term| {
+        find_preceded_by(&tokenize(line).unwrap(), 1, b"then", line, term)
+    };
+    // The real terminator finds the keyword; the quoted words do not, in either
+    // term set.
+    assert_eq!(find(b"if true; then :; fi", Term::Semi), Some(3));
+    assert_eq!(find(b"if true \";\" then :; fi", Term::Semi), None);
+    assert_eq!(find(b"if true ';' then :; fi", Term::Semi), None);
+    assert_eq!(find(b"if true \";\" then :; fi", Term::SemiAmp), None);
+    assert_eq!(find(b"if true \"&\" then :; fi", Term::SemiAmp), None);
+    assert_eq!(find(b"if true \"&&\" then :; fi", Term::SemiAmp), None);
+    assert_eq!(find(b"if true & then :; fi", Term::SemiAmp), Some(3));
+    assert_eq!(
+        find(b"if true \"&\" & then :; fi", Term::SemiAmp),
+        Some(4),
+        "the **unquoted** `&` behind the quoted word terminates the list"
+    );
+
+    // [`is_list_terminator`] on the word itself: the newline and `)` tokens (the
+    // tokenizer emits a `;` token for each) are terminators, the quoted words
+    // are words.
+    let last = |line: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        let n = tokens.len();
+        is_list_terminator(tokens.get(n - 1).unwrap())
+    };
+    assert!(last(b"echo a ;"));
+    assert!(last(b"echo a\n"), "the newline tokenizes as a `;`");
+    assert!(
+        !last(b"echo a )"),
+        "the `)` word is a closer, not a terminator"
+    );
+    assert!(last(b"echo a &"));
+    assert!(!last(b"echo a \";\""));
+    assert!(!last(b"echo a ';'"));
+    assert!(!last(b"echo a \"&\""));
+    assert!(!last(b"echo a \\;"), "the escape pair stays in the word");
+
+    // [`amp_semi`]: a quoted `";"` glued behind the real `&` is word data, and
+    // a real `;` behind a quoted `"&"` is no glue — the `&` half is the
+    // discriminating row (the `;` half's byte is a quote, so the byte arm
+    // already refused it).
+    let glued = |line: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        let idx = tokens
+            .iter()
+            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+            .unwrap();
+        amp_semi(&tokens, line, idx)
+    };
+    assert!(glued(b"for i in 1; do echo a & ; done"));
+    assert!(!glued(b"for i in 1; do echo a \"&\" ; done"));
+    assert!(!glued(b"for i in 1; do echo a & \";\" done"));
+
+    // [`is_closer_predecessor`]: the quoted word leaves the closer with no legal
+    // predecessor, so every block form reports its own missing `;`.
+    let before_closer = |line: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        is_closer_predecessor(&tokens, line, tokens.len() - 2)
+    };
+    assert!(before_closer(b"if true; then echo a ; fi"));
+    assert!(before_closer(b"if true; then echo a & fi"));
+    assert!(!before_closer(b"if true; then echo a \";\" fi"));
+    assert!(!before_closer(b"if true; then echo a ';' fi"));
+    assert!(!before_closer(b"if true; then echo a \"&\" fi"));
+}

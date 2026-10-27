@@ -181,3 +181,79 @@ fn block_condition_rejects_a_trimmed_empty_slice() {
     );
     assert_eq!(cond(b"if ; & then :; fi", 1, 3), None);
 }
+
+/// The text [`trim_semi`] keeps on a **non-statement** slice (a `for` word list,
+/// a `case` pattern), read back from the line's bytes.
+fn trimmed(line: &[u8], from: usize, to: usize) -> String {
+    let tokens = tokenize(line).unwrap();
+    let kept = trim_semi(tokens.get(from..to).unwrap_or(&[]));
+    let (s, e) = token_range(kept);
+    String::from_utf8_lossy(line.get(s..e).unwrap_or(b"")).into_owned()
+}
+
+/// A **quoted** separator word is word data: it trims out of no slice, ends no
+/// body, cuts no condition and never flags the `&`-terminator (task #336). The
+/// rows are the kept **text**, per the rule of [`body`] above, and each quoted
+/// row stands next to its unquoted twin.
+#[test]
+fn a_quoted_semicolon_word_trims_out_of_no_slice() {
+    // Body slices: the quoted word stays at either edge, the real `;` still
+    // trims, and the `& ;` glue is untouched.
+    assert_eq!(
+        body(b"if :; then \";\" echo a \";\" fi", b"then", b"fi"),
+        "\";\" echo a \";\""
+    );
+    assert_eq!(
+        body(b"if :; then echo a \";\" ; fi", b"then", b"fi"),
+        "echo a \";\"",
+        "the real `;` trims, the quoted word stays"
+    );
+    assert_eq!(body(b"if :; then echo a ; fi", b"then", b"fi"), "echo a");
+    assert_eq!(body(b"if :; then ';' fi", b"then", b"fi"), "';'");
+    assert_eq!(body(b"if :; then ; fi", b"then", b"fi"), "");
+    // A quoted word is a **glued** word for `body_end`, so the closer's own slot
+    // stays in the body; the real `;` hands that slot to the closer.
+    let end = |line: &[u8], closer: &[u8]| {
+        let tokens = tokenize(line).unwrap();
+        let idx = tokens
+            .iter()
+            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
+            .unwrap();
+        body_end(&tokens, line, idx)
+    };
+    assert_eq!(end(b"if true; then echo a \";\" fi", b"fi"), 7);
+    assert_eq!(end(b"if true; then echo a ; fi", b"fi"), 6);
+    // Non-statement slices: a word list keeps the quoted separator as a list
+    // word at both ends, and trims the real ones.
+    assert_eq!(trimmed(b"for i in ; 1 ; do", 3, 6), "1");
+    assert_eq!(trimmed(b"for i in \";\" 1 \";\" do", 3, 6), "\";\" 1 \";\"");
+    assert_eq!(trimmed(b"for i in ';' 1 do", 3, 5), "';' 1");
+    // Condition slices: the quoted word is the condition's own word, so nothing
+    // is trimmed away and the `&` cut needs the real `&`.
+    let cond = |line: &[u8], from: usize, to: usize| {
+        let tokens = tokenize(line).unwrap();
+        let (s, e) = token_range(trim_condition(tokens.get(from..to).unwrap_or(&[]), line));
+        String::from_utf8_lossy(line.get(s..e).unwrap_or(b"")).into_owned()
+    };
+    assert_eq!(cond(b"if \";\" ; then echo x; fi", 1, 3), "\";\"");
+    assert_eq!(cond(b"if true ; then echo x; fi", 1, 3), "true");
+    assert_eq!(cond(b"if true & then echo x; fi", 1, 3), "true");
+    assert_eq!(cond(b"if true \"&\" then echo x; fi", 1, 3), "true \"&\"");
+    // The `&`-terminator flag: a quoted separator word **stops** the walk, where
+    // a newline token steps over it (LESSONS: "a `;` token is a newline in
+    // disguise" — the gate is what keeps word data out of that walk).
+    let bg = |line: &[u8], from: usize, to: usize| {
+        let tokens = tokenize(line).unwrap();
+        condition_background(tokens.get(from..to).unwrap_or(&[]), line)
+    };
+    assert!(bg(b"if true & then echo x; fi", 1, 3));
+    assert!(bg(b"if true &\n; then echo x; fi", 1, 4));
+    assert!(!bg(b"if true & \";\" then echo x; fi", 1, 4));
+    assert!(!bg(b"if true & \";\"\nthen echo x; fi", 1, 5));
+    assert!(
+        !bg(b"if true & \"&\" then echo x; fi", 1, 4),
+        "the walk stops at the quoted word, and that word is not the plain `&`"
+    );
+    assert!(!bg(b"if true \"&\" then echo x; fi", 1, 3));
+    assert!(!bg(b"if true \\; then echo x; fi", 1, 2));
+}

@@ -171,3 +171,30 @@ fn heredoc_body(pipe: &Pipeline, stage: usize) -> String {
     };
     String::from_utf8_lossy(body.as_bytes().unwrap_or(&[])).into_owned()
 }
+
+/// The stage's first-`;` cut goes through [`span_word`](crate::parse::word_quoted::span_word),
+/// so a quoted `";"` is a **word** of the stage: the stage keeps its words and
+/// the here-doc operator written behind them (task #336). The ungated text cut
+/// truncated the stage at the quoted word, dropped that operator and handed the
+/// body to the stage **behind** it — so the two bodies below are the pin.
+#[test]
+fn a_quoted_semicolon_word_does_not_cut_a_stage() {
+    let line = b"cat \";\" << A | cat << B\nbodyA\nA\nbodyB\nB";
+    let pipe = pipeline(line);
+    assert_eq!(pipe.stages.len(), 2);
+    let Stage::Command(cmd) = pipe.stages.first().unwrap() else {
+        panic!("the quoted separator is an argument word of a command stage");
+    };
+    assert_eq!(
+        cmd.args,
+        vec![c";".into()],
+        "the word is the separator's text"
+    );
+    assert_eq!(heredoc_body(&pipe, 0), "bodyA\n");
+    assert_eq!(heredoc_body(&pipe, 1), "bodyB\n");
+    // The escaped separator is a word too.
+    assert_eq!(
+        heredoc_body(&pipeline(b"cat \\; << A | cat\nbodyA\nA"), 0),
+        "bodyA\n"
+    );
+}

@@ -152,3 +152,39 @@ fn redirect_syntax_error_propagates_through_the_group_tail() {
     assert_eq!(tail_err(b"{ echo a; } 2>"), "invalid redirect syntax");
     assert_eq!(tail_err(b"{ echo a; } >|"), "invalid redirect syntax");
 }
+
+/// The tail's whole-word `|` test is [`span_word`]'s (task #336): a quoted `"|"`
+/// is a trailing **word**, the same error a plain word after `}` gives, where the
+/// real `|` is the pipeline operator the group cannot take. The `&` row is the
+/// deliberately ungated neighbour: its test is a prefix test, so `&&`/`&>` keep
+/// their pinned errors.
+#[test]
+fn a_quoted_pipe_word_is_a_trailing_word() {
+    assert_eq!(tail_err(b"{ echo a; } | cat"), "unexpected pipe");
+    assert_eq!(
+        tail_err(b"{ echo a; } \"|\""),
+        "group: unexpected word after '}'",
+        "the quoted pipe is a word"
+    );
+    assert_eq!(
+        tail_err(b"{ echo a; } '|'"),
+        "group: unexpected word after '}'"
+    );
+    assert_eq!(
+        tail_err(b"{ echo a; } \\|"),
+        "group: unexpected word after '}'"
+    );
+    assert_eq!(
+        tail_err(b"{ echo a; } \"|\" >f"),
+        "group: unexpected word after '}'"
+    );
+    // The unquoted prefix rows, unchanged.
+    assert_eq!(
+        tail_err(b"{ echo a; } &&"),
+        "unexpected character in this context"
+    );
+    assert_eq!(
+        tail_err(b"{ echo a; } &"),
+        "unexpected character in this context"
+    );
+}

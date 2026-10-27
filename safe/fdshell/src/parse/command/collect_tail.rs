@@ -7,7 +7,7 @@ use crate::parse::bg_redirect::{insert_redirect, parse_bg_redirect};
 use crate::parse::classify::{parse_capture, parse_redirect};
 use crate::parse::here_string::parse_here_string;
 use crate::parse::heredoc::{HeredocBody, is_operator, parse_operator};
-use crate::parse::word_quoted::word_quoted;
+use crate::parse::word_quoted::{span_word, word_quoted};
 use crate::parse::{CommandLine, Token};
 use error_stack::{Report, bail};
 use sys::Position;
@@ -27,16 +27,19 @@ pub(crate) fn collect(
     mut word0_slot: bool,
 ) -> Result<(), Report<ParseError>> {
     let mut spec_at = 0usize;
-    while let Some(tok @ (t, ts, te, _fq, _mask, _spans)) = tokens.get(i) {
-        if t.eq_bytes(b";") {
+    while let Some(tok @ (t, _ts, _te, _fq, _mask, _spans)) = tokens.get(i) {
+        // A quoted `";"` is word data (POSIX 2.9.1, task #336): the statement
+        // ends at the tokenizer's separator token, whose span is the one byte
+        // it stands for, and never at a word whose *text* is `;`.
+        if span_word(tok, b";") {
             break;
         }
         // A bare `&` token is a parse error here: the scanner consumes every
         // statement-terminating `&` (task #326), so one reaching the parse
         // layer is the empty-command family (`echo a && & echo b` — bash's
-        // syntax error too). A quoted or escaped `&` is an ordinary argument
-        // (`echo "&"` prints `&`, measured bash).
-        if t.eq_bytes(b"&") && *te - *ts == t.len() {
+        // syntax error too). A quoted `&` is an ordinary argument
+        // (`echo "&"` prints `&`, measured bash) — the same span gate.
+        if span_word(tok, b"&") {
             bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
         let mut skip = 0usize;

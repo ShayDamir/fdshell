@@ -7,6 +7,7 @@
 
 use super::Token;
 use super::preceded::amp_semi;
+use crate::parse::word_quoted::span_word;
 
 mod background;
 mod block;
@@ -16,10 +17,11 @@ pub(crate) use block::{block_body, block_condition};
 
 /// The `;` **token**: the tokenizer emits one for a `;` byte, a newline and `)`
 /// alike, so this is the token test, never a byte test ([`amp_semi`] adds the
-/// byte). One owner of the six-field destructuring every walk of a token slice
-/// needs.
+/// byte), and [`span_word`] is the quoting half — a quoted `";"` is word data
+/// and trims out of no slice (task #336). One owner of the six-field
+/// destructuring every walk of a token slice needs.
 fn is_semi(tok: &Token) -> bool {
-    tok.0.eq_bytes(b";")
+    span_word(tok, b";")
 }
 
 /// The exclusive end of a body slice written **before** the closer at
@@ -78,10 +80,7 @@ pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
 /// text carries the split its own scan rejects.
 pub(crate) fn trim_condition<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token] {
     let body = trim_body(tokens, line);
-    let amp = usize::from(
-        body.last()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"&")),
-    );
+    let amp = usize::from(body.last().is_some_and(|tok| span_word(tok, b"&")));
     let end = body.len().saturating_sub(amp);
     body.get(..end).unwrap_or(&[])
 }
