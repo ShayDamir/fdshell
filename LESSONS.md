@@ -5327,3 +5327,61 @@ and `the_unquoted_var_and_pidvar_arms_are_unchanged`, and the filesystem rows
 `a_bound_fd_variable_does_not_capture_a_quoted_target`,
 `the_empty_pair_and_the_bare_percent_stay_documented_divergences` — each at
 the **filesystem**, per the #264 entry.
+
+## A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself
+
+POSIX §2.9.1 recognizes a metacharacter only **unquoted**, so bash reads `";"`,
+`';'`, `"|"`, `"&"`, `")"` as ordinary **word bytes**: `echo a ";" b` prints
+`a ; b`, `case x in a) echo A ';;' ;; esac` prints `A ;;`, and a quoted `;`
+never restarts command position inside a block body. fdshell's tokenizer emits
+each of them as a **word token whose text is the separator**, so every whole-word
+separator test in the parse layer reads word data as a statement, pipeline or
+`case`-clause boundary. One gate owns the fix: `parse/word_quoted.rs::span_word`
+— text **and** `!word_quoted(text, start, end)` — called at every site. A
+call-site copy of the `te - ts == t.len()` arithmetic is the byte-identical
+private duplicate that drifts (the entry above "An empty quoted region…").
+
+The gate is the **raw span**, never the mask and never the scan-back:
+
+* the mask is blind — `"";` is an empty word token **plus** a real `;` token (the
+  pair owns no bit, and the `;`'s span is one byte), and `a";"b` is **one** word
+  whose text is `a;b`, so no separator-shaped text exists to gate at all;
+* `keywords::quoted::quoted_word`'s scan-back stops at the byte that breaks a
+  word, and **that set contains `;`, `|`, `&`, `(`, `)`, `<`, `>`** — for a
+  separator-shaped word the walk ends on its own byte, so the scan-back is sound
+  only where the word ends in a *letter*: it stays the **keyword** gate
+  (`keyword_word`), and the separator gate cannot be it. The span form is also
+  the only one computable at the sites that have the token and no `line` in
+  reach (`semi/trim.rs::is_semi`, `semi/preceded.rs::is_list_terminator`,
+  `pipeline/stage.rs::trim_at_semi`, `envassign.rs`'s statement bounds,
+  `case_block/literal.rs::word_at`) — one gate for all of them, no `line`
+  threaded through the parse layer.
+
+The **escape** spellings need no arm, and that is the tokenizer's standing rule
+(#109, "POSIX #4.1 escapes"): `\;`, `\|`, `\)` keep the pair in the token
+**text** (`parse/token/escape.rs`), so their text is `\;`, not `;`, and no
+separator test fires — `echo a \; b` is parity today. Pin them: the pin kills
+anyone who "widens" a separator text test into a quote-removed comparison, which
+is what would split `echo a \; b`.
+
+The byte test one gate away is real: `semi/trim/background.rs::is_newline_semi`
+asks `line[start] != b';'` of a `;` token to tell a newline from a `;` byte ("A
+`;` token is a newline in disguise", task #355) — for a quoted `";"` that byte is
+`"`, so it read **word data as a newline** and let the `&`-terminator flag walk
+over it. Gating the text test first is what makes the byte arm mean what it says.
+
+Byte/token lockstep: the byte splitters (`segment`, `cond`, `scan/advance`) need
+no gate, because they read raw bytes where a quoted separator's word text is
+`";"` / `"|"` and no separator row can fire; `parse/redirect/clobber/pipe.rs::pipe_token_span`
+is this rule for the `|`, and its doc is the template. A token-level rule that
+fires on word data is the divergence; a byte-level rule that sees the quote bytes
+is not.
+
+Pins: `parse/word_quoted/tests.rs::span_word_gates_every_separator_spelling`
+(the `";"` / `';'` / `"";` / `a";"b` / `\;` spellings — `"";` is the
+mask-blindness pin, `\;` the no-widening pin),
+`parse/semi/trim/tests.rs` + `parse/semi/preceded/tests.rs` (slice **text**,
+never the rc, per #355), `tests/quotes.rs::a_quoted_separator_word_is_word_data`,
+and the fence the blast radius names: `tests/heredoc.rs`, `tests/block_bodies.rs`,
+`tests/cond_blocks.rs`, `tests/case.rs`, `tests/group.rs`, `tests/pipeline.rs`,
+`tests/async.rs`, `tests/env_assign.rs`, `tests/glued_pair.rs` green untouched.

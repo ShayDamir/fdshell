@@ -26,5 +26,29 @@ pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
     t.eq_bytes(kw) && !quoted_word(line, *end)
 }
 
+/// The separator-recognition gate (POSIX §2.9.1, task #336): `tok` **is** the
+/// separator word `w` only when its raw span is exactly those bytes, so it
+/// carries no quote byte. A quote-protected `";"`, `';'`, `"|"`, `"&"`, `")"`
+/// is a word whose *text* is the separator, and bash reads it as word **data**:
+/// it splits no statement, no pipeline, no `case` clause, and it never restarts
+/// command position (`echo a ";" b` prints `a ; b`).
+/// LESSONS: "A separator-shaped word needs the span gate"
+///
+/// The gate is the raw span, never the mask (`"";` is an empty word token
+/// **plus** a real `;`, and `a";"b` is one word whose text is `a;b`) and never
+/// [`quoted_word`]'s scan-back, whose word-break set contains the separator
+/// bytes themselves, so it is sound only for a keyword word, which ends in a
+/// letter. The span form is also the gate the sites that own no `line` can
+/// compute (`semi/trim.rs::is_semi`, `pipeline/stage.rs::trim_at_semi`,
+/// `envassign.rs`). Escape spellings need no arm: `\;`, `\|`, `\)` keep the pair
+/// in the token **text** (`parse/token/escape.rs`), so no separator text exists
+/// to gate. Byte-level twin: the byte scanners read raw bytes, where a quoted
+/// separator's word text is `";"` / `"|"` and no separator row can fire —
+/// `parse::redirect::clobber::pipe::pipe_token_span` is this rule for the `|`.
+pub(crate) fn span_word(tok: &Token, w: &[u8]) -> bool {
+    let (t, start, end, _fq, _mask, _spans) = tok;
+    t.eq_bytes(w) && !word_quoted(t, *start, *end)
+}
+
 #[cfg(test)]
 mod tests;
