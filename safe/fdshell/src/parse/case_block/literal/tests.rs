@@ -110,3 +110,32 @@ fn pattern_of_a_clause_closed_by_esac_is_protected() {
         vec![1, 3, 9]
     );
 }
+/// The region walk reads its needles through [`span_word`](crate::parse::word_quoted::span_word)
+/// (task #336), so it records the regions `case_clause::parse_clauses` actually
+/// parses (the mirror property of tasks #273/#455): a quoted `")"` never closes a
+/// pattern list — the region it sits in is **no** region at all, the same verdict
+/// the parser reports as `case: missing ')'` — and a quoted `|` / `;` stay inside
+/// the region they sit in.
+#[test]
+fn a_quoted_separator_keeps_the_regions_where_the_parser_reads_them() {
+    // The case word and the pattern region of a normal line.
+    assert_eq!(indices(b"case x in a) echo A;; esac"), vec![1, 3]);
+    assert_eq!(indices(b"case x in a) esac"), vec![1, 3]);
+    // A quoted `|` is pattern text: the region covers the whole pattern, token
+    // for token as the unquoted two-pattern spelling does.
+    assert_eq!(
+        indices(b"case x in a \"|\" b) echo A;; esac"),
+        indices(b"case x in a|b) echo A;; esac")
+    );
+    // A quoted `)` is pattern text, so the list never closes and no pattern
+    // region is recorded; the ungated walk recorded one for that `)`.
+    assert_eq!(indices(b"case x in a\")\" esac"), vec![1]);
+    // A quoted `;` is arm text: it closes no clause, so the second `)` of the
+    // line is arm text too and only the first clause has a pattern region.
+    assert_eq!(
+        indices(b"case x in a) echo \";\" b) echo C;; esac"),
+        vec![1, 3]
+    );
+    // A quoted `;` as the case **word** is a word, so the walk starts normally.
+    assert_eq!(indices(b"case \";\" in a) echo A;; esac"), vec![1, 3]);
+}

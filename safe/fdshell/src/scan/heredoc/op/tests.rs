@@ -194,7 +194,9 @@ fn operator_matches_the_stripped_quoted_delimiter() {
 /// gated on the **raw span** instead (task #330): an empty text over a quoted
 /// span is the word `""`/`''` (POSIX #2.3: the delimiter is the word after
 /// quote removal), and the mask has no bit to say so; an empty span is the
-/// missing operand. `;` and `|` stay mask- and span-independent arms. One
+/// missing operand. The `;` and `|` arms are gated on the **same span flag**
+/// (task #336): a quoted `";"` / `"|"` word is the delimiter word of a
+/// here-document (`cat << ";"` reads a body), not the missing operand. One
 /// positive row per operator byte keeps the four arms killable, and both
 /// directions of the span flag kill the new arm's mutants.
 #[test]
@@ -227,9 +229,14 @@ fn invalid_delimiter_gates_operator_bytes_on_the_quote_mask() {
         // unquoted empty word: only the span flag gates this arm.
         (b"", &[], true, false),
         (b"", &[], false, true),
-        // Mask-independent arms and plain words.
+        // The separator arms: the unquoted word is the missing operand, a
+        // quoted raw span (`";"`, `"|"`) is a word — the empty delimiter.
         (b";", &[f], false, true),
         (b"|", &[f], false, true),
+        (b";", &[f], true, false),
+        (b"|", &[f], true, false),
+        (b";", &[], true, false),
+        (b"|", &[], true, false),
         (b"abc", &[f], false, false),
         (b"x&f", &[f], false, false),
         (b"--", &[f], false, false),

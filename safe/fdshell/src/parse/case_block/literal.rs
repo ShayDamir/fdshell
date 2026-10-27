@@ -5,6 +5,7 @@
 use super::Token;
 use crate::keywords::Closer;
 use crate::parse::semi::{List, list_closing_keyword_index};
+use crate::parse::word_quoted::span_word;
 use alloc::vec::Vec;
 
 /// The token indices of the case word and every clause's pattern region in
@@ -62,10 +63,12 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
     out
 }
 
+/// The needle word at `i`, gated on the raw span ([`span_word`], task #336): a
+/// quoted `";"` / `")"` is pattern data, and the `in` needle is the keyword the
+/// mirror site `case_block.rs` reads through [`keyword_word`] — one span fact
+/// for a keyword needle, so the #455/#273 mirror property holds.
 fn word_at(tokens: &[Token], i: usize, w: &[u8]) -> bool {
-    tokens
-        .get(i)
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(w))
+    tokens.get(i).is_some_and(|tok| span_word(tok, w))
 }
 
 #[cfg(test)]

@@ -207,3 +207,41 @@ fn the_mask_and_the_spans_stay_parallel_across_the_stripped_paren() {
     assert_eq!(control.spans, pattern.spans);
     assert_eq!(control.mask, pattern.mask);
 }
+
+/// Every separator word of the clause walk is [`span_word`]'s (task #336):
+/// quoted, a `;` is no clause-leading skip, a `|` is no pattern separator, a `)`
+/// is no pattern closer and a `;;` closes no clause — the bytes are pattern and
+/// body **text**. Each row is the bash-measured shape.
+#[test]
+fn a_quoted_separator_word_is_pattern_or_body_text() {
+    // A `|` inside a pattern word is pattern text: one pattern, quotes stripped.
+    let clauses = clauses_of(b"case x in a\"|\"b) echo A;; esac").unwrap();
+    assert_eq!(clauses[0].patterns.len(), 1);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"a|b"));
+    // The same separator as its **own** quoted word joins into the pattern with
+    // the token-joining space, and stays one pattern.
+    let clauses = clauses_of(b"case x in a \"|\" b) echo A;; esac").unwrap();
+    assert_eq!(clauses[0].patterns.len(), 1);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"a | b"));
+    // The unquoted twin of both rows is the two-pattern split.
+    let clauses = clauses_of(b"case x in a|b) echo A;; esac").unwrap();
+    assert_eq!(clauses[0].patterns.len(), 2);
+    // A quoted `;` is a pattern **word**, never the leading skip: the pattern
+    // list it opens still needs its `)`.
+    let clauses = clauses_of(b"case x in \";\" a) echo A;; esac").unwrap();
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"; a"));
+    assert!(clauses_of(b"case x in \";\" a esac").is_err());
+    // A quoted `)` is pattern text, so the list never closes: bash's syntax
+    // error, fdshell's missing paren.
+    let err = clauses_of(b"case x in a\")\" esac").err().unwrap();
+    assert_eq!(err.current_context().to_string(), "case: missing ')'");
+    // A quoted `;;` is body text: the clause stays open until the real one.
+    let clauses = clauses_of(b"case x in a) echo A \";;\" ;; esac").unwrap();
+    assert_eq!(clauses.len(), 1);
+    assert_eq!(clauses[0].body.data, ShortCStr::from(c"echo A \";;\""));
+    // The unquoted `;;` ends the clause, and the next clause's body starts
+    // behind it.
+    let clauses = clauses_of(b"case x in a) echo A;; b) echo B;; esac").unwrap();
+    assert_eq!(clauses.len(), 2);
+    assert_eq!(clauses[0].body.data, ShortCStr::from(c"echo A"));
+}

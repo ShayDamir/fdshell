@@ -3914,3 +3914,51 @@ fn a_comment_terminated_line_starved_and_deferred_rows_keep_their_owners() {
     lines.sort_unstable();
     assert_eq!(lines, ["a", "b"], "stdout={out}");
 }
+
+/// Task #336: a **quote-protected separator word** is a delimiter word like any
+/// other. The bare-operand guard's `;` and `|` arms are gated on the word's raw
+/// span (`scan::heredoc::op::invalid_delimiter`'s span flag, the same fact as
+/// `parse::word_quoted::span_word`), so `cat << ";"` takes `;` as its delimiter
+/// and reads the body up to the line that is just `;` — where the **unquoted**
+/// `cat << ;` stays the missing operand. Expectations are bash 5.3.9's.
+#[test]
+fn a_quoted_delimiter_may_be_a_separator_word() {
+    for (script, want) in [
+        ("cat << \";\"\nbody\n;\n", "body\n"),
+        ("cat << ';'\nbody\n;\n", "body\n"),
+        ("cat << \"|\"\nbody\n|\n", "body\n"),
+        ("cat << \"&\"\nbody\n&\n", "body\n"),
+        // The delimiter word is data for the scan, so the real `;` behind the
+        // operator is a statement separator and the region still claims its body.
+        ("cat << \";\" ; echo after\nbody\n;\n", "body\nafter\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // The unquoted twins are the missing operand (task #330's arm, ungated): bash
+    // rc 2, fdshell rc 1.
+    for script in ["cat << ;\nbody\n;\n", "cat << |\nbody\n|\n"] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
+    }
+    // A quoted separator delimiter with no delimiter line is the missing
+    // delimiter, the same verdict the empty quoted delimiter reports (bash warns
+    // and exits 0, the family `a_bare_quoted_empty_delimiter_delimits_on_the_empty_line`
+    // pins).
+    let (out, err, code) = run("cat << \";\"");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("missing terminating delimiter line ';'"),
+        "stderr={err:?}"
+    );
+    // The bare path redirect of a quoted separator word is task **#475**'s
+    // divergence, pinned here so the change is visible: bash writes the file `;`
+    // (rc 0), fdshell answers the redirect parse error.
+    let (out, err, code) = run("echo x > \";\"");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("invalid redirect syntax"),
+        "task #475 owns the bare path-redirect word: stderr={err:?}"
+    );
+}

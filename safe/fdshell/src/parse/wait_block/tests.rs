@@ -2,6 +2,7 @@
 use super::*;
 use crate::parse::Token;
 use crate::parse::token::tokenize_statement;
+use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -112,5 +113,45 @@ fn a_call_at_the_closer_bails() {
         arm::next_arm(&tokens, &text, done_idx, done_idx)
             .unwrap()
             .is_none()
+    );
+}
+
+/// Every separator test of the arm walk is [`span_word`]'s (task #336): a quoted
+/// `";"` in front of an arm is its **pattern word**, never the leading skip, and
+/// a quoted `")"` is pattern text, never the arm's head closer. Each row stands
+/// next to its unquoted twin.
+#[test]
+fn a_quoted_separator_is_pattern_text_in_the_arm_walk() {
+    // The real `;` in front of the arm is skipped, so the pattern keyword stands
+    // at the head of the arm.
+    assert_eq!(
+        walk(b"wait\n;\nwritable %wr) echo w;\ndone")
+            .unwrap()
+            .bodies,
+        vec![b"echo w".to_vec()]
+    );
+    // A quoted or escaped `;` is that word, not the skip: the arm's pattern no
+    // longer starts with a pattern keyword (bash rejects the same shape), where
+    // the ungated walk skipped it and parsed the arm.
+    for line in [
+        b"wait\n\";\" writable %wr) echo w;\ndone".as_slice(),
+        b"wait\n\';' writable %wr) echo w;\ndone",
+        b"wait\n\\; writable %wr) echo w;\ndone",
+    ] {
+        let err = walk(line).err().unwrap();
+        assert_eq!(
+            err.current_context().to_string(),
+            "`wait`: unknown arm pattern keyword",
+            "{line:?}"
+        );
+    }
+    // A quoted `)` is pattern text: the arm never reaches its head closer, and
+    // the block reports the missing one.
+    let err = walk(b"wait\nreadable \")\" %rd echo x;\ndone")
+        .err()
+        .unwrap();
+    assert_eq!(
+        err.current_context().to_string(),
+        "`wait`: missing ')' after arm pattern"
     );
 }

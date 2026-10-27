@@ -1,7 +1,7 @@
 use super::Token;
 use super::part_text::part_text;
 use super::semi::block_body;
-use super::word_quoted::{keyword_word, word_quoted};
+use super::word_quoted::{keyword_word, span_word, word_quoted};
 use crate::error::parse::ParseError;
 use crate::keywords::{name_len, quoted_word};
 use error_stack::{Report, ResultExt};
@@ -27,9 +27,9 @@ pub(crate) fn is_function_def(tokens: &[Token], line: &[u8]) -> bool {
 /// POSIX `name() {`: token 0 is an unquoted `name(` with a non-empty name,
 /// token 1 is `)`.
 fn posix_def(tokens: &[Token], line: &[u8]) -> bool {
-    let parens = tokens
-        .get(1)
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b")"));
+    // The `)` is [`span_word`]'s: a quoted `")"` is a word, not the definer's
+    // parameter-list paren (task #336, bash rejects `f()")" { …; }` rc 2).
+    let parens = tokens.get(1).is_some_and(|tok| span_word(tok, b")"));
     parens
         && tokens
             .first()

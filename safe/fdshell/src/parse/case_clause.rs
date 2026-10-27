@@ -4,6 +4,7 @@ pub(crate) mod stray;
 
 use super::Token;
 use super::semi::trim_semi;
+use super::word_quoted::span_word;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, bail, ensure};
@@ -23,10 +24,7 @@ pub fn parse_clauses(
     let mut clauses = Vec::new();
     let mut pos = start;
     while pos < esac_idx {
-        if tokens
-            .get(pos)
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
-        {
+        if tokens.get(pos).is_some_and(|tok| span_word(tok, b";")) {
             pos += 1;
             continue;
         }
@@ -44,6 +42,10 @@ pub fn parse_clauses(
 /// The clause's first token goes through [`pattern::take_open_paren`] first, so
 /// the pattern list starts behind bash's optional leading `(` (POSIX 2.9.4.3's
 /// `( pattern-list )`, task #334).
+///
+/// Every separator test here is [`span_word`]'s, so a quoted `")"` / `"|"` /
+/// `";"` is **pattern text**: `case x in a"|"b)` is the one pattern `a|b`, and a
+/// leading `";"` is a pattern word, never the skip (task #336).
 ///
 /// The **paren** ends the pattern list, not the position: a clause whose `)` is
 /// the token right before `esac` is a clause with an empty body
@@ -69,12 +71,12 @@ fn collect_patterns(
         let Some(token) = tokens.get(*pos) else {
             break;
         };
-        if token.0.eq_bytes(b")") {
+        if span_word(token, b")") {
             *pos += 1;
             closed_paren = true;
             break;
         }
-        if token.0.eq_bytes(b"|") {
+        if span_word(token, b"|") {
             if current_pattern.is_empty() {
                 bail!(ParseError::CaseEmptyPattern);
             }

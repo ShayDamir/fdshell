@@ -3,6 +3,7 @@ use super::stray;
 use crate::error::parse::ParseError;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{amp_semi, trim_body};
+use crate::parse::word_quoted::span_word;
 use error_stack::{Report, ResultExt, bail};
 use sys::ScriptText;
 
@@ -15,6 +16,10 @@ use sys::ScriptText;
 /// regions sit past `esac`, in a multi-line clause they are inside the span,
 /// where `part_text`'s extension mode returns the slice's verbatim span
 /// unchanged.
+///
+/// Both arms of the window are [`span_word`]'s, so a quoted `";"` pair is body
+/// data and ends no clause (task #336; the glue test `h.2 == t.1` is the pair's
+/// own rule, #355).
 ///
 /// The arm region (up to the `;;` window that ends it) is also where a missing
 /// clause separator shows up: [`stray`] decides the shape, and this site owns
@@ -29,7 +34,7 @@ pub(crate) fn body(
     let body_slice = tokens.get(body_start..esac_idx).unwrap_or(&[]);
     let end = body_slice
         .windows(2)
-        .position(|w| matches!(w, [a, b] if a.0.eq_bytes(b";") && b.0.eq_bytes(b";")))
+        .position(|w| matches!(w, [a, b] if span_word(a, b";") && span_word(b, b";")))
         .map(|i| body_start + i);
     // The bound is the window's index **in the region**, so the next clause's
     // own pattern parens (`a) echo hi;; b) ;; esac`) are never in scope.

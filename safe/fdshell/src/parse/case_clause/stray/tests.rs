@@ -9,8 +9,8 @@ use alloc::vec;
 /// as the index of the `;;` window that ends the arm region (`None`: the run up
 /// to `esac`). This is the token list the parse layer scans (`case_clause::
 /// extract::body`), heredoc bodies blanked and byte offsets preserved, and `line`
-/// is the statement's own text, so the keyword gate [`super::keyword_word`] reads
-/// the spans the tokens were built from.
+/// is the statement's own text, so the span gates [`super::span_word`] and
+/// [`super::separator_data`] read the spans the tokens were built from.
 fn opens(line: &[u8], limit: Option<usize>) -> bool {
     opens_next_pattern(&tokenize_statement(line).unwrap(), limit, line)
 }
@@ -261,4 +261,33 @@ fn a_paren_behind_an_operator_token_is_not_a_pattern_paren() {
 #[test]
 fn a_heredoc_body_written_in_an_arm_is_not_in_the_region() {
     assert!(!opens(b"case x in x) cat <<T\nx)\n)\nT\nesac", None));
+}
+
+/// A **quoted** separator word is word data, so it never restarts command
+/// position for the paren written behind it (task #336, [`separator_data`]): the
+/// `)` follows an argument and stays arm text — the accepted #419 family. The
+/// unquoted twins are the rows of [`a_paren_behind_a_command_position_word_opens_the_next_pattern`].
+#[test]
+fn a_quoted_semicolon_never_restarts_command_position() {
+    // The real `;` restarts command position, so the `)` behind the next word is
+    // the clause pattern of a missing `;;`.
+    assert!(opens(b"echo a;b)", None));
+    // The quoted and escaped words are the command's **arguments**: the paren
+    // follows data.
+    assert!(!opens(b"echo a \";\" b)", None));
+    assert!(!opens(b"echo a ';' b)", None));
+    assert!(!opens(b"echo a \\; b)", None));
+    assert!(
+        opens(b"echo a \";\" b); c)", None),
+        "the quoted word keeps the first `)` out of the rule, and the real `;` of \
+         the next statement restarts command position for `c`"
+    );
+    // The same rule inside the arm's own block bodies, where the `;` of the
+    // block's clauses is command position.
+    assert!(!opens(b"if true; then echo a \";\" b) fi", None));
+    assert!(opens(b"if true; then echo a; b) fi", None));
+    // A quoted separator as the arm's **first** word is the command word, not a
+    // restart; the paren behind its argument is arm text (#419's family).
+    assert!(!opens(b"\";\" b)", None));
+    assert!(opens(b"; b)", None), "the real `;` leaves command position");
 }

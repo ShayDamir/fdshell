@@ -9,7 +9,7 @@ use crate::parse::Token;
 use crate::parse::block_tail::{is_closer, redirects};
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, block_body, ensure_before_closer, up_to_closing};
-use crate::parse::word_quoted::keyword_word;
+use crate::parse::word_quoted::{keyword_word, span_word};
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
@@ -31,10 +31,7 @@ pub(super) fn tail_body(
         .collect();
     // Between `))` and `do` stands at most one `;` token: `)) do`, `)) ; do`,
     // `))\ndo`, `))do`. `)) ; ; do` and `)) ;; do` are bash's rc-2 pair.
-    let gap = usize::from(
-        tail.first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b";")),
-    );
+    let gap = usize::from(tail.first().is_some_and(|tok| span_word(tok, b";")));
     let tail = tail.get(gap..).unwrap_or(&[]);
     ensure!(
         tail.first()

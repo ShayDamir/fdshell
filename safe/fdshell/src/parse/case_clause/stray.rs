@@ -4,15 +4,15 @@
 //! `;;` shows up as a `)` written in **command position** inside the arm.
 
 use super::Token;
-use crate::keywords::{Glue, Place, after};
+use crate::keywords::{Glue, Place, after, separator_data, word_place};
 use crate::mask::{MaskBit, quoted_at};
 use crate::parse::semi::glue_at;
-use crate::parse::word_quoted::keyword_word;
+use crate::parse::word_quoted::span_word;
 
 /// Does `region` — one arm's tokens, `limit` the index of the `;;` that ends it
 /// (`None`: the run up to `esac`) — carry the pattern paren of the clause that
-/// follows it without a `;;`? `line` is the statement's text, for the keyword
-/// gate [`keyword_word`] reads.
+/// follows it without a `;;`? `line` is the statement's text, for the
+/// byte-level rows of [`after`].
 ///
 /// The rule is the shared command-position machine ([`after`], LESSONS "One
 /// clause rule, three scorers"), and the `)` counts only when it closes nothing
@@ -45,9 +45,13 @@ use crate::parse::word_quoted::keyword_word;
 ///   own rule owns them, so `a) ((1)); b) ;; esac` still bails;
 /// - **an operator predecessor** ([`is_operator`]): `((1))` is the tokens `((1`,
 ///   `)`, `)` and its second `)` follows an operator token, not a pattern word;
-/// - [`keyword_word`]: a quoted `")"` is a word whose text is `)`, and an
-///   escaped `\)` keeps its pair in the word text, so `a) echo ")" ;;` stays
-///   arm text (the same gate the keyword scorers open with).
+/// - [`span_word`]: a quoted `")"` is a **word** whose text is `)` and whose
+///   span carries the quote bytes, and an escaped `\)` keeps its pair in the
+///   word text, so `a) echo ")" ;;` and `a) echo \) ;;` stay arm text. The span
+///   gate is **stronger** here than the keyword gate [`keyword_word`], whose
+///   scan-back breaks on the `)` byte itself (task #336);
+/// - [`separator_data`]: a quoted `";"` inside the arm is word data, so it never
+///   restarts command position for the `)` written behind it (task #336).
 pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &[u8]) -> bool {
     // `place` is the place of the token being read, `before` the place of the
     // token before it — the word the `)`-test judges. The arm's first token
@@ -69,7 +73,7 @@ pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &
         let Ok(bytes) = word.as_bytes() else {
             continue;
         };
-        let paren = keyword_word(tok, line, b")");
+        let paren = span_word(tok, b")");
         if arith {
             arith = !paren; // the arithmetic region ends at its own closing `)`
             continue;
@@ -95,7 +99,14 @@ pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &
         // parens, and the arm-level opener/closer pairing is the `case`
         // builder's (it walks with `Closer::Esac`), so the closer row of
         // [`after`] is asked with `None` — the top-level behavior (task #309).
-        place = after(bytes, line, *end, place, glue, None);
+        // A quoted `";"` is word data, so it leaves the place an ordinary word
+        // leaves and never reopens command position for the `)` behind it
+        // (task #336).
+        place = if separator_data(tok) {
+            word_place(place)
+        } else {
+            after(bytes, line, *end, place, glue, None)
+        };
     }
     false
 }
@@ -104,13 +115,13 @@ pub(crate) fn opens_next_pattern(region: &[Token], limit: Option<usize>, line: &
 /// `;;` before it? Its predecessor word must sit in command position (`b` in
 /// `a) b) ;;`, behind the `;` in `a) echo hi; b) ;;`) and must not be an operator
 /// token — a `)` written behind `;`, `|`, `&` or another `)` closes that operator,
-/// never a pattern list.
+/// never a pattern list. The operator test is the **token**'s, gated on the raw
+/// span, so a quoted `";"` / `"|"` predecessor is word data and leaves the paren
+/// behind it a clause paren (task #336).
 fn is_a_clause_pattern(before: Place, region: &[Token], i: usize) -> bool {
     matches!(before, Place::Command)
         && i > 0
-        && region
-            .get(i - 1)
-            .is_some_and(|prev| !prev.0.as_bytes().is_ok_and(is_operator))
+        && region.get(i - 1).is_some_and(|prev| !is_operator(prev))
 }
 
 /// How many groups this word opens **inside the arm**, counted over the word's
@@ -164,9 +175,12 @@ fn opens_groups(b: &[u8], mask: &[MaskBit]) -> usize {
     opened
 }
 
-/// The operator words the tokenizer emits as tokens of their own.
-fn is_operator(b: &[u8]) -> bool {
-    matches!(b, b";" | b"|" | b"&" | b")")
+/// The operator words the tokenizer emits as tokens of their own — every one of
+/// them through [`span_word`], so a quoted spelling is a word, never an operator
+/// predecessor (task #336).
+fn is_operator(tok: &Token) -> bool {
+    let w = |sep: &[u8]| span_word(tok, sep);
+    w(b";") || w(b"|") || w(b"&") || w(b")")
 }
 
 #[cfg(test)]

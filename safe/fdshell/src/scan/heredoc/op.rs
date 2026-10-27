@@ -101,17 +101,23 @@ pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
 /// here-document terminates on — where an empty span is the missing operand.
 /// `span_quoted` is that test, computed by the caller owning the token span
 /// (`parse::word_quoted::word_quoted`, whose span-vs-text length is the only
-/// signal for a zero-byte quoted region). The path families pass `false` and
-/// keep the text-only arm: bash parses `> ""` and fails at the open, so
-/// fdshell's rc 1 parse error is its side of that pair. Byte-level twin:
+/// signal for a zero-byte quoted region). The **same flag gates the separator
+/// arms** (task #336): a quoted `";"` / `"|"` is a word, so `cat << ";"` with a
+/// body and a `;` line delimits, as bash measures — the byte level accepts it
+/// (`lines::delimiter_span` reads the raw bytes, `Operator::new` quote-removes
+/// the word), so the two levels are in lockstep only once the token level stops
+/// rejecting it. The path families pass `false` and keep the text-only arms:
+/// bash parses `> ""` / `> ";"` and fails at the open (or creates the file `;`),
+/// so fdshell's rc 1 parse error is its side of that pair, owned by #326/#329/
+/// #330 and pinned for the quoted-`;` target by #475. Byte-level twin:
 /// `lines::delimiter_span` rejects an empty **raw** word and `""` is not
 /// empty, so that level needs no gate. Every bare-operand site calls this one
 /// function, so the families cannot drift apart.
 pub(crate) fn invalid_delimiter(word: &ShortCStr, mask: &[MaskBit], span_quoted: bool) -> bool {
     (word.is_empty() && !span_quoted)
         || operator_word(word, mask)
-        || word.eq_bytes(b";")
-        || word.eq_bytes(b"|")
+        || (word.eq_bytes(b";") && !span_quoted)
+        || (word.eq_bytes(b"|") && !span_quoted)
 }
 
 /// The operator-byte arm of the bare-operand rule, gated on the operand's own

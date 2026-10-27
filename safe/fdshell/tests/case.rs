@@ -1140,3 +1140,63 @@ fn case_pattern_span_survives_the_stripped_paren() {
         assert_eq!((out.as_str(), code), ("n\n", 0), "{script}: {err}");
     }
 }
+
+/// Task #336: a quote-protected separator word is **pattern or body text**, never
+/// clause structure. The `|` of a pattern, the `)` that closes a pattern list, the
+/// `;` the clause walk skips and the `;;` that closes a clause are all read through
+/// `parse::word_quoted::span_word`, so a quoted spelling is data: `x"|"y` is the one
+/// pattern `x|y`, and `";"` in front of a pattern is a pattern **word** (the rows
+/// bash 5.3.9 accepts, recorded; its syntax errors land on fdshell's parse error at
+/// rc 1, and the accepted rows are the leniency task #419 owns — a `)` behind an
+/// argument is arm text here).
+#[test]
+fn a_quoted_separator_is_pattern_or_body_text() {
+    for (script, want) in [
+        // The `|` inside a pattern word is pattern text: one pattern `x|y`.
+        (r#"case 'x|y' in x"|"y) echo M ;; esac"#, "M\n"),
+        // The unquoted twins: a real `|` splits the pattern list.
+        (r#"case b in a|b) echo M ;; esac"#, "M\n"),
+        (r#"case x in a"|"b) echo A ;; esac"#, ""),
+        // The `;` and the `;;` inside an arm's body are arm text.
+        (r#"case a in a) echo "A ;" ;; esac"#, "A ;\n"),
+        (r#"case a in a) echo "A ;;" ;; esac"#, "A ;;\n"),
+        (r#"case a in a) echo "a; b" ;; esac"#, "a; b\n"),
+        // A quoted `;` in front of the pattern is a pattern word, so the clause
+        // it opens is the pattern `; a`, which matches nothing here.
+        (r#"case a in ";" a) echo P;; esac"#, ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // A quoted `)` is pattern text, so the pattern list never closes and the
+    // block loses its structure: bash's syntax error (2) is fdshell's parse
+    // error (1).
+    for (script, needle) in [
+        (r#"case x in "a)" echo M ;; esac"#, "case: missing ')'"),
+        (
+            r#"case a in a")" esac"#,
+            "'case' is missing its closing 'esac'",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "stderr={err:?}");
+    }
+    // The accepted divergence (task #419's family, the owner of a `)` behind an
+    // argument): a **quoted** separator keeps the arm open, so bash's
+    // missing-`;;` syntax error is fdshell's arm text. The unquoted twin reports
+    // the missing `;;`.
+    for (script, want) in [
+        (r#"case x in a) echo a ";" b) ;; esac"#, ""),
+        (
+            r#"case a in a) echo A ";;" b) echo B ;; esac"#,
+            "A ;; b ) echo B\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    let (out, err, code) = run(r#"case x in a) echo a; b) ;; esac"#);
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("missing ';;'"), "stderr={err:?}");
+}
