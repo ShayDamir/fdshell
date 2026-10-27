@@ -452,3 +452,42 @@ fn a_block_closer_inside_a_body_region_never_reaches_the_stack() {
     let fed = modes_of(&line[..], &[(0, Place::Command, 1), (9, Place::Command, 0)]);
     assert_eq!(fed.mode_at(16), Mode::Body, "the body at the region's site");
 }
+
+/// The window's `to` bound is **one past** the run's terminating newline, and
+/// that byte is load-bearing for a delimiter word with an unterminated quote:
+/// `cat <<'a b` + `a b` ends the word's raw span exactly on the newline, so at
+/// `to == nl` the quote region stops at the window edge, the delimiter reads as
+/// `a b`, the next line matches it, and the run owns a region. One past the
+/// newline, the quote swallows the newline byte, the delimiter is `a b\n`, no
+/// line ever matches it, and the run carries no region at all — the caller's
+/// plain `\n` arm applies (task #466: the program-level argument that the parse
+/// layer rejects such a text binds the *program*, not this helper, so the
+/// helper's own answer — the region list and the window end — is the pin).
+#[test]
+fn window_end_is_one_past_the_runs_newline() {
+    let text = alloc::string::String::from("cat <<'a b\na b");
+    let line = text.as_bytes();
+    let nl = line.iter().position(|&b| b == b'\n').unwrap_or(0);
+    assert_eq!(nl, 10, "the run's terminating newline");
+    assert_eq!(
+        window(line, 0, nl),
+        (0, 11),
+        "the window ends one past the newline, not on it"
+    );
+    let (regions, resume) = regions_of(line, 0, nl);
+    assert_eq!(
+        (regions.as_slice(), resume),
+        (&[] as &[(usize, usize)], 11),
+        "the unterminated quote swallows the newline, so the delimiter never matches"
+    );
+    assert_eq!(
+        step_of(&line[..], true),
+        None,
+        "no regions: the caller's plain `\\n` arm applies"
+    );
+    assert_eq!(
+        step_of(&line[..], false),
+        None,
+        "the same in statement context"
+    );
+}

@@ -96,3 +96,43 @@ fn a_region_covering_the_window_is_subtracted_only_for_its_own_window() {
         "the block's window keeps `<<A` and `<<B`"
     );
 }
+
+/// The region filter compares the claimant operator's **physical line start**
+/// with the window's `from`, and that boundary is load-bearing: a window that
+/// starts exactly on the line whose operator claimed the region does claim it,
+/// so the terminator line's own chevron stays blind (task #466: the `+ 1` of
+/// `line_start`'s `map(|n| n + 1)`, whose identity mutant `* 1` answers with the
+/// newline's own index, drops the region out of the filter and the count
+/// converges with the window-blind plain count — the pair below is the pin).
+#[test]
+fn a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron() {
+    let text = alloc::string::String::from("x\ncat <<'a <<b'\nbody\na <<b\n");
+    let line = text.as_bytes();
+    // The claimant `cat <<'a <<b'` sits on the second line, whose start is one
+    // past the leading newline at index 1.
+    assert_eq!(
+        line_start(line, 2),
+        2,
+        "a line-initial position is its own start"
+    );
+    assert_eq!(
+        line_start(line, 13),
+        2,
+        "the body line\'s anchor is the claimant\'s line start, not the newline\'s index"
+    );
+    assert_eq!(
+        operator_count(line, 2, line.len()),
+        2,
+        "the plain count sees the operator **and** the terminator\'s own chevron"
+    );
+    assert_eq!(
+        operator_count_opaque(line, 2, line.len()),
+        1,
+        "the region claimed on the window\'s own line blinds the chevron"
+    );
+    assert_eq!(
+        operator_count_opaque(line, 3, line.len()),
+        2,
+        "one byte right, the region belongs to the earlier line, so nothing is blinded"
+    );
+}
