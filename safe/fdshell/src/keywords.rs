@@ -12,7 +12,10 @@ pub(crate) use function::{definer_len, function_def_name, leading_ws, name_len};
 pub(crate) use kind::{Closer, Keyword, keyword_kind};
 pub(crate) use pair::pair_payload;
 pub(crate) use pairing::Pairing;
-pub(crate) use position::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, scores};
+pub(crate) use position::{
+    Glue, Place, after, body_keyword, clause_keyword, list_keyword, scores, separator_data,
+    word_place,
+};
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 
 /// Return `Some(1)` for keywords that open a block, `Some(-1)` for closers —

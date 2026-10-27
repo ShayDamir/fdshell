@@ -24,6 +24,8 @@
 //! ends. Two orthogonal gates: [`after`] takes the innermost open block as `top`.
 
 use crate::keywords::Closer;
+use crate::parse::Token;
+use crate::parse::word_quoted::word_quoted;
 use crate::segment::group::opens;
 
 mod clause;
@@ -36,6 +38,46 @@ mod score;
 pub(crate) use clause::{body_keyword, clause_keyword, list_keyword, list_opener};
 pub(crate) use place::{Glue, Place};
 pub(crate) use score::{closer_matches, scores};
+
+/// The words the plain rule of [`after`] reads as a command restart: the
+/// separators and the parens, **one set**, shared with the `for` list's
+/// [`list::step`] so the two byte-level rows cannot drift, and read back by the
+/// token-level gate [`separator_data`] so a token-level walk cannot drift
+/// either (task #336).
+///
+/// The **byte-level** callers of [`after`] (`cond/boundary/block`,
+/// `comment/depth_delta`) hand it raw line bytes, so a quoted separator's word
+/// text there is `";"` / `"|"` — the shape this set does not contain — and they
+/// need no gate and no signature change. Only the two token-level callers see a
+/// token whose text is the separator, and that is what [`separator_data`]
+/// catches.
+pub(crate) fn separator_shape(w: &[u8]) -> bool {
+    matches!(w, b"" | b";" | b"&&" | b"||" | b"&" | b"(" | b")")
+}
+
+/// The place an **ordinary word** leaves: an argument everywhere, except that a
+/// `for` word list **stays** a list (task #306's sticky place, [`list::step`]).
+/// This is what a quote-protected separator leaves — `for i in ";" do …` keeps
+/// its list, where a plain `Place::Data` would drop it.
+pub(crate) fn word_place(place: Place) -> Place {
+    if matches!(place, Place::Words) {
+        Place::Words
+    } else {
+        Place::Data
+    }
+}
+
+/// `tok` is a **separator-shaped word**: its text is one of [`separator_shape`]'s
+/// words **and** its raw span carries quote bytes, so POSIX §2.9.1 makes it word
+/// data and not the separator [`after`]'s rows read (task #336 — the token-level
+/// twin of `parse::word_quoted::span_word`, which is text **and** span, reached
+/// through [`word_quoted`]). The text is trimmed as [`after`] trims it, because a
+/// quoted `" ; "` word carries its spaces in the text.
+pub(crate) fn separator_data(tok: &Token) -> bool {
+    let (t, start, end, _fq, _mask, _spans) = tok;
+    t.as_bytes()
+        .is_ok_and(|w| separator_shape(w.trim_ascii()) && word_quoted(t, *start, *end))
+}
 
 /// The place of the word written after `word`: separators, cond operators, a
 /// subshell `(`, a group opener and a `case` clause's glued `)` start a
@@ -91,7 +133,7 @@ pub(crate) fn after(
         Glue::Tail => place,
     };
     if matches!(glue, Glue::None) {
-        if matches!(w, b"" | b";" | b"&&" | b"||" | b"&" | b"(" | b")") || w.ends_with(b")") {
+        if separator_shape(w) || w.ends_with(b")") {
             return Place::Command;
         }
         if opens(word, line, word_end) {

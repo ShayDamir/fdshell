@@ -255,3 +255,33 @@ fn the_walk_is_seeded_with_the_closer_of_its_own_block() {
         "{line:?}"
     );
 }
+
+/// The closer walk's separator rows are gated on the token's raw span (task
+/// #336, [`super::separator_data`]): a quoted `";"` leaves the place an ordinary
+/// word leaves, so it restarts no command position and the closer written behind
+/// it is a **word**, never the block's closer. Every row stands next to its
+/// unquoted twin, so an ungated walk is dead.
+#[test]
+fn a_quoted_semicolon_word_closes_no_block() {
+    let idx = |line: &[u8]| closing_keyword_index(&toks(line), line);
+    // The real `;` puts the closer in command position; the quoted word does not.
+    assert_eq!(idx(b"while false; do echo a; done"), Some(7));
+    assert_eq!(
+        idx(b"while false; do echo a \";\" done"),
+        None,
+        "the `done` is an argument of `echo`"
+    );
+    assert_eq!(idx(b"while false; do echo a \";\" ; done"), Some(8));
+    assert_eq!(idx(b"while false; do echo a ';' done"), None);
+    assert_eq!(idx(b"while false; do echo a \\; done"), None);
+    // The same for the `fi` and the `esac` closers.
+    assert_eq!(idx(b"if :; then echo a; fi"), Some(7));
+    assert_eq!(idx(b"if :; then echo a \";\" fi"), None);
+    assert_eq!(idx(b"if :; then echo a \";\" ; fi"), Some(8));
+    assert_eq!(idx(b"case x in a) echo a;; esac"), Some(9));
+    assert_eq!(idx(b"case x in a) echo a \";\" esac"), None);
+    // A `for` list keeps its own place rule: the quoted word is a list word, so
+    // the list still ends at its `do` and the block closes normally.
+    assert_eq!(idx(b"for i in \";\" do echo x; done"), Some(8));
+    assert_eq!(idx(b"for i in 1 do echo x; done"), Some(8));
+}

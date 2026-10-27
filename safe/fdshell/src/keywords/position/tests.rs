@@ -4,8 +4,13 @@
 //! `case` list vs `for` list vs argument, brace carve-out, `time [-p]`
 //! transparency).
 
+#![allow(clippy::unwrap_used)]
+
 use super::list;
-use super::{Glue, Place, after, body_keyword, clause_keyword, list_keyword, list_opener, scores};
+use super::{
+    Glue, Place, after, body_keyword, clause_keyword, list_keyword, list_opener, scores,
+    separator_data, separator_shape, word_place,
+};
 use crate::keywords::{Closer, first_word_end};
 
 /// `after` on the whole word: `word_end` sits just past it, outside a cond
@@ -732,4 +737,74 @@ fn a_closer_restarts_command_position_only_for_its_own_block() {
         ),
         Place::Words
     );
+}
+
+/// The separator-shape set is the **one** set the plain row of [`after`] and the
+/// `for` list's [`list::step`] share, and [`separator_data`] is its token-level
+/// twin: the text **and** the raw span (task #336). Quoted, a separator-shaped
+/// word leaves the place an ordinary word leaves — [`word_place`], an argument
+/// everywhere, a `for` list that stays a list.
+#[test]
+fn a_quoted_separator_shape_leaves_the_place_of_a_word() {
+    for w in [b"".as_slice(), b";", b"&&", b"||", b"&", b"(", b")"] {
+        assert!(separator_shape(w), "{w:?}");
+        assert_eq!(after_word(w, Place::Data), Place::Command, "{w:?}");
+        assert_eq!(list::step(w, Glue::None), Place::Command, "{w:?}");
+    }
+    for w in [
+        b";;".as_slice(),
+        b"|",
+        b";x",
+        b"do",
+        b"fi",
+        b"a",
+        b"\";\"",
+        b"\\;",
+    ] {
+        assert!(
+            !separator_shape(w),
+            "{w:?} is no separator shape: the byte-level word text of a quoted \
+             separator carries its quotes, and the escape pair keeps the pair"
+        );
+    }
+    // [`word_place`] is the ordinary word's place, with the list's sticky rule.
+    assert_eq!(word_place(Place::Command), Place::Data);
+    assert_eq!(word_place(Place::Data), Place::Data);
+    assert_eq!(word_place(Place::Pattern), Place::Data);
+    assert_eq!(word_place(Place::Words), Place::Words);
+
+    // [`separator_data`]: the **same text** under a quote is word data. The
+    // trimmed-text row is the quoted `" ; "` word, whose text carries spaces.
+    let data = |line: &[u8], idx: usize| {
+        separator_data(
+            crate::parse::token::tokenize(line)
+                .unwrap()
+                .get(idx)
+                .unwrap(),
+        )
+    };
+    assert!(!data(b"a ; b", 1));
+    assert!(!data(b"a\nb", 1), "the newline token is the real separator");
+    assert!(!data(b"a && b", 1));
+    assert!(!data(b"a & b", 1));
+    assert!(!data(b"a ( b", 1));
+    assert!(
+        !data(b"a \\; b", 1),
+        "the escape pair stays in the word text"
+    );
+    assert!(data(b"a \";\" b", 1));
+    assert!(data(b"a ';' b", 1));
+    assert!(
+        data(b"a \" ; \" b", 1),
+        "the quoted text is trimmed like `after` does"
+    );
+    assert!(
+        data(b"a \"\" b", 1),
+        "the empty quoted word is in the set and quoted"
+    );
+    assert!(data(b"a \"&\" b", 1));
+    assert!(data(b"a \"(\" b", 1));
+    assert!(data(b"a \")\" b", 1));
+    assert!(data(b"a \"&&\" b", 1));
+    assert!(!data(b"a b", 1), "an ordinary word is no separator shape");
 }

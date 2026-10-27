@@ -19,6 +19,7 @@
 //! with this place ([`crate::segment::block`], and the seed is read by the run
 //! the scan begins in: a word list never crosses a separator).
 
+use crate::keywords::position::separator_shape;
 use crate::keywords::{Glue, Place};
 
 /// May a keyword word be scored at all at `place`? A word of a `for` list never
@@ -38,9 +39,7 @@ pub(crate) fn scores(place: Place) -> bool {
 /// the body and terminates the list. `then`/`else` stay list words: bash runs
 /// `for i in then; do echo "$i"; done` and prints `then`.
 pub(crate) fn step(w: &[u8], glue: Glue) -> Place {
-    if matches!(glue, Glue::None)
-        && matches!(w, b"" | b";" | b"&&" | b"||" | b"&" | b"(" | b")" | b"do")
-    {
+    if matches!(glue, Glue::None) && (separator_shape(w) || w == b"do") {
         return Place::Command;
     }
     Place::Words
