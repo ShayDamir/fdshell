@@ -14,13 +14,46 @@ pub(crate) const fn rights_space(n: usize) -> usize {
     core::mem::size_of::<libc::cmsghdr>() + n * core::mem::size_of::<libc::c_int>()
 }
 
+/// The `SCM_CREDENTIALS` cmsg **as a type**: header, `ucred`, padded to the
+/// 8-byte cmsg alignment. `cred_space` is this type's size, so the
+/// sum-and-round arithmetic it used to spell — header plus `ucred` plus 7,
+/// masked to `!7` — offers no `+` for a mutant to widen: over-reserving the
+/// control buffer is a compile-time fact about the layout, not a runtime
+/// event no test can see.
+#[repr(C)]
+struct CredCmsg {
+    hdr: libc::cmsghdr,
+    cred: libc::ucred,
+}
+
+/// The whole receive buffer **as a type**: one full `MAX_FDS` `SCM_RIGHTS`
+/// cmsg followed by one `SCM_CREDENTIALS`. `MAX_CTRL` is this type's size.
+#[repr(C)]
+struct CtrlLayout {
+    rights_hdr: libc::cmsghdr,
+    fds: [libc::c_int; MAX_FDS],
+    cred_hdr: libc::cmsghdr,
+    cred: libc::ucred,
+}
+
 /// `CMSG_SPACE(sizeof(struct ucred))`: bytes a `SCM_CREDENTIALS` cmsg occupies.
 pub(crate) const fn cred_space() -> usize {
-    (core::mem::size_of::<libc::cmsghdr>() + core::mem::size_of::<libc::ucred>() + 7) & !7
+    core::mem::size_of::<CredCmsg>()
 }
 
 /// Largest control buffer: `MAX_FDS` rights plus one `SCM_CREDENTIALS`.
-pub(crate) const MAX_CTRL: usize = rights_space(MAX_FDS) + cred_space();
+pub(crate) const MAX_CTRL: usize = core::mem::size_of::<CtrlLayout>();
+
+// The layout sizes, stated as numbers so a field added to either type is a
+// compile error with a name on it, and the **safety** direction: the buffer
+// `recvmsg` passes as `msg_controllen` (`rights_space(max_fds) + cred_space`,
+// capped at `max_fds == MAX_FDS`) must fit inside `MAX_CTRL`. Under the old
+// sum, a `+`→`-` mutant of `MAX_CTRL` under-reserved the buffer and the kernel
+// wrote past it **silently** — a stack overflow no test could see; a `+`→`*`
+// mutant over-reserved it invisibly. Neither is a runtime event any more.
+const _: () = assert!(core::mem::size_of::<CredCmsg>() == 32);
+const _: () = assert!(MAX_CTRL == 304);
+const _: () = assert!(MAX_CTRL >= rights_space(MAX_FDS) + cred_space());
 
 /// Walk the kernel-written cmsgs of a received `msghdr`, taking ownership of
 /// the `SCM_RIGHTS` fds in `fds` and the `SCM_CREDENTIALS` in `cred`.
