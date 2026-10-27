@@ -48,10 +48,13 @@ pub(super) fn attached(t: &Token) -> Result<Option<RedirectDef>, Report<ParseErr
     }
     // The dup arm needs the `&` unquoted too: a quoted `&` ends the operator,
     // so `2> "&" 1` falls through to the path arm and opens the file `&1`
-    // (bash parity, R1's continuation clause).
-    if after_op.starts_with(b"&")
-        && !crate::parse::redirect::quoted_bytes(mask, op_pos + 1, op_pos + 2)
-    {
+    // (bash parity, R1's continuation clause). Read the **one** bit with
+    // `mask::quoted_at`, not the 2-byte `quoted_bytes` window: the window's
+    // `op_pos + 1` → `op_pos * 1` mutant only widened the range by the
+    // operator byte the gate above has already proven unquoted, so it changed
+    // nothing; as a single-byte read it answers "unquoted" and the dup arm
+    // fires on `2> "&" 1`, which the R1-continuation rows pin.
+    if after_op.starts_with(b"&") && !crate::mask::quoted_at(mask, op_pos + 1) {
         return parse_fd_dup_redirect(&after_op, &prefix, mask, dir);
     }
     parse_path_redirect(t, op_pos, dir, &prefix)
