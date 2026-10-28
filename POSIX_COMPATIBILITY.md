@@ -168,7 +168,8 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   `case … esac`). Measured divergences, all pinned:
   a **redirect-only** suffix behind the `&` (`cat <<A & <<B`, `echo hi <<T & <<U`)
   runs the bare here-doc redirection: the suffix's body is the empty command's
-  stdin, both bodies print, rc 0 — bash parity, owner **#345** closed it (it had
+  stdin, the prefix's body prints and the suffix's is consumed, rc 0 — bash
+  parity, owner **#345** closed it (it had
   `<<B` running as a command word; the plain redirect-only statement of #303
   never reached it, since a here-doc body region is what gated the parse); the glued
   `cat <<A& cat <<B` keeps the tokenizer's

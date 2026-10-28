@@ -5511,10 +5511,21 @@ pair"). Rule: change the count at **both** levels in the same commit and run the
 to let a window look back so `3<<T` at a window start reads as an io-number
 (`cat&&3<<T`). A per-window io rule diverges from the line-level count and breaks
 the glued-pair invariant (every counting window is a sub-window of the line's
-window — `regions.rs`). The glued spellings stay **word data** at both levels and
-keep rc 1 (`cat&&3<<T`, `true&&<<B`, `x<<EOF`), pinned as the glued-pair family's
-own; `&`, `(`, `<`, `>` are word bytes for the tokenizer, `;`, `\n`, `)`, space
-and tab are word breaks. A new byte-level word test must be the tokenizer's
+window — `regions.rs`). The glued spellings are **two signatures**: the
+word-glued `x<<EOF` is word data at both levels (the tokenizer never splits a
+word at an operator byte), so its lookup fails rc 1 and the body stays free,
+pinned. The `&&`-glued word-0 spellings (`cat&&3<<T`, `true&&<<B`) count 0 on
+the physical line (`&`, `(`, `<`, `>` are word bytes for the tokenizer; `;`,
+`\n`, `)`, space and tab are word breaks) **but 1 in their part window**: the
+cond splitter cuts right after the `&` of the glued pair, the window opens on
+the operator, and the window-relative `run == from` arm of `opens_word` opens
+the site gate — the part asks for a region the line's list never claimed and
+the parse layer reports the **false** `here-doc: missing terminating delimiter
+line 'T'` (the body *is* present and terminated), rc 1 where bash is rc 0.
+Pinned as measured in `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`;
+the real fix — the window must report the physical line's word-start status,
+i.e. the cond splitter cutting at a word boundary for a glued pair — is the
+glued-pair family's. A new byte-level word test must be the tokenizer's
 separator arm byte-for-byte (the standing rule).
 
 **Measure a position-dependent shape with its real prefix.** The bare-separator

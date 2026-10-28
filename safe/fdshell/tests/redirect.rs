@@ -2725,6 +2725,9 @@ fn a_heredoc_only_statement_with_a_word_runs_that_word() {
 /// * A `<<` **glued inside a word** (`x<<EOF`) is word data at both levels (the
 ///   tokenizer never splits a word at an operator byte): the command lookup is
 ///   rc 1 and the body lines run as commands. Owner: the glued-pair family.
+/// * The **`&&`-glued word-0** spellings (`true&&<<B`, `cat&&3<<T`, bash rc 0)
+///   are the glued pair's **count-mismatch** signature, pinned as measured —
+///   see the comment at their rows below. Owner: the glued-pair family.
 /// * The **operator-token**-leading rows (`> <<EOF`, `>| <<EOF`) are the #185
 ///   family: word 0 is a non-here-doc operator, the statement keeps its rc-1
 ///   command word (bash rc 2).
@@ -2745,6 +2748,36 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
     let (out, err, code) = run("x<<EOF\nbody\nEOF");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("\"x<<EOF\" not found"), "stderr={err:?}");
+    // The `&&`-glued word-0 spellings, pinned as measured (bash: rc 0, silent).
+    // The cond splitter cuts the part right after the `&` of the glued pair,
+    // and `&` is a word byte for the tokenizer, so the part window **opens on
+    // the operator**: the window-relative `run == from` arm of the site gate
+    // (`scan/heredoc/ops.rs::opens_word`) counts 1 in the window while the
+    // physical line counts 0 — the part asks for a body region the line's list
+    // never claimed, and the parse layer reports the count-mismatch signature:
+    // a **false** `missing terminating delimiter line` (the body *is* present
+    // and terminated). The rc is unchanged (1) and the body no longer runs as
+    // commands; the real fix — the window must report the physical line's
+    // word-start status, i.e. the cond splitter cutting at a word boundary for
+    // a glued pair — belongs to the glued-pair family, not to the word-0 rule.
+    for (script, needle) in [
+        (
+            "true&&<<B\nbody\nB",
+            "missing terminating delimiter line 'B'",
+        ),
+        (
+            "cat&&3<<T\nbody\nT",
+            "missing terminating delimiter line 'T'",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+        assert!(
+            !err.contains("\"body\" not found"),
+            "{script}: the body must never be a command: stderr={err:?}"
+        );
+    }
     // The operator-token-leading twin of the #185 pins stays rc 1 on its word.
     for (script, needle) in [
         ("> <<EOF\nbody\nEOF", "\">\" not found"),

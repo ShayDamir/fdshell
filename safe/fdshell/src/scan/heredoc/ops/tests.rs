@@ -398,12 +398,15 @@ fn redirect_operator_leading_run_counts_the_operator() {
 /// syntactic, and `parse::heredoc::operator_at` is what reports the fd.
 /// The io-number at a **run start** (`3<<T`, ` 3<<T`) counts 1 and carries its
 /// fd (task #345: word 0 of a redirections-only statement). The **glued** form
-/// (`cat&&3<<T`, whose window opens on the digits because the cond splitter
-/// consumed the `&`) stays 0 at both levels: `&` is a word byte for the
-/// tokenizer, so `io_prefix`'s narrow word rule rejects the run — the count
-/// must be 0 on the line **and** in the part window, or the part asks for a
-/// body the line's region list never claimed (`tests/heredoc.rs::
-/// a_glued_io_number_heredoc_stays_a_command_word` pins the rc-1 shape).
+/// (`cat&&3<<T`) counts 0 on the physical line — `&` is a word byte for the
+/// tokenizer, so `io_prefix`'s narrow word rule rejects the run — **but 1 in
+/// its part window**: the cond splitter cuts right after the `&` of the glued
+/// pair, the window opens on the operator, and the window-relative `run ==
+/// from` arm counts a site the line never counted. The part then asks for a
+/// body the line's region list never claimed and the parse layer reports the
+/// false `missing terminating delimiter line 'T'` (rc 1, bash rc 0), pinned by
+/// `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`; the real
+/// fix (a word-boundary cut for the glued pair) is the glued-pair family's.
 #[test]
 fn io_number_prefixed_operators_carry_their_fd() {
     for (line, want) in [

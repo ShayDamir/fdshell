@@ -96,10 +96,14 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
         // The io-number form's word starts at its digits, so the word gate is
         // evaluated at the operator's own word start `run`: the operator's
         // prefix is never its own preceding token, and `io_prefix`'s word rule
-        // is the narrow io one on purpose — the glued `cat&&3<<T` hides the
-        // io-number at every window the byte scan sees (the `&` is word
-        // content), and the count must stay 0 on the line *and* in the part
-        // window, or the part asks for a body the line's list never claimed.
+        // is the narrow io one on purpose — on the physical line the glued
+        // `cat&&3<<T` counts 0 (the `&` is word content). The cond splitter's
+        // part window is the measured exception: it opens on the operator, so
+        // the window-relative `run == from` arm counts 1 and the part asks for
+        // a body the line's list never claimed — the false `missing
+        // terminating delimiter` signature, pinned by
+        // `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`
+        // (owner: the glued-pair family).
         let io = io_prefix(line, i, &state);
         let run = io.map_or(i, |(run, _)| run);
         if bare && opens_word(line, from, run, &state) && is_chevron(line, i) {
@@ -126,8 +130,12 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
 /// the token and needs no predecessor at all (task #345). The break set is the
 /// tokenizer's separator arm, derived from `parse::token::step` and never
 /// invented here: `&`, `(`, `<`, `>` are **word bytes** for the tokenizer, so
-/// the glued `true&&<<B` and `cat&&3<<T` stay word data at both levels
-/// (pinned in `ops/tests.rs`, the divergence owner is the glued-pair family).
+/// the physical line counts the glued `true&&<<B` / `cat&&3<<T` as word data —
+/// while a cond part window opened on the operator counts 1 through the
+/// window-relative `run == from` arm (the measured count mismatch: false
+/// `missing terminating delimiter`, rc 1, bash rc 0), pinned by
+/// `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`; the
+/// divergence owner is the glued-pair family.
 fn opens_word(line: &[u8], from: usize, run: usize, state: &ScanState) -> bool {
     run == from || word_start(line, run, state) || precedes_pipe(line, run)
 }
