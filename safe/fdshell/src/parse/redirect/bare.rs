@@ -72,9 +72,6 @@ pub(super) fn parse_bare(
     if invalid_delimiter(word, omask, false) {
         bail!(ParseError::InvalidRedirect);
     }
-    if let Some(n) = super::super::fd_path::fd_path_target(word) {
-        return Ok(Some(RedirectDef::dup(export_to, n)));
-    }
     Ok(Some(RedirectDef {
         export_to,
         extra_to: None,

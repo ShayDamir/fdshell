@@ -669,3 +669,52 @@ fn seed_entries_are_older_than_every_def() {
         "the def's fd 1 wins over the seed's pipe end"
     );
 }
+
+/// A `/dev/fd/<n>` target is a **fresh `open()`** of the file the fd points at,
+/// run at resolve time: bash's `>` flags truncate, and the new descriptor starts
+/// at offset 0 while the fd it names keeps its own offset. The seed plays the
+/// role of the preceding def here (the fd state the command already installed);
+/// the integration twin walks the def route.
+///
+/// The bytes prove both halves: after the seed's fd writes `abcdef` (offset 6),
+/// the magic def's fd writes `e\n` at **0** (a truncating fresh description), and
+/// the seed's next write lands at 6, leaving the hole the truncation opened.
+/// A `dup` of the seed's fd — what fdshell did before task #337, when the parse
+/// layer turned the word into a dup — would append and give `abcdefe\nxy`.
+#[test]
+fn dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file() {
+    let c = cell();
+    let (path, _scratch) = temp_path("magic_open");
+    let seed_fd = open_file(&path);
+    seed_fd.write_all(b"abcdef").unwrap();
+    let seed = vec![Redirect::new(1, seed_fd.try_clone().unwrap())];
+    // The consumer pre-opened the word as an ordinary path. The magic arm
+    // resolves its own open, so this fd is the one the command never sees.
+    let opened = vec![open_file(&path)];
+    let redirects = vec![RedirectDef::write_path(2, cstr("/dev/fd/1"))];
+    let resolved = resolve_redirects(&redirects, &opened, &seed, &c).unwrap();
+    let fd2 = dup_of(resolved.first().unwrap());
+    fd2.write_all(b"e\n").unwrap();
+    seed_fd.write_all(b"xy").unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes, b"e\n\0\0\0\0xy", "two descriptions, offsets 0 and 6");
+}
+
+/// The same lookup as `dup_after_a_close_def_reports_the_fd_as_not_open`, at the
+/// magic arm: a preceding `1>&-` leaves no fd, and the kernel has no
+/// `/dev/fd/1` entry for a closed descriptor, so the def fails on the open (bash
+/// `2> /dev/fd/1: No such file or directory`, rc 1). Integration twin:
+/// `tests/redirect.rs::dev_fd_target_after_a_closed_fd_fails`.
+#[test]
+fn dev_fd_target_after_a_close_def_fails_the_open() {
+    let c = cell();
+    let opened = vec![open_file("/dev/null")];
+    let redirects = vec![
+        RedirectDef::close(1),
+        RedirectDef::write_path(2, cstr("/dev/fd/1")),
+    ];
+    let report = resolve_redirects(&redirects, &opened, &[], &c)
+        .err()
+        .unwrap();
+    assert!(matches!(report.current_context(), OpenRedirectError::Open));
+}

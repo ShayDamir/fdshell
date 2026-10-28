@@ -857,22 +857,23 @@ fn test_fd_dup_redirect_non_numeric_prefix_is_arg() {
     assert_eq!(cmd.args, vec![c"a>&1".into()]);
 }
 
+/// A `/dev/fd/N` target is a **path** def, in the operator's own direction: bash
+/// opens the magic path with the operator's flags as the redirection runs, so the
+/// direction is not inert and the def is not a dup (the resolver's magic arm,
+/// `redirect/resolve/fd_path.rs`; LESSONS).
 #[test]
-fn test_fd_path_redirect_dups_fd() {
+fn test_fd_path_redirect_is_a_path_def() {
     let ParsedLine::Cmd(cmd) = parse(b"cat </dev/fd/3").unwrap() else {
         panic!("expected Cmd")
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef {
-            export_to: 0,
-            extra_to: None,
-            direction: RedirectDirection::Read,
-            source: RedirectSource::Dup(3),
-        }]
+        vec![path_def(0, RedirectDirection::Read, "/dev/fd/3")]
     );
 }
 
+/// The numbered operator keeps its own direction on the magic path: `5>` writes
+/// and truncates the file fd 2 points at (bash's `open` flags).
 #[test]
 fn test_fd_path_redirect_numbered_write() {
     let ParsedLine::Cmd(cmd) = parse(b"cmd 5>/dev/fd/2").unwrap() else {
@@ -880,21 +881,20 @@ fn test_fd_path_redirect_numbered_write() {
     };
     assert_eq!(
         cmd.redirects,
-        vec![RedirectDef {
-            export_to: 5,
-            extra_to: None,
-            direction: RedirectDirection::Read,
-            source: RedirectSource::Dup(2),
-        }]
+        vec![path_def(5, RedirectDirection::Write, "/dev/fd/2")]
     );
 }
 
+/// `/proc/self/fd/N` is the other prefix Linux installs, and the same rule.
 #[test]
-fn test_proc_self_fd_redirect_dups_fd() {
+fn test_proc_self_fd_redirect_is_a_path_def() {
     let ParsedLine::Cmd(cmd) = parse(b"cmd </proc/self/fd/7").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::dup(0, 7)]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(0, RedirectDirection::Read, "/proc/self/fd/7")]
+    );
 }
 
 #[test]
@@ -1039,12 +1039,16 @@ fn test_space_separated_redirect_quoted_path() {
     );
 }
 
+/// The space-separated bare operator takes the magic path as its word.
 #[test]
-fn test_space_separated_redirect_fd_path_dups() {
+fn test_space_separated_redirect_fd_path_is_a_path() {
     let ParsedLine::Cmd(cmd) = parse(b"cat < /dev/fd/3").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::dup(0, 3)]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(0, RedirectDirection::Read, "/dev/fd/3")]
+    );
 }
 
 #[test]
@@ -1167,12 +1171,17 @@ fn test_clobber_var_form() {
     );
 }
 
+/// `>|` keeps its `Clobber` direction on the magic path: the open bypasses
+/// `noclobber` and truncates the file fd 3 points at.
 #[test]
 fn test_clobber_bare_fd_path() {
     let ParsedLine::Cmd(cmd) = parse(b"cat >| /dev/fd/3").unwrap() else {
         panic!("expected Cmd")
     };
-    assert_eq!(cmd.redirects, vec![RedirectDef::dup(1, 3)]);
+    assert_eq!(
+        cmd.redirects,
+        vec![path_def(1, RedirectDirection::Clobber, "/dev/fd/3")]
+    );
 }
 
 #[test]

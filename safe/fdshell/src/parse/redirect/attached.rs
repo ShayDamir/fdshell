@@ -4,7 +4,6 @@
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::parse::fd_dup::parse_fd_dup_redirect;
-use crate::parse::fd_path::fd_path_target;
 use crate::parse::redirect_op::redirect_op;
 use crate::redirect::{RedirectDef, RedirectSource};
 use error_stack::{Report, ResultExt};
@@ -96,9 +95,6 @@ fn parse_path_redirect(
             direction,
             source: RedirectSource::var(name),
         }));
-    }
-    if let Some(n) = fd_path_target(&rest) {
-        return Ok(Some(RedirectDef::dup(export_to, n)));
     }
     // A quoted `%` target fell through the mask gate above and lands here:
     // the plain file word (`>"%v"` is the file `%v`, bash parity, #329).

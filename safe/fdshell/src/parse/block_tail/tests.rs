@@ -120,7 +120,8 @@ fn redirect_shapes_after_the_closer() {
     );
 }
 
-/// `>%var` and `/dev/fd/N` are the same rules the group's tail gives.
+/// `>%var` and `/dev/fd/N` are the same rules the group's tail gives: the magic
+/// path is a path def in the operator's direction (task #337).
 #[test]
 fn var_and_fd_path_targets() {
     assert_eq!(
@@ -129,7 +130,7 @@ fn var_and_fd_path_targets() {
     );
     assert_eq!(
         shape(&tail(b"while :; do :; done > /dev/fd/1")),
-        vec![(1, RedirectDirection::Read, b"dup1".to_vec())]
+        vec![(1, RedirectDirection::Write, b"/dev/fd/1".to_vec())]
     );
 }
 

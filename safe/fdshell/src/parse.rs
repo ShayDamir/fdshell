@@ -21,7 +21,6 @@ mod elif;
 mod emit;
 mod envassign;
 mod fd_dup;
-mod fd_path;
 pub(crate) mod for_block;
 pub(crate) mod function_block;
 pub(crate) mod group_block;

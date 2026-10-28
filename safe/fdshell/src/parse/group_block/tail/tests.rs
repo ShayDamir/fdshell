@@ -80,7 +80,7 @@ fn redirects_after_brace() {
     );
     assert_eq!(
         shape(&tail_redirects(b"{ echo a; } > /dev/fd/3")),
-        vec![(1, RedirectDirection::Read, b"dup3".to_vec())]
+        vec![(1, RedirectDirection::Write, b"/dev/fd/3".to_vec())]
     );
     assert_eq!(
         shape(&tail_redirects(b"{ echo a; } > f1 2> f2")),

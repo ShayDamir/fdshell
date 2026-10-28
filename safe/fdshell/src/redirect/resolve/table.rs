@@ -42,6 +42,20 @@ pub(super) fn source(
     }
 }
 
+/// The fd **number** a `/dev/fd/<from>` target opens through: the local fd of the
+/// entry the preceding redirections left on `from` — opening `/dev/fd/<that>`
+/// follows the magic symlink to the file the def's `open()` wants — and `from`
+/// itself when no redirection touched it. `None` for a preceding `N>&-`: the fd
+/// is gone and the kernel has no `/dev/fd/<from>` entry for it, which is the
+/// failed open bash measures.
+pub(super) fn number(from: i32, built: &[Redirect], seed: &[Redirect]) -> Option<i32> {
+    match latest(from, built).or_else(|| latest(from, seed)) {
+        Some(Redirect::Dup { local, .. }) => Some(local.as_raw()),
+        Some(Redirect::Close { .. }) => None,
+        None => Some(from),
+    }
+}
+
 /// A fd the command never redirected: copy the fd the shell passed down.
 fn dup_process(from: i32, min_fd: i32) -> Result<LocalFd, Report<OpenRedirectError>> {
     let imported = ImportedFd::from_number(from)

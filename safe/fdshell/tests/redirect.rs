@@ -1103,6 +1103,123 @@ fn exec_and_group_scopes_apply_in_written_order() {
     );
 }
 
+// --- the `/dev/fd/N` magic path (task #337) ---------------------------------
+//
+// bash opens a `/dev/fd/<n>` (`/proc/self/fd/<n>`) target with the operator's
+// flags **as the redirection runs**: the open follows the magic symlink to the
+// file that fd points at *at that moment* — the fd state the earlier
+// redirections of the same command left — and yields a **fresh** open file
+// description with its own offset. fdshell pre-#337 turned the word into a
+// `dup` at parse time, which shares the target's description and its offset, so
+// every byte below was different. Values are `bash -c` (5.3.9) measured
+// 2026-10-28 in this harness (stdout and stderr piped).
+
+#[test]
+fn dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at() {
+    let (path, _spath) = temp_path("devfd_fresh");
+    let _ = std::fs::remove_file(&path);
+    // `f > z 2> /dev/fd/1`: fd 1 is `z` when the magic open runs, so fd 2 gets a
+    // second description of `z`, truncated and at offset 0. `hi\n` lands at 0,
+    // then `e\n` overwrites its first two bytes — bash's `e\n\n`, where the
+    // shared-offset dup wrote `hi\ne\n`. The `>>` and `/proc/self/fd/` variants
+    // measure the same bytes.
+    for (op, word) in [
+        (">", "/dev/fd/1"),
+        (">>", "/dev/fd/1"),
+        (">", "/proc/self/fd/1"),
+    ] {
+        let _ = std::fs::remove_file(&path);
+        let (out, err, code) = run(&format!(
+            "f(){{ echo hi; echo e >&2; }}; f {op} {path} 2> {word}"
+        ));
+        let body = std::fs::read(&path).unwrap();
+        assert_eq!((out.as_str(), code), ("", 0), "{op} {word}: stderr={err:?}");
+        assert!(err.is_empty(), "{op} {word}: stderr={err:?}");
+        assert_eq!(
+            body, b"e\n\n",
+            "{op} {word}: two descriptions racing at offset 0"
+        );
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn dev_fd_read_target_starts_at_byte_zero() {
+    // The read direction is the same open, not a dup: bash starts at byte 0 of
+    // the file and keeps the named fd's own offset. The dup form continued the
+    // read where the earlier fd had stopped (`cdef`, `y`).
+    let dir = seeded("devfd_read_offset");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!(
+        "cd {dir}; printf abcdef > f.txt; exec < f.txt; head -c 2; cat < /dev/fd/0; echo"
+    ));
+    assert_eq!((out.as_str(), code), ("ababcdef\n", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("f.txt")).unwrap(),
+        b"abcdef"
+    );
+    let (out, err, code) = run(&format!(
+        "cd {dir}; printf xy > p.txt; exec 3< p.txt; head -c 1 <&3; cat < /dev/fd/3"
+    ));
+    assert_eq!((out.as_str(), code), ("xxy", 0), "stderr={err:?}");
+}
+
+#[test]
+fn dev_fd_target_is_canonical_digits_only() {
+    // The kernel's entry for fd 1 is named `1`, so `/dev/fd/01`, `/dev/fd/1x`
+    // and a closed fd's number are ordinary paths and the open fails (bash rc 1,
+    // `No such file or directory`). The earlier `> z` ran, so `z` exists empty —
+    // the failure is this def's open, not the list's.
+    let (path, _spath) = temp_path("devfd_digits");
+    for word in ["/dev/fd/01", "/dev/fd/1x", "/dev/fd/7", "/proc/self/fd/01"] {
+        let _ = std::fs::write(&path, "stale");
+        let (out, err, code) = run(&format!(
+            "f(){{ echo hi; echo e >&2; }}; f > {path} 2> {word}"
+        ));
+        let body = std::fs::read(&path).unwrap();
+        assert_eq!((out.as_str(), code), ("", 1), "{word}: stderr={err:?}");
+        assert!(
+            err.contains("redirection failed") || err.contains("open"),
+            "{word}: stderr={err:?}"
+        );
+        assert_eq!(
+            body, b"",
+            "{word}: the earlier redirection created the empty file"
+        );
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn dev_fd_target_after_a_closed_fd_fails() {
+    // `echo x 1>&- 2> /dev/fd/1`: the `Close` entry leaves no fd, and the kernel
+    // has no entry for a closed descriptor, so the open fails (bash: `No such
+    // file or directory`, rc 1, and bash runs the next command). fdshell's
+    // redirect failure is fatal, so the trailing `echo rc=$?` never runs — the
+    // pre-existing policy divergence the `&>` rows record.
+    let (out, err, code) = run("echo x 1>&- 2> /dev/fd/1; echo rc=$?");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("redirect"), "stderr={err:?}");
+}
+
+#[test]
+fn dev_fd_target_in_a_pipeline_stage_lands_on_the_pipe() {
+    // The seed and the magic path together: the stage's fd 1 is the pipe, so
+    // `2> /dev/fd/1` opens the pipe and `cat` relays the message into `g`.
+    let dir = seeded("devfd_pipeline");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code) = run(&format!("cd {dir}; cat missing 2> /dev/fd/1 | cat > g"));
+    let body = std::fs::read(std::path::Path::new(dir).join("g")).unwrap();
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(
+        body.starts_with(b"cat: missing: No such file"),
+        "the magic open followed the stage's pipe, g={body:?}"
+    );
+}
+
 // --- the bare-operand guard is mask-gated (task #323) -----------------------
 //
 // The operand of a bare `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` is an operator only

@@ -1,11 +1,13 @@
 mod arms;
+mod fd_path;
+mod here;
 mod table;
 
 use super::{Redirect, RedirectDef};
 use crate::error::redirect::OpenRedirectError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::LocalFd;
@@ -69,33 +71,12 @@ fn resolve_one(
         super::RedirectSource::Var(var) => {
             arms::resolve_var(var, r.export_to, r.extra_to, min_fd, cell)
         }
-        super::RedirectSource::Path { .. } => {
-            arms::resolve_path(r.export_to, r.extra_to, min_fd, opened_iter)
+        super::RedirectSource::Path { path, .. } => {
+            arms::resolve_path(r, path, min_fd, opened_iter, built, seed)
         }
-        super::RedirectSource::HereString { word, mask, spans } => Ok((
-            Redirect::Dup {
-                export_to: r.export_to,
-                // The body memfd is cloned above every target like every other
-                // source: created on its own target it would make `dup2` a no-op
-                // and its `Drop` would close that target (LESSONS). The clone
-                // shares the **read-only** open file description the arm
-                // re-opened, and the writable memfd is already closed inside the
-                // arm, so the body survives the original's drop (task #325).
-                local: super::herestring::here_string(word, mask, spans, cache, cell)?
-                    .try_clone_above(min_fd)
-                    .change_context(OpenRedirectError::HereStringCreate)?,
-            },
-            None,
-        )),
-        super::RedirectSource::HereDoc { body, expand } => Ok((
-            Redirect::Dup {
-                export_to: r.export_to,
-                local: super::heredoc::here_doc(body, *expand, cache, cell)?
-                    .try_clone_above(min_fd)
-                    .change_context(OpenRedirectError::HereDocCreate)?,
-            },
-            None,
-        )),
+        super::RedirectSource::HereString { .. } | super::RedirectSource::HereDoc { .. } => {
+            here::resolve(r, &r.source, min_fd, cache, cell)
+        }
         super::RedirectSource::Dup(from) => {
             arms::resolve_dup(r.export_to, min_fd, *from, built, seed)
         }
