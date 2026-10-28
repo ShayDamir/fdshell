@@ -97,9 +97,32 @@ fn the_gate_fires_on_every_redirect_shape() {
     }
 }
 
+/// A **here-doc** word 0 opens the gate with the body in hand (task #345):
+/// `<<EOF` is the redirections-only statement, the io-number form carries its
+/// descriptor, and a word behind the operator is the command word, exactly as
+/// the `>f g` row above.
+#[test]
+fn the_gate_fires_on_a_heredoc_word_zero() {
+    for line in [
+        b"<<EOF\nbody\nEOF" as &[u8],
+        b"<<-EOF\n\tbody\n\tEOF",
+        b"<<'EOF'\nbody\nEOF",
+        b"3<<EOF\nbody\nEOF",
+        b"<<EOF g\nbody\nEOF",
+        b"<<EOF >f\nbody\nEOF",
+        b"VAR=x <<EOF\nbody\nEOF",
+        b"<<EOF | cat\nbody\nEOF",
+        // The `| <<EOF` stage is the same gate seen on the **stage**'s token
+        // slice (the pipeline layer splits before `parse_command` runs), pinned
+        // in `parse/pipeline/stage/tests.rs`.
+    ] {
+        assert!(gate(line), "{line:?} must open the gate");
+    }
+}
+
 /// Word data never opens the gate: a plain word, a **quoted** operator word
 /// (every quoting gate is inherited), a non-digit io-number prefix, the bare
-/// `&`, the `%` capture word, and the `<<` token the here-doc machinery owns.
+/// `&`, the `%` capture word, and the `<<` glued inside a word.
 #[test]
 fn the_gate_stays_off_on_word_data() {
     for line in [
@@ -114,26 +137,48 @@ fn the_gate_stays_off_on_word_data() {
         b"2 > f",
         b"&",
         b"%o",
-        b"<<EOF",
         b">&x",
     ] {
         assert!(!gate(line), "{line:?} must stay word data");
     }
 }
 
-/// A statement carrying a here-doc body keeps the gate **off**, which is what
-/// preserves the pinned leading-operator family (`> <<EOF`, `>| x <<EOF`, the
-/// async `cat <<A & <<B`) and routes the here-doc-only statement to its owner.
+/// A statement carrying a here-doc body keeps the gate **off** when its word 0
+/// is *not* a here-doc operator: that is what preserves the pinned
+/// leading-operator family (`> <<EOF`, `>| x <<EOF`, `>x <<EOF`, `>>x <<EOF` —
+/// bash rc 2, fdshell the command word their pins record) and every
+/// `cat <<EOF`-shaped command.
 #[test]
-fn a_heredoc_body_keeps_the_gate_off() {
+fn a_heredoc_body_keeps_the_gate_off_behind_a_plain_word_zero() {
     for line in [
         b">x <<EOF\nbody\nEOF" as &[u8],
         b">| x <<EOF\nbody\nEOF",
         b">>x <<EOF\nbody\nEOF",
-        b"<<EOF\nbody\nEOF",
+        b"> <<EOF\nbody\nEOF",
+        b">| <<EOF\nbody\nEOF",
         b"cat <<EOF\nbody\nEOF",
+        b"builtin cat <<EOF\nbody\nEOF",
+        b"VAR=x cat <<EOF\nbody\nEOF",
     ] {
-        assert!(!gate(line), "a heredoc spec keeps {line:?} off the gate");
+        assert!(
+            !gate(line),
+            "a here-doc body behind a non-heredoc word 0 keeps {line:?} off the gate"
+        );
+    }
+}
+
+/// A here-doc operator with **no body at all** keeps the shape its owner
+/// reports: `layout` needs a body for every operator, so the statement never
+/// reaches the gate (task #275's incomplete-stream rule must not start
+/// succeeding — the rc-1 pins live in `safe/fdshell/tests/heredoc.rs`).
+#[test]
+fn a_heredoc_operator_without_a_body_never_reaches_the_gate() {
+    for line in [b"<<EOF" as &[u8], b"<<EOF g", b"3<<EOF", b">x <<EOF"] {
+        let tokens = tokenize_statement(line).unwrap();
+        assert!(
+            crate::parse::heredoc::layout(line, &tokens).is_err(),
+            "{line:?} has no body to claim"
+        );
     }
 }
 

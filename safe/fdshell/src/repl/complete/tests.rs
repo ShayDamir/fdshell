@@ -145,16 +145,21 @@ fn closed_block_with_arrived_body_and_trailing_statement_is_complete() {
     ));
 }
 
-/// A `<<` word that *begins* a command line is a command word, not an operator
+/// A `<<` that *begins* a command line is an operator since task #345
 /// (script-mode pin
-/// `heredoc_after_semicolon_with_no_command_word_consumes_its_body`), so the
-/// closed-block arm's window must never reach it: the line is complete. Pins
-/// `cmd_line_end`'s bound (kills the `||`→`&&` mutant).
+/// `heredoc_after_semicolon_with_no_command_word_is_a_redirect_only_statement`),
+/// so the REPL buffers for its body like it does for `cat <<T`. Pins
+/// `cmd_line_end`'s bound (kills the `||`→`&&` mutant): the closed-block arm
+/// must never swallow the body lines of a line that opens on a separator.
 #[test]
-fn statement_initial_chevron_after_a_separator_is_complete() {
-    assert!(is_complete(b"echo x; <<T"));
-    assert!(is_complete(b"if true; then :; fi; <<T"));
-    assert!(is_complete(b"for x in a; do :; done; <<T"));
+fn statement_initial_chevron_after_a_separator_continues_for_its_body() {
+    // A word-0 here-doc operator is an operator (task #345), so the scanner
+    // feeds the REPL the same continuation `cat <<T` gets: the body has not
+    // arrived, so the prompt buffers until the delimiter line does.
+    assert!(!is_complete(b"echo x; <<T"));
+    assert!(is_complete(b"echo x; <<T\nbody\nT"));
+    assert!(!is_complete(b"if true; then :; fi; <<T"));
+    assert!(!is_complete(b"for x in a; do :; done; <<T"));
 }
 
 #[test]

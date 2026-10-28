@@ -181,11 +181,14 @@ fn skip_triple_chevron_is_not_operator() {
     assert_eq!(skip(b"cat <<<EOF\nEOF", 0, 10), None);
 }
 
-// A `|` before `<<` (only whitespace between) is a pipeline position: the
-// word is a command, not an operator. The run ends at the newline (9).
+// A `|` before `<<` (only whitespace between) is the tokenizer's pipeline pipe:
+// it ends the previous stage's word and **begins** the `<<` word, so the
+// operator counts and the stage is a redirections-only command whose body is
+// claimed (task #345). The run ends at the newline (9), the body is the empty
+// line, and the resume is the end of the delimiter line.
 #[test]
-fn skip_pipe_position_is_not_operator() {
-    assert_eq!(skip(b"a | <<EOF\nEOF", 0, 9), None);
+fn skip_pipe_position_claims_its_body() {
+    assert_eq!(skip(b"a | <<EOF\nEOF", 0, 9), Some(13));
 }
 
 // The region is the body lines only: from the first body byte to the start

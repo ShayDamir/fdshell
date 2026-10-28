@@ -5,11 +5,11 @@
 
 use crate::scan::ScanState;
 
-use super::io::{io_fd, io_prefix, word_start};
+use super::io::{io_fd, io_prefix, is_chevron, word_start};
 use super::lines::delimiter_span;
 use super::op::Operator;
 use alloc::vec::Vec;
-use pipe::{precedes_pipe, token_before};
+use pipe::precedes_pipe;
 
 mod pipe;
 
@@ -30,13 +30,18 @@ pub(crate) struct Site {
 /// start) is skipped whole, so a `<<` in a comment is not an operator (the
 /// tokenizer never yields it, and the two counts must agree).
 ///
-/// A `<<` counts as an operator when a token precedes its word and that token
-/// is not a pipeline `|` — the byte mirror of `parse::heredoc::is_operator`
-/// (`i != 0 && prev != |`). A `<<` at the run start is the command word and
-/// never counts. The io-number form (`3<<T`, `0<<-T`) is read through the
-/// shared `io::io_prefix`, so its digits begin the operator's word and the
-/// operator carries their fd; `io::span_operator` is the token-level half of
-/// that same rule (LESSONS: the byte-level and token-level counts must agree).
+/// A `<<` counts as an operator when it **begins a word** of the run: at the
+/// run start (the tokenizer's word 0 of the text it is handed — a
+/// redirections-only statement is `simple_command = REDIRECT…` with no command
+/// word, task #345) or right after a tokenizer word-break byte: whitespace,
+/// `;`, a newline, a top-level `)`, and a pipeline `|` (the ONE rule
+/// `parse::redirect::pipeline_pipe` decides whether a `|` byte is the stage
+/// boundary or the `>|` clobber's operator byte). A `<<` glued inside a word
+/// (`x<<EOF`, `><<EOF`, `>x<<EOF`) is word data at both levels. The io-number
+/// form (`3<<T`, `0<<-T`) is read through the shared `io::io_prefix`, so its
+/// digits begin the operator's word and the operator carries their fd;
+/// `io::span_operator` is the token-level half of that same rule. LESSONS: the
+/// byte-level and token-level counts must agree, per part.
 pub(crate) fn operator_delims(line: &[u8], from: usize, to: usize) -> Option<Vec<Operator>> {
     let mut found: Vec<Operator> = Vec::new();
     for site in sites(line, from, to) {
@@ -74,7 +79,6 @@ pub(crate) fn operator_sites(line: &[u8], from: usize, to: usize) -> Vec<usize> 
 pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
     let mut state = ScanState::new();
     let mut found: Vec<Site> = Vec::new();
-    let mut seen_token = false;
     let mut i = from;
     while i < to {
         let bare =
@@ -89,27 +93,18 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
             }
             continue;
         }
-        // The io-number form's word starts at its digits, so both the word
-        // gate and the pipeline gate are evaluated at the operator's own word
-        // start `run`: the operator's prefix is never its own preceding token
-        // (`is_operator`'s `i != 0`), and a `|` written right before the
-        // digits is a stage boundary (`prev != |`).
+        // The io-number form's word starts at its digits, so the word gate is
+        // evaluated at the operator's own word start `run`: the operator's
+        // prefix is never its own preceding token, and `io_prefix`'s word rule
+        // is the narrow io one on purpose — the glued `cat&&3<<T` hides the
+        // io-number at every window the byte scan sees (the `&` is word
+        // content), and the count must stay 0 on the line *and* in the part
+        // window, or the part asks for a body the line's list never claimed.
         let io = io_prefix(line, i, &state);
         let run = io.map_or(i, |(run, _)| run);
-        let preceded = if run == i {
-            seen_token && word_start(line, i, &state)
-        } else {
-            token_before(line, from, run)
-        };
-        if bare
-            && preceded
-            && line.get(i) == Some(&b'<')
-            && line.get(i + 1) == Some(&b'<')
-            && line.get(i + 2) != Some(&b'<')
-            && !precedes_pipe(line, run)
-        {
-            let dash = line.get(i + 2) == Some(&b'-');
+        if bare && opens_word(line, from, run, &state) && is_chevron(line, i) {
             let fd = io.and_then(|(_, digits)| io_fd(digits)).unwrap_or(0);
+            let dash = line.get(i + 2) == Some(&b'-');
             found.push(Site { op: i, dash, fd });
             let tail = if dash { i + 3 } else { i + 2 };
             let next = delimiter_span(line, tail, to).map_or(tail, |(next, _)| next);
@@ -118,15 +113,23 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
             }
             continue;
         }
-        // Read the byte before `advance`: the `\<`, `$(`, `((` and quoted-region
-        // arms jump 2+ bytes, so the post-jump byte is not the token's first byte.
-        let byte = line.get(i).copied();
         i = state.advance(line, i);
-        if byte.is_some_and(pipe::is_token_byte) {
-            seen_token = true;
-        }
     }
     found
+}
+
+/// The `<<` of a word that begins at `run` **begins a word of the run**: the
+/// window start, a tokenizer word-break byte (`io::word_start` — whitespace,
+/// `;`, a newline, a top-level `)`), or a pipeline `|` (the `>|` clobber's `|`
+/// is operator content, never a break: `> <<EOF` breaks, `>|<<EOF` does not).
+/// The byte mirror of `parse::heredoc::is_operator`, which reads the shape of
+/// the token and needs no predecessor at all (task #345). The break set is the
+/// tokenizer's separator arm, derived from `parse::token::step` and never
+/// invented here: `&`, `(`, `<`, `>` are **word bytes** for the tokenizer, so
+/// the glued `true&&<<B` and `cat&&3<<T` stay word data at both levels
+/// (pinned in `ops/tests.rs`, the divergence owner is the glued-pair family).
+fn opens_word(line: &[u8], from: usize, run: usize, state: &ScanState) -> bool {
+    run == from || word_start(line, run, state) || precedes_pipe(line, run)
 }
 
 #[cfg(test)]

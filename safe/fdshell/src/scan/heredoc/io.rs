@@ -96,14 +96,20 @@ pub(crate) fn io_fd(digits: &[u8]) -> Option<i32> {
 }
 
 /// A here-doc operator's first two bytes at `pos`: `<<`, never the `<<<` of a
-/// here-string.
-fn is_chevron(line: &[u8], pos: usize) -> bool {
+/// here-string. The byte scan's site gate reads the same test (`ops::sites`).
+pub(super) fn is_chevron(line: &[u8], pos: usize) -> bool {
     line.get(pos..pos + 2) == Some(&b"<<"[..]) && line.get(pos + 2) != Some(&b'<')
 }
 
 /// `i` starts a token word: the run start or a tokenizer word-break byte. A
 /// `)` breaks the word only at top level — a `$( )`-closing `)` keeps the
-/// token whole, exactly as the tokenizer does.
+/// token whole, exactly as the tokenizer does. This is the **narrow** io rule:
+/// it is what `io_prefix`/`span_operator` read for the io-number's digit run,
+/// and it excludes `|` on purpose (a `|` byte never starts an io-number word,
+/// so `cat|3<<T` is one word at both levels). The here-doc *site* gate is the
+/// wider [`super::ops::opens_word`], which adds the window start and the
+/// pipeline `|` — the two arms the token layer sees for a redirections-only
+/// statement (`<<EOF`, `| <<EOF`) and for a part sliced at a separator.
 pub(super) fn word_start(line: &[u8], i: usize, state: &ScanState) -> bool {
     if i == 0 {
         return true;

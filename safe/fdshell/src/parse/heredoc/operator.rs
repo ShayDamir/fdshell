@@ -3,7 +3,6 @@
 
 use super::super::Token;
 use crate::error::parse::ParseError;
-use crate::parse::pipe_token_span;
 use crate::parse::word_quoted::word_quoted;
 use crate::scan::heredoc::{
     Operator, attached, invalid_delimiter, io_fd, operator_delim, span_operator,
@@ -13,33 +12,32 @@ use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
 /// Whether the token at `i` is a heredoc operator: an unquoted `<<` word
-/// (not `<<<`) with the io-number form `N<<word` included, never the command
-/// word, never in a pipeline position. The shape test reads the token's **raw
-/// span** and the shared `span_operator`, never the token text: quote removal
-/// makes `3"<<"T` read exactly like `3<<T`, and a token-text rule for a
-/// raw-byte structure is the byte/token count mismatch (LESSONS). The
-/// predecessor test is the same rule: only a span of exactly one `|` byte is
-/// the tokenizer's pipe token, so a quoted `"|"`/`'|'` and an escaped `\|`
-/// (word tokens whose *text* is `|`) leave the `<<` an operator —
-/// `parse::redirect::pipeline_pipe` is that rule on the byte side.
+/// (not `<<<`) with the io-number form `N<<word` included, at **any** word
+/// position — word 0 included, since POSIX #2.9 makes a redirections-only
+/// statement (`simple_command = [NAME=value…] REDIRECT… [word…]`) a command of
+/// its own, and a pipeline stage is such a statement in its own right
+/// (`cat "a>" | <<EOF` feeds the body to an empty stage, task #345). Nothing
+/// about the **predecessor** is consulted: task #261 required a preceding token
+/// that is not a pipeline `|`, and task #345 removed both halves of that rule —
+/// the word-0 arm and the pipe arm (the *pipeline split* rule,
+/// `parse::redirect::pipe_token_span`, is untouched and owns that shape).
+/// The shape test reads the token's **raw span** and the shared
+/// `span_operator`, never the token text: quote removal makes `3"<<"T` read
+/// exactly like `3<<T`, and a token-text rule for a raw-byte structure is the
+/// byte/token count mismatch (LESSONS). The byte-level twin of this predicate
+/// is `scan::heredoc::ops::opens_word`, whose word-break arms are the
+/// tokenizer's separators plus the pipeline `|` (the ONE rule
+/// `parse::redirect::pipeline_pipe`).
 pub(crate) fn is_operator(line: &[u8], tokens: &[Token], i: usize) -> bool {
-    if i == 0 {
-        return false;
-    }
     let Some((_t, start, end, fq, _mask, _spans)) = tokens.get(i) else {
         return false;
     };
-    if *fq || span_operator(line, *start, *end).is_none() {
-        return false;
-    }
-    !tokens
-        .get(i - 1)
-        .is_some_and(|(_p, ps, pe, _fq, _m, _s)| pipe_token_span(line, *ps, *pe))
+    !*fq && span_operator(line, *start, *end).is_some()
 }
 
-/// The token index of every heredoc operator (never the command word).
+/// The token index of every heredoc operator, word 0 included.
 fn operator_indices(line: &[u8], tokens: &[Token]) -> Vec<usize> {
-    (1..tokens.len())
+    (0..tokens.len())
         .filter(|&i| is_operator(line, tokens, i))
         .collect()
 }

@@ -369,11 +369,15 @@ fn layout_bare_quoted_empty_delimiter_is_a_delimiter() {
 }
 
 #[test]
-fn operator_count_skips_command_word() {
-    // index 0 is the command word even when it looks like an operator.
+fn operator_count_counts_word_zero() {
+    // Word 0 counts when its token is an operator: POSIX's
+    // `simple_command = [NAME=value…] REDIRECT… [word…]` has no mandatory
+    // command word, so `<<EOF x` is the body-fed `x` and `<<EOF` alone is the
+    // redirections-only statement (task #345). The byte level agrees.
     let line = b"<<EOF x";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(operator_count(line, &tokens), 0);
+    assert_eq!(operator_count(line, &tokens), 1);
+    assert_eq!(crate::scan::heredoc::operator_count(line, 0, line.len()), 1);
 }
 
 #[test]
@@ -385,11 +389,15 @@ fn operator_count_builtin_prefix() {
 }
 
 #[test]
-fn operator_count_pipe_position_is_not_operator() {
-    // The word right after `|` is a command word, not an operator.
+fn operator_count_pipe_position_is_an_operator() {
+    // The word right after a pipeline `|` is that stage's word 0, and a
+    // here-doc operator there is the stage's redirections-only command
+    // (`a | <<B` is `a` piped into an empty command fed by the body, rc 0 in
+    // bash) — task #345. The byte level counts the same 1.
     let line = b"a | <<B";
     let tokens = tokenize_statement(line).unwrap();
-    assert_eq!(operator_count(line, &tokens), 0);
+    assert_eq!(operator_count(line, &tokens), 1);
+    assert_eq!(crate::scan::heredoc::operator_count(line, 0, line.len()), 1);
 }
 
 #[test]
@@ -477,23 +485,29 @@ fn a_terminator_line_is_not_an_operator_at_either_level() {
 /// absorbed `|` as a pipe) and `echo a>|<<EOF` (no operator: the `<<` bytes are
 /// inside one word). A divergence shifts the body regions and the per-command
 /// spec allocation silently.
+///
+/// The pipeline-pipe rows (`| <<EOF`, `a >| b | <<EOF`, `cat "a>"| <<EOF`,
+/// `cat x\>| <<EOF`, `cat a>b>| <<EOF`) count 1 at both levels since task
+/// #345: a real pipeline pipe ends the previous stage's word and begins the
+/// `<<` word, so the stage is a redirections-only command.
 #[test]
 fn operator_count_clobber_forms_agree_at_both_levels() {
     for (line, want) in [
         (b"cat >| q <<EOF" as &[u8], 1usize),
         (b"cat >| <<EOF", 1),
         (b"echo a>|<<EOF", 0),
-        (b"a >| b | <<EOF", 0),
+        (b"a >| b | <<EOF", 1),
         (b"cat >| q <<EOF && cat <<A", 2),
-        (b"| <<EOF", 0),
+        (b"| <<EOF", 1),
         // The shared rule (`parse::redirect::clobber_word`) is applied to the
         // raw word bytes with the quote mask: a quoted `>` never terminates an
         // operator word, an escape pair shields its second byte, and an
-        // unquoted `>`/`<` earlier in the word disqualifies it.
-        (b"cat \"a>\"| <<EOF", 0),
+        // unquoted `>`/`<` earlier in the word disqualifies it — so the `|` is
+        // a pipeline pipe and begins the `<<` word (1).
+        (b"cat \"a>\"| <<EOF", 1),
         (b"echo \"a>\"|b <<EOF", 1),
-        (b"cat x\\>| <<EOF", 0),
-        (b"cat a>b>| <<EOF", 0),
+        (b"cat x\\>| <<EOF", 1),
+        (b"cat a>b>| <<EOF", 1),
         (b"cat x\\>a>| <<EOF", 1),
         (b"cat \"a>\"x\\y>| <<EOF", 1),
         // The escape pair is skipped only outside quotes: inside `"a\>"` the `>`
@@ -512,14 +526,14 @@ fn operator_count_clobber_forms_agree_at_both_levels() {
     }
 }
 
-/// A run that opens with a redirect/separator token and has no command word
-/// counts its `<<` at both levels: `is_operator` needs a preceding token that
-/// is not a pipeline `|`, and the byte scan mirrors exactly that (task #185 —
-/// it used to require a preceding *word*, so `> <<EOF` counted 0 byte-level
-/// and 1 token-level). A divergence shifts the body regions and the per-command
-/// spec allocation silently. The whitespace-leading rows pin the other half of
-/// the mirror: with no token at all the `<<` is the command word (0) at both
-/// levels, and the first token of the run makes the next `<<` an operator.
+/// Every **word-0 / word-break** shape agrees byte-for-token (task #345 moved
+/// this family onto the operator side): the gate at both levels is "the `<<`
+/// begins a word" — the run start, whitespace, `;`, a newline, a top-level `)`,
+/// a pipeline `|`. Task #185 pinned the mirror when it was "a preceding token
+/// that is not a pipeline `|`" (`> <<EOF` counted 0 byte-level and 1
+/// token-level then); a divergence shifts the body regions and the per-command
+/// spec allocation silently, so the rows below assert **both** levels in one
+/// table, as the LESSONS entry requires.
 #[test]
 fn operator_count_leading_operator_forms_agree() {
     for (line, want) in [
@@ -540,23 +554,46 @@ fn operator_count_leading_operator_forms_agree() {
         (b">| x <<EOF", 1),
         (b"> <<EOF <<B", 2),
         (b"> <<EOF && cat <<A", 2),
-        // Agreement zeros: the run-start `<<` is a command word, a pipeline `|`
-        // right before it is a stage boundary, `>x<<EOF`/`><<EOF` keep the `<<`
-        // inside one word, a quoted `<<` is data, and a comment hides it. A run
-        // that opens with only whitespace has no preceding token either: the
-        // `i == 0` arm makes its `<<` the command word.
-        (b"<<EOF", 0),
-        (b"| <<EOF", 0),
-        (b"  <<EOF", 0),
-        (b"  <<-EOF", 0),
-        (b"> | <<EOF", 0),
+        // The word-0 family: the run start is a word start, a pipeline `|`
+        // begins a word, whitespace begins a word, and the line behind a
+        // comment begins at its newline — 1 at both levels.
+        (b"<<EOF", 1),
+        (b"<<EOF x", 1),
+        (b"<<EOF >f", 1),
+        (b"| <<EOF", 1),
+        (b"| <<EOF x", 1),
+        (b"  <<EOF", 1),
+        (b"  <<-EOF", 1),
+        (b"> | <<EOF", 1),
+        (b"a|<<EOF", 1),
+        (b"cat \"a>\"| <<EOF", 1),
+        (b"x\n<<EOF", 1),
+        (b"&&\n<<EOF", 1),
+        (b"true &&\n<<B", 1),
+        (b"# x\n<<EOF", 1),
+        (b"<<-EOF", 1),
+        (b"3<<EOF", 1),
+        (b"<<EOF <<B", 2),
+        // The bare `<<` at word 0 is an operator that takes the next word as
+        // its delimiter, so `<< <<EOF` is two operators at both levels (the
+        // second one's delimiter word is operator-shaped, the parse site's
+        // `InvalidRedirect` family — task #261's class 3).
+        (b"<< <<EOF", 2),
+        // The zeros that stay: `>x<<EOF`/`><<EOF` keep the `<<` inside one
+        // word, a quoted `<<` is data, and `true&&<<B` is one word for the
+        // tokenizer (fdshell never splits a word at an operator byte — the
+        // glued-pair family).
         (b">x<<EOF", 0),
         (b"><<EOF", 0),
         (b"> \"<<EOF\"", 0),
-        (b"# x\n<<EOF", 0),
-        // Whitespace leading, then a real token: the token counts, so the
-        // second `<<` is an operator at both levels (1).
-        (b"  <<EOF <<B", 1),
+        (b"x<<EOF", 0),
+        (b"a<<EOF", 0),
+        (b"true&&<<B", 0),
+        (b">>x<<EOF", 0),
+        // Whitespace leading: both `<<` begin words (the first at the
+        // whitespace break, the second at the space after `EOF`) — 2, where the
+        // pre-#345 rule counted 1 (`is_operator`'s word-0 arm).
+        (b"  <<EOF <<B", 2),
         // Multi-statement agreements: `;`/`&&`/`|` split the line into runs, and
         // each run keeps its own operator at both levels.
         (b"cat <<A ; <<B", 2),
@@ -612,21 +649,26 @@ fn operator_count_quoted_delimiter_forms_agree() {
 }
 
 /// Class 1 of task #261: the pipeline-pipe predecessor test at both levels.
-/// A pipeline `|` is a stage boundary (0 operators); an escaped `\|` and a
-/// quoted `"|"`, `'|'` are **word** tokens whose text is `|`, so the `<<`
-/// behind them is an operator (1) — `is_operator` reads the predecessor
-/// token's raw span (`parse::redirect::pipe_token_span`), and the byte scan
-/// reads the mask + escape walk (`parse::redirect::pipeline_pipe`). Before the
-/// fix the escaped pair read 0/1 and the quoted pair 1/0: the same
+/// An escaped `\|` and a quoted `"|"`, `'|'` are **word** tokens whose text is
+/// `|`, so the `<<` behind them is an operator — `is_operator` reads the
+/// predecessor token's raw span (`parse::redirect::pipe_token_span`), and the
+/// byte scan reads the mask + escape walk (`parse::redirect::pipeline_pipe`).
+/// Before the fix the escaped pair read 0/1 and the quoted pair 1/0: the same
 /// token-text-vs-raw-bytes trap in both directions.
+///
+/// Task #261 pinned the real pipeline pipe at **0** (the word behind `|` is
+/// the stage's command word). Task #345 moved that row to 1: the stage behind
+/// a pipeline pipe is `simple_command = REDIRECT…`, a redirections-only command
+/// fed by the body. The pipe **split** rule is untouched — these lines are
+/// still pipelines at both levels.
 #[test]
 fn operator_count_pipe_predecessors_agree() {
     for (line, want) in [
-        (b"| <<EOF".as_slice(), 0usize),
-        (b"> | <<EOF", 0),
-        (b"a >| b | <<EOF", 0),
-        (b"cat \"a>\"| <<EOF", 0),
-        (b"cat x\\>| <<EOF", 0),
+        (b"| <<EOF".as_slice(), 1usize),
+        (b"> | <<EOF", 1),
+        (b"a >| b | <<EOF", 1),
+        (b"cat \"a>\"| <<EOF", 1),
+        (b"cat x\\>| <<EOF", 1),
         (b"\\| <<EOF", 1),
         (b"x\\| <<EOF", 1),
         (b"echo x\\| <<EOF", 1),
@@ -679,9 +721,9 @@ fn operator_count_invalid_delimiter_agree() {
 /// Class 4 of task #261: a newline is a separator token (`token/step.rs`
 /// emits `;` for `\n` and `)`, and no token for ` `/`\t`), so a
 /// newline-leading run has a preceding token and its `<<` is an operator at
-/// both levels. The space/tab rows keep the other half of the mirror: they
-/// contribute no token, so the run-start `<<` stays the command word (0) and
-/// the `is_token_byte` mutants stay killable.
+/// both levels. Task #345 moved the space/tab/run-start rows to 1 as well:
+/// every one of those bytes (and the window start itself) is a **word break**,
+/// and word 0 of a redirections-only statement is the operator.
 #[test]
 fn operator_count_leading_newline_agree() {
     for (line, want) in [
@@ -692,10 +734,10 @@ fn operator_count_leading_newline_agree() {
         (b"x\n<<EOF\nbody\nEOF", 1),
         (b"&&\n<<EOF", 1),
         (b"cat <<A\n<<B", 2),
-        (b"<<EOF", 0),
-        (b" <<EOF", 0),
-        (b"\t<<EOF", 0),
-        (b"# x\n<<EOF", 0),
+        (b"<<EOF", 1),
+        (b" <<EOF", 1),
+        (b"\t<<EOF", 1),
+        (b"# x\n<<EOF", 1),
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());
@@ -981,7 +1023,9 @@ fn layout_quoted_body_keeps_its_continuation_pair() {
 /// *text* reads like an operator (`3"<<"T`, `"3"<<T`, `\3<<T`, `x3<<T`,
 /// `>3<<T`, `x<<T`) counts 0 at both levels, because `is_operator` tests the
 /// token's raw span through the shared `span_operator` (the byte/token
-/// agreement rule, LESSONS; task #276).
+/// agreement rule, LESSONS; task #276). The io-number at a **run start**
+/// (`3<<T`, ` 3<<T`) is word 0 of a redirections-only statement: 1 with its fd
+/// at both levels (task #345).
 #[test]
 fn operator_count_io_number_forms_agree() {
     for (line, want) in [
@@ -996,8 +1040,8 @@ fn operator_count_io_number_forms_agree() {
         (b"cat 3<<T && cat 4<<U", 2),
         (b"cat 3<<T | tr", 1),
         (b"builtin cat 3<<T", 1),
-        (b"3<<T", 0),
-        (b" 3<<T", 0),
+        (b"3<<T", 1),
+        (b" 3<<T", 1),
         (b"cat x<<T", 0),
         (b"cat x3<<T", 0),
         (b"cat -3<<T", 0),
