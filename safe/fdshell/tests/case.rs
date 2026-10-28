@@ -1144,11 +1144,13 @@ fn case_pattern_span_survives_the_stripped_paren() {
 /// Task #336: a quote-protected separator word is **pattern or body text**, never
 /// clause structure. The `|` of a pattern, the `)` that closes a pattern list, the
 /// `;` the clause walk skips and the `;;` that closes a clause are all read through
-/// `parse::word_quoted::span_word`, so a quoted spelling is data: `x"|"y` is the one
-/// pattern `x|y`, and `";"` in front of a pattern is a pattern **word** (the rows
-/// bash 5.3.9 accepts, recorded; its syntax errors land on fdshell's parse error at
-/// rc 1, and the accepted rows are the leniency task #419 owns — a `)` behind an
-/// argument is arm text here).
+/// a **raw-span** gate, so a quoted spelling is data: the `|` through
+/// `parse::redirect::pipe_token_span` (task #261's ONE pipe-token predicate, moved
+/// to the clause walk by task #346) and the rest through
+/// `parse::word_quoted::span_word`. `x"|"y` is the one pattern `x|y`, and `";"` in
+/// front of a pattern is a pattern **word** (the rows bash 5.3.9 accepts, recorded;
+/// its syntax errors land on fdshell's parse error at rc 1, and the accepted rows
+/// are the leniency task #419 owns — a `)` behind an argument is arm text here).
 #[test]
 fn a_quoted_separator_is_pattern_or_body_text() {
     for (script, want) in [
@@ -1157,6 +1159,13 @@ fn a_quoted_separator_is_pattern_or_body_text() {
         // The unquoted twins: a real `|` splits the pattern list.
         (r#"case b in a|b) echo M ;; esac"#, "M\n"),
         (r#"case x in a"|"b) echo A ;; esac"#, ""),
+        // The separator as a clause's **whole** pattern list is the one pattern
+        // `|`: task #346's measured row, bash-equal (`hit`, rc 0). Reading the
+        // token *text* split the clause at the quoted `|` and reported
+        // `case: empty pattern` at rc 1.
+        (r#"case '|' in "|") echo hit;; esac"#, "hit\n"),
+        // The same quoted pattern against a word it does not match: no arm runs.
+        (r#"case x in "|") echo M;; esac"#, ""),
         // The `;` and the `;;` inside an arm's body are arm text.
         (r#"case a in a) echo "A ;" ;; esac"#, "A ;\n"),
         (r#"case a in a) echo "A ;;" ;; esac"#, "A ;;\n"),

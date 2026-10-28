@@ -3,11 +3,12 @@ pub(crate) mod pattern;
 pub(crate) mod stray;
 
 use super::Token;
+use super::pipe_token_span;
 use super::semi::trim_semi;
 use super::word_quoted::span_word;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
-use error_stack::{Report, bail, ensure};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ScriptText;
 
 pub struct CaseClause {
@@ -21,6 +22,7 @@ pub fn parse_clauses(
     esac_idx: usize,
     text: &ScriptText,
 ) -> Result<Vec<CaseClause>, Report<ParseError>> {
+    let line = text.as_bytes().change_context(ParseError::Never)?;
     let mut clauses = Vec::new();
     let mut pos = start;
     while pos < esac_idx {
@@ -28,7 +30,7 @@ pub fn parse_clauses(
             pos += 1;
             continue;
         }
-        let patterns = collect_patterns(tokens, &mut pos, esac_idx)?;
+        let patterns = collect_patterns(tokens, line, &mut pos, esac_idx)?;
         let (body, next_pos) = extract::body(tokens, text, pos, esac_idx)?;
         clauses.push(CaseClause { patterns, body });
         pos = next_pos;
@@ -43,9 +45,13 @@ pub fn parse_clauses(
 /// the pattern list starts behind bash's optional leading `(` (POSIX 2.9.4.3's
 /// `( pattern-list )`, task #334).
 ///
-/// Every separator test here is [`span_word`]'s, so a quoted `")"` / `"|"` /
-/// `";"` is **pattern text**: `case x in a"|"b)` is the one pattern `a|b`, and a
-/// leading `";"` is a pattern word, never the skip (task #336).
+/// The separator tests read **raw spans**, never the token text. The `|` is
+/// [`pipe_token_span`]'s — task #261's ONE pipe-token predicate: a pipe token's
+/// span is exactly one `|` byte, while quote removal makes a `"|"`, a `'|'` and
+/// an escaped `\|` word tokens whose *text* is `|`. `)`, `;` and `;;` keep task
+/// #336's [`span_word`] gate (its rule for a separator word in general), so a
+/// quoted `")"` / `"|"` / `";"` is **pattern text**: `case x in a"|"b)` is the
+/// one pattern `a|b`, and a leading `";"` is a pattern word, never the skip.
 ///
 /// The **paren** ends the pattern list, not the position: a clause whose `)` is
 /// the token right before `esac` is a clause with an empty body
@@ -55,6 +61,7 @@ pub fn parse_clauses(
 /// `case x in echo yes;; esac`).
 fn collect_patterns(
     tokens: &[Token],
+    line: &[u8],
     pos: &mut usize,
     esac_idx: usize,
 ) -> Result<Vec<pattern::Pattern>, Report<ParseError>> {
@@ -68,15 +75,15 @@ fn collect_patterns(
         *pos += 1;
     }
     while *pos <= esac_idx {
-        let Some(token) = tokens.get(*pos) else {
+        let Some(tok @ (_t, start, end, _fq, _mask, _spans)) = tokens.get(*pos) else {
             break;
         };
-        if span_word(token, b")") {
+        if span_word(tok, b")") {
             *pos += 1;
             closed_paren = true;
             break;
         }
-        if span_word(token, b"|") {
+        if pipe_token_span(line, *start, *end) {
             if current_pattern.is_empty() {
                 bail!(ParseError::CaseEmptyPattern);
             }
@@ -84,7 +91,7 @@ fn collect_patterns(
             current_pattern.clear();
             *pos += 1;
         } else {
-            current_pattern.push(token.clone());
+            current_pattern.push(tok.clone());
             *pos += 1;
         }
     }

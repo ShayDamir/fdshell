@@ -208,22 +208,39 @@ fn the_mask_and_the_spans_stay_parallel_across_the_stripped_paren() {
     assert_eq!(control.mask, pattern.mask);
 }
 
-/// Every separator word of the clause walk is [`span_word`]'s (task #336):
-/// quoted, a `;` is no clause-leading skip, a `|` is no pattern separator, a `)`
-/// is no pattern closer and a `;;` closes no clause — the bytes are pattern and
-/// body **text**. Each row is the bash-measured shape.
+/// Every separator word of the clause walk is a **raw-span** test: the `|` is
+/// [`pipe_token_span`]'s (task #261's ONE pipe-token predicate, moved here by
+/// #346) and `;`, `)` and `;;` are [`span_word`]'s (task #336). Quoted, a `;` is
+/// no clause-leading skip, a `|` is no pattern separator, a `)` is no pattern
+/// closer and a `;;` closes no clause — the bytes are pattern and body **text**.
+/// Each row is the bash-measured shape.
 #[test]
 fn a_quoted_separator_word_is_pattern_or_body_text() {
     // A `|` inside a pattern word is pattern text: one pattern, quotes stripped.
     let clauses = clauses_of(b"case x in a\"|\"b) echo A;; esac").unwrap();
     assert_eq!(clauses[0].patterns.len(), 1);
     assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"a|b"));
-    // The same separator as its **own** quoted word joins into the pattern with
-    // the token-joining space, and stays one pattern.
+    // The separator as its **own** quoted word joins into the pattern with the
+    // token-joining space, and stays one pattern.
     let clauses = clauses_of(b"case x in a \"|\" b) echo A;; esac").unwrap();
     assert_eq!(clauses[0].patterns.len(), 1);
     assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"a | b"));
-    // The unquoted twin of both rows is the two-pattern split.
+    // The quoted `|` as the clause's **whole** pattern list is the one pattern
+    // `|` — never the empty-pattern verdict a pipe-token reading gives. This is
+    // the shape task #346's measurement names: `case '|' in "|") echo hit;; esac`
+    // matches, prints `hit`, rc 0, bash-equal (a text reading split the clause at
+    // the quoted `|` and reported `case: empty pattern`).
+    let clauses = clauses_of(b"case '|' in \"|\") echo hit;; esac").unwrap();
+    assert_eq!(clauses.len(), 1);
+    assert_eq!(clauses[0].patterns.len(), 1);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"|"));
+    // The escaped twin keeps **both** bytes of the pair in the pattern text (the
+    // tokenizer keeps an escape pair, `parse/token/escape.rs`), so it is pattern
+    // text as well and no separator exists to split at.
+    let clauses = clauses_of(b"case x in \\|) echo P;; esac").unwrap();
+    assert_eq!(clauses[0].patterns.len(), 1);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"\\|"));
+    // The unquoted twin of the quoted rows is the two-pattern split.
     let clauses = clauses_of(b"case x in a|b) echo A;; esac").unwrap();
     assert_eq!(clauses[0].patterns.len(), 2);
     // A quoted `;` is a pattern **word**, never the leading skip: the pattern

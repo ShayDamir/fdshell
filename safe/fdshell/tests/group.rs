@@ -293,6 +293,36 @@ fn pipeline_stage_group_is_a_parse_error() {
     assert!(err.contains("unexpected pipe"), "{err}");
 }
 
+/// A **quoted** `|` after `}` is word data, not the pipeline operator the group
+/// cannot take: the tail's `|` test reads the token's raw span
+/// (`parse::redirect::pipe_token_span`, task #261's ONE pipe-token predicate,
+/// moved to the group tail by task #346). The two measured signatures name
+/// different arms:
+///
+/// * `{ true } "|" out` never reaches the tail's pipe test at all — POSIX #1.2
+///   requires a list terminator before `}`, so the verdict is the terminator's
+///   `expected ';' before '}'` at rc 1 (bash 5.3.9: rc 2, `syntax error:
+///   unexpected end of file from '{' command on line 1`).
+/// * `{ true; } "|" out` reaches the tail, whose **word** arm fires on the quoted
+///   `|`: `group: unexpected word after '}'` at rc 1 (bash 5.3.9: rc 2, `syntax
+///   error near unexpected token '"|"'`).
+///
+/// Both are rc 1 vs bash's rc 2: the parse-error message family, the row task
+/// #346 records. The unquoted twin above keeps its `unexpected pipe`.
+#[test]
+fn a_quoted_pipe_after_brace_is_a_trailing_word() {
+    let (out, err, rc) = run(r#"{ true } "|" out"#);
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("expected ';' before '}'"), "{err}");
+    let (out, err, rc) = run(r#"{ true; } "|" out"#);
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("group: unexpected word after '}'"), "{err}");
+    // The unquoted twin is the pipeline form, unchanged.
+    let (out, err, rc) = run("{ echo a; } | cat");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("unexpected pipe"), "{err}");
+}
+
 /// A background group (`{ …; } &`) and a here-doc on a group are unsupported;
 /// each pinned parse error names what is missing.
 #[test]

@@ -153,8 +153,10 @@ fn redirect_syntax_error_propagates_through_the_group_tail() {
     assert_eq!(tail_err(b"{ echo a; } >|"), "invalid redirect syntax");
 }
 
-/// The tail's whole-word `|` test is [`span_word`]'s (task #336): a quoted `"|"`
-/// is a trailing **word**, the same error a plain word after `}` gives, where the
+/// The tail's whole-word `|` test is [`pipe_token_span`]'s (task #261's ONE
+/// pipe-token predicate, moved here by #346): only the one-`|`-byte span is the
+/// tokenizer's pipe token, so a quoted `"|"` / `'|'` and an escaped `\|` are
+/// trailing **words**, the same error a plain word after `}` gives, where the
 /// real `|` is the pipeline operator the group cannot take. The `&` row is the
 /// deliberately ungated neighbour: its test is a prefix test, so `&&`/`&>` keep
 /// their pinned errors.
@@ -176,6 +178,14 @@ fn a_quoted_pipe_word_is_a_trailing_word() {
     );
     assert_eq!(
         tail_err(b"{ echo a; } \"|\" >f"),
+        "group: unexpected word after '}'"
+    );
+    // The word-behind-the-quoted-pipe twin of the script row
+    // (`tests/group.rs::a_quoted_pipe_after_brace_is_a_trailing_word`): the
+    // quoted `|` and its `out` word are both trailing words, and the first of
+    // them is the error. bash 5.3.9 is a syntax error (rc 2) on the script.
+    assert_eq!(
+        tail_err(b"{ echo a; } \"|\" out"),
         "group: unexpected word after '}'"
     );
     // The unquoted prefix rows, unchanged.

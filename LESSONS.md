@@ -2716,12 +2716,32 @@ exactly one `|` byte. The **pipeline split** reads the same predicate
 and `alias_expand::command_positions` too, because splitting a line at a `|`
 is the same structural decision as counting an operator after one:
 `echo "|" <<EOF` is one command (rc 0, prints `|`, bash-equal), not a pipeline
-whose second stage's command word is `<<EOF`. Two `|`-text readers are
-deliberately left for **task #346** (`parse/case_clause.rs`'s pattern
+whose second stage's command word is `<<EOF`. Two `|`-text readers were
+deliberately left out of that migration (`parse/case_clause.rs`'s pattern
 separator — measured `case '|' in "|") echo hit;; esac`: fdshell rc 1
 `case: empty pattern`, bash rc 0 `hit`; `parse/group_block.rs`'s trailing-word
 test — measured `{ true } "|" out`: fdshell rc 1 `expected ';' before '}'`,
 bash rc 2): message/pattern family only, nothing feeds the heredoc counts.
+**Task #346 landed both readers**, so no token layer reads `|` text any more:
+`parse/case_clause.rs::collect_patterns` threads `line` out of the `ScriptText`
+(the `as_bytes().change_context` idiom every block builder uses) and
+`parse/group_block/tail.rs::redirects` (the site task #354 split out of
+`parse/group_block.rs`) both call `pipe_token_span`. The review check is
+`grep 'eq_bytes(b"|")' safe/fdshell/src`: the only hit is
+`scan/heredoc/op.rs`, the byte-level reader of a raw byte run with its own
+`span_quoted` gate, which owns its rule. Task #336's `span_word` gate had
+already removed the rc divergence of the two measurements above — today
+`case '|' in "|") echo hit;; esac` is rc 0 `hit` (bash-equal) and
+`{ true } "|" out` is rc 1 `expected ';' before '}'` vs bash rc 2 (message
+family; with the terminator, `{ true; } "|" out` reports the tail's own
+`group: unexpected word after '}'`). The migration is behavior-preserving by
+the token invariant: `span_word(tok, b"|")` ⇔ `pipe_token_span`, because a
+span-gated token has span ≤ text, so its span is one byte and that byte is the
+raw `|`, while a quoted `"|"` / `'|'` (span 3, text 1) and an escaped `\|`
+(the pair stays in the text, `parse/token/escape.rs`) fail both gates. Pinned
+by task #336's rows of `parse/case_clause/tests.rs` and
+`parse/group_block/tail/tests.rs` plus #346's `case '|' in "|")`,
+`case x in "|")`, `case x in \|)` and group rows.
 - **the byte scan's word-break test is the tokenizer's separator arm
 byte-wise** (the helper was `is_token_byte`; task #345 folded its byte set into
 the word-break / run-start arms of `scan/heredoc/ops.rs::opens_word`):
