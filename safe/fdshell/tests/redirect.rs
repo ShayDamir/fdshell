@@ -995,6 +995,41 @@ fn stderr_dup_after_a_write_redirect_lands_on_the_file() {
     );
 }
 
+/// Two defs on fd 1, then a dup from it: `f > a > b 2>&1`. The table's walk is
+/// **reverse**, so the `2>&1` sees the fd 1 that the **last** write def
+/// installed and fd 2 shares `b`'s description (bash 5.3.9: rc 0, `a` created
+/// and empty, `b` = `hi\ne\n`). A forward walk answers with the first entry —
+/// `a` — and the two writes split across the files (`a` = `e\n`, `b` = `hi\n`);
+/// that mutation of `redirect/resolve/table.rs::latest` is the one this test
+/// kills. The unit twin is
+/// `redirect/resolve/tests.rs::dup_shares_the_last_def_s_description_when_two_defs_target_one_fd`.
+#[test]
+fn stderr_dup_after_duplicate_write_redirects_lands_on_the_last_file() {
+    let (a, b, _sp) = two_paths("dup_after_two_writes");
+    for p in [&a, &b] {
+        let _ = std::fs::remove_file(p);
+    }
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f > {a} > {b} 2>&1; echo rc=$?"
+    ));
+    let a_body = std::fs::read_to_string(&a).unwrap();
+    let b_body = std::fs::read_to_string(&b).unwrap();
+    for p in [&a, &b] {
+        let _ = std::fs::remove_file(p);
+    }
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "rc=0\n", "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        b_body, "hi\ne\n",
+        "fd 2 lands on the winning def's file, sharing its offset"
+    );
+    assert_eq!(
+        a_body, "",
+        "the superseded def's file is created and takes nothing"
+    );
+}
+
 #[test]
 fn stderr_dup_before_a_write_redirect_keeps_the_shell_fd() {
     // The reverse order, written first: `f 2>&1 > z` applies `2>&1` while fd 1

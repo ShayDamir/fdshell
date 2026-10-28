@@ -577,6 +577,48 @@ fn dup_after_a_path_def_shares_the_preceding_def_s_description() {
     assert_eq!(body, "hi\ne\n", "the two descriptors share one offset");
 }
 
+/// The reverse walk of the table, with **two** defs on the source fd
+/// (`cmd > a > b 2>&1`): the winner of fd 1 is the **last** entry, so the
+/// `Dup(1)` shares **b**'s description and `a` — the superseded def's file —
+/// takes nothing (bash 5.3.9: `a` empty, `b` = `hi\ne\n`). A forward walk
+/// answers with the first entry: fd 2 lands on `a`, giving `a` = `e\n` and
+/// `b` = `hi\n`. This is the killer of the `.rev()` in
+/// `redirect/resolve/table.rs::latest` (plan Verification 8); the integration
+/// twin is
+/// `tests/redirect.rs::stderr_dup_after_duplicate_write_redirects_lands_on_the_last_file`.
+#[test]
+fn dup_shares_the_last_def_s_description_when_two_defs_target_one_fd() {
+    let c = cell();
+    let (a, _sa) = temp_path("dup_last_of_two_a");
+    let (b, _sb) = temp_path("dup_last_of_two_b");
+    // The consumer's pre-open pass runs in the same source order, so the fd
+    // sequence is `a` first, then `b`.
+    let src = vec![open_file(&a), open_file(&b)];
+    let redirects = vec![
+        RedirectDef::write_path(1, cstr(&a)),
+        RedirectDef::write_path(1, cstr(&b)),
+        RedirectDef::dup(2, 1),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
+    assert_eq!(resolved.len(), 3, "three defs, three entries, no pair");
+    let fd_b = dup_of(resolved.get(1).unwrap()).try_clone().unwrap();
+    let fd2 = dup_of(resolved.get(2).unwrap()).try_clone().unwrap();
+    fd_b.write_all(b"hi\n").unwrap();
+    fd2.write_all(b"e\n").unwrap();
+    drop((fd_b, fd2));
+    drop(resolved);
+    assert_eq!(
+        std::fs::read_to_string(&b).unwrap(),
+        "hi\ne\n",
+        "fd 2 shares the winning def's description and its offset"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        "",
+        "the superseded def's file is created and stays empty"
+    );
+}
+
 /// `echo x 1>&- 2>&1`: the `Close` entry for fd 1 means the fd will be gone
 /// when the `Dup` is exported, so the def fails as a dup of an unopen fd —
 /// bash's `1: Bad file descriptor`, rc 1. The frame is the one the `>&N` arm
@@ -648,8 +690,8 @@ fn dup_from_a_seed_entry_shares_the_seed_s_description() {
 /// seed's entry, so `> f 2>&1` in a pipeline stage lands fd 2 on `f` and not on
 /// the pipe (the order the table walk encodes: the built prefix first, then the
 /// seed). Asserted through `resolve_redirects`, never through a copy of the
-/// walk. Integration twin: `tests/redirect.rs::dev_fd_target_after_a_write_redirect_shares_the_file_of_that_fd`
-/// for the same precedence at the magic-path arm.
+/// walk. Integration twin, for the same precedence at the magic-path arm:
+/// `tests/redirect.rs::dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`.
 #[test]
 fn seed_entries_are_older_than_every_def() {
     let c = cell();
