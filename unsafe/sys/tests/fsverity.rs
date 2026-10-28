@@ -22,9 +22,10 @@ static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 /// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
 /// unique among *live* processes only, so the scratch must die with its
 /// process: pids are recycled, and a dir that outlives its process is a later
-/// run's inherited dir with that run's files in it (LESSONS, task #255; sweep
-/// task #342). Removal is `.ok()`-tolerant: teardown never panics, and it runs
-/// on a failing test's unwind, which is exactly the test that used to leak.
+/// run's inherited dir with that run's files in it
+/// (LESSONS: "pid + counter is collision-free only if"). Removal is
+/// `.ok()`-tolerant: teardown never panics, and it runs on a failing test's
+/// unwind, which is exactly the test that used to leak.
 struct Scratch(PathBuf);
 
 impl Drop for Scratch {
@@ -40,13 +41,26 @@ impl Deref for Scratch {
     }
 }
 
-/// A scratch dir; each test gets its own (pid + counter, per LESSONS),
-/// removed when the test's guard drops.
+/// A scratch dir; each test gets its own (pid + counter, per
+/// LESSONS: "pid + counter is collision-free only if"), removed when the test's
+/// guard drops. The dir is *created exclusively* (`create_dir`, never
+/// `create_dir_all`): a pid+counter name allocated by `create_dir_all` can be a
+/// dir a killed run leaked and a recycled pid landed on, so it is inherited,
+/// not allocated. Inheriting is what this family's EPERM flake is: a leaked
+/// verity scratch dir holds a verity-enabled file, and the kernel refuses a
+/// writable open of a verity inode with `EPERM`, permanently.
 fn scratch() -> Scratch {
-    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fdshell-verity-{}-{}", std::process::id(), c));
-    std::fs::create_dir_all(&dir).unwrap();
-    Scratch(dir)
+    loop {
+        let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("fdshell-verity-{}-{}", std::process::id(), c));
+        match std::fs::create_dir(&dir) {
+            // The name is taken (a killed run's leak, a recycled pid, a
+            // pid-namespace twin): take the next counter, never inherit.
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Ok(()) => return Scratch(dir),
+            Err(e) => panic!("cannot create a private scratch dir {dir:?}: {e}"),
+        }
+    }
 }
 
 fn cstr(p: &std::path::Path) -> CString {
@@ -243,4 +257,41 @@ fn read_metadata_non_verity_is_enodata() {
     let fd = open_file(&dir, "plain", CONTENT);
     let e = read_meta(&fd, FS_VERITY_METADATA_TYPE_DESCRIPTOR, 0, 256).unwrap_err();
     assert_eq!(e.errno(), libc::ENODATA);
+}
+
+/// Seed every scratch name this binary can hand out with a **verity** file,
+/// then prove `scratch()` lands on a clean private dir. This is the reported
+/// EPERM flake, planted deterministically (no load loop): the flake is the
+/// write of `f` inside an *inherited* dir, because a verity inode refuses
+/// `O_WRONLY|O_CREAT|O_TRUNC` with `EPERM` — forever.
+#[test]
+fn scratch_dir_is_exclusive() {
+    const WINDOW: u64 = 32; // > the 14 scratch() call sites in this binary
+    let base = std::env::temp_dir();
+    let pid = std::process::id();
+    let start = COUNTER.load(std::sync::atomic::Ordering::Relaxed);
+    let mut seeds: Vec<Scratch> = Vec::new();
+    for c in start..start + WINDOW {
+        let dir = base.join(format!("fdshell-verity-{pid}-{c}"));
+        if std::fs::create_dir(&dir).is_err() {
+            continue; // a name some other holder owns: not ours to seed
+        }
+        let owned = Scratch(dir);
+        let fd = open_file(&owned, "f", CONTENT);
+        match fd.enable_verity(FS_VERITY_HASH_ALG_SHA256, 4096) {
+            Ok(()) => seeds.push(owned),
+            // No fs-verity on this host/fs: the landmine cannot be planted.
+            Err(e) if matches!(e.errno(), libc::ENOTTY | libc::EOPNOTSUPP) => return,
+            Err(e) => panic!("seed enable failed: {e}"),
+        }
+    }
+    let dir = scratch();
+    assert!(
+        !seeds.iter().any(|s| **s == *dir),
+        "scratch() inherited a seeded dir: {}",
+        dir.display()
+    );
+    // Pre-fix the assertion above fires; this is the exact reported panic site
+    // (`std::fs::write` -> EPERM) one step deeper.
+    open_file(&dir, "f", CONTENT);
 }
