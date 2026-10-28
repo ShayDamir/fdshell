@@ -4770,9 +4770,25 @@ Keep the leniency in the layer that needs it (the #354 entry): relaxing
 already bash's rc-2 shape fdshell reports rc 1) and relaxing the **token**
 check rejects `… &\ndone`, which bash accepts — the token's byte is the only
 shape that separates the two. And the body-slice rule is a **statement-text**
-rule: the `for` word list, `case` patterns and the `case` word keep the plain
-`trim_semi` — `for i in 1 & ; do echo x; done` runs the `&` as a word (pin
-measured, follow-up).
+rule: `case` patterns, the `case` word and the `for` word list keep the plain
+`trim_semi`, because there the `&` is no slice boundary at all. In the `for`
+word list a plain `&` **is** bash's async operator, and the rule at that
+granularity is a **token gate at the builder** (task #360, it flipped the
+pin-as-measured): `for_block/words.rs::plain_amp` reads the list's tokens and
+`for_block.rs::tokens_to_for` bails with the `do` expectation, so the slice
+`trim_semi` owns never carries a plain `&`. Three facts of that gate: bash
+reports the **earliest** offending token, so the gate precedes the closer and
+empty-body validators (`for i in 1 & ; do; done` says `expected 'do'`, not
+`'do' body is empty`); the gate reads the **untrimmed** slice, because
+`for i in 1 ;&; do` tokenizes as `1`, `;`, `&` and `trim_semi` leaves the `&`;
+and the rule is **parse-time**, so a `&` that expansion produces
+(`for i in $(echo '&')`) stays a word, as in bash. Quoting is the span gate's,
+not a byte compare — `"&"`, `'&'`, `\&` (the pair stays in the word text),
+`x&` and `&&` stay words —
+LESSONS: "A separator-shaped word needs the span gate"
+The rule has **one granularity** and no scan-side twin: the run layer never
+re-derives a word list, unlike the closer/opener scoring of task #306, whose
+rule lives at the scans' place **and** seed.
 
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 

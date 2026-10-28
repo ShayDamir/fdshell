@@ -116,10 +116,12 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   function-def position; the multi-line `&` newline `;` form streams as bash
   runs line 1 (the `;` line is fdshell's accepted divergence), and an
   **untaken** arm's body is parsed, never scanned (`if true; then :; else
-  echo a & ; fi` runs nothing at rc 0). `for`'s word list is not statement
-  text and stays lenient: `for i in 1 & do :; done` is a parse error (bash rc
-  2, fdshell rc 1), and `for i in 1 & ; do echo x; done` runs the `&` as a
-  word (bash rc 2, fdshell rc 0 — pinned). A `&`-terminated **condition**
+   echo a & ; fi` runs nothing at rc 0). `for`'s word list is not statement
+   text, so the plain `&` there is the async operator and no word at all:
+   `for i in 1 & do :; done`, `for i in 1 & ; do :; done` (the `&;`, `;&` and
+   `; & ;` spellings of the same list) and the newline spelling are parse
+   errors (bash rc 2, fdshell rc 1), while a quoted `"&"` / `'&'`, an escaped
+   `\&` and a glued `x&` stay words. A `&`-terminated **condition**
   (`if true & then echo x; fi`, `while : & do …; break; done`, the `elif` twin)
   is a background job of its own: **one nameless job per condition run**, so a
   loop records one per iteration, `$!` reports it and `wait` reaps it. The

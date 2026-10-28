@@ -161,8 +161,13 @@ if true & then echo x; fi          # a `&`-terminated condition runs as a job
 f(){ echo hi & }                   # the function body keeps its `&`
 ```
 
-`for`'s word list stays strict — `for i in 1 & do :; done` is a parse error —
-and a `&` behind a `&`, or a `;;` behind a `&` outside a block (`echo a & ;;
+`for`'s word list stays strict: a plain `&` **anywhere** in it is the async
+operator, not a word, so `for i in 1 & do :; done`, `for i in 1 & ; do :; done`
+(`&;`, `;&` and `; & ;` spell the same list) and the newline spelling
+(`for i in 1 &` newline `do :; done`) are parse errors — bash stops at rc 2,
+fdshell at rc 1 with `expected 'do'`. A quoted `"&"` / `'&'`, an escaped `\&`
+and a glued `x&` stay word data. A `&` behind a `&`, or a `;;` behind a `&`
+outside a block (`echo a & ;;
 echo b`), is the parse error that runs nothing. A `&`-terminated **condition**
 is a background job too, one per condition run, so a loop records one per
 iteration (`while : & do …; break; done`): the arm it gates sees the async
@@ -961,7 +966,12 @@ words and the block runs from its own `do` to its own `done` —
 is fdshell's parse error (task #310). A list word glued to an operator is word
 data here, so `for x in done>f; do echo A; done>f2` files `A` in `f2` and
 `for i in a && b; do echo hi; break; done` iterates — both at rc 0 where bash
-stops at rc 2 (accepted divergences). A missing `in` stays fdshell's own rc 1:
+stops at rc 2 (accepted divergences). The **standalone** `&` is the one
+operator word the list rejects: bash's list ends at the async operator and its
+parser fails the `do` expectation there, so `for i in 1 & ; do :; done` is a
+parse error (rc 1 here, rc 2 in bash, task #360), while `"&"`, `'&'` and `\&`
+stay words; the glued family above is the surviving divergence (owner #496).
+A missing `in` stays fdshell's own rc 1:
 `for i 1 2` is `expected 'in'`, bash rc 2.
 
 A block's **closing keyword** needs a command-list terminator in front of it —
