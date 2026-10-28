@@ -339,3 +339,80 @@ fn ampersand_only_body_is_not_an_empty_body() {
         );
     }
 }
+
+/// Task #358, the non-`if` half of the family: a body that **ends in a dangling
+/// `&&`/`||`** runs at rc 0 where bash stops at rc 2. This is neither the
+/// empty-body rule of this file nor the closer rule of `tests/block_closers.rs`
+/// (which answers only the closer's *predecessor* question, and behind a
+/// newline's `;` token the predecessor is legal): the body's own cond list
+/// splits at the trailing operator and `cond/part.rs::run_part` answers the
+/// empty part behind it with `Ok(None)`. Each row names the task that owns its
+/// rule — the cond-list rule of **#367** (an operator with no command behind it,
+/// at a `;`/newline or at end of input), the stray `;;` rule of **#423**, the
+/// function body's missing terminator before `}` of **#424**, and the list
+/// continuation of **#492** (an operator at a physical-line end continues the
+/// list in bash, which fdshell does not implement).
+///
+/// Every row measured 2026-10-28 against bash 5.3.9, fdshell on `master`
+/// `f8f2cbab`. The rc-0 rows are a **measured acceptance**: the owner flips them
+/// deliberately. Two rows are the boundary a fix must not cross: the `&` twin is
+/// bash **parity** (a `&` is a list terminator, not an operator), and
+/// `false &&` + newline + `echo b` is the continuation gap of **#492** (bash
+/// runs nothing, rc 1), not the trailing-operator rule's.
+#[test]
+fn a_dangling_cond_operator_before_a_block_closer_is_measured() {
+    // The loop rows run under the bounded child: a mis-paired closer is a hang.
+    for (script, want) in [
+        // The newline's `;` closes the statement, so the closer rule passes and
+        // the body's list ends on the operator (#367 + #492's continuation).
+        ("for i in 1; do echo a ||\ndone", "a\n"),
+        ("for i in 1; do echo a &&\ndone", "a\n"),
+        // The `;` behind the operator is #367's alone: the body's list ends with
+        // `echo a`'s status, and the loop stops.
+        ("while false; do echo a || ;\ndone", ""),
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash rc 2, accepted divergence: {err}"
+        );
+    }
+    // The plain `&` behind the body is a list **terminator**, so the closer rule
+    // accepts it and the loop body runs in the background: bash parity, and
+    // #354's rule, pinned here for stdout/rc only.
+    let (out, err, rc) = run_bounded("while false; do echo a &\ndone");
+    assert_eq!((out.as_str(), rc), ("", 0), "bash parity: {err}");
+    for (script, want) in [
+        // The group: the closer rule passes for the same reason (#367).
+        ("{ echo a ||\n}", "a\n"),
+        ("{ echo a ||; }", "a\n"),
+        // A function-definition body needs no terminator before `}` at all
+        // (#424), so the glued pair reaches the body's list directly.
+        ("f() { echo a || }; f", "a\n"),
+        ("f() { echo a && }; f", "a\n"),
+        ("f() { echo a ||; }; f", "a\n"),
+        ("f() { echo a ||\n}; f", "a\n"),
+        // A `case` arm body behind the operator (`;;` is #423's, the `;` #367's).
+        ("case x in x) echo a || ;; esac", "a\n"),
+        ("case x in x) echo a && ;; esac", "a\n"),
+        ("case x in x) echo a ||\n;; esac", "a\n"),
+        ("case x in x) echo a ||; esac", "a\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash rc 2, accepted divergence: {err}"
+        );
+    }
+    // #492's row, not this rule's: bash ends the list at the line end, runs
+    // nothing and reports rc 1, while fdshell's short-circuit is per statement
+    // and reaches the next line. Pinned at the measured value.
+    let (out, err, rc) = run_bounded("false &&\necho b");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("b\n", 0),
+        "bash runs nothing at rc 1 (the list continuation is task #492's): {err}"
+    );
+}

@@ -177,8 +177,28 @@ fn mid_run_and_stage_blocks_close_at_their_own_closer() {
 }
 
 /// The closer glued straight behind a cond operator: bash rc 2, and the rule
-/// owns the message (task #358's flipped rows land here — the `&&`/`||` pair is
-/// one word, never the plain `&` of the terminator set).
+/// owns the message (the `&&`/`||` pair is one word, never the plain `&` of the
+/// terminator set).
+///
+/// Task #358's rc-identity record, in the owner-then-flipper-then-restorer
+/// order. Measured 2026-10-20 on `master` `4e45653` / `task354` `69bba51`:
+/// #354's body-slice rule flipped the two `||` rows (`echo a || fi`,
+/// `echo a || fi; echo after`) from rc 1 to **rc 0** — the body text became
+/// `echo a ||`, and a cond list ending on an operator runs its last part and
+/// reports the list's rc, 0 — while the `&&` rows stayed rc 0 and the `|`/`>`
+/// rows stayed rc 1. Task #301's `ensure_before_closer` (the predecessor gate
+/// this file exists for) **restored rc 1 for every row here**, re-measured
+/// 2026-10-28 on `f8f2cbab`; bash rc 2 throughout. A tail written behind such a
+/// row runs nothing: the parse dies before the first statement, so stdout is
+/// empty and `echo a >f fi` opens no file (pinned in
+/// [`the_rc_1_family_stays_a_parse_error`]).
+///
+/// The rows that end in a dangling operator **with a terminator behind it**
+/// (`echo a ||; fi`, the newline spelling) are *not* this rule's: the closer's
+/// predecessor is then a legal `;`, and the leniency sits one layer below, in
+/// the body's own cond list — owners #367/#423/#424, pinned by
+/// `tests/cond_blocks.rs::a_dangling_cond_operator_in_an_if_body_is_measured`
+/// and `tests/block_bodies.rs::a_dangling_cond_operator_before_a_block_closer_is_measured`.
 #[test]
 fn a_closer_glued_behind_a_cond_operator_is_a_parse_error() {
     err("if true; then echo a && fi", "expected ';' before 'fi'");
@@ -189,6 +209,70 @@ fn a_closer_glued_behind_a_cond_operator_is_a_parse_error() {
     );
     bounded_err("while false; do : && done", "expected ';' before 'done'");
     bounded_err("while false; do : | done", "expected ';' before 'done'");
+    // The tail behind the row runs nothing (the parse dies first).
+    err(
+        "if true; then echo a || fi; echo after",
+        "expected ';' before 'fi'",
+    );
+    err("if true; then echo a | fi", "expected ';' before 'fi'");
+    err(
+        "if true; then echo a || else fi",
+        "expected ';' before 'fi'",
+    );
+    err(
+        "if true; then echo a || elif fi",
+        "expected ';' before 'fi'",
+    );
+    // A redirection operand in front of the operator changes nothing.
+    err(
+        "if true; then echo a 2>&1 || fi",
+        "expected ';' before 'fi'",
+    );
+    // A **compound** command as the last body statement: the compound-closer
+    // exception above answers for the body's end, the operator word after it is
+    // still no terminator.
+    err(
+        "if true; then for i in 1; do :; done || fi",
+        "expected ';' before 'fi'",
+    );
+    bounded_err(
+        "while false; do { echo a; } || done",
+        "expected ';' before 'done'",
+    );
+    // The operator read by a longer body list, and the row written mid-run.
+    err(
+        "if true; then echo a && echo b || fi; echo tail",
+        "expected ';' before 'fi'",
+    );
+    err(
+        "true && if true; then echo a || fi",
+        "expected ';' before 'fi'",
+    );
+    bounded_err(
+        "for i in 1; do echo a || done",
+        "expected ';' before 'done'",
+    );
+    bounded_err(
+        "for i in 1; do echo a && done",
+        "expected ';' before 'done'",
+    );
+    bounded_err(
+        "while false; do echo a || done",
+        "expected ';' before 'done'",
+    );
+    bounded_err(
+        "until true; do echo a || done",
+        "expected ';' before 'done'",
+    );
+    // The group's own closer, same decision at the group builder:
+    // `expected ';' before '}'`.
+    err("{ echo a || }", "expected ';' before '}'");
+    // The **pipeline-stage** twin: rc parity, message family. The stage's span
+    // scan never reaches the builder, so the row reports the bare
+    // `missing 'fi'` (`parse/semi/closing.rs`) where the plain row above
+    // reports `expected ';' before 'fi'`; unifying the two texts is the
+    // closing-keyword walk's decision, not this rule's.
+    err("echo x | if true; then echo a || fi", "missing 'fi'");
 }
 
 /// A block keyword in argument position is word data and never swallows the

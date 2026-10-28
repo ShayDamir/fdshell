@@ -989,6 +989,19 @@ a redirection (`while false; do { :; }>f done`). A `;;` written in a `then` body
 is the separator rule's, not this one's: `if true; then echo a ;; fi` prints `a`
 at rc 0 where bash stops at rc 2.
 
+This rule answers only the closer's **predecessor** question, so a body that
+ends in a **dangling `&&`/`||`** behind a legal terminator reaches its own
+condition list and **runs**: `if true; then echo a ||; fi`,
+`if true; then echo a ||` + newline + `fi`, `for i in 1; do echo a ||` +
+newline + `done`, `{ echo a ||; }`, `f() { echo a || }; f` and
+`case x in x) echo a || ;; esac` print `a` at rc 0 where bash stops at rc 2 —
+the trailing-operator rule of task #367, the `;;` rule of #423, and the function
+body's missing terminator before `}` of #424. The `|` twin does report: a
+pipeline stage must begin, so `if true; then echo a |; fi` is
+`expected command after pipe` (rc 1, bash rc 2). A plain `&` behind the body is
+a terminator, not an operator, and is bash parity (`if true; then echo a & fi`
+runs `a` in the background).
+
 A closing keyword closes **its own kind of block**: `fi` an `if`, `done` a
 `while`/`until`/`for`, `esac` a `case`, `}` a group. A closer of a **foreign**
 kind written in a body is an ordinary **command word** — it scores nothing and
@@ -1132,6 +1145,15 @@ pipeline stage but the last, is not implemented: a failing command in a
 non-final stage ends the shell (task #490). A redirection whose target cannot be
 opened aborts the whole script here, `set -e` written or not, where bash fails
 only that command (task #179).
+
+A `&&`/`||` with **no command behind it** is accepted, at statement level too:
+`echo a &&` and `echo a && ; echo b` print `a` and `b` at rc 0, where bash stops
+at rc 2 (task #367). The interactive shell keeps buffering such a line, as
+"Interactive shell" below says, because the construct is not complete. A `&&` at
+the end of a physical line does **not** continue the list onto the next line
+here: `echo a &&` + newline + `echo b` prints `a` and `b`, as bash does, while
+`false &&` + newline + `echo b` prints `b` — bash short-circuits the whole list,
+runs nothing and ends 1 (task #492).
 
 A stage is a **command**, so the word behind a `|` starts a command and a keyword
 block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop in

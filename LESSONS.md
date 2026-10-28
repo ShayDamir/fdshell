@@ -3821,13 +3821,26 @@ predicate, read at the scan and at the builders, that knows both halves.
   simply answers first, and the divergence from bash (rc 0, prints `}`) is the
   same accepted one.
 
+- **A dangling operator at a body's end is invisible to this gate:** behind a
+  `||` at a line end the closer's predecessor is the newline's `;` token
+  (LESSONS: "A `;` token is a newline in disguise"), and the leniency sits one
+  layer below, in the empty part `cond/part.rs::run_part` answers `Ok(None)`.
+  Bash **accepts** an operator at a line end, so a fix for the empty part must
+  not fire on `echo a &&` + newline + `echo b` (that row is parity) and must
+  decide fdshell's missing continuation (#492) in the same step.
+- **A rule that *restores* an rc a sibling task flipped is audited as a triple** —
+  owner, flipper, restorer, in the pin comment (#301 restored the rc 1 #354's
+  body slice turned to 0): a two-column audit reads it as a reverted fix.
+
 Pins: `keywords/position/tests.rs` (the closer arm, the clause gate),
 `parse/semi/preceded/tests.rs` (the predecessor set, index 0, off the list),
 `parse/semi/closing/tests.rs` (the walk closes behind `fi`/`}`/`esac`/`)`),
 `parse/tests.rs` (`glued_closer_reports_the_missing_semicolon_not_an_empty_body`),
 `tests/block_closers.rs` (every row measured against bash; the loop forms under
 a bounded child, because a mis-paired closer is a hang), `tests/block_bodies.rs`,
-`tests/cond_blocks.rs`, `tests/group.rs`.
+`tests/cond_blocks.rs`, `tests/group.rs`; task #358's accepted side, owner named
+per row, `tests/cond_blocks.rs::a_dangling_cond_operator_in_an_if_body_…` and
+`tests/block_bodies.rs::a_dangling_cond_operator_before_a_block_closer_…`.
 ## One clause rule, three scorers: closers and openers do not share one gate
 
 One shared state machine (`keywords/position.rs`) is consumed verbatim by every

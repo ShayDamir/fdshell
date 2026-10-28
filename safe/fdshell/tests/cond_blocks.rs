@@ -1686,3 +1686,93 @@ fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     let (out, _, rc) = run_bounded("if cat <<X; then # c\nb\nX\nfi");
     assert_eq!((out.strip_prefix("b\n").is_some(), rc), (true, 1));
 }
+
+/// Task #358: a body that **ends in a dangling `&&`/`||`** runs, rc 0 where bash
+/// stops at rc 2. The closer rule of `tests/block_closers.rs` answers only the
+/// closer's **predecessor** question, and a newline *is* a `;` token (LESSONS,
+/// task #355), so `if true; then echo a ||` + newline + `fi` has a legal
+/// predecessor and passes `is_closer_predecessor`; the body slice then ends at
+/// the operator, the body's own cond list splits there, and
+/// `cond/part.rs::run_part` answers the empty part behind the operator with
+/// `Ok(None)`. The leniency is one layer below the closer rule, and each row
+/// names its owner: the cond-list rule of task **#367** (an operator with no
+/// command behind it, at a `;` or at end of input), the `;;` rule of **#423**,
+/// the function body's missing terminator of **#424**. The `|` twin is **not**
+/// lenient — a stage must begin, so the pipe reports.
+///
+/// Every row measured 2026-10-28 against bash 5.3.9. A #367 fix **flips** the
+/// rc-0 rows, which is why each names its owner: the flip must be a deliberate
+/// edit of this pin. The last block is the boundary that fix must not cross —
+/// bash **continues** a list behind an operator written at a physical-line end,
+/// so those rows are bash **parity** and a partial fix shows up as their
+/// failure.
+#[test]
+fn a_dangling_cond_operator_in_an_if_body_is_measured() {
+    // The operator sits behind a legal terminator (the `;`, the newline's `;`
+    // token), so the closer rule never sees it: the body's own cond list does.
+    for (script, want) in [
+        ("if true; then echo a ||; fi", "a\n"),
+        ("if true; then echo a && ; fi", "a\n"),
+        ("if true; then echo a ||; echo b; fi", "a\nb\n"),
+        ("if true; then echo a ||\nfi", "a\n"),
+        ("if true; then echo a ||\nelse echo e; fi", "a\n"),
+        (
+            "if true; then echo a ||\nelif false; then echo e; fi",
+            "a\n",
+        ),
+        // A `;;` glued behind the operator: the separator rule of #423.
+        ("if true; then echo a ||;; fi", "a\n"),
+        // The plain `&` is a **terminator**, not an operator: bash parity, and
+        // #354's acceptance (asserted for stdout/rc only; its background-job
+        // record is pinned by `ampersand_in_an_if_body_backgrounds_the_statement`).
+        ("if true; then echo a & fi", "a\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash rc 2, accepted divergence: {err}"
+        );
+    }
+    // The pipe twin of the first two rows: the operator with nothing behind it
+    // **is** reported, rc 1 (bash rc 2 — the message family of the accepted
+    // pair). `parse/pipeline.rs`'s `expected command after pipe`.
+    for script in ["if true; then echo a |; fi", "if true; then echo a |\nfi"] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+        assert!(
+            err.contains("expected command after pipe"),
+            "{script}: {err}"
+        );
+    }
+    // The same rule at **statement** level (#367): the trailing operator's empty
+    // part is the last part of the list, so the list ends with the rc of the
+    // command before it.
+    for (script, want) in [
+        ("echo a &&", "a\n"),
+        ("echo a ||", "a\n"),
+        ("echo a && ", "a\n"),
+        ("echo a && #c", "a\n"),
+        ("echo a && ; echo b", "a\nb\n"),
+        ("echo a || ; echo b", "a\nb\n"),
+        ("echo a || &&", "a\n"),
+        ("echo a || |", "a\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash rc 2, accepted divergence: {err}"
+        );
+    }
+    // The boundary of any such fix: an operator at a physical-line end **continues**
+    // the list in bash, so these rows are parity and stay green.
+    for (script, want) in [("echo a &&\necho b", "a\nb\n"), ("false ||\necho b", "b\n")] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash parity: {err}"
+        );
+    }
+}
