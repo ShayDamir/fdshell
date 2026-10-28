@@ -63,7 +63,9 @@ pub(super) fn resolve_path(
         // `src` is not this def's source and is left to its owner: it is CLOEXEC
         // and above every target, so the command never sees it, and its open ran
         // against the descriptor the shell had **before** the command's
-        // redirections (task #337).
+        // redirections (task #337). That pre-open also decides the magic open's
+        // *success*, so a word naming an fd an earlier def of the same command
+        // opens fails here where bash succeeds — the divergence #482 owns.
         return fd_path::resolve(def, prefix, n, min_fd, built, seed);
     }
     let local = src

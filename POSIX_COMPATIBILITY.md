@@ -364,11 +364,12 @@ The `<<<` form's remaining differences from bash:
 `> /dev/fd/3` (and `/proc/self/fd/3`) opens the file descriptor 3 points at,
 with the operator's flags, **as the redirection runs** — so it sees the fd state
 the command's earlier redirections left, a pipeline stage's pipe ends included,
-and the open is a fresh one: `>` truncates, `<` starts at byte 0. bash behaves
-the same way and fdshell matches it byte-for-byte on the direct spellings
+and the open is a fresh one: `>` truncates, `<` starts at byte 0. The **success**
+of that open is the exception, third bullet below. bash behaves the same way and
+fdshell matches it byte-for-byte on the direct spellings
 (`tests/redirect.rs::dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`
-and its neighbours, task #337). Two measured divergences remain, both 2026-10-28
-against bash 5.3.9 with stdout and stderr piped:
+and its neighbours, task #337). Three measured divergences remain, all
+2026-10-28 against bash 5.3.9 with stdout and stderr piped:
 
 - A target that only **expands** to the magic form keeps the consumer's
   pre-command open, because the magic reading is on the word as the parser wrote
@@ -376,6 +377,16 @@ against bash 5.3.9 with stdout and stderr piped:
   `hi\n` and prints `e` on stdout, where bash leaves `z` = `e\n\n` and prints
   nothing. The quoted, unexpanded `2> "/dev/fd/1"` matches bash. Owning task:
   **#479**.
+- A target naming an fd that an **earlier def of the same command** opens fails
+  here, because the consumer's pre-open pass opens every path word **before** any
+  redirection is applied; bash applies them one by one, so its open finds the fd
+  (rc 1 for fdshell, `redirect file open failed`, and a `>` target created
+  empty). Measured with fd 3 closed in the invoking shell, bash rc 0 in all
+  three: `echo e 3>&1 2> /dev/fd/3` prints `e`; `echo e 3> z 2> /dev/fd/3` prints
+  `e` and leaves `z` empty, because fd 2 is `z`; `f 3>&1 > z 2> /dev/fd/3`
+  (`f(){ echo hi; echo e >&2; }`) leaves `z` = `hi\n` and prints `e`. Where the
+  fd **exists** the content rule above holds and both shells agree. Owning task:
+  **#482**.
 - `set -C` refuses a magic target whose descriptor is a **pipe**
   (`set -C; echo e > /dev/fd/1` → rc 1, `noclobber is set`); bash's open
   succeeds — Linux ignores `O_EXCL` for a non-regular file — and prints `e`. On
