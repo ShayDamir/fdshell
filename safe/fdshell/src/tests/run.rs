@@ -16,9 +16,9 @@ use sys::{Origin, Position, ScriptText};
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// A per-test scratch dir (pid + counter), removed on drop — the `tests/verity.rs`
-/// shape (LESSONS "Tests in one binary share the process: pid-only temp paths
-/// collide"). Drop's removal is `.ok()`-tolerant so a concurrent suite run can
-/// never turn teardown into an ENOENT panic.
+/// shape (LESSONS: "pid + counter is collision-free only if"). Drop's removal is
+/// `.ok()`-tolerant so a concurrent suite run can never turn teardown into an
+/// ENOENT panic.
 struct Scratch(std::path::PathBuf);
 
 impl Scratch {
@@ -2474,7 +2474,8 @@ fn unclosed_function_brace_is_parse_error() {
 /// The `cd` itself persists (a scoped redirect does not undo the builtin).
 #[test]
 fn in_process_command_applies_its_redirect_and_is_restored() {
-    let path = std::env::temp_dir().join(format!("fdshell_scope_cd_{}", std::process::id()));
+    let dir = Scratch::new();
+    let path = dir.join("out");
     let cmd = format!("cd /tmp > {}", path.to_str().unwrap());
     let out = capture_stdout(|| {
         let cell = make_cell();
@@ -2483,7 +2484,6 @@ fn in_process_command_applies_its_redirect_and_is_restored() {
         run_one(b"echo after", &cell).unwrap();
     });
     let body = std::fs::read_to_string(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
     assert_eq!(body, "");
     assert_eq!(out, b"/tmp\nafter\n");
 }
