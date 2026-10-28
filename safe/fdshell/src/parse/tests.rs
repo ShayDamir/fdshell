@@ -1375,10 +1375,12 @@ fn test_duplicate_write_redirects_last_is_last() {
     );
 }
 
-// A duplicate key arriving after a larger key is inserted inside the equal-key
-// block, never after it: the list stays sorted by target fd and stable within it.
+// The list is in the order the redirections were **written**: POSIX #2.5
+// applies every redirection in that order, and "the last entry for a fd wins"
+// follows from it. A duplicate key that arrives after a larger one therefore
+// stays after it — sorting by target fd would move `1>b` before `2>e`.
 #[test]
-fn test_duplicate_targets_stay_sorted_across_fds() {
+fn test_targets_stay_in_written_order() {
     let ParsedLine::Cmd(cmd) = parse(b"cmd >a 2>e 1>b").unwrap() else {
         panic!("expected Cmd")
     };
@@ -1386,10 +1388,39 @@ fn test_duplicate_targets_stay_sorted_across_fds() {
         cmd.redirects,
         vec![
             path_def(1, RedirectDirection::Write, "a"),
-            path_def(1, RedirectDirection::Write, "b"),
             path_def(2, RedirectDirection::Write, "e"),
+            path_def(1, RedirectDirection::Write, "b"),
         ]
     );
+}
+
+/// The `2>&1`/`> f` pair is written in the order the shell must apply it: a
+/// fd-sorted table would move `> f` (fd 1) in front of `2>&1` (fd 2) and send
+/// fd 2 to `f`, where bash keeps the shell's fd 1 (`tests/redirect.rs::
+/// stderr_dup_before_a_write_redirect_keeps_the_shell_fd`).
+#[test]
+fn test_stderr_dup_and_write_redirect_keep_written_order() {
+    for (line, want) in [
+        (
+            b"cmd 2>&1 > f".as_slice(),
+            vec![
+                RedirectDef::dup(2, 1),
+                path_def(1, RedirectDirection::Write, "f"),
+            ],
+        ),
+        (
+            b"cmd > f 2>&1",
+            vec![
+                path_def(1, RedirectDirection::Write, "f"),
+                RedirectDef::dup(2, 1),
+            ],
+        ),
+    ] {
+        let ParsedLine::Cmd(cmd) = parse(line).unwrap() else {
+            panic!("line={line:?}: expected Cmd")
+        };
+        assert_eq!(cmd.redirects, want, "line={line:?}");
+    }
 }
 
 #[test]
@@ -1544,11 +1575,13 @@ fn test_bare_combined_operand_does_not_shift_the_heredoc_body() {
     let ParsedLine::Cmd(cmd) = parse(b"echo a &> f <<EOF\nbody\nEOF").unwrap() else {
         panic!("expected Cmd")
     };
+    // The written order: the `&>` def (fd 1) precedes the here-doc (fd 0). The
+    // bare operand took `f`, not the body, and the body kept its own def.
     assert_eq!(
         cmd.redirects,
         vec![
-            RedirectDef::here_doc(0, c"body\n", true),
             combined_def(RedirectDirection::Write, "f"),
+            RedirectDef::here_doc(0, c"body\n", true),
         ]
     );
     assert_eq!(cmd.args, vec![c"a".into()]);

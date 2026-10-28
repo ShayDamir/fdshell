@@ -494,3 +494,48 @@ fn noclobber_reports_the_expanded_target_name() {
     };
     assert_eq!(name.as_bytes().unwrap(), abs.as_bytes());
 }
+
+/// A plain write def on an explicit target fd (the order pins below need the
+/// fd-2 half of the pair, which `write_def` fixes to fd 1).
+fn write_def_to(export_to: i32, path: &str) -> RedirectDef {
+    RedirectDef {
+        export_to,
+        extra_to: None,
+        direction: RedirectDirection::Write,
+        source: RedirectSource::path(
+            ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap(),
+            Vec::new(),
+        ),
+    }
+}
+
+/// The open pre-pass runs in the order the defs were **written** and stops at
+/// the first failure, so the losers' side effects follow that order too:
+/// `echo x 2>missing/dir/e >f` never opens `f`, and bash creates no `f`
+/// either (rc 1). A fd-sorted def list opens fd 1's target first, so `f` is
+/// truncated (here: emptied) before the fd-2 open fails — a filesystem effect
+/// of a redirection the command never applied. See
+/// LESSONS: "POSIX redirect order is observable" (task #337); the integration
+/// twin is
+/// `tests/redirect.rs::an_earlier_failed_open_creates_no_later_target`.
+#[test]
+fn opens_run_in_source_order_and_stop_at_the_first_failure() {
+    let (dir, _scratch) = scratch();
+    std::fs::write(format!("{dir}/a1"), b"keep\n").unwrap();
+    let cell = ForkCell::new(ShellState::new());
+    let defs = vec![
+        write_def_to(2, &format!("{dir}/nope/dir/e")),
+        write_def_to(1, &format!("{dir}/a1")),
+    ];
+    let report = open_redirect_files(&defs, &cell).err().unwrap();
+    assert!(
+        matches!(report.current_context(), OpenRedirectError::Open),
+        "the fd-2 open of a missing directory fails: {:?}",
+        report.current_context()
+    );
+    assert_eq!(
+        std::fs::read_to_string(format!("{dir}/a1")).unwrap(),
+        "keep\n",
+        "the later target is never opened, so it keeps its bytes"
+    );
+}

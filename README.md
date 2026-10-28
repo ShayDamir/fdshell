@@ -297,12 +297,13 @@ other (`echo hi; echo e >&2` writes `hi\ne\n`). Writing the same file with two
 operators — `cmd > f 2> f` — is two separate opens, and the second one
 truncates at offset 0.
 
-The `&>` family's fd-2 half is applied in fd 1's slot of the command's
-redirection table, so a `2>`-targeted redirection written **after** `&>` wins
-fd 2: `cmd 2>&- &> f` fails (rc 1, fd 2 closed) and `cmd 2>&1 &> f` sends fd 2
-to the pre-redirect fd 1, where bash applies `&>` later and reopens fd 2 onto
-`f`. (Tracked by task #337; the `&>` bytes for fd 1 and for a plain `&> f`
-match bash.)
+A command's redirections apply **in the order they are written**, and each one
+sees the descriptors the earlier ones left: `cmd > f 2>&1` puts fd 2 into `f`
+(the `2>&1` copies the fd 1 the earlier redirection installed), while
+`cmd 2>&1 > f` leaves fd 2 on the terminal. The target opens follow the same
+order and stop at the first failure, so the side effects of the earlier opens
+survive a later failure (`cmd > f 2> missing/dir/x` creates the empty `f`,
+`cmd 2> missing/dir/x > f` creates nothing) — as bash applies them.
 
 The target of `>` can also be `%var` (an fd variable), `/dev/fd/N` (a copy of
 the open fd `N`), `>&1` (a copy of fd 1), `2>&%f` (a copy of the fd `%f`

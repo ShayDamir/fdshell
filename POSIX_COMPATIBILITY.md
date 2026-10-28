@@ -62,12 +62,13 @@ word. fdshell additionally reads `&name` as a task variable:
   between fd 1 and fd 2 (bash's `> f 2>&1`), so the streams append to each
   other; `cmd > f 2> f` stays two opens. In POSIX, `cmd &> file` is a
   background command followed by a truncating redirection.
-- Divergence within the family: the `&>` def's fd-2 half is applied in fd 1's
-  slot of the command's redirection table, so a later fd-2 redirection wins it.
-  `cmd 2>&- &> f` fails (rc 1, fd 2 closed) and `cmd 2>&1 &> f` sends fd 2 to
-  the **pre-redirect** fd 1, where bash applies `&>` later and reopens fd 2
-  onto `f`. Pinned with the measured values in
-  `safe/fdshell/tests/redirect.rs`; owned by task #337.
+- Redirection **order** follows POSIX #2.5: a command's redirections are
+  applied one by one in the order they are written, and each sees the
+  descriptors the earlier ones left; the target opens run in that order too and
+  stop at the first failure. So `cmd > f 2>&1` sends fd 2 into `f`, `cmd 2>&1
+  > f` leaves fd 2 on the terminal, `cmd 2>&- &> f` reopens fd 2 onto `f`, and
+  `cmd 2> missing/dir/x > f` creates no `f` — all measured against bash 5.3.9
+  and pinned in `safe/fdshell/tests/redirect.rs`.
 
 POSIX also uses a trailing `&` as the async control operator (POSIX
 #3.9.4.1: `echo hi &` runs `echo hi` asynchronously). fdshell supports it:

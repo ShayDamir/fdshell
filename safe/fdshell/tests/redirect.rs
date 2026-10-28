@@ -870,81 +870,96 @@ fn combined_redirect_noclobber_creates_fresh_file() {
     assert_eq!(out, "hi\ne\n", "stdout={out:?}");
 }
 
-// --- the `&>` def's fd-2 half is applied in fd 1's table slot (task #251) ----
+// --- the `&>` def's fd-2 half applies at the def's own slot (tasks #251, #337) --
 //
-// Cause: `insert_redirect` keeps a command's redirect list sorted by
-// `export_to` ("the last entry for a fd wins"), and the `&>` def carries its
-// second target in `extra_to`, which is **not** a table entry. So the def's
-// fd-2 half is applied in fd 1's slot — before every def that targets fd 2 —
-// and a `2>&-` / `2>&1` written *after* `&>` wins fd 2, where bash applies
-// `&>` later and reopens it. These three shapes are the recorded consequences,
-// measured on this branch (3/3 runs each) against bash 5.3.9 and master
-// `b68878c`, 2026-10-19. Task #337 owns the fix: two *table* entries sharing
-// one open by identity, never path equality (`> f 2> f` stays two opens —
-// `separate_write_and_stderr_redirects_keep_two_opens`).
+// `insert_redirect` appends, so the def list is in the order the redirections
+// were written (POSIX #2.5). The `&>` def carries its second target in
+// `extra_to`, and that half is applied immediately after its fd-1 half — at the
+// def's slot — which is what bash does for one `&>` operator. The old
+// fd-sorted table applied the fd-2 half in **fd 1's slot**, i.e. before every
+// def that targets fd 2, so a `2>&-` / `2>&1` written *after* `&>` won fd 2.
+// Those were the three shapes recorded by task #251's round-2 verdict; task
+// #337's source-order list closes them, and every value below is `bash -c`
+// (5.3.9) measured 2026-10-28 in a scratch dir (stdout and stderr piped).
+// The def keeps **one** open: `separate_write_and_stderr_redirects_keep_two_opens`
+// pins that a second `>`-operator on the same path stays two descriptions.
 
 #[test]
-fn combined_redirect_after_close_stderr_fails() {
-    // `f 2>&- &> z`: the later `2>&-` wins fd 2, so fd 2 is closed and the
-    // child's own `>&2` has nothing to duplicate. fdshell's launch failure is
-    // fatal, so the trailing `echo rc=$?` never runs. bash 5.3.9: rc 0, stdout
-    // `rc=0`, `z` = `e\n`; master `b68878c`: rc 0, `z` = `e\n`.
+fn combined_redirect_after_close_stderr_reopens_stderr() {
+    // `f 2>&- &> z`: the `&>` def comes later, so its fd-2 half wins fd 2 and
+    // the child's `>&2` write lands in `z` (bash rc 0, `z` = `e\n`).
     let (path, _spath) = temp_path("combined_after_close_stderr");
     let _ = std::fs::remove_file(&path);
     let (out, err, code) = run(&format!(
         "f(){{ echo e >&2; }}; f 2>&- &> {path}; echo rc=$?"
     ));
     let body = std::fs::read(&path).unwrap();
-    assert_eq!(code, 1, "stderr={err:?}");
-    assert!(
-        out.is_empty(),
-        "the fatal launch aborts the shell, stdout={out:?}"
-    );
-    assert!(
-        err.contains("launch failed") && err.contains("fd 2 is not open"),
-        "stderr={err:?}"
-    );
-    assert!(
-        body.is_empty(),
-        "the operand is opened before the fd-2 failure, got {body:?}"
-    );
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "rc=0\n", "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(body, b"e\n", "the later `&>` reopens fd 2 onto the operand");
 }
 
 #[test]
-fn combined_append_after_close_stderr_fails() {
-    // The same shape through `&>>`: `echo hi` reaches the file, `echo e >&2`
-    // fails and the shell aborts. bash 5.3.9: rc 0, stdout `rc=0`, `z` =
-    // `hi\ne\n`; master `b68878c`: rc 0, `z` = `hi\ne\n`.
+fn combined_append_after_close_stderr_reopens_stderr() {
+    // The same shape through `&>>`: both halves land on the shared append
+    // description, so the two writes follow each other (bash `hi\ne\n`).
     let (path, _spath) = temp_path("combined_append_after_close_stderr");
     let _ = std::fs::remove_file(&path);
     let (out, err, code) = run(&format!(
         "f(){{ echo hi; echo e >&2; }}; f 2>&- &>> {path}; echo rc=$?"
     ));
     let body = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(code, 1, "stderr={err:?}");
-    assert!(out.is_empty(), "stdout={out:?}");
-    assert!(
-        err.contains("launch failed") && err.contains("fd 2 is not open"),
-        "stderr={err:?}"
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "rc=0\n", "stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        body, "hi\ne\n",
+        "fd 2 is the shared description, not closed"
     );
-    assert_eq!(body, "hi\n", "only fd 1's half of the def survives");
 }
 
 #[test]
-fn combined_redirect_after_dup_stderr_to_stdout_keeps_pre_redirect_fd1() {
-    // `f 2>&1 &> z`: the later `2>&1` wins fd 2 and is resolved against fd 1
-    // **before** `&>`'s export, so fd 2 ends as the pre-redirect fd 1 (the
-    // terminal) and the `>&2` write escapes there. bash 5.3.9: `z` = `hi\ne\n`,
-    // terminal silent; master `b68878c`: `z` = `e\n\n`, terminal silent.
-    // (#337's class: resolve-then-export sees the pre-redirect fd 1.)
+fn combined_redirect_after_dup_stderr_to_stdout_reopens_both() {
+    // `f 2>&1 &> z`: the `&>` def is applied last, so fd 1 and fd 2 both reach
+    // the shared description and nothing escapes to the terminal (bash
+    // `hi\ne\n`, terminal silent). Under the fd-sorted table the earlier
+    // `2>&1` won fd 2 and the `>&2` write escaped on the pre-redirect fd 1.
     let (path, _spath) = temp_path("combined_after_dup_stderr");
     let _ = std::fs::remove_file(&path);
     let (out, err, code) = run(&format!("f(){{ echo hi; echo e >&2; }}; f 2>&1 &> {path}"));
     let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "e\n", "fd 2 is the pre-redirect fd 1, stdout={out:?}");
+    assert!(
+        out.is_empty(),
+        "the `>&2` write lands in the file, stdout={out:?}"
+    );
     assert!(err.is_empty(), "stderr={err:?}");
-    assert_eq!(body, "hi\n", "fd 1 keeps the shared open description");
+    assert_eq!(body, "hi\ne\n", "the shared description keeps both writes");
+}
+
+/// The written order is observable at the filesystem, not only in the winner's
+/// bytes: the opens run in source order and stop at the first failure, so
+/// `echo x 2>missing/dir/e >f` creates no `f` while `echo x >f 2>missing/dir/e`
+/// creates the empty `f` (bash 5.3.9 measures exactly these two rows, rc 1 in
+/// both). The unit twin is
+/// `redirect/open/tests.rs::opens_run_in_source_order_and_stop_at_the_first_failure`.
+#[test]
+fn an_earlier_failed_open_creates_no_later_target() {
+    let dir = seeded("open_order");
+    let dir = dir.to_str().unwrap();
+    for (script, want) in [
+        ("echo x 2>nodir/e >f", Vec::<String>::new()),
+        ("echo x >f 2>nodir/e", vec!["f".to_string()]),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), want, "{script}: created {files:?}");
+    }
 }
 
 // --- the bare-operand guard is mask-gated (task #323) -----------------------
@@ -2208,22 +2223,33 @@ fn a_redirect_only_statement_leaves_the_status_and_the_prefix() {
 }
 
 /// A redirection that cannot open its target fails the statement at rc 1 with a
-/// chain naming the path, and creates nothing (bash rc 1 too, with its own
-/// `No such file or directory`). fdshell opens **every** target before applying
-/// any, so `>f <nofile` leaves no `f` where bash does — the same all-or-nothing
-/// open `: >f <nofile` has always had here. A target expanding to no word, or
+/// chain naming the path. The opens run in the order the redirections were
+/// **written**, so the side effect of the earlier open survives the later
+/// failure and the later target is never touched: `>f <nofile` leaves the
+/// empty `f` (fd 1 opens first) and `<nofile >f` creates nothing, exactly as
+/// bash 5.3.9 measures it (rc 1 in both, its own `No such file or directory`).
+/// A target expanding to no word, or
 /// to two, is bash's `ambiguous redirect`; `<file` on an existing file is the
 /// success case of the same shape.
 #[test]
 fn a_redirect_only_statement_with_an_unopenable_target_fails() {
     let dir = seeded("redirect_only_fail");
     let dir = dir.to_str().unwrap();
-    for script in ["<nofile", ">f <nofile", "2<nofile"] {
+    // The rows are ordered by which open runs first, and the created set is
+    // the observable: the earlier open lands, the later target stays absent.
+    for (script, want) in [
+        ("<nofile", Vec::<String>::new()),
+        ("2<nofile", Vec::new()),
+        ("<nofile >f", Vec::new()),
+        (">f <nofile", vec!["f".to_string()]),
+        ("echo x 2>nodir/e >f", Vec::new()),
+        ("echo x >f 2>nodir/e", vec!["f".to_string()]),
+    ] {
         clean(dir);
         let (out, err, code, files) = run_ls(dir, script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
         assert!(err.contains("redirection"), "{script}: stderr={err:?}");
-        assert!(created(&files).is_empty(), "{script}: created {files:?}");
+        assert_eq!(created(&files), want, "{script}: created {files:?}");
     }
     // The `>&3` family takes its source from the **parent's** fd table, so the
     // rows only fail when fd 3 is closed there (bash: rc 1 `3: Bad file

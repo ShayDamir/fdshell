@@ -104,16 +104,22 @@ fn pidvar(name: ShortCStr, bg_force: bool) -> (BgRedirectResult, usize) {
     )
 }
 
-/// Insert `r` keeping the list sorted by target fd, and the entries of one
-/// target fd in command-line order. POSIX #2.5 applies every redirection of a
-/// command in the order written, so a second redirect to a fd is not an error:
-/// the last one to that fd wins, and the earlier ones still take effect (their
-/// files are opened/truncated, and a failing earlier open aborts the command).
-/// `partition_point` is the stable insertion point; `binary_search_by_key`
-/// returns an arbitrary equal-key index, which cannot express "last wins".
+/// Append `r` in the order it was written. POSIX #2.5 applies every
+/// redirection of a command in the order written, so "the last entry for a fd
+/// wins" is a **consequence** of that order, not a property of the table: a
+/// second redirect to a fd is not an error, and the earlier ones still take
+/// effect (their files are opened/truncated, and a failing earlier open
+/// aborts the command).
+///
+/// Sorting the list by target fd is what the append replaces, because the
+/// order of a command's defs is observable wherever two defs touch the same
+/// fd: `cmd 2>&1 > f` must apply `2>&1` while fd 1 is still the shell's, and
+/// `echo x 2>missing/dir >f` must fail before `f` is opened. See
+/// LESSONS: "POSIX redirect order is observable". Block tails already
+/// append (`parse/block_tail.rs`, `parse/group_block/tail.rs`), so the whole
+/// crate keeps one ordering rule.
 pub fn insert_redirect(redirects: &mut Vec<RedirectDef>, r: RedirectDef) {
-    let at = redirects.partition_point(|x| x.export_to <= r.export_to);
-    redirects.insert(at, r);
+    redirects.push(r);
 }
 
 #[cfg(test)]

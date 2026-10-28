@@ -1342,10 +1342,12 @@ The tokenizer strips `"` bytes from the word text, so a pattern byte is a *maske
 Pinning an expansion that can be empty needs the assignment form: `r0=${v##a*}; printf "[%s]" "$r0"` keeps the empty result visible as `[]`, while `echo ${v##a*}` drops the word and `printf "[%s]" ${v##a*}` collapses the fields. Write pattern/expansion tests as `defs; rN=<expr>; printf "[%s]" "$rN" ...` and expect no trailing newline.
 
 ## A side table that must stay sorted by key and stable within a key needs `partition_point`, not `binary_search_by_key`
-`parse/bg_redirect.rs::insert_redirect` keeps a command's redirect list sorted by target fd, and the entries of one fd in command-line order, because POSIX #2.5 applies **every** redirection in the order written: the last one to a fd wins, and the earlier ones still open their files. The old code used `binary_search_by_key(&r.export_to, …)` and read its `Ok(_)` as "duplicate target", bailing. That search returns an arbitrary index inside the equal-key block, so it cannot express "insert after the last equal key" — and the insertion it performs for `Err(i)` is where the sorted invariant lives. The correct form is `let at = redirects.partition_point(|x| x.export_to <= r.export_to); redirects.insert(at, r);` — total (no indexing, §4.11), stable within a key, and it keeps the sorted invariant. Rule: when the semantics is "the last entry for a key wins", the list is a *stable* ordered table; a `HashMap<fd, RedirectDef>` is not equivalent, because `resolve_redirects` zips the pre-opened fds with the list by position, so dropping entries silently mis-assigns opened fds to sources. Predicate mutants to kill: `<=`→`>` (cargo-mutants generates it) and `<=`→`<` (cargo-mutants does **not** generate it — it reverses the order among duplicates, so verify it by hand; `test_duplicate_read_redirects_keep_source_order` and the write/close variants catch it).
+When a keyed side table must land an entry **after the last equal key**, the insertion point is `partition_point(|x| key(x) <= k)` — total (no indexing, §4.11), stable within the key. `binary_search_by_key` returns an arbitrary index inside the equal-key block, so it cannot express "insert after the last equal key", and its `Ok(_)` invites reading a duplicate key as an error. Rule: when the semantics is "the last entry for a key wins", the list is a *stable* ordered table; a `HashMap<key, T>` is not equivalent, because a consumer that zips the table with a parallel vector **by position** mis-assigns entries the moment two keys collapse. Live user of the rule: `substitute/origin.rs` takes both bounds of a region with `partition_point` over `(index, _)` pairs. Predicate mutants of such a predicate: `<=`→`>` (cargo-mutants generates it) and `<=`→`<` (cargo-mutants does **not** generate it — it reverses the order among equal keys, so verify it by hand). **Retired example (task #337):** `parse/bg_redirect.rs::insert_redirect` kept a command's redirect list sorted by target fd with exactly this insertion, and the sort was wrong — POSIX #2.5 applies every redirection *in the order written*, and that order is observable wherever two redirections touch one fd, so the list is a plain append now. See the entry below for the rule and its pins.
 
 ## POSIX redirect order is observable at the filesystem: pin the created-empty-file fact
 `echo hi >a >b` does not merely write `hi` to `b`; the first redirect **opens and truncates `a`**, so `a` exists and is empty. bash 5.3.9 measures exactly that, and so does fdshell once every entry is kept. A last-wins design that deletes the earlier entry at parse time passes the "b contains hi" test and fails `a`-exists, `cat <missing <f2` (rc 1 — the earlier open aborts the command), `set -o noclobber; echo hi >x >y` (rc 1, `y` absent, because the first target blocks) and `set -o noclobber; echo hi >y >x` (rc 1, `y` created empty). Rule: when a spec says "all of them take effect", test the *side effects of the losers*, not only the winner's output — integration tests must read the files the earlier redirects created (`tests/redirect.rs::duplicate_write_redirect_last_wins_and_first_is_created`, `noclobber_duplicate_write_first_target_blocks`).
+
+The rule extends across fds, and it is why the def list is a plain append and never an fd-sorted table (task #337): POSIX #2.5 applies a command's redirections **one by one in the order written**, so the opens of *different* fds also run in that order and stop at the first failure — `echo x 2>missing/dir/e >f` creates **no** `f`, while `echo x >f 2>missing/dir/e` creates the empty `f`. A fd-sorted list opens fd 1's target first and leaves the `f` of a redirection the command never applied. Pins: `redirect/open/tests.rs::opens_run_in_source_order_and_stop_at_the_first_failure`, `tests/redirect.rs::an_earlier_failed_open_creates_no_later_target` and the written-order rows of `a_redirect_only_statement_with_an_unopenable_target_fails`; the append itself is pinned by the parse shape rows `test_targets_stay_in_written_order` and `test_stderr_dup_and_write_redirect_keep_written_order`. The same order is observable in the **fd state** a later source resolves against (`cmd > f 2>&1`), and that half of the rule has its own entry below.
 
 ## A command's fds must be saved above every redirect target of that command
 Saving a target fd with `dup_cloexec` returns the **lowest** free fd, which can
@@ -4173,26 +4175,27 @@ the test process `try_clone_above(2)` already returns ≥ 3 — so the pin that
 folds `extra_to` into `min_fd` is
 `combined_def_target_folds_into_the_source_minimum`, which closes fd 2 first:
 the hole is what makes a source landing on the fd-2 target observable (its
-`Drop` closes the target, and the fd-2 write fails). Measured cost of the def
-shape (bash 5.3.9): `extra_to` is a *target*, so it must participate in
-`insert_redirect`'s fd-sorted table (the `partition_point` entry above —
-"the last entry for a fd wins"), and the current def shape does **not** put it
-there: the fd-2 half is applied in **fd 1's slot**, i.e. before every def that
-targets fd 2. A `2>&-` / `2>&1` written *after* `&>` therefore wins fd 2,
-where bash applies `&>` later and reopens it.
-`f(){ echo e >&2; }; f 2>&- &> f` → rc 1, `f` created empty, fatal
-`launch failed → redirect file open failed → fd 2 is not open` (bash rc 0 with
-`e\n`); `f 2>&- &>> f` → rc 1, `f` = `hi\n` (bash `hi\ne\n`); `f 2>&1 &> f` →
-`f` = `hi\n` and `e\n` on the terminal, fd 2 being the **pre-redirect** fd 1
-(bash `hi\ne\n`). Recorded as measured pins:
-`tests/redirect.rs::combined_redirect_after_close_stderr_fails`,
-`combined_append_after_close_stderr_fails` and
-`combined_redirect_after_dup_stderr_to_stdout_keeps_pre_redirect_fd1`; task
-#337 owns the ordering fix — give the def's two targets two *table* entries
-that share one open by **identity** (never path equality: `> f 2> f` stays two
-opens, pinned byte-for-byte above), so the fd-2 half lands in the fd-2 key
-region. Sorting the whole def by its max target is **not** a valid shortcut:
-it moves fd 1's half out of fd 1's slot and breaks `cmd &> a > b`.
+`Drop` closes the target, and the fd-2 write fails). The def shape's one real
+cost was **ordering**, and it belongs to the def list, not to the def: the old
+fd-sorted table (the retired `partition_point` example above) applied the fd-2
+half in **fd 1's slot**, i.e. before every def that targets fd 2, so a
+`2>&-` / `2>&1` written *after* `&>` won fd 2 — `f(){ echo e >&2; }; f 2>&- &> f`
+was rc 1 with `f` created empty (bash rc 0, `e\n`), `f 2>&- &>> f` left `hi\n`
+(bash `hi\ne\n`), and `f 2>&1 &> f` leaked `e\n` onto the **pre-redirect** fd 1
+(bash `hi\ne\n`, terminal silent). Task #337 closed all three by making the
+list a plain append (POSIX #2.5: apply every redirection in the order it was
+written), which puts the fd-2 half **immediately after its fd-1 half, at the
+def's own slot** — one `&>` operator's semantics, no def-shape change. Pins:
+the three bash rows `tests/redirect.rs::combined_redirect_after_close_stderr_reopens_stderr`,
+`combined_append_after_close_stderr_reopens_stderr` and
+`combined_redirect_after_dup_stderr_to_stdout_reopens_both`, and the bash
+orderings `cmd &> a > b` (fd 1 = `b`, fd 2 = `a`), `cmd &> a 2> b` (fd 1 = `a`,
+fd 2 = `b`), `cmd 2> b &> a` (both streams on `a`). The two *table* entries
+sharing one open by identity that this entry used to prescribe are only worth
+building while the table is fd-sorted: under source order they would add an
+`Rc`-keyed open registry, churn ten test files, and still leave `2>&1 > f`
+broken. Sorting the whole def by its max target is **not** a valid shortcut
+either — it moves fd 1's half out of fd 1's slot and breaks `cmd &> a > b`.
 
 ## Cargo's incremental cache served a stale MIR body for edited predicates — `[profile.dev] incremental = false` is the fix
 While executing task #326 the `fdshell` lib repeatedly compiled the **previous** body of a small predicate (`scan::bg::is_bg`) while picking up its freshly edited callees: probe tests printed values that no source version of the function could produce, and `cargo clean -p fdshell` did not reliably help. The symptom class: a rebuilt binary behaves like an older revision, `touch`+rebuild changes nothing, and only a *semantic* edit (negate the predicate, add a `+2` to an index) proves which body is in the artifact. The fix is `incremental = false` in the workspace `[profile.dev]` (the crates are small, the rebuild is ~4 s). Discipline it demands of every agent here: **verify behavior empirically, not compilation success** — a `cargo build` that prints `Finished` in ~0.01 s with no `Compiling` line relinked nothing, so the binary you are measuring is the old one; after editing a lib, measure the acceptance shape on the binary and, when a measurement contradicts the source, force the rebuild (`touch` the edited file, check a `Compiling` line appears) before believing the measurement.
