@@ -74,8 +74,11 @@ fn resolve_one(
         super::RedirectSource::Path { path, .. } => {
             arms::resolve_path(r, path, min_fd, opened_iter, built, seed)
         }
-        super::RedirectSource::HereString { .. } | super::RedirectSource::HereDoc { .. } => {
-            here::resolve(r, &r.source, min_fd, cache, cell)
+        super::RedirectSource::HereString { word, mask, spans } => {
+            here::resolve_string(r, word, mask, spans, min_fd, cache, cell)
+        }
+        super::RedirectSource::HereDoc { body, expand } => {
+            here::resolve_doc(r, body, *expand, min_fd, cache, cell)
         }
         super::RedirectSource::Dup(from) => {
             arms::resolve_dup(r.export_to, min_fd, *from, built, seed)
