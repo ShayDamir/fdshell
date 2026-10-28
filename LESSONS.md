@@ -1349,6 +1349,16 @@ When a keyed side table must land an entry **after the last equal key**, the ins
 
 The rule extends across fds, and it is why the def list is a plain append and never an fd-sorted table (task #337): POSIX #2.5 applies a command's redirections **one by one in the order written**, so the opens of *different* fds also run in that order and stop at the first failure — `echo x 2>missing/dir/e >f` creates **no** `f`, while `echo x >f 2>missing/dir/e` creates the empty `f`. A fd-sorted list opens fd 1's target first and leaves the `f` of a redirection the command never applied. Pins: `redirect/open/tests.rs::opens_run_in_source_order_and_stop_at_the_first_failure`, `tests/redirect.rs::an_earlier_failed_open_creates_no_later_target` and the written-order rows of `a_redirect_only_statement_with_an_unopenable_target_fails`; the append itself is pinned by the parse shape rows `test_targets_stay_in_written_order` and `test_stderr_dup_and_write_redirect_keep_written_order`. The same order is observable in the **fd state** a later source resolves against (`cmd > f 2>&1`), and that half of the rule has its own entry below.
 
+## A redirect source resolves against the fd state the earlier redirections left
+POSIX #2.5's "one by one, in the order written" gives a `Dup` source (`2>&1`) and a `/dev/fd/N` target the descriptors the command's **earlier** redirections leave, which a resolve-then-export pipeline does not have for free: `redirect/resolve.rs` resolves every def before any consumer exports one, so a `Dup(from)` that dups the *process* fd `from` snapshots the pre-command descriptor and `cmd > f 2>&1` sends fd 2 to the terminal, where bash sends it into `f`. The resolver keeps its shape (five consumers, none of which touches the shell's fds) and carries an **fd-state table** of the entries it has already built, plus a `seed` — `redirect/resolve/table.rs`. Three arms, one per bash mechanism:
+1. an entry for `from` → `try_clone_above(min_fd)` of *its* descriptor: `F_DUPFD_CLOEXEC` shares the open file description **and its offset**, so exporting the clone is bash's `dup2` of the post-redirect fd (the writes of `> f 2>&1` follow each other in `f`);
+2. a `Close` entry → `FdNotOpen` (`echo x 1>&- 2>&1` fails rc 1, bash's `1: Bad file descriptor`), the same variant the `>&N` arm already produces, with no syscall attempted;
+3. no entry → the inherited process fd, as bash's plain `dup` of an untouched fd.
+
+The `seed` is the pipeline child's pipe ends: bash applies a stage's redirections on top of them, so `cat missing 2>&1 | cat > g` puts the message in the **pipe** (`pipeline/child.rs` passes them; every other caller passes `&[]`). The seed is older than every def, so a stage's own `> f` wins fd 1 and its `2>&1` lands on `f`. Two rules this design must not lose: the walk is **reverse** (`latest`), because the last entry to a fd is its winner; and the clone takes `min_fd`, because a source landing on a target makes the `dup2` a no-op whose `Drop` closes the target. `Scope` keeps saving per entry, and that stays sound: for a fd touched by several redirections the first *save* of that fd precedes its first *export*, so the shell's original value is the earliest copy and the reverse restore replays it last.
+
+Pins: `tests/redirect.rs::stderr_dup_after_a_write_redirect_lands_on_the_file`, `stderr_dup_before_a_write_redirect_keeps_the_shell_fd` (the fd-major trap: the written order must decide, and a sorted table cannot), `dup_from_a_fd_the_command_closed_fails` (2), `stderr_dup_after_a_write_redirect_in_a_pipeline_stage` (the seed, both precedences), `exec_and_group_scopes_apply_in_written_order` (the `exec` and group scopes); unit: `redirect/resolve/tests.rs::dup_after_a_path_def_shares_the_preceding_def_s_description`, `dup_after_a_close_def_reports_the_fd_as_not_open`, `dup_clone_of_a_process_fd_sits_above_every_target`, `dup_from_a_seed_entry_shares_the_seed_s_description`, `seed_entries_are_older_than_every_def`, and `redirect/scope/tests.rs::interleaved_scope_restores_both_fds_after_a_dup`. Closing the gap also retired the sibling-dup divergences of tasks #178/#183/#363 (`cat 3<<<str <&3`, `cat 3<<T 1>&3`, `cat 3<<'a <<b' <&3` now match bash) — see `herestring::prefixed_here_string_sibling_dup_sees_the_descriptor` and the `*_known_divergences` rows of `tests/heredoc.rs`.
+
 ## A command's fds must be saved above every redirect target of that command
 Saving a target fd with `dup_cloexec` returns the **lowest** free fd, which can
 be a hole below a later target; the next `dup2` (e.g. `2>&1`) closes its target
@@ -4153,11 +4163,11 @@ source clone landing on it makes the `dup2` a no-op whose drop closes the
 target (the "redirect source fds above the highest target" rule above). fd 2
 is fed by a **second clone of the same source fd** (`F_DUPFD_CLOEXEC` shares
 the description, `dup2` shares it too), *not* by emitting
-`RedirectDef::dup(2, 1)`: every consumer resolves all defs before exporting
-any of them, so a resolve-time dup of fd 1 captures the **pre-redirect** fd 1
-— exactly the apply-order divergence task #337 owns. Building `&>` on that
-form would make a correct open depend on an unresolved design decision; the
-clone form has no apply-order dependence at all. Pin layers, one per
+`RedirectDef::dup(2, 1)`: the clone needs no fd state at all, so the open
+cannot depend on how the def list is ordered. Task #337's fd-state table (the
+entry above) makes a `dup(2, 1)` at the `&>`'s own slot resolve to that same
+open description, so the two forms agree today — the clone stays as the
+shorter path to it, one open and no table lookup. Pin layers, one per
 observable (a missing pair, a second open, a wrong order): parse shape
 (`combined_def`, one def with `extra_to: Some(2)`), open count
 (`combined_def_opens_the_path_once`: exactly one fd, fd ≥ 3), resolve shape

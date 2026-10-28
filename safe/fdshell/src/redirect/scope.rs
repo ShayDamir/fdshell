@@ -19,21 +19,30 @@ pub struct Scope {
 }
 
 impl Scope {
-    /// Save each target fd, then apply the redirections in list order. The list
-    /// is sorted by target fd and stable within one fd, so the last entry to a fd
-    /// wins while every entry still opens/truncates its target, and a failing
-    /// open aborts the command before its handler runs.
+    /// Save each target fd, then apply the redirections in the order they were
+    /// written (POSIX #2.5). "The last entry to a fd wins" is a consequence of
+    /// that order, and every entry still opens/truncates its target, so a
+    /// failing open aborts the command before its handler runs. The seed is
+    /// empty: the shell's own fds are the state a scope's `Dup` source resolves
+    /// against, and the scope's saves are the only other fd state (a pipeline
+    /// stage passes its pipe ends instead — `pipeline/child.rs`).
     ///
     /// A saved copy is allocated strictly above every target of the command, so
     /// no `dup2` of a later redirection can clobber it; a closed target records
-    /// `None` because `EBADF` is not an error the user can fix (§4.12).
+    /// `None` because `EBADF` is not an error the user can fix (§4.12). Saving
+    /// rides the apply loop rather than pre-passing over the whole list, and
+    /// that stays sound under the fd-state resolution: for a fd touched by
+    /// several redirections the **first** save of that fd precedes its first
+    /// export, so the shell's original value is the earliest copy and
+    /// `restore`'s reverse iteration replays it last
+    /// (`scope/tests.rs::interleaved_scope_restores_both_fds_after_a_dup`).
     pub fn open(
         redirects: &[RedirectDef],
         cell: &ForkCell<ShellState>,
     ) -> Result<Self, Report<CmdError>> {
         let opened =
             super::open_redirect_files(redirects, cell).change_context(CmdError::Redirect)?;
-        let resolved = super::resolve_redirects(redirects, &opened, cell)
+        let resolved = super::resolve_redirects(redirects, &opened, &[], cell)
             .change_context(CmdError::Redirect)?;
         let min_fd = RedirectDef::max_target(redirects)
             .checked_add(1)

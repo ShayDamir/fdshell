@@ -962,6 +962,147 @@ fn an_earlier_failed_open_creates_no_later_target() {
     }
 }
 
+// --- the fd state a dup source resolves against (task #337) -----------------
+//
+// POSIX #2.5 applies a command's redirections one by one in the order written,
+// and each one sees the descriptors the earlier ones left. `resolve_redirects`
+// resolves every def before any consumer exports one, so the resolver carries
+// that fd state itself (`redirect/resolve/table.rs`): a `Dup(from)` clones the
+// descriptor the preceding entry for `from` installed, a `Close` entry is
+// `FdNotOpen`, no entry dups the process fd, and a pipeline stage seeds the
+// table with the pipe ends it already holds. Every value below is `bash -c`
+// (5.3.9) measured 2026-10-28 with stdout and stderr piped to files.
+
+#[test]
+fn stderr_dup_after_a_write_redirect_lands_on_the_file() {
+    // `f > z 2>&1`: the `2>&1` copies the fd 1 that `> z` installed, so both
+    // streams share `z` and its offset (bash `hi\ne\n`, terminal silent).
+    // fdshell before #337 dups the **pre-redirect** fd 1: `e` escapes to the
+    // terminal and `z` keeps only `hi\n`.
+    let (path, _spath) = temp_path("dup_after_write");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f > {path} 2>&1; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\ne\n", "cat reads the shared file, stdout={out:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        body, "hi\ne\n",
+        "one description: the writes follow each other"
+    );
+}
+
+#[test]
+fn stderr_dup_before_a_write_redirect_keeps_the_shell_fd() {
+    // The reverse order, written first: `f 2>&1 > z` applies `2>&1` while fd 1
+    // is still the shell's stdout, so `e` reaches the terminal and `z` keeps
+    // only `hi\n` (bash). This is the row a fd-sorted def list cannot answer
+    // once the fd state is resolved: sorted, it is the same table as
+    // `f > z 2>&1` above.
+    let (path, _spath) = temp_path("dup_before_write");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo hi; echo e >&2; }}; f 2>&1 > {path}; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "e\nhi\n",
+        "the `>&2` write is on the terminal, stdout={out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(body, "hi\n");
+}
+
+#[test]
+fn dup_from_a_fd_the_command_closed_fails() {
+    // `echo x 1>&- 2>&1`: the `Close` entry for fd 1 wins, so the `Dup` has
+    // nothing to copy and the command fails rc 1 (bash: `1: Bad file
+    // descriptor`, rc 1, and bash continues with `echo rc=$?`). fdshell's
+    // redirect failure is **fatal** to the shell — the pre-existing divergence
+    // the `&>` rows above record — so the trailing `echo rc=$?` never runs.
+    let (out, err, code) = run("echo x 1>&- 2>&1; echo rc=$?");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        out.is_empty(),
+        "the failed command aborts the shell, stdout={out:?}"
+    );
+    assert!(
+        err.contains("fd 1 is not open") && err.contains("has nothing to duplicate"),
+        "stderr={err:?}"
+    );
+}
+
+#[test]
+fn stderr_dup_after_a_write_redirect_in_a_pipeline_stage() {
+    // The seed: bash puts the stage's pipe ends in place before it applies the
+    // stage's own redirections, so `2>&1` copies the **pipe** and `cat` relays
+    // the message into `g` (stdout and stderr stay silent). Without the seed
+    // fd 2 is the shell's stdout and the message escapes there.
+    let dir = seeded("pipeline_seed");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code) = run(&format!("cd {dir}; cat missing 2>&1 | cat > g"));
+    let body = std::fs::read_to_string(std::path::Path::new(dir).join("g")).unwrap();
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert!(
+        body.starts_with("cat: missing: No such file"),
+        "the stage's stderr reached the pipe, g={body:?}"
+    );
+    // `> f` in the same stage is the **newer** entry, so fd 2 lands on `f` and
+    // the pipe carries nothing (bash: `f` = `e\n`, `g` empty).
+    clean(dir);
+    let (out, err, code) = run(&format!("cd {dir}; sh -c 'echo e 1>&2' > f 2>&1 | cat > g"));
+    let f = std::fs::read_to_string(std::path::Path::new(dir).join("f")).unwrap();
+    let g = std::fs::read_to_string(std::path::Path::new(dir).join("g")).unwrap();
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(f, "e\n");
+    assert_eq!(g, "", "the pipe carried nothing");
+}
+
+#[test]
+fn exec_and_group_scopes_apply_in_written_order() {
+    let dir = seeded("scope_order");
+    let dir = dir.to_str().unwrap();
+    // The no-command `exec`: the redirections are permanent, so the whole
+    // statement runs inside them — and `cat z` inherits fd 1 = `z`, which bash
+    // reports as `input file is output file` **in the file**. Byte-for-byte
+    // identical in both shells (rc 1).
+    clean(dir);
+    let (out, err, code) = run(&format!(
+        "cd {dir}; exec > z 2>&1; echo e >&2; echo back; cat z"
+    ));
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("z")).unwrap(),
+        "e\nback\ncat: z: input file is output file\n"
+    );
+    // The group scope: both streams land on the shared description, and the
+    // scope restores the shell's fds, so `cat` prints them.
+    clean(dir);
+    let (out, err, code) = run(&format!(
+        "cd {dir}; {{ echo hi; echo e >&2; }} > z 2>&1; cat z"
+    ));
+    assert_eq!((out.as_str(), code), ("hi\ne\n", 0), "stderr={err:?}");
+    // `exec` with the fds saved on fd 3: the writes land in `z`, and the
+    // restores put the terminal back so `cat z` prints `e`.
+    clean(dir);
+    let (out, err, code) = run(&format!(
+        "cd {dir}; exec 3>&1; exec > z 2>&1; echo e >&2; exec 1>&3; exec 2>&3; exec 3>&-; cat z"
+    ));
+    assert_eq!((out.as_str(), code), ("e\n", 0), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(dir).join("z")).unwrap(),
+        "e\n"
+    );
+}
+
 // --- the bare-operand guard is mask-gated (task #323) -----------------------
 //
 // The operand of a bare `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` is an operator only

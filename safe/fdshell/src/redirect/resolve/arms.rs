@@ -1,9 +1,10 @@
+use super::table;
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::Redirect;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
-use sys::{ImportedFd, LocalFd, ShortCStr};
+use sys::{LocalFd, ShortCStr};
 
 /// A def with `extra_to` yields a second `Redirect` fed by a **second clone of
 /// the same source fd**: both targets share one open file description, so they
@@ -59,16 +60,17 @@ pub(super) fn resolve_path(
     Ok((Redirect::new(export_to, local), pair))
 }
 
-/// `N>&M` source: dup the imported fd above the targets.
+/// `N>&M` source: the descriptor the command's **preceding** redirections left
+/// on `M` (`redirect/resolve/table.rs`), cloned above every target of the
+/// command. `cmd > f 2>&1` therefore lands fd 2 on `f`'s open file description,
+/// sharing its offset, exactly as bash's `dup2` of the post-redirect fd 1 does.
 pub(super) fn resolve_dup(
     export_to: i32,
     min_fd: i32,
     from: i32,
+    built: &[Redirect],
+    seed: &[Redirect],
 ) -> Result<(Redirect, Option<Redirect>), Report<OpenRedirectError>> {
-    let imported = ImportedFd::from_number(from)
-        .change_context_lazy(|| OpenRedirectError::FdNotOpen { n: from })?;
-    let local = imported
-        .try_dup_above(min_fd)
-        .change_context_lazy(|| OpenRedirectError::DupFdFailed { n: from })?;
+    let local = table::source(from, built, seed, min_fd)?;
     Ok((Redirect::new(export_to, local), None))
 }

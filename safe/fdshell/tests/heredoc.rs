@@ -3135,16 +3135,18 @@ fn numbered_heredoc_known_divergences() {
     assert_eq!(code, 1);
     assert_eq!(out, "");
 
-    // A sibling `>&N` dup takes its source from the parent's fd table, so the
-    // descriptor that `3<<T` opens in the same command is invisible to it
-    // (task #178, order of redirections). Run through `run_fd3_closed`: the
-    // assertion is that fd 3 is closed *in the parent*, which only holds on a
-    // deterministic fd table (an inherited fd 3 — cargo-mutants' jobserver —
-    // would make `1>&3` succeed).
+    // A sibling `>&N` dup reads the descriptor the `3<<T` of the **same**
+    // command opened: task #178/#183's pre-command-fd gap is closed by
+    // resolving a dup against the fds the preceding redirections leave (LESSONS:
+    // "POSIX redirect order is observable"). `1>&3` puts the read-only here-doc
+    // source on fd 1, so `cat` writes nothing and both shells are silent, rc 0.
+    // Run through `run_fd3_closed`: the assertion is that fd 3 is closed *in
+    // the parent*, which only holds on a deterministic fd table (an inherited
+    // fd 3 — cargo-mutants' jobserver — would make `1>&3` read that fd).
     let (out, err, code) = run_fd3_closed("cat 3<<T 1>&3\nbody\nT");
-    assert_eq!(code, 1);
+    assert_eq!(code, 0, "{err}");
     assert_eq!(out, "");
-    assert!(err.contains("fd 3 is not open"), "{err}");
+    assert_eq!(err, "");
 
     // `( … )` is not a subshell: `(` reaches the command lookup (task #316).
     let (out, err, code) = run("( cat 3<<T )\nbody\nT");
@@ -3694,11 +3696,11 @@ fn a_terminator_line_with_a_capture_marker_or_tilde_is_data() {
     }
 }
 
-/// Divergences of the same family that this rule does **not** own, pinned at
-/// their measured rc 1 with the task that owns each one: a delimiter word cut at
-/// escaped whitespace (**#349**), and an io-number here-doc whose fd a sibling
-/// `<&3` of the same command cannot see (**#363**, filed from task #266's
-/// planning round; measured identical on `master`).
+/// A divergence of the same family, pinned at its measured rc 1 and owned by
+/// the task named in its comment: a delimiter word cut at escaped whitespace
+/// (**#349**). The io-number here-doc whose fd a sibling `<&3` of the same
+/// command reads is **not** a divergence anymore — the second row pins it
+/// against bash (task #363, closed by the written-order resolution of #337).
 #[test]
 fn chevron_terminator_known_divergences() {
     // #349: the delimiter word ends at the escaped space, so the terminator
@@ -3710,14 +3712,13 @@ fn chevron_terminator_known_divergences() {
         "stderr={err}"
     );
 
-    // #363: `<&3` takes its source from the parent's fd table, so the fd the
-    // io-number here-doc opens in the same command is invisible to it. Run
+    // #363, closed: `<&3` reads the descriptor the io-number here-doc of the
+    // same command opened, so the body prints, as bash measures it. Run
     // through `run_fd3_closed` so fd 3 is closed in the parent (LESSONS: an
-    // inherited fd 3 makes the assertion depend on the harness). bash prints
-    // the body (rc 0).
+    // inherited fd 3 makes the assertion depend on the harness).
     let (out, err, code) = run_fd3_closed("cat 3<<'a <<b' <&3\nbody\na <<b");
-    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
-    assert!(err.contains("fd 3 is not open"), "stderr={err}");
+    assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+    assert_eq!(err, "");
 }
 
 /// The here-doc **delimiter word** is a quote-removal surface, never a

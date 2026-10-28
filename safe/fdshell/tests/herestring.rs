@@ -454,21 +454,24 @@ fn prefixed_here_string_composes_with_the_statement_shapes() {
     }
 }
 
-/// A sibling `>&N`/`<&N` dup takes its source from the **parent's** fd table,
-/// never from the descriptor a sibling redirect of the same command opens: the
-/// gap task #178/#183 owns. bash prints `str` here. Recording the measured
-/// report and naming the owner is the deliverable (the #276 precedent).
+/// A sibling `>&N`/`<&N` dup takes its source from the descriptor a sibling
+/// redirect of the **same command** opens, in the order written: task #183
+/// closed the pre-command-fd gap by resolving a dup against the fd state the
+/// preceding redirections leave (LESSONS: "POSIX redirect order is
+/// observable"). bash prints `str`; fdshell now prints `str` too (measured
+/// `bash -c` 5.3.9 2026-10-28 with fd 3 closed in the parent). The rows stay
+/// under `run_fd3_closed` so the assertion is about the command's own fd 3,
+/// never an inherited one (LESSONS: the harness jobserver).
 #[test]
-fn prefixed_here_string_sibling_dup_cannot_see_the_descriptor() {
-    for script in ["cat 3<<<str <&3", "cat 3<<<x 1>&3"] {
-        let (out, err, code) = run_fd3_closed(script);
-        assert_eq!(code, 1, "script={script:?} out={out:?}");
-        assert_eq!(out, "", "script={script:?}");
-        assert!(
-            err.contains("fd 3 is not open"),
-            "script={script:?} err={err}"
-        );
-    }
+fn prefixed_here_string_sibling_dup_sees_the_descriptor() {
+    let (out, err, code) = run_fd3_closed("cat 3<<<str <&3");
+    assert_eq!((out.as_str(), code), ("str\n", 0), "stderr={err}");
+    assert_eq!(err, "");
+    // `1>&3`: fd 1 lands on the here-string source, which is read-only, so
+    // `cat` writes nothing and bash is silent, rc 0.
+    let (out, err, code) = run_fd3_closed("cat 3<<<x 1>&3");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert_eq!(err, "");
 }
 
 /// `cat 3<<<<<x` is the pinned `cat <<<<<x` shape fd-ified: the word `<<x`

@@ -58,7 +58,7 @@ fn out_of_range_export_to_is_actionable_error() {
             },
         );
     }
-    let report = resolve_redirects(&[RedirectDef::var(i32::MAX, c"x")], &[], &c)
+    let report = resolve_redirects(&[RedirectDef::var(i32::MAX, c"x")], &[], &[], &c)
         .err()
         .unwrap();
     assert!(matches!(
@@ -70,7 +70,7 @@ fn out_of_range_export_to_is_actionable_error() {
 #[test]
 fn out_of_range_path_redirect_is_actionable_error() {
     let c = cell();
-    let report = resolve_redirects(&[RedirectDef::write_path(i32::MAX, c"f")], &[], &c)
+    let report = resolve_redirects(&[RedirectDef::write_path(i32::MAX, c"f")], &[], &[], &c)
         .err()
         .unwrap();
     assert!(matches!(
@@ -82,7 +82,7 @@ fn out_of_range_path_redirect_is_actionable_error() {
 #[test]
 fn unknown_var_source_names_the_missing_variable() {
     let c = cell();
-    let report = resolve_redirects(&[RedirectDef::var(99, c"nope")], &[], &c)
+    let report = resolve_redirects(&[RedirectDef::var(99, c"nope")], &[], &[], &c)
         .err()
         .unwrap();
     assert!(matches!(
@@ -94,7 +94,7 @@ fn unknown_var_source_names_the_missing_variable() {
 #[test]
 fn dup_redirect_clones_open_fd() {
     let c = cell();
-    let resolved = resolve_redirects(&[RedirectDef::dup(7, 1)], &[], &c).unwrap();
+    let resolved = resolve_redirects(&[RedirectDef::dup(7, 1)], &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 7, .. }));
     assert!(dup_of(r).verify().is_ok());
@@ -103,7 +103,7 @@ fn dup_redirect_clones_open_fd() {
 #[test]
 fn dup_redirect_closed_source_is_actionable_error() {
     let c = cell();
-    let report = resolve_redirects(&[RedirectDef::dup(7, 999)], &[], &c)
+    let report = resolve_redirects(&[RedirectDef::dup(7, 999)], &[], &[], &c)
         .err()
         .unwrap();
     assert!(matches!(
@@ -117,7 +117,7 @@ fn close_redirect_closes_the_fd() {
     let c = cell();
     let (rd, _wr) = sys::pipe::pipe2(0).unwrap();
     let n = rd.as_raw();
-    let resolved = resolve_redirects(&[RedirectDef::close(n)], &[], &c).unwrap();
+    let resolved = resolve_redirects(&[RedirectDef::close(n)], &[], &[], &c).unwrap();
     assert!(matches!(
         resolved.first().unwrap(),
         Redirect::Close { export_to: _n } if *_n == n
@@ -149,7 +149,7 @@ fn here_string_expands_word_and_appends_newline() {
         vec![Unquoted; 2],
         Vec::new(),
     )];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
     let mut buf = [0u8; 16];
@@ -161,7 +161,7 @@ fn here_string_expands_word_and_appends_newline() {
 fn here_string_empty_word_is_bare_newline() {
     let c = cell();
     let redirects = vec![RedirectDef::here_string(0, c"", Vec::new(), Vec::new())];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(r).read(&mut buf).unwrap();
@@ -177,7 +177,7 @@ fn here_string_reads_back_to_eof() {
         vec![Unquoted; 3],
         Vec::new(),
     )];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(r).read(&mut buf).unwrap();
@@ -198,7 +198,7 @@ fn here_string_quoted_escape_pair_keeps_the_backslash() {
         vec![Quoted; 4],
         Vec::new(),
     )];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
     assert_eq!(buf.get(..n).unwrap(), b"a\\ b\n");
@@ -215,7 +215,7 @@ fn here_string_unquoted_escape_pair_folds_the_backslash() {
         Vec::new(),
         Vec::new(),
     )];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
     assert_eq!(buf.get(..n).unwrap(), b"a b\n");
@@ -234,7 +234,7 @@ fn numbered_here_string_source_sits_above_the_export_targets() {
         RedirectDef::dup(5, 1),
         RedirectDef::here_string(3, c"body", vec![Unquoted; 4], Vec::new()),
     ];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let src = resolved
         .iter()
         .find(|r| matches!(r, Redirect::Dup { export_to: 3, .. }))
@@ -256,7 +256,7 @@ fn here_doc_body_is_a_quoted_context() {
     // backslash, and `$( … )` still runs (bash: `a\ b`).
     let c = cell();
     let redirects = vec![RedirectDef::here_doc(0, c"a\\ b\n", true)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
     assert_eq!(buf.get(..n).unwrap(), b"a\\ b\n");
@@ -266,7 +266,7 @@ fn here_doc_body_is_a_quoted_context() {
 fn here_doc_quoted_delimiter_body_stays_verbatim() {
     let c = cell();
     let redirects = vec![RedirectDef::here_doc(0, c"a\\ b $(echo hi)\n", false)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let mut buf = [0u8; 32];
     let n = dup_of(resolved.first().unwrap()).read(&mut buf).unwrap();
     assert_eq!(buf.get(..n).unwrap(), b"a\\ b $(echo hi)\n");
@@ -276,7 +276,7 @@ fn here_doc_quoted_delimiter_body_stays_verbatim() {
 fn here_doc_writes_body_verbatim_without_newline() {
     let c = cell();
     let redirects = vec![RedirectDef::here_doc(0, c"ab\n", true)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     assert!(matches!(r, Redirect::Dup { export_to: 0, .. }));
     let mut buf = [0u8; 16];
@@ -293,7 +293,7 @@ fn here_doc_writes_body_verbatim_without_newline() {
 fn here_doc_empty_body_is_zero_bytes() {
     let c = cell();
     let redirects = vec![RedirectDef::here_doc(0, c"", false)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
     assert_eq!(dup_of(r).read(&mut buf).unwrap(), 0);
@@ -310,7 +310,7 @@ fn here_doc_unquoted_delimiter_expands() {
         );
     }
     let redirects = vec![RedirectDef::here_doc(0, c"hi $x\n", true)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(r).read(&mut buf).unwrap();
@@ -328,7 +328,7 @@ fn here_doc_quoted_delimiter_is_literal() {
         );
     }
     let redirects = vec![RedirectDef::here_doc(0, c"hi $x\n", false)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let r = resolved.first().unwrap();
     let mut buf = [0u8; 16];
     let n = dup_of(r).read(&mut buf).unwrap();
@@ -347,7 +347,7 @@ fn numbered_here_doc_source_sits_above_the_export_targets() {
         RedirectDef::dup(5, 1),
         RedirectDef::here_doc(3, c"body\n", true),
     ];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let doc = resolved
         .iter()
         .find(|r| matches!(r, Redirect::Dup { export_to: 3, .. }))
@@ -377,7 +377,7 @@ fn here_string_source_refuses_writes() {
         vec![Unquoted; 1],
         Vec::new(),
     )];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let src = dup_of(resolved.first().unwrap());
     let err = src.write_all(b"hi\n").unwrap_err();
     assert!(
@@ -397,7 +397,7 @@ fn here_string_source_refuses_writes() {
 fn here_doc_source_refuses_writes() {
     let c = cell();
     let redirects = vec![RedirectDef::here_doc(0, c"ab\n", true)];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let src = dup_of(resolved.first().unwrap());
     let err = src.write_all(b"zz\n").unwrap_err();
     assert!(
@@ -414,7 +414,8 @@ fn here_doc_source_refuses_writes() {
 #[test]
 fn here_doc_source_is_above_its_zero_target() {
     let c = cell();
-    let resolved = resolve_redirects(&[RedirectDef::here_doc(0, c"x\n", true)], &[], &c).unwrap();
+    let resolved =
+        resolve_redirects(&[RedirectDef::here_doc(0, c"x\n", true)], &[], &[], &c).unwrap();
     let doc = resolved.first().unwrap();
     assert!(dup_of(doc).as_raw() > 0);
 }
@@ -477,7 +478,7 @@ fn combined_path_def_resolves_to_a_pair_from_one_open() {
         RedirectDirection::Write,
         RedirectSource::path(cstr(&path), Vec::new()),
     )];
-    let resolved = resolve_redirects(&redirects, &src, &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
     let (fd1, fd2) = pair_of(&resolved, 1, 2);
     assert!(
         fd1.as_raw() >= 3 && fd2.as_raw() >= 3,
@@ -513,7 +514,7 @@ fn combined_var_def_resolves_to_a_pair_from_one_table_fd() {
         RedirectDirection::Append,
         RedirectSource::Var(c"log".into()),
     )];
-    let resolved = resolve_redirects(&redirects, &[], &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
     let (fd1, fd2) = pair_of(&resolved, 1, 2);
     assert!(fd1.as_raw() >= 3 && fd2.as_raw() >= 3);
     fd1.write_all(b"hi\n").unwrap();
@@ -536,7 +537,7 @@ fn two_path_defs_keep_two_independent_opens() {
         RedirectDef::write_path(1, cstr(&path)),
         RedirectDef::write_path(2, cstr(&path)),
     ];
-    let resolved = resolve_redirects(&redirects, &src, &c).unwrap();
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
     assert_eq!(resolved.len(), 2, "two defs, two opens, no pair");
     let (fd1, fd2) = pair_of(&resolved, 1, 2);
     fd1.write_all(b"hi\n").unwrap();
@@ -547,5 +548,124 @@ fn two_path_defs_keep_two_independent_opens() {
     assert_eq!(
         body, "e\n\n",
         "fd 2's open starts at offset 0 and overwrites fd 1"
+    );
+}
+
+/// `cmd > f 2>&1`: the `Dup(1)` source resolves against the fd state the
+/// **preceding** def leaves, so fd 2 gets a second descriptor for the fd 1
+/// entry's open file description — one description, one offset, and the fd-2
+/// write follows the fd-1 write (bash's `hi\ne\n`, where resolving the process
+/// fd sent fd 2 to the terminal; task #337). The integration twins are
+/// `tests/redirect.rs::stderr_dup_after_a_write_redirect_lands_on_the_file`
+/// and `combined_redirect_shares_one_file_description`.
+#[test]
+fn dup_after_a_path_def_shares_the_preceding_def_s_description() {
+    let c = cell();
+    let (path, _scratch) = temp_path("dup_after_path");
+    let src = vec![open_file(&path)];
+    let redirects = vec![
+        RedirectDef::write_path(1, cstr(&path)),
+        RedirectDef::dup(2, 1),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
+    let (fd1, fd2) = pair_of(&resolved, 1, 2);
+    fd1.write_all(b"hi\n").unwrap();
+    fd2.write_all(b"e\n").unwrap();
+    drop((fd1, fd2));
+    drop(resolved);
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(body, "hi\ne\n", "the two descriptors share one offset");
+}
+
+/// `echo x 1>&- 2>&1`: the `Close` entry for fd 1 means the fd will be gone
+/// when the `Dup` is exported, so the def fails as a dup of an unopen fd —
+/// bash's `1: Bad file descriptor`, rc 1. The frame is the one the `>&N` arm
+/// already produces (no new variant). Integration twin:
+/// `tests/redirect.rs::dup_from_a_fd_the_command_closed_fails`.
+#[test]
+fn dup_after_a_close_def_reports_the_fd_as_not_open() {
+    let c = cell();
+    let redirects = vec![RedirectDef::close(1), RedirectDef::dup(2, 1)];
+    let report = resolve_redirects(&redirects, &[], &[], &c).err().unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::FdNotOpen { n: 1 }
+    ));
+}
+
+/// A fd the command never redirected still dups the **process** fd, and the
+/// clone sits above every target: closing fd 2 leaves a hole, and a source
+/// landing on the fd-2 target makes the export a `dup2` no-op whose `Drop`
+/// closes the target the def just installed (the
+/// `combined_def_target_folds_into_the_source_minimum` trick, in the
+/// resolve-then-export form: the write below happens after `resolved` drops).
+#[test]
+fn dup_clone_of_a_process_fd_sits_above_every_target() {
+    let c = cell();
+    let (path, _scratch) = temp_path("dup_clone_min_fd");
+    let _ = sys::dup::close(2);
+    let src = vec![open_file(&path)];
+    let redirects = vec![
+        RedirectDef::write_path(1, cstr(&path)),
+        RedirectDef::dup(2, 1),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
+    for r in &resolved {
+        r.export().unwrap();
+    }
+    drop(resolved);
+    // The write is the observable: fd 2 is the file, and it survived the drop.
+    let fd2 = sys::ImportedFd::from_number(2).unwrap();
+    fd2.write_all(b"x").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "x");
+    // Give the harness a stderr again so a failure below is reportable.
+    sys::openat2::open(c"/dev/null", sys::fcntl::O_RDWR)
+        .unwrap()
+        .export_to(2)
+        .unwrap();
+}
+
+/// The pipeline child seeds the table with the pipe ends it installed for the
+/// stage (`pipeline/child.rs`), because bash applies a stage's redirections on
+/// top of them: a `2>&1` dup's the **pipe**, so a write through the resolved
+/// fd arrives at the pipe's read end (the description-identity proof;
+/// integration twin
+/// `tests/redirect.rs::stderr_dup_after_a_write_redirect_in_a_pipeline_stage`).
+#[test]
+fn dup_from_a_seed_entry_shares_the_seed_s_description() {
+    let c = cell();
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    let seed = vec![Redirect::new(1, write_end.try_clone().unwrap())];
+    let resolved = resolve_redirects(&[RedirectDef::dup(2, 1)], &[], &seed, &c).unwrap();
+    let fd2 = dup_of(resolved.first().unwrap());
+    fd2.write_all(b"e\n").unwrap();
+    let mut buf = [0u8; 8];
+    let n = read_end.read(&mut buf).unwrap();
+    assert_eq!(buf.get(..n).unwrap(), b"e\n", "the write reached the pipe");
+}
+
+/// The seed is **older** than every def: a def that targets fd 1 wins over the
+/// seed's entry, so `> f 2>&1` in a pipeline stage lands fd 2 on `f` and not on
+/// the pipe (the order the table walk encodes: the built prefix first, then the
+/// seed). Asserted through `resolve_redirects`, never through a copy of the
+/// walk. Integration twin: `tests/redirect.rs::dev_fd_target_after_a_write_redirect_shares_the_file_of_that_fd`
+/// for the same precedence at the magic-path arm.
+#[test]
+fn seed_entries_are_older_than_every_def() {
+    let c = cell();
+    let (path, _scratch) = temp_path("seed_order");
+    let (_read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    let seed = vec![Redirect::new(1, write_end.try_clone().unwrap())];
+    let src = vec![open_file(&path)];
+    let redirects = vec![
+        RedirectDef::write_path(1, cstr(&path)),
+        RedirectDef::dup(2, 1),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &seed, &c).unwrap();
+    let fd2 = dup_of(resolved.get(1).unwrap());
+    assert_eq!(
+        std::fs::read_link(format!("/proc/self/fd/{}", fd2.as_raw())).unwrap(),
+        std::path::Path::new(&path),
+        "the def's fd 1 wins over the seed's pipe end"
     );
 }

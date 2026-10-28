@@ -350,9 +350,6 @@ The `<<<` form's remaining differences from bash:
 - An expansion failure in the word is an error (`cat 3<<<$99999999999999999999`
   reports `index or value too large`); bash expands it to the empty word and
   prints a newline.
-- A sibling `>&N`/`<&N` dup of the same command cannot read the descriptor the
-  `N<<<word` form opens: fdshell reports `fd 3 is not open` where bash prints
-  the body (`cat 3<<<text <&3`). Owning task: #178/#183 (order of redirections).
 - A redirect written after a group's `}` is not attached to the group
   (`{ cat; } 3<<<x` is a parse error); owning tasks: #187/#191.
 

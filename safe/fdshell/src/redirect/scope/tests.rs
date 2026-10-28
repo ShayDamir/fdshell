@@ -385,12 +385,12 @@ fn saved_copy_survives_a_later_dup2() {
     )
     .unwrap();
     write_fd(1, b"x");
-    // The write redirect wins on fd 1. `2>&1` copies the fd 1 that resolve
-    // captured, i.e. the pre-scope stdout: sources are resolved before the scope
-    // applies, so an intra-command `> a 2>&1` does not see the new fd 1 (a
-    // divergence from bash, tracked by task #183).
+    // Both fds are on `a`: the write redirect wins fd 1, and `2>&1` copies the
+    // fd 1 that the earlier redirection of the same command installed — the
+    // state bash's one-by-one apply leaves, not the pre-scope stdout (LESSONS:
+    // "POSIX redirect order is observable"; task #183's divergence, closed).
     assert_eq!(link(1), std::path::Path::new(&a));
-    assert_eq!(link(2), before);
+    assert_eq!(link(2), std::path::Path::new(&a));
     scope.restore().unwrap();
     // fd 1 is back to the pre-scope stdout. fd 2 was closed when the scope
     // opened, so its save is `None` and the restore leaves it closed.
@@ -399,6 +399,37 @@ fn saved_copy_survives_a_later_dup2() {
     // Give the harness a stderr again so a failure below is reportable.
     open_at(&"/dev/null".to_string(), 2);
     assert_eq!(body(&a), "x");
+}
+
+/// The save/restore invariant under the fd-state resolution: a scope whose
+/// second redirection dups the fd its first one installed saves **both** shell
+/// fds before their first export, so the restore puts both back and every
+/// post-restore write reaches the shell's original descriptors, not the file.
+/// Deleting the per-entry save (or restoring in apply order) sends the
+/// post-restore `after`/`err` bytes into `a`.
+#[test]
+fn interleaved_scope_restores_both_fds_after_a_dup() {
+    let (a, _sa) = temp_path("interleave");
+    let out_before = link(1);
+    let err_before = link(2);
+    let cell = cell();
+    let scope = Scope::open(
+        &[RedirectDef::write_path(1, cstr(&a)), RedirectDef::dup(2, 1)],
+        &cell,
+    )
+    .unwrap();
+    write_fd(2, b"in");
+    assert_eq!(
+        link(2),
+        std::path::Path::new(&a),
+        "fd 2 is the file fd 1 got"
+    );
+    scope.restore().unwrap();
+    write_fd(1, b"after");
+    write_fd(2, b"err");
+    assert_eq!(link(1), out_before, "fd 1 is back on the shell's stdout");
+    assert_eq!(link(2), err_before, "fd 2 is back on the shell's stderr");
+    assert_eq!(body(&a), "in", "the post-restore writes missed the file");
 }
 
 // --- `Scope::run`: the combinator the block executors and `run_group` use ----

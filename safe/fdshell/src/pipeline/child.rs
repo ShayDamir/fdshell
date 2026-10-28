@@ -56,8 +56,14 @@ pub fn run_child(
     let opened = crate::redirect::open_redirect_files(stage.redirects(), cell)
         .change_context(ChildProcessError::RedirectFailed)?;
 
-    let file_redirects = crate::redirect::resolve_redirects(stage.redirects(), &opened, cell)
-        .change_context(ChildProcessError::RedirectFailed)?;
+    // The pipe clones above are the stage's **seed**: bash applies a stage's
+    // redirections on top of the pipeline's own fds, so `echo e 2>&1 | cat`
+    // dup's the pipe write end, not the shell's stdout (LESSONS: "POSIX
+    // redirect order is observable"). The stage's own defs are the newer
+    // entries, so `> f 2>&1` in a stage still lands fd 2 on `f`.
+    let file_redirects =
+        crate::redirect::resolve_redirects(stage.redirects(), &opened, &redirects, cell)
+            .change_context(ChildProcessError::RedirectFailed)?;
     redirects.extend(file_redirects);
 
     let child_sock = capture_pairs
