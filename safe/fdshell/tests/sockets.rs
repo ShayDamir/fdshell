@@ -97,7 +97,10 @@ fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
 }
 
 /// `EADDRINUSE`/`EADDRNOTAVAIL`: the port is taken. 98 is already pinned in
-/// this file (`bind_abstract_no_file_created`).
+/// this file (`bind_abstract_no_file_created`). With the helper's errexit,
+/// `111` (`ECONNREFUSED`) from the self-connect can only mean the script's
+/// **own** listener is not live at a port its own `listen` bound — a real-bug
+/// signature, so it stays out of the retry list.
 const PORT_BUSY: [i32; 2] = [98, 99];
 const INET_ATTEMPTS: u32 = 5;
 
@@ -107,13 +110,23 @@ const INET_ATTEMPTS: u32 = 5;
 /// assertion. No sleeps, at most `INET_ATTEMPTS` script runs, and the
 /// assertions stay exactly as they are (`code == 0`, `out == "got:hi\n"`) —
 /// a retry re-attempts the test, it never widens its tolerance.
+///
+/// The retry sees only the script's **final** status, so the script runs
+/// under `set -e`: it must die at the failing socket builtin, with that
+/// builtin's errno as the exit code, for 98/99 to be observable at all. A
+/// script that continues past the failed builtin masks the port-busy status
+/// behind a later rc-1 launch failure (the unset-`%c` redirect), and rc 1 is
+/// not a status the retry may accept (LESSONS: "A pid-derived test port is a
+/// shared name"; task #341). A caller that wants non-errexit inet semantics
+/// must use `run` directly.
 fn run_inet(script: &dyn Fn(u16) -> String) -> (String, String, i32) {
-    let mut last = run(&script(inet_port()));
+    let attempt = |port: u16| run(&format!("set -e; {}", script(port)));
+    let mut last = attempt(inet_port());
     for _ in 1..INET_ATTEMPTS {
         if !PORT_BUSY.contains(&last.2) {
             break;
         }
-        last = run(&script(inet_port()));
+        last = attempt(inet_port());
     }
     last
 }
@@ -566,7 +579,9 @@ fn connect_listen_accept_in_one_script_abstract() {
     assert_eq!(out, "got:hi\n");
 }
 
-/// The AF_INET one-script variant.
+/// The AF_INET one-script variant. `run_inet` runs it under errexit, so a
+/// port collision exits with the failing builtin's errno (98/99) and is
+/// retried on a fresh port.
 #[test]
 fn connect_listen_accept_in_one_script_inet() {
     let (out, err, code) = run_inet(&|port| {
@@ -584,7 +599,8 @@ fn connect_listen_accept_in_one_script_inet() {
 
 /// The `--addr` alias, one script: it is the peer-shaped spelling for
 /// `connect`, and `listen` keeps accepting `--backlog` (the only builtin
-/// that calls `listen(2)`).
+/// that calls `listen(2)`). Errexit comes from `run_inet`, so a port
+/// collision surfaces as 98/99 and is retried.
 #[test]
 fn connect_listen_accept_in_one_script_inet_addr_alias() {
     let (out, err, code) = run_inet(&|port| {

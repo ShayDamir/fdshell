@@ -1853,6 +1853,16 @@ arms in `net/getsockname.rs` are unreachable *by construction*: the
 `position(…).unwrap_or(len) ≤ len`, so `get(..end)` is always `Some`. Their 0
 coverage hits are the proof, not a gap: STYLE §4.10 sanctions the `Never` +
 `?` shape, so a later "coverage fix" must not delete these guards.
+The **retry half sees only the script's final status.** `;` separators let a
+script continue past a failing builtin, so a port collision at `listen` leaves
+`%l`/`%c` unset, the statements after it die on their redirects, and the
+process exits **1** at a launch failure — a status the 98/99 retry must not
+accept, so the collision escapes the retry entirely (1-in-48 full-suite runs
+at 4-way concurrency, task #341). Prefix `set -e` in the retry helper itself,
+so the first failing builtin's errno *is* the exit code the retry reads; widen
+`PORT_BUSY` never — under errexit a `111` (`ECONNREFUSED`) from the
+self-connect can only mean the script's own listener died, i.e. a real bug,
+and it must fail the test (`run_inet` in `safe/fdshell/tests/sockets.rs`).
 
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
