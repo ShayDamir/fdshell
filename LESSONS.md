@@ -1205,6 +1205,9 @@ body-line half of the class is #311's, pinned by
 
 Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines.rs::word_span`/`delimiter_span`, which step one byte at a time. Owner: task #349 (measured, no prerequisite relation to #263; the flag flip leaves every one of those rows rc 1, unchanged).
 
+**Closed by task #347 for the pair half, and the boundary is narrower now** (measured 2026-10-28, bash 5.3.9): `word_span` consumes an unquoted `\X` pair whole, so the escaped-whitespace rows are bash parity — `cat <<a\ b`, `<<\ b`, `<<a\<TAB>b`, `<<a\;b`, `<<a\|b`, `<<a\)`, `<<\;`, `<<\|`, their `<<-` and io-number twins, and `X=v; cat <<a\ b` + `$X` (the pair quotes the body) all print their body at rc 0. The **`\` at the end of the word** member is not closed: the tokenizer's continuation join (`<<E\` + `zzz` → the word `Ezzz`, `<<a\` + `a\` → `aa\`, bash rc 0 with its EOF warning) is task **#489**'s, pinned as measured in `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`. #349's remaining scope is that join (its pair half landed in #347); the pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
+
+
 
 ## `finish_command`'s `spec_at += 1` mutant became killable when duplicate redirect targets became legal; its `args_from - 1` neighbour is killable too
 `cargo mutants` on `parse/command_args.rs` (task #109 re-work) found two mutants on lines that are not escape-fold code:
@@ -2742,6 +2745,66 @@ raw `|`, while a quoted `"|"` / `'|'` (span 3, text 1) and an escaped `\|`
 by task #336's rows of `parse/case_clause/tests.rs` and
 `parse/group_block/tail/tests.rs` plus #346's `case '|' in "|")`,
 `case x in "|")`, `case x in \|)` and group rows.
+- **The third `|`-text reader is `scan/heredoc/op.rs`, and it owns its rule**
+(task #347). `invalid_delimiter`'s `;`/`|` arms read the operand's **text**, gated
+on `span_quoted`, which the here-doc caller computes from the raw span
+(`parse/heredoc/operator.rs` passes `word_quoted(word, start, end)`). For a word
+whose text is the **one-byte** separator that span test *is* the quote-mask
+decision the task asked for: span longer than text ⇔ the span carries a quote
+byte ⇔ `mask::quoted_at(mask, 0)`, and the span form is the canonical separator
+gate (`parse/word_quoted.rs::span_word`). Escape spellings reach **neither** arm:
+`\;` / `\|` keep the pair in the token text, so their text is never `;`/`|`. The
+four headline rows of the report — `cat <<"|"`, `<<'|'`, `<<"|x"`, `<<"|EOF"`
+(plus `<<";"`, `<< ";"`), each with its delimiter line, **empty body** — measure
+rc 0 and silent, bash-equal: `tests/heredoc.rs::a_quoted_separator_delimiter_with_an_empty_body_is_parity`
+(the with-body shape is #336's `a_quoted_delimiter_may_be_a_separator_word`; the
+report's rc-1 numbers were measured on `60a2ebd`, before #336's gate). The
+path-redirect callers pass `span_quoted=false` and keep the text-only arms —
+switching the shared arms to a mask test would flip #475's pinned `echo x > ";"`
+rc 1, and the arms' mask insensitivity is pinned by
+`scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`.
+- **A byte walk over a delimiter word consumes `\X` pairs whole** (task #347,
+closing #349's scope). The tokenizer keeps the pair in the word text
+(`parse/token/escape.rs::read_escape`), so `scan/heredoc/lines.rs::word_span`
+that steps over the `\` alone ends the word at the separator byte **behind** it
+(`token_word_end`'s set: ` `, tab, `;`, `|`, `)`) and the region layer delimits
+on the truncated word while the parse layer compares the **folded** word — the
+signature is the false `missing terminating delimiter line 'a b'` for
+`cat <<a\ b` + body + `a b` (rc 1, bash rc 0, delimiter `a b`). Twin rules:
+`read_escape`, and `pipeline_pipe`'s escape walk (the word walk must land
+exactly on the `|` byte — `x\|` is one word); the general form is "byte-level
+and token-level counts must agree". The pair is clipped at the window end
+(`min(to)`): a `\` at the physical line's end stays a lone byte
+(`fold_quotes` keeps the backslash, so the delimiter is the literal `a\`), and
+the `\`+newline continuation join stays task **#489**'s. Pins:
+`scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word`,
+`scan/heredoc/tests.rs::delimiter_span_clips_a_trailing_escape_pair_to_the_window`,
+`parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`
+(the byte layer's `Operator`s fold to the token layer's),
+`tests/heredoc.rs::an_escaped_delimiter_word_is_one_word_at_both_levels` (every
+row bash-measured: the `<<-` form, the io-number form, two operators on one
+line, the escaped-tab word, and `X=v; cat <<a\ b` + `$X` + `a b`, whose folded
+pair quotes the body), and the flipped #349 pin
+`tests/heredoc.rs::chevron_terminator_known_divergences`. The rows that stay
+divergent keep their owners: the continuation join (**#489**) and the
+EOF-starved delimiter (**#275** / **#429**, bash reads to EOF with its warning
+at rc 0) in
+`tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`.
+- **A region's first body/delimiter line is data for the deferral rule too.**
+The line-opening-`&` deferral (`segment/bg.rs::async_ahead`, the #326/#333
+family) reads the **next** physical line's raw bytes *before* the flush computes
+this line's region claims, so it swallows the region the current line's operator
+owns whenever that next line is the region's body or delimiter line:
+`cat <<"&x"` + `&x` answers `missing terminating delimiter line '&x'` (rc 1,
+bash rc 0), `cat <<EOF` + `&x` + `EOF` runs `&x` as a command and loses the body
+(`wc -c` says 0, bash says 3). The task #347 report measured `cat <<"&x"` rc 0
+on `60a2ebd` — the row **regressed** when the deferral landed. Owner **#468**,
+whose pinned rows now include the delimiter-word family (`cat <<"&x"`, `<<'&x'`,
+`<<\&x`, `<< "&x"`, `<<-"&x"`, `<<"&&"`, `<<"& x"` and the `&`-body rows), pinned
+as measured with bash's value beside each in
+`tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`;
+a candidate gate is to consult `scan::heredoc::skip` for the physical line and
+suppress the deferral when its resume passes the `&`.
 - **the byte scan's word-break test is the tokenizer's separator arm
 byte-wise** (the helper was `is_token_byte`; task #345 folded its byte set into
 the word-break / run-start arms of `scan/heredoc/ops.rs::opens_word`):
@@ -5138,7 +5201,16 @@ comment included, so a `#`-terminated line owns a body stream: `cat <<X # note`
 + body + `X` is the same end of line as a plain newline, and `# note; echo
 after` is comment data. Pins: `segment/tests.rs::a_comment_terminated_line_flushes_its_runs_and_jumps_its_regions`,
 `tests/heredoc.rs::a_comment_terminated_line_owns_its_body_stream`; the
-`&`-deferred member (`cat <<X\n& echo b\nbody\nX`) is **#468**'s.
+`&`-deferred member (`cat <<X\n& echo b\nbody\nX`) is **#468**'s. Task #347
+pinned the delimiter-word members of the same deferral beside it —
+`cat <<"&x"` + `&x`, `<<'&x'`, `<<\&x`, `<< "&x"`, `<<-"&x"`, `<<"&&"`,
+`<<"& x"` and the `&`-body rows (`cat <<EOF` + `&x` + `EOF`,
+`wc -c <<EOF` + `&x` + `EOF`) — as measured, with owner **#468** named, in
+`tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`;
+the deferral reads the next line's raw bytes **before** the flush computes the
+line's region claims, so a region's first body/delimiter line is data for it
+too, and #468 flips those rows when it lands.
+
 
 **In a shared module, record the arm one caller cannot reach instead of
 padding a test for it** (#311's rule): the extension arm of `claimed_bodies`

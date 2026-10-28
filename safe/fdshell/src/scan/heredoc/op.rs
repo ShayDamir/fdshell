@@ -106,7 +106,16 @@ pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
 /// body and a `;` line delimits, as bash measures — the byte level accepts it
 /// (`lines::delimiter_span` reads the raw bytes, `Operator::new` quote-removes
 /// the word), so the two levels are in lockstep only once the token level stops
-/// rejecting it. The path families pass `false` and keep the text-only arms:
+/// rejecting it. The `;`/`|` arms are the operand's **quote-mask** decision in
+/// span form (task #347): a word whose text is the one-byte separator has a span
+/// longer than its text exactly when the span carries a quote byte, i.e. exactly
+/// when `mask::quoted_at(mask, 0)` is set — the span form is the canonical
+/// separator gate (`parse::word_quoted::span_word`). Escape spellings reach
+/// **neither** arm: `\;` and `\|` keep the pair in the token text
+/// (`parse/token/escape.rs`), so there is no separator text to gate. The four
+/// here-doc rows that motivated the check — `cat <<"|"`, `<<'|'`, `<<"|x"`,
+/// `<<"|EOF"`, each with its delimiter line — measure rc 0 and empty, bash-equal.
+/// The path families pass `false` and keep the text-only arms:
 /// bash parses `> ""` / `> ";"` and fails at the open (or creates the file `;`),
 /// so fdshell's rc 1 parse error is its side of that pair, owned by #326/#329/
 /// #330 and pinned for the quoted-`;` target by #475. Byte-level twin:

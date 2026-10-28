@@ -466,9 +466,18 @@ quotes it — `<<'EOF'`, `<<"EOF"`, `<<E\OF`, `<<EO\F`, `<<\E\O\F`, `<<\$HOME`
 (POSIX XCU 2.3 counts `\` a quote operator, so the escape-only word `<<E\OF`
 quotes the body exactly like `<<"EOF"`). The word is folded for matching, so
 `<<E\OF` delimits `EOF`, and a quoted body is verbatim: nothing expands in it
-and no `\<newline>` continuation is stripped from it. `<<-EOF` strips leading
-tabs from the body and the delimiter. A here-document is usually attached to
-`cat`, `read` or another command that reads stdin. A bare delimiter word
+and no `\<newline>` continuation is stripped from it. Every escape pair is a
+byte **of the word**, so the whitespace or separator behind a `\` is delimiter
+content: `<<a\ b` delimits `a b`, `<<a\<TAB>b` delimits `a<TAB>b`, `<<\;`
+delimits `;` and `<<a\)` delimits `a)` (rc 0, as bash), and the pair quotes the
+body — `X=v; cat <<a\ b` + `$X` + `a b` prints `$X`. A `\` at the **end** of the
+word is the open member of that family: bash joins the word with the next line
+(`<<E\` + `zzz` delimits `Ezzz`), which fdshell does not do yet. `<<-EOF` strips
+leading tabs from the body and the delimiter. A here-document is usually
+attached to `cat`, `read` or another command that reads stdin. A bare delimiter
+word
+
+
 that begins with `<`, `>`, `&` or `%` is a delimiter when that byte is
 quoted (`cat << "<x"` + body + `<x` prints the body, as bash); unquoted it
 is a syntax error. An **empty quoted** delimiter is a delimiter too — the
