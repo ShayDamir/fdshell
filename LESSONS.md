@@ -721,7 +721,62 @@ Parse-side invariants: a statement of *all* assignment words (up to `;`) stays a
 `parse/command_args.rs` — `finish_command`'s `collect_range(tokens, args_from - 1)` end bound is **not** an accepted equivalent mutant (the acceptance first recorded here is superseded). "The command word is by construction never an assignment word — `prefix_len` stopped *there* precisely because it is not `NAME=value`" holds only when the keyword prefix is empty (`kw == 0`): on the `command`/`builtin` path `args_from = prefix_len + kw + 1`, so the widened range swallows the command **name** word, which can be assignment-shaped. `-`→`/` and `-`→`+` are killed by `command_keyword_keeps_the_name_word_out_of_the_env_prefix` (`safe/fdshell/tests/backslash.rs`); the full analysis is the entry "`finish_command`'s `spec_at += 1` mutant became killable when duplicate redirect targets became legal; its `args_from - 1` neighbour is killable too" below.
 
 ## Errexit fires on the final part's status, so a skipped `&&` tail must be excluded with a `ran` guard
-Bash's errexit rule keys on *which command failed* (only the command following the final `&&`/`||` can trigger it), but the executor only sees the list's resulting `last_status`. In `cond::run_cond_list`, `false && echo x` skips `echo x` and ends with an **empty final part** that never ran, leaving `false`'s failure in `last_status` — an errexit check on the status alone would exit where bash continues (`set -e; false && echo x; echo after` must print `after`). The guard is `!is_empty_part(line, start, i)`: `run_part` returns `Ok(None)` both for a part that ran cleanly and for an empty part, so "ran" must be decided from the raw bytes, not from `run_part`'s result. The same guard is what makes `true || false` (short-circuit returns before the final segment) and `if`/`while` conditions (the `exempt` parameter) behave like bash. Pinned by `errexit_skipped_and_chain_does_not_exit` (unit) and the `set -e; false && …` integration tests.
+
+Bash's errexit rule keys on *which command failed* (only the command
+following the final `&&`/`||` can trigger it), but the executor only sees the
+list's resulting `last_status`. In `cond::run_cond_list`, `false && echo x`
+skips `echo x` and ends with an **empty final part** that never ran, leaving
+`false`'s failure in `last_status` — an errexit check on the status alone
+would exit where bash continues (`set -e; false && echo x; echo after` must
+print `after`). The guard is `!is_empty_part(line, start, i)`: `run_part`
+returns `Ok(None)` both for a part that ran cleanly and for an empty part, so
+"ran" must be decided from the raw bytes, not from `run_part`'s result. The
+same guard is what makes `true || false` (short-circuit returns before the
+final segment) and `if`/`while` conditions (the `exempt` parameter) behave like
+bash. Pinned by `errexit_skipped_and_chain_does_not_exit` (unit) and the
+`set -e; false && …` integration tests.
+
+The rule's other half is an execution **context**, not a status. The exemption
+covers *everything executed inside* a compound sitting in a gated position — a
+`for`/`while`/`until` body, a `{ …; }` group, an `if` then/else body, a `case`
+arm, a function frame — because each of them reaches `cond/errexit.rs::should_exit`
+through its **own nested** `run_cond_list`, which hardcodes `exempt = false`.
+No parameter threaded down from `cond.rs` can reach them all (every executor
+and `run_script` would have to forward it, and a dropped argument is a silent
+regression), so the gate rides `ShellState::errexit_gated`:
+`cond/errexit.rs::gated` sets it around the **non-final** part's `run_part` and
+`should_exit` reads it as one extra conjunct; the final part is unwrapped, so a
+compound that is the command following the final operator keeps exiting. Three
+shape decisions carry the mechanism:
+
+* a `FnOnce` wrapper in the `loop_control::in_loop` pairing idiom — a
+  `Return`/`Exit` control and an `Err` raised inside the part escape it, and an
+  inline set/restore pair would leak the gate past them;
+* the restore writes the **saved** value, never `false`: a gated part nested in
+  a gated part goes back to gated;
+* `drop(state)` before running the closure — the borrow never spans the
+  recursive body.
+
+`exempt` (a condition's failure is data for the test) and the gate (a list
+position) are two independent suppressions of one check, documented next to
+each other in `cond.rs`. The flag is state, so it rides the fork copy into a
+pipeline stage and a background job, as bash's execution context does. Pins:
+the unit pins `errexit_gate_reaches_a_group_body`,
+`errexit_gate_reaches_a_loop_body`, `errexit_gate_reaches_a_function_frame`,
+`errexit_gate_is_restored_after_the_list`,
+`errexit_gate_is_restored_on_a_returned_control`,
+`errexit_gate_is_restored_on_an_error`,
+`ungated_compound_as_final_list_element_exits` and
+`ungated_compound_body_exits`; the whole bash-measured table is
+`safe/fdshell/tests/errexit.rs`.
+
+Reproduction trick for any new errexit row: run it with `set -e` **removed**.
+If the shell still stops there, the row is not about errexit. That is how
+`set -e; for x in 1; do true; done > nodir/x && echo after` proved to be the
+redirect-open abort of task #179 (fdshell aborts the script with and without
+`-e`, bash runs on) and how `set -e; for x in 1; do false; done | cat` stayed
+the non-final-pipeline-stage exemption of task #490; both are pinned at
+fdshell's measured value with bash's value beside them and their owner named.
 
 ## Bash's `-c` mode exits 127 on an unbound-variable expansion error; script mode exits 1
 `bash -c 'set -u; echo $x'` exits **127** on bash 5.3 (the `-c` path reports the never-executed command as not-found), while the same two lines in a script file exit **1**. fdshell's `-c` mode reports the child's substitution failure and exits **1** (the script-mode status) — the plan pinned 1 after probing; do not "fix" the integration tests toward 127 to match the `-c` quirk.

@@ -1073,6 +1073,9 @@ make && echo built || echo "build failed"
 for x in 1 2 3; do false; break; done; echo $?   # 0
 ```
 
+`set -e` treats these lists as exemptions: which failing command ends the shell
+is spelled out in "Pipelines and lists" below.
+
 ### Functions and groups
 
 ```shell
@@ -1111,6 +1114,24 @@ statements, `&&`/`||` gate them, and a trailing `&` turns the statement before
 it into a background job (fdshell also offers the named form `cmd &>&name`,
 above). `time cmd` reports how long cmd
 took; `timeout seconds cmd` stops it after a deadline.
+
+`set -e` (`set -o errexit`) ends the shell at a failing command, with that
+command's own status. Two positions are exempt, as in bash: a command run in an
+`if`/`elif`/`while`/`until` **condition**, and any command that is part of a
+`&&`/`||` list except the command following the final operator. The list
+exemption reaches **everything a compound in that position executes** — a
+`for`/`while`/`until` body, a `{ …; }` group, an `if` then/elif/else body, a
+`case` arm, a function frame, a `source`d file — so
+`set -e; { false; } && echo after; echo rc=$?` prints `rc=1` and ends 0, and
+`set -e; for x in 1; do false; done && echo after` runs on. The exemption
+suppresses the exit, never the status: the list ends with the failing status,
+and it ends with the list, so the next statement's failure is fatal again. A
+compound that **is** the command following the final operator keeps exiting —
+`set -e; true && { false; }; echo rc=$?` exits 1. bash's third exemption, every
+pipeline stage but the last, is not implemented: a failing command in a
+non-final stage ends the shell (task #490). A redirection whose target cannot be
+opened aborts the whole script here, `set -e` written or not, where bash fails
+only that command (task #179).
 
 A stage is a **command**, so the word behind a `|` starts a command and a keyword
 block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop in
