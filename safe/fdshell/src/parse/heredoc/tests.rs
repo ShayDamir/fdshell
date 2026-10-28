@@ -1137,3 +1137,46 @@ fn operator_at_rejects_an_io_number_that_is_not_a_descriptor() {
     let (op, _extra) = operator_at(line, &tokens, 1).unwrap();
     assert_eq!(op.fd, i32::MAX);
 }
+
+/// The **escaped delimiter word** agrees at both levels (task #347, the shape
+/// #349 measured): the region layer's byte walk consumes every `\X` pair whole,
+/// so its `Operator`s fold to exactly the token layer's — same delimiter bytes,
+/// same quoted/strip flags, same descriptors. `skip`'s pins
+/// (`scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word`) show the
+/// region is claimed; this is the shape half of the same rule: a byte walk that
+/// stepped over the `\` alone would fold a truncated word (`a` for `a\ b`) and
+/// the two lists would differ.
+#[test]
+fn escaped_delimiter_words_fold_the_same_at_both_levels() {
+    let shape = |ops: &[crate::scan::heredoc::Operator]| -> Vec<(Vec<u8>, bool, bool, i32)> {
+        ops.iter()
+            .map(|op| (op.delim.clone(), op.quoted, op.strip, op.fd))
+            .collect()
+    };
+    for line in [
+        b"cat <<a\\ b\na b" as &[u8],
+        b"cat <<a\\\tb\na\tb",
+        b"cat <<\\ b\n b",
+        b"cat <<-a\\ b\n\ta b",
+        b"cat <<a\\;b\na;b",
+        b"cat <<a\\|b\na|b",
+        b"cat <<a\\)\na)",
+        b"cat <<\\;\n;",
+        b"cat << \\;\n;",
+        b"cat <<\\|\n|",
+        b"cat 3<<\\;\n;",
+        b"cat <<\\; <<\\|\n;\n|",
+    ] {
+        let tokens = tokenize_statement(line).unwrap();
+        // The byte layer's window is the command line (the run window the
+        // region layer is handed), never the whole text.
+        let to = line.iter().position(|&b| b == b'\n').unwrap_or(line.len());
+        let byte = shape(&crate::scan::heredoc::operator_delims(line, 0, to).unwrap());
+        let token = shape(&super::operators(line, &tokens).unwrap());
+        assert!(
+            !byte.is_empty(),
+            "every row is a claimed operator: {line:?}"
+        );
+        assert_eq!(byte, token, "line={line:?}");
+    }
+}

@@ -46,8 +46,20 @@ pub(crate) fn delimiter_span(line: &[u8], mut j: usize, to: usize) -> Option<(us
 /// The index just past the delimiter word byte at `j`: a quoted span (`"…"`
 /// or `'…'`) is consumed whole, because the tokenizer reads it as one word and
 /// its spaces are word content (`<<'a b'` and `<<"a b"` delimit `a b`) —
-/// byte-level and token-level rules must agree (LESSONS).
+/// byte-level and token-level rules must agree (LESSONS). So is an unquoted
+/// escape pair `\X`: `parse/token/escape.rs::read_escape` keeps **both** bytes
+/// in the word text, so a walk that steps over the `\` alone ends the word at
+/// the separator byte **behind** it (`token_word_end`'s set) and the region
+/// layer delimits on a truncated word — the visible signature is the false
+/// `missing terminating delimiter line` while bash reads the whole folded word
+/// (`<<a\ b` delimits `a b`, `<<\;` delimits `;`). A `\` at the window end
+/// stays a lone byte: the pair never steps over the physical-line end (the
+/// `\`+newline continuation is task #489's), exactly `read_escape`'s
+/// trailing-`\` rule, and `fold_quotes` keeps that backslash.
 fn word_span(line: &[u8], j: usize, to: usize) -> usize {
+    if line.get(j) == Some(&b'\\') {
+        return j.saturating_add(2).min(to);
+    }
     let quote = line.get(j).copied().filter(|b| *b == QUOTE || *b == SQUOTE);
     let Some(q) = quote else {
         return j + 1;

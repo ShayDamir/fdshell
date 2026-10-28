@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use super::lines::delimiter_span;
 use super::{body_regions, skip, skip_region, terminator_spans, unterminated};
 use alloc::vec;
 
@@ -465,4 +466,74 @@ fn semi_terminated_regions_guard_is_live() {
     let line = b"if true; then cat <<T; fi\nbody\nT";
     assert!(super::regions::semi_terminated_regions(line, 8, 21).is_some());
     assert_eq!(body_regions(line), vec![(26, 31)]);
+}
+
+/// An escape pair `\X` is **word content** for the tokenizer
+/// (`parse/token/escape.rs` keeps both bytes in the word text, mask `false`),
+/// so the delimiter word's byte walk consumes the pair whole (task #347, the
+/// shape #349 measured): a walk that steps over the `\` alone ends the word at
+/// the separator byte behind it (`token_word_end`'s set) and the region layer
+/// delimits on a truncated word — the false `missing terminating delimiter
+/// line 'a b'` for `cat <<a\ b` + body + `a b`, rc 1 where bash is rc 0. Every
+/// row here claims its region: the delimiter line is the **folded** word.
+/// The byte/token agreement probe for these rows lives in
+/// `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`
+/// (it needs the token layer's `operators`). Here the region is the point: the
+/// delimiter line the **folded** word names is found, so the region layer
+/// claims the body the parse layer expects.
+#[test]
+fn skip_escaped_delimiter_word_is_one_word() {
+    // `\ ` and `\<TAB>` are word bytes: the delimiter is `a b` / `a<TAB>b`.
+    assert_eq!(skip(b"cat <<a\\ b\na b", 0, 10), Some(14));
+    assert_eq!(skip(b"cat <<a\\ b\nbody\na b", 0, 10), Some(19));
+    assert_eq!(skip(b"cat <<a\\\tb\na\tb", 0, 10), Some(14));
+    assert_eq!(skip(b"cat <<\\ b\n b", 0, 9), Some(12));
+    // The `<<-` form: the tab-indented terminator carries the folded space.
+    assert_eq!(skip(b"cat <<-a\\ b\n\tbody\n\ta b", 0, 11), Some(22));
+    // A separator behind the `\` is the word's own byte: delimiters `;`, `|`,
+    // `a;b`, `a|b`, `a)`.
+    assert_eq!(skip(b"cat <<\\;\n;", 0, 8), Some(10));
+    assert_eq!(skip(b"cat << \\;\n;", 0, 9), Some(11));
+    assert_eq!(skip(b"cat <<\\|\n|", 0, 8), Some(10));
+    assert_eq!(skip(b"cat <<a\\;b\na;b", 0, 10), Some(14));
+    assert_eq!(skip(b"cat <<a\\|b\na|b", 0, 10), Some(14));
+    assert_eq!(skip(b"cat <<a\\)\na)", 0, 9), Some(12));
+    // The io-number form keeps its fd, the `<<-` form its strip flag, and two
+    // operators on one line each claim their own folded word.
+    assert_eq!(skip(b"cat 3<<\\;\n;", 0, 9), Some(11));
+    assert_eq!(skip(b"cat <<\\; <<\\|\n;\n|", 0, 13), Some(17));
+    // A non-separator pair (`\a` → `a`) was already parity; kept beside the
+    // rows above so the pair rule is not mistaken for a separator rule.
+    assert_eq!(skip(b"cat <<a\\a\naa", 0, 9), Some(12));
+}
+
+/// A `\` at the **window end** stays a lone byte: the pair is clipped to `to`,
+/// so the walk never reads past the physical-line window the caller handed it
+/// (the window ends at the newline; the `\`+newline continuation join is task
+/// **#489**'s). `fold_quotes` keeps that trailing backslash, so the delimiter
+/// is the literal `a\`.
+#[test]
+fn delimiter_span_clips_a_trailing_escape_pair_to_the_window() {
+    // The window ends at the `\` (index 7): the word is the raw `a\`.
+    assert_eq!(delimiter_span(b"cat <<a\\", 6, 8), Some((8, &b"a\\"[..])));
+    assert_eq!(
+        delimiter_span(b"cat <<a\\\nX", 6, 8),
+        Some((8, &b"a\\"[..])),
+        "the pair never steps over the newline"
+    );
+    // The same word inside a wider window keeps the `\`, and the region's
+    // delimiter line is the literal `a\` line.
+    assert_eq!(skip(b"cat <<a\\\na\\", 0, 8), Some(11));
+    // Mid-word, the pair is consumed whole: the escaped space is word content,
+    // so the raw span runs past it to the window end.
+    assert_eq!(
+        delimiter_span(b"cat <<a\\ b", 6, 10),
+        Some((10, &b"a\\ b"[..]))
+    );
+    // An escaped word starts with `\`, so the bare-`<<` reject set (`<`, `>`,
+    // `&`, `%`) needs no escape arm: the word is accepted as-is.
+    assert_eq!(
+        delimiter_span(b"cat << \\;x", 7, 10),
+        Some((10, &b"\\;x"[..]))
+    );
 }
