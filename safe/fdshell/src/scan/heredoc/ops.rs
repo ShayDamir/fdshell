@@ -96,14 +96,23 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
         // The io-number form's word starts at its digits, so the word gate is
         // evaluated at the operator's own word start `run`: the operator's
         // prefix is never its own preceding token, and `io_prefix`'s word rule
-        // is the narrow io one on purpose — on the physical line the glued
-        // `cat&&3<<T` counts 0 (the `&` is word content). The cond splitter's
-        // part window is the measured exception: it opens on the operator, so
-        // the window-relative `run == from` arm counts 1 and the part asks for
-        // a body the line's list never claimed — the false `missing
-        // terminating delimiter` signature, pinned by
+        // is the narrow io one on purpose — the glued `cat&&3<<T` counts 0 on
+        // the physical line (`&` is word content) **and 0 in its cond part
+        // window**: the part is `3<<T`, so the window opens on the digit run,
+        // `io_prefix` rejects it (`word_start` sees the `&` behind the window
+        // start) and `opens_word` is false at the chevron. The byte layer
+        // agrees with itself at 0 (pinned at
+        // `io_number_prefixed_operators_carry_their_fd`); its 1 comes from
+        // the **token** level — the part text `3<<T` is one operator through
+        // `parse::heredoc::is_operator` (the scan starts at index 0), a
+        // byte(0)-token(1) disagreement: the parse layer expects a body the
+        // byte layer never allocated while the part asks for **no** region
+        // (`cond::parts::take_bodies` takes 0), the false `missing
+        // terminating delimiter` signature pinned by
         // `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`
-        // (owner: the glued-pair family).
+        // (owner: the byte/token word-0 agreement for a part text that begins
+        // with an io-number operator — the glued-pair family's word-boundary
+        // cut is the chevron member's owner and changes nothing for this one).
         let io = io_prefix(line, i, &state);
         let run = io.map_or(i, |(run, _)| run);
         if bare && opens_word(line, from, run, &state) && is_chevron(line, i) {
@@ -130,12 +139,22 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
 /// the token and needs no predecessor at all (task #345). The break set is the
 /// tokenizer's separator arm, derived from `parse::token::step` and never
 /// invented here: `&`, `(`, `<`, `>` are **word bytes** for the tokenizer, so
-/// the physical line counts the glued `true&&<<B` / `cat&&3<<T` as word data —
-/// while a cond part window opened on the operator counts 1 through the
-/// window-relative `run == from` arm (the measured count mismatch: false
-/// `missing terminating delimiter`, rc 1, bash rc 0), pinned by
-/// `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`; the
-/// divergence owner is the glued-pair family.
+/// the physical line counts the glued `true&&<<B` / `cat&&3<<T` as word data.
+/// The `&&`-glued spellings diverge from their cond part windows as **two**
+/// members (both report the false `missing terminating delimiter`, rc 1, bash
+/// rc 0, pinned by
+/// `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`):
+/// the chevron member `true&&<<B` — the cond part `<<B` opens **on the
+/// operator**, the window-relative `run == from` arm fires, so the window
+/// counts 1 while the physical line counts 0, a byte-vs-byte mismatch (the
+/// window-start arms pinned by
+/// `scan/heredoc/ops/tests.rs::window_end_is_exclusive`), and the part asks
+/// for a body region the line's list never claimed — owner: the glued-pair
+/// family (the cond splitter cutting at a word boundary for a glued pair);
+/// the io-number member `cat&&3<<T` — the part `3<<T` opens on the **digit
+/// run**, the byte count is 0 in the window as on the line (see the `sites()`
+/// note), and its 1 is a token-level count — owner: the byte/token word-0
+/// agreement for a part text that begins with an io-number operator.
 fn opens_word(line: &[u8], from: usize, run: usize, state: &ScanState) -> bool {
     run == from || word_start(line, run, state) || precedes_pipe(line, run)
 }

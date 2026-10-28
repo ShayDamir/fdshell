@@ -2726,8 +2726,13 @@ fn a_heredoc_only_statement_with_a_word_runs_that_word() {
 ///   tokenizer never splits a word at an operator byte): the command lookup is
 ///   rc 1 and the body lines run as commands. Owner: the glued-pair family.
 /// * The **`&&`-glued word-0** spellings (`true&&<<B`, `cat&&3<<T`, bash rc 0)
-///   are the glued pair's **count-mismatch** signature, pinned as measured —
-///   see the comment at their rows below. Owner: the glued-pair family.
+///   report a false `missing terminating delimiter`, pinned as measured — the
+///   members diverge differently, with per-member owners in the comment at
+///   their rows below: the chevron `true&&<<B` is the glued-pair family's
+///   byte-vs-byte window/line count mismatch, the io-number `cat&&3<<T` has
+///   byte counts of 0 in both scopes and its 1 at the token level (the
+///   byte/token word-0 agreement for a part text beginning with an io-number
+///   operator).
 /// * The **operator-token**-leading rows (`> <<EOF`, `>| <<EOF`) are the #185
 ///   family: word 0 is a non-here-doc operator, the statement keeps its rc-1
 ///   command word (bash rc 2).
@@ -2748,18 +2753,30 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
     let (out, err, code) = run("x<<EOF\nbody\nEOF");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("\"x<<EOF\" not found"), "stderr={err:?}");
-    // The `&&`-glued word-0 spellings, pinned as measured (bash: rc 0, silent).
-    // The cond splitter cuts the part right after the `&` of the glued pair,
-    // and `&` is a word byte for the tokenizer, so the part window **opens on
-    // the operator**: the window-relative `run == from` arm of the site gate
-    // (`scan/heredoc/ops.rs::opens_word`) counts 1 in the window while the
-    // physical line counts 0 — the part asks for a body region the line's list
-    // never claimed, and the parse layer reports the count-mismatch signature:
-    // a **false** `missing terminating delimiter line` (the body *is* present
-    // and terminated). The rc is unchanged (1) and the body no longer runs as
-    // commands; the real fix — the window must report the physical line's
-    // word-start status, i.e. the cond splitter cutting at a word boundary for
-    // a glued pair — belongs to the glued-pair family, not to the word-0 rule.
+    // The `&&`-glued word-0 spellings, pinned as measured (bash: rc 0,
+    // silent). Both report a **false** `missing terminating delimiter line`
+    // (the body *is* present and terminated), rc 1, and the body no longer
+    // runs as commands — but their mechanisms and owners differ. The cond
+    // splitter cuts the part right after the `&` of the glued pair, and `&`
+    // is a word byte for the tokenizer:
+    // * chevron member `true&&<<B`: the part `<<B` **opens on the operator**,
+    //   so the window-relative `run == from` arm of the site gate
+    //   (`scan/heredoc/ops.rs::opens_word`) counts 1 in the window while the
+    //   physical line counts 0 — a byte-vs-byte mismatch, and the part asks
+    //   for a body region the line's list never claimed. Owner: the
+    //   glued-pair family (the window must report the physical line's
+    //   word-start status, i.e. the cond splitter cutting at a word boundary
+    //   for a glued pair).
+    // * io-number member `cat&&3<<T`: the part `3<<T` opens on the **digit
+    //   run**, and the byte count is 0 in the window as on the line
+    //   (`scan/heredoc/ops/tests.rs::io_number_prefixed_operators_carry_their_fd`)
+    //   — the 1 comes from the **token** level: the part text begins with an
+    //   operator and `parse::heredoc::is_operator` starts at index 0, a
+    //   byte(0)-token(1) disagreement (the parse layer expects a body the
+    //   byte layer never allocated; the part asks for **no** region at all).
+    //   Owner: the byte/token word-0 agreement for a part text beginning
+    //   with an io-number operator — the glued-pair word-boundary cut changes
+    //   nothing for this member.
     for (script, needle) in [
         (
             "true&&<<B\nbody\nB",
@@ -2795,10 +2812,14 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
 /// lookup (bash 127, `f` created by the redirection that still applies), an
 /// io-number must be glued to its operator (`2 > f` is the command `2`), a bare
 /// operator with no operand stays the parse error, and the **operator-token**-
-/// leading here-doc family (`> <<EOF`, `>| x <<EOF`, `>x <<EOF`) keeps the
-/// rc-1 behavior the #185 pins record (bash is rc 2 there). A **word-0**
-/// here-doc operator is the other family: rc 0, the redirections-only statement
-/// of task #345, pinned by the async row at the end.
+/// leading here-doc family keeps the rc-1 behavior the #185 pins record; bash
+/// splits it by shape (measured, 5.3.9): the bare operator words (`> <<EOF`,
+/// `>| <<EOF`) are rc 2 (syntax error near `<<`), the operator words **with
+/// their operand** (`>| x <<EOF`, `>x <<EOF`) are rc 0 — bash creates the
+/// operand file and feeds the body to the empty command, the divergence
+/// #488 owns (POSIX_COMPATIBILITY lists `>f <<EOF` as bash rc 0, fdshell rc 1).
+/// A **word-0** here-doc operator is the other family: rc 0, the
+/// redirections-only statement of task #345, pinned by the async row at the end.
 #[test]
 fn a_quoted_operator_or_heredoc_word_stays_a_command() {
     let dir = seeded("redirect_only_guard");
@@ -2835,9 +2856,13 @@ fn a_quoted_operator_or_heredoc_word_stays_a_command() {
         assert!(err.contains("invalid redirect"), "{script}: {err}");
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
-    // The operator-token-leading family keeps its owners: the operator word is
-    // reported and the body lines never run (bash rc 2 on every row). The
-    // here-doc **word-0** rows moved to rc 0 with task #345, so the async
+    // The operator-token-leading family keeps its owners: the operator word
+    // is reported and the body lines never run. bash (5.3.9) splits by shape:
+    // the bare operator words (`> <<EOF`, `>| <<EOF`) are rc 2 (syntax error
+    // near `<<`); the operator words **with their operand** (`>| x <<EOF`,
+    // `>x <<EOF`) are rc 0 — bash creates the operand file and feeds the body
+    // to the empty command, the divergence shape #488 owns. The here-doc
+    // **word-0** rows moved to rc 0 with task #345, so the async
     // `cat <<A & <<B` row is asserted below, next to the rc-0 family.
     let rows: [(&str, &str); 4] = [
         ("> <<EOF\nbody\nEOF", "\">\" not found"),

@@ -5511,22 +5511,41 @@ pair"). Rule: change the count at **both** levels in the same commit and run the
 to let a window look back so `3<<T` at a window start reads as an io-number
 (`cat&&3<<T`). A per-window io rule diverges from the line-level count and breaks
 the glued-pair invariant (every counting window is a sub-window of the line's
-window — `regions.rs`). The glued spellings are **two signatures**: the
+window — `regions.rs`). The glued spellings are **three signatures**: the
 word-glued `x<<EOF` is word data at both levels (the tokenizer never splits a
 word at an operator byte), so its lookup fails rc 1 and the body stays free,
 pinned. The `&&`-glued word-0 spellings (`cat&&3<<T`, `true&&<<B`) count 0 on
 the physical line (`&`, `(`, `<`, `>` are word bytes for the tokenizer; `;`,
-`\n`, `)`, space and tab are word breaks) **but 1 in their part window**: the
-cond splitter cuts right after the `&` of the glued pair, the window opens on
-the operator, and the window-relative `run == from` arm of `opens_word` opens
-the site gate — the part asks for a region the line's list never claimed and
-the parse layer reports the **false** `here-doc: missing terminating delimiter
-line 'T'` (the body *is* present and terminated), rc 1 where bash is rc 0.
-Pinned as measured in `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`;
-the real fix — the window must report the physical line's word-start status,
-i.e. the cond splitter cutting at a word boundary for a glued pair — is the
-glued-pair family's. A new byte-level word test must be the tokenizer's
-separator arm byte-for-byte (the standing rule).
+`\n`, `)`, space and tab are word breaks) and their two members diverge from
+their cond part windows **differently** (the cond splitter cuts the part right
+after the `&` of the glued pair; both members report the **false** `here-doc:
+missing terminating delimiter line` — the body *is* present and terminated —
+rc 1 where bash is rc 0, pinned as measured in
+`tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`):
+
+- **Chevron `true&&<<B`**: the part `<<B` opens **on the operator**, the
+  window-relative `run == from` arm of `opens_word` opens the site gate, and
+  the window counts 1 where the line counts 0 — a byte-vs-byte mismatch (the
+  window-start arms pinned by
+  `scan/heredoc/ops/tests.rs::window_end_is_exclusive`), and the part asks
+  for a region the line's list never claimed. Owner: the **glued-pair
+  family** (the window must report the physical line's word-start status,
+  i.e. the cond splitter cutting at a word boundary for a glued pair).
+- **Io-number `cat&&3<<T`**: the part `3<<T` opens on the **digit run**,
+  `io_prefix` rejects it and `opens_word` is false at the chevron, so the
+  byte layer reports 0 in the window **as on the line** (pinned by
+  `scan/heredoc/ops/tests.rs::io_number_prefixed_operators_carry_their_fd`)
+  — it agrees with itself. The 1 comes from the **token** level:
+  `cond::part::reconstruct` hands `run_one` the part text `3<<T` and
+  `parse/heredoc/operator.rs::is_operator` / `operator_indices` start at
+  index 0 — a byte(0)↔token(1) disagreement: the parse layer expects a body
+  the byte layer never allocated, while the part asks for **no** region
+  (`cond::parts::take_bodies` takes 0). Owner: the **byte/token word-0
+  agreement for a part whose text begins with an io-number operator** — the
+  glued-pair word-boundary cut changes nothing for this member.
+
+A new byte-level word test must be the tokenizer's separator arm byte-for-byte
+(the standing rule).
 
 **Measure a position-dependent shape with its real prefix.** The bare-separator
 scripts that read like the shape are bash syntax errors *for the separator*:
@@ -5540,7 +5559,8 @@ command in front before writing any divergence bullet.
 The **guards** of the family must not start succeeding because word 0 became an
 operator: `<<EOF` with **no body** stays #275's `missing terminating delimiter
 line 'EOF'` rc 1 (bash warns at rc 0); a `>`-led statement keeps its own rc-1
-reading (`> <<EOF`, `>| <<EOF`, `>f <<EOF` — bash rc 2 / rc 0, the #185 family);
+reading (the bare operator words `> <<EOF`, `>| <<EOF` — bash rc 2 — and
+`>f <<EOF` — bash rc 0: rule family #185, the decision owned by #488);
 the **glued** word keeps its lookup rc 1 with the body free.
 
 Pins: `tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`

@@ -399,14 +399,27 @@ fn redirect_operator_leading_run_counts_the_operator() {
 /// The io-number at a **run start** (`3<<T`, ` 3<<T`) counts 1 and carries its
 /// fd (task #345: word 0 of a redirections-only statement). The **glued** form
 /// (`cat&&3<<T`) counts 0 on the physical line — `&` is a word byte for the
-/// tokenizer, so `io_prefix`'s narrow word rule rejects the run — **but 1 in
-/// its part window**: the cond splitter cuts right after the `&` of the glued
-/// pair, the window opens on the operator, and the window-relative `run ==
-/// from` arm counts a site the line never counted. The part then asks for a
-/// body the line's region list never claimed and the parse layer reports the
-/// false `missing terminating delimiter line 'T'` (rc 1, bash rc 0), pinned by
-/// `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`; the real
-/// fix (a word-boundary cut for the glued pair) is the glued-pair family's.
+/// tokenizer, so `io_prefix`'s narrow word rule rejects the run — and **0 in
+/// its cond part window too**: the cond splitter cuts right after the `&`, so
+/// the part `3<<T` opens on the **digit run**, `io_prefix` rejects it
+/// (`word_start` sees the `&` behind the window start) and `opens_word` is
+/// false at the chevron — the byte layer agrees with itself at 0 (asserted at
+/// the end of this test). The spelling's 1 is the **token** level's: the part
+/// text `3<<T` is one operator through `parse::heredoc::is_operator` (the
+/// scan starts at index 0; pinned by
+/// `parse/heredoc/tests.rs::operator_count_io_number_forms_agree`), a
+/// byte(0)-token(1) disagreement — the parse layer expects a body the byte
+/// layer never allocated, while the part asks for **no** region at all
+/// (`cond::parts::take_bodies` takes 0). The end-to-end signature (the false
+/// `missing terminating delimiter line 'T'`, rc 1, bash rc 0) is pinned by
+/// `tests/redirect.rs::a_heredoc_word_zero_keeps_its_owner_guards`; owner:
+/// the byte/token word-0 agreement for a part text that begins with an
+/// io-number operator. (The chevron member `true&&<<B` is the byte-vs-byte
+/// count mismatch — its window opens on the operator and the `run == from`
+/// arm counts 1 where the line counts 0, pinned by
+/// `window_end_is_exclusive` — and belongs to the glued-pair family, the
+/// cond splitter cutting at a word boundary for a glued pair; that fix
+/// changes nothing for this member, whose byte layer already agrees at 0.)
 #[test]
 fn io_number_prefixed_operators_carry_their_fd() {
     for (line, want) in [
