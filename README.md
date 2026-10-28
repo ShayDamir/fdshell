@@ -397,8 +397,11 @@ in-process run are accepted divergences: the prefix is also **exported** (bash
 keeps such an assignment shell-local), and a `set -x` trace prints nothing for
 the statement (bash prints a line for the command it traces). A word behind the
 redirections is the command word — `>f g` runs `g` with the redirection — and a
-quoted operator word (`'>f'`, `"&>f"`) is a command name, never a redirection;
-a statement carrying a here-doc body keeps the behavior its own pins record.
+quoted operator word (`'>f'`, `"&>f"`) is a command name, never a redirection.
+A **here-document operator** is a redirection too, so a statement that *begins*
+with one is in this family: `<<EOF` + body, `3<<EOF` + body, `cat | <<EOF` + body
+feed the body to the empty command's stdin, print nothing and exit **0** (see
+*Here-documents*).
 
 A **keyword block** takes a redirection written after its closing keyword and
 applies it to the whole block: `while :; do echo a; break; done > f` files the
@@ -429,6 +432,33 @@ line one
 line two
 EOF
 ```
+
+A here-document **needs no command word**: when the operator is the statement's
+first word, the statement is the redirections-only command above — the body feeds
+the *empty* command's stdin, nothing prints, and the status is **0**, as bash:
+
+```shell
+<<EOF
+the body is this empty command's stdin
+EOF
+
+cat | 3<<EOF
+the body is fd 3's input in this stage
+EOF
+```
+
+Every spelling joins it — `<<'EOF'`, `<<-EOF`, the io-number `3<<EOF` / `0<<EOF`
+(its descriptor is the one opened), a statement that starts on a later line
+(`true &&` + newline + `<<EOF`), a block arm (`if`, `for`, `while`, `case`,
+`{ … }`), a pipeline stage (`cat | <<EOF`, `<<EOF | cat`), a background job
+(`<<EOF >f &` creates the empty `f`), and a redirection written behind the
+operator (`<<EOF >f` files nothing). A word behind the operator is the command
+word — `<<EOF g` runs `g` with the body as its stdin — and a `NAME=value` prefix
+**persists** through the statement (`VAR=x <<EOF` leaves `VAR` set, as bash).
+Two shapes keep their own owners: `<<EOF` with **no body line at all** reports
+the missing delimiter (rc 1, where bash reads to end-of-file with a warning), and
+a `<<` **glued inside a word** (`x<<EOF`) stays word data
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
 
 An unquoted delimiter expands `$`/`$(…)`/backticks in the body. A **quoted**
 delimiter makes the body literal, and any quote operator in the delimiter word

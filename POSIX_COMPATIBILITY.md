@@ -167,10 +167,10 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   block/arm position (`if … fi`, `{ … }`, `f(){ … }`, `for … done`,
   `case … esac`). Measured divergences, all pinned:
   a **redirect-only** suffix behind the `&` (`cat <<A & <<B`, `echo hi <<T & <<U`)
-  runs `<<B` as a command word (bash runs a bare redirection, rc 0) — the
-  here-doc half, owner **#345** (a statement with a here-doc body keeps the
-  operator-word behavior; the plain redirect-only statement of #303 never
-  reaches it, since its body region is what gates the parse); the glued
+  runs the bare here-doc redirection: the suffix's body is the empty command's
+  stdin, both bodies print, rc 0 — bash parity, owner **#345** closed it (it had
+  `<<B` running as a command word; the plain redirect-only statement of #303
+  never reached it, since a here-doc body region is what gated the parse); the glued
   `cat <<A& cat <<B` keeps the tokenizer's
   word rule (`&` is an ordinary word byte, so the byte-level delimiter is `A&`)
    and reports the missing terminator; a `#` comment behind the `&` ends the
@@ -178,9 +178,11 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
    end-of-line bookkeeping (task **#333** closed the body-less member of that
    family), so the suffix is flushed on its own line and claims the region its
    own operator owns: `cat <<A & cat <<B # note` plus the four body lines prints
-   both bodies at rc 0 in both shells. A bare `<<` behind the `&` is
+   both bodies at rc 0 in both shells. A **bodyless** bare `<<` behind the `&`
+   (`echo x & <<EOF`, `cat <<A & <<B` with no body lines) is the
 
-  `invalid redirect syntax` rc 1 where bash is rc 2; a body that never arrives
+  missing-delimiter parse error rc 1, where bash warns
+  `here-document … delimited by end-of-file` at rc 0 (owner **#275**); a body that never arrives
   empties the **whole line's** region list (owner **#275**); a **block opened
   behind the `&`** (`cat <<A & if true; then cat <<B … fi`) prints the prefix's
   body lines twice, since the block's span has to cover them — the one-job async
@@ -302,6 +304,27 @@ together with its operator byte (`>&{a,b}`, bash `{a,b}`). The async form
 `echo x >{a,b} &` is refused in the parent (rc 1) where bash prints the
 diagnostic in the child and its own status is 0 — the task #179 family.
 
+A redirection operator written as a statement's **first word** is a redirection
+of a **redirections-only** statement — POSIX XCU 2.1
+`simple_command = [NAME=value …] REDIRECT… [word…]` requires no command word
+(task #303 for the `>` family, task **#345** for the here-doc member, where both
+shells agree on every row): `<<EOF` + body applies the body to the *empty*
+command's stdin and exits **0** silently, and so do `<<'EOF'`, `<<-EOF`, `3<<EOF`
+/ `0<<EOF`, the same statement after a newline (`true &&` + newline + `<<EOF`),
+in a cond part, in a block arm (`if`, `for`, `while`, `case`, `{ … }`), as a
+pipeline stage (`cat | <<EOF`, `<<EOF | cat`), behind a `&` (`<<EOF >f &` creates
+the empty `f`), and with a redirection written behind the operator (`<<EOF >f`
+files nothing). A word behind the operator is the command word (`<<EOF g` looks
+`g` up, its stdin the body — fdshell's shell-wide **1** against bash's 127), and a
+`NAME=value` prefix **persists** through the statement (`VAR=x <<EOF` leaves `VAR`
+set, as bash). Three owners stay measured: `<<EOF` with **no body line at all** is
+the incomplete-stream report rc 1 (owner **#275**, where bash reads to EOF with a
+warning), a `<<` **glued inside a word** (`x<<EOF`) is word data (the no-split rule
+above), and `> <<EOF` / `>| <<EOF` keep the operator-token-leading reading rc 1
+(owner **#185**; bash rc 2). The adjacent shapes — `>f <<EOF` (bash rc 0, fdshell
+rc 1), `for x in <<EOF` and `case x in <<EOF)` (bash rc 2, fdshell rc 0),
+`( <<EOF … )` (bash rc 0, fdshell rc 1: no subshells) — are owner **#488**.
+
 ## Here-document and here-string descriptor numbers
 
 `[N]<<word` delivers the body to descriptor `N` (`cat 3<<EOF` writes the body
@@ -324,10 +347,11 @@ rule as `N>file`, on raw bytes, and that gives three differences from bash:
   valid descriptor number` where bash passes `999…` as an argument. Same for
   `cat 99999999999999999999999<<<x`, which reports `here-string: '999…' is not
   a valid descriptor number`.
-- A number-prefixed operator at the start of a run is fdshell's command word
-  (`3<<EOF` and `3<<<x` alone run as commands, rc 1); bash opens fd 3 for the
-  here-document (and prints nothing) and reports `3: Bad file descriptor` for
-  the here-string.
+- A number-prefixed operator at the start of a run is a **redirection** of a
+  redirections-only statement in both shells: `3<<EOF` + body and `3<<<x` alone
+  open the descriptor, put it back, print nothing and exit **0** (bash 5.3.9 rc 0
+  on both; the here-doc half is task **#345**, which dropped fdshell's rc-1
+  command-word reading of `3<<EOF`, the here-string half being #303's).
 
 The descriptor these operators open is **read-only**, as bash's
 here-document/here-string source is: a `N>file`-style write to it is refused

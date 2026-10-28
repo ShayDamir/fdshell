@@ -1113,7 +1113,11 @@ before chasing any of this.
    (re-proved by hand, 2026-10-25): at `i == to` the read is `line.get(to)` of the
    **whole** line — `None` only when the window ends the line — and a token byte
    there (`\n` is one, task #261) sets `seen_token`, which is exactly what
-   `ops/tests.rs::window_end_is_exclusive` pins. Coordinates drift as the file
+   `ops/tests.rs::window_end_is_exclusive` pins. **Task #345 rewrote this body**
+   (the `seen_token` flag is gone: the site test is `ops.rs::opens_word`, whose
+   run-start arm `run == from` is what a window-end `\n` now feeds), so every
+   flag these two items reason about is deleted code — re-prove both by applying
+   the mutation on the current body before trusting either record. Coordinates drift as the file
    gains helpers and doc comments, so re-derive them from the loop rather than
    trusting line numbers. The `sites` list is `pub(crate)` and is reused
    **unchanged** for the window-blind count in `scan/heredoc/opaque.rs`, precisely
@@ -1126,17 +1130,28 @@ before chasing any of this.
    the `seen_token` guard a word-start `<<` can never be preceded only by spaces
    (all bytes before it would have to be whitespace, which makes `seen_token`
    false), so the loop always returns from the body before `k` reaches 0 and the
-   extra step is unreachable.
+   extra step is unreachable. **Task #345 deleted that guard** (the site test is
+   `ops.rs::opens_word`, which calls `precedes_pipe` as its `|` arm), so the
+   `k == 0` step is reachable whenever the `|` is the window's first byte: the
+   equivalence is unproven on the new body.
  3. `ops.rs`'s comment-skip arm `i = i + p + 1` → `i + p * 1` (the comment skip
     lands **on** the comment's `\n` instead of just past it) was recorded
     equivalent; it is **killed** now — task #318 re-proved it by hand: applying the
-    mutation fails `ops/tests.rs::newline_is_a_token_byte_space_and_tab_are_not`
-    (`# x\n<<EOF` counts **1** operator where the clean walker counts **0**) plus
+    mutation fails `ops/tests.rs::word_break_bytes_and_the_run_start_open_the_operator`
+    (renamed from `newline_is_a_token_byte_space_and_tab_are_not`, task #345;
+    `# x\n<<EOF` counts **1** operator where the clean walker counts **0**) plus
     `parse::heredoc::tests::operator_count_leading_newline_agree` and
     `…leading_operator_forms_agree`. The old argument stopped at "`advance`
     consumes the `\n` as one word-break byte" and skipped the flag:
-    `ops/pipe.rs::is_token_byte` calls `\n` a token byte (task #261), so landing on
-    it sets `seen_token` and turns the next `<<` into an operator. **Rule:** an
+    the old `is_token_byte` helper (deleted by task #345, which folded its byte
+    set into the `io::word_start` / run-start arms of `ops.rs::opens_word`;
+    `ops/pipe.rs::precedes_pipe` is all that is left of that module) counted `\n`
+    a token
+    byte (task #261), so landing on
+    it sets `seen_token` and turns the next `<<` into an operator. **Task #345**
+    made the clean walker count **1** on `# x\n<<EOF` (the run behind the
+    comment's newline opens its operator at the run start), so this pin's kill
+    must be re-derived on the new body. **Rule:** an
     equivalence argument must cover every variable the extra iteration can reach —
     a flag is as load-bearing as the index — and a recorded equivalent on a
     rewritten body is a **new** finding: 4950/4950 green in the 2026-10 record,
@@ -1472,7 +1487,9 @@ Pins: `parse/token/tests.rs::clobber_pipe_absorbed_into_operator`,
 deviation from bash, recorded in README), the byte/token count agreement list in
 `parse/heredoc/tests.rs::operator_count_clobber_forms_agree_at_both_levels` with
 `scan/heredoc/ops/tests.rs::clobber_pipe_is_an_operator_byte_not_a_pipeline`, and
-the real-script pair `tests/redirect.rs::quoted_operator_word_keeps_the_pipe_and_the_body_free`
+the real-script pair `tests/redirect.rs::quoted_operator_word_keeps_the_pipe_and_consumes_the_body`
+(renamed by task #345, which made the pipe-position `<<` a stage's own
+redirection, so the body is consumed)
 / `quoted_operator_word_does_not_shift_the_next_heredoc_body`. The *run-start* half
 of the `cat >| <<EOF` / `>| <<EOF` divergence (the byte scan required a preceding
 command word, so a `>|`-leading run counted 0 against the token layer's 1) is closed
@@ -2651,14 +2668,14 @@ The write arm's "unobservable write" rationale covers the plain names only. An i
 ## A digit run that overflows keeps the pinned `TooLarge` bail
 Sharing `positional_value` between the two paths makes the braced `${99999999999999999999}` hit the `usize` parse, and the tempting bash parity (fall through to a variable lookup, expanding to empty at rc 0) would break `tests/herestring.rs::here_string_expansion_failure_is_reported`, which pins the bare path's rc-1 `TooLarge`. Keeping the bail makes the braced form rc 1 where bash is rc 0 — an accepted divergence with a README bullet and a unit pin, chosen over a per-path parse so one index map stays honest. Rule: when two paths share a helper, audit what each path's pinned rc is *before* moving the shared logic, and prefer the documented divergence over duplicating the parse.
 
-## The byte scan's "preceding token" test must mirror the token layer's `i != 0 && prev != |`
+## The byte scan's "preceding token" test must mirror the token layer's `i != 0 && prev != |` (superseded by task #345: word 0 is a site)
 `scan/heredoc/ops.rs` counted a `<<` only after a *command word* (`seen_word`, set from `state.word_active`) while `parse/heredoc/operator.rs::is_operator` counts it whenever a **token** precedes it and that token is not a pipeline `|`. `is_word_break` ends a word at `>`, `<`, `|`, so a word-seen flag can *never* express the token rule: re-measured on master (`f821c94`), `> <<EOF`, `>| <<EOF`, `>> <<EOF`, `>& <<EOF`, `<> <<EOF`, `< <<EOF`, `; <<EOF`, `& <<EOF`, `&& <<EOF`, `( <<EOF`, `>> >& <<EOF`, `> << EOF`, `> <<EOF <<B` (1/2) and `> <<EOF && cat <<A` (1/2) diverged (byte 0 / token 1 where not noted), while `<<EOF` (run start), `| <<EOF`, `> | <<EOF`, `>x<<EOF`, `><<EOF`, `> "<<EOF"`, `# x\n<<EOF`, `\< <<EOF`, `>>x <<EOF`, `cat ; > <<EOF` and the multi-statement forms `cat <<A ; <<B`, `cat <<A && <<B`, `cat <<A && cat <<B`, `cat <<A | tr <<B` agreed. The fix is a flag with the token layer's meaning (`seen_token`), not a wider word rule. The measured shape of the mirror:
 
 - `;`, `&&`, `&` and `(` **are** tokens for the tokenizer, so they set the flag: `; <<EOF` is 1 at both levels, `cat <<A ; <<B` is 2. A flag reset at `;`/`&&` was measured (task #185's planning worktree) and **rejected** — it re-diverges in the other direction (`; <<EOF` 0 vs 1, `cat <<A ; <<B` 1 vs 2). "Count agreement" pins must be measured against the token layer, never against intuition about what starts a statement.
 - A pipeline `|` never sets the flag; the `|` absorbed into a `>|` clobber is operator content of its word and is decided by `precedes_pipe`/`parse::redirect::clobber_pipe`, never by this flag.
 - The flag's byte is read **before** `state.advance`: the `\<`, `$(`, `((` and quoted-region arms jump 2+ bytes, so a post-jump read misses the token of a run that opens with an escape pair (`\< <<EOF` counts 1).
 - Do not derive the predicate from `scan::advance::is_word_break`: that list names bytes that *end* a word, and `;`/`&`/`<`/`>` are word-enders **and** tokens.
-- Whitespace never sets the flag, so the pins that kill the `is_token_byte` mutants are the **whitespace-leading runs**: `  <<EOF`, ` <<EOF`, `\t<<EOF`, `  <<EOF x`, `  <<-EOF`, `   | <<EOF` → 0 at both levels. Every other pin of this rule has a token between the run start and the `<<`, so its flag is already set by that token and a mutation that turns *every* byte into a token byte (`is_token_byte -> true`, `delete !`, `&& -> ||`) cannot be seen there. Pinned in `scan/heredoc/ops/tests.rs::redirect_operator_leading_run_counts_the_operator` and `parse/heredoc/tests.rs::operator_count_leading_operator_forms_agree`.
+- Whitespace never sets the flag, so the pins that kill the `is_token_byte` mutants are the **whitespace-leading runs**: `  <<EOF`, ` <<EOF`, `\t<<EOF`, `  <<EOF x`, `  <<-EOF`, `   | <<EOF` → 0 at both levels. **Task #345 inverted this row set**: a word break *and the run start* open a site, so all of them are **1/1** and their statements are redirections-only commands (rc 0); the kill pins for the byte set moved to the rows of `ops/tests.rs::word_break_bytes_and_the_run_start_open_the_operator`. Every other pin of this rule has a token between the run start and the `<<`, so its flag is already set by that token and a mutation that turns *every* byte into a token byte (`is_token_byte -> true`, `delete !`, `&& -> ||`) cannot be seen there. Pinned in `scan/heredoc/ops/tests.rs::redirect_operator_leading_run_counts_the_operator` and `parse/heredoc/tests.rs::operator_count_leading_operator_forms_agree`.
 
 Rule: when two layers count the same thing, write the predicate on the layer that owns the definition (the tokenizer here) and mirror it byte-wise; a *word*-shaped approximation is equal only on the lines that happen to carry a command word. The delta is pinned, not "fixed" silently: the line-level count claims the body region, so a token-leading line now consumes its body and reports its operator word (`> <<EOF` + body → rc 1 `">" not found`, `; <<EOF` + body → rc 1 `"<<EOF" not found`) where master ran the body lines as commands; bash is a syntax error (rc 2) on all of them (task #185, `tests/heredoc.rs::heredoc_leading_*`).
 
@@ -2705,13 +2722,19 @@ separator — measured `case '|' in "|") echo hit;; esac`: fdshell rc 1
 `case: empty pattern`, bash rc 0 `hit`; `parse/group_block.rs`'s trailing-word
 test — measured `{ true } "|" out`: fdshell rc 1 `expected ';' before '}'`,
 bash rc 2): message/pattern family only, nothing feeds the heredoc counts.
-- **`is_token_byte` is the tokenizer's separator arm byte-wise**:
+- **the byte scan's word-break test is the tokenizer's separator arm
+byte-wise** (the helper was `is_token_byte`; task #345 folded its byte set into
+the word-break / run-start arms of `scan/heredoc/ops.rs::opens_word`):
 `token/step.rs` emits a `;` token for `\n` and `)` and nothing for ` `/`\t`,
-so a newline-leading run *has* a preceding token (1/1) and a space/tab-leading
-run has none (0/0). Pinned as measured: `\n<<EOF` + body and `true &&\n<<B` +
-body report one resolve error (`"<<EOF" not found`) and run no `body`/`EOF`
-command. The whitespace-leading rows remain the `is_token_byte` kill pins (the
-#185 rule above).
+so a newline-leading run *has* a preceding token (1/1). The space/tab-leading
+rows are **task #345's** change: every word break *and the run start* open the
+operator, so ` <<EOF`, `\t<<EOF`, `\n<<EOF` count **1/1** and their statements
+are redirections-only commands. Pinned as measured: `\n<<EOF` + body and
+`true &&\n<<B` + body print nothing at rc 0 and run no `body`/`EOF` command
+(`tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`).
+The whitespace-leading rows remain the kill pins of this byte set (the #185
+rule above), and `ops/tests.rs::word_break_bytes_and_the_run_start_open_the_operator`
+is the row list.
 - **The count is a shape count; the region scan keeps its `None`.**
 `operator_count` counts *sites* (`scan/heredoc/ops.rs::sites`), the delimiter
 gate stayed in `operator_delims`, and the split is allocation-neutral by the
@@ -3909,8 +3932,14 @@ record: the token text of `cat 3"<<"T`, `cat "3"<<T` and `cat \3<<T` is exactly
 
 Related rules that must stay separate: the *word-start* test (`word_start`,
 space/tab/`;`/`\n`, deliberately **not** `|`) decides whether a digit run begins
-the operator's word; the *preceding-token* test (`token_before`, the `is_operator`
-mirror `i != 0 && prev != b"|"`) decides whether the operator is a command word.
+the operator's word; the *preceding-token* test (the old `token_before`, the
+`is_operator` mirror `i != 0 && prev != b"|"`) decided whether the operator was a
+command word. **Task #345 deleted that third rule**: a word-0 operator is a
+redirection, so nothing may veto a site, and `ops.rs::opens_word` is the
+surviving gate — its io arm is `word_start` with `io::is_chevron` (one io-number
+helper at both levels, which is this record's rule), and its `|` arm is
+`ops/pipe.rs::precedes_pipe`, the **pipeline-split** rule, not a command-word
+rule.
 Merging them breaks the pinned `a | <<B` / `cat a|3<<T` rows (the pipeline's
 command word) and the `> <<EOF` rows. `parse::redirect::parse_fd` is the single
 fd rule (`N>file` and `N<<word` share it), so the fd-number semantics cannot
@@ -3970,11 +3999,15 @@ accepted equivalents, unkillable because of scanner invariants:
   `seen_token`, already true whenever the branch is entered (`token_before`
   implies a consumed token byte, and every jump in `ScanState::advance`
   starts on one); quote/escape state is identical because both paths `advance`
-  over it.
+  over it. **Task #345 rewrote this body** (the flags are gone: the site test
+  is `opens_word`), so this argument describes deleted code — re-prove the
+  equivalence by applying the mutation.
 - `ops.rs` `while k > 0`→`>=` in `precedes_pipe`: it is reached only after
   `preceded`, which implies a token byte before `run`, so the backward scan
   returns at that byte and never decrements `k` past 0 — the underflow the
-  mutant causes is unreachable.
+  mutant causes is unreachable. **Task #345 deleted `preceded`**: `opens_word`
+  calls `precedes_pipe` directly as its `|` arm, so a window starting on a `|`
+  reaches `k == 0` — re-prove.
 - `ops.rs` `i + p + 1`→`i + p * 1` in the comment skip (the MISSED one,
   col 38): the mutant's jump is `i + p * 1 = i + p`, the comment's
   terminating newline — exactly **one byte short** of the unmutated
@@ -4113,6 +4146,10 @@ species live there.
   with the *stricter* preceding-token rule (`seen_token` starts false at
   `run_start`), while `operator_delims(line, start, body_start)` scans the whole
   physical line from `line_start` with `seen_token` already raised by the runs
+  (**task #345 deleted `seen_token` and the stricter rule**: `opens_word`'s
+  run-start arm makes the sub-window's first word an operator site, so this
+  record's asymmetry premise is gone — re-derive the reachability argument on
+  the current body)
   before the `;` — a line-start scan is a superset, so a non-empty run always
   yields a non-empty `ops` (the coverage report shows the guard's `return None` at
   zero hits). The guard stays because it is what keeps an empty `ops` from jumping
@@ -5442,3 +5479,75 @@ never the rc, per #355), `tests/quotes.rs::a_quoted_separator_word_is_word_data`
 and the fence the blast radius names: `tests/heredoc.rs`, `tests/block_bodies.rs`,
 `tests/cond_blocks.rs`, `tests/case.rs`, `tests/group.rs`, `tests/pipeline.rs`,
 `tests/async.rs`, `tests/env_assign.rs`, `tests/glued_pair.rs` green untouched.
+
+## A word-0 redirection operator is a **three-layer** rule: the byte site gate, the token index and the parse gate open together (task #345)
+
+POSIX XCU 2.1 `simple_command = [NAME=value …] REDIRECT… [word…]` has no
+mandatory command word, so a `<<` / `<<-` written as a statement's **first word**
+is a redirection of a **redirections-only** statement: the body feeds the *empty*
+command's stdin, the statement is silent, rc 0, and the io-number form (`3<<T`,
+`0<<T`) opens the descriptor it names. That is task #303's rule, extended to the
+here-doc operator — and it lives in three places that must open **in one step**:
+
+- the **byte site gate**, `scan/heredoc/ops.rs::opens_word` (a `<<` is an
+  operator site at a run start, after a word break, or behind a pipeline `|`);
+- the **token index**, `parse/heredoc/operator.rs::is_operator` +
+  `operator_indices` (the scan starts at index **0**: no `i != 0` skip, no
+  pipe-predecessor bail);
+- the **parse gate**, `parse/command/redirect_first.rs::leads()` (with
+  redirections collected, an operator at word 0 fires the gate; with none, the
+  statement's own predicates decide).
+
+**The operator count is the region contract between the scan layer and the parse
+layer.** Opening one layer alone shifts the body-region allocation: with only the
+parse gate open, `cat&&3<<T` + body + `T` reported
+`here-doc: missing terminating delimiter line 'T'` — the **part window** counted
+1 operator and the **physical line** counted 0, so the part asked for a region the
+line never claimed (LESSONS: "A region window and the skip derived from it are one
+pair"). Rule: change the count at **both** levels in the same commit and run the
+`operator_count_*_agree` pairs (`parse/heredoc/tests.rs`) before anything else.
+
+**Do not add a window-local io-number arm.** The temptation at the byte layer is
+to let a window look back so `3<<T` at a window start reads as an io-number
+(`cat&&3<<T`). A per-window io rule diverges from the line-level count and breaks
+the glued-pair invariant (every counting window is a sub-window of the line's
+window — `regions.rs`). The glued spellings stay **word data** at both levels and
+keep rc 1 (`cat&&3<<T`, `true&&<<B`, `x<<EOF`), pinned as the glued-pair family's
+own; `&`, `(`, `<`, `>` are word bytes for the tokenizer, `;`, `\n`, `)`, space
+and tab are word breaks. A new byte-level word test must be the tokenizer's
+separator arm byte-for-byte (the standing rule).
+
+**Measure a position-dependent shape with its real prefix.** The bare-separator
+scripts that read like the shape are bash syntax errors *for the separator*:
+`; <<EOF`, `&& <<EOF`, `| <<EOF`, `& <<EOF` as a script's first line are bash rc 2
+(`syntax error near unexpected token`), while `echo a; <<EOF`, `true && <<EOF`,
+`cat | <<EOF`, `echo x & <<EOF` are bash rc 0. Every one of those rc-2s is a
+leading-separator artifact, not a here-doc rule, and a "bash is rc 2 → keep rc 1"
+decision taken from such a script is a **fake divergence**. Re-measure with a real
+command in front before writing any divergence bullet.
+
+The **guards** of the family must not start succeeding because word 0 became an
+operator: `<<EOF` with **no body** stays #275's `missing terminating delimiter
+line 'EOF'` rc 1 (bash warns at rc 0); a `>`-led statement keeps its own rc-1
+reading (`> <<EOF`, `>| <<EOF`, `>f <<EOF` — bash rc 2 / rc 0, the #185 family);
+the **glued** word keeps its lookup rc 1 with the body free.
+
+Pins: `tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`
+(every position: run start, cond part, block arm, group, pipeline stage, io-number,
+`&`, the persisting `NAME=` prefix), `…_with_a_word_runs_that_word`,
+`a_heredoc_word_zero_keeps_its_owner_guards`,
+`tests/pipeline.rs::heredoc_only_stage_is_a_redirect_only_stage`,
+`tests/heredoc.rs::numbered_heredoc_known_divergences`,
+`scan/heredoc/ops/tests.rs::word_break_bytes_and_the_run_start_open_the_operator`,
+`parse/heredoc/tests.rs::operator_count_counts_word_zero` /
+`operator_count_pipe_position_is_an_operator`,
+`parse/command/redirect_first/tests.rs::the_gate_fires_on_a_heredoc_word_zero` /
+`a_heredoc_operator_without_a_body_never_reaches_the_gate`.
+
+**Renaming a pin is a LESSONS.md edit.** `python3 tools/lessons_check.py --check`
+reports every `<file>.rs` citation whose `::ident` is gone
+(`Ident references … absent from the resolved file`) and `nix flake check` gates
+it; deleting a helper (`is_token_byte`, `token_before`, `seen_token` — all folded
+into `opens_word` by this task) breaks the citations of records that *reasoned*
+about it, so add "task #N rewrote this body / renamed from X" to each record
+instead of rewriting its measurement.
