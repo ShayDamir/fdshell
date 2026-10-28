@@ -40,6 +40,11 @@ pub struct ShellState {
     /// Number of `for`/`while`/`until` loops enclosing the command being executed
     /// (`break n` / `continue n` counts against it; `if`, `case` and groups are transparent).
     pub(crate) loop_depth: u32,
+    /// True while the command being executed runs inside a part of a `&&`/`||`
+    /// list that bash exempts from errexit (every part except the command
+    /// following the final operator) — the execution context set by
+    /// [`crate::cond::errexit::gated`]; `should_exit` consults it.
+    pub(crate) errexit_gated: bool,
     pub(crate) eval_depth: u32,
     pub(crate) ifs: ShortCStr,
     pub(crate) options: u32,

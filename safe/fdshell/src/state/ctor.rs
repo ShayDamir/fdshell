@@ -42,6 +42,7 @@ pub(crate) fn build() -> ShellState {
         environ: sys::env::environ_snapshot(),
         nesting: 0,
         loop_depth: 0,
+        errexit_gated: false,
         eval_depth: 0,
         ifs: ShellState::default_ifs(),
         options: crate::options::DEFAULTS,

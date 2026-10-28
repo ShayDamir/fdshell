@@ -13,9 +13,12 @@ use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
 /// `exempt` disables errexit on the list's final segment (the conditions of
-/// `if`/`while`/`until` are exempt, as in bash). `background` marks the list's
-/// **last** part to run asynchronously (the plain `&` ends the statement after
-/// that part — task #326); the preceding parts of the list run foreground.
+/// `if`/`while`/`until` are exempt, as in bash). The list's **non-final** parts
+/// carry bash's other errexit suppression, the `&&`/`||` gate
+/// ([`errexit::gated`]) — two independent suppressions of one check.
+/// `background` marks the list's **last** part to run asynchronously (the plain
+/// `&` ends the statement after that part — task #326); the preceding parts of
+/// the list run foreground.
 pub(crate) fn run_cond_list(
     text: &ScriptText,
     bodies: &[Vec<u8>],
@@ -38,7 +41,12 @@ pub(crate) fn run_cond_list(
             }
             // Errexit only for a final part that actually ran: a list that
             // ended on a skipped `&&` chain keeps the failure in the exempt
-            // preceding part and must not stop the shell.
+            // preceding part and must not stop the shell. The other half of
+            // bash's rule is the gate below: every **non-final** part runs
+            // inside `errexit::gated`, so a compound sitting there (loop body,
+            // group, `if` body, `case` arm, function frame) never consults
+            // `should_exit`; the final part is the command following the final
+            // operator, so it keeps exiting.
             if !exempt && !parts::is_empty_part(line, start, i) && errexit::should_exit(cell)? {
                 return Ok(Some(LoopControl::Exit));
             }
@@ -47,8 +55,9 @@ pub(crate) fn run_cond_list(
         if !parts::is_empty_part(line, start, i) {
             // A non-final part of the list always runs foreground: the plain
             // `&` flag marks only the list's last part.
-            if let Some(control) = part::run_part(text, line, start, i, &part_bodies, cell, false)?
-            {
+            if let Some(control) = errexit::gated(cell, || {
+                part::run_part(text, line, start, i, &part_bodies, cell, false)
+            })? {
                 return Ok(Some(control));
             }
             let st = cell.borrow().change_context(CmdError::Never)?;

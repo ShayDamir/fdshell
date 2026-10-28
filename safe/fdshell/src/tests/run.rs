@@ -1022,6 +1022,117 @@ fn errexit_failing_final_and_command_exits() {
     });
 }
 
+/// The `&&`/`||` errexit gate reaches a `{ …; }` body: `false` runs inside a
+/// non-final part, so the shell keeps running with the failing status (bash
+/// `set -e; { false; } && echo x; echo rc=$?` → `rc=1`, rc 0).
+#[test]
+fn errexit_gate_reaches_a_group_body() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"{ false; } && builtin echo skipped", &cell).unwrap();
+        assert!(control.is_none());
+        assert_eq!(borrow_state(&cell).last_status.exit_code(), 1);
+    });
+}
+
+/// The gate reaches a `for` body (bash row: `set -e; for x in 1; do false;
+/// done && echo x` continues).
+#[test]
+fn errexit_gate_reaches_a_loop_body() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control =
+            run_script(b"for x in 1; do false; done && builtin echo skipped", &cell).unwrap();
+        assert!(control.is_none());
+        assert_eq!(borrow_state(&cell).last_status.exit_code(), 1);
+    });
+}
+
+/// The gate reaches a function-call frame: the body runs through its own
+/// `run_script`, and the flag rides the state into it.
+#[test]
+fn errexit_gate_reaches_a_function_frame() {
+    child_test(|| {
+        let cell = make_cell();
+        run_script(b"f() { false; }", &cell).unwrap();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_cond_list(b"f && builtin echo skipped", &cell).unwrap();
+        assert!(control.is_none());
+        assert_eq!(borrow_state(&cell).last_status.exit_code(), 1);
+    });
+}
+
+/// The pairing pin: `gated` restores the flag when the list ends, so the very
+/// next statement exits again (the shape of
+/// [`loop_depth_restored_after_loop_before_outside_break`] below).
+#[test]
+fn errexit_gate_is_restored_after_the_list() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"{ false; } && builtin echo skipped", &cell).unwrap();
+        assert!(control.is_none());
+        assert!(!borrow_state(&cell).errexit_gated);
+        let control = run_cond_list(b"false", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Exit)));
+    });
+}
+
+/// The restore is not tied to the clean path: a control-flow signal raised
+/// inside the gated part escapes the list (`{ return; }` is transparent, so
+/// `Return` propagates), and the flag is off afterwards.
+#[test]
+fn errexit_gate_is_restored_on_a_returned_control() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"{ return; } && builtin echo x", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Return)));
+        assert!(!borrow_state(&cell).errexit_gated);
+    });
+}
+
+/// The same pairing across an `Err` raised inside the gated part (`break` at
+/// loop depth 0 bails): the flag never outlives the part, so the next statement
+/// is ungated again.
+#[test]
+fn errexit_gate_is_restored_on_an_error() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"{ break; } && builtin echo x", &cell);
+        assert!(control.is_err());
+        assert!(!borrow_state(&cell).errexit_gated);
+    });
+}
+
+/// A compound that is the **final** element of the list is the command
+/// following the final operator, so it keeps exiting (bash row
+/// `set -e; true && { false; }; echo rc=$?` → rc 1).
+#[test]
+fn ungated_compound_as_final_list_element_exits() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"builtin true && { false; }", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Exit)));
+    });
+}
+
+/// The control of the ungated case: a bare group's failing body exits (the
+/// `tests/group.rs` twin).
+#[test]
+fn ungated_compound_body_exits() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"{ false; }", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Exit)));
+    });
+}
+
 #[test]
 fn pwd_builtin_succeeds() {
     child_test(|| {
