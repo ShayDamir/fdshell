@@ -540,18 +540,19 @@ fn clobber_before_a_heredoc_is_a_redirect_error_not_a_delimiter_error() {
 }
 
 // A quoted word is not `>`-terminated, so `cat "a>"| <<EOF` keeps the `|` as
-// the pipeline pipe: `<<EOF` is the second stage's command word, the body lines
-// are their own commands, and the two `<<` counts agree at 0 (no body region).
-// bash 5.3.9: rc 0, `cat: 'a>': No such file`; fdshell exits 1 because `body`
-// is not a command, and master measures the same rc 1 with the same stderr.
+// the pipeline pipe and the shape stays in the pipeline family: the counts
+// agree at 1 (task #345 — the pipe ends the first stage's word and begins the
+// `<<EOF` word), the body is the second stage's stdin and claims its region,
+// and the pipeline exits rc 0 with only the `cat` report on stderr.
+// bash 5.3.9: rc 0, `cat: 'a>': No such file`.
 #[test]
-fn quoted_operator_word_keeps_the_pipe_and_the_body_free() {
+fn quoted_operator_word_keeps_the_pipe_and_consumes_the_body() {
     let (out, err, code) = run("cat \"a>\"| <<EOF\nbody\nEOF");
-    assert_eq!(code, 1, "stdout={out:?}");
+    assert_eq!(code, 0, "stdout={out:?} stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
     assert!(
-        err.contains("\"body\" not found"),
-        "the body line must stay a command, stderr={err:?}"
+        !err.contains("\"body\" not found"),
+        "the body line must not be a command, stderr={err:?}"
     );
     assert!(
         !err.contains("missing terminating delimiter"),
@@ -2613,14 +2614,158 @@ fn a_redirect_only_statement_with_a_word_runs_that_word() {
     );
 }
 
+/// The **here-doc members of the redirections-only family** (task #345):
+/// POSIX `simple_command = [NAME=value…] REDIRECT… [word…]` has no mandatory
+/// command word, so a word-0 `<<` (the io-number form included) is a
+/// redirection that feeds the body to the *empty* command's stdin. Every row is
+/// bash 5.3.9's measurement: rc 0, silent, nothing created, the body consumed
+/// (never a command of its own). The io-number opens the descriptor it names,
+/// a second redirection joins it, and the shapes that stay rc 1 are the owners
+/// named below (#275's missing body, the glued word, the operator-word family).
+#[test]
+fn a_heredoc_only_statement_is_a_redirect_only_statement() {
+    let dir = seeded("heredoc_only");
+    let dir = dir.to_str().unwrap();
+    // Silent, rc 0, nothing created. The block arms, the pipeline stage and the
+    // cond-list parts all take the same arm.
+    for script in [
+        "<<EOF\nbody\nEOF",
+        "<<'EOF'\n$HOME\nEOF",
+        "<<-EOF\n\tbody\n\tEOF",
+        "\n<<EOF\nbody\nEOF",
+        "true && <<EOF\nbody\nEOF",
+        "true &&\n<<EOF\nbody\nEOF",
+        "if true\nthen\n<<EOF\nbody\nEOF\nfi",
+        "for i in a; do\n<<EOF\nbody\nEOF\ndone",
+        "case a in a)\n<<EOF\nbody\nEOF\n;;\nesac",
+        "{ <<EOF\nbody\nEOF\n}",
+        "cat | <<EOF\nbody\nEOF",
+        "<<EOF | cat\nbody\nEOF",
+        "3<<EOF\nbody\nEOF",
+        "0<<EOF\nbody\nEOF",
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((code, out.as_str()), (0, ""), "{script}: stderr={err:?}");
+        assert!(created(&files).is_empty(), "{script}: created {files:?}");
+        assert!(
+            !err.contains("\"body\" not found"),
+            "{script}: the body must never be a command: stderr={err:?}"
+        );
+    }
+    // A redirection written behind the operator joins the same statement: both
+    // files appear, empty, rc 0 (bash: the empty command's fds, then restored).
+    for (script, want) in [
+        ("<<EOF >f\nbody\nEOF", &["f"][..]),
+        ("<<EOF >f 2>g\nbody\nEOF", &["f", "g"]),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (code, out.as_str(), created(&files)),
+            (0, "", names(want)),
+            "{script}: stderr={err:?}"
+        );
+    }
+    // The scoped `NAME=value` prefix **persists** through a redirections-only
+    // statement (the #303 rule, bash's too): `VAR=x` survives the here-doc.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "VAR=x <<EOF\nbody\nEOF\necho \"[$VAR]\" $?");
+    assert_eq!(
+        (out.as_str(), code, created(&files)),
+        ("[x] 0\n", 0, names(&[])),
+        "stderr={err:?}"
+    );
+    // The async member: the background job applies the redirection, its body is
+    // consumed and the file appears (bash rc 0, `done`).
+    let dir = seeded("heredoc_only_async");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_cwd(dir, "<<EOF >f &\nbody\nEOF\necho done");
+    assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err:?}");
+    let path = std::path::Path::new(dir).join("f");
+    assert!(
+        path.exists(),
+        "f must be created: {}",
+        listing(dir).join(" ")
+    );
+    assert_eq!(std::fs::metadata(&path).ok().map(|m| m.len()), Some(0));
+}
+
+/// The same family with a **word behind** the redirections: the word is the
+/// command (`>f g`'s rule, task #303), the here-doc body is its stdin, the
+/// file is created, and the lookup fails at fdshell's shell-wide **1** where
+/// bash reports 127. The body never runs as a command.
+#[test]
+fn a_heredoc_only_statement_with_a_word_runs_that_word() {
+    let dir = seeded("heredoc_only_word");
+    let dir = dir.to_str().unwrap();
+    for (script, needle, want) in [
+        ("<<EOF g\nbody\nEOF", "\"g\" not found", &[][..]),
+        ("<<EOF >f g\nbody\nEOF", "\"g\" not found", &["f"]),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), names(want), "{script}: {files:?}");
+        assert!(
+            !err.contains("\"body\" not found"),
+            "{script}: the body must never be a command: stderr={err:?}"
+        );
+    }
+}
+
+/// The guards of the same family, pinned **as measured** with their owners:
+///
+/// * `<<EOF` with **no body at all** is #275's incomplete-stream rule: the
+///   operator demands a body, the parse layer reports the missing delimiter,
+///   rc 1. bash reads to EOF with a warning and exits 0 — the divergence stays
+///   owned by #275 and must not start succeeding because word 0 is now an
+///   operator.
+/// * A `<<` **glued inside a word** (`x<<EOF`) is word data at both levels (the
+///   tokenizer never splits a word at an operator byte): the command lookup is
+///   rc 1 and the body lines run as commands. Owner: the glued-pair family.
+/// * The **operator-token**-leading rows (`> <<EOF`, `>| <<EOF`) are the #185
+///   family: word 0 is a non-here-doc operator, the statement keeps its rc-1
+///   command word (bash rc 2).
+#[test]
+fn a_heredoc_word_zero_keeps_its_owner_guards() {
+    let dir = seeded("heredoc_only_guards");
+    let dir = dir.to_str().unwrap();
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "<<EOF");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("missing terminating delimiter line 'EOF'"),
+        "stderr={err:?}"
+    );
+    assert!(created(&files).is_empty(), "created {files:?}");
+    // The glued word: no operator at either level, so the body is free.
+    clean(dir);
+    let (out, err, code) = run("x<<EOF\nbody\nEOF");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("\"x<<EOF\" not found"), "stderr={err:?}");
+    // The operator-token-leading twin of the #185 pins stays rc 1 on its word.
+    for (script, needle) in [
+        ("> <<EOF\nbody\nEOF", "\">\" not found"),
+        (">| <<EOF\nbody\nEOF", "\">|\" not found"),
+    ] {
+        clean(dir);
+        let (_out, err, code) = run_cwd(dir, script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(err.contains(needle), "{script}: stderr={err:?}");
+    }
+}
+
 /// The guards: a **quoted** operator word stays a command word (the
 /// operator-quoting gate, task #250), a quoted empty word 0 stays a command
 /// lookup (bash 127, `f` created by the redirection that still applies), an
 /// io-number must be glued to its operator (`2 > f` is the command `2`), a bare
-/// operator with no operand stays the parse error, and every here-doc-bearing
-/// statement keeps the leading-operator behavior the #185 pins record (owners
-/// #345 and the here-doc family — bash is rc 2 on the `> <<EOF` rows, rc 0 on
-/// the last two).
+/// operator with no operand stays the parse error, and the **operator-token**-
+/// leading here-doc family (`> <<EOF`, `>| x <<EOF`, `>x <<EOF`) keeps the
+/// rc-1 behavior the #185 pins record (bash is rc 2 there). A **word-0**
+/// here-doc operator is the other family: rc 0, the redirections-only statement
+/// of task #345, pinned by the async row at the end.
 #[test]
 fn a_quoted_operator_or_heredoc_word_stays_a_command() {
     let dir = seeded("redirect_only_guard");
@@ -2657,25 +2802,30 @@ fn a_quoted_operator_or_heredoc_word_stays_a_command() {
         assert!(err.contains("invalid redirect"), "{script}: {err}");
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
-    // The here-doc family keeps its owners: the operator word is reported and
-    // the body lines never run.
-    let rows: [(&str, &str); 5] = [
+    // The operator-token-leading family keeps its owners: the operator word is
+    // reported and the body lines never run (bash rc 2 on every row). The
+    // here-doc **word-0** rows moved to rc 0 with task #345, so the async
+    // `cat <<A & <<B` row is asserted below, next to the rc-0 family.
+    let rows: [(&str, &str); 4] = [
         ("> <<EOF\nbody\nEOF", "\">\" not found"),
         (">| <<EOF\nbody\nEOF", "\">|\" not found"),
         (">| x <<EOF\nbody\nEOF", "\">|\" not found"),
         (">x <<EOF\nbody\nEOF", "\">x\" not found"),
-        ("cat <<A & <<B\nx\nA\ny\nB", "\"<<B\" not found"),
     ];
     for (script, needle) in rows {
-        // `run_cwd`, not `run_ls`: the `cat <<A & <<B` row is an `&`-terminated
-        // segment followed by a newline, which the `cd {dir}; ` prefix breaks
-        // (the tokenizer quirk `run_cwd` exists for). Its stdout is the prefix
-        // job's body (`x`), which `tests/herestring.rs` pins; rc 1 is the
-        // suffix's report.
+        // `run_cwd`, not `run_ls`: the rows are `&`-terminated segments and
+        // multi-line scripts, which the `cd {dir}; ` prefix of `run_ls` breaks
+        // (the tokenizer quirk `run_cwd` exists for).
         let (_out, err, code) = run_cwd(dir, script);
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(err.contains(needle), "{script}: stderr={err:?}");
     }
+    // The async here-doc-only suffix: `<<B` is the second statement's word 0,
+    // so it is the redirections-only command (rc 0), and the prefix job's body
+    // prints. bash 5.3.9: rc 0, stdout `x`; no resolve report.
+    let (out, err, code) = run_cwd(dir, "cat <<A & <<B\nx\nA\ny\nB");
+    assert_eq!((code, out.as_str()), (0, "x\n"), "stderr={err:?}");
+    assert!(!err.contains("not found"), "stderr={err:?}");
 }
 
 /// `>>&x` is the collection loop's own vocabulary: `>>` with the **path**

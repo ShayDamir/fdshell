@@ -502,3 +502,30 @@ fn a_heredoc_and_a_function_definition_inside_a_block_stage() {
         "bash: rc 127 `f: command not found`"
     );
 }
+
+/// Task #345: the word behind a pipeline `|` is the stage's word 0, and a
+/// here-doc operator there is the stage's **only** redirection: POSIX's
+/// `simple_command = REDIRECT… [word…]` needs no command word, so the body
+/// feeds the empty stage's stdin, the stage exits 0 and the pipeline is silent.
+/// The pipe **split** rule is untouched (the shape is a pipeline: the first
+/// stage's stdout is a pipe nobody reads), and the io-number form behaves the
+/// same. bash 5.3.9 rc 0, no output, on every row.
+#[test]
+fn heredoc_only_stage_is_a_redirect_only_stage() {
+    let dir = Scratch::new();
+    for (script, want) in [
+        ("true | <<EOF\nbody\nEOF\necho done", "done\n"),
+        ("cat | <<EOF\nbody\nEOF", ""),
+        ("3<<EOF\nbody\nEOF", ""),
+        ("<<EOF | cat\nbody\nEOF", ""),
+        ("true | 3<<EOF\nbody\nEOF\necho done", "done\n"),
+    ] {
+        let out = run(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, Some(0)),
+            "script {script:?}: stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}

@@ -523,13 +523,14 @@ fn heredoc_attached_after_substitution_fails_explicitly() {
 }
 
 #[test]
-fn heredoc_pipe_position_fails_explicitly() {
-    // After a `|`, `<<EOF` is a command word, not an operator: the body lines
-    // stay real commands. Explicit errors, never a silent swallow.
-    let (_out, err, code) = run("true | <<EOF\nx\nEOF");
-    assert_ne!(code, 0);
-    assert!(err.contains("\"x\" not found"), "stderr={err:?}");
-    assert!(err.contains("\"EOF\" not found"), "stderr={err:?}");
+fn heredoc_pipe_position_is_a_redirect_only_stage() {
+    // After a `|`, `<<EOF` is the **stage's** word 0, and a stage is a full
+    // `simple_command`: POSIX lets it carry redirections with no command word,
+    // so the body feeds the empty stage and the pipeline is silent, rc 0
+    // (bash 5.3.9: rc 0, no output). Task #345; the body lines never run.
+    let (out, err, code) = run("true | <<EOF\nx\nEOF");
+    assert_eq!((code, out.as_str()), (0, ""));
+    assert!(!err.contains("not found"), "body must not leak: {err:?}");
 }
 
 // --- A line that opens with a redirect/separator token: the `<<` is an
@@ -611,12 +612,20 @@ fn heredoc_clobber_operator_with_word_consumes_its_body() {
 
 /// `;` is a token for the tokenizer, so the `<<` after it counts and the body
 /// is consumed: master ran `hi` and `EOF` as commands, the fixed scan does not.
+/// Task #345 then made the statement itself the redirections-only command: rc 0,
+/// silent, the body never a command.
+///
+/// bash is a **rc-2 syntax error** here (`syntax error near unexpected token
+/// ;'`), and fdshell runs the whole line-leading separator family loosely
+/// (`; echo hi` runs at rc 0; nothing pins rc 1 for it). Task **#487** owns
+/// that separator-led rule; the parse layer cannot tell `; <<EOF` from
+/// `\n<<EOF` (`cond::part::reconstruct` hands both the identical text
+/// `<<EOF\nhi\nEOF`), so this row follows the here-doc family's rule and stays
+/// rc 0 until #487 decides otherwise.
 #[test]
-fn heredoc_after_semicolon_with_no_command_word_consumes_its_body() {
+fn heredoc_after_semicolon_with_no_command_word_is_a_redirect_only_statement() {
     let (out, err, code) = run("; <<EOF\nhi\nEOF");
-    assert_eq!(code, 1);
-    assert_eq!(out, "");
-    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
+    assert_eq!((code, out.as_str()), (0, ""));
     assert!(
         !err.contains("\"hi\" not found"),
         "body must not leak: {err:?}"
@@ -3128,11 +3137,12 @@ fn numbered_heredoc_largest_io_number_is_reported_at_open() {
 /// Divergences pinned as measured, each owned by the task named in its comment.
 #[test]
 fn numbered_heredoc_known_divergences() {
-    // A `<<` at the run start is fdshell's command word (the operator rule needs
-    // a preceding token), so `3<<T` alone runs as a command: rc 1. bash reads it
-    // as a here-doc on fd 3 with no command: rc 0.
+    // A `<<` at the run start is word 0 of a redirections-only statement
+    // (task #345): fd 3 gets the body, no command runs, rc 0 — **parity** with
+    // bash, where the row used to be fdshell's command lookup (rc 1) because
+    // the operator rule demanded a preceding token.
     let (out, _err, code) = run("3<<T\nbody\nT");
-    assert_eq!(code, 1);
+    assert_eq!(code, 0);
     assert_eq!(out, "");
 
     // A sibling `>&N` dup reads the descriptor the `3<<T` of the **same**
@@ -3231,22 +3241,27 @@ fn heredoc_quoted_pipe_predecessor_is_a_word_not_a_stage() {
 }
 
 /// The pipeline twin of the quoted case: a quoted `>` never terminates a word,
-/// so the `|` **is** a pipeline pipe and the shape stays in the pipeline family
-/// (`<<EOF` becomes the second stage's command word). Unchanged by task #261 at
-/// both levels (byte 0 / token 0, pinned in
-/// `parse/heredoc/tests.rs::operator_count_pipe_predecessors_agree`); bash runs
-/// the pipeline and its rc is 0.
+/// so the `|` **is** a pipeline pipe and the shape stays in the pipeline family.
+/// Task #345 made the second stage a redirections-only command (`<<EOF` is its
+/// word 0), so the count is 1 at both levels (pinned in
+/// `parse/heredoc/tests.rs::operator_count_pipe_predecessors_agree`), the body
+/// is consumed, and the pipeline exits rc 0 — bash 5.3.9's number.
 #[test]
 fn heredoc_quoted_gt_word_keeps_the_pipeline_split() {
     let (out, err, code) = run("echo \"a>\"| <<EOF\nbody\nEOF");
-    assert_eq!((code, out.as_str()), (1, ""));
-    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
-    // No heredoc operator on the line, so no region is claimed and the body
-    // lines are the pipeline's own commands (`tests/redirect.rs::quoted_operator_word_keeps_the_pipe_and_the_body_free`).
-    assert!(err.contains("\"body\" not found"), "stderr={err:?}");
+    // The pipe's reader is the empty stage, whose stdin is the here-doc body,
+    // so `echo`'s line goes into the pipe and nobody reads it: silent.
+    assert_eq!((code, out.as_str()), (0, ""), "stderr={err:?}");
+    // The body is the second stage's stdin, never a command of its own.
+    assert!(!err.contains("not found"), "stderr={err:?}");
     let (out, err, code) = run("cat \"a>\"| <<EOF\nbody\nEOF");
-    assert_eq!((code, out.as_str()), (1, ""));
+    assert_eq!((code, out.as_str()), (0, ""), "stderr={err:?}");
     assert!(err.contains("cat: 'a>'"), "stderr={err:?}");
+    assert_eq!(
+        err.lines().filter(|l| l.contains("not found")).count(),
+        0,
+        "only the `cat` report, no body leak: stderr={err:?}"
+    );
 }
 
 /// The `(( … ))` region stays opaque to the byte scan (its `<<` is counted by
@@ -3340,29 +3355,31 @@ fn heredoc_invalid_delimiter_keeps_the_parse_errors() {
 /// Class 4: the tokenizer's separator arm emits a `;` token for a newline, so a
 /// newline-leading run has a preceding token, claims its body region, and
 /// reports **one** error (its operator word) where master ran the body lines as
-/// commands (`"<<EOF"`, `"body"`, `"EOF"`). rc stays 1; bash is rc 0 for the
-/// "heredoc with no command word" family (task #345 owns that gap), and for the
-/// `x` row it is the `x: command not found` status the heredoc replaces.
+/// commands (`"<<EOF"`, `"body"`, `"EOF"`). Task #345 closed the gap it left:
+/// the word-0 `<<` is an operator, so the statement is the redirections-only
+/// command — **rc 0 and silent**, bash 5.3.9's number on every row. The `x` row
+/// keeps its own `"x" not found` report and the rc 0 the heredoc brings.
 #[test]
-fn heredoc_leading_newline_consumes_its_body() {
+fn heredoc_leading_newline_is_a_redirect_only_statement() {
     let (out, err, code) = run("\n<<EOF\nbody\nEOF");
-    assert_eq!((code, out.as_str()), (1, ""));
-    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
+    assert_eq!((code, out.as_str()), (0, ""));
     assert!(
         !err.contains("\"body\" not found"),
         "body must not leak: {err:?}"
     );
+    assert!(
+        !err.contains("\"EOF\" not found"),
+        "body must not leak: {err:?}"
+    );
     let (out, err, code) = run("true &&\n<<B\nbody\nB");
-    assert_eq!((code, out.as_str()), (1, ""));
-    assert!(err.contains("\"<<B\" not found"), "stderr={err:?}");
+    assert_eq!((code, out.as_str()), (0, ""));
     assert!(
         !err.contains("\"body\" not found"),
         "body must not leak: {err:?}"
     );
     let (out, err, code) = run("x\n<<EOF\nbody\nEOF");
-    assert_eq!((code, out.as_str()), (1, ""));
+    assert_eq!((code, out.as_str()), (0, ""), "stderr={err:?}");
     assert!(err.contains("\"x\" not found"), "stderr={err:?}");
-    assert!(err.contains("\"<<EOF\" not found"), "stderr={err:?}");
     assert!(
         !err.contains("\"body\" not found"),
         "body must not leak: {err:?}"
@@ -3382,9 +3399,9 @@ fn heredoc_leading_newline_consumes_its_body() {
 ///   byte-level delimiter is `A&` and the line's region list is empty. Owner:
 ///   the glued-pair family (the tokenizer's split set), not this task.
 /// * A redirect-only suffix (`<<B` / `<<U` with no command word): bash runs a
-///   bare redirection; fdshell runs `<<B` as a command word. Owner **#345** —
-///   the statement carries a here-doc body, which is exactly the condition
-///   task #303's parse gate stays off for (the plain `>f` family is rc 0 now).
+///   bare redirection; **fdshell does too** since task #345 — the suffix is
+///   `simple_command = REDIRECT…`, its body is consumed and the statement
+///   exits 0 (the rows moved from rc 1 to rc 0, i.e. to parity with bash).
 #[test]
 fn a_heredoc_behind_an_ampersand_known_divergences() {
     // The glued twin of the `#`-behind-`&` row: the prefix job runs (its body
@@ -3397,18 +3414,23 @@ fn a_heredoc_behind_an_ampersand_known_divergences() {
         "script {script:?}: stderr={err}"
     );
     // The redirect-only suffix: the prefix's body prints, the suffix is a
-    // command lookup (bash: rc 0, no complaint).
+    // redirections-only statement (bash: rc 0, no complaint). The rc is the
+    // foreground status, the prefix's report goes to the job's own output.
     for (script, word) in [
         ("cat <<A & <<B\nx\nA\ny\nB", "\"<<B\""),
         ("echo hi <<T & <<U\nbody\nT\nb2\nU", "\"<<U\""),
     ] {
         let (out, err, code) = run(script);
-        assert_eq!(code, 1, "script {script:?}: out={out}");
+        assert_eq!(code, 0, "script {script:?}: out={out} stderr={err}");
         assert!(
-            err.contains(&format!("failed to resolve command path: {word}")),
+            !err.contains(&format!("failed to resolve command path: {word}")),
             "script {script:?}: stderr={err}"
         );
     }
+    // The prefix job's body is its own stdout: one writer, so the ordering
+    // question the async pins raise (`tests/async.rs`) does not arise here.
+    let (out, _err, code) = run("cat <<A & <<B\nx\nA\ny\nB");
+    assert_eq!((code, out.as_str()), (0, "x\n"));
 }
 
 /// Task #313, the all-or-nothing rows of the same family. A physical line's
