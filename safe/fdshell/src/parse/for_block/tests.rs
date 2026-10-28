@@ -283,3 +283,64 @@ fn word_form_pins_are_untouched() {
     assert_eq!(fb.words, vec![c"a".into(), c"b".into(), c"c".into()]);
     assert_eq!(fb.body.data, c"echo $var".into());
 }
+
+/// A plain `&` token anywhere in the `in` list is the async operator, not a
+/// word: the builder rejects the list with the `do` expectation (task #360,
+/// bash stops at rc 2 with its own `do` message). The four spellings below pin
+/// the gate at the unit layer; the integration family in `tests/loops.rs`
+/// carries the rest of the shapes.
+///
+/// * `& ;` — the `;` is the **list** separator, so the `&` used to ride into
+///   the list as a word (the pin #360 flipped from #355).
+/// * `& ; do; done` — the **ordering** pin: bash reports the earliest offending
+///   token, so the gate precedes the closer/body validators.
+/// * `;&;` — the tokenizer emits `;` and `&` as separate tokens, so the `&`
+///   survives `trim_semi` and the gate must read the **untrimmed** slice.
+/// * a `&` **mid**-list — the predicate is `any`, not `all`.
+#[test]
+fn a_plain_ampersand_in_the_word_list_is_a_parse_error() {
+    for line in [
+        b"for i in 1 & ; do echo x; done".as_slice(),
+        b"for i in 1 & ; do; done".as_slice(),
+        b"for i in 1 ;&; do echo x; done".as_slice(),
+        b"for i in 1 & 2 ; do echo x; done".as_slice(),
+    ] {
+        assert_eq!(parse_err(line), "expected 'do'", "{line:?}: bash rc 2");
+    }
+}
+
+/// The span gate is the whole quoting rule: `"&"`, `'&'` and a glued `x&` are
+/// word **data**, and an escaped `\&` reaches the list as the pair — the
+/// tokenizer keeps the backslash in the word text (measured, and bash prints
+/// `&` for the quoted and escaped forms).
+/// LESSONS: "A separator-shaped word needs the span gate"
+#[test]
+fn a_quoted_ampersand_in_the_word_list_stays_a_word() {
+    for (line, want) in [
+        (
+            b"for i in \"&\" ; do echo x; done".as_slice(),
+            vec![c"&".into()],
+        ),
+        (
+            b"for i in '&' ; do echo x; done".as_slice(),
+            vec![c"&".into()],
+        ),
+        (
+            b"for i in \\& ; do echo x; done".as_slice(),
+            vec![c"\\&".into()],
+        ),
+        (
+            b"for i in x& ; do echo x; done".as_slice(),
+            vec![c"x&".into()],
+        ),
+        (
+            b"for i in 1 \"&\" 2 ; do echo x; done".as_slice(),
+            vec![c"1".into(), c"&".into(), c"2".into()],
+        ),
+    ] {
+        let ParsedLine::For(fb) = crate::parse::parse(&stext(line)).unwrap() else {
+            panic!("expected For {line:?}")
+        };
+        assert_eq!(fb.words, want, "{line:?}");
+    }
+}

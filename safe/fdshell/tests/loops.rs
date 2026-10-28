@@ -1204,14 +1204,154 @@ fn loop_body_statement_with_trailing_ampersand_runs() {
     assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
 }
 
-/// A `for` **word list** takes no list terminator (POSIX #2.9.1: the `do`
-/// follows the list), so `for i in 1 & do` stays a parse error — bash rc 2,
-/// fdshell rc 1 (the documented rc-1-vs-2 family, README "Errors").
+/// A plain `&` **anywhere** in a `for` word list is bash's async operator, not a
+/// word: bash's list ends at it and its parser fails the `do` expectation there
+/// (rc 2, nothing runs). fdshell rejects the same list with `expected 'do'` at
+/// rc 1 — the standing rc-1-vs-2 parse-error family (README "Errors"). Task
+/// #360 landed the rule and flipped the pin-as-measured of task #355, whose
+/// `& ;` rows ran the `&` as a list word.
+///
+/// The `;`-terminated spellings are the point: `;` is the **list** separator, so
+/// the `&` used to ride into the list as a word. A word list is not statement
+/// text, so the body-slice rule of #355 cannot reach it; the rule there is a
+/// token gate on the raw span (`parse/for_block/words.rs::plain_amp`).
+/// LESSONS: "A `;` token is a newline in disguise: the body-slice rule must read
+/// the token's byte (task #355)"
 #[test]
-fn ampersand_in_a_for_word_list_is_a_parse_error() {
-    let (out, err, rc) = run("for i in 1 & do echo x; done");
-    assert_eq!((out.as_str(), rc), ("", 1));
+fn ampersand_in_a_for_word_list_before_the_do_is_a_parse_error() {
+    for script in [
+        // The pre-#360 shape, `&` glued to the `do`: a parse error already then.
+        "for i in 1 & do echo x; done",
+        // #360's rows: the `;` is the list separator, so the `&` reached the list.
+        "for i in 1 & ; do echo x; done",
+        "for i in 1 &; do echo x; done",
+        "for i in & ; do echo x; done",
+        "for i in &; do echo x; done",
+        // A `&` **mid**-list, not its only word (kills an `any`→`all` mutant).
+        r#"for i in 1 & 2 ; do echo "[$i]"; done"#,
+        "for i in 1 2 & ; do echo x; done",
+        // The tokenizer emits `;` and `&` as **separate** tokens, so the list
+        // the builder saw was `1`, `;`, `&`.
+        r#"for i in 1 ;&; do echo "[$i]"; done"#,
+        // The `&` survives `trim_semi`, so the gate reads the **untrimmed** slice.
+        r#"for i in ; & ; do echo "[$i]"; done"#,
+        // The **ordering** pin: bash reports the earliest offending token, so the
+        // gate precedes the closer/body validators — `expected 'do'` here, not
+        // `'do' body is empty` or `expected 'done'`.
+        "for i in 1 & ; do; done",
+        // The newline spelling is **not** #355's accepted `&`-terminated body:
+        // the word list is not statement text.
+        "for i in 1 &\ndo echo x\ndone",
+        // Nested, and inside a function frame: the same silent rc 1.
+        "for i in 1; do for j in 1 & ; do echo y; done; done",
+        "f() { for i in 1 & ; do echo x; done; }; f",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains("expected 'do'"), "{script}: {err}");
+    }
+}
+
+/// The parse fails **before** the block tail opens its redirections: bash stops
+/// at rc 2 and creates no `f`, and so does fdshell at rc 1 (measured on `master`
+/// the file was written, because the list ran).
+#[test]
+fn a_for_word_list_with_an_ampersand_opens_no_redirection() {
+    let dir = scratch("amp-list");
+    let output = Command::new(BIN)
+        .current_dir(&*dir)
+        .args(["-c", "for i in 1 & ; do echo x; done >f"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    let err = str::from_utf8(&output.stderr).unwrap().to_string();
+    assert_eq!(output.status.code().unwrap_or(-1), 1, "bash rc 2: {err}");
+    assert!(
+        !dir.join("f").exists(),
+        "the word-list parse must fail before the redirection opens"
+    );
+}
+
+/// A quoted `"&"` / `'&'`, an escaped `\&` and a `&` that **expansion** produces
+/// are word data, not the async operator: the gate is the token's raw span, and
+/// a `&` created after the parse is no parse-time operator. Measured identical
+/// in bash 5.3.9 (rc 0, the loop runs).
+/// LESSONS: "A separator-shaped word needs the span gate"
+#[test]
+fn a_quoted_ampersand_in_a_for_word_list_stays_a_word() {
+    for (script, want) in [
+        (r#"for i in "&" ; do echo "[$i]"; done"#, "[&]\n"),
+        (r#"for i in '&' ; do echo "[$i]"; done"#, "[&]\n"),
+        (r#"for i in \& ; do echo "[$i]"; done"#, "[&]\n"),
+        (
+            r#"for i in 1 "&" 2 ; do echo "[$i]"; done"#,
+            "[1]\n[&]\n[2]\n",
+        ),
+        (r#"for i in "1 &" ; do echo "[$i]"; done"#, "[1 &]\n"),
+        // The parse-time-only boundary: the `&` is expansion's output.
+        (r#"for i in $(echo '&') ; do echo "[$i]"; done"#, "[&]\n"),
+        // The empty list stays the empty list: no iterations, rc 0.
+        ("for i in; do echo x; done", ""),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash parity: {err}"
+        );
+    }
+}
+
+/// Every **other** operator word of the list stays a word, pin-as-measured with
+/// bash's rc 2 named: owner task **#496** (the glued `x&`, the `&&` family
+/// README documents, the `|`, the leading-`;` leniency). The `for i in ; 1;`
+/// row is the **text** half of the gate: a `b"&"`→`b";"` mutant of the span gate
+/// would reject its leading `;` and fail here.
+#[test]
+fn other_operator_words_in_a_for_word_list_stay_words() {
+    for (script, want) in [
+        (r#"for i in ; 1; do echo "[$i]"; done"#, "[1]\n"),
+        ("for i in 1 && ; do echo x; done", "x\nx\n"),
+        ("for i in 1 | ; do echo x; done", "x\nx\n"),
+        (r#"for i in x& ; do echo "[$i]"; done"#, "[x&]\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash rc 2, #496: {err}"
+        );
+    }
+}
+
+/// A brace-expanded list row that carries `&` is a plain `&` **token** by the
+/// time the list is built: fdshell expands braces as a pre-parse rewrite, so
+/// `{a,&}` yields the words `a` and `&` and the word-list gate rejects the list
+/// (rc 1, where `master` printed `[a][&]`). Bash stops at rc 2 on the same
+/// script — its parser tokenizes the `&` before brace expansion runs — so this
+/// row **converges** on bash; the divergence #496 owns is the glued `x&`, which
+/// stays one word.
+#[test]
+fn a_brace_expanded_ampersand_in_a_for_word_list_is_a_parse_error() {
+    let (out, err, rc) = run(r#"for i in {a,&} ; do echo "[$i]"; done"#);
+    assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2");
     assert!(err.contains("expected 'do'"), "{err}");
+}
+
+/// fdshell parses and runs **statement by statement**, so the statement before a
+/// failing loop has already run when the loop's parse fails: stdout `a`, rc 1,
+/// where bash parses the whole script first and prints nothing (rc 2).
+/// Script-level parse-once is an architecture question of its own; the
+/// divergence is pinned so it is stated, not silently absorbed.
+#[test]
+fn a_for_word_list_parse_error_stops_the_script_after_the_previous_statement() {
+    let (out, err, rc) = run("echo a; for i in 1 & ; do echo x; done; echo tail");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("a\n", 1),
+        "bash prints nothing at rc 2: {err}"
+    );
 }
 
 /// A `& ;` written **inside a loop body** runs nothing (task #355): the body
@@ -1234,16 +1374,6 @@ fn ampersand_then_semicolon_in_a_loop_body_runs_nothing() {
         let (out, err, rc) = run_bounded(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
     }
-}
-
-/// The `for` **word list** is not statement text: the body-slice rule of task
-/// #355 does not reach it, and there the `&` is an ordinary word byte —
-/// `for i in 1 & ; do echo x; done` runs two iterations (`1` and `&`),
-/// pin-as-measured where bash stops with rc 2.
-#[test]
-fn ampersand_in_a_for_word_list_before_the_do_runs_the_amp_as_a_word() {
-    let (out, _err, rc) = run("for i in 1 & ; do echo x; done");
-    assert_eq!((out.as_str(), rc), ("x\nx\n", 0), "bash rc 2");
 }
 
 /// The split-time guard already covers the cond-pair and glued forms behind
