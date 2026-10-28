@@ -237,6 +237,17 @@ fn invalid_delimiter_gates_operator_bytes_on_the_quote_mask() {
         (b"|", &[f], true, false),
         (b";", &[], true, false),
         (b"|", &[], true, false),
+        // Task #347: the two separator arms are **span**-gated, not mask-gated
+        // (`operator_word` owns the mask). For a one-byte separator word the
+        // two flags coincide — a span longer than the one-byte text is exactly
+        // a quote byte, exactly `quoted_at(mask, 0)` — so no mask arm is needed
+        // and no caller passes a Quoted bit with an unquoted span for `;`/`|`
+        // (an escape spelling keeps the pair in the text,
+        // `parse/token/escape.rs`, so its text is never `;`/`|`). The row is
+        // unreachable in production and pins the arm's insensitivity: switching
+        // these arms to the mask would flip them.
+        (b";", &[t], false, true),
+        (b"|", &[t], false, true),
         (b"abc", &[f], false, false),
         (b"x&f", &[f], false, false),
         (b"--", &[f], false, false),

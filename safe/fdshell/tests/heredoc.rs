@@ -3719,20 +3719,20 @@ fn a_terminator_line_with_a_capture_marker_or_tilde_is_data() {
 }
 
 /// A divergence of the same family, pinned at its measured rc 1 and owned by
-/// the task named in its comment: a delimiter word cut at escaped whitespace
-/// (**#349**). The io-number here-doc whose fd a sibling `<&3` of the same
-/// command reads is **not** a divergence anymore — the second row pins it
-/// against bash (task #363, closed by the written-order resolution of #337).
+/// the task named in its comment: the io-number here-doc whose fd a sibling
+/// `<&3` of the same command reads is **not** a divergence anymore — the second
+/// row pins it against bash (task #363, closed by the written-order resolution
+/// of #337).
 #[test]
 fn chevron_terminator_known_divergences() {
-    // #349: the delimiter word ends at the escaped space, so the terminator
-    // line `a b` never matches. bash prints the body (rc 0).
+    // #349, closed by task #347: the delimiter word's byte walk consumes the
+    // `\ ` pair whole, so the terminator line `a b` matches the folded word and
+    // the body prints — bash parity, rc 0. Pinned here (the row that carried
+    // the rc-1 divergence) and in
+    // `an_escaped_delimiter_word_is_one_word_at_both_levels`.
     let (out, err, code) = run("cat <<a\\ b\nbody\na b");
-    assert_eq!((code, out.as_str()), (1, ""), "stderr={err:?}");
-    assert!(
-        err.contains("missing terminating delimiter line 'a b'"),
-        "stderr={err}"
-    );
+    assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+    assert_eq!(err, "");
 
     // #363, closed: `<&3` reads the descriptor the io-number here-doc of the
     // same command opened, so the body prints, as bash measures it. Run
@@ -3984,4 +3984,165 @@ fn a_quoted_delimiter_may_be_a_separator_word() {
         err.contains("invalid redirect syntax"),
         "task #475 owns the bare path-redirect word: stderr={err:?}"
     );
+}
+
+/// Task #347: a **quoted separator word as the whole here-doc delimiter**, in
+/// the empty-body shape (task #336 pinned the with-body shape). The
+/// `;`/`|` arms of `scan/heredoc::op::invalid_delimiter` are gated on the word's
+/// raw span, which for a one-byte word is the quote-mask decision (span longer
+/// than the text ⇔ a quote byte), so the quoted `|` is a word byte, not a pipe:
+/// the delimiter is `|`, `|x`, `|EOF`, `;` and the statement is a here-doc with
+/// an empty body. Every row is rc 0 and silent, bash 5.3.9's number (the task's
+/// report measured rc 1 — `failed to resolve command path: "x"` — on `60a2ebd`,
+/// before #336's span gate).
+#[test]
+fn a_quoted_separator_delimiter_with_an_empty_body_is_parity() {
+    for script in [
+        "cat <<\"|\"\n|",
+        "cat <<'|'\n|",
+        "cat <<\"|x\"\n|x",
+        "cat <<\"|EOF\"\n|EOF",
+        "cat <<\";\"\n;",
+        "cat << \";\"\n;",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// Task #347: the delimiter word's **byte walk consumes `\X` pairs whole**,
+/// because the tokenizer keeps the pair inside the word
+/// (`parse/token/escape.rs`). A walk that stepped over the `\` alone ended the
+/// word at the separator byte **behind** it (`token_word_end`'s set: ` `, tab,
+/// `;`, `|`, `)`), so the region layer delimiting on the truncated word answered
+/// the false `missing terminating delimiter line` while bash read the whole
+/// folded word (the rows #349 measured: rc 1 vs bash rc 0). The pair is also a
+/// POSIX quote operator, so the body of a `\ `-delimited here-doc is literal
+/// (task #263's rule, visible in the `$X` row). Every row is bash-equal.
+#[test]
+fn an_escaped_delimiter_word_is_one_word_at_both_levels() {
+    for (script, want) in [
+        // A separator behind the `\` is the word's own byte: `;`, `|`.
+        ("cat <<\\;\n;", ""),
+        ("cat << \\;\n;", ""),
+        ("cat <<\\|\n|", ""),
+        ("cat << \\|\n|", ""),
+        // An escaped whitespace byte keeps the word together: `a b`, `a<TAB>b`,
+        // ` b` (the `#349` row list).
+        ("cat <<a\\ b\na b", ""),
+        ("cat <<a\\ b\nbody\na b", "body\n"),
+        ("cat <<a\\ b\nX=zzz\na b", "X=zzz\n"),
+        ("X=v; cat <<a\\ b\n$X\na b", "$X\n"),
+        ("cat <<-a\\ b\n\ta b", ""),
+        ("cat <<-a\\ b\n\tbody\n\ta b", "body\n"),
+        ("cat <<a\\\tb\na\tb", ""),
+        ("cat <<\\ b\n b", ""),
+        // `;`, `|` and `)` glued behind a plain byte: one word, no split.
+        ("cat <<a\\;b\na;b", ""),
+        ("cat <<a\\;b\nbody\na;b", "body\n"),
+        ("cat <<a\\|b\na|b", ""),
+        ("cat <<a\\)\na)", ""),
+        // The io-number form and the two-operator line keep their own words.
+        ("cat 3<<\\;\n;", ""),
+        ("cat <<\\; <<\\|\n;\n|", ""),
+        // A non-separator pair was already parity (the pair rule is not a
+        // separator rule): the delimiter is the folded `aa`.
+        ("cat <<a\\a\naa", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
+/// Task #347, the members of the escaped-delimiter family that stay divergent,
+/// pinned **as measured** with the owner named (never silently accepted): a `\`
+/// at the **end of the word** opens the tokenizer's line-continuation join —
+/// the delimiter word swallows the next line (`cat <<a\` with a following `a\`
+/// is one word `aa\` in bash, `cat <<E\` with a following `zzz` is `Ezzz`),
+/// which task **#489** owns; a delimiter line that never
+/// arrives is the EOF-starved family of **#275** / **#429** (bash reads to EOF
+/// with its warning at rc 0, fdshell reports the missing delimiter at rc 1).
+#[test]
+fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
+    // #489: the trailing `\` joins the word with the next line, so fdshell's
+    // delimiter is the two-line text and the delimiter line never matches
+    // (bash: the delimiter is `a ` / `aa\` / `Ezzz`, rc 0).
+    for script in ["cat <<a\\ \na ", "cat <<a\\\na\\", "cat <<E\\\nzzz\nEOF"] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "script {script:?}: out={out}"
+        );
+        assert!(
+            err.contains("missing terminating delimiter line"),
+            "script {script:?}: stderr={err:?}"
+        );
+    }
+    // #275 / #429: the folded delimiter is right, its line never arrives —
+    // bash prints the body with its end-of-file warning.
+    for script in ["cat <<a\\ b\nX=zzz\nNOPE", "cat <<a\\\tb\n\tbody\n\ta\tb"] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "script {script:?}: out={out}"
+        );
+        assert!(
+            err.contains("missing terminating delimiter line"),
+            "script {script:?}: stderr={err:?}"
+        );
+    }
+}
+
+/// Task #347, the `&`-deferred members of the delimiter-word family: the
+/// line-opening-`&` **deferral** (`segment/bg.rs::mark`, the #326/#333 family)
+/// reads the next physical line's raw bytes **before** the flush computes that
+/// line's region claims, so when the next line is a here-doc's first body line
+/// or its delimiter line the deferral swallows region data. Every row here is
+/// pinned as measured with **owner #468** named (its scope is exactly "what a
+/// line-opening `&` may claim when the deferred flush has claimed a body
+/// region"), and it flips these rows when it lands. The task #347 report
+/// measured `cat <<"&x"` rc 0 on `60a2ebd`: the row regressed when #326's
+/// deferral landed, and this pin is where that regression is recorded.
+/// bash 5.3.9's value is beside every row.
+#[test]
+fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468() {
+    // The delimiter line IS the `&` line: the region is swallowed, so the
+    // delimiter never arrives (bash: rc 0, silent, the delimiter is `&x`).
+    for (script, delim) in [
+        ("cat <<\"&x\"\n&x", "&x"),
+        ("cat <<'&x'\n&x", "&x"),
+        ("cat <<\\&x\n&x", "&x"),
+        ("cat << \"&x\"\n&x", "&x"),
+        ("cat <<-\"&x\"\n\t&x", "&x"),
+        ("cat <<\"&&\"\n&&", "&&"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "script {script:?}: out={out}"
+        );
+        assert!(
+            err.contains(&format!("missing terminating delimiter line '{delim}'")),
+            "script {script:?}: stderr={err:?}"
+        );
+    }
+    // A `&` word with a space behind it: the swallowed region leaves `x` as a
+    // command word (bash: rc 0, silent).
+    let (out, err, code) = run("cat <<\"& x\"\n& x");
+    assert_eq!((out.as_str(), code), ("", 1), "out={out}");
+    assert!(
+        err.contains("failed to resolve command path: \"x\""),
+        "stderr={err:?}"
+    );
+    // The `&` line is a **body** line: it runs as a command and the body is
+    // lost (bash prints `&x`, and `wc -c` says 3).
+    let (out, err, code) = run("cat <<EOF\n&x\nEOF");
+    assert_eq!((out.as_str(), code), ("", 1), "out={out}");
+    assert!(err.contains("\"&x\" not found"), "stderr={err:?}");
+    let (out, err, code) = run("wc -c <<EOF\n&x\nEOF");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.starts_with("0"), "the body is lost: stdout={out:?}");
 }
