@@ -338,8 +338,14 @@ that prefix is bash's, on every shell-reported write error. The machinery stays
 divergent where it shows through: bash 5.3.9 backs the body with a **pipe**
 opened read-only (so it is not seekable), fdshell with a memfd re-opened
 `O_RDONLY` through `/proc/self/fd/N` (offset 0, seekable). Owning task: **#459**
-(`> /dev/fd/N` onto such a descriptor: bash opens the *path* — a FIFO — and its
-write succeeds, fdshell maps the path to a dup and refuses the write).
+(`> /dev/fd/N` onto such a descriptor: task #337 made fdshell **open** the magic
+path like bash, so the shapes separate by what the fd is. On a file-backed fd
+they agree — `exec 3< f; echo hi > /dev/fd/3` leaves `f` = `hi\n` in both (the
+pre-#337 dup refused the write). On a here-body fd they do not: bash's is a
+**FIFO**, so the `O_TRUNC` open finds a pipe, ignores the truncation and appends
+— `exec 3<<<x; echo hi > /dev/fd/3; echo rc=$?; cat <&3` prints `rc=0`, `x`,
+`hi` — while fdshell's memfd path re-opens as a fresh descriptor of the memfd
+and truncates the body, printing `rc=0` and `hi` (measured 2026-10-28).
 
 The `<<<` form's remaining differences from bash:
 
@@ -352,6 +358,29 @@ The `<<<` form's remaining differences from bash:
   prints a newline.
 - A redirect written after a group's `}` is not attached to the group
   (`{ cat; } 3<<<x` is a parse error); owning tasks: #187/#191.
+
+## A `/dev/fd/N` target is opened, not duplicated
+
+`> /dev/fd/3` (and `/proc/self/fd/3`) opens the file descriptor 3 points at,
+with the operator's flags, **as the redirection runs** — so it sees the fd state
+the command's earlier redirections left, a pipeline stage's pipe ends included,
+and the open is a fresh one: `>` truncates, `<` starts at byte 0. bash behaves
+the same way and fdshell matches it byte-for-byte on the direct spellings
+(`tests/redirect.rs::dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`
+and its neighbours, task #337). Two measured divergences remain, both 2026-10-28
+against bash 5.3.9 with stdout and stderr piped:
+
+- A target that only **expands** to the magic form keeps the consumer's
+  pre-command open, because the magic reading is on the word as the parser wrote
+  it: `f(){ echo hi; echo e >&2; }; p=/dev/fd/1; f > z 2> $p` leaves `z` =
+  `hi\n` and prints `e` on stdout, where bash leaves `z` = `e\n\n` and prints
+  nothing. The quoted, unexpanded `2> "/dev/fd/1"` matches bash. Owning task:
+  **#479**.
+- `set -C` refuses a magic target whose descriptor is a **pipe**
+  (`set -C; echo e > /dev/fd/1` → rc 1, `noclobber is set`); bash's open
+  succeeds — Linux ignores `O_EXCL` for a non-regular file — and prints `e`. On
+  a regular-file target both shells refuse, which is the pinned shape. Owning
+  task: **#480**.
 
 ## `wait` is also a block keyword
 

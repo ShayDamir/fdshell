@@ -303,11 +303,17 @@ sees the descriptors the earlier ones left: `cmd > f 2>&1` puts fd 2 into `f`
 `cmd 2>&1 > f` leaves fd 2 on the terminal. The target opens follow the same
 order and stop at the first failure, so the side effects of the earlier opens
 survive a later failure (`cmd > f 2> missing/dir/x` creates the empty `f`,
-`cmd 2> missing/dir/x > f` creates nothing) — as bash applies them.
+`cmd 2> missing/dir/x > f` creates nothing) — as bash applies them. A pipeline
+stage's own pipe ends are part of that state before the stage's redirections
+run, so `cat missing 2>&1 | cat > g` puts the message into the pipe, and
+`cat missing > f 2>&1 | cat > g` puts it in `f`.
 
-The target of `>` can also be `%var` (an fd variable), `/dev/fd/N` (a copy of
-the open fd `N`), `>&1` (a copy of fd 1), `2>&%f` (a copy of the fd `%f`
-refers to) or `2>&-` (close fd 2):
+The target of `>` can also be `%var` (an fd variable), `/dev/fd/N` (the file
+that open fd `N` points at — the magic path is **opened** with the operator's
+flags as the redirection runs, so `> /dev/fd/1` truncates the file stdout is on
+and `cat < /dev/fd/0` reads it from byte 0; only the canonical spelling counts,
+`/dev/fd/01` is an ordinary path), `>&1` (a copy of fd 1), `2>&%f` (a copy of
+the fd `%f` refers to) or `2>&-` (close fd 2):
 
 ```shell
 builtin openat2 --dirfd %CWD --flags O_CREAT --flags O_WRONLY --mode 0644 log %>%log
@@ -352,9 +358,12 @@ and the `shopt -s nullglob`/`failglob` behaviour on a redirect word is the
 accepted divergence (task #369). A quoted byte never splits and never globs,
 and never suppresses a substitution region: only `'` does.
 
-The fd target forms are decided at parse time — the attached `>%var`,
-`/dev/fd/N`, `>&N` — so a `%` byte inside a target word is file-name data:
-`> a%b` creates `a%b`. The `>&N` duplicate word is not a word to expand
+The fd target forms are decided at parse time — the attached `>%var` and the
+`>&N` duplicate word — so a `%` byte inside a target word is file-name data:
+`> a%b` creates `a%b`. A `/dev/fd/N` target is an ordinary word at parse time
+and only becomes a magic path at open time (task #337), which is why a target
+that merely *expands* to the magic form keeps the pre-command descriptor (the
+accepted divergence, task #479). The `>&N` duplicate word is not a word to expand
 (`>&$(echo 1)` reads the `1` literally, task #370). In strict mode the ban on
 an absolute target is checked on the **expanded** word, so a target expanding
 to `/etc/x` is refused before anything is opened.
