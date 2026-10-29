@@ -379,16 +379,15 @@ fn an_ampersand_that_ends_the_line_keeps_the_region_jump() {
     );
 }
 
-/// The suffix runs behind a `&` whose line **cannot** carry them keep the shape
-/// the same shapes without a `&` already had (the pinned divergences,
-/// `tests/heredoc.rs`): a glued `&` is a word byte of the delimiter
-/// (`token_word_end`), so the line's region list is empty and the suffix is
-/// flushed body-less. A `#` comment behind the `&` no longer starves the suffix:
-/// task **#333** gave a `#`-terminated line the newline's whole end-of-line
-/// bookkeeping, so the suffix is flushed **on its own line** and claims the
-/// region its own operator owns.
+/// Both suffixes behind a `&` carry the regions their own lines own. A `#`
+/// comment behind the `&` no longer starves the suffix: task **#333** gave a
+/// `#`-terminated line the newline's whole end-of-line bookkeeping, so the
+/// suffix is flushed **on its own line** and claims the region its own operator
+/// owns. The glued `&` is still a word byte (`token_word_end` unchanged) — but a
+/// delimiter that no line matches is the end-of-file shape (task #364): the
+/// suffix carries its line's tail claim instead of flushing body-less.
 #[test]
-fn a_glued_suffix_is_flushed_body_less_while_a_comment_suffix_carries_its_body() {
+fn both_the_glued_and_the_comment_suffix_carry_their_bodies() {
     // `cat <<A & cat <<B # note`: the comment ends the physical line and the
     // suffix is flushed there, indexing the line's region stream by its
     // operator's global position (`cat <<B` follows one operator written before
@@ -401,16 +400,19 @@ fn a_glued_suffix_is_flushed_body_less_while_a_comment_suffix_carries_its_body()
             (b"cat <<B".as_slice(), alloc::vec![b"y\nB".to_vec()], false),
         ],
     );
-    // Glued `<<A&`: the byte-level delimiter is `A&`, unreadable as `A`, so the
-    // line's region list is empty and the suffix is body-less (owner: the
-    // tokenizer's `&`-is-a-word-byte rule, `token_word_end`).
+    // Glued `<<A&`: the glued word's delimiter never arrives as a whole line,
+    // so the suffix's operator ends in the end-of-file shape (task #364): the
+    // suffix no longer flushes body-less but carries an empty tail region, and
+    // the `y`/`B` lines stop being separate segments (the word tokenization
+    // itself — `token_word_end` — is unchanged). At runtime fdshell prints `x`,
+    // warns `wanted 'B'`, rc 0; bash treats `&` as the operator (async cat,
+    // delimiter `B` matched on the newline-less last line, no warning) and
+    // prints only `x` (measured 2026-10-29).
     assert_eq!(
         statements(b"cat <<A& cat <<B\nx\nA\ny\nB"),
         alloc::vec![
             (b"cat <<A".as_slice(), alloc::vec![b"x\nA\n".to_vec()], true),
-            (b"cat <<B".as_slice(), alloc::vec![], false),
-            (b"y".as_slice(), alloc::vec![], false),
-            (b"B".as_slice(), alloc::vec![], false),
+            (b"cat <<B".as_slice(), alloc::vec![alloc::vec![]], false),
         ],
     );
     // A bare `<<` behind the `&`: the prefix flush's window ends before the

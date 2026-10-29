@@ -170,36 +170,41 @@ fn layout_body_is_opaque_to_tokenizer() {
     );
 }
 
+/// Nothing is left after the command line: the body is **empty** and the
+/// statement runs — bash's end-of-file shape, warning and rc 0 (task #364). The
+/// warning itself is asserted in the integration tests.
 #[test]
-fn layout_missing_newline_is_unterminated() {
-    let line = b"cat <<EOF";
-    let tokens = tokenize_statement(line).unwrap();
-    assert!(matches!(
-        layout(line, &tokens).unwrap_err().current_context(),
-        ParseError::UnterminatedHeredoc { .. }
-    ));
+fn layout_missing_newline_is_accepted_with_an_empty_body() {
+    let s = specs(b"cat <<EOF");
+    assert_eq!(s.len(), 1);
+    assert!(s[0].body.is_empty());
+    assert!(s[0].expand);
 }
 
+/// A zero-byte final line (EOF right after the body) is not the blank delimiter
+/// line, so the delimiter never arrives: the body is the remaining lines and the
+/// statement runs (bash warns, prints `body`, rc 0 — task #364).
 #[test]
-fn layout_empty_delimiter_eof_without_blank_line_is_unterminated() {
-    // A zero-byte final line (EOF right after the body) is not the blank
-    // delimiter line: the statement is unterminated, not silently cut.
-    let line = b"cat <<\"\"\nbody\n";
-    let tokens = tokenize_statement(line).unwrap();
-    assert!(matches!(
-        layout(line, &tokens).unwrap_err().current_context(),
-        ParseError::UnterminatedHeredoc { .. }
-    ));
+fn layout_empty_delimiter_eof_takes_the_remaining_lines() {
+    let s = specs(b"cat <<\"\"\nbody\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].body, ShortCStr::from_vec(b"body\n".to_vec()).unwrap());
+    assert!(!s[0].expand);
 }
 
+/// The delimiter line is missing at the end of the text, so the body is every
+/// line the stream leaves — unterminated last line included, closed to a whole
+/// line (`eof::close_last_line`): bash prints `body` and `nothing` on their own
+/// lines with its warning at rc 0 (task #364).
 #[test]
-fn layout_missing_delimiter_is_unterminated() {
-    let line = b"cat <<NOPE\nbody\nnothing";
-    let tokens = tokenize_statement(line).unwrap();
-    assert!(matches!(
-        layout(line, &tokens).unwrap_err().current_context(),
-        ParseError::UnterminatedHeredoc { .. }
-    ));
+fn layout_missing_delimiter_takes_the_remaining_lines() {
+    let s = specs(b"cat <<NOPE\nbody\nnothing");
+    assert_eq!(s.len(), 1);
+    assert_eq!(
+        s[0].body,
+        ShortCStr::from_vec(b"body\nnothing\n".to_vec()).unwrap()
+    );
+    assert!(s[0].expand);
 }
 
 #[test]
@@ -733,7 +738,6 @@ fn operator_count_leading_newline_agree() {
         (b"true &&\n<<B\nbody\nB", 1),
         (b"x\n<<EOF\nbody\nEOF", 1),
         (b"&&\n<<EOF", 1),
-        (b"cat <<A\n<<B", 2),
         (b"<<EOF", 1),
         (b" <<EOF", 1),
         (b"\t<<EOF", 1),
@@ -744,6 +748,16 @@ fn operator_count_leading_newline_agree() {
         assert_eq!(byte, operator_count(line, &tokens), "line={:?}", line);
         assert_eq!(byte, want, "line={:?}", line);
     }
+    // The agreement holds per window, and an end-of-file body line sits behind
+    // the window's operator (task #364): the byte scan sees both sites of
+    // `cat <<A\n<<B` (2), the tokenizer sees one operator and one blanked body
+    // line (1). The parse layer follows the token layer, and bash agrees — the
+    // `<<B` line is body data, printed raw with the warning at rc 0
+    // (measured 2026-10-29).
+    let line = b"cat <<A\n<<B";
+    let tokens = tokenize_statement(line).unwrap();
+    assert_eq!(crate::scan::heredoc::operator_count(line, 0, line.len()), 2);
+    assert_eq!(operator_count(line, &tokens), 1);
 }
 
 /// Class 2 of task #261: the **pinned divergence**, asserted as a divergence.
@@ -850,10 +864,16 @@ fn layout_escaped_delimiter_folds() {
     assert_eq!(s[0].body, ShortCStr::from_vec(b"$X\n".to_vec()).unwrap());
     assert!(!s[0].expand);
     // A delimiter line keeps its raw bytes, so `E\OF` never matches the folded
-    // delimiter `EOF`: the statement is unterminated, not silently cut.
-    let line = b"cat <<EOF\nbody\nE\\OF\n";
-    let tokens = tokenize_statement(line).unwrap();
-    assert!(layout(line, &tokens).is_err());
+    // delimiter `EOF` — and never can, so the heredoc is the end-of-file shape
+    // and the line is body data (task #364). bash prints `body` and `E\OF` raw
+    // with its warning at rc 0 (measured 2026-10-29).
+    let s = specs(b"cat <<EOF\nbody\nE\\OF\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(
+        s[0].body,
+        ShortCStr::from_vec(b"body\nE\\OF\n".to_vec()).unwrap()
+    );
+    assert!(s[0].expand);
 }
 
 /// A quoted delimiter keeps the pair inside the quotes, so `<<"E\OF"`

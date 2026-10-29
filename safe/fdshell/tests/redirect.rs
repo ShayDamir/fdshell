@@ -2717,22 +2717,22 @@ fn a_heredoc_only_statement_with_a_word_runs_that_word() {
 
 /// The guards of the same family, pinned **as measured** with their owners:
 ///
-/// * `<<EOF` with **no body at all** is #275's incomplete-stream rule: the
-///   operator demands a body, the parse layer reports the missing delimiter,
-///   rc 1. bash reads to EOF with a warning and exits 0 — the divergence stays
-///   owned by #275 and must not start succeeding because word 0 is now an
-///   operator.
+/// * `<<EOF` with **no body at all** reached bash parity with task **#364**:
+///   the delimiter line never arrives, the statement is the word-0 operator's
+///   redirections-only command (task #345's rule, kept), it runs at rc 0 with
+///   the end-of-file warning, and still creates no file named `EOF` (measured
+///   2026-10-29).
 /// * A `<<` **glued inside a word** (`x<<EOF`) is word data at both levels (the
 ///   tokenizer never splits a word at an operator byte): the command lookup is
 ///   rc 1 and the body lines run as commands. Owner: the glued-pair family.
 /// * The **`&&`-glued word-0** spellings (`true&&<<B`, `cat&&3<<T`, bash rc 0)
-///   report a false `missing terminating delimiter`, pinned as measured — the
-///   members diverge differently, with per-member owners in the comment at
-///   their rows below: the chevron `true&&<<B` is the glued-pair family's
-///   byte-vs-byte window/line count mismatch, the io-number `cat&&3<<T` has
-///   byte counts of 0 in both scopes and its 1 at the token level (the
-///   byte/token word-0 agreement for a part text beginning with an io-number
-///   operator).
+///   run the body lines as commands (the word's list claims them, the part
+///   gets an end-of-file warning — task #364), pinned as measured — the members
+///   diverge differently, with per-member owners in the comment at their rows
+///   below: the chevron `true&&<<B` is the glued-pair family's byte-vs-byte
+///   window/line count mismatch, the io-number `cat&&3<<T` has byte counts of 0
+///   in both scopes and its 1 at the token level (the byte/token word-0
+///   agreement for a part text beginning with an io-number operator).
 /// * The **operator-token**-leading rows (`> <<EOF`, `>| <<EOF`) are the #185
 ///   family: word 0 is a non-here-doc operator, the statement keeps its rc-1
 ///   command word (bash rc 2).
@@ -2742,11 +2742,8 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
     let dir = dir.to_str().unwrap();
     clean(dir);
     let (out, err, code, files) = run_ls(dir, "<<EOF");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
-    assert!(
-        err.contains("missing terminating delimiter line 'EOF'"),
-        "stderr={err:?}"
-    );
+    assert_eq!((out.as_str(), code), ("", 0), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     assert!(created(&files).is_empty(), "created {files:?}");
     // The glued word: no operator at either level, so the body is free.
     clean(dir);
@@ -2754,9 +2751,9 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("\"x<<EOF\" not found"), "stderr={err:?}");
     // The `&&`-glued word-0 spellings, pinned as measured (bash: rc 0,
-    // silent). Both report a **false** `missing terminating delimiter line`
-    // (the body *is* present and terminated), rc 1, and the body no longer
-    // runs as commands — but their mechanisms and owners differ. The cond
+    // silent). Both end in the end-of-file shape of task **#364** (the part's
+    // claim warns, the body lines run as commands), rc 1 — but their mechanisms
+    // and owners differ. The cond
     // splitter cuts the part right after the `&` of the glued pair, and `&`
     // is a word byte for the tokenizer:
     // * chevron member `true&&<<B`: the part `<<B` **opens on the operator**,
@@ -2777,22 +2774,16 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
     //   Owner: the byte/token word-0 agreement for a part text beginning
     //   with an io-number operator — the glued-pair word-boundary cut changes
     //   nothing for this member.
-    for (script, needle) in [
-        (
-            "true&&<<B\nbody\nB",
-            "missing terminating delimiter line 'B'",
-        ),
-        (
-            "cat&&3<<T\nbody\nT",
-            "missing terminating delimiter line 'T'",
-        ),
-    ] {
+    for script in ["true&&<<B\nbody\nB", "cat&&3<<T\nbody\nT"] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
-        assert!(err.contains(needle), "{script}: stderr={err:?}");
         assert!(
-            !err.contains("\"body\" not found"),
-            "{script}: the body must never be a command: stderr={err:?}"
+            err.contains("delimited by end-of-file"),
+            "{script}: stderr={err:?}"
+        );
+        assert!(
+            err.contains("\"body\" not found"),
+            "{script}: the body runs as a command on this family: stderr={err:?}"
         );
     }
     // The operator-token-leading twin of the #185 pins stays rc 1 on its word.

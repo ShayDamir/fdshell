@@ -243,10 +243,13 @@ fn heredoc_dash_form_byte_count_no_trailing_newline() {
 
 #[test]
 fn heredoc_plain_form_ignores_tab_indented_terminator() {
-    // The plain `<<` form never strips tabs, so `\tEOF` is not the terminator.
-    let (_out, err, code) = run("cat <<EOF\n\tEOF");
-    assert_ne!(code, 0);
-    assert!(err.contains("terminating"), "stderr={err:?}");
+    // The plain `<<` form never strips tabs, so `\tEOF` is not the terminator:
+    // the delimiter line never arrives, the line is the body, and the run
+    // carries the end-of-file warning — bash 5.3.9 measured 2026-10-29, rc 0,
+    // fdshell matches.
+    let (out, err, code) = run("cat <<EOF\n\tEOF");
+    assert_eq!((code, out.as_str()), (0, "\tEOF\n"), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
 }
 
 #[test]
@@ -408,10 +411,13 @@ fn heredoc_bare_operator_at_eol_is_error() {
 }
 
 #[test]
-fn heredoc_missing_delimiter_is_error() {
-    let (_out, err, code) = run("cat <<NOPE\nbody\nnothing");
-    assert_ne!(code, 0);
-    assert!(err.contains("terminating"), "stderr={err:?}");
+fn heredoc_missing_delimiter_warns_and_runs() {
+    // The delimiter line never arrives; the whole tail is the body and the run
+    // carries the end-of-file warning — bash 5.3.9 measured 2026-10-29, rc 0,
+    // fdshell matches (task #364).
+    let (out, err, code) = run("cat <<NOPE\nbody\nnothing");
+    assert_eq!((code, out.as_str()), (0, "body\nnothing\n"), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
 }
 
 #[test]
@@ -448,12 +454,13 @@ fn heredoc_empty_quoted_delimiter_empty_body() {
 }
 
 #[test]
-fn heredoc_empty_quoted_delimiter_eof_is_error() {
-    // EOF right after the body: no blank line, so the delimiter line is
-    // missing. Explicit error (bash only warns); never a silent cut.
-    let (_out, err, code) = run("wc -c <<\"\"\nbody\n");
-    assert_ne!(code, 0);
-    assert!(err.contains("terminating"), "stderr={err:?}");
+fn heredoc_empty_quoted_delimiter_eof_warns_and_runs() {
+    // EOF right after the body: no blank line, so the delimiter line never
+    // arrives — bash warns and exits 0, and fdshell matches (task #364;
+    // measured 2026-10-29).
+    let (out, err, code) = run("wc -c <<\"\"\nbody\n");
+    assert_eq!((code, out.as_str()), (0, "5\n"), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
 }
 
 /// The **bare** quoted empty pair is the same delimiter as the attached
@@ -462,9 +469,9 @@ fn heredoc_empty_quoted_delimiter_eof_is_error() {
 /// terminates on (task #330; the byte scan already counted these lines, the
 /// token parser rejected them). Every row measured against bash 5.3.9
 /// (`bash -c`), stdout and stderr captured separately. The EOF row is the
-/// divergence `heredoc_empty_quoted_delimiter_eof_is_error` pins for the
-/// attached form (bash warns at rc 0, fdshell reports the missing delimiter
-/// line at rc 1); the last three rows are the empty-operand **errors** that
+/// shape `heredoc_empty_quoted_delimiter_eof_warns_and_runs` pins for the
+/// attached form (bash warns at rc 0 and fdshell matches, task #364); the
+/// last three rows are the empty-operand **errors** that
 /// must stay — `cat <<` has no operand at all (bash rc 2, fdshell rc 1), and
 /// the `>` family's `> ""` is pinned by
 /// `safe/fdshell/tests/redirect.rs::unquoted_operator_operands_stay_syntax_errors`.
@@ -496,11 +503,11 @@ fn a_bare_quoted_empty_delimiter_delimits_on_the_empty_line() {
     assert_eq!((code, out.as_str()), (0, ""), "stderr={err:?}");
     let (out, err, code) = run_fd3_closed("exec 3<< \"\"\nbody\n\ncat <&3");
     assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
-    // No blank line after the body: no delimiter line, so the explicit
-    // `missing terminating delimiter line ''` (bash warns and exits 0).
-    let (_out, err, code) = run("wc -c << \"\"\nbody");
-    assert_ne!(code, 0);
-    assert!(err.contains("terminating"), "stderr={err:?}");
+    // No blank line after the body: no delimiter line — bash warns and exits 0,
+    // and fdshell matches (task #364; measured 2026-10-29).
+    let (out, err, code) = run("wc -c << \"\"\nbody");
+    assert_eq!((code, out.as_str()), (0, "5\n"), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     // A missing operand, and a separator standing in for one, stay the parse
     // error: the empty arm only yields to a *quoted* span.
     for script in ["cat <<", "cat <<-", "cat << ;"] {
@@ -1229,18 +1236,16 @@ fn block_with_heredoc_runs_a_failing_body_cond_list() {
 
 /// Task #234: the operator written on a heredoc's **delimiter line** is region
 /// data, never a cond-list split. In a multi-line block the body region starts
-/// on the block's own lines, so the region swallows `break`/`done` and the
-/// block reports its own unterminated heredoc (rc 1) — bash's region rule is
-/// the same and ends in a syntax error (rc 2, with its
-/// `here-document ... delimited by end-of-file` warning).
+/// on the block's own lines, so the region swallows `break`/`done` (its
+/// delimiter line never arrives — the end-of-file claim, task #364) and the
+/// block's parser reports the missing `done` (rc 1; fdshell prints no warning
+/// for a heredoc it never runs, measured 2026-10-29) — bash's region rule is
+/// the same and ends in a syntax error (rc 2, warning included).
 #[test]
 fn block_body_heredoc_delimiter_line_operator_is_region_data() {
     let (_out, err, code) = run("while :; do\ncat <<Q\nbody\nQ && echo x\nbreak\ndone");
     assert_eq!(code, 1, "bash rc 2");
-    assert!(
-        err.contains("missing terminating delimiter line 'Q'"),
-        "stderr={err:?}"
-    );
+    assert!(err.contains("missing its closing 'done'"), "stderr={err:?}");
 }
 
 /// Task #234 (review F2): a `#`-comment **block closer written inside a heredoc
@@ -1440,7 +1445,7 @@ fn a_wait_block_arm_heredoc_region_is_a_body_region() {
 /// `a_comment_terminated_line_owns_its_body_stream` (`cat <<Q # c` + body +
 /// `Q` prints `q && y` at rc 0, the block twin likewise); the starved-stream
 /// twins of the same shape keep their owners in
-/// `a_comment_terminated_line_starved_and_deferred_rows_keep_their_owners`.
+/// `a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners`.
 /// Measured 2026-10-26 against bash 5.3.9 and `target/debug/fdshell`.
 #[test]
 fn a_comment_behind_a_heredoc_line_is_the_statement_level_parity() {
@@ -1452,16 +1457,23 @@ fn a_comment_behind_a_heredoc_line_is_the_statement_level_parity() {
     assert_eq!((out.as_str(), code), ("q && y\n", 0), "stderr={err}");
 }
 
-/// Task #275 (measured 2026-10-21, bash 5.3.9): the line's regions are allocated
-/// **greedily, one entry per operator**, so an unterminated `<<E` in the `elif`
-/// condition claims the (empty) rest of the stream and the `then` arm keeps its
-/// own complete body: `bodyT`, rc 0. bash prints the same and additionally warns
-/// `here-document at line 3 delimited by end-of-file (wanted 'E')` — the warning
-/// is task **#364**'s.
+/// Task #275 (measured 2026-10-21, bash 5.3.9; warnings re-measured
+/// 2026-10-29): the line's regions are allocated **greedily, one entry per
+/// operator**, so an unterminated `<<E` in the `elif` condition claims the
+/// (empty) rest of the stream and the `then` arm keeps its own complete body:
+/// `bodyT`, rc 0 — both shells print the same. bash warns
+/// `here-document at line 3 delimited by end-of-file (wanted 'E')` for the
+/// `E` heredoc; fdshell warns for each EOF region it **runs**, and the `E`
+/// heredoc sits in an arm that never runs, so fdshell stays silent here (the
+/// named divergence of task **#364**).
 #[test]
 fn single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm() {
-    let (out, _err, code) = run("if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT");
+    let (out, err, code) = run("if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT");
     assert_eq!((out.as_str(), code), ("bodyT\n", 0));
+    assert!(
+        err.is_empty(),
+        "fdshell warns only for run arms: stderr={err:?}"
+    );
 }
 
 /// Task #275, the statement twins of the acceptance shape (measured 2026-10-21,
@@ -1470,22 +1482,27 @@ fn single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_comple
 /// operator behind it takes what is left of the stream as its own body.
 #[test]
 fn an_unterminated_heredoc_behind_a_complete_one_keeps_the_complete_body() {
-    let (out, _err, code) = run("cat <<T; cat <<E\nbodyT\nT");
+    // The end-of-file warning is task **#364**'s and fires in both shells now
+    // (fdshell's wording), measured 2026-10-29.
+    let (out, err, code) = run("cat <<T; cat <<E\nbodyT\nT");
     assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     // The rest-of-stream claim: the lines left after the complete body are the
     // unterminated operator's **body**, never commands (`extra` prints, rc 0).
-    let (out, _err, code) = run("cat <<T; cat <<E\nbodyT\nT\nextra");
+    let (out, err, code) = run("cat <<T; cat <<E\nbodyT\nT\nextra");
     assert_eq!(
         (out.as_str(), code),
         ("bodyT\nextra\n", 0),
         "bash: bodyT extra, rc 0"
     );
-    let (out, _err, code) = run("cat <<T; cat <<E\nbodyT\nT\nextra\nmore");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
+    let (out, err, code) = run("cat <<T; cat <<E\nbodyT\nT\nextra\nmore");
     assert_eq!(
         (out.as_str(), code),
         ("bodyT\nextra\nmore\n", 0),
         "bash: bodyT extra more, rc 0"
     );
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
 }
 
 /// Task #275, the condition position (measured 2026-10-21: bash prints `bodyT`
@@ -1493,105 +1510,123 @@ fn an_unterminated_heredoc_behind_a_complete_one_keeps_the_complete_body() {
 /// same line — the condition claims its region, the arm reads an empty body.
 #[test]
 fn a_complete_block_condition_heredoc_survives_an_unterminated_arm_one() {
-    let (out, _err, code) = run("if cat <<T; then echo y; cat <<E; fi\nbodyT\nT");
+    let (out, err, code) = run("if cat <<T; then echo y; cat <<E; fi\nbodyT\nT");
     assert_eq!(
         (out.as_str(), code),
         ("bodyT\ny\n", 0),
         "bash: bodyT y, rc 0"
     );
+    assert!(
+        err.contains("delimited by end-of-file"),
+        "the #364 warning fires in both shells (measured 2026-10-29)"
+    );
 }
 
 /// Task #275, the arm-shape twins (measured 2026-10-21: `bodyT`, rc 0 in bash):
 /// a `case` clause, a `for` arm and a `while` arm with one complete and one
-/// unterminated operator on the same line.
+/// unterminated operator on the same line. The unterminated one is an
+/// end-of-file claim (task **#364**) and warns in both shells here — the arm
+/// runs (measured 2026-10-29).
 #[test]
 fn an_unterminated_heredoc_behind_a_complete_one_in_a_case_clause_and_a_loop_arm() {
-    let (out, _err, code) = run("case x in x) cat <<T; cat <<E;; esac\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
-    let (out, _err, code) = run("for i in 1; do cat <<T; cat <<E; done\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
-    let (out, _err, code) = run("while :; do cat <<T; cat <<E; break; done\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
-}
-
-/// Task #275, the `<<-` form (measured 2026-10-21: `bodyT`, rc 0 in bash): the
-/// synthesized terminator line of the starved operator is tab-stripped exactly
-/// like a real one, because it is written untabbed.
-#[test]
-fn an_unterminated_dashed_heredoc_behind_a_complete_one_keeps_the_complete_arm() {
-    let (out, _err, code) = run("if true; then cat <<-T; elif cat <<-E; then echo b; fi\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
-}
-
-/// Task #275, a block with a trailing statement on its line (measured
-/// 2026-10-21: bash `bodyT`, rc 0 + warning): the tail claim consumes the rest
-/// of the stream, so the scan resumes at the text end and the trailing
-/// `cat <<E` runs with an empty body, printing nothing.
-#[test]
-fn a_tail_claim_past_a_block_leaves_the_trailing_statement_an_empty_body() {
-    let (out, _err, code) = run("if true; then cat <<T; fi; cat <<E\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
-}
-
-/// Task #275's **residual**, pinned as measured: a line whose **first** `<<`
-/// operator has no delimiter line stays fdshell's parse error — the greedy
-/// allocation claims nothing when `found == 0` and the parse layer owns "this
-/// heredoc has no body at all". bash warns and runs (rc 0, its body is the
-/// remaining lines); task **#364** owns that whole end-of-file family.
-#[test]
-fn a_line_whose_first_heredoc_is_unterminated_is_still_a_parse_error() {
     for script in [
-        "cat <<E; cat <<T\nbodyT\nT",
-        "echo a; cat <<E; echo b\nbody",
-        "cat <<E",
+        "case x in x) cat <<T; cat <<E;; esac\nbodyT\nT",
+        "for i in 1; do cat <<T; cat <<E; done\nbodyT\nT",
+        "while :; do cat <<T; cat <<E; break; done\nbodyT\nT",
     ] {
         let (out, err, code) = run(script);
-        assert_eq!(
-            (out.as_str(), code),
-            (
-                if script.starts_with("echo") {
-                    "a\n"
-                } else {
-                    ""
-                },
-                1
-            ),
-            "script={script:?} err={err}"
-        );
+        assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
         assert!(
-            err.contains("missing terminating delimiter line 'E'"),
-            "script={script:?} err={err}"
+            err.contains("delimited by end-of-file"),
+            "the #364 warning fires in both shells (measured 2026-10-29): script {script:?}: stderr={err:?}"
         );
     }
 }
 
-/// Task #275's **residual**, the block mirror of the acceptance shape (measured
-/// 2026-10-21): the line's first operator (`<<T`, in the `then` arm) is the
-/// unterminated one, so `found == 0` starves the complete `elif` body as well.
-/// bash runs the `elif` and prints `b` (rc 0, two warnings) — #364.
+/// Task #275, the `<<-` form (measured 2026-10-21, warnings re-measured
+/// 2026-10-29: `bodyT`, rc 0 in bash): the starved operator's claim is the
+/// end-of-file shape of task **#364** — bash warns for it; the `elif` arm never
+/// runs, so fdshell warns for nothing (the named divergence — compare
+/// `single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm`).
 #[test]
-fn a_block_line_whose_first_operator_is_unterminated_is_still_a_parse_error() {
-    let (out, err, code) = run("if false; then cat <<T; elif cat <<E; then echo b; fi\nbodyE\nE");
-    assert_eq!((out.as_str(), code), ("", 1), "bash: b, rc 0");
+fn an_unterminated_dashed_heredoc_behind_a_complete_one_keeps_the_complete_arm() {
+    let (out, err, code) = run("if true; then cat <<-T; elif cat <<-E; then echo b; fi\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
     assert!(
-        err.contains("missing terminating delimiter line 'E'"),
-        "err={err}"
+        err.is_empty(),
+        "fdshell warns only for run arms: stderr={err:?}"
     );
 }
 
-/// Task #275, accepted divergence (measured 2026-10-21): a multi-line block
-/// whose stream runs past the closer. The tail claim extends the extension-mode
-/// span to the end of the text, so `fi` becomes body data and the block never
-/// closes. bash consumes the same lines as body data and stops at a **syntax
-/// error (rc 2)**; fdshell reports the missing delimiter (rc 1).
+/// Task #275, a block with a trailing statement on its line (measured
+/// 2026-10-21, warnings re-measured 2026-10-29: bash `bodyT`, rc 0 + warning):
+/// the tail claim consumes the rest of the stream, so the scan resumes at the
+/// text end and the trailing `cat <<E` runs with an empty body, printing
+/// nothing. The end-of-file warning (task **#364**) fires in both shells here —
+/// the claiming operator runs.
+#[test]
+fn a_tail_claim_past_a_block_leaves_the_trailing_statement_an_empty_body() {
+    let (out, err, code) = run("if true; then cat <<T; fi; cat <<E\nbodyT\nT");
+    assert_eq!((out.as_str(), code), ("bodyT\n", 0), "bash: bodyT, rc 0");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
+}
+
+/// Task #275's **residual**, the end-of-file family task **#364** owns: a line
+/// whose **first** `<<` operator has no delimiter line takes the claim over the
+/// remaining lines and runs. bash 5.3.9 measured 2026-10-29, stdout captured
+/// separately; fdshell matches byte-for-byte (its warning wording differs, and
+/// it warns for each EOF region it runs — the two-warnings row shows that).
+#[test]
+fn a_line_whose_first_heredoc_is_unterminated_claims_the_stream() {
+    for (script, want) in [
+        ("cat <<E; cat <<T\nbodyT\nT", "bodyT\nT\n"),
+        ("echo a; cat <<E; echo b\nbody", "a\nbody\nb\n"),
+        ("cat <<E", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, 0),
+            "script={script:?} err={err:?}"
+        );
+        assert!(
+            err.contains("delimited by end-of-file"),
+            "script={script:?} err={err:?}"
+        );
+    }
+}
+
+/// Task #275's **residual**, the block mirror of the acceptance shape, the
+/// end-of-file family task **#364** owns: the line's first operator (`<<T`, in
+/// the `then` arm) has no delimiter line and claims the stream; the `elif`
+/// condition runs on its own claim and the arm prints `b`. bash 5.3.9 measured
+/// 2026-10-29 (`b`, rc 0, **two** warnings — one per EOF heredoc); fdshell
+/// matches stdout/rc and warns **once**: the `then`-arm operator it never ran
+/// stays silent (named divergence).
+#[test]
+fn a_block_line_whose_first_operator_is_unterminated_claims_the_stream() {
+    let (out, err, code) = run("if false; then cat <<T; elif cat <<E; then echo b; fi\nbodyE\nE");
+    assert_eq!((out.as_str(), code), ("b\n", 0), "bash: b, rc 0");
+    assert!(err.contains("delimited by end-of-file"), "err={err:?}");
+    assert_eq!(
+        err.matches("delimited by end-of-file").count(),
+        1,
+        "fdshell warns only for the arm it ran (bash: 2)"
+    );
+}
+
+/// Task #275, accepted divergence (measured 2026-10-21, re-measured
+/// 2026-10-29): a multi-line block whose stream runs past the closer. The tail
+/// claim extends the extension-mode span to the end of the text, so `fi`
+/// becomes body data and the block never closes. bash consumes the same lines
+/// as body data (the `<<E` gets its end-of-file warning) and stops at a
+/// **syntax error (rc 2)**; fdshell's parse layer accepts the heredoc and its
+/// block parser reports the missing `fi` (rc 1) — same family, its own wording.
 #[test]
 fn a_multi_line_block_with_a_tail_claim_past_the_closer_is_a_parse_error() {
     let (out, err, code) = run("if true; then\ncat <<T\nT\ncat <<E\nfi");
     assert_eq!((out.as_str(), code), ("", 1), "bash rc 2, syntax error");
-    assert!(
-        err.contains("missing terminating delimiter line 'E'"),
-        "err={err}"
-    );
+    assert!(err.contains("is missing its closing 'fi'"), "err={err:?}");
 }
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -2214,14 +2249,21 @@ fn heredoc_body_continuation_into_the_delimiter_line_ends_the_body() {
 }
 
 /// A body that ends with a trailing `\<newline>` and has **no** delimiter line
-/// is fdshell's usual unterminated-heredoc error, the same rc 1 as the plain
-/// `cat <<EOF` + body. bash only warns (rc 0).
+/// runs at rc 0 with the end-of-file warning — the family of task **#364**,
+/// bash 5.3.9 measured 2026-10-29. The stdout stays a pinned divergence
+/// (pre-existing, the test above this one): fdshell's byte layer consumed the
+/// continuation pair, so its body is `ab` with no newline where bash keeps the
+/// literal `ab\`.
 #[test]
-fn heredoc_unterminated_body_with_continuation_is_a_parse_error() {
-    let (_out, err, code) = run("cat <<EOF\nab\\\n");
-    assert_eq!(code, 1);
+fn heredoc_unterminated_body_with_continuation_warns_and_runs() {
+    let (out, err, code) = run("cat <<EOF\nab\\\n");
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "ab"),
+        "bash prints \"ab\\\" at rc 0"
+    );
     assert!(err.contains("here-doc"), "stderr={err:?}");
-    assert!(err.contains("missing terminating"), "stderr={err:?}");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
 }
 
 /// Accepted divergence (task #222, to be closed by task #288): a here-doc body
@@ -2509,15 +2551,16 @@ fn group_body_heredoc_behind_a_statement_keeps_the_trailing_statement() {
 ///   to the group, fdshell keeps its `here-doc on a group is not supported`
 ///   message (tasks **#187**/**#191**). The claim never reaches the tail: the tail
 ///   operator's region is not part of the group's body text.
-/// * the **EOF-starved** stream: the region's delimiter line never arrives, so
-///   the line's allocation claims nothing (task **#429**'s family) and fdshell
-///   rejects the group where bash prints the body with its end-of-file warning.
+/// * the **EOF-starved** stream is parity now (task **#364**): the delimiter
+///   line never arrives, the claim covers the body, and both shells print it at
+///   rc 0 with the end-of-file warning (fdshell's wording).
 /// * the delimiter word shaped like a brace (`{ cat <<}; }`): the closer search
 ///   of task **#432** — bash prints `x` rc 0 with its EOF warning, fdshell
-///   reports the missing delimiter for the `}` word.
+///   reports the group missing its closing brace (the `}` word is the closer's
+///   search site; the wording moved with task #364, the rc 1 stands).
 /// * the **multi-line** group with a `;`-terminated inner heredoc: bash rejects
-///   the syntax at rc 2, fdshell runs the first body line and reports the missing
-///   delimiter at rc 1 (the rc-1-vs-2 family).
+///   the syntax at rc 2, fdshell reports the group missing its closing brace at
+///   rc 1 (the rc-1-vs-2 family — the `}` sits inside the claimed region).
 /// * the group as a pipeline stage: `} | cat` is unsupported (tasks
 ///   **#186**/**#190**, pinned as `unexpected pipe` by
 ///   `tests/group.rs::pipeline_stage_group_is_a_parse_error`).
@@ -2535,19 +2578,21 @@ fn group_body_heredoc_behind_a_statement_keeps_the_trailing_statement() {
 /// `a_comment_terminated_line_owns_its_body_stream`.
 #[test]
 fn group_body_heredoc_divergences_keep_their_owners() {
+    // The starved-stream row is parity now (task #364): bash prints `body`
+    // with its end-of-file warning at rc 0, fdshell matches (measured
+    // 2026-10-29).
+    let (out, err, code) = run("{ cat <<T; }\nbody");
+    assert_eq!((out.as_str(), code), ("body\n", 0), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     for (script, want) in [
         (
             "{ cat <<T; } <<EOF\nbody\nT\nEOF",
             "here-doc on a group is not supported",
         ),
-        (
-            "{ cat <<T; }\nbody",
-            "missing terminating delimiter line 'T'",
-        ),
-        ("{ cat <<}; }\nx", "missing terminating delimiter line '}'"),
+        ("{ cat <<}; }\nx", "group is missing a closing brace"),
         (
             "{ echo a\ncat <<T;\n}\nbody\nT",
-            "missing terminating delimiter line 'T'",
+            "group is missing a closing brace",
         ),
         ("{ cat <<T; } | cat\nbody\nT", "unexpected pipe"),
         (
@@ -2797,10 +2842,9 @@ fn function_body_heredoc_calls_in_a_loop_and_with_redirects() {
 ///   (rc 1) where bash reports the last body command's (rc 0) — measured on
 ///   master with a plain loop body, so it is the loop-status rule, not this
 ///   task's; the here-doc itself prints `body` twice.
-/// * the incomplete stream: the line's **first** operator's delimiter line never
-///   arrives, so the allocation claims nothing (task **#429**'s family) and
-///   fdshell rejects the definition where bash prints the body with its
-///   end-of-file warning.
+/// * the incomplete stream is parity now (task **#364**): the delimiter line
+///   never arrives, the claim covers the body, and both shells print it at rc 0
+///   with the end-of-file warning (fdshell's wording).
 /// * the unclosed definer keeps its missing-closer message (task #277's
 ///   contract), and the group body row stays with **#315**.
 #[test]
@@ -2812,17 +2856,17 @@ fn function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence() {
         ("body\nbody\n", 1),
         "bash prints the same twice at rc 0"
     );
-    for (script, want) in [
-        (
-            "f() { cat <<E; }; f\nbody",
-            "missing terminating delimiter line 'E'",
-        ),
-        ("f() { cat <<E;", "is missing its closing '}'"),
-    ] {
-        let (_out, err, code) = run(script);
-        assert_eq!(code, 1, "{script}: bash prints the body at rc 0");
-        assert!(err.contains(want), "{script}: stderr={err}");
-    }
+    // The single-call starved row is parity now (task #364): bash prints the
+    // body with its end-of-file warning at rc 0, fdshell matches (measured
+    // 2026-10-29).
+    let (out, err, code) = run("f() { cat <<E; }; f\nbody");
+    assert_eq!((out.as_str(), code), ("body\n", 0), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
+    // The unclosed definer keeps its missing-closer message (task #277's
+    // contract): fdshell rc 1; bash warns and stops at its rc 2 syntax error.
+    let (_out, err, code) = run("f() { cat <<E;");
+    assert_eq!(code, 1, "bash: warning + syntax error rc 2");
+    assert!(err.contains("is missing its closing '}'"), "stderr={err}");
 }
 
 /// The shapes the definer claim does **not** reach, pinned with their owners so
@@ -3403,14 +3447,16 @@ fn heredoc_invalid_delimiter_keeps_the_parse_errors() {
         assert_eq!((code, out.as_str()), (1, ""), "script={script:?}");
         assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
     }
-    // The multi-part line: the first operator's delimiter line is what the
-    // parse reports, unchanged, and no body line is executed.
+    // The multi-part line: the first operator's claim is the end-of-file shape
+    // (task #364) and prints its warning, the invalid operator keeps its parse
+    // error, and no body line is executed.
     let (out, err, code) = run("cat <<A ; cat <<- <<X ; cat <<B\na\nA\nX\nB");
     assert_eq!((code, out.as_str()), (1, ""));
     assert!(
-        err.contains("missing terminating delimiter line 'A'"),
+        err.contains("delimited by end-of-file (wanted 'A')"),
         "stderr={err:?}"
     );
+    assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
     assert!(
         !err.contains("\"X\" not found"),
         "body must not leak: {err:?}"
@@ -3459,23 +3505,29 @@ fn heredoc_leading_newline_is_a_redirect_only_statement() {
 ///   the physical line, so the run behind the `&` is flushed on it and claims
 ///   its own region) — pinned by
 ///   `a_comment_behind_an_ampersand_lets_the_suffix_carry_its_body`.
-/// * Glued `<<A&`: `&` is a **word byte** for the tokenizer
-///   (`scan::heredoc::lines::token_word_end` says so explicitly), so the
-///   byte-level delimiter is `A&` and the line's region list is empty. Owner:
-///   the glued-pair family (the tokenizer's split set), not this task.
+/// * Glued `<<A&`: `&` is still a **word byte** for the tokenizer
+///   (`scan::heredoc::lines::token_word_end` says so explicitly — word rules
+///   unchanged, owner the glued-pair family) — but a glued delimiter that no
+///   whole line matches is the end-of-file shape (task **#364**): the pair
+///   runs, fdshell prints the prefix's body with its end-of-file warning at
+///   rc 0, bash prints both bodies (the async suffix races) silently at rc 0.
 /// * A redirect-only suffix (`<<B` / `<<U` with no command word): bash runs a
 ///   bare redirection; **fdshell does too** since task #345 — the suffix is
 ///   `simple_command = REDIRECT…`, its body is consumed and the statement
 ///   exits 0 (the rows moved from rc 1 to rc 0, i.e. to parity with bash).
 #[test]
 fn a_heredoc_behind_an_ampersand_known_divergences() {
-    // The glued twin of the `#`-behind-`&` row: the prefix job runs (its body
-    // prints), the suffix is the parse error.
-    let (script, delim) = ("cat <<A& cat <<B\nx\nA\ny\nB", "B");
+    // The glued twin of the `#`-behind-`&` row: the glued word never matches a
+    // line, so the suffix's operator ends in the end-of-file shape (task #364)
+    // — fdshell prints the prefix's body `x` and warns; bash (its `&` is the
+    // operator, so the prefix runs async) prints `x` too, with no warning
+    // (delimiters match) and the suffix's `y` racing on the job's own output
+    // (measured 2026-10-29).
+    let script = "cat <<A& cat <<B\nx\nA\ny\nB";
     let (out, err, code) = run(script);
-    assert_eq!(code, 1, "script {script:?}: out={out}");
+    assert_eq!((code, out.as_str()), (0, "x\n"), "script {script:?}");
     assert!(
-        err.contains(&format!("missing terminating delimiter line '{delim}'")),
+        err.contains("delimited by end-of-file (wanted 'B')"),
         "script {script:?}: stderr={err}"
     );
     // The redirect-only suffix: the prefix's body prints, the suffix is a
@@ -3505,41 +3557,53 @@ fn a_heredoc_behind_an_ampersand_known_divergences() {
 /// (owner **#275**). bash reads to EOF with a warning and runs on.
 #[test]
 fn a_heredoc_behind_an_ampersand_reports_a_missing_body() {
-    // The first body never arrives: `A` is the report (bash: two EOF warnings,
-    // rc 0).
+    // The first body never arrives: both operators end in the end-of-file shape
+    // and run — bash: two EOF warnings, prints `y` and `B`, rc 0; fdshell
+    // matches stdout and the two warnings (its own wording), measured
+    // 2026-10-29.
     let (out, err, code) = run("cat <<A & cat <<B\ny\nB");
-    assert_eq!(code, 1, "out={out}");
-    assert!(
-        err.contains("missing terminating delimiter line 'A'"),
-        "stderr={err}"
+    assert_eq!((code, out.as_str()), (0, "y\nB\n"), "bash agrees");
+    assert_eq!(
+        err.matches("delimited by end-of-file").count(),
+        2,
+        "bash counts two, stderr={err:?}"
     );
-    // `cat <<A &` with no body lines at all: bash warns at EOF and exits 0.
+    // `cat <<A &` with no body lines at all: bash warns at EOF and exits 0;
+    // fdshell matches (measured 2026-10-29).
     let (_out, err, code) = run("cat <<A &");
-    assert_eq!(code, 1);
-    assert!(
-        err.contains("missing terminating delimiter line 'A'"),
-        "stderr={err}"
-    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     // A bare `<<` behind the `&`: bash's rc 2 syntax error, fdshell's rc 1
     // `invalid redirect syntax` — the same rc family, after the fix the prefix
     // prints its body first.
     let (out, err, code) = run("cat <<A & cat <<\nx\nA");
     assert_eq!(code, 1, "out={out}");
     assert!(err.contains("invalid redirect syntax"), "stderr={err}");
-    // Unterminated bodies next to the `&` (the pre-existing heredoc rule,
-    // owner #266 for the terminator-is-statement-text case): bash warns and
-    // reads to EOF, fdshell bails.
-    for script in [
-        "echo hi <<T &\nbody\n T\necho after",
-        "echo hi <<T &\nbody\nT; echo after",
-        "echo hi <<T &\r\nbody\r\nT\r\n",
+    // Unterminated bodies next to the `&` — the end-of-file family of task
+    // **#364**: bash warns and reads to EOF and runs (its `hi` lands on the
+    // job's own output, measured 2026-10-29). The first two rows reach parity
+    // at rc 0 with the warning (fdshell's wording); the `\r` row keeps the CR
+    // parse family's own report (bash rc 127 with `$'\r': command not found`).
+    for (script, code, needle) in [
+        (
+            "echo hi <<T &\nbody\n T\necho after",
+            0,
+            "delimited by end-of-file",
+        ),
+        (
+            "echo hi <<T &\nbody\nT; echo after",
+            0,
+            "delimited by end-of-file",
+        ),
+        (
+            "echo hi <<T &\r\nbody\r\nT\r\n",
+            1,
+            "delimited by end-of-file",
+        ),
     ] {
-        let (_out, err, code) = run(script);
-        assert_eq!(code, 1, "script {script:?}");
-        assert!(
-            err.contains("missing terminating delimiter line 'T'"),
-            "script {script:?}: stderr={err}"
-        );
+        let (_out, err, got) = run(script);
+        assert_eq!(got, code, "script {script:?}: stderr={err}");
+        assert!(err.contains(needle), "script {script:?}: stderr={err}");
     }
 }
 
@@ -3590,12 +3654,13 @@ fn a_heredoc_at_the_end_of_a_case_arm_with_an_ampersand() {
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "hi\n");
 
+    // The unclosed `case`: the body line never arrives for the `&`-terminated
+    // operator — the end-of-file shape of task #364: fdshell accepts, warns and
+    // runs silently at rc 0; bash reports its rc 2 EOF syntax error after the
+    // warning (measured 2026-10-29).
     let (_out, err, code) = run("case x in x) echo hi <<T & ;;\nesac");
-    assert_eq!(code, 1);
-    assert!(
-        err.contains("missing terminating delimiter line 'T'"),
-        "stderr={err}"
-    );
+    assert_eq!(code, 0, "bash rc 2, syntax error; stderr={err}");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err}");
 }
 
 // --- Task #266: a here-doc **terminator line** is heredoc structure, never
@@ -3821,31 +3886,26 @@ fn chevron_terminator_known_divergences() {
 /// are the divergence task **#372** owns, pinned at their measured rc.
 #[test]
 fn substitution_delimiter_word_is_literal() {
-    // bash: the delimiter is the literal `$(echo EOF)`, the body is `body` and
-    // `EOF`, and the warning says `wanted $(echo EOF)` (rc 0). fdshell: the
-    // delimiter word is the same literal, so the `EOF` line never matches.
+    // The delimiter is the literal `$(echo EOF)` in both shells and its line
+    // never arrives — the end-of-file family of task **#364**: the body is
+    // `body` and `EOF`, with the end-of-file warning at rc 0. Measured
+    // 2026-10-29, bash 5.3.9; fdshell matches byte-for-byte (wording aside).
     let (out, err, code) = run("cat <<$(echo EOF)\nbody\nEOF\n");
     assert_eq!(
         (code, out.as_str()),
-        (1, ""),
-        "bash prints `body` + `EOF` at rc 0; stderr={err:?}"
+        (0, "body\nEOF\n"),
+        "bash agrees; stderr={err:?}"
     );
     assert!(
-        err.contains("missing terminating delimiter line '$(echo EOF)'"),
+        err.contains("delimited by end-of-file"),
         "the delimiter word is literal, stderr={err}"
     );
-    // bash matches the literal terminator line and prints the body (rc 0);
-    // fdshell's blanked terminator reads `EOF` → #372.
+    // The literal terminator line arrives: both shells print `body` at rc 0,
+    // silent — parity (the blanked-delimiter divergence of #372 is closed by
+    // task #364's mechanism; measured 2026-10-29).
     let (out, err, code) = run("cat <<$(echo EOF)\nbody\n$(echo EOF)\n");
-    assert_eq!(
-        (code, out.as_str()),
-        (1, ""),
-        "bash prints `body` at rc 0 (#372); stderr={err:?}"
-    );
-    assert!(
-        err.contains("missing terminating delimiter line"),
-        "stderr={err}"
-    );
+    assert_eq!((code, out.as_str()), (0, "body\n"), "bash agrees");
+    assert!(err.is_empty(), "stderr={err:?}");
     // The neighbouring surface that *is* a substitution surface, unchanged.
     let (out, err, code) = run("cat <<< $(echo hi)");
     assert_eq!((code, out.as_str()), (0, "hi\n"), "stderr={err:?}");
@@ -3958,41 +4018,41 @@ fn a_comment_behind_an_ampersand_lets_the_suffix_carry_its_body() {
     assert_eq!(lines, ["x", "y"], "stdout={out}");
 }
 
-/// The members of the family that stay divergent, pinned **as measured** with
-/// their owner named (never silently accepted):
+/// The starved-stream rows reach **parity** with bash (task **#364**: the
+/// delimiter line never arrives, the claim covers the remaining lines, the run
+/// carries the end-of-file warning; measured 2026-10-29). The members that stay
+/// divergent are pinned **as measured** with their owner named (never silently
+/// accepted):
 ///
-/// * the **starved** stream — the region's delimiter line never arrives, so the
-///   line's allocation claims nothing (the all-or-nothing rule of task **#275**,
-///   the EOF family of **#429** / **#364**): fdshell reports the missing
-///   delimiter at rc 1 where bash prints the body with its end-of-file warning.
 /// * a line-opening `&` **below** a comment-terminated here-doc line: the flush
 ///   is deferred into the region and the region's tail runs as a command, the
 ///   `segment/bg.rs::mark` family of task **#468**.
 /// * `echo a # note` + a line-opening `&`: the accepted line-deferral family
 ///   (bash's rc 2 syntax error, fdshell runs both).
 #[test]
-fn a_comment_terminated_line_starved_and_deferred_rows_keep_their_owners() {
-    // #275 / #429: the delimiter line never arrives (bash prints `body`, rc 0).
-    for script in ["cat <<X # note\nbody", "cat <<X # note"] {
+fn a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners() {
+    // #275's all-or-nothing rule is gone; the #429/#364 family is parity (bash
+    // prints `body` at rc 0, the lone line prints nothing).
+    for (script, want_out) in [("cat <<X # note\nbody", "body\n"), ("cat <<X # note", "")] {
         let (out, err, code) = run(script);
         assert_eq!(
             (code, out.as_str()),
-            (1, ""),
-            "script {script:?}: out={out}"
+            (0, want_out),
+            "script {script:?}: bash agrees"
         );
         assert!(
-            err.contains("missing terminating delimiter line 'X'"),
+            err.contains("delimited by end-of-file"),
             "script {script:?}: stderr={err}"
         );
     }
     // #468: the `&` line is swallowed by the region, whose tail then runs as a
-    // command. bash prints `& echo b` and `body` at rc 0.
+    // command (the `& echo b` job's own output lands in stdout; the `body` tail
+    // answers with the shell's report). bash prints `& echo b` and `body` at
+    // rc 0.
     let (out, err, code) = run("cat <<X # note\n& echo b\nbody\nX");
-    assert_eq!((code, out.as_str()), (1, ""), "out={out}");
-    assert!(
-        err.contains("missing terminating delimiter line 'X'"),
-        "stderr={err}"
-    );
+    assert_eq!((code, out.as_str()), (1, "b\n"), "out={out}");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err}");
+    assert!(err.contains("\"body\" not found"), "stderr={err}");
     // The accepted line-deferral family: bash stops at the line-opening `&`
     // with rc 2, fdshell runs both statements. The `& echo b` is a background
     // job, so its output has no order (the `tests/async.rs` convention).
@@ -4030,16 +4090,13 @@ fn a_quoted_delimiter_may_be_a_separator_word() {
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
         assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
     }
-    // A quoted separator delimiter with no delimiter line is the missing
-    // delimiter, the same verdict the empty quoted delimiter reports (bash warns
-    // and exits 0, the family `a_bare_quoted_empty_delimiter_delimits_on_the_empty_line`
-    // pins).
+    // A quoted separator delimiter with no delimiter line is the end-of-file
+    // shape of task **#364**: bash warns and exits 0, the family
+    // `a_bare_quoted_empty_delimiter_delimits_on_the_empty_line` pins; fdshell
+    // matches (measured 2026-10-29).
     let (out, err, code) = run("cat << \";\"");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
-    assert!(
-        err.contains("missing terminating delimiter line ';'"),
-        "stderr={err:?}"
-    );
+    assert_eq!((out.as_str(), code), ("", 0), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     // The bare path redirect of a quoted separator word is task **#475**'s
     // divergence, pinned here so the change is visible: bash writes the file `;`
     // (rc 0), fdshell answers the redirect parse error.
@@ -4125,36 +4182,54 @@ fn an_escaped_delimiter_word_is_one_word_at_both_levels() {
 /// the delimiter word swallows the next line (`cat <<a\` with a following `a\`
 /// is one word `aa\` in bash, `cat <<E\` with a following `zzz` is `Ezzz`),
 /// which task **#489** owns; a delimiter line that never
-/// arrives is the EOF-starved family of **#275** / **#429** (bash reads to EOF
-/// with its warning at rc 0, fdshell reports the missing delimiter at rc 1).
+/// arrives is the end-of-file family of task **#364** (both shells read to EOF,
+/// warn and run at rc 0 — parity measured 2026-10-29; the #489 rows keep their
+/// word-shape divergence, which decides the warning's text and whether bash
+/// warns at all on the matching row).
 #[test]
 fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
     // #489: the trailing `\` joins the word with the next line, so fdshell's
     // delimiter is the two-line text and the delimiter line never matches
     // (bash: the delimiter is `a ` / `aa\` / `Ezzz`, rc 0).
-    for script in ["cat <<a\\ \na ", "cat <<a\\\na\\", "cat <<E\\\nzzz\nEOF"] {
+    // #489's rows: the trailing `\` joins the word with the next line **in
+    // bash** (`a ` / `aa\` / `Ezzz`); fdshell keeps its own word shape, so the
+    // delimiter line never matches and the run carries the end-of-file warning
+    // (task #364). Both shells now run at rc 0; only the word text (and the
+    // warning it produces) stays with #489. Measured 2026-10-29.
+    for (script, want_out) in [
+        ("cat <<a\\ \na ", ""),
+        ("cat <<a\\\na\\", ""),
+        ("cat <<E\\\nzzz\nEOF", "EOF\n"),
+    ] {
         let (out, err, code) = run(script);
         assert_eq!(
-            (out.as_str(), code),
-            ("", 1),
+            (code, out.as_str()),
+            (0, want_out),
             "script {script:?}: out={out}"
         );
         assert!(
-            err.contains("missing terminating delimiter line"),
+            err.contains("delimited by end-of-file"),
             "script {script:?}: stderr={err:?}"
         );
     }
-    // #275 / #429: the folded delimiter is right, its line never arrives —
-    // bash prints the body with its end-of-file warning.
-    for script in ["cat <<a\\ b\nX=zzz\nNOPE", "cat <<a\\\tb\n\tbody\n\ta\tb"] {
-        let (out, err, code) = run(script);
+    // The EOF family of task **#364**, parity on the first row (bash prints
+    // the body with its end-of-file warning). The second row keeps a pinned
+    // divergence: bash's word ends at the escaped space (`a `) and `b` is a
+    // cat argument (`cat: b: No such file`, rc 1), while fdshell's word span
+    // takes the whole `a\tb` (owner #347's pair rule) and runs at rc 0 printing
+    // the claimed body (measured 2026-10-29).
+    for (script, want_out, code) in [
+        ("cat <<a\\ b\nX=zzz\nNOPE", "X=zzz\nNOPE\n", 0),
+        ("cat <<a\\\tb\n\tbody\n\ta\tb", "\tbody\n\ta\tb\n", 0),
+    ] {
+        let (out, err, got) = run(script);
         assert_eq!(
-            (out.as_str(), code),
-            ("", 1),
-            "script {script:?}: out={out}"
+            (got, out.as_str()),
+            (code, want_out),
+            "script {script:?}: stderr={err:?}"
         );
         assert!(
-            err.contains("missing terminating delimiter line"),
+            err.contains("delimited by end-of-file"),
             "script {script:?}: stderr={err:?}"
         );
     }
@@ -4174,14 +4249,16 @@ fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
 #[test]
 fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468() {
     // The delimiter line IS the `&` line: the region is swallowed, so the
-    // delimiter never arrives (bash: rc 0, silent, the delimiter is `&x`).
-    for (script, delim) in [
-        ("cat <<\"&x\"\n&x", "&x"),
-        ("cat <<'&x'\n&x", "&x"),
-        ("cat <<\\&x\n&x", "&x"),
-        ("cat << \"&x\"\n&x", "&x"),
-        ("cat <<-\"&x\"\n\t&x", "&x"),
-        ("cat <<\"&&\"\n&&", "&&"),
+    // delimiter never arrives — the end-of-file shape of task **#364**: fdshell
+    // warns, and the deferral's command report (`"&x"/`&&" not found`) rides on
+    // the same stderr (bash: rc 0, silent, the delimiter is `&x`; measured
+    // 2026-10-29).
+    for script in [
+        "cat <<\"&x\"\n&x",
+        "cat <<'&x'\n&x",
+        "cat <<\\&x\n&x",
+        "cat << \"&x\"\n&x",
+        "cat <<-\"&x\"\n\t&x",
     ] {
         let (out, err, code) = run(script);
         assert_eq!(
@@ -4190,10 +4267,16 @@ fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468()
             "script {script:?}: out={out}"
         );
         assert!(
-            err.contains(&format!("missing terminating delimiter line '{delim}'")),
+            err.contains("delimited by end-of-file"),
             "script {script:?}: stderr={err:?}"
         );
     }
+    // The `&&` twin: `&&` is an operator word the deferral swallows whole, so
+    // no command report rides along and the run ends at rc 0 (bash: rc 0,
+    // silent — parity; the `&x` rows keep their command reports, owner #468).
+    let (out, err, code) = run("cat <<\"&&\"\n&&");
+    assert_eq!((out.as_str(), code), ("", 0), "bash agrees: out={out}");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     // A `&` word with a space behind it: the swallowed region leaves `x` as a
     // command word (bash: rc 0, silent).
     let (out, err, code) = run("cat <<\"& x\"\n& x");

@@ -79,16 +79,17 @@ fn unclosed_block_claims_nothing() {
     assert_eq!(claim(line, 0, end, false), (Vec::new(), end));
 }
 
-/// The line's stream claims nothing when its **first** delimiter line is
-/// missing (#275's rule): the window keeps its span end, extended to the
-/// line's resume, and carries no contents.
+/// The line's stream claims everything when the **first** delimiter line is
+/// missing (task #364): the window keeps its span end — no longer extended —
+/// and the contents of the remaining lines travel with it. bash prints
+/// `echo after` as the body, warns, and runs at rc 0 (measured 2026-10-29).
 #[test]
-fn first_missing_delimiter_line_claims_nothing() {
+fn first_missing_delimiter_line_claims_the_stream() {
     let line = b"if cat <<A; then :; fi\necho after";
     let end = 22;
     let got = claim(line, 0, end, true);
-    assert_eq!(got.0, Vec::<Vec<u8>>::new());
-    assert_eq!(got.1, 23, "the span end reaches the line's resume");
+    assert_eq!(got.0, vec![b"echo after".to_vec()]);
+    assert_eq!(got.1, 22, "the span end stays put");
 }
 
 /// The skip is the count of the operators written on the physical line

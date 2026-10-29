@@ -116,9 +116,10 @@ fn append_mode_claims_the_blocks_own_regions() {
 
 /// Extension mode: bodies interleaved with the block's own lines keep the
 /// forward-only extension and carry no body regions — the span covers the whole
-/// block text verbatim, exactly as before the region slicing.
+/// block text verbatim, growing to the line's resume whenever an operator's
+/// tail claim reaches past the block's closer (task #364).
 #[test]
-fn extension_mode_keeps_the_span_and_no_bodies() {
+fn extension_mode_grows_with_the_tail_claim() {
     // A multi-line block whose condition carries a heredoc: the region starts
     // before the closing keyword's separator, so the span is extended to cover
     // the block's own lines.
@@ -127,12 +128,14 @@ fn extension_mode_keeps_the_span_and_no_bodies() {
     assert_eq!(got.1, line.len(), "span end");
     assert_eq!(got.4, Vec::<Vec<u8>>::new(), "no bodies in extension mode");
 
-    // Missing bodies: the region list is empty and the extension falls back to
-    // the line's resume, with no regions carried.
+    // Missing bodies: the delimiter line never arrives, the operator claims the
+    // tail, and the extension grows to the line's resume — the closing keyword
+    // written inside the claim is body data (task #364; bash parses the whole
+    // script and reports a syntax error rc 2 there, measured 2026-10-29).
     let line = b"while cat <<X; do a && b; X\ndone\necho after";
     let got = scan_at(line, 0);
-    assert_eq!(got.1, 32, "span end is the closing keyword's separator");
-    assert_eq!(got.4, Vec::<Vec<u8>>::new());
+    assert_eq!(got.1, 43, "span end grows with the tail claim");
+    assert_eq!(got.4, Vec::<Vec<u8>>::new(), "no regions carried");
 }
 
 /// The two block branches share one claim: feeding the shared

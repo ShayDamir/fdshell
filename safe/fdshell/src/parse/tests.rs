@@ -606,12 +606,15 @@ fn test_heredoc_args_and_redirect_after_operator() {
     );
 }
 
-// The exact variants (UnterminatedHeredoc / InvalidRedirect) are pinned in
+// A heredoc whose delimiter line never arrives is the end-of-file shape (task
+// #364): the parse layer accepts it — an empty body when nothing is left, the
+// remaining lines as the body when they are — and warns (the warning itself is
+// asserted in the integration tests). `InvalidRedirect` variants stay pinned in
 // parse/heredoc/tests.rs, where the layout result is test-Debug.
 #[test]
-fn test_heredoc_unterminated_is_parse_error() {
-    assert!(parse(b"cat <<EOF").is_err());
-    assert!(parse(b"cat <<NOPE\nbody\nnothing").is_err());
+fn test_heredoc_at_end_of_file_is_accepted() {
+    assert!(parse(b"cat <<EOF").is_ok());
+    assert!(parse(b"cat <<NOPE\nbody\nnothing").is_ok());
 }
 
 #[test]

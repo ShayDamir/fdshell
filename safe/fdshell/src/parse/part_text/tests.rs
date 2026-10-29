@@ -74,16 +74,17 @@ fn part_text_appends_only_the_regions_the_slice_claims() {
     assert_eq!(part.data.as_bytes().unwrap(), b"cat <<T\nbodyT\nT");
 }
 
-/// A region the slice claims past the end of the text (a body the block
-/// scanner never allocated) yields the slice's verbatim text, not a truncated
-/// one: `part_text` never invents body bytes.
+/// A region claimed at the end of the text — the end-of-file shape, whose
+/// delimiter line never arrived (task #364) — travels with the slice verbatim:
+/// the slice's own bytes, a newline, and the claimed lines exactly as the text
+/// has them (bash prints them as the body, warns, and runs at rc 0).
 #[test]
-fn part_text_of_an_unallocated_region_is_verbatim() {
+fn part_text_of_an_end_of_file_region_travels_with_the_slice() {
     let line = b"if true; then cat <<T; fi\nbodyT";
     let text = block_text(line);
     let slice = arm_slice(&text, b"if");
     let part = part_text(&text, &slice).unwrap();
-    assert_eq!(part.data, verbatim(&text, &slice).unwrap().data);
+    assert_eq!(part.data.as_bytes().unwrap(), b"cat <<T\nbodyT");
 }
 
 fn block_text(line: &[u8]) -> ScriptText {

@@ -167,18 +167,19 @@ fn a_heredoc_body_keeps_the_gate_off_behind_a_plain_word_zero() {
     }
 }
 
-/// A here-doc operator with **no body at all** keeps the shape its owner
-/// reports: `layout` needs a body for every operator, so the statement never
-/// reaches the gate (task #275's incomplete-stream rule must not start
-/// succeeding — the rc-1 pins live in `safe/fdshell/tests/heredoc.rs`).
+/// A here-doc operator with **no body at all** is the end-of-file shape (task
+/// #364): `layout` accepts it with an empty body and the statement reaches the
+/// gate normally — bash warns and runs at rc 0 (measured 2026-10-29; the
+/// integration pins live in `safe/fdshell/tests/heredoc.rs`).
 #[test]
-fn a_heredoc_operator_without_a_body_never_reaches_the_gate() {
+fn a_heredoc_operator_without_a_body_reaches_the_gate() {
     for line in [b"<<EOF" as &[u8], b"<<EOF g", b"3<<EOF", b">x <<EOF"] {
         let tokens = tokenize_statement(line).unwrap();
-        assert!(
-            crate::parse::heredoc::layout(line, &tokens).is_err(),
-            "{line:?} has no body to claim"
-        );
+        let specs =
+            crate::parse::heredoc::layout(line, &tokens).unwrap_or_else(|_| panic!("{line:?}"));
+        assert_eq!(specs.len(), 1, "{line:?} is one operator");
+        let spec = specs.first().unwrap_or_else(|| panic!("{line:?}"));
+        assert!(spec.body.is_empty(), "{line:?} has no body to claim");
     }
 }
 

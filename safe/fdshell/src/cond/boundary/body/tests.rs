@@ -111,16 +111,19 @@ fn semicolon_terminated_operator_line_finds_its_regions() {
 
 /// Statement context (`block_depth == 0`): every region inside the text is
 /// skipped whole, so the region's bytes (body lines *and* the delimiter line)
-/// never split, and a multi-region run skips all of them.
+/// never split, and a multi-region run skips all of them. On the first text the
+/// delimiter line never arrives, so the region is the end-of-file claim over the
+/// remaining lines (task #364) and their `&&` is region data — bash prints those
+/// lines as the body and runs `echo b` off the command line's `&&` (rc 0).
 #[test]
 fn statement_regions_are_skipped_whole() {
     let line = b"cat <<A && echo b\nq && r\nX";
     assert_eq!(boundary_of(&line[..]), (8, false), "the pre-body operator");
     // Resuming at the region start: the region is skipped whole — its `&&`
-    // (13) is region data — and the scan ends as one part.
-    assert_eq!(boundary_from(&line[..], 11), (20, false), "one part");
+    // is region data — and the scan ends as one part.
+    assert_eq!(boundary_from(&line[..], 11), (26, false), "one part");
     // Resuming inside the region: the same, opaque to the region's end.
-    assert_eq!(boundary_from(&line[..], 12), (20, false), "one part");
+    assert_eq!(boundary_from(&line[..], 12), (26, false), "one part");
     // Two operators on one run: the run's own `&&` (8) is the boundary, and
     // resuming after it skips the region of the *second* operator whole.
     let line = b"cat <<A && echo b\nq\nA\ntail\nB";
@@ -459,10 +462,11 @@ fn a_block_closer_inside_a_body_region_never_reaches_the_stack() {
 /// `to == nl` the quote region stops at the window edge, the delimiter reads as
 /// `a b`, the next line matches it, and the run owns a region. One past the
 /// newline, the quote swallows the newline byte, the delimiter is `a b\n`, no
-/// line ever matches it, and the run carries no region at all — the caller's
-/// plain `\n` arm applies (task #466: the program-level argument that the parse
-/// layer rejects such a text binds the *program*, not this helper, so the
-/// helper's own answer — the region list and the window end — is the pin).
+/// line ever matches it — and a delimiter line that never matches is the
+/// end-of-file shape (task #364): the run owns the region of its remaining
+/// lines and the resume is the text end. At CLI level the unmatched quote is a
+/// parse error rc 1 (bash rc 2), so this is the helper's own answer only
+/// (task #466: the program-level argument binds the *program*, not this helper).
 #[test]
 fn window_end_is_one_past_the_runs_newline() {
     let text = alloc::string::String::from("cat <<'a b\na b");
@@ -477,13 +481,17 @@ fn window_end_is_one_past_the_runs_newline() {
     let (regions, resume) = regions_of(line, 0, nl);
     assert_eq!(
         (regions.as_slice(), resume),
-        (&[] as &[(usize, usize)], 11),
+        (&[(11usize, 14usize)][..], 14),
         "the unterminated quote swallows the newline, so the delimiter never matches"
     );
     assert_eq!(
         step_of(line, true),
-        None,
-        "no regions: the caller's plain `\\n` arm applies"
+        Some(Step::Skip(14)),
+        "the end-of-file region is skipped whole (task #364)"
     );
-    assert_eq!(step_of(line, false), None, "the same in statement context");
+    assert_eq!(
+        step_of(line, false),
+        Some(Step::Skip(14)),
+        "the same in statement context"
+    );
 }

@@ -239,11 +239,13 @@ fn line_start_words_keep_the_closer_and_argument_gates() {
         boundary_of(b"if cat <<X; then\nbody && x\nX\nfi"),
         (22, false)
     );
-    // The body-skip arm resumes a fresh run: the operator written on the
-    // delimiter line after a body (23) is the split.
+    // The body-skip arm: the delimiter line never arrives (`X && echo y` is
+    // not `X`), so the region is the end-of-file claim over the remaining lines
+    // (task #364) and their `&&` is region data — one part. bash prints the
+    // lines as the body, warns, and runs at rc 0 (measured 2026-10-29).
     assert_eq!(
         boundary_of(b"echo p; cat <<X\nbody\nX && echo y"),
-        (23, false)
+        (32, false)
     );
 }
 
@@ -373,16 +375,18 @@ fn gate_end_skips_the_gated_and_list_to_its_separator() {
         gate_of(b"echo a || cat <<E\nbody && z\nE\n:; echo b", 10, false),
         30
     );
-    // Block context: the region's own `&&` is a *split* for the boundary scan
-    // and is no gate end — it falls through to the plain run reset, and the
-    // block's closer ends the gate.
+    // Block context: the region's `&&` sits in the end-of-file claim (the
+    // delimiter line never arrives — `Q; fi; echo tail` is not `Q`), so it is
+    // region data (task #364): the claim swallows the block's closer, the gate
+    // runs to the text end, and bash's whole-script parse ends at a syntax
+    // error rc 2 (measured 2026-10-29).
     assert_eq!(
         gate_of(
             b"echo a || if :; then cat <<Q\nq && y\nQ; fi; echo tail",
             10,
             false
         ),
-        42
+        52
     );
     assert_eq!(
         gate_of(
@@ -390,7 +394,8 @@ fn gate_end_skips_the_gated_and_list_to_its_separator() {
             10,
             false
         ),
-        37
+        47,
+        "the end-of-file claim swallows the closer here too (task #364)"
     );
 }
 
@@ -486,14 +491,17 @@ fn a_word_start_comment_hides_the_line_operators() {
     // the group depth (the comment's `{` never joined a run).
     assert_eq!(boundary_of(b"{ echo a # {\n} && echo b"), (15, false));
     // R8: non-regression — the comment's tail text is inert, and the body-skip
-    // resume keeps the delimiter line's operator (23).
+    // resume walks to the end of the text: the delimiter line never arrives
+    // (`X && echo y` is not `X`), so the region is the end-of-file claim and
+    // its `&&` is region data — one part (task #364; bash prints the lines as
+    // the body, warns, and runs at rc 0, measured 2026-10-29).
     assert_eq!(
         boundary_of(b"while :; do echo a; break; done # c\necho tail"),
         (45, false)
     );
     assert_eq!(
         boundary_of(b"echo p; cat <<X\nbody\nX && echo y"),
-        (23, false)
+        (32, false)
     );
 }
 

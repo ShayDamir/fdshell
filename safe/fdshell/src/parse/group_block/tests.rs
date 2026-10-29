@@ -119,11 +119,12 @@ fn appended_region_travels_with_the_stored_body() {
     // Two operators, in operator order.
     let g = group(b"{ cat <<T; cat <<U; }\nbT\nT\nbU\nU");
     assert!(g.body.data.eq_bytes(b"cat <<T; cat <<U\nbT\nT\nbU\nU"));
-    // No region at all (the text carries no body lines): the claim is empty, the
-    // tail is untouched, and the body is the trimmed slice — the run layer is what
-    // reports the missing delimiter (task #429's family).
+    // The text carries no body lines: the operator's region is the empty
+    // end-of-file one (task #364), the tail is untouched, and the stored body is
+    // the trimmed slice plus the region — a text the parse layer decides for:
+    // empty body, warning, rc 0 (bash warns and runs, measured 2026-10-29).
     let g = group(b"{ cat <<T; }");
-    assert!(g.body.data.eq_bytes(b"cat <<T"));
+    assert!(g.body.data.eq_bytes(b"cat <<T\n"));
     assert!(g.redirects.is_empty());
 }
 

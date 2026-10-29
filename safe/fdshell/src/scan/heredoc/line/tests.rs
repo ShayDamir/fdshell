@@ -57,36 +57,42 @@ fn line_bodies_of_a_partial_stream_keep_the_complete_regions() {
     let contents = line_body_contents(line, 0, 16);
     assert_eq!(contents.1, line.len());
     let texts: Vec<&[u8]> = contents.0.iter().map(|b| b.as_slice()).collect();
-    assert_eq!(texts, vec![b"bodyT\nT\n".as_slice(), b"E\n".as_slice()]);
+    assert_eq!(texts, vec![b"bodyT\nT\n".as_slice(), b"".as_slice()]);
 }
 
-/// The line's **first** delimiter line missing: nothing is claimed and the
-/// resume is the line end, byte-identical to the pre-#275 rule — the parse
-/// layer reports the shape (the `found == 0` family, task #364 owns bash's
-/// end-of-file warning).
+/// The line's **first** delimiter line missing: the end-of-file shape — the
+/// first missing operator claims the rest of the stream by the same rule that
+/// serves the operators behind it (task #275's `found == 0` exception is gone),
+/// the resume is the text end, and the parse layer accepts the claim with
+/// bash's end-of-file warning (bash warns twice and runs at rc 0 on this line,
+/// measured 2026-10-29).
 #[test]
-fn line_bodies_of_a_first_missing_delimiter_are_empty() {
+fn line_bodies_of_a_first_missing_delimiter_claims_the_stream() {
     let line = b"cat <<E; cat <<T\nbodyT\nT";
-    assert_eq!(line_bodies_for_line(line, 0, 16), (Vec::new(), 16usize));
+    assert_eq!(
+        line_bodies_for_line(line, 0, 16),
+        (vec![(17, 24), (24, 24)], 24)
+    );
     assert_eq!(
         line_body_contents(line, 0, 16),
-        (Vec::<Vec<u8>>::new(), 16usize)
+        (vec![b"bodyT\nT\n".to_vec(), Vec::new()], 24usize)
     );
 }
 
 /// A window claims the line's allocation **after** the operators written before
 /// it, and a tail claim is an entry of its own: with a tail region present the
-/// `skip`/`take` stays exact, the window taking the synthesized body.
+/// `skip`/`take` stays exact, the window taking the tail claim's own text —
+/// which is empty for an end-of-file region (task #364).
 #[test]
 fn claimed_line_bodies_skip_the_operators_written_before_the_window() {
     let line = b"cat <<T; cat <<E\nbodyT\nT";
     let (regions, bodies) = super::claimed_line_bodies(line, 0, 10, 16, 1);
     assert_eq!(regions, vec![(25, 24)]);
-    assert_eq!(bodies, vec![b"E\n".to_vec()]);
+    assert_eq!(bodies, vec![Vec::new()]);
     // The whole window (both operators) keeps both entries, in order.
     let (all, texts) = super::claimed_line_bodies(line, 0, 0, 16, 2);
     assert_eq!(all, vec![(17, 24), (25, 24)]);
-    assert_eq!(texts, vec![b"bodyT\nT\n".to_vec(), b"E\n".to_vec()]);
+    assert_eq!(texts, vec![b"bodyT\nT\n".to_vec(), Vec::new()]);
 }
 
 /// `line_start` is the index **past** the preceding newline: the whole-line

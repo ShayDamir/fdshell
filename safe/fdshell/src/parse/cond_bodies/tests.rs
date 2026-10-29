@@ -8,6 +8,7 @@ use super::condition_bodies;
 use crate::parse::Token;
 use crate::parse::semi::{Term, closing_keyword_index, find_preceded_by, token_range, trim_semi};
 use crate::parse::token::tokenize_statement;
+use crate::scan::heredoc::body_regions;
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::{Origin, Position, ScriptText, ShortCStr};
@@ -132,34 +133,38 @@ fn condition_bodies_skip_is_zero_on_a_bare_condition_line() {
     );
 }
 
-/// A line whose **first** operator has no delimiter line yields no bodies at
-/// all: the greedy allocation claims nothing when `found == 0`, and the parse
-/// layer reports the missing delimiter (task #275 keeps this fallback; task
-/// #364 owns bash's end-of-file warning). A missing delimiter line **behind**
-/// the first operator no longer starves the condition — see
+/// A line whose **first** operator has no delimiter line claims the stream
+/// (the end-of-file shape, task #364), so the condition written behind it —
+/// the second operator — takes the empty region at the text end. bash warns
+/// twice, prints `bodyA`/`A`, and the `then` arm runs at rc 0
+/// (measured 2026-10-29). A missing delimiter line **behind** the first
+/// operator starves nothing — see
 /// `claimed_bodies_of_an_arm_survive_a_later_unterminated_operator`.
 #[test]
-fn condition_bodies_of_an_incomplete_line_stream_are_empty() {
-    // The `then` arm's `<<X` has no body: its delimiter line is searched first
-    // and is missing, so the stream has no regions at all.
+fn condition_bodies_of_an_incomplete_line_stream_take_the_empty_tail() {
+    // The `then` arm's `<<X` has no body: its delimiter line is searched first,
+    // never arrives, and claims the whole stream; the condition gets the empty
+    // region behind it.
     let line = b"if false; then cat <<X; elif cat <<A; then echo b; fi\nbodyA\nA";
-    assert!(cond_bodies_of(line, b"elif").is_empty());
+    assert_eq!(
+        cond_bodies_of(line, b"elif"),
+        vec![ShortCStr::from_vec(b"".to_vec()).unwrap()]
+    );
 }
 
-/// The region window is **bounded to the condition's own physical line**: an
-/// unterminated heredoc on an *earlier* line never enters it, so the condition
-/// keeps its bodies. (This is the observable half of the window's anchor: the
-/// success path is invariant to it, the missing-delimiter path is not —
-/// LESSONS.)
+/// The region window is **bounded to the condition's own physical line** — and
+/// an unterminated heredoc on an *earlier* line resolves at the end of the
+/// text, so its end-of-file claim swallows the condition's own line along with
+/// the rest (task #364). bash reads the same lines as body data and prints
+/// them at rc 0 with its warning (measured 2026-10-29). (This is the observable
+/// half of the window's anchor: the success path is invariant to it, the
+/// end-of-file path decides — LESSONS.)
 #[test]
 fn condition_bodies_window_is_bounded_to_the_conditions_line() {
     // `<<Z` sits on a line before the condition's and has no delimiter line in
-    // the text; the condition's own line is complete, so it claims its region.
+    // the text: the end-of-file shape claims every line after the command line.
     let line = b"cat <<Z\nif cat <<A; then echo y; fi\nbodyA\nA";
-    assert_eq!(
-        cond_bodies_of(line, b"if"),
-        vec![ShortCStr::from_vec(b"bodyA\nA".to_vec()).unwrap()]
-    );
+    assert_eq!(body_regions(line), vec![(8, 43)]);
 }
 
 /// `scan::heredoc::line_start` is panic-free on a text starting with a newline: the anchor
@@ -292,8 +297,10 @@ fn claimed_regions_of_a_slice_without_operators_are_empty() {
 
 /// Task #275: the line's regions are allocated **one entry per operator**, so an
 /// unterminated operator behind an arm leaves the arm its own complete body, and
-/// the missing one carries its synthesized delimiter line (the integration twin
-/// is `single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm`).
+/// the missing one claims the stream tail — its bytes are its own text, empty
+/// when the stream ran out (the parse layer decides that heredoc itself, task
+/// #364; the integration twin is
+/// `single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm`).
 #[test]
 fn claimed_bodies_of_an_arm_survive_a_later_unterminated_operator() {
     let line = b"if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT";
@@ -309,34 +316,46 @@ fn claimed_bodies_of_an_arm_survive_a_later_unterminated_operator() {
     );
     assert_eq!(
         bodies.get(1).map(|b| b.as_slice()),
-        Some(b"E\n".as_slice()),
-        "the unterminated operator carries its synthesized delimiter line"
+        Some(b"".as_slice()),
+        "the unterminated operator claims the spent stream — empty bytes"
     );
 }
 
 /// The same shape's condition half: the `elif` condition's body of a partially
-/// complete stream is the synthesized delimiter line, so its rebuilt command
-/// line parses as a heredoc with an **empty** body.
+/// complete stream is the empty tail claim, so its rebuilt command line is the
+/// end-of-file shape with an **empty** body (task #364; bash warns for it).
 #[test]
-fn condition_bodies_of_a_partial_stream_are_the_synthesized_delimiter_line() {
+fn condition_bodies_of_a_partial_stream_are_the_empty_tail() {
     let line = b"if true; then cat <<T; elif cat <<E; then echo b; fi\nbodyT\nT";
     assert_eq!(
         cond_bodies_of(line, b"elif"),
-        vec![ShortCStr::from_vec(b"E\n".to_vec()).unwrap()]
+        vec![ShortCStr::from_vec(b"".to_vec()).unwrap()]
     );
 }
 
 /// The mirror of that shape: the line's **first** operator (`<<T`, in the `then`
-/// arm) is the unterminated one, so `found == 0` and the whole line claims
-/// nothing — the arm and the `elif` condition are both body-less, and the parse
-/// layer reports the missing delimiter (the family task **#364** owns).
+/// arm) is the unterminated one, so it claims the stream by the same rule that
+/// serves the operators behind it (task #364) — the arm carries the claimed
+/// region and the `elif` condition takes the empty tail. bash warns twice,
+/// prints `bodyE`/`E`, runs `echo b` at rc 0 (measured 2026-10-29; the
+/// integration twin is
+/// `a_line_whose_first_heredoc_is_unterminated_is_still_a_parse_error`).
 #[test]
-fn claimed_bodies_of_a_line_whose_first_operator_is_unterminated_are_empty() {
+fn claimed_bodies_of_a_line_whose_first_operator_is_unterminated_claim_the_stream() {
     let line = b"if false; then cat <<T; elif cat <<E; then echo b; fi\nbodyE\nE";
     let text = text_of(line);
-    assert!(claimed_regions(&text, &arm_slice(line, b"if")).is_empty());
-    assert!(claimed_bodies(&text, &arm_slice(line, b"if")).is_empty());
-    assert!(cond_bodies_of(line, b"elif").is_empty());
+    assert_eq!(
+        claimed_regions(&text, &arm_slice(line, b"if")),
+        vec![(54, 61), (61, 61)]
+    );
+    assert_eq!(
+        claimed_bodies(&text, &arm_slice(line, b"if")),
+        vec![b"bodyE\nE\n".to_vec(), Vec::new()]
+    );
+    assert_eq!(
+        cond_bodies_of(line, b"elif"),
+        vec![ShortCStr::from_vec(b"".to_vec()).unwrap()]
+    );
 }
 
 /// The pre-slice `skip` stays exact with a tail region present: a tail claim is

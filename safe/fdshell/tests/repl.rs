@@ -222,25 +222,23 @@ fn pre_block_heredoc_behind_a_group_spans_both_regions() {
     assert!(err.is_empty(), "stderr={err}");
 }
 
-/// Task #322, pinned divergence of the same fix at the prompt.
+/// Task #322's shape at the prompt, at **parity** with bash since task
+/// **#364**.
 ///
-/// The `elif` row at EOF: the `E` delimiter never arrives, the buffer executes
-/// and reports `missing terminating delimiter line 'E'`, stdout is prompts only,
-/// rc 0 — the incomplete-body-stream rule pinned in script mode by
-/// `tests/heredoc.rs::cond_bodies_of_an_incomplete_line_stream_are_empty`; bash
-/// 5.3.9 prints `{a,b}\nT` with an EOF-delimiter warning, rc 0. The group twin
-/// `{ cat <<T; }` flipped to bash parity with task **#315** and is pinned in the
-/// family above.
+/// The `elif` row at EOF: the `E` delimiter never arrives, the claim covers the
+/// body lines, the buffer executes and prints `{a,b}\nT` with the end-of-file
+/// warning, rc 0 — the script-mode twin is
+/// `tests/heredoc.rs::cond_bodies_of_an_incomplete_line_stream_take_the_empty_tail`;
+/// bash 5.3.9 prints the same with its own warning wording (measured
+/// 2026-10-29). The group twin `{ cat <<T; }` flipped to bash parity with task
+/// **#315** and is pinned in the family above.
 #[test]
-fn closed_block_heredoc_prompt_divergences() {
+fn closed_block_heredoc_prompt_reaches_parity() {
     // EOF (no `exit`): the third `> ` consumes EOF, the buffer executes.
     let (out, err, code) = run_repl("if false; then :; elif true; then cat <<E; fi\n{a,b}\nT\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out, "fdshell> > > > fdshell> ", "stdout: {out:?}");
-    assert!(
-        err.contains("missing terminating delimiter line 'E'"),
-        "stderr={err}"
-    );
+    assert_eq!(out, "fdshell> > > > {a,b}\nT\nfdshell> ", "stdout: {out:?}");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err}");
 }
 
 #[test]
@@ -327,10 +325,12 @@ fn whitespace_line_is_skipped_not_executed() {
 
 #[test]
 fn eof_mid_heredoc_executes_buffer() {
-    // EOF mid-heredoc (ignoreeof off): the buffer is executed and reports the
-    // missing-delimiter parse error.
+    // EOF mid-heredoc (ignoreeof off): the buffer is executed — the claim
+    // covers the body, and the run carries the end-of-file warning; bash 5.3.9
+    // measured 2026-10-29 prints `body` with its own warning wording (the
+    // prompt bookkeeping above this test is fdshell's own, unchanged).
     let (_out, err, _code) = run_repl("cat <<EOF\nbody\n");
-    assert!(err.contains("terminating"), "stderr: {err:?}");
+    assert!(err.contains("delimited by end-of-file"), "stderr: {err:?}");
 }
 
 #[test]

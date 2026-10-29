@@ -318,21 +318,22 @@ fn for_list_with_and_is_an_accepted_divergence() {
 /// Task #234: a heredoc-carrying block text is opaque to the cond split too —
 /// the `&&` in the block's **command** text is the block's own cond list. What
 /// stays a divergence is the shape whose heredoc has **no delimiter line**
-/// inside the block text: the block runs as one part and reports its own
-/// unterminated heredoc (rc 1), where bash reports a syntax error rc 2 (the
-/// same rc-1-vs-2 family as `midrun_adjacent_shapes_stay_measured_divergences`).
+/// inside the block text: the end-of-file claim (task #364) swallows the block
+/// closer as body data, the block's parser reports its missing closing keyword
+/// (rc 1), where bash reports a syntax error rc 2 (the same rc-1-vs-2 family as
+/// `midrun_adjacent_shapes_stay_measured_divergences`).
 #[test]
 fn and_in_a_block_with_an_unterminated_heredoc_is_a_parse_error() {
-    for script in [
-        "while cat <<X; do a && b; X\ndone\necho after",
-        "if cat <<X; then a && b; X\nfi\necho after",
+    for (script, want) in [
+        (
+            "while cat <<X; do a && b; X\ndone\necho after",
+            "expected 'done'",
+        ),
+        ("if cat <<X; then a && b; X\nfi\necho after", "missing 'fi'"),
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: bash rc 2");
-        assert!(
-            err.contains("missing terminating delimiter line 'X'"),
-            "{script}: stderr={err}"
-        );
+        assert!(err.contains(want), "{script}: stderr={err}");
     }
 }
 

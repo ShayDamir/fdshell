@@ -58,10 +58,12 @@ fn single_quoted_delimiter_is_literal_and_spans_words() {
     let out = skip(b"cat << 'a b'\nbody\na b", 0, 12);
     assert_eq!(out, Some(21));
     // An unbalanced span is not a quoted word: quote removal strips the lone
-    // `'`, so the delimiter is `EOF` and the `'EOF` line no longer matches.
-    // At CLI level such a line is a parse error (`unmatched quote`, rc 1), so
-    // this is the scan-internal shape only (task #207 re-pin).
-    assert_eq!(skip(b"cat <<'EOF\nbody\n'EOF", 0, 10), None);
+    // `'`, so the delimiter is `EOF` and the `'EOF` line no longer matches —
+    // and never can, so the run is the end-of-file shape and the resume is the
+    // text end (task #364). At CLI level such a line is a parse error
+    // (`unmatched quote`, rc 1), so this is the scan-internal shape only
+    // (task #207 re-pin).
+    assert_eq!(skip(b"cat <<'EOF\nbody\n'EOF", 0, 10), Some(20));
     // The balanced form terminates at the stripped word.
     assert_eq!(skip(b"cat <<'EOF\nbody\nEOF", 0, 10), Some(19));
 }
@@ -109,10 +111,13 @@ fn skip_dash_form_consumes_one_dash() {
     assert_eq!(skip(b"cat <<---\nbody\n--", 0, 9), Some(17));
 }
 
-// A plain `<<EOF` never strips tabs: a tab-indented terminator does not match.
+// A plain `<<EOF` never strips tabs: a tab-indented terminator does not match,
+// so the delimiter line never arrives and the heredoc is the end-of-file shape
+// (task #364). bash keeps the tabs in the body, warns, and runs at rc 0
+// (integration pin `heredoc_plain_form_ignores_tab_indented_terminator`).
 #[test]
 fn skip_plain_form_ignores_tab_indented_terminator() {
-    assert_eq!(skip(b"cat <<EOF\n\tEOF", 0, 9), None);
+    assert_eq!(skip(b"cat <<EOF\n\tEOF", 0, 9), Some(14));
 }
 
 // `<<-""` (empty quoted delimiter) is terminated by a tabs-only line, which
@@ -164,10 +169,12 @@ fn skip_semicolon_after_operator_is_none() {
     assert_eq!(skip(b"cat << ;", 0, 7), None);
 }
 
-// A missing delimiter line: `None`.
+// A delimiter line that never arrives: the end-of-file shape (task #364) —
+// the run resolves and the resume is the text end, so the body lines stay
+// data. bash reads them, warns, and runs at rc 0 (measured 2026-10-29).
 #[test]
-fn skip_missing_delimiter_is_none() {
-    assert_eq!(skip(b"cat <<NOPE\nbody\nnothing", 0, 10), None);
+fn skip_missing_delimiter_resolves_at_end_of_file() {
+    assert_eq!(skip(b"cat <<NOPE\nbody\nnothing", 0, 10), Some(23));
 }
 
 // An attached word before `<<` (no word break) is not an operator.
@@ -240,18 +247,22 @@ fn skip_two_heredocs_same_delimiter() {
     assert_eq!(skip(b"cat <<Q <<Q\nx\nQ\ny\nQ", 0, 11), Some(19));
 }
 
-// Two empty-delimiter operators need two blank lines; one is not enough.
+// Two empty-delimiter operators need two blank lines; with one, the first
+// takes it and the second ends at the text end (task #364). bash warns for the
+// second operator and runs both at rc 0 (measured 2026-10-29).
 #[test]
-fn skip_two_empty_delimiters_need_two_blank_lines() {
-    assert_eq!(skip(b"cat <<\"\" <<\"\"\n\n", 0, 13), None);
+fn skip_two_empty_delimiters_leave_the_second_at_end_of_file() {
+    assert_eq!(skip(b"cat <<\"\" <<\"\"\n\n", 0, 13), Some(15));
 }
 
-// An empty delimiter with no blank line is unterminated. A zero-byte final
-// line (EOF right after the body's newline) never matches.
+// An empty delimiter with no blank line is the end-of-file shape: a zero-byte
+// final line (EOF right after the body's newline) still never matches as the
+// blank delimiter line (task #364). bash warns and runs the body it has
+// (`cat <<""` + `body` prints `body` at rc 0, measured 2026-10-29).
 #[test]
-fn skip_empty_delimiter_without_blank_line_is_none() {
-    assert_eq!(skip(b"cat <<\"\"\n", 0, 8), None);
-    assert_eq!(skip(b"wc -c <<\"\"\nbody\n", 0, 10), None);
+fn skip_empty_delimiter_without_blank_line_is_end_of_file() {
+    assert_eq!(skip(b"cat <<\"\"\n", 0, 8), Some(9));
+    assert_eq!(skip(b"wc -c <<\"\"\nbody\n", 0, 10), Some(16));
 }
 
 // A `$( )`-closing `)` does not break the word (the tokenizer keeps
@@ -331,18 +342,23 @@ fn body_regions_of_two_operators_on_one_semicolon_terminated_line() {
 }
 
 // A `;`-terminated line with no `<<` in the run, a `<<` that is not an operator
-// (quotes, `$( … )`, a comment), and a missing delimiter line all keep the
-// "no region" outcome: the parse layer's own error, as before.
+// (quotes, `$( … )`, a comment), keep the "no region" outcome. A missing
+// delimiter line is now the end-of-file shape (task #364): the run resolves and
+// the lines it leaves are one region of their own — bash warns and prints them.
 #[test]
 fn body_regions_of_a_semicolon_terminated_run_without_a_region() {
     assert!(body_regions(b"echo hi; echo x\n").is_empty());
-    assert!(body_regions(b"cat <<T; echo hi\nb\nNOPE").is_empty());
     assert!(body_regions(b"if true; then echo \"a <<b\"; fi\n").is_empty());
     assert!(
         body_regions(b"if true; then echo $(echo <<b); fi\n").is_empty(),
         "a `<<` inside `$( … )` is substitution text"
     );
     assert!(body_regions(b"if true; then echo hi # <<T; fi\nb\nT\n").is_empty());
+    assert_eq!(
+        body_regions(b"cat <<T; echo hi\nb\nNOPE"),
+        vec![(17, 23)],
+        "the delimiter line never arrives: the whole stream is the body"
+    );
 }
 
 // The delimiter line is the second half of the same scan: one span per heredoc,
@@ -379,8 +395,10 @@ fn terminator_spans_of_a_semicolon_terminated_arm_line() {
 }
 
 // An empty delimiter line has no bytes of its own (its newline is excluded), so
-// it yields no span; a missing delimiter line yields no region at all, hence no
-// span — the parse layer's `missing terminating delimiter line` stays its error.
+// it yields no span; a delimiter line that never arrives has no line of its own
+// to span — the region exists (task #364) but its body is what the text leaves,
+// and the parse layer accepts it with its end-of-file warning (bash warns and
+// runs at rc 0).
 #[test]
 fn terminator_spans_of_an_empty_or_missing_delimiter_line() {
     assert!(terminator_spans(b"cat <<''\nbody\n\n").is_empty());
