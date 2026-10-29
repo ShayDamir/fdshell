@@ -3161,6 +3161,68 @@ fn numbered_heredoc_known_divergences() {
     assert_eq!(out, "");
     assert_eq!(err, "");
 
+    // Task #363's reported row, the `<&N` direction of that same rule:
+    // `cat 3<<T <&3` — the dup reads the descriptor the io-number here-doc of
+    // the **same** command opened, so bash prints `body` at rc 0 and so does
+    // fdshell (closed by #337; the unit twin is
+    // `redirect/resolve/tests.rs::dup_after_a_here_doc_def_reads_that_def_s_body`).
+    // `run_fd3_closed` is what makes the row a kill: fd 3 is closed in the
+    // parent, so only the command's own def can answer.
+    let (out, err, code) = run_fd3_closed("cat 3<<T <&3\nbody\nT");
+    assert_eq!((code, out.as_str()), (0, "body\n"), "{err}");
+    assert_eq!(err, "");
+
+    // The explicit fd-0 spelling of the same row, and the `-` form whose
+    // tab-indented body and terminator are stripped as usual (bash `body`, rc 0).
+    for script in ["cat 3<<T 0<&3\nbody\nT", "cat 3<<-T <&3\n\tbody\n\tT"] {
+        let (out, err, code) = run_fd3_closed(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, "body\n"),
+            "script={script:?} {err}"
+        );
+        assert_eq!(err, "");
+    }
+
+    // Written order, now for the **source**: `cat <&3 3<<T` puts the dup first,
+    // so its source is the process fd 3 — closed in the parent — and bash
+    // reports `bash: line 1: 3: Bad file descriptor` at rc 1. fdshell's chain is
+    // its own (STYLE §4), pinned loosely as elsewhere in this file. A resolver
+    // that read the whole def set instead of the written prefix would print the
+    // body at rc 0 here.
+    let (out, err, code) = run_fd3_closed("cat <&3 3<<T\nbody\nT");
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    assert!(err.contains("fd 3 is not open"), "{err}");
+
+    // An unquoted delimiter's expansion reaches the dup (bash `zzz`, rc 0).
+    let (out, err, code) = run_fd3_closed("X=zzz; cat 3<<T <&3\n$X\nT");
+    assert_eq!((code, out.as_str()), (0, "zzz\n"), "{err}");
+    assert_eq!(err, "");
+
+    // The same-command dup on a redirections-only statement (the #345/#303 shape
+    // crossed with this family): nobody reads the body, so both shells are
+    // silent at rc 0.
+    let (out, err, code) = run_fd3_closed("3<<T <&3\nbody\nT");
+    assert_eq!((code, out.as_str()), (0, ""), "{err}");
+    assert_eq!(err, "");
+
+    // The precedence pair, with fd 3 opened **inside** the script (the harness's
+    // fd table is not deterministic, so these rows never assert the parent's
+    // fd). Written order decides both ways: the command's own def wins over the
+    // shell's fd when it comes first (`body`), and a dup written first sees the
+    // shell's fd instead (`PARENT`) — bash-measured, rc 0. Content, never fd
+    // numbers, so #184's fd floor cannot move these rows.
+    let dir = scratch("same_command_dup");
+    std::fs::write(dir.join("parent"), b"PARENT\n").unwrap();
+    for (script, want) in [
+        ("exec 3<parent; cat 3<<T <&3\nbody\nT", "body\n"),
+        ("exec 3<parent; cat <&3 3<<T\nbody\nT", "PARENT\n"),
+    ] {
+        let (out, err, code) = run(&format!("cd {}; {}", dir.display(), script));
+        assert_eq!((code, out.as_str()), (0, want), "script={script:?} {err}");
+        assert_eq!(err, "");
+    }
+
     // `( … )` is not a subshell: `(` reaches the command lookup (task #316).
     let (out, err, code) = run("( cat 3<<T )\nbody\nT");
     assert_eq!(code, 1);

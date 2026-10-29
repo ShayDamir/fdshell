@@ -635,6 +635,33 @@ fn dup_after_a_close_def_reports_the_fd_as_not_open() {
     ));
 }
 
+/// Task **#363**'s reported shape — `cat 3<<T <&3`: the `<&N` source resolves
+/// against the fd state the command's **own** earlier redirections left, and a
+/// here-doc def is such an entry (its entry is the body's memfd,
+/// `here.rs::one`). Closing **process** fd 3 first — the
+/// `dup_clone_of_a_process_fd_sits_above_every_target` idiom, so only the built
+/// table can answer — is what makes this a kill: the pre-#337 resolver read the
+/// caller's fd table here and bailed `fd 3 is not open; >&3 has nothing to
+/// duplicate`, where bash prints the body. Integration twin:
+/// `tests/heredoc.rs::numbered_heredoc_known_divergences`.
+#[test]
+fn dup_after_a_here_doc_def_reads_that_def_s_body() {
+    let c = cell();
+    let _ = sys::dup::close(3);
+    let redirects = vec![
+        RedirectDef::here_doc(3, c"body\n", true),
+        RedirectDef::dup(0, 3),
+    ];
+    let resolved = resolve_redirects(&redirects, &[], &[], &c).unwrap();
+    let mut buf = [0u8; 16];
+    let n = dup_of(resolved.get(1).unwrap()).read(&mut buf).unwrap();
+    assert_eq!(
+        buf.get(..n).unwrap(),
+        b"body\n",
+        "the dup reads the def's body"
+    );
+}
+
 /// A fd the command never redirected still dups the **process** fd, and the
 /// clone sits above every target: closing fd 2 leaves a hole, and a source
 /// landing on the fd-2 target makes the export a `dup2` no-op whose `Drop`
