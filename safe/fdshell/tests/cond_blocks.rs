@@ -715,9 +715,10 @@ fn keyword_shaped_argument_words_do_not_swallow_the_cond_operators() {
 /// group around the definition, a definition in an `if` body, and a variable
 /// word in the body are measured against `bash -c` 5.3.9.
 ///
-/// Not pinned here: `f() { … }; f | cat` — the `&&` split is fixed, but a
-/// function *in a pipeline stage* is task #182's pre-existing gap (`f | cat`
-/// fails identically with a `&&`-free body on master).
+/// Not pinned here: `f() { … }; f | cat` — the `&&` split is fixed, and a
+/// function *in a pipeline stage* now runs the function: the gap task #182
+/// recorded is closed by task **#481**, pinned in `tests/pipeline.rs`
+/// (`a_function_stage_runs_the_function`), so this test keeps its own shapes.
 #[test]
 fn definer_body_operators_keep_the_definition_one_part() {
     for (script, want) in [

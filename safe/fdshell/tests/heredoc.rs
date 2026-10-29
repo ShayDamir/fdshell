@@ -2831,11 +2831,14 @@ fn function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence() {
 /// * a delimiter word shaped like a brace (`f() { cat <<}; }; f`): bash prints
 ///   the body rc 0 (with its end-of-file warning), fdshell rejects the line —
 ///   the closer search of task **#432**.
-/// * a function in a pipeline stage (`f | cat`): the stage's process has no
-///   function table (task **#182**).
 /// * a def-prefix redirection (`f() <<E { … }`): bash rejects the syntax rc 2;
 ///   fdshell parses it as a definer and the def body's own region prints
 ///   (task **#433**, filed by this one — #180 is the accepted trailing form).
+///
+/// The third member of the family — a function in a pipeline stage
+/// (`f() { cat <<E; }; f | cat`) — is **closed** by task **#481**: the definition
+/// claims the region exactly as the plain-shape row above (the #432 twin) does,
+/// and the stage fork now runs the function, so the row below is bash parity.
 #[test]
 fn function_body_heredoc_shapes_that_stay_divergent() {
     let (out, _err, code) = run("f() { cat <<}; }; f\nx");
@@ -2843,8 +2846,8 @@ fn function_body_heredoc_shapes_that_stay_divergent() {
     let (out, _err, code) = run("f() { cat <<E; }; f | cat\nbody\nE");
     assert_eq!(
         (out.as_str(), code),
-        ("", 0),
-        "bash prints body at rc 0 (task #182)"
+        ("body\n", 0),
+        "bash prints body at rc 0 — parity since task #481"
     );
     let (out, _err, code) = run("f() <<E { cat <<G; }\nbodyE\nE\nbodyG\nG\nf");
     assert_eq!(

@@ -12,3 +12,9 @@ fn other_errors_exit_code_is_1() {
     let e = ChildProcessError::ExecFailed;
     assert_eq!(e.exit_code(), 1);
 }
+
+#[test]
+fn user_function_failed_exit_code_is_1() {
+    let e = ChildProcessError::UserFunctionFailed;
+    assert_eq!(e.exit_code(), 1);
+}

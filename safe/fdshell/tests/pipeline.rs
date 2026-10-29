@@ -529,3 +529,158 @@ fn heredoc_only_stage_is_a_redirect_only_stage() {
         );
     }
 }
+
+// ── A user function written as a stage (task #481) ───────────────────────────
+// A stage's name resolves through the same order a plain command uses: the
+// function first, then the builtin table, then `PATH`. Every row below was
+// measured against bash 5.3.9 and `target/debug/fdshell` with stdin
+// `/dev/null`; the assertions state **fdshell's** value with bash's named in the
+// message, and the group-shape members of the family stay parse errors owned by
+// tasks #190/#186 (`tests/group.rs`).
+
+/// `run` with stdin from `/dev/null`: some rows below have a stage that **reads**
+/// stdin (`cat | f`), so the harness's stdin must not leak into them.
+fn run_stdin_null(dir: &Path, script: &str) -> Output {
+    Command::new(BIN)
+        .current_dir(dir)
+        .args(["-c", script])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// A function in stage position runs, in the stage's own fork: as the first
+/// stage, as the last one, in both at once, with arguments reaching the body's
+/// positionals, with a scoped `NAME=value` prefix, and backgrounded. Every row
+/// is bash parity (before #481 the stage fell to the `PATH` search and reported
+/// `failed to resolve command path: "f"`).
+#[test]
+fn a_function_stage_runs_the_function() {
+    let dir = Scratch::new();
+    for (script, want) in [
+        ("f(){ echo hi; }; f | cat", "hi\n"),
+        ("f(){ echo hi; }; cat | f", "hi\n"),
+        ("f(){ echo a; }; g(){ cat; }; f | g", "a\n"),
+        ("f(){ echo \"$1\"; }; f x | cat", "x\n"),
+        ("V=x; f(){ echo \"$V $1\"; }; V=y f z | cat", "y z\n"),
+        ("f(){ echo hi; }; f | cat & wait; echo done", "hi\ndone\n"),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, Some(0)),
+            "script {script:?}: bash prints `{want}` at rc 0; stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}
+
+/// The reported row: the stage's **own** redirections apply on both sides of the
+/// pipe — `z` gets the function's line, `g` gets what `cat` reads from the pipe
+/// (nothing: the function wrote to `z`, not to stdout). Before #481 both files
+/// were empty, because no stage ran at all.
+#[test]
+fn a_function_stage_keeps_its_own_redirects() {
+    let dir = Scratch::new();
+    let out = run_stdin_null(&dir, "f(){ echo hi; }; f > z | cat > g");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("", Some(0)),
+        "bash: no stdout, rc 0; stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    assert_eq!(
+        std::fs::read(dir.join("z")).unwrap(),
+        b"hi\n",
+        "bash: `hi\\n`"
+    );
+    assert_eq!(std::fs::read(dir.join("g")).unwrap(), b"", "bash: empty");
+}
+
+/// The status a stage function reports: its own last status (the last stage's
+/// status is the pipeline's). A `break`/`continue` the body raises, and the
+/// depth cap a recursive body hits, die with the fork — only the status is
+/// reported, as `pipeline/child/block.rs` documents for a block stage. bash
+/// exempts every stage but the last from `set -e` (task **#490**); that gap is
+/// not visible here, where the failing function is the last stage in one row and
+/// the pipeline status is the last stage's in the other — both rows are parity.
+#[test]
+fn a_function_stage_reports_the_status_it_runs_with() {
+    let dir = Scratch::new();
+    for (script, want) in [
+        ("f(){ false; }; cat | f; echo rc=$?", "rc=1\n"),
+        ("f(){ false; }; f | cat; echo rc=$?", "rc=0\n"),
+        ("f(){ exit 3; }; cat | f; echo rc=$?", "rc=3\n"),
+        ("f(){ f; echo x; }; f | cat", ""),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, Some(0)),
+            "script {script:?}: bash prints `{want}` at rc 0; stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}
+
+/// The stage's fork is a **subshell**: the function's `cd` and its assignment
+/// die with the child, so the parent's working directory and its `V` are
+/// untouched — bash behaves the same.
+#[test]
+fn a_function_stages_state_changes_die_with_the_fork() {
+    let dir = Scratch::new();
+    let out = run_stdin_null(&dir, "f(){ cd /tmp; echo in; }; f | cat; echo pwd=$(pwd)");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        (format!("in\npwd={}\n", dir.display()).as_str(), Some(0)),
+        "bash: `in` then the scratch dir (the fork's `cd` died with it); stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+    let out = run_stdin_null(&dir, "f(){ V=1; }; f | cat; echo V=${V:-unset}");
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("V=unset\n", Some(0)),
+        "bash: `V=unset` at rc 0 (the fork's assignment died with it)"
+    );
+}
+
+/// The function arm sits **after** `child_main`'s own work: the trace names the
+/// call and the body's command, and the scoped-prefix/substitution steps have
+/// already run (the data rows above pin those). The rows assert the two trace
+/// lines as members — the pipeline's stages write concurrently, so their order
+/// is not the assertion, and fdshell additionally traces its own `set -x`
+/// (a divergence pinned in `tests/xtrace.rs`).
+#[test]
+fn a_function_stage_traces_the_call() {
+    let dir = Scratch::new();
+    let out = run_stdin_null(&dir, "set -x; f(){ echo hi; }; f | cat");
+    let err = str::from_utf8(&out.stderr).unwrap().to_string();
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("hi\n", Some(0)),
+        "bash prints `hi` at rc 0; stderr={err}"
+    );
+    assert!(err.contains("+ f") && err.contains("+ echo hi"), "{err}");
+}
+
+/// The prefix rows stay where they were: `builtin` and `command` bypass functions
+/// (POSIX #2.4), so the stage falls to their own answer — bash reports on stderr
+/// at rc 0 (`f: command not found`, `builtin: f: not a shell builtin`), fdshell
+/// reports its own chain at rc 0.
+#[test]
+fn a_function_stage_keeps_the_prefix_rows() {
+    let dir = Scratch::new();
+    for (script, want) in [
+        ("f(){ echo hi; }; command f | cat", "not found"),
+        ("f(){ echo hi; }; builtin f | cat", "not a shell builtin"),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        let err = str::from_utf8(&out.stderr).unwrap().to_string();
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            ("", Some(0)),
+            "script {script:?}: bash is silent on stdout at rc 0, naming `{want}` on stderr"
+        );
+        assert!(err.contains(want), "{script:?}: stderr={err}");
+    }
+}
