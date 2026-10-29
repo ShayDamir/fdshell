@@ -3020,6 +3020,51 @@ fn ampersand_terminated_condition_side_effects_die_with_the_child() {
     });
 }
 
+/// A loop-control **keyword** written with the plain `&` is a job too (task
+/// #362): `run_parsed`'s arm list is the single owner of what the flag does, the
+/// child runs the keyword in its own copy of the state — where its signal dies —
+/// and the parent records the job and continues with the async 0. The **job
+/// record** is the observable, never the output (LESSONS). One row per keyword
+/// (each is a pattern arm of the same guard), plus the **body** position (without
+/// the arm the parent's loop ends at the signal and records nothing), the
+/// iteration count as the pin that the loop was **not** broken, the **condition**
+/// position reached through `cond_background`, and the function frame. `wait`
+/// (POSIX, no operands) drains the deque.
+#[test]
+fn a_loop_control_keyword_with_the_ampersand_records_a_job() {
+    for (script, want) in [
+        (b"break &".as_slice(), 1usize),
+        (b"continue &", 1),
+        (b"return &", 1),
+        (b"for i in 1; do break & done", 1),
+        (b"for i in 1 2; do continue & done", 2),
+        (b"while break & do builtin true; break; done", 1),
+        (b"f(){ return & }; f", 1),
+    ] {
+        child_test(|| {
+            let cell = make_cell();
+            let control = run_script(script, &cell).unwrap();
+            assert!(
+                control.is_none(),
+                "{script:?}: no signal reached the parent"
+            );
+            let mut state = borrow_state_mut(&cell);
+            assert_eq!(state.jobs.anon_len(), want, "{script:?}");
+            assert_eq!(
+                state.last_bg_pid,
+                state.jobs.anon_pids()[want - 1].into(),
+                "{script:?}: $! reports the job"
+            );
+            assert!(
+                matches!(state.last_status, WaitStatus::Exited(0)),
+                "{script:?}: the parent continues with the async 0"
+            );
+            crate::task::posix_wait(&[], &mut state).unwrap();
+            assert!(state.jobs.is_empty(), "{script:?}: wait reaps it");
+        });
+    }
+}
+
 /// The unclosed block span of the `&`-in-block-text family: the script-level
 /// parse error, with **nothing executed**. The message is not pinned (the shape
 /// is bash's "unexpected end of file", rc 2, fdshell's rc 1).

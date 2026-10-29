@@ -25,9 +25,11 @@ pub(crate) fn run_one(
 
 /// Dispatch an already-parsed statement. Split out of [`run_one`] so the
 /// `time` hook can run its inner statement through the identical path.
-/// `background` is the plain-`&` flag: a `Cmd`/`Pipeline` with it becomes an
-/// async job (see [`async_job`]); every other arm runs foreground (measured
-/// divergence, task #326 — compound background is a filed follow-up).
+/// `background` is the plain-`&` flag: a `Cmd`/`Pipeline` or a loop-control
+/// keyword with it becomes an async job (see [`async_job`], whose child runs the
+/// keyword and lets its signal die with the child — task #362); every other arm
+/// runs foreground (measured divergence, task #326 — compound background is a
+/// filed follow-up).
 pub(crate) fn run_parsed(
     parsed: &ParsedLine,
     text: &ScriptText,
@@ -37,6 +39,11 @@ pub(crate) fn run_parsed(
     match parsed {
         ParsedLine::Cmd(cmdline) if background => async_job::spawn(parsed, text, cell),
         ParsedLine::Pipeline(pipeline) if background => async_job::spawn(parsed, text, cell),
+        // A loop-control keyword is a job too: its signal dies with the child
+        // (task #362), which is what keeps the parent's loop running.
+        ParsedLine::Break(_) | ParsedLine::Continue(_) | ParsedLine::Return(_) if background => {
+            async_job::spawn(parsed, text, cell)
+        }
         ParsedLine::Cmd(cmdline) => cmd::run_cmd(cmdline, text, cell),
         ParsedLine::Pipeline(pipeline) => pipeline::run_pipeline(pipeline, text, cell),
         ParsedLine::For(forblock) => {

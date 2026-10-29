@@ -125,7 +125,13 @@ wait                   # reap every nameless job
 ```
 
 A nameless job's state changes die with the child, so `cd /tmp &`, `exit &`
-and `break &` leave the parent untouched. `&` is only the operator at a
+and `break &` leave the parent untouched: the loop-control keywords (`break`,
+`continue`, `return`) are jobs too — the child runs the keyword in its own copy
+of the shell and the signal dies with it, so the parent's loop, function frame
+or script runs on with status 0 (`for i in 1; do break & echo x; done` prints
+`x`, as bash does). Bash parity there is stdout and status only: bash warns for
+a top-level `break`/`continue`/`return`, fdshell prints its own report from the
+child and nothing for a `return` that escaped. `&` is only the operator at a
 word's start: `a&b` stays one word, `"&"` is data, `&&`, `&>file`, `N>&N` and
 `|&` keep their meanings, and a `>` before it owns the byte (`cat > &f` is a
 redirect). A `&` must terminate a command — `& echo b`, `echo a ; & b`,

@@ -1460,6 +1460,34 @@ fn ampersand_terminated_condition_records_a_job() {
     }
 }
 
+/// The condition-position **job record** of a loop-control keyword written with the
+/// plain `&` (task **#362**): `run_parsed`'s arm list backgrounds the keyword, so the
+/// condition records its job and the arm/loop gates on the async 0 — the `while` row
+/// runs its body, the `until` row stops at once (bash prints nothing), and the `if`
+/// row takes `then` (bash warns; the child prints fdshell's own report, so this is
+/// stdout+rc parity only). The pid is read from a **file** in a scratch dir, never
+/// out of stdout (the load-flake note in
+/// [`ampersand_in_an_if_body_backgrounds_the_statement`]); every script ends with
+/// `wait`.
+#[test]
+fn a_loop_control_keyword_in_a_condition_records_a_job() {
+    let dir = scratch("cond-keyword-pid");
+    for (tag, script, want) in [
+        ("while", "while break & do :; break; done", ""),
+        ("until", "until break & do :; break; done", ""),
+        ("if", "if break & then echo t; else echo f; fi", "t\n"),
+    ] {
+        let (out, err, rc) = run_in(&dir, &format!("{script}\nbuiltin echo $! >{tag}\nwait"));
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+        let pid: i64 = record(&dir, tag).trim().parse().unwrap_or_default();
+        assert!(
+            pid > 0,
+            "{script}: $! = {:?}, not a job pid",
+            record(&dir, tag)
+        );
+    }
+}
+
 /// The condition's side effects die with the child (task #356): a `cd` written
 /// in a `&`-terminated condition leaves the parent's cwd where it was (bash
 /// parity — master's foreground condition moved it).

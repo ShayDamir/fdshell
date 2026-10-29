@@ -882,16 +882,68 @@ fn exit_in_a_conditional_leaves_the_script_running() {
     contains_all(&out, &["x", "tail"]);
 }
 
-/// Pinned divergence (owner **#362**, measured identical on master): a
-/// loop-control **keyword** with the `&` is not a `Cmd`/`Pipeline`, so
-/// `run_parsed` runs it in the parent — the `break` ends the loop before its
-/// body ever runs, where bash (the whole condition is the child) prints `x`
-/// then `tail`. Pinned as measured, bounded by the `break` in the body.
+/// Bash parity (owner **#362**, closed 2026-10-29): a loop-control **keyword**
+/// with the `&` is a job, so the condition's `break` dies with the child and the
+/// parent's loop runs its body once — bash prints `x` then `tail`, and so does
+/// fdshell now (the row #356 pinned as measured and named here). Every script
+/// ends with `wait`; output is a set (async output has no order).
 #[test]
-fn break_in_a_conditional_ends_the_loop_here() {
+fn a_loop_control_keyword_in_a_condition_is_a_job() {
     let out = run("while break & do builtin echo x; break; done\nbuiltin echo tail\nwait");
     assert_eq!(rc(&out), 0);
-    assert_eq!(lines(&out), ["tail"], "bash prints x too: #362");
+    assert_eq!(lines(&out), ["tail", "x"], "measured against bash 5.3.9");
+}
+
+/// The whole parity family of task **#362**: a loop-control keyword written with
+/// the plain `&` is the job bash makes of it — the shell forks, the child's signal
+/// dies with it, and the parent's loop, function frame or top level runs on. Rows
+/// are chosen so the backgrounded child prints **nothing** (deterministic stdout)
+/// and each keyword has a row whose value differs from its siblings': the **body**
+/// position, the child's own status read through `wait $!`, and the top level.
+/// Bash parity is stdout+rc only — the **stderr wording** differs (fdshell prints
+/// its own report from the child for a top-level `break`/`continue`, and prints
+/// **nothing** for a `return` that escaped, where bash warns). The two `wait $!`
+/// rows of the top-level spellings are pinned **as measured**: the accepted
+/// out-of-loop rule (task #99 rule 7) reaches through the child (`break &` exits
+/// 1 where bash's subshell exits 0), and `return &` leaves the status it set (0)
+/// where bash's `return` warns and returns 2.
+#[test]
+fn a_loop_control_keyword_with_the_ampersand_is_a_job() {
+    for (script, want) in [
+        (
+            "for i in 1; do break & builtin echo x; done\nbuiltin echo tail\nwait",
+            &["tail", "x"][..],
+        ),
+        (
+            "for i in 1 2; do continue & builtin echo x; done\nbuiltin echo tail\nwait",
+            &["tail", "x", "x"],
+        ),
+        (
+            "f(){ return & builtin echo in; }; f\nbuiltin echo tail\nwait",
+            &["in", "tail"],
+        ),
+        (
+            "for i in 1; do break & done\nwait $!; builtin echo rc=$?",
+            &["rc=0"],
+        ),
+        (
+            "f(){ return 3 & }; f\nwait $!; builtin echo rc=$?",
+            &["rc=3"],
+        ),
+        ("break & builtin echo tail\nwait", &["tail"]),
+        ("continue & builtin echo tail\nwait", &["tail"]),
+        ("return & builtin echo tail\nwait", &["tail"]),
+        ("break & wait $!; builtin echo rc=$?", &["rc=1"]),
+        ("return & wait $!; builtin echo rc=$?", &["rc=0"]),
+    ] {
+        let out = run(script);
+        assert_eq!(rc(&out), 0, "{script}");
+        assert_eq!(
+            lines(&out),
+            want,
+            "{script}: bash stdout measured 2026-10-29"
+        );
+    }
 }
 
 /// A here-doc carried by a `&`-terminated condition keeps its body region (the

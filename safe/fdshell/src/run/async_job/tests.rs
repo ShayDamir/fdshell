@@ -99,18 +99,56 @@ fn child_error_path_exits_one() {
     assert_eq!(status.exit_code(), 1);
 }
 
-/// A loop control written in background (`exit &`, `break &`) dies with the
-/// child: the parent sees no `LoopControl` and keeps running.
+/// A loop control written in background (`exit &`, `break &`, `continue &`,
+/// `return &`) dies with the child: the parent sees no `LoopControl` and keeps
+/// running. The `exit` row (a builtin, so the `Cmd` arm) stays as it was; the
+/// three keywords reach `spawn` through `run_parsed`'s arm of task #362. The
+/// child's own exit code is read through the **pid** form of `wait` (POSIX
+/// no-operand `wait` reports 0 whatever): at the top level the accepted
+/// out-of-loop rule (task #99 rule 7) makes a `break`/`continue` child print its
+/// report and exit 1, a `return` child exits with the status it left (0, or 3 for
+/// `return 3`), and inside a loop the child exits 0 silently.
 #[test]
 fn loop_control_dies_with_the_child() {
-    let cell = cell();
+    let exit_cell = cell();
     let text = st(b"exit");
     let parsed = parse(&text).unwrap();
-    let control = spawn(&parsed, &text, &cell).unwrap();
+    let control = spawn(&parsed, &text, &exit_cell).unwrap();
     assert!(control.is_none());
-    let mut state = cell.borrow_mut().unwrap();
+    let mut state = exit_cell.borrow_mut().unwrap();
     assert_eq!(state.jobs.anon_len(), 1);
     crate::task::posix_wait(&[], &mut state).unwrap();
+
+    for (script, want) in [
+        (b"break".as_slice(), 1),
+        (b"continue", 1),
+        (b"return", 0),
+        (b"return 3", 3),
+        (b"for i in 1; do break; done", 0),
+    ] {
+        let cell = cell();
+        let text = st(script);
+        let parsed = parse(&text).unwrap();
+        let control = spawn(&parsed, &text, &cell).unwrap();
+        assert!(
+            control.is_none(),
+            "{script:?}: no signal reached the parent"
+        );
+        let mut state = cell.borrow_mut().unwrap();
+        assert_eq!(state.jobs.anon_len(), 1, "{script:?}");
+        assert!(
+            matches!(state.last_status, sys::siginfo::WaitStatus::Exited(0)),
+            "{script:?}: the parent continues with the async 0"
+        );
+        let pid = state.jobs.anon_pids()[0];
+        let arg = ShortCStr::from_vec(alloc::format!("{}", pid.as_raw()).into_bytes()).unwrap();
+        let status = crate::task::posix_wait(&[arg], &mut state).unwrap();
+        assert_eq!(
+            status.exit_code(),
+            want,
+            "{script:?}: the child's own status"
+        );
+    }
 }
 
 /// The child's copy of `ShellState` is discarded: a statement that mutates

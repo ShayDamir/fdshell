@@ -1204,6 +1204,30 @@ fn loop_body_statement_with_trailing_ampersand_runs() {
     assert_eq!((out.as_str(), rc), ("hi\n", 0), "stderr={err}");
 }
 
+/// A loop-control keyword with the plain `&` in a loop **condition** is the job, so
+/// the parent re-tests its own condition and runs its body (bash 5.3.9; task
+/// **#362**). On `master` the signal reached the parent: the `continue &` row
+/// re-tested forever (rc 124 at the bound) and the `break &` rows ended the loop
+/// before its body ever ran — every row here is bounded for exactly that reason.
+/// The rows are also stdout+rc parity only: bash **warns** for the `return &` row
+/// ("can only `return' from a function") where fdshell is silent, because the
+/// child exits with the status its `return` left and prints nothing.
+#[test]
+fn a_loop_control_keyword_with_the_ampersand_in_a_condition_runs_the_body() {
+    let (out, err, code) = run_bounded(
+        "i=0; while continue & do i=$((i+1)); echo $i; [ $i -ge 3 ] && break; done; echo tail",
+    );
+    assert_eq!((out.as_str(), code), ("1\n2\n3\ntail\n", 0), "stderr={err}");
+    let (out, err, code) = run_bounded("while break & do echo x; break; done; echo tail");
+    assert_eq!((out.as_str(), code), ("x\ntail\n", 0), "stderr={err}");
+    let (out, err, code) = run_bounded("while return & do echo x; break; done; echo tail");
+    assert_eq!(
+        (out.as_str(), code),
+        ("x\ntail\n", 0),
+        "stderr={err}: bash warns"
+    );
+}
+
 /// A plain `&` **anywhere** in a `for` word list is bash's async operator, not a
 /// word: bash's list ends at it and its parser fails the `do` expectation there
 /// (rc 2, nothing runs). fdshell rejects the same list with `expected 'do'` at

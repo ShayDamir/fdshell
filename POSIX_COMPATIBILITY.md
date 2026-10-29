@@ -135,8 +135,15 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   side effects die with the child (`if cd /tmp & then :; fi` leaves the cwd
   alone, `if exit &` leaves the script running). The `&` **newline** form is
   the same shape (`if true &` newline `then echo x; fi` is a job), and
-  `if true && false & then echo x; fi` prints `x` like bash. Measured
-  divergences of the condition family, all pinned: a condition whose last part
+  `if true && false & then echo x; fi` prints `x` like bash. A loop-control
+  **keyword** written with the `&` is a job too: `while break & do echo x;
+  break; done` prints `x` and `tail` like bash, because the child runs the
+  keyword in its own copy of the shell and its signal dies with the child, so
+  the parent's loop runs on (task **#362**; the same rule holds in a body and at
+  the top level, README "`&`"). Parity there is stdout and status only: bash
+  **warns** for a top-level `break`/`continue`/`return`, fdshell prints its own
+  report from the child and nothing for a `return` that escaped.
+  Measured divergences of the condition family, all pinned: a condition whose last part
   is **short-circuited away** records no job and gates on that part's status
   (`if false && true & then echo x; fi` prints nothing where bash prints `x`,
   and `if cd a && cd a &` cds in the parent) and a **compound** last part
@@ -144,9 +151,8 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   backgrounds the whole list/compound, owner **#352**; a `&` on its **own
   line** behind the condition is the deferral family, owner **#313**; an
   **empty** condition (`if & then`, `while & do`) is a parse error since task
-  **#299** (bash rc 2, rc 1 here), so it has no job to record; `break`/`continue`/`return` written with the
-  `&` reach the **parent** (the loop-control keyword is not a `Cmd`), owner
-  **#362**; `{ cat <<T & }` plus body prints the body at rc 0 and
+  **#299** (bash rc 2, rc 1 here), so it has no job to record;
+  `{ cat <<T & }` plus body prints the body at rc 0 and
    `{ echo <<T & }` plus body prints nothing at rc 0 — the `&` job of a
    single-line group body rides the region the group claims, at parity since
    task **#315** closed the group body's gap (the `cat` row pinned in
