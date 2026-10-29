@@ -5,7 +5,9 @@
 //! structure, so an opacity change cannot drift between the two halves.
 
 use super::super::{Boundary, ScanState, boundary, skip_comment};
-use super::{body_spans, line_end_after, line_start, operator_count, operator_delims, skip_region};
+use super::{
+    Span, body_spans, line_end_after, line_start, operator_count, operator_delims, skip_region,
+};
 use alloc::vec::Vec;
 
 /// The opaque body regions of the text, in order: for every heredoc command
@@ -44,7 +46,7 @@ pub(crate) fn body_regions(line: &[u8]) -> Vec<(usize, usize)> {
             None => {
                 if let Some((regions_of_line, resume)) = semi_terminated_regions(line, run_start, i)
                 {
-                    regions.extend(regions_of_line);
+                    regions.extend(regions_of_line.into_iter().map(|s| s.region));
                     i = resume;
                     run_start = i;
                     continue;
@@ -89,13 +91,15 @@ pub(crate) fn terminator_end(line: &[u8], start: usize) -> usize {
 /// region, in operator order, as the segment layer's `line_bodies_for_line`
 /// does (one rule at both granularities, LESSONS). The run behind the `;` is
 /// consumed by the returned resume index, so the line's regions are counted
-/// once. `None` when the separator is not a `;`, the run writes no operator,
-/// or a delimiter line is missing (the parse layer's own error, as before).
+/// once. `None` when the separator is not a `;`, the run writes no operator, or
+/// a delimiter word is unreadable. A delimiter line that never arrived is the
+/// end-of-file shape (task #364): it yields a region like any other, so the
+/// lines it claims stay body data.
 pub(super) fn semi_terminated_regions(
     line: &[u8],
     run_start: usize,
     semi: usize,
-) -> Option<(Vec<(usize, usize)>, usize)> {
+) -> Option<(Vec<Span>, usize)> {
     if line.get(semi) != Some(&b';') || operator_count(line, run_start, semi) == 0 {
         return None;
     }
@@ -113,5 +117,5 @@ pub(super) fn semi_terminated_regions(
     if ops.is_empty() {
         return None;
     }
-    body_spans(line, body_start, &ops).ok()
+    Some(body_spans(line, body_start, &ops))
 }

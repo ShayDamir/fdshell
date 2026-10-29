@@ -75,7 +75,7 @@ fn claimed(text: &ScriptText, tokens: &[Token]) -> (Vec<(usize, usize)>, Vec<Vec
         .skip(claimed_before)
         .take(ops.len())
         .collect();
-    let bodies = body_contents(line, &all, &alloc)
+    let bodies = body_contents(line, &alloc)
         .into_iter()
         .skip(claimed_before)
         .take(ops.len())

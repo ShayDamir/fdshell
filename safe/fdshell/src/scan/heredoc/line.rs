@@ -38,10 +38,12 @@ pub(crate) fn line_end_after(line: &[u8], from: usize) -> usize {
 /// stream (its bytes are body data, never commands).
 ///
 /// `(empty, empty, line_end)` — the line claims nothing, and the parse layer
-/// reports the shape — when it has no operator, when an operator's delimiter
-/// word is unreadable, when the stream starts at/past the text end (no body
-/// lines at all), or when its **first** delimiter line is missing
-/// (`found == 0`, task #275's residual family).
+/// owns the shape — when it has no operator, when an operator's delimiter word is
+/// unreadable, or when the stream starts at/past the text end (no body lines at
+/// all: the parse layer accepts an **empty** body and warns, task #364). Every
+/// other operator, including one whose delimiter line never arrived, has a region
+/// — the first missing one claims the rest of the stream (the `found == 0`
+/// exception of task #275 is gone).
 fn line_stream_bodies(
     line: &[u8],
     line_start: usize,
@@ -61,11 +63,8 @@ fn line_stream_bodies(
         return nothing;
     }
     let alloc = body_regions_full(line, body_start, &ops);
-    if alloc.regions.is_empty() {
-        return nothing;
-    }
     let resume = alloc.resume;
-    let bodies = contents(line, &ops, &alloc);
+    let bodies = contents(line, &alloc);
     (alloc.regions, bodies, resume)
 }
 
@@ -83,9 +82,9 @@ pub(crate) fn line_bodies_for_line(
 }
 
 /// The body **bytes** of a physical line's `<<` operators, in operator order,
-/// plus the resume index. A region whose delimiter line never arrived carries
-/// that line synthesized ([`contents`]), so the command line rebuilt from
-/// these bytes parses as a complete heredoc (task #275).
+/// plus the resume index. The bytes are the region's own text, so a region whose
+/// delimiter line never arrived rebuilds a command line the parse layer still
+/// decides for — the end-of-file shape, warning included (task #364).
 pub(crate) fn line_body_contents(
     line: &[u8],
     line_start: usize,

@@ -134,8 +134,6 @@ pub(crate) enum ParseError {
     WaitInvalidTimeout,
     /// `wait`: unexpected token in arm pattern
     WaitUnexpectedToken,
-    /// here-doc: missing terminating delimiter line '{delim}'
-    UnterminatedHeredoc { delim: sys::ShortCStr },
     /// here-doc: '{prefix}' is not a valid descriptor number (a decimal fd
     /// number in `0 ..= 2147483647`, as in `N>file`)
     InvalidHeredocFd { prefix: sys::ShortCStr },

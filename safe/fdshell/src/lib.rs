@@ -65,6 +65,7 @@ mod task;
 mod time_exec;
 mod verbose;
 mod wait;
+mod warn;
 mod xtrace;
 
 #[cfg(test)]

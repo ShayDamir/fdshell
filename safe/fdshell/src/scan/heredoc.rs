@@ -14,7 +14,7 @@ mod opaque;
 mod ops;
 mod regions;
 
-pub(crate) use body::body_spans;
+pub(crate) use body::{Span, body_spans};
 pub(crate) use cont::unterminated;
 pub(crate) use full::{body_regions_full, contents as body_contents};
 pub(crate) use io::{io_fd, span_operator, string_span};
@@ -31,8 +31,10 @@ pub(crate) use regions::{body_regions, terminator_spans};
 /// If `line[run_start..run_end]` is a heredoc command line, return the index
 /// of the newline terminating the last delimiter line (or `line.len()` when
 /// that line is last). The body is opaque: the caller resumes just past the
-/// returned newline. `None` when the run has no `<<` operator, when a bare
-/// `<<` has no delimiter word, or when a delimiter line is missing.
+/// returned newline. `None` when the run has no `<<` operator or when a bare
+/// `<<` has no delimiter word. A delimiter line that never arrived is the
+/// end-of-file shape (task #364): the run resolves and the resume is the text
+/// end, so what is left of the text stays body data.
 pub(crate) fn skip(line: &[u8], run_start: usize, run_end: usize) -> Option<usize> {
     skip_region(line, run_start, run_end).map(|(_, resume, _)| resume)
 }
@@ -52,16 +54,18 @@ pub(crate) fn skip_region(
     if delims.is_empty() || !matches!(line.get(run_end), Some(&b'\n') | None) {
         return None;
     }
-    let (spans, resume) = body_spans(line, run_end + 1, &delims).ok()?;
+    let (spans, resume) = body_spans(line, run_end + 1, &delims);
     // Non-empty by construction: `delims` is checked above and `spans` has
-    // one entry per found delimiter.
-    let first = spans.first()?.0;
-    let last = spans.last()?.1;
+    // one entry per delimiter, the end-of-file one included.
+    let first = spans.first()?.region.0;
+    let last = spans.last()?;
     // An empty final delimiter extends the span through the blank line's
     // newline; the blank line always has one (a zero-byte final line never
-    // matches), so `span_end` stays in bounds.
-    let span_end = resume + usize::from(delims.last().is_some_and(|o| o.delim.is_empty()));
-    Some(((first, last), resume, span_end))
+    // matches), so `span_end` stays in bounds. An end-of-file delimiter has no
+    // line of its own to extend through, so the span ends at the text end.
+    let blank = last.found && delims.last().is_some_and(|o| o.delim.is_empty());
+    let span_end = resume + usize::from(blank);
+    Some(((first, last.region.1), resume, span_end))
 }
 
 #[cfg(test)]

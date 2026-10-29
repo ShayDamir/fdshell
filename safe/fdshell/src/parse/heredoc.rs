@@ -1,6 +1,7 @@
 //! Heredoc parsing: extracting the bodies of `<<` operators from a line and
 //! turning the operator tokens into stdin redirects.
 
+mod eof;
 mod operator;
 mod strip;
 
@@ -34,14 +35,26 @@ pub(crate) fn layout(
     if ops.is_empty() {
         return Ok(Vec::new());
     }
-    let from = heredoc::first_unquoted_newline(line)
-        .ok_or_else(|| unterminated(ops.first().map(|o| o.delim.as_slice()).unwrap_or(b"")))?;
-    let (spans, _) = heredoc::body_spans(line, from, &ops)
-        .map_err(|n| unterminated(ops.get(n).map(|o| o.delim.as_slice()).unwrap_or(b"")))?;
+    // Both shapes the old version rejected are bash's end-of-file here-doc now
+    // (task #364): nothing left after the command line means an empty body, the
+    // lines that are left mean a body, and `eof` prints the warning.
+    let from = heredoc::first_unquoted_newline(line).unwrap_or(line.len());
+    let (spans, _) = heredoc::body_spans(line, from, &ops);
+    eof::warn_eof(&spans, &ops);
     ops.iter()
         .zip(spans)
-        .map(|(op, (body_start, body_end))| {
-            let bytes = op.body_bytes(line.get(body_start..body_end).ok_or(ParseError::Never)?);
+        .map(|(op, span)| {
+            let raw = line
+                .get(span.region.0..span.region.1)
+                .ok_or(ParseError::Never)?;
+            // Bash reads body lines whole, so an end-of-file body gets the
+            // newline its last line lacks (`close_last_line`); a found span
+            // keeps its bytes byte-exact.
+            let bytes = if span.found {
+                op.body_bytes(raw)
+            } else {
+                op.body_bytes(&eof::close_last_line(raw.to_vec()))
+            };
             let body =
                 ShortCStr::from_vec(bytes).change_context(ParseError::InvalidChar { ch: 0 })?;
             // An expandable body is a quoted context whose `\<newline>` pairs
@@ -75,15 +88,6 @@ pub(crate) fn parse_operator(
         RedirectDef::here_doc(op.fd, spec.body.clone(), spec.expand),
         extra,
     ))
-}
-
-fn unterminated(delim: &[u8]) -> Report<ParseError> {
-    // A NUL in the delimiter is impossible: the delimiter is a token word
-    // and tokens never carry NUL bytes.
-    let Ok(delim) = ShortCStr::from_vec(delim.to_vec()) else {
-        return Report::new(ParseError::Never);
-    };
-    Report::new(ParseError::UnterminatedHeredoc { delim })
 }
 
 #[cfg(test)]
