@@ -4,7 +4,7 @@ pub(super) mod book;
 pub(crate) mod group;
 mod line;
 
-use crate::scan::{Boundary, boundary};
+use crate::scan::{Boundary, boundary, last_op};
 use alloc::vec::Vec;
 use book::{Book, Run};
 
@@ -91,6 +91,20 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             _ => {}
         }
         book.state.word_active = false;
+
+        // POSIX #2.9's AND-IF-TERMINATOR (task #492): a physical line that ends
+        // on a top-level `&&`/`||` does not end the cond list — the operator and
+        // its newline are one token, so neither the run nor the line is flushed
+        // here and the next physical line joins the same run. The word-state
+        // reset above still applies (the next line starts a new word), and
+        // `book.start`/`line_start` stay, so the flush's region window covers
+        // every physical line the run spans. The comment arm applies the same
+        // rule (`line::end_comment`); `;`, end of input, a lone `|` and the
+        // plain `&` are not join points.
+        if line.get(book.i) == Some(&b'\n') && last_op::ends_on_operator(line, book.i) {
+            book.i += 1;
+            continue;
+        }
 
         let raw = line.get(book.start..book.i).unwrap_or(b"");
         let part = raw.trim_ascii();

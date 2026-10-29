@@ -406,13 +406,13 @@ fn a_dangling_cond_operator_before_a_block_closer_is_measured() {
             "{script}: bash rc 2, accepted divergence: {err}"
         );
     }
-    // #492's row, not this rule's: bash ends the list at the line end, runs
-    // nothing and reports rc 1, while fdshell's short-circuit is per statement
-    // and reaches the next line. Pinned at the measured value.
+    // Task #492's row: the operator and its newline are one token, so the list
+    // continues onto the next line and the short-circuit runs nothing — bash
+    // parity now, not a measured divergence.
     let (out, err, rc) = run_bounded("false &&\necho b");
     assert_eq!(
         (out.as_str(), rc),
-        ("b\n", 0),
-        "bash runs nothing at rc 1 (the list continuation is task #492's): {err}"
+        ("", 1),
+        "bash parity (task #492): {err}"
     );
 }

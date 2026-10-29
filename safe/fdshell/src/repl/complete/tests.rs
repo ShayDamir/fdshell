@@ -218,8 +218,8 @@ fn trailing_pipe_is_hard_error_not_continuation() {
 fn lone_amp_and_pipe_with_trailing_space_are_complete() {
     // A lone `&` or `|` followed by whitespace is not a two-char trailing
     // operator (no backgrounding; the pipeline parser cannot span a `|`):
-    // it is a hard parse error, not a continuation. Pins `top_level_op`'s
-    // `&`/`|` guards and the 2-char lengths.
+    // it is a hard parse error, not a continuation. Pins
+    // `scan::last_op::top_level_op`'s `&`/`|` guards and the 2-char lengths.
     assert!(is_complete(b"echo a & "));
     assert!(is_complete(b"echo a | "));
 }
@@ -231,12 +231,13 @@ fn trailing_semicolon_is_complete() {
 
 #[test]
 fn quoted_cond_list_operator_is_complete() {
-    // No "is the scan state bare" gate guards the trailing-operator check: a
-    // `&&`/`||` inside a quote, a single-quoted span, a backtick, or a `$( )`
-    // is answered by the scope itself — a balanced one leaves its
-    // non-whitespace closer in the tail (complete), an unbalanced one is caught
-    // by the open-scope checks (continuation). Both sides of every scope are
-    // pinned here, plus the whitespace tail that makes a top-level `&&` open.
+    // The "is the scan state bare" gate the walk applies lives in
+    // `scan::last_op` (task #492), where its kill pins are. At this granularity
+    // every row below is answered by the scope itself — a balanced one leaves
+    // its non-whitespace closer in the tail (complete), an unbalanced one is
+    // caught by the open-scope checks (continuation) — so the gate changes no
+    // answer here; both sides of every scope are pinned here, plus the
+    // whitespace tail that makes a top-level `&&` open.
     assert!(is_complete(b"echo \"a && b\""));
     assert!(is_complete(b"echo 'a && b'"));
     assert!(is_complete(b"echo `a && b`"));
@@ -250,12 +251,11 @@ fn quoted_cond_list_operator_is_complete() {
     // A lone `&`/`|` is the async/pipeline operator byte only at the top level
     // (there the scan stamps it `Async`); inside a quote, a single-quoted span,
     // a backtick, or a balanced `$( )` it is an ordinary word byte, so
-    // `top_level_op`'s 2-char match must not read the byte after it as its
-    // partner. These rows are the killers of `top_level_op`'s
-    // "guard → true" and `i + 1`→`i * 1` mutants: read as a 2-char operator,
-    // the lone `&` swallows the closing `"`/`'`/backtick/`)`, the tail becomes
-    // whitespace, and the line opens a continuation that the unmutated build
-    // answers at once.
+    // `scan::last_op::top_level_op`'s 2-char match must not read the byte after
+    // it as its partner. These rows pin the REPL's answer behind that gate; the
+    // killers of the match's `i + 1`→`i * 1` mutant and of the gate itself are
+    // the top-level rows in `scan::last_op::tests` (task #492), where the
+    // operator is the buffer's last token.
     assert!(is_complete(b"echo \"a &\""));
     assert!(is_complete(b"echo 'a &'"));
     assert!(is_complete(b"echo `a &`"));

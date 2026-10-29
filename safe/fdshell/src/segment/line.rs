@@ -32,6 +32,16 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
     // The flush window ends at the comment's own newline, so the comment's
     // bytes are never read as operators.
     let nl = scan::comment_end(line, book.i);
+    // POSIX #2.9's AND-IF-TERMINATOR is an operator **plus its newline**, read
+    // here at the comment's word start (task #492): the comment text is not a
+    // token, so a run whose last token is a top-level `&&`/`||` stays open and
+    // the next physical line joins it. A comment with no newline behind it ends
+    // the input, and the rule that owns a trailing operator with an empty operand
+    // stands.
+    if nl < line.len() && scan::last_op::ends_on_operator(line, book.i) {
+        book.i = scan::skip_comment(line, nl);
+        return;
+    }
     let deferred = line.get(nl) == Some(&b'\n') && bg::async_ahead(line, nl);
     book.i = nl;
     // `skip_comment` is the newline's successor: the next physical line's
@@ -68,11 +78,17 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
 /// trailing `#` comment no longer reaches here: [`end_comment`] ends the
 /// physical line and flushes its runs **on** it, because a `#`-terminated line
 /// owns its body stream (task #333 — bash reads the body after the logical
-/// line, comment included). The rule is *not* about a run whose own text spans
+/// line, comment included) — unless the run stays open on a trailing operator
+/// (task #492), which is the multi-line case below. The rule is *not* about a run whose own text spans
 /// several physical lines: a keyword block opened mid-run keeps its bytes
 /// inside the run (task #232) and never moves `line_start`, so the run is
 /// flushed on the line it opened on and claims that line's region stream like
-/// any single-line run (task #295).
+/// any single-line run (task #295) — and a cond-list run joined across a
+/// newline by a trailing `&&`/`||` (task #492) is the same shape: the window
+/// spans every physical line it runs over, so a region that **starts inside the
+/// run's span** is already part of its bytes (extension mode, nothing claimed —
+/// the parse layer reads the inline body), while a region at or after the run's
+/// end is attached in operator order as today.
 pub(crate) fn flush_line<'a>(
     book: &mut Book<'a>,
     line: &[u8],

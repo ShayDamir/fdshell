@@ -1,69 +1,25 @@
 //! Trailing-open check: does the buffer end in an open quote, backtick,
 //! `$( )`, or a dangling top-level `&&`/`||` followed only by whitespace?
 
-use crate::scan::{Boundary, ScanState, boundary, heredoc, skip_comment};
+use crate::scan::last_op;
 
 /// `true` when `line` ends in an open quote (double or single)/backtick/`$( )`,
 /// or in a top-level `&&`/`||` operator followed only by whitespace.
 pub(super) fn trailing_open(line: &[u8]) -> bool {
-    let mut state = ScanState::new();
-    let mut i = 0usize;
-    let mut run_start = 0usize;
-    let mut last_op: Option<(usize, usize)> = None;
-    while i <= line.len() {
-        let kind = boundary(line, i, &state);
-        if kind == Boundary::Char {
-            // No "is the state bare" gate: an in-quote / in-span / in-backtick
-            // / in-`$( )` `&&`-`||` is never the *last* top-level operator with
-            // a whitespace tail (a balanced scope leaves its non-whitespace
-            // closer in the tail, an unbalanced one is caught by the check
-            // below), so the gate had no observable effect and every mutant of
-            // it was equivalent.
-            if let Some(len) = top_level_op(line, i) {
-                last_op = Some((i, len));
-                for _ in 0..len {
-                    i = state.advance(line, i);
-                }
-                continue;
-            }
-            i = state.advance(line, i);
-            continue;
-        }
-        state.word_active = false;
-        if kind == Boundary::Comment {
-            i = skip_comment(line, i);
-            run_start = i;
-            continue;
-        }
-        match heredoc::skip_region(line, run_start, i) {
-            Some((_, resume, _)) => {
-                i = resume;
-                run_start = i;
-            }
-            None => {
-                i += 1;
-                run_start = i;
-            }
-        }
-    }
+    // The shared state-aware walk (task #492), read here at the whole-buffer
+    // granularity: `line.len() + 1` includes the end-of-input boundary. The
+    // operator it reports is the buffer's last *token*, so an operator inside a
+    // quote, a span or a comment is word data and answers "not open".
+    let (state, op) = last_op::walk(line, line.len() + 1);
     if state.in_quote || state.in_single || state.in_backtick || state.paren_depth > 0 {
         return true;
     }
-    matches!(last_op, Some((pos, len)) if tail_is_whitespace(line, pos + len))
-}
-
-/// The length of the top-level cond-list operator at `i`: `&&` (2) or `||`
-/// (2). A lone `&` is not a continuation: it is the plain async operator
-/// (task #326) and a complete input the boundary loop already ended, so the
-/// REPL executes it at once. A lone `|` is not a continuation either (the
-/// pipeline parser cannot span a `|` across a newline, so a trailing `|`
-/// stays a hard parse error).
-fn top_level_op(line: &[u8], i: usize) -> Option<usize> {
-    match line.get(i).copied() {
-        Some(b'&') if line.get(i + 1) == Some(&b'&') => Some(2),
-        Some(b'|') if line.get(i + 1) == Some(&b'|') => Some(2),
-        _ => None,
-    }
+    // The REPL's own rule, and the reason the two granularities differ: this one
+    // demands whitespace to the end of the buffer, so a `#` comment after the
+    // operator is input the REPL executes at once — while the segment scanner
+    // reads the same input as one cond list, because comment text is discarded
+    // (task #492). Both answers are pinned.
+    matches!(op, Some((pos, len)) if tail_is_whitespace(line, pos + len))
 }
 
 /// `true` when `line[from..]` is all whitespace (or empty).

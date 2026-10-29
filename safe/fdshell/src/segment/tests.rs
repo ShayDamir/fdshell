@@ -1808,3 +1808,27 @@ fn a_comment_terminated_line_flushes_its_runs_and_jumps_its_regions() {
         vec![(b"cat <<X".to_vec(), Vec::new())],
     );
 }
+
+/// A physical line that ends on a top-level `&&`/`||` is POSIX #2.9's
+/// AND-IF-TERMINATOR: the run is not flushed there, so the joined list is one
+/// statement whose bytes span the newline (task #492).
+#[test]
+fn scan_a_line_ending_on_a_cond_operator_joins_the_next_line() {
+    for line in [
+        b"false &&\necho b".as_slice(),
+        b"true ||\necho b".as_slice(),
+    ] {
+        let segments = scan_segments(line, false);
+        assert_eq!(segments.len(), 1, "{:?}", line);
+        match &segments[0] {
+            Segment::Statement {
+                cmd, off, bodies, ..
+            } => {
+                assert_eq!(*off, 0, "{:?}", line);
+                assert_eq!(*cmd, line, "{:?}", line);
+                assert!(bodies.is_empty(), "{:?}", line);
+            }
+            _ => panic!("expected one statement, {:?}", line),
+        }
+    }
+}
