@@ -347,9 +347,11 @@ bash's `{a,b}`). A rule fixed at one granularity is a divergence at the other
 (LESSONS: "A word-list rule lives at **two granularities**" is that lesson at
 the word-list layer), which is why `body_regions`' consumers
 (`tokenize_statement`, `brace_expand/protect`) inherit the rule rather than
-re-implementing it. A `;`-terminated run with no `<<`, a comment-terminated
-line and a missing delimiter line keep the "no region" outcome, so
-`missing terminating delimiter line` stays the parse layer's error.
+re-implementing it. A `;`-terminated run with no `<<` and a comment-terminated
+line keep the "no region" outcome. A missing delimiter line no longer does
+(task **#364**): the operator claims the rest of the stream as its region, the
+parse layer **accepts** the shape and prints its end-of-file warning, and the
+`here-doc: missing terminating delimiter line` error is gone.
 
 The granularity split matters at the cond layer, which must know the
 **regions**: a run window that ends on a `;`-terminated operator line
@@ -618,7 +620,9 @@ A here-doc's body is not part of the command line's bytes: it sits **after the w
 
 Threading the skip count into the condition as a parameter — the literal reading of the task — adds a parameter to five shared signatures (`run_one`, `parse`, `dispatch_keyword`, `tokens_to_if`/`tokens_to_loop`/`parse_elifs`) and ~40 call sites for a number meaningful to exactly one kind of text; slicing the region list where it is computed is the same arithmetic with none of it. The append/extension discriminator is `regions.first().0 >= token_range(slice).end` — **the same predicate the block scanner applies at block granularity** (`segment/block/keyword.rs:82`), so it must stay one rule at both granularities: a copy per call site is where it starts to drift (LESSONS: "A word-list rule lives at **two granularities**").
 
-Consequences measured against bash 5.3.9, all pinned: an arm's rebuilt text is self-contained, so a body line that is exactly `fi`/`done`/`else`/`elif` is body data at arm granularity too; an unrun loop body never parses, so `while false; do cat <<T; done` + bodies stays silent (rc 0, bash parity); an arm slice on a line carrying an *earlier* arm's here-doc claims only its own region (`elif cat <<C; then cat <<T; fi`); and an `&&` written in the **appended body text** does not re-split the arm's text (`if true; then cat <<T; fi` + `body && x` + `T` prints `body && x`, rc 0 — `tests/heredoc.rs::single_line_block_body_heredoc_with_and_in_body_runs_the_body`), because the block segment delivers its regions as `run_cond_list` bodies exactly like the arm bodies do. One divergence stays measured-and-pinned, not "fixed": a line whose body stream is **incomplete** yields no regions at all, so in `if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT` + `T` the missing `E` body leaves the `then` arm with nothing to claim (rc 1; bash prints `bodyT` with a warning about `E`) — the pinned condition-position rule `cond_bodies_of_an_incomplete_line_stream_are_empty` is the same rule at the other granularity, so fixing one means fixing both. Refactoring `cond_bodies.rs` for the shared arithmetic must keep its window+skip pair (the physical-line anchor, LESSONS: "A region window and the skip derived from it are one pair") byte-identical: the accepted-equivalent mutants and their killers refer to that pair, not to the extraction's callers.
+Consequences measured against bash 5.3.9, all pinned: an arm's rebuilt text is self-contained, so a body line that is exactly `fi`/`done`/`else`/`elif` is body data at arm granularity too; an unrun loop body never parses, so `while false; do cat <<T; done` + bodies stays silent (rc 0, bash parity); an arm slice on a line carrying an *earlier* arm's here-doc claims only its own region (`elif cat <<C; then cat <<T; fi`); and an `&&` written in the **appended body text** does not re-split the arm's text (`if true; then cat <<T; fi` + `body && x` + `T` prints `body && x`, rc 0 — `tests/heredoc.rs::single_line_block_body_heredoc_with_and_in_body_runs_the_body`), because the block segment delivers its regions as `run_cond_list` bodies exactly like the arm bodies do. The former divergence "**incomplete** body stream yields no regions at all" is closed by task **#364**: the rule now has no first-operator exception — the operator whose delimiter line never arrived claims the rest of the stream **and** the parse layer accepts the claim, printing its end-of-file warning — so `if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT` + `T` prints `bodyT`/`T` at rc 0. What stays measured-and-pinned is the warning **count**: bash parses the whole script and warns twice, fdshell parses per statement and warns once (the `elif` arm that never runs stays silent), and the condition-position rule `cond_bodies_of_an_incomplete_line_stream_take_the_empty_tail` is the same claim rule at the other granularity. Refactoring `cond_bodies.rs` for the shared arithmetic must keep its window+skip pair (the physical-line anchor, LESSONS: "A region window and the skip derived from it are one pair") byte-identical: the accepted-equivalent mutants and their killers refer to that pair, not to the extraction's callers.
+
+**The split task #364 fixes, in one sentence: the allocator claims, the parse layer accepts.** Claiming is the allocation's whole job — one entry per operator (found region, end-of-file claim, empty tail), so the window/skip/count arithmetic stays exact and the claimed body lines never run as commands. Accepting is the parse layer's: an operator whose delimiter line never arrived **is accepted** — its body is whatever the claim covers (empty when the stream left nothing) — and the parse layer prints the end-of-file warning once per operator it decides for (`warn.rs`, through `crate::io::Stderr`, fdshell's wording, no line number; a warning never rides the `Report<ParseError>` return channel). The synthesis of a missing delimiter line retired with the decision, because its only reason was a parse layer that rejected the shape; `contents()` now returns each region's own text, and the `found == 0` exception arm retired with it. Consequences to keep: the diagnostic owner prints only on the **execution** path (`line_body_contents`, `claimed_line_bodies`, `parse/cond_bodies` callers) — the tokenizer's `body_regions` and `brace_expand/protect` must never print — parse-time warnings repeat per loop iteration (pin single-iteration loops), and a branch that never runs stays silent where bash, which parses the whole script, warns.
 
 ## Task #273 completes the arm-granularity rule for `for`/`case`, and the closer search must know the block's word list
 
@@ -1261,7 +1265,7 @@ body-line half of the class is #311's, pinned by
 
 Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines.rs::word_span`/`delimiter_span`, which step one byte at a time. Owner: task #349 (measured, no prerequisite relation to #263; the flag flip leaves every one of those rows rc 1, unchanged).
 
-**Closed by task #347 for the pair half, and the boundary is narrower now** (measured 2026-10-28, bash 5.3.9): `word_span` consumes an unquoted `\X` pair whole, so the escaped-whitespace rows are bash parity — `cat <<a\ b`, `<<\ b`, `<<a\<TAB>b`, `<<a\;b`, `<<a\|b`, `<<a\)`, `<<\;`, `<<\|`, their `<<-` and io-number twins, and `X=v; cat <<a\ b` + `$X` (the pair quotes the body) all print their body at rc 0. The **`\` at the end of the word** member is not closed: the tokenizer's continuation join (`<<E\` + `zzz` → the word `Ezzz`, `<<a\` + `a\` → `aa\`, bash rc 0 with its EOF warning) is task **#489**'s, pinned as measured in `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`. #349's remaining scope is that join (its pair half landed in #347); the pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
+**Closed by task #347 for the pair half, and the boundary is narrower now** (measured 2026-10-28, bash 5.3.9): `word_span` consumes an unquoted `\X` pair whole, so the escaped-whitespace rows are bash parity — `cat <<a\ b`, `<<\ b`, `<<a\<TAB>b`, `<<a\;b`, `<<a\|b`, `<<a\)`, `<<\;`, `<<\|`, their `<<-` and io-number twins, and `X=v; cat <<a\ b` + `$X` (the pair quotes the body) all print their body at rc 0. The **`\` at the end of the word** member is narrowed but not closed: the tokenizer's continuation join (`<<E\` + `zzz` → the word `Ezzz`, `<<a\` + `a\` → `aa\`) is task **#489**'s, pinned as measured in `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners` — since task **#364** both shells run these rows at rc 0 with an end-of-file warning, so only the word text (and the warning count it produces) stays with #489. #349's remaining scope is that join (its pair half landed in #347); the pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
 
 
 
@@ -1346,13 +1350,14 @@ Three faces of *measure, don't quote*.
   `tests/heredoc.rs::numbered_heredoc_in_a_function_body_feeds_the_descriptor`
   (numbered form only).
   **EOF-starved** (one `-c` line, no delimiter line): all four shapes — both
-  group and both function forms — report `missing terminating delimiter line`
-  rc 1 where bash warns `delimited by end-of-file` and exits 0: the
-  statement-level missing-delimiter family, owner task **#429**, whose line
-  with #315 is drawn in the entry
-  LESSONS: "A function-definition body is a block body for the region rule too"
-  (the starved first operator is **#429**'s; the group's unclaimed region was
-  **#315**'s and is closed). The **mid-run** keyword-block row of this family is bash-equal,
+   group and both function forms — reach **parity** with task **#364**: bash
+   warns `delimited by end-of-file` and exits 0, and fdshell matches with its own
+   wording. That was the statement-level missing-delimiter family, owner task
+   **#429**, closed by the accept-and-warn rule; its line
+   with #315 is drawn in the entry
+   LESSONS: "A function-definition body is a block body for the region rule too"
+   (the starved first operator was **#429**'s; the group's unclaimed region was
+   **#315**'s and is closed). The **mid-run** keyword-block row of this family is bash-equal,
   pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and
   `midrun_block_body_heredoc_is_region_scanned`; `( cat 3<<T )` is not a
   subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
@@ -1520,7 +1525,10 @@ the same way, or the two `<<` counts drift silently. `cat >| <<EOF` counts 1
 token-level and 0 byte-level (the scan hits the absorbed `|`), `echo a>|<<EOF` 1
 byte-level vs 0 token-level, and a real script breaks observably: `cat "a>"| <<EOF`
 then the body then `EOF` reports `missing terminating delimiter` on the divergent
-tree, where master and bash read the body (rc 1 / rc 0).
+tree, where master and bash read the body (rc 1 / rc 0). Task **#364** retires
+the error half of that counterfactual: the parse layer now accepts the
+end-of-file shape and warns, so a byte/token count drift of this kind would show
+as a warning, not a failure.
 
 ONE predicate decides both layers: `parse/redirect/clobber.rs::clobber_word`, over
 the word's RAW bytes + quote mask — the word's last byte is `>`, unquoted and not
@@ -2368,7 +2376,9 @@ pinnable in this suite, so the pinned shape is the bounded one (`break` in the
 body, rc 0). Two families are owned elsewhere: the ungated `)` rows
 `if (cat) && cat <<X; then` and `if :; then echo a); cat <<X` (task #430), and
 the comment-terminated delimiter row `if :; then cat <<Q # c` / `cat <<Q # c`
-(bash rc 0, fdshell rc 1 `missing terminating delimiter line 'Q'`, task #429).
+(task **#364** brings it to bash's side: both shells run at rc 0 with the
+end-of-file warning; the pins are the parity rows of
+`tests/heredoc.rs::a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners`).
 
 ## A cond-list heredoc arm's `b == b'\n'` guard: a missing mid-run pin, then a dead-code equivalence, then a kill
 
@@ -2397,9 +2407,11 @@ granularity:
    rejection forbids: `cond/boundary/body/tests.rs::window_end_is_one_past_the_runs_newline`
    calls the window directly and asserts the triple — at `to == nl` the quote
    region stops at the window edge, the delimiter reads `a b`, the next line
-   matches it and the run owns a region `(11, 14)` to skip; one past the newline
-   the quote swallows the newline byte, the delimiter is `a b\n`, no line matches
-   and the run carries no region. Same accepted species as
+    matches it and the run owns a region `(11, 14)` to skip; one past the newline
+    the quote swallows the newline byte, the delimiter is `a b\n`, no line matches
+    — and since task **#364** the run owns the same region there too (no match is
+    the end-of-file claim now), so the test's **window** assertion is what
+    separates the two answers. Same accepted species as
    `parse/cond_bodies.rs`'s `n + 1` → `n * 1`
    (LESSONS: "A region window and the skip derived from it are one pair") — that
    file has no `n + 1` site left, so the pair lives only here now. The `+`→`-`
@@ -2418,12 +2430,18 @@ granularity:
    `cond/boundary/body/tests.rs::region_window_is_the_runs_own_physical_line`: at
    `p == 0` the mutation computes `0 - 1` in `usize` — a debug panic, and in
    release `line.get(0..usize::MAX)` is `None`, so the anchor collapses to `0` and
-   the window widens. The same test kills the helper's literal mutants `→ 0` and
-   `→ 1`: the anchor is the run's **own physical line**, and widening it to the
-   text start drags an earlier line's unterminated heredoc into the region list
-   (the helper's missing-delimiter path empties the list, so the body stops being
-   opaque), while a window starting one byte right stops recognizing a `<<` that
-   opens its line after a word break.
+    the window widens. `region_window_is_the_runs_own_physical_line` no longer
+    kills the helper's literal mutants `→ 0` and `→ 1` (re-measured 2026-10-29);
+    those are killed by
+    `scan/heredoc/opaque/tests.rs::a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron`
+    and `scan/heredoc/line/tests.rs::line_start_anchors_past_the_preceding_newline`,
+    which also kill the `+`→`*` mutant above (both fail under it). The anchor is
+    the run's **own physical line**, and widening it to the
+    text start drags an earlier line's unterminated heredoc into the region list
+    (since task **#364** that heredoc arrives as an end-of-file claim — the list
+    is never emptied any more — so what the pins assert is the changed claim),
+    while a window starting one byte right stops recognizing a `<<` that
+    opens its line after a word break.
 3. `operator_in_region`'s `while i < end` — `<`→`<=` is unkillable: a region's
    `end` is the end of its **delimiter line**, so `line[end]` is the newline that
    closes the region (or nothing, at the end of the text) — a byte that can never
@@ -2460,13 +2478,20 @@ survivor of this rule now.
 
 Not an equivalence but dead code: the old `regions()` ended with
 `.filter(|&(start, _)| start < line.len())` and a doc claim that the filter keeps
-a statement's bodies fully opaque. It never drops anything — `body_regions_full`
-returns `Err` before it can push a region whose start is `line.len()` (its
-`pos = end + 1` reaching the text end makes `next_delimiter` fail), so that
-filter's `<`→`<=` mutant was unkillable by construction, and statement opacity is
+a statement's bodies fully opaque. It never dropped anything *then* —
+`body_regions_full` returned `Err` before it could push a region whose start was
+`line.len()` (its `pos = end + 1` reaching the text end made `next_delimiter`
+fail), so that filter's `<`→`<=` mutant was unkillable by construction, and
+statement opacity is
 the shared helper's own `body_start >= line.len()` guard in
 `scan/heredoc/line.rs`. Deleting the filter deleted the mutant (the species of
 LESSONS: "Re-deriving an already-set flag is dead code with equivalent mutants").
+**Re-derived for task #364 (hand probe, 2026-10-29): the dead-code verdict would
+now go the other way** — with the end-of-file claim the allocation can push a
+tail region whose start is at or past `line.len()` (`pos` one past the text end
+when the last delimiter line has no terminating newline), so the filter would no
+longer be a no-op and its mutant would be killable; the filter stays deleted, and
+the reversed-range tail region is documented in `full.rs` instead.
 ## A region window and the skip derived from it are one pair — only on the success path
 
 `parse/cond_bodies.rs` anchors both halves of a condition's body extraction at
@@ -2478,37 +2503,49 @@ the window prepends `k` regions and raises the skip by exactly `k`, so the slice
 `regions[skip .. skip + ops.len()]` is identical for every anchor: the pair-shift
 is invariant **on the success path**.
 
-- **The accepted/missed mutants of the anchor** (`cond_bodies.rs:77:75`).
-  `n + 1` → `n * 1` is **strictly equivalent** (`* 1` is the identity, and the
-  newline byte is never part of an operator, so on a line whose head is not `<<`
-  the anchor shift counts the same operators) — the file's only accepted missed
-  mutant. `n + 1` → `n - 1` is that same equivalence only for `n ≥ 1`: at `n = 0`
-  it computes `0 - 1` in `usize` — a debug panic (release wraps to `usize::MAX`),
-  emptying the window — and is **killed**, not accepted, by
-  `condition_bodies_of_a_text_starting_with_a_newline`. The `line_start_of`
-  **literal** mutants `→ 0` and `→ 1` are **not** equivalent:
+- **The accepted/missed mutants of the anchor** (the `n + 1` of `line_start`,
+  `scan/heredoc/line.rs:128`, reached from `parse/cond_bodies.rs` through the
+  shared helper; the private copy this record was written against is gone).
+  `n + 1` → `n * 1` was accepted on the argument that the newline byte is never
+  part of an operator, so on a line whose head is not `<<` the anchor shift counts
+  the same operators — that argument is **retired**: the shift now also moves the
+  end-of-file claim (task **#364**), and the mutant is killed, by
+  `scan/heredoc/opaque/tests.rs::a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron`
+  and `scan/heredoc/line/tests.rs::line_start_anchors_past_the_preceding_newline`
+  (re-derived by hand, 2026-10-29). `n + 1` → `n - 1` is still **killed**, by
+  `condition_bodies_of_a_text_starting_with_a_newline` (the same equivalence only
+  for `n ≥ 1`: at `n = 0` it computes `0 - 1` in `usize` — a debug panic (release
+  wraps to `usize::MAX`), emptying the window; verified). The `line_start`
+  **literal** mutants `→ 0` and `→ 1` are **not** equivalent — still killed, but
+  no longer by
   `parse/cond_bodies/tests.rs::condition_bodies_window_is_bounded_to_the_conditions_line`
-  (complete condition line, unterminated `<<` on an earlier line) kills both, and
-  `→ 1` is inert only when the computed anchor is 0, i.e. only for a condition
-  that starts its line. The `b == b'\n'` → `b != b'\n'` mutant in the same
-  function (`cond_bodies.rs:77:55`) is likewise **not** equivalent: killed by
-  `condition_bodies_of_an_incomplete_line_stream_are_empty` (the `found == 0`
-  fallback) and `condition_bodies_skip_the_regions_claimed_before_them`
+  (it passes under both since #364; re-measured): the killers are the two pins
+  above plus the `cond/` region pins `a_body_position_region_is_the_bodys_own_data`,
+  `block_regions_split_on_their_earliest_operator`,
+  `region_bytes_never_fold_into_the_callers_state` and
+  `gate_end_skips_the_gated_and_list_to_its_separator`. The `b == b'\n'` →
+  `b != b'\n'` mutant (the newline search now inside `line_start`'s `rposition`,
+  `scan/heredoc/line.rs:127`) is likewise **not** equivalent: killed by
+  `condition_bodies_of_an_incomplete_line_stream_take_the_empty_tail` (verified —
+  the claim, not the old `found == 0` fallback, is what the pin asserts) and
+  `condition_bodies_skip_the_regions_claimed_before_them`
   (`condition_bodies_skip_is_exact_when_a_tail_region_is_present` pins the same
   `skip` with a tail region in the list, so the pair stays exact).
   `condition_bodies_claim_the_mid_line_region_of_a_multi_line_condition` pins the
   non-trivial anchor (operator mid-line in a multi-line condition, the shape bash
   rejects with a syntax error) and the exact region it claims (`cat <<A; echo x` +
   `Z`, bytes 18..36).
-- **The missing-delimiter path is not anchor-invariant.** `body_regions_full`
-  (`scan/heredoc/full.rs`) is no longer a `Result`: allocation is **one entry per
-  operator**, and the *only* path that empties the region list is `found == 0` —
-  the **first** operator of the window's line having no delimiter line (the
-  operators behind a missing one keep their regions). Widening the window to an
+- **The missing-delimiter path is anchor-invariant again, because it is a claim
+  like any other.** `body_regions_full` (`scan/heredoc/full.rs`) is **one entry
+  per operator**, and since task **#364** no path empties the list: the *first*
+  operator of the window's line whose delimiter line never arrived claims the rest
+  of the stream (the old `found == 0` exception is gone; only a line with no
+  readable operator yields nothing). Widening the window to an
   earlier line makes *that* line's unterminated heredoc the window's first
-  operator, so the list is empty again and the condition keeps nothing: the
-  anchor's observable half is narrower than the pair rule suggests and unchanged
-  in kind.
+  operator, and it now arrives with its claim, so the anchor's observable half is
+  no longer narrower than the pair rule suggests — the pair-shift invariance holds
+  on every path, and the heading's "only on the success path" is the retired
+  history of the exception arm.
 - **Scope an equivalence claim to the path it argues about** — a shift that is
   invisible once the regions are consumed is visible on the path that refuses to
   consume them. A blanket "a window starting before, at, or after the newline
@@ -2518,35 +2555,36 @@ is invariant **on the success path**.
   equivalent anchor mutant *caught*, which is load flakiness — and write down
   which tests kill the ones that are killed.
 
-**A region is a byte range; a region whose structure line is missing must carry
-it, synthesized.** Allocation hands out **byte ranges**, and every consumer
+**A region is a byte range; a region whose structure line is missing carries
+only its own bytes.** Allocation hands out **byte ranges**, and every consumer
 rebuilds a **command line** from bytes (`cond/part.rs::reconstruct` =
 `cmd + "\n" + bodies`, and `parse/part_text.rs` for an arm body). A region
 `(body_start, delimiter_line_end)` stands for a complete heredoc only because its
-last line *is* the delimiter line, so a region whose delimiter line never arrived
-is an unterminated heredoc and the parse layer rejects it
-(`here-doc: missing terminating delimiter line`) — the mechanism by which one
-unterminated `<<` starved every other operator of its line.
+last line *is* the delimiter line, and a region whose delimiter line never
+arrived is the end-of-file one — which task **#364 accepts**: the body is the
+range the claim covers, the command runs at rc 0, and the parse layer prints its
+end-of-file warning. The synthesis of the missing delimiter line retired with the
+rejection: `contents()` copies each region's own text verbatim, so the rebuild is
+a text the parse layer can still decide for and warn from — exactly once, per
+operator the parse layer decides for, on the **execution** path only. Synthesis
+existed solely because a parse layer rejected the shape; when the decision moved,
+the `found == 0` exception arm retired with it.
 
-* Synthesize at the **region→bytes boundary** (`scan/heredoc/full.rs::contents`),
-  never in the inner consumer. The outer synthesis makes the inner allocation
-  **find** the delimiter line, so `found` covers it and `contents` copies the bytes
-  verbatim: no double-append. A `<<-` operator's synthesized line is written
-  untabbed (the comparison strips tabs), an empty delimiter's is a real blank line
-  (a zero-byte final line never matches).
 * A region's bytes are **whole lines**, except the last region's. The bodies are
   **concatenated** into one text and a `-c` script may end mid-line, leaving its
   last delimiter line unterminated: an unclosed region glues the next body's first
   byte onto its delimiter line (`…\nT` + `E\n` = `TE\n`, which terminates nothing —
   the arm then re-parses its own `<<T` bodyless). So close every region that is
-  followed by another one, and every synthesized region (its delimiter line needs a
-  line start of its own); leave the last region byte-exact, which is what the
+  followed by another one; leave the last region byte-exact, which is what the
   exact-bytes pins (`condition_bodies_extracted_from_block_text`) keep green.
-* `found == 0` **keeps the parse layer's error**: the allocator does not own "this
-  heredoc has no body at all". bash's end-of-file warning-and-run is a separate
-  diagnostic (task #364), and the
-  `condition_bodies_of_an_incomplete_line_stream_are_empty` /
-  `a_heredoc_behind_an_ampersand_reports_a_missing_body` families pin the split.
+* `found == 0` **no longer keeps a refusal**: the exception arm retired with task
+  **#364** — the first operator whose delimiter line never arrived is claimed by
+  the same tail-claim rule as the operators behind it, and the parse layer accepts
+  the claim with its warning. The
+  `condition_bodies_of_an_incomplete_line_stream_take_the_empty_tail` /
+  `a_heredoc_behind_an_ampersand_reports_a_missing_body` families now pin bash's
+  warn-and-run parity as measured (the second test's name is historical: it
+  asserts warnings and rc 0).
 * **One entry per operator** is what keeps the pair rule above alive: the
   rest-of-stream claim and the empty regions behind it are entries of their own,
   so the window's `skip`/`take` arithmetic stays exact in
@@ -2559,16 +2597,17 @@ unterminated `<<` starved every other operator of its line.
   `end = end.max(e)`), so a closing keyword written in the swallowed lines becomes
   body data: `if true; then`/`cat <<T`/`T`/`cat <<E`/`fi` never closes. bash
   consumes the same lines as body data and stops at a syntax error (rc 2), fdshell
-  at the missing-delimiter error (rc 1) — pinned as the accepted divergence
+  at the block parser's `is missing its closing 'fi'` (rc 1) — pinned as the
+  accepted divergence
   `tests/heredoc.rs::a_multi_line_block_with_a_tail_claim_past_the_closer_is_a_parse_error`.
 
-Pins: `scan/heredoc/full/tests.rs::contents_synthesizes_the_missing_delimiter_line`,
+Pins: `scan/heredoc/full/tests.rs::contents_keeps_the_regions_own_text`,
 `…_closes_a_region_that_ends_mid_line`,
-`…_of_a_missing_delimiter_reallocates_as_a_complete_heredoc` (the no-double-append
-property, re-allocating the rebuilt command line),
+`…_of_a_spent_stream_is_empty`, `…_rebuild_stays_an_end_of_file_shape` (the
+region's-own-text property, so the parse layer keeps the decision),
 `scan/heredoc/line/tests.rs::line_bodies_of_a_partial_stream_keep_the_complete_regions`,
 `tests/heredoc.rs::single_line_block_body_heredoc_of_an_incomplete_line_stream_prints_the_complete_arm`,
-and the residual rows in `a_line_whose_first_heredoc_is_unterminated_is_still_a_parse_error`.
+and the residual rows in `a_line_whose_first_heredoc_is_unterminated_claims_the_stream`.
 ## A catch-all short-flag parser must be the last arm of the builtin that owns it
 
 `set` claims several flag-shaped words before its short-flag word is treated as
@@ -2842,17 +2881,22 @@ row bash-measured: the `<<-` form, the io-number form, two operators on one
 line, the escaped-tab word, and `X=v; cat <<a\ b` + `$X` + `a b`, whose folded
 pair quotes the body), and the flipped #349 pin
 `tests/heredoc.rs::chevron_terminator_known_divergences`. The rows that stay
-divergent keep their owners: the continuation join (**#489**) and the
-EOF-starved delimiter (**#275** / **#429**, bash reads to EOF with its warning
-at rc 0) in
-`tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`.
+divergent keep their owners: the continuation join (**#489**, narrowed by task
+**#364** — both shells now run its rows at rc 0 with the end-of-file warning, so
+only the word text and the warning count differ) in
+`tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`;
+the EOF-starved delimiter rows (**#275** / **#429**) these tests used to pin are
+parity now.
 - **A region's first body/delimiter line is data for the deferral rule too.**
 The line-opening-`&` deferral (`segment/bg.rs::async_ahead`, the #326/#333
 family) reads the **next** physical line's raw bytes *before* the flush computes
 this line's region claims, so it swallows the region the current line's operator
-owns whenever that next line is the region's body or delimiter line:
-`cat <<"&x"` + `&x` answers `missing terminating delimiter line '&x'` (rc 1,
-bash rc 0), `cat <<EOF` + `&x` + `EOF` runs `&x` as a command and loses the body
+owns whenever that next line is the region's body or delimiter line. A swallowed
+**delimiter** line is the end-of-file shape of task **#364**:
+`cat <<"&x"` + `&x` answers the end-of-file warning with rc 1 (bash rc 0, silent;
+its command report rides on the same stderr; the `&&` twin is parity at rc 0),
+while a swallowed **body** line keeps the old reading:
+`cat <<EOF` + `&x` + `EOF` runs `&x` as a command and loses the body
 (`wc -c` says 0, bash says 3). The task #347 report measured `cat <<"&x"` rc 0
 on `60a2ebd` — the row **regressed** when the deferral landed. Owner **#468**,
 whose pinned rows now include the delimiter-word family (`cat <<"&x"`, `<<'&x'`,
@@ -2905,9 +2949,10 @@ scan ignores the `<<` inside the substitution; taking the gate away makes the
 outer scan claim and blank those body lines. (2) Counting the arithmetic `<<`
 is worse than a divergence: `(( 1 << 2 )) && cat <<B` + body is rc 0 `body`
 (bash-equal), and if the byte scan counted that `<<`, `operator_delims` would
-read `2` as its delimiter, `body_spans` would find no `2` line, the line would
-produce **no** regions at all, and `cat <<B` would lose its body
-(`missing terminating delimiter 'B'`, rc 1). So the `((`-leading pairs are
+read `2` as its delimiter, `body_spans` would find no `2` line, and the line's
+first operator would end in the end-of-file claim of task **#364** — `cat <<B`
+behind it would get an empty body and the script would run with a stray warning
+where bash prints `body`. So the `((`-leading pairs are
 pinned as the accepted byte≠token exception
 (`parse/heredoc/tests.rs::arith_region_count_divergence_is_pinned`,
 `scan/heredoc/ops/tests.rs::arithmetic_and_substitution_regions_are_opaque`),
@@ -4339,9 +4384,11 @@ lines) and runs the buffer with the body attached — `{ cat <<T; }` + `{a,b}` +
 prints `{a,b}` at the prompt, pinned in the parity family
 `tests/repl.rs::single_line_block_heredoc_spans_lines` (task #315 closed the
 script-layer group gap, so the prompt and the parse layer agree). The elif-at-EOF
-row is the same rule as `cond_bodies_of_an_incomplete_line_stream_are_empty` seen
-from the prompt: an incomplete body stream yields regions, the buffer executes and
-fails parse at EOF (rc 0; bash warns and prints the body). `repl/trailing.rs` needs
+row is the same rule as `cond_bodies_of_an_incomplete_line_stream_take_the_empty_tail`
+seen from the prompt: an incomplete body stream yields regions (whose claims cover
+the body lines), the buffer executes and prints `{a,b}`/`T` with the end-of-file
+warning at rc 0 — **parity** with bash, pinned by
+`tests/repl.rs::closed_block_heredoc_prompt_reaches_parity`. `repl/trailing.rs` needs
 nothing: it walks `skip_region` for quote/substitution state and is not a
 `body_regions` consumer — #311's opacity inheritance reaches it through the shared
 scanners, not through this arm. Rule (the #311 one-opacity-rule at prompt
@@ -4698,9 +4745,13 @@ flush of that line resumes inside a claimed region. `mark`'s tail guard
 **unnecessary** — with `line_start` untouched, the suffix flush's window *is*
 already the physical line — and it **costs** the glued form: the window that
 swallows the `&` reads the operator's word as `A&` (`&` is an ordinary word byte
-for the tokenizer, `scan::heredoc::lines::token_word_end`), so the delimiter is
-unreadable, the whole line's region list is empty, and `cat <<A&` + body — at
-bash parity on `master` — becomes `missing terminating delimiter line`. One
+for the tokenizer, `scan::heredoc::lines::token_word_end`), so no line matches
+that delimiter — and since task **#364** that is the end-of-file claim: the glued
+line's first operator claims the rest of the stream and the suffix behind it
+carries an empty tail region instead of flushing body-less; the two shells still
+part on the warning (fdshell warns, bash reads `&` as the operator, pinned in
+`segment/bg/tests.rs::both_the_glued_and_the_comment_suffix_carry_their_bodies`).
+One
 unit pin (`segment/line/tests.rs::flush_line_indexes_the_line_stream_globally`)
 records the two flushes of the same line and the index each uses; keep the
 window where the caller put it. The two rows the widening was meant to fix
@@ -5737,8 +5788,9 @@ decision taken from such a script is a **fake divergence**. Re-measure with a re
 command in front before writing any divergence bullet.
 
 The **guards** of the family must not start succeeding because word 0 became an
-operator: `<<EOF` with **no body** stays #275's `missing terminating delimiter
-line 'EOF'` rc 1 (bash warns at rc 0); a `>`-led statement keeps its own rc-1
+operator: `<<EOF` with **no body** is the end-of-file shape of task **#364** now
+(both shells warn and run at rc 0 — the pins assert the warning); a `>`-led
+statement keeps its own rc-1
 reading (the bare operator words `> <<EOF`, `>| <<EOF` — bash rc 2 — and
 `>f <<EOF` — bash rc 0: rule family #185, the decision owned by #488);
 the **glued** word keeps its lookup rc 1 with the body free.

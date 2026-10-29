@@ -544,15 +544,16 @@ prints `z && y` at rc 0, as bash, in every block shape: `then`/`else` arms,
 
 The stream is read **greedily, one body per operator**, as bash reads it: each
 operator's body starts where the previous operator's delimiter line ended, and
-an operator whose delimiter line never arrives takes what is left of the stream
-as its body (empty when nothing is left) — the operators behind it get an empty
-body, and the body lines never run as commands. So `cat <<T; cat <<E` +
-`bodyT`/`T`/`extra` prints `bodyT` and `extra` (rc 0), and
+an operator whose delimiter line never arrives — **the first one included** —
+takes what is left of the stream as its body (empty when nothing is left) and
+runs at rc 0, printing the end-of-file warning
+`warning: here-doc delimited by end-of-file (wanted 'E')` (fdshell's wording,
+no line numbers; bash also warns for operators in branches that never run,
+where fdshell stays silent — pinned in `tests/heredoc.rs`). The operators
+behind it get an empty body, and the body lines never run as commands. So
+`cat <<T; cat <<E` + `bodyT`/`T`/`extra` prints `bodyT` and `extra` (rc 0), and
 `if true; then cat <<T; elif cat <<E; then echo b; fi` + `bodyT`/`T` prints
-`bodyT` (rc 0). What stays a limitation is the **first** operator's missing
-delimiter line: `cat <<E` + `body` reports
-`here-doc: missing terminating delimiter line 'E'` (rc 1), where bash warns
-`here-document … delimited by end-of-file` and runs.
+`bodyT` (rc 0); `cat <<E` + `body` alone prints `body` with the warning.
 
 A number in front of the operator puts the body on that descriptor instead of
 stdin: `cat 3<<EOF` makes the body fd 3's input and leaves stdin alone, and
