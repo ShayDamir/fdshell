@@ -50,7 +50,7 @@ pub fn expand_pipeline(
     let mut out = Vec::new();
     for stage in stages {
         match stage {
-            ExpandedStage::Command(cmd) => out.push(expand(cmd, text, cell)?),
+            ExpandedStage::Command(cmd, _) => out.push(expand(cmd, text, cell)?),
             ExpandedStage::Block(_) => out.push(Vec::new()),
         }
     }

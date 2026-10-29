@@ -33,7 +33,7 @@ pub(super) fn parse_stage(
     let parsed = dispatch_keyword(tokens, text)?;
     match parsed {
         Some(parsed) => block_stage(tokens, parsed, line, spec_at, text),
-        None => command_stage(tokens, line, specs, spec_at, set_at),
+        None => command_stage(tokens, line, specs, spec_at, set_at, text),
     }
 }
 
@@ -56,13 +56,17 @@ fn block_stage(
     }))
 }
 
-/// The simple-command stage: today's path, with the stage's own heredoc specs.
+/// The simple-command stage: today's path, with the stage's own heredoc specs,
+/// plus its own text slice — the same `verbatim` read the block arm does, on the
+/// tokens this stage owns (task #481: the run layer's dispatch decision needs the
+/// stage's text to resolve a function name).
 fn command_stage(
     tokens: &[Token],
     line: &[u8],
     specs: &[HeredocBody],
     spec_at: &mut usize,
     set_at: Position,
+    text: &ScriptText,
 ) -> Result<Stage, Report<ParseError>> {
     let trimmed = trim_at_semi(tokens);
     let count = operator_count(line, trimmed);
@@ -70,12 +74,8 @@ fn command_stage(
         .get(*spec_at..*spec_at + count)
         .ok_or(ParseError::Never)?;
     *spec_at += count;
-    Ok(Stage::Command(parse_command(
-        trimmed,
-        line,
-        stage_specs,
-        set_at,
-    )?))
+    let command = parse_command(trimmed, line, stage_specs, set_at)?;
+    Ok(Stage::Command(command, verbatim(text, trimmed)?))
 }
 
 /// Drop the tokens after the first `;`: heredoc body words are not

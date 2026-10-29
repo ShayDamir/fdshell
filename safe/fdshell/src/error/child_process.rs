@@ -36,6 +36,8 @@ pub(crate) enum ChildProcessError {
     InheritedFdClose,
     /// compound command in a pipeline stage failed
     StageFailed,
+    /// user function in a pipeline stage failed
+    UserFunctionFailed,
     /// impossible error state (should never occur)
     Never,
 }
@@ -57,6 +59,7 @@ impl ChildProcessError {
             | Self::ExportFailed
             | Self::InheritedFdClose
             | Self::StageFailed
+            | Self::UserFunctionFailed
             | Self::Never => 1,
         }
     }

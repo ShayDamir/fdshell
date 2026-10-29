@@ -71,7 +71,13 @@ pub fn run_child(
         .and_then(|p| p.take().map(|(_, ch)| ch));
 
     match stage {
-        ExpandedStage::Command(cmd) => child::child_main(child_sock, cell, cmd, &redirects, env),
+        // The stage's own text slice is what makes the user-function arm
+        // reachable: a stage is a full command, so its name resolves through the
+        // plain path's order — function, builtin table, `PATH` (task #481). The
+        // plain launch has no stage text and passes `None` instead.
+        ExpandedStage::Command(cmd, _) => {
+            child::child_main(child_sock, cell, cmd, &redirects, env, Some(stage.text()))
+        }
         ExpandedStage::Block(block) => block::run_block(block, &redirects, cell),
     }
 }

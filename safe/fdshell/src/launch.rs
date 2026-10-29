@@ -40,7 +40,7 @@ pub fn launch(
         .change_context(crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {
-        None => match child::child_main(child_fd, cell, cmdline, &resolved, env.clone()) {
+        None => match child::child_main(child_fd, cell, cmdline, &resolved, env.clone(), None) {
             Ok(code) => sys::exit(code),
             Err(report) => {
                 let _ = writeln!(crate::io::Stderr, "{report:?}");

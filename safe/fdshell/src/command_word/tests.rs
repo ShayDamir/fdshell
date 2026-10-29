@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
+use sys::{Origin, Position, ScriptText};
 
 use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::parse::{BuiltinPrefix, CommandLine, Pipeline, Stage};
@@ -27,6 +28,12 @@ fn bytes(cs: &ShortCStr) -> Vec<u8> {
 
 fn words(list: &[ShortCStr]) -> Vec<Vec<u8>> {
     list.iter().map(bytes).collect()
+}
+
+/// A stage's own text slice (task #481 carries it on the stage): these pins drive
+/// word-0 expansion, so the position is a placeholder.
+fn text(s: &str) -> ScriptText {
+    ScriptText::new(word(s), Position::new(1, 1), Origin::Shell)
 }
 
 /// A command line with raw (unquoted) word text: mask all `false`, no quoted
@@ -310,8 +317,8 @@ fn pipeline_stages_expand_their_word_zero() {
     let cell = cell();
     let pipeline = Pipeline {
         stages: vec![
-            Stage::Command(cmdline("$(echo echo)", &["hi"])),
-            Stage::Command(cmdline("cat", &[])),
+            Stage::Command(cmdline("$(echo echo)", &["hi"]), text("$(echo echo) hi")),
+            Stage::Command(cmdline("cat", &[]), text("cat")),
         ],
     };
     let out = super::expand_pipeline(&pipeline, &cell).unwrap();

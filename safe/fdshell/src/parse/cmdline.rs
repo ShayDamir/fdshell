@@ -65,11 +65,14 @@ pub struct CommandLine {
 
 /// One pipeline stage: a simple command, or a keyword block. A stage is a full
 /// command (task #292), so the word that follows a `|` is in command position
-/// and a keyword there is a block, not a word of the previous stage.
+/// and a keyword there is a block, not a word of the previous stage. Both
+/// variants carry the stage's **own text slice** (task #481): the run layer hands
+/// it to the dispatch decision, which is where a function name must be resolved
+/// (the statement path's function arm is `run/parent.rs`).
 pub enum Stage {
     /// A simple command: word 0, args, redirects, captures — the pipeline's
-    /// forked child execs it or runs the builtin.
-    Command(CommandLine),
+    /// forked child execs it or runs the builtin — and the stage's own text.
+    Command(CommandLine, ScriptText),
     /// A keyword block (`if`/`for`/`while`/`until`/`case`/event-`wait`/
     /// `name() { … }`) written as a stage: the child runs it through
     /// `run::run_parsed`, as bash runs a stage in its subshell.
@@ -91,8 +94,16 @@ impl Stage {
     /// of its own, so every consumer that walks those lists skips it.
     pub fn command(&self) -> Option<&CommandLine> {
         match self {
-            Self::Command(cmd) => Some(cmd),
+            Self::Command(cmd, _) => Some(cmd),
             Self::Block(_) => None,
+        }
+    }
+
+    /// The stage's own text slice — see [`Stage`].
+    pub fn text(&self) -> &ScriptText {
+        match self {
+            Self::Command(_, text) => text,
+            Self::Block(block) => &block.text,
         }
     }
 }
@@ -115,7 +126,7 @@ impl Pipeline {
 /// the same size — or the keyword block, which has no word 0 to expand and
 /// travels by reference (task #292).
 pub enum ExpandedStage<'a> {
-    Command(Box<CommandLine>),
+    Command(Box<CommandLine>, ScriptText),
     Block(&'a BlockStage),
 }
 
@@ -123,8 +134,18 @@ impl<'a> ExpandedStage<'a> {
     /// The stage's simple command, `None` for a keyword block.
     pub fn command(&self) -> Option<&CommandLine> {
         match self {
-            Self::Command(cmd) => Some(cmd),
+            Self::Command(cmd, _) => Some(cmd),
             Self::Block(_) => None,
+        }
+    }
+
+    /// The stage's own text slice — the text the forked child's dispatch reads
+    /// a function name at (task #481), the parse layer's slice of the statement
+    /// to this stage's tokens.
+    pub fn text(&self) -> &ScriptText {
+        match self {
+            Self::Command(_, text) => text,
+            Self::Block(block) => &block.text,
         }
     }
 

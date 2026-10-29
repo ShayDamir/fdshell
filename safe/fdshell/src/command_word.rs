@@ -61,9 +61,9 @@ pub(crate) fn expand_pipeline<'a>(
     let mut stages = Vec::new();
     for stage in &pipeline.stages {
         match stage {
-            Stage::Command(cmd) => {
+            Stage::Command(cmd, text) => {
                 let expanded = expand(cmd, cell)?.into_owned();
-                stages.push(ExpandedStage::Command(Box::new(expanded)));
+                stages.push(ExpandedStage::Command(Box::new(expanded), text.clone()));
             }
             Stage::Block(block) => stages.push(ExpandedStage::Block(block)),
         }

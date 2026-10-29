@@ -1,3 +1,4 @@
+use crate::child::setup_shellfd::setup_shellfd;
 use crate::child::{self, Command, external};
 use crate::error::child_process::ChildProcessError;
 use crate::parse::{BuiltinPrefix, CommandLine};
@@ -7,14 +8,24 @@ use crate::substitute::substitute_args;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
+use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
+/// Run the forked child: the child's own setup, then the dispatch.
+///
+/// `stage_text` is the gate of the user-function arm (task #481): it is the
+/// stage's own text slice, which only the *pipeline* caller has, and only that
+/// caller may run a function — a stage is a full command, so its name resolves
+/// the way a plain command's does. The plain launch passes `None`: its functions
+/// belong to `run/parent.rs`, and fdshell's own forked keywords (`timeout 1 f`)
+/// must keep resolving as external commands.
 pub fn child_main(
     child_sock: Option<sys::LocalFd>,
     cell: &ForkCell<ShellState>,
     cmdline: &CommandLine,
     redirects: &[Redirect],
     env: crate::run_env::EnvAssigns,
+    stage_text: Option<&ScriptText>,
 ) -> Result<i32, Report<ChildProcessError>> {
     let cmd = Command::from(cmdline);
     let args = &cmdline.args;
@@ -70,28 +81,21 @@ pub fn child_main(
             .borrow()
             .change_context(ChildProcessError::BorrowFailed)?;
         child::dispatch::run_builtin(cmd.name.clone(), &refs, args, &state)
+    } else if let Some(text) = stage_text
+        && let Some(body) = crate::function_call::look_up(cmdline, cell)
+            .change_context(ChildProcessError::BorrowFailed)?
+    {
+        // A stage is a full command, so its name resolves through the same
+        // order a plain command uses: user function first, then the builtin
+        // table, then `PATH`. `function_call::look_up` is the single owner of
+        // the rule (it answers `None` when a `builtin`/`command` prefix is set,
+        // so those rows keep reporting). The arm sits at this decision point so
+        // it runs after everything `child_main` owns: the capture socket, the
+        // stage's redirects, arg substitution, the scoped prefix and the trace.
+        child::user_function::run(text, cmdline, &body, cell)
     } else {
         external::run_external(&cmd, &refs, cell)
     }
-}
-
-fn setup_shellfd(
-    sock: Option<&sys::LocalFd>,
-    cell: &ForkCell<ShellState>,
-) -> Result<(), Report<ChildProcessError>> {
-    if let Some(s) = sock {
-        let mut state = cell
-            .borrow_mut()
-            .change_context(ChildProcessError::BorrowFailed)?;
-        state.shell_sock = Some(
-            s.try_clone()
-                .change_context(ChildProcessError::ExportFailed)?,
-        );
-        sys::shellfd::set_capture_active(true);
-    } else {
-        sys::shellfd::set_capture_active(false);
-    }
-    Ok(())
 }
 
 /// Apply the child's opened redirects: the fd 0/1 pipe ends of a pipeline

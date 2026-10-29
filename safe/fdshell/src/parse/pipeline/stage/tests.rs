@@ -139,11 +139,41 @@ fn spec_shares_survive_a_block_stage() {
 fn a_keyword_shaped_stage_argument_stays_a_command() {
     let pipe = pipeline(b"echo x | echo if");
     assert_eq!(pipe.stages.len(), 2);
-    let Stage::Command(cmd) = pipe.stages.get(1).unwrap() else {
+    let Stage::Command(cmd, _) = pipe.stages.get(1).unwrap() else {
         panic!("`echo if` is a command stage");
     };
     assert_eq!(cmd.command, c"echo".into());
     assert_eq!(cmd.args, vec![c"if".into()]);
+}
+
+/// A **command** stage carries its own text slice: `echo a | f` gives each stage
+/// its own bytes (`echo a`, then `f`), word 0 included, with nothing of the
+/// neighbour's words. Task #481 needs the slice at runtime — the forked stage
+/// child is where a function name must resolve, and `function_call::call` takes
+/// the text the way the plain path hands it to `run_cmd` (the block stage above
+/// already carries its slice for that reason) — so this is the parse-side guard
+/// of that plumbing: a stage that lost its own slice would report the whole
+/// statement and this pin would move.
+#[test]
+fn a_command_stage_carries_its_own_text_slice() {
+    let pipe = pipeline(b"echo a | f");
+    assert_eq!(pipe.stages.len(), 2);
+    let Stage::Command(cmd, text) = pipe.stages.get(1).unwrap() else {
+        panic!("a bare name in stage position is a plain command");
+    };
+    assert_eq!(
+        text.as_bytes().unwrap(),
+        b"f",
+        "the slice is the stage's own"
+    );
+    assert_eq!(cmd.command, c"f".into(), "the slice starts at its word 0");
+    assert!(cmd.args.is_empty(), "stage 0's words stay in stage 0");
+    assert_eq!(pipe.command_at(0).unwrap().args, vec![c"a".into()]);
+    assert_eq!(
+        pipe.stages.first().unwrap().text().as_bytes().unwrap(),
+        b"echo a",
+        "stage 0 carries its own slice"
+    );
 }
 
 /// The spec cursor a block stage **leaves** is where the next stage reads: the
@@ -182,7 +212,7 @@ fn a_quoted_semicolon_word_does_not_cut_a_stage() {
     let line = b"cat \";\" << A | cat << B\nbodyA\nA\nbodyB\nB";
     let pipe = pipeline(line);
     assert_eq!(pipe.stages.len(), 2);
-    let Stage::Command(cmd) = pipe.stages.first().unwrap() else {
+    let Stage::Command(cmd, _) = pipe.stages.first().unwrap() else {
         panic!("the quoted separator is an argument word of a command stage");
     };
     assert_eq!(
