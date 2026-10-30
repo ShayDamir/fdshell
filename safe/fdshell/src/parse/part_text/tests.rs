@@ -109,3 +109,27 @@ fn arm_slice(text: &ScriptText, keyword: &[u8]) -> Vec<Token> {
     let then = find_preceded_by(&tokens, kw + 1, b"then", line, Term::Semi).unwrap();
     trim_semi(tokens.get(then + 1..closing - 1).unwrap()).to_vec()
 }
+
+/// A terminator line whose word sits **mid-line** (its syntax bytes are blank for
+/// the tokenizer, LESSONS "A heredoc terminator line is structure, not command
+/// bytes") leaves its tail bytes behind the slice's last token, so extension mode
+/// must own the **whole** terminator line: `cat <<$(x)` + `body` + `$(x)` keeps
+/// its `)`, the byte scan matches the terminator, and the text behind it keeps its
+/// owner. On `master` the stored text stopped at the surviving word `x`, the
+/// terminator could never match, and the block reported a missing closer — the
+/// integration rows are
+/// `tests/heredoc.rs::a_delimiter_word_with_a_substitution_region_keeps_the_tail`.
+/// The newline behind the terminator stays out of the slice exactly as it does on
+/// the plain-word pin above (the `;` it tokenizes as drops out of the body).
+#[test]
+fn extension_mode_owns_a_terminator_line_whose_word_sits_mid_line() {
+    let line = b"if true; then cat <<$(x)\nbody\n$(x)\nfi";
+    let text = block_text(line);
+    let slice = arm_slice(&text, b"if");
+    let part = part_text(&text, &slice).unwrap();
+    assert_eq!(
+        part.data.as_bytes().unwrap(),
+        b"cat <<$(x)\nbody\n$(x)",
+        "the slice ends at the terminator line's last byte, not at its word"
+    );
+}

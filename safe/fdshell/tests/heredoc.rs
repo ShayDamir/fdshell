@@ -3881,9 +3881,15 @@ fn chevron_terminator_known_divergences() {
 /// not be "unified" — the target expansion of #278 leaves both as measured.
 ///
 /// fdshell's terminator-line rule (#266: the terminator's syntax bytes are
-/// blanked for the tokenizer) reads `$(echo EOF)` as `EOF`, so a delimiter word
-/// that carries a substitution region can never be terminated: both rows below
-/// are the divergence task **#372** owns, pinned at their measured rc.
+/// blanked for the tokenizer) reads the line `$(echo EOF)` as the word `EOF`,
+/// so the *tokenizer* never sees a terminator shaped like the delimiter word.
+/// The match that decides the body is the **byte scan's** (`scan/heredoc/body.rs`
+/// compares the raw line against the quote-removed word), and the byte scan owns
+/// the multi-line body allocation, so both rows below run at bash's values —
+/// parity, measured 2026-10-30 against bash 5.3.9 (wording aside). The
+/// tokenizer's word view is the family's detector, pinned at unit level in
+/// `parse/token/tests.rs`; the delimiter word it must agree with is pinned in
+/// `scan/heredoc/tests.rs`.
 #[test]
 fn substitution_delimiter_word_is_literal() {
     // The delimiter is the literal `$(echo EOF)` in both shells and its line
@@ -3912,6 +3918,125 @@ fn substitution_delimiter_word_is_literal() {
     // A quoted delimiter keeps its body literal, region bytes included.
     let (out, err, code) = run("cat <<'$(echo EOF)'\nbody\n$(echo EOF)\n");
     assert_eq!((code, out.as_str()), (0, "body\n"), "stderr={err:?}");
+}
+
+/// The family's rule, pinned at the values **bash 5.3.9** measures (measured
+/// 2026-10-30 against `target/debug/fdshell`): when the delimiter word carries an
+/// unquoted `$( … )` / `$(( … ))` region, the terminator line still matches it —
+/// the word walk consumes the region whole at the byte level (LESSONS "A quoted
+/// region is a unit for *every* byte scanner"), the terminator line's
+/// token-level word stays blanked-syntax (task #266), and a **block body's** text
+/// slice owns the whole terminator line it reaches (`parse/part_text::owned_span`)
+/// — so everything from the terminator's newline onward still runs.
+///
+/// On `master` every row below printed only its body: the tail after the
+/// terminator was dropped (the terminator was matched against the truncated word
+/// `$(x`), and the last five rows failed one step earlier, at the block closer
+/// (`'{' is missing its closing '}'`, `'if' … 'fi'`, `'case' … 'esac'`).
+#[test]
+fn a_delimiter_word_with_a_substitution_region_keeps_the_tail() {
+    for (script, want) in [
+        // The task's headline rows: the word is a bare region, part of a longer
+        // word, region-shaped, an arithmetic region, and the `<<-` twin.
+        ("cat <<$(x)\nbody\n$(x)\necho after", "body\nafter\n"),
+        ("cat <<a$(x)b\nbody\na$(x)b\necho after", "body\nafter\n"),
+        ("cat <<x$(x)\nbody\nx$(x)\necho after", "body\nafter\n"),
+        (
+            "cat <<a$((b))c\nbody\na$((b))c\necho after",
+            "body\nafter\n",
+        ),
+        ("cat <<-$(x)\nbody\n$(x)\necho after", "body\nafter\n"),
+        // The io-number form (its own descriptor, read back through `<&3`), the
+        // pipeline twin, the `;`-separated tail, and the statement before it.
+        ("cat 3<<$(x) <&3\nbody\n$(x)\necho after", "body\nafter\n"),
+        ("cat <<$(x) | cat\nbody\n$(x)\necho after", "body\nafter\n"),
+        (
+            "cat <<$(x); echo after\nbody\n$(x)\necho tail",
+            "body\nafter\ntail\n",
+        ),
+        (
+            "echo pre\ncat <<$(x)\nbody\n$(x)\necho after",
+            "pre\nbody\nafter\n",
+        ),
+        // A second here-doc after the terminator line, its own delimiter.
+        (
+            "cat <<$(x)\nbody\n$(x)\ncat <<EOF\nbody2\nEOF",
+            "body\nbody2\n",
+        ),
+        // A body line that expands, and the async twin.
+        ("x=V\ncat <<$(x)\n$x\n$(x)\necho after", "V\nafter\n"),
+        ("cat <<$(x) &\nbody\n$(x)\nwait", "body\n"),
+        // The block family: the group, the definer, `if`, the single-line `if`
+        // (append mode), the `case` arm, and the loop bodies.
+        ("{ cat <<$(x)\nbody\n$(x)\n}", "body\n"),
+        ("f() { cat <<$(x)\nbody\n$(x)\n}\nf", "body\n"),
+        ("if true; then\ncat <<$(x)\nbody\n$(x)\nfi", "body\n"),
+        (
+            "if true; then cat <<$(x); fi\nbody\n$(x)\necho after",
+            "body\nafter\n",
+        ),
+        ("case x in\nx)\ncat <<$(x)\nbody\n$(x)\n;;\nesac", "body\n"),
+        (
+            "while true; do\ncat <<$(x)\nbody\n$(x)\nbreak\ndone",
+            "body\n",
+        ),
+        ("for i in 1; do\ncat <<$(x)\nbody\n$(x)\ndone", "body\n"),
+        (
+            "if false; then\ncat <<$(x)\nbody\n$(x)\nelse\ncat <<$(y)\nbody2\n$(y)\nfi",
+            "body2\n",
+        ),
+        // A statement after the closer: the block's text ends with the terminator
+        // line and the tail still runs.
+        ("{ cat <<$(x)\nbody\n$(x)\n}; echo after", "body\nafter\n"),
+        (
+            "if true; then\ncat <<$(x)\nbody\n$(x)\nfi\necho after",
+            "body\nafter\n",
+        ),
+        // Nothing after the terminator line at all: the body is all bash prints.
+        ("cat <<$(x)\nbody\n$(x)", "body\n"),
+        ("cat <<a$(x)b\nbody\na$(x)b", "body\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, want),
+            "stderr={err:?}  script={script:?}"
+        );
+        assert_eq!(err, "", "script={script:?}");
+    }
+}
+
+/// The parity controls of the same family, pinned at bash's values so the fix
+/// cannot drift: the **quoted** word (the discriminator pair's other half — it
+/// was always one word for the byte walk, which is what made the unquoted rows
+/// diverge), the backtick word, the escape-pair word, a plain `$var` word, and
+/// the bare form (the word is on the same line for both shells — bash prints the
+/// body, silently).
+#[test]
+fn the_substitution_word_family_keeps_its_parity_controls() {
+    for (script, want) in [
+        ("cat <<'$(x)'\nbody\n$(x)\necho after", "body\nafter\n"),
+        ("cat <<`x`\nbody\n`x`\necho after", "body\nafter\n"),
+        ("cat <<\\$x\nbody\n$x\necho after", "body\nafter\n"),
+        ("cat <<a$b\nbody\na$b\necho after", "body\nafter\n"),
+        ("cat << $(echo EOF)\nbody\n$(echo EOF)", "body\n"),
+        ("cat <<\"EOF\"\nbody\nEOF", "body\n"),
+        // The quoted word inside the block shapes, the same rule one level up.
+        ("if true; then\ncat <<'$(x)'\nbody\n$(x)\nfi", "body\n"),
+        ("f() { cat <<'$(x)'\nbody\n$(x)\n}\nf", "body\n"),
+        (
+            "case x in\nx)\ncat <<'$(x)'\nbody\n$(x)\n;;\nesac",
+            "body\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, want),
+            "stderr={err:?}  script={script:?}"
+        );
+        assert_eq!(err, "", "script={script:?}");
+    }
 }
 
 // ── A `#`-terminated line owns its body stream (task #333) ───────────────────

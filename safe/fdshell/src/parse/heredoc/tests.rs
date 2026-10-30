@@ -447,6 +447,12 @@ fn operator_count_byte_and_token_levels_agree() {
         b">> << <<EOF",
         b"cat <<- <<EOF",
         b"\\n<<EOF".as_slice(),
+        // A delimiter word carrying a substitution region (task #372): the byte
+        // walk consumes the region whole, so it counts the same operator the
+        // tokenizer sees; the lone-`$` twin is the unbalanced-region shape whose
+        // word blanks to nothing for the tokenizer.
+        b"cat <<$(x)\nbody\n$(x)",
+        b"cat <<$\nbody\n$",
     ] {
         let tokens = tokenize_statement(line).unwrap();
         let byte = crate::scan::heredoc::operator_count(line, 0, line.len());

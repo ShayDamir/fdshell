@@ -603,3 +603,49 @@ fn is_structural_is_the_tokenizer_syntax_byte_set() {
         assert!(!super::statement::is_structural(*b), "{b:?} is a word byte");
     }
 }
+
+/// The **discriminator pair** of the substitution-word family (task #372): the
+/// quoted and the unquoted delimiter word differ only in their quote bytes, so
+/// every byte-level rule must answer identically for both (the byte pins are in
+/// `scan/heredoc/tests.rs`), and this list is where the two *do* differ — in the
+/// delimiter word's own text, stored in the escape form on the quoted side. The
+/// word is a quote-removal surface, never a substitution surface (task #278), so
+/// no part is recorded on it; the terminator line contributes only its surviving
+/// word `x` on both sides, and the statement behind it survives on both — the
+/// byte scan owns the terminator match, this pin is the family's detector.
+#[test]
+fn the_substitution_delimiter_word_pair_differs_only_in_its_quotes() {
+    assert_eq!(
+        statement_text(b"cat <<$(x)\nbody\n$(x)\necho after"),
+        vec![
+            ShortCStr::from(c"cat"),
+            ShortCStr::from(c"<<$(x)"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"x"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"after"),
+        ]
+    );
+    assert_eq!(
+        statement_text(b"cat <<'$(x)'\nbody\n$(x)\necho after"),
+        vec![
+            ShortCStr::from(c"cat"),
+            ShortCStr::from(c"<<\\$(x)"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"x"),
+            ShortCStr::from(c";"),
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"after"),
+        ]
+    );
+    // A region opened by an unquoted `$(` keeps its closer **inside** the word:
+    // the tokenizer's `$(` arm consumes the region whole, so the operator token
+    // owns the entire `<<$(x)` and nothing splits the word at the `)`. The byte
+    // walk has to agree — its pin is the delimiter-word pair in
+    // `scan/heredoc/tests.rs`.
+    assert_eq!(
+        text(b"cat <<$(x)"),
+        vec![ShortCStr::from(c"cat"), ShortCStr::from(c"<<$(x)")]
+    );
+}

@@ -555,3 +555,57 @@ fn delimiter_span_clips_a_trailing_escape_pair_to_the_window() {
         Some((10, &b"\\;x"[..]))
     );
 }
+
+/// A `$( … )` region opened **on the delimiter word** is one word for the byte
+/// walk too: the region is consumed whole through the shared paren scan, exactly
+/// as the tokenizer's `$(` arm consumes it (LESSONS "A quoted region is a unit
+/// for *every* byte scanner"), so `cat <<$(x)` delimits the whole `$(x)` and a
+/// terminator line `$(x)` matches it — the row that made task **#372**. Before
+/// the walk consumed the region, the word stopped at the `)` that closes it
+/// (`$(x`) and the terminator could never match. The quoted word beside it is the
+/// discriminator pair's other half: the quote rule already consumed it whole, and
+/// the two rows differ only in quote bytes — the pair is the family's detector,
+/// pinned at the token level in
+/// `parse/token/tests.rs::the_substitution_delimiter_word_pair_differs_only_in_its_quotes`.
+#[test]
+fn a_substitution_region_on_the_delimiter_word_is_one_word() {
+    assert_eq!(
+        delimiter_span(b"cat <<$(x)\nbody\n$(x)\necho after", 6, 10),
+        Some((10, &b"$(x)"[..]))
+    );
+    assert_eq!(
+        delimiter_span(b"cat <<'$(x)'\nbody\n$(x)\necho after", 6, 12),
+        Some((12, &b"'$(x)'"[..]))
+    );
+    // A region in the middle of a word, and an arithmetic region: the walk steps
+    // over the region and keeps the word bytes behind it.
+    assert_eq!(
+        delimiter_span(b"cat <<a$((b))c\nbody\na$((b))c", 6, 14),
+        Some((14, &b"a$((b))c"[..]))
+    );
+    // Region and terminator line of the pair — the same shape on both sides, one
+    // byte offset per quote byte.
+    assert_eq!(
+        body_regions(b"cat <<$(x)\nbody\n$(x)\necho after"),
+        vec![(11, 16)]
+    );
+    assert_eq!(
+        terminator_spans(b"cat <<$(x)\nbody\n$(x)\necho after"),
+        vec![(16, 20)]
+    );
+    assert_eq!(
+        body_regions(b"cat <<'$(x)'\nbody\n$(x)\necho after"),
+        vec![(13, 18)]
+    );
+    assert_eq!(
+        terminator_spans(b"cat <<'$(x)'\nbody\n$(x)\necho after"),
+        vec![(18, 22)]
+    );
+    // An unbalanced region is not a region: the walk falls back to byte-at-a-time
+    // and the word ends at the window end, so the delimiter is the lone `$` and
+    // the `$` line ends the body (the fallback every region scanner uses).
+    assert_eq!(
+        delimiter_span(b"cat <<$\nbody\n$", 6, 7),
+        Some((7, &b"$"[..]))
+    );
+}
