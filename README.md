@@ -1008,13 +1008,15 @@ at rc 0 where bash stops at rc 2.
 
 This rule answers only the closer's **predecessor** question, so a body that
 ends in a **dangling `&&`/`||`** behind a legal terminator reaches its own
-condition list and **runs**: `if true; then echo a ||; fi`,
-`if true; then echo a ||` + newline + `fi`, `for i in 1; do echo a ||` +
-newline + `done`, `{ echo a ||; }`, `f() { echo a || }; f` and
-`case x in x) echo a || ;; esac` print `a` at rc 0 where bash stops at rc 2 —
-the trailing-operator rule of task #367, the `;;` rule of #423, and the function
-body's missing terminator before `}` of #424. The `|` twin does report: a
-pipeline stage must begin, so `if true; then echo a |; fi` is
+condition list — and that list reports (task #367, rc 1 where bash stops at rc
+2): `if true; then echo a ||; fi`, `if true; then echo a ||` + newline + `fi`,
+`for i in 1; do echo a ||` + newline + `done`, `{ echo a ||; }`,
+`f() { echo a || }; f` — the function body's missing terminator before `}` of
+#424, whose row reports through this rule now — and `case x in x) echo a || ;;
+esac`, the same for the `;;` rule of #423. A body whose list *runs* stays
+bash-parity: `while false; do echo a ||` + newline + `done` never reaches the
+operator. The `|` twin reports the same way: a pipeline stage must begin, so
+`if true; then echo a |; fi` is
 `expected command after pipe` (rc 1, bash rc 2). A plain `&` behind the body is
 a terminator, not an operator, and is bash parity (`if true; then echo a & fi`
 runs `a` in the background).
@@ -1163,11 +1165,16 @@ non-final stage ends the shell (task #490). A redirection whose target cannot be
 opened aborts the whole script here, `set -e` written or not, where bash fails
 only that command (task #179).
 
-A `&&`/`||` with **no command behind it** is accepted, at statement level too:
-`echo a &&` and `echo a && ; echo b` print `a` and `b` at rc 0, where bash stops
-at rc 2 (task #367). The interactive shell keeps buffering such a line, as
-"Interactive shell" below says, because the construct is not complete. A `&&`/`||`
-at the end of a physical line **does** continue the list onto the next line, as
+A `&&`/`||` with **no command behind it** reports, at statement level too:
+`echo a &&`, `echo a && #c` and `echo a && ; echo b` print nothing at fdshell's
+rc 1 where bash stops at rc 2 (task #367). The report fires **before** any part
+of the list runs. Bash parses its whole input before running any of it, while
+fdshell's report reaches one scan pass, so a statement that already ran stays
+run: `echo z; echo a &&` prints `z` and stops at rc 1. The interactive shell
+keeps buffering such a line, as "Interactive shell" below says, because the
+construct is not complete; at the end of input it runs the buffer, and the
+report fires there. A `&&`/`||` at the end of a physical line **does** continue
+the list onto the next line, as
 POSIX #2.9's AND-IF/OR-IF terminator says: the short circuit, the gate and the
 list's status all span the joined lines, so `false &&` + newline + `echo b` runs
 nothing and ends 1, and `true ||` + newline + `echo b` runs nothing and ends 0.
