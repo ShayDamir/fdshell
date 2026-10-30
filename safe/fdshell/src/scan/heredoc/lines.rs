@@ -2,6 +2,7 @@
 
 use super::super::ScanState;
 use crate::bytes::{QUOTE, SQUOTE};
+use crate::paren_scan::scan_at;
 
 /// A byte that ends a token word for the tokenizer (the split set of
 /// `token/step.rs`; `&`, `<`, `>` and `#` are ordinary word bytes).
@@ -55,10 +56,14 @@ pub(crate) fn delimiter_span(line: &[u8], mut j: usize, to: usize) -> Option<(us
 /// (`<<a\ b` delimits `a b`, `<<\;` delimits `;`). A `\` at the window end
 /// stays a lone byte: the pair never steps over the physical-line end (the
 /// `\`+newline continuation is task #489's), exactly `read_escape`'s
-/// trailing-`\` rule, and `fold_quotes` keeps that backslash.
+/// trailing-`\` rule, and `fold_quotes` keeps that backslash. So is a `$( … )`
+/// region opened on the word ([`substitution_span`]).
 fn word_span(line: &[u8], j: usize, to: usize) -> usize {
     if line.get(j) == Some(&b'\\') {
         return j.saturating_add(2).min(to);
+    }
+    if let Some(end) = substitution_span(line, j, to) {
+        return end;
     }
     let quote = line.get(j).copied().filter(|b| *b == QUOTE || *b == SQUOTE);
     let Some(q) = quote else {
@@ -69,6 +74,25 @@ fn word_span(line: &[u8], j: usize, to: usize) -> usize {
         k += 1;
     }
     k.saturating_add(1).min(to)
+}
+
+/// The index just past a `$( … )` region opened at `j` — the word byte at `j`
+/// is an unquoted `$` followed by `(`. The tokenizer reads such a region as one
+/// unit inside the word (`token/step.rs`'s `$(` arm), so the byte-level word
+/// scan must not end the word at the `)` that closes it: the delimiter word of
+/// `cat <<$(x)` is the whole `$(x)`, and the terminator line that matches it is
+/// `$(x)`, not `$(x` (LESSONS: "A quoted region is a unit for *every* byte
+/// scanner", and `scan/advance.rs::advance` consumes `$(` for every scanner that
+/// shares it). `to` bounds the region: a closer past the window end is not this
+/// word's closer, and an unbalanced region returns `None` so the walk stays byte
+/// at a time — the fallback every region scanner uses for unbalanced input.
+fn substitution_span(line: &[u8], j: usize, to: usize) -> Option<usize> {
+    if line.get(j) != Some(&b'$') || line.get(j + 1) != Some(&b'(') {
+        return None;
+    }
+    let window = line.get(..to)?;
+    let (_, end) = scan_at(window, j + 2, 1)?;
+    Some(end)
 }
 
 /// The index just after the first newline that is not inside quotes, a
