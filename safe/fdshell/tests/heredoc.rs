@@ -4315,3 +4315,55 @@ fn a_line_ending_on_a_cond_operator_joins_across_a_region() {
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
 }
+
+/// The **multi-run** half of task #492's family: a `;` on the physical line means
+/// the join decision is made for the run whose own text ends on the terminator —
+/// the flush's last run — and each `;`-separated run keeps the `(text, bodies)`
+/// pair the line's operator order gives it. The join never reaches back over a
+/// `;`, and a body never rides onto a run that does not own its operator. Measured
+/// 2026-10-30 against bash 5.3.9 (`bash -c`, stdin `/dev/null`, and with the
+/// harness's inherited stdin — no row here reads stdin); every row is bash's value,
+/// and the same-line spelling of each shape (the plan's acceptance criterion) is
+/// pinned beside it.
+#[test]
+fn a_semicolon_split_line_joining_on_an_operator_keeps_each_runs_body() {
+    for (script, want, rc) in [
+        (
+            "echo a ; cat <<B &&\nbody\nB\necho tail",
+            "a\nbody\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B ; echo a &&\nbody\nB\necho tail",
+            "body\na\ntail\n",
+            0,
+        ),
+        ("false ; cat <<B &&\nbody\nB\necho tail", "body\ntail\n", 0),
+        (
+            "cat <<B ; cat <<C &&\nb1\nB\nb2\nC\necho tail",
+            "b1\nb2\ntail\n",
+            0,
+        ),
+        (
+            "echo a ; echo b &&\ncat <<B &&\nbody\nB\necho tail",
+            "a\nb\nbody\ntail\n",
+            0,
+        ),
+        // The same-line spellings: what the joined shapes above must produce.
+        (
+            "echo a ; cat <<B && echo tail\nbody\nB",
+            "a\nbody\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B ; echo a && echo tail\nbody\nB",
+            "body\na\ntail\n",
+            0,
+        ),
+        // A `;`-split line with no line-ending operator, at parity.
+        ("echo a ; cat <<B\nbody\nB", "a\nbody\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

@@ -1173,7 +1173,10 @@ list's status all span the joined lines, so `false &&` + newline + `echo b` runs
 nothing and ends 1, and `true ||` + newline + `echo b` runs nothing and ends 0.
 Glued (`false&&`), trailing-blank (` &&`) and leading-blank (` echo b`) spellings
 join the same way; a quoted `"&&"` or an escaped `\&&` stays a word, so nothing
-joins there (task #496), and `;` or the end of input ends the list (task #367).
+joins there (task #496), and `;` or the end of input ends the list (task #367). The
+`set -e` exemption of the paragraph above spans the joined lines too, so
+`set -e; false &&` + newline + `echo b` + newline + `echo tail` prints `tail` and
+ends 0.
 
 A stage is a **command**, so the word behind a `|` starts a command and a keyword
 block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop in

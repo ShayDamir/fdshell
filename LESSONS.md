@@ -4851,10 +4851,13 @@ join is decided in the scan — the one granularity that sees physical lines
 (`segment/join.rs`) — and every granularity that never re-scans keeps its own
 answer: condition slices (task #498), the body-slice trim above, the REPL's own
 completeness rule (its pins are in `repl/complete/tests.rs`). One shape cannot
-travel through the scan: a run whose own command line wrote a `<<` cannot hand the
+travel through the scan: a physical line that claims a body region — its `<<` in the
+joining run's own text **or** in a `;`-separated run ahead of it — cannot hand the
 scan its region text and keep the body attached, so the scanner leaves per-line
-segments, each with its own bodies, and the concatenation of the physical lines the
-operator continues onto happens in the runner (`script/merge.rs`).
+segments, each with its own bodies, the runner's mark rides on the run whose own text
+ends on the terminator (never on a `;`-separated run flushed beside it), and the
+concatenation of the physical lines the operator continues onto happens in the runner
+(`script/merge.rs`).
 
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 

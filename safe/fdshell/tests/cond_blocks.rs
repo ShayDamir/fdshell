@@ -1835,6 +1835,11 @@ fn a_line_ending_on_a_cond_operator_continues_the_list() {
         ("true &&\necho b", "b\n", 0),
         // The join is transitive, and the list's status is the decider's.
         ("false &&\necho b\necho c", "c\n", 0),
+        // A `;` on the physical line keeps its runs apart: the join decision is
+        // made for the run that ends on the operator, and the run ahead of it
+        // stays its own statement (the region-carrying shapes of this family are
+        // pinned in `tests/heredoc.rs`).
+        ("echo x ; echo y\ntrue &&\necho z", "x\ny\nz\n", 0),
         // fdshell's answer on the same-line spelling, reached through the join;
         // bash's `c` here is the pre-existing gate divergence, owned by the rule
         // that gates a short-circuited `||` chain.

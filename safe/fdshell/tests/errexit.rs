@@ -509,3 +509,22 @@ fn a_nonfinal_pipeline_stage_keeps_its_owner_490() {
         ),
     ]);
 }
+
+/// The gate spans a **joined** list (task #492): POSIX #2.9's AND-IF/OR-IF
+/// terminator makes the newline behind the operator part of the operator token, so
+/// the short circuit, the errexit exemption and the list's status all reach the
+/// next physical line. Measured 2026-10-30 against bash 5.3.9 (`bash -c`, stdin
+/// `/dev/null`); every row here is bash's value.
+#[test]
+fn the_gate_spans_a_joined_list() {
+    assert_rows(&[
+        // The gated `false` short-circuits the joined list, so `echo b` never
+        // runs, and its failing status never triggers the exit: `tail` prints.
+        ("set -e; false &&\necho b\necho tail", "tail\n", 0),
+        // The `||` side, same shape: `true ||` short-circuits, `echo b` is skipped.
+        ("set -e; true ||\necho b\necho tail", "tail\n", 0),
+        // The list ends with the failing status of the command that decided it, so
+        // the next statement reports `rc=1` and the shell runs on at rc 0.
+        ("false &&\necho b\necho rc=$?", "rc=1\n", 0),
+    ]);
+}
