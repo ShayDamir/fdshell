@@ -230,6 +230,66 @@ fn keyword_form_keeps_the_name_leniency() {
     }
 }
 
+/// A definer-shaped statement whose name-slot word carries a `$( … )` region is
+/// the name rejection bash makes at parse time (task #368): the production matches
+/// the statement, so the word lands in the name slot, the report names it, and
+/// nothing runs (fdshell's parse-error rc 1, bash's identifier rc 1). The name
+/// slot is the word behind `function` in the keyword form and the `name(` word in
+/// the POSIX form — the pair the accepted definer uses.
+#[test]
+fn a_definer_word_carrying_a_region_is_reported() {
+    for text in [
+        &b"f$( echo x )() { :; }"[..],
+        &b"$( echo f )() { :; }"[..],
+        &b"function $( echo x ) { :; }"[..],
+    ] {
+        // `ParsedLine` is not `Debug`, so map the `Ok` arm to `()` before unwrap_err.
+        assert!(
+            matches!(
+                try_parse(text).map(|_| ()).unwrap_err().current_context(),
+                ParseError::FunctionNameWithSubstitution { .. }
+            ),
+            "{text:?} is the name-slot report"
+        );
+    }
+}
+
+/// The rule reaches only a word the production *matches*: the accepted definers
+/// keep defining, and every shape it does not match stays an ordinary command
+/// line the runner walks — a region word that is not definer-shaped, a
+/// quote-gated word (task #247), an escape fold (no region to carry), a shape with
+/// no `{` token, and the split-paren definer that both layers reject
+/// (task #368; bash's own rc for these rows is its stray-closer and
+/// command-position family, README "Words and quoting").
+#[test]
+fn only_the_production_shape_reports() {
+    for text in [
+        &b"f() { echo hi; }"[..],
+        &b"f( ) { echo hi; }"[..],
+        &b"function f  (  )  { echo hi; }"[..],
+    ] {
+        assert!(
+            matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} stays a definition"
+        );
+    }
+    for text in [
+        &b"$( echo hi ) { :; }"[..],
+        &b"x$( echo hi ) { :; }"[..],
+        &b"$() { :; }"[..],
+        &b"x=$( echo a )"[..],
+        &b"f'$(echo x)'() { :; }"[..],
+        &b"f\\$(echo x)() { :; }"[..],
+        &b"f$(echo x)() echo hi"[..],
+        &b"f ( ) { echo hi; }"[..],
+    ] {
+        assert!(
+            !matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} is neither a definition nor a report"
+        );
+    }
+}
+
 /// The definer rule rejects a `function` word with no definer name.
 #[test]
 fn keyword_form_without_a_name_is_not_a_function() {

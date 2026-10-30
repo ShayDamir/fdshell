@@ -305,3 +305,48 @@ fn a_line_ending_on_a_cond_operator_continues_a_function_body() {
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
 }
+
+/// A definer word that carries a `$( … )` region is never a name: the production
+/// matches the statement, the word lands in the name slot, and bash rejects the
+/// name at parse time (`` `$(echo x)': not a valid identifier ``). fdshell names
+/// the word its tokenizer sees — with the glued `(` bash does not read into the
+/// name — and stops at its shell-wide parse-error rc 1 with nothing run (the
+/// rc-1-vs-bash-2 family, README "Words and quoting"; task #368).
+#[test]
+fn a_definer_word_carrying_a_region_reports_the_name() {
+    for (script, word) in [
+        ("f$( echo x )() { :; }", "f$( echo x )("),
+        ("$( echo f )() { :; }", "$( echo f )("),
+        ("function $( echo x ) { :; }", "$( echo x )"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "script={script}: stderr={err}");
+        let want = format!("'{word}' is not a valid function name");
+        assert!(err.contains(&want), "script={script}: stderr={err}");
+        assert!(err.contains("Suggestion"), "script={script}: stderr={err}");
+    }
+    // The continuation divergence is frozen here: bash keeps going after its own
+    // report (`; echo tail` prints `tail` at rc 0), while fdshell's parse error
+    // aborts the script, so the tail never runs.
+    let (out, err, rc) = run("$( echo f )() { :; }; echo tail");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(err.contains("is not a valid function name"), "stderr={err}");
+}
+
+/// A definition must be followed by `;`, a newline or the end of input for bash,
+/// never by a word: `f() { echo hi; } $( echo x )` is a syntax error there
+/// (rc 2). fdshell accepts the define-and-call idiom, so the trailing word
+/// **runs** — pinned on both sides of the boundary: the `;`-twin control runs in
+/// both shells at rc 0, the define-and-call spelling prints `hi` at rc 0 (its
+/// owner is `definer_extra_words_and_trailing_run_are_dropped`), and this row is
+/// pinned as measured (task #368, no behavior change).
+#[test]
+fn a_definition_behind_a_trailing_word_runs_it() {
+    let (out, err, rc) = run("f() { echo hi; } $( echo x )");
+    assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2: stderr={err}");
+    assert!(err.contains(r#""x" not found"#), "stderr={err}");
+    let (out, err, rc) = run("f() { :; }; echo ok");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("ok\n", "", 0));
+    let (out, err, rc) = run("function f { echo hi; } f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+}

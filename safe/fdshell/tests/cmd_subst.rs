@@ -917,9 +917,22 @@ fn space_body_substitution_runs_in_a_function_body_and_block_statements() {
 /// the words (`hi`, `}` — not found, rc 1) where bash rejects the line at parse
 /// time with a syntax error rc 2. The definer gate now rejects every word that
 /// carries a substitution region, exactly as the tokenizer's word split does.
+///
+/// Bash's rc 2 here is the **stray `}` at command position**, not the
+/// substitution: the no-substitution twins `echo a; }` and `x=a { echo b; }` get
+/// the same syntax error, because its grammar requires a command after each `;`.
+/// That family (the `fi`/`done`/`esac` acceptance family's `}` half) is task
+/// **#499**; task **#368** owns the rows whose word the definer production
+/// *matches* and which bash therefore reports by name
+/// (`tests/function_keyword.rs::a_definer_word_carrying_a_region_reports_the_name`).
 #[test]
 fn definer_position_substitution_word_is_not_a_definition() {
-    for script in ["$( echo hi ) { :; }", "x$( echo hi ) { :; }", "$() { :; }"] {
+    for script in [
+        "$( echo hi ) { :; }",
+        "x$( echo hi ) { :; }",
+        "$() { :; }",
+        "x=$(echo a) { echo b; }",
+    ] {
         let (_out, err, rc) = run(script);
         assert_eq!(rc, 1, "{script:?}, stderr={err}");
         assert!(

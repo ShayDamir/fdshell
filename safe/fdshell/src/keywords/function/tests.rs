@@ -237,3 +237,32 @@ fn word_end_region_offsets() {
     assert_eq!(word_end(b"$()x)"), 4);
     assert_eq!(word_end(b"$( echo a ) x)"), 11);
 }
+
+/// The shape question the parse dispatch asks (task #368): does the word carry a
+/// **closed** `$( … )` region? The rows are the two arms of [`carries_region`]'s
+/// one implementation, so each is killable directly: a word whose region is glued
+/// behind name bytes, one whose region is the whole word, and a region with bytes
+/// behind it all answer true; a `$` that never opens a region, a word with no
+/// region at all, an escaped `\(` that is not a region opener, and an
+/// unterminated region (the tokenizer's own report, and [`word_end`]'s claim on
+/// the rest of the word) answer false.
+#[test]
+fn carries_region_arms() {
+    for word in [
+        b"f$( echo x )(".as_slice(),
+        b"$( echo a )(",
+        b"$(echo a)b(",
+        b"$( echo a ) b(",
+    ] {
+        assert!(carries_region(word), "{word:?} carries a region");
+    }
+    for word in [
+        b"$F()".as_slice(),
+        b"f(",
+        b"f\\(echo x)(",
+        b"$( echo true",
+        b"",
+    ] {
+        assert!(!carries_region(word), "{word:?} carries no closed region");
+    }
+}

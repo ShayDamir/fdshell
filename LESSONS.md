@@ -1697,15 +1697,15 @@ The `function name { … }` definer rule is one implementation (`keywords/functi
 same shapes. The byte word split must equal the tokenizer's word split, and the
 tokenizer emits `)` as a separator **token** (`(` is a word char): a lone `)` is a
 word of its own, not a terminator to skip. Skipping it shifts the following words,
-so `function ) f {` would pair `function` with `f` at the byte level while the token
-layer pairs `function` with `)` and rejects it — the span would be claimed by text
-the parser runs as commands. A definer word `)` is therefore produced by the byte
+so `function ) f {` pairs `function` with `f` at the byte level while the token
+layer pairs it with `)` and rejects it — the span would be claimed by text the
+parser runs as commands. A definer word `)` is therefore produced by the byte
 split and rejected by `name_len` (which rejects `)`, `{`, `}`, whitespace, and any
 `(` that is not the word's last byte). The same rule covers a `)` **glued to the
-preceding word**: `function)f` splits into `function` + `)`, the rest returned with
-a word must start at the `)` (never past it), so `)` is always emitted as the next
-word and never consumed. Consuming the glued `)` claimed `function)f g { … }` as a
-`g`-named block that the token layer rejects, so `echo hi` was silently dropped
+preceding word**: `function)f` splits into `function` + `)`, and the rest returned
+with a word must start at the `)` (never past it), so `)` is always the next word,
+never consumed — consuming it claimed `function)f g { … }` as a `g`-named block the
+token layer rejects and `echo hi` was silently dropped
 (rc 0, killed by `keywords/function/tests.rs::glued_close_paren_after_the_keyword_is_its_own_word`).
 The same alignment makes `function f ( ) {`
 work, and keeps `f ( ) {` (POSIX form, split parens) rejected by both layers.
@@ -1715,29 +1715,43 @@ the tokenizer's unit here is a whole `$( … )` region.** `parse/token/step.rs`
 reads `$(` with `read_dollar_paren` and returns the closed region as **one word
 token**, so the byte word split must consume a `$(` region whole (task #277:
 `keywords/function.rs::word_end` jumps to the region's end through
-`paren_scan::scan_at`, the same entry point `scan/advance/subst.rs` and
-`arith/expand.rs` use — one implementation at both levels, no per-position
+`paren_scan::scan_at` — the shared entry point `scan/advance/subst.rs` and
+`arith/expand.rs` use, one implementation at both levels, no per-position
 special case). Ungated, the split stopped at the whitespace inside the region:
 `$( echo true )` at a run start became the word `$(`, `name_len` read it as the
-definer of the function `$` (a `(` is legal as a word's last byte),
-`brace::scan_function_block` found no `{`, and the statement died as a bare
-`parse error` rc 1 where bash runs `true`; the same walk owns the
-assignment-value spelling `x=$( echo a )`, whose head word was `x=$(`. The
-`$(echo true )` spelling was never broken — its first byte-run `$(echo` has the
-`(` *not* last, so `name_len` already rejected it, which is exactly the
-space-after-`$(` only pattern. Consequences, both pinned: an unterminated region
-claims the rest of the word (`map_or(body.len(), …)`) so the gate can never pair
-a word behind a region the tokenizer rejects with a `{`, and the jump stays
-terminating (`keywords/function/tests.rs::definer_word_consumes_a_substitution_region`;
-a `map_or(0, …)`/`map_or(i, …)` mutant hangs the scan, so the unterminated rows
-are the kill); the byte gate now rejects **every** word that carries a
-substitution region, so the definer-position shapes bash rejects at parse time
-(`$( echo hi ) { :; }`, `x$( echo hi ) { :; }`, `$() { :; }`) stay simple
-commands fdshell runs at rc 1 — the rc-2 family, filed as its own task, and the
-name-validity rule (`a$b()`, `$F()`) belongs to task **#166**, which is why
-`def(b"$F() {")` is pinned to `Some(b"$F")` here.
-Pins: `keywords/function/tests.rs`, `segment/tests.rs::scan_substitution_region_at_a_run_start_is_a_statement`,
-`tests/cmd_subst.rs::word0_substitution_body_starting_with_a_space_*`.
+definer of `$` (a `(` is legal as a word's last byte), the scan found no `{`, and
+the statement died as a bare `parse error` rc 1 where bash runs `true`; the same
+walk owns `x=$( echo a )`, whose head word was `x=$(`. The `$(echo true )` spelling
+was never broken — `name_len` already rejected `$(echo` (its `(` is not last), the
+space-after-`$(`-only pattern. Consequences, both
+pinned: an unterminated region claims the rest of the word (`region_end` answers
+`None`, the walk takes the remainder) so the gate can never pair a word behind a
+region the tokenizer rejects with a `{`, and the jump stays terminating
+(`keywords/function/tests.rs::definer_word_consumes_a_substitution_region`; an
+`unwrap_or(0, …)` mutant hangs the scan, so the unterminated rows are the kill);
+the byte gate now rejects **every** word that carries a substitution region, so
+the definer-position shapes bash rejects at parse time (`$( echo hi ) { :; }`,
+`x$( echo hi ) { :; }`, `$() { :; }`) stay simple commands fdshell runs at rc 1 —
+the rc-2 family, filed as task **#499**, and the name-validity rule (`a$b()`,
+`$F()`) belongs to task **#166**, which is why `def(b"$F() {")` is pinned to
+`Some(b"$F")` here.
+
+**The production's shape is what makes a word a name slot** (task #368). A region
+word that lands in it — the unquoted `{` token behind the `name(` + `)` pair, or
+behind `function` behind the name word — is *reported*, rc 1, naming the word
+(`parse/function_block/definer_region.rs`); a region word the shape does not match
+runs its words. The report rides the parse/dispatch layer and never `name_len` —
+that `None` is the scan's own answer and the pins above are what keep it — and the
+quote gate stays first, so a quoted word and the escape-folded `\$(…)` (whose text
+only *looks* like a region) stay word data. Pins: `keywords/function/tests.rs`,
+`segment/tests.rs::scan_substitution_region_at_a_run_start_is_a_statement`,
+`tests/cmd_subst.rs::word0_substitution_body_starting_with_a_space_*`,
+`tests/cmd_subst.rs::definer_position_substitution_word_is_not_a_definition`,
+`parse/function_block/tests.rs::a_definer_word_carrying_a_region_is_reported`
+(asserts the variant) plus
+`parse/function_block/tests.rs::only_the_production_shape_reports`,
+`keywords/function/tests.rs::carries_region_arms`,
+`tests/function_keyword.rs::a_definer_word_carrying_a_region_reports_the_name`.
 
 ## `cargo mutants` dies with a nutmeg "View mutex" panic when the filesystem is full
 Symptom: the run aborts in its first two minutes with

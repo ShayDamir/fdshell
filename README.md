@@ -647,8 +647,16 @@ A `\`-escaped word (`\if`) was never a keyword here: its text is `\if`, so it
 is looked up in `PATH` in both shells. The command-not-found exit code is
 fdshell's shell-wide **1**, not bash's 127. The same word-unit rule covers a
 `$( … )` region: the region is one word, so its `(` is never the definer
-opener's `(` and `$( echo true ) { :; }` runs the words instead of opening a
-definition. An unclosed block names the keyword it wants —
+opener's `(`. A region word the definer production does **not** match
+(`$( echo true ) { :; }`, `x=$( echo a ) { echo b; }`) is a simple command and
+runs its words; bash's rc 2 there is its stray-`}`-at-command-position rule
+(task #499), not the substitution. A region word the production **does** match —
+the word ends with its own `(` and the `)` word follows, or `function` is
+followed by the name word — is a name slot, and fdshell reports it:
+`'$( echo f )(' is not a valid function name (a command substitution is not part
+of a definer word)`, rc 1 with nothing run, where bash reports its own
+`` `$(echo f)': not a valid identifier `` and keeps going. An unclosed block
+names the keyword it wants —
 `'if' is missing its closing 'fi'` — and fails with that same parse-error rc 1.
 
 ### Variables
@@ -1138,6 +1146,15 @@ body of only the plain `&` is **not** an empty body, and a definition's body
 its call is the parse error (bash rejects the definition outright, rc 2 — the
 statement-by-statement parse rule,
 [POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#quoted-keywords-are-command-words-quoted-control-keywords-are-not)).
+
+A definition ends at its `}`, and a **word** written behind it is fdshell's
+accepted define-and-call idiom: `function f { echo hi; } f` runs the body at rc 0
+and `f() { echo hi; } $( echo x )` runs the trailing word at rc 1, where POSIX and
+bash want `;`, a newline or the end of input and reject both with a syntax error at
+rc 2. The `;`-twin control `f() { :; }; echo ok` runs in both shells at rc 0; the
+family is pinned in
+`tests/function_keyword.rs::a_definition_behind_a_trailing_word_runs_it` (task
+#368).
 
 ### Pipelines and lists
 

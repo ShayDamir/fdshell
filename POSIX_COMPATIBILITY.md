@@ -549,8 +549,12 @@ The pinned divergences are the owners' own, not this rule's: the bare path
 redirect of a quoted separator word (`echo x > ";"` — bash writes the file `;` at
 rc 0, fdshell answers `invalid redirect syntax`, task **#475**); a `)` behind an
 **argument** is arm text here, where bash rejects the clause with rc 2 (task
-**#419**'s family, e.g. `case x in a) echo a ";" b) ;; esac`); and the
-command-not-found **status** of a quoted separator run as a command (`X=1 ";"`) is
+**#419**'s family, e.g. `case x in a) echo a ";" b) ;; esac`); the definer word
+that **carries a region** (task **#368**) — the production needs the word's own
+last byte, so a word whose region supplies one is not a definer, and a region word
+that lands in the production's name slot (`$( echo f )() { :; }`) is reported as a
+name at fdshell's rc 1 where bash's rc 1 names the region without the glued `(`;
+and the command-not-found **status** of a quoted separator run as a command (`X=1 ";"`) is
 fdshell's rc 1 where bash answers 127, the shell-wide convention of STYLE §4 — the
 name on stderr is the fact.
 
