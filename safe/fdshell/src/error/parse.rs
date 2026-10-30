@@ -52,6 +52,9 @@ pub(crate) enum ParseError {
     FunctionMissingCloseBrace,
     /// function definition body is empty
     FunctionEmptyBody,
+    /// '{word}' is not a valid function name (a command substitution is not
+    /// part of a definer word)
+    FunctionNameWithSubstitution { word: sys::ShortCStr },
     /// group is missing a closing brace
     GroupMissingCloseBrace,
     /// group is empty

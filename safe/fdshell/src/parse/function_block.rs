@@ -1,9 +1,13 @@
+mod definer_region;
+
+pub(crate) use definer_region::definer_with_region;
+
 use super::Token;
 use super::part_text::part_text;
 use super::semi::block_body;
-use super::word_quoted::{keyword_word, span_word, word_quoted};
+use super::word_quoted::{gated_word, keyword_word, span_word};
 use crate::error::parse::ParseError;
-use crate::keywords::{name_len, quoted_word};
+use crate::keywords::name_len;
 use error_stack::{Report, ResultExt};
 use sys::{ScriptText, ShortCStr};
 
@@ -45,14 +49,12 @@ fn keyword_def(tokens: &[Token], line: &[u8]) -> bool {
     keyword && tokens.get(1).is_some_and(|tok| is_definer(tok, line))
 }
 
-/// The definer word gate: a word with a definer name and no quote byte in
-/// its raw span. The span test is [`word_quoted`] (span longer than the
-/// token's text) next to [`quoted_word`]: the POSIX definer token carries its
-/// trailing `(` (`foo'('`), and `quoted_word` breaks its scan at that `(`,
-/// never reaching the quote bytes before it.
+/// The definer word gate: a word with a definer name, past the word gate
+/// [`gated_word`] (span test next to the scan-back — the POSIX definer token
+/// carries its trailing `(` (`foo'('`), and `quoted_word` breaks its scan at
+/// that `(`, never reaching the quote bytes before it).
 fn is_definer(tok: &Token, line: &[u8]) -> bool {
-    let (t, start, end, _fq, _mask, _spans) = tok;
-    def_len(t).is_some() && !word_quoted(t, *start, *end) && !quoted_word(line, *end)
+    def_len(&tok.0).is_some() && gated_word(tok, line)
 }
 
 /// The definer word: the name token after `function` in the keyword form, the

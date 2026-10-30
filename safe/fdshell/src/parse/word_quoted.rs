@@ -26,6 +26,15 @@ pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
     t.eq_bytes(kw) && !quoted_word(line, *end)
 }
 
+/// The definer-word gate: the word's raw span carries no quote byte, by **both**
+/// tests — [`word_quoted`] (the span is longer than the word's own bytes) and
+/// [`quoted_word`]'s scan-back, because a definer word can end in the POSIX `(`
+/// (`foo'('`) and the scan alone never reaches the quote bytes behind it.
+pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
+    let (t, start, end, _fq, _mask, _spans) = tok;
+    !word_quoted(t, *start, *end) && !quoted_word(line, *end)
+}
+
 /// The separator-recognition gate (POSIX §2.9.1, task #336): `tok` **is** the
 /// separator word `w` only when its raw span is exactly those bytes, so it
 /// carries no quote byte. A quote-protected `";"`, `';'`, `"|"`, `"&"`, `")"`

@@ -4,6 +4,7 @@ use super::{
 };
 use crate::error::parse::ParseError;
 use crate::parse::line::ParsedLine;
+use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 
@@ -21,6 +22,15 @@ pub(super) fn dispatch_keyword(
     if function_block::is_function_def(raw, line) {
         return Ok(Some(ParsedLine::Function(
             function_block::tokens_to_function(raw, text)?,
+        )));
+    }
+    // A word the definer production matches but whose name slot carries a
+    // `$( … )` region is bash's `` `x': not a valid identifier `` at parse time
+    // (task #368), so fdshell reports it here instead of running the words.
+    if let Some(word) = function_block::definer_with_region(raw, line) {
+        let report = Report::new(ParseError::FunctionNameWithSubstitution { word: word.clone() });
+        return Err(report.attach_opaque(Suggestion(
+            "spell the definer without a substitution, e.g. f() { … }",
         )));
     }
     let is = |kw: &[u8]| raw.first().is_some_and(|tok| keyword_word(tok, line, kw));

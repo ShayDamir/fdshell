@@ -122,6 +122,22 @@ fn skip_word(word: &[u8]) -> (Option<&[u8]>, &[u8]) {
     (word, body.get(end..).unwrap_or(b""))
 }
 
+/// Whether `word` carries a **closed** `$( … )` region. Such a word is never a
+/// definer name ([`name_len`]), and the parse dispatch reports the ones that land
+/// in the production's name slot (task #368, [`region_end`]'s question).
+pub(crate) fn carries_region(word: &[u8]) -> bool {
+    region_end(word).is_some()
+}
+
+/// The region jump of [`word_end`]: the end of the first `$( … )` region, through
+/// `paren_scan::scan_at` — the tokenizer's unit, one implementation (task #277).
+/// `None` = the word carries no *closed* region: no `$( … )` at all, or one that
+/// never closes and is the tokenizer's own report.
+fn region_end(body: &[u8]) -> Option<usize> {
+    let open = body.windows(2).position(|w| w == b"$(")?;
+    paren_scan::scan_at(body, open + 2, 1).map(|(_, at)| at)
+}
+
 /// The end of the first word of `body`: the walk stops at whitespace or at the
 /// tokenizer's `)` separator, and **consumes a `$( … )` region whole** —
 /// `parse/token/step.rs` reads `$( … )` as one word, so the byte split must not
@@ -130,14 +146,15 @@ fn skip_word(word: &[u8]) -> (Option<&[u8]>, &[u8]) {
 /// so a word that carries one is never a definer word ([`name_len`]), in word 0
 /// (`$( echo true )`) as much as glued into one (`x=$( echo a )`).
 ///
-/// An unterminated region claims the rest of `body`: the tokenizer rejects that
+/// An unterminated region claims the rest of `body` ([`region_end`] answers
+/// `None`, the walk takes the remainder): the tokenizer rejects that
 /// input with `unexpected end of input`, so the byte scan must never pair a word
 /// behind it with a `{`, and the walk stays terminating.
 fn word_end(body: &[u8]) -> usize {
     let mut i = 0;
     while let Some(&b) = body.get(i) {
-        if body.get(i..i + 2) == Some(b"$(") {
-            i = paren_scan::scan_at(body, i + 2, 1).map_or(body.len(), |(_, at)| at);
+        if let Some(region) = body.get(i..).filter(|r| r.starts_with(b"$(")) {
+            i += region_end(region).unwrap_or(region.len());
             continue;
         }
         if b.is_ascii_whitespace() || b == b')' {
