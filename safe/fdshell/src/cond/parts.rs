@@ -1,12 +1,14 @@
 //! The cond list's *parts*: how a part gets its share of the heredoc bodies,
-//! when a part is empty, and how the rest of a failed `&&` chain is skipped up
-//! to the next `||`. Body allocation follows the global per-line operator
+//! when a part is empty, how the rest of a failed `&&` chain is skipped up
+//! to the next `||`, and when the list ends on an operator with no command
+//! behind it. Body allocation follows the global per-line operator
 //! order (LESSONS.md: "A heredoc body is a property of the logical line, not of
 //! a contiguous span"); the boundary scanning itself is `boundary`.
 
 use super::boundary;
-use crate::scan::{ScanState, heredoc};
+use crate::scan::{ScanState, heredoc, last_op};
 use alloc::vec::Vec;
+use sys::ShortCStr;
 
 /// After a failing `&&` part, the next `||` (or end of line): everything up
 /// to it is skipped without running. The skipped parts' body bytes are still
@@ -55,4 +57,34 @@ pub(crate) fn take_bodies(
 
 pub(crate) fn is_empty_part(line: &[u8], start: usize, i: usize) -> bool {
     line.get(start..i).unwrap_or(b"").trim_ascii().is_empty()
+}
+
+/// The `&&` / `||` that is the text's **last token** — nothing but whitespace,
+/// comment text and here-doc regions sits behind it, so the operator has no
+/// command after it and bash's grammar refuses the list (task #367). The walk is
+/// the shared state-aware one (task #492): quotes, escapes, comments, regions,
+/// `$( )` and the glued pair are read by the existing scan rules, never by a
+/// byte compare, and a list whose command lives behind a physical-line end has
+/// already been joined onto the line, so it arrives here complete. The operator's
+/// name is the report's parameter, and the caller reports **before** any part of
+/// the list runs, as bash runs nothing of a list it refuses.
+pub(crate) fn dangling_operator(line: &[u8]) -> Option<ShortCStr> {
+    let (start, _len) = last_op::walk(line, line.len() + 1).1?;
+    // Bash's and-list is `command (AND-IF-TERMINATOR command) …`, so an operator
+    // needs a command on **both** sides. One that opens the text — an operator
+    // alone below a `<<` line, `x\n&& y` — is the empty-*left* family with its own
+    // owner (task #406); only the empty *right* side is this rule's.
+    let before = line
+        .get(..start)
+        .is_none_or(|pre| pre.trim_ascii().is_empty());
+    if before {
+        return None;
+    }
+    // The walk reports only `&&` and `||`; its predicate's own byte tells them
+    // apart, and the literals are the scanner's, not user data (STYLE §6.3).
+    match line.get(start).copied() {
+        Some(b'&') => Some(ShortCStr::from(c"&&")),
+        Some(b'|') => Some(ShortCStr::from(c"||")),
+        _ => None,
+    }
 }

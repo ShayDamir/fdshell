@@ -4,6 +4,7 @@ pub(crate) mod part;
 mod parts;
 
 use crate::error::cmd::CmdError;
+use crate::error::parse::ParseError;
 use crate::loop_control::LoopControl;
 use crate::scan::ScanState;
 use crate::state::ShellState;
@@ -27,6 +28,19 @@ pub(crate) fn run_cond_list(
     background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
+    // An operator with no command behind it is a parse error, and it reports
+    // **before** any part of the list runs — the house pre-pass shape, like
+    // `script.rs`'s `AsyncInvalid` check — because bash's grammar requires a
+    // command after `&&`/`||` and stops before running the list (task #367).
+    // The walk is the shared one (task #492), so a list whose command lives
+    // behind a physical-line end arrives here complete and never reports.
+    if let Some(op) = parts::dangling_operator(line) {
+        // `bail!` cannot carry the `.change_context()` this conversion needs
+        // (STYLE §4.14): construct the report explicitly.
+        return Err(
+            Report::new(ParseError::ExpectedCommandAfterOp { op }).change_context(CmdError::Parse)
+        );
+    }
     let mut state = ScanState::new();
     let mut start = 0;
     let mut body_idx = 0;

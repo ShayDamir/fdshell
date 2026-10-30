@@ -1,9 +1,11 @@
-//! Tests for the cond-list body assignment and the group-depth boundary scan.
+//! Tests for the cond-list body assignment, the group-depth boundary scan, and the
+//! operator that ends a text with no command behind it.
 
 use super::boundary::next_boundary;
-use super::parts::take_bodies;
+use super::parts::{dangling_operator, take_bodies};
 use crate::scan::ScanState;
 use alloc::vec;
+use sys::ShortCStr;
 
 /// `next_boundary` from the start of `line`.
 fn boundary_of(line: &[u8]) -> (usize, bool) {
@@ -535,4 +537,73 @@ fn a_comment_ends_the_gate_at_its_newline() {
         gate_of(b"echo a || if :; then :; fi # c\necho tail", 9, false),
         31
     );
+}
+
+/// The empty-*right*-side rule of task #367, from the report's side: the
+/// `&&` / `||` that is the text's **last token** — nothing behind it but whitespace,
+/// comment text and here-doc regions — is the one this rule reports, and its name is
+/// the report's parameter. The `;` and newline rows are the units this layer is
+/// handed: `script.rs` splits a `;` or a newline before a run reaches
+/// `run_cond_list`, and a physical-line end that **continues** the list (task #492's
+/// join) arrives complete, so its operator is no longer the last token.
+#[test]
+fn an_operator_with_nothing_behind_it_is_the_report_s() {
+    assert_eq!(
+        dangling_operator(b"echo a &&"),
+        Some(ShortCStr::from(c"&&"))
+    );
+    assert_eq!(
+        dangling_operator(b"echo a ||"),
+        Some(ShortCStr::from(c"||"))
+    );
+    // Trailing whitespace keeps the operator the text's last token.
+    assert_eq!(
+        dangling_operator(b"echo a && "),
+        Some(ShortCStr::from(c"&&"))
+    );
+    // A word-start `#` is comment text — bash's lexer discards it — so the operator
+    // stays the last token.
+    assert_eq!(
+        dangling_operator(b"echo a && #c"),
+        Some(ShortCStr::from(c"&&"))
+    );
+    // A newline that ends the text ends the list the same way.
+    assert_eq!(
+        dangling_operator(b"echo a ||\n"),
+        Some(ShortCStr::from(c"||"))
+    );
+    // The glued pair is one operator token (task #496) with a command in front.
+    assert_eq!(dangling_operator(b"false&&"), Some(ShortCStr::from(c"&&")));
+}
+
+/// The shapes the rule must **not** report, restated from the report's side as the
+/// existing boundary rules. Each row names the rule that owns it.
+#[test]
+fn a_command_behind_the_operator_keeps_the_rule_off() {
+    // A word, a quoted word, a here-doc operator, a group body, `$( )`: the walk's
+    // last token is a word, so the operator has its command.
+    assert_eq!(dangling_operator(b"echo a && echo b"), None);
+    assert_eq!(dangling_operator(b"echo a && \"b\""), None);
+    assert_eq!(dangling_operator(b"echo a && cat <<X"), None);
+    assert_eq!(dangling_operator(b"echo a && <<X"), None);
+    assert_eq!(dangling_operator(b"echo a && { echo b; }"), None);
+    assert_eq!(dangling_operator(b"echo a && $( : )"), None);
+    // An operator written inside a quote is word data.
+    assert_eq!(dangling_operator(b"echo \"a && b\""), None);
+    // The comment whose text a join keeps: the command behind it is the last token
+    // (`tests/cond_blocks.rs` and `tests/heredoc.rs` pin the shapes end to end).
+    assert_eq!(dangling_operator(b"echo a && #c\necho b"), None);
+    assert_eq!(dangling_operator(b"cat <<\"&&\"\n&&"), None);
+    // The empty-*left* family, its own owner (task #406): an operator that opens the
+    // text needs the command **in front** of it, which bash's grammar also requires.
+    assert_eq!(dangling_operator(b"&&"), None);
+    assert_eq!(dangling_operator(b"&& echo b"), None);
+    assert_eq!(dangling_operator(b"false || && builtin true"), None);
+    // A `;` inside the text: the walk answers for the whole text, and the `;`-split
+    // unit is what this layer is handed — the end-to-end pin is
+    // `tests/cond_blocks.rs::a_dangling_cond_operator_in_an_if_body_is_measured`.
+    assert_eq!(dangling_operator(b"echo a && ; echo b"), None);
+    // The lone `|` behind the operator is a word — the pipe rule's family, pinned by
+    // the `expected command after pipe` rows.
+    assert_eq!(dangling_operator(b"echo a || |"), None);
 }
