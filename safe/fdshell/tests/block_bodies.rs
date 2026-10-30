@@ -416,3 +416,18 @@ fn a_dangling_cond_operator_before_a_block_closer_is_measured() {
         "bash parity (task #492): {err}"
     );
 }
+
+/// The `if` body granularity of task #492: the body is re-scanned, so a
+/// line-ending `&&`/`||` joins the list onto the next physical line (POSIX #2.9).
+/// Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_continues_an_if_body() {
+    for (script, want, rc) in [
+        ("if true; then echo a ||\necho b; fi", "a\n", 0),
+        ("if :; then false &&\necho b; fi", "", 1),
+        ("if :; then true ||\necho b; fi", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

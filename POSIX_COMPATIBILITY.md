@@ -521,6 +521,11 @@ clause keyword, the closing-keyword walk, the pipeline's `|`, the background `&`
 the `case` clause's `|` / `)` / `;;`, a `wait` arm's pattern head, a definer's
 `)`, the scoped-assignment prefix bound, and the here-document's delimiter word.
 
+The one separator rule that reads a **newline** is the terminator one: an unquoted
+`&&`/`||` at the end of a physical line is POSIX #2.9's AND-IF/OR-IF terminator and
+continues the list onto the next line (task #492), so the quoted spellings above are
+the only ones that do not join (the escaped `\&&` word is owner #496).
+
 The gate is the token's **raw span**, one owner:
 `safe/fdshell/src/parse/word_quoted.rs::span_word` (text **and** span). Not the
 per-byte mask — `"";` is an empty word token **plus** a real `;`, and a zero-byte

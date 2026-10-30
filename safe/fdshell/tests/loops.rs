@@ -2097,3 +2097,25 @@ fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only(
     assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
     assert!(err.contains("failed to resolve command path"), "{err}");
 }
+
+/// The body granularity of task #492: a loop body is re-scanned, so a
+/// line-ending `&&`/`||` inside one joins the list onto the next physical line
+/// (POSIX #2.9). Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_continues_a_loop_body() {
+    for (script, want, rc) in [
+        ("for i in 1; do false &&\necho b\ndone", "", 1),
+        ("for i in 1; do true ||\necho b\ndone", "", 0),
+        ("for i in 1; do echo a ||\necho b\ndone", "a\n", 0),
+        ("for i in 1; do false &&\necho b\necho c\ndone", "c\n", 0),
+        ("while :; do echo a ||\necho b; break; done", "a\n", 0),
+        (
+            "i=0; while [ $i -eq 0 ]; do echo a ||\necho b; i=1; done",
+            "a\n",
+            1,
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

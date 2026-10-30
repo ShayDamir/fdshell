@@ -3129,3 +3129,18 @@ fn the_empty_pair_and_the_bare_percent_stay_documented_divergences() {
     assert!(err.contains("fd variable '' is not set"), "stderr={err:?}");
     assert!(created(&files).is_empty(), "{files:?}");
 }
+
+/// The join × redirection row of task #492 (POSIX #2.9): the short-circuited
+/// side of a line-ending operator never runs, and its redirect goes with it.
+/// Measured 2026-10-30 against bash 5.3.9 and this build; the row is
+/// `a_heredoc_only_statement_is_a_redirect_only_statement`'s neighbour.
+#[test]
+fn a_line_ending_on_a_cond_operator_skips_the_redirected_command() {
+    for (script, want, rc) in [
+        ("false &&\necho b > /dev/null", "", 1),
+        ("false &&\necho b", "", 1),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

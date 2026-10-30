@@ -1042,3 +1042,18 @@ fn a_conditional_family_pins_the_measured_divergences() {
         );
     }
 }
+
+/// The plain `&` boundary of task #492: `&` is a list terminator, not an operator,
+/// so a line ending on it is not a join point (task #326), and an async split
+/// behind a line-ending operator keeps the preflight's granularity (bash reports
+/// a syntax error, rc 2 — the accepted family of #326/#352/#353/#360). Measured
+/// 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_the_plain_ampersand_does_not_join() {
+    let out = run("false &\necho b");
+    assert_eq!(lines(&out), vec!["b".to_string()]);
+    assert_eq!(rc(&out), 0);
+    let out = run("echo a &&\n& echo b");
+    assert_eq!(lines(&out), vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(rc(&out), 0, "bash rc 2: the accepted family named above");
+}

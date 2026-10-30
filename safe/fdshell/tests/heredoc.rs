@@ -4294,3 +4294,24 @@ fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468()
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(out.starts_with("0"), "the body is lost: stdout={out:?}");
 }
+
+/// The join × region rows of task #492 (POSIX #2.9), next to
+/// `heredoc_leading_newline_is_a_redirect_only_statement` and
+/// `a_heredoc_only_statement_is_a_redirect_only_statement`, whose parity rows stay
+/// green. A run that wrote a `<<` and ends on the operator keeps its own segment,
+/// body included; the region that starts inside the joined run stays inline
+/// (extension mode), and the concatenation of the physical lines the operator
+/// continues onto happens in the runner (`script/merge.rs`). Measured 2026-10-30
+/// against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_joins_across_a_region() {
+    for (script, want, rc) in [
+        ("true && cat <<B\nbody\nB", "body\n", 0),
+        ("false && cat <<B\nbody\nB", "", 1),
+        ("false <<B &&\nbody\nB\necho b", "", 1),
+        ("echo a <<B &&\nbody\nB\necho b", "a\nb\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

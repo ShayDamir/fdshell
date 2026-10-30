@@ -1209,3 +1209,18 @@ fn a_quoted_separator_is_pattern_or_body_text() {
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("missing ';;'"), "stderr={err:?}");
 }
+
+/// The case-arm granularity of task #492 (POSIX #2.9): an arm body is
+/// re-scanned, so a line-ending `&&`/`||` joins the list onto the next physical
+/// line. Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_continues_a_case_arm() {
+    for (script, want, rc) in [
+        ("case x in x) echo a ||\necho b;; esac", "a\n", 0),
+        ("case x in x) false &&\necho b;; esac", "", 1),
+        ("case x in x) true ||\necho b;; esac", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

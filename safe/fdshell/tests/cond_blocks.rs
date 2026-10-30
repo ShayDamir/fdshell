@@ -1806,3 +1806,53 @@ fn a_dangling_cond_operator_in_an_if_body_is_measured() {
         );
     }
 }
+
+/// POSIX #2.9's AND-IF-TERMINATOR / OR-IF-TERMINATOR (task #492): the newline
+/// behind a top-level `&&`/`||` is part of the operator token, so the list
+/// continues onto the next physical line and the short circuit, the gate and the
+/// list's status span the joined list. The acceptance criterion is that the joined
+/// spelling produces what the same-line spelling produces, so every row here is
+/// the joined spelling next to its bash value; the rows whose two disagree name
+/// their owner. Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_continues_the_list() {
+    // The short-circuited side never runs: nothing prints, and the rc is the
+    // status of the command that decided it.
+    for (script, want, rc) in [
+        ("false &&\necho b", "", 1),
+        ("true ||\necho b", "", 0),
+        ("false && #c\necho b", "", 1),
+        ("false&&\necho b", "", 1),
+        ("false &&\n echo b", "", 1),
+        ("false &&\n{ echo y; }", "", 1),
+        ("false &&\nif :; then echo y; fi", "", 1),
+        // The taken side runs, through the join.
+        ("echo a &&\necho b", "a\nb\n", 0),
+        ("echo a && \necho b", "a\nb\n", 0),
+        ("echo a && #c\necho b", "a\nb\n", 0),
+        ("echo a &&\necho b # tail", "a\nb\n", 0),
+        ("false ||\necho b", "b\n", 0),
+        ("true &&\necho b", "b\n", 0),
+        // The join is transitive, and the list's status is the decider's.
+        ("false &&\necho b\necho c", "c\n", 0),
+        // fdshell's answer on the same-line spelling, reached through the join;
+        // bash's `c` here is the pre-existing gate divergence, owned by the rule
+        // that gates a short-circuited `||` chain.
+        ("true ||\necho b &&\necho c", "", 0),
+        // Not join points: `;` and end of input, where bash reports a syntax
+        // error (rc 2) and task #367 owns the report.
+        ("false &&\n; echo b", "b\n", 0),
+        ("false &&\n", "", 1),
+        ("echo a && ; echo b", "a\nb\n", 0),
+        // Quoted and escaped operator words are words, so no join; the escaped
+        // row is task #496's (bash reads `b`, then `a &`).
+        ("echo a \"&&\"\necho b", "a &&\nb\n", 0),
+        ("echo a \\&&\necho b", "a &&\nb\n", 0),
+        // The condition granularity is task #498's; this row reaches bash's value
+        // through the scan's join.
+        ("if true ||\nfalse; then echo y; fi", "y\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

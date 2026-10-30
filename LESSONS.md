@@ -3871,9 +3871,12 @@ predicate, read at the scan and at the builders, that knows both halves.
   `||` at a line end the closer's predecessor is the newline's `;` token
   (LESSONS: "A `;` token is a newline in disguise"), and the leniency sits one
   layer below, in the empty part `cond/part.rs::run_part` answers `Ok(None)`.
-  Bash **accepts** an operator at a line end, so a fix for the empty part must
-  not fire on `echo a &&` + newline + `echo b` (that row is parity) and must
-  decide fdshell's missing continuation (#492) in the same step.
+  Bash **accepts** an operator at a line end, and the continuation is decided one
+  step earlier, in the scan: the newline behind a top-level `&&`/`||` is part of
+  the operator token (POSIX #2.9, task #492), so this leniency never sees a
+  line-ending operator — it answers only for an operator with nothing behind it in
+  the statement text it is given, and `echo a &&` + newline + `echo b` still prints
+  `a` and `b` (parity).
 - **A rule that *restores* an rc a sibling task flipped is audited as a triple** —
   owner, flipper, restorer, in the pin comment (#301 restored the rc 1 #354's
   body slice turned to 0): a two-column audit reads it as a reverted fix.
@@ -4841,6 +4844,17 @@ LESSONS: "A separator-shaped word needs the span gate"
 The rule has **one granularity** and no scan-side twin: the run layer never
 re-derives a word list, unlike the closer/opener scoring of task #306, whose
 rule lives at the scans' place **and** seed.
+
+The same layering decides the newline **behind** a top-level `&&`/`||` (task
+#492): POSIX #2.9 makes that newline part of the AND-IF/OR-IF terminator, so the
+join is decided in the scan — the one granularity that sees physical lines
+(`segment/join.rs`) — and every granularity that never re-scans keeps its own
+answer: condition slices (task #498), the body-slice trim above, the REPL's own
+completeness rule (its pins are in `repl/complete/tests.rs`). One shape cannot
+travel through the scan: a run whose own command line wrote a `<<` cannot hand the
+scan its region text and keep the body attached, so the scanner leaves per-line
+segments, each with its own bodies, and the concatenation of the physical lines the
+operator continues onto happens in the runner (`script/merge.rs`).
 
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 

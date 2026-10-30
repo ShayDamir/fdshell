@@ -703,3 +703,18 @@ fn ampersand_does_not_loosen_the_group_closer_rule() {
         );
     }
 }
+
+/// The group-body granularity of task #492 (POSIX #2.9): a `{ …; }` body is
+/// re-scanned, so a line-ending `&&`/`||` joins the list onto the next physical
+/// line. Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_continues_a_group_body() {
+    for (script, want, rc) in [
+        ("{ echo a ||\necho b; }", "a\n", 0),
+        ("{ false &&\necho b; }", "", 1),
+        ("{ true ||\necho b; }", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

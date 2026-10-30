@@ -690,3 +690,16 @@ fn heredocs_on_both_sides_of_an_ampersand_span_their_lines() {
     );
     assert!(!err.contains("parse error"), "parse error: {err}");
 }
+
+/// The REPL keeps its own whitespace-tail rule (task #492, plan §4.4): the
+/// comment-tail spelling is complete input here, where bash buffers it, so this
+/// row executes at once and prints `b`. The scan-level rule that ignores comment
+/// text is pinned in `cond_blocks` (the script path prints nothing); two
+/// granularities, one shape each, both pinned. Measured 2026-10-30.
+#[test]
+fn a_comment_tail_after_a_trailing_operator_is_complete_input() {
+    let (out, err, code) = run_repl("false && #c\necho b\nexit\n");
+    assert_eq!(code, 0, "stderr: {err:?}");
+    assert!(out.contains("b"), "output: {out:?}");
+    assert!(!err.contains("parse error"), "stderr: {err:?}");
+}

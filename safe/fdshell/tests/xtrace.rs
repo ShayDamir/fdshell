@@ -69,3 +69,23 @@ fn xtrace_settable_via_set_dash_o() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert!(err.contains("+ echo hi"), "stderr={err:?}");
 }
+
+/// `set -x` on a joined list (task #492, POSIX #2.9): one statement, and only the
+/// commands that run are traced — the short-circuited side leaves no trace line,
+/// exactly as on the same-line spelling. Measured 2026-10-30 against bash 5.3.9
+/// and this build.
+#[test]
+fn xtrace_of_a_joined_cond_list_traces_only_what_runs() {
+    for (script, ran, skipped, rc) in [
+        ("set -x; false &&\necho b", "false", "echo b", 1),
+        ("set -x; true ||\necho b", "true", "echo b", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", rc), "{script}: {err}");
+        assert!(err.contains(ran), "{script}: {ran} ran: {err}");
+        assert!(
+            !err.contains(skipped),
+            "{script}: {skipped} was skipped: {err}"
+        );
+    }
+}

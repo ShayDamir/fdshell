@@ -1166,11 +1166,14 @@ only that command (task #179).
 A `&&`/`||` with **no command behind it** is accepted, at statement level too:
 `echo a &&` and `echo a && ; echo b` print `a` and `b` at rc 0, where bash stops
 at rc 2 (task #367). The interactive shell keeps buffering such a line, as
-"Interactive shell" below says, because the construct is not complete. A `&&` at
-the end of a physical line does **not** continue the list onto the next line
-here: `echo a &&` + newline + `echo b` prints `a` and `b`, as bash does, while
-`false &&` + newline + `echo b` prints `b` — bash short-circuits the whole list,
-runs nothing and ends 1 (task #492).
+"Interactive shell" below says, because the construct is not complete. A `&&`/`||`
+at the end of a physical line **does** continue the list onto the next line, as
+POSIX #2.9's AND-IF/OR-IF terminator says: the short circuit, the gate and the
+list's status all span the joined lines, so `false &&` + newline + `echo b` runs
+nothing and ends 1, and `true ||` + newline + `echo b` runs nothing and ends 0.
+Glued (`false&&`), trailing-blank (` &&`) and leading-blank (` echo b`) spellings
+join the same way; a quoted `"&&"` or an escaped `\&&` stays a word, so nothing
+joins there (task #496), and `;` or the end of input ends the list (task #367).
 
 A stage is a **command**, so the word behind a `|` starts a command and a keyword
 block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop in

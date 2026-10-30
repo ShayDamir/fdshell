@@ -487,3 +487,25 @@ fn for_list_nounset_bails() {
     assert!(err.contains("undef: unbound variable"), "stderr={err:?}");
     assert_eq!(out, "");
 }
+
+/// `set -v` on a joined list (task #492, POSIX #2.9): the verbose trace is of the
+/// physical lines as they are read, and only the commands that run produce output.
+/// Measured 2026-10-30 against bash 5.3.9 (whose rc each row shows) and this build.
+#[test]
+fn verbose_trace_of_a_joined_cond_list() {
+    for (script, want, rc) in [
+        ("set -v; false &&\necho b", "", 1),
+        ("set -v; true ||\necho b", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+        for line in ["false &&", "true ||", "echo b"] {
+            if script.contains(line) {
+                assert!(
+                    err.contains(line),
+                    "{script}: the line read is traced: {err}"
+                );
+            }
+        }
+    }
+}

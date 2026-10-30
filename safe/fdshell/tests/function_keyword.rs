@@ -290,3 +290,18 @@ fn ampersand_then_semicolon_in_a_function_body_is_rejected_at_the_call() {
         "bash rc 2: lazy-parse divergence"
     );
 }
+
+/// The function-body granularity of task #492 (POSIX #2.9): a function body is
+/// re-scanned, so a line-ending `&&`/`||` joins the list onto the next physical
+/// line. Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_line_ending_on_a_cond_operator_continues_a_function_body() {
+    for (script, want, rc) in [
+        ("f(){ echo a ||\necho b; }; f", "a\n", 0),
+        ("f(){ false &&\necho b; }; f", "", 1),
+        ("f(){ true ||\necho b; }; f", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}
