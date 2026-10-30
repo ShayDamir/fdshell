@@ -8,9 +8,15 @@
 //! body is a property of the logical line, not of a contiguous span"), so the
 //! scanner leaves every physical line's segment as it stands, each keeping its
 //! own (text, bodies) pair, and the runner concatenates them here — in operator
-//! order — into the single statement the join calls for. The scanner marks the
-//! segment it could not join (`Segment::Statement::join_next`); nothing here
-//! re-reads the predicate, and a `;`-separated pair never carries the mark.
+//! order — into the single statement the join calls for, spelled the way the
+//! whole list on one physical line would be: the links share one line and the
+//! separator between them is a **space**, because the parse layer reads a
+//! newline as a `;` token (LESSONS: "A `;` token is a newline in disguise") and
+//! an operator left at the end of a synthesized line is no operator token for
+//! it — a chain of two or more operators would split back into separate
+//! statements. The scanner marks the segment it could not join
+//! (`Segment::Statement::join_next`); nothing here re-reads the predicate, and a
+//! `;`-separated pair never carries the mark.
 
 use crate::error::cmd::CmdError;
 use crate::segment::Segment;
@@ -27,7 +33,8 @@ pub(crate) struct Unit<'a> {
 }
 
 /// A joined statement: its synthesized text (the physical lines' command texts,
-/// in scan order — the region lines are not command bytes), its bodies in
+/// in scan order — the region lines are not command bytes — on one line, space
+/// separated, so the parse layer sees the operators as operators), its bodies in
 /// operator order, and the plain-`&` flag of the list's **last** part (task
 /// #326).
 pub(crate) struct Joined {
@@ -72,14 +79,18 @@ pub(crate) fn units<'a>(segments: &'a [Segment<'a>]) -> Vec<Unit<'a>> {
     out
 }
 
-/// The chain as one statement: the texts in scan order, the bodies in operator
-/// order, and the last part's flag.
+/// The chain as one statement: the texts in scan order, on one line as the
+/// same-line spelling would write them, the bodies in operator order, and the
+/// last part's flag.
 fn concatenate(chain: &[Part<'_>]) -> Joined {
     let mut text = Vec::new();
     let mut bodies = Vec::new();
     for (i, link) in chain.iter().enumerate() {
+        // The one line the chain stands for: a space, never the newline the
+        // physical lines had — the parse layer reads a newline as a `;` token
+        // and would split the chain back into statements (task #492).
         if i > 0 {
-            text.push(b'\n');
+            text.push(b' ');
         }
         text.extend_from_slice(link.text);
         bodies.extend(link.bodies.iter().cloned());

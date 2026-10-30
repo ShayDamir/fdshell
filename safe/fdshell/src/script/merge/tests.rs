@@ -31,7 +31,9 @@ fn joined(segments: &[Segment<'_>]) -> Option<Joined> {
 }
 
 /// The plan's row 19: the scanner marks the run it could not join, and the
-/// runner joins it with the line the operator continues onto.
+/// runner joins it with the line the operator continues onto — as the same-line
+/// spelling, so the parse layer sees the operator as an operator token (the
+/// separator is a space; a newline would split the chain back into statements).
 #[test]
 fn joins_a_run_that_wrote_a_heredoc() {
     let segments = vec![
@@ -39,7 +41,7 @@ fn joins_a_run_that_wrote_a_heredoc() {
         stmt(b"echo b", Vec::new(), false, false),
     ];
     let joined = joined(&segments).unwrap();
-    assert_eq!(joined.text, b"echo a <<B &&\necho b".to_vec());
+    assert_eq!(joined.text, b"echo a <<B && echo b".to_vec());
     assert_eq!(joined.bodies, vec![b"body\n".to_vec()]);
     assert!(!joined.background);
     assert_eq!(units(&segments).len(), 1, "the chain folds into its leader");
@@ -72,7 +74,9 @@ fn a_block_follower_stops_the_chain() {
     assert_eq!(units(&segments).len(), 2);
 }
 
-/// The chain is transitive, and the bodies stay in operator order.
+/// The chain is transitive — every link lands on the one line the chain stands
+/// for, so a chain of two operators is one statement, not two — and the bodies
+/// stay in operator order.
 #[test]
 fn a_chain_concatenates_bodies_in_operator_order() {
     let segments = vec![
@@ -83,7 +87,7 @@ fn a_chain_concatenates_bodies_in_operator_order() {
     let joined = joined(&segments).unwrap();
     assert_eq!(
         joined.text,
-        b"cat <<A &&\ncat <<B &&\necho c".to_vec(),
+        b"cat <<A && cat <<B && echo c".to_vec(),
         "the chain is transitive"
     );
     assert_eq!(

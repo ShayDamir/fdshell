@@ -4367,3 +4367,89 @@ fn a_semicolon_split_line_joining_on_an_operator_keeps_each_runs_body() {
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
 }
+
+/// A merge chain with **more than one** operator (task #492): the runner writes the
+/// chain as the same-line spelling — one line, space separated — because the parse
+/// layer reads a newline as a `;` token (LESSONS: "A `;` token is a newline in
+/// disguise") and an operator left at the end of a synthesized line is no operator
+/// token for it; a newline separator splits the chain back into statements and loses
+/// every operator but the first. Every joined spelling is pinned beside its same-line
+/// spelling, at bash 5.3.9's value (measured 2026-10-30 against bash 5.3.9 with stdin
+/// `/dev/null` **and** with the harness's inherited stdin — no row here reads stdin).
+/// A comment tail of the operator survives the join, and a quoted newline inside a
+/// link stays a newline. The last row is the intersection with the end of input — an
+/// operator with nothing behind it, where bash reports rc 2 and task #367 owns the
+/// report; it stays at the accepted value the shape had before this rule.
+#[test]
+fn a_merge_chain_with_two_operators_is_one_statement() {
+    for (script, want, rc) in [
+        (
+            "cat <<B &&\nbody\nB\necho x &&\necho tail",
+            "body\nx\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\ncat <<C &&\nc1\nC\necho tail",
+            "body\nc1\ntail\n",
+            0,
+        ),
+        (
+            "echo a ; cat <<B &&\nbody\nB\necho x &&\necho tail",
+            "a\nbody\nx\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\necho x && echo tail && echo more",
+            "body\nx\ntail\nmore\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\ncat <<C &&\nc1\nC\ncat <<D &&\nd1\nD\necho tail",
+            "body\nc1\nd1\ntail\n",
+            0,
+        ),
+        // The same-line spellings: what the joined rows above must produce.
+        (
+            "cat <<B && echo x && echo tail\nbody\nB",
+            "body\nx\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B && cat <<C && echo tail\nbody\nB\nc1\nC",
+            "body\nc1\ntail\n",
+            0,
+        ),
+        (
+            "echo a ; cat <<B && echo x && echo tail\nbody\nB",
+            "a\nbody\nx\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B && cat <<C && cat <<D && echo tail\nb1\nB\nc1\nC\nd1\nD",
+            "b1\nc1\nd1\ntail\n",
+            0,
+        ),
+        (
+            "cat <<B && echo x && echo tail && echo more\nbody\nB",
+            "body\nx\ntail\nmore\n",
+            0,
+        ),
+        // The comment tail of the operator: bash's lexer discards it, and the join
+        // reaches the line behind it.
+        ("cat <<B && #c\nbody\nB\necho tail", "body\ntail\n", 0),
+        (
+            "cat <<B &&\nbody\nB\necho x && #c\necho tail",
+            "body\nx\ntail\n",
+            0,
+        ),
+        // A quoted newline inside a link stays a newline of that link's own word.
+        ("cat <<B &&\nbody\nB\necho \"x\ny\"", "body\nx\ny\n", 0),
+        // The end-of-input side: nothing behind the operator, so bash stops at rc 2
+        // (task #367's report) and fdshell runs the chain it has. Pinned at the
+        // measured accepted value, unchanged from before the rule.
+        ("echo a ; cat <<B &&\nbody\nB", "a\nbody\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

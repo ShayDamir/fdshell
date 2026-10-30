@@ -4857,7 +4857,11 @@ scan its region text and keep the body attached, so the scanner leaves per-line
 segments, each with its own bodies, the runner's mark rides on the run whose own text
 ends on the terminator (never on a `;`-separated run flushed beside it), and the
 concatenation of the physical lines the operator continues onto happens in the runner
-(`script/merge.rs`).
+(`script/merge.rs`) **as the same-line spelling**: the links share one line, separated
+by spaces, because the parse layer reads a newline as a `;` token — an operator left at
+the end of a synthesized line is no operator token for it, so a newline separator splits
+a chain of two operators back into statements and loses every operator but the first
+(pinned in `tests/heredoc.rs`).
 
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 
