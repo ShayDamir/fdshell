@@ -46,6 +46,14 @@ pub(super) struct Book<'a> {
     /// same statement. Read once, by the flush it stamps, and reset — and the
     /// flush stamps **that run only**, never a `;`-separated run flushed with it.
     pub(super) join_next: bool,
+    /// The **separator** newlines the scan stepped over as the operator's terminator
+    /// (POSIX #2.9, task #492) since the last flush, in scan order — recorded by the
+    /// `Join` arm of the loop, never by the comment arm (a comment's own newline ends
+    /// comment text, so it stays a newline). Each one falls inside the bytes of the run
+    /// of the flush it belongs to; [`crate::segment::line::flush_line`] hands it to that
+    /// run's segment, and the runner writes it as a space
+    /// (`script/merge/chain.rs`).
+    pub(super) sep_joins: Vec<usize>,
 }
 
 impl<'a> Book<'a> {
@@ -62,6 +70,7 @@ impl<'a> Book<'a> {
             sep_since_run: false,
             midrun_open: false,
             join_next: false,
+            sep_joins: Vec::new(),
         }
     }
 

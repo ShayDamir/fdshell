@@ -35,6 +35,15 @@ pub(crate) enum Segment<'a> {
         /// and the runner concatenates it with the segments it continues onto
         /// (`script/merge.rs`, task #492).
         join_next: bool,
+        /// The newlines **inside `cmd`** at which the scan stepped over a physical
+        /// line's end because the run stayed open on the operator's terminator
+        /// (POSIX #2.9) — offsets into `cmd`, in scan order. The run the decision
+        /// was made for is the one that spans them, and the runner writes each as a
+        /// space so the chain it folds is one line for the parse layer
+        /// (`script/merge/chain.rs`, task #492). A quoted word's newline and a
+        /// comment's terminating newline are **not** here: they are data the parse
+        /// layer keeps, and they stay newlines.
+        joins: Vec<usize>,
     },
     /// A plain `&` whose split is invalid (nothing to terminate, `;`-separated
     /// target, or a `;`/`|`/`&` peek behind it — bash's "syntax error, nothing
@@ -112,6 +121,12 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         // the join point is the newline that ends the comment. `;`, end of
         // input, a lone `|` and the plain `&` are not join points.
         //
+        // A **separator** join point is recorded on the book (`sep_joins`) for the run
+        // that spans it, so the runner — which writes a merged chain as one line — knows
+        // which of that run's newlines are separators. A comment's terminating newline is
+        // not recorded: the comment's text is data up to that newline, and the parse layer
+        // needs the newline to end it.
+        //
         // A physical line that claims a body region is the exception: its body is
         // a region on the lines below, and the region text cannot be both inline in
         // the run's bytes and attached in operator order, so the physical lines keep
@@ -120,6 +135,9 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         // the flush's last run — never on a `;`-separated run flushed beside it.
         match join::decision(line, &book, &kind) {
             join::Decision::Join(nl) => {
+                if kind == Boundary::Separator {
+                    book.sep_joins.push(nl);
+                }
                 book.i = skip_comment(line, nl);
                 continue;
             }

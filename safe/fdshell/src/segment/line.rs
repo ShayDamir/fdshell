@@ -4,7 +4,7 @@
 use crate::scan::{self, heredoc};
 use crate::segment::Segment;
 use crate::segment::bg;
-use crate::segment::book::Book;
+use crate::segment::book::{Book, Run};
 use alloc::vec::Vec;
 
 /// End of a physical line: flush its buffered runs, or defer the flush when
@@ -94,6 +94,9 @@ pub(crate) fn flush_line<'a>(
     // The join flag belongs to the run that ended on the operator's terminator,
     // and this is the flush that stamps it (task #492).
     let join_next = core::mem::replace(&mut book.join_next, false);
+    // The separator join points recorded so far belong to the runs of **this**
+    // flush — a run claims only the ones inside its own bytes (`run_joins`).
+    let joins = core::mem::take(&mut book.sep_joins);
     if runs.is_empty() {
         return line_end;
     }
@@ -127,9 +130,24 @@ pub(crate) fn flush_line<'a>(
             background: run.background,
             midrun_open,
             join_next: join_next && index + 1 == last,
+            joins: run_joins(&joins, &run),
         });
     }
     resume
+}
+
+/// The separator join points of one run (task #492), as offsets into the run's own
+/// bytes: a run claims only the newlines that fall inside its span, so a
+/// `;`-separated run never takes a join point belonging to the run beside it. The
+/// runner writes the claimed ones as spaces when it folds a chain
+/// (`script/merge/chain.rs`).
+fn run_joins(joins: &[usize], run: &Run<'_>) -> Vec<usize> {
+    let end = run.off + run.bytes.len();
+    joins
+        .iter()
+        .filter(|at| **at >= run.off && **at < end)
+        .map(|at| at - run.off)
+        .collect()
 }
 
 #[cfg(test)]

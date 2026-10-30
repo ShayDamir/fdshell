@@ -8,13 +8,16 @@
 //! body is a property of the logical line, not of a contiguous span"), so the
 //! scanner leaves every physical line's segment as it stands, each keeping its
 //! own (text, bodies) pair, and the runner concatenates them here — in operator
-//! order — into the single statement the join calls for, spelled the way the
-//! whole list on one physical line would be: the links share one line and the
-//! separator between them is a **space**, because the parse layer reads a
-//! newline as a `;` token (LESSONS: "A `;` token is a newline in disguise") and
-//! an operator left at the end of a synthesized line is no operator token for
-//! it — a chain of two or more operators would split back into separate
-//! statements. The scanner marks the segment it could not join
+//! order — into the single statement the join calls for, spelled the way the whole
+//! list on one physical line would be: [`chain`] writes the links on one line,
+//! space separated, because the parse layer reads a newline as a `;` token (LESSONS:
+//! "A `;` token is a newline in disguise") and an operator left at the end of a
+//! synthesized line is no operator token for it — a chain of two or more operators
+//! would split back into separate statements. A link whose own text spans physical
+//! lines is written on the one line too: the scan left the offsets of its separator
+//! newlines on the segment, and the chain writes each as a space (a newline that is
+//! data — inside a quoted word, or the one ending a `#` comment — stays). The
+//! scanner marks the segment it could not join
 //! (`Segment::Statement::join_next`); nothing here re-reads the predicate, and a
 //! `;`-separated pair never carries the mark.
 
@@ -23,6 +26,10 @@ use crate::segment::Segment;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::{ScriptText, ShortCStr};
+
+use self::chain::Part;
+
+mod chain;
 
 /// A segment as the runner sees it: the segment itself, and when it is a
 /// statement that continues onto the segments below, the joined statement to
@@ -43,21 +50,13 @@ pub(crate) struct Joined {
     pub(crate) background: bool,
 }
 
-/// One statement's parts; a non-statement is no link of a chain.
-struct Part<'a> {
-    text: &'a [u8],
-    bodies: &'a Vec<Vec<u8>>,
-    background: bool,
-    join_next: bool,
-}
-
 /// The segments to execute, in order, with every chain of segments a
 /// line-ending `&&`/`||` continues folded into its first member.
 pub(crate) fn units<'a>(segments: &'a [Segment<'a>]) -> Vec<Unit<'a>> {
     let mut out: Vec<Unit<'_>> = Vec::new();
     let mut i = 0;
     while let Some(segment) = segments.get(i) {
-        let Some(first) = part(segment) else {
+        let Some(first) = chain::part(segment) else {
             out.push(Unit {
                 segment,
                 joined: None,
@@ -65,61 +64,20 @@ pub(crate) fn units<'a>(segments: &'a [Segment<'a>]) -> Vec<Unit<'a>> {
             i += 1;
             continue;
         };
-        let mut chain: Vec<Part<'_>> = Vec::new();
+        let mut links: Vec<Part<'_>> = Vec::new();
         let mut link = Some(first);
         while let Some(current) = link {
             let continues = current.join_next;
-            chain.push(current);
+            links.push(current);
             i += 1;
-            link = continues.then(|| segments.get(i).and_then(part)).flatten();
+            link = continues
+                .then(|| segments.get(i).and_then(chain::part))
+                .flatten();
         }
-        let joined = (chain.len() > 1).then(|| concatenate(&chain));
+        let joined = (links.len() > 1).then(|| chain::concatenate(&links));
         out.push(Unit { segment, joined });
     }
     out
-}
-
-/// The chain as one statement: the texts in scan order, on one line as the
-/// same-line spelling would write them, the bodies in operator order, and the
-/// last part's flag.
-fn concatenate(chain: &[Part<'_>]) -> Joined {
-    let mut text = Vec::new();
-    let mut bodies = Vec::new();
-    for (i, link) in chain.iter().enumerate() {
-        // The one line the chain stands for: a space, never the newline the
-        // physical lines had — the parse layer reads a newline as a `;` token
-        // and would split the chain back into statements (task #492).
-        if i > 0 {
-            text.push(b' ');
-        }
-        text.extend_from_slice(link.text);
-        bodies.extend(link.bodies.iter().cloned());
-    }
-    let background = chain.last().map(|p| p.background).unwrap_or(false);
-    Joined {
-        text,
-        bodies,
-        background,
-    }
-}
-
-/// A segment's text, bodies and flag, or `None` for anything but a statement.
-fn part<'a>(segment: &'a Segment<'a>) -> Option<Part<'a>> {
-    match segment {
-        Segment::Statement {
-            cmd,
-            bodies,
-            background,
-            join_next,
-            ..
-        } => Some(Part {
-            text: cmd,
-            bodies,
-            background: *background,
-            join_next: *join_next,
-        }),
-        _ => None,
-    }
 }
 
 /// The `ScriptText` of a joined statement, anchored at the first segment's

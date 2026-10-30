@@ -4861,7 +4861,16 @@ concatenation of the physical lines the operator continues onto happens in the r
 by spaces, because the parse layer reads a newline as a `;` token — an operator left at
 the end of a synthesized line is no operator token for it, so a newline separator splits
 a chain of two operators back into statements and loses every operator but the first
-(pinned in `tests/heredoc.rs`).
+(pinned in `tests/heredoc.rs`). A link that is itself a scan-joined run carries the
+newlines the scan stepped over **inside its own text**, so the scan leaves their offsets
+on the segment (`Segment::Statement::joins`, claimed per run by
+`segment/line.rs::run_joins`) and the chain writes each of those as a space too. A newline
+that is **data** stays a newline: a quoted word's, and the one that ends a `#` comment (the
+parse layer reads comment text only up to it, and a space would let the comment swallow the
+links behind it). The exception has a visible cost, pinned as measured in
+`tests/heredoc.rs`: a chain with a comment on one of its middle links still splits at the
+comment's newline, so that one shape does not produce what bash does; closing it means
+discarding comment text, a rule the parse layer owns and the runner must not re-derive.
 
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 

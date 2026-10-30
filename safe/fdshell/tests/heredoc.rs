@@ -4453,3 +4453,86 @@ fn a_merge_chain_with_two_operators_is_one_statement() {
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
 }
+
+/// The family pin's next step (task #492): a chain whose non-region link is itself a
+/// **scan-joined run** of three or more physical lines. Such a run carries the newlines
+/// the scan stepped over as the operator's terminator inside its own text, and the chain
+/// writes every one of them as a space (`script/merge/chain.rs`, the offsets ride on
+/// `Segment::Statement::joins`). Left as newlines they are `;` tokens for the parse layer
+/// (LESSONS: "A `;` token is a newline in disguise"), the operator at the end of the run's
+/// second line stops being an operator token, and the chain splits back into statements and
+/// loses every operator but the first. Measured 2026-10-30 against bash 5.3.9, the `master`
+/// build before the fix and this build (`bash -c`, stdin `/dev/null` **and** the harness's
+/// inherited stdin — no row here reads stdin): every joined spelling sits at bash's value
+/// **and** at its same-line spelling's — which is where the 3-, 4- and 5-line rows sat on
+/// `master` and did **not** sit before this step (they printed `body/c1/c2 &&`). The
+/// comment row is the documented exception: a comment's terminating newline is **data**
+/// (the parse layer reads comment text only up to it, so a space would let the comment
+/// swallow the links behind it), the chain still splits there, and the row keeps its
+/// measured value — not bash's `body/c1/c2/last`, 0. Closing that row needs the parse layer
+/// to discard comment text, a rule its owner layer holds; the decision is the user's.
+#[test]
+fn a_scan_joined_run_of_three_lines_is_written_on_one_line() {
+    for (script, want, rc) in [
+        (
+            "cat <<B &&\nbody\nB\necho c1 &&\necho c2 &&\necho last",
+            "body\nc1\nc2\nlast\n",
+            0,
+        ),
+        (
+            "cat <<B && echo c1 && echo c2 && echo last\nbody\nB",
+            "body\nc1\nc2\nlast\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\necho c1 &&\nfalse &&\necho last",
+            "body\nc1\n",
+            1,
+        ),
+        (
+            "cat <<B && echo c1 && false && echo last\nbody\nB",
+            "body\nc1\n",
+            1,
+        ),
+        ("echo c1 &&\necho c2 &&\necho last", "c1\nc2\nlast\n", 0),
+        ("echo c1 && echo c2 && echo last", "c1\nc2\nlast\n", 0),
+        (
+            "cat <<B &&\nbody\nB\necho c1 &&\necho c2 &&\necho c3 &&\necho last",
+            "body\nc1\nc2\nc3\nlast\n",
+            0,
+        ),
+        (
+            "cat <<B && echo c1 && echo c2 && echo c3 && echo last\nbody\nB",
+            "body\nc1\nc2\nc3\nlast\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\necho c1 &&\necho c2 &&\necho c3 &&\necho c4 &&\necho last",
+            "body\nc1\nc2\nc3\nc4\nlast\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\necho x &&\necho tail && echo end",
+            "body\nx\ntail\nend\n",
+            0,
+        ),
+        (
+            "cat <<B && echo x && echo tail && echo end\nbody\nB",
+            "body\nx\ntail\nend\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\necho c1 &&\necho c2 &&\necho last #c",
+            "body\nc1\nc2\nlast\n",
+            0,
+        ),
+        (
+            "cat <<B &&\nbody\nB\necho c1 && #c\necho c2 &&\necho last",
+            "body\nc1\nc2 && echo last\n",
+            0,
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}

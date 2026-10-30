@@ -1545,6 +1545,7 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
                 background: head_bg,
                 midrun_open: head_mid,
                 join_next: _,
+                joins: _,
             },
             Segment::Statement {
                 cmd: tail,
@@ -1553,6 +1554,7 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
                 background: tail_bg,
                 midrun_open: tail_mid,
                 join_next: _,
+                joins: _,
             },
         ) => {
             assert_eq!(head, b"cat <<A");
@@ -1603,6 +1605,7 @@ fn scan_substitution_region_at_a_run_start_is_a_statement() {
                 background: bg,
                 midrun_open: mid,
                 join_next: _,
+                joins: _,
             } => {
                 assert_eq!(*got, cmd, "{line:?} is one statement");
                 assert_eq!(*off, 0, "{line:?}");
@@ -1849,6 +1852,39 @@ fn scan_a_line_ending_on_a_cond_operator_joins_the_next_line() {
                 assert!(bodies.is_empty() != cmd.ends_with(b"&&"), "{cmd:?}");
             }
             _ => panic!("expected statements, {:?}", shape),
+        }
+    }
+}
+
+/// The scan hands the runner the separator newlines it stepped over (task #492): the
+/// region line keeps its own segment and its own body, and the run that the join carries
+/// across **two** physical lines below it is one segment whose text spans them — with
+/// the offsets of both join points on it, so the runner's chain writes each as a space
+/// (`script/merge/chain.rs`) and the parse layer reads the chain as one line. A join
+/// point of a line the scan joined is recorded; the region line's own terminator
+/// newline is not, since that line is the merge's decision, not the join's.
+#[test]
+fn the_scan_records_the_join_points_of_the_run_that_spans_them() {
+    //   c a t   < < B  && \n b o d y \n B \n e c h o   c 1  && \n e c h o   c 2  && \n e c h o   l a s t
+    //   0123456789  10            15 16  17            28            39
+    let shape = b"cat <<B &&\nbody\nB\necho c1 &&\necho c2 &&\necho last";
+    let segments = scan_segments(shape, false);
+    assert_eq!(segments.len(), 2, "the region line keeps its own segment");
+    let want: [(&[u8], Vec<usize>); 2] = [
+        (b"cat <<B &&", Vec::new()),
+        (b"echo c1 &&\necho c2 &&\necho last", vec![10, 21]),
+    ];
+    for (segment, (cmd, joins)) in segments.iter().zip(want) {
+        match segment {
+            Segment::Statement {
+                cmd: got,
+                joins: got_joins,
+                ..
+            } => {
+                assert_eq!(*got, cmd, "{shape:?}");
+                assert_eq!(*got_joins, joins, "{shape:?}");
+            }
+            _ => panic!("expected statements, {shape:?}"),
         }
     }
 }

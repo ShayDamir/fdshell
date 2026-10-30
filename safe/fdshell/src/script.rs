@@ -41,8 +41,10 @@ pub(crate) fn run_script(
                 // diagnostic and its rc (tasks #232/#236), so the script
                 // runner runs the buffer as written (task #294).
                 midrun_open: _,
-                // The join flag is read by `merge::units` before the loop.
+                // The join flag and the join points are read by `merge::units`
+                // before the loop; an unmerged statement runs the text as written.
                 join_next: _,
+                joins: _,
             } => {
                 // A statement whose list a here-doc region split runs as the
                 // joined statement `script/merge.rs` built for it.

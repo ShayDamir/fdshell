@@ -75,6 +75,7 @@ fn has_target_accepts_a_run_a_pending_word_a_flushed_statement_a_closed_block() 
         background: false,
         midrun_open: false,
         join_next: false,
+        joins: Vec::new(),
     }];
     // A statement flushed by the deferral above is a target while no `;`
     // closed it (`echo a ;\necho b &`); a flushed `;`-terminated one is not
@@ -134,6 +135,7 @@ fn mark_marks_the_run_the_pending_word_or_the_flushed_statement() {
         background: false,
         midrun_open: false,
         join_next: false,
+        joins: Vec::new(),
     }];
     split(b"x\necho a", 0, 2, b"", &mut runs, &mut segs, false).mark();
     match segs.first() {

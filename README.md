@@ -1173,7 +1173,13 @@ list's status all span the joined lines, so `false &&` + newline + `echo b` runs
 nothing and ends 1, and `true ||` + newline + `echo b` runs nothing and ends 0.
 Glued (`false&&`), trailing-blank (` &&`) and leading-blank (` echo b`) spellings
 join the same way; a quoted `"&&"` or an escaped `\&&` stays a word, so nothing
-joins there (task #496), and `;` or the end of input ends the list (task #367). The
+joins there (task #496), and `;` or the end of input ends the list (task #367). A `#`
+comment tail is not part of the predicate's text, so `false && #c` + newline + `echo b`
+joins too and reaches bash's answer; a comment written on one of the **middle** lines of a
+joined chain keeps its own newline (the parse layer reads comment text only up to it), so the
+chain splits there and `cat <<B &&` + `body` + `B` + `echo c1 && #c` + `echo c2 &&` +
+`echo last` prints `body`, `c1` and `c2 && echo last` where bash prints `body`, `c1`, `c2`
+and `last`. The
 `set -e` exemption of the paragraph above spans the joined lines too, so
 `set -e; false &&` + newline + `echo b` + newline + `echo tail` prints `tail` and
 ends 0.

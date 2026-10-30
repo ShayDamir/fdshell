@@ -248,3 +248,25 @@ fn flush_line_stamps_only_the_run_the_join_decision_made_for() {
         }
     }
 }
+
+/// A run claims only the separator join points that fall **inside its own bytes**
+/// (task #492): the flush hands them to that run's segment as offsets into `cmd`, so a
+/// `;`-separated run never takes a join point belonging to the run beside it, and the
+/// runner writes the claimed ones as spaces when it folds the chain.
+#[test]
+fn flush_hands_each_run_its_own_join_points() {
+    //   e c h o   a  ;  e c h o   b  && \n e c h o   c
+    //   012345 6 7 89        17 18  19
+    let line = b"echo a ; echo b &&\necho c";
+    let mut book = book_with(vec![run(b"echo a", 0), run(b"echo b &&\necho c", 9)]);
+    book.sep_joins = vec![18];
+    flush_line(&mut book, line, 0, 18);
+    assert_eq!(book.segments.len(), 2);
+    for (index, want) in [(0, Vec::new()), (1, vec![9])] {
+        match &book.segments[index] {
+            Segment::Statement { joins, .. } => assert_eq!(*joins, want),
+            Segment::Block { .. } => panic!("expected Statement"),
+            Segment::AsyncInvalid => panic!("expected Statement"),
+        }
+    }
+}
