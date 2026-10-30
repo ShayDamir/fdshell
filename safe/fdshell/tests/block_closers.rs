@@ -195,8 +195,9 @@ fn mid_run_and_stage_blocks_close_at_their_own_closer() {
 ///
 /// The rows that end in a dangling operator **with a terminator behind it**
 /// (`echo a ||; fi`, the newline spelling) are *not* this rule's: the closer's
-/// predecessor is then a legal `;`, and the leniency sits one layer below, in
-/// the body's own cond list — owners #367/#423/#424, pinned by
+/// predecessor is then a legal `;`, and the report sits one layer below, in
+/// the body's own cond list — owner #367 (through the terminators of #423 and
+/// #424), pinned by
 /// `tests/cond_blocks.rs::a_dangling_cond_operator_in_an_if_body_is_measured`
 /// and `tests/block_bodies.rs::a_dangling_cond_operator_before_a_block_closer_is_measured`.
 #[test]

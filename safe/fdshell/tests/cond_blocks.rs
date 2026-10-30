@@ -1717,56 +1717,54 @@ fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     assert_eq!((out.strip_prefix("b\n").is_some(), rc), (true, 1));
 }
 
-/// Task #358: a body that **ends in a dangling `&&`/`||`** runs, rc 0 where bash
-/// stops at rc 2. The closer rule of `tests/block_closers.rs` answers only the
-/// closer's **predecessor** question, and a newline *is* a `;` token (LESSONS,
-/// task #355), so `if true; then echo a ||` + newline + `fi` has a legal
-/// predecessor and passes `is_closer_predecessor`; the body slice then ends at
-/// the operator, the body's own cond list splits there, and
-/// `cond/part.rs::run_part` answers the empty part behind the operator with
-/// `Ok(None)`. The leniency is one layer below the closer rule, and each row
-/// names its owner: the cond-list rule of task **#367** (an operator with no
-/// command behind it, at a `;` or at end of input), the `;;` rule of **#423**,
-/// the function body's missing terminator of **#424**. The `|` twin is **not**
-/// lenient — a stage must begin, so the pipe reports.
+/// Task #367: a body that **ends in a dangling `&&`/`||`** is a parse error — the
+/// cond layer reports `expected command after '&&'` / `'||'` and **nothing of the
+/// list runs**, at fdshell's shell-wide rc 1 where bash stops at rc 2. The closer
+/// rule of `tests/block_closers.rs` answers only the closer's **predecessor**
+/// question, and a newline *is* a `;` token (LESSONS, task #355), so
+/// `if true; then echo a ||` + newline + `fi` has a legal predecessor and passes
+/// `is_closer_predecessor`; the body's own cond list is where the report fires —
+/// it is the layer that sees nested lists (bodies, arms, function frames). Each
+/// row names the rule that owns its value: the `;;` row reaches the report through
+/// the separator rule of **#423**, the function body's missing terminator before
+/// `}` is **#424**'s. The `|` twin is **not** lenient — a stage must begin, so the
+/// pipe reports (`expected command after pipe`, the same rc-1 family), and the `&`
+/// twin is bash **parity**: a `&` is a terminator, not an operator (#354).
 ///
-/// Every row measured 2026-10-28 against bash 5.3.9. A #367 fix **flips** the
-/// rc-0 rows, which is why each names its owner: the flip must be a deliberate
-/// edit of this pin. The last block is the boundary that fix must not cross —
-/// bash **continues** a list behind an operator written at a physical-line end,
-/// so those rows are bash **parity** and a partial fix shows up as their
-/// failure.
+/// Every row measured 2026-10-30 against bash 5.3.9 and this build. The last block
+/// is the boundary the rule must not cross: an operator at a physical-line end
+/// **continues** the list (task #492's join), so those rows stay at bash's values.
+/// Bash parses the whole input first and runs nothing; fdshell's report reaches one
+/// scan pass, so a statement that already ran stays run — the multi-statement rows
+/// are pinned at that value, each with bash's whole-input answer beside it.
 #[test]
 fn a_dangling_cond_operator_in_an_if_body_is_measured() {
     // The operator sits behind a legal terminator (the `;`, the newline's `;`
-    // token), so the closer rule never sees it: the body's own cond list does.
-    for (script, want) in [
-        ("if true; then echo a ||; fi", "a\n"),
-        ("if true; then echo a && ; fi", "a\n"),
-        ("if true; then echo a ||; echo b; fi", "a\nb\n"),
-        ("if true; then echo a ||\nfi", "a\n"),
-        ("if true; then echo a ||\nelse echo e; fi", "a\n"),
-        (
-            "if true; then echo a ||\nelif false; then echo e; fi",
-            "a\n",
-        ),
-        // A `;;` glued behind the operator: the separator rule of #423.
-        ("if true; then echo a ||;; fi", "a\n"),
-        // The plain `&` is a **terminator**, not an operator: bash parity, and
-        // #354's acceptance (asserted for stdout/rc only; its background-job
-        // record is pinned by `ampersand_in_an_if_body_backgrounds_the_statement`).
-        ("if true; then echo a & fi", "a\n"),
+    // token, the `;;` of #423's row), so the closer rule never sees it: the body's
+    // own cond list does, and reports before any part of it runs.
+    for script in [
+        "if true; then echo a ||; fi",
+        "if true; then echo a && ; fi",
+        "if true; then echo a ||; echo b; fi",
+        "if true; then echo a ||\nfi",
+        "if true; then echo a ||\nelse echo e; fi",
+        "if true; then echo a ||\nelif false; then echo e; fi",
+        // A `;;` glued behind the operator: #423's separator rule hands the
+        // operator to this one.
+        "if true; then echo a ||;; fi",
     ] {
         let (out, err, rc) = run(script);
-        assert_eq!(
-            (out.as_str(), rc),
-            (want, 0),
-            "{script}: bash rc 2, accepted divergence: {err}"
-        );
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
+        assert!(err.contains("expected command after"), "{script}: {err}");
     }
+    // The plain `&` is a **terminator**, not an operator: bash parity, and
+    // #354's acceptance (asserted for stdout/rc only; its background-job
+    // record is pinned by `ampersand_in_an_if_body_backgrounds_the_statement`).
+    let (out, err, rc) = run("if true; then echo a & fi");
+    assert_eq!((out.as_str(), rc), ("a\n", 0), "bash parity: {err}");
     // The pipe twin of the first two rows: the operator with nothing behind it
-    // **is** reported, rc 1 (bash rc 2 — the message family of the accepted
-    // pair). `parse/pipeline.rs`'s `expected command after pipe`.
+    // **is** reported, rc 1 (bash rc 2 — the message family of the reported pair).
+    // `parse/pipeline.rs`'s `expected command after pipe`.
     for script in ["if true; then echo a |; fi", "if true; then echo a |\nfi"] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
@@ -1775,28 +1773,34 @@ fn a_dangling_cond_operator_in_an_if_body_is_measured() {
             "{script}: {err}"
         );
     }
-    // The same rule at **statement** level (#367): the trailing operator's empty
-    // part is the last part of the list, so the list ends with the rc of the
-    // command before it.
-    for (script, want) in [
-        ("echo a &&", "a\n"),
-        ("echo a ||", "a\n"),
-        ("echo a && ", "a\n"),
-        ("echo a && #c", "a\n"),
-        ("echo a && ; echo b", "a\nb\n"),
-        ("echo a || ; echo b", "a\nb\n"),
-        ("echo a || &&", "a\n"),
-        ("echo a || |", "a\n"),
+    // The rule at **statement** level, reported before the list runs.
+    for script in [
+        "echo a &&",
+        "echo a ||",
+        "echo a && ",
+        "echo a && #c",
+        "echo a && ; echo b",
+        "echo a || ; echo b",
+        "echo a || &&",
+        "echo a && ; echo b && echo c",
     ] {
         let (out, err, rc) = run(script);
-        assert_eq!(
-            (out.as_str(), rc),
-            (want, 0),
-            "{script}: bash rc 2, accepted divergence: {err}"
-        );
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
     }
-    // The boundary of any such fix: an operator at a physical-line end **continues**
-    // the list in bash, so these rows are parity and stay green.
+    // `echo a || |`: the `|` is a word, so the operator has a right side and this
+    // rule stays out of it — the pipe rule's family keeps its measured answer.
+    let (out, err, rc) = run("echo a || |");
+    assert_eq!((out.as_str(), rc), ("a\n", 0), "bash rc 2: {err}");
+    // What already ran, stays run: bash refuses the whole input (rc 2, nothing
+    // printed) while fdshell's report reaches one scan pass.
+    let (out, err, rc) = run("echo z; echo a &&");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("z\n", 1),
+        "bash prints nothing at rc 2: {err}"
+    );
+    // The boundary of any such rule: an operator at a physical-line end
+    // **continues** the list in bash, so these rows are parity and stay green.
     for (script, want) in [("echo a &&\necho b", "a\nb\n"), ("false ||\necho b", "b\n")] {
         let (out, err, rc) = run(script);
         assert_eq!(
@@ -1805,6 +1809,30 @@ fn a_dangling_cond_operator_in_an_if_body_is_measured() {
             "{script}: bash parity: {err}"
         );
     }
+}
+
+/// The end-of-input side through a **script file** (task #367): the file's last line
+/// ends on the operator, so bash stops at rc 2 and runs nothing, and fdshell reports
+/// its own message at rc 1. The stdin spelling of the same shape is the REPL's path,
+/// which reads it as interactive — `tests/repl.rs` pins the report there, at the
+/// REPL's own end-of-input exit code. Measured 2026-10-30 against bash 5.3.9.
+#[test]
+fn a_dangling_operator_at_the_end_of_a_script_file_reports() {
+    let dir = scratch("dangling-at-eof");
+    let path = dir.join("last-line.sh");
+    std::fs::write(&path, "echo a &&").unwrap();
+    let output = Command::new(BIN)
+        .arg(&path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
+    let stderr = str::from_utf8(&output.stderr).unwrap().to_string();
+    assert!(stdout.is_empty(), "bash prints nothing at rc 2: {stderr}");
+    assert_eq!(output.status.code().unwrap_or(-1), 1, "stderr={stderr}");
+    assert!(stderr.contains("expected command after"), "stderr={stderr}");
 }
 
 /// POSIX #2.9's AND-IF-TERMINATOR / OR-IF-TERMINATOR (task #492): the newline
@@ -1845,10 +1873,11 @@ fn a_line_ending_on_a_cond_operator_continues_the_list() {
         // that gates a short-circuited `||` chain.
         ("true ||\necho b &&\necho c", "", 0),
         // Not join points: `;` and end of input, where bash reports a syntax
-        // error (rc 2) and task #367 owns the report.
-        ("false &&\n; echo b", "b\n", 0),
+        // error (rc 2) and task #367's rule owns the report — fdshell's rc-1
+        // family, and nothing of the list runs.
+        ("false &&\n; echo b", "", 1),
         ("false &&\n", "", 1),
-        ("echo a && ; echo b", "a\nb\n", 0),
+        ("echo a && ; echo b", "", 1),
         // Quoted and escaped operator words are words, so no join; the escaped
         // row is task #496's (bash reads `b`, then `a &`).
         ("echo a \"&&\"\necho b", "a &&\nb\n", 0),

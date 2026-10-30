@@ -180,13 +180,15 @@ fn bash_parity_forms_stay_green() {
 }
 
 /// The shapes the rule must **not** reject: a cond-list with an empty **last
-/// part** (`if true && &`, `while : &`) is a non-empty condition — bash stops
-/// at rc 2 on those two, and they stay in fdshell's documented leniency family.
-/// A `for` word list and the arith clause are not conditions at all.
+/// part** is a non-empty condition — `while : &` stays in fdshell's documented
+/// leniency family (bash stops at rc 2 there). A `for` word list and the arith
+/// clause are not conditions at all. The `if true && &` row is no longer one of
+/// them: its empty last part sits behind an operator, and the cond layer reports
+/// that since task **#367** — at fdshell's rc 1, bash's rc 2, so the flag's run is
+/// never reached.
 #[test]
 fn the_neighbouring_leniencies_stay_green() {
-    let cases: [(&str, &str); 5] = [
-        ("if true && & then builtin echo a; fi", "a\n"),
+    let cases: [(&str, &str); 4] = [
         ("while : & do :; break; done", ""),
         // bash rc 0: an empty word list iterates zero times.
         ("for i in; do echo a; done", ""),
@@ -197,4 +199,7 @@ fn the_neighbouring_leniencies_stay_green() {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "`{script}` stderr: {err}");
     }
+    let (out, err, code) = run("if true && & then builtin echo a; fi");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command after"), "{err}");
 }

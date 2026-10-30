@@ -2972,11 +2972,13 @@ fn ampersand_terminated_condition_records_a_job_per_iteration() {
 }
 
 /// The flag is **inert** when the cond-list's last part is empty: `if true && &
-/// then` runs the `true` foreground, records no job, and takes the arm on the
-/// status the list left (measured rc 0, no job; bash rejects the shape rc 2 —
-/// the pre-existing leniency family). A mutant on the predicate's `&` arm that
-/// only flips this shape is equivalent to the flag's run-side empty-part guard
-/// (`cond/part.rs`), and this pin is the proof (task #356). The fully empty
+/// then` recorded no job and took the arm on the status the list left. Since task
+/// **#367** the shape reports first — the operator has no command behind it, and
+/// the cond layer bails before any part of the list runs (bash's rc 2, fdshell's
+/// rc-1 family) — so the flag's run is never reached and the job facts are the
+/// same: no job, no `$!`. A mutant on the predicate's `&` arm that only flips this
+/// shape is equivalent to the flag's run-side empty-part guard (`cond/part.rs`),
+/// and this pin is the proof (task #356). The fully empty
 /// condition (`if & then`, `if ; then`) is a parse error since task #299, so it
 /// is not a row here.
 #[test]
@@ -2984,7 +2986,11 @@ fn ampersand_terminated_condition_with_an_empty_last_part_records_no_job() {
     let script: &[u8] = b"if true && & then builtin true; fi";
     child_test(|| {
         let cell = make_cell();
-        run_script(script, &cell).unwrap();
+        let report = run_script(script, &cell);
+        let Some(err) = report.as_ref().err() else {
+            panic!("the dangling operator reports since task #367");
+        };
+        assert!(matches!(err.current_context(), CmdError::Parse), "{err:?}");
         let state = borrow_state(&cell);
         assert_eq!(state.jobs.anon_len(), 0, "no part to background");
         assert!(state.last_bg_pid.is_none(), "$! moved");

@@ -4378,8 +4378,8 @@ fn a_semicolon_split_line_joining_on_an_operator_keeps_each_runs_body() {
 /// `/dev/null` **and** with the harness's inherited stdin — no row here reads stdin).
 /// A comment tail of the operator survives the join, and a quoted newline inside a
 /// link stays a newline. The last row is the intersection with the end of input — an
-/// operator with nothing behind it, where bash reports rc 2 and task #367 owns the
-/// report; it stays at the accepted value the shape had before this rule.
+/// operator with nothing behind it, where bash reports rc 2 and task #367's rule
+/// reports at fdshell's rc 1, and a statement that already ran stays run.
 #[test]
 fn a_merge_chain_with_two_operators_is_one_statement() {
     for (script, want, rc) in [
@@ -4445,9 +4445,9 @@ fn a_merge_chain_with_two_operators_is_one_statement() {
         // A quoted newline inside a link stays a newline of that link's own word.
         ("cat <<B &&\nbody\nB\necho \"x\ny\"", "body\nx\ny\n", 0),
         // The end-of-input side: nothing behind the operator, so bash stops at rc 2
-        // (task #367's report) and fdshell runs the chain it has. Pinned at the
-        // measured accepted value, unchanged from before the rule.
-        ("echo a ; cat <<B &&\nbody\nB", "a\nbody\n", 0),
+        // and task **#367**'s report fires — at fdshell's rc 1, and only for the
+        // list it sees: the `echo a` before the `;` already ran and stays run.
+        ("echo a ; cat <<B &&\nbody\nB", "a\n", 1),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");

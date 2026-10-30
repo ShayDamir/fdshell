@@ -693,13 +693,42 @@ fn heredocs_on_both_sides_of_an_ampersand_span_their_lines() {
 
 /// The REPL keeps its own whitespace-tail rule (task #492, plan §4.4): the
 /// comment-tail spelling is complete input here, where bash buffers it, so this
-/// row executes at once and prints `b`. The scan-level rule that ignores comment
-/// text is pinned in `cond_blocks` (the script path prints nothing); two
+/// row executes at once — and since task **#367** the operator with nothing behind
+/// it reports at once too (fdshell's rc-1 message family; bash buffers the shape
+/// and answers rc 1 without printing, so its REPL prints nothing). The next line
+/// runs, so `b` prints and the REPL exits 0. The scan-level rule that ignores
+/// comment text is pinned in `cond_blocks` (the script path prints nothing); two
 /// granularities, one shape each, both pinned. Measured 2026-10-30.
 #[test]
 fn a_comment_tail_after_a_trailing_operator_is_complete_input() {
     let (out, err, code) = run_repl("false && #c\necho b\nexit\n");
     assert_eq!(code, 0, "stderr: {err:?}");
     assert!(out.contains("b"), "output: {out:?}");
-    assert!(!err.contains("parse error"), "stderr: {err:?}");
+    assert!(
+        err.contains("expected command after"),
+        "the dangling operator reports: {err:?}"
+    );
+}
+
+/// The REPL buffers a dangling operator (the shared walk says "keep reading", task
+/// #492), reaches the end of input, and running the buffer is where the report of
+/// task **#367** fires: fdshell's own message at rc 1, nothing of the list printed.
+/// The exit code is the REPL's own end-of-input answer, so only the report is this
+/// rule's; both are asserted with `contains` because the prompts make exact stdout
+/// unstable. Measured 2026-10-30 against bash 5.3.9 and this build.
+#[test]
+fn a_dangling_operator_at_the_end_of_the_repl_input_reports() {
+    let (out, err, code) = run_repl("echo a &&\n");
+    assert!(
+        err.contains("expected command after"),
+        "bash stops at rc 2: {err:?}"
+    );
+    assert!(
+        !out.contains("a\n"),
+        "the report fires before any part of the list runs: {out:?}"
+    );
+    assert_eq!(
+        code, 0,
+        "the REPL's own end-of-input answer; stderr: {err:?}"
+    );
 }

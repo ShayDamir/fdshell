@@ -995,8 +995,11 @@ fn a_conditional_records_one_job_per_iteration() {
 /// * a `&` on its **own line** behind the condition is the deferral family
 ///   (owner **#313**): fdshell accepts it and, since the slice ends in the `&`,
 ///   records the job;
-/// * an **empty** last part of the cond-list (`if true && &`) makes the flag
-///   inert — no part runs, no job. The fully empty **condition**
+/// * an **empty** last part of the cond-list (`if true && &`) reported nothing and
+///   recorded no job; since task **#367** it is the dangling-operator rule's — the
+///   operator has no command behind it, so the list reports at fdshell's rc 1
+///   (bash rc 2) and the flag is never consulted, which is why no job is recorded
+///   either way. The fully empty **condition**
 ///   (`if & then`, `if ; then`) is a parse error since task #299 (bash rc 2),
 ///   so it is no longer a row here;
 /// * `if true; & then` is the `; &` leniency (owner **#313**): the slice ends in
@@ -1007,7 +1010,6 @@ fn a_conditional_family_pins_the_measured_divergences() {
         "if { builtin echo g; } & then builtin echo x; fi",
         "if for i in 1; do builtin echo y; done & then builtin echo x; fi",
         "if false && true & then builtin echo x; else builtin echo f; fi",
-        "if true && & then builtin echo x; fi",
     ] {
         let out = run(&format!("{shape}\nbuiltin echo pid=$!; wait"));
         assert_eq!(rc(&out), 0, "shape {shape:?}");
@@ -1018,6 +1020,16 @@ fn a_conditional_family_pins_the_measured_divergences() {
             str::from_utf8(&out.stdout).unwrap_or_default()
         );
     }
+    // The empty-last-part shape, reported since task #367: the report fires before
+    // the flag's run, so the script dies there and no job record is produced (bash
+    // rc 2, fdshell rc 1).
+    let out = run("if true && & then builtin echo x; fi\nbuiltin echo pid=$!; wait");
+    assert_eq!(rc(&out), 1, "bash rc 2");
+    assert_eq!(
+        str::from_utf8(&out.stdout).unwrap_or_default(),
+        "",
+        "the report fires before the flag's run"
+    );
     // The compound condition prints in the parent, in order, where bash
     // backgrounds the whole compound (#352): `g` before `x`.
     let out = run("if { builtin echo g; } & then builtin echo x; fi\nwait");
@@ -1045,15 +1057,21 @@ fn a_conditional_family_pins_the_measured_divergences() {
 
 /// The plain `&` boundary of task #492: `&` is a list terminator, not an operator,
 /// so a line ending on it is not a join point (task #326), and an async split
-/// behind a line-ending operator keeps the preflight's granularity (bash reports
-/// a syntax error, rc 2 — the accepted family of #326/#352/#353/#360). Measured
-/// 2026-10-30 against bash 5.3.9 and this build.
+/// behind a line-ending operator keeps the preflight's granularity — the operator's
+/// own report (task **#367**) fires before anything of the list runs, at fdshell's
+/// rc 1 where bash reports a syntax error rc 2 (the accepted family of
+/// #326/#352/#353/#360 is what the plain-`&` row stays in). Measured 2026-10-30
+/// against bash 5.3.9 and this build.
 #[test]
 fn a_line_ending_on_the_plain_ampersand_does_not_join() {
     let out = run("false &\necho b");
     assert_eq!(lines(&out), vec!["b".to_string()]);
     assert_eq!(rc(&out), 0);
-    let out = run("echo a &&\n& echo b");
-    assert_eq!(lines(&out), vec!["a".to_string(), "b".to_string()]);
-    assert_eq!(rc(&out), 0, "bash rc 2: the accepted family named above");
+    // The `&` is not a join point, and the operator behind the line's end reports
+    // before the async split runs: bash prints nothing at rc 2.
+    for script in ["echo a &&\n& echo b", "echo a && &"] {
+        let out = run(script);
+        assert_eq!(lines(&out), Vec::<String>::new(), "script {script:?}");
+        assert_eq!(rc(&out), 1, "script {script:?}: bash rc 2");
+    }
 }

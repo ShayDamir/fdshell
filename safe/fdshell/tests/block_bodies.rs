@@ -340,70 +340,68 @@ fn ampersand_only_body_is_not_an_empty_body() {
     }
 }
 
-/// Task #358, the non-`if` half of the family: a body that **ends in a dangling
-/// `&&`/`||`** runs at rc 0 where bash stops at rc 2. This is neither the
+/// Task #367, the non-`if` half of the family: a body that **ends in a dangling
+/// `&&`/`||`** is a parse error — the cond layer reports
+/// `expected command after '&&'` / `'||'` and runs **nothing of the list**, at
+/// fdshell's shell-wide rc 1 where bash stops at rc 2. This is neither the
 /// empty-body rule of this file nor the closer rule of `tests/block_closers.rs`
 /// (which answers only the closer's *predecessor* question, and behind a
-/// newline's `;` token the predecessor is legal): the body's own cond list
-/// splits at the trailing operator and `cond/part.rs::run_part` answers the
-/// empty part behind it with `Ok(None)`. Each row names the task that owns its
-/// rule — the cond-list rule of **#367** (an operator with no command behind it,
-/// at a `;`/newline or at end of input), the stray `;;` rule of **#423**, the
-/// function body's missing terminator before `}` of **#424**, and the list
-/// continuation of **#492** (an operator at a physical-line end continues the
-/// list in bash, which fdshell does not implement).
+/// newline's `;` token the predecessor is legal): the body's own cond list is the
+/// layer that sees it. Each row names the rule that owns its value — the `;;`
+/// rows reach the report through **#423**, and the function body's missing
+/// terminator before `}` is **#424**'s; the list continuation of **#492** (an
+/// operator at a physical-line end continues the list in bash) owns the one row
+/// below that stays at bash's value.
 ///
-/// Every row measured 2026-10-28 against bash 5.3.9, fdshell on `master`
-/// `f8f2cbab`. The rc-0 rows are a **measured acceptance**: the owner flips them
-/// deliberately. Two rows are the boundary a fix must not cross: the `&` twin is
-/// bash **parity** (a `&` is a list terminator, not an operator), and
-/// `false &&` + newline + `echo b` is the continuation gap of **#492** (bash
-/// runs nothing, rc 1), not the trailing-operator rule's.
+/// Every row measured 2026-10-30 against bash 5.3.9 and this build. Two rows are
+/// the boundary the rule must not cross: the `&` twin is bash **parity** (a `&` is
+/// a list terminator, not an operator), and the loop row whose body never runs
+/// never reports, because nothing of an unrun body is parsed — bash stops at rc 2.
 #[test]
 fn a_dangling_cond_operator_before_a_block_closer_is_measured() {
-    // The loop rows run under the bounded child: a mis-paired closer is a hang.
-    for (script, want) in [
-        // The newline's `;` closes the statement, so the closer rule passes and
-        // the body's list ends on the operator (#367 + #492's continuation).
-        ("for i in 1; do echo a ||\ndone", "a\n"),
-        ("for i in 1; do echo a &&\ndone", "a\n"),
-        // The `;` behind the operator is #367's alone: the body's list ends with
-        // `echo a`'s status, and the loop stops.
-        ("while false; do echo a || ;\ndone", ""),
+    // The newline's `;` closes the statement, so the closer rule passes and the
+    // body's list reports.
+    for script in [
+        "for i in 1; do echo a ||\ndone",
+        "for i in 1; do echo a &&\ndone",
     ] {
         let (out, err, rc) = run_bounded(script);
         assert_eq!(
             (out.as_str(), rc),
-            (want, 0),
-            "{script}: bash rc 2, accepted divergence: {err}"
+            ("", 1),
+            "{script}: bash rc 2, reported since task #367: {err}"
         );
     }
+    // An **unrun** body never parses, so no report happens: the loop body is
+    // skipped whole and the loop ends at rc 0 where bash stops at rc 2.
+    let (out, err, rc) = run_bounded("while false; do echo a || ;\ndone");
+    assert_eq!((out.as_str(), rc), ("", 0), "bash rc 2: {err}");
     // The plain `&` behind the body is a list **terminator**, so the closer rule
     // accepts it and the loop body runs in the background: bash parity, and
     // #354's rule, pinned here for stdout/rc only.
     let (out, err, rc) = run_bounded("while false; do echo a &\ndone");
     assert_eq!((out.as_str(), rc), ("", 0), "bash parity: {err}");
-    for (script, want) in [
-        // The group: the closer rule passes for the same reason (#367).
-        ("{ echo a ||\n}", "a\n"),
-        ("{ echo a ||; }", "a\n"),
+    for script in [
+        // The group: the closer rule passes for the same reason.
+        "{ echo a ||\n}",
+        "{ echo a ||; }",
         // A function-definition body needs no terminator before `}` at all
         // (#424), so the glued pair reaches the body's list directly.
-        ("f() { echo a || }; f", "a\n"),
-        ("f() { echo a && }; f", "a\n"),
-        ("f() { echo a ||; }; f", "a\n"),
-        ("f() { echo a ||\n}; f", "a\n"),
+        "f() { echo a || }; f",
+        "f() { echo a && }; f",
+        "f() { echo a ||; }; f",
+        "f() { echo a ||\n}; f",
         // A `case` arm body behind the operator (`;;` is #423's, the `;` #367's).
-        ("case x in x) echo a || ;; esac", "a\n"),
-        ("case x in x) echo a && ;; esac", "a\n"),
-        ("case x in x) echo a ||\n;; esac", "a\n"),
-        ("case x in x) echo a ||; esac", "a\n"),
+        "case x in x) echo a || ;; esac",
+        "case x in x) echo a && ;; esac",
+        "case x in x) echo a ||\n;; esac",
+        "case x in x) echo a ||; esac",
     ] {
         let (out, err, rc) = run(script);
         assert_eq!(
             (out.as_str(), rc),
-            (want, 0),
-            "{script}: bash rc 2, accepted divergence: {err}"
+            ("", 1),
+            "{script}: bash rc 2, reported since task #367: {err}"
         );
     }
     // Task #492's row: the operator and its newline are one token, so the list

@@ -1404,8 +1404,9 @@ fn ampersand_then_semicolon_in_a_loop_body_runs_nothing() {
 /// the `&` in a body: `&|` and `& &` are invalid splits that run nothing
 /// (bash rc 2, fdshell rc 1). The `&& ;` row is the **dangling-pair** family
 /// of task #358: the tokenizer's `&&` is one word, not the plain `&`, the
-/// `;` trims off the body slice, and the body's scan runs the dangling pair's
-/// left side — pin-as-measured rc 0 where bash stops with rc 2.
+/// `;` trims off the body slice — and since task **#367** the body's own cond
+/// list reports the operator with nothing behind it, so nothing runs, at
+/// fdshell's rc 1 (bash rc 2).
 #[test]
 fn ampersand_pair_forms_in_a_loop_body_are_their_own_families() {
     for script in [
@@ -1416,11 +1417,7 @@ fn ampersand_pair_forms_in_a_loop_body_are_their_own_families() {
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
     }
     let (out, _err, rc) = run_bounded("for i in 1; do echo a && ; done");
-    assert_eq!(
-        (out.as_str(), rc),
-        ("a\n", 0),
-        "bash rc 2: #358's dangling pair"
-    );
+    assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2: #367's report");
 }
 
 /// A `&`-terminated loop **condition** is one background job per condition
