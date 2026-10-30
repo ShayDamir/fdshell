@@ -58,7 +58,10 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
 /// The flush empties the book's runs, and stamps them with its mid-run flag and
 /// its join flag: an unclosed mid-run construct resumes at the end of input, so
 /// the whole physical line stays unfinished and every run of the flush is stamped
-/// (task #294).
+/// (task #294). The join flag goes on the flush's **last** run — the run whose own
+/// text ended on the operator's terminator, the one the decision was made for —
+/// and the `;`-separated runs ahead of it keep their own `(text, bodies)` pair
+/// (task #492).
 ///
 /// Runs buffered from an **earlier physical line** — the flush was deferred past
 /// the line's newline by a line-opening `&` (`bg::async_ahead`), or the run
@@ -75,10 +78,10 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
 /// the run is flushed on the line it opened on and claims that line's region
 /// stream like any single-line run (task #295). A run joined across a newline
 /// (task #492) is the exception: its window spans every physical line the run
-/// runs over, so a region that **starts inside the run's span** stays inline in
-/// its bytes (extension mode, nothing claimed — the parse layer reads the inline
-/// body), while a region at or after the run's end is attached in operator order
-/// as today.
+/// runs over, and the run joins only when that window claims **no** region at all
+/// (extension mode, nothing claimed). A line that claims one keeps its own segment
+/// with its own bodies, the run the decision was made for carries the mark, and the
+/// runner concatenates the chain (`script/merge.rs`).
 pub(crate) fn flush_line<'a>(
     book: &mut Book<'a>,
     line: &[u8],
@@ -108,7 +111,12 @@ pub(crate) fn flush_line<'a>(
         .first()
         .map(|run| heredoc::operator_count(line, line_start, run.off))
         .unwrap_or(0);
-    for run in runs.drain(..) {
+    // The flag belongs to the run the decision was made for — the one whose own
+    // text ends on the terminator, which is the flush's last run. A `;`-separated
+    // run ahead of it keeps its own `(text, bodies)` pair and its own statement
+    // (task #492): the join never reaches back over a `;`.
+    let last = runs.len();
+    for (index, run) in runs.drain(..).enumerate() {
         let n = heredoc::operator_count(line, run.off, run.off + run.bytes.len());
         let run_bodies: Vec<Vec<u8>> = bodies.iter().skip(assigned).take(n).cloned().collect();
         assigned += n;
@@ -118,7 +126,7 @@ pub(crate) fn flush_line<'a>(
             bodies: run_bodies,
             background: run.background,
             midrun_open,
-            join_next,
+            join_next: join_next && index + 1 == last,
         });
     }
     resume

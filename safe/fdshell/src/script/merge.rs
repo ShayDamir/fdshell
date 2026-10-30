@@ -2,7 +2,7 @@
 //!
 //! POSIX #2.9 reads `&&`/`||` plus its newline as one token, so the list
 //! continues onto the next physical line and the scanner joins the run there
-//! (`segment.rs`). A run whose own command line wrote a `<<` is the exception:
+//! (`segment.rs`). A physical line that claims a body region is the exception:
 //! its body is a region on the lines below, and the region text cannot be both
 //! inline in the run's bytes and attached in operator order (LESSONS: "A heredoc
 //! body is a property of the logical line, not of a contiguous span"), so the

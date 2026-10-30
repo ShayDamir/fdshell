@@ -226,3 +226,25 @@ fn flush_stamps_the_books_midrun_flag() {
         assert_eq!(stamps(&book), vec![flag, flag], "flag {flag}");
     }
 }
+
+/// The join mark rides on the flush's **last** run — the run whose own text ends
+/// on the operator's terminator, the one the decision was made for (task #492). A
+/// `;`-separated run ahead of it keeps its own `(text, bodies)` pair, so the runner
+/// folds only the terminator run with the segments below it.
+#[test]
+fn flush_line_stamps_only_the_run_the_join_decision_made_for() {
+    //   e c h o   a  ;  c a t   < < B  && \n b o d y \n B \n e c h o   t a i l
+    //   0          7  9        16 17 18  19
+    let line = b"echo a ; cat <<B &&\nbody\nB\necho tail";
+    let mut book = book_with(vec![run(b"echo a", 0), run(b"cat <<B &&", 9)]);
+    book.join_next = true;
+    flush_line(&mut book, line, 0, 19);
+    assert_eq!(book.segments.len(), 2);
+    for (index, want) in [(0, false), (1, true)] {
+        match &book.segments[index] {
+            Segment::Statement { join_next, .. } => assert_eq!(*join_next, want),
+            Segment::Block { .. } => panic!("expected Statement"),
+            Segment::AsyncInvalid => panic!("expected Statement"),
+        }
+    }
+}

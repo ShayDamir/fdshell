@@ -112,11 +112,12 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         // the join point is the newline that ends the comment. `;`, end of
         // input, a lone `|` and the plain `&` are not join points.
         //
-        // A run that wrote a `<<` is the exception: its body is a region on the
-        // lines below, and the region text cannot be both inline in the run's
-        // bytes and attached in operator order, so the physical lines keep their
-        // own segments (each with its own bodies) and `script/merge.rs` joins
-        // them in the runner.
+        // A physical line that claims a body region is the exception: its body is
+        // a region on the lines below, and the region text cannot be both inline in
+        // the run's bytes and attached in operator order, so the physical lines keep
+        // their own segments (each with its own bodies) and `script/merge.rs` joins
+        // them in the runner. The mark rides on the run the decision was made for —
+        // the flush's last run — never on a `;`-separated run flushed beside it.
         match join::decision(line, &book, &kind) {
             join::Decision::Join(nl) => {
                 book.i = skip_comment(line, nl);

@@ -18,20 +18,24 @@ pub(super) enum Decision {
     /// Not a join point: the run is flushed here, as before.
     Flush,
     /// The operator's terminator: the run is not flushed and the next physical
-    /// line joins the same run; `at` is the newline to step over.
+    /// line joins the same run; `at` is the newline to step over. The joined run's
+    /// text is the whole contiguous span, so nothing of the line below it may be
+    /// claimed as a body (see [`Decision::Merge`]).
     Join(usize),
-    /// The same terminator, but the run's own command line wrote a `<<` whose
-    /// body is a region on the lines below: the region text cannot be both inline
-    /// in the run's bytes and attached in operator order (LESSONS: "A heredoc
-    /// body is a property of the logical line, not of a contiguous span"), so
-    /// every physical line keeps its own segment, each with its own bodies, and
-    /// the runner concatenates them — `script/merge.rs`.
+    /// The same terminator, but the physical line the boundary ends claims a body
+    /// region on the lines below — its `<<` stands in this run's own text or in a
+    /// `;`-separated run ahead of it. The region text cannot be both inline in the
+    /// run's bytes and attached in operator order (LESSONS: "A heredoc body is a
+    /// property of the logical line, not of a contiguous span"), so every physical
+    /// line keeps its own segment, each with its own bodies, and the runner
+    /// concatenates them — `script/merge.rs`.
     Merge,
 }
 
-/// The decision at the boundary `kind` at `book.i`, read on the run's text up to
-/// that boundary (comment text is not a token, so the comment arm reads the
-/// predicate before the `#` and the join point is the newline that ends it).
+/// The decision at the boundary `kind` at `book.i`: the predicate is read on the
+/// text up to that boundary (comment text is not a token, so the comment arm reads
+/// it before the `#` and the join point is the newline that ends it), and the body
+/// region the physical line claims decides `Join` from `Merge`.
 pub(super) fn decision(line: &[u8], book: &Book<'_>, kind: &Boundary) -> Decision {
     let nl = match *kind {
         Boundary::Separator => (line.get(book.i) == Some(&b'\n')).then_some(book.i),
@@ -46,7 +50,7 @@ pub(super) fn decision(line: &[u8], book: &Book<'_>, kind: &Boundary) -> Decisio
     if !last_op::ends_on_operator(line, book.i) {
         return Decision::Flush;
     }
-    if heredoc::operator_count(line, book.start, book.i) == 0 {
+    if heredoc::operator_count(line, book.line_start, book.i) == 0 {
         Decision::Join(nl)
     } else {
         Decision::Merge

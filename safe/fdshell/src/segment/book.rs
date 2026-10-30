@@ -43,7 +43,8 @@ pub(super) struct Book<'a> {
     /// Set when a run ends on the operator's terminator (POSIX #2.9, task #492)
     /// and [`crate::segment::join`] hands the join to the runner: the run that
     /// flushes here keeps its own bodies and the segments below it belong to the
-    /// same statement. Read once, by the flush it stamps, and reset.
+    /// same statement. Read once, by the flush it stamps, and reset — and the
+    /// flush stamps **that run only**, never a `;`-separated run flushed with it.
     pub(super) join_next: bool,
 }
 

@@ -66,3 +66,22 @@ fn a_run_that_wrote_a_heredoc_goes_to_the_runner() {
         Decision::Merge
     ));
 }
+
+/// The same exception one step further: the `<<` stands in the `;`-separated run
+/// **ahead** of the one that ends on the terminator, so the physical line claims a
+/// region and the flush keeps its per-line segments — and the mark rides on the
+/// joining run alone (`segment/line.rs`, `script/merge.rs`).
+#[test]
+fn a_region_claimed_by_an_earlier_run_of_the_line_goes_to_the_runner() {
+    //   c a t   < < B  ;  e c h o   a  && \n b o d y \n B \n e c h o   t a i l
+    //   0          8  10        15 17 18  19
+    let line = b"cat <<B ; echo a &&\nbody\nB\necho tail";
+    let mut book = Book::new();
+    book.line_start = 0;
+    book.start = 10;
+    book.i = first(line, &Boundary::Separator);
+    assert!(matches!(
+        decision(line, &book, &Boundary::Separator),
+        Decision::Merge
+    ));
+}
