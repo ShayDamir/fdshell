@@ -85,7 +85,10 @@ fn word_span(line: &[u8], j: usize, to: usize) -> usize {
 /// scanner", and `scan/advance.rs::advance` consumes `$(` for every scanner that
 /// shares it). `to` bounds the region: a closer past the window end is not this
 /// word's closer, and an unbalanced region returns `None` so the walk stays byte
-/// at a time — the fallback every region scanner uses for unbalanced input.
+/// at a time — the fallback every region scanner uses for unbalanced input. No
+/// script reaches that arm: a here-doc word whose `$( ` is never closed is a parse
+/// error in both shells (bash `unexpected EOF while looking for matching ')'`,
+/// fdshell `unexpected end of input`), so the arm is a guard, unpinned on purpose.
 fn substitution_span(line: &[u8], j: usize, to: usize) -> Option<usize> {
     if line.get(j) != Some(&b'$') || line.get(j + 1) != Some(&b'(') {
         return None;

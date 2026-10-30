@@ -5872,8 +5872,11 @@ the walk stepped byte at a time and stopped at the `)` closing the region, so th
 word read as `$(x`, its own terminator line could never match, and everything from
 the terminator's newline onward was dropped — the tail after the terminator never
 ran (`set -x` shows the here-doc command run and the script end). An unbalanced
-region is not a region: the walk falls back to byte-at-a-time and the word ends at
-the window end, so `cat <<$` delimits a lone `$`.
+region is not a region: the walk falls back to byte at a time, so `cat <<$` delimits
+a lone `$`. The arm where the scan finds no closer inside the window is a **guard**
+no input reaches — a here-doc word whose `$( ` is never closed is a parse error in
+both shells (bash `unexpected EOF while looking for matching ')'`, fdshell
+`unexpected end of input`) — so it is unpinned on purpose.
 
 The block half of the same shape: extension mode must own the **whole** terminator
 line. `safe/fdshell/src/parse/part_text.rs::owned_span` widens the verbatim span to
