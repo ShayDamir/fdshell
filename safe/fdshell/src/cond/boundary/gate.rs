@@ -2,7 +2,7 @@
 //! byte just past the `;` that ends the gated AND-list.
 
 use crate::keywords::{Pairing, Place};
-use crate::scan::{ScanState, comment_end};
+use crate::scan::{ScanState, comment_end, last_op};
 use crate::segment::group::opens_at;
 
 use super::{
@@ -73,7 +73,12 @@ pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize
                 continue;
             }
             if b == b'\n' || b == b';' {
-                if group_depth == 0 && !pairing.is_open() {
+                // POSIX #2.9's AND-IF-TERMINATOR (task #492): a newline behind a
+                // top-level `&&`/`||` is part of the operator token, so it does
+                // not end the gated list either — the gate spans it exactly as it
+                // spans the same-line spelling. A `;` still ends it.
+                let terminator = b == b'\n' && last_op::ends_on_operator(line, i);
+                if group_depth == 0 && !pairing.is_open() && !terminator {
                     return i + 1;
                 }
                 // A `;` inside a block still resets the gate's run: each

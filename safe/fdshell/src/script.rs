@@ -8,6 +8,7 @@ use crate::state::ShellState;
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
+mod merge;
 mod unclosed;
 
 pub(crate) fn run_script(
@@ -28,8 +29,8 @@ pub(crate) fn run_script(
             Report::new(ParseError::UnexpectedChar { ch: b'&' }).change_context(CmdError::Parse)
         );
     }
-    for segment in segments {
-        match segment {
+    for unit in merge::units(&segments) {
+        match unit.segment {
             Segment::Statement {
                 cmd,
                 off,
@@ -40,11 +41,22 @@ pub(crate) fn run_script(
                 // diagnostic and its rc (tasks #232/#236), so the script
                 // runner runs the buffer as written (task #294).
                 midrun_open: _,
+                // The join flag is read by `merge::units` before the loop.
+                join_next: _,
             } => {
-                crate::verbose::trace(line.get(off..off + cmd.len()).unwrap_or(b""), cell);
-                let part = sub(text, off, cmd.len())?;
+                // A statement whose list a here-doc region split runs as the
+                // joined statement `script/merge.rs` built for it.
+                let (bytes, bodies, background) = match &unit.joined {
+                    Some(joined) => (joined.text.as_slice(), &joined.bodies, joined.background),
+                    None => (*cmd, bodies, *background),
+                };
+                crate::verbose::trace(bytes, cell);
+                let part = match &unit.joined {
+                    Some(joined) => merge::text_at(&joined.text, *off, text)?,
+                    None => sub(text, *off, bytes.len())?,
+                };
                 if let Some(control) =
-                    crate::cond::run_cond_list(&part, &bodies, cell, false, background)?
+                    crate::cond::run_cond_list(&part, bodies, cell, false, background)?
                 {
                     return Ok(Some(control));
                 }
@@ -58,12 +70,12 @@ pub(crate) fn run_script(
                 if !closed {
                     // Named, not bare: `'if' is missing its closing 'fi'` with
                     // the caret under the opener (task #277, STYLE §4.7).
-                    return Err(unclosed::report(line, block_start));
+                    return Err(unclosed::report(line, *block_start));
                 }
-                let raw = line.get(block_start..end_pos).unwrap_or(b"");
+                let raw = line.get(*block_start..*end_pos).unwrap_or(b"");
                 crate::verbose::trace(raw.trim_ascii(), cell);
                 let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-                let cmd_start = block_start + lead;
+                let cmd_start = *block_start + lead;
                 // The block's text is its **command** bytes only, and its body
                 // bytes travel as `run_cond_list`'s bodies exactly like a
                 // statement's (task #234): `cond::parts::take_bodies` gives the
@@ -75,7 +87,7 @@ pub(crate) fn run_script(
                 // A block statement's own `&` runs it foreground (measured
                 // divergence, task #326 — compound background is a follow-up).
                 if let Some(control) =
-                    crate::cond::run_cond_list(&full, &bodies, cell, false, false)?
+                    crate::cond::run_cond_list(&full, bodies, cell, false, false)?
                 {
                     return Ok(Some(control));
                 }

@@ -40,6 +40,11 @@ pub(super) struct Book<'a> {
     /// resumes at the end of input, so it is the last thing the scan sees and
     /// the flush it stamps is the line's last one.
     pub(super) midrun_open: bool,
+    /// Set when a run ends on the operator's terminator (POSIX #2.9, task #492)
+    /// and [`crate::segment::join`] hands the join to the runner: the run that
+    /// flushes here keeps its own bodies and the segments below it belong to the
+    /// same statement. Read once, by the flush it stamps, and reset.
+    pub(super) join_next: bool,
 }
 
 impl<'a> Book<'a> {
@@ -55,6 +60,7 @@ impl<'a> Book<'a> {
             runs: Vec::new(),
             sep_since_run: false,
             midrun_open: false,
+            join_next: false,
         }
     }
 

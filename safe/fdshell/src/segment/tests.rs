@@ -1544,6 +1544,7 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
                 bodies: head_bodies,
                 background: head_bg,
                 midrun_open: head_mid,
+                join_next: _,
             },
             Segment::Statement {
                 cmd: tail,
@@ -1551,6 +1552,7 @@ fn scan_ampersand_separated_heredocs_share_one_body_stream() {
                 bodies: tail_bodies,
                 background: tail_bg,
                 midrun_open: tail_mid,
+                join_next: _,
             },
         ) => {
             assert_eq!(head, b"cat <<A");
@@ -1600,6 +1602,7 @@ fn scan_substitution_region_at_a_run_start_is_a_statement() {
                 bodies,
                 background: bg,
                 midrun_open: mid,
+                join_next: _,
             } => {
                 assert_eq!(*got, cmd, "{line:?} is one statement");
                 assert_eq!(*off, 0, "{line:?}");
@@ -1811,12 +1814,17 @@ fn a_comment_terminated_line_flushes_its_runs_and_jumps_its_regions() {
 
 /// A physical line that ends on a top-level `&&`/`||` is POSIX #2.9's
 /// AND-IF-TERMINATOR: the run is not flushed there, so the joined list is one
-/// statement whose bytes span the newline (task #492).
+/// statement whose bytes span the newline (task #492). A word-start `#` comment
+/// reads the same rule with its own window (comment text is not a token), and a
+/// run whose own command line wrote a `<<` is the exception: the region text
+/// cannot be both inline and attached, so each physical line keeps its segment
+/// (each with its own body) and `script/merge.rs` joins them in the runner.
 #[test]
 fn scan_a_line_ending_on_a_cond_operator_joins_the_next_line() {
     for line in [
         b"false &&\necho b".as_slice(),
         b"true ||\necho b".as_slice(),
+        b"echo a && #c\necho b".as_slice(),
     ] {
         let segments = scan_segments(line, false);
         assert_eq!(segments.len(), 1, "{:?}", line);
@@ -1829,6 +1837,18 @@ fn scan_a_line_ending_on_a_cond_operator_joins_the_next_line() {
                 assert!(bodies.is_empty(), "{:?}", line);
             }
             _ => panic!("expected one statement, {:?}", line),
+        }
+    }
+    // The `<<` exception: two statements, each owning its own line and body.
+    let shape = b"echo a <<B &&\nbody\nB\necho b";
+    let segments = scan_segments(shape, false);
+    assert_eq!(segments.len(), 2, "the region line keeps its own segment");
+    for segment in &segments {
+        match segment {
+            Segment::Statement { cmd, bodies, .. } => {
+                assert!(bodies.is_empty() != cmd.ends_with(b"&&"), "{cmd:?}");
+            }
+            _ => panic!("expected statements, {:?}", shape),
         }
     }
 }

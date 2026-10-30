@@ -2,9 +2,10 @@ mod bg;
 mod block;
 pub(super) mod book;
 pub(crate) mod group;
+mod join;
 mod line;
 
-use crate::scan::{Boundary, boundary, last_op};
+use crate::scan::{Boundary, boundary, skip_comment};
 use alloc::vec::Vec;
 use book::{Book, Run};
 
@@ -15,7 +16,9 @@ pub(crate) enum Segment<'a> {
     /// has no heredoc), the plain-`&` flag marking its **last** run to
     /// run asynchronously (`background`, task #326), and the flag saying one
     /// of its runs opens a mid-run construct whose closer never arrived
-    /// (`midrun_open`, task #294).
+    /// (`midrun_open`, task #294), and whether its text ends on the operator's
+    /// terminator so that the segments below it belong to the same statement
+    /// (`join_next`, task #492).
     Statement {
         cmd: &'a [u8],
         off: usize,
@@ -27,6 +30,11 @@ pub(crate) enum Segment<'a> {
         /// signal (task #294) and inert for the script runner, whose parse
         /// layer owns the missing-closer diagnostic.
         midrun_open: bool,
+        /// The run's own command line wrote a `<<` and ended on the operator's
+        /// terminator (POSIX #2.9), so its body is a region on the lines below
+        /// and the runner concatenates it with the segments it continues onto
+        /// (`script/merge.rs`, task #492).
+        join_next: bool,
     },
     /// A plain `&` whose split is invalid (nothing to terminate, `;`-separated
     /// target, or a `;`/`|`/`&` peek behind it — bash's "syntax error, nothing
@@ -98,12 +106,24 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
         // here and the next physical line joins the same run. The word-state
         // reset above still applies (the next line starts a new word), and
         // `book.start`/`line_start` stay, so the flush's region window covers
-        // every physical line the run spans. The comment arm applies the same
-        // rule (`line::end_comment`); `;`, end of input, a lone `|` and the
-        // plain `&` are not join points.
-        if line.get(book.i) == Some(&b'\n') && last_op::ends_on_operator(line, book.i) {
-            book.i += 1;
-            continue;
+        // every physical line the run spans. A word-start `#` reads the same
+        // rule with its own window: comment text is not a token (bash's lexer
+        // discards it), so the predicate is read on the text before the `#` and
+        // the join point is the newline that ends the comment. `;`, end of
+        // input, a lone `|` and the plain `&` are not join points.
+        //
+        // A run that wrote a `<<` is the exception: its body is a region on the
+        // lines below, and the region text cannot be both inline in the run's
+        // bytes and attached in operator order, so the physical lines keep their
+        // own segments (each with its own bodies) and `script/merge.rs` joins
+        // them in the runner.
+        match join::decision(line, &book, &kind) {
+            join::Decision::Join(nl) => {
+                book.i = skip_comment(line, nl);
+                continue;
+            }
+            join::Decision::Merge => book.join_next = true,
+            join::Decision::Flush => {}
         }
 
         let raw = line.get(book.start..book.i).unwrap_or(b"");

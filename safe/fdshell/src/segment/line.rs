@@ -32,16 +32,6 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
     // The flush window ends at the comment's own newline, so the comment's
     // bytes are never read as operators.
     let nl = scan::comment_end(line, book.i);
-    // POSIX #2.9's AND-IF-TERMINATOR is an operator **plus its newline**, read
-    // here at the comment's word start (task #492): the comment text is not a
-    // token, so a run whose last token is a top-level `&&`/`||` stays open and
-    // the next physical line joins it. A comment with no newline behind it ends
-    // the input, and the rule that owns a trailing operator with an empty operand
-    // stands.
-    if nl < line.len() && scan::last_op::ends_on_operator(line, book.i) {
-        book.i = scan::skip_comment(line, nl);
-        return;
-    }
     let deferred = line.get(nl) == Some(&b'\n') && bg::async_ahead(line, nl);
     book.i = nl;
     // `skip_comment` is the newline's successor: the next physical line's
@@ -65,30 +55,30 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
 /// resume index (the end of the last claimed region — the text end when a
 /// missing delimiter line claimed the rest of the stream — or the line end). A
 /// block's condition bodies are handled by the block-text parse, not here.
-/// The flush empties the book's runs, and stamps them with its mid-run flag:
-/// an unclosed mid-run construct resumes at the end of input, so the whole
-/// physical line stays unfinished and every run of the flush is stamped
+/// The flush empties the book's runs, and stamps them with its mid-run flag and
+/// its join flag: an unclosed mid-run construct resumes at the end of input, so
+/// the whole physical line stays unfinished and every run of the flush is stamped
 /// (task #294).
 ///
-/// Runs buffered from an **earlier physical line** — the flush was deferred
-/// past the line's newline by a line-opening `&` (`bg::async_ahead`) — are
-/// emitted body-less: a run of an earlier line must never index *this* line's
-/// region list, and the run's own line is unidentifiable once `line_start` has
-/// moved, so the `single_line` arm below is the total-function defense. A
-/// trailing `#` comment no longer reaches here: [`end_comment`] ends the
-/// physical line and flushes its runs **on** it, because a `#`-terminated line
-/// owns its body stream (task #333 — bash reads the body after the logical
-/// line, comment included) — unless the run stays open on a trailing operator
-/// (task #492), which is the multi-line case below. The rule is *not* about a run whose own text spans
-/// several physical lines: a keyword block opened mid-run keeps its bytes
-/// inside the run (task #232) and never moves `line_start`, so the run is
-/// flushed on the line it opened on and claims that line's region stream like
-/// any single-line run (task #295) — and a cond-list run joined across a
-/// newline by a trailing `&&`/`||` (task #492) is the same shape: the window
-/// spans every physical line it runs over, so a region that **starts inside the
-/// run's span** is already part of its bytes (extension mode, nothing claimed —
-/// the parse layer reads the inline body), while a region at or after the run's
-/// end is attached in operator order as today.
+/// Runs buffered from an **earlier physical line** — the flush was deferred past
+/// the line's newline by a line-opening `&` (`bg::async_ahead`), or the run
+/// stayed open across a newline because its last token is a top-level `&&`/`||`
+/// (POSIX #2.9's AND-IF-TERMINATOR, task #492) — are emitted body-less: a run of
+/// an earlier line must never index *this* line's region list, and the run's own
+/// line is unidentifiable once `line_start` has moved, so the `single_line` arm
+/// below is the total-function defense. A trailing `#` comment no longer reaches
+/// here: [`end_comment`] ends the physical line and flushes its runs **on** it,
+/// because a `#`-terminated line owns its body stream (task #333 — bash reads the
+/// body after the logical line, comment included). The rule is *not* about a run
+/// whose own text spans several physical lines: a keyword block opened mid-run
+/// keeps its bytes inside the run (task #232) and never moves `line_start`, so
+/// the run is flushed on the line it opened on and claims that line's region
+/// stream like any single-line run (task #295). A run joined across a newline
+/// (task #492) is the exception: its window spans every physical line the run
+/// runs over, so a region that **starts inside the run's span** stays inline in
+/// its bytes (extension mode, nothing claimed — the parse layer reads the inline
+/// body), while a region at or after the run's end is attached in operator order
+/// as today.
 pub(crate) fn flush_line<'a>(
     book: &mut Book<'a>,
     line: &[u8],
@@ -98,6 +88,9 @@ pub(crate) fn flush_line<'a>(
     // No runs to emit: the line's body regions (if any) belong to the block
     // the caller is about to scan, not to a statement — claim nothing.
     let mut runs = core::mem::take(&mut book.runs);
+    // The join flag belongs to the run that ended on the operator's terminator,
+    // and this is the flush that stamps it (task #492).
+    let join_next = core::mem::replace(&mut book.join_next, false);
     if runs.is_empty() {
         return line_end;
     }
@@ -125,6 +118,7 @@ pub(crate) fn flush_line<'a>(
             bodies: run_bodies,
             background: run.background,
             midrun_open,
+            join_next,
         });
     }
     resume
