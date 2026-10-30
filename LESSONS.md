@@ -5860,3 +5860,42 @@ it; deleting a helper (`is_token_byte`, `token_before`, `seen_token` — all fol
 into `opens_word` by this task) breaks the citations of records that *reasoned*
 about it, so add "task #N rewrote this body / renamed from X" to each record
 instead of rewriting its measurement.
+
+## The delimiter word is structure for the byte walk too: its region is one unit, and the pair that differs only in quote bytes is the detector (task #372)
+
+`cat <<$(x)` + `body` + `$(x)` + `echo after` prints `body` and `after` at rc 0
+(bash 5.3.9), so a `$( … )` / `$(( … ))` region opened **on the delimiter word** is
+one word for the byte walk: `safe/fdshell/src/scan/heredoc/lines.rs::word_span`
+consumes it whole through the shared paren scan, exactly as it consumes a quoted
+region (LESSONS: "A quoted region is a unit for *every* byte scanner"). Before that,
+the walk stepped byte at a time and stopped at the `)` closing the region, so the
+word read as `$(x`, its own terminator line could never match, and everything from
+the terminator's newline onward was dropped — the tail after the terminator never
+ran (`set -x` shows the here-doc command run and the script end). An unbalanced
+region is not a region: the walk falls back to byte-at-a-time and the word ends at
+the window end, so `cat <<$` delimits a lone `$`.
+
+The block half of the same shape: extension mode must own the **whole** terminator
+line. `safe/fdshell/src/parse/part_text.rs::owned_span` widens the verbatim span to
+the end of every terminator line it reaches, because a terminator whose word sits
+mid-line leaves its tail bytes behind every token — on `master` the arm text stopped
+at the surviving word `x`, the block never saw its closer, and the group / definer /
+`if` / `case` rows reported a missing closer where bash prints the body. The newline
+behind the terminator stays out of the slice exactly as it does on a plain-word
+terminator (the `;` it tokenizes as drops out of the body), so the `end.max(reach)`
+guard is load-bearing, not a clamp.
+
+The detector is the pair differing **only in the quote bytes** of the delimiter word
+— the quoted `cat <<'$(x)'` (the quote rule already consumed the word whole: parity)
+beside the unquoted `cat <<$(x)` (the divergence). Pin both operator counts on the
+shape whose word blanks to nothing for the tokenizer (`cat <<$`): the byte walk still
+counts the operator there, so a design that blanks a word for the tokenizer changes
+every rule reading the word text/mask and the counts part company (the byte/token
+agreement rule, LESSONS: "A heredoc terminator line is structure, not command bytes").
+
+Pins: `scan/heredoc/tests.rs::a_substitution_region_on_the_delimiter_word_is_one_word`,
+`parse/token/tests.rs::the_substitution_delimiter_word_pair_differs_only_in_its_quotes`,
+`parse/part_text/tests.rs::extension_mode_owns_a_terminator_line_whose_word_sits_mid_line`,
+`parse/heredoc/tests.rs::operator_count_byte_and_token_levels_agree`,
+`tests/heredoc.rs::a_delimiter_word_with_a_substitution_region_keeps_the_tail`,
+`tests/heredoc.rs::the_substitution_word_family_keeps_its_parity_controls`.

@@ -512,7 +512,11 @@ contain them and its own terminator line is matched literally —
 `cat <<a\"b` + `body` + `a"b` all print `body` (rc 0, as bash). Its words stay,
 so a block keeps the delimiter line inside its own text and the statement
 written behind a terminator (`cat <<'a <<b' && echo after` + body + terminator)
-is a separate statement.
+is a separate statement. The word's own `$( … )` region is part of the word — the
+byte walk consumes it whole, exactly as it consumes a quoted region — so
+`cat <<$(x)` + `body` + `$(x)` + `echo after` prints `body` and `after` (rc 0, as
+bash), and a block arm whose terminator line is such a word keeps the whole
+terminator line inside its own text.
 
 A physical line owns **one** body stream, and its regions are handed out in
 operator order to the operators written on that line: the pre-block statements
