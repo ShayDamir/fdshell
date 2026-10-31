@@ -1,23 +1,21 @@
+mod condition;
 mod types;
 
 pub(crate) use types::{ElifArm, IfBlock};
 
 use super::Token;
-use super::cond_bodies::condition_bodies;
 use super::part_text::part_text;
 use super::semi::List;
 use super::semi::Term;
 use super::semi::block_body;
 use super::semi::body_end;
-use super::semi::condition_background;
 use super::semi::ensure_before_closer;
 use super::semi::find_preceded_by;
-use super::semi::span_verbatim;
-use super::semi::trim_condition;
 use super::semi::up_to_closing;
 use crate::error::parse::ParseError;
 use crate::keywords::Closer;
 use alloc::vec::Vec;
+use condition::condition;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
 
@@ -43,28 +41,11 @@ pub(crate) fn tokens_to_if(
 
     // An `if`/`elif` condition is a compound list: `then` may sit behind the
     // plain `&` as behind a `;` (task #354), and that `&` is the condition's
-    // background-job flag (task #356, `condition_background`).
+    // background-job flag, computed by `condition::condition` (task #356).
     let first_then =
         find_preceded_by(closed, 1, b"then", line, Term::SemiAmp).ok_or(ParseError::MissingThen)?;
 
-    let cond_slice = closed
-        .get(1..first_then)
-        .ok_or(ParseError::MissingCondition)?;
-    let cond_tokens = trim_condition(cond_slice, line);
-    let cond_background = condition_background(cond_slice, line);
-
-    // The condition's emptiness rule (`if ; then`, `if & then`, task #299) lives
-    // in `span_verbatim`'s `block_condition`, so it is checked before the
-    // `then` body's `block_body` below: `if ; then; fi` says `missing condition`.
-    let condition = span_verbatim(
-        text,
-        closed,
-        1,
-        first_then,
-        line,
-        ParseError::MissingCondition,
-    )?;
-    let cond_bodies = condition_bodies(text, cond_tokens);
+    let cond = condition(closed, text, first_then, line)?;
 
     // POSIX #2.9: the closing `fi` stands behind a command-list terminator, or
     // behind the closer of a compound command that is the body's last statement
@@ -102,12 +83,12 @@ pub(crate) fn tokens_to_if(
         .map(|ei| super::elif::parse_else_body(closed, ei, fi_idx, text))
         .transpose()?;
     Ok(IfBlock {
-        condition,
+        condition: cond.span,
         then_body,
         elifs,
         else_body,
-        cond_bodies,
-        cond_background,
+        cond_bodies: cond.bodies,
+        cond_background: cond.background,
         redirects,
     })
 }
