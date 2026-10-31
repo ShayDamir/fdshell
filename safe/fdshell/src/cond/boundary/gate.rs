@@ -61,9 +61,8 @@ pub(crate) fn gate_end(line: &[u8], from: usize, state: &mut ScanState) -> usize
             } else if b == b'}' {
                 group_depth = group_depth.saturating_sub(1).max(0);
             }
-            if b == b'\n'
-                && let Some(body::Step::Skip(resume)) =
-                    body::step(line, run_start, i, pairing.is_open(), &modes)
+            if let Some(body::Step::Skip(resume)) =
+                body::step(line, run_start, i, pairing.is_open(), &modes)
             {
                 // Heredoc bodies are opaque data: the gate scan never splits
                 // inside one, it resumes at the last delimiter's newline.

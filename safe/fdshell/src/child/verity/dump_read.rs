@@ -12,8 +12,11 @@ use sys::{LocalFd, OUT};
 use super::dump::DumpSpec;
 use super::emit::write_hex_rows;
 
-/// Read chunk size: bounds the dump's memory to one chunk at a time.
-const CHUNK: usize = 64 * 1024;
+/// Read chunk size (64 KiB): bounds the dump's memory to one chunk at a time.
+/// A plain literal — the recorded `*` mutant was test-inseparable (hex rows are
+/// chunk-boundary-independent), and a literal leaves no operator to mutate
+/// (task #477).
+const CHUNK: usize = 65_536;
 
 pub(crate) fn dump_metadata(fd: &LocalFd, spec: &DumpSpec) -> Result<i32, Report<BuiltinError>> {
     let mut offset = spec.offset;

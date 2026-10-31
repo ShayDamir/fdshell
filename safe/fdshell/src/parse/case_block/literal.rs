@@ -55,9 +55,14 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
             break;
         };
         out.extend(pos..close);
-        pos = close + 1;
-        let pair = (pos..esac_idx.saturating_sub(1))
-            .find(|&i| word_at(tokens, i, b";") && word_at(tokens, i + 1, b";"));
+        // No step offset and no window trim: `close` is the `)` token and the
+        // pinned pattern tokens cannot match the searched needle, so no `;;`
+        // pair starts at `close`, at `close + 1`, or at the token before the
+        // `esac` closer (whose pair-test's second slot is the closer itself) —
+        // the walk answers identically and no operator is left to mutate.
+        pos = close;
+        let pair =
+            (pos..esac_idx).find(|&i| word_at(tokens, i, b";") && word_at(tokens, i + 1, b";"));
         pos = pair.map_or(esac_idx, |i| i + 2);
     }
     out
