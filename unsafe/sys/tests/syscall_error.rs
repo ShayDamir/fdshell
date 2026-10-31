@@ -32,15 +32,53 @@ fn syscall_name_accessor() {
     assert_eq!(o.syscall(), "sendmsg");
 }
 
+/// Every table entry renders its standard description: bare when the syscall
+/// is the placeholder (the `.into()` path — the shape bash prints after the
+/// word), with the syscall appended when it is named. Both arms per entry, so
+/// neither is an unkillable equivalent mutant (task #374).
+#[test]
+fn display_renders_standard_descriptions() {
+    let table = [
+        (libc::E2BIG, "Argument list too long"),
+        (libc::EACCES, "Permission denied"),
+        (libc::EAGAIN, "Resource temporarily unavailable"),
+        (libc::EBADF, "Bad file descriptor"),
+        (libc::EEXIST, "File exists"),
+        (libc::EINVAL, "Invalid argument"),
+        (libc::EIO, "Input/output error"),
+        (libc::EISDIR, "Is a directory"),
+        (libc::ELOOP, "Too many levels of symbolic links"),
+        (libc::EMFILE, "Too many open files"),
+        (libc::ENAMETOOLONG, "File name too long"),
+        (libc::ENOENT, "No such file or directory"),
+        (libc::ENOSYS, "Function not implemented"),
+        (libc::ENOTDIR, "Not a directory"),
+        (libc::EPERM, "Operation not permitted"),
+    ];
+    for (errno, desc) in table {
+        let bare: SyscallError = errno.into();
+        assert_eq!(format!("{bare}"), desc, "errno {errno} via the placeholder");
+        let named = SyscallError::Other {
+            errno,
+            syscall: "openat2",
+        };
+        assert_eq!(
+            format!("{named}"),
+            format!("{desc} (openat2)"),
+            "errno {errno} with a named syscall"
+        );
+    }
+}
+
 #[test]
 fn display_named_variants() {
     assert_eq!(
         format!("{}", SyscallError::EINVAL("waitid")),
-        "EINVAL (waitid)"
+        "Invalid argument (waitid)"
     );
     assert_eq!(
         format!("{}", SyscallError::EBADF("fchdir")),
-        "EBADF (fchdir)"
+        "Bad file descriptor (fchdir)"
     );
 }
 
@@ -50,7 +88,14 @@ fn display_other_variant() {
         errno: 22,
         syscall: "sendmsg",
     };
-    assert_eq!(format!("{}", o), "sendmsg (errno 22)");
+    assert_eq!(format!("{}", o), "Invalid argument (sendmsg)");
+}
+
+#[test]
+fn display_never() {
+    // `Never` is an invariant violation, not an errno (STYLE 4.10): it keeps
+    // its own name even though `errno()` answers 0 for it.
+    assert_eq!(format!("{}", SyscallError::Never), "Never");
 }
 
 #[test]
@@ -58,7 +103,7 @@ fn from_errno_known() {
     let e: SyscallError = libc::EEXIST.into();
     assert_eq!(e.errno(), libc::EEXIST);
     assert_eq!(e.syscall(), "unknown");
-    assert_eq!(format!("{}", e), "EEXIST (unknown)");
+    assert_eq!(format!("{}", e), "File exists");
 }
 
 #[test]

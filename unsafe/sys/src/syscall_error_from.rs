@@ -4,7 +4,7 @@ use super::SyscallError;
 use SyscallError::*;
 
 // Default syscall name when converted from raw errno without context.
-const UNKNOWN: &str = "unknown";
+pub(crate) const UNKNOWN: &str = "unknown";
 
 impl From<i32> for SyscallError {
     fn from(raw: i32) -> Self {

@@ -1,6 +1,13 @@
+pub mod description;
+
 pub const HELP: i32 = 0;
 pub const EINVAL: i32 = libc::EINVAL;
 pub const ENOENT: i32 = libc::ENOENT;
+pub const EACCES: i32 = libc::EACCES;
+pub const ENOTDIR: i32 = libc::ENOTDIR;
+pub const EISDIR: i32 = libc::EISDIR;
+pub const ELOOP: i32 = libc::ELOOP;
+pub const ENAMETOOLONG: i32 = libc::ENAMETOOLONG;
 pub const E2BIG: i32 = libc::E2BIG;
 pub const ENOSYS: i32 = libc::ENOSYS;
 pub const EEXIST: i32 = libc::EEXIST;

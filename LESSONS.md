@@ -1505,7 +1505,8 @@ constructible.** For target fd 1 the copy lands at **fd 6**
 (`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes land 6 then 7), inside the
 script-visible range, where bash's save sits at fd >= 10. A body closes it with
 `exec 6>&-`, so the parent's `scope.restore()?` (`run/parent.rs:40`) fails: rc 1,
-`redirection failed` + `EBADF`, the two-frame `scope.rs:60` report with **no**
+`redirection failed` + `Bad file descriptor` (errno `EBADF`'s standard
+description), the two-frame `scope.rs:60` report with **no**
 `redirect.rs:48` middle frame. Pins:
 `run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command` (the
 copy fd measured by opening the same scope once) and
@@ -5952,3 +5953,40 @@ Pins: `scan/heredoc/tests.rs::a_substitution_region_on_the_delimiter_word_is_one
 `parse/heredoc/tests.rs::operator_count_byte_and_token_levels_agree`,
 `tests/heredoc.rs::a_delimiter_word_with_a_substitution_region_keeps_the_tail`,
 `tests/heredoc.rs::the_substitution_word_family_keeps_its_parity_controls`.
+
+## The errno leaf frame of a printed chain reads as the standard description, and the syscall name rides only when it is known (task #374)
+
+`echo hi > ~` and `echo hi > /tmp` fail at the open with `EISDIR`, and until
+this task the leaf frame read `unknown (errno 21)` — rc 1, chain shape and
+errnos right, nothing created, but the message named nothing (STYLE §4.7).
+`error_stack` renders the leaf frame through `Display`, so the single place
+that decides the text is the lookup `unsafe/sys/src/errno/description.rs::standard`
+— the 10 errnos the enum names plus the open-path neighbours `EACCES`,
+`ENOTDIR`, `ELOOP`, `ENAMETOOLONG`, `EISDIR`. The descriptions are the
+standard (glibc) ones, verified against `os.strerror` and against bash 5.3.9
+(row per shape, rc 1 in both shells, nothing created; bash prints the words
+after `<path>: `): `2 No such file or directory`, `13 Permission denied`,
+`20 Not a directory`, `21 Is a directory`, `36 File name too long`,
+`40 Too many levels of symbolic links`.
+
+The rule lives in the shared lookup, never in one arm: when the syscall is
+the placeholder (`syscall_error_from.rs`'s `UNKNOWN`, the `.into()` path) the
+rendering is the bare description — exactly what bash prints after the word;
+when the syscall is named, the parenthesis stays (`Invalid argument
+(sendmsg)`) so the diagnostic keeps the syscall that failed; an errno with no
+table entry keeps `"<syscall> (errno <n>)"` unchanged. Two rules for one
+errno table is the drift source. Hence the lookup returns `None` for
+everything outside the table, **including 0** (`errno::HELP`) — that keeps
+the fallback arm reachable — and `Never`, whose `errno()` is 0 (STYLE
+§4.10), answers before the lookup. rc and chain shape are untouched: this
+changed only the words.
+
+Pins: `unsafe/sys/tests/syscall_error.rs::display_renders_standard_descriptions`
+(both arms per entry: bare through `.into()`, `<desc> (openat2)` with a
+named syscall), `unsafe/sys/tests/syscall_error.rs::display_never`,
+`unsafe/sys/tests/syscall_error.rs::from_errno_unknown` (the
+no-description fallback), `tests/redirect.rs::open_failures_render_their_standard_descriptions`
+(the four deterministic rows, substrings not whole lines; `EACCES` is
+root-dependent — `safe/fdshell/tests/openat2_path.rs::can_read` — so it is
+pinned only in the unit table), and the extended `> ~` row
+`tests/redirect.rs::tilde_in_a_target_expands_with_its_own_rules`.

@@ -222,7 +222,10 @@ fn cd_home_is_the_shell_variable() {
     let (out, err, code) = run_env(&work, &env, "HOME=; cd; builtin echo after");
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(out.is_empty(), "the run aborts: {out:?}");
-    assert!(err.contains("ENOENT"), "stderr={err:?}");
+    assert!(
+        err.contains("No such file or directory"),
+        "bash is a silent no-op here; stderr={err:?}"
+    );
 
     // `HOME` set in **neither** table: `$HOME not set` at rc 1. bash 5.3.9
     // prints `cd: HOME not set` at the same rc (measured) — no
@@ -458,7 +461,10 @@ fn cd_null_operand_is_the_open_failure() {
     let (out, err, code) = run_in(&work, &home, "cd \"\"; builtin echo after");
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(out.is_empty(), "the run aborts, so nothing prints: {out:?}");
-    assert!(err.contains("ENOENT"), "stderr={err:?}");
+    assert!(
+        err.contains("No such file or directory"),
+        "bash: `cd: null directory`; stderr={err:?}"
+    );
 }
 
 /// `strict` bans nothing on `cd`'s operand, before or after the expansion: the
@@ -546,7 +552,10 @@ fn cd_option_words_are_operands() {
         let (out, err, code) = run_in(&work, &home, &format!("{script}; builtin echo after"));
         assert_eq!(code, 1, "script {script:?}: stderr={err:?}");
         assert!(out.is_empty(), "the run aborts: {out:?}");
-        assert!(err.contains("ENOENT"), "script {script:?}: stderr={err:?}");
+        assert!(
+            err.contains("No such file or directory"),
+            "script {script:?}: stderr={err:?}"
+        );
     }
     // `-L dir`/`-P dir` are two fields: the usage error, where bash cds.
     for script in ["cd -L sub", "cd -P sub"] {

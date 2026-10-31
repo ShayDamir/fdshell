@@ -2179,9 +2179,57 @@ fn tilde_in_a_target_expands_with_its_own_rules() {
         "bash: `/home/…: Is a directory', rc 1; stderr={err:?}"
     );
     assert!(
+        err.contains("Is a directory"),
+        "bash: '…: Is a directory'; stderr={err:?}"
+    );
+    assert!(
         created(&files).is_empty(),
         "the expanded HOME is the dir itself"
     );
+}
+
+/// The leaf frame of an open failure renders the standard description — bash
+/// 5.3.9 spells each row this way (measured: rc 1 in both shells, nothing
+/// created): `dir: Is a directory`, `reg/x: Not a directory`, `loop: Too many
+/// levels of symbolic links`, `<300 x's>: File name too long`. Substrings, not
+/// whole lines (the frames are ANSI-wrapped). The `EACCES` row
+/// (`Permission denied`) is environment-dependent — the sandbox runs as root
+/// and writes a `000` file (`openat2_path.rs::can_read`) — so it is pinned by
+/// the sys table pin `display_renders_standard_descriptions`, not here.
+#[test]
+fn open_failures_render_their_standard_descriptions() {
+    let (file, scratch) = temp_path("errno_leaf");
+    let dir = scratch.to_path_buf();
+    std::fs::write(&file, b"").unwrap();
+    let link = dir.join("loop");
+    std::os::unix::fs::symlink("loop", &link).unwrap();
+    for (target, want) in [
+        (dir.to_str().unwrap().to_string(), "Is a directory"),
+        (format!("{file}/x"), "Not a directory"),
+        (
+            link.to_str().unwrap().to_string(),
+            "Too many levels of symbolic links",
+        ),
+        (
+            dir.join("x".repeat(300)).to_str().unwrap().to_string(),
+            "File name too long",
+        ),
+    ] {
+        let (out, err, code) = run(&format!("echo hi > {target}"));
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "{target}: bash says '{want}'; stderr={err:?}"
+        );
+        assert!(err.contains(want), "bash says '{want}'; stderr={err:?}");
+    }
+    // Nothing was created: only the seeded file and the seeded symlink are left.
+    let mut left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_str().unwrap().to_string())
+        .collect();
+    left.sort();
+    assert_eq!(left, vec!["errno_leaf.txt".to_string(), "loop".to_string()]);
 }
 
 /// The target expands in the **pipeline child** too, where the open happens in
