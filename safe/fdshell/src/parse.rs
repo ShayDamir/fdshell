@@ -44,7 +44,8 @@ pub(crate) mod while_block;
 pub(crate) mod word_quoted;
 
 pub(crate) use case_block::literal_indices;
-pub use cmdline::{BlockStage, BuiltinPrefix, CommandLine, ExpandedStage, Pipeline, Stage};
+pub use cmdline::stage::{BlockStage, ExpandedStage, Pipeline, Stage};
+pub use cmdline::{BuiltinPrefix, CommandLine};
 pub use envassign::{Assign, value_mask, value_spans};
 pub(crate) use here_string::word_indices;
 pub(crate) use heredoc::delimiter_token_indices;
