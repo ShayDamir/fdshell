@@ -243,3 +243,39 @@ fn oversized_script_fails_with_size_limit_error() {
     );
     assert!(!output.status.success());
 }
+
+/// A script file handed to the shell is bytes the user controls, so a NUL in
+/// it must be named as such with something to do about it — never reported as
+/// an impossible internal state (a NUL in argv or env cannot reach this site).
+#[test]
+fn script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state() {
+    let dir = scratch("nul");
+    let path = dir.join("nul.sh");
+    std::fs::write(&path, b"echo a\0b\n").unwrap();
+
+    let output = Command::new(BIN)
+        .arg(path.to_str().unwrap())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "expected the script-file NUL error at rc 1, stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("script file"),
+        "expected the report to name the script file, stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("NUL"),
+        "expected the report to name the NUL byte, stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains("impossible"),
+        "a user-reachable input must not be reported as an internal state, stderr={stderr}"
+    );
+}

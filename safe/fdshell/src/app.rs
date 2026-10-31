@@ -27,6 +27,8 @@ pub enum AppError {
     LineTooLarge,
     /// missing script path after --dirfd
     MissingScriptPath,
+    /// script file contains NUL bytes; strip them and run it again
+    ScriptNul,
     /// impossible
     Never,
 }

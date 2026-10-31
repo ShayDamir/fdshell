@@ -51,7 +51,7 @@ pub fn execute_script(
     state: &ForkCell<ShellState>,
 ) -> Result<(), Report<AppError>> {
     let text = ScriptText::new(
-        ShortCStr::from_vec(script_content.to_vec()).change_context(AppError::Never)?,
+        ShortCStr::from_vec(script_content.to_vec()).change_context(AppError::ScriptNul)?,
         Position::new(1, 1),
         origin,
     );
