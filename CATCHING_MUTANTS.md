@@ -175,3 +175,13 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     -fd` before measuring, and stage explicit paths: `git add -A` commits the
     leak, and the committed `safe/fdshell/0` then breaks the *clean* suite at
     every run.
+
+24. **When an entry's own proof shows an operand can never matter, delete the
+    operand and the family dies with it.** Prove the operand dead by hand (rule 1),
+    then write the value in a shape with no operator left to mutate: a plain literal
+    for a product, an exact range for a ±1, a predicate for a boundary comparison,
+    the callee's own gate for a duplicated conjunct. The registry entries this
+    chore resolved (task #477) each landed on a form an existing rule already
+    names — rules 3, 6, 11, 13, 15, 16, 18, 20, 22; this one is the pointer, not a
+    new recipe. A deleted operator cannot be re-flagged by a future sweep, and the
+    pins that named the surviving behaviour stay green on the simplified source.
