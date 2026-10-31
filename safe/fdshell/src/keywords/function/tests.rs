@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use super::walk::word_end;
 use super::*;
 use alloc::vec::Vec;
 

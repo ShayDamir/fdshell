@@ -1714,7 +1714,7 @@ work, and keeps `f ( ) {` (POSIX form, split parens) rejected by both layers.
 the tokenizer's unit here is a whole `$( … )` region.** `parse/token/step.rs`
 reads `$(` with `read_dollar_paren` and returns the closed region as **one word
 token**, so the byte word split must consume a `$(` region whole (task #277:
-`keywords/function.rs::word_end` jumps to the region's end through
+`keywords/function/walk.rs::word_end` jumps to the region's end through
 `paren_scan::scan_at` — the shared entry point `scan/advance/subst.rs` and
 `arith/expand.rs` use, one implementation at both levels, no per-position
 special case). Ungated, the split stopped at the whitespace inside the region:
