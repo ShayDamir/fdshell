@@ -1321,6 +1321,20 @@ the raw word or on the expanded value (`shopt -s strict; d=/tmp; cd $d` moves
 the base): the ban list names redirects, program words and `hash` pins, and
 moving the base is what `cd` is for.
 
+`strict` is inherited by the forked command-substitution child, so the program
+word and `PATH` bans apply inside `$( … )` and `` ` … ` `` as well: with an
+ambient absolute `PATH`, fdshell's own builtins (`builtin …`) are the only
+programs a substitution can run, and an external program runs only through a
+**relative** `PATH` entry resolved at the pinned `%CWD` base. A program the
+child cannot run is reported by the **child**, on stderr — its stdout *is* the
+capture pipe — and contributes no bytes, so the expansion is empty: an argument
+word then carries no field (the command runs without it, rc 0 — bash's shape),
+and a redirect target lands on 0 fields, which is bash's `ambiguous redirect`:
+the message names the word, not the cause, because the parent can only see
+empty output. Pinned by
+`tests/strict.rs::strict_substitution_needs_a_relative_path_for_an_external_program`
+and `tests/cmd_subst.rs::strict_external_in_a_substitution_yields_an_empty_field`.
+
 ## Sockets
 
 `bind`, `listen`, `accept` and `connect` give a script both the server and

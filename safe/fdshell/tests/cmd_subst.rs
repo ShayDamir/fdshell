@@ -4,6 +4,9 @@ use std::process::Command;
 use std::str;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
+/// The `arg_print` helper (compiled by `build.rs`), copied into a scratch dir by
+/// the strict pins so a `PATH` entry names a real program (task #373).
+const ARG_PRINT: &str = env!("ARG_PRINT_PATH");
 
 /// A command substitution with an unbounded producer (`$(yes)`) must hit the
 /// capture limit: the child is killed and a clean, actionable error is
@@ -374,6 +377,39 @@ fn word0_scratch() -> (String, Scratch) {
 fn run_in(dir: &str, script: &str) -> (String, String, i32) {
     let output = Command::new(BIN)
         .current_dir(dir)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+static STRICT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Scratch dir for the strict pins (task #373): the `arg_print` helper copied in
+/// as `fdprint`, so a `PATH` entry can name a real program and only strict's ban
+/// can decide the row.
+fn strict_scratch() -> (String, Scratch) {
+    let c = STRICT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-strict-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dst = dir.join("fdprint");
+    std::fs::copy(ARG_PRINT, &dst).unwrap();
+    std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (dir.to_str().unwrap().to_string(), Scratch(dir))
+}
+
+/// Run with `PATH` replaced by `path` (absolute, or relative to `dir`), so the
+/// strict program ban can fire on the search itself.
+fn run_path(dir: &str, path: &str, script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .current_dir(dir)
+        .env("PATH", path)
         .args(["-c", script])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -990,4 +1026,36 @@ fn word0_and_the_redirect_target_expand_in_one_command() {
     let (out, err, rc) = run_in(&dir, "echo hi > $(echo a; echo b)");
     assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
     assert!(err.contains("ambiguous redirect"), "stderr={err}");
+}
+
+/// An external program the forked substitution child cannot run under strict
+/// contributes **no bytes**: it reports its own failure on stderr (its stdout
+/// *is* the capture pipe), so the argument word carries no field and the command
+/// runs without it. Row 1 is measured against README "Strict mode" (bash has no
+/// strict mode; its ban covers every absolute `PATH` entry, so the program is
+/// really there and only the ban can fire); rows 2–3 are bash's shape, measured.
+/// Parent and child share one pipe, so the report is asserted as a substring,
+/// never as an order (task #373).
+#[test]
+fn strict_external_in_a_substitution_yields_an_empty_field() {
+    let (dir, _scratch) = strict_scratch();
+    let (out, err, rc) = run_path(&dir, &dir, "shopt -s strict; builtin echo $(fdprint SUB)");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(&out, "\n", "the argument word must carry no field");
+    assert!(err.contains("strict"), "stderr={err:?}");
+    assert!(err.contains("absolute"), "stderr={err:?}");
+    // Strict off is bash's shape: the field is the program's own output.
+    let (out, err, rc) = run_path(&dir, &dir, "builtin echo $(fdprint SUB)");
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "", "bash reports nothing on this row");
+    assert_eq!(&out, "[SUB]\n");
+    // The in-process form needs no program search, so strict changes nothing.
+    let (out, err, rc) = run_path(
+        &dir,
+        &dir,
+        "shopt -s strict; builtin echo $(builtin echo hi)",
+    );
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(err, "", "stderr={err}");
+    assert_eq!(&out, "hi\n");
 }

@@ -479,6 +479,48 @@ fn strict_command_substitution_runs_relative_program() {
     assert_eq!(stdout(&out), "[SUB]\n");
 }
 
+/// An external program inside a `$( … )` is subject to strict's program and
+/// `PATH` bans: with an absolute `PATH` entry the forked child resolves nothing
+/// (the program is **there**, so only the ban can fire), reports its own strict
+/// error on stderr — its only channel, its stdout *is* the capture pipe — and
+/// contributes no bytes. The expansion is empty, so the target lands on 0 fields
+/// and the parent answers with bash's own message for an empty expansion,
+/// naming the word, not the cause (task #373). Both reports come from different
+/// writers, so they are asserted as substrings, never as an order. Rows 2–3 are
+/// bash's shape / the README-allowed path (bash has no strict mode).
+#[test]
+fn strict_substitution_needs_a_relative_path_for_an_external_program() {
+    let dir = Scratch::new();
+    program(&dir, "fdprint", ARG_PRINT);
+    let abs = dir.to_str().unwrap().to_string();
+    let out = run_path(
+        &dir,
+        &abs,
+        "shopt -s strict; builtin echo hi > $(fdprint one)",
+    );
+    assert!(!out.status.success(), "stdout={:?}", stdout(&out));
+    let err = stderr(&out);
+    assert!(err.contains("strict"), "stderr={err:?}");
+    assert!(err.contains("absolute"), "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect"), "stderr={err:?}");
+    assert!(!dir.join("[one]").exists(), "nothing may be created");
+    // Strict off: the file the expansion names is written, as bash does.
+    let out = run_path(&dir, &abs, "builtin echo hi > $(fdprint two)");
+    assert!(out.status.success(), "stderr={}", stderr(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("[two]")).unwrap(), "hi\n");
+    // The documented allowed path: a relative `PATH` entry at the pinned base.
+    let out = run_path(
+        &dir,
+        ".",
+        "shopt -s strict; builtin echo hi > $(fdprint three)",
+    );
+    assert!(out.status.success(), "stderr={}", stderr(&out));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("[three]")).unwrap(),
+        "hi\n"
+    );
+}
+
 /// Strict off is byte-for-byte the old behavior: absolute redirect targets,
 /// absolute program words and absolute `PATH` entries all still resolve.
 #[test]
