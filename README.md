@@ -685,9 +685,10 @@ name leaves `$name`, `${name:-word}` and the child environment together (after
 fdshell's fd form: `unset %name` closes the fd variable (descriptor, fd array,
 named task) and `unset %arr[%src]` removes one array entry. An unbound name is
 a silent no-op with exit status 0, a bare `unset` does nothing, and
-`unset IFS` restores the default split set (space, tab, newline). No operand is
-validated: `unset 1abc` names a variable no expansion can reach and exits 0,
-which is what bash does too.
+`unset IFS` restores the default split set (space, tab, newline) while the name
+itself becomes unbound — it reads empty, and `set -u` reports it (bash). No
+operand is validated: `unset 1abc` names a variable no expansion can reach and
+exits 0, which is what bash does too.
 
 The name namespaces follow bash's no-option rule: **variable first, function
 second**. A name that is also a function keeps its function — the variable is
@@ -793,6 +794,13 @@ expanded against the filesystem:
 IFS=:; parts=$PATH        # split PATH into a : separated list
 for f in *.txt; do …; done
 ```
+
+The shell **sets `IFS` to that default at startup**, even when the parent
+exported it (POSIX XCU 2.5.1, bash): an inherited `IFS` contributes only its
+**export attribute**, so `IFS=, fdshell -c 'builtin echo "[$IFS]"'` prints the
+default split set, and a child's `env` shows `IFS=` with the default value as
+well. Only an assignment inside the shell changes the value; with no inherited
+row, `env` shows no `IFS=` line at all.
 
 A quoted byte never splits and never globs. `set -f` disables pathname
 expansion; `shopt -s dotglob` lets patterns match a leading dot;

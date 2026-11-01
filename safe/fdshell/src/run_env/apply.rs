@@ -10,8 +10,10 @@ use sys::{ImportedStr, ShortCStr};
 use super::EnvAssign;
 
 /// The previous values of the first-touched names, plus the old `IFS` when
-/// the prefix sets one: `set_var` syncs `state.ifs`, but IFS is not seeded
-/// in `strings`, so a scoped IFS would leak into the parent on restore.
+/// the prefix sets one: `set_var` syncs `state.ifs`, and the split set is a
+/// **field**, so the per-name loop below cannot reach it and a scoped IFS
+/// would leak into the parent on restore. (The loop does cover the `IFS`
+/// *name*, whose seed the startup put in `strings` — task #388.)
 pub struct EnvSave {
     entries: Vec<(ShortCStr, Option<ImportedStr>, Option<ImportedStr>)>,
     old_ifs: Option<ShortCStr>,

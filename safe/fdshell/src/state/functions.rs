@@ -22,8 +22,9 @@ impl ShellState {
     /// True for every store [`ShellState::unset_var`] owns — the string table,
     /// the export attribute, the inherited `environ` row — plus the single-name
     /// `IFS` sync, which bash also counts as a variable: a function named `IFS`
-    /// **survives** `unset IFS` (measured, task #386). Dropping the `IFS` clause
-    /// answers a bare `IFS` name the other way and removes that function.
+    /// **survives** `unset IFS` (measured, task #386). The startup seed already
+    /// puts `IFS` in the string table, so this clause is what answers when the
+    /// seed is gone — the second `unset IFS`, measured as task #512.
     fn is_variable(&self, name: &ShortCStr) -> bool {
         name.eq_bytes(b"IFS")
             || self.strings.contains_key(name)

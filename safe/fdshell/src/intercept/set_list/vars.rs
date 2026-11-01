@@ -22,7 +22,9 @@ pub fn list_vars(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
     }
     let mut names: Vec<&ShortCStr> = state.strings.keys().collect();
     let ifs: ShortCStr = c"IFS".into();
-    // `IFS` lives in `state.ifs` until first assigned; always list it (bash).
+    // The listed value is the live split set. The startup seed normally puts
+    // `IFS` in `strings`, so this push is reached only once the name is unbound
+    // — after `unset IFS`, where bash lists nothing (task #511).
     if !names.iter().any(|n| n.eq_bytes(b"IFS")) {
         names.push(&ifs);
     }

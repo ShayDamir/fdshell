@@ -13,7 +13,9 @@ use crate::error::cmd::CmdError;
 
 /// The first-touch `strings`/`exports` values of every name shadowed in one
 /// call, plus the old `IFS` when a shadow touches it: `set_var` syncs
-/// `state.ifs`, and `IFS` is not seeded in `strings`.
+/// `state.ifs`, and the split set is a **field** — the per-name entry restore
+/// cannot reach it (the entry itself now holds the startup seed, so it restores
+/// too).
 pub(crate) struct VarFrame {
     entries: HashMap<ShortCStr, (Option<ImportedStr>, Option<ImportedStr>)>,
     old_ifs: Option<ShortCStr>,
