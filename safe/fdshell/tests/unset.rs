@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-//! `unset name…` (task #290): the operands are **shell variable names**;
-//! the `%` spelling keeps fdshell's fd namespace. Every bash column below was
-//! measured with `bash -c` (5.3.9) and every fdshell column with
+//! `unset name…` (task #290): the operands are **shell variable names**, and a
+//! name no variable store holds is a **function** of that name (task #386's
+//! priority); the `%` spelling keeps fdshell's fd namespace. Every bash column
+//! below was measured with `bash -c` (5.3.9) and every fdshell column with
 //! `target/debug/fdshell -c` on this task's branch before the rows were pinned:
 //!
 //! ```text
@@ -19,8 +20,16 @@
 //! set -- x y; unset 1; $1 bash `x`                fdshell `x`
 //! unset a b; echo $_      bash `b`                fdshell `b`
 //! unset %v                bash rc 0 (a plain name)fdshell rc 0 (closes fd `%v`)  ← namespaces
-//! f(){ :; }; unset f; f   bash `command not found` rc 127   fdshell runs f, rc 0  ← task #386
+//! f(){ :; }; unset f; f   bash `command not found` rc 127   fdshell the call fails, rc 1
+//!                           (no variable of that name, so the function goes — parity
+//!                           in shape, the rc-1-vs-127 family)
 //! ```
+//!
+//! `-v` and `-f` stay **name-shaped** here (task #386): the keyword has no option
+//! surface, so `unset -v v` unsets `v` because `-v` names nothing, and `unset -f f`
+//! removes `f` through the no-option rule, not through an option parser. bash's
+//! option rows (`-f`, `-v`, `-n`, `--`, and their rc-1/rc-2 error paths) are
+//! documented by task #510.
 
 use std::process::{Command, Stdio};
 use std::str;
@@ -307,16 +316,86 @@ fn the_fd_namespace_stays_the_fd_namespace() {
     assert_eq!(out, "x\nempty\ny\n", "one entry, then the array is gone");
 }
 
-/// **Documented divergence** (task #386): bash's `unset NAME` also removes a
-/// *function* named `NAME` (`f(){ :; }; unset f; f` → `command not found`, rc
-/// 127). fdshell has no `-f`/`-v` option surface and no function-removal path,
-/// so the function survives; pinned as measured so the follow-up sees the row.
+/// bash's no-option rule, now fdshell's too (task #386): `unset` tries the
+/// **variable** namespace first and only when the name is not a variable does it
+/// remove a **function** of that name — `bash -c 'help unset'` says it outright.
+/// A name in both stores therefore keeps its function; a pure-function name is
+/// gone, and its call lands on fdshell's shell-wide **rc 1** (the rc-1-vs-127
+/// family) with no output from the function.
 #[test]
-fn a_function_survives_unset_documented_divergence() {
+fn a_bare_unset_names_a_variable_first_and_a_function_second() {
     let (out, err, code) = run("f(){ builtin echo F; }; f");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "F\n");
+    assert_eq!(out, "F\n", "the definition alone still runs");
+
     let (out, err, code) = run("f(){ builtin echo F; }; unset f; f");
+    assert_eq!(
+        code, 1,
+        "the function was removed, so the call fails: stderr={err:?}"
+    );
+    assert!(
+        out.is_empty(),
+        "no output from the removed function: stdout={out:?}"
+    );
+    assert!(err.contains("not found"), "stderr={err:?}");
+
+    let (out, err, code) =
+        run("f=V; f(){ builtin echo F; }; unset f; builtin echo \"[${f:-U}]\"; f");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "F\n", "task #386: bash prints nothing and exits 127");
+    assert_eq!(
+        out, "[U]\nF\n",
+        "the variable goes, the function runs — bash too"
+    );
+}
+
+/// The frame asymmetry (task #386, measured in both shells): a `local` in the
+/// frame makes the name a variable, so the function survives the `unset`; a frame
+/// that removes a name which is **only** a function removes it **globally** —
+/// definitions are not frame-scoped, so the removal outlives the call that
+/// performed it (which is exactly what bash measures, so a frame-restore
+/// implementation is caught here).
+#[test]
+fn a_function_removal_outlives_the_frame_that_performed_it() {
+    let (out, err, code) =
+        run("f(){ builtin echo F; }; g(){ local f=L; unset f; builtin echo \"[${f:-U}]\"; }; g; f");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "[U]\nF\n",
+        "a local is a variable, so the function stays"
+    );
+
+    let (out, err, code) = run("f(){ builtin echo F; }; g(){ unset f; }; g; f");
+    assert_eq!(code, 1, "the removal outlives the frame: stderr={err:?}");
+    assert!(out.is_empty(), "stdout={out:?}");
+    assert!(err.contains("not found"), "stderr={err:?}");
+}
+
+/// Positionals are **not** variables for `unset`, so a numeric name that is a
+/// function is the function's, and `unset 1` takes it away while `$1` stays
+/// (task #386; the same rows with no function defined are pinned by
+/// `every_operand_shape_bash_accepts_is_a_plain_name`).
+#[test]
+fn a_positional_name_is_not_a_variable_so_the_function_goes() {
+    let (out, err, code) =
+        run("set -- a b; 1(){ builtin echo F; }; unset 1; builtin echo \"[${1:-U}]\"; 1");
+    assert_eq!(
+        code, 1,
+        "the call of the removed function fails: stderr={err:?}"
+    );
+    assert_eq!(
+        out, "[a]\n",
+        "$1 is intact, the function's own output is absent"
+    );
+    assert!(err.contains("not found"), "stderr={err:?}");
+}
+
+/// A function named `IFS` **survives** `unset IFS`: `IFS` is a variable for
+/// `unset` — the single-name split-set sync is part of the footprint the delete
+/// path owns (task #386, measured in both shells) — so the variable branch is
+/// taken and the function store is untouched.
+#[test]
+fn a_function_named_ifs_survives_unset_ifs() {
+    let (out, err, code) = run("IFS(){ builtin echo F; }; unset IFS; IFS");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "F\n", "bash measures the same");
 }

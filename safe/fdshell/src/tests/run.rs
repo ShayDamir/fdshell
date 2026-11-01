@@ -2112,6 +2112,38 @@ fn unset_ifs_restores_the_default_split_set() {
     assert!(state.strings.get(&ShortCStr::from(c"IFS")).is_none());
 }
 
+/// A plain `unset` operand reaches the **function store through the dispatch
+/// arm** (task #386): a name no variable store holds is the function's, and a
+/// name in both stores keeps its function, because the variable is what the
+/// priority reaches first. `run_script` is what covers `run_dispatch::unset`.
+#[test]
+fn unset_reaches_the_function_store_through_the_dispatch_arm() {
+    let cell = make_cell();
+    run_script(b"f() { :; }", &cell).unwrap();
+    let name = ShortCStr::from(c"f");
+    assert!(
+        borrow_state(&cell).functions.contains_key(&name),
+        "the definition is in the store"
+    );
+    run_script(b"unset f", &cell).unwrap();
+    assert!(
+        !borrow_state(&cell).functions.contains_key(&name),
+        "no variable store held the name, so the function went"
+    );
+    assert_eq!(borrow_state(&cell).last_status.exit_code(), 0);
+
+    run_script(b"g() { :; }; g=V; unset g", &cell).unwrap();
+    let both = ShortCStr::from(c"g");
+    assert!(
+        borrow_state(&cell).strings.get(&both).is_none(),
+        "the variable is what goes"
+    );
+    assert!(
+        borrow_state(&cell).functions.contains_key(&both),
+        "the function stays"
+    );
+}
+
 /// `$_` is the last operand's stored name, and with **no** operands bash's
 /// fallback is the command word itself (`unset; echo $_` → `unset`).
 #[test]
