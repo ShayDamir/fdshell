@@ -736,6 +736,7 @@ fn an_intercepted_stages_state_changes_die_with_the_fork() {
         ("alias g=echo | cat; alias", ""),
         (r#"export E=1; echo a | export E=2; echo "$E""#, "1\n"),
         (r"set -- a b; echo x | set -- c; echo $#", "2\n"),
+        (r"export V=1 | cat; echo ${V:-unset}", "unset\n"),
         (
             "signalfd %s USR1; echo a | signalfd %s USR1; fdexplain %s",
             "%s (from shell default)\n",
@@ -814,8 +815,9 @@ fn a_printing_intercept_keeps_its_shape_as_a_stage() {
 }
 
 /// A stage that reads stdin: `read` takes the pipe's own line, `eval` re-enters
-/// the interpreter (the nesting counter is the fork's copy — LESSONS "Keep
-/// execution-context counters in ShellState"), `source` reads the pipe as a file
+/// the interpreter (the nesting counter is the fork's own copy — LESSONS: "Keep
+/// execution-context counters in ShellState" — so a stage's `eval` reaches depth
+/// three, one row per depth and no new cap), `source` reads the pipe as a file
 /// and runs what it finds (the word `a`, which neither shell has as a command),
 /// `wait` has no jobs to collect. Every row runs under `run_bounded` with an
 /// immediate EOF — never a fixed sleep — and matches bash.
@@ -824,6 +826,11 @@ fn a_stage_that_reads_stdin_runs_the_intercept_table() {
     for (script, want) in [
         ("echo a | read x; echo rc=$?", "rc=0\n"),
         ("echo a | eval echo hi; echo tail", "hi\ntail\n"),
+        ("echo a | eval 'eval echo hi'; echo tail", "hi\ntail\n"),
+        (
+            r#"echo a | eval 'eval "eval echo hi"'; echo tail"#,
+            "hi\ntail\n",
+        ),
         ("echo a | wait; echo tail", "tail\n"),
         ("echo a | source /dev/stdin; echo tail", "tail\n"),
     ] {
