@@ -2460,11 +2460,11 @@ end-of-file warning; the pins are the parity rows of
 
 **Rules:** before recording a mutant as equivalent, prove the branch is reachable at all; and when a survivor is a *pin gap*, write down the shape that would pin it — the survivor then dies with the pin. Two accepted equivalents surfaced by the same run stay in the registry: `segment/block/keyword.rs`'s resume `end + 1` (`+`→`-`, `+`→`*`) — the resume lands on the separator closing an unclosed block's run, where the scanner's separator arm and the run parser's EOF flush produce the same segment text, so no output distinguishes them (the ±1-offset species).
 
-## The cond-boundary region rule: its surviving mutant is the region `end`, not the window's `+ 1`
+## The cond-boundary region rule: its `+ 1` terms and the region `end` bound are pinned at the helper's granularity
 
 The `+ 1` terms here were the **identity** mutations (`+`→`*`) of a window
-bound, recorded as unobservable; both are now killed at the helper's own
-granularity:
+bound, recorded as unobservable, and the region bound's `<`→`<=` was recorded
+with them; all three are now killed at the helper's own granularity:
 
 1. `line_bodies_for_line(line, anchor, nl + 1)` — the `+`→`*` mutant is `nl * 1`,
    the identity, and the old record's argument was that no input **the program
@@ -2512,12 +2512,17 @@ granularity:
     is never emptied any more — so what the pins assert is the changed claim),
     while a window starting one byte right stops recognizing a `<<` that
     opens its line after a word break.
-3. `operator_in_region`'s `while i < end` — `<`→`<=` is unkillable: a region's
-   `end` is the end of its **delimiter line**, so `line[end]` is the newline that
-   closes the region (or nothing, at the end of the text) — a byte that can never
-   be the first of an `&&` / `||` pair, so the scan answers identically. The bound
-   *is* the region's rule, so it stays; this is the "a ±1 offset is equivalent
-   when the byte it lands on can never match the needle" species.
+3. `operator_in_region`'s `while i < end` — `<`→`<=` was accepted because a
+   region's `end` "is the newline that closes the region (or nothing, at the
+   end of the text)". It is not: the allocation ends a region **one past** the
+   delimiter line's newline (`(end + 1).min(line.len())` in
+   `scan/heredoc/full`), so when the delimiter line is not the last line the
+   byte the bound lands on belongs to the *following* line — and a real
+   `&&` / `||` pair written there is exactly what the bound excludes. Pin the
+   helper with that text:
+   `cond/boundary/body/tests.rs::a_pair_written_past_the_region_end_is_not_the_regions_operator`
+   answers `Skip` (the delimiter line's newline) while the mutant answers
+   `Split(12, false)` on the same call (measured by hand).
 
 **Killed** (verified on the hand-mutated tree): the pair test's successor read
 `line.get(i + 1)` — `+`→`*` compares a byte with *itself*, so every *lone* `&` (a
@@ -2547,8 +2552,8 @@ stands.
 **Rule:** a `+ 1` identity is never accepted on a program-level reachability
 argument: pin the helper with the very text the program rejects (CATCHING_MUTANTS
 rule 19). A "±1 offset is equivalent" claim must name the byte the offset lands
-on and prove the scan treats it identically; that is item 3, and it is the only
-survivor of this rule now.
+on and prove the scan treats it identically — item 3 named the wrong byte, so the
+bound has a kill now and the rule has no survivor left.
 
 Not an equivalence but dead code: the old `regions()` ended with
 `.filter(|&(start, _)| start < line.len())` and a doc claim that the filter keeps

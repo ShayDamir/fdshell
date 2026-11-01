@@ -495,3 +495,29 @@ fn window_end_is_one_past_the_runs_newline() {
         "the same in statement context"
     );
 }
+
+/// The scan stops at the region's own `end`, and that `end` is **one past** the
+/// newline terminating the delimiter line — the byte it lands on is the first
+/// byte of the line that follows, so it can be a real `&&` pair. Reading it would
+/// turn the region's successor line into the region's operator, so the answer
+/// here (`Skip`, the delimiter line's newline) is what separates the bound from
+/// its `<=` mutant (the record claimed the landed byte can never match the
+/// needle; a region whose delimiter line is not the last line proves otherwise).
+#[test]
+fn a_pair_written_past_the_region_end_is_not_the_regions_operator() {
+    // The region is `(8, 12)`: body `q` + the delimiter line `A` with its
+    // newline. `line[12..]` is the `&&` pair — the region's successor line, and
+    // the scan never reaches it.
+    assert_eq!(
+        step_of(b"cat <<A\nq\nA\n&& echo tail", true),
+        Some(Step::Skip(11)),
+        "the scan answers for the region's own bytes only"
+    );
+    // The `||` twin, same shape: a scan that reads the byte at `end` reports the
+    // split at 12 and claims the pair is `||`.
+    assert_eq!(
+        step_of(b"cat <<A\nq\nA\n|| echo tail", true),
+        Some(Step::Skip(11)),
+        "the region stays opaque, so nothing splits"
+    );
+}
