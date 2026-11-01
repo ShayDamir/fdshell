@@ -1605,22 +1605,23 @@ and `scan/heredoc/ops/tests.rs::redirect_operator_leading_run_counts_the_operato
 — see the entry "The byte scan's 'preceding token' test must mirror the token
 layer's `i != 0 && prev != |`".
 
-Residual equivalent mutants (accepted, do not chase): `clobber.rs:50:13` `i < e` →
-`i <= e` — the extra step appends one mask entry at index `e`, which is outside
-every word slice; `clobber.rs:57:28` guard `!in_quote` → `false` — the pair push is
-index alignment only (the predicate's escape-pair skip lives in `clobber_word`), so
-no reachable word distinguishes it. The former third item — the word-start walk's
-`s > 0` → `s >= 0` (`clobber/pipe.rs::word_start`, coordinates re-derived from the
-loop) — is **not** an accepted equivalent: the record was stale, re-measured by
-hand on task #477, where the mutation fails 23 tests, its direct probes in
-`parse/redirect/clobber/pipe/tests.rs` (`pipe_at_run_start_is_a_pipe`,
+Nothing here is an accepted equivalent any more. The `MaskBit` split (task #285)
+made the mask an **exact-vector** assertion in `parse/redirect/clobber/tests.rs`,
+and a pin that measures the length **and** the bits kills what a slice-consuming
+consumer can never see (CATCHING_MUTANTS rule 26): `i < e` → `<=` — the extra step
+appended one mask entry at index `e`, outside every word slice — fails
+`single_quote_span_masks_its_bytes`, `span_masks_the_escape_and_the_quote_bytes` and
+`escape_pair_never_leaves_a_toggle_behind`, and the escape-arm `!in_quote` guard
+→ `false` fails those plus `each_quote_arm_is_gated_by_the_other_state` and
+`parse/redirect/clobber/pipe/tests.rs::quoted_pipe_bytes_are_word_content` (both
+re-probed by hand on 2026-11-01). The one **profile-dependent** kill is the
+word-start walk's `s > 0` → `s >= 0` (`clobber/pipe.rs::word_start`): its guard
+exists so a debug build cannot panic on the `s - 1` underflow at `s = 0`, the rows
+that walk a word back to byte 0 reach it (`pipe_at_run_start_is_a_pipe`,
 `plain_pipe_bytes_are_pipes`, `escape_pair_tails_are_not_pipes`,
-`absorbed_pipe_bytes_are_not_pipes`) among them. The guard exists so a debug build
-cannot panic on the `s - 1` underflow at `s = 0`, and rows that walk a word back
-to byte 0 do reach it — the kill works in the dev profile (what nextest and
-`cargo mutants` build); in release the wrapped index reads past the slice and the
-mutant is equivalent, so a release-profile `Missed` line for it is the
-equivalence, not a gap.
+`absorbed_pipe_bytes_are_not_pipes` — 23 tests in all, re-measured on task #477),
+and only in release does the wrapped index read past the slice and make the mutant
+equivalent — a release-profile `Missed` line there is the equivalence, not a gap.
 
 ## Model a redirect bypass as a `RedirectDirection` variant, not a flag on the def
 `>|` clobber is the direction `Clobber`: `redirect/open.rs` gates the noclobber

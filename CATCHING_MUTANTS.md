@@ -198,3 +198,16 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     — `+` and `/` — now fails
     `copy_file_range/tests.rs::remaining_counts_the_bytes_past_the_position`,
     so the `/` mutant dies on arithmetic, not on a debug divide-by-zero.
+
+26. **A pin that asserts a whole vector — length included — kills mutants a
+    slice-consuming consumer cannot see.** A consumer handed a *slice* never sees an
+    entry appended past the window's end, so the mutant that appended it looked
+    equivalent; assert the computed vector exactly in a test and both the length and
+    the per-byte bits get measured. Measured on
+    `parse/redirect/clobber.rs::quote_mask`: the exact-vector rows in
+    `parse/redirect/clobber/tests.rs` (`single_quote_span_masks_its_bytes`,
+    `span_masks_the_escape_and_the_quote_bytes`,
+    `each_quote_arm_is_gated_by_the_other_state`,
+    `escape_pair_never_leaves_a_toggle_behind`) now kill its `i < e`→`<=` bound and
+    the escape-arm `!in_quote` guard together — two records this chore deleted, made
+    obsolete by the mask split, died for free.
