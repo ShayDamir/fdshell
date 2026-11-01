@@ -13,12 +13,13 @@ use sys::fork_cell::ForkCell;
 
 /// Run the forked child: the child's own setup, then the dispatch.
 ///
-/// `stage_text` is the gate of the user-function arm (task #481): it is the
-/// stage's own text slice, which only the *pipeline* caller has, and only that
-/// caller may run a function — a stage is a full command, so its name resolves
-/// the way a plain command's does. The plain launch passes `None`: its functions
-/// belong to `run/parent.rs`, and fdshell's own forked keywords (`timeout 1 f`)
-/// must keep resolving as external commands.
+/// `stage_text` is the gate of the two arms a stage gains over the plain launch
+/// (tasks #481 and #381): it is the stage's own text slice, which only the
+/// *pipeline* caller has, and only that caller may run a function or an
+/// intercepted builtin — a stage is a full command, so its name resolves the way
+/// a plain command's does. The plain launch passes `None`: its functions and
+/// intercepts belong to `run/parent.rs`, and fdshell's own forked keywords
+/// (`timeout 1 f`) must keep resolving as external commands.
 pub fn child_main(
     child_sock: Option<sys::LocalFd>,
     cell: &ForkCell<ShellState>,
@@ -63,8 +64,6 @@ pub fn child_main(
     let state = cell
         .borrow()
         .change_context(ChildProcessError::BorrowFailed)?;
-
-    crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), &resolved, &state);
     // `run_external` re-borrows the cell to glob the command name, so the
     // trace borrow must end first (RefCell, LESSONS.md). `command NAME`
     // dispatches as a builtin only when the name is in the dispatch table;
@@ -76,23 +75,49 @@ pub fn child_main(
     };
     drop(state);
 
+    // Which arm answers the name, decided once (bash's order: the forked table,
+    // then a user function, then the intercepted table, then `PATH`) so that the
+    // trace below goes to the arm that runs it.
+    let stage = stage_text.is_some();
+    let fn_body = if builtin || !stage {
+        None
+    } else {
+        crate::function_call::look_up(cmdline, cell)
+            .change_context(ChildProcessError::BorrowFailed)?
+    };
+    let intercepts = child::intercepted::answers(&cmd.name, builtin, stage, &fn_body);
+    // The intercept arm owns its trace: `intercept::try_intercept` prints the
+    // raw arguments (and `set` traces itself), which is what the plain path does
+    // for the same command — one line per command, on both paths.
+    if !intercepts {
+        let state = cell
+            .borrow()
+            .change_context(ChildProcessError::BorrowFailed)?;
+        crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), &resolved, &state);
+    }
+
     if builtin {
         let state = cell
             .borrow()
             .change_context(ChildProcessError::BorrowFailed)?;
         child::dispatch::run_builtin(cmd.name.clone(), &refs, args, &state)
-    } else if let Some(text) = stage_text
-        && let Some(body) = crate::function_call::look_up(cmdline, cell)
-            .change_context(ChildProcessError::BorrowFailed)?
+    } else if let Some(body) = fn_body
+        && let Some(text) = stage_text
     {
         // A stage is a full command, so its name resolves through the same
-        // order a plain command uses: user function first, then the builtin
-        // table, then `PATH`. `function_call::look_up` is the single owner of
+        // order a plain command uses: user function first, then both builtin
+        // tables, then `PATH`. `function_call::look_up` is the single owner of
         // the rule (it answers `None` when a `builtin`/`command` prefix is set,
-        // so those rows keep reporting). The arm sits at this decision point so
-        // it runs after everything `child_main` owns: the capture socket, the
+        // so those rows keep reporting). The arms sit at this decision point so
+        // they run after everything `child_main` owns: the capture socket, the
         // stage's redirects, arg substitution, the scoped prefix and the trace.
         child::user_function::run(text, cmdline, &body, cell)
+    } else if intercepts && let Some(text) = stage_text {
+        // The intercepted table's arm (task #381): the plain path runs these
+        // handlers in the parent, and the stage's fork is the child's own copy
+        // of the state — bash's stage subshell, where a `cd`, an option, a
+        // positional or an alias change dies with the fork.
+        child::intercepted::run(text, cmdline, cell)
     } else {
         external::run_external(&cmd, &refs, cell)
     }

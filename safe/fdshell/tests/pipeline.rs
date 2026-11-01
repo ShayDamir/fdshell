@@ -684,3 +684,332 @@ fn a_function_stage_keeps_the_prefix_rows() {
         assert!(err.contains(want), "{script:?}: stderr={err}");
     }
 }
+
+// ---- The intercepted table answers a name written as a stage (task #381) ----
+
+/// The headline rows: a stage resolves the plain path's order — a user function,
+/// then **both** builtin tables, then `PATH` — so every intercepted builtin
+/// written as a stage runs in the stage's own fork. Before #381 each row fell to
+/// the `PATH` search (`failed to resolve command path: "cd"`) and the failure
+/// stayed invisible in bash, where the visible rc is the pipeline's. Every row is
+/// the bash-measured pair (stdout, stderr, rc), and bash is silent on stderr.
+#[test]
+fn an_intercepted_stage_runs_the_intercept_table() {
+    let dir = Scratch::new();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    for (script, want) in [
+        ("cd sub | cat", ""),
+        ("echo hi | cd sub", ""),
+        ("set -- a | cat", ""),
+        ("shopt -s nullglob | cat", ""),
+        ("alias g=echo | cat", ""),
+        ("export V=1 | cat", ""),
+        ("echo a | :", ""),
+        ("eval echo hi | cat", "hi\n"),
+        ("eval 'echo hi' | cat", "hi\n"),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (
+                str::from_utf8(&out.stdout).unwrap(),
+                str::from_utf8(&out.stderr).unwrap(),
+                out.status.code()
+            ),
+            (want, "", Some(0)),
+            "script {script:?}: bash prints `{want:?}` at rc 0 and says nothing"
+        );
+    }
+}
+
+/// What an intercepted builtin changes in a stage dies with the fork — bash's
+/// stage subshell cannot move the parent's base either, which is what these
+/// measured rows say. The `signalfd`/`fdexplain` pair is fdshell's own rule (bash
+/// has no such builtins): the plain row registers the fd var, the stage row's
+/// registration dies with the child.
+#[test]
+fn an_intercepted_stages_state_changes_die_with_the_fork() {
+    let dir = Scratch::new();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let here = format!("{}\n", dir.display());
+    for (script, want) in [
+        ("cd sub | cat; pwd", here.as_str()),
+        ("alias g=echo | cat; alias", ""),
+        (r#"export E=1; echo a | export E=2; echo "$E""#, "1\n"),
+        (r"set -- a b; echo x | set -- c; echo $#", "2\n"),
+        (
+            "signalfd %s USR1; echo a | signalfd %s USR1; fdexplain %s",
+            "%s (from shell default)\n",
+        ),
+        ("echo a | signalfd %s USR1; fdexplain %s", "%s is unset\n"),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, Some(0)),
+            "script {script:?}: bash prints `{want:?}` at rc 0 (the stage's change \
+             died with it); stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}
+
+/// The status a stage's intercepted builtin reports, from both sides: `exit` in
+/// the **last** stage is the pipeline's code, and `exit` in a middle stage dies
+/// with the child while the last stage's code is what the pipeline reports — the
+/// pair bash measures as 3 and 0. `local` outside a function is the handler's own
+/// report at rc 1 in both shells; fdshell's chain carries bash's own words
+/// ("can only be used in a function"), so the assertion holds on both sides.
+#[test]
+fn an_intercepted_stage_reports_the_status_it_runs_with() {
+    let dir = Scratch::new();
+    for (script, want, rc) in [
+        ("echo a | exit 3", "", Some(3)),
+        ("echo a | exit 3 | cat", "", Some(0)),
+        ("echo a | local x=1", "", Some(1)),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, rc),
+            "script {script:?}: bash prints `{want:?}` at rc {rc:?}; stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+    let out = run_stdin_null(&dir, "echo a | local x=1");
+    let err = str::from_utf8(&out.stderr).unwrap();
+    assert!(
+        err.contains("can only be used in a function"),
+        "bash: `local: can only be used in a function`; stderr={err}"
+    );
+}
+
+/// `times`, `hash`, bare `set` and bare `export` as a stage each print their own
+/// shell's state — the numbers, wording and table contents differ per shell — so
+/// only the shape is pinned: the stage runs, its output reaches the pipe (the
+/// `tail` line is the pipeline's last statement's own), both shells stay silent
+/// on stderr, and the rc is 0. Before #381 the stage fell to the `PATH` search
+/// and answered the row its own way.
+#[test]
+fn a_printing_intercept_keeps_its_shape_as_a_stage() {
+    let dir = Scratch::new();
+    for script in [
+        "echo a | times; echo tail",
+        "echo a | hash; echo tail",
+        "echo a | set; echo tail",
+        "echo a | export; echo tail",
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (
+                str::from_utf8(&out.stdout).unwrap().lines().last(),
+                out.status.code()
+            ),
+            (Some("tail"), Some(0)),
+            "script {script:?}: bash ends with its own `tail` line at rc 0 and says \
+             nothing; stdout={:?}, stderr={:?}",
+            str::from_utf8(&out.stdout).unwrap(),
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}
+
+/// A stage that reads stdin: `read` takes the pipe's own line, `eval` re-enters
+/// the interpreter (the nesting counter is the fork's copy — LESSONS "Keep
+/// execution-context counters in ShellState"), `source` reads the pipe as a file
+/// and runs what it finds (the word `a`, which neither shell has as a command),
+/// `wait` has no jobs to collect. Every row runs under `run_bounded` with an
+/// immediate EOF — never a fixed sleep — and matches bash.
+#[test]
+fn a_stage_that_reads_stdin_runs_the_intercept_table() {
+    for (script, want) in [
+        ("echo a | read x; echo rc=$?", "rc=0\n"),
+        ("echo a | eval echo hi; echo tail", "hi\ntail\n"),
+        ("echo a | wait; echo tail", "tail\n"),
+        ("echo a | source /dev/stdin; echo tail", "tail\n"),
+    ] {
+        let out = run_bounded(script, "", Duration::from_secs(5));
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, Some(0)),
+            "script {script:?}: bash prints `{want:?}` at rc 0; stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+    let out = run_bounded(
+        "echo a | source /dev/stdin; echo tail",
+        "",
+        Duration::from_secs(5),
+    );
+    assert!(
+        str::from_utf8(&out.stderr).unwrap().contains("not found"),
+        "bash names the `a` it cannot run: stderr={}",
+        str::from_utf8(&out.stderr).unwrap()
+    );
+}
+
+/// One trace line per command, on both paths: the arm goes through
+/// `intercept::try_intercept`, which owns the intercepts' trace (the raw
+/// arguments — the already-documented raw-vs-expanded wording; `set` traces
+/// itself), so `child_main`'s generic trace must not add a second line for the
+/// stage. bash traces the stage it runs, so it prints one `+ cd sub` and one
+/// `+ cat`; fdshell's extra `+ set -x` is its own, pinned in `tests/xtrace.rs`.
+/// The gate belongs to the **arm** that runs: a function shadowing an
+/// intercepted name keeps the generic line (bash traces the call).
+#[test]
+fn an_intercepted_stage_prints_one_trace_line() {
+    let dir = Scratch::new();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let out = run_stdin_null(&dir, "set -x; cd sub | cat");
+    let err = str::from_utf8(&out.stderr).unwrap().to_string();
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("", Some(0)),
+        "bash is silent on stdout at rc 0; stderr={err}"
+    );
+    for line in ["+ cd sub", "+ cat"] {
+        assert_eq!(
+            err.lines().filter(|l| *l == line).count(),
+            1,
+            "bash prints `{line}` exactly once for the stage: {err}"
+        );
+    }
+
+    let out = run_stdin_null(&dir, "set -x; cd(){ echo fn; }; cd x | cat");
+    let err = str::from_utf8(&out.stderr).unwrap().to_string();
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("fn\n", Some(0)),
+        "bash prints `fn` at rc 0; stderr={err}"
+    );
+    assert!(
+        err.contains("+ cd x") && err.contains("+ echo fn"),
+        "bash traces the function call and its body: {err}"
+    );
+
+    let out = run_stdin_null(&dir, "echo hi | set -x");
+    let err = str::from_utf8(&out.stderr).unwrap().to_string();
+    assert_eq!(
+        (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+        ("", Some(0)),
+        "bash is silent at rc 0 — its stage subshell enables xtrace after the \
+         command is expanded — while fdshell's handler traces `set -x` itself on \
+         both paths: stdout={:?}",
+        str::from_utf8(&out.stdout).unwrap()
+    );
+    assert!(err.contains("+ set -x"), "bash says nothing: {err}");
+}
+
+/// A stage redirect feeding an intercept: the stage's own `>` is opened by the
+/// fork, and bash creates the file too (the stage's redirect is part of the
+/// pipeline's fd state, README "Redirection"/"Pipelines and lists").
+#[test]
+fn a_stage_redirect_feeds_an_intercept() {
+    let dir = Scratch::new();
+    let out = run_stdin_null(&dir, "cd . > out | cat");
+    assert_eq!(
+        (
+            str::from_utf8(&out.stdout).unwrap(),
+            str::from_utf8(&out.stderr).unwrap(),
+            out.status.code()
+        ),
+        ("", "", Some(0)),
+        "bash creates the file, is silent, rc 0"
+    );
+    assert!(dir.join("out").exists(), "bash creates `out` in the stage");
+}
+
+/// The prefix pair keeps the family's answer, the same one `tests/command.rs`
+/// pins for the plain path: `builtin` reaches the **forked** table (which has no
+/// `cd`), and a name the intercepted table answers reports the prefix it cannot
+/// run. bash reaches its own builtin through the prefix, silently, at rc 0.
+#[test]
+fn the_prefix_pair_keeps_its_own_answer() {
+    let dir = Scratch::new();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    for (script, want) in [
+        ("echo a | builtin cd sub", "is not a shell builtin"),
+        ("echo a | command cd sub", "prefix is not supported"),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        let err = str::from_utf8(&out.stderr).unwrap().to_string();
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            ("", Some(1)),
+            "script {script:?}: bash is silent on stdout at rc 0, naming `{want}` \
+             on stderr; stderr={err}"
+        );
+        assert!(
+            err.contains(want),
+            "{script:?}: bash says nothing; stderr={err}"
+        );
+    }
+}
+
+/// A function named after an intercepted builtin wins the stage — bash resolves
+/// a user function before the builtin tables, and the arm order in
+/// `child/run.rs` is the same (the trace rows above pin the same order).
+#[test]
+fn a_function_wins_over_the_intercepted_table() {
+    let dir = Scratch::new();
+    let out = run_stdin_null(&dir, "cd(){ echo fn; }; cd x | cat");
+    assert_eq!(
+        (
+            str::from_utf8(&out.stdout).unwrap(),
+            str::from_utf8(&out.stderr).unwrap(),
+            out.status.code()
+        ),
+        ("fn\n", "", Some(0)),
+        "bash prints `fn` at rc 0 and is silent"
+    );
+}
+
+/// `set -e` and a failing intercepted stage, from both sides: bash exempts every
+/// stage but the **last** (task **#490**) — the middle stage's failure prints its
+/// own diagnostic and the pipeline runs on at rc 0 — while a failing last stage
+/// ends the pipeline at rc 1 before the statement behind it. fdshell agrees on
+/// both rows; only the wording of the two diagnostics is each shell's own.
+#[test]
+fn set_e_and_a_failing_intercepted_stage() {
+    let dir = Scratch::new();
+    for (script, want, rc) in [
+        (
+            "set -e; cd /nonexistent | cat; echo tail",
+            "tail\n",
+            Some(0),
+        ),
+        ("set -e; cat | cd /nonexistent; echo tail", "", Some(1)),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            (want, rc),
+            "script {script:?}: bash prints `{want:?}` at rc {rc:?}; stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+    }
+}
+
+/// `timeout` is fdshell's own forked keyword, so the plain path must keep the
+/// answer it had before #381 — bash's coreutils `timeout` runs the payload there
+/// too — while in a stage fdshell's own intercept runs. Every row is silent at
+/// rc 0 in both shells, which is the pair to keep.
+#[test]
+fn the_plain_paths_forked_keyword_keeps_its_answer() {
+    let dir = Scratch::new();
+    for (script, want) in [
+        ("timeout 1 true; echo tail", "tail\n"),
+        ("timeout 1 true | cat", ""),
+        ("echo a | timeout 1 true; echo tail", "tail\n"),
+    ] {
+        let out = run_stdin_null(&dir, script);
+        assert_eq!(
+            (
+                str::from_utf8(&out.stdout).unwrap(),
+                str::from_utf8(&out.stderr).unwrap(),
+                out.status.code()
+            ),
+            (want, "", Some(0)),
+            "script {script:?}: bash prints `{want:?}` at rc 0 and is silent"
+        );
+    }
+}

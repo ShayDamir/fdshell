@@ -1540,17 +1540,15 @@ fn a_stage_block_reads_the_pipe_with_the_read_divergence() {
 
 /// The POSIX builtin `wait` behind a `|` opens **no** block span (the shared
 /// scorer's gate: no pattern keyword behind the word), so it is an ordinary
-/// command stage — and the fork has no `wait` to dispatch: it reports the
-/// unresolved command on stderr while the pipeline's own status stays 0. The
-/// stage-child gap of task **#381** (the `cd` twin is pinned there).
+/// command stage — and the stage's fork answers the intercepted table (task
+/// **#381**): `wait` with no jobs is silent at rc 0, exactly bash's pair, so the
+/// pipeline's own status is all there is. `run_bounded` because a `wait` that
+/// found a job here would block; `tests/pipeline.rs` pins the same rows.
 #[test]
 fn the_builtin_wait_behind_a_pipe_is_a_command_stage() {
-    let (out, err, rc) = run("echo a | wait; echo tail");
+    let (out, err, rc) = run_bounded("echo a | wait; echo tail");
     assert_eq!((out.as_str(), rc), ("tail\n", 0), "{err}");
-    assert!(
-        err.contains("failed to resolve command path"),
-        "bash runs the builtin silently: {err}"
-    );
+    assert!(err.is_empty(), "bash runs the builtin silently: {err}");
 }
 
 /// A control builtin behind the `|` is an ordinary **stage**: the fork has no

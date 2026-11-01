@@ -646,9 +646,12 @@ fn the_five_names_have_no_builtins_pinned() {
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
         assert!(err.contains(needle), "{script}: stderr={err:?}");
     }
-    // The pipeline-stage half (owner **task #381**): a stage runs in a forked
-    // child, so a control signal raised there has no loop to reach and the
-    // visible `not found` is the honest failure (bash warns at rc 0).
+    // The pipeline-stage half (owner **task #381**, which now dispatches the
+    // whole intercepted table inside the stage's fork): these five names have
+    // **no** builtins — the owner pair **#473**/**#472** is unchanged — so a stage
+    // that runs one still falls to the `PATH` search, and a control signal raised
+    // there has no loop to reach: the visible `not found` is the honest failure
+    // (bash warns at rc 0).
     for (script, needle) in [
         ("echo a | 'break'", "\"break\" not found"),
         ("echo a | 'continue'", "\"continue\" not found"),

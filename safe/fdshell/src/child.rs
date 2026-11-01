@@ -14,6 +14,7 @@ pub(crate) mod fdpass;
 mod flags;
 mod flock;
 mod help;
+mod intercepted;
 mod listen;
 mod ls;
 mod netaddr;
