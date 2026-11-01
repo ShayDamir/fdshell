@@ -25,6 +25,8 @@ pub enum CmdError {
     Cd,
     /// cd: too many arguments
     CdTooManyArgs,
+    /// cd: failed to write the new directory to standard output
+    CdDashWrite,
     /// invalid export name
     ExportName,
     /// fd pass-through failed

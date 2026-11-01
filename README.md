@@ -821,6 +821,14 @@ expansion produces **no field at all** — `cd "$@"` with no positionals,
 to the previous directory even where a directory named `-` exists; that
 directory is reached by any other path, `cd ./-`.
 
+A `-` operand also prints: after a **successful** move, `cd -` writes the new
+directory to standard output, as POSIX XCU 4.57 requires (bash does the same).
+fdshell writes the value its own `pwd` writes — `getcwd` is the shell's only
+source for the cwd's path — where bash writes its new `PWD` value; the two agree
+byte for byte on every path reached without a symlink hop, and `cd`'s
+`O_NOFOLLOW` open means fdshell never takes one. A failed move prints nothing,
+and its report aborts the script (the task #179 family, where bash continues).
+
 `$_` reports the last **expanded** field the command consumed: `V=sub; cd $V`
 leaves `$_` at `sub`, and the quoted twin `cd '$V'` leaves it at the literal
 `$V`, because a quoted word is not expanded. A fully quoted word that expands
@@ -848,8 +856,7 @@ leaves the directory alone at rc 0; a scoped `IFS=` prefix splits the
 expansion on the *scoped* `IFS` (`v=a:b; IFS=: cd $v`
 is two fields here, one name in bash — the
 `tests/cmd_subst.rs::word0_scoped_ifs_divergence` family); `cd`'s option words
-`--`, `-L`, `-P` and `-x` are operands (task #380); and `cd -` prints nothing,
-where bash prints the new directory (task #378).
+`--`, `-L`, `-P` and `-x` are operands (task #380).
 
 ### Command lookup table (`hash`)
 

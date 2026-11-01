@@ -9,7 +9,9 @@
 //!   `cd $unset`, `shopt -s nullglob; cd zzz*`);
 //! - 1 field is the directory, and the field `-` is the `OLDPWD` form — read on
 //!   the expanded value, so `D=-; cd "$D"` goes back even where a directory
-//!   named `-` exists (`cd ./-` is how that directory is reached);
+//!   named `-` exists (`cd ./-` is how that directory is reached), and after a
+//!   **successful** move that form writes the new directory to stdout (POSIX XCU
+//!   4.57) — the value its own `pwd` would print there;
 //! - 2+ fields is `cd: too many arguments` and opens nothing (fdshell's rc is
 //!   1 and the report aborts the script — the accepted task #179 family);
 //! - `shopt -s strict` bans nothing here: the base follows the shell, and
@@ -26,8 +28,10 @@ use error_stack::{Report, ResultExt, bail};
 use crate::cd::CdTarget;
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
+use sys::OUT;
 use sys::ScriptText;
 use sys::ShortCStr;
+use sys::env::getcwd;
 use sys::fork_cell::ForkCell;
 
 /// The operand's field list travels back to the frame, so `$_` is the last
@@ -62,10 +66,35 @@ pub(crate) fn run_cd(
     };
     let expanded = var.is_none();
     let target = target(var, &fields)?;
+    // Bound before `target` moves into `cd` (the enum is not `Copy`): the print is
+    // a per-form behavior, so the gate lives here, not in `cd.rs`.
+    let dashed = matches!(target, CdTarget::OldCwd);
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     crate::cd::cd(target, &mut state, text.start).change_context(CmdError::Cd)?;
+
+    // Only the `-` form writes, and only a move that **succeeded** (a failed one
+    // prints nothing, as bash). The print runs before `set_last_exit(0)` so a
+    // write failure is never reported as success.
+    if dashed {
+        print_new_directory()?;
+    }
+
     state.set_last_exit(0);
     Ok(expanded.then_some(fields))
+}
+
+/// The `-` form's line, in the exact shape of `child/simple.rs::handle_pwd`:
+/// `getcwd` is the shell's single source of the current directory's path, since
+/// a stored `Origin` is provenance — `Shell`, `EnvVar(HOME)`, the relative name a
+/// hop was typed with — not a printable path
+/// (LESSONS: "The cwd's printable path is `getcwd`"). bash prints its own `PWD`
+/// value here; the two are the same bytes unless a hop went through a symlink,
+/// and `cd`'s `O_NOFOLLOW` open means fdshell never takes one.
+fn print_new_directory() -> Result<(), Report<CmdError>> {
+    let cwd = getcwd().change_context(CmdError::CdDashWrite)?;
+    OUT.write_all(&cwd).change_context(CmdError::CdDashWrite)?;
+    OUT.write_all(b"\n").change_context(CmdError::CdDashWrite)?;
+    Ok(())
 }
 
 /// Decide which directory to open. `var` is the `%name` operand's name, read

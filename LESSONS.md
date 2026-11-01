@@ -6034,3 +6034,40 @@ through `try_intercept` — `intercept/cd/tests.rs`,
 `intercept/hash_cmd/tests.rs`, `intercept/source/tests.rs`,
 `intercept/local/tests.rs`, `intercept/tests.rs` — each with real per-word masks
 (LESSONS: "No substitution surface takes an empty mask").
+
+## The cwd's printable path is `getcwd`, not its `Origin` (task #378)
+
+**A print of "the current directory" goes through `sys::env::getcwd()`, the same
+mechanism `child/simple.rs::handle_pwd` uses** — never through the cwd's stored
+`Origin`. `Origin` is *provenance*: the startup cwd carries `Origin::Shell` (no
+path at all, `state/setters.rs::insert_cwd`), a hop typed `cd sub` records
+`Origin::File("sub")` (relative, as typed), a hop typed `cd ~` records
+`Origin::EnvVar(HOME)` (a name). None of those is a printable path and there is
+no logical-path store to fall back on, so `getcwd` is the shell's single source
+for the cwd's path — one fact, one lookup, one source
+(LESSONS: "A second table for one fact").
+
+`cd -` is where the print shows up: POSIX XCU 4.57 makes the `-` form write the
+new directory to stdout, and bash prints its own `PWD` value. fdshell prints what
+its `pwd` prints — the physical path — so the two are byte-identical wherever
+both shells can move; `cd`'s `O_NOFOLLOW` open means fdshell never takes a
+symlink hop, and bash's logical value can only part company on a chain that has
+one. The gate is per-form (the expanded-field `-`, and only after a **successful**
+move) and lives in `intercept/cd.rs`, the form's owner — not in `cd.rs`, whose
+doc is a pure-move contract — and the print runs **before** `set_last_exit(0)`, so
+a write failure never reports success.
+
+Pins: `tests/cd_expand.rs::cd_dash_prints_the_new_directory` (plain form, double
+bounce, `$( … )` capture, strict row), `tests/cd_expand.rs::cd_dash_fires_on_the_expanded_field`
+(every route to the field, exact bytes; the path-form row stays silent),
+`tests/cd_expand.rs::cd_dash_print_goes_where_the_redirect_goes` (the line follows
+the redirect, into the cwd *at redirect time*),
+`tests/cd_expand.rs::cd_dash_prints_the_physical_path` (the named divergence),
+`tests/cd_expand.rs::cd_dash_prints_only_after_a_successful_move`, and
+`tests/cd_expand.rs::cd_dash_write_failure_is_reported` (kills the two `write_all`
+arms; bash continues after its rc-1 error, fdshell aborts — the task #179 family).
+
+Accepted equivalent: the `getcwd()` arm's `change_context` in
+`intercept/cd.rs::print_new_directory` — on this path the new cwd exists by
+construction, so only the cap's `E2BIG` (LESSONS: "Retrying on a foreign errno
+converges") could reach the arm and no test can; the arm only names the failure.

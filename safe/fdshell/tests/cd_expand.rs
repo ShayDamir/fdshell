@@ -369,20 +369,19 @@ fn cd_fields_are_the_target_rule() {
     );
 }
 
-/// `cd -` returns to the previous directory (fdshell prints nothing; bash
-/// prints the new directory — task #378), and the form fires on the **expanded**
-/// field: `D=-; cd "$D"` goes back even though a directory named `-` exists in
-/// the cwd (measured: bash agrees). The literal directory is reached by any
-/// other path.
+/// `cd -` returns to the previous directory **and writes it to standard output**
+/// (POSIX XCU 4.57 — every row's bytes are `bash -c`'s own answer, measured in
+/// the same layout first), and the form fires on the **expanded** field: `D=-;
+/// cd "$D"` goes back even though a directory named `-` exists in the cwd
+/// (measured: bash agrees). The literal directory is reached by any other path —
+/// the path form stays silent, so that row is one line.
 #[test]
 fn cd_dash_fires_on_the_expanded_field() {
     let work = workdir("dash");
     let home = scratch("dash-home");
-    let (out, err, code) = run_in(&work, &home, "cd sub; cd -; builtin pwd");
-    assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out.trim(), work.display().to_string());
-
+    let w = work.display().to_string();
     for script in [
+        "cd sub; cd -; builtin pwd",
         "cd sub; D=-; cd \"$D\"; builtin pwd",
         // The same field through the positional list; `cd sub` first, because
         // `cd -` with no `OLDPWD` is a failure in bash too.
@@ -390,16 +389,150 @@ fn cd_dash_fires_on_the_expanded_field() {
     ] {
         let (out, err, code) = run_in(&work, &home, script);
         assert_eq!(code, 0, "script {script:?}: stderr={err:?}");
+        // Two lines: the `-` form's print, then `pwd`'s — the same path, and both
+        // are exactly what bash prints.
         assert_eq!(
-            out.trim(),
-            work.display().to_string(),
+            out,
+            format!("{w}\n{w}\n"),
             "script {script:?} must land on OLDPWD"
         );
     }
 
     let (out, err, code) = run_in(&work, &home, "cd ./-; builtin pwd");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out.trim(), format!("{}/-", work.display()));
+    assert_eq!(out, format!("{w}/-\n"), "the path form prints nothing");
+}
+
+/// POSIX XCU 4.57's print, on every route that decides the field is `-`, and
+/// every row measured against `bash -c` (5.3.9) in the same layout before being
+/// pinned: the plain form, the double bounce, the capture, and `strict` (which
+/// bans nothing on `cd` — README "Strict mode"). The printed value is what
+/// fdshell's own `pwd` prints there, `getcwd` being the shell's only source for
+/// the cwd's path; bash prints its `PWD` value, and the two can only part on a
+/// path reached through a symlink, which `cd`'s `O_NOFOLLOW` open refuses
+/// (`cd_dash_prints_the_physical_path`).
+#[test]
+fn cd_dash_prints_the_new_directory() {
+    let work = workdir("dashprint");
+    let home = scratch("dashprint-home");
+    let w = work.display().to_string();
+
+    let (out, err, code) = run_in(&work, &home, "cd sub; cd -");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out,
+        format!("{w}\n"),
+        "bash od-verified: the path, one newline"
+    );
+
+    // Every `-` use prints: bash answers `W`, `W/sub`, then `pwd`'s `W/sub`.
+    let (out, err, code) = run_in(&work, &home, "cd sub; cd -; cd -; builtin pwd");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("{w}\n{w}/sub\n{w}/sub\n"));
+
+    // The print is captured when fd 1 is the capture pipe, and a `$( … )` value
+    // loses its trailing newline on assignment, as `tests/cmd_subst.rs` pins.
+    let (out, err, code) = run_in(
+        &work,
+        &home,
+        "x=$(cd sub; cd -); builtin echo \"x=$x\"; cd sub; builtin pwd",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("x={w}\n{w}/sub\n"));
+
+    // `strict` changes nothing here; bash has no `strict` option, so this row is
+    // fdshell's own — and it is bash's shape above without the shopt.
+    let (out, err, code) = run_in(&work, &home, "shopt -s strict; cd sub; cd -; builtin pwd");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("{w}\n{w}\n"));
+}
+
+/// `cd - > f`: the redirect belongs to the command, so the line lands in the file
+/// opened in the cwd **at redirect time** (`sub/f`, bash-verified) and only
+/// `pwd`'s line reaches stdout. The parent's `redirect::Scope` already moves fd 1
+/// for intercepted builtins (`validation.rs`), so the print follows it.
+#[test]
+fn cd_dash_print_goes_where_the_redirect_goes() {
+    let work = workdir("dashredirect");
+    let home = scratch("dashredirect-home");
+    let w = work.display().to_string();
+    let (out, err, code) = run_in(&work, &home, "cd sub; cd - > f; builtin pwd");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("{w}\n"), "only `pwd`'s line is left on stdout");
+    assert_eq!(
+        std::fs::read(work.join("sub/f")).unwrap(),
+        format!("{w}\n").as_bytes(),
+        "bash writes the same bytes into `sub/f`"
+    );
+}
+
+/// The printed value is fdshell's own `pwd` answer — the **physical** path — where
+/// bash prints its `PWD` value. They can only part on a chain with a symlink hop,
+/// and `cd`'s `O_NOFOLLOW` open refuses a symlink operand, so the row dies at the
+/// open (rc 1, nothing on stdout) where bash prints its logical `…/link` twice.
+/// The all-physical twin of the same chain is bash-exact, and that is the rule
+/// this test pins: the two shells print the same bytes wherever they can both move.
+#[test]
+fn cd_dash_prints_the_physical_path() {
+    let work = scratch("dashlink");
+    std::fs::create_dir_all(work.join("d/d2")).unwrap();
+    std::os::unix::fs::symlink("d", work.join("link")).unwrap();
+    let w = work.display().to_string();
+
+    let (out, err, code) = run_in(&work, &work, "cd link; cd d2; cd -; builtin pwd");
+    assert_eq!(
+        code, 1,
+        "bash cds through the link and prints {w}/link twice: stderr={err:?}"
+    );
+    assert!(
+        out.is_empty(),
+        "the run aborts at the symlink open: {out:?}"
+    );
+    assert!(err.contains("Not a directory"), "stderr={err:?}");
+
+    let (out, err, code) = run_in(&work, &work, "cd d; cd d2; cd -; builtin pwd");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out,
+        format!("{w}/d\n{w}/d\n"),
+        "bash answers the same bytes here"
+    );
+}
+
+/// The print is gated on a **successful** move: a `cd -` with nothing in the
+/// `OLDCWD` slot reports the failure and prints nothing on stdout, exactly as
+/// bash does. The words and the continuation are the named divergences — bash
+/// says `cd: OLDPWD not set` at rc 1 and its run **continues** (the task #179
+/// family), fdshell reports and aborts.
+#[test]
+fn cd_dash_prints_only_after_a_successful_move() {
+    let work = workdir("dashnone");
+    let home = scratch("dashnone-home");
+    let (out, err, code) = run_in(&work, &home, "cd -");
+    assert_eq!(code, 1, "bash's rc is 1 too: stderr={err:?}");
+    assert!(out.is_empty(), "bash's stdout is empty too: {out:?}");
+    assert!(err.contains("fd variable not set"), "stderr={err:?}");
+}
+
+/// The write itself failing is an error like any other: bash reports
+/// `cd: write error: No space left on device` at rc 1, moves the cwd, and
+/// **continues** (so it prints `after`). fdshell reports the same fact in its own
+/// words at rc 1 and aborts the run — the accepted task #179 family, so the row
+/// pins the abort and the message, never a source frame.
+#[test]
+fn cd_dash_write_failure_is_reported() {
+    let work = workdir("dashfull");
+    let home = scratch("dashfull-home");
+    let (out, err, code) = run_in(&work, &home, "cd sub; cd - >/dev/full; builtin echo after");
+    assert_eq!(
+        code, 1,
+        "bash prints `after` after its rc-1 error: stderr={err:?}"
+    );
+    assert!(out.is_empty(), "the run aborts, so nothing prints: {out:?}");
+    assert!(
+        err.contains("failed to write the new directory"),
+        "the variant's own text: {err:?}"
+    );
 }
 
 /// The `%name` form is read on the **raw** word: the pipeline's `%` arm yields
