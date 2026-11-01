@@ -55,9 +55,13 @@ pub(super) fn group_block<'a>(
 ) -> (Segment<'a>, usize, usize) {
     let mut quotes = quotes;
     let (close, closed) = scan_brace_block(line, start + 1, &mut quotes);
-    // The group never closes: the span is the rest of the input, and the REPL
-    // keeps reading continuation lines.
-    let open_end = line.len().min(close + 1);
+    // A group that never closes: `scan_brace_block`'s walk ran to the end of the
+    // text, so `close` **is** the line length here and the span is the rest of the
+    // input (the REPL keeps reading continuation lines) — nothing for `min` to
+    // clamp, and no operator left to mutate (CATCHING_MUTANTS rule 24). The closed
+    // branch never reads this binding; its `+ 1` is the one inside `statement_end`
+    // below, pinned by `segment/group/tests.rs::span_ends_past_the_closing_brace`.
+    let open_end = close;
     let (end, resume, floor, bodies) = if closed {
         let (sep, r) = statement_end(line, close + 1, quotes);
         let line_end = heredoc::line_end_after(line, start);

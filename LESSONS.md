@@ -1735,14 +1735,21 @@ arm keeps the pins that name the surviving behaviour — the region rows of
 `cond/boundary/body/tests.rs`. Delete the outer test when the callee guards the
 same byte (CATCHING_MUTANTS rules 11/15).
 
-## An unclosed brace scan ends at the line length, so `min(len, close + 1)` and `min(len, close)` agree
-`scan_brace_block` reports `close = line.len()` when the group never closes, so
-in `segment/group/block.rs::group_block` the `close + 1`→`close * 1` mutant gives
-the same `open_end`
-(`line.len().min(len)` = `line.len()`), and the suite passes under it: an accepted
-equivalent mutant. The `+1` is still required for the closed case (the `+1`→`-1`
-mutant is killed by `segment/group/tests.rs::span_ends_past_the_closing_brace`),
-so keep the offset and record the `*` survivor rather than chasing it.
+## An unclosed brace scan ends at the line length, so the group's span end needs no clamp
+`scan_brace_block`'s walk runs to the end of the text when a group never closes, so
+in `segment/group/block.rs::group_block` the span end of that arm **is** `close`:
+the `min` it used to carry had nothing to clamp and its `+ 1` was a `+`→`*` identity
+no test could see (measured green once more on 2026-11-01) — so the operand is gone
+and the family with it (CATCHING_MUTANTS rule 24). The operators left are pinned in
+both directions, and they are the reason the shape is worth keeping: the closed case's
+`close + 1` feeding `statement_end` is killed under `+`→`-` by
+`segment/group/tests.rs::span_ends_past_the_closing_brace`,
+`glued_comment_after_the_closing_brace_ends_the_statement` and
+`a_multi_line_group_claims_no_bodies`, and under `+`→`*` by
+`glued_comment_after_the_closing_brace_ends_the_statement`; the unclosed arm's
+`open_end + 1` resume is killed by
+`segment/group/tests.rs::unclosed_group_is_open` (`+`→`*` answers 8 where the pin
+asserts 9). All measured on the current tree.
 
 ## Byte-level definer words must be the tokenizer's tokens
 The `function name { … }` definer rule is one implementation (`keywords/function.rs`:
