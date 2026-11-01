@@ -148,7 +148,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use sys::fcntl::{O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, SEEK_SET};
 use sys::fileat::unlinkat;
 
-use super::copy_file_range_exec;
+use super::{copy_file_range_exec, remaining};
 use sys::AtFd;
 use sys::LocalFd;
 
@@ -367,4 +367,33 @@ fn empty_source_with_count_is_count_error() {
     assert_eq!(contents(&dst), b"xy");
     cleanup(&src);
     cleanup(&dst);
+}
+
+/// `remaining`'s byte count is pinned at **its own computation site**: its only
+/// consumer hands the value to a `copy_file_range` total that the kernel clamps
+/// to the bytes really available, so nothing downstream can see the difference
+/// (CATCHING_MUTANTS rule 4/9 — this call is the only place the value is
+/// observable). Both sides of the subtraction are pinned: the zero offset, where
+/// the two forms agree, and a nonzero one, where they cannot.
+#[test]
+fn remaining_counts_the_bytes_past_the_position() {
+    let src = unique("cfra_src");
+    let in_fd = source(&src, b"0123456789ab");
+    assert_eq!(
+        remaining(&in_fd).unwrap(),
+        12,
+        "a position at 0 owns the file"
+    );
+    in_fd.lseek(5, SEEK_SET).unwrap();
+    assert_eq!(
+        remaining(&in_fd).unwrap(),
+        7,
+        "a position past 0 owns the tail"
+    );
+    assert_eq!(
+        offset_of(&in_fd),
+        5,
+        "the position is left where the caller put it"
+    );
+    cleanup(&src);
 }

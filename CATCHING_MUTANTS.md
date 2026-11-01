@@ -185,3 +185,16 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     names — rules 3, 6, 11, 13, 15, 16, 18, 20, 22; this one is the pointer, not a
     new recipe. A deleted operator cannot be re-flagged by a future sweep, and the
     pins that named the surviving behaviour stay green on the simplified source.
+
+25. **When every consumer *clamps* the value, pin it at the computation site.**
+    An external agent (the kernel, a library) is told the value and acts on at
+    most what it has: `copy_file_range` copies only the bytes the source really
+    holds, so an over-counting `remaining` — `end - start` → `end + start` —
+    hands it a bigger total and the copy is byte-identical, which is why the
+    record called it "unkillable by construction" and said "don't add a seeking
+    test". It is killable one level up: the test calls the function and asserts
+    the exact count, on a nonzero offset (the difference) plus the zero row
+    (rule 3). Measured on `copy_file_range.rs::remaining`: its whole `-` family
+    — `+` and `/` — now fails
+    `copy_file_range/tests.rs::remaining_counts_the_bytes_past_the_position`,
+    so the `/` mutant dies on arithmetic, not on a debug divide-by-zero.
