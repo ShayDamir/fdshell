@@ -69,7 +69,10 @@ impl ShellState {
     /// the default split set, mirroring `set_var`'s sync.
     ///
     /// An unbound name is a silent no-op: bash validates no operand of `unset`
-    /// at all (`unset 1abc`, `unset ""` are rc 0 with no effect).
+    /// at all (`unset 1abc`, `unset ""` are rc 0 with no effect). A plain
+    /// `unset` operand reaches this through `super::functions::unset_name`,
+    /// which tries the variable stores first and only then the function store
+    /// (bash's rule, task #386).
     pub fn unset_var(&mut self, name: &ShortCStr) {
         if name.eq_bytes(b"IFS") {
             self.ifs = Self::default_ifs();

@@ -1,7 +1,8 @@
 //! `unset`'s run half (task #290): every operand of one statement is applied
 //! in the order it was written. The fd arms live here, next to the other
-//! descriptor bookkeeping; a shell variable's whole footprint is one
-//! `ShellState::unset_var` call, because the state owns those stores.
+//! descriptor bookkeeping; a plain name's whole footprint is one
+//! `ShellState::unset_name` call, because the state owns the stores the name can
+//! reach (task #386 put the namespace choice there).
 
 use crate::error::cmd::CmdError;
 use crate::parse::UnsetTarget;
@@ -30,8 +31,10 @@ pub(super) fn run(
 
 /// One operand, inside its own namespace. `%name` closes the descriptor, drops
 /// an fd array of that name, and detaches a named task only — a plain-`&` job
-/// is unnamed and stays `wait`'s to reap (task #326). A plain name is a shell
-/// variable and touches no fd, which is the `%` = fd namespace rule (STYLE §5).
+/// is unnamed and stays `wait`'s to reap (task #326). Those `%` arms are
+/// unchanged by task #386. A plain name is a **variable first, a function
+/// second** (bash's no-option rule, measured), and never an fd — the `%` = fd
+/// namespace rule (STYLE §5).
 fn unset_one(state: &mut ShellState, target: &UnsetTarget) {
     match target {
         UnsetTarget::Fd(name) => {
@@ -40,7 +43,7 @@ fn unset_one(state: &mut ShellState, target: &UnsetTarget) {
             state.jobs.remove_named(name);
         }
         UnsetTarget::FdArrayEntry { var, source } => state.remove_array_entry(var, source),
-        UnsetTarget::Var(name) => state.unset_var(name),
+        UnsetTarget::Var(name) => state.unset_name(name),
     }
 }
 

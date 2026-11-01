@@ -84,6 +84,7 @@ mod ctor;
 mod cwd;
 pub(crate) mod fds;
 pub(crate) mod frames;
+mod functions;
 pub(crate) mod jobs;
 mod options;
 mod setters;
