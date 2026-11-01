@@ -201,3 +201,19 @@ fn skip_is_bounded_to_the_blocks_physical_line() {
         Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
+
+/// An **unclosed** block ends its span at the text end and hands back the cursor
+/// **one past** it. The segment text is the same either way — the scan's separator
+/// arm and the run parser's EOF flush print the same bytes — so the resume is the
+/// only thing a pin can see at this site (rule 9), and it is what kills the
+/// unclosed arm's `+`→`*` identity and its `+`→`-` twin.
+#[test]
+fn an_unclosed_block_resumes_one_past_the_text_end() {
+    for (line, end, resume) in [
+        (b"if :; then echo y".as_slice(), 17, 18),
+        (b"if :; then echo y;".as_slice(), 18, 19),
+        (b"while :; do echo y".as_slice(), 18, 19),
+    ] {
+        assert_eq!(scan(line), (0, end, false, resume), "{line:?}");
+    }
+}
