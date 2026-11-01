@@ -27,10 +27,14 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
     let Some(tokens) = tokens.get(..=esac_idx) else {
         return Vec::new();
     };
-    let (Some(first), Some(last)) = (tokens.first(), tokens.last()) else {
+    let Some(first) = tokens.first() else {
         return Vec::new();
     };
-    if !first.0.eq_bytes(b"case") || !crate::parse::block_tail::is_closer(last, b"esac") {
+    // The truncation gate above is the `esac` half of the rule: it only ever
+    // accepts a line whose word list closes on an `esac`-shaped token, so the
+    // last token's shape says nothing the guard has to repeat (its `||` had a
+    // family no test could see). The guard states the one rule left.
+    if !first.0.eq_bytes(b"case") {
         return Vec::new();
     }
     let Some(in_idx) = (1..tokens.len()).find(|&i| word_at(tokens, i, b"in")) else {
