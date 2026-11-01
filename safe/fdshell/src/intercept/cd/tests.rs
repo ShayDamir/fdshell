@@ -230,6 +230,63 @@ fn target_two_fields_is_the_usage_error() {
 }
 
 // ---------------------------------------------------------------------------
+// The option surface: parsed on the expanded fields, from the head of the list.
+
+#[test]
+fn target_consumes_the_accepted_option_words() {
+    // Exactly four words are accepted, each as a no-op; the operand is what
+    // follows them (bash-measured, and the walker is the whole rule).
+    for words in [
+        &["-L", "sub"][..],
+        &["-P", "-e", "sub"][..],
+        &["-e", "-L", "sub"][..],
+    ] {
+        let found = target(None, &fields(words)).unwrap();
+        assert!(matches!(&found, CdTarget::Path(p) if p.eq_bytes(b"sub")));
+    }
+    // The conflict bash accepts is accepted (rc 0 → `$HOME`), and so is the
+    // 0-operand shape reached through `--`.
+    assert!(matches!(target(None, &fields(&["--"])), Ok(CdTarget::Home)));
+    assert!(matches!(
+        target(None, &fields(&["-L", "-P"])),
+        Ok(CdTarget::Home)
+    ));
+    // A lone `-` is not an option — it is the `OLDPWD` operand — and the first
+    // operand word stops the parsing, so the `-` after it counts too.
+    assert!(matches!(
+        target(None, &fields(&["-"])),
+        Ok(CdTarget::OldCwd)
+    ));
+    for words in [&["sub", "-L"][..], &["-", "a", "b"][..]] {
+        let report = target(None, &fields(words)).unwrap_err();
+        assert!(
+            matches!(report.current_context(), CmdError::CdTooManyArgs),
+            "{words:?} is the usage error"
+        );
+    }
+}
+
+#[test]
+fn target_reports_an_unaccepted_option_word() {
+    // `-@` is bash's getopt magic-`@` marker, not an option, and a cluster is
+    // not split: both are whole-word invalid options here (bash accepts `-LP`,
+    // measured rc 0, and names the first bad character of `---` — `--`).
+    for word in ["-@", "-x", "-LP", "---"] {
+        let report = target(None, &fields(&[word])).unwrap_err();
+        assert!(
+            matches!(report.current_context(),
+                     CmdError::CdInvalidOption { option } if option.eq_bytes(word.as_bytes())),
+            "the whole word {word:?} is named"
+        );
+    }
+    // After `--` the terminator has done its work, so `-x` is an operand: the
+    // path arm takes it, exactly as bash's open failure on a `-x` directory.
+    let one = fields(&["--", "-x"]);
+    let found = target(None, &one).unwrap();
+    assert!(matches!(&found, CdTarget::Path(p) if p.eq_bytes(b"-x")));
+}
+
+// ---------------------------------------------------------------------------
 // `run_cd` over a real mask: the operand is expanded before the target is set.
 
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -320,6 +377,34 @@ fn run_cd_single_quoted_operand_stays_literal() {
         let result = run_cd(&line, &cmdline, &text(&line), &cell);
         let report = result.unwrap_err();
         assert!(matches!(report.current_context(), CmdError::Cd));
+    });
+}
+
+/// `V=-L; W=sub; cd "$V" "$W"`: the option word arrives from an **expansion** —
+/// quoting is no gate (bash-measured), and the operand is the field after it.
+/// Both words carry real `false` masks (#279 item 6), and the row moves the base,
+/// so it runs in the `child_test` fork like its neighbour.
+#[test]
+fn run_cd_parses_the_option_on_the_expanded_fields() {
+    let dir = scratch("options");
+    child_test(|| {
+        let cell = make_cell();
+        {
+            let mut state = cell.borrow_mut().unwrap();
+            state
+                .strings
+                .insert(ShortCStr::from(c"V"), ImportedStr::shell(c"-L".into()));
+            state
+                .strings
+                .insert(ShortCStr::from(c"W"), ImportedStr::shell(c"sub".into()));
+            cd(CdTarget::Path(base(&dir.0)), &mut state, pos()).unwrap();
+        }
+        let line = make_line(&["cd", "$V", "$W"]);
+        let cmdline = make_cmdline_masked(&["$V", "$W"], &[false, false]);
+        let result = run_cd(&line, &cmdline, &text(&line), &cell);
+        assert!(result.is_ok(), "stderr path: {result:?}");
+        // The base moved into `sub`, so the relative open lands on its marker.
+        sys::openat2::open(c"marker", sys::fcntl::O_RDONLY).unwrap();
     });
 }
 

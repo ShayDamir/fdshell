@@ -831,7 +831,8 @@ and its report aborts the script (the task #179 family, where bash continues).
 
 `$_` reports the last **expanded** field the command consumed: `V=sub; cd $V`
 leaves `$_` at `sub`, and the quoted twin `cd '$V'` leaves it at the literal
-`$V`, because a quoted word is not expanded. A fully quoted word that expands
+`$V`, because a quoted word is not expanded. An option word is a field too, so
+`cd --` leaves `$_` at `--` and `cd -- sub` at `sub`. A fully quoted word that expands
 to nothing counts as an (empty) field, and the command word is the `$_` only when
 there were no operand words at all. Bash sets `$_` the same way for every command
 it runs, and every intercept that expands its words (`hash`, `cd`, `eval`,
@@ -855,8 +856,36 @@ empty-`HOME` form `HOME=; cd` is that same open failure at rc 1, where bash
 leaves the directory alone at rc 0; a scoped `IFS=` prefix splits the
 expansion on the *scoped* `IFS` (`v=a:b; IFS=: cd $v`
 is two fields here, one name in bash — the
-`tests/cmd_subst.rs::word0_scoped_ifs_divergence` family); `cd`'s option words
-`--`, `-L`, `-P` and `-x` are operands (task #380).
+`tests/cmd_subst.rs::word0_scoped_ifs_divergence` family).
+
+`cd`'s option words are parsed on the **expanded fields**, from the head of the
+list, exactly as `hash` parses its own: `--`, `-L`, `-P` and `-e` are accepted —
+quoting is no gate — and the last three are no-ops, because the move is a pinned
+`O_DIRECTORY + O_NOFOLLOW` fd and the logical/physical distinction bash measures
+on a symlinked directory has nothing to decide here (the `-L -P` conflict bash
+accepts is accepted too). `--` is consumed and **ends** the parsing, so every
+word after it is an operand, and a lone `-` is not an option: it is the `OLDPWD`
+form. The first other word stops the parsing, so the words after it are counted
+by the rule above.
+
+```shell
+cd --                     # $HOME    (`--` ends the options)
+cd -- sub                 # sub      (the operand after the terminator)
+V=-L; W=sub; cd "$V" "$W" # sub      (options are parsed after expansion)
+cd -- -L                  # the open failure: `-L` is a name after `--`
+cd sub -L                 # cd: too many arguments
+```
+
+Pinned divergences of this surface: bash accepts a clustered short (`-LP sub`
+cds) where fdshell matches the four words whole, and bash's message names the
+first bad character (`---` is reported as `--`) where fdshell names the whole
+word; bash's invalid option is a usage line at rc 2 and the script continues,
+where fdshell prints no usage line and reports at rc 1 — the family above. bash's
+help line `[-@]` is the getopt magic-`@` marker, not an option, so `cd -@` is the
+invalid option in both shells. A failed `cd` still sets bash's `$_` to its last
+word (`cd -x`), which fdshell cannot show end to end because its report aborts
+the run. The `%name` gate stays a **word 0** rule, so in `cd -L %dir` the `%`
+word goes through the pipeline like any other argument.
 
 ### Command lookup table (`hash`)
 

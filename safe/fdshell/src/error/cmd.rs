@@ -161,6 +161,8 @@ pub enum CmdError {
     RecvmsgPayloadNul,
     /// ambiguous redirect: {name}
     AmbiguousRedirect { name: sys::ShortCStr },
+    /// cd: {option}: invalid option
+    CdInvalidOption { option: sys::ShortCStr },
 }
 
 impl core::error::Error for CmdError {}

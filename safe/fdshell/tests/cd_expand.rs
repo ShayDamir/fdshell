@@ -659,7 +659,9 @@ fn cd_literal_rows_stay_green() {
 /// the divergence task #376 owned is closed, so this row is a bash-parity pin.
 /// The twin is the `'…'` pair: a quoted word is not expanded, so the literal
 /// name `$V` is the field, and the row cds into a directory literally named
-/// `$V` (the same pair the unit pin in `intercept/cd/tests.rs` walks).
+/// `$V` (the same pair the unit pin in `intercept/cd/tests.rs` walks). An
+/// **option** word is a field too — bash sets `$_` from the last word it read,
+/// including `--` (task #380's surface).
 #[test]
 fn cd_last_arg_is_the_expanded_field() {
     let work = workdir("lastarg");
@@ -668,6 +670,8 @@ fn cd_last_arg_is_the_expanded_field() {
     for (script, want) in [
         ("V=sub; cd $V; builtin echo \"$_\"", "sub"),
         ("V=sub; cd '$V'; builtin echo \"$_\"", "$V"),
+        ("cd --; builtin echo \"$_\"", "--"),
+        ("cd -- sub; builtin echo \"$_\"", "sub"),
     ] {
         let (out, err, code) = run_in(&work, &home, script);
         assert_eq!(code, 0, "script {script:?}: stderr={err:?}");
@@ -679,36 +683,57 @@ fn cd_last_arg_is_the_expanded_field() {
     }
 }
 
-/// `cd`'s option words (`--`, `-L`, `-P`, `-x`) are operands today: `--` and
-/// `-x` are the open failure on the literal word, `-L dir` is the usage error.
-/// bash parses the options (`cd --` is the bare `cd`, `cd -L sub` cds,
-/// `cd -x` is `invalid option` at rc 2). Task #380 owns that surface and must
-/// update these rows when it lands.
+/// The option surface (task #380): the four words bash accepts (`--`, `-L`,
+/// `-P`, `-e`) are parsed on the **expanded** fields, from the head of the list,
+/// and each of the last three is a no-op — the move is a pinned
+/// `O_DIRECTORY + O_NOFOLLOW` fd, so `-L` and `-P` have nothing to disagree
+/// about here. Every bash column was measured in `bash -c` (5.3.9) in this same
+/// layout; the divergences are named in the assertions that carry them.
 #[test]
-fn cd_option_words_are_operands() {
+fn cd_parses_the_accepted_option_words() {
     let work = workdir("options");
     let home = scratch("options-home");
-    // `--` and `-x` are opened as paths: the ENOENT report at rc 1, where bash
-    // prints `$HOME` and `cd: -x: invalid option` at rc 2.
-    for script in ["cd --", "cd -x"] {
+    // `cd --` is the bare `cd`, `cd -- sub` leaves `sub` as the operand, and the
+    // option word may arrive from an expansion — quoting is no gate.
+    for (script, want) in [
+        ("cd --; builtin pwd", home.display().to_string()),
+        ("cd -- sub; builtin pwd", format!("{}/sub", work.display())),
+        (
+            "V=-L; W=sub; cd \"$V\" \"$W\"; builtin pwd",
+            format!("{}/sub", work.display()),
+        ),
+    ] {
+        let (out, err, code) = run_in(&work, &home, script);
+        assert_eq!(code, 0, "script {script:?}: stderr={err:?}");
+        assert_eq!(out.trim(), want, "script {script:?} matches bash");
+    }
+    // After `--` the dash rule is `-` only, so `-L` is a directory name: the open
+    // failure on the name, which is exactly what bash reports for it.
+    let (out, err, code) = run_in(&work, &home, "cd -- -L; builtin echo after");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "the run aborts: {out:?}");
+    assert!(err.contains("No such file or directory"), "stderr={err:?}");
+    // Pinned divergences: bash accepts a cluster (`-LP sub` cds, rc 0) and names
+    // the first bad character of `---` (`--`), while fdshell matches the four
+    // words whole and names the whole word; and where bash prints a usage line at
+    // rc 2 and continues, fdshell prints no usage line and reports at rc 1 (the
+    // task #179 family).
+    for (script, want) in [
+        ("cd -x", "cd: -x: invalid option"),
+        ("cd -LP sub", "cd: -LP: invalid option"),
+        ("cd ---", "cd: ---: invalid option"),
+    ] {
         let (out, err, code) = run_in(&work, &home, &format!("{script}; builtin echo after"));
         assert_eq!(code, 1, "script {script:?}: stderr={err:?}");
         assert!(out.is_empty(), "the run aborts: {out:?}");
-        assert!(
-            err.contains("No such file or directory"),
-            "script {script:?}: stderr={err:?}"
-        );
+        assert!(err.contains(want), "script {script:?}: stderr={err:?}");
     }
-    // `-L dir`/`-P dir` are two fields: the usage error, where bash cds.
-    for script in ["cd -L sub", "cd -P sub"] {
-        let (out, err, code) = run_in(&work, &home, &format!("{script}; builtin echo after"));
-        assert_eq!(code, 1, "script {script:?}: stderr={err:?}");
-        assert!(out.is_empty(), "the run aborts: {out:?}");
-        assert!(
-            err.contains("too many arguments"),
-            "script {script:?}: stderr={err:?}"
-        );
-    }
+    // A lone `-` is not an option — it is the `OLDPWD` operand — so the operand
+    // count is what answers: bash's rc 2, fdshell's rc 1.
+    let (out, err, code) = run_in(&work, &home, "cd - a b; builtin echo after");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(out.is_empty(), "the run aborts: {out:?}");
+    assert!(err.contains("too many arguments"), "stderr={err:?}");
 }
 
 /// Escape pairs fold inside the operand, as every word does: `cd su\b` is the
