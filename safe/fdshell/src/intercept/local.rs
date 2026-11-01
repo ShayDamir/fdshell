@@ -11,6 +11,7 @@
 mod expand;
 mod list;
 
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ScriptText, ShortCStr};
@@ -24,7 +25,7 @@ pub(crate) fn run_local(
     cmdline: &CommandLine,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, Report<CmdError>> {
+) -> Result<Option<Vec<ShortCStr>>, Report<CmdError>> {
     super::validation::validate_intercept_no_builtin(line, "local", cmdline)?;
     {
         // A shared borrow, scoped so it is dropped before any later borrow.
@@ -33,16 +34,32 @@ pub(crate) fn run_local(
     }
     if cmdline.args.is_empty() {
         list::list_locals(cell)?;
-        return Ok(true);
+        return Ok(Some(Vec::new()));
     }
     let words = expand::expand_words(cmdline, text, cell)?;
+    let consumed = consumed_words(&words);
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     for (name, value) in words {
         state.shadow(&name)?;
         store(&mut state, &name, value);
     }
     state.set_last_exit(0);
-    Ok(true)
+    Ok(Some(consumed))
+}
+
+/// The words `local` consumed, rebuilt with the **expanded** values, because
+/// bash's `$_` is the last argument after expansion (`x=hello` for
+/// `local "x=$V"`). A word whose value did not expand rebuilds to the raw word,
+/// and a bare name is reported as-is, so the existing pins stay put.
+fn consumed_words(words: &[(ShortCStr, Option<ImportedStr>)]) -> Vec<ShortCStr> {
+    let eq: ShortCStr = c"=".into();
+    words
+        .iter()
+        .map(|(name, value)| match value {
+            Some(value) => ShortCStr::concat(&[name, &eq, &value.value]),
+            None => name.clone(),
+        })
+        .collect()
 }
 
 /// Store one shadowed word: `Some` assigns and exports it (so children forked

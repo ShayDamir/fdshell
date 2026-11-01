@@ -1,5 +1,6 @@
 use super::*;
 use crate::capture::Capture;
+use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use alloc::format;
 use alloc::vec;
@@ -167,6 +168,7 @@ fn run_eval_executes_assignment_in_current_state() {
     assert!(
         eval_cmd::run_eval(&line, &cmdline, &text(&line), &cell)
             .unwrap()
+            .0
             .is_none()
     );
     let state = cell.borrow().unwrap();
@@ -191,7 +193,7 @@ fn run_eval_break_propagates_loop_control() {
     let line = make_line("eval", &[r"break"]);
     let control = eval_cmd::run_eval(&line, &cmdline, &text(&line), &cell).unwrap();
     assert!(matches!(
-        control,
+        control.0,
         Some(crate::loop_control::LoopControl::Break(1))
     ));
 }
@@ -230,6 +232,7 @@ fn run_eval_empty_script_sets_zero_status() {
     assert!(
         eval_cmd::run_eval(b"eval", &cmdline, &text(b"eval"), &cell)
             .unwrap()
+            .0
             .is_none()
     );
     assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
@@ -593,4 +596,94 @@ fn intercepted_commands_are_in_process_except_the_replacers() {
     // A command word the dispatch table does not handle goes to the child.
     assert!(!commands::is_intercepted(b"echo"));
     assert!(!commands::is_intercepted(b"true"));
+}
+
+/// `make_cmdline` with a **real** mask per word (`quoted[i]` is every byte's bit
+/// of word `i`) — an expansion row must pass one, since an empty entry reads as
+/// fully quoted (LESSONS "No substitution surface takes an empty mask").
+fn make_cmdline_masked(command: &[u8], args: &[&str], quoted: &[bool]) -> CommandLine {
+    let mut cmdline = make_cmdline(command, args);
+    cmdline.args_mask = args
+        .iter()
+        .zip(quoted)
+        .map(|(w, &q)| vec![MaskBit::from_quoted(q); w.len()])
+        .collect();
+    cmdline.args_quoted = quoted.to_vec();
+    cmdline
+}
+
+/// The shell's `_` variable, as the frame left it (`None` when never set).
+fn last_arg(cell: &ForkCell<ShellState>) -> Option<Vec<u8>> {
+    let state = cell.borrow().unwrap();
+    state
+        .strings
+        .get(&sys::ShortCStr::from(c"_"))
+        .map(|v| v.value.as_bytes().unwrap().to_vec())
+}
+
+/// The shell variable `name` = `value`, bound before the run.
+fn bind(cell: &ForkCell<ShellState>, name: &str, value: &str) {
+    let name = ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap();
+    let value = ShortCStr::from_vec(value.as_bytes().to_vec()).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .set_var(name, sys::ImportedStr::shell(value));
+}
+
+/// Task #376: the expanding intercepts hand their field list to the frame, so
+/// `$_` is the **expanded** field. `eval`'s value lands after the inner run,
+/// which stays inside the eval-frame rule — the assignment runs without a fork,
+/// so this row is observable at unit level (bash's answer, measured).
+#[test]
+fn eval_reports_the_expanded_field() {
+    let cell = make_cell();
+    bind(&cell, "V", "A=1");
+    let cmdline = make_cmdline_masked(b"eval", &[r"$V"], &[false; 3]);
+    assert!(
+        try_intercept(&text(b"eval $V"), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(last_arg(&cell).as_deref(), Some(b"A=1".as_slice()));
+    assert_eq!(
+        cell.borrow()
+            .unwrap()
+            .strings
+            .get(&sys::ShortCStr::from(c"A"))
+            .map(|v| v.value.as_bytes().unwrap().to_vec())
+            .as_deref(),
+        Some(b"1".as_slice()),
+        "the inner assignment still ran"
+    );
+}
+
+/// Task #376: `let` reports the **expanded** expression it evaluated (bash's
+/// `V='x=1'; let "$V"; echo "$_"`).
+#[test]
+fn let_reports_the_expanded_expression() {
+    let cell = make_cell();
+    bind(&cell, "V", "x=1");
+    let cmdline = make_cmdline_masked(b"let", &[r"$V"], &[false; 2]);
+    assert!(
+        try_intercept(&text(b"let $V"), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(last_arg(&cell).as_deref(), Some(b"x=1".as_slice()));
+}
+
+/// Task #376: `wait` reports the pid **expansion** it reaped; a 0-field line
+/// (nothing to reap, the status unchanged) falls back to the command word, as
+/// bash's does. The pid-shaped row is at integration level, where the pid is a
+/// real background task.
+#[test]
+fn wait_falls_back_to_the_command_word_without_fields() {
+    let cell = make_cell();
+    let cmdline = make_cmdline_masked(b"wait", &[], &[]);
+    assert!(
+        try_intercept(&text(b"wait"), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(last_arg(&cell).as_deref(), Some(b"wait".as_slice()));
 }

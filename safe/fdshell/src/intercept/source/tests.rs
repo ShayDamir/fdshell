@@ -4,6 +4,7 @@ use super::run_source;
 use crate::error::cmd::CmdError;
 use crate::intercept::try_intercept;
 use crate::loop_control::LoopControl;
+use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 use alloc::format;
@@ -156,7 +157,7 @@ fn run_source_executes_in_current_shell() {
     let cell = make_cell();
     let cmdline = make_cmdline(b"source", &[&path]);
     let control = run_source(b"source f", &cmdline, &text(b"source f"), &cell).unwrap();
-    assert!(control.is_none());
+    assert!(control.0.is_none());
     assert_eq!(get_string(&cell, &c"A".into()), b"hello".to_vec());
 }
 
@@ -166,7 +167,7 @@ fn run_source_extras_become_positional_parameters() {
     let cell = make_cell();
     let cmdline = make_cmdline(b"source", &[&path, "x", "y"]);
     let control = run_source(b"source f x y", &cmdline, &text(b"source f x y"), &cell).unwrap();
-    assert!(control.is_none());
+    assert!(control.0.is_none());
     assert_eq!(get_string(&cell, &c"A".into()), b"x".to_vec());
     assert_eq!(get_string(&cell, &c"B".into()), b"y".to_vec());
 }
@@ -227,7 +228,7 @@ fn run_source_break_propagates_loop_control() {
     cell.borrow_mut().unwrap().loop_depth = 1;
     let cmdline = make_cmdline(b"source", &[&path]);
     let control = run_source(b"source f", &cmdline, &text(b"source f"), &cell).unwrap();
-    assert!(matches!(control, Some(LoopControl::Break(1))));
+    assert!(matches!(control.0, Some(LoopControl::Break(1))));
 }
 
 #[test]
@@ -308,4 +309,31 @@ fn read_to_end_over_limit_fails() {
     let fd = memfd_bytes(b"hello");
     let e = read_to_end(&fd, 4).unwrap_err();
     assert!(matches!(e.current_context(), CmdError::SourceTooLarge));
+}
+
+/// Task #376: `source`'s word goes through the pipeline, so `$_` is the
+/// **expanded** path, not the parsed word. The frame call lands after the
+/// handler returns, so the sourced run (an assignment: no fork) stays inside the
+/// eval-frame rule and the command's own field is the one that lands — the shape
+/// bash reports too (`f=<path>; source $f; echo "$_"`).
+#[test]
+fn last_arg_is_the_expanded_path() {
+    let (_tmp, path) = TempFile::new("lastarg", b"V=1\n");
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.strings.insert(
+            c"P".into(),
+            sys::ImportedStr::shell(ShortCStr::from_vec(path.as_bytes().to_vec()).unwrap()),
+        );
+    }
+    let mut cmdline = make_cmdline(b"source", &[r"$P"]);
+    // A real mask for the expansion row (LESSONS "No substitution surface takes
+    // an empty mask"): two bytes, neither quoted.
+    cmdline.args_mask = vec![vec![MaskBit::from_quoted(false); 2]];
+    cmdline.args_quoted = vec![false];
+    let text = text(b"source $P");
+    try_intercept(&text, &cmdline, &cell).unwrap();
+    assert_eq!(get_string(&cell, &c"_".into()), path.as_bytes());
+    assert_eq!(get_string(&cell, &c"V".into()), b"1".to_vec());
 }

@@ -30,12 +30,14 @@ use sys::ScriptText;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+/// The operand's field list travels back to the frame, so `$_` is the last
+/// **expanded** field; the `%name` path reports none and keeps the raw rule.
 pub(crate) fn run_cd(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, Report<CmdError>> {
+) -> Result<Option<Vec<ShortCStr>>, Report<CmdError>> {
     super::validation::validate_intercept(line, "cd", cmdline)?;
     // The expansion re-borrows the `ForkCell` (IFS, `dotglob`, `%fd`, and a
     // `$( … )` forks), so it runs **before** the state borrow, never across it
@@ -58,11 +60,12 @@ pub(crate) fn run_cd(
         )
         .change_context(CmdError::Resolve)?,
     };
+    let expanded = var.is_none();
     let target = target(var, &fields)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     crate::cd::cd(target, &mut state, text.start).change_context(CmdError::Cd)?;
     state.set_last_exit(0);
-    Ok(true)
+    Ok(expanded.then_some(fields))
 }
 
 /// Decide which directory to open. `var` is the `%name` operand's name, read

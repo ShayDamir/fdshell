@@ -15,15 +15,18 @@ mod pin;
 
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+/// The expanded field list travels back to the frame, so `$_` is the last
+/// **expanded** word the command consumed.
 pub(crate) fn run_hash(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, Report<CmdError>> {
+) -> Result<Option<Vec<ShortCStr>>, Report<CmdError>> {
     super::validation::validate_intercept(line, "hash", cmdline)?;
     crate::xtrace::trace_cmd(b"hash", cmdline, cell);
     // The expansion re-borrows the `ForkCell` (IFS, `dotglob`, `%fd`), so it
@@ -40,7 +43,7 @@ pub(crate) fn run_hash(
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     let exit = dispatch(&words, &mut state)?;
     state.set_last_exit(exit);
-    Ok(true)
+    Ok(Some(words))
 }
 
 /// Options are read on the expanded fields: `hash $(echo -r)` clears the

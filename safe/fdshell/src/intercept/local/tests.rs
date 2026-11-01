@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 use crate::capture::Capture;
+use crate::intercept::try_intercept;
 use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use crate::state::frames::{pop_frame, push_frame};
@@ -56,7 +57,10 @@ fn make_cell() -> ForkCell<ShellState> {
     cell
 }
 
-fn run(args: &[&str], cell: &ForkCell<ShellState>) -> Result<bool, Report<CmdError>> {
+fn run(
+    args: &[&str],
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<Vec<ShortCStr>>, Report<CmdError>> {
     run_local(&make_line(args), &make_cmdline(args), &text(b"local"), cell)
 }
 
@@ -89,7 +93,7 @@ fn local_outside_a_frame_is_rejected() {
 fn assignment_shadows_and_stores() {
     let cell = make_cell();
     set_caller_var(&cell, &s(b"v"), &s(b"pre"));
-    assert!(run(&["v=1"], &cell).unwrap());
+    assert!(run(&["v=1"], &cell).unwrap().is_some());
     assert_eq!(stored(&cell, &s(b"v")), Some(s(b"1")));
     let state = cell.borrow().unwrap();
     assert_eq!(state.local_names().len(), 1);
@@ -99,7 +103,7 @@ fn assignment_shadows_and_stores() {
 #[test]
 fn assignment_is_exported_inside_the_call() {
     let cell = make_cell();
-    assert!(run(&["E=loc"], &cell).unwrap());
+    assert!(run(&["E=loc"], &cell).unwrap().is_some());
     assert_eq!(exported(&cell, &s(b"E")), Some(s(b"loc")));
 }
 
@@ -107,7 +111,7 @@ fn assignment_is_exported_inside_the_call() {
 fn declare_form_leaves_the_name_unset() {
     let cell = make_cell();
     set_caller_var(&cell, &s(b"v"), &s(b"pre"));
-    assert!(run(&["v"], &cell).unwrap());
+    assert!(run(&["v"], &cell).unwrap().is_some());
     assert_eq!(stored(&cell, &s(b"v")), None);
     // The export attribute stays global (bash parity), so `exports` is untouched.
     assert_eq!(exported(&cell, &s(b"v")), None);
@@ -117,7 +121,7 @@ fn declare_form_leaves_the_name_unset() {
 #[test]
 fn several_words_shadow_in_one_call() {
     let cell = make_cell();
-    assert!(run(&["p=1", "q=2"], &cell).unwrap());
+    assert!(run(&["p=1", "q=2"], &cell).unwrap().is_some());
     assert_eq!(stored(&cell, &s(b"p")), Some(s(b"1")));
     assert_eq!(stored(&cell, &s(b"q")), Some(s(b"2")));
     assert_eq!(cell.borrow().unwrap().local_names().len(), 2);
@@ -142,7 +146,7 @@ fn bad_names_are_rejected() {
 fn value_is_expanded_without_splitting_or_glob() {
     let cell = make_cell();
     set_caller_var(&cell, &s(b"v"), &s(b"a b"));
-    assert!(run(&["x=*", "y=$v"], &cell).unwrap());
+    assert!(run(&["x=*", "y=$v"], &cell).unwrap().is_some());
     assert_eq!(stored(&cell, &s(b"x")), Some(s(b"*")));
     assert_eq!(stored(&cell, &s(b"y")), Some(s(b"a b")));
 }
@@ -168,7 +172,7 @@ fn captures_are_rejected() {
 #[test]
 fn list_form_is_handled_and_keeps_the_status_zero() {
     let cell = make_cell();
-    assert!(run(&[], &cell).unwrap());
+    assert!(run(&[], &cell).unwrap().is_some());
     assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
 }
 
@@ -177,8 +181,8 @@ fn the_list_form_prints_the_shadowed_names_with_their_values() {
     // Prints `local p=1` and `local q=2` (sorted by bytes) on stdout; the
     // in-process assertions cover the state the print path must leave behind.
     let cell = make_cell();
-    assert!(run(&["q=2", "p=1"], &cell).unwrap());
-    assert!(run(&[], &cell).unwrap());
+    assert!(run(&["q=2", "p=1"], &cell).unwrap().is_some());
+    assert!(run(&[], &cell).unwrap().is_some());
     assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
     assert_eq!(stored(&cell, &s(b"p")), Some(s(b"1")));
     assert_eq!(stored(&cell, &s(b"q")), Some(s(b"2")));
@@ -190,8 +194,8 @@ fn the_list_form_prints_a_declared_name_without_a_value() {
     // divergence from bash's `declare -- p="..."`), leaving the name unset.
     let cell = make_cell();
     set_caller_var(&cell, &s(b"p"), &s(b"pre"));
-    assert!(run(&["p"], &cell).unwrap());
-    assert!(run(&[], &cell).unwrap());
+    assert!(run(&["p"], &cell).unwrap().is_some());
+    assert!(run(&[], &cell).unwrap().is_some());
     assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 0);
     assert_eq!(stored(&cell, &s(b"p")), None);
     {
@@ -206,7 +210,7 @@ fn the_list_form_prints_a_declared_name_without_a_value() {
 fn local_ifs_syncs_the_splitting_and_is_recorded() {
     let cell = make_cell();
     let caller_ifs = cell.borrow().unwrap().ifs.clone();
-    assert!(run(&["IFS=:"], &cell).unwrap());
+    assert!(run(&["IFS=:"], &cell).unwrap().is_some());
     {
         let state = cell.borrow().unwrap();
         assert_eq!(state.ifs, s(b":"));
@@ -234,4 +238,35 @@ fn local_value_keeps_a_quoted_escape_pair() {
     let plain = make_cmdline_with_masks(&[word], false);
     run_local(&line, &plain, &text(b"local"), &cell).unwrap();
     assert_eq!(stored(&cell, &s(b"q")), Some(s(b"a b")));
+}
+
+/// Run `local` through `try_intercept`, so the `$_` frame is part of the run
+/// (the direct `run` helper above stops short of it).
+fn through_intercept(args: &[&str], cell: &ForkCell<ShellState>) {
+    let line = make_line(args);
+    assert!(
+        try_intercept(&text(&line), &make_cmdline(args), cell)
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// Task #376: `$_` is the word `local` **consumed** — the name with the expanded
+/// value, as bash sets it. The rebuild is byte-identical to the raw word when
+/// nothing expanded, and a bare name is reported as-is.
+#[test]
+fn last_arg_is_the_consumed_word() {
+    let cell = make_cell();
+    set_caller_var(&cell, &s(b"V"), &s(b"hello"));
+    through_intercept(&[r"x=$V"], &cell);
+    assert_eq!(stored(&cell, &s(b"_")), Some(s(b"x=hello")));
+
+    let cell = make_cell();
+    through_intercept(&["plain=x"], &cell);
+    assert_eq!(stored(&cell, &s(b"_")), Some(s(b"plain=x")));
+
+    let cell = make_cell();
+    through_intercept(&["bare"], &cell);
+    assert_eq!(stored(&cell, &s(b"bare")), None, "the declare form");
+    assert_eq!(stored(&cell, &s(b"_")), Some(s(b"bare")));
 }

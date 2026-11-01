@@ -51,7 +51,10 @@ fn line(args: &[&str]) -> Vec<u8> {
     }
 }
 
-fn run(args: &[&str], cell: &ForkCell<ShellState>) -> Result<bool, Report<CmdError>> {
+fn run(
+    args: &[&str],
+    cell: &ForkCell<ShellState>,
+) -> Result<Option<Vec<ShortCStr>>, Report<CmdError>> {
     run_hash(&line(args), &cmdline(args, false), cell)
 }
 
@@ -247,4 +250,52 @@ fn pin_and_clear_through_the_intercept() {
         cell.borrow().unwrap().hash_table.is_empty(),
         "the table must be empty"
     );
+}
+
+/// The shell's `_` variable, as the frame left it (`None` when never set).
+fn last_arg(cell: &ForkCell<ShellState>) -> Option<Vec<u8>> {
+    let state = cell.borrow().unwrap();
+    state
+        .strings
+        .get(&s("_"))
+        .map(|v| v.value.as_bytes().unwrap().to_vec())
+}
+
+/// Run `hash` through `try_intercept`, so the `$_` frame is part of the run
+/// (the direct handler calls above stop short of it).
+fn through_intercept(text: &str, args: &[&str], quoted: bool, cell: &ForkCell<ShellState>) {
+    let text = sys::ScriptText::new(s(text), Position::new(1, 1), Origin::Shell);
+    assert!(
+        try_intercept(&text, &cmdline(args, quoted), cell)
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// Task #376: the expanded list is handed to the frame, so `$_` is the last
+/// **expanded** word the command consumed — the field, not the parsed word.
+/// The pair is the mask rule of #279 item 6: the expansion row runs on real
+/// `false` bits, its twin on the `'…'` encoding (`\$n`, every bit set), where
+/// the field is the literal `$n`.
+#[test]
+fn last_arg_is_the_expanded_field() {
+    let cell = ForkCell::new(ShellState::new());
+    set_var(&cell, "n", "/bin/true");
+    through_intercept("hash ls $n", &["ls", "$n"], false, &cell);
+    assert_eq!(last_arg(&cell).as_deref(), Some(b"/bin/true".as_slice()));
+
+    let cell = ForkCell::new(ShellState::new());
+    set_var(&cell, "n", "/bin/true");
+    through_intercept(r"hash ls '\$n'", &["ls", r"\$n"], true, &cell);
+    assert_eq!(last_arg(&cell).as_deref(), Some(b"$n".as_slice()));
+}
+
+/// A 0-field expansion has no operand word, so `$_` falls back to the command
+/// word — the arm the frame shares with every no-argument intercept (bash's
+/// `hash` prints `hash: hash table empty` and sets `$_` to `hash`).
+#[test]
+fn last_arg_of_a_zero_field_line_is_the_command_word() {
+    let cell = ForkCell::new(ShellState::new());
+    through_intercept("hash $zz", &["$zz"], false, &cell);
+    assert_eq!(last_arg(&cell).as_deref(), Some(b"hash".as_slice()));
 }

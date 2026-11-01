@@ -559,3 +559,32 @@ fn hash_pin_path_is_banned_absolute_only_after_expansion() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out.trim(), "ran-target", "stdout={out:?}");
 }
+
+/// Task #376: `hash` hands its expanded field list to the `$_` frame, so `$_`
+/// is the last **expanded** word the command consumed. bash prints only the
+/// `$_` line — the resolved-path line of the first row is fdshell's pin/lookup
+/// print (the extension of task #375's surface), so the whole stdout is pinned.
+/// The second row is the mask pair: a `'…'` word is not expanded, so the literal
+/// `$n` is the field; bash's reading hashes each name and adds a `not found`
+/// line for it on stderr, at the same rc.
+#[test]
+fn last_arg_is_the_expanded_field() {
+    let (out, err, code) = run_with_path("n=exec_ok; hash $n; builtin echo \"$_\"");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, format!("{HELPER}\nexec_ok\n"));
+
+    let (out, err, code) = run_with_path("n=exec_ok; hash exec_ok '$n'; builtin echo \"$_\"");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "$n\n");
+}
+
+/// A 0-field expansion has no operand word, so `$_` falls back to the command
+/// word — bash's answer too (its `hash: hash table empty` line is the listing
+/// surface, task #375's, and it is on stdout there), and the field rule is what
+/// this pins.
+#[test]
+fn last_arg_of_a_zero_field_line_is_the_command_word() {
+    let (out, err, code) = run_with_path("hash $zz; builtin echo \"$_\"");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hash\n");
+}

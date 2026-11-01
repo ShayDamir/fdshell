@@ -821,6 +821,15 @@ expansion produces **no field at all** — `cd "$@"` with no positionals,
 to the previous directory even where a directory named `-` exists; that
 directory is reached by any other path, `cd ./-`.
 
+`$_` reports the last **expanded** field the command consumed: `V=sub; cd $V`
+leaves `$_` at `sub`, and the quoted twin `cd '$V'` leaves it at the literal
+`$V`, because a quoted word is not expanded. A fully quoted word that expands
+to nothing counts as an (empty) field, and the command word is the `$_` only when
+there were no operand words at all. Bash sets `$_` the same way for every command
+it runs, and every intercept that expands its words (`hash`, `cd`, `eval`,
+`source`, `local`, `let`, `wait`) hands its field list to that one frame;
+`set --` keeps its own store of the expanded list.
+
 The bare `cd` reads `HOME` through the **same lookup `$HOME` and `~` use**: the
 shell's own variables first, then the environment fdshell was started with. A
 `HOME=/tmp/H` assignment therefore moves the bare `cd` exactly as it moves
@@ -839,9 +848,8 @@ leaves the directory alone at rc 0; a scoped `IFS=` prefix splits the
 expansion on the *scoped* `IFS` (`v=a:b; IFS=: cd $v`
 is two fields here, one name in bash — the
 `tests/cmd_subst.rs::word0_scoped_ifs_divergence` family); `cd`'s option words
-`--`, `-L`, `-P` and `-x` are operands (task #380); `$_` keeps the raw word
-(task #376); and `cd -` prints nothing, where bash prints the new directory
-(task #378).
+`--`, `-L`, `-P` and `-x` are operands (task #380); and `cd -` prints nothing,
+where bash prints the new directory (task #378).
 
 ### Command lookup table (`hash`)
 

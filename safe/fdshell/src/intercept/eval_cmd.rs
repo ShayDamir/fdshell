@@ -1,17 +1,19 @@
 use crate::error::cmd::CmdError;
-use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
 use sys::{ScriptText, ShortCStr};
 
 /// `eval`: join the substituted args and run them as a script in this shell.
+/// The control and the **substituted** list travel together: the frame call in
+/// `try_intercept` lands after this handler returns, so `$_` is the last field
+/// `eval` consumed, and the inner run stays inside the `with_eval_frame` rule.
 pub(crate) fn run_eval(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
-) -> Result<Option<LoopControl>, Report<CmdError>> {
+) -> Result<super::Handled, Report<CmdError>> {
     super::validation::validate_intercept(line, "eval", cmdline)?;
     let substituted = crate::substitute::substitute_args(
         &cmdline.args,
@@ -25,16 +27,17 @@ pub(crate) fn run_eval(
     if script.is_empty() {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_last_exit(0);
-        return Ok(None);
+        return Ok((None, Some(substituted)));
     }
     let script_text = ScriptText::new(script, text.start, text.origin.clone());
-    super::last_arg_frame::with_eval_frame(cell, || {
+    let control = super::last_arg_frame::with_eval_frame(cell, || {
         // Count each eval level toward the nesting cap (a self-eval would
         // otherwise recurse through run_script until the stack overflows).
         crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
             crate::script::run_script(&script_text, cell)
         })
-    })
+    })?;
+    Ok((control, Some(substituted)))
 }
 
 fn join_space(args: &[ShortCStr]) -> ShortCStr {

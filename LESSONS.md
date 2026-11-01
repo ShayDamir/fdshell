@@ -1171,7 +1171,7 @@ Task #284 makes `cd`'s operand expand: `cd $V`, `cd "$@"`, `cd ~`, `cd "$(echo s
 5. **The field count is the target rule, and 0 fields is the bare `cd`.** No word at all and a 0-field expansion (`cd $(true)`, `cd $zz`, `set --; cd "$@"`, `shopt -s nullglob; cd zzz*`) reach the decision identically and mean `$HOME` — that is the `set --; cd "$@"` probe shape that surfaced the bug in #219. One field is the directory (the `-` of rule 4 included); two or more are `cd: too many arguments` and open nothing (`cd a b`, `cd sub extra`, `cd *` in a busy directory, `cd $(echo a; echo b)`), which replaces master's "open the first word, ignore the rest". Pin the rc (fdshell's 1, bash's 2) and the missing `echo after`: the failure aborts the script (the accepted #179 family).
 6. **Keep the pipeline's own policies; write none of them here.** `"` never suppresses an expansion and `'` does, `set -f`/`nullglob`/`failglob`/`dotglob` apply exactly as they do for arguments (so `cd zzz*` keeps the literal pattern and fails, while `nullglob` gives the 0-field form), a fully quoted word is one field even when empty (`cd ""` is the open failure on the empty path where bash says `cd: null directory`), and escape pairs fold inside the word (`cd su\b` is `sub`; `cd s\*` is mask-protected, so it never globs). A **literal** word never splits — `IFS=:; cd a:b` is one name in both shells, because field splitting cuts *expansion* bytes only — while a scoped prefix does split the expansion (`v=a:b; IFS=: cd $v` is two fields here, one name in bash): the `tests/cmd_subst.rs::word0_scoped_ifs_divergence` family, named in the pin.
 7. **Strict mode: measure the ban list, do not extend it by accident.** `cd` is absent from README's ban list and `cd ..` is the list's own escape hatch, so `cd`'s operand stays unbanned **on the expanded value too** (`shopt -s strict; d=/tmp; cd $d` moves the base); the pin makes the flip a visible edit, and adding the ban is a user decision, not part of a substitution fix. Never probe strict with a `$( … )`: the ban covers every absolute `PATH` entry, so `cd $(echo sub)` under strict expands to nothing and the row silently measures rule 5. The substitution shape itself is owned by LESSONS: "The redirect target is a substitution surface" rule 10, whose pins use the helper binaries and a `builtin …` row so the program ban cannot shadow them.
-8. **Two surfaces the fix does not reach: `$_` and the option words.** `last_arg_frame::set_intercepted_last_arg` stores the **raw** last word of every intercept, so `V=sub; cd $V; echo $_` prints `$V` where bash prints `sub` (task #376), and `cd --`, `cd -L d`, `cd -P d`, `cd -x` are operands (task #380). Pin both as measured, so the later fix is a visible edit.
+8. **Two surfaces the fix did not reach: `$_` and the option words.** `V=sub; cd $V; echo $_` printing `$V` where bash prints `sub` was the `$_` half — task #376 closed it, and the row is now the bash-parity pin `tests/cd_expand.rs::cd_last_arg_is_the_expanded_field` plus its `'…'` twin, with the unit pair in `intercept/cd/tests.rs`; the rule itself is in the entry titled LESSONS: "`$_` is the last expanded field". The option words are the half still standing: `cd --`, `cd -L d`, `cd -P d`, `cd -x` are operands (task #380), pinned as measured so the later fix is a visible edit.
 9. **A mask pair for an expanding intercept is `false`-mask vs the `'…'` encoding, never an all-`true` mask.** `run_cd`'s expansion row passes `vec![false; w.len()]`; its literal twin is the single-quote encoding (`\$V` with every bit set), because a fully **double**-quoted `$V` expands in bash and in fdshell alike — an all-`true` "quoted" twin asserts a word bash expands (the pair that legitimately keeps empty masks is the existing "an empty mask **is** a quoted word" set, #279 item 6). `cd` fchdir's the **process**, so every unit row that moves the base runs in the `child_test` fork, like `cd/tests.rs`.
 
 ## Four mutants of `scan/heredoc/ops.rs` are equivalent, and one neighbour of `lines.rs` is (accepted, do not chase)
@@ -5990,3 +5990,47 @@ no-description fallback), `tests/redirect.rs::open_failures_render_their_standar
 root-dependent — `safe/fdshell/tests/openat2_path.rs::can_read` — so it is
 pinned only in the unit table), and the extended `> ~` row
 `tests/redirect.rs::tilde_in_a_target_expands_with_its_own_rules`.
+
+## `$_` is the last expanded field: expanding intercepts hand their list to one frame (task #376)
+
+**`$_` is the last field the command consumed** — the expanded field when the
+handler ran the substitution pipeline, the parsed word when it consumed raw
+words, and the command word **only** when there were no operand words at all. A
+fully quoted word that expands to nothing is an (empty) field, so it wins over
+the fallback (`eval "$zz"` leaves `$_` empty, as bash). Measured against bash
+5.3.9 on every row pinned below.
+
+The field list travels as the dispatch tuple (`intercept/dispatch.rs` →
+`intercept.rs::try_intercept` → `intercept/last_arg_frame.rs`): the seven
+handlers whose words go through the pipeline — `hash`, `cd`, `eval`, `source`,
+`local`, `let`, `wait` — report their list, and every other handler reports
+`None` and keeps the raw-word rule. **Why the handler reports and the frame does
+not expand:** the pipeline already ran, and a frame that expanded on its own
+would re-run command substitutions and forks. One adapter (`handled_fields`) and
+one rule site (`last_field`) keep the sentence in one place, so the ~22 handlers
+that consume raw words (`read`, `shopt`, `export` — where bash disagrees, the
+disagreement is the expansion-policy task) keep their signatures untouched.
+`cd`'s `%name` path reports `None`, because its pipeline never ran; `local`
+reports the **consumed** word — name, `=`, expanded value — because that is the
+word it processed.
+
+`eval`/`source` land their value *after* their run returns, which is exactly
+bash's timing: the `with_eval_frame` rule suppresses inner updates, so the
+command's own field is what survives. `set --` keeps its own inline store of the
+expanded list (the frame skips it; its bare-form fallback word is task #508).
+Function-call `$_` scoping is task #509: bash keeps inner updates inside a call
+and sets `$_` from the call's last argument, and does *not* do that for loops,
+where both shells let the body's last command win.
+
+Pins: `tests/last_arg.rs` (`eval_reports_its_expanded_word`,
+`let_reports_the_expanded_expression`, `local_reports_the_consumed_word`,
+`wait_reports_the_expanded_pid`, `source_reports_its_expanded_path`,
+`eval_reports_the_quoted_word_that_expanded_to_nothing`,
+`zero_field_expansion_falls_back_to_command_name`,
+`expanded_command_name_is_the_fallback`), the flipped
+`tests/cd_expand.rs::cd_last_arg_is_the_expanded_field` and its `'…'` twin,
+`tests/hash.rs::last_arg_is_the_expanded_field`, and the unit pins that go
+through `try_intercept` — `intercept/cd/tests.rs`,
+`intercept/hash_cmd/tests.rs`, `intercept/source/tests.rs`,
+`intercept/local/tests.rs`, `intercept/tests.rs` — each with real per-word masks
+(LESSONS: "No substitution surface takes an empty mask").

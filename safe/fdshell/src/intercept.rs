@@ -1,9 +1,14 @@
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::ScriptText;
 use sys::fork_cell::ForkCell;
+use sys::{ScriptText, ShortCStr};
+
+/// The control a handler propagates, and the **expanded** field list it consumed
+/// (`None` when no substitution pipeline ran).
+type Handled = (Option<LoopControl>, Option<Vec<ShortCStr>>);
 
 /// `None`: not intercepted; `Some(control)`: handled, with the control to propagate.
 pub(crate) fn try_intercept(
@@ -19,16 +24,24 @@ pub(crate) fn try_intercept(
         crate::xtrace::trace_cmd(cmd, cmdline, cell);
     }
     let result = dispatch::dispatch(cmd, line, cmdline, text, cell)?;
-    if let Some(control) = result {
-        last_arg_frame::set_intercepted_last_arg(cmdline, cell)?;
+    if let Some((control, expanded)) = result {
+        last_arg_frame::set_intercepted_last_arg(cmdline, expanded.as_deref(), cell)?;
         Ok(Some(control))
     } else {
         Ok(None)
     }
 }
 
-pub(super) fn handled(ran: bool) -> Option<Option<LoopControl>> {
-    if ran { Some(None) } else { None }
+/// The table's adapter for handlers that consume raw words: no field list, so
+/// `$_` follows the raw rule.
+pub(super) fn handled(ran: bool) -> Option<Handled> {
+    if ran { Some((None, None)) } else { None }
+}
+
+/// The table's adapter for handlers whose words went through the pipeline: they
+/// hand their field list back, so `$_` is the last **expanded** field.
+pub(super) fn handled_fields(fields: Option<Vec<ShortCStr>>) -> Option<Handled> {
+    Some((None, fields))
 }
 
 #[cfg(test)]

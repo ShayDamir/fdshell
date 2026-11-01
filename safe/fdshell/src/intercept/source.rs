@@ -1,7 +1,6 @@
 mod file;
 
 use crate::error::cmd::CmdError;
-use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use alloc::collections::VecDeque;
 use error_stack::{Report, ResultExt};
@@ -16,12 +15,17 @@ use sys::fork_cell::ForkCell;
 /// Extra arguments replace `$1..` (as `set --` does) for the duration of the
 /// sourced script; the previous ones are restored after. `$0` survives the
 /// swap, as in bash.
+///
+/// The control and the **substituted** list travel together: the frame call in
+/// `try_intercept` lands after this handler returns, so `$_` is the last field
+/// `source` consumed, and the sourced run stays inside the `with_eval_frame`
+/// rule.
 pub(crate) fn run_source(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
-) -> Result<Option<LoopControl>, Report<CmdError>> {
+) -> Result<super::Handled, Report<CmdError>> {
     super::validation::validate_intercept(line, "source", cmdline)?;
     let substituted = crate::substitute::substitute_args(
         &cmdline.args,
@@ -34,12 +38,13 @@ pub(crate) fn run_source(
     let path = substituted.first().ok_or(CmdError::SourceNoFile)?;
     let extra = substituted.get(1..).unwrap_or(&[]);
     let saved = swap_positional(cell, extra, text)?;
-    let result = super::last_arg_frame::with_eval_frame(cell, || file::run_sourced(path, cell));
+    let control = super::last_arg_frame::with_eval_frame(cell, || file::run_sourced(path, cell));
     if let Some(saved) = saved {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.set_positional(saved);
     }
-    result
+    let control = control?;
+    Ok((control, Some(substituted)))
 }
 
 /// Replace `$1..` with `extra` and return the saved ones. Returns `None` when

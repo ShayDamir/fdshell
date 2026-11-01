@@ -66,7 +66,12 @@ fn run_eval_counts_toward_nesting_limit() {
         let mut state = cell.borrow_mut().unwrap();
         state.nesting = crate::nest::MAX_NESTING - 1;
     }
-    assert!(run_eval(b"eval", &cmdline, &text, &cell).unwrap().is_none());
+    assert!(
+        run_eval(b"eval", &cmdline, &text, &cell)
+            .unwrap()
+            .0
+            .is_none()
+    );
     assert_eq!(cell.borrow().unwrap().nesting, crate::nest::MAX_NESTING - 1);
 
     // At the cap: entering the eval level fails with NestingTooDeep.

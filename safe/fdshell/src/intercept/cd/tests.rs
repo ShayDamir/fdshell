@@ -1,6 +1,7 @@
 use super::*;
 use crate::capture::Capture;
 use crate::cd::cd;
+use crate::intercept::try_intercept;
 use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use alloc::format;
@@ -85,7 +86,7 @@ fn cd_to_tmp_success() {
     let cell = make_cell();
     let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
-    assert!(result.unwrap());
+    assert!(result.unwrap().is_some());
     let state = cell.borrow().unwrap();
     assert!(state.fds.contains_key::<sys::ShortCStr>(&c"CWD".into()));
 }
@@ -104,7 +105,7 @@ fn cd_dash_switches_to_oldwd() {
     let cmdline = make_cmdline(&["-"]);
     let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
-    assert!(result.unwrap());
+    assert!(result.unwrap().is_some());
     let state = cell.borrow().unwrap();
     assert!(state.fds.contains_key::<sys::ShortCStr>(&c"OLDCWD".into()));
 }
@@ -123,7 +124,7 @@ fn cd_home_success() {
     let cell = make_cell();
     let result = run_cd(&line, &cmdline, &text(&line), &cell);
     assert!(result.is_ok());
-    assert!(result.unwrap());
+    assert!(result.unwrap().is_some());
     let state = cell.borrow().unwrap();
     assert!(state.fds.contains_key::<sys::ShortCStr>(&c"CWD".into()));
 }
@@ -341,5 +342,49 @@ fn run_cd_two_fields_is_the_usage_error() {
         let report = result.unwrap_err();
         assert!(matches!(report.current_context(), CmdError::CdTooManyArgs));
         sys::openat2::open(c"sub", sys::fcntl::O_RDONLY + sys::fcntl::O_DIRECTORY).unwrap();
+    });
+}
+
+/// The shell's `_` variable, as the frame left it (empty when never set).
+fn last_arg(cell: &ForkCell<ShellState>) -> Vec<u8> {
+    cell.borrow()
+        .unwrap()
+        .strings
+        .get(&ShortCStr::from(c"_"))
+        .map(|v| v.value.as_bytes().unwrap().to_vec())
+        .unwrap_or_default()
+}
+
+/// Task #376: the operand `cd` expanded is what `$_` reports. The pair is the
+/// mask rule of #284 item 9 — the expansion row passes real `false` bits, its
+/// twin is the `'…'`-encoded word — and both rows move the base, so they run
+/// in the `child_test` fork. Each row lands on a directory that exists: the
+/// expansion on `sub`, the quoted word on a literal `$V` (the base by then is
+/// the `sub` the first row moved).
+#[test]
+fn try_intercept_reports_the_expanded_operand() {
+    let dir = scratch("lastarg");
+    std::fs::create_dir(dir.0.join("sub/$V")).unwrap();
+    child_test(|| {
+        let cell = make_cell();
+        {
+            let mut state = cell.borrow_mut().unwrap();
+            state
+                .strings
+                .insert(ShortCStr::from(c"V"), ImportedStr::shell(c"sub".into()));
+            state.set_last_arg(ShortCStr::from(c"seed"));
+            cd(CdTarget::Path(base(&dir.0)), &mut state, pos()).unwrap();
+        }
+        // The expansion row: the field the pipeline produced names `sub`.
+        let line = make_line(&["cd", "$V"]);
+        let cmdline = make_cmdline_masked(&["$V"], &[false]);
+        try_intercept(&text(&line), &cmdline, &cell).unwrap();
+        assert_eq!(last_arg(&cell), b"sub");
+        // The `'…'` twin: the encoding decodes back to the literal `$V`, so
+        // the field is the literal name and `$_` is that.
+        let line = make_line(&["cd", r"\$V"]);
+        let cmdline = make_cmdline_masked(&[r"\$V"], &[true; 3]);
+        try_intercept(&text(&line), &cmdline, &cell).unwrap();
+        assert_eq!(last_arg(&cell), b"$V");
     });
 }

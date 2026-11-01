@@ -8,17 +8,20 @@
 use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
+use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
 use hashbrown::HashMap;
 use sys::ExportedFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+/// The expanded list travels back to the frame, so `$_` is the last **expanded**
+/// expression.
 pub(crate) fn run_let(
     line: &[u8],
     cmdline: &CommandLine,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, Report<CmdError>> {
+) -> Result<Option<Vec<ShortCStr>>, Report<CmdError>> {
     super::validation::validate_intercept_no_builtin(line, "let", cmdline)?;
     // `CommandLine.args` excludes the command word, so every entry is an
     // expression; `args` and `args_mask` are parallel at the same offset.
@@ -26,17 +29,19 @@ pub(crate) fn run_let(
         bail!(CmdError::LetExpressionExpected);
     }
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let mut expanded_args: Vec<ShortCStr> = Vec::new();
     let mut status = 0;
     for (i, arg) in cmdline.args.iter().enumerate() {
         let mask = cmdline.args_mask.get(i).cloned().unwrap_or_default();
         let spans = cmdline.args_span.get(i).cloned().unwrap_or_default();
         let (expanded, _) = crate::substitute::substitute_arg(arg, &mask, &spans, &mut cache, cell)
             .change_context(CmdError::Resolve)?;
+        expanded_args.push(expanded.clone());
         let bytes = expanded.as_bytes().change_context(CmdError::Resolve)?;
         let value = crate::arith::eval(bytes, cell).change_context(CmdError::Resolve)?;
         status = i32::from(value == 0);
     }
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(status);
-    Ok(true)
+    Ok(Some(expanded_args))
 }

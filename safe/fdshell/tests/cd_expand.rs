@@ -522,19 +522,28 @@ fn cd_literal_rows_stay_green() {
     assert_eq!(code, 1, "stdout={out:?}");
 }
 
-/// `$_` after an intercept is the **raw** word, where bash stores the expanded
-/// field. Accepted divergence, owned by task #376.
+/// `$_` after an intercept is the last **expanded** field, as bash sets it —
+/// the divergence task #376 owned is closed, so this row is a bash-parity pin.
+/// The twin is the `'…'` pair: a quoted word is not expanded, so the literal
+/// name `$V` is the field, and the row cds into a directory literally named
+/// `$V` (the same pair the unit pin in `intercept/cd/tests.rs` walks).
 #[test]
-fn cd_last_arg_is_the_raw_word() {
+fn cd_last_arg_is_the_expanded_field() {
     let work = workdir("lastarg");
     let home = scratch("lastarg-home");
-    let (out, err, code) = run_in(&work, &home, "V=sub; cd $V; builtin echo $_");
-    assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(
-        out.trim(),
-        "$V",
-        "bash prints `sub`; fdshell stores the raw word (task #376)"
-    );
+    std::fs::create_dir(work.join("$V")).unwrap();
+    for (script, want) in [
+        ("V=sub; cd $V; builtin echo \"$_\"", "sub"),
+        ("V=sub; cd '$V'; builtin echo \"$_\"", "$V"),
+    ] {
+        let (out, err, code) = run_in(&work, &home, script);
+        assert_eq!(code, 0, "script {script:?}: stderr={err:?}");
+        assert_eq!(
+            out.trim(),
+            want,
+            "script {script:?} matches bash (task #376)"
+        );
+    }
 }
 
 /// `cd`'s option words (`--`, `-L`, `-P`, `-x`) are operands today: `--` and
