@@ -6087,3 +6087,42 @@ Accepted equivalent: the `getcwd()` arm's `change_context` in
 `intercept/cd.rs::print_new_directory` — on this path the new cwd exists by
 construction, so only the cap's `E2BIG` (LESSONS: "Retrying on a foreign errno
 converges") could reach the arm and no test can; the arm only names the failure.
+
+## A namespace-selection predicate must cover every store the delete path owns
+
+`unset NAME` with no options is bash's **variable first, function second** rule —
+`bash -c 'help unset'` states it outright — and the predicate that picks the
+namespace must consult **exactly** the stores the delete path owns, no narrower
+and no wider. `unset_var`'s footprint is the string table, the export attribute,
+the inherited `environ` row *and* the single-name `IFS` sync; the last of those is
+a field, not a map entry, so a predicate built from the three maps answers "not a
+variable" for a bare `IFS` in a clean environment and removes a function named
+`IFS` that bash keeps. The `IFS` clause in `state/functions.rs::is_variable` is
+therefore load-bearing, not decorative, and the row that catches its removal is
+the one where the name lives in the function store only.
+
+The same rule at pinning granularity: the priority is only observable from a name
+that lives in **two** stores at once, so a single-store pin decides nothing about
+it — pin one store each, and measure the row on the clean tree before naming a
+killer (LESSONS: "Verify bash's real output before pinning a test, not the task text").
+
+The half that is easy to get wrong is the frame asymmetry. Variables are
+frame-restored — a `local` records its first-touch value
+(LESSONS: "A save/restore frame must carry") — while function definitions are
+global, so a removal performed inside a call **outlives the frame that performed
+it**, and a numeric name is no variable either: positionals are not one of the
+stores, so `unset 1` reaches a function named `1` while `$1` stays.
+
+Pins: `state/tests.rs`
+(`a_name_in_both_stores_loses_the_variable_and_keeps_the_function`,
+`a_name_only_the_function_store_has_is_removed`,
+`the_export_attribute_is_a_variable_so_the_function_stays`,
+`the_inherited_environment_is_a_variable_so_the_function_stays`,
+`ifs_is_a_variable_so_a_function_named_ifs_stays`,
+`an_unbound_name_leaves_both_stores_alone`) and `tests/unset.rs`
+(`a_bare_unset_names_a_variable_first_and_a_function_second`,
+`a_function_removal_outlives_the_frame_that_performed_it`,
+`a_positional_name_is_not_a_variable_so_the_function_goes`,
+`a_function_named_ifs_survives_unset_ifs`), plus
+`src/tests/run.rs::unset_reaches_the_function_store_through_the_dispatch_arm`
+for the dispatch arm.

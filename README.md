@@ -689,6 +689,15 @@ a silent no-op with exit status 0, a bare `unset` does nothing, and
 validated: `unset 1abc` names a variable no expansion can reach and exits 0,
 which is what bash does too.
 
+The name namespaces follow bash's no-option rule: **variable first, function
+second**. A name that is also a function keeps its function — the variable is
+what this reaches first — and a name that is not a variable removes a function of
+that name, so `f(){ :; }; unset f; f` runs nothing. An unbound name stays the same
+silent no-op. The operand is never an option here: `-f` and `-v` are read as names
+(bash's `unset -f`, `-v` and `-x` rows are documented in
+[POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md) by task #387). The rule is pinned
+in `tests/unset.rs::a_bare_unset_names_a_variable_first_and_a_function_second`.
+
 ### Parameter expansion
 
 | Form | Result |
@@ -1187,6 +1196,12 @@ greet world
 
 A function sees its arguments as `$1..`; a group shares the surrounding
 shell, so its assignments and `cd` survive it.
+
+A function is a definition, and `unset NAME` reaches it only when no variable of
+that name exists (the priority is spelled out in "Variables" above). Definitions
+are global, so a name removed by an `unset` inside a function stays gone after the
+call returns; a `local NAME` in that same frame is a variable, so the function
+survives that one.
 
 A group's closing `}` obeys the closer rule of "Conditionals and loops": a
 statement the group opened must be terminated before it — `{ echo a }` is the
