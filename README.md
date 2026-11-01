@@ -712,8 +712,17 @@ A **bare** name — `$v`, `$1`, `%fd` — ends at the closing quote of the quote
 region that holds the trigger byte, as it does in bash: `"$v"bc` is `v` plus the
 literal `bc`, `"$v""b"` is `v` plus `b` (the second `"` opens a new region),
 `"$1""2"` is `$1` plus `2`, and `"$v"'x'y` is the value of `v` plus `x` plus `y`.
-Inside one region the name stays greedy (`"x$vbc"` is the value of `vbc`), and
-the braced forms are unaffected — `${name}` ends at its `}`.
+Inside one region the name stays greedy (`"x$vbc"` is the value of `vbc`), and a
+braced reference written **inside** one region is unaffected — `${name}` ends at
+its `}`; a region that ends at the `$` leaves no braced reference either, so
+`"$"{v}` prints `${v}` (bash parity).
+
+The cap covers **every** `$` arm, special parameters included: a `$` whose own
+region ends at the `$` starts no reference, so the `$` is a literal byte —
+`"$"?` prints `$?`, `"$"#` prints `$#`, `"$"@` prints `$@`, `"$"!` prints `$!`,
+`"$"$` prints `$$`, `"$"-$` prints `$-$`, and `x"$""$"` prints `x$$`; bash
+prints each of them the same way
+(`tests/quotes.rs::special_parameter_arms_obey_the_region_cap`).
 
 A digit run obeys the **same** cap, so a region that ends right after the `$`
 leaves no name and no digit: the arm consumes nothing, the `$` is a literal

@@ -3331,11 +3331,11 @@ sibling rule above, which is what makes that index trustworthy).
   `bare_dollar_marks_expansion` pins; do not "clean up" the flag here.
   The `%` arm needs no special case: an empty name takes the existing
   literal-`%` fallback and consumes nothing.
-- **Both name-shaped arms of the `$` arm share that one guard** (task #286):
+- **Every arm of the `$` arm shares that one guard** (tasks #286, #384):
   `dollar::region_ends_at_dollar(limit, out)` is the whole rule, called as the
-  first statement of the name arm and of the **digit** arm, **before** the digit
-  arm's `peek.next()` — consuming the first digit unconditionally was the
-  asymmetry, and it made `$"1"` expand positional 1 (`[A]`) in a family where
+  first statement of `dollar_subst`, **before** any arm consumes its trigger
+  byte — consuming the first digit unconditionally was once the asymmetry,
+  and it made `$"1"` expand positional 1 (`[A]`) in a family where
   the name arm prints the literal (`$v`). Measured on bash 5.3.9, fdshell after
   the guard: `$"1"` → `$1` (bash `1`), `$"12"` → `$12` (bash `12`), `a$"1"b` →
   `a$1b` (bash `a1b`), `$"0"` → `$0` (bash `0`, no program name), `"$"1` → `$1`
@@ -3352,7 +3352,11 @@ sibling rule above, which is what makes that index trustworthy).
   rows are the discriminants that keep the guard honest (and keep the digit arm
   alive, see the sibling entry). bash extends the same cap to the
   **special-parameter** arms (`"$"?` → `$?`, `"$"#` → `$#`, measured, all literal
-  in bash); fdshell expands all of them — **task #384** owns that half.
+  in bash), and fdshell now ends **every** arm at the boundary through the one
+  hoisted call; the whole-word `$@`/`$*` path of `substitute/fields.rs` is the
+  loop's own shape and takes the same cap (`"$"@` → `$@`, `"$"*` → `$*`,
+  `"$"{v}` → `${v}`, `x"$""$"` → `x$$`, bash parity). Pinned by
+  `tests/quotes.rs::special_parameter_arms_obey_the_region_cap`.
 - **A region boundary is a bit, not an index (task #285).** `"$v""b"` is the
   text `vb`, and under a `bool` mask every byte of it is `true`: one region, so
   the name collects `vb` and fdshell printed `[VB]` where bash prints `[qb]`
