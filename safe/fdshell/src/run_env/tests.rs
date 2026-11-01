@@ -108,8 +108,11 @@ fn apply_syncs_ifs_and_restore_reverts_it() {
         cell.borrow().unwrap().ifs.as_bytes().unwrap_or(&[]),
         b" \t\n"
     );
-    // IFS was not seeded in `strings`, so it must not leak there on restore.
-    assert!(get(&cell, "IFS", "strings").is_none());
+    // The entry restore reaches `IFS` too: the name is seeded in `strings` at
+    // the default split set, so the scoped `:` is undone (bash measures the same
+    // through `$IFS`). The split-set field above needs `old_ifs` for the same
+    // undo — a field is not a per-name entry.
+    assert_eq!(get(&cell, "IFS", "strings"), Some(c" \t\n".into()));
 }
 
 #[test]

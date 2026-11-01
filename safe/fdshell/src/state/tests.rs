@@ -1,6 +1,10 @@
 #![allow(clippy::unwrap_used)]
-use super::*;
+use alloc::vec;
+
 use sys::Origin;
+
+use super::ctor::{seeded_environ, seeded_strings};
+use super::*;
 
 #[test]
 fn shift_removes_n_positional() {
@@ -154,8 +158,9 @@ fn the_inherited_environment_is_a_variable_so_the_function_stays() {
 
 /// `IFS` is a variable for `unset` too — the single-name sync is part of the
 /// predicate, so a function named `IFS` survives `unset IFS` (bash, measured).
-/// The name lives in the function store and in the `ifs` field only, so a
-/// predicate built from the three maps alone answers the other way.
+/// The startup seed puts the name in `strings`, so the map half of the predicate
+/// reaches it here; the explicit `IFS` clause is what answers on a **second**
+/// `unset IFS`, after the seed itself is gone (task #512).
 #[test]
 fn ifs_is_a_variable_so_a_function_named_ifs_stays() {
     let mut state = ShellState::new();
@@ -172,14 +177,63 @@ fn ifs_is_a_variable_so_a_function_named_ifs_stays() {
 }
 
 /// A name in neither store is a silent no-op in both directions: no removal, no
-/// panic (bash validates no `unset` operand at all).
+/// panic (bash validates no `unset` operand at all). Both stores are named by
+/// entry, not by size — the `IFS` seed is in `strings` from startup (task #388),
+/// so a size assertion would be about the seed, not about this no-op.
 #[test]
 fn an_unbound_name_leaves_both_stores_alone() {
     let mut state = ShellState::new();
     let kept = ShortCStr::from(c"f");
     with_function(&mut state, &kept);
-    state.unset_name(&ShortCStr::from(c"absent"));
+    let absent = ShortCStr::from(c"absent");
+    state.unset_name(&absent);
     assert!(state.functions.contains_key(&kept), "nothing was removed");
-    assert!(state.strings.is_empty());
-    assert!(state.exports.is_empty());
+    assert!(!state.strings.contains_key(&absent), "nothing was removed");
+    assert!(!state.exports.contains_key(&absent), "nothing was removed");
+}
+
+/// The fresh shell **sets `IFS` to its default value** (POSIX XCU 2.5.1, bash
+/// 5.3.9), so `$IFS` answers the default split set bytes whether or not the
+/// parent exported the name, and the value's provenance is the shell, not the
+/// environment. Without this seed `$IFS` answers empty in a clean environment
+/// and the parent's bytes in an inheriting one.
+#[test]
+fn the_string_store_is_seeded_with_the_default_ifs() {
+    let state = ShellState::new();
+    let seed = state.strings.get(&ShortCStr::from(c"IFS")).unwrap();
+    assert!(
+        seed.value.eq_bytes(b" \t\n"),
+        "the default split set, byte for byte"
+    );
+    assert!(matches!(seed.trace.origin, Origin::Shell));
+    assert!(seeded_strings().contains_key(&ShortCStr::from(c"IFS")));
+}
+
+/// The snapshot's `IFS` row keeps its place (the parent's export attribute
+/// survives, and bash passes it on) but carries the **default** value; every
+/// other row is the parent's. A snapshot without an `IFS` row is returned
+/// unchanged — no row means no export (bash measures `grep -c` 0), and the seed
+/// of `strings` alone answers `$IFS`.
+#[test]
+fn the_environ_seed_rewrites_only_the_ifs_row() {
+    let snapshot = vec![
+        (ShortCStr::from(c"IFS"), ShortCStr::from(c",")),
+        (ShortCStr::from(c"PATH"), ShortCStr::from(c"/bin")),
+    ];
+    let seeded = seeded_environ(snapshot);
+    assert_eq!(seeded.len(), 2, "the row stays, only its value moves");
+    assert!(value_of(&seeded, b"IFS").unwrap().eq_bytes(b" \t\n"));
+    assert!(
+        value_of(&seeded, b"PATH").unwrap().eq_bytes(b"/bin"),
+        "an unrelated inherited row keeps its value"
+    );
+    let no_row = seeded_environ(vec![(ShortCStr::from(c"PATH"), ShortCStr::from(c"/bin"))]);
+    assert_eq!(no_row.len(), 1, "nothing is added");
+    assert!(value_of(&no_row, b"PATH").unwrap().eq_bytes(b"/bin"));
+}
+
+fn value_of(rows: &[(ShortCStr, ShortCStr)], name: &[u8]) -> Option<ShortCStr> {
+    rows.iter()
+        .find(|(key, _)| key.eq_bytes(name))
+        .map(|(_, value)| value.clone())
 }
