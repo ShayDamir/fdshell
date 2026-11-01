@@ -15,11 +15,25 @@ use super::origin::Origin;
 
 /// The `$` arm's quote-region context: the output mask, the word index of the
 /// byte after `$` (the `${…}` arm reads the mask under its own content
-/// bytes), and the name cap of the trigger byte's quote region.
+/// bytes), and the cap of the trigger byte's quote region, spent by
+/// [`region_ends_at_dollar`] before any arm runs.
 pub(crate) struct Region<'a> {
     pub mask: &'a [MaskBit],
     pub start: usize,
     pub limit: usize,
+}
+
+/// The region cap **every** arm of the `$` arm obeys, special parameters
+/// included: when the trigger byte's quote region ends at the `$`, no reference
+/// can start there, so the arm consumes nothing and the `$` is a literal byte
+/// (`"$"v` is `$v`, `"$"?` is `$?` — bash prints both literally). `true` means
+/// the literal byte is written and the arm is done.
+fn region_ends_at_dollar(limit: usize, out: &mut ShortCStr) -> bool {
+    if limit == 0 {
+        out.push(c"$");
+        return true;
+    }
+    false
 }
 
 pub(crate) fn dollar_subst(
@@ -32,6 +46,9 @@ pub(crate) fn dollar_subst(
     origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
     let Region { mask, start, limit } = region;
+    if region_ends_at_dollar(limit, out) {
+        return Ok(());
+    }
     match peek.peek().copied() {
         Some(b'$') => {
             peek.next();
@@ -53,9 +70,9 @@ pub(crate) fn dollar_subst(
         }
         // `$@`/`$*` inside a larger word: the arm lives in `dollar/at_star.rs`.
         Some(b'@') | Some(b'*') => at_star::expand(peek, cell, out, quoted, join, origin)?,
-        // The two region-capped arms — `$<digit…>` and `$<name>` — live in
-        // `dollar/name.rs`: the region cap is checked there **before** the
-        // trigger byte is consumed, so the borrow of the state stays below it.
+        // The two name-shaped arms — `$<digit…>` and `$<name>` — live in
+        // `dollar/name.rs`; the region cap at the top of this function has
+        // already let them through, so `limit` there is at least one byte.
         Some(c @ b'0'..=b'9') => name::positional(c, peek, cell, out, limit)?,
         Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
             name::variable(peek, cell, out, limit)?

@@ -12,7 +12,7 @@ use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
-use crate::mask::MaskBit;
+use crate::mask::{MaskBit, region_len};
 use crate::state::ShellState;
 
 use super::Join;
@@ -42,7 +42,12 @@ pub(crate) fn word_fields(
 ) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
     let fq = super::fully_quoted(mask);
     if word.eq_bytes(b"$@") || word.eq_bytes(b"$*") {
-        return positional_fields(word.eq_bytes(b"$*"), fq, quoted, cell);
+        // The fast path is the loop's own shape, so it takes the same cap: a
+        // `$` whose quote region ends at the `$` starts no reference — bash
+        // prints `"$"@` as the literal `$@` — and the loop below must get it.
+        if region_len(mask, 0) >= 2 {
+            return positional_fields(word.eq_bytes(b"$*"), fq, quoted, cell);
+        }
     }
     let (text, text_mask, origin) =
         substitute_arg_marked(word, mask, spans, Join::Args, cache, cell)?;

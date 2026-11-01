@@ -1121,6 +1121,84 @@ fn locale_family_digits_obey_the_region_cap() {
     }
 }
 
+/// The **special-parameter** arms of the `$` arm obey the same region cap a bare
+/// name does (task #384): a reference cannot cross a quote-region boundary, so a
+/// region that ends at the `$` is a literal byte in *every* arm — `"$"?` prints
+/// `$?` and fdshell prints exactly that. Rows whose region continues past the
+/// `$` must still expand (the cap must not fire there). Every expectation is
+/// bash 5.3.9's own output for the same `-c` script, measured in this test's
+/// working directory (the two `*` rows glob a `$*…` pattern, and no file there
+/// starts with `$`, so both shells leave the word as-is).
+#[test]
+fn special_parameter_arms_obey_the_region_cap() {
+    // The cap rows: the region ends at the `$`, so the `$` is a literal byte.
+    for (script, want) in [
+        (r#"set -- A B; printf "[%s]" "$"?"#, "[$?]"),
+        ("set -- A B; printf \"[%s]\" \"$\"#", "[$#]"),
+        (r#"set -- A B; printf "[%s]" "$"!"#, "[$!]"),
+        (r#"set -- A B; printf "[%s]" "$"*"#, "[$*]"),
+        (r#"set -- A B; printf "[%s]" "$"@"#, "[$@]"),
+        (r#"set -- A B; printf "[%s]" "$"-$"#, "[$-$]"),
+        (r#"set -- A B; printf "[%s]" "$"$"#, "[$$]"),
+        (r#"set -- A B; v=V; printf "[%s]" "$"{v}"#, "[${v}]"),
+        (r#"printf "[%s]" x"$""$""#, "[x$$]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // Controls: the region runs past the `$`, so the arm expands — bash's
+    // columns, unchanged by the cap. The bare-name row of this family is pinned
+    // by `dollar_at_a_region_end_is_a_literal_byte`.
+    for (script, want) in [
+        (r#"set -- A B; v=V; printf "[%s]" "${v}"x"#, "[Vx]"),
+        (r#"set -- A B; printf "[%s]" "$#"$"#, "[2$]"),
+        (r#"printf "[%s]" "$"{"#, "[${]"),
+        // The first `$` ends its region and the next one starts a fresh arm:
+        // `$?` is the exit status of the last command, 0 in both shells.
+        (r#"set -- A B; v=V; printf "[%s]\n" "$"$?"#, "[$0]\n"),
+        (r#"set -- A B; printf "[%s]" "$"$X"#, "[$]"),
+        (r#"X=x; set -- A B; printf "[%s]\n" "$"$X"#, "[$x]\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // Splitting and provenance (LESSONS: "`$@` has two join rules"): after the
+    // cap nothing is expansion bytes for the splitter to cut, so the word stays
+    // one field — bash's `[x$@,y]` and `[x$*,y]`.
+    for (script, want) in [
+        (r#"IFS=,; set -- A B; printf "[%s]" x"$"@,y"#, "[x$@,y]"),
+        (r#"IFS=,; set -- A B; printf "[%s]" x"$"*,y"#, "[x$*,y]"),
+        // The capped word is one argument, kept even when it is all literal.
+        (
+            r#"set -- A B; set -- "$"?x; printf "[%s]\n" "$@""#,
+            "[$?x]\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // The family rule from task #286: an expansion that expands nothing has no
+    // unbound name, so `set -u` stays quiet — bash prints `[?]` / `[#]` rc 0.
+    for (script, want) in [
+        (r#"set -u; set --; printf "[%s]" "$"?"#, "[$?]"),
+        ("set -u; set --; printf \"[%s]\" \"$\"#", "[$#]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // The `$"…"` family with a special byte: the cap fires there too (the `$`
+    // is its own one-byte region), so the span text reaches the word as literal
+    // bytes — the README's accepted divergence, which prints the span *text*:
+    // bash `[?]` for `$"?"` and `[#]` for `$"#"`.
+    for (script, want) in [
+        (r#"printf "[%s]" $"?""#, "[$?]"),
+        ("set -- A B; printf \"[%s]\" $\"#\"", "[$#]"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+}
+
 /// A quote region ends a bare name (task #285): the mask spells where each
 /// region starts (`MaskBit::QuotedStart`), so `$name` stops at the closing
 /// quote of the region holding the `$` — bash's rule, now fdshell's.
