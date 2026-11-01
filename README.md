@@ -1274,15 +1274,22 @@ that opens the pipe, so `echo a |` + `while :; do :; done` is rejected where
 bash runs the loop.
 
 A stage's **name** resolves through the same order a plain command uses: a user
-function first, then the builtin table, then `PATH`. So `f(){ echo hi; }; f | cat`
+function first, then the builtin tables, then `PATH`. So `f(){ echo hi; }; f | cat`
 prints `hi` at rc 0, and `f(){ echo a; }; g(){ cat; }; f | g` runs a function in
 each of the two forks. The stage's fork is a **subshell**, so what a function
 changes there dies with it: a `cd`, an assignment or an `exit` written in the body
 leaves the parent's working directory, variables and life alone — bash's stage
 subshell behaves the same, and `f(){ exit 3; }; cat | f; echo rc=$?` prints `rc=3`
-in both. The `builtin`/`command` prefixes bypass functions (POSIX #2.4), and the
-parent-side handlers a plain command runs before forking (`cd`, `read`, `set --`,
-`wait`, …) stay out of a stage (task #381).
+in both. The `builtin`/`command` prefixes bypass functions (POSIX #2.4), and so do
+the handlers a plain command runs in the parent before forking — `cd`, `read`,
+`set --`, `wait`, `eval`, `alias`, `export`, `local`, `exit`, … — which a stage runs
+in its own fork (task #381): what they change dies with the fork there too, so
+`cd sub | cat; pwd` prints the directory the stage started in,
+`export E=1; echo a | export E=2; echo "$E"` prints `1`, and a stage's `exit 3` is
+the pipeline's code only when the stage is its last one. What stays outside a stage
+is what has no builtin at all — the parse-level commands of "Builtins" above — and
+the forked table answers `builtin` first, so `echo a | builtin cd sub` reports
+`"cd" is not a shell builtin` at rc 1.
 
 A `#` at the start of a word comments out the rest of its **physical** line, so
 no `&&`/`||` written inside it splits a list: the rule reaches a keyword block's
