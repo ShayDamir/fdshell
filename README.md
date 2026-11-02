@@ -1007,6 +1007,17 @@ The language has the usual precedence, `&&`/`||`, comparisons, the ternary
 `?:`, `++`/`--`, assignments and the comma operator, plus decimal, hex
 (`0xff`), octal (`010`) and `base#number` literals.
 
+`$name`, `$$`, `$!`, `$(…)`, nested `$((…))` and `${…}` regions expand inside
+an expression before it is parsed (bash's model: expand first, then evaluate
+the resulting string) — on every surface at once: `$((…))`, the `((expr))`
+command, `let` and the arithmetic `for`'s clauses. A braced region goes through
+the word expansion path, so its param-ops (`${n:-2}`, `${n#a}`, `${#n}`) and
+braced positionals (`${1}` is `3` with `set -- 3 4`, as in bash) work as bash
+does. v1 decisions (task #397, implementation task #517): a bare `$1` or `$*`
+inside an expression stays a syntax error (bash expands them, `3` measured),
+and an unset variable inside a region splices to empty — fdshell reports its
+own syntax error at rc 1 where bash's empty-expression rule prints `0` at rc 0.
+
 ### Conditionals and loops
 
 ```shell
@@ -1168,7 +1179,9 @@ newline, and the glued `))do`), and the body is the usual `do … done` block �
 here-doc inside it is re-read once per iteration. The region is read as raw
 bytes, so `;`, `|`, `<<`, a quote and a newline inside it are data:
 `for ((i=0;i<$(echo 3);i++))` has three clauses, and the `<<` of `1<<2` claims no
-here-doc. A word whose bytes are exactly a keyword word **ends** at an unquoted
+here-doc; a closed `${…}` region in a clause is expanded before the clauses are
+cut, as on every arithmetic surface (task #397, see "Arithmetic" above). A word
+whose bytes are exactly a keyword word **ends** at an unquoted
 metacharacter — one byte set, one reserved list, read at both granularities —
 so the glued `for((i=0;i<3;i++))` runs the loop as bash does (task #396).
 Behind the region stands `do` — or the `{` of a **group body** (task #394:
@@ -1178,9 +1191,7 @@ rules are then the body's: its `;`-before-`}` terminator, its emptiness rule, it
 trailing redirections, and the one `;` the tail rule allows between the region and the
 body (`)) ; { …; }` and `)); { …; }` both run). Shapes that stay open: a
 word that is **not** a keyword word keeps its whole word — bash's
-general break, the open work of tasks #316/#470/#422/#499 — and a `${…}`
-expansion in a clause, which is a syntax error on every arithmetic surface
-(task #397). A step spaced as `i ++` is **parity**, not an open shape (task
+general break, the open work of tasks #316/#470/#422/#499. A step spaced as `i ++` is **parity**, not an open shape (task
 #395): whitespace never separates an operand from its `++`/`--`, so
 `for ((i = 0 ; i < 2 ; i ++)) { echo $i; }` ends like bash's, pinned in
 `tests/loops.rs::c_style_for_a_spaced_step_matches_bash`. A clause count that is

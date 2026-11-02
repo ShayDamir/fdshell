@@ -615,8 +615,9 @@ separate the pair; only the same-command observation separates a parse claim
 from the fork deviation, and it shows glued and spaced agree. **#396** the glued
 `for((…))` has **landed** with the boundary rule (see LESSONS: "The metacharacter
 boundary is a keyword-word rule"), **#397** a
-`${…}` inside a clause (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the
-`((expr))` command and `$((…))` fail identically), and the
+`${…}` inside a clause **landed** with the pre-expansion splice through the word
+path's non-split substitution entry (the scanner is the shared
+`region_scan/brace.rs`), and the
 redirect-after-the-closer family **#298**, since closed by
 `parse/block_tail.rs`.
 
