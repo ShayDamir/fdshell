@@ -2902,13 +2902,14 @@ and `alias_expand::command_positions` too, because splitting a line at a `|`
 is the same structural decision as counting an operator after one:
 `echo "|" <<EOF` is one command (rc 0, prints `|`, bash-equal), not a pipeline
 whose second stage's command word is `<<EOF`. Two `|`-text readers were
-deliberately left out of that migration (`parse/case_clause.rs`'s pattern
-separator — measured `case '|' in "|") echo hit;; esac`: fdshell rc 1
+deliberately left out of that migration (`parse/case_clause/patterns.rs`'s
+pattern separator — measured `case '|' in "|") echo hit;; esac`: fdshell rc 1
 `case: empty pattern`, bash rc 0 `hit`; `parse/group_block.rs`'s trailing-word
 test — measured `{ true } "|" out`: fdshell rc 1 `expected ';' before '}'`,
 bash rc 2): message/pattern family only, nothing feeds the heredoc counts.
 **Task #346 landed both readers**, so no token layer reads `|` text any more:
-`parse/case_clause.rs::collect_patterns` threads `line` out of the `ScriptText`
+`parse/case_clause/patterns.rs::collect_patterns` threads `line` out of the
+`ScriptText` (the `as_bytes().change_context` idiom every block builder uses) and
 (the `as_bytes().change_context` idiom every block builder uses) and
 `parse/group_block/tail.rs::redirects` (the site task #354 split out of
 `parse/group_block.rs`) both call `pipe_token_span`. The review check is
@@ -4375,9 +4376,9 @@ rule, five consequences:
    a side effect.
 5. **A clause may open with the optional `(` of POSIX 2.9.4.3's
    `( pattern-list )`, and bash strips exactly that byte** (#334):
-   `parse/case_clause.rs` asks `pattern::take_open_paren` about the clause's
-   **first** token, and the byte goes only when mask bit 0 is `Unquoted` **and**
-   `ShortCStr::strip_prefix(b"(")` matches — the two signals
+    `parse/case_clause/patterns.rs` asks `pattern::take_open_paren` about the
+    clause's **first** token, and the byte goes only when mask bit 0 is
+    `Unquoted` **and** `ShortCStr::strip_prefix(b"(")` matches — the two signals
    `stray::opens_groups` reads for a paren, and the mask (never `fully_quoted`)
    is the discriminator: `"("a*`, `'('a*` and the escape pair `\(a*` keep the
    byte as text (bash agrees), a `(` behind a `|` is never reached, `((a*))`
