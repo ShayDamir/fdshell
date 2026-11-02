@@ -472,3 +472,17 @@ fn over_cap_cross_product_is_a_parse_error() {
     assert!(err.contains("too many words"), "stderr={err:?}");
     assert!(out.is_empty());
 }
+
+// --- keyword words glued to a brace-expanded paren (task #396) -------------
+
+#[test]
+fn brace_expanded_words_glued_to_a_paren_split_at_the_boundary() {
+    // The boundary rule applies to brace-expanded words the same way: the
+    // expansion's words `if(x` and `fi(x` split at the `(`, so `echo` prints
+    // five fields where `master` printed two (`if(x fi(x )`). bash rejects the
+    // whole line with a syntax error rc 2 — its word break is **general** and
+    // would split `echo x(y` too, the break task #316 owns; this pin records
+    // the new word count, not bash's answer.
+    let (out, err, code) = run("echo {if,fi}(x)");
+    assert_eq!((out.as_str(), code), ("if (x fi (x )\n", 0), "{err:?}");
+}

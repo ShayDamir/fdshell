@@ -1093,6 +1093,12 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
         // A `(` in the `case` **word** is that word's own shape — task **#470**:
         // the word stays `(abc)`, so the stripped pattern `a*` misses it.
         (r"case (abc) in (a*) echo m;; *) echo n;; esac", "n\n"),
+        // A `(` glued right behind the `case` keyword ends the keyword word
+        // (task **#396**): the subject is the word `(a)`, no pattern matches it,
+        // so the line prints nothing at rc 0 while bash rejects it with rc 2
+        // (the general word break behind a non-keyword-shaped position is
+        // task **#316**'s family).
+        (r"case(a) in a) echo hi;; esac", ""),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
@@ -1114,11 +1120,12 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
     let (out, err, code) = run(r"case abc in (a*)esac");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
     assert!(err.contains("missing its closing 'esac'"), "stderr={err}");
-    // A `(` glued right behind the `in` keyword is the keyword-boundary shape —
-    // task **#469**, unchanged by this task.
+    // A `(` glued right behind the `in` keyword ends the keyword word (task
+    // **#396**, the boundary rule): the words split into `in` and `(a*)`, and
+    // the parenthesized clause pattern matches — **bash parity** (task **#469**
+    // is this row; bash 5.3.9 prints `m` rc 0, measured, and so does the tree).
     let (out, err, code) = run(r"case abc in(a*) echo m;; esac");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
-    assert!(err.contains("missing 'in'"), "stderr={err}");
+    assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err}");
 }
 
 /// The zero-byte quote spans of task #321 ride **on** the stripped byte: the

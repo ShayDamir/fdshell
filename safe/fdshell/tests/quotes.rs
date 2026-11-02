@@ -1333,3 +1333,23 @@ fn a_quoted_semicolon_does_not_split_a_block() {
     let (out, err, code) = run("{ echo a ; }");
     assert_eq!((out.as_str(), code), ("a\n", 0), "stderr={err:?}");
 }
+
+/// The quote gate of task **#396**'s boundary rule: a metacharacter ends a
+/// keyword word **only when the word is ungated-quoted**, so `'for'((…))` and
+/// `"for"((…)` keep their word whole and the whole shape stays command words
+/// (POSIX §2.9.1) — the kill rows of the LESSONS entry "A keyword word is
+/// gated on its raw span" stay green unchanged, and these rows measure the
+/// glued spellings. bash rejects all three with a syntax error rc 2;
+/// `do`/`done` run as commands here (rc 1), exactly as on `master`.
+#[test]
+fn a_quoted_keyword_glued_to_a_metacharacter_stays_a_command_word() {
+    for script in [
+        "'for'((i=0;i<2;i++));do :;done",
+        "\"for\"((i=0;i<2;i++));do :;done",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(err.contains("\"do\" not found"), "{script}: {err:?}");
+        assert!(err.contains("\"done\" not found"), "{script}: {err:?}");
+    }
+}

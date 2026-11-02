@@ -1,3 +1,4 @@
+mod keyword;
 mod sep;
 
 use alloc::vec::Vec;
@@ -65,6 +66,11 @@ impl State {
                 self.word_start();
                 self.read_escape(bytes)?;
             }
+            // A metacharacter ends a **keyword word** (task #396): the one
+            // word-break set, applied only to the reserved list so every other
+            // word keeps the current segmentation. No separator token: the
+            // stream is the one the spaced spelling already produced.
+            b'&' | b'<' | b'>' | b'(' if self.keyword_run(b) => self.split_keyword_run(b)?,
             _ => {
                 self.word_start();
                 self.push_masked(b, false)?;

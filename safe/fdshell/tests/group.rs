@@ -537,6 +537,28 @@ fn function_def_beats_the_block_keyword() {
     assert!(err.contains("parse error"), "{err}");
 }
 
+/// The same family for the other keyword names (task **#396**): the `(` ends a
+/// keyword word, so `done()`/`fi()`/`in()`/`then()` are no longer definer words
+/// — `master` defined the function and ran it (`d`, `e`, `f`, `g`, rc 0) — and
+/// every row now reports the keyword word not found at rc 1. bash rejects the
+/// whole shape with a syntax error rc 2, so the
+/// recognition (not the definer) is what the boundary rule decides; the
+/// glued-`(` definer token of a **non**-keyword name (`f'oo'()`,
+/// `function 'f'`) is untouched, as the pins of that rule insist.
+#[test]
+fn a_keyword_named_definer_stops_being_a_definer() {
+    for (script, msg) in [
+        ("done() { echo d; }; done", "\"done\" not found"),
+        ("fi() { echo e; }; fi", "\"fi\" not found"),
+        ("in() { echo f; }; in", "\"in\" not found"),
+        ("then() { echo g; }; then", "\"then\" not found"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
+        assert!(err.contains(msg), "{script}: {err}");
+    }
+}
+
 /// `fdshell` has no bad-substitution diagnostic: `${{a}` expands to an empty
 /// word, so the line prints an empty line then `b` rc 0 where bash reports
 /// `bad substitution` rc 1 (accepted divergence; `master` agrees).

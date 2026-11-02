@@ -16,8 +16,9 @@ fn the_row_fires_only_for_a_region_followed_by_an_opener() {
     // No opener behind the region: the head keeps its `done` frame.
     assert!(!opens_a_group(b"for ((i=0;i<2;i++)) do echo a; done", 3));
     assert!(!opens_a_group(b"for ((i=0;i<2;i++)) echo a", 3));
-    // No whitespace gap is the glued head (task #396), not this row.
-    assert!(!opens_a_group(b"for((i=0;i<2;i++)) { echo a; }", 3));
+    // No whitespace gap is the glued head (task #396), and it rows too: bash
+    // runs `for((…)) { …; }` with the group as its body (measured parity).
+    assert!(opens_a_group(b"for((i=0;i<2;i++)) { echo a; }", 3));
     // A region that never closes hands the word back to the `done` frame.
     assert!(!opens_a_group(b"for ((i=0;i<2;i++ { echo a; }", 3));
     // Not a region at all.
@@ -67,7 +68,9 @@ fn the_run_gate_takes_only_a_head_whose_body_is_a_group() {
         b"for ((i=0;i<2;i++)) ;; { echo a; }",
         0
     ));
-    assert!(!opens_a_block(
+    // The glued head (task #396) is this gate's run too — bash runs the
+    // glued `for((…)) { …; }` with the group as its body (measured parity).
+    assert!(opens_a_block(
         b"for((i=0;i<2;i++))".as_slice(),
         b"for((i=0;i<2;i++)) { echo a; }",
         0
@@ -85,8 +88,9 @@ fn the_run_test_wants_the_head_and_nothing_else() {
     assert!(!is_run_head(b"for ((i=0;i<2;i++)) }"));
     assert!(!is_run_head(b"for ((i=0;i<2;i++)) echo a"));
     assert!(!is_run_head(b"for ((i=0;i<2;i++)) ;"));
-    // The glued head (task #396) and a word that is not this construct.
-    assert!(!is_run_head(b"for((i=0;i<2;i++))"));
+    // The glued head (task #396) rows with the spaced one; a word that is not
+    // this construct does not.
+    assert!(is_run_head(b"for((i=0;i<2;i++))"));
     assert!(!is_run_head(b"for i in a"));
     assert!(!is_run_head(b"for ((i=0;i<2;i++)"));
     assert!(!is_run_head(b"while :; do"));

@@ -1854,22 +1854,63 @@ fn c_style_for_a_stage_with_a_shift_and_a_heredoc_is_bash_parity() {
     assert_eq!((out.as_str(), rc), ("body\nbody\nbody\nbody\n", 0), "{err}");
 }
 
-/// The glued `for((…))` form stays an open divergence, with its own task: the glued
-/// word is no keyword at all, so `do`/`done` run as commands (task **#396**). The
-/// `{ …; }` body that used to sit in this test is implemented — task **#394**, pinned
-/// in the section below.
+/// The glued `for((…))` form is **bash parity** now (task **#396**, the
+/// reserved-word boundary): the `(` ends the keyword word at both
+/// granularity levels, the tokenizer splits `for` off the region, and the
+/// spaced form's machinery runs the loop — `0 1 2` at rc 0, exactly like bash.
+/// The `{ …; }` body that used to sit in this test is implemented — task
+/// **#394**, pinned in the section below.
 #[test]
-fn c_style_for_the_glued_form_stays_a_divergence() {
+fn c_style_for_the_glued_form_is_bash_parity() {
     let (out, err, rc) = run("for((i=0;i<3;i++));do echo $i;done");
-    assert_eq!(out, "", "task #396: the glued word is no keyword: {out}");
-    assert_eq!(
-        rc, 1,
-        "task #396: bash rc 0, fdshell runs `do`/`done`: {err}"
-    );
-    assert!(
-        err.contains("failed to resolve command path"),
-        "task #396: {err}"
-    );
+    assert_eq!((out.as_str(), rc), ("0\n1\n2\n", 0), "{err}");
+}
+
+/// Task **#396**'s family, each row measured against bash 5.3.9: once the
+/// keyword word ends at the metacharacter, every glued spelling lands on the
+/// spaced machinery — the glued `do`, the `{ …; }` body of task **#394** behind
+/// a glued head, the empty-clause loop, a glued loop as a pipeline stage and
+/// behind a cond operator. All parity.
+#[test]
+fn glued_arith_for_shapes_run_the_loop_like_bash() {
+    for (script, want) in [
+        ("for((i=0;i<3;i++))do echo $i;done", "0\n1\n2\n"),
+        ("for((i=0;i<2;i++)) { echo $i; }", "0\n1\n"),
+        ("for((;;)){ echo z; break; }", "z\n"),
+        ("echo x | for((i=0;i<2;i++));do echo $i;done", "0\n1\n"),
+        ("true && for((i=0;i<2;i++));do echo $i;done", "0\n1\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The glued arith-condition keywords (task **#396**): `if((expr))`,
+/// `while((expr))` and `until((expr))` split at the `(` and the condition is
+/// the `((expr))` command, already implemented. The `if`/`until` rows are bash
+/// parity; the `while` row prints `bash parity's` two prints but exits rc 1 —
+/// the loop's last status is the failed condition test, fdshell's existing rule
+/// for a spaced `while ((expr))` too (bash returns the body's last status, rc
+/// 0): the row is pinned with the tree's value, not bash's.
+#[test]
+fn glued_arith_conditions_land_on_the_arith_command_rule() {
+    let (out, err, rc) = run("x=1; if((x));then echo y;fi");
+    assert_eq!((out.as_str(), rc), ("y\n", 0), "{err}");
+    let (out, err, rc) = run("i=0; while((i<2));do echo w; i=$((i+1)); done");
+    assert_eq!((out.as_str(), rc), ("w\nw\n", 1), "{err}");
+    let (out, err, rc) = run("until((0));do echo u;break;done");
+    assert_eq!((out.as_str(), rc), ("u\n", 0), "{err}");
+}
+
+/// A glued `for` whose region holds a `<<`-shaped byte inside a real here-doc
+/// line: the statement path detects the arithmetic `for` before
+/// `heredoc::layout` counts its specs (the spaced pin
+/// [`c_style_for_shift_in_the_region_is_not_a_heredoc`]'s glued twin), and the
+/// body prints once — bash parity.
+#[test]
+fn glued_arith_for_with_a_heredoc_line_runs_the_loop() {
+    let (out, err, rc) = run("for((i=0;i<1;i++));do cat <<B; done\nbody\nB");
+    assert_eq!((out.as_str(), rc), ("body\n", 0), "{err}");
 }
 
 /// `set -u` does not stop the clauses (task **#170** owns nounset in

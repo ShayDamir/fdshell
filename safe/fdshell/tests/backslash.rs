@@ -525,3 +525,18 @@ fn command_keyword_keeps_the_name_word_out_of_the_env_prefix() {
         assert_eq!(out, "[]\n", "{script}: bash prints []");
     }
 }
+
+/// The escape-pair twin of task **#396**'s boundary-rule gate: `\for((…)`
+/// keeps the escape pair in the word text (the kill row of the LESSONS entry
+/// `alias_name_keeps_the_escape_pair` mechanism), so the text is not the
+/// reserved word and the metacharacter does not split it. The word runs as the
+/// command the tokenizer saw, bash rejects the line with rc 2, and the answer
+/// is what `master` gave.
+#[test]
+fn an_escaped_keyword_glued_to_a_metacharacter_stays_a_command_word() {
+    let (out, err, code) = run("\\for((i=0;i<2;i++));do :;done");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("\"for((i=0\" not found"), "{err:?}");
+    assert!(err.contains("\"do\" not found"), "{err:?}");
+    assert!(err.contains("\"done\" not found"), "{err:?}");
+}

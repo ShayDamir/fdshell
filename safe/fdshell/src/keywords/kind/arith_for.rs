@@ -17,8 +17,9 @@ const OPEN: &[u8] = b"((";
 const FOR: &[u8] = b"for";
 
 /// The text behind the `for` word is a closed `(( … ))` region: `Some` = the byte
-/// just past it, `None` when there is no whitespace gap, no region, or a region
-/// that never closes. The region is opaque to every byte rule, so the walk is
+/// just past it, `None` when there is no region (whitespace-separated or glued —
+/// task #396 — both spellings land here) or one that never closes. The region is
+/// opaque to every byte rule, so the walk is
 /// [`paren_scan::scan_at`]'s tokenizer unit with the whole opening pair counted as
 /// consumed: it ends at the closing pair's **first** `)`, so the pair's second `)`
 /// must sit on the next byte — the same shape the arithmetic `for`'s own region
@@ -26,7 +27,7 @@ const FOR: &[u8] = b"for";
 fn region_end(text: &[u8]) -> Option<usize> {
     let gap = ws_len(text);
     let body = text.get(gap..)?;
-    (gap > 0 && body.starts_with(OPEN)).then(|| {
+    body.starts_with(OPEN).then(|| {
         let (_, past) = paren_scan::scan_at(body, OPEN.len(), OPEN.len() as u32)?;
         (body.get(past) == Some(&b')')).then_some(gap + past + 1)
     })?

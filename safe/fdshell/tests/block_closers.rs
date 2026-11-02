@@ -413,3 +413,25 @@ fn a_double_semi_body_is_the_separator_rule_not_this_one() {
     ok("if true; then echo a ;; fi", "a\n");
     err("if true; then b ;; fi", "\"b\" not found");
 }
+
+/// The glued-`(` keyword family of task **#396**'s boundary rule: `fi(x)` and
+/// its five siblings split at the `(` — bash's tokenizer ends a word at a
+/// metacharacter, and the one boundary rule now does too — so the keyword is
+/// **recognized** and bash rejects every row with rc 2. The top level here runs
+/// a lone keyword word as a command (fdshell's standing rule, rc 1), so each
+/// row is pinned with its measured `"word" not found`; the split itself is the
+/// change, and `wait(x)`/`time (x)` stay whole because `wait`/`time` are not on
+/// the reserved list (task **#316** owns the general break).
+#[test]
+fn a_glued_keyword_word_is_recognized_at_the_boundary() {
+    for (script, msg) in [
+        ("fi(x)", "\"fi\" not found"),
+        ("done(x)", "\"done\" not found"),
+        ("esac(x)", "\"esac\" not found"),
+        ("then(x)", "\"then\" not found"),
+        ("do(x)", "\"do\" not found"),
+        ("in(x)", "\"in\" not found"),
+    ] {
+        err(script, msg);
+    }
+}

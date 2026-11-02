@@ -1153,3 +1153,23 @@ fn state_home_drives_the_tilde_and_stays_un_splittable() {
         assert_eq!(out, want, "{script}");
     }
 }
+
+/// Task **#396**'s boundary rule splits a keyword word glued to a `(`:
+/// `echo in(a*)` now gets the words `in` and `(a*` (and the `)` token), so
+/// `echo` prints three fields — `in (a* )` where `master` printed `in(a* )`.
+/// bash rejects the line outright with rc 2 — its word break is **general** and
+/// the `(` splits every word, the break task **#316** owns; this pin records
+/// the new word count, not bash's answer. `wait` and `time` are **not** on the
+/// reserved list (`wait` is no bash reserved word, `time` a prefix), so their
+/// glued words stay whole and their answers are `master`'s.
+#[test]
+fn a_keyword_word_glued_to_a_paren_splits_and_the_others_do_not() {
+    let (out, err, code) = run("echo in(a*)");
+    assert_eq!((out.as_str(), code), ("in (a* )\n", 0), "{err}");
+    let (out, err, code) = run("wait(x)");
+    assert_eq!((out.as_str(), code), ("", 1), "{err}");
+    assert!(err.contains("\"wait(x\" not found"), "{err:?}");
+    let (out, err, code) = run("time (echo t)");
+    assert_eq!((out.as_str(), code), ("", 1), "{err}");
+    assert!(err.contains("\"(echo\" not found"), "{err:?}");
+}

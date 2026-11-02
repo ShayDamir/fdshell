@@ -455,9 +455,10 @@ fn closer_shaped_words_stay_word_data() {
         "the `done` pattern does not match `x`"
     );
 
-    // The `for` list's glued `done>f` is a list word: the block span reaches the
-    // real `done`, the list word's `>` opens nothing, and the closer's own
-    // redirect files the body (bash stops at rc 2 and opens nothing).
+    // The `for` list's glued `done>f` is word data, but the `>` now **splits**
+    // the keyword word (task #396): the list is `done` and `>f`, the loop runs
+    // both words, and the closer's redirect files both prints (bash stops at
+    // rc 2 and opens nothing).
     let dir = Scratch::new();
     let o = run(&dir, "for x in done>f; do echo A; done>f2");
     assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
@@ -467,18 +468,20 @@ fn closer_shaped_words_stay_word_data() {
     );
     assert_eq!(
         file(&dir, "f2"),
-        Some(b"A\n".to_vec()),
-        "`master` rejected the whole statement (`expected 'do'`, rc 1)"
+        Some(b"A\nA\n".to_vec()),
+        "the split list runs `done` and `>f` (`echo a>f>g` behaves the same)"
     );
 
     // The family, each row measured against bash 5.3.9: every glued shape runs
     // (rc 0, `A`) where bash stops at rc 2, and the operator-shaped list words
     // (`>f`, `2>/dev/null`, `done2>f`, `<f`) are the pre-existing rows of the
     // same family — unchanged by task #306, listed so the family is one place.
-    // The spaced spelling is bash parity: the closer's redirect files the list
-    // word the loop iterated.
+    // The glued **keyword** words now split at the metacharacter (task #396),
+    // so the first row's list is `done` and `>f` and the loop prints twice;
+    // `done2>f` is no keyword word and stays one word. The spaced spelling is
+    // bash parity: the closer's redirect files the list word the loop iterated.
     for (script, want, want_f) in [
-        ("for x in done>f; do echo A; done", "A\n", None),
+        ("for x in done>f; do echo A; done", "A\nA\n", None),
         ("for x in done|cat; do echo A; break; done", "A\n", None),
         ("for x in done&&true; do echo A; break; done", "A\n", None),
         ("for x in >f; do echo A; break; done", "A\n", None),

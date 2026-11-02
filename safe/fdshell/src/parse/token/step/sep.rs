@@ -1,5 +1,8 @@
 //! The separator/terminator arm of the unquoted-byte dispatcher: the five bytes
-//! that end a word, three of which also emit a separator token.
+//! that end a word, three of which also emit a separator token. The `&`, `<`,
+//! `>` and `(` bytes stay word bytes here — except when the accumulated word is
+//! exactly a reserved word, which [`super::keyword`] ends at the metacharacter
+//! (task #396).
 
 use super::State;
 

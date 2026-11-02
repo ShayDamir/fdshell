@@ -515,6 +515,44 @@ fn for_with_a_closer_shaped_list_word_buffers_until_the_closer() {
     );
 }
 
+/// Task **#396**: the glued `for((…))` is a keyword word at the byte level
+/// now, so the **byte scan opens the block frame** and the REPL sees the same
+/// buffering as any other unclosed block: the first line waits under `> ` for
+/// the closer, and the completed statement runs (`0`, `1` — bash parity). At
+/// EOF the buffer is executed and reports its missing closer — bash prints its
+/// `unexpected end of file` report and exits 2, fdshell reports the parse error
+/// and exits 0: the documented REPL rc-1-vs-2 family (README). `master`
+/// dispatched each line by itself (`do`/`done` ran as commands).
+#[test]
+fn glued_arith_for_buffers_until_the_closer() {
+    let (out, err, code) = run_repl("for((i=0;i<2;i++))\ndo echo $i; done\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert!(
+        out.contains("> "),
+        "the first line was dispatched, not buffered: {out:?}"
+    );
+    assert_eq!(
+        out.replace(PROMPT, "").replace("> ", ""),
+        "0\n1\n",
+        "the completed glued loop runs: {out:?}"
+    );
+    assert!(!err.contains("parse error"), "parse error: {err:?}");
+    // EOF mid-buffer: the buffer is executed and reports the missing closer,
+    // naming the word the byte scan measured (`for((i=0`).
+    let (out, err, code) = run_repl("for((i=0;i<2;i++))\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert!(
+        out.replace(PROMPT, "").contains("> "),
+        "no continuation prompt: {out:?}"
+    );
+    assert!(
+        err.contains("'for((i=0' is missing its closing 'done'"),
+        "the buffer was not executed as an unclosed block: {err:?}"
+    );
+}
+
 /// Task #294: an **unclosed mid-run construct** (a `{ …` cond part, a keyword
 /// block after `&&` or behind `|`, a `true && f() {` definition) is skipped
 /// whole inside its run, so the scan stamps its closedness on the statement

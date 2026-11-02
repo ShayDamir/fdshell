@@ -649,3 +649,36 @@ fn the_substitution_delimiter_word_pair_differs_only_in_its_quotes() {
         vec![ShortCStr::from(c"cat"), ShortCStr::from(c"<<$(x)")]
     );
 }
+
+// --- keyword boundary split (task #396) --------------------------------------
+
+// A reserved keyword word ends at an unquoted metacharacter, at token
+// granularity exactly like the byte-level word rule (`bytes::word_break`): the
+// `for((i=0` spelling becomes the two tokens the spaced form would give.
+#[test]
+fn reserved_keyword_word_splits_at_the_boundary() {
+    assert_eq!(
+        text(b"for((i=0"),
+        vec![ShortCStr::from(c"for"), ShortCStr::from(c"((i=0")]
+    );
+    assert_eq!(
+        text(b"echo in(a*)"),
+        vec![
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"in"),
+            ShortCStr::from(c"(a*"),
+            ShortCStr::from(c")"),
+        ]
+    );
+}
+
+// The gates of the rule: the split is on the word's **raw span**, so a quoted
+// or escaped keyword keeps its word whole (POSIX §2.9.1), and a non-reserved
+// name is never split — the general break behind any word is task #316's.
+#[test]
+fn gated_and_unreserved_words_stay_whole() {
+    assert_eq!(text(b"'for'((i=0"), vec![ShortCStr::from(c"for((i=0")]);
+    assert_eq!(text(b"\\for((i=0"), vec![ShortCStr::from(c"\\for((i=0")]);
+    assert_eq!(text(b"foo((i=0"), vec![ShortCStr::from(c"foo((i=0")]);
+    assert_eq!(text(b"wait((i=0"), vec![ShortCStr::from(c"wait((i=0")]);
+}

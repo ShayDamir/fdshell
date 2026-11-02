@@ -114,12 +114,16 @@ fn arith_for_head_run_opens_a_group() {
         group_at_run(b"echo x | for ((i=0;i<1;i++)) { echo b; }", 0, 29),
         None
     );
-    // A word before the head is data; a glued head (task #396) is no head.
+    // A word before the head is data; a glued head (task #396) is a head too —
+    // bash runs the glued `for((…)) { …; }` with the group as its body.
     assert_eq!(
         group_at_run(b"echo for ((i=0;i<1;i++)) { b; }", 0, 25),
         None
     );
-    assert_eq!(group_at_run(b"for((i=0;i<1;i++)) { b; }", 0, 19), None);
+    assert_eq!(
+        group_at_run(b"for((i=0;i<1;i++)) { b; }", 0, 19),
+        Some(true)
+    );
 }
 
 #[test]
