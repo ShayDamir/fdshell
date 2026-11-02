@@ -1829,15 +1829,12 @@ fn c_style_for_a_stage_with_a_shift_and_a_heredoc_is_bash_parity() {
     assert_eq!((out.as_str(), rc), ("body\nbody\nbody\nbody\n", 0), "{err}");
 }
 
-/// Two forms bash accepts stay open divergences, each with its own task, and
-/// both fail loudly rather than silently: the `{ …; }` body (task **#394**,
-/// fdshell: a parse error, rc 1) and the glued `for((…))` (task **#396**, not a
-/// keyword word at all, so `do`/`done` run as commands).
+/// The glued `for((…))` form stays an open divergence, with its own task: the glued
+/// word is no keyword at all, so `do`/`done` run as commands (task **#396**). The
+/// `{ …; }` body that used to sit in this test is implemented — task **#394**, pinned
+/// in the section below.
 #[test]
-fn c_style_for_the_glued_and_brace_body_forms_stay_divergences() {
-    let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i; }");
-    assert_eq!((out.as_str(), rc), ("", 1), "task #394: {err}");
-    assert!(err.contains("parse error"), "task #394: {err}");
+fn c_style_for_the_glued_form_stays_a_divergence() {
     let (out, err, rc) = run("for((i=0;i<3;i++));do echo $i;done");
     assert_eq!(out, "", "task #396: the glued word is no keyword: {out}");
     assert_eq!(
@@ -2113,4 +2110,165 @@ fn a_line_ending_on_a_cond_operator_continues_a_loop_body() {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// The arithmetic `for` with a `{ …; }` body (task #394).
+//
+// bash's `for_action` ends with a compound list, so a group opener written
+// behind the region is the loop's body; the parse path is the group's own
+// (`parse::group_block`), and every pin below was measured against bash 5.3.9
+// (`bash -c`) and `target/debug/fdshell -c`; the doc comment states both sides.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The plain body, and the spellings of the gap between the region and the body:
+/// glued (`)){`), after the single separator the tail rule allows (`)); {` and
+/// `)) ; {`, both run in bash). bash prints `0 1` at rc 0 for each; so does fdshell.
+#[test]
+fn c_style_for_a_brace_body_runs_the_loop() {
+    for script in [
+        "for ((i=0;i<2;i++)) { echo $i; }; echo rc=$?",
+        "for ((i=0;i<2;i++)){ echo $i; }; echo rc=$?",
+        "for ((i=0;i<2;i++)); { echo $i; }; echo rc=$?",
+        "for ((i=0;i<2;i++)) ; { echo $i; }; echo rc=$?",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("0\n1\nrc=0\n", 0), "{script}: {err}");
+    }
+    // The group's own terminator rule is the group's: no `;` before the `}` inside
+    // the body, and bash and fdshell both reject it (`0 1` rc 0 for bash).
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i;}");
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
+}
+
+/// The body's trailing redirection belongs to the loop, exactly as `done > f`'s does
+/// (task #298) — the group's tail rule answers it, glued or spaced. bash and fdshell
+/// print only the status line at rc 0 (measured, with the body's output sent to
+/// `/dev/null`).
+#[test]
+fn c_style_for_a_brace_body_takes_its_trailing_redirection() {
+    for script in [
+        "for ((i=0;i<2;i++)) { echo $i; } > /dev/null; echo rc=$?",
+        "for ((i=0;i<2;i++)) { echo $i;}> /dev/null; echo rc=$?",
+        "for ((i=0;i<2;i++)) { echo $i; } 2>&1 >/dev/null; echo rc=$?",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("rc=0\n", 0), "{script}: {err}");
+    }
+}
+
+/// Loop control inside the body works through the group: `break` stops the loop after
+/// the first iteration, `continue` runs both, `exit 3` leaves the shell with rc 3, and
+/// an assignment in the body is the loop's own (`$1` stays empty). Measured bash
+/// parity on every row.
+#[test]
+fn c_style_for_loop_control_in_a_brace_body_matches_bash() {
+    for (script, want) in [
+        (
+            "for ((i=0;i<2;i++)) { echo $i; break; }; echo rc=$?",
+            "0\nrc=0\n",
+        ),
+        (
+            "for ((i=0;i<2;i++)) { echo $i; continue; }; echo rc=$?",
+            "0\n1\nrc=0\n",
+        ),
+        ("for ((i=0;i<2;i++)) { x=$i; }; echo x=$1", "x=\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i; exit 3; }; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("0\n", 3), "{err}");
+}
+
+/// The body is a compound command, so it nests: inside a function definition, behind
+/// a cond operator (the `time [-p]` prefix's transparency, and the `&&` arm's), and
+/// with the group as the cond part's last command. Measured bash parity.
+#[test]
+fn c_style_for_a_brace_body_nests_like_a_group() {
+    for (script, want) in [
+        (
+            "f() { for ((i=0;i<1;i++)) { echo $i; }; }; f; echo rc=$?",
+            "0\nrc=0\n",
+        ),
+        (
+            "false || for ((i=0;i<2;i++)) { echo $i; }; echo rc=$?",
+            "0\n1\nrc=0\n",
+        ),
+        (
+            "for ((i=0;i<2;i++)) { echo $i; } && echo yes",
+            "0\n1\nyes\n",
+        ),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The shapes bash rejects with a syntax error (rc 2) fdshell rejects with its own
+/// parse error (rc 1): the two-separator pair after the region, an opener glued to a
+/// word, a plain word / subshell / `if` behind the region, a group with no `;` before
+/// its `}`, and an empty group. Both sides fail loudly; only the wording and the
+/// status differ (measured).
+#[test]
+fn c_style_for_brace_body_shapes_bash_also_rejects() {
+    for script in [
+        "for ((i=0;i<2;i++)) ;; { echo a; }",
+        "for ((i=0;i<2;i++)) ; ; { echo a; }",
+        "for ((i=0;i<2;i++)) {echo a; }",
+        "for ((i=0;i<2;i++)) echo hi",
+        "for ((i=0;i<2;i++)) ( echo x; )",
+        "for ((i=0;i<2;i++)) if true; then echo a; fi",
+        "for ((i=0;i<2;i++)) { echo a }",
+        "for ((i=0;i<2;i++)) { }",
+        "for ((i=0;i<2;i++)) { ; }",
+        "for ((i=0;i<2;i++)) \"{ echo a; }\"",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
+        assert!(err.contains("parse error"), "{script}: {err}");
+    }
+}
+
+/// A **pipe** behind the body, and the loop behind a pipe: both run in bash (rc 0),
+/// and fdshell inherits the group layer's pinned divergence for exactly those
+/// positions — a pipe after a group is `unexpected pipe`, a brace at a pipeline stage
+/// is word data (#186/#190, pinned in `tests/group.rs`). The group's rules own both,
+/// so the brace body reports them unchanged.
+#[test]
+fn c_style_for_a_brace_body_at_a_pipeline_boundary_is_a_divergence() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i; } | cat; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(err.contains("unexpected pipe"), "{err}");
+    let (out, err, rc) = run("echo x | for ((i=0;i<1;i++)) { echo $i; }; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(err.contains("group is missing a closing brace"), "{err}");
+}
+
+/// A here-doc **and** a trailing `&` inside the construct are the group layer's pinned
+/// divergences too: bash runs both at rc 0 (the here-doc with a warning about the
+/// delimiter), fdshell reports the group's own parse error. `&` on a group stays
+/// #188/#192's; a `}` with a word after it is the group tail's.
+#[test]
+fn c_style_for_a_brace_body_with_a_heredoc_or_a_ampersand_is_a_divergence() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) { cat <<E; }; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(err.contains("group: unexpected word after '}'"), "{err}");
+    let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i; } &");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(
+        err.contains("unexpected character in this context"),
+        "{err}"
+    );
+}
+
+/// The head on its own line, the body on the next: bash reads the newline after the
+/// region as the end of the construct and rejects the `; echo after` line with a
+/// syntax error (rc 2), while fdshell reads the whole thing as one construct and runs
+/// it (`0 1 after` rc 0). Pinned as measured — the divergence is the newline's, not
+/// the brace body's: the same shape with `do … done` is fdshell parity (task #293).
+#[test]
+fn c_style_for_a_brace_body_on_the_next_line_is_a_divergence() {
+    let (out, err, rc) = run("for ((i=0;i<2;i++))\n{ echo $i; }\n; echo after");
+    assert_eq!((out.as_str(), rc), ("0\n1\nafter\n", 0), "{err}");
 }

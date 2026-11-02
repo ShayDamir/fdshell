@@ -7,6 +7,7 @@ use crate::error::parse::ParseError;
 use crate::keywords::Closer;
 use crate::parse::Token;
 use crate::parse::block_tail::{is_closer, redirects};
+use crate::parse::group_block::tokens_to_group;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, block_body, ensure_before_closer, up_to_closing};
 use crate::parse::word_quoted::{keyword_word, span_word};
@@ -33,6 +34,17 @@ pub(super) fn tail_body(
     // `))\ndo`, `))do`. `)) ; ; do` and `)) ;; do` are bash's rc-2 pair.
     let gap = usize::from(tail.first().is_some_and(|tok| span_word(tok, b";")));
     let tail = tail.get(gap..).unwrap_or(&[]);
+    // The **brace body** (task #394): bash's `for_action` ends with a compound
+    // list, so a group opener standing behind the region is the loop's body. The
+    // group parse answers it — its terminator rule, its emptiness rule, its
+    // trailing redirections and its quote gates are the group's own, not a copy.
+    if tail
+        .first()
+        .is_some_and(|tok| keyword_word(tok, line, b"{"))
+    {
+        let group = tokens_to_group(tail, text)?;
+        return Ok((group.body, group.redirects));
+    }
     ensure!(
         tail.first()
             .is_some_and(|tok| keyword_word(tok, line, b"do")),

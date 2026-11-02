@@ -3,7 +3,7 @@
 //! the plain-`&` arm read it identically, so a `&` that is a run's first
 //! boundary cannot flush an incomplete block as a statement (task #354).
 
-use crate::brace::scan_function_block;
+use crate::brace::{scan_arith_for_block, scan_function_block};
 use crate::keywords::{first_word_end, keyword_delta, leading_ws};
 use crate::scan::Quotes;
 use crate::segment::bg;
@@ -11,9 +11,11 @@ use crate::segment::book::Book;
 
 /// `true` when the run `raw` starting at `start` opens a block: a block-opening
 /// keyword word (`keyword_delta == Some(1)`, which scores a quoted keyword word
-/// `None` — a quoted `case`/`if` is a command word, task #247) or a
-/// `name() { … }` definition. `quotes` is the scanner's quote state at the
-/// cursor, and an empty run opens nothing.
+/// `None` — a quoted `case`/`if` is a command word, task #247), a
+/// `name() { … }` definition, or an arithmetic-`for` head written alone in the run
+/// (task #394 — the head scores `None` too, so this gate is what opens its block).
+/// `quotes` is the scanner's quote state at the cursor, and an empty run opens
+/// nothing.
 pub(in crate::segment) fn opens_run(line: &[u8], raw: &[u8], start: usize, quotes: Quotes) -> bool {
     let part = raw.trim_ascii();
     if part.is_empty() {
@@ -23,6 +25,7 @@ pub(in crate::segment) fn opens_run(line: &[u8], raw: &[u8], start: usize, quote
     let def_start = start + leading_ws(raw);
     keyword_delta(part, line, first_word_end(part, def_start)) == Some(1)
         || scan_function_block(line, part, def_start, quotes).is_some()
+        || scan_arith_for_block(line, part, def_start, quotes).is_some()
 }
 
 /// The plain-`&` boundary. A run that opens a block is opened as a **block**:

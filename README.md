@@ -1168,13 +1168,20 @@ newline, and the glued `))do`), and the body is the usual `do … done` block �
 here-doc inside it is re-read once per iteration. The region is read as raw
 bytes, so `;`, `|`, `<<`, a quote and a newline inside it are data:
 `for ((i=0;i<$(echo 3);i++))` has three clauses, and the `<<` of `1<<2` claims no
-here-doc. Shapes that stay open: a `{ …; }` body where bash accepts it
-(task #394), the glued `for((i=0;i<3;i++))` with no space after `for` (task #396),
-a step spaced as `i ++` (its side effect is lost, so the loop never ends — task
+here-doc. Behind the region stands `do` — or the `{` of a **group body** (task #394:
+bash's `for_action` ends with a compound list), so
+`for ((i=0;i<2;i++)) { echo $i; }` runs the group as the loop's body. The group's own
+rules are then the body's: its `;`-before-`}` terminator, its emptiness rule, its
+trailing redirections, and the one `;` the tail rule allows between the region and the
+body (`)) ; { …; }` and `)); { …; }` both run). Shapes that stay open: the glued
+`for((i=0;i<3;i++))` with no space after `for` (task #396), a step spaced as `i ++` (its side effect is lost, so the loop never ends — task
 #395), and a `${…}` expansion in a clause, which is a syntax error on every
 arithmetic surface (task #397). A clause count that is not three (`for ((i=0))`,
 `for ((i=0;i<2;i++;))`) and any word between `))` and `do` (`))x`, `)) 2>/dev/null`,
-`)) ;;`) are parse errors, as they are in bash (rc 2 there, rc 1 here).
+`)) ;;`) are parse errors, as they are in bash (rc 2 there, rc 1 here). A pipe behind
+the body, the loop behind a pipe, a here-doc in the body and a trailing `&` are the
+**group layer's** pinned divergences for those positions (#186/#190, #188/#192), which
+the brace body inherits unchanged: bash runs them, fdshell reports the group's error.
 
 `break` and `continue` accept an optional loop count (`break 2`), and are builtins
 whose own status is `0`: right after a loop that ends through one of them, `$?` is

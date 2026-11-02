@@ -344,3 +344,50 @@ fn a_quoted_ampersand_in_the_word_list_stays_a_word() {
         assert_eq!(fb.words, want, "{line:?}");
     }
 }
+
+/// bash's `for_action` ends with a compound list, so a group opener written behind
+/// the region is the loop's **body** (task #394). The group parse answers it — its
+/// terminator rule, its emptiness rule and its trailing redirections are the group's
+/// own, not a copy of the `do … done` tail.
+#[test]
+fn a_group_behind_the_region_is_the_body() {
+    for line in [
+        b"for ((i=0;i<2;i++)) { echo a; }".as_slice(),
+        b"for ((i=0;i<2;i++)); { echo a; }".as_slice(),
+    ] {
+        let b = arith_for(line);
+        assert_eq!(b.body.data, c"echo a".into(), "{line:?}");
+    }
+    // The body's trailing redirection is the block's, exactly as `done > f`'s is
+    // (task #298).
+    assert_eq!(
+        arith_for(b"for ((i=0;i<2;i++)) { echo a; } > f")
+            .redirects
+            .len(),
+        1
+    );
+    // The group's own rules answer the group's own shapes.
+    assert_eq!(
+        parse_err(b"for ((i=0;i<2;i++)) { echo a }"),
+        "expected ';' before '}'"
+    );
+    assert_eq!(parse_err(b"for ((i=0;i<2;i++)) { ; }"), "group is empty");
+    // A pipe behind the body is the group tail's pinned divergence (#186/#190); the
+    // two-separator pair and a quoted opener keep the parse layer's `do` rule.
+    assert_eq!(
+        parse_err(b"for ((i=0;i<2;i++)) { echo a; } | cat"),
+        "unexpected pipe"
+    );
+    assert_eq!(
+        parse_err(b"for ((i=0;i<2;i++)) ;; { echo a; }"),
+        "expected 'do'"
+    );
+    assert_eq!(
+        parse_err(b"for ((i=0;i<2;i++)) ; ; { echo a; }"),
+        "expected 'do'"
+    );
+    assert_eq!(
+        parse_err(b"for ((i=0;i<2;i++)) \"{ echo a; }\""),
+        "expected 'do'"
+    );
+}

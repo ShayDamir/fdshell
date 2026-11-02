@@ -582,11 +582,27 @@ inside the region, so the region stays closed and only the step's own
 arithmetic fails, `0` then rc 1, where bash prints `0` then its
 `((: i++ # c: arithmetic syntax error`. The statement-level unclosed-`for`
 check (`script/unclosed.rs`) fires **before** this parser for whole
-statements, so `for ((i=0))` and `for ((i=0;i<2;i++)) { …; }` report
-`'for' is missing its closing 'done'` and `ArithForMissingCloseParen` is
-reachable only from a fragment (a stage, a mid-run part, a unit call). Filed,
-measured, do not re-open blind: **#394** the `{ …; }` body (bash runs it,
-fdshell rc 1), **#395** the spaced step `i ++` (no side effect → the loop
+statements, so `for ((i=0))` reports `'for' is missing its closing 'done'` and
+`ArithForMissingCloseParen` is reachable only from a fragment (a stage, a mid-run
+part, a unit call).
+
+Task **#394** closed the `{ …; }` body: bash's `for_action` ends with a compound list,
+so a group opener written behind the region is the loop's body. One byte rule answers
+both sides of it (`keywords/kind/arith_for.rs`): the recognition-table row — the text
+behind the `for` word is a closed region with the opener behind it, through the one `;`
+the tail rule allows — answers **no keyword**, so the brace pair nets zero in every
+scorer and no `done` frame is opened; the run gate's twin — the whole run is the head
+and the opener stands behind the run — is what opens the block, and `span_start` pulls
+the head into the span, the `time [-p]` prefix's design, so the parse layer sees one
+statement. The parse path hands the tail to `parse/group_block::tokens_to_group`, and
+from there the **group's** rules answer the body: its `;`-before-`}` terminator, its
+emptiness rule, its trailing redirections, its quote gates. Inheriting them also
+inherits the group layer's pinned divergences at the positions it never claimed — a
+pipe behind the body (`unexpected pipe`), the loop behind a pipe (`group is missing a
+closing brace`), a here-doc in the body, a trailing `&` — bash runs all four, fdshell
+reports the group's own error, pinned in `safe/fdshell/tests/loops.rs`.
+
+Filed, measured, do not re-open blind: **#395** the spaced step `i ++` (no side effect → the loop
 hangs; never test it looping), **#396** the glued `for((…))` (not a keyword
 word, so `do`/`done` run as commands), **#397** a `${…}` inside a clause
 (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the `((expr))` command and
@@ -1678,6 +1694,17 @@ redirections at the group end, and must not be "fixed" to undo `exec`. Pinned by
 `tests/group.rs::exec_in_a_group_is_persistent` (stdout empty, the file holds
 `after`). The same fact makes the group's assignment persist
 (`group_body_runs_in_the_current_shell`), which is the fork-free proof.
+
+A statement **prefix** written in the run before the brace is transparent to these run
+tests: a `time [-p]` prefix, and since task #394 an arithmetic-`for` head
+(`for ((…))`) — neither is a word of its own, so the brace behind it is the same group
+and `span_start` pulls the prefix into the span for the parser that owns it; behind a
+`&&` / `||` each is the cond part's group (`trails_cond_op`, `trails_cond_head`). The
+group's rules then own the body whole — its terminator, its emptiness rule, its
+trailing redirections — and the positions these rules never claimed (a pipe after the
+brace, a brace at a pipeline stage, a here-doc, a trailing `&`) stay the pinned
+divergences they are, which is exactly what an arithmetic-`for` brace body reports in
+those shapes.
 
 ## Count brace depth per exact `{`/`}` word, not per clause position
 The POSIX grammar puts `{` in clause position (`;`/`then`/`else`/`do`), so a

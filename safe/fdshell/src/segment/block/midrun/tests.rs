@@ -122,6 +122,17 @@ fn opener_len_agrees_with_the_scored_keyword() {
             "{word:?}: the seed and the score must agree"
         );
     }
+    // The `for` row answers **no keyword** when a group opener stands behind the
+    // region (task #394): `opener_len` measures the word blind, so the seed and the
+    // score part company exactly where the group branch takes the construct.
+    assert_eq!(
+        keyword_delta(b"for", b"for ((i=0;i<2;i++)) { echo a; }", 3),
+        None
+    );
+    assert_eq!(
+        keyword_delta(b"for", b"for ((i=0;i<2;i++)) do echo a; done", 3),
+        Some(1)
+    );
     // `wait`: length 4 for both forms; `+1` only for the event-case form, and
     // the POSIX builtin is **no keyword at all** (task #309: the recognition
     // table has no `0` row — the old table's `Some(0)` reads the same at every

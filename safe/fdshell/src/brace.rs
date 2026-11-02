@@ -1,4 +1,4 @@
-use crate::keywords::function_def_name;
+use crate::keywords::{function_def_name, opens_a_block};
 use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
 /// If `part` opens a `name() { … }` block, return the exclusive end position
@@ -11,6 +11,27 @@ pub(crate) fn scan_function_block(
     quotes: Quotes,
 ) -> Option<(usize, bool)> {
     function_def_name(part, line, start)?;
+    Some(brace_block_behind_a_head(line, start, quotes))
+}
+
+/// If `part` is an arithmetic-`for` head with a `{ …; }` body written behind it
+/// (task #394), return that block — the definer arm's shape, because the head plays
+/// the definer's role: the run it is written alone in opens the block, and the parse
+/// layer sees the head and its body as one statement. A head with a `do … done`
+/// body behind it is not this arm's: the keyword row owns it.
+pub(crate) fn scan_arith_for_block(
+    line: &[u8],
+    part: &[u8],
+    start: usize,
+    quotes: Quotes,
+) -> Option<(usize, bool)> {
+    opens_a_block(part, line, start).then(|| brace_block_behind_a_head(line, start, quotes))
+}
+
+/// The `{ …; }` block written behind a head word, at or after the byte its own
+/// text starts at ([`scan_brace_block`]'s scan) — one body for the definer arm and
+/// the arithmetic-`for` arm, so the two cannot drift.
+fn brace_block_behind_a_head(line: &[u8], start: usize, quotes: Quotes) -> (usize, bool) {
     let brace = line
         .get(start..)
         .and_then(|s| s.iter().position(|&b| b == b'{'))
@@ -19,7 +40,7 @@ pub(crate) fn scan_function_block(
     let mut quotes = quotes;
     let (close_pos, closed) = scan_brace_block(line, brace + 1, &mut quotes);
     let end = line.len().min(close_pos + 1);
-    Some((end, closed))
+    (end, closed)
 }
 
 /// Scan forward from `i` (just after an opening `{`) to the matching `}`,

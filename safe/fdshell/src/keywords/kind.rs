@@ -14,7 +14,13 @@
 //! `done>f` form, whose token-side twin is `parse::block_tail::is_closer`), the
 //! [`wait_opens_block`] disambiguation of the event-`wait` block from the POSIX
 //! builtin, and the group's `{`/`}` predicates from
-//! [`crate::segment::group::{opens, closes}`].
+//! [`crate::segment::group::{opens, closes}`]. The rows that answer *no keyword*
+//! are load-bearing: the POSIX builtin `wait`, the glued `for((…))` opener (task
+//! #396), and the arithmetic `for` whose region has a group opener behind it
+//! (task #394, [`arith_for`]) — there the brace pair nets zero, so the word
+//! contributes no pairing frame and the group branch takes the whole construct.
+
+pub(crate) mod arith_for;
 
 use super::{quoted_word, time_prefix_len, wait_opens_block};
 use crate::segment::group::{closes, opens};
@@ -76,6 +82,13 @@ pub(crate) fn keyword_kind(word: &[u8], line: &[u8], word_end: usize) -> Option<
         return Some(Keyword::Closes(Closer::Fi));
     }
     if word.starts_with(b"for") && boundary(word, 3, b"") {
+        // The arithmetic `for` whose region has a group opener behind it is
+        // **no keyword** (task #394): the brace pair nets zero in every scorer, so
+        // the word contributes no pairing frame and the group branch takes the
+        // whole construct. The run gate is what opens its block.
+        if arith_for::opens_a_group(line, word_end) {
+            return None;
+        }
         return Some(Keyword::Opens(Closer::Done));
     }
     // The event-`wait` opener and the POSIX builtin, one row: the builtin opens

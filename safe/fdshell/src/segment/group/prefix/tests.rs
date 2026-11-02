@@ -85,6 +85,57 @@ fn span_start_includes_a_bare_time_prefix() {
     assert_eq!(span_start(b"time time -p echo { b; }", 0, 18), 18);
 }
 
+// Task #394: the arithmetic-`for` head is the `time [-p]` prefix's twin — the run it
+// is written alone in opens the group, and the span pulls the head in so the parse
+// layer sees one statement.
+#[test]
+fn arith_for_head_run_opens_a_group() {
+    assert_eq!(
+        group_at_run(b"for ((i=0;i<2;i++)) { echo a; }", 0, 20),
+        Some(true)
+    );
+    assert_eq!(
+        group_at_run(b"  for ((i=0;i<2;i++)) { echo a; }", 2, 22),
+        Some(true)
+    );
+    // Behind a cond operator the head is the cond part's group — the `time` prefix's
+    // cond-part twin, read by `trails_cond_head`.
+    assert_eq!(
+        group_at_run(b"echo a && for ((i=0;i<1;i++)) { echo b; }", 0, 30),
+        Some(false)
+    );
+    assert_eq!(
+        group_at_run(b"echo a || for ((i=0;i<1;i++)) { echo b; }", 0, 30),
+        Some(false)
+    );
+    // A `|` is not a cond operator: a brace at a pipeline stage stays word data
+    // (#186/#190), so a head behind one is command data to this rule.
+    assert_eq!(
+        group_at_run(b"echo x | for ((i=0;i<1;i++)) { echo b; }", 0, 29),
+        None
+    );
+    // A word before the head is data; a glued head (task #396) is no head.
+    assert_eq!(
+        group_at_run(b"echo for ((i=0;i<1;i++)) { b; }", 0, 25),
+        None
+    );
+    assert_eq!(group_at_run(b"for((i=0;i<1;i++)) { b; }", 0, 19), None);
+}
+
+#[test]
+fn span_start_includes_an_arith_for_head() {
+    assert_eq!(span_start(b"for ((i=0;i<2;i++)) { echo a; }", 0, 20), 0);
+    assert_eq!(span_start(b"  for ((i=0;i<2;i++)) { echo a; }", 2, 22), 2);
+    // Behind a cond operator the run is more than the head, so the span starts at the
+    // brace — the `time` prefix's cond-part behavior, its twin above.
+    assert_eq!(
+        span_start(b"echo a && for ((i=0;i<1;i++)) { echo b; }", 0, 30),
+        30
+    );
+    // Not a head run: the brace.
+    assert_eq!(span_start(b"echo for ((i=0;i<1;i++)) { b; }", 0, 25), 25);
+}
+
 // Task #235: the definer run rule (cond layer only — `group_at_run` stays
 // `None` there so the segment scanner keeps claiming the definition).
 #[test]

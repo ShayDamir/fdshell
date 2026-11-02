@@ -5,7 +5,7 @@ mod length;
 pub(super) mod midrun;
 pub(super) mod opener;
 pub(super) mod stage;
-use crate::brace::scan_function_block;
+use crate::brace::{scan_arith_for_block, scan_function_block};
 use crate::keywords::leading_ws;
 use crate::scan::ScanState;
 use crate::scan::heredoc;
@@ -37,7 +37,9 @@ pub(super) fn open<'a>(line: &'a [u8], raw: &[u8], book: &mut Book<'a>) {
 /// resume floor (past which no flush may resume), and the line start the
 /// trailing runs' bookkeeping continues from.
 ///
-/// Dispatch order: a `name() { … }` function body, then a keyword block.
+/// Dispatch order: a `name() { … }` function body or an arithmetic-`for` head
+/// (task #394) — both are head words whose `{ …; }` body the span swallows, so both
+/// go to [`function_block`] — and then a keyword block.
 /// Each branch is guarded by the same predicate the segment scanner tests, so
 /// the scanner's condition and this dispatch agree. The `{ …; }` group is not
 /// dispatched here: the scanner recognises its opener at the byte level (a
@@ -57,12 +59,14 @@ pub(super) fn open_block<'a>(
 ) -> (Segment<'a>, usize, usize, usize) {
     // The definer gate walks `line` from `part`'s own first byte, not the run's.
     let def_start = start + leading_ws(raw);
-    let (segment, resume, floor) =
-        if let Some((end, closed)) = scan_function_block(line, part, def_start, state.quotes()) {
-            function_block(line, start, end, closed, pre_resume, line_start)
-        } else {
-            keyword::keyword_block(line, raw, part, start, line_start, state, pre_resume)
-        };
+    let span = scan_function_block(line, part, def_start, state.quotes())
+        .or_else(|| scan_arith_for_block(line, part, def_start, state.quotes()));
+    let (segment, resume, floor) = match span {
+        // The definer and the arithmetic-`for` head (task #394) share the block
+        // builder: both are head words whose `{ …; }` body the span swallows.
+        Some((end, closed)) => function_block(line, start, end, closed, pre_resume, line_start),
+        None => keyword::keyword_block(line, raw, part, start, line_start, state, pre_resume),
+    };
     // Trailing content shares the block's physical line: the line's bookkeeping
     // (and its global body stream) continues from the line's start, so the
     // trailing runs' flush skips the regions the pre-block statements and the

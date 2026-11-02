@@ -2,7 +2,7 @@
 //! transparent: a prefix is a statement prefix, never a word of its own, so a
 //! group written behind one is the same group.
 
-use crate::keywords::{definer_len, time_prefix_len};
+use crate::keywords::{definer_len, is_run_head, time_prefix_len};
 
 /// What the `{` at `brace` is, seen from the run that starts at `start` (the
 /// byte after the last separator): `Some(true)` starts a new statement (the run
@@ -14,12 +14,15 @@ use crate::keywords::{definer_len, time_prefix_len};
 /// [`super::stage_at_run`]), or glued to a word, as in bash.
 ///
 /// A `time [-p]` prefix is transparent: `time { …; }` is a group statement and
-/// `x && time { …; }` a group cond part, exactly like the unprefixed forms.
+/// `x && time { …; }` a group cond part, exactly like the unprefixed forms. So is
+/// an arithmetic-`for` head written right in front of the brace (task #394): the
+/// head is the whole run, and [`span_start`] pulls it into the span; behind a cond
+/// operator it is the cond part's group, as [`trails_cond_head`] reads.
 pub(crate) fn group_at_run(line: &[u8], start: usize, brace: usize) -> Option<bool> {
     let body = strip_prefix(line.get(start..brace).unwrap_or(b"").trim_ascii());
-    if body.is_empty() {
+    if body.is_empty() || is_run_head(body) {
         Some(true)
-    } else if ends_cond_op(body) || trails_cond_op(body) {
+    } else if ends_cond_op(body) || trails_cond_op(body) || trails_cond_head(body) {
         Some(false)
     } else {
         None
@@ -27,15 +30,23 @@ pub(crate) fn group_at_run(line: &[u8], start: usize, brace: usize) -> Option<bo
 }
 
 /// The span start of a group statement: the `{` at `brace`, or a `time [-p]`
-/// prefix written alone in the run before it (`time { …; }`) — the prefix must
-/// sit inside the span so the `time` parse hook sees it.
+/// prefix or an arithmetic-`for` head written alone in the run before it
+/// (`time { …; }`, `for ((i=0;i<2;i++)) { …; }`) — both must sit inside the span
+/// so the parse hook that owns them sees one statement.
 pub(super) fn span_start(line: &[u8], run_start: usize, brace: usize) -> usize {
     let raw = line.get(run_start..brace).unwrap_or(b"");
     let trimmed = raw.trim_ascii();
-    match time_prefix_len(trimmed) {
-        Some(len) if len == trimmed.len() => run_start + (raw.len() - raw.trim_ascii_start().len()),
-        _ => brace,
+    if is_the_whole_run_a_prefix(trimmed) {
+        return run_start + (raw.len() - raw.trim_ascii_start().len());
     }
+    brace
+}
+
+/// The run that is nothing but a statement prefix: a whole `time [-p]` prefix run
+/// (a prefix is a statement prefix, never a word of its own), or a whole
+/// arithmetic-`for` head (task #394).
+fn is_the_whole_run_a_prefix(trimmed: &[u8]) -> bool {
+    time_prefix_len(trimmed).is_some_and(|len| len == trimmed.len()) || is_run_head(trimmed)
 }
 
 /// The run's text with its `time [-p]` prefix run removed.
@@ -58,6 +69,13 @@ fn ends_cond_op(body: &[u8]) -> bool {
 /// cannot split the group (`x && time time -p { …; }`).
 fn trails_cond_op(body: &[u8]) -> bool {
     ends_cond_op(strip_trailing_prefix(body))
+}
+
+/// `x && for ((i=0;i<2;i++)) { …; }`: the run's tail after its last `&&` / `||` is an
+/// arithmetic-`for` head — the head is a statement prefix like the `time [-p]` prefix
+/// [`trails_cond_op`] strips, so the group behind it starts the cond part (task #394).
+fn trails_cond_head(body: &[u8]) -> bool {
+    last_cond_op(body).is_some_and(|end| is_run_head(strip_prefix(body.get(end..).unwrap_or(b""))))
 }
 
 /// The `{` at `brace` opens a function definition's body: the run before it is
