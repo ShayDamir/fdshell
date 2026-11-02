@@ -640,33 +640,89 @@ fn midrun_adjacent_shapes_stay_measured_divergences() {
     assert_eq!(code, 1);
 }
 
-/// Task #295: a **multi-line** mid-run construct whose body carries a here-doc
-/// stays a measured divergence. The construct's body region starts on its own
-/// lines, so it swallows the closer (`break` / `done`, `}`) and the construct
-/// reports its own unterminated shape — rc 1, where bash reports a syntax
-/// error rc 2. Same rc-1-vs-2 family as
+/// Task #295, the family task #403 implements the mechanism for: a **multi-line**
+/// mid-run construct whose body carries a here-doc stays a measured divergence.
+/// The construct's body region starts on its own lines, so it swallows the closer
+/// (`break` / `done`, `}`) and the construct reports its own unterminated shape —
+/// rc 1, where bash reports a syntax error rc 2. The allocation is the
+/// per-physical-line one the tokenizer blanks with (the single definition of an
+/// opaque body), so the pins are green by the principled path, not by a
+/// single-region accident — the discriminating rows are in
+/// [`multi_line_mid_run_runs_consume_their_own_lines_streams`].
+/// Same rc-1-vs-2 family as
 /// `midrun_adjacent_shapes_stay_measured_divergences` above and as
 /// `tests/heredoc.rs::block_body_heredoc_delimiter_line_operator_is_region_data`
 /// (task #234); the **single-line** mid-run twin is bash-equal and pinned in
-/// `tests/heredoc.rs::mid_run_heredoc_parity_family`. No task owns this family
-/// yet — the pins document it and README covers it in words.
+/// `tests/heredoc.rs::mid_run_heredoc_parity_family`. README covers the family in
+/// words. The stdout lines are asserted too (measured bash 5.3.9, 2026-11-02): a
+/// list bash refuses runs nothing in fdshell either, so both shells print nothing.
 #[test]
 fn multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured() {
-    let (_out, err, code) = run("true && while :; do\ncat <<T; break\ndone\nbodyT\nT");
-    assert_eq!(code, 1, "bash rc 2: syntax error from `while'");
+    let (out, err, code) = run("true && while :; do\ncat <<T; break\ndone\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 2: syntax error from `while'"
+    );
     assert!(err.contains("expected 'done'"), "stderr={err}");
-    let (_out, err, code) = run("true && f() {\ncat <<T\n}\nbodyT\nT\nf");
-    assert_eq!(code, 1, "bash rc 2: syntax error from `{{'");
+    let (out, err, code) = run("true && f() {\ncat <<T\n}\nbodyT\nT\nf");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 2: syntax error from `{{'"
+    );
     assert!(
         err.contains("function definition is missing a closing brace"),
         "stderr={err}"
     );
-    let (_out, err, code) = run("true && {\ncat <<T\n}\nbodyT\nT");
-    assert_eq!(code, 1, "bash rc 2: syntax error from `{{'");
+    let (out, err, code) = run("true && {\ncat <<T\n}\nbodyT\nT");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 2: syntax error from `{{'"
+    );
     assert!(
         err.contains("group is missing a closing brace"),
         "stderr={err}"
     );
+}
+
+/// Task #403: inside a run whose text spans several physical lines, each physical
+/// line owns exactly one here-doc body stream and hands its regions out in operator
+/// order, so a run with operators on two of its lines gets them in **global per-line
+/// order** — the pair below is what a single-region accident cannot fake (swap the
+/// delimiter lines and the output follows). Both rows are bash-equal. The run's
+/// closer search already skips the claimed regions (the same single definition),
+/// which is why the three rows of
+/// [`multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`] report their
+/// own shape; when the run's own bytes stop being chopped at the line the run opened
+/// on, the line behind the closer is a command again and runs — the last row is that
+/// shape, and it is bash-equal too. The short-circuited row keeps the design: a
+/// branch that never runs stays silent where bash parses and warns.
+#[test]
+fn multi_line_mid_run_runs_consume_their_own_lines_streams() {
+    // Two operators on two physical lines of the run, each body on its own line:
+    // each cat gets its own body, in the order the operators were written.
+    let (out, err, code) =
+        run("true && while :; do cat <<A\nbodyA\nA\ncat <<B\nbodyB\nB\nbreak\ndone");
+    assert_eq!((out.as_str(), code), ("bodyA\nbodyB\n", 0), "stderr={err}");
+    // The same shape with the delimiter lines swapped: the allocation follows the
+    // operators, not the text.
+    let (out, err, code) =
+        run("true && while :; do cat <<B\nbodyB\nB\ncat <<A\nbodyA\nA\nbreak\ndone");
+    assert_eq!((out.as_str(), code), ("bodyB\nbodyA\n", 0), "stderr={err}");
+    // The run closed, its operator's body on the line below, and a command behind
+    // the closer: the short-circuited branch stays silent and the tail runs (bash's
+    // value — the observable task #403 moved).
+    let (out, err, code) = run("false && while :; do cat <<T\nbodyT\nT\ndone\necho tail");
+    assert_eq!((out.as_str(), code), ("tail\n", 0), "stderr={err}");
+    // The delimiter line never arrives, so the construct is unterminated; the
+    // branch is short-circuited and never runs: fdshell stays silent at rc 1, while
+    // bash parses the whole script, warns (`here-document … delimited by
+    // end-of-file (wanted 'T')`) and exits 2. Design, kept pinned.
+    let (out, err, code) = run("false && while :; do cat <<T; break\nbodyT\ndone\necho tail");
+    assert_eq!((out.as_str(), code), ("", 1), "bash: warns, then rc 2");
+    assert!(err.is_empty(), "the branch never runs: stderr={err}");
 }
 
 /// Task #137 regression: a keyword-shaped word in an **argument** position is

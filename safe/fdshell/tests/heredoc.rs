@@ -3610,10 +3610,14 @@ fn a_heredoc_behind_an_ampersand_reports_a_missing_body() {
 /// Task #313, the deferral and block-behind-`&` rows (measured 2026-10-20):
 ///
 /// * `cat <<A\n & cat <<B` — the line-deferral of task #326 (a newline whose
-///   next line opens with `&`): fdshell attaches both bodies and runs the pair
-///   (rc 0), bash runs the line as garbage (`"y" not found`, rc 127). fdshell
-///   is the *nicer* side here; the row pins it so the deferral cannot regress
-///   into the junk shape.
+///   next line opens with `&`): fdshell runs the pair (rc 0), bash runs the
+///   deferred line as garbage (`"y" not found`, rc 127). fdshell is the *nicer*
+///   side here; the row pins it so the deferral cannot regress into the junk
+///   shape. Task #403 moved the line set: the body of an operator on a physical
+///   line is every region that definition assigns to the bytes after it, and the
+///   deferred line is those bytes — so the first heredoc prints `" & cat <<B"`
+///   and `x` exactly as bash does (measured 2026-11-02), and only `y`/`B` are
+///   fdshell's own (the deferral runs them instead of executing them).
 /// * `cat <<A & cat <<B` + a third heredoc line below: both shells produce
 ///   junk (the body of the third operator lands in the middle of the run).
 /// * `cat <<A & if true; then cat <<B … fi` — a **block opened behind the
@@ -3626,7 +3630,7 @@ fn a_heredoc_behind_an_ampersand_deferral_and_block_rows() {
     assert_eq!(code, 0, "out={out} stderr={err}");
     let mut lines: Vec<&str> = out.lines().collect();
     lines.sort_unstable();
-    assert_eq!(lines, ["x", "y"], "stdout={out}");
+    assert_eq!(lines, [" & cat <<B", "x", "y"], "stdout={out}");
 
     let (out, _err, code) = run("cat <<A & cat <<B\ncat <<C\nx\nA\ny\nB\nz\nC");
     assert_eq!(code, 1);
@@ -4367,17 +4371,23 @@ fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
 /// or its delimiter line the deferral swallows region data. Every row here is
 /// pinned as measured with **owner #468** named (its scope is exactly "what a
 /// line-opening `&` may claim when the deferred flush has claimed a body
-/// region"), and it flips these rows when it lands. The task #347 report
-/// measured `cat <<"&x"` rc 0 on `60a2ebd`: the row regressed when #326's
-/// deferral landed, and this pin is where that regression is recorded.
-/// bash 5.3.9's value is beside every row.
+/// region"), and it flips these rows when it lands — **task #403 landed it**
+/// (2026-11-02): the flush now hands the operator the regions the single
+/// definition assigns to the bytes after it, so the delimiter lines and body
+/// lines below arrive, and the rows that were region-swallow shapes now match
+/// bash's output; the rows that stay fdshell's are the deferral running the `&`
+/// line as a command. The task #347 report measured `cat <<"&x"` rc 0 on
+/// `60a2ebd`: the row keeps its rc 1 (the deferral's report) and lost only the
+/// end-of-file warning. bash 5.3.9's value is beside every row.
 #[test]
 fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468() {
-    // The delimiter line IS the `&` line: the region is swallowed, so the
-    // delimiter never arrives — the end-of-file shape of task **#364**: fdshell
-    // warns, and the deferral's command report (`"&x"/`&&" not found`) rides on
-    // the same stderr (bash: rc 0, silent, the delimiter is `&x`; measured
-    // 2026-10-29).
+    // The delimiter line IS the `&` line: with the mechanism landed (task **#403**)
+    // the body of the operator is the region the single definition assigns to the
+    // bytes after it, so the delimiter line arrives and the end-of-file warning is
+    // gone — bash's shape (rc 0, silent, the delimiter is `&x`; measured
+    // 2026-11-02). Only the deferral's command report (`"&x"/`&&" not found`)
+    // remains, and it is fdshell's own (bash never runs the line as a command):
+    // rc 1 stays pinned.
     for script in [
         "cat <<\"&x\"\n&x",
         "cat <<'&x'\n&x",
@@ -4392,16 +4402,18 @@ fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468()
             "script {script:?}: out={out}"
         );
         assert!(
-            err.contains("delimited by end-of-file"),
+            err.contains("\"&x\" not found"),
             "script {script:?}: stderr={err:?}"
         );
     }
-    // The `&&` twin: `&&` is an operator word the deferral swallows whole, so
-    // no command report rides along and the run ends at rc 0 (bash: rc 0,
-    // silent — parity; the `&x` rows keep their command reports, owner #468).
+    // The `&&` twin: `&&` is an operator word the deferral swallows whole, so no
+    // command report rides along and the run ends at rc 0. Task #403 put the row
+    // fully on bash (rc 0, **silent**, measured 2026-11-02): the delimiter line
+    // arrives, so the end-of-file warning is gone. The `&x` rows keep their
+    // command reports, owner #468.
     let (out, err, code) = run("cat <<\"&&\"\n&&");
     assert_eq!((out.as_str(), code), ("", 0), "bash agrees: out={out}");
-    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
+    assert!(err.is_empty(), "bash is silent: stderr={err:?}");
     // A `&` word with a space behind it: the swallowed region leaves `x` as a
     // command word (bash: rc 0, silent).
     let (out, err, code) = run("cat <<\"& x\"\n& x");
@@ -4410,14 +4422,20 @@ fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468()
         err.contains("failed to resolve command path: \"x\""),
         "stderr={err:?}"
     );
-    // The `&` line is a **body** line: it runs as a command and the body is
-    // lost (bash prints `&x`, and `wc -c` says 3).
+    // The `&` line is a **body** line: task #403 gives the operator its own body
+    // back — `cat` prints `&x` and `wc -c` says 3, exactly bash's measured output
+    // (2026-11-02). What stays fdshell's is the deferral of task #326 running the
+    // `&` line as a command: the report rides on stderr and the run ends at rc 1
+    // where bash is rc 0.
     let (out, err, code) = run("cat <<EOF\n&x\nEOF");
-    assert_eq!((out.as_str(), code), ("", 1), "out={out}");
+    assert_eq!((out.as_str(), code), ("&x\n", 1), "out={out}");
     assert!(err.contains("\"&x\" not found"), "stderr={err:?}");
     let (out, err, code) = run("wc -c <<EOF\n&x\nEOF");
     assert_eq!(code, 1, "stderr={err:?}");
-    assert!(out.starts_with("0"), "the body is lost: stdout={out:?}");
+    assert!(
+        out.starts_with("3"),
+        "the body is no longer lost: stdout={out:?}"
+    );
 }
 
 /// The join × region rows of task #492 (POSIX #2.9), next to
