@@ -42,6 +42,7 @@ use sys::ScriptText;
 use sys::ShortCStr;
 use sys::env::getcwd;
 use sys::fork_cell::ForkCell;
+mod options;
 
 /// The operand's field list travels back to the frame, so `$_` is the last
 /// **expanded** field; the `%name` path reports none and keeps the raw rule.
@@ -111,49 +112,18 @@ fn print_new_directory() -> Result<(), Report<CmdError>> {
 /// Decide which directory to open. `var` is the `%name` operand's name, read
 /// off the raw word by the caller (`None` for every other word, whose fields
 /// came out of the pipeline). The match runs on the **operands**: the field list
-/// with its leading option words consumed by [`operands`].
+/// with its leading option words consumed by [`options::operands`].
 fn target(var: Option<ShortCStr>, fields: &[ShortCStr]) -> Result<CdTarget, Report<CmdError>> {
     if let Some(name) = var {
         return Ok(CdTarget::Var(name));
     }
-    let fields = operands(fields)?;
+    let fields = options::operands(fields)?;
     Ok(match fields {
         [] => CdTarget::Home,
         [field] if field.eq_bytes(b"-") => CdTarget::OldCwd,
         [field] => CdTarget::Path(field.clone()),
         _ => bail!(CmdError::CdTooManyArgs),
     })
-}
-
-/// Walk the leading option words of the **expanded** field list and return the
-/// operand list. `-L`, `-P` and `-e` are accepted as no-ops: the move is a pinned
-/// `O_DIRECTORY + O_NOFOLLOW` fd (README "The accepted divergences"), so the
-/// logical/physical distinction bash measures on a symlinked directory has
-/// nothing to decide here, and the conflict bash accepts is accepted too.
-fn operands(fields: &[ShortCStr]) -> Result<&[ShortCStr], Report<CmdError>> {
-    let mut rest = fields;
-    while let Some(word) = rest.first() {
-        if is_noop_option(word) {
-            rest = rest.get(1..).unwrap_or(&[]);
-            continue;
-        }
-        if word.eq_bytes(b"--") {
-            return Ok(rest.get(1..).unwrap_or(&[]));
-        }
-        if word.eq_bytes(b"-") || !word.starts_with(b"-") {
-            return Ok(rest);
-        }
-        bail!(CmdError::CdInvalidOption {
-            option: word.clone()
-        });
-    }
-    Ok(rest)
-}
-
-/// The accepted words, matched whole — no getopt cluster walker (decision pinned
-/// in README: bash's help line `[-@]` is the getopt `@` marker, not an option).
-fn is_noop_option(word: &ShortCStr) -> bool {
-    word.eq_bytes(b"-L") || word.eq_bytes(b"-P") || word.eq_bytes(b"-e")
 }
 
 #[cfg(test)]
