@@ -1733,7 +1733,10 @@ fn a_comment_tail_next_to_a_block_stays_inert() {
 /// The comment edges bash rejects and fdshell does not (yet) are pinned with
 /// their **current** result, so this fix is measured as not touching them; the
 /// owner task is named per row (the rc-1-vs-2 family, README "Accepted
-/// divergences").
+/// divergences"). Task **#404** is no longer one of them — a `#` line inside a
+/// `{ …; }` body reached parity (bash's brace grammar reads the comment's newline as
+/// the body's terminator, the keyword closers do not) and is pinned in
+/// `tests/group.rs::a_comment_line_inside_the_body_terminates_the_group`.
 #[test]
 fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     // #405: a word written after the closing keyword. The glued closer `done#c`
@@ -1757,10 +1760,6 @@ fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     // stops with rc 2.
     let (out, err, rc) = run_bounded("echo a # c\n&& echo y");
     assert_eq!((out.as_str(), rc), ("a\ny\n", 0), "stderr={err}");
-    // #404: a `#` line inside a `{ …; }` body breaks the group parse.
-    let (out, err, rc) = run_bounded("{ echo g # c && echo z\n} && echo w");
-    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
-    assert!(err.contains("expected ';' before '}'"), "stderr={err}");
     // #304 closed this row's **region-rule** half (a region claimed by a word of
     // the block's body is opaque, so the `&&` in `q && y` never splits the block
     // text); the **statement-level** half — a `#` behind a here-doc delimiter

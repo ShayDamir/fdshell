@@ -673,7 +673,7 @@ A `#` at a word start comments out the rest of its **physical** line, so no `&&`
 
 **Landing *on* the newline that ends the comment is the load-bearing choice**, and `scan::skip_comment` (which lands *past* it) is the wrong helper here: two arms of the scan are keyed on the `\n` byte — the heredoc **region** arm (`body::step`) and the **run-reset** arm (`run_start = i`, `place = Place::Command`, `state.word_active = false`, the entry above). A `;`-terminated operator line whose run ends in a comment (`if cat <<X; then # c`) must still reach the region arm for its bodies on the following lines: `boundary_of(b"if cat <<X; then # c\nbody && x\nX\nfi") == (26, false)` is the pin, and landing past the newline turns it into `(35, false)` — that row is the mutant-killer for this decision. Landing on the newline also keeps the comment's own run in the run-reset arm, so the operator on the **next** line still splits (`… done # c\n&& echo x` → 36).
 
-The rule is shared, deliberately: `cond/boundary/gate.rs::gate_end` (the gate of a short-circuited `||`) takes the same arm, because the gate's own `\n` arm is the gate's end — a `;` written inside the comment must never end the gate, since `run_cond_list` resuming there resumes **inside comment text** (`true || if :; then :; fi # fi ; echo tail` ran `echo tail`; bash prints nothing). And deliberately **not** shared: `cond/boundary/body.rs::operator_in_region` gets no comment rule. A here-doc **body** region is literal text — bash reads a `#` there as data, and the split inside a block-carried region is pinned (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). Neighbours filed with their own owners, all pinned with their current result in `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`: **#404** a `#` line inside a `{ …; }` body breaks the group parse, **#405** a word after the closing keyword is run where bash rejects the line (the glued `done#c` and the `fi x#y` rows), **#406** a `&&`/`||` at the start of a physical line, **#304** the region position gate (**landed**: a region claimed by a word of the block's *body* is the body's own data, and the `# c` row of that family is now purely the **statement-level** divergence of a `#` written behind a delimiter word, owner **#429**; the redirect after the closing keyword is no longer a divergence — task #298's block tail).
+The rule is shared, deliberately: `cond/boundary/gate.rs::gate_end` (the gate of a short-circuited `||`) takes the same arm, because the gate's own `\n` arm is the gate's end — a `;` written inside the comment must never end the gate, since `run_cond_list` resuming there resumes **inside comment text** (`true || if :; then :; fi # fi ; echo tail` ran `echo tail`; bash prints nothing). And deliberately **not** shared: `cond/boundary/body.rs::operator_in_region` gets no comment rule. A here-doc **body** region is literal text — bash reads a `#` there as data, and the split inside a block-carried region is pinned (`tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part`). Neighbours filed with their own owners, all pinned with their current result in `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`: **#404** a `#` line inside a `{ …; }` body **landed** in task #404 (LESSONS: "A comment-terminated line ends a brace group's body, and no keyword block's"), **#405** a word after the closing keyword is run where bash rejects the line (the glued `done#c` and the `fi x#y` rows), **#406** a `&&`/`||` at the start of a physical line, **#304** the region position gate (**landed**: a region claimed by a word of the block's *body* is the body's own data, and the `# c` row of that family is now purely the **statement-level** divergence of a `#` written behind a delimiter word, owner **#429**; the redirect after the closing keyword is no longer a divergence — task #298's block tail).
 
 ## The attached-vs-bare delimiter rule is a raw-byte rule, and a pre-parse protection match must allow the line's optional leading bytes
 `<<-` (tab stripping) broke two assumptions that both keyed on the *word* the tokenizer saw, not the raw bytes. (1) `parse/heredoc::operator::attached` decided attached-vs-bare from the *unquoted* token text (`t.len() > 2 || end - start > t.len()`), which cannot see the `-` marker buried in the raw span: a bare `<<-` token read its delimiter as `-` (the marker byte) instead of taking the next word, so `<<- WORD` and `<<- -` mis-parsed. The rule must read the raw operator bytes — `scan::heredoc::op::operator_delim` now returns `(strip, delim)` and feeds **both** the byte scanner and the token parser through one `Operator`, so the two levels cannot diverge (the LESSONS.md "byte-level and token-level rule must agree" trap, made un-recreatable). (2) `brace_expand::protect::heredoc_terminator_indices` matched the terminator as the token whose start *equals* a `body_regions` end. A `<<-` terminator line is tab-indented, so its word starts *after* the tabs and the equality match failed — the "protect the terminator line" failure in reverse (the terminator was brace-expanded and the heredoc looked unterminated). The fix relaxes the match to "the first token that follows the region end across leading tabs only" (`terminator_word`); a plain `>=` is wrong, because it would protect a real statement that follows a *blank* terminator line, which must match nothing — so the gap must be tabs-only. General rules: a token-text predicate that decides raw-byte structure (attached vs. bare) must read the raw bytes, not the unquoted word; and an offset-equality match against a line start must be widened to exactly the region the structure permits — here, leading tabs only.
@@ -6256,3 +6256,32 @@ Pins: `state/tests.rs`
 `a_function_named_ifs_survives_unset_ifs`), plus
 `src/tests/run.rs::unset_reaches_the_function_store_through_the_dispatch_arm`
 for the dispatch arm.
+
+## A comment-terminated line ends a brace group's body, and no keyword block's
+
+The tokenizer drops comment text — at a word start only, LESSONS: "A word-start
+`#` ends at its newline: the cond scan must land *on* it, not past it" — and the
+newline that **ends** the comment goes away with it, so no `;` token ever stands for
+it. That is right for the **keyword** closers, where bash stops at rc 2
+(`if true; then # c` + newline + `fi`, pinned in
+`tests/block_bodies.rs::empty_then_body_is_a_parse_error` and
+`empty_do_body_is_a_parse_error`), so the predecessor set of
+`parse/semi/preceded.rs` stays the set those blocks share. Bash's **brace-group**
+grammar decides that one case differently — `{ echo a # c` + newline + `}` runs, rc 0
+— so the extra predecessor (a word whose line is closed by a comment) lives in the
+group arm alone, in `parse/group_block/comment.rs`, and reads the **raw bytes of the
+gap** the tokenizer left between the word and the closer, because comment bytes reach
+nowhere else. Those gap bytes sit outside every quote — what is quoted, escaped or
+substituted is inside a token — so the shared `boundary`/`ScanState` walk starts fresh
+there and its word-start rule is the tokenizer's own; a byte compare would be a second
+rule. The body slice stays the tokens' own span, so the comment's words are excluded
+and never run. Do **not** fix this by emitting a separator token for a comment's
+newline: it is global, it would make fdshell *accept* the keyword rows above (a new
+divergence, in the wrong direction), and it rewrites the tokenizer's comment pins.
+
+Pins: `tests/group.rs::a_comment_line_inside_the_body_terminates_the_group` (every
+row measured against bash 5.3.9; the `{ false # c` row's rc 1 is **earned by
+running**, so its pin asserts the parse message is **gone** — the only shape that
+tells "runs and fails" from "always errors") and
+`parse/group_block/comment/tests.rs` — the arm from both sides of the gap: a
+comment-terminated line, and `{ echo a }` without one.

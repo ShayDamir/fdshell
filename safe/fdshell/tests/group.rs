@@ -770,3 +770,40 @@ fn a_line_ending_on_a_cond_operator_continues_a_group_body() {
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
 }
+
+/// Task #404: a `#` comment closing a line **inside** a `{ …; }` body is the body's
+/// terminator — bash's **brace-group** grammar reads the newline that ends such a
+/// comment as the `;` before `}`, while its keyword closers do not: bash stops at rc 2
+/// for `if true; then # c` + newline + `fi` (pinned in
+/// `tests/block_bodies.rs::empty_then_body_is_a_parse_error`), so the rule is the
+/// group arm's own. What the comment hides is never run, and a brace named in it is
+/// comment text. Every row measured 2026-11-02 against bash 5.3.9 and this build.
+#[test]
+fn a_comment_line_inside_the_body_terminates_the_group() {
+    for (script, want) in [
+        ("{ echo g # c && echo z\n} && echo w", "g\nw\n"),
+        ("{ echo a # {\n} && echo b", "a\nb\n"),
+        ("{ echo a # }\n} && echo b", "a\nb\n"),
+        ("{ echo a && echo b # {\n} && echo c", "a\nb\nc\n"),
+        ("{ echo a \"b # c\" # d\n} && echo b", "a b # c\nb\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: stderr={err}");
+    }
+    // The group's status is the body's last command, so the `&&` tail is skipped — an
+    // rc now **earned by running**, not by the old parse error: the message is gone, so
+    // a regression that errors on every comment-terminated body would show up here.
+    let (out, err, rc) = run("{ false # c\n} && echo w");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 1));
+    // The single-line shape, where the comment eats the closer: no group is parsed, so
+    // the unclosed-block report is the documented rc-1-vs-2 family (bash rc 2, README
+    // "Accepted divergences").
+    let (out, err, rc) = run("{ echo a # c; } && echo b");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(err.contains("'{' is missing its closing '}'"), "{err}");
+    // The closer's redirection still belongs to the group.
+    let (f, _sf) = temp_path("comment_body");
+    let (out, err, rc) = run(&format!("{{ echo a # c\n}} > {f} && echo w"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("w\n", "", 0), "{err}");
+    assert_eq!(body(&f), "a\n");
+}
