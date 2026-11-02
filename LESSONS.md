@@ -1762,6 +1762,20 @@ brace, a brace at a pipeline stage, a here-doc, a trailing `&`) stay the pinned
 divergences they are, which is exactly what an arithmetic-`for` brace body reports in
 those shapes.
 
+The two predicates do **not** share the end-of-input boundary (task #402): the byte
+form counts it — a lone `{`, an `x && {` and the arithmetic-`for`'s `)) {` written
+last are openers in bash, and the definer family already rows this on its side —
+while the word form does not, because it is reached in argument position too, where
+bash keeps the brace a word (`echo {` prints `{`). The asymmetry therefore lives on
+the predicate, and every byte-form caller brings the `group_at_run`
+command-position rule: the segment scanner and the cond boundary already AND it in,
+and `statement_end`'s tail arm must state it explicitly, or an **argument** brace at
+the end of input takes the arm and buffers where bash answers at once
+(`{ echo a; } && echo {`). Pins: `segment/group/word/tests.rs`,
+`segment/group/tests.rs`, `cond/tests.rs`, `keywords/kind/arith_for/tests.rs`,
+`repl/complete/tests.rs`, `tests/repl.rs::a_brace_at_the_end_of_input_buffers_in_command_position`,
+`tests/group.rs::a_brace_at_the_end_of_input_reports_its_missing_closer`.
+
 ## Count brace depth per exact `{`/`}` word, not per clause position
 The POSIX grammar puts `{` in clause position (`;`/`then`/`else`/`do`), so a
 depth rule that counted braces only in clause position would drop the `+1` for a
@@ -5290,10 +5304,16 @@ Do **not** model the fact as a fourth `Segment` variant: every exhaustive
 `Segment` match in the suite enumerates all three variants (~35 arms), so a new
 variant forces an arm at each; the `Statement` field cost 7 sites, and
 `background` (task #326) is the precedent for a scan-level flag travelling on
-the statement. One shape stays out of reach, and is pinned as complete: a brace
+the statement. One shape stayed out of reach, and was pinned as complete: a brace
 whose next byte is not an opener boundary is a **word** (the `group/word.rs`
-rule, task #141), so `true && {` at the end of input records no span at all —
+rule, task #141), so `true && {` at the end of input recorded no span at all —
 the twin of the run-start `{` gap, an opener-word limitation, not a mid-run one.
+Task #402 closed it: the **byte** predicate now counts end of input as a
+boundary (both title shapes buffer, pins flipped in `repl/complete/tests.rs`
+and `tests/repl.rs`), while the **word** predicate deliberately does not — it is
+reached in argument position too, where bash keeps `echo {` a word, so the byte
+form's callers each apply the command-position rule (`group_at_run`) that keeps
+the argument brace a word.
 
 ## A block's tail is parsed **at** its closer, by one module every builder shares (task #298)
 

@@ -31,6 +31,10 @@ fn operator_inside_a_group_body_is_not_a_boundary() {
     assert_eq!(boundary_of(b"echo a; { echo b; } && echo c"), (20, false));
     // Two groups as cond-list parts: the split is the `&&` between them.
     assert_eq!(boundary_of(b"{ echo a; } && { echo b; }"), (12, false));
+    // Task #402: the second part's group is a brace at the very end of input —
+    // bash buffers the shape and running it with `echo b` on the next line
+    // prints `a`, `b`; the split is the `&&` at 7 as on every other row.
+    assert_eq!(boundary_of(b"echo a && {"), (7, false));
     // A group inside `$( … )` is the substitution's own text: the top-level
     // `&&` after the closing `)` (22) splits.
     assert_eq!(boundary_of(b"echo $( { echo a; } ) && echo c"), (22, false));
@@ -65,6 +69,11 @@ fn brace_in_argument_position_is_not_a_group() {
     assert_eq!(boundary_of(b"x=1; echo { && echo $x"), (12, false));
     // A brace glued to a word (brace expansion) is not an opener.
     assert_eq!(boundary_of(b"echo a{b && echo c"), (9, false));
+    // Task #402: the byte rule now counts end of input as a boundary, so an
+    // **argument** brace written last must still be word data — the `&&` at 7
+    // splits and bash prints `a` and `{` (measured); the caller's run rule is
+    // what keeps this brace a word (`group_at_run` answers `None` on it).
+    assert_eq!(boundary_of(b"echo a && echo {"), (7, false));
 }
 
 /// `take_bodies` assigns the next `n` body bytes to a part with `n` operators.

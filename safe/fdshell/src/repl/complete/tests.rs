@@ -309,6 +309,12 @@ fn group_open_and_closed() {
     assert!(is_complete(b"{ cat <<EOF\nhi\nEOF\n; }"));
     assert!(is_complete(b"{ { echo n; }; }"));
     assert!(!is_complete(b"{ { echo n; }"));
+    // Task #402: a brace at the very end of input **is** an opener boundary for
+    // the byte predicate — the run-start shape pushes an unclosed block and
+    // buffers. An **argument-position** brace does not (the caller's
+    // command-position gate keeps it a word, as bash answers it at once).
+    assert!(!is_complete(b"{"));
+    assert!(is_complete(b"echo {"));
 }
 
 /// Task #401: a **closed** run-start group whose statement tail carries an
@@ -397,16 +403,17 @@ fn midrun_construct_needs_its_closer() {
     assert!(is_complete(b"echo a | while :; do :; done"));
     assert!(!is_complete(b"true && f() {"));
     assert!(is_complete(b"true && f() { echo hi; }"));
-    // A brace whose next byte is not an opener boundary is a **word** (the
-    // `word::opens_at` rule, task #141): at the end of input there is no such
-    // byte, so `true && {` records no mid-run span and answers at once — the
-    // same opener-word limitation a run-start `{` has (`is_complete(b"{")`),
-    // not a mid-run gap. Pinned: the parse layer owns the shape's report.
-    assert!(is_complete(b"true && {"));
+    // Task #402: a `{` written at the end of input **is** an opener for the byte
+    // predicate (bash buffers the shape), so `true && {` records the mid-run
+    // stamp and reads on — it joined the buffering family. The closed twin and
+    // the glued brace word stay answered at once.
+    assert!(!is_complete(b"true && {"));
     assert!(is_complete(b"true && {echo g; }"));
     assert!(is_complete(b"true && { echo g; } && echo y"));
     assert!(is_complete(b"true && while :; do :; done && echo y"));
-    // Word data, the gated builtin, and quoted operators open no mid-run span.
+    // Word data, the gated builtin, and quoted operators open no mid-run span:
+    // where the byte rule now says "opener", the callers' command-position gate
+    // keeps these argument-position braces words — bash answers them at once.
     assert!(is_complete(b"echo a { b"));
     assert!(is_complete(b"true && wait; echo tail"));
     assert!(is_complete(b"echo \"a && {\""));

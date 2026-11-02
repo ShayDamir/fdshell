@@ -270,6 +270,21 @@ fn glued_brace_stays_a_command_word() {
     assert!(err.contains("\"{echo\" not found"), "{err}");
 }
 
+/// A **bare** `{` at the end of input is an opener for the byte rule since task
+/// #402, so the statement-level unclosed-check (`script/unclosed.rs`, which
+/// fires **before** the parse layer — LESSONS task #394's note) reports
+/// `'{' is missing its closing '}'` at fdshell's rc 1, where bash 5.3.9 reports
+/// `syntax error: unexpected end of file from '{' command on line 1` and exits
+/// 2 — the documented rc-1-vs-2 family. Before the task the brace was a word
+/// and the parse layer's `group is missing a closing brace` answered at the
+/// same rc 1; the argument-position twin below keeps its word answer.
+#[test]
+fn a_brace_at_the_end_of_input_reports_its_missing_closer() {
+    let (out, err, rc) = run("{");
+    assert_eq!((out.as_str(), rc), ("", 1), "bash: rc 2");
+    assert!(err.contains("'{' is missing its closing '}'"), "{err}");
+}
+
 /// A brace in an argument position is a word: `echo {` prints the brace. The
 /// `{` after a pipeline `|` is a command word too, never a group opener — task
 /// #292's stage arm takes only a **keyword** block, so the brace keeps the

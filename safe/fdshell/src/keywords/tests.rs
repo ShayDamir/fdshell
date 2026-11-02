@@ -73,8 +73,10 @@ fn first_word_end_stops_at_separator() {
 }
 
 /// `{`/`}` are the group command's delimiters: a `{` with a boundary after it
-/// (whitespace, `&`, `|`, end of input) is `+1`, `}` with a boundary (incl. the
-/// glued redirect forms) is `-1`, and a glued brace word is neither.
+/// (whitespace, `&`, `|` — not end of input, which the byte form counts but the
+/// word form behind `keyword_delta` does not, task #402) is `+1`, `}` with a
+/// boundary (incl. the glued redirect forms) is `-1`, and a glued brace word
+/// is neither.
 #[test]
 fn keyword_delta_group_delimiters() {
     assert_eq!(keyword_delta(b"{", b"{ echo a; }", 1), Some(1));

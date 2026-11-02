@@ -23,6 +23,13 @@ fn the_row_fires_only_for_a_region_followed_by_an_opener() {
     assert!(!opens_a_group(b"for ((i=0;i<2;i++ { echo a; }", 3));
     // Not a region at all.
     assert!(!opens_a_group(b"for i in a; do echo a; done", 3));
+    // Task #402: the head with its opener at the very end of input rows — bash
+    // buffers `for ((…)) {` under `>` (measured; at EOF it reports
+    // `unexpected end of file from '{'`, and fdshell's EOF report of the same
+    // shape is pinned in `tests/repl.rs`). An argument-position brace at the
+    // end does not: it is word data, as bash prints `a` and `{` there.
+    assert!(opens_a_group(b"for ((i=0;i<2;i++)) {", 3));
+    assert!(!opens_a_group(b"for ((i=0;i<2;i++)) echo {", 3));
 }
 
 /// The run gate's question, from the whole run and the line behind it (task #394):
@@ -73,6 +80,19 @@ fn the_run_gate_takes_only_a_head_whose_body_is_a_group() {
     assert!(opens_a_block(
         b"for((i=0;i<2;i++))".as_slice(),
         b"for((i=0;i<2;i++)) { echo a; }",
+        0
+    ));
+    // Task #402: a head whose group opener sits at the very end of input is
+    // this gate's run with an unclosed body — bash buffers the shape. The
+    // argument-position twin keeps the word data and bash's at-once answer.
+    assert!(opens_a_block(
+        b"for ((i=0;i<2;i++))",
+        b"for ((i=0;i<2;i++)) {",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"for ((i=0;i<2;i++))",
+        b"for ((i=0;i<2;i++)) echo {",
         0
     ));
 }

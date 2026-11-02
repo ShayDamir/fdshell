@@ -63,7 +63,7 @@ pub(super) fn group_block<'a>(
     // below, pinned by `segment/group/tests.rs::span_ends_past_the_closing_brace`.
     let open_end = close;
     let (end, resume, floor, bodies, midrun_open) = if closed {
-        let (sep, r, tail_closed) = statement_end(line, close + 1, quotes);
+        let (sep, r, tail_closed) = statement_end(line, close + 1, quotes, block_start);
         let line_end = heredoc::line_end_after(line, start);
         // `line_resume` is the end of the line's last body region (the line end
         // when the bodies are missing) — the same anchor the keyword branch uses.

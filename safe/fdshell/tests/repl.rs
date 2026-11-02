@@ -814,3 +814,98 @@ fn a_dangling_operator_at_the_end_of_the_repl_input_reports() {
         "the REPL's own end-of-input answer; stderr: {err:?}"
     );
 }
+
+/// Task **#402**: a brace at the very end of input **is** an opener boundary
+/// for the byte rule (`segment/group/word.rs::opens_at` counts the missing
+/// byte), so both title shapes buffer under `> ` until the closer arrives —
+/// bash 5.3.9 buffers them too (`script -qec "bash --norc --noprofile -i"`
+/// measured): `{` + `echo a` + `}` and `true && {` + `echo a` + `}` print `a`
+/// as **one** dispatch. At end of input fdshell executes the buffer it has and
+/// reports its own missing-closer error at rc 0 — bash exits 2 naming `{`:
+/// the documented REPL rc-1-vs-2 family (README). The run-start report is the
+/// scan level's (`script/unclosed.rs`, which fires **before** the parse layer,
+/// LESSONS task #394's note); the mid-run one is the parse layer's (task
+/// #294's family). The empty-group row answers with fdshell's own `group is
+/// empty` where bash reports `syntax error near unexpected token '}'`, and the
+/// arithmetic-`for` row entered the group branch from the `done` frame, so its
+/// EOF report now names `}`: `'for' is missing its closing '}'` (bash: the
+/// same `unexpected end of file from '{'` wording, rc 2). The two guard rows
+/// stay answered at once — an **argument-position** brace stays word data in
+/// bash and here, the callers' command-position gate holding it.
+#[test]
+fn a_brace_at_the_end_of_input_buffers_in_command_position() {
+    // Closer on the next line: the buffer joins the lines into ONE dispatch.
+    for input in ["{\necho a\n}\n", "true && {\necho a\n}\n"] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "{input}: stderr: {err}");
+        assert!(!err.contains("parse error"), "parse error: {err}");
+        assert_eq!(
+            out.replace(PROMPT, "").replace("> ", ""),
+            "a\n",
+            "{input}: the joined buffer ran: {out:?}"
+        );
+        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+        assert_eq!(
+            out.replace(PROMPT, "").matches("> ").count(),
+            2,
+            "{input}: continuations: {out:?}"
+        );
+    }
+    // EOF mid-buffer: the buffer is executed and reports its missing closer.
+    for (input, want) in [
+        ("{\n", "'{' is missing its closing '}'"),
+        ("true && {\n", "group is missing a closing brace"),
+        ("{\n}\n", "group is empty"),
+        (
+            "for ((i=0;i<2;i++)) {\n",
+            "'for' is missing its closing '}'",
+        ),
+    ] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "{input}: bash exits 2: stderr={err}");
+        assert!(err.contains(want), "{input}: stderr={err}");
+        assert_eq!(
+            err.matches(want).count(),
+            1,
+            "{input}: the diagnostic is reported once: {err}"
+        );
+        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+        assert_eq!(
+            out.replace(PROMPT, "").matches("> ").count(),
+            1,
+            "{input}: continuations: {out:?}"
+        );
+    }
+    // The arithmetic-`for` with its closer on the next line keeps bash's answer
+    // (it buffered on master too, via the `done` frame; now via the group
+    // branch — the observable is unchanged, and bash prints `a` twice).
+    let (out, err, code) = run_repl("for ((i=0;i<2;i++)) {\necho a\n}\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(!err.contains("parse error"), "parse error: {err}");
+    assert_eq!(
+        out.replace(PROMPT, "").replace("> ", ""),
+        "a\na\n",
+        "the loop ran its group body: {out:?}"
+    );
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        2,
+        "continuations: {out:?}"
+    );
+    // The guard rows: bash answers an argument-position brace at once (and
+    // so does fdshell — the byte rule's `None` arms at the callers), no
+    // continuation prompt.
+    for (input, want) in [("echo {\n", "{\n"), ("{ echo a; } && echo {\n", "a\n{\n")] {
+        let (out, err, code) = run_repl(input);
+        assert_eq!(code, 0, "{input}: stderr: {err}");
+        assert!(
+            out.replace(PROMPT, "").ends_with(want),
+            "{input}: answered at once: {out:?}"
+        );
+        assert!(
+            !out.replace(PROMPT, "").contains("> "),
+            "{input}: continuation prompt: {out:?}"
+        );
+    }
+}

@@ -1393,9 +1393,15 @@ divergence is what happens at end of input: fdshell executes the buffer it has,
 so `echo a; true && { echo g` and `{ echo a; } && { echo b` print `a` and report
 `group is missing a closing brace` (rc 1 in a script), where bash parses the
 whole line first, runs nothing, and exits 2 — the REPL's rc-1-vs-2 family. A
-brace whose next byte is not an opener boundary is a **word**, so a brace
-written at the very end of input (`true && {`, and the run-start `{`) is
-answered at once: the group-opener word rule's limitation, not the mid-run one.
+brace at the very end of input **in command position** joins this family since
+task #402 — the byte rule counts the missing byte as an opener boundary, so the
+run-start `{`, the mid-run `true && {` and the arithmetic `for`'s
+`for ((…)) {` buffer, and the EOF answer is the family's own report (the scan
+level's missing-closer for the run-start shapes, the parse layer's for the
+mid-run one, bash naming `{` at rc 2). What stays answered at once is the
+glued/brace-expansion set (`{echo`, `{;`, `{a,b}`, `{}`) and an
+**argument-position** brace (`echo {` prints `{`) — the callers'
+command-position rule keeps those words, in bash and here.
 
 End of input is the `ignoreeof` policy (`set -o ignoreeof`, `set -i`, on by
 default when stdin is a terminal): on a **terminal** an EOF prints

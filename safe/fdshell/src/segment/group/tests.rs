@@ -49,6 +49,13 @@ fn group_span_covers_the_statement_after_the_closing_brace() {
     // A nested group that never closes is opaque: the span runs to end of input,
     // and its unclosedness rides on the span's flag for the REPL (task #401).
     span(b"{ echo a; } && { echo b", 23, 23, 0, true);
+    // Task #402's new rule: a brace at the end of input **is** the opener when
+    // the run's rule puts it at a cond-part start, and the tail group that never
+    // closes carries the flag.
+    span(b"{ echo a; } && {", 16, 16, 0, true);
+    // The caller gate: the same brace in an **argument** position stays word
+    // data — bash answers that line at once, so the tail must stay closed.
+    span(b"{ echo a; } && echo {", 21, 21, 0, false);
 }
 
 /// A group that never closes keeps the REPL reading continuation lines: the
@@ -332,5 +339,29 @@ fn the_opener_arm_stamps_an_unclosed_midrun_group() {
             Segment::Block { .. } => panic!("{line:?} must stay one statement"),
             Segment::AsyncInvalid => panic!("unexpected async marker"),
         }
+    }
+}
+
+/// Task #402's two title shapes: a brace at the very end of input is an opener
+/// for the byte predicate, so the **run-start** path pushes an unclosed
+/// `Segment::Block` and the **mid-run** arm records `midrun_open` on the
+/// statement — both are the signals that make the REPL buffer the line.
+#[test]
+fn a_brace_at_the_end_of_input_opens_its_shape() {
+    let segments = scan_segments(b"{", false);
+    assert_eq!(segments.len(), 1, "the lone brace is one segment");
+    match &segments[0] {
+        Segment::Block { closed, .. } => assert!(!closed, "the lone brace never closes"),
+        Segment::Statement { .. } => panic!("the run-start brace must be a block"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
+    }
+    let segments = scan_segments(b"true && {", false);
+    assert_eq!(segments.len(), 1, "the cond split is the cond layer's");
+    match &segments[0] {
+        Segment::Statement { midrun_open, .. } => {
+            assert!(*midrun_open, "the mid-run opener never closes")
+        }
+        Segment::Block { .. } => panic!("the mid-run brace must stay one statement"),
+        Segment::AsyncInvalid => panic!("unexpected async marker"),
     }
 }
