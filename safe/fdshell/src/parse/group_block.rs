@@ -3,7 +3,6 @@ use super::cond_bodies::claimed_regions;
 use super::part_text::part_text;
 use super::semi::block_body;
 use super::semi::closing_keyword_index;
-use super::semi::is_list_terminator;
 use super::semi::token_range;
 use super::value_spans;
 use crate::error::parse::ParseError;
@@ -13,6 +12,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, ensure};
 use sys::ScriptText;
 
+mod comment;
 mod tail;
 
 /// The `{ …; }` group command (POSIX #1.2): the body text to run in the
@@ -44,10 +44,13 @@ pub(crate) fn tokens_to_group(
     // tokenizer emits a `;` token for a newline, so `{ echo a` newline `}` is
     // accepted, and the plain `&` backgrounds the body's last statement
     // (task #354: `{ echo hi & }`). `closing_keyword_index` skips token 0 (the
-    // `{`), so `close` is never 0.
-    let before_close = tokens.get(close.saturating_sub(1));
+    // `{`), so `close` is never 0. The body's last **word** is a predecessor as well
+    // once its line is closed by a `#` comment — bash's brace grammar reads the newline
+    // that ends such a comment as the terminator (task #404; the group arm's own half of
+    // the rule, since the keyword closers must keep the shared set).
+    let before_close = close.saturating_sub(1);
     ensure!(
-        before_close.is_some_and(is_list_terminator),
+        comment::terminates_closer(tokens, line, before_close),
         ParseError::ExpectedSemicolonBeforeCloseBrace
     );
     // The **extension** discriminator, at arm granularity (the pair
