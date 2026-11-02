@@ -613,11 +613,38 @@ Mechanism: the lexer joins an operand to its `++`/`--` from the token stream
 (postfix) and by whitespace-skipping lookahead (prefix), so whitespace cannot
 separate the pair; only the same-command observation separates a parse claim
 from the fork deviation, and it shows glued and spaced agree. **#396** the glued
-`for((…))` (not a keyword word, so `do`/`done` run as commands), **#397** a
+`for((…))` has **landed** with the boundary rule (see LESSONS: "The metacharacter
+boundary is a keyword-word rule"), **#397** a
 `${…}` inside a clause (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the
 `((expr))` command and `$((…))` fail identically), and the
 redirect-after-the-closer family **#298**, since closed by
 `parse/block_tail.rs`.
+
+## The metacharacter boundary is a keyword-word rule: one byte set, one reserved list, read at both granularities (task #396)
+Bash's tokenizer ends **every** word at a metacharacter; fdshell's word
+segmentation does not, and the open general break stays the work of tasks
+**#316/#470/#422/#499**. What task **#396** adopted is the **narrow** rule: the
+boundary applies only when the accumulated word is exactly a word of the one
+reserved list (`safe/fdshell/src/keywords/reserved.rs`), read through the one byte
+set (`safe/fdshell/src/bytes.rs::word_break`) at **both** granularities so they
+cannot drift — the byte scans (the scan-back in
+`safe/fdshell/src/keywords/quoted.rs`, the recognition boundary of
+`safe/fdshell/src/keywords/kind.rs` as measured by
+`safe/fdshell/src/segment/block/length.rs::opener_len`, the clause scorer
+`safe/fdshell/src/keywords/position/clause.rs`) and the tokenizer's split arm
+(`safe/fdshell/src/parse/token/step/keyword.rs`). A second word-break list or a
+second keyword list on either granularity is the drift this entry exists to
+prevent. **Not part of the rule:** the definer's glued `(` token (a
+non-reserved name — `f'oo'()` and `function 'f'` keep their word, as that
+rule's pins insist), and gated words — a quoted or escaped keyword keeps the
+word whole (POSIX §2.9.1, the raw-span gate of LESSONS: "A keyword word is
+gated on its raw span"). `wait` and `time` are **not** on the list (`wait` is
+no bash reserved word, `time` a prefix), so their glued spellings answer what
+they answered before. Pins: `safe/fdshell/src/keywords/reserved/tests.rs` (the
+list), `safe/fdshell/src/parse/token/tests.rs` (split and gates at token
+granularity), the glued `for`/`if`/`while`/`until` family in
+`safe/fdshell/tests/loops.rs`, and the glued-closer and definer families in
+`safe/fdshell/tests/block_closers.rs` and `safe/fdshell/tests/group.rs`.
 
 ## `next_boundary`'s `run_start` reset is load-bearing for block text: word state, and (since #234) the region anchor
 The `;`/`\n` `run_start` reset in `cond/boundary.rs::next_boundary` is load-bearing **for block text** in two ways. (1) It clears `word_active`, so a closer written at the start of a physical line is scored (`state.at_word_start()`), and it anchors the group-opener rule (`group_at_run`: a brace opens a group only at a run start). Forgetting the reset swallows a block's trailing operator into its text. (2) Task #234 replaced the `heredoc::skip` window with a region walk anchored at the **physical line start** of the run (`cond/boundary/body.rs::regions` → `line_bodies_for_line`), which is what makes the pinned `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` split survive: block text (`if … fi`) travels whole through `run_cond_list` with its condition bodies inside the span, so a `;`-terminated `<<` in a block condition (`if cat <<X; then`) has its bodies on the block text's following lines. Before #234 that was only visible through the run window — with it, the region scan always sees the `<<` of the physical line and walks the body region: its top-level `&&` splits the part (rc 1 `missing 'fi'`, bash rc 2), while every other region byte stays opaque. Top-level statement segments are not affected by either mechanism, because their part text is a subslice of the command bytes only — the body regions travel separately as `run_cond_list`'s `bodies` (Task #79) — so `next_boundary` never sees a `;`-terminated `<<` run with a body at top level; the killing case is the block wrapper. The split pins are `block_heredoc_cond_run_and_and_in_body_splits_part` and `block_body_heredoc_delimiter_line_operator_is_region_data` in `safe/fdshell/tests/heredoc.rs`; the top-level window semantics are covered by `heredoc_after_semicolon_word_drives_boundary_skip` and `heredoc_attached_operator_before_semicolon_is_not_a_delimiter`, which the region anchor keeps green unchanged.
