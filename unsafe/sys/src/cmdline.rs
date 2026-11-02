@@ -15,6 +15,8 @@ pub enum ReadCmdlineError {
     /// command line is empty (missing argv[0])
     EmptyCmdline,
     /// impossible state (indexing invariant violation)
+    // Truly never: `n` is a read count bounded by this buffer (§4.11), so `get(..n)`
+    // is always in range. Chore #507: excluded from later respawns.
     Never,
 }
 

@@ -13,6 +13,8 @@ pub enum UmaskError {
     /// invalid octal umask value in /proc/self/status
     InvalidUmask,
     /// impossible
+    // Truly never: `n` is a read count bounded by this buffer (§4.11), so `get(..n)`
+    // is always in range. Chore #507: excluded from later respawns.
     Never,
 }
 

@@ -94,14 +94,21 @@ task #502), a sourced file (`CmdError::SourceNul`), a stdin line
 (`AppError::Read`), a socket payload (`CmdError::RecvmsgPayloadNul`,
 `CmdError::SendmsgBadPayload`). The outer frame names what the user handed in and
 stays actionable; the inner names the cause — the two must not read as one
-sentence (see LESSONS: "`.change_context()` with same-message variants").
+sentence (see LESSONS: "`.change_context()` with same-message variants"). The
+same mechanism at word granularity: a UTF-8 parse of a **user word** at
+an argument-parsing entry point is a domain error too — `signalfd --flags
+0x<non-UTF-8>` answers `SignalfdBadFlag`, because the word is the user's and
+the printed message can name it.
 
 Pins: the printed-words row
 `tests/cli_args.rs::script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state`
 — the rc alone cannot tell these paths apart, every one of them exits 1 — beside
 the in-process variant assert
-`intercept/source/tests.rs::run_source_nul_byte_content_fails`. Debug builds add
-`at …` source frames to the report, so assert text, never a frame.
+`intercept/source/tests.rs::run_source_nul_byte_content_fails`, and the printed
+row
+`tests/signalfd.rs::signalfd_non_utf8_flag_value_names_the_argument`.
+Debug builds add `at …` source frames to the report, so assert text, never a
+frame.
 
 ## `dispatch_builtin` exit codes belong in `Ok`, not `Err`
 Exit codes (0/1/errno) are shell convention, not errors. `Ok(code)`, only `Err(BuiltinError::Unknown)` on failure.
