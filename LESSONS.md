@@ -5273,11 +5273,18 @@ them; the fix carries it as one flag (`Book::midrun_open` →
    whole line first, prints its `unexpected end of file`, and exits 2 — the
    REPL's rc-1-vs-2 family. Pin it (`tests/repl.rs::
    statements_before_an_unclosed_midrun_run_at_eof`), never "fix" it silently.
-4. **A heredoc body is never scanned for mid-run openers** (the flush's resume
-   skips the body regions), so `cat <<T` + `true && {` + `T` stays complete:
-   the flag inherits the region skipping, and adding a body scan would break it
-   (`segment/tests.rs::a_heredoc_body_hides_a_midrun_opener_from_the_stamp`).
-   The same skipping is why the body's opener text is never a statement.
+ 4. **A heredoc body is never scanned for mid-run openers** (the flush's resume
+    skips the body regions), so `cat <<T` + `true && {` + `T` stays complete:
+    the flag inherits the region skipping, and adding a body scan would break it
+    (`segment/tests.rs::a_heredoc_body_hides_a_midrun_opener_from_the_stamp`).
+    The same skipping is why the body's opener text is never a statement.
+ 5. **A construct's `closed` measures only its own closer**, so a span that
+    swallows a statement tail has to report the tail's unclosedness separately —
+    a run-start span has no flush for this flag to land on. Hence
+    `Segment::Block::midrun_open`, set by the group builder alone; the keyword and
+    definer arms already report a tail through their own `closed`. Pins:
+    `segment/group/tests.rs`, `repl/complete/tests.rs`,
+    `tests/repl.rs::a_closed_group_with_an_unclosed_tail_group_buffers`.
 
 Do **not** model the fact as a fourth `Segment` variant: every exhaustive
 `Segment` match in the suite enumerates all three variants (~35 arms), so a new

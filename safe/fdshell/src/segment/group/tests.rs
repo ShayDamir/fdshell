@@ -12,19 +12,23 @@ use alloc::vec::Vec;
 /// the keyword branch's rule: with trailing content on the physical line it is
 /// the end of the line's last body region (the line end when the line has no
 /// `<<` operator), and `0` when the group ends the line (`Book::rewind`'s
-/// deeper-of-two keeps the floor a block before it left).
-fn span(line: &[u8], end: usize, resume: usize, floor: usize) {
+/// deeper-of-two keeps the floor a block before it left). `tail_open` is the
+/// span's tail-closedness flag — `true` only when a group in the statement tail
+/// never closed (task #401), so both directions are pinned in one table.
+fn span(line: &[u8], end: usize, resume: usize, floor: usize, tail_open: bool) {
     let (segment, got_resume, got_floor) = group_block(line, 0, 0, Quotes::new(), 0, 0);
     match segment {
         Segment::Block {
             block_start,
             end_pos,
             closed,
+            midrun_open,
             bodies: _,
         } => {
             assert_eq!(block_start, 0, "span of {line:?}");
             assert_eq!(end_pos, end, "span end of {line:?}");
             assert!(closed, "{line:?} must be a closed group");
+            assert_eq!(midrun_open, tail_open, "tail flag of {line:?}");
         }
         Segment::Statement { .. } => panic!("{line:?} must be a block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
@@ -35,15 +39,16 @@ fn span(line: &[u8], end: usize, resume: usize, floor: usize) {
 
 #[test]
 fn group_span_covers_the_statement_after_the_closing_brace() {
-    span(b"{ echo a; }", 11, 11, 0);
-    span(b"{ echo a; } > out; echo b", 17, 18, 25);
-    span(b"{ echo a; } && echo b", 21, 21, 0);
-    span(b"{ echo a; } ; echo b", 12, 13, 20);
-    span(b"{ echo a; }>out3", 16, 16, 0);
-    span(b"{ echo a; } # note", 12, 18, 0);
-    span(b"{ { echo n; }; }", 16, 16, 0);
-    // A nested group that never closes is opaque: the span runs to end of input.
-    span(b"{ echo a; } && { echo b", 23, 23, 0);
+    span(b"{ echo a; }", 11, 11, 0, false);
+    span(b"{ echo a; } > out; echo b", 17, 18, 25, false);
+    span(b"{ echo a; } && echo b", 21, 21, 0, false);
+    span(b"{ echo a; } ; echo b", 12, 13, 20, false);
+    span(b"{ echo a; }>out3", 16, 16, 0, false);
+    span(b"{ echo a; } # note", 12, 18, 0, false);
+    span(b"{ { echo n; }; }", 16, 16, 0, false);
+    // A nested group that never closes is opaque: the span runs to end of input,
+    // and its unclosedness rides on the span's flag for the REPL (task #401).
+    span(b"{ echo a; } && { echo b", 23, 23, 0, true);
 }
 
 /// A group that never closes keeps the REPL reading continuation lines: the
@@ -57,6 +62,7 @@ fn unclosed_group_is_open() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!((block_start, end_pos), (0, 8));
             assert!(!closed);
@@ -83,6 +89,7 @@ fn group_resume_never_reopens_the_group_body() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(block_start, 19);
             assert_eq!(end_pos, line.len());
@@ -188,9 +195,9 @@ fn a_multi_line_group_claims_no_bodies() {
 /// statement-end scan starts *past* the brace, never at the body's `;`.
 #[test]
 fn span_ends_past_the_closing_brace() {
-    span(b"{ echo a;}", 10, 10, 0);
-    span(b"{ echo a; }", 11, 11, 0);
-    span(b"{ echo a; } ; echo b", 12, 13, 20);
+    span(b"{ echo a;}", 10, 10, 0, false);
+    span(b"{ echo a; }", 11, 11, 0, false);
+    span(b"{ echo a; } ; echo b", 12, 13, 20, false);
 }
 
 /// A second group in the same statement is opaque: the span resumes just past
@@ -199,11 +206,14 @@ fn span_ends_past_the_closing_brace() {
 #[test]
 fn nested_group_span_resumes_past_its_closing_brace() {
     // The second group closes at 25; `>f` runs to the `;` at 28.
-    span(b"{ echo a; } && { echo b; }>f; echo c", 28, 29, 36);
+    span(b"{ echo a; } && { echo b; }>f; echo c", 28, 29, 36, false);
     // With no separator after the second group, the span runs to end of input.
-    span(b"{ echo a; } && { echo b; } && echo c", 36, 36, 0);
+    span(b"{ echo a; } && { echo b; } && echo c", 36, 36, 0, false);
+    // The **second** tail group is the unclosed one: the flag is the whole tail's,
+    // not just the first group's (task #401).
+    span(b"{ echo a; } && { echo b; } && { echo c", 38, 38, 0, true);
     // The tail is a comment: the span ends at the `#` and resumes past the comment.
-    span(b"{ echo a; } && { echo b; } # note", 27, 33, 0);
+    span(b"{ echo a; } && { echo b; } # note", 27, 33, 0, false);
 }
 
 /// A group opener after `&&` is not a segment-level block: the cond layer splits
@@ -231,7 +241,7 @@ fn group_after_and_stays_a_cond_part_not_a_block() {
 /// so the span ends at the `;` — not at the brace's closing `}`.
 #[test]
 fn word_active_brace_in_the_tail_is_not_a_group() {
-    span(b"{ echo a; } && a{ b; }", 19, 20, 22);
+    span(b"{ echo a; } && a{ b; }", 19, 20, 22, false);
 }
 
 /// A comment glued to a closing brace ends the statement at the `#`: the scan
@@ -239,8 +249,8 @@ fn word_active_brace_in_the_tail_is_not_a_group() {
 /// not comment data glued to a word.
 #[test]
 fn glued_comment_after_the_closing_brace_ends_the_statement() {
-    span(b"{ echo a; }# note", 11, 17, 0);
-    span(b"{ echo a; } && { echo b; }#x", 26, 28, 0);
+    span(b"{ echo a; }# note", 11, 17, 0, false);
+    span(b"{ echo a; } && { echo b; }#x", 26, 28, 0, false);
 }
 
 /// A `'…'` span masks its bytes (task #141): a `{`/`}` written inside a span is
@@ -266,8 +276,8 @@ fn quoted_braces_are_not_group_delimiters() {
         );
     }
     // A group whose body words are spans: the span's `;` is data.
-    span(b"{ 'a; b'; }", 11, 11, 0);
-    span(b"{ echo 'a' 'b'; }", 17, 17, 0);
+    span(b"{ 'a; b'; }", 11, 11, 0, false);
+    span(b"{ echo 'a' 'b'; }", 17, 17, 0, false);
 }
 
 /// `skip_group`'s pair (resume, closed) for the `{` at `i` of `line`, with a

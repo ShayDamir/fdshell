@@ -1386,8 +1386,11 @@ buffers under `> ` until its closer arrives: the scan skips such a span inside
 its run, so it is the scan's record of the missing closer, never an open block,
 that keeps the prompt reading. `true && while :; do` + `echo hi` + `break` +
 `done` buffers the three continuation lines and runs as **one** statement,
-printing `hi`. The divergence is what happens at end of input: fdshell executes
-the buffer it has, so `echo a; true && { echo g` prints `a` and reports
+printing `hi`. A run-start group whose **own** brace closed but whose tail group
+did not buffers too — `{ echo a; } && { echo b` (task #401) — because what the
+prompt reads is the **statement's** closedness, not the construct's own. The
+divergence is what happens at end of input: fdshell executes the buffer it has,
+so `echo a; true && { echo g` and `{ echo a; } && { echo b` print `a` and report
 `group is missing a closing brace` (rc 1 in a script), where bash parses the
 whole line first, runs nothing, and exits 2 — the REPL's rc-1-vs-2 family. A
 brace whose next byte is not an opener boundary is a **word**, so a brace

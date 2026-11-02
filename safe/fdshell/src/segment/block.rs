@@ -125,6 +125,11 @@ fn function_block(
             block_start: start,
             end_pos: end,
             closed,
+            // The definer's span ends at its own closing brace, so an unclosed
+            // tail is scanned as a mid-run opener and lands on the book's flag,
+            // never here (task #294; the group branch is the one that needs the
+            // field, task #401).
+            midrun_open: false,
             bodies,
         },
         resume,

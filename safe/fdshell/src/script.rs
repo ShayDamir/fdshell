@@ -67,6 +67,10 @@ pub(crate) fn run_script(
                 block_start,
                 end_pos,
                 closed,
+                // The group span's tail-closedness flag is the REPL's signal
+                // (task #401); the parse layer owns the runner's report, exactly
+                // as the `Statement` arm's flag above (tasks #232/#236/#294).
+                midrun_open: _,
                 bodies,
             } => {
                 if !closed {

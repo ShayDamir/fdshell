@@ -682,6 +682,50 @@ fn statements_before_an_unclosed_midrun_run_at_eof() {
     );
 }
 
+/// Task **#401**: a run-start `{ …; }` whose **own** brace closed but whose tail
+/// group did not joins the buffering family — what the prompt reads is the
+/// **statement's** closedness, not the construct's own. Measured against
+/// `bash --norc --noprofile -i` under `script -qec … /dev/null` (the convention of
+/// the tests above): bash buffers the same line under `>` and running the buffer
+/// with the closer on the next line prints `a`, `b`, `tail`. At end of input bash
+/// reports `syntax error: unexpected end of file from '{' command on line 1` and
+/// exits 2, while fdshell runs what it can — the closed group's `echo a` prints —
+/// and reports its missing closer, exiting 0: the documented REPL rc-1-vs-2 family
+/// (README, task #294), and the reason the buffer still runs what it can.
+#[test]
+fn a_closed_group_with_an_unclosed_tail_group_buffers() {
+    // Closer on the next line: the buffer joins the lines into ONE dispatch —
+    // three prompts (the shape, the joined buffer, `exit`), exactly one `> `.
+    let (out, err, code) = run_repl("{ echo a; } && { echo b\n}\necho tail\nexit\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        1,
+        "continuations: {out:?}"
+    );
+    assert_eq!(
+        out.replace(PROMPT, "").replace("> ", ""),
+        "a\nb\ntail\n",
+        "the joined buffer ran: {out:?}"
+    );
+    assert!(!err.contains("parse error"), "parse error: {err:?}");
+    // EOF mid-buffer: the buffer is executed and reports its missing closer.
+    let (out, err, code) = run_repl("{ echo a; } && { echo b\n");
+    assert_eq!(code, 0, "stderr: {err}");
+    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
+    assert_eq!(
+        out.replace(PROMPT, "").matches("> ").count(),
+        1,
+        "the first line was dispatched, not buffered: {out:?}"
+    );
+    assert!(out.contains('a'), "the closed group ran: {out:?}");
+    assert!(
+        err.contains("group is missing a closing brace"),
+        "the buffer was not executed as an unclosed group: {err:?}"
+    );
+}
+
 /// A single-line `case` whose arm ends with the plain `&` and whose `esac` has
 /// not arrived (task #354): the block-opener gate owns the run, so the shape
 /// enters the `> ` continuation buffer instead of answering the first line with

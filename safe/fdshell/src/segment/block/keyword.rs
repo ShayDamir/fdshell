@@ -112,6 +112,10 @@ pub(super) fn keyword_block<'a>(
             block_start: start,
             end_pos: end,
             closed,
+            // The keyword block's own scan walks the statement tail, so an
+            // unclosed group there keeps the depth up and `closed` already
+            // reports it — the flag is the group branch's own (task #401).
+            midrun_open: false,
             bodies,
         },
         resume,

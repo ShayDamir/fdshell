@@ -2,7 +2,8 @@
 //! or does it need more lines (continuation)?
 //!
 //! The check reuses the existing byte scanners verbatim (no parser changes):
-//! `scan_segments` reports open keyword/function blocks, closed blocks whose
+//! `scan_segments` reports open keyword/function blocks, closed group blocks
+//! whose **tail** group is open (task #401), closed blocks whose
 //! here-doc body lines have not arrived, heredoc command lines, and statements
 //! carrying an unclosed **mid-run** construct (`true && { …`,
 //! `true && while :; do …`), and a `ScanState` walk reports open
@@ -26,12 +27,19 @@ pub(crate) fn is_complete(line: &[u8]) -> bool {
 fn blocks_or_heredoc_open(line: &[u8]) -> bool {
     for seg in scan_segments(line, false) {
         match seg {
-            Segment::Block { closed: false, .. } => return true,
+            Segment::Block { closed: false, .. }
+            | Segment::Block {
+                midrun_open: true, ..
+            } => {
+                return true;
+            }
             // A construct opened mid-run — `&& { …`, `&& while … do`,
             // `| while … do`, `&& f() {` — is skipped whole inside its run, so
             // it is never a `Segment::Block`; the scan stamps its closedness on
             // the statement and the buffer keeps reading until the closer
-            // arrives (task #294).
+            // arrives (task #294). A **closed** run-start group carries the same
+            // signal on its own span (`midrun_open`): its brace closed but the
+            // tail group did not (task #401).
             Segment::Statement {
                 midrun_open: true, ..
             } => return true,

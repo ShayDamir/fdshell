@@ -46,8 +46,18 @@ pub(crate) enum Segment<'a> {
     Block {
         block_start: usize,
         end_pos: usize,
-        /// Whether the closing keyword was found.
+        /// Whether the construct's **own** closer was found — the runner's and
+        /// the `&`-split's signal, unchanged by the flag below.
         closed: bool,
+        /// A `{ …; }` group whose own brace closed swallowed a statement tail
+        /// holding an **unclosed** group (`{ echo a; } && { echo b`, task #401):
+        /// this is the REPL's continuation signal and inert for the runner, whose
+        /// parse layer owns the missing-closer diagnostic — exactly like
+        /// [`Segment::Statement::midrun_open`] (task #294). A run-start span has
+        /// no flush for the book's flag to land on, so the tail rides here; every
+        /// other producer passes `false` and reports the tail through its own
+        /// `closed`.
+        midrun_open: bool,
         /// The block's own heredoc body bytes, appended to its text; empty
         /// when the block carries no `<<` operator, or when its bodies are
         /// interleaved with its lines (extension mode, see

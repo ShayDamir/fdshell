@@ -21,6 +21,7 @@ fn scan_time_prefixed_keyword_block() {
                 end_pos,
                 closed,
                 bodies: _,
+                ..
             } => {
                 assert_eq!(*block_start, 0, "{:?}", line);
                 assert_eq!(*end_pos, line.len(), "{:?}", line);
@@ -44,6 +45,7 @@ fn scan_time_prefixed_group_span_starts_at_the_prefix() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 22);
@@ -67,6 +69,7 @@ fn scan_if_block_end_pos() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 16);
@@ -87,6 +90,7 @@ fn scan_for_block_end_pos() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 30);
@@ -107,6 +111,7 @@ fn scan_case_block_end_pos() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 26);
@@ -182,6 +187,7 @@ fn scan_if_with_leading_whitespace() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 18);
@@ -202,6 +208,7 @@ fn scan_for_with_leading_whitespace() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 32);
@@ -311,6 +318,7 @@ fn scan_comment_on_block_line() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 26);
@@ -356,6 +364,7 @@ fn scan_block_not_closed() {
             end_pos: _,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert!(!*closed);
@@ -671,6 +680,7 @@ fn scan_block_heredoc_body_fi_does_not_close() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 33);
@@ -704,6 +714,7 @@ fn scan_pre_block_block_and_trailing_share_one_body_stream() {
                 end_pos,
                 closed,
                 bodies,
+                ..
             },
             Segment::Statement {
                 cmd: tail,
@@ -767,6 +778,7 @@ fn scan_wait_block_opens_on_subsequent_line() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 29);
@@ -788,6 +800,7 @@ fn scan_wait_block_opens_on_same_line_keyword() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 28);
@@ -812,6 +825,7 @@ fn scan_function_block_keyword_form_span() {
                 end_pos,
                 closed,
                 bodies: _,
+                ..
             },
             Segment::Statement { cmd, off, .. },
         ) => {
@@ -1101,6 +1115,7 @@ fn check_shapes(line: &[u8], want: &[Shape]) {
                 end_pos,
                 closed,
                 bodies,
+                ..
             } => ("B", *block_start, *end_pos, *closed, bodies.clone()),
             Segment::AsyncInvalid => ("A", 0, 0, false, Vec::new()),
         })
@@ -1135,6 +1150,7 @@ fn check_block(line: &[u8], want: (usize, usize, bool)) {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => assert_eq!((*block_start, *end_pos, *closed), want, "{line:?}"),
         Segment::Statement { .. } => panic!("{line:?} must be a group block"),
         Segment::AsyncInvalid => panic!("{line:?} must be a group block"),
@@ -1151,6 +1167,7 @@ fn check_segments(line: &[u8], want: &[(usize, usize, bool)]) {
                 end_pos,
                 closed,
                 bodies: _,
+                ..
             } => Some((*block_start, *end_pos, *closed)),
             Segment::Statement { .. } => None,
             Segment::AsyncInvalid => None,
@@ -1715,6 +1732,7 @@ fn scan_for_block_with_a_closer_shaped_list_word() {
             end_pos,
             closed,
             bodies: _,
+            ..
         } => {
             assert_eq!(*block_start, 0);
             assert_eq!(*end_pos, 30, "the whole statement is the span");

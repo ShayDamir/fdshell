@@ -56,6 +56,7 @@ fn has_target_accepts_a_run_a_pending_word_a_flushed_statement_a_closed_block() 
         block_start: 0,
         end_pos: 4,
         closed: true,
+        midrun_open: false,
         bodies: Vec::new(),
     }];
     let mut runs = Vec::new();
@@ -64,6 +65,7 @@ fn has_target_accepts_a_run_a_pending_word_a_flushed_statement_a_closed_block() 
         block_start: 0,
         end_pos: 4,
         closed: false,
+        midrun_open: false,
         bodies: Vec::new(),
     }];
     assert!(!split(b"", 0, 0, b"", &mut runs, &mut open, false).has_target());

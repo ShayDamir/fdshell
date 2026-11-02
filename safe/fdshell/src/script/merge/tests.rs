@@ -95,6 +95,7 @@ fn a_block_follower_stops_the_chain() {
             block_start: 0,
             end_pos: 10,
             closed: true,
+            midrun_open: false,
             bodies: Vec::new(),
         },
     ];

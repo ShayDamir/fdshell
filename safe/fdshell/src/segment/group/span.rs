@@ -15,28 +15,35 @@ use super::word::opens_at;
 /// A second `{ …; }` group in the same statement (after `&&` / `||`) is opaque:
 /// its text is skipped whole, so the span ends past its closing brace and the
 /// `cond` scan splits the statement into one part per group.
-pub(crate) fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize) {
+/// The third element is the tail's closedness — `true` when every nested group
+/// the scan skipped closed (task #401): the group's own `closed` measures its
+/// own brace, so a tail left open rides on this flag to the REPL.
+pub(crate) fn statement_end(line: &[u8], mut i: usize, quotes: Quotes) -> (usize, usize, bool) {
     let mut state = quotes.scan_state();
+    let mut tail_closed = true;
     while line.get(i).is_some() {
         match boundary(line, i, &state) {
-            Boundary::Separator => return (i, i + 1),
-            Boundary::Comment => return (i, skip_comment(line, i)),
+            Boundary::Separator => return (i, i + 1, tail_closed),
+            Boundary::Comment => return (i, skip_comment(line, i), tail_closed),
             // A group swallows a trailing `&` as word data (word_active is set
             // by the scan), exactly like a `Char`: the group's text carries the
             // `&` to the parse layer, which keeps its pinned group `&` error
             // (task #326 — group backgrounding stays #188/#192's).
             Boundary::Char | Boundary::Async => {
                 i = if state.at_word_start() && opens_at(line, i) {
-                    // The tail of a run-start group: its nested-group closedness
-                    // is not this span's signal, so only the resume is taken.
-                    skip_group(line, i, &mut state).0
+                    // The tail of a run-start group: its closedness is not this
+                    // span's own `closed`, so it accumulates separately for the
+                    // caller (task #401).
+                    let (resume, closed) = skip_group(line, i, &mut state);
+                    tail_closed &= closed;
+                    resume
                 } else {
                     state.advance(line, i)
                 };
             }
         }
     }
-    (line.len(), line.len())
+    (line.len(), line.len(), tail_closed)
 }
 
 /// Skip the whole `{ …; }` group at `i` (a nested group in the same statement,

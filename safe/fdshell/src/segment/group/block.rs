@@ -62,8 +62,8 @@ pub(super) fn group_block<'a>(
     // branch never reads this binding; its `+ 1` is the one inside `statement_end`
     // below, pinned by `segment/group/tests.rs::span_ends_past_the_closing_brace`.
     let open_end = close;
-    let (end, resume, floor, bodies) = if closed {
-        let (sep, r) = statement_end(line, close + 1, quotes);
+    let (end, resume, floor, bodies, midrun_open) = if closed {
+        let (sep, r, tail_closed) = statement_end(line, close + 1, quotes);
         let line_end = heredoc::line_end_after(line, start);
         // `line_resume` is the end of the line's last body region (the line end
         // when the bodies are missing) — the same anchor the keyword branch uses.
@@ -91,15 +91,18 @@ pub(super) fn group_block<'a>(
             // The group ends its physical line: resume past every region.
             (r.max(line_resume).max(pre_resume), 0)
         };
-        (end, resume, floor, bodies)
+        (end, resume, floor, bodies, !tail_closed)
     } else {
-        (open_end, open_end + 1, 0, Vec::new())
+        // An unclosed group already reports itself through `closed`, so the
+        // REPL's flag stays `false` here — one signal per construct (task #401).
+        (open_end, open_end + 1, 0, Vec::new(), false)
     };
     (
         Segment::Block {
             block_start,
             end_pos: end,
             closed,
+            midrun_open,
             bodies,
         },
         resume,

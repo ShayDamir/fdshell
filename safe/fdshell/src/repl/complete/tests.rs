@@ -311,6 +311,26 @@ fn group_open_and_closed() {
     assert!(!is_complete(b"{ { echo n; }"));
 }
 
+/// Task #401: a **closed** run-start group whose statement tail carries an
+/// unclosed group keeps the REPL reading — the prompt reads the **statement's**
+/// closedness, not the construct's own. The neighbouring arms report the same
+/// through their own routes (the keyword block's scan walks the tail, the
+/// definer's span ends at its own brace so the tail is a mid-run opener); they
+/// are pinned as regressions.
+#[test]
+fn closed_group_with_an_unclosed_tail_group_buffers() {
+    assert!(!is_complete(b"{ echo a; } && { echo b"));
+    assert!(!is_complete(b"{ echo a; } && { echo b; } && { echo c"));
+    assert!(!is_complete(b"while :; do :; done && { echo b"));
+    assert!(!is_complete(b"f() { echo hi; } && { echo b"));
+    // Every closer present: complete again, and the tail's own closer is what
+    // matters, not the first group's.
+    assert!(is_complete(b"{ echo a; } && { echo b; }"));
+    assert!(is_complete(b"{ echo a; } && { echo b; } && { echo c; }"));
+    assert!(is_complete(b"while :; do :; done && { echo b; }"));
+    assert!(is_complete(b"f() { echo hi; } && { echo b; }"));
+}
+
 /// A group inside a keyword block nets out of the depth: the `if` still needs
 /// its `fi`, and the braces do not close it early.
 #[test]

@@ -364,6 +364,21 @@ fn unclosed_group_is_a_parse_error() {
     assert_eq!((out.as_str(), rc), ("", 1));
     assert!(err.contains("parse error"), "{err}");
 }
+
+/// Task #401: the tail group's unclosedness rides on the closed group's span for
+/// the **REPL** only — the script runner is inert to it and keeps the documented
+/// run-what-it-can-then-report divergence: `echo a` prints and the missing closer
+/// reports rc 1, where bash parses first, runs nothing and exits 2. With the
+/// closer written, the shape runs whole and bash agrees (rc 0).
+#[test]
+fn the_tail_group_flag_is_inert_for_the_runner() {
+    let (out, err, rc) = run("{ echo a; } && { echo b");
+    assert_eq!((out.as_str(), rc), ("a\n", 1));
+    assert!(err.contains("group is missing a closing brace"), "{err}");
+    let (out, err, rc) = run("{ echo a; } && { echo b\n}");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("a\nb\n", "", 0));
+}
+
 /// A body command that writes to stderr lands its message in the group's `2>`
 /// file, and the process's own stderr stays clean.
 #[test]
