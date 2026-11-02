@@ -120,8 +120,13 @@ pub(crate) fn flush_line<'a>(
     // (task #492): the join never reaches back over a `;`.
     let last = runs.len();
     for (index, run) in runs.drain(..).enumerate() {
-        let n = heredoc::operator_count(line, run.off, run.off + run.bytes.len());
-        let run_bodies: Vec<Vec<u8>> = bodies.iter().skip(assigned).take(n).cloned().collect();
+        let end = run.off + run.bytes.len();
+        let n = heredoc::operator_count(line, run.off, end);
+        let run_bodies: Vec<Vec<u8>> = if spans_lines(line, run.off, end) {
+            heredoc::run_line_bodies(line, end)
+        } else {
+            bodies.iter().skip(assigned).take(n).cloned().collect()
+        };
         assigned += n;
         book.segments.push(Segment::Statement {
             cmd: run.bytes,
@@ -148,6 +153,23 @@ fn run_joins(joins: &[usize], run: &Run<'_>) -> Vec<usize> {
         .filter(|at| **at >= run.off && **at < end)
         .map(|at| at - run.off)
         .collect()
+}
+
+/// Whether the run's bytes `line[run_start..run_end]` span more than one physical
+/// line — a run whose bytes cross a newline is a mid-run keyword block (task #232),
+/// and its `<<` operators are written on its **own internal** lines. Each physical
+/// line inside such a run owns exactly one body stream and hands its regions out in
+/// operator order, so the allocations come out in global per-line order — the single
+/// definition of an opaque body, the same rule the whole-text scan
+/// (`scan/heredoc/regions.rs`) and `segment/block/claim.rs` apply, pinned by
+/// `tests/cond_blocks.rs::multi_line_mid_run_runs_consume_their_own_lines_streams`.
+/// The bytes those regions stand for sit **inside** the run's text, so they stay
+/// there as data for the parse layer to re-allocate (extension mode: nothing is
+/// attached, and the run's closer search already skips them — the construct reports
+/// its own shape). A run of one physical line keeps the flush's allocation
+/// (tasks #232/#295, byte-identical).
+fn spans_lines(line: &[u8], run_start: usize, run_end: usize) -> bool {
+    heredoc::line_start(line, run_start) < heredoc::line_start(line, run_end)
 }
 
 #[cfg(test)]

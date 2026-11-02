@@ -8,6 +8,11 @@ use super::full::{body_regions_full, contents};
 use super::operator_delims;
 use alloc::vec::Vec;
 
+mod span;
+
+pub(crate) use span::run_line_bodies;
+use span::stream_start;
+
 /// The index just after the first unquoted newline **at or after** `from`
 /// (`line.len()` when there is none). `from` is always a physical-line start
 /// or a `;`/`\n` boundary (never mid-quote), so a fresh `ScanState` is valid.
@@ -54,11 +59,7 @@ fn line_stream_bodies(
     else {
         return nothing;
     };
-    let body_start = if line_end > 0 && line.get(line_end - 1) == Some(&b'\n') {
-        line_end
-    } else {
-        line_end_after(line, line_end)
-    };
+    let body_start = stream_start(line, line_start, line_end);
     if body_start >= line.len() {
         return nothing;
     }
