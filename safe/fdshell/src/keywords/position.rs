@@ -40,10 +40,13 @@ pub(crate) use place::{Glue, Place};
 pub(crate) use score::{closer_matches, scores};
 
 /// The words the plain rule of [`after`] reads as a command restart: the
-/// separators and the parens, **one set**, shared with the `for` list's
+/// separators and the parens, **one set** — the words of
+/// [`crate::bytes::word_break`] spelled out — shared with the `for` list's
 /// [`list::step`] so the two byte-level rows cannot drift, and read back by the
 /// token-level gate [`separator_data`] so a token-level walk cannot drift
-/// either (task #336).
+/// either (task #336). A word that merely *ends* in a word-break byte is not
+/// one of these words: the boundary rule (task #396) reads such a word through
+/// the keyword rows, and only the glued-`)` clause-close row keeps it.
 ///
 /// The **byte-level** callers of [`after`] (`cond/boundary/block`,
 /// `comment/depth_delta`) hand it raw line bytes, so a quoted separator's word
@@ -133,7 +136,12 @@ pub(crate) fn after(
         Glue::Tail => place,
     };
     if matches!(glue, Glue::None) {
-        if separator_shape(w) || w.ends_with(b")") {
+        // The glued case-clause `)` is a word's last byte — but not for a word
+        // that **is** a keyword at its own boundary (task #396): the `)` of
+        // `for((…))` is region bytes, not the clause close, so the keyword rows
+        // below judge such a word and the glued-`)` row keeps every word the
+        // boundary rule does not read.
+        if separator_shape(w) || (w.ends_with(b")") && !list_opener(w)) {
             return Place::Command;
         }
         if opens(word, line, word_end) {

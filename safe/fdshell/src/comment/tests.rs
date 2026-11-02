@@ -889,26 +889,38 @@ fn a_span_opened_in_a_run_swallows_the_closer_behind_it() {
     }
 }
 
-/// A `(` glued to a word is **word data, not a substitution**: only `$(` raises the
-/// substitution depth, so the paren rides in the fragment and `keyword_delta`'s
-/// boundary test rejects the keyword-shaped word (`fi(`, `if(`) — the run scores
-/// `0`.
+/// A `(` glued to a word **ends the keyword word** (task #396, the one
+/// word-break set): `fi(` and `if(` are scored, `-1` and `+1` — bash reads both
+/// as keywords at its metacharacter boundary and only the grammar rejects them
+/// (`fi(x)` and `if(x)` are syntax errors, measured). The test keeps its name
+/// for the substitution arm it was built to kill; that arm's old kill is gone —
+/// with the boundary rule accepting the glued keyword, good and mutant builds
+/// agree on the first two rows, so they now pin the rule instead.
 ///
-/// Kills the substitution arm's second `&&` (`&&`→`||`), which degrades the test to
-/// "any byte glued to a `(`": the arm then fires on `i(` / `f(`, raises `depth` and,
-/// with `step = 2`, eats the `(` out of the fragment, leaving the bare keyword to
-/// score at the run's seed — measured `-1` for `fi(` and `+1` for `if(`. The last
-/// row is the control, not a kill: a real `$(` is taken identically in both builds
-/// (`0` either way) and its fragment `$(fi` is no keyword, so it documents the arm.
+/// The last row is the control the entry measured: a real `$(` raises the
+/// substitution depth and its fragment `$(fi` is no keyword (the word starts at
+/// the `$`), so the run scores `0`.
 #[test]
 fn a_glued_open_paren_is_word_data_not_a_substitution() {
     let glued_closer: &[u8] = b"fi(";
     let glued_opener: &[u8] = b"if(";
     let substitution: &[u8] = b"$(fi";
-    for (raw, what) in [
-        (glued_closer, "a closer glued to a `(` is no closer"),
-        (glued_opener, "an opener glued to a `(` is no opener"),
-        (substitution, "a real substitution's fragment is no keyword"),
+    for (raw, want, what) in [
+        (
+            glued_closer,
+            -1,
+            "a closer glued to a `(` is its keyword (task #396)",
+        ),
+        (
+            glued_opener,
+            1,
+            "an opener glued to a `(` is its keyword (task #396)",
+        ),
+        (
+            substitution,
+            0,
+            "a real substitution's fragment is no keyword",
+        ),
     ] {
         assert_eq!(
             depth_delta::depth_delta(
@@ -920,7 +932,7 @@ fn a_glued_open_paren_is_word_data_not_a_substitution() {
                 Place::Command,
                 &mut Pairing::new(),
             ),
-            0,
+            want,
             "{what}"
         );
     }

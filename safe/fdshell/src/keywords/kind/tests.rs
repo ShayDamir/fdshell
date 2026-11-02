@@ -102,8 +102,12 @@ fn non_keywords_and_the_time_prefix() {
     );
     // A bare `time` opens nothing of its own.
     assert_eq!(keyword_kind(b"time", b"time", 4), None);
-    // The glued arithmetic `for` is not a keyword word (task #396).
-    assert_eq!(keyword_kind(b"for((i=0", b"for((i=0;i<2;i++))", 8), None);
+    // The glued arithmetic `for` **is** a keyword word now (task #396): the `(`
+    // ends the keyword word on the one word-break set.
+    assert_eq!(
+        keyword_kind(b"for((i=0", b"for((i=0;i<2;i++))", 8),
+        Some(Keyword::Opens(Closer::Done))
+    );
     // The arithmetic `for` whose region has a group opener behind it is **no
     // keyword** either (task #394): the brace pair nets zero and the group branch
     // takes the construct. Without an opener the word keeps its `done` frame.

@@ -4,9 +4,11 @@ mod pair;
 mod pairing;
 mod position;
 mod quoted;
+mod reserved;
 mod wait;
 
 pub(crate) use quoted::quoted_word;
+pub(crate) use reserved::reserved_word;
 
 pub(crate) use function::{carries_region, definer_len, function_def_name, leading_ws, name_len};
 pub(crate) use kind::arith_for::{is_run_head, opens_a_block};

@@ -3,13 +3,14 @@
 //! ([`super::midrun::skip`]'s span start), so the two spans of the same keyword
 //! are seeded at the same byte.
 
+use crate::bytes::word_break;
 use crate::keywords::{Closer, Keyword, Place, keyword_kind};
 
 /// The length of the block-opening keyword at the start of `word`:
 /// `case`/`wait` (4), `if` (2), `for` (3), `while`/`until` (5), when the keyword
-/// ends at a word boundary (whitespace, `;`, or the end of the word — the
-/// boundary rule `keywords::keyword_delta` scores with, so the measured length
-/// and the scored keyword cannot drift).
+/// ends at a word boundary — the one word-break set
+/// ([`crate::bytes::word_break`]) that `keywords::keyword_delta` scores with,
+/// so the measured length and the scored keyword cannot drift (task #396).
 ///
 /// `None` for every other word: the group brace (the `{ …; }` group is owned by
 /// `segment/group.rs`, whose opener rule the scanner tests first), a closing
@@ -36,9 +37,7 @@ pub(super) fn opener_len(word: &[u8]) -> Option<usize> {
     } else {
         return None;
     };
-    word.get(len)
-        .is_none_or(|&b| b.is_ascii_whitespace() || b == b';')
-        .then_some(len)
+    word.get(len).is_none_or(|&b| word_break(b)).then_some(len)
 }
 
 /// The length of the `for` keyword: `for` is the one opener that owns a **word
@@ -66,11 +65,12 @@ pub(super) fn list_seed(kw_len: usize) -> Place {
 
 /// The [`Closer`] a block span scan is seeded with for the opener word
 /// `keyword` (task #309): the opener's own kind, read from the one recognition
-/// table [`keyword_kind`], so a `while` span pairs with `done` and an `if` span
-/// with `fi` and neither closes at a closer of the other kind. For a word the
-/// scorer does not read — the glued `for((…))` form (task #396), which
-/// [`opener_len`] measures while the scorer rejects it — the closer follows the
-/// opener [`opener_len`] measured: `case` → `esac`, `if` → `fi`,
+/// table [`keyword_kind`] — glued forms included, both granularities share the
+/// one boundary rule (task #396) — so a `while` span pairs with `done` and an
+/// `if` span with `fi` and neither closes at a closer of the other kind. For a
+/// word the scorer answers *no keyword* — the arithmetic `for` whose region has
+/// a group opener behind it (task #394) — the closer follows the opener
+/// [`opener_len`] measured: `case` → `esac`, `if` → `fi`,
 /// `for`/`while`/`until`/`wait` → `done`.
 pub(super) fn opener_closer(keyword: &[u8], line: &[u8], word_end: usize) -> Closer {
     if let Some(Keyword::Opens(closer)) = keyword_kind(keyword, line, word_end) {

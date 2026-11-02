@@ -10,19 +10,23 @@
 //! is word data.
 //!
 //! The rows are `keyword_delta`'s, verbatim: the [`quoted_word`] gate, the
-//! `time [-p]` prefix strip, the closer's `&|<>` boundary set (the glued
-//! `done>f` form, whose token-side twin is `parse::block_tail::is_closer`), the
-//! [`wait_opens_block`] disambiguation of the event-`wait` block from the POSIX
-//! builtin, and the group's `{`/`}` predicates from
-//! [`crate::segment::group::{opens, closes}`]. The rows that answer *no keyword*
-//! are load-bearing: the POSIX builtin `wait`, the glued `for((…))` opener (task
-//! #396), and the arithmetic `for` whose region has a group opener behind it
-//! (task #394, [`arith_for`]) — there the brace pair nets zero, so the word
+//! `time [-p]` prefix strip, the **one word-break set**
+//! ([`crate::bytes::word_break`], task #396) shared with the tokenizer's
+//! keyword split, the [`wait_opens_block`] disambiguation of the event-`wait`
+//! block from the POSIX builtin, and the group's `{`/`}` predicates from
+//! [`crate::segment::group::{opens, closes}`]. The glued `done>f` closer
+//! (whose token-side twin is `parse::block_tail::is_closer`) and the glued
+//! `for((…))` opener (whose token-side twin is
+//! `parse::token::step::keyword`) are answered by the one boundary rule. The
+//! rows that answer *no keyword* are load-bearing: the POSIX builtin `wait`,
+//! and the arithmetic `for` whose region has a group opener behind it (task
+//! #394, [`arith_for`]) — there the brace pair nets zero, so the word
 //! contributes no pairing frame and the group branch takes the whole construct.
 
 pub(crate) mod arith_for;
 
 use super::{quoted_word, time_prefix_len, wait_opens_block};
+use crate::bytes::word_break;
 use crate::segment::group::{closes, opens};
 
 /// The closer an open block requires: the type half of the opener/closer
@@ -46,20 +50,22 @@ pub(crate) enum Keyword {
     Closes(Closer),
 }
 
-/// Check that `word` ends at a token boundary at position `len`. Openers accept
-/// whitespace, `;` and the end of the word only; a **closer** also accepts the
-/// redirection operator bytes (`&|<>`), so `fi>f` closes the block and leaves
-/// the operator to `parse::block_tail`.
-fn boundary(word: &[u8], len: usize, extra: &[u8]) -> bool {
-    word.get(len)
-        .is_none_or(|&b| b.is_ascii_whitespace() || b == b';' || extra.contains(&b))
+/// Check that `word` ends at a token boundary at position `len`: the one word-break
+/// set ([`crate::bytes::word_break`]) — whitespace, `;`, and the metacharacters
+/// `|&<>()` — or the end of the word, so one rule serves openers and closers and
+/// agrees with the tokenizer's keyword split ([`crate::keywords::reserved`]).
+/// `fi>f` closes the block and leaves the operator to `parse::block_tail`;
+/// `for((…))`'s `(` ends the keyword word (task #396).
+fn boundary(word: &[u8], len: usize) -> bool {
+    word.get(len).is_none_or(|&b| word_break(b))
 }
 
 /// The block keyword a scored word is, `None` for a word that is no keyword:
 /// a quoted word ([`quoted_word`] — bash reads a quoted keyword as data), a
-/// prefix like `ifconfig`/`donec`, the POSIX builtin `wait`, the glued
-/// `for((…))` opener (task #396, not a keyword word for the scorer), and every
-/// ordinary word. A `time [-p]` word is a *prefix*, not a keyword of its own:
+/// prefix like `ifconfig`/`donec`, the POSIX builtin `wait`, and every
+/// ordinary word. A word glued to a metacharacter — the `for((…))` head
+/// (task #396) or the `done>f` closer — **is** scored, on the one boundary
+/// rule. A `time [-p]` word is a *prefix*, not a keyword of its own:
 /// the keyword behind it is scored on the rest of the word, which keeps such a
 /// statement one segment for the `time` parse hook.
 pub(crate) fn keyword_kind(word: &[u8], line: &[u8], word_end: usize) -> Option<Keyword> {
@@ -69,19 +75,19 @@ pub(crate) fn keyword_kind(word: &[u8], line: &[u8], word_end: usize) -> Option<
     if let Some(p) = time_prefix_len(word) {
         return keyword_kind(word.get(p..).unwrap_or(b""), line, word_end);
     }
-    if word.starts_with(b"case") && boundary(word, 4, b"") {
+    if word.starts_with(b"case") && boundary(word, 4) {
         return Some(Keyword::Opens(Closer::Esac));
     }
-    if word.starts_with(b"esac") && boundary(word, 4, b"&|<>") {
+    if word.starts_with(b"esac") && boundary(word, 4) {
         return Some(Keyword::Closes(Closer::Esac));
     }
-    if word.starts_with(b"if") && boundary(word, 2, b"") {
+    if word.starts_with(b"if") && boundary(word, 2) {
         return Some(Keyword::Opens(Closer::Fi));
     }
-    if word.starts_with(b"fi") && boundary(word, 2, b"&|<>") {
+    if word.starts_with(b"fi") && boundary(word, 2) {
         return Some(Keyword::Closes(Closer::Fi));
     }
-    if word.starts_with(b"for") && boundary(word, 3, b"") {
+    if word.starts_with(b"for") && boundary(word, 3) {
         // The arithmetic `for` whose region has a group opener behind it is
         // **no keyword** (task #394): the brace pair nets zero in every scorer, so
         // the word contributes no pairing frame and the group branch takes the
@@ -94,13 +100,13 @@ pub(crate) fn keyword_kind(word: &[u8], line: &[u8], word_end: usize) -> Option<
     // The event-`wait` opener and the POSIX builtin, one row: the builtin opens
     // no block, so it is **no keyword** (`keyword_delta` scored it `Some(0)`,
     // which every consumer reads as "no delta").
-    if word.starts_with(b"wait") && boundary(word, 4, b"") {
+    if word.starts_with(b"wait") && boundary(word, 4) {
         return wait_opens_block(line, word_end).then_some(Keyword::Opens(Closer::Done));
     }
-    if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5, b"") {
+    if (word.starts_with(b"while") || word.starts_with(b"until")) && boundary(word, 5) {
         return Some(Keyword::Opens(Closer::Done));
     }
-    if word.starts_with(b"done") && boundary(word, 4, b"&|<>") {
+    if word.starts_with(b"done") && boundary(word, 4) {
         return Some(Keyword::Closes(Closer::Done));
     }
     if opens(word, line, word_end) {

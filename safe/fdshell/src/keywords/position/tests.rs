@@ -102,9 +102,9 @@ fn in_moves_the_place_to_pattern() {
 /// A `for` in **command position** opens its own **word list**
 /// ([`Place::Words`], task #306): the opener, not `in`, is the word that tells
 /// the two list kinds apart. The row is command-position-only — in a `case`
-/// pattern list `for` is a pattern word, behind data it is an argument — and it
-/// reads the whole word, so a quoted `"for"`, a `forx`-shaped word and the
-/// arithmetic `for ((…))` (which reaches the row as one glued word) stay out.
+/// pattern list `for` is a pattern word, behind data it is an argument — and a
+/// quoted `"for"` and a `forx`-shaped word stay out; the glued arithmetic
+/// `for ((…))` joins it at the one boundary rule (task #396).
 #[test]
 fn a_for_in_command_position_opens_a_word_list() {
     assert_eq!(
@@ -132,14 +132,15 @@ fn a_for_in_command_position_opens_a_word_list() {
         Place::Data,
         "`foreish` is no keyword"
     );
-    // The arithmetic `for ((…))` reaches the row as the one glued word
-    // `for((…))`, so it opens no list place; the word's own trailing `)` is the
-    // `case`-clause-`)` row of [`glued_case_clause_close_moves_the_place_to_command`],
-    // which it keeps.
+    // The arithmetic `for ((…))` spelled glued ends its keyword word at the
+    // `(` — the one boundary rule (task #396) — so the word **does** take the
+    // `list_opener` row. The trailing-`)` glued-case-clause row keeps every
+    // word the boundary rule does not read (see
+    // [`glued_case_clause_close_moves_the_place_to_command`]).
     assert_eq!(
         after_word(b"for((i=0;i<2;i++))", Place::Command),
-        Place::Command,
-        "the arithmetic `for ((…))` opens no list place"
+        Place::Words,
+        "the glued arithmetic `for ((…))` opens the list place (task #396)"
     );
 }
 
@@ -281,13 +282,28 @@ fn the_clause_keyword_set_is_one_set_with_after() {
         b"elifx",
         b"time then",
         b"forx",
-        b"for((i=0;i<2;i++))",
     ] {
         assert!(!body_keyword(word), "{word:?} is no body keyword");
         assert!(!clause_keyword(word), "{word:?} is no clause keyword");
         assert!(!list_keyword(word), "{word:?} is no word-list keyword");
         assert!(!list_opener(word), "{word:?} opens no list-owning block");
     }
+    // The glued arithmetic `for ((…))` (task #396): the word is read by the
+    // boundary-reading `list_opener` row and by no other of the four.
+    let glued = b"for((i=0;i<2;i++))";
+    assert!(!body_keyword(glued), "the glued head is no body keyword");
+    assert!(
+        !clause_keyword(glued),
+        "the glued head is no clause keyword"
+    );
+    assert!(
+        !list_keyword(glued),
+        "the glued head is no word-list keyword"
+    );
+    assert!(
+        list_opener(glued),
+        "the glued head opens the list (task #396)"
+    );
 }
 
 /// The glued cond pair is *two* word starts (task #236's S2): the byte-level
@@ -622,14 +638,22 @@ fn non_keyword_words_never_score() {
         b"true",
         b"ifconfig",
         b"donec",
-        b"fi)",
-        b"esac)",
     ] {
         assert!(
             !scores_word(word, Place::Command),
             "{word:?} is not a block keyword"
         );
     }
+    // The glued closers **are** read on the one boundary rule (task #396):
+    // `fi)` and `esac)` score as their closers — bash's tokenizer ends those
+    // words at the `)` and its grammar then rejects the line (measured rc 2;
+    // the repo convention is the rc-1 parse error, pinned in
+    // `tests/block_closers.rs`).
+    assert!(scores_word(b"fi)", Place::Command), "`fi)` is its closer");
+    assert!(
+        scores_word(b"esac)", Place::Command),
+        "`esac)` is its closer"
+    );
 }
 
 /// A `wait` scores only as the event-case block opener (a pattern keyword

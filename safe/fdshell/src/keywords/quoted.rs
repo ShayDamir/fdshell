@@ -1,6 +1,6 @@
 //! The quoted-word rule of keyword recognition (task #141).
 
-use crate::bytes::{QUOTE, SQUOTE};
+use crate::bytes::{QUOTE, SQUOTE, word_break};
 
 /// A word written with quote bytes is data, never a keyword: `"fi"`, `'done'`,
 /// `"{"` are words (POSIX §2.9.1 recognizes only unquoted keyword tokens, and
@@ -16,7 +16,7 @@ pub(crate) fn quoted_word(line: &[u8], word_end: usize) -> bool {
     let mut quoted = false;
     while i > 0 {
         match line.get(i - 1).copied() {
-            Some(b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'<' | b'>' | b'(' | b')') => break,
+            Some(b) if word_break(b) => break,
             Some(b) => quoted |= b == QUOTE || b == SQUOTE,
             None => break,
         }
