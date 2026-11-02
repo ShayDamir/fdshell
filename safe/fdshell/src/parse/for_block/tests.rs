@@ -100,6 +100,54 @@ fn a_semicolon_before_do_is_optional() {
     );
 }
 
+/// The gap in front of the body keyword is **at most one `;` and then any run of
+/// newlines** (task #400), measured against bash 5.3.9: `)) ;` + newline + `do`,
+/// a double newline, `;` + two newlines, and the same run in front of task
+/// #394's `{ …; }` body — bash runs every one of them. The byte test is the whole
+/// rule: the tokenizer folds a `;` byte and a newline into one `;` token, so only
+/// the raw byte tells them apart. The shapes that break the run are pinned below.
+#[test]
+fn a_run_of_terminators_before_the_body_keyword_is_accepted() {
+    for line in [
+        b"for ((i=0;i<2;i++)) ;\ndo echo a; done".as_slice(),
+        b"for ((i=0;i<2;i++))\n\ndo echo a; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n\ndo echo a; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n{ echo a; }".as_slice(),
+        b"for ((i=0;i<2;i++))\n\n{ echo a; }".as_slice(),
+    ] {
+        assert_eq!(arith_for(line).body.data, c"echo a".into(), "{line:?}");
+    }
+}
+
+/// Every gap shape bash rejects (rc 2) stays a parse error here (rc 1, the
+/// repo-wide convention), measured: a `;` **behind** a newline — bash gives the
+/// tail one terminator slot and absorbs newlines only behind it — a second `;`
+/// (`; ;`, the glued `;;`), the `&` family, and the quote/escape spellings that
+/// the span gate keeps out of the run (LESSONS: "A separator-shaped word needs
+/// the span gate").
+#[test]
+fn a_gap_that_breaks_the_run_stays_a_parse_error() {
+    for line in [
+        b"for ((i=0;i<2;i++))\n; do :; done".as_slice(),
+        b"for ((i=0;i<2;i++))\n\n; do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n; do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ; ; do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ;; do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) & do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ;& do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) &\ndo :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) \";\" do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) \\; do :; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ; ; { echo a; }".as_slice(),
+        b"for ((i=0;i<2;i++))\n; { echo a; }".as_slice(),
+        // The run may exhaust the statement: the walk asks for one token past
+        // the last newline and gets nothing, and the keyword gate answers.
+        b"for ((i=0;i<2;i++)) ;\n".as_slice(),
+    ] {
+        assert_eq!(parse_err(line), "expected 'do'", "{line:?}");
+    }
+}
+
 /// A clause written empty is `None`: bash runs `for ((;;))` as the
 /// empty-init/true-cond/no-step loop, spaced spelling included.
 #[test]

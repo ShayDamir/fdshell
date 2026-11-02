@@ -30,9 +30,11 @@ pub(super) fn tail_body(
         .skip_while(|(_, start, _, _, _, _)| *start < region_end)
         .cloned()
         .collect();
-    // Between `))` and `do` stands at most one `;` token: `)) do`, `)) ; do`,
-    // `))\ndo`, `))do`. `)) ; ; do` and `)) ;; do` are bash's rc-2 pair.
-    let gap = usize::from(tail.first().is_some_and(|tok| span_word(tok, b";")));
+    // Between the region and the body keyword (the `do`, or the `{` of a group
+    // body) stands at most one `;` token and then any run of newlines: `)) do`,
+    // `)) ; do`, `))\ndo`, `))do`, `))\n\ndo`, `)) ;\ndo`. `)) ; ; do` and
+    // `)) ;; do` are bash's rc-2 pair.
+    let gap = gap_len(&tail, line);
     let tail = tail.get(gap..).unwrap_or(&[]);
     // The **brace body** (task #394): bash's `for_action` ends with a compound
     // list, so a group opener standing behind the region is the loop's body. The
@@ -79,4 +81,32 @@ pub(super) fn tail_body(
     // Statement-relative offsets, the statement's own `ScriptText`: a body
     // heredoc's region offsets are read from this text.
     part_text(text, body).map(|body| (body, redirects))
+}
+
+/// The gap in front of the body keyword: **at most one** real `;` byte, then
+/// any run of newlines. Bash's grammar gives this tail one
+/// `simple_list_terminator` slot and absorbs the newlines behind it
+/// (`)) ;\ndo`, `))\n\ndo`), while a `;` behind a newline, a second `;`
+/// (`; ;`, `;;`) and a `&` stay parse errors — bash's rc-2 family, measured.
+fn gap_len(tail: &[Token], line: &[u8]) -> usize {
+    let mut run = 0;
+    if separator_byte(tail, line, run, b';') {
+        run += 1;
+    }
+    while separator_byte(tail, line, run, b'\n') {
+        run += 1;
+    }
+    run
+}
+
+/// The `;` token at `idx` of `tail` is the separator byte `byte` in `line`: the
+/// tokenizer folds a `;` and a newline into one `;` token
+/// (`parse/token/step/sep.rs`), so only the raw byte tells them apart — the
+/// test `semi/preceded.rs::amp_semi` reads for the same pair. The [`span_word`]
+/// gate keeps a quoted `";"` word (and an escaped `\;`) out of the run.
+fn separator_byte(tail: &[Token], line: &[u8], idx: usize, byte: u8) -> bool {
+    let Some(tok @ (_t, start, _, _, _, _)) = tail.get(idx) else {
+        return false;
+    };
+    span_word(tok, b";") && line.get(*start) == Some(&byte)
 }

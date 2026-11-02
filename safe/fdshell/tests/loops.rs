@@ -1805,6 +1805,24 @@ fn c_style_for_in_a_group_with_a_redirect() {
     assert_eq!((out.as_str(), rc), ("2\n", 0), "{err}");
 }
 
+/// The gap between the region and the body keyword is a **run** of list
+/// terminators: at most one real `;` byte, then any run of newlines (task
+/// **#400**). Every row measured against `bash -c` (5.3.9) — bash runs them all
+/// at rc 0, and so does fdshell. The `{ …; }` row is task **#394**'s body shape
+/// behind the same run: one rule answers both bodies.
+#[test]
+fn c_style_for_a_terminator_run_before_the_body_matches_bash() {
+    for (script, want) in [
+        ("for ((i=0;i<2;i++)) ;\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++))\n\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n{ echo a; }", "a\na\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
 /// Everything bash rejects, fdshell rejects too (bash rc 2, fdshell rc 1 — the
 /// repo-wide parse-error convention): a clause count that is not three, a word
 /// between `))` and `do`, a redirection there, the `;;`/`; ;` spellings, a pipe,
@@ -1825,6 +1843,11 @@ fn c_style_for_rejects_bash_rejects() {
         "for ((i=0;i<2;i++)) ; ; do :; done",
         "for ((i=0;i<2;i++)) | cat",
         "for ((i=0;i<2;i++)); do; done",
+        "for ((i=0;i<2;i++))\n; do :; done",
+        "for ((i=0;i<2;i++))\n\n; do :; done",
+        "for ((i=0;i<2;i++)) ;\n; do :; done",
+        "for ((i=0;i<2;i++)) & do :; done",
+        "for ((i=0;i<2;i++)) ;& do :; done",
     ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
