@@ -5,6 +5,7 @@ mod ast;
 mod binop;
 mod eval;
 mod expand;
+mod expand_brace;
 mod expr;
 mod lex;
 mod lex_name;

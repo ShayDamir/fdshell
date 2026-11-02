@@ -38,8 +38,9 @@ pub(super) fn lex_dollar(
             Ok(j)
         }
         // `$` before a digit, `)`, or any other byte is a syntax error in v1
-        // (no positional parameters or `${…}` inside arithmetic). `$(…)` is
-        // expanded before lexing by the `expand` pass, so it never reaches here.
+        // (no positional parameters inside arithmetic — task #517). `$(…)`,
+        // nested `$((…))` and `${…}` are expanded before lexing by the
+        // `expand` pass, so they never reach here.
         _ => bail!(ResolveError::ArithSyntax),
     }
 }

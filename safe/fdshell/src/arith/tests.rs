@@ -673,12 +673,118 @@ fn arith_nested_depth_cap() {
 fn arith_var_value_cmd_subst_not_expanded() {
     // A variable's value is re-evaluated unexpanded, so `$(…)` in it is a
     // syntax error relabeled "not an integer" (not a command substitution).
+    // bash expands values in arithmetic context (it reports the `${n}` row's
+    // parse failure at rc 1 with its own message), but fdshell's rule stands:
+    // the pre-expansion pass runs on the body, not on spliced values (task #397).
     let c = cell();
     set_var(&c, c"x", c"$(echo 3)");
     assert!(matches!(
         eval_err(&c, "x").current_context(),
         ResolveError::ArithNotInteger { .. }
     ));
+    set_var(&c, c"y", c"${n}");
+    assert!(matches!(
+        eval_err(&c, "y").current_context(),
+        ResolveError::ArithNotInteger { .. }
+    ));
+}
+
+#[test]
+fn arith_brace_region_spliced_in_body() {
+    // A `${…}` region joins the pre-expansion pass: the closed region is
+    // rebuilt as the tokenizer's word and run through the word path's non-split
+    // substitution entry (bash 5.3.9 rows measured 2026-11-02: 2, 20, 1).
+    let c = cell();
+    set_var(&c, c"n", c"2");
+    assert_eq!(eval(&c, "${n}"), 2);
+    assert_eq!(eval(&c, "${n} * 10"), 20);
+    assert_eq!(eval(&c, "i<${n:-2}"), 1);
+}
+
+#[test]
+fn arith_brace_operator_forms_match_bash() {
+    // The param-op arms live behind the substitution entry, so the braced
+    // forms answer bash's rows (measured 5.3.9: 1, 0, 1, 3 — the `${n#a}` row
+    // strips the matching `a` from `ab`, and the bare name `b` reads 0). The
+    // last row nests a `$(…)` inside the region, which the word pass owns
+    // (#174 is the mirror direction).
+    let c = cell();
+    set_var(&c, c"n", c"2");
+    assert_eq!(eval(&c, "${#n}"), 1);
+    set_var(&c, c"n", c"ab");
+    assert_eq!(eval(&c, "${n#a}"), 0);
+    set_var(&c, c"m", c"x1");
+    assert_eq!(eval(&c, "${m#x}"), 1);
+    set_var(&c, c"n", c"2");
+    assert_eq!(eval(&c, "${n:-$(echo 3)} + ${#n}"), 3);
+}
+
+#[test]
+fn arith_percent_arm_inside_region_inherited() {
+    // A `%` byte in region content reaches the word path's shellfd arm —
+    // pre-existing word-path semantics this reuse inherits (task #397's risk
+    // list). The default is not taken, so the arm never runs and the row is
+    // bash parity (measured 5.3.9: 5).
+    let c = cell();
+    set_var(&c, c"x", c"5");
+    assert_eq!(eval(&c, "${x:-%data}"), 5);
+}
+
+#[test]
+fn arith_brace_unclosed_region_stays_literal() {
+    // An unclosed region takes the byte-at-a-time fallback: the `$` is copied
+    // and the region stays literal text for the lexer (the word-level parse of
+    // the full `$(( ${n:-2 ))` spelling differs from bash's, so the pin lives
+    // at the eval level). bash closes the word and reports `bad
+    // substitution` at rc 1 (measured 5.3.9); fdshell reaches its own syntax
+    // error at the same rc.
+    let c = cell();
+    set_var(&c, c"n", c"2");
+    assert!(matches!(
+        eval_err(&c, "${n:-2 ").current_context(),
+        ResolveError::ArithSyntax
+    ));
+}
+
+#[test]
+fn arith_brace_unset_var_splices_empty() {
+    // An unset variable in a region splices to empty, landing on the pinned
+    // empty-body answer. bash's empty-expression rule answers `0` at rc 0
+    // (measured) — the README divergence line covers the difference.
+    assert!(matches!(
+        eval_err(&cell(), "${x}").current_context(),
+        ResolveError::ArithSyntax
+    ));
+}
+
+#[test]
+fn arith_brace_quote_marker_in_region() {
+    // A quote inside a region is a marker the scanner strips, so the spliced
+    // text is ` a b  + 0 ` and both shells fail the parse (bash: its arithmetic
+    // syntax error at rc 1, measured 5.3.9; fdshell: the same answer, its own
+    // message). The mask-fidelity risk stays invisible here: nothing in the
+    // content matches a pattern or nests `$@`.
+    assert!(matches!(
+        eval_err(&cell(), r#"${x:-"a b"} + 0 "#).current_context(),
+        ResolveError::ArithSyntax
+    ));
+}
+
+#[test]
+fn arith_bare_positional_forms_stay_syntax_errors() {
+    // The v1 decision (task #397, implementation task #517): a bare `$1`/`$*`
+    // in an arithmetic body stays a syntax error even though the word path
+    // resolves both — bash expands them (measured: `$1` with `set -- 3 4` is
+    // `3`). The braced `${1}` parity lives in `tests/arith.rs`.
+    for body in ["$1", "$*"] {
+        assert!(
+            matches!(
+                eval_err(&cell(), body).current_context(),
+                ResolveError::ArithSyntax
+            ),
+            "{body:?} should stay a syntax error"
+        );
+    }
 }
 
 // --- assignment ---

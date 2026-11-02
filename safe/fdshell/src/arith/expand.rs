@@ -1,21 +1,26 @@
-//! Pre-expansion of `$(…)` and nested `$((…))` inside a `$((…))` body.
+//! Pre-expansion of `$(…)`, nested `$((…))` and `${…}` regions inside a
+//! `$((…))` body.
 //!
 //! The raw body bytes are walked once and each substitution is spliced in
 //! place with its result, so the remainder is a single arithmetic expression
 //! the lex/parse/eval pipeline can consume (bash's model: expand first, then
-//! evaluate the resulting string).
+//! evaluate the resulting string). A `${…}` region is handed to the word path's
+//! non-split substitution entry, which owns param-ops, positionals and nesting
+//! inside the region.
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail, ensure};
 use sys::fork_cell::ForkCell;
 
+use crate::arith::expand_brace::splice_brace;
 use crate::error::resolve::ResolveError;
 use crate::paren_scan::scan_at;
 use crate::state::ShellState;
 
-/// Expand `$(…)` command substitutions and nested `$((…))` in a `$((…))` body,
-/// splicing each result in place. All other bytes (including other `$` forms,
-/// which stay arithmetic syntax errors) are copied verbatim.
+/// Expand `$(…)` command substitutions, nested `$((…))` and `${…}` parameter
+/// expansions in a `$((…))` body, splicing each result in place. All other
+/// bytes (including the other `$` forms, which stay arithmetic syntax errors)
+/// are copied verbatim.
 pub(super) fn expand_body(
     body: &[u8],
     cell: &ForkCell<ShellState>,
@@ -26,6 +31,10 @@ pub(super) fn expand_body(
         i += 1;
         if c == b'$' && body.get(i) == Some(&b'(') {
             i = splice_dollar_paren(body, i, cell, &mut out)?;
+            continue;
+        }
+        if c == b'$' && body.get(i) == Some(&b'{') {
+            i = splice_brace(body, i - 1, cell, &mut out)?;
             continue;
         }
         out.push(c);

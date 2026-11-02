@@ -242,6 +242,65 @@ fn arith_cmd_subst_in_quoted_word() {
     assert_eq!(str::from_utf8(&output.stdout).unwrap().trim(), "2");
 }
 
+/// A `${…}` region joins the in-body substitution pass (task #397): the region
+/// is rebuilt as the tokenizer's word and run through the word path's non-split
+/// substitution entry, so the braced forms — plain, default, strip, length, and
+/// a nested `$(…)` inside the region — answer bash's rows on every surface that
+/// enters through `arith::eval`: `$((…))`, the `((…))` command and `let` (bash
+/// 5.3.9 measured 2026-11-02; the arithmetic-`for` shape is pinned in
+/// `tests/loops.rs`). `${1}` is bash parity for free: the braced region
+/// resolves positionals on the word path.
+#[test]
+fn arith_brace_region_matches_bash_on_every_surface() {
+    for (script, want) in [
+        ("n=2; echo $(( ${n} ))", "2"),
+        ("n=2; echo $(( ${n} * 10 ))", "20"),
+        ("n=2; echo $(( i<${n:-2} ))", "1"),
+        ("n=2; (( i<${n:-2} )); echo rc=$?", "rc=0"),
+        ("n=2; let \"i<${n:-2}\"; echo rc=$?", "rc=0"),
+        ("n=2; echo $(( ${#n} ))", "1"),
+        ("n=ab; echo $(( ${n#a} ))", "0"),
+        ("n=2; echo $(( ${n:-$(echo 3)} + ${#n} ))", "3"),
+        ("set -- 3 4; echo $(( ${1} ))", "3"),
+    ] {
+        let out = run(script);
+        assert!(
+            out.status.success(),
+            "{script}: stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+        assert_eq!(
+            str::from_utf8(&out.stdout).unwrap().trim(),
+            want,
+            "{script}"
+        );
+    }
+}
+
+/// Pinned divergences of the same rule (the task #397 decision, implementation
+/// task #517): a bare `$1` in an arithmetic body stays a syntax error even
+/// though the word path resolves it (bash expands it — `3` measured), and an
+/// unset variable in a region splices to empty, landing on fdshell's own
+/// empty-expression answer where bash's rule prints `0` at rc 0 (measured).
+#[test]
+fn arith_brace_pinned_divergences() {
+    let out = run("set -- 3 4; echo $(( $1 ))");
+    let stderr = str::from_utf8(&out.stderr).unwrap();
+    assert!(
+        stderr.contains("arithmetic expression has a syntax error"),
+        "stderr={stderr}"
+    );
+    assert_eq!(out.status.code(), Some(1));
+
+    let out = run("echo $(( ${x} ))");
+    let stderr = str::from_utf8(&out.stderr).unwrap();
+    assert!(
+        stderr.contains("arithmetic expression has a syntax error"),
+        "stderr={stderr}"
+    );
+    assert_eq!(out.status.code(), Some(1));
+}
+
 /// Division by zero is a clean error that fails the command.
 #[test]
 fn arith_division_by_zero_fails_command() {

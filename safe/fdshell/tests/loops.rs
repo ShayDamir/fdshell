@@ -1991,18 +1991,16 @@ fn c_style_for_under_errexit_exits_the_shell() {
     assert_eq!((out.as_str(), rc), ("", 1), "{err}");
 }
 
-/// A `${…}` expansion inside a clause is the pre-existing arithmetic gap of task
-/// **#397** (`arith` expands only `$(…)` and `$((…))` in a clause, so a braced
-/// expansion is a syntax error on **every** arithmetic surface — the `((expr))`
-/// command and `$((…))` fail identically). bash runs the loop on `${n:-2}`.
+/// A `${…}` expansion inside a clause is spliced by the arithmetic
+/// pre-expansion pass (task **#397** landed: a closed region is rebuilt as the
+/// tokenizer's word and run through the word path's non-split substitution
+/// entry, with `region_scan/brace.rs` as the shared scanner), so every
+/// arithmetic surface — the `((expr))` command, `$((…))`, `let` and this loop —
+/// answers bash: the loop runs `0 1` rc 0 (measured 2026-11-02).
 #[test]
-fn c_style_for_braced_expansion_in_a_clause_is_the_arith_gap() {
+fn c_style_for_a_braced_expansion_in_a_clause_matches_bash() {
     let (out, err, rc) = run("n=2; for ((i=0;i<${n:-2};i++)); do echo $i; done");
-    assert_eq!((out.as_str(), rc), ("", 1), "task #397: bash prints 0 1");
-    assert!(
-        err.contains("arithmetic expression has a syntax error"),
-        "task #397: {err}"
-    );
+    assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{err}");
 }
 
 /// Task **#306**: a `for` **word list** is read as words, so a keyword-shaped
