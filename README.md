@@ -1174,8 +1174,9 @@ it). The init runs once, the condition before every body, the step after it; a
 clause written empty is a no-op and an **empty condition is true**, so
 `for ((;;))` runs until its body `break`s out. The loop's status is the body's
 last command, and `0` when the body never ran. `do` is required: the region is
-followed by at most one `;` and the keyword `do` (`)) do`, `)) ; do`, `))`+
-newline, and the glued `))do`), and the body is the usual `do … done` block — a
+followed by at most one real `;`, then any run of newlines, then the keyword
+`do` (`)) do`, `)) ; do`, `))`+ newline, `))`+ two newlines, `)) ;`+ newline,
+and the glued `))do`), and the body is the usual `do … done` block — a
 here-doc inside it is re-read once per iteration. The region is read as raw
 bytes, so `;`, `|`, `<<`, a quote and a newline inside it are data:
 `for ((i=0;i<$(echo 3);i++))` has three clauses, and the `<<` of `1<<2` claims no
@@ -1188,8 +1189,9 @@ Behind the region stands `do` — or the `{` of a **group body** (task #394:
 bash's `for_action` ends with a compound list), so
 `for ((i=0;i<2;i++)) { echo $i; }` runs the group as the loop's body. The group's own
 rules are then the body's: its `;`-before-`}` terminator, its emptiness rule, its
-trailing redirections, and the one `;` the tail rule allows between the region and the
-body (`)) ; { …; }` and `)); { …; }` both run). Shapes that stay open: a
+trailing redirections, and the gap the tail rule allows before the opener — one
+real `;`, then any run of newlines (`)) ; { …; }` and `)); { …; }` both run, and
+so do `)) ;`+ newline + `{ …; }` and `))`+ two newlines + `{ …; }`). Shapes that stay open: a
 word that is **not** a keyword word keeps its whole word — bash's
 general break, the open work of tasks #316/#470/#422/#499. A step spaced as `i ++` is **parity**, not an open shape (task
 #395): whitespace never separates an operand from its `++`/`--`, so
@@ -1197,7 +1199,8 @@ general break, the open work of tasks #316/#470/#422/#499. A step spaced as `i +
 `tests/loops.rs::c_style_for_a_spaced_step_matches_bash`. A clause count that is
 not three (`for ((i=0))`, `for ((i=0;i<2;i++;))`) and any word between `))` and
 `do` (`))x`, `)) 2>/dev/null`, `)) ;;`) are parse errors, as they are in bash (rc
-2 there, rc 1 here). A pipe behind
+2 there, rc 1 here) — so is a gap that breaks the rule: a second `;` (`; ;`), a
+`;` written **after** a newline, and the `&` family (`&`, `;&`). A pipe behind
 the body, the loop behind a pipe, a here-doc in the body and a trailing `&` are the
 **group layer's** pinned divergences for those positions (#186/#190, #188/#192), which
 the brace body inherits unchanged: bash runs them, fdshell reports the group's error.

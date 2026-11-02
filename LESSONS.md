@@ -538,9 +538,27 @@ rejects (`((i=0))`, `((i=0;))`, `((i=0;i<2;i++;))`) stay parse errors — a
 region that runs forever is the hang this shape invites.
 
 The `do … done` tail **is** token-level, and the two layers join by byte
-offset: take the tokens starting at or past the region's end, drop at most one
-leading `;` token, require `keyword_word(…, b"do")`. Two offset details are
-load-bearing. (1) The region end is the byte after **both** closing parens,
+offset: take the tokens starting at or past the region's end, drop the **gap** —
+at most one real `;` byte, then any run of newline tokens — and require
+`keyword_word(…, b"do")` (task #400: bash gives this tail one
+`simple_list_terminator` slot and absorbs newlines **behind** it, so `)) ;\ndo`,
+`))\n\ndo`, `)) ;\n\ndo` and the gap's two `{ …; }` twins run — measured, rc 0).
+The raw byte is the whole rule, exactly as on the clause cut above: the tokenizer
+folds a `;` byte and a newline into one `;` token, so without the byte test a `;`
+run and a newline run collapse into one set and bash's rejections are lost —
+`; ;`, `;;`, a `;` **behind** a newline, and the `&` that `is_list_terminator`
+counts stay parse errors (bash rc 2, measured). The rule is this tail's own — the
+word-form `for`, `while` and `if` are looser than bash at the same spot — and the
+same gap stands in front of the `{` of task #394's group body, which is the rule
+decided once, as #394 asked. Pin both sides:
+`parse/for_block/tests.rs::a_run_of_terminators_before_the_body_keyword_is_accepted`,
+`parse/for_block/tests.rs::a_gap_that_breaks_the_run_stays_a_parse_error`,
+`safe/fdshell/tests/loops.rs::c_style_for_a_terminator_run_before_the_body_matches_bash`.
+Swapping the gap walk's two byte constants (the `;` slot and the newline run)
+looks like an equivalent mutation and is not — measured on the branch: it loses
+`))\n\ndo` and the pins above kill it, as they kill a byte test dropped entirely
+(which folds `;` and a newline into one set and accepts `; ;`, `;;` and
+newline-then-`;`). Two offset details are load-bearing. (1) The region end is the byte after **both** closing parens,
 not after the first: the tokenizer emits a `;` token *for the closing-paren
 byte*, so ending after the first paren would leave `)) ; do` with two leading
 `;` tokens (and reject bash's accepted spelling), while ending after both
