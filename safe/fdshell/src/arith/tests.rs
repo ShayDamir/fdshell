@@ -875,7 +875,8 @@ fn arith_inc_of_non_variable_is_evaluated() {
 #[test]
 fn arith_inc_needs_a_name_neighbor() {
     // A spaced prefix (`++ x`) and a spaced postfix (`x ++`) are both the
-    // increment token; `1--1`/`1++1` are two separate `-`/`+` tokens.
+    // increment token; `1--1`/`1++1` are two separate `-`/`+` tokens. The
+    // spaced decrement pair is the same rule, so both spellings write back.
     let c = cell();
     set_var(&c, c"x", c"3");
     assert_eq!(eval(&c, "++ x"), 4);
@@ -883,6 +884,14 @@ fn arith_inc_needs_a_name_neighbor() {
     set_var(&d, c"x", c"3");
     assert_eq!(eval(&d, "x ++"), 3);
     assert_eq!(var_bytes(&d, c"x"), b"4");
+    let g = cell();
+    set_var(&g, c"x", c"3");
+    assert_eq!(eval(&g, "x --"), 3);
+    assert_eq!(var_bytes(&g, c"x"), b"2");
+    let h = cell();
+    set_var(&h, c"x", c"3");
+    assert_eq!(eval(&h, "-- x"), 2);
+    assert_eq!(var_bytes(&h, c"x"), b"2");
     assert_eq!(eval(&cell(), "1--1"), 2);
     assert_eq!(eval(&cell(), "1++1"), 2);
     let e = cell();

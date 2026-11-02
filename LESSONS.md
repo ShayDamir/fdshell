@@ -602,12 +602,22 @@ pipe behind the body (`unexpected pipe`), the loop behind a pipe (`group is miss
 closing brace`), a here-doc in the body, a trailing `&` — bash runs all four, fdshell
 reports the group's own error, pinned in `safe/fdshell/tests/loops.rs`.
 
-Filed, measured, do not re-open blind: **#395** the spaced step `i ++` (no side effect → the loop
-hangs; never test it looping), **#396** the glued `for((…))` (not a keyword
-word, so `do`/`done` run as commands), **#397** a `${…}` inside a clause
-(`arith/expand.rs` splices only `$(…)`/`$((…))`, so the `((expr))` command and
-`$((…))` fail identically), and the redirect-after-the-closer family **#298**,
-since closed by `parse/block_tail.rs`.
+Filed, measured, do not re-open blind: **#395** the spaced step `i ++` is
+**parity** on both spellings (`i ++`/`++ i`, `i --`/`-- i`), pinned by
+`safe/fdshell/tests/loops.rs::c_style_for_a_spaced_step_matches_bash` and by
+`safe/fdshell/tests/arith.rs::arith_spaced_increment_spellings_match_bash`; what
+it measured is the **fork-boundary** rule, shared by the glued and the spaced
+form and pinned by
+`safe/fdshell/tests/arith.rs::arith_increment_side_effect_stays_in_the_command`.
+Mechanism: the lexer joins an operand to its `++`/`--` from the token stream
+(postfix) and by whitespace-skipping lookahead (prefix), so whitespace cannot
+separate the pair; only the same-command observation separates a parse claim
+from the fork deviation, and it shows glued and spaced agree. **#396** the glued
+`for((…))` (not a keyword word, so `do`/`done` run as commands), **#397** a
+`${…}` inside a clause (`arith/expand.rs` splices only `$(…)`/`$((…))`, so the
+`((expr))` command and `$((…))` fail identically), and the
+redirect-after-the-closer family **#298**, since closed by
+`parse/block_tail.rs`.
 
 ## `next_boundary`'s `run_start` reset is load-bearing for block text: word state, and (since #234) the region anchor
 The `;`/`\n` `run_start` reset in `cond/boundary.rs::next_boundary` is load-bearing **for block text** in two ways. (1) It clears `word_active`, so a closer written at the start of a physical line is scored (`state.at_word_start()`), and it anchors the group-opener rule (`group_at_run`: a brace opens a group only at a run start). Forgetting the reset swallows a block's trailing operator into its text. (2) Task #234 replaced the `heredoc::skip` window with a region walk anchored at the **physical line start** of the run (`cond/boundary/body.rs::regions` → `line_bodies_for_line`), which is what makes the pinned `tests/heredoc.rs::block_heredoc_cond_run_and_and_in_body_splits_part` split survive: block text (`if … fi`) travels whole through `run_cond_list` with its condition bodies inside the span, so a `;`-terminated `<<` in a block condition (`if cat <<X; then`) has its bodies on the block text's following lines. Before #234 that was only visible through the run window — with it, the region scan always sees the `<<` of the physical line and walks the body region: its top-level `&&` splits the part (rc 1 `missing 'fi'`, bash rc 2), while every other region byte stays opaque. Top-level statement segments are not affected by either mechanism, because their part text is a subslice of the command bytes only — the body regions travel separately as `run_cond_list`'s `bodies` (Task #79) — so `next_boundary` never sees a `;`-terminated `<<` run with a body at top level; the killing case is the block wrapper. The split pins are `block_heredoc_cond_run_and_and_in_body_splits_part` and `block_body_heredoc_delimiter_line_operator_is_region_data` in `safe/fdshell/tests/heredoc.rs`; the top-level window semantics are covered by `heredoc_after_semicolon_word_drives_boundary_skip` and `heredoc_attached_operator_before_semicolon_is_not_a_delimiter`, which the region anchor keeps green unchanged.

@@ -380,6 +380,43 @@ fn arith_increment_in_loop() {
     assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "1\n2\n3");
 }
 
+/// A `++`/`--` spaced away from its operand is still the increment token, so the
+/// four spaced spellings do their side effect exactly like the glued ones on all
+/// three surfaces (`$((…))`, `((…))`, `let`) — bash parity, measured 5.3.9. The
+/// lexer joins the operand and the operator across whitespace on both sides: the
+/// postfix reads the token stream, the prefix uses a whitespace-skipping
+/// lookahead. Every row's value is distinct, so a mutant moving one row cannot
+/// hide behind another.
+#[test]
+fn arith_spaced_increment_spellings_match_bash() {
+    for (script, want) in [
+        ("i=1; echo $((i ++)) $i", "1 2"),
+        ("i=3; echo $((++ i)) $i", "4 4"),
+        ("i=2; echo $((i --)) $i", "2 1"),
+        ("i=0; echo $((-- i)) $i", "-1 -1"),
+        ("i=5; ((i ++)); echo \"$? $i\"", "0 6"),
+        ("i=6; ((++ i)); echo \"$? $i\"", "0 7"),
+        ("i=0; ((i --)); echo \"$? $i\"", "1 -1"),
+        ("i=-1; ((-- i)); echo \"$? $i\"", "0 -2"),
+        ("i=8; let \"i ++\"; echo \"$? $i\"", "0 9"),
+        ("i=9; let \"++ i\"; echo \"$? $i\"", "0 10"),
+        ("i=1; let \"i --\"; echo \"$? $i\"", "0 0"),
+        ("i=0; let \"-- i\"; echo \"$? $i\"", "0 -1"),
+    ] {
+        let out = run(script);
+        assert!(
+            out.status.success(),
+            "{script}: stderr={}",
+            str::from_utf8(&out.stderr).unwrap()
+        );
+        assert_eq!(
+            str::from_utf8(&out.stdout).unwrap().trim(),
+            want,
+            "{script}"
+        );
+    }
+}
+
 /// A `++`/`--` with no operand, or a number glued after a postfix, is a clean
 /// syntax error that fails the command.
 #[test]
@@ -398,11 +435,21 @@ fn arith_malformed_increment_is_syntax_error() {
 /// Deviation (pinned): a command's arguments are substituted in the forked
 /// child, so a `$((…))` side effect does not reach the next statement. The
 /// same-command form above (`echo $((x++)) $x`) sees it.
+///
+/// The fork boundary, not the spacing, is what loses the write: the spaced
+/// spelling of the headline example lands on the same pinned `3\n3` (bash
+/// answers `3\n4`), and both spellings stay bash parity whenever the
+/// observation is inside the same command — see
+/// `arith_spaced_increment_spellings_match_bash`.
 #[test]
 fn arith_increment_side_effect_stays_in_the_command() {
     let out = run("x=3; echo $((x++)); echo $x");
     assert!(out.status.success());
     assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "3\n3");
+
+    let spaced = run("x=3; echo $((x ++)); echo $x");
+    assert!(spaced.status.success());
+    assert_eq!(str::from_utf8(&spaced.stdout).unwrap().trim(), "3\n3");
 }
 
 /// Deviation (pinned): the `$((…))` body scan closes at the first `)` that

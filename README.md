@@ -1174,11 +1174,15 @@ bash's `for_action` ends with a compound list), so
 rules are then the body's: its `;`-before-`}` terminator, its emptiness rule, its
 trailing redirections, and the one `;` the tail rule allows between the region and the
 body (`)) ; { …; }` and `)); { …; }` both run). Shapes that stay open: the glued
-`for((i=0;i<3;i++))` with no space after `for` (task #396), a step spaced as `i ++` (its side effect is lost, so the loop never ends — task
-#395), and a `${…}` expansion in a clause, which is a syntax error on every
-arithmetic surface (task #397). A clause count that is not three (`for ((i=0))`,
-`for ((i=0;i<2;i++;))`) and any word between `))` and `do` (`))x`, `)) 2>/dev/null`,
-`)) ;;`) are parse errors, as they are in bash (rc 2 there, rc 1 here). A pipe behind
+`for((i=0;i<3;i++))` with no space after `for` (task #396), and a `${…}`
+expansion in a clause, which is a syntax error on every arithmetic surface
+(task #397). A step spaced as `i ++` is **parity**, not an open shape (task
+#395): whitespace never separates an operand from its `++`/`--`, so
+`for ((i = 0 ; i < 2 ; i ++)) { echo $i; }` ends like bash's, pinned in
+`tests/loops.rs::c_style_for_a_spaced_step_matches_bash`. A clause count that is
+not three (`for ((i=0))`, `for ((i=0;i<2;i++;))`) and any word between `))` and
+`do` (`))x`, `)) 2>/dev/null`, `)) ;;`) are parse errors, as they are in bash (rc
+2 there, rc 1 here). A pipe behind
 the body, the loop behind a pipe, a here-doc in the body and a trailing `&` are the
 **group layer's** pinned divergences for those positions (#186/#190, #188/#192), which
 the brace body inherits unchanged: bash runs them, fdshell reports the group's error.

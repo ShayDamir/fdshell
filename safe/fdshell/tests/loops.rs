@@ -1652,6 +1652,31 @@ fn c_style_for_clause_shapes_match_bash() {
     }
 }
 
+/// A step spaced away from its operand is still the step, so the loop advances
+/// and terminates exactly like bash's `0 1` rc 0 — the task **#395** shape, on
+/// the `do … done` and the `{ …; }` (task **#394**) body spellings and for the
+/// spaced prefix `++ i` too. Whitespace cannot separate an operand from its
+/// `++`/`--`: the postfix join is decided from the token stream and the prefix
+/// one by a whitespace-skipping lookahead.
+///
+/// Every row runs under [`run_bounded`]: a step that loses its side effect makes
+/// these loops infinite, so a regression must surface as that helper's diagnostic
+/// panic and not as a bare timeout. The `i --` step is **not** a pin —
+/// `for ((i=0;i<2;i --))` is infinite in bash as well (measured), so only a
+/// `break`-bounded body could test that spelling.
+#[test]
+fn c_style_for_a_spaced_step_matches_bash() {
+    for script in [
+        "for ((i=0;i<2;i ++)); do echo $i; done",
+        "for ((i = 0 ; i < 2 ; i ++)) { echo $i; }",
+        "for ((i=0;i<2;++ i)); do echo $i; done",
+        "for ((i = 0 ; i < 2 ; ++ i)) { echo $i; }",
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!((out.as_str(), rc), ("0\n1\n", 0), "{script}: {err}");
+    }
+}
+
 /// The comma operator lives inside one clause: bash's `for ((i=1,j=2;i<3;i++))`
 /// binds both vars and steps only `i`, so the pairs are `1 2` and `2 2` — the
 /// measured second line, not `2 3`.
