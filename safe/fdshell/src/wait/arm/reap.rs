@@ -1,3 +1,5 @@
+mod release;
+
 use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
@@ -71,21 +73,4 @@ pub(super) fn parent_reap(
         s.apply_release(release);
     }
     Ok(status.exit_code())
-}
-
-impl ShellState {
-    /// Close the descriptor an arm chose to release, per the keep/release protocol.
-    fn apply_release(&mut self, key: &ReleaseKey) {
-        match key {
-            ReleaseKey::None => {}
-            ReleaseKey::Var(name) => {
-                self.fds.remove(name);
-                self.arrays.remove(name);
-            }
-            ReleaseKey::Array { arr, source } => {
-                self.remove_array_entry(arr, source);
-            }
-            ReleaseKey::Task(_) => {}
-        }
-    }
 }
