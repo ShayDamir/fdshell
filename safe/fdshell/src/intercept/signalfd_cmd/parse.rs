@@ -51,7 +51,8 @@ pub(super) fn parse(args: &[ShortCStr]) -> Result<Parsed, Report<CmdError>> {
 
 fn parse_flag(bytes: &[u8], val: &ShortCStr) -> Result<i32, Report<CmdError>> {
     if let Some(hex) = bytes.strip_prefix(b"0x") {
-        let h = core::str::from_utf8(hex).change_context(CmdError::Never)?;
+        let h = core::str::from_utf8(hex)
+            .change_context(CmdError::SignalfdBadFlag { value: val.clone() })?;
         return i32::from_str_radix(h, 16)
             .change_context(CmdError::SignalfdBadFlag { value: val.clone() });
     }
