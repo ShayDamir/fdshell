@@ -1020,3 +1020,27 @@ fn the_plain_paths_forked_keyword_keeps_its_answer() {
         );
     }
 }
+
+/// The pipe neighbours of task #406's line-initial rule: a stage must **begin**, so the
+/// pipe rule owns the report and the line-initial rule never reaches these rows — the
+/// operator sits behind a `|` (on the same line, or on the line a line-end `|` does not
+/// join across, LESSONS: "A trailing `|` is a hard parse error…"). Both spellings report
+/// `expected command after pipe` at the house rc 1, where bash stops at rc 2 and prints
+/// nothing. Measured 2026-11-03 against bash 5.3.9 and this build.
+#[test]
+fn a_line_initial_operator_behind_a_pipe_keeps_the_pipes_report() {
+    let dir = Scratch::new();
+    for script in ["echo a |\n&& echo y", "echo a | && echo y"] {
+        let out = run_stdin_null(&dir, script);
+        let err = str::from_utf8(&out.stderr).unwrap().to_string();
+        assert_eq!(
+            (str::from_utf8(&out.stdout).unwrap(), out.status.code()),
+            ("", Some(1)),
+            "script {script:?}: bash prints nothing at rc 2; stderr={err}"
+        );
+        assert!(
+            err.contains("expected command after pipe"),
+            "{script:?}: {err}"
+        );
+    }
+}

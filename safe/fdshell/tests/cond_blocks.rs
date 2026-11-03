@@ -611,9 +611,12 @@ fn event_case_wait_mid_run_keeps_its_block_span() {
 }
 
 /// Accepted divergences pinned with the task that owns them: an unclosed
-/// mid-run construct (rc 1 parse error, bash rc 2); a line that opens with
-/// `&&` (bash rejects it, rc 2; fdshell runs the part, documented in README,
-/// no task). The keyword block **as a pipeline stage** used to sit in this
+/// mid-run construct (rc 1 parse error, bash rc 2). The **line-opening `&&`**
+/// row of this test used to sit here (bash rejected the line at rc 2 while
+/// fdshell ran both parts at rc 0, and the README sentence the old comment
+/// pointed at did not exist): it **landed** in task #406 and is pinned at the
+/// report in `an_operator_that_opens_a_physical_line_reports`. The keyword block
+/// **as a pipeline stage** used to sit in this
 /// list (task #292): the `|` position is a command position, so that script
 /// now forks the block as a stage and matches bash — pinned with the family in
 /// `tests/pipeline.rs` (`block_stage_*`).
@@ -626,13 +629,12 @@ fn midrun_adjacent_shapes_stay_measured_divergences() {
     assert_eq!(code, 1);
     let (_out, _err, code) = run("true && if");
     assert_eq!(code, 1);
-    // A line opening with `&&`: bash rc 2 (syntax), fdshell runs the part.
-    let (out, _err, code) = run("while :; do\necho a\nbreak\ndone\n&& echo x");
-    assert_eq!(
-        (out.as_str(), code),
-        ("a\nx\n", 0),
-        "bash rc 2: measured divergence"
-    );
+    // Task #406 landed: the line opens with `&&`, so the report fires before the
+    // part runs and only what already ran stays — bash prints `a` too, then stops
+    // at rc 2 (measured 2026-11-03).
+    let (out, err, code) = run("while :; do\necho a\nbreak\ndone\n&& echo x");
+    assert_eq!((out.as_str(), code), ("a\n", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command before '&&'"), "{err}");
     // A `name()` word with no `{` body opens no definition span (the scorer
     // gate, LESSONS): it stays word data, rc 1 — byte-identical to master and
     // to the run-start twin `f()`. bash reports a syntax error rc 2.
@@ -1742,7 +1744,9 @@ fn a_comment_tail_next_to_a_block_stays_inert() {
 /// **#405** is no longer one of them either, except its glued row: a word after the
 /// closing keyword reaches the house rc-1 convention now (`parse/block_tail/word.rs`),
 /// while the glued `done#c` closer still never closes and answers as the unclosed
-/// block.
+/// block. Task **#406** is no longer one of them either: the line-initial `&&` row
+/// below is pinned at the report (the family lives in
+/// `an_operator_that_opens_a_physical_line_reports`).
 #[test]
 fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
     // #405 (the glued half, still a divergence): the glued closer `done#c` never
@@ -1780,10 +1784,14 @@ fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
         err.contains("'done' must be followed by a separator"),
         "stderr={err}"
     );
-    // #406: a `&&` at the start of a physical line is an operator where bash
-    // stops with rc 2.
+    // #406 landed: a `&&` at the start of a physical line is an operator with no
+    // command in front of it, so the report fires before the part runs and only
+    // what already ran stays — bash prints `a` as well, then stops with rc 2
+    // (measured 2026-11-03). The comment on the first line ends that line's
+    // statement (task #296), so it does not shield the operator.
     let (out, err, rc) = run_bounded("echo a # c\n&& echo y");
-    assert_eq!((out.as_str(), rc), ("a\ny\n", 0), "stderr={err}");
+    assert_eq!((out.as_str(), rc), ("a\n", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command before '&&'"), "{err}");
     // #304 closed this row's **region-rule** half (a region claimed by a word of
     // the block's body is opaque, so the `&&` in `q && y` never splits the block
     // text); the **statement-level** half — a `#` behind a here-doc delimiter
@@ -1967,5 +1975,103 @@ fn a_line_ending_on_a_cond_operator_continues_the_list() {
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+}
+
+/// Task #406: an operator with **nothing in front of it** has no command on that side,
+/// and bash's AND-IF/OR-IF grammar requires one on **both** — so bash stops at rc 2.
+/// The rule walks a text that begins at a physical-line start, so the operator opens
+/// either the line or a part inside it. fdshell reports its own message at the house
+/// rc 1 (README "Pipelines and lists", LESSONS: "An operator that opens a physical
+/// line reports; the join needs a command on the other side"), and the report fires
+/// **before** any part of the list runs, while a statement that already ran stays run —
+/// so the rows where bash printed `a`/`t` print the same here. Each row names the shape
+/// that reaches the rule: the plain line, the `;`-split line, a comment-terminated line,
+/// the operator that opens a part inside a line, and the operator written as the first
+/// line of a block body, a loop body, a `case` arm, a function body or a `{ …; }` group.
+/// Measured 2026-11-03 against bash 5.3.9 and this build.
+#[test]
+fn an_operator_that_opens_a_physical_line_reports() {
+    for script in [
+        "&& echo y",
+        "echo a && && echo b",
+        "echo a &&\n&& echo b",
+        "false || && builtin true",
+        "if :; then\n&& echo y\nfi",
+        "while :; do\n&& echo y\nbreak\ndone",
+        "case x in x)\n&& echo y\n;;\nesac",
+        "f(){\n&& echo y\n}\nf",
+        "{\n&& echo y\n}",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "{script}: bash rc 2, nothing runs: {err}"
+        );
+        assert!(err.contains("expected command before"), "{script}: {err}");
+    }
+    // The rows whose earlier statement bash also ran: `a` (or `t`) is printed before
+    // the report, exactly as bash prints it before its syntax error.
+    for (script, printed) in [
+        ("echo a\n&& echo y", "a\n"),
+        ("echo a\n|| echo y", "a\n"),
+        ("echo a;\n&& echo y", "a\n"),
+        ("if :; then echo t; fi\n&& echo y", "t\n"),
+        ("echo a # c\n&& echo y", "a\n"),
+        ("while :; do\necho a\nbreak\ndone\n&& echo x", "a\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (printed, 1),
+            "{script}: bash prints {printed:?} then rc 2: {err}"
+        );
+        assert!(err.contains("expected command before"), "{script}: {err}");
+    }
+    // The comment head: the parse layer reads comment text only up to its newline
+    // (task #296), so the body the cond layer is handed opens with the operator and
+    // the rule fires — the value moves to bash's side (bash rc 2, nothing runs).
+    let (out, err, code) = run("if :; then\n#c\n&& echo y\nfi");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command before"), "{err}");
+}
+
+/// The boundaries the rule of `an_operator_that_opens_a_physical_line_reports` must
+/// not cross, each pinned at its measured value (bash 5.3.9, this build, 2026-11-03)
+/// and naming its owner. A `&&`/`||` at a physical-line **end** continues the list
+/// (task #492's join, bash parity); a here-doc **delimiter line** is that operator's
+/// data (tasks #336/#403, bash parity); a comment tail a join keeps is data (task
+/// #296). A text that begins **mid-line** is not the rule's either: its head was
+/// claimed by another layer — a definition's body, a here-doc region — so the operator
+/// does have its command in front of it (the definer rows are bash parity, and
+/// `function_keyword.rs`/`cond_blocks.rs`'s definer families pin them). A lone operator
+/// on a line has a blank side on both, and each rule declines it, so the shape stays the
+/// deferral's (`tests/heredoc.rs`'s delimiter rows).
+#[test]
+fn the_operator_that_opens_a_line_keeps_its_boundaries() {
+    // Line-end join, comment tail, heredoc data, claimed heads: bash parity, and the
+    // rule stays out.
+    for (script, want) in [
+        ("echo a &&\necho b", "a\nb\n"),
+        ("cat <<\"&&\"\n&&", ""),
+        ("echo a && #c\necho b", "a\nb\n"),
+        ("f() { echo hi; } && echo done", "done\n"),
+        ("function f { echo hi; } && echo done; f", "done\nhi\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+    // The lone `|` behind the operator is a word, so the operator has its right side and
+    // this rule stays out of it — the row keeps its measured answer (bash rc 2). The unit
+    // pin is `cond::tests::a_command_behind_the_operator_keeps_the_rule_off`.
+    let (out, err, code) = run("echo a || |");
+    assert_eq!((out.as_str(), code), ("a\n", 0), "bash rc 2: {err}");
+    // The empty-*right* rule owns a text whose operator is its last token (task #367),
+    // and the pipe rule owns a stage that must begin (`tests/pipeline.rs`).
+    for script in ["echo a &&", "echo a && ; echo b"] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2: {err}");
+        assert!(err.contains("expected command after"), "{script}: {err}");
     }
 }

@@ -909,3 +909,31 @@ fn a_brace_at_the_end_of_input_buffers_in_command_position() {
         );
     }
 }
+
+/// Task #406's shape through the interactive shell: the first line is complete and
+/// runs, and the report fires on the **line-initial** line — the operator opens it, so
+/// no command sits in front of it (bash prints `a` here too, then stops at rc 2 and runs
+/// nothing of the rejected line). The reported line's own part never runs, the session
+/// reads on to the end of input, and the exit code stays the REPL's own end-of-input
+/// answer. Both are asserted with `contains` because the prompts make stdout unstable.
+/// Measured 2026-11-03 against bash 5.3.9 (`bash` reading stdin) and this build.
+#[test]
+fn an_operator_opening_the_second_line_reports_and_the_session_reads_on() {
+    let (out, err, code) = run_repl("echo a\n&& echo y\n");
+    assert!(
+        err.contains("expected command before"),
+        "the line-initial operator reports: {err:?}"
+    );
+    assert!(
+        out.contains("a\n"),
+        "the complete line before it ran, as bash runs it: {out:?}"
+    );
+    assert!(
+        !out.contains("y\n"),
+        "the report fires before any part of the reported list runs: {out:?}"
+    );
+    assert_eq!(
+        code, 0,
+        "the REPL's own end-of-input answer; stderr: {err:?}"
+    );
+}
