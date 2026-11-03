@@ -1028,10 +1028,6 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
         "case x in a) while false; do m=(1); done ;; esac",
         "case x in a) for i in 1; do m=(1); done ;; esac",
         "case x in a) { m=(1); } ;; esac",
-        // A quoted `(` is word text and an escaped one is a literal byte, so
-        // neither opens a group; these stay the accepted #419 shapes (bash rc 2).
-        "case x in a) echo \"x(\" b) ;; esac",
-        "case x in a) echo x\\() ;; esac",
         // A quoted backslash enters the word as a pair of quoted bytes, so the
         // `(` behind it opens its group: the arm reads as the subshell shape of
         // #316/#419 and parses (bash rejects it, rc 2).
@@ -1059,10 +1055,11 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
 
 /// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted
 /// leniencies (a lone `;`, a trailing `&`, the `;&` closer, a closer-shaped word
-/// in the arm, the glued `;;b)esac` of task **#421**, a `)` with no word before
-/// it — task **#419**'s family), and the rejects that stay rc 1 where bash is
-/// rc 2. `case x in a) ; esac` is the accepted leniency this task deliberately
-/// does not tighten (the plan's open question 2).
+/// in the arm, the glued `;;b)esac` of task **#421**), and the rejects that stay
+/// rc 1 where bash is rc 2. `case x in a) ; esac` is the accepted leniency this
+/// task deliberately does not tighten (the plan's open question 2). A `)` with
+/// no word before it is no longer here: task **#419** closed it, pinned in
+/// [`a_paren_the_arm_command_list_cannot_take_is_refused`].
 #[test]
 fn the_semi_family_around_an_arm_stays_as_measured() {
     for script in [
@@ -1071,10 +1068,6 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
         "case x in a) echo hi;& esac",
         "case x in a) echo esac;; esac",
         "case x in a) ; esac",
-        // A `)` with no word before it (the arm is empty, so the paren has no
-        // predecessor) is arm text here; bash rejects it, rc 2 (task #419).
-        "case x in a) ) ;; esac",
-        "case x in a) echo y; ) ;; esac",
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 0, "{script}: {err}");
@@ -1092,6 +1085,66 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: {err}");
+    }
+}
+
+/// An unquoted `)` inside an arm region that no inner construct consumes is a
+/// token the arm's **command list** cannot take: bash rc 2, fdshell rc 1 (the
+/// repo-wide rc convention) with the parse error naming the paren (pinned by
+/// text, never by a frame — LESSONS). Task **#419** closed this family: the
+/// depth-0 parens behind an argument, behind an operator token, or with no word
+/// before it at all. The rows with a **matching** arm answer at the parse gate,
+/// not at the runtime the shape used to reach. `;&` itself stays task **#420**'s
+/// (the terminator is bash-equal); it is the operator predecessor here that
+/// this task's depth rule closes.
+#[test]
+fn a_paren_the_arm_command_list_cannot_take_is_refused() {
+    const NEEDLE: &str = "case arm: unexpected ')' — a command list cannot take a paren";
+    for script in [
+        // The four headline rows of the family (measured against bash 5.3.9).
+        "case x in a) echo hi) esac",
+        "case x in a) echo a[b) ;; esac",
+        "case x in a) echo (b) ;; esac",
+        "case x in a) echo one ) ;; esac",
+        // The two members added by task #300's review round: the arm is empty,
+        // so the clause walk's command-position test never fires and the paren
+        // had no predecessor at all.
+        "case x in a) ) ;; esac",
+        "case x in a) echo y; ) ;; esac",
+        // A quoted `(` is word text and an escaped one is a literal byte, so
+        // neither opens a group and the paren behind them sits at depth 0.
+        "case x in a) echo \"x(\" b) ;; esac",
+        "case x in a) echo x\\() ;; esac",
+        // The subshell-shaped arms with the arm that **matches**: the parse gate
+        // answers, not the run that used to print `(x )` / nothing.
+        "case x in x) echo (x) ;; esac",
+        "case x in x) echo (b) ;; esac",
+        // A **quoted** separator is word data (task #336), so the paren written
+        // behind it lands in argument position. The unquoted twins already
+        // answered `missing ';;'` (task #300) and still do.
+        r#"case x in a) echo a ";" b) ;; esac"#,
+        r"case x in a) echo ';' b) ;; esac",
+        r"case x in a) echo a \; b) ;; esac",
+        r#"case a in a) echo A ";;" b) echo B ;; esac"#,
+        r#"case x in a) ";" b) ;; esac"#,
+        // The same shape inside the arm's own `if` body, where the `;` of the
+        // block's clauses is command position but the quoted one is not.
+        r#"case x in a) if true; then echo a ";" b) fi ;; esac"#,
+        // The leading-`(` pattern family: a second `)` glued behind the pattern's
+        // own, and an arm that **starts** with the paren (the pattern `a*`
+        // matches, so the runtime used to answer `")" not found`; the rc stays,
+        // the message is the parse error now).
+        r"case abc in (a)) echo m;; *) echo n;; esac",
+        r"case abc in (a*) ) echo m;; *) echo n;; esac",
+        // Operator predecessors: the paren closes no pattern list (task #300's
+        // rule stays clean here), and the arm's command list cannot take it.
+        "case x in x) echo hi | ) ;; esac",
+        "case x in x) echo hi & ) ;; esac",
+        "case x in x) echo hi ;& ) ;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
+        assert!(err.contains(NEEDLE), "{script}: {err}");
     }
 }
 
@@ -1210,16 +1263,11 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
         // A newline ends the pattern list for fdshell, and the arm's `b` runs as
         // a command that the pattern never reaches.
         ("case abc in (a*\nb) echo m;; *) echo n;; esac", "n\n"),
-        // A second `)` behind the pattern's own is arm text; the pattern `a` does
-        // not match `abc`, so the `*)` arm answers.
-        (r"case abc in (a)) echo m;; *) echo n;; esac", "n\n"),
         // An empty quote pair contributes no byte, so the unquoted `(` is at index
         // 0 of the text and the strip applies (the raw-span test would not).
         (r#"case abc in ""(a*) echo m;; *) echo n;; esac"#, "m\n"),
         // The leading-`;` leniency (task #300) and the strip compose.
         (r"case abc in ; (a*) echo m;; *) echo n;; esac", "m\n"),
-        // A `(` in the arm's command position is arm text — task **#419**.
-        (r"case abc in (a*) echo (x);; *) echo n;; esac", "(x )\n"),
         // A `(` in the `case` **word** is that word's own shape — task **#470**:
         // the word stays `(abc)`, so the stripped pattern `a*` misses it.
         (r"case (abc) in (a*) echo m;; *) echo n;; esac", "n\n"),
@@ -1233,12 +1281,6 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
     }
-    // An arm that **starts** with a `)` runs that paren as a command (task
-    // **#419**'s family, bash rc 2): the stripped pattern `a*` matches, so the
-    // arm is the `) echo m` written behind it.
-    let (out, err, code) = run(r"case abc in (a*) ) echo m;; *) echo n;; esac");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
-    assert!(err.contains("\")\" not found"), "stderr={err}");
     // The strip makes the pattern match, so the arm's `"b"` is the command: bash
     // says rc 127, fdshell reports the same missing command at its own rc 1 (a
     // divergence of the not-found path, not of the pattern).
@@ -1286,8 +1328,9 @@ fn case_pattern_span_survives_the_stripped_paren() {
 /// to the clause walk by task #346) and the rest through
 /// `parse::word_quoted::span_word`. `x"|"y` is the one pattern `x|y`, and `";"` in
 /// front of a pattern is a pattern **word** (the rows bash 5.3.9 accepts, recorded;
-/// its syntax errors land on fdshell's parse error at rc 1, and the accepted rows
-/// are the leniency task #419 owns — a `)` behind an argument is arm text here).
+/// its syntax errors land on fdshell's parse error at rc 1 — the rows whose `)`
+/// sits behind a quoted separator, the leniency task #419 owned, are refused by
+/// its rule now and pinned in [`a_paren_the_arm_command_list_cannot_take_is_refused`]).
 #[test]
 fn a_quoted_separator_is_pattern_or_body_text() {
     for (script, want) in [
@@ -1328,20 +1371,10 @@ fn a_quoted_separator_is_pattern_or_body_text() {
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
         assert!(err.contains(needle), "stderr={err:?}");
     }
-    // The accepted divergence (task #419's family, the owner of a `)` behind an
-    // argument): a **quoted** separator keeps the arm open, so bash's
-    // missing-`;;` syntax error is fdshell's arm text. The unquoted twin reports
-    // the missing `;;`.
-    for (script, want) in [
-        (r#"case x in a) echo a ";" b) ;; esac"#, ""),
-        (
-            r#"case a in a) echo A ";;" b) echo B ;; esac"#,
-            "A ;; b ) echo B\n",
-        ),
-    ] {
-        let (out, err, code) = run(script);
-        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
-    }
+    // The unquoted twin reports the missing `;;` (task #300). The **quoted**
+    // rows moved to [`a_paren_the_arm_command_list_cannot_take_is_refused`]:
+    // task **#419** closed the family, and a quoted separator keeps the paren in
+    // argument position, where the command list cannot take it.
     let (out, err, code) = run(r#"case x in a) echo a; b) ;; esac"#);
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("missing ';;'"), "stderr={err:?}");
